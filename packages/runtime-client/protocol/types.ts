@@ -11,19 +11,19 @@ import type {
   WriteStackTraceEntry,
   WriteStackTraceMatcher,
 } from "@commonfabric/runner/shared";
-import type { CfcLabelView } from "@commonfabric/runner/cfc";
+import type { CfcLabelView } from "@commonfabric/runner/cfc/label-view-core";
 import type { DID, KeyPairRaw } from "@commonfabric/identity";
 import { type Program } from "@commonfabric/js-compiler/interface";
 import { RuntimeTelemetryMarkerResult } from "@commonfabric/runtime-client";
 export type { JSONSchema, JSONValue, Program };
 
-import type { MemoryVersion } from "@commonfabric/memory/interface";
-
 export type { CfcLabelView };
 
 export type MessageId = number;
 
-export type CellRef = NormalizedFullLink;
+export type CellRef = NormalizedFullLink & {
+  cfcLabelView?: CfcLabelView;
+};
 
 export type PageRef = {
   cell: CellRef;
@@ -126,8 +126,6 @@ export interface InitializationData {
   spaceIdentity?: KeyPairRaw;
   // Default timeout in milliseconds.
   timeoutMs?: number;
-  // Test-only storage/runtime override for integration comparisons.
-  memoryVersion?: MemoryVersion;
   // Experimental space-model feature flags.
   experimental?: {
     modernDataModel?: boolean;

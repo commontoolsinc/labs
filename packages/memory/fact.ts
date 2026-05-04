@@ -1,5 +1,6 @@
 import type { URI } from "./interface.ts";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/api";
+import { FabricHash } from "@commonfabric/data-model/fabric-hash";
 import {
   Assertion,
   Fact,
@@ -11,13 +12,7 @@ import {
   State,
   Unclaimed,
 } from "./interface.ts";
-import {
-  HashObject,
-  hashObjectFromJson,
-  hashObjectFromString,
-  hashOf,
-  isHashObject,
-} from "@commonfabric/data-model/value-hash";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 
 /**
  * Creates an unclaimed fact.
@@ -27,9 +22,8 @@ export const unclaimed = (
 ): Unclaimed => ({ the, of });
 
 /**
- * Cache of frozen `{ the, of }` objects keyed by `"${the}\0${of}"`. Reusing
- * the same frozen object identity lets downstream caches (WeakMap in
- * `modernHash()`, merkle-reference's internal WeakMap) hit on every
+ * Cache of frozen `{ the, of }` objects keyed by `"${the}\0${of}"`. Reusing the
+ * same frozen object identity lets the downstream hashing cache hit on every
  * repeat instead of re-hashing a fresh object each time.
  */
 const frozenUnclaimedCache = new Map<
@@ -44,7 +38,7 @@ const frozenUnclaimedCache = new Map<
  */
 export const unclaimedRef = (
   { the, of }: { the: MIME; of: URI },
-): HashObject<Unclaimed> => {
+): FabricHash => {
   const key = `${the}\0${of}`;
   let frozen = frozenUnclaimedCache.get(key);
   if (!frozen) {
@@ -67,13 +61,13 @@ export const assert = <
   the: T;
   of: Of;
   is: Is;
-  cause?: Fact | HashObject<Fact> | null | undefined;
+  cause?: Fact | FabricHash | null | undefined;
 }) =>
   ({
     the,
     of,
     is,
-    cause: isHashObject(cause)
+    cause: (cause instanceof FabricHash)
       ? cause
       : cause == null
       ? unclaimedRef({ the, of })
@@ -114,7 +108,7 @@ export const iterate = function* (
         yield {
           the: the as MIME,
           of: of as URI,
-          cause: hashObjectFromString(cause),
+          cause: FabricHash.fromString(cause),
           since,
           ...(is ? { is } : undefined),
         };
@@ -136,9 +130,7 @@ export function normalizeFact<
     of: Of;
     is: Is;
     cause?:
-      | HashObject<Assertion<T, Of, Is>>
-      | HashObject<Retraction<T, Of, Is>>
-      | HashObject<Unclaimed<T, Of>>
+      | FabricHash
       | Fact
       | { "/": string };
   },
@@ -153,9 +145,7 @@ export function normalizeFact<
     the: T;
     of: Of;
     cause?:
-      | HashObject<Assertion<T, Of, Is>>
-      | HashObject<Retraction<T, Of, Is>>
-      | HashObject<Unclaimed<T, Of>>
+      | FabricHash
       | Fact
       | { "/": string };
   },
@@ -171,19 +161,17 @@ export function normalizeFact<
     of: Of;
     is?: Is;
     cause?:
-      | HashObject<Assertion<T, Of, Is>>
-      | HashObject<Retraction<T, Of, Is>>
-      | HashObject<Unclaimed<T, Of>>
+      | FabricHash
       | Fact
       | { "/": string };
   },
 ): Assertion<T, Of, Is> | Retraction<T, Of, Is> {
-  const newCause = isHashObject(arg.cause)
+  const newCause = (arg.cause instanceof FabricHash)
     ? arg.cause
     : arg.cause == null
     ? unclaimedRef({ the: arg.the, of: arg.of })
     : "/" in arg.cause
-    ? hashObjectFromJson(arg.cause as unknown as { "/": string })
+    ? FabricHash.fromJson(arg.cause as unknown as { "/": string })
     : hashOf({
       the: arg.cause.the,
       of: arg.cause.of,
@@ -206,6 +194,6 @@ export function normalizeFact<
   }
 }
 
-export const factReference = (fact: Fact): HashObject<Fact> => {
+export const factReference = (fact: Fact): FabricHash => {
   return hashOf(normalizeFact(fact));
 };

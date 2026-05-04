@@ -52,12 +52,10 @@ describe("CFC flow precision claims", () => {
   it("attaches trusted collection flow-precision claims to builtin outputs", async () => {
     storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: "v2",
       cfcEnforcementMode: "observe",
     });
 

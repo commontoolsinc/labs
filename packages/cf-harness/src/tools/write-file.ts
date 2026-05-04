@@ -10,6 +10,10 @@ import {
   type StructuredFileToolErrorOutput,
   structuredFileToolErrorOutputSchema,
 } from "./file-errors.ts";
+import {
+  isResolvedPathInsideArtifactRoot,
+  RESERVED_ARTIFACT_PATH_DETAIL,
+} from "./reserved-artifacts.ts";
 
 export type WriteFileMode = "replace" | "append";
 
@@ -83,39 +87,57 @@ export const writeFileTool: HarnessToolDefinition<
         detail: detailFromUnknownError(error),
       });
     }
+    if (await isResolvedPathInsideArtifactRoot(context, resolvedPath)) {
+      return createStructuredFileToolErrorOutput(context, "write_file", {
+        path: resolvedPath,
+        code: "permission_denied",
+        detail: RESERVED_ARTIFACT_PATH_DETAIL,
+      });
+    }
     const mode = input.mode ?? "replace";
+    const command = [
+      "set -eu",
+      'path="$1"',
+      'mode="$2"',
+      'create_parents="$3"',
+      'parent="$(dirname "$path")"',
+      'if [ "$create_parents" = "true" ]; then',
+      '  mkdir -p "$parent"',
+      'elif [ ! -d "$parent" ]; then',
+      '  echo "file not found: parent directory $parent" >&2',
+      "  exit 10",
+      "fi",
+      'if [ -e "$path" ] && [ ! -f "$path" ]; then',
+      '  echo "not a file: $path" >&2',
+      "  exit 11",
+      "fi",
+      'case "$mode" in',
+      "  replace)",
+      '    cat > "$path"',
+      "    ;;",
+      "  append)",
+      '    cat >> "$path"',
+      "    ;;",
+      "  *)",
+      '    echo "unsupported write mode: $mode" >&2',
+      "    exit 12",
+      "    ;;",
+      "esac",
+    ].join("\n");
+    const args = [resolvedPath, mode, String(input.createParents ?? false)];
     const result = await context.sandbox.runShell({
-      command: [
-        "set -eu",
-        'path="$1"',
-        'mode="$2"',
-        'create_parents="$3"',
-        'parent="$(dirname "$path")"',
-        'if [ "$create_parents" = "true" ]; then',
-        '  mkdir -p "$parent"',
-        'elif [ ! -d "$parent" ]; then',
-        '  echo "file not found: parent directory $parent" >&2',
-        "  exit 10",
-        "fi",
-        'if [ -e "$path" ] && [ ! -f "$path" ]; then',
-        '  echo "not a file: $path" >&2',
-        "  exit 11",
-        "fi",
-        'case "$mode" in',
-        "  replace)",
-        '    cat > "$path"',
-        "    ;;",
-        "  append)",
-        '    cat >> "$path"',
-        "    ;;",
-        "  *)",
-        '    echo "unsupported write mode: $mode" >&2',
-        "    exit 12",
-        "    ;;",
-        "esac",
-      ].join("\n"),
-      args: [resolvedPath, mode, String(input.createParents ?? false)],
+      command,
+      args,
+      cwd: context.currentDir,
       stdinText: input.content,
+      cfcInvocationContext: await context.createCfcInvocationContext({
+        toolId: "write_file",
+        operation: "shell",
+        cwd: context.currentDir,
+        command,
+        args,
+        stdinText: input.content,
+      }),
     });
     if (result.exitCode !== 0) {
       return createStructuredFileToolErrorOutput(context, "write_file", {

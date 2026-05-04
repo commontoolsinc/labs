@@ -2,9 +2,11 @@ import { assertEquals, assertExists, assertRejects } from "@std/assert";
 import { FakeTime } from "@std/testing/time";
 import { Server, SessionRegistry } from "../v2/server.ts";
 import {
+  decodeMemoryBoundary,
+  encodeMemoryBoundary,
   type EntitySnapshot,
-  getMemoryV2Flags,
-  MEMORY_V2_PROTOCOL,
+  getMemoryProtocolFlags,
+  MEMORY_PROTOCOL,
   type SessionSync,
   toDocumentPath,
 } from "../v2.ts";
@@ -13,8 +15,8 @@ import { createGraphFixture } from "./v2-graph.fixture.ts";
 
 const HELLO_OK = {
   type: "hello.ok",
-  protocol: MEMORY_V2_PROTOCOL,
-  flags: getMemoryV2Flags(),
+  protocol: MEMORY_PROTOCOL,
+  flags: getMemoryProtocolFlags(),
 } as const;
 
 Deno.test("memory v2 client watch sets expand to previously hidden graph nodes", async () => {
@@ -347,6 +349,121 @@ Deno.test("memory v2 watch view keeps emitted snapshots incrementally ordered", 
   );
 });
 
+Deno.test("memory v2 watch view batches structural syncs deterministically", () => {
+  const view = WatchView.fromSync({
+    type: "sync",
+    fromSeq: 0,
+    toSeq: 1,
+    upserts: [{
+      branch: "",
+      id: "of:doc:d",
+      seq: 1,
+      doc: { value: { label: "d" } },
+    }, {
+      branch: "",
+      id: "of:doc:a",
+      seq: 1,
+      doc: { value: { label: "a" } },
+    }, {
+      branch: "",
+      id: "of:doc:c",
+      seq: 1,
+      doc: { value: { label: "c" } },
+    }],
+    removes: [],
+  });
+
+  view.applySync({
+    type: "sync",
+    fromSeq: 1,
+    toSeq: 2,
+    upserts: [{
+      branch: "",
+      id: "of:doc:c",
+      seq: 2,
+      doc: { value: { label: "c2" } },
+    }, {
+      branch: "",
+      id: "of:doc:b",
+      seq: 2,
+      doc: { value: { label: "b-old" } },
+    }, {
+      branch: "",
+      id: "of:doc:b",
+      seq: 3,
+      doc: { value: { label: "b-new" } },
+    }, {
+      branch: "",
+      id: "of:doc:f",
+      seq: 2,
+      doc: { value: { label: "removed" } },
+    }],
+    removes: [{
+      branch: "",
+      id: "of:doc:d",
+    }, {
+      branch: "",
+      id: "of:doc:f",
+    }, {
+      branch: "",
+      id: "of:doc:missing",
+    }],
+  }, false);
+
+  assertEquals(
+    view.entities.map((entity) => entity.id),
+    ["of:doc:a", "of:doc:b", "of:doc:c"],
+  );
+  assertEquals(
+    view.entities.find((entity) => entity.id === "of:doc:b")?.document,
+    { value: { label: "b-new" } },
+  );
+  assertEquals(
+    view.entities.find((entity) => entity.id === "of:doc:c")?.document,
+    { value: { label: "c2" } },
+  );
+});
+
+Deno.test("memory v2 watch view return clears pending snapshot waiters", async () => {
+  const view = WatchView.fromSync({
+    type: "sync",
+    fromSeq: 0,
+    toSeq: 1,
+    upserts: [],
+    removes: [],
+  });
+
+  const canceled = view.subscribe();
+  const canceledNext = canceled.next();
+  await canceled.return?.();
+  assertEquals(await canceledNext, {
+    done: true,
+    value: undefined,
+  });
+
+  const active = view.subscribe();
+  const activeNext = active.next();
+  view.applySync({
+    type: "sync",
+    fromSeq: 1,
+    toSeq: 2,
+    upserts: [{
+      branch: "",
+      id: "of:doc:active",
+      seq: 2,
+      doc: { value: { label: "active" } },
+    }],
+    removes: [],
+  }, true);
+
+  const snapshot = await activeNext;
+  assertEquals(snapshot.done, false);
+  assertEquals(
+    snapshot.value.entities.map((entity: EntitySnapshot) => entity.id),
+    ["of:doc:active"],
+  );
+});
+
 Deno.test("memory v2 client close settles a pending ack flush", async () => {
   const time = new FakeTime();
   const transport = new HangingAckTransport();
@@ -391,7 +508,7 @@ class ReconnectableLoopbackTransport implements Transport {
   constructor(private readonly server: Server) {}
 
   async send(payload: string): Promise<void> {
-    const message = JSON.parse(payload) as { type?: string };
+    const message = decodeMemoryBoundary(payload) as { type?: string };
     await this.connection().receive(payload);
     if (message.type === "session.watch.set") {
       this.watchSetCount++;
@@ -421,7 +538,7 @@ class ReconnectableLoopbackTransport implements Transport {
     if (this.#connection === null) {
       this.connectionCount++;
       this.#connection = this.server.connect((message) => {
-        this.#receiver(JSON.stringify(message));
+        this.#receiver(encodeMemoryBoundary(message));
       });
     }
     return this.#connection;
@@ -452,7 +569,7 @@ class ScriptedReconnectTransport implements Transport {
       this.connectionCount++;
     }
 
-    const message = JSON.parse(payload) as {
+    const message = decodeMemoryBoundary(payload) as {
       type: string;
       requestId?: string;
       commit?: { localSeq?: number };
@@ -523,7 +640,7 @@ class ScriptedReconnectTransport implements Transport {
   }
 
   #respond(message: unknown): void {
-    this.#receiver(JSON.stringify(message));
+    this.#receiver(encodeMemoryBoundary(message));
   }
 }
 
@@ -539,7 +656,7 @@ class DelayedTransactTransport implements Transport {
   setCloseReceiver(): void {}
 
   send(payload: string): Promise<void> {
-    const message = JSON.parse(payload) as {
+    const message = decodeMemoryBoundary(payload) as {
       type: string;
       requestId?: string;
       commit?: { localSeq?: number };
@@ -607,7 +724,7 @@ class DelayedTransactTransport implements Transport {
   }
 
   #respond(message: unknown): void {
-    this.#receiver(JSON.stringify(message));
+    this.#receiver(encodeMemoryBoundary(message));
   }
 }
 
@@ -626,7 +743,7 @@ class AckCountingTransport implements Transport {
   }
 
   send(payload: string): Promise<void> {
-    const message = JSON.parse(payload) as {
+    const message = decodeMemoryBoundary(payload) as {
       type: string;
       requestId?: string;
     };
@@ -683,7 +800,7 @@ class AckCountingTransport implements Transport {
   }
 
   #respond(message: unknown): void {
-    this.#receiver(JSON.stringify(message));
+    this.#receiver(encodeMemoryBoundary(message));
   }
 }
 
@@ -702,7 +819,7 @@ class HangingAckTransport implements Transport {
   }
 
   send(payload: string): Promise<void> {
-    const message = JSON.parse(payload) as {
+    const message = decodeMemoryBoundary(payload) as {
       type: string;
       requestId?: string;
     };
@@ -752,7 +869,7 @@ class HangingAckTransport implements Transport {
   }
 
   #respond(message: unknown): void {
-    this.#receiver(JSON.stringify(message));
+    this.#receiver(encodeMemoryBoundary(message));
   }
 }
 
@@ -783,7 +900,7 @@ class ControlledReconnectTransport implements Transport {
   }
 
   send(payload: string): Promise<void> {
-    const message = JSON.parse(payload) as {
+    const message = decodeMemoryBoundary(payload) as {
       type: string;
       requestId?: string;
     };
@@ -795,10 +912,10 @@ class ControlledReconnectTransport implements Transport {
           queueMicrotask(() => this.#closeReceiver(new Error("offline")));
           return Promise.resolve();
         }
-        this.#receiver(JSON.stringify(HELLO_OK));
+        this.#receiver(encodeMemoryBoundary(HELLO_OK));
         return Promise.resolve();
       case "session.open":
-        this.#receiver(JSON.stringify({
+        this.#receiver(encodeMemoryBoundary({
           type: "response",
           requestId: message.requestId!,
           ok: {
@@ -832,19 +949,19 @@ class CloseOnSessionOpenTransport implements Transport {
   }
 
   send(payload: string): Promise<void> {
-    const message = JSON.parse(payload) as {
+    const message = decodeMemoryBoundary(payload) as {
       type: string;
       requestId?: string;
     };
 
     if (message.type === "hello") {
-      this.#receiver(JSON.stringify(HELLO_OK));
+      this.#receiver(encodeMemoryBoundary(HELLO_OK));
       return Promise.resolve();
     }
 
     if (message.type === "session.open") {
       this.#closeReceiver(
-        new DOMException("memory/v2 transport closed", "NetworkError") as Error,
+        new DOMException("memory transport closed", "NetworkError") as Error,
       );
       return Promise.resolve();
     }
@@ -871,7 +988,7 @@ class CloseOnAppliedCommitTransport implements Transport {
   }
 
   send(payload: string): Promise<void> {
-    const message = JSON.parse(payload) as {
+    const message = decodeMemoryBoundary(payload) as {
       type: string;
       requestId?: string;
       commit?: { localSeq?: number };
@@ -879,10 +996,10 @@ class CloseOnAppliedCommitTransport implements Transport {
 
     switch (message.type) {
       case "hello":
-        this.#receiver(JSON.stringify(HELLO_OK));
+        this.#receiver(encodeMemoryBoundary(HELLO_OK));
         return Promise.resolve();
       case "session.open":
-        this.#receiver(JSON.stringify({
+        this.#receiver(encodeMemoryBoundary({
           type: "response",
           requestId: message.requestId!,
           ok: {
@@ -892,7 +1009,7 @@ class CloseOnAppliedCommitTransport implements Transport {
         }));
         return Promise.resolve();
       case "session.ack":
-        this.#receiver(JSON.stringify({
+        this.#receiver(encodeMemoryBoundary({
           type: "response",
           requestId: message.requestId!,
           ok: {
@@ -901,7 +1018,7 @@ class CloseOnAppliedCommitTransport implements Transport {
         }));
         return Promise.resolve();
       case "transact":
-        this.#receiver(JSON.stringify({
+        this.#receiver(encodeMemoryBoundary({
           type: "response",
           requestId: message.requestId!,
           ok: {
@@ -1497,16 +1614,14 @@ Deno.test("memory v2 client rejects hello.ok when flags disagree", async () => {
   let receiver = (_payload: string) => {};
   const transport: Transport = {
     send(payload): Promise<void> {
-      const message = JSON.parse(payload) as { type?: string };
+      const message = decodeMemoryBoundary(payload) as { type?: string };
       if (message.type === "hello") {
-        receiver(JSON.stringify({
+        receiver(encodeMemoryBoundary({
           type: "hello.ok",
-          protocol: MEMORY_V2_PROTOCOL,
+          protocol: MEMORY_PROTOCOL,
           flags: {
-            richStorableValues: getMemoryV2Flags().richStorableValues,
-            unifiedJsonEncoding: getMemoryV2Flags().unifiedJsonEncoding,
-            canonicalHashing: !getMemoryV2Flags().canonicalHashing,
-            modernSchemaHash: getMemoryV2Flags().modernSchemaHash,
+            richStorableValues: !getMemoryProtocolFlags().richStorableValues,
+            unifiedJsonEncoding: getMemoryProtocolFlags().unifiedJsonEncoding,
           },
         }));
       }
@@ -1522,7 +1637,7 @@ Deno.test("memory v2 client rejects hello.ok when flags disagree", async () => {
   await assertRejects(
     () => connect({ transport }),
     Error,
-    "memory/v2 flag mismatch",
+    "memory flag mismatch",
   );
 });
 
@@ -1536,7 +1651,7 @@ Deno.test("memory v2 client wraps close errors with connection error names", asy
   } catch (error) {
     assertEquals(error instanceof Error, true);
     assertEquals((error as Error).name, "ConnectionError");
-    assertEquals((error as Error).message, "memory/v2 transport closed");
+    assertEquals((error as Error).message, "memory transport closed");
     await client.close();
     return;
   }
@@ -1606,7 +1721,7 @@ class DisconnectableAckTransport implements Transport {
   }
 
   send(payload: string): Promise<void> {
-    const message = JSON.parse(payload) as {
+    const message = decodeMemoryBoundary(payload) as {
       type: string;
       requestId?: string;
     };
@@ -1666,7 +1781,7 @@ class DisconnectableAckTransport implements Transport {
   }
 
   #respond(message: unknown): void {
-    this.#receiver(JSON.stringify(message));
+    this.#receiver(encodeMemoryBoundary(message));
   }
 }
 
@@ -1741,7 +1856,7 @@ class SessionChangingTransport implements Transport {
   }
 
   send(payload: string): Promise<void> {
-    const message = JSON.parse(payload) as {
+    const message = decodeMemoryBoundary(payload) as {
       type: string;
       requestId?: string;
       sessionId?: string;
@@ -1750,7 +1865,7 @@ class SessionChangingTransport implements Transport {
 
     switch (message.type) {
       case "hello":
-        this.#receiver(JSON.stringify(HELLO_OK));
+        this.#receiver(encodeMemoryBoundary(HELLO_OK));
         return Promise.resolve();
       case "session.open": {
         this.sessionOpenCount++;
@@ -1758,7 +1873,7 @@ class SessionChangingTransport implements Transport {
         const sessionId = this.sessionOpenCount === 1
           ? "session-A"
           : "session-B";
-        this.#receiver(JSON.stringify({
+        this.#receiver(encodeMemoryBoundary({
           type: "response",
           requestId: message.requestId!,
           ok: {
@@ -1777,7 +1892,7 @@ class SessionChangingTransport implements Transport {
           return Promise.resolve();
         }
         // If we get here, a transact was sent with new session — this is the bug
-        this.#receiver(JSON.stringify({
+        this.#receiver(encodeMemoryBoundary({
           type: "response",
           requestId: message.requestId!,
           ok: { seq: this.transactCount },
@@ -1785,7 +1900,7 @@ class SessionChangingTransport implements Transport {
         return Promise.resolve();
       }
       case "session.ack":
-        this.#receiver(JSON.stringify({
+        this.#receiver(encodeMemoryBoundary({
           type: "response",
           requestId: message.requestId!,
           ok: { serverSeq: 0 },

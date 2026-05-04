@@ -1,40 +1,16 @@
+import { isInstance } from "@commonfabric/utils/types";
 import type { FabricValue } from "./fabric-value.ts";
 import type { ReconstructionContext } from "./fabric-value.ts";
-import { JsonEncodingContext } from "./json-encoding-modern.ts";
-
-// ---------------------------------------------------------------------------
-// Module-level JSON encoding context (stateless -- created once, reused).
-// ---------------------------------------------------------------------------
-
-const jsonEncodingContext = new JsonEncodingContext();
-
-// ---------------------------------------------------------------------------
-// Flag-dispatched public API
-//
-// These two symbols are reassigned by `configureDispatch()` whenever the
-// unified JSON encoding flag changes. When OFF (default), both are plain
-// JSON.stringify / JSON.parse. When ON, they route through the
-// `JsonEncodingContext` codec which handles serialization and deserialization internally.
-// ---------------------------------------------------------------------------
-
-/**
- * Encode a fabric value to a JSON string. When unified JSON encoding is
- * ON, serializes modern types (bigint, undefined, Map, etc.) into the
- * `/<Type>@<Version>` tagged wire format and stringifies. When OFF,
- * equivalent to `JSON.stringify(value)`.
- */
-export let jsonFromValue: (value: FabricValue) => string;
-
-/**
- * Decode a JSON string back into a fabric value. When unified JSON
- * encoding is ON, parses the string and deserializes tagged forms back
- * into modern runtime types. When OFF,
- * equivalent to `JSON.parse(json)`.
- */
-export let valueFromJson: (
-  json: string,
-  runtime: ReconstructionContext,
-) => FabricValue;
+import {
+  jsonFromValueLegacy,
+  seemsLikeJsonEncodedFabricValueLegacy,
+  valueFromJsonLegacy,
+} from "./json-encoding-legacy.ts";
+import {
+  jsonFromValueModern,
+  seemsLikeJsonEncodedFabricValueModern,
+  valueFromJsonModern,
+} from "./json-encoding-modern.ts";
 
 // ---------------------------------------------------------------------------
 // Unified JSON encoding flag and dispatch configuration
@@ -49,47 +25,6 @@ export let valueFromJson: (
 let jsonEncodingEnabled = false;
 
 /**
- * Reassign the public API symbols based on the current value of
- * `jsonEncodingEnabled`. Called at module load and whenever the flag
- * changes.
- */
-function configureDispatch(): void {
-  if (jsonEncodingEnabled) {
-    // ----- Unified JSON encoding implementations -----
-
-    jsonFromValue = (value: FabricValue): string => {
-      return jsonEncodingContext.encode(value);
-    };
-
-    valueFromJson = (
-      json: string,
-      runtime: ReconstructionContext,
-    ): FabricValue => {
-      return jsonEncodingContext.decode(json, runtime);
-    };
-  } else {
-    // ----- Passthrough (flag OFF) -----
-
-    jsonFromValue = (value: FabricValue): string => {
-      const result = JSON.stringify(value);
-      if (result === undefined) {
-        throw new Error(
-          "jsonFromValue: cannot stringify undefined (flag OFF)",
-        );
-      }
-      return result;
-    };
-
-    valueFromJson = (
-      json: string,
-      _runtime: ReconstructionContext,
-    ): FabricValue => {
-      return JSON.parse(json) as FabricValue;
-    };
-  }
-}
-
-/**
  * Activates or deactivates unified JSON encoding mode. Called by the
  * `Runtime` constructor to propagate
  * `ExperimentalOptions.unifiedJsonEncoding` into the memory layer.
@@ -97,7 +32,6 @@ function configureDispatch(): void {
 export function setJsonEncodingConfig(enabled?: boolean): void {
   if (enabled !== undefined) {
     jsonEncodingEnabled = enabled;
-    configureDispatch();
   }
 }
 
@@ -113,11 +47,76 @@ export function getJsonEncodingConfig(): boolean {
  */
 export function resetJsonEncodingConfig(): void {
   jsonEncodingEnabled = false;
-  configureDispatch();
 }
 
 // ---------------------------------------------------------------------------
-// Initialize dispatch to passthrough mode at module load.
+// Flag-dispatched public API
 // ---------------------------------------------------------------------------
 
-configureDispatch();
+/**
+ * Encodes a fabric value to a JSON string. When unified JSON encoding is ON,
+ * uses the modern JSON-based format. When OFF, equivalent to
+ * `JSON.stringify(value)`.
+ */
+export function jsonFromValue(value: FabricValue): string {
+  if (jsonEncodingEnabled) {
+    return jsonFromValueModern(value);
+  } else {
+    return jsonFromValueLegacy(value);
+  }
+}
+
+/**
+ * Decodes a JSON string back into a fabric value which is expected to be a
+ * plain object. Throws if it turns out to be something else.
+ */
+export function plainObjectFromJson<T extends object = object>(
+  json: string,
+  runtime?: ReconstructionContext,
+): T {
+  const result = valueFromJson(json, runtime);
+
+  if ((result === null) || (typeof result !== "object")) {
+    throw new Error("plainObjectFromJson: Decoded to non-object");
+  } else if (Array.isArray(result)) {
+    throw new Error(
+      "plainObjectFromJson: Decoded to array (not a plain object)",
+    );
+  } else if (isInstance(result)) {
+    throw new Error(
+      "plainObjectFromJson: Decoded to instance (not a plain object)",
+    );
+  }
+
+  return result as T;
+}
+
+/**
+ * Indicates if the given text has a "first-blush" appearance as valid encoded
+ * JSON as defined by this module.
+ */
+export function seemsLikeJsonEncodedFabricValue(value: string): boolean {
+  if (jsonEncodingEnabled) {
+    return seemsLikeJsonEncodedFabricValueModern(value);
+  } else {
+    return seemsLikeJsonEncodedFabricValueLegacy(value);
+  }
+}
+
+/**
+ * Decodes a JSON string back into a fabric value. When unified JSON encoding is
+ * ON, uses the modern JSON-based format. When OFF, equivalent to
+ * `JSON.parse(json)`. The `runtime` argument is only consulted when the flag
+ * is ON; if omitted, the shared `EMPTY_RECONSTRUCTION_CONTEXT` is substituted,
+ * which throws if any cell reconstruction is needed.
+ */
+export function valueFromJson(
+  json: string,
+  runtime?: ReconstructionContext | undefined,
+): FabricValue {
+  if (jsonEncodingEnabled) {
+    return valueFromJsonModern(json, runtime);
+  } else {
+    return valueFromJsonLegacy(json);
+  }
+}

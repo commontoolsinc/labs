@@ -8,7 +8,16 @@ import {
   resolve,
 } from "@std/path";
 import type { HarnessRunState } from "./run-state.ts";
+import type { HarnessCfcPolicySnapshot } from "./contracts/cfc-policy-snapshot.ts";
+import type { HarnessPolicyTrace } from "./contracts/policy-trace.ts";
 import { createHarnessPolicyEvent } from "./contracts/policy.ts";
+import type { HarnessRunManifest } from "./contracts/run-manifest.ts";
+import type { HarnessRunReport } from "./contracts/run-report.ts";
+import type {
+  HarnessSkillActivations,
+  HarnessSkillRegistry,
+  HarnessSkillResourceReads,
+} from "./contracts/skill.ts";
 import type { HarnessTranscriptMessage } from "./contracts/transcript.ts";
 import type { ToolOutputId } from "./contracts/tool-result.ts";
 import type { HarnessCapabilitySnapshot } from "./diagnostics.ts";
@@ -63,6 +72,25 @@ export interface HarnessArtifactStore {
   persistCapabilitySnapshot(
     snapshot: HarnessCapabilitySnapshot,
   ): Promise<string>;
+  persistCfcPolicySnapshot(
+    snapshot: HarnessCfcPolicySnapshot,
+  ): Promise<string>;
+  persistPolicyTrace?(
+    trace: HarnessPolicyTrace,
+  ): Promise<string>;
+  persistRunReport(
+    report: HarnessRunReport,
+  ): Promise<string>;
+  persistRunManifest?(manifest: HarnessRunManifest): Promise<string>;
+  persistSkillRegistry?(
+    registry: HarnessSkillRegistry,
+  ): Promise<string>;
+  persistSkillActivations?(
+    activations: HarnessSkillActivations,
+  ): Promise<string>;
+  persistSkillResourceReads?(
+    reads: HarnessSkillResourceReads,
+  ): Promise<string>;
   persistToolOutput(
     toolId: string,
     outputId: ToolOutputId,
@@ -109,6 +137,67 @@ export class FileSystemHarnessArtifactStore implements HarnessArtifactStore {
     return path;
   }
 
+  async persistCfcPolicySnapshot(
+    snapshot: HarnessCfcPolicySnapshot,
+  ): Promise<string> {
+    await ensureDir(this.runRoot);
+    const path = join(this.runRoot, "policy-snapshot.json");
+    await writeJsonFile(path, snapshot);
+    return path;
+  }
+
+  async persistPolicyTrace(
+    trace: HarnessPolicyTrace,
+  ): Promise<string> {
+    await ensureDir(this.runRoot);
+    const path = join(this.runRoot, "policy-trace.json");
+    await writeJsonFile(path, trace);
+    return path;
+  }
+
+  async persistRunReport(
+    report: HarnessRunReport,
+  ): Promise<string> {
+    await ensureDir(this.runRoot);
+    const path = join(this.runRoot, "run-report.json");
+    await writeJsonFile(path, report);
+    return path;
+  }
+
+  async persistRunManifest(manifest: HarnessRunManifest): Promise<string> {
+    await ensureDir(this.runRoot);
+    const path = join(this.runRoot, "run-manifest.json");
+    await writeJsonFile(path, manifest);
+    return path;
+  }
+
+  async persistSkillRegistry(
+    registry: HarnessSkillRegistry,
+  ): Promise<string> {
+    await ensureDir(this.runRoot);
+    const path = join(this.runRoot, "skill-registry.json");
+    await writeJsonFile(path, registry);
+    return path;
+  }
+
+  async persistSkillActivations(
+    activations: HarnessSkillActivations,
+  ): Promise<string> {
+    await ensureDir(this.runRoot);
+    const path = join(this.runRoot, "skill-activations.json");
+    await writeJsonFile(path, activations);
+    return path;
+  }
+
+  async persistSkillResourceReads(
+    reads: HarnessSkillResourceReads,
+  ): Promise<string> {
+    await ensureDir(this.runRoot);
+    const path = join(this.runRoot, "skill-resource-reads.json");
+    await writeJsonFile(path, reads);
+    return path;
+  }
+
   async persistToolOutput(
     toolId: string,
     outputId: ToolOutputId,
@@ -140,6 +229,12 @@ const normalizeHarnessRunState = (
       : createHarnessPolicyEvent(event)
   ),
   toolOutputs: [...(state.toolOutputs ?? [])],
+  ...(state.policyDecisions !== undefined
+    ? { policyDecisions: [...state.policyDecisions] }
+    : {}),
+  ...(state.subagentRuns !== undefined
+    ? { subagentRuns: [...state.subagentRuns] }
+    : {}),
   failureRecords: [...(state.failureRecords ?? [])],
 });
 
@@ -154,6 +249,11 @@ export const readHarnessTranscript = async (
   path: string,
 ): Promise<HarnessTranscriptMessage[]> =>
   JSON.parse(await Deno.readTextFile(path)) as HarnessTranscriptMessage[];
+
+export const readHarnessRunReport = async (
+  path: string,
+): Promise<HarnessRunReport> =>
+  JSON.parse(await Deno.readTextFile(path)) as HarnessRunReport;
 
 export interface HarnessRunArtifacts {
   runRoot: string;

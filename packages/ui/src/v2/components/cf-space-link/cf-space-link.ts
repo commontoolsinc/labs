@@ -71,7 +71,7 @@ export class CFSpaceLink extends BaseElement {
 
     return html`
       <cf-chip
-        variant="primary"
+        color="primary"
         interactive
         @click="${this._handleClick}"
       >

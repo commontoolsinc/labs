@@ -706,6 +706,64 @@ describe("Schema - Link Resolution", () => {
    * - With asCell: returns a Cell pointing one step further (second)
    */
   describe("validateAndTransform with redirect links", () => {
+    it("creates schema-declared stream cells for missing stream targets", () => {
+      const processCell = runtime.getCell(
+        space,
+        "missing-stream-target-process",
+        undefined,
+        tx,
+      );
+      processCell.setRawUntyped({ internal: {} });
+
+      const streamSchema = {
+        type: "object",
+        properties: {
+          value: { type: "number" },
+        },
+        required: ["value"],
+        asCell: ["stream"],
+        ifc: { confidentiality: [{ kind: "secret" }] },
+      } as const satisfies JSONSchema;
+
+      const inputs = runtime.getImmutableCell(
+        space,
+        {
+          $ctx: {
+            add: {
+              $alias: {
+                cell: processCell.entityId,
+                path: ["internal", "dialog", "add"],
+                schema: streamSchema,
+              },
+            },
+          },
+        },
+        undefined,
+        tx,
+      );
+
+      const handlerSchema = {
+        type: "object",
+        properties: {
+          $ctx: {
+            type: "object",
+            properties: {
+              add: streamSchema,
+            },
+            required: ["add"],
+          },
+        },
+        required: ["$ctx"],
+      } as const satisfies JSONSchema;
+
+      const result = inputs.asSchema(handlerSchema).get() as any;
+
+      expect(result).toBeDefined();
+      expect(result.$ctx).toBeDefined();
+      expect(isCell(result.$ctx.add)).toBe(true);
+      expect(() => result.$ctx.add.send({ value: 1 })).not.toThrow();
+    });
+
     it("without asCell: toCell() returns first non-redirect cell", () => {
       // Chain: start --redirect--> redir --redirect--> first --regular--> second --regular--> data
       //
@@ -1579,7 +1637,6 @@ describe("Schema - Link Resolution", () => {
           id: dataCellURI,
           path: [],
           space,
-          type: "application/json",
         },
         cellASchema,
       );

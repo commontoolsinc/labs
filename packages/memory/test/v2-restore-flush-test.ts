@@ -1,6 +1,7 @@
 import { assert, assertEquals } from "@std/assert";
 import { Server } from "../v2/server.ts";
 import { connect, type Transport } from "../v2/client.ts";
+import { decodeMemoryBoundary, encodeMemoryBoundary } from "../v2.ts";
 
 const SPACE = "did:key:z6Mk-restore-flush-test";
 
@@ -25,7 +26,7 @@ class ReconnectableTransport implements Transport {
   constructor(private readonly server: Server) {}
 
   async send(payload: string): Promise<void> {
-    const message = JSON.parse(payload) as {
+    const message = decodeMemoryBoundary(payload) as {
       type?: string;
       requestId?: string;
       commit?: { localSeq?: number };
@@ -87,7 +88,9 @@ class ReconnectableTransport implements Transport {
   }
 
   async #deliver(payload: string): Promise<void> {
-    const message = JSON.parse(payload) as { commit?: { localSeq?: number } };
+    const message = decodeMemoryBoundary(payload) as {
+      commit?: { localSeq?: number };
+    };
     if (typeof message.commit?.localSeq === "number") {
       this.#deliveredTransactLocalSeqs.push(message.commit.localSeq);
     }
@@ -103,7 +106,7 @@ class ReconnectableTransport implements Transport {
         const localSeq = typeof requestId === "string"
           ? this.#transactRequestLocalSeqById.get(requestId)
           : undefined;
-        const payload = JSON.stringify(message);
+        const payload = encodeMemoryBoundary(message);
         if (
           this.#delayTransacts &&
           typeof requestId === "string" &&
@@ -349,7 +352,7 @@ Deno.test(
       );
       assertEquals(
         (commitCResult.reason as Error).message,
-        "memory/v2 session closed",
+        "memory session closed",
       );
       assertEquals(
         transport.deliveredTransactLocalSeqs.filter((localSeq) =>

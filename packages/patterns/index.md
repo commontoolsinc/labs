@@ -632,6 +632,45 @@ interface Output {
 }
 ```
 
+## `cfc-agent-prompt-injection-demo/main.tsx`
+
+Interactive side-by-side chatbot demo for the new observation ceiling and
+subagent behavior. One chat reads a hostile prompt-influencing briefing directly
+and gets tainted before it can use a low-conf tool; the other delegates the raw
+text to a higher-ceiling userland subagent pattern via `patternTool()` and only
+receives a schema-limited safe summary.
+
+**Keywords:** llmDialog, patternTool, prompt-injection, confidentiality,
+tool-calling, cf-chat
+
+### Input Schema
+
+```ts
+type Input = Record<string, never>;
+```
+
+### Output Schema
+
+```ts
+type SentEmail = {
+  route: string;
+  recipient: string;
+  subject: string;
+  body: string;
+  loggedAt: string;
+};
+
+type Output = {
+  emails: SentEmail[];
+  unsafeMessages: BuiltInLLMMessage[];
+  safeMessages: BuiltInLLMMessage[];
+  unsafePending: boolean;
+  safePending: boolean;
+  parentModel: string;
+  subAgentModel: string;
+};
+```
+
 ## `chatbot.tsx`
 
 Full-featured AI chat assistant with tool support, model selection, and

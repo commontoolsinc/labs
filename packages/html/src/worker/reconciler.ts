@@ -1839,7 +1839,7 @@ export class WorkerReconciler {
     const link = base
       ? parseLink(rawValue, base) ?? parseLink(value, base)
       : parseLink(rawValue) ?? parseLink(value);
-    if (link?.id && link.space && link.type) {
+    if (link?.id && link.space) {
       return propsCell.runtime.getCellFromLink(link);
     }
     if (isCell(value)) {

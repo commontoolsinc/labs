@@ -1,6 +1,7 @@
+import { toIndentedDebugString } from "@commonfabric/data-model/value-debug";
+import { hashOf, hashStringOf } from "@commonfabric/data-model/value-hash";
 import {
   hashSchema,
-  hashSchemaItem,
   internSchema,
   internSchemaAsHashString,
 } from "@commonfabric/data-model/schema-hash";
@@ -308,8 +309,7 @@ export class MapSet<K, V> {
 /**
  * Convenience subclass of `MapSet` specialized for `string` keys and
  * `SchemaPathSelector` values — the common case throughout traverse/query
- * code. When `hashValues` is `true`, uses `hashSchemaItem` from the
- * schema-hash dispatch layer as the hash function.
+ * code. When `hashValues` is `true`, uses `hashStringOf()`.
  *
  * **Contract:** Callers must hand in selectors that have already been
  * interned via `internPathSelector` (from `@commonfabric/data-model/schema-utils`).
@@ -326,7 +326,7 @@ export class MapSetStringToPathSelectors extends MapSet<
   SchemaPathSelector
 > {
   constructor(hashValues: boolean = false) {
-    super(hashValues ? (v) => hashSchemaItem(v) : undefined);
+    super(hashValues ? (v) => hashStringOf(v) : undefined);
   }
 }
 
@@ -339,6 +339,46 @@ export class MapSetStringToStrings extends MapSet<string, string> {
     super();
   }
 }
+
+const pathStartsWith = (
+  path: readonly string[],
+  prefix: readonly string[],
+): boolean =>
+  prefix.length <= path.length &&
+  prefix.every((part, index) => path[index] === part);
+
+export const schemaTrackerCoversSelector = (
+  schemaTracker: MapSet<string, SchemaPathSelector>,
+  key: string,
+  selector: SchemaPathSelector,
+): boolean => {
+  const internedSelector = selector.schema !== undefined &&
+      Object.isFrozen(selector) && Object.isFrozen(selector.path)
+    ? selector
+    : internPathSelector({
+      path: [...selector.path],
+      schema: selector.schema ?? false,
+    });
+  if (schemaTracker.hasValue(key, internedSelector)) {
+    return true;
+  }
+
+  const existingSelectors = schemaTracker.get(key);
+  if (existingSelectors === undefined) {
+    return false;
+  }
+
+  for (const existing of existingSelectors) {
+    if (
+      existing.schema !== undefined &&
+      ContextualFlowControl.isTrueSchema(existing.schema) &&
+      pathStartsWith(internedSelector.path, existing.path)
+    ) {
+      return true;
+    }
+  }
+  return false;
+};
 
 export class CycleTracker<K> {
   private partial: Set<K>;
@@ -375,7 +415,7 @@ export class CycleTracker<K> {
  * is keyed on `internSchemaAsHashString(extraKey ?? true)`, so repeat
  * calls with a structurally-equal schema re-lookup the same entry in
  * O(1) without re-hashing — the intern cache's WeakMap returns the
- * canonical hash string without invoking `hashSchemaItem` on
+ * canonical hash string without invoking `hashStringOf()` on
  * already-interned inputs.
  *
  * An `undefined` `extraKey` is normalized to `true` (JSON Schema's
@@ -670,11 +710,10 @@ function getNormalizedLink(
   if (address.path.length === 0 || address.path[0] !== "value") {
     throw new Error("Unable to create link to non-value address");
   }
-  const { space, id, path, type } = address;
+  const { space, id, path } = address;
   return {
     space,
     id,
-    type,
     path: path.slice(1),
     ...(schema !== undefined && { schema }),
   };
@@ -698,6 +737,7 @@ export abstract class BaseObjectTraverser {
     protected traverseCells = true,
   ) {}
   protected dagMemo = new Map<string, Immutable<FabricValue>>();
+  private coverageSelectorCache = new Map<string, SchemaPathSelector>();
   traverseDAGCalls = 0;
   getDocAtPathCalls = 0;
   abstract traverse(
@@ -819,21 +859,13 @@ export abstract class BaseObjectTraverser {
     } else if (isRecord(doc.value)) {
       // First, see if we need special handling
       if (isPrimitiveCellLink(doc.value)) {
-        // Check if target doc is already tracked BEFORE calling getAtPath,
-        // since getAtPath/followPointer will add it to schemaTracker
-        let alreadyTracked = false;
-        // If the link didn't have a space/type, make sure we add one
+        // Check coverage before getAtPath/followPointer adds this link target
+        // to schemaTracker.
+        const alreadyTracked = this.isLinkedDocumentCovered(
+          doc,
+          DEFAULT_SELECTOR,
+        );
         const link = parseLink(doc.value, doc.address);
-        if (link.id !== undefined) {
-          const targetKey = `${link.space}/${link.id}/${link.type}`;
-          alreadyTracked = this.schemaTracker.hasValue(
-            targetKey,
-            internPathSelector({
-              path: ["value", ...link.path],
-              schema: true,
-            }),
-          );
-        }
         const [redirDoc, _redirSelector] = this.getDocAtPath(
           doc,
           [],
@@ -973,6 +1005,54 @@ export abstract class BaseObjectTraverser {
     } else {
       return [doc, selector];
     }
+  }
+
+  protected isLinkedDocumentCovered(
+    doc: IMemorySpaceValueAttestation,
+    selector: SchemaPathSelector,
+  ): boolean {
+    const link = parseLink(doc.value, doc.address);
+    if (link?.id === undefined) {
+      return false;
+    }
+
+    const targetSelector = narrowSchema(
+      doc.address.path,
+      selector,
+      ["value", ...(link.path as readonly string[])],
+      this.cfc,
+    );
+    targetSelector.schema = combineOptionalSchema(
+      targetSelector.schema,
+      link.schema,
+    );
+
+    return schemaTrackerCoversSelector(
+      this.schemaTracker,
+      `${link.space}/${link.id}/application/json`,
+      this.internCoverageSelector(targetSelector),
+    );
+  }
+
+  private internCoverageSelector(
+    selector: SchemaPathSelector,
+  ): SchemaPathSelector {
+    const schema = selector.schema ?? false;
+    const schemaKey = typeof schema === "boolean"
+      ? String(schema)
+      : hashSchema(schema);
+    const cacheKey = `${selector.path.join("\0")}\0${schemaKey}`;
+    const cached = this.coverageSelectorCache.get(cacheKey);
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    const interned = internPathSelector({
+      path: [...selector.path],
+      schema,
+    });
+    this.coverageSelectorCache.set(cacheKey, interned);
+    return interned;
   }
 
   /**
@@ -1402,7 +1482,6 @@ export function loadMetaLinkedDoc(
   const address = {
     space: link.space,
     id: link.id!,
-    type: link.type! as MIME,
     path: [],
   };
   if (address === undefined) {
@@ -1428,7 +1507,7 @@ export function loadMetaLinkedDocs(
   const pendingDocs = [valueEntry];
   while (pendingDocs.length > 0) {
     const currentDoc = pendingDocs.shift()!;
-    for (const meta of ["source", "pattern", "argument", "internal"] as const) {
+    for (const meta of ["pattern", "argument", "internal"] as const) {
       const linkedDoc = loadMetaLinkedDoc(tx, currentDoc, meta, schemaTracker);
       if (linkedDoc === undefined) continue;
       if (cycleCheck.has(linkedDoc.address.id)) continue;
@@ -1966,7 +2045,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       logger.debug("traverse", () => [
         "Call to traverse failed validation",
         doc,
-        JSON.stringify(this.selector?.schema, undefined, 2),
+        toIndentedDebugString(this.selector?.schema),
         this.getDebugValue(doc),
       ]);
     }
@@ -2583,11 +2662,11 @@ export class SchemaObjectTraverser<V extends FabricValue>
         },
         value: item,
       };
-      this.tx.read(curDoc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
       let curSelector: SchemaPathSelector = {
         path: curDoc.address.path,
         schema: itemSchema,
       };
+      this.tx.read(curDoc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
       // Sparse array holes are densified to `null` at the storage boundary in
       // legacy JSON mode. When the item schema expects cells/streams, or the
       // schema rejects both `null` and `undefined`, treat that committed `null`
@@ -2622,6 +2701,18 @@ export class SchemaObjectTraverser<V extends FabricValue>
       // let createdDataURI = false;
       // const maybeLink = parseLink(item, arrayLink);
       if (isPrimitiveCellLink(item)) {
+        const alreadyTracked = this.isLinkedDocumentCovered(
+          curDoc,
+          curSelector,
+        );
+        const link = parseLink(item, curDoc.address);
+        if (
+          this.traverseCells && alreadyTracked && link?.id !== doc.address.id
+        ) {
+          this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
+          arrayObj[index] = null;
+          return true;
+        }
         this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
         const [redirDoc, selector] = this.getDocAtPath(
           curDoc,
@@ -2918,6 +3009,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
   ): TraverseResult<Immutable<FabricValue>> {
     this.traversePointerCalls++;
     const selector = { path: doc.address.path, schema };
+    const alreadyTracked = this.isLinkedDocumentCovered(doc, selector);
 
     // In the case of an opaque cell, we want to skip any deeper reads
     // This means we don't follow any redirects
@@ -2925,6 +3017,14 @@ export class SchemaObjectTraverser<V extends FabricValue>
     if (asCellValues.at(0) === "opaque") {
       const cellLink = getNextCellLink(doc, schema);
       return { ok: this.objectCreator.createObject(cellLink, undefined) };
+    }
+
+    const pointerLink = parseLink(doc.value, doc.address);
+    if (
+      this.traverseCells && alreadyTracked &&
+      pointerLink?.id !== doc.address.id
+    ) {
+      return { ok: null };
     }
 
     const [redirDoc, redirSelector] = this.getDocAtPath(
@@ -2947,6 +3047,17 @@ export class SchemaObjectTraverser<V extends FabricValue>
         redirSelector?.schema === undefined ||
         SchemaObjectTraverser.hasAsCell(redirSelector.schema)
       ) {
+        const schema = redirSelector?.schema;
+        const asCellValues = ContextualFlowControl.getAsCellValues(
+          schema,
+        );
+        if (schema !== undefined && asCellValues.at(0) === "stream") {
+          const cellLink = getNormalizedLink(
+            redirDoc.address,
+            schema,
+          );
+          return { ok: this.objectCreator.createObject(cellLink, undefined) };
+        }
         // If we don't have a schema, we don't allow undefined
         // If we have a schema with asCell, we can't create a cell for this,
         // since we can't follow all the write-redirect links.
@@ -2957,6 +3068,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
           : fail(TRAVERSE_FAILURES.undefinedLink);
       }
     }
+
     // For the runtime, where we don't traverse cells, we just want
     // to create a cell object and don't walk into the object beyond
     // what we need to resolve the pointers.
@@ -3063,13 +3175,11 @@ export class SchemaObjectTraverser<V extends FabricValue>
     if (doc.value === undefined) {
       return "undefined";
     }
-    return JSON.stringify(
+    return toIndentedDebugString(
       this.traverseWithSelector(doc, {
         path: doc.address.path,
         schema: true,
       }),
-      getCircularReplacer(),
-      2,
     );
   }
 }
@@ -3313,23 +3423,6 @@ function _mergeAnyOfBranchSchemasUncached(
     ...((outerSchema.asCell || outerSchema.asStream) &&
       { asCell: outerSchema.asCell ?? ["stream"] }),
   } as JSONSchemaObj;
-}
-
-// Utility function used for debugging so we can convert proxy objects into
-// regular objects when there's circular references.
-function getCircularReplacer() {
-  const ancestors: object[] = [];
-  return function (_key: string, value: any) {
-    if (typeof value !== "object" || value === null) {
-      return value;
-    }
-    // Check if the value has been seen before in the current ancestry path
-    if (ancestors.includes(value)) {
-      return "[Circular]"; // Replace cyclic reference with a string
-    }
-    ancestors.push(value);
-    return value;
-  };
 }
 
 /**

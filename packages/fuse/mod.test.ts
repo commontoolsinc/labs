@@ -1,8 +1,13 @@
 import { assertEquals } from "@std/assert";
 import {
+  appendDecodedJsonPath,
+  bufferForNoHandleTruncate,
+  decodeFuseNamespaceName,
   DEFAULT_CFC_XATTR_NAMESPACE,
   defaultCfcWritebackStatePath,
   parseCfcXattrNamespace,
+  rootSpaceLookupNames,
+  sourceRelPathToTreeSegments,
 } from "./mod.ts";
 
 function env(values: Record<string, string | undefined>) {
@@ -57,4 +62,36 @@ Deno.test("default CFC writeback state path avoids /tmp fallback", () => {
     ),
     "/home/alice/.cache/commonfabric-fuse/cfc-writeback-_2Fmnt_2Fcf.json",
   );
+});
+
+Deno.test("FUSE namespace writeback decodes path component names", () => {
+  assertEquals(decodeFuseNamespaceName("of%3Aentity"), "of:entity");
+  assertEquals(
+    appendDecodedJsonPath(["items"], "of%3Aentity"),
+    ["items", "of:entity"],
+  );
+});
+
+Deno.test("source writeback re-encodes decoded source relpaths for tree lookup", () => {
+  assertEquals(
+    sourceRelPathToTreeSegments("src/has:colon.tsx"),
+    ["src", "has%3Acolon.tsx"],
+  );
+});
+
+Deno.test("no-handle truncate opens only the bounded target prefix", () => {
+  const content = new Uint8Array([1, 2, 3, 4, 5]);
+  assertEquals([...bufferForNoHandleTruncate(content, 2)], [1, 2]);
+  assertEquals(bufferForNoHandleTruncate(content, 0).length, 0);
+});
+
+Deno.test("root space lookup decodes request names and replies with canonical names", () => {
+  assertEquals(rootSpaceLookupNames("did%3Akey%3AzSpace"), {
+    spaceName: "did:key:zSpace",
+    directoryName: "did%3Akey%3AzSpace",
+  });
+  assertEquals(rootSpaceLookupNames("home"), {
+    spaceName: "home",
+    directoryName: "home",
+  });
 });

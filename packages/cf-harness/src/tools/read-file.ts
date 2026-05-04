@@ -10,6 +10,10 @@ import {
   type StructuredFileToolErrorOutput,
   structuredFileToolErrorOutputSchema,
 } from "./file-errors.ts";
+import {
+  isResolvedPathInsideArtifactRoot,
+  RESERVED_ARTIFACT_PATH_DETAIL,
+} from "./reserved-artifacts.ts";
 
 export interface ReadFileToolInput {
   path: string;
@@ -80,26 +84,43 @@ export const readFileTool: HarnessToolDefinition<
         detail: detailFromUnknownError(error),
       });
     }
+    if (await isResolvedPathInsideArtifactRoot(context, resolvedPath)) {
+      return createStructuredFileToolErrorOutput(context, "read_file", {
+        path: resolvedPath,
+        code: "permission_denied",
+        detail: RESERVED_ARTIFACT_PATH_DETAIL,
+      });
+    }
+    const command = [
+      "set -eu",
+      'if [ ! -e "$1" ]; then',
+      '  echo "file not found: $1" >&2',
+      "  exit 10",
+      "fi",
+      'if [ ! -f "$1" ]; then',
+      '  echo "not a file: $1" >&2',
+      "  exit 11",
+      "fi",
+      'if [ -n "$2" ]; then',
+      '  exec head -c "$2" "$1"',
+      "fi",
+      'exec cat "$1"',
+    ].join("\n");
+    const args = [
+      resolvedPath,
+      input.maxBytes !== undefined ? String(input.maxBytes) : "",
+    ];
     const result = await context.sandbox.runShell({
-      command: [
-        "set -eu",
-        'if [ ! -e "$1" ]; then',
-        '  echo "file not found: $1" >&2',
-        "  exit 10",
-        "fi",
-        'if [ ! -f "$1" ]; then',
-        '  echo "not a file: $1" >&2',
-        "  exit 11",
-        "fi",
-        'if [ -n "$2" ]; then',
-        '  exec head -c "$2" "$1"',
-        "fi",
-        'exec cat "$1"',
-      ].join("\n"),
-      args: [
-        resolvedPath,
-        input.maxBytes !== undefined ? String(input.maxBytes) : "",
-      ],
+      command,
+      args,
+      cwd: context.currentDir,
+      cfcInvocationContext: await context.createCfcInvocationContext({
+        toolId: "read_file",
+        operation: "shell",
+        cwd: context.currentDir,
+        command,
+        args,
+      }),
     });
     if (result.exitCode !== 0) {
       return createStructuredFileToolErrorOutput(context, "read_file", {

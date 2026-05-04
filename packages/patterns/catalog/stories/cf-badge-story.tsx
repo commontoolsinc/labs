@@ -16,10 +16,9 @@ interface BadgeStoryOutput {
 }
 
 export default pattern<BadgeStoryInput, BadgeStoryOutput>(() => {
-  const variant = Writable.of<
-    "default" | "secondary" | "destructive" | "outline"
-  >(
-    "default",
+  const variant = Writable.of<"solid" | "outline">("solid");
+  const color = Writable.of<"neutral" | "primary" | "accent" | "danger">(
+    "primary",
   );
   const removable = Writable.of(false);
   const label = Writable.of("Badge");
@@ -39,6 +38,7 @@ export default pattern<BadgeStoryInput, BadgeStoryOutput>(() => {
         >
           <cf-badge
             variant={variant}
+            color={color}
             removable={removable}
           >
             {label}
@@ -53,14 +53,24 @@ export default pattern<BadgeStoryInput, BadgeStoryOutput>(() => {
       <Controls>
         <>
           <SelectControl
+            label="color"
+            description="Color intent"
+            defaultValue="primary"
+            value={color}
+            items={[
+              { label: "Neutral", value: "neutral" },
+              { label: "Primary", value: "primary" },
+              { label: "Accent", value: "accent" },
+              { label: "Danger", value: "danger" },
+            ]}
+          />
+          <SelectControl
             label="variant"
             description="Visual style variant"
-            defaultValue="default"
+            defaultValue="solid"
             value={variant}
             items={[
-              { label: "Default", value: "default" },
-              { label: "Secondary", value: "secondary" },
-              { label: "Destructive", value: "destructive" },
+              { label: "Solid", value: "solid" },
               { label: "Outline", value: "outline" },
             ]}
           />

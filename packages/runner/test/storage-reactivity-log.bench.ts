@@ -6,7 +6,6 @@ import {
   markReadAsPotentialWrite,
 } from "../src/storage/reactivity-log.ts";
 import { txToReactivityLog } from "../src/scheduler.ts";
-import { BENCH_MEMORY_VERSION } from "./bench-memory-version.ts";
 
 const signer = await Identity.fromPassphrase("storage-reactivity-log-bench");
 const space = signer.did();
@@ -14,12 +13,10 @@ const space = signer.did();
 const setup = () => {
   const storageManager = StorageManager.emulate({
     as: signer,
-    memoryVersion: BENCH_MEMORY_VERSION,
   });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
-    memoryVersion: BENCH_MEMORY_VERSION,
   });
   return { storageManager, runtime };
 };
@@ -41,7 +38,6 @@ Deno.bench(
       tx.writeValueOrThrow({
         space,
         id: "of:reactivity-log-bench",
-        type: "application/json",
         path: [],
       }, {
         count: 0,
@@ -53,31 +49,26 @@ Deno.bench(
         tx.readValueOrThrow({
           space,
           id: "of:reactivity-log-bench",
-          type: "application/json",
           path: ["count"],
         });
         tx.read({
           space,
           id: "of:reactivity-log-bench",
-          type: "application/json",
           path: ["nested", "value"],
         }, { nonRecursive: true });
         tx.read({
           space,
           id: "of:reactivity-log-bench",
-          type: "application/json",
           path: ["nested"],
         }, { meta: ignoreReadForScheduling });
         tx.read({
           space,
           id: "of:reactivity-log-bench",
-          type: "application/json",
           path: ["list"],
         }, { meta: markReadAsPotentialWrite });
         tx.writeValueOrThrow({
           space,
           id: "of:reactivity-log-bench",
-          type: "application/json",
           path: ["count"],
         }, index);
       }
@@ -99,7 +90,6 @@ Deno.bench(
       tx.writeValueOrThrow({
         space,
         id: "of:reactivity-log-repeat",
-        type: "application/json",
         path: [],
       }, {
         count: 0,
@@ -110,13 +100,11 @@ Deno.bench(
         tx.readValueOrThrow({
           space,
           id: "of:reactivity-log-repeat",
-          type: "application/json",
           path: ["nested", "value"],
         });
         tx.writeValueOrThrow({
           space,
           id: "of:reactivity-log-repeat",
-          type: "application/json",
           path: ["count"],
         }, index);
       }

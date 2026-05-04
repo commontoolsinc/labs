@@ -1,4 +1,4 @@
-import { css, html } from "lit";
+import { css, html, LitElement } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { BaseElement } from "../../core/base-element.ts";
 
@@ -25,6 +25,11 @@ import { BaseElement } from "../../core/base-element.ts";
  */
 
 export class CFRadio extends BaseElement {
+  static override shadowRootOptions = {
+    ...LitElement.shadowRootOptions,
+    delegatesFocus: true,
+  };
+
   static override styles = css`
     :host {
       display: inline-block;
@@ -153,11 +158,20 @@ export class CFRadio extends BaseElement {
     }
 
     override connectedCallback() {
+      if (!this.hasAttribute("role")) {
+        this.setAttribute("role", "radio");
+      }
+      if (!this.hasAttribute("exportparts")) {
+        this.setAttribute("exportparts", "radio,indicator");
+      }
       super.connectedCallback();
-      // Make the element focusable
-      this.tabIndex = this.disabled ? -1 : 0;
-      this.setAttribute("role", "radio");
       this._updateAriaAttributes();
+
+      // Host owns role="radio" and focus — handle interaction here so
+      // keyboard (Space) and click both work regardless of where in the
+      // component they land.
+      this.addEventListener("click", this._handleClick);
+      this.addEventListener("keydown", this._handleKeydown);
 
       // Check if within a radio group
       const radioGroup = this.closest("cf-radio-group");
@@ -170,14 +184,16 @@ export class CFRadio extends BaseElement {
       }
     }
 
+    override disconnectedCallback() {
+      super.disconnectedCallback();
+      this.removeEventListener("click", this._handleClick);
+      this.removeEventListener("keydown", this._handleKeydown);
+    }
+
     override updated(
       changedProperties: Map<string | number | symbol, unknown>,
     ) {
       super.updated(changedProperties);
-
-      if (changedProperties.has("disabled")) {
-        this.tabIndex = this.disabled ? -1 : 0;
-      }
 
       if (
         changedProperties.has("checked") || changedProperties.has("disabled")
@@ -202,11 +218,10 @@ export class CFRadio extends BaseElement {
         <div
           class="${classString}"
           part="radio"
-          @click="${this._handleClick}"
-          @keydown="${this._handleKeydown}"
         >
           <span class="indicator" part="indicator"></span>
         </div>
+        <slot></slot>
         <input
           type="radio"
           class="sr-only"
@@ -223,6 +238,7 @@ export class CFRadio extends BaseElement {
     private _updateAriaAttributes() {
       this.setAttribute("aria-checked", String(this.checked));
       this.setAttribute("aria-disabled", String(this.disabled));
+      this.tabIndex = this.disabled ? -1 : 0;
     }
 
     private _handleClick(event: Event) {

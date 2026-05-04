@@ -18,6 +18,7 @@ import {
   NAME,
   pattern,
   safeDateNow,
+  toIndentedDebugString,
   UI,
 } from "commonfabric";
 
@@ -287,7 +288,7 @@ export default pattern<InputSchema, Output>(({ source }) => {
         >
           <h3>Raw Source State:</h3>
           <pre style={{ fontSize: "12px", overflow: "auto" }}>
-            {computed(() => JSON.stringify({ auth: source.auth, name: source.name }, null, 2))}
+            {computed(() => toIndentedDebugString({ auth: source.auth, name: source.name }))}
           </pre>
         </div>
       </div>

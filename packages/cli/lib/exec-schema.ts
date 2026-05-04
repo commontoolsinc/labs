@@ -1,4 +1,5 @@
 import type { JSONSchema } from "@commonfabric/api";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { cliCommand } from "./cli-name.ts";
 
 export interface ExecCommandSpec {
@@ -607,14 +608,13 @@ function schemaDescription(schema: JSONSchema): string | undefined {
 
 function schemaEnumSummary(schema: JSONSchema): string | undefined {
   if (!isSchemaObject(schema) || !Array.isArray(schema.enum)) return undefined;
-  return (schema.enum as unknown[]).map((value) => JSON.stringify(value)).join(
-    " | ",
-  );
+  return (schema.enum as unknown[]).map((value) => toCompactDebugString(value))
+    .join(" | ");
 }
 
 function schemaDefaultSummary(schema: JSONSchema): string | undefined {
   if (!isSchemaObject(schema) || !("default" in schema)) return undefined;
-  return JSON.stringify(schema.default);
+  return toCompactDebugString(schema.default);
 }
 
 function valuePlaceholder(schema: JSONSchema): string {
@@ -1028,7 +1028,7 @@ function schemaShapeString(
   }
 
   if (Array.isArray(schema.enum)) {
-    return schema.enum.map((value) => JSON.stringify(value)).join(" | ");
+    return schema.enum.map((value) => toCompactDebugString(value)).join(" | ");
   }
 
   const unionSchemas = Array.isArray(schema.anyOf)

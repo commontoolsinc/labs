@@ -49,6 +49,13 @@ keywords/features.
   - **Keywords**: lift, handler, navigateTo, cf-select, cf-render,
     cf-autolayout, wish, [ID]
 
+- cfc-agent-prompt-injection-demo/main.tsx: Side-by-side chatbot demo showing
+  raw prompt-influence taint versus a schema-limited subagent sanitization path
+  - **Data types**: array of LLM messages, confidential string, decision log
+    entries
+  - **Keywords**: llmDialog, patternTool, prompt-injection, confidentiality,
+    cf-chat, tool-calling
+
 - chatbot.tsx: Full-featured chatbot with LLM integration and attachments
   - **Data types**: array of LLM messages, array of attachments (objects), array
     of pieces

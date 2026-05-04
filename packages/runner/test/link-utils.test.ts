@@ -217,7 +217,6 @@ describe("link-utils", () => {
         id: expect.stringContaining("of:"),
         path: [],
         space: space,
-        type: "application/json",
         schema: undefined,
       });
     });
@@ -232,7 +231,6 @@ describe("link-utils", () => {
         id: expect.stringContaining("of:"),
         path: ["nested"],
         space: space,
-        type: "application/json",
         schema: undefined,
       });
     });
@@ -245,7 +243,6 @@ describe("link-utils", () => {
         id: expect.stringContaining("of:"),
         path: [],
         space: space,
-        type: "application/json",
         schema: undefined,
       });
     });
@@ -267,7 +264,6 @@ describe("link-utils", () => {
         id: "of:test",
         path: ["nested", "value"],
         space: space,
-        type: "application/json",
         schema: { type: "number" },
       });
     });
@@ -290,7 +286,6 @@ describe("link-utils", () => {
         id: "of:test",
         path: ["nested", "value"],
         space: space,
-        type: "application/json",
         schema: { type: "number" },
       });
     });
@@ -302,7 +297,6 @@ describe("link-utils", () => {
             id: "of:test",
             path: ["nested", "value"],
             space: space,
-            type: "application/json",
             schema: { type: "number" },
             overwrite: "redirect",
           },
@@ -314,7 +308,6 @@ describe("link-utils", () => {
         id: "of:test",
         path: ["nested", "value"],
         space: space,
-        type: "application/json",
         schema: { type: "number" },
         overwrite: "redirect",
       });
@@ -336,7 +329,6 @@ describe("link-utils", () => {
         id: expect.stringContaining("of:"),
         path: ["nested", "value"],
         space: space,
-        type: "application/json",
         schema: undefined,
       });
     });
@@ -353,7 +345,6 @@ describe("link-utils", () => {
 
       expect(result).toEqual({
         path: ["nested", "value"],
-        type: "application/json",
       });
 
       // Don't allow `id: undefined`, etc.
@@ -371,7 +362,6 @@ describe("link-utils", () => {
         id: expect.stringContaining("of:"),
         path: [],
         space: space,
-        type: "application/json",
         schema: undefined,
       });
     });
@@ -391,7 +381,6 @@ describe("link-utils", () => {
         id: expect.stringContaining("of:"),
         path: ["nested", "value"],
         space: space,
-        type: "application/json",
         schema: { type: "number" },
         overwrite: "redirect",
       });
@@ -409,7 +398,6 @@ describe("link-utils", () => {
       expect(result).toEqual({
         id: expect.stringContaining("of:"),
         path: ["nested", "value"],
-        type: "application/json",
         space: space,
         schema: undefined,
         overwrite: "redirect",
@@ -436,6 +424,16 @@ describe("link-utils", () => {
         "Cannot parse value as link",
       );
       expect(() => parseLinkOrThrow(123)).toThrow("Cannot parse value as link");
+    });
+
+    it("should not crash on BigInt values when formatting the error", () => {
+      // Regression: a previous version embedded `JSON.stringify(value)` in the
+      // error message, which throws on BigInt and masks the original "not a
+      // link" failure. Using `toCompactDebugString` instead handles BigInt
+      // safely.
+      expect(() => parseLinkOrThrow(123n as unknown as never)).toThrow(
+        "Cannot parse value as link",
+      );
     });
   });
 
@@ -1192,7 +1190,6 @@ describe("link-utils", () => {
         id: longId,
         path: ["path", "to", "cell"],
         space: space,
-        type: "application/json",
       });
     });
 
@@ -1203,7 +1200,6 @@ describe("link-utils", () => {
       expect(result).toEqual({
         id: longId,
         path: ["path"],
-        type: "application/json",
       });
     });
 

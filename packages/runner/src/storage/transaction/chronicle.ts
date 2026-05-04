@@ -30,7 +30,7 @@ import {
   UnsupportedMediaTypeError,
   write,
 } from "./attestation.ts";
-import { refer } from "@commonfabric/memory/reference";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import * as Edit from "./edit.ts";
 
 const isEmptyRecord = (
@@ -43,16 +43,12 @@ const isEmptyRecord = (
   Object.keys(value).length === 0;
 
 const alignRootWriteWithLoadedShape = (
-  type: string,
   _loaded: FabricValue | undefined,
   merged: FabricValue | undefined,
   options: {
     isV2JsonRoot: boolean;
   },
 ): FabricValue | undefined => {
-  if (type !== "application/json") {
-    return merged;
-  }
   if (options.isV2JsonRoot) {
     return isEmptyRecord(merged) ? undefined : merged;
   }
@@ -107,10 +103,11 @@ export class Chronicle {
    * such fact exists yet.
    */
   load(address: Omit<IMemoryAddress, "path">): State {
+    const type = address.type ?? "application/json";
     // If we have not read nor written into overlapping memory address,
     // we'll read it from the local replica.
     return this.#replica.get(address) ??
-      unclaimed({ of: address.id, the: address.type });
+      unclaimed({ of: address.id, the: type });
   }
 
   /**
@@ -165,7 +162,10 @@ export class Chronicle {
 
     // Initialize working copy from replica if needed (only happens once per document)
     if (!changes.getWorkingCopy()) {
-      const state = this.load({ id: address.id, type: address.type });
+      const state = this.load({
+        id: address.id,
+        type: address.type ?? "application/json",
+      });
       const loaded = attest(state);
       changes.initFromReplica(loaded);
     }
@@ -295,12 +295,10 @@ export class Chronicle {
         const normalizedLoaded = fabricFromNativeValue(loaded.is);
 
         const alignedMerged = alignRootWriteWithLoadedShape(
-          changes.address.type,
           normalizedLoaded,
           normalizedMerged,
           {
-            isV2JsonRoot: changes.address.type === "application/json" &&
-              "getDocument" in replica &&
+            isV2JsonRoot: "getDocument" in replica &&
               typeof replica.getDocument === "function",
           },
         );
@@ -315,7 +313,7 @@ export class Chronicle {
           // Create an assertion referring to the loaded fact in a causal
           // reference.
           const factToRefer = loaded.cause ? normalizeFact(loaded) : loaded;
-          const causeRef = refer(factToRefer);
+          const causeRef = hashOf(factToRefer);
 
           edit.assert({
             ...loaded,
@@ -418,7 +416,7 @@ class Novelty {
   }
 
   edit(address: IMemoryAddress) {
-    const key = `${address.id}/${address.type}`;
+    const key = address.id;
     const changes = this.#model.get(key);
     if (changes) {
       return changes;
@@ -500,7 +498,7 @@ class Novelty {
    * Returns changes for the fact at the provided address.
    */
   select(address: IMemoryAddress) {
-    return this.#model.get(`${address.id}/${address.type}`);
+    return this.#model.get(address.id);
   }
 }
 

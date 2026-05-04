@@ -14,6 +14,7 @@ import type {
 } from "./interface.ts";
 import { MemorySpace } from "./interface.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 
 export const unauthorized = (
   message: string,
@@ -134,7 +135,9 @@ export class TheQueryError extends Error implements QueryError {
     public override cause: SystemError,
   ) {
     super(
-      `Query ${JSON.stringify(selector)} in ${space} failed: ${cause.message}`,
+      `Query ${
+        toCompactDebugString(selector)
+      } in ${space} failed: ${cause.message}`,
     );
   }
   toJSON(): QueryError {

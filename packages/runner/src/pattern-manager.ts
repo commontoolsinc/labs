@@ -122,7 +122,6 @@ export class PatternManager {
         id: patternId,
         path: [],
         space,
-        type: "application/json",
         schema: patternMetaSchema,
       },
       tx,

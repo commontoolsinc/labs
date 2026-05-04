@@ -865,7 +865,7 @@ describe("scheduler", () => {
     expect(resultCell.get()).toEqual({ count: 1, lastValue: { value: 1 } });
   });
 
-  it("should not react to stored CFC metadata updates read through verifier helpers", async () => {
+  it("should react to stored CFC metadata updates read through verifier helpers", async () => {
     const sourceCell = runtime.getCell<{ secret: string }>(
       space,
       "source-cell-for-cfc-metadata-reactivity-test",
@@ -919,7 +919,6 @@ describe("scheduler", () => {
       {
         space: secretLink.space,
         id: secretLink.id,
-        type: secretLink.type as "application/json",
         path: ["cfc"],
       },
       {
@@ -938,8 +937,8 @@ describe("scheduler", () => {
     tx = runtime.edit();
     await resultCell.pull();
 
-    expect(actionRunCount).toBe(1);
-    expect(resultCell.get()).toEqual({ count: 1, applies: false });
+    expect(actionRunCount).toBe(2);
+    expect(resultCell.get()).toEqual({ count: 2, applies: true });
 
     const verifyTx = runtime.edit();
     expect(storedCfcMetadataAppliesToPath(verifyTx, secretLink)).toBe(true);
@@ -981,7 +980,6 @@ describe("scheduler", () => {
       const cfcDocument = actionTx.readOrThrow({
         space: sourceLink.space,
         id: sourceLink.id,
-        type: sourceLink.type as "application/json",
         path: ["cfc"],
       }) as { version?: number } | undefined;
       lastVersion = cfcDocument?.version ?? 0;
@@ -1006,7 +1004,6 @@ describe("scheduler", () => {
       {
         space: sourceLink.space,
         id: sourceLink.id,
-        type: sourceLink.type as "application/json",
         path: ["cfc"],
       },
       {
@@ -1692,7 +1689,6 @@ describe("event handling", () => {
         tx.write({
           space,
           id: entityId,
-          type: "application/json",
           path: [],
         }, { version: 2 });
       };

@@ -35,6 +35,7 @@ Current Loom migration judgment:
 See also:
 
 - [LOOM_MIGRATION_NOTES.md](LOOM_MIGRATION_NOTES.md)
+- [SKILLS_SUPPORT_SPEC.md](SKILLS_SUPPORT_SPEC.md)
 
 ## Design Principles
 
@@ -84,6 +85,7 @@ The package already includes:
 - package exports and tasks in [deno.json](../deno.json)
 - initial contract surfaces:
   - [prompt-slot.ts](../src/contracts/prompt-slot.ts)
+  - [run-manifest.ts](../src/contracts/run-manifest.ts)
   - [observation.ts](../src/contracts/observation.ts)
   - [policy.ts](../src/contracts/policy.ts)
   - [transcript.ts](../src/contracts/transcript.ts)
@@ -119,6 +121,7 @@ Why:
 
 - artifact store in [artifacts.ts](../src/artifacts.ts)
 - run-state tracking in [run-state.ts](../src/run-state.ts)
+- retained Loom run manifest artifacts
 - transcript-based resume support in the prompt loop and CLI
 
 Why:
@@ -143,7 +146,12 @@ Why:
   - `observe`
   - `enforce-explicit`
   - `enforce-strict`
+- default CFC mode aligned with runner-style `enforce-explicit`
 - deny/recovery via JSON `ObservationDenied` tool messages
+- spec-aligned `PromptSlotBound` prompt-slot evidence
+- capability snapshots that record current CFC mode, manifest presence,
+  substrate absence behavior, sandbox CFC request hints, and expected protected
+  xattr visibility
 - CLI summaries of accumulated policy events
 
 Why:
@@ -161,6 +169,134 @@ Why:
 
 - to support current Common Tools gateway expectations
 - to make local operator debugging less ambiguous
+
+### Stage H: Minimal subagent delegation
+
+- built-in `delegate_task` tool descriptor
+- prompt-loop orchestration for one focused child run at a time
+- fresh child prompt context with the delegated goal and optional context
+- explicit default child profile limited to:
+  - `bash`
+  - `read_file`
+  - `write_file`
+- parent delegation authority separated from direct parent tool allowlists:
+  - unconstrained runs allow the default profile
+  - runs with an explicit `--allow-tool` list require
+    `--allow-subagent-profile default` to spawn the default profile
+- named return policy that sends the parent a summary, manifest, and sanitized
+  run-state summary, while retaining raw child transcript/failure detail in
+  child artifacts
+- persisted parent references to child run ids, manifests, summaries, and run
+  state snapshots
+- summary-only parent tool output, without exposing the child transcript back to
+  the parent model
+
+Why:
+
+- to introduce the core containment and provenance shape before browser access
+- to give Loom and Pattern Factory a native delegation primitive without adding
+  additional profiles, parallelism, or browser mediation in the first slice
+- to make delegation a visible policy transition before adding higher-taint
+  child capabilities such as `agent-browser`
+
+### Stage I: Browser subagent profile, provisional host shell
+
+- built-in `bash-no-sandbox` tool descriptor and implementation
+- parent/default prompt loops keep `bash-no-sandbox` unavailable unless a loop
+  is explicitly constructed with that tool
+- package CLI intentionally does not expose `bash-no-sandbox` as a parent
+  `--allow-tool`
+- named `browser` subagent profile limited to:
+  - `bash-no-sandbox`
+  - `read_file`
+- subagent manifests record `hostToolIds` so host execution capability is
+  visible in retained provenance
+- child prompt explicitly labels host execution as outside the sandbox and
+  orients browser-profile children toward `agent-browser`
+
+### Stage J: Browser host command policy
+
+- `bash-no-sandbox` is no longer an arbitrary host shell even inside the browser
+  profile
+- allowed host command shapes:
+  - `agent-browser ...` except host-mutating setup such as
+    `agent-browser install`
+  - `which agent-browser` and `command -v agent-browser`
+  - `pwd`
+  - `ls` with a small read-only flag set and workspace-relative paths
+  - `find` with workspace-relative paths, required bounded `-maxdepth`, and a
+    small read-only predicate set
+- denied host commands return a normal nonzero tool result without invoking the
+  host process runner, and diagnostics classify the denial as `tool_not_allowed`
+
+Why:
+
+- to keep the intended eventual `agent-browser` usage shape: agents invoke it
+  through shell commands, not through a special-purpose harness tool
+- to put the high-taint browser capability behind an explicit delegation
+  transition before broader browser policy exists
+- to avoid silently making host execution part of the parent/default tool
+  surface
+
+### Stage K: Browser write posture and artifact placement
+
+- browser-profile children do not receive `write_file`; browser observations
+  should return through schema-validated structured returns rather than normal
+  workspace files
+- raw browser host-tool outputs and raw structured returns are still retained in
+  child artifacts for audit/debugging
+- local/browser examples should place `--artifact-root` outside `--workspace` so
+  raw child artifacts do not become ordinary parent-readable workspace files
+- when artifacts are physically placed under a workspace, the artifact root is
+  reserved from `read_file`, `write_file`, and browser-profile host `ls`/`find`
+  discovery paths
+
+Still planned:
+
+- stop treating raw host artifact paths as model-facing references; prefer
+  opaque output IDs/handles for parent-visible results and keep paths in
+  operator-facing run state/report data
+- introduce an explicit declassification/readback mechanism for raw child
+  artifacts before exposing them to a parent model
+
+Why:
+
+- removing `write_file` prevents the browser child from directly turning tainted
+  page observations into normal workspace files, but it does not by itself make
+  raw retained artifacts confidential if the artifact directory is mounted
+  inside the workspace
+- the long-term sandbox/infrastructure design should make raw browser artifacts
+  operator-inspectable while keeping them out of the parent prompt unless a
+  deliberate declassification step occurs
+
+### Stage L: Explicit Agent Skills preload
+
+- explicit `skillsRoot` configuration and CLI flags
+- explicit skill preload for batch/product runs
+- persisted skill registry and activation artifacts
+- runtime-generated supporting-resource indexes in skill registry artifacts
+- text-first `read_skill_resource` support for indexed resources
+- `skill-resource-reads.json` provenance artifacts
+- CFC classification of skill content as context, not direct-command authority
+- context message insertion before the final task prompt
+
+Still planned:
+
+- eventual dedicated `load_skill` tool for model-driven activation
+- script execution through a separately permissioned boundary
+- explicit subagent skill activation policy
+
+Why:
+
+- Pattern Factory depends on repo-local skills for acceptable implementation
+  quality
+- `cf-harness` should not need broad parent `bash` just to discover or load task
+  guidance
+- skill loading must be inspectable, resumable, and aligned with CFC policy
+
+See the package-local spec:
+
+- [SKILLS_SUPPORT_SPEC.md](SKILLS_SUPPORT_SPEC.md)
 
 ## Current Verified State
 
@@ -270,8 +406,22 @@ Current resumability is transcript-based and useful, but still limited:
 
 ### 5. When do subagents start mattering?
 
-The current package is intentionally single-loop and sequential. That is the
-right choice so far, but it is not the end state.
+The package now has a first minimal subagent path: a parent can delegate one
+focused child run through `delegate_task`, and the child receives a fresh prompt
+context plus the selected profile's tool set. The default profile remains
+sandbox shell/file only; the provisional browser profile adds host shell access
+for `agent-browser`-style commands. `delegate_task` can also take an optional
+`returnSchema`; when supplied, the harness validates the child JSON return,
+keeps the raw return in child artifacts, and exposes only a sanitized structured
+value with free-form strings and objects with unmodeled keys linkified through
+opaque `@link` handles.
+
+The remaining subagent work is still substantial:
+
+- first-class browser-mediated subagent policy on top of the provisional host
+  shell path
+- parallel child orchestration
+- richer orchestration resume for partially completed child runs
 
 ## Suggested Reading Order
 

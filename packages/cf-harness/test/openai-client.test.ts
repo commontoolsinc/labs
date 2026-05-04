@@ -1,5 +1,8 @@
-import { assertEquals, assertRejects } from "@std/assert";
-import { OpenAICompatibleGatewayClient } from "../src/gateway/openai-client.ts";
+import { assert, assertEquals, assertRejects } from "@std/assert";
+import {
+  type OpenAIChatCompletionAttemptDiagnostic,
+  OpenAICompatibleGatewayClient,
+} from "../src/gateway/openai-client.ts";
 
 Deno.test("OpenAICompatibleGatewayClient resolves endpoint URLs against the base URL", () => {
   const client = new OpenAICompatibleGatewayClient({
@@ -94,17 +97,62 @@ Deno.test("OpenAICompatibleGatewayClient parses successful chat completion JSON 
   assertEquals(response.choices[0]?.message.content, "ok");
 });
 
-Deno.test("OpenAICompatibleGatewayClient surfaces chat completion errors with response text", async () => {
+Deno.test("OpenAICompatibleGatewayClient retries chat completion transport failures once by default", async () => {
+  let calls = 0;
+  const attempts: OpenAIChatCompletionAttemptDiagnostic[] = [];
   const client = new OpenAICompatibleGatewayClient({
     baseUrl: "https://llm.stage.commontools.dev/",
     apiKey: "test-key",
-    fetchFn: () =>
-      Promise.resolve(
-        new Response("bad request", {
-          status: 400,
-          statusText: "Bad Request",
-        }),
-      ),
+    chatCompletionRetryDelayMs: 0,
+    fetchFn: () => {
+      calls += 1;
+      if (calls === 1) {
+        return Promise.reject(new Error("connection error: timed out"));
+      }
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [{
+              index: 0,
+              message: { role: "assistant", content: "ok" },
+            }],
+          }),
+          { status: 200 },
+        ),
+      );
+    },
+  });
+
+  const response = await client.createChatCompletionJson({
+    model: "gpt-5.4",
+    messages: [],
+  }, {
+    onChatCompletionAttempt: (attempt) => {
+      attempts.push(attempt);
+    },
+  });
+
+  assertEquals(calls, 2);
+  assertEquals(response.choices[0]?.message.content, "ok");
+  assertEquals(attempts.map((attempt) => attempt.outcome), [
+    "transport_error",
+    "http_response",
+  ]);
+  assertEquals(attempts.map((attempt) => attempt.attempt), [1, 2]);
+  assertEquals(attempts[0].errorDetail, "connection error: timed out");
+  assertEquals(attempts[1].httpStatus, 200);
+});
+
+Deno.test("OpenAICompatibleGatewayClient surfaces exhausted chat completion transport retries", async () => {
+  let calls = 0;
+  const client = new OpenAICompatibleGatewayClient({
+    baseUrl: "https://llm.stage.commontools.dev/",
+    apiKey: "test-key",
+    chatCompletionRetryDelayMs: 0,
+    fetchFn: () => {
+      calls += 1;
+      return Promise.reject(new Error("connection error: timed out"));
+    },
   });
 
   await assertRejects(
@@ -114,8 +162,68 @@ Deno.test("OpenAICompatibleGatewayClient surfaces chat completion errors with re
         messages: [],
       }),
     Error,
+    "chat completion transport request failed after 2 attempts",
+  );
+  assertEquals(calls, 2);
+});
+
+Deno.test("OpenAICompatibleGatewayClient surfaces chat completion errors with response text", async () => {
+  const attempts: OpenAIChatCompletionAttemptDiagnostic[] = [];
+  const client = new OpenAICompatibleGatewayClient({
+    baseUrl: "https://llm.stage.commontools.dev/",
+    apiKey: "test-key",
+    fetchFn: () =>
+      Promise.resolve(
+        new Response("bad request", {
+          status: 400,
+          statusText: "Bad Request",
+          headers: {
+            "x-request-id": "req-bad-request",
+          },
+        }),
+      ),
+  });
+
+  await assertRejects(
+    () =>
+      client.createChatCompletionJson({
+        model: "gpt-5.4",
+        messages: [{ role: "user", content: "hello" }],
+        tools: [{
+          type: "function",
+          function: {
+            name: "read_file",
+          },
+        }],
+      }, {
+        onChatCompletionAttempt: (attempt) => {
+          attempts.push(attempt);
+        },
+      }),
+    Error,
     "chat completion request failed (400): bad request",
   );
+  assertEquals(attempts.length, 1);
+  const attempt = attempts[0];
+  assertEquals(attempt.type, "cf-harness.gateway.chat-completion-attempt");
+  assertEquals(attempt.operation, "chat.completions");
+  assertEquals(attempt.outcome, "http_response");
+  assertEquals(attempt.attempt, 1);
+  assertEquals(attempt.maxTransportAttempts, 2);
+  assertEquals(attempt.request.model, "gpt-5.4");
+  assertEquals(attempt.request.messageCount, 1);
+  assertEquals(attempt.request.toolCount, 1);
+  assert(attempt.request.serializedBytes > 0);
+  assertEquals(attempt.httpStatus, 400);
+  assertEquals(attempt.httpStatusText, "Bad Request");
+  assertEquals(attempt.requestId, "req-bad-request");
+  assertEquals(attempt.responseHeaders?.["x-request-id"], "req-bad-request");
+  assertEquals(attempt.responseBodyBytes, 11);
+  assertEquals(attempt.responseBodyExcerpt, "bad request");
+  assertEquals(attempt.responseBodyTruncated, false);
+  assert(attempt.durationMs >= 0);
+  assert(new Date(attempt.startedAt).toString() !== "Invalid Date");
+  assert(new Date(attempt.endedAt).toString() !== "Invalid Date");
 });
 
 Deno.test("OpenAICompatibleGatewayClient fails clearly when no API key is configured", async () => {

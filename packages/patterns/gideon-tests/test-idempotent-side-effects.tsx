@@ -31,6 +31,7 @@ import {
   NAME,
   pattern,
   safeDateNow,
+  toIndentedDebugString,
   UI,
   Writable,
 } from "commonfabric";
@@ -192,7 +193,7 @@ export default pattern<TestInput, TestOutput>(({ triggerCount }) => {
             >
               <strong>Data (keeps growing):</strong>
               <pre style={{ fontSize: "11px", margin: "5px 0" }}>
-                {JSON.stringify(nonIdempotentArray.get(), null, 2)}
+                {toIndentedDebugString(nonIdempotentArray.get())}
               </pre>
             </div>
 
@@ -245,7 +246,7 @@ export default pattern<TestInput, TestOutput>(({ triggerCount }) => {
             >
               <strong>Data (stable):</strong>
               <pre style={{ fontSize: "11px", margin: "5px 0" }}>
-                {JSON.stringify(idempotentMap.get(), null, 2)}
+                {toIndentedDebugString(idempotentMap.get())}
               </pre>
             </div>
 

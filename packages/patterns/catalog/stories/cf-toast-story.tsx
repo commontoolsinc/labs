@@ -23,31 +23,36 @@ export default pattern<ToastStoryInput, ToastStoryOutput>(() => {
           <cf-heading level={5}>Toast Variants</cf-heading>
           <cf-hstack gap="2">
             <cf-button
-              variant="secondary"
+              color="neutral"
+              variant="outline"
               onClick={action(() => showDefault.set(true))}
             >
               Default
             </cf-button>
             <cf-button
-              variant="secondary"
+              color="neutral"
+              variant="outline"
               onClick={action(() => showSuccess.set(true))}
             >
               Success
             </cf-button>
             <cf-button
-              variant="secondary"
+              color="neutral"
+              variant="outline"
               onClick={action(() => showError.set(true))}
             >
               Error
             </cf-button>
             <cf-button
-              variant="secondary"
+              color="neutral"
+              variant="outline"
               onClick={action(() => showWarning.set(true))}
             >
               Warning
             </cf-button>
             <cf-button
-              variant="primary"
+              color="primary"
+              variant="solid"
               onClick={action(() => showAction.set(true))}
             >
               With Action
@@ -58,7 +63,7 @@ export default pattern<ToastStoryInput, ToastStoryOutput>(() => {
         <cf-toast-provider position="bottom">
           <cf-toast
             open={showDefault}
-            variant="default"
+            status="info"
             duration={4000}
             oncf-toast-dismiss={action(() => showDefault.set(false))}
           >
@@ -66,7 +71,7 @@ export default pattern<ToastStoryInput, ToastStoryOutput>(() => {
           </cf-toast>
           <cf-toast
             open={showSuccess}
-            variant="success"
+            status="success"
             duration={4000}
             oncf-toast-dismiss={action(() => showSuccess.set(false))}
           >
@@ -74,16 +79,16 @@ export default pattern<ToastStoryInput, ToastStoryOutput>(() => {
           </cf-toast>
           <cf-toast
             open={showError}
-            variant="error"
+            status="error"
             duration={0}
-            dismissable
+            dismissible
             oncf-toast-dismiss={action(() => showError.set(false))}
           >
             Connection lost. Retrying...
           </cf-toast>
           <cf-toast
             open={showWarning}
-            variant="warning"
+            status="warning"
             duration={4000}
             oncf-toast-dismiss={action(() => showWarning.set(false))}
           >
@@ -91,15 +96,16 @@ export default pattern<ToastStoryInput, ToastStoryOutput>(() => {
           </cf-toast>
           <cf-toast
             open={showAction}
-            variant="success"
+            status="success"
             duration={5000}
             oncf-toast-dismiss={action(() => showAction.set(false))}
           >
             Wish sent.
             <cf-button
               slot="action"
-              variant="ghost"
-              style="padding: 2px 8px; font-size: 13px;"
+              color="neutral"
+              variant="outline"
+              size="sm"
             >
               View
             </cf-button>

@@ -9,11 +9,11 @@ import type {
   StatsRoute,
 } from "./health.routes.ts";
 import { checkLLMHealth } from "./llm-health.service.ts";
+import { getSlowQueries } from "@commonfabric/memory/v2/server";
 import {
   getLoggerCountsBreakdown,
   getTimingStatsBreakdown,
 } from "@commonfabric/utils/logger";
-import { Provider } from "@commonfabric/memory";
 
 export const HealthResponseSchema = z.object({
   status: z.literal("OK"),
@@ -54,7 +54,7 @@ export const stats: AppRouteHandler<StatsRoute> = (c) => {
     serverStart: serverStartTimestamp,
     logCounts: getLoggerCountsBreakdown(),
     timingStats: getTimingStatsBreakdown(),
-    slowQueries: Provider.getSlowQueries(),
+    slowQueries: [...getSlowQueries()],
   }, HttpStatusCodes.OK);
 };
 

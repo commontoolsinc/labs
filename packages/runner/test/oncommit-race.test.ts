@@ -24,7 +24,6 @@ describe("onCommit callback final outcome", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: "v2",
       cfcEnforcementMode: "enforce-explicit",
     });
     runtime.scheduler.disablePullMode();

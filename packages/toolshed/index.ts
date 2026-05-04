@@ -52,8 +52,6 @@ const initializeRuntime = async () => {
       experimental: {
         modernDataModel: env.EXPERIMENTAL_MODERN_DATA_MODEL,
         unifiedJsonEncoding: env.EXPERIMENTAL_UNIFIED_JSON_ENCODING,
-        modernHash: env.EXPERIMENTAL_MODERN_HASH,
-        modernSchemaHash: env.EXPERIMENTAL_MODERN_SCHEMA_HASH,
       },
       cachedCompiler,
     });
@@ -101,7 +99,7 @@ const handleShutdown = async () => {
 
         console.log("Closing memory system...");
         const result = await memory.close();
-        if (result.error) {
+        if ("error" in result) {
           console.error("Error closing memory:", result.error);
         } else {
           console.log("Memory system closed successfully");

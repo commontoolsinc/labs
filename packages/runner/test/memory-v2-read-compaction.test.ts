@@ -13,11 +13,9 @@ const createRuntime = async (label: string) => {
   const signer = await Identity.fromPassphrase(label);
   const storage = StorageManager.emulate({
     as: signer,
-    memoryVersion: "v2",
   });
   const runtime = new Runtime({
     storageManager: storage,
-    memoryVersion: "v2",
     apiUrl: new URL(import.meta.url),
   });
   return { signer, storage, runtime };

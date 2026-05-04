@@ -351,7 +351,6 @@ describe("Schema - Examples", () => {
         path: ["current", "label"],
         space,
         schema: current.schema,
-        type: "application/json",
       });
 
       // .get() the currently selected cell. This should not change when
@@ -379,7 +378,6 @@ describe("Schema - Examples", () => {
         id: toURI(initialEntityId),
         path: ["foo"],
         space,
-        type: "application/json",
         schema: omitSchema,
       });
       const log = txToReactivityLog(tx);

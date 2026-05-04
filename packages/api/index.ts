@@ -1525,7 +1525,12 @@ export interface ImageData {
 export type BuiltInLLMTool =
   & { description?: string }
   & (
-    | { pattern: Pattern; handler?: never; extraParams?: Record<string, any> }
+    | {
+      pattern: Pattern;
+      handler?: never;
+      extraParams?: Record<string, any>;
+      useResultSchemaForObservation?: boolean;
+    }
     | { handler: Stream<any> | OpaqueRef<any>; pattern?: never }
   );
 
@@ -1536,6 +1541,8 @@ export interface BuiltInLLMParams {
   system?: string;
   stop?: string;
   maxTokens?: number;
+  builtinTools?: boolean;
+  observationMaxConfidentiality?: readonly ImmutableJSONValue[];
   /**
    * Specifies the mode of operation for the LLM.
    * - `"json"`: Indicates that the LLM should process and return data in JSON format.
@@ -1575,6 +1582,7 @@ export interface BuiltInLLMState {
 export interface BuiltInLLMGenerateObjectState<T> {
   pending: boolean;
   result?: T;
+  messages?: BuiltInLLMMessage[];
   partial?: string;
   error?: unknown;
   cancelGeneration: Stream<void>;
@@ -1602,6 +1610,8 @@ export type BuiltInGenerateObjectParams =
     system?: string;
     cache?: boolean;
     maxTokens?: number;
+    observationMaxConfidentiality?: readonly ImmutableJSONValue[];
+    schemaSanitizePromptInjection?: boolean;
     metadata?: Record<string, string | undefined | object>;
     tools?: Record<string, BuiltInLLMTool>;
     queue?: string;
@@ -1615,6 +1625,8 @@ export type BuiltInGenerateObjectParams =
     system?: string;
     cache?: boolean;
     maxTokens?: number;
+    observationMaxConfidentiality?: readonly ImmutableJSONValue[];
+    schemaSanitizePromptInjection?: boolean;
     metadata?: Record<string, string | undefined | object>;
     tools?: Record<string, BuiltInLLMTool>;
     queue?: string;
@@ -1711,6 +1723,7 @@ export interface PatternFunction {
 export interface PatternToolResult<E = Record<PropertyKey, never>> {
   pattern: Pattern;
   extraParams: E;
+  useResultSchemaForObservation?: boolean;
 }
 
 export type PatternToolFunction = <
@@ -2128,6 +2141,11 @@ export interface PatternEnvironment {
 export type GetPatternEnvironmentFunction = () => PatternEnvironment;
 export type NonPrivateRandomFunction = () => number;
 export type SafeDateNowFunction = () => number;
+export type ToCompactDebugStringFunction = (
+  value: unknown,
+  maxLength?: number,
+) => string;
+export type ToIndentedDebugStringFunction = (value: unknown) => string;
 
 /**
  * Compare two cells or values for equality after resolving, i.e. after
@@ -2172,6 +2190,8 @@ export declare const byRef: ByRefFunction;
 export declare const getPatternEnvironment: GetPatternEnvironmentFunction;
 export declare const nonPrivateRandom: NonPrivateRandomFunction;
 export declare const safeDateNow: SafeDateNowFunction;
+export declare const toCompactDebugString: ToCompactDebugStringFunction;
+export declare const toIndentedDebugString: ToIndentedDebugStringFunction;
 
 export interface UiActionProps {
   readonly as?: string;

@@ -27,11 +27,18 @@ import {
   buildFsProjection,
   buildJsonTree,
   buildJsonTreeAsync,
+  buildPendingJsonTreeAsync,
   type FsValue,
   isSigilLink,
   isVNode,
   safeStringify,
 } from "./tree-builder.ts";
+import {
+  decodeFuseComponent,
+  decodeFusePathSegments,
+  encodeFuseComponent,
+  encodeFusePathSegments,
+} from "./path-codec.ts";
 import type { JSONSchema } from "@commonfabric/api";
 import type { PieceManager } from "@commonfabric/piece";
 import type {
@@ -139,6 +146,14 @@ function resolveProjectedPieceName(
 
   const fallback = normalizeProjectedPieceName(pieceId);
   return fallback || "piece";
+}
+
+function encodeSpaceDirectoryName(spaceName: string): string {
+  return encodeFuseComponent(spaceName);
+}
+
+function decodeSpaceDirectoryName(spaceName: string): string {
+  return decodeFuseComponent(spaceName);
 }
 
 type Cancel = () => void;
@@ -302,8 +317,74 @@ export class CellBridge {
    * Set to true when a write fails due to a transport/connection error.
    * Once disconnected, all files appear read-only (EACCES on write)
    * so agents get immediate feedback rather than silent data loss.
+   * Reconnection is attempted automatically with exponential backoff.
    */
-  disconnected = false;
+  private _disconnected = false;
+  private _disconnectCount = 0;
+  private _lastDisconnectReason: string | null = null;
+  private _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+  get disconnected(): boolean {
+    return this._disconnected;
+  }
+
+  /** Mark the bridge as disconnected and schedule reconnection. */
+  markDisconnected(reason: string): void {
+    if (this._disconnected) return;
+    this._disconnected = true;
+    this._disconnectCount++;
+    this._lastDisconnectReason = reason;
+    console.error(
+      `[FUSE] Backend connection lost (${reason}) — mount is READ-ONLY. ` +
+        `Will attempt reconnection in ${this._reconnectDelayMs()}ms.`,
+    );
+    this._scheduleReconnect();
+    this.updateStatus();
+  }
+
+  private _reconnectDelayMs(): number {
+    // Exponential backoff: 2s, 4s, 8s, 16s, cap at 30s
+    return Math.min(2000 * Math.pow(2, this._disconnectCount - 1), 30_000);
+  }
+
+  private _scheduleReconnect(): void {
+    if (this._reconnectTimer !== null) clearTimeout(this._reconnectTimer);
+    const timerId = setTimeout(() => {
+      this._reconnectTimer = null;
+      this._attemptReconnect();
+    }, this._reconnectDelayMs());
+    // Don't prevent Deno process from exiting while waiting to reconnect
+    Deno.unrefTimer(timerId);
+    this._reconnectTimer = timerId;
+  }
+
+  private async _attemptReconnect(): Promise<void> {
+    for (const [spaceName, state] of this.spaces) {
+      try {
+        await state.manager.synced();
+        // If synced() succeeds, connection is back
+        this._disconnected = false;
+        this._disconnectCount = 0;
+        console.error(
+          `[FUSE] Backend connection restored — write access resumed.`,
+        );
+        this.updateStatus();
+        return;
+      } catch (e) {
+        console.error(
+          `[FUSE] Reconnect probe to ${spaceName} failed: ${
+            e instanceof Error ? e.message : String(e)
+          }`,
+        );
+      }
+    }
+    // All probes failed — retry with increasing backoff
+    this._disconnectCount++;
+    console.error(
+      `[FUSE] Reconnect failed, retrying in ${this._reconnectDelayMs()}ms`,
+    );
+    this._scheduleReconnect();
+  }
 
   constructor(tree: FsTree, execCli = "", options: CellBridgeOptions = {}) {
     this.tree = tree;
@@ -454,6 +535,11 @@ export class CellBridge {
         },
         startedAt: this.startedAt,
         spaces,
+        connection: {
+          disconnected: this._disconnected,
+          disconnectCount: this._disconnectCount,
+          lastDisconnectReason: this._lastDisconnectReason,
+        },
         ...extra,
       },
       null,
@@ -544,7 +630,7 @@ export class CellBridge {
         name,
         pattern: manifest.pattern,
         summary: manifest.summary,
-        entityPath: `entities/${id}`,
+        entityPath: `entities/${encodeFuseComponent(id)}`,
       });
     }
 
@@ -784,7 +870,7 @@ export class CellBridge {
     // Minimum: spaceName/pieces/pieceName/cell = 4 segments
     if (segments.length < 4) return null;
 
-    const spaceName = segments[0];
+    const spaceName = decodeSpaceDirectoryName(segments[0]);
     if (segments[1] !== "pieces") return null;
     const pieceName = segments[2];
 
@@ -849,8 +935,11 @@ export class CellBridge {
 
       // Convert numeric segments to numbers for array indexing
       jsonPath = remaining.map((s) => {
-        const n = Number(s);
-        return Number.isInteger(n) && n >= 0 && String(n) === s ? n : s;
+        const decoded = decodeFuseComponent(s);
+        const n = Number(decoded);
+        return Number.isInteger(n) && n >= 0 && String(n) === decoded
+          ? n
+          : decoded;
       });
     } else {
       // Not a recognized cell segment
@@ -885,9 +974,9 @@ export class CellBridge {
     if (segments[1] !== "pieces") return null;
     if (segments[3] !== ".src") return null;
 
-    const spaceName = segments[0];
+    const spaceName = decodeSpaceDirectoryName(segments[0]);
     const pieceName = segments[2];
-    const relPath = segments.slice(4).join("/");
+    const relPath = decodeFusePathSegments(segments.slice(4)).join("/");
 
     const space = this.spaces.get(spaceName);
     if (!space) return null;
@@ -1185,18 +1274,31 @@ export class CellBridge {
       const buildRootName = existingIno !== undefined || jsonIno !== undefined
         ? pendingPropName
         : propName;
-      const propIno = await buildJsonTreeAsync(
-        this.tree,
-        pieceIno,
-        buildRootName,
-        treeValue,
-        undefined,
-        resolveLink,
-        0,
-        skipEntry,
-        classifyEntry,
-        cfcAnnotator?.jsonContext([]),
-      );
+      const propIno = buildRootName === pendingPropName
+        ? await buildPendingJsonTreeAsync(
+          this.tree,
+          pieceIno,
+          propName,
+          treeValue,
+          undefined,
+          resolveLink,
+          0,
+          skipEntry,
+          classifyEntry,
+          cfcAnnotator?.jsonContext([]),
+        )
+        : await buildJsonTreeAsync(
+          this.tree,
+          pieceIno,
+          propName,
+          treeValue,
+          undefined,
+          resolveLink,
+          0,
+          skipEntry,
+          classifyEntry,
+          cfcAnnotator?.jsonContext([]),
+        );
       this.addCallableFiles(propIno, callables, propName, cfcAnnotator);
       if (propName === "result") {
         this.addVNodeJsonFiles(propIno, treeValue, cfcAnnotator);
@@ -1428,7 +1530,10 @@ export class CellBridge {
         }
       }
 
-      const entityIno = this.tree.lookup(state.entitiesIno, pieceId);
+      const entityIno = this.tree.lookup(
+        state.entitiesIno,
+        encodeFuseComponent(pieceId),
+      );
       if (entityIno !== undefined) {
         this.invalidateRootPropCache(entityIno, propName);
       }
@@ -1513,14 +1618,15 @@ export class CellBridge {
 
     // Determine current space from parent's path
     const currentSpace = parentSegments.length > 0
-      ? parentSegments[0]
+      ? decodeSpaceDirectoryName(parentSegments[0])
       : undefined;
 
     // Match: /<space>/entities/<hash>[/<path...>]
     if (resolved.length >= 3 && resolved[1] === "entities") {
       const targetSpace = resolved[0];
-      const hash = resolved[2];
-      const pathParts = resolved.slice(3);
+      const decodedTargetSpace = decodeFuseComponent(targetSpace);
+      const hash = decodeFuseComponent(resolved[2]);
+      const pathParts = decodeFusePathSegments(resolved.slice(3));
 
       const result: { id?: string; path?: string[]; space?: string } = {
         id: hash,
@@ -1531,9 +1637,9 @@ export class CellBridge {
       }
 
       // Omit space if same as current
-      if (targetSpace !== currentSpace) {
-        const did = this.knownSpaces.get(targetSpace);
-        result.space = did || targetSpace;
+      if (decodedTargetSpace !== currentSpace) {
+        const did = this.knownSpaces.get(decodedTargetSpace);
+        result.space = did || decodedTargetSpace;
       }
 
       return result;
@@ -1542,7 +1648,7 @@ export class CellBridge {
     // Self-reference: target within same piece, no entities/ segment
     // Resolved path: [space, "pieces", pieceName, cell, ...subpath]
     if (resolved.length >= 4 && resolved[1] === "pieces") {
-      const subpath = resolved.slice(4);
+      const subpath = decodeFusePathSegments(resolved.slice(4));
       if (subpath.length > 0) {
         return { path: subpath };
       }
@@ -1686,7 +1792,10 @@ export class CellBridge {
     const pieces = new PiecesController(manager);
 
     // Create space directory structure
-    const spaceIno = this.tree.addDir(this.tree.rootIno, spaceName);
+    const spaceIno = this.tree.addDir(
+      this.tree.rootIno,
+      encodeSpaceDirectoryName(spaceName),
+    );
     const piecesIno = this.tree.addDir(spaceIno, "pieces");
     const entitiesIno = this.tree.addDir(spaceIno, "entities");
 
@@ -1785,6 +1894,11 @@ export class CellBridge {
     entitiesIno: bigint,
     entityId: string,
   ): Promise<boolean> {
+    const decodedEntityId = decodeFuseComponent(entityId);
+    if (encodeFuseComponent(decodedEntityId) !== entityId) {
+      return false;
+    }
+
     const existingEntityIno = this.tree.lookup(entitiesIno, entityId);
     if (existingEntityIno !== undefined) {
       return true;
@@ -1803,7 +1917,9 @@ export class CellBridge {
     if (!state || !spaceName) return false;
 
     // Match entity ID against known pieces (with or without of: prefix)
-    const bareId = entityId.startsWith("of:") ? entityId.slice(3) : entityId;
+    const bareId = decodedEntityId.startsWith("of:")
+      ? decodedEntityId.slice(3)
+      : decodedEntityId;
     let matchedPiece: PieceController | undefined;
     for (const [, piece] of state.pieceControllers) {
       const pieceBareid = piece.id.startsWith("of:")
@@ -1815,11 +1931,12 @@ export class CellBridge {
       }
     }
     if (!matchedPiece) return false;
+    if (encodeFuseComponent(matchedPiece.id) !== entityId) return false;
 
     await this.loadPieceTree(
       matchedPiece,
       entitiesIno,
-      entityId,
+      encodeFuseComponent(matchedPiece.id),
       spaceName,
       existingEntityIno,
       "entities",
@@ -1873,7 +1990,8 @@ export class CellBridge {
     // Create a lightweight stub entity dir so `ls entities/` shows stable IDs
     // immediately. Full content is populated lazily by resolveEntity() on
     // first access, avoiding doubled subscriptions and startup cost.
-    const entityStubIno = this.tree.addDir(state.entitiesIno, piece.id);
+    const entityName = encodeFuseComponent(piece.id);
+    const entityStubIno = this.tree.addDir(state.entitiesIno, entityName);
     const entityMetaObject = {
       id: piece.id,
       entityId: piece.id,
@@ -1887,7 +2005,11 @@ export class CellBridge {
       value: entityMetaObject,
     });
     entityAnnotator?.annotateJsonDirectory(entityStubIno, [], {});
-    entityAnnotator?.annotateEntry(state.entitiesIno, piece.id, entityStubIno);
+    entityAnnotator?.annotateEntry(
+      state.entitiesIno,
+      entityName,
+      entityStubIno,
+    );
     const entityMetaIno = this.tree.addFile(
       entityStubIno,
       "meta.json",
@@ -1904,7 +2026,7 @@ export class CellBridge {
     this.registerPieceRoot(entityStubIno, {
       spaceName,
       rootKind: "entities",
-      rootName: piece.id,
+      rootName: entityName,
       pieceId: piece.id,
       piece,
     });
@@ -1935,12 +2057,13 @@ export class CellBridge {
 
     // Clean up entity tree
     if (pieceId) {
-      const entityIno = this.tree.lookup(state.entitiesIno, pieceId);
+      const entityName = encodeFuseComponent(pieceId);
+      const entityIno = this.tree.lookup(state.entitiesIno, entityName);
       if (entityIno !== undefined) {
         this.unregisterPieceRoot(entityIno);
         this.fsProjectionEntries.delete(entityIno);
       }
-      this.tree.removeChild(state.entitiesIno, pieceId);
+      this.tree.removeChild(state.entitiesIno, entityName);
     }
 
     state.pieceMap.delete(name);
@@ -2047,7 +2170,7 @@ export class CellBridge {
       const entityInvalidIds = [
         ...removedEntityIds,
         ...toAdd.map((p) => p.id),
-      ];
+      ].map((id) => encodeFuseComponent(id));
       if (entityInvalidIds.length > 0) {
         this.onInvalidate(state.entitiesIno, entityInvalidIds);
       }
@@ -2184,7 +2307,7 @@ export class CellBridge {
       pieceId,
       (siblingParentIno, name, value) => {
         if (siblingParentIno === pieceIno) {
-          entries.add(name);
+          entries.add(encodeFuseComponent(name, { reserveJsonSuffix: true }));
         }
         this.makeFsSubtreeBuilder(
           resolveLink,
@@ -2210,13 +2333,13 @@ export class CellBridge {
       !Array.isArray(treeValue)
     ) {
       for (const [key, value] of Object.entries(treeValue)) {
-        if (isVNode(value)) entries.add(`${key}.json`);
+        if (isVNode(value)) entries.add(`${encodeFuseComponent(key)}.json`);
       }
     }
 
     this.addCallableFiles(pieceIno, callables, "result", annotator);
     for (const { key, callableKind } of callables) {
-      entries.add(`${key}.${callableKind}`);
+      entries.add(`${encodeFuseComponent(key)}.${callableKind}`);
     }
 
     this.fsProjectionEntries.set(pieceIno, entries);
@@ -2392,9 +2515,10 @@ export class CellBridge {
     for (const { key, callableKind, schema } of callables) {
       const typeStr = displayCallableInputType(callableKind, schema);
       const script = buildCallableScript(this.execCli, schema, typeStr);
+      const fileName = `${encodeFuseComponent(key)}.${callableKind}`;
       const callableIno = this.tree.addCallable(
         propIno,
-        `${key}.${callableKind}`,
+        fileName,
         callableKind,
         key,
         cellProp,
@@ -2409,7 +2533,7 @@ export class CellBridge {
         cellProp,
         schemaLabel,
       });
-      annotator?.annotateEntry(propIno, `${key}.${callableKind}`, callableIno, {
+      annotator?.annotateEntry(propIno, fileName, callableIno, {
         labelPath: [key],
       });
     }
@@ -2434,12 +2558,14 @@ export class CellBridge {
         const [key, val] of Object.entries(value as Record<string, unknown>)
       ) {
         if (isVNode(val)) {
-          currentVNodeKeys.add(key);
-          const existing = this.tree.lookup(parentIno, `${key}.json`);
+          const encodedKey = encodeFuseComponent(key);
+          const fileName = `${encodedKey}.json`;
+          currentVNodeKeys.add(encodedKey);
+          const existing = this.tree.lookup(parentIno, fileName);
           if (existing !== undefined) this.tree.clear(existing);
           const vnodeIno = this.tree.addFile(
             parentIno,
-            `${key}.json`,
+            fileName,
             safeStringify(val),
             "object",
           );
@@ -2449,7 +2575,7 @@ export class CellBridge {
             vnodeIno,
             "aggregate-json",
             [key],
-            { ino: parentIno, name: `${key}.json` },
+            { ino: parentIno, name: fileName },
             contentLabel,
           );
         }
@@ -2788,7 +2914,10 @@ export class CellBridge {
             if (renamedPieceIno !== undefined) {
               this.updatePieceMetaName(renamedPieceIno, newName);
             }
-            const entityIno = this.tree.lookup(state.entitiesIno, piece.id);
+            const entityIno = this.tree.lookup(
+              state.entitiesIno,
+              encodeFuseComponent(piece.id),
+            );
             if (entityIno !== undefined) {
               this.updatePieceMetaName(entityIno, newName);
             }
@@ -2857,30 +2986,53 @@ export class CellBridge {
         string,
         unknown
       >;
-      const linkData = inner["link@1"] as {
-        id?: string;
-        path?: readonly string[];
-        space?: string;
+      const rawLinkData = inner["link@1"];
+      if (
+        typeof rawLinkData !== "object" || rawLinkData === null ||
+        Array.isArray(rawLinkData)
+      ) {
+        return null;
+      }
+      const linkData = rawLinkData as {
+        id?: unknown;
+        path?: unknown;
+        space?: unknown;
       };
+      if (linkData.id !== undefined && typeof linkData.id !== "string") {
+        return null;
+      }
+      if (
+        linkData.space !== undefined && typeof linkData.space !== "string"
+      ) {
+        return null;
+      }
+      if (
+        linkData.path !== undefined &&
+        (!Array.isArray(linkData.path) ||
+          !linkData.path.every((part) => typeof part === "string"))
+      ) {
+        return null;
+      }
 
-      const pathSuffix = linkData.path?.length
-        ? "/" + linkData.path.join("/")
-        : "";
+      const encodedPath = Array.isArray(linkData.path)
+        ? encodeFusePathSegments(linkData.path as string[])
+        : undefined;
+      const pathSuffix = encodedPath?.length ? "/" + encodedPath.join("/") : "";
 
       if (!linkData.id) {
         // Self-reference: just the path relative to piece root
-        return linkData.path?.length ? linkData.path.join("/") : null;
+        return encodedPath?.length ? encodedPath.join("/") : null;
       }
 
-      const entityHash = linkData.id;
+      const entityHash = encodeFuseComponent(linkData.id);
       // depth is relative to the piece dir (input/ or result/ adds 1)
       // We need to go up to the space dir: up from current depth + up past piece name + up past "pieces"
       const upToSpace = "../".repeat(depth + 2);
 
       if (linkData.space && linkData.space !== spaceName) {
         // Cross-space: go up to mount root, then into other space
-        return upToSpace + "../" + linkData.space + "/entities/" + entityHash +
-          pathSuffix;
+        return upToSpace + "../" + encodeFuseComponent(linkData.space) +
+          "/entities/" + entityHash + pathSuffix;
       }
 
       // Same-space: go up to space dir, then into entities/
@@ -3024,23 +3176,25 @@ export class CellBridge {
         ? file.name.slice(1)
         : file.name;
       const parts = relPath.split("/");
+      const encodedParts = encodeFusePathSegments(parts);
       let parentIno = srcIno;
       // Create intermediate directories
       for (let i = 0; i < parts.length - 1; i++) {
-        const existing = this.tree.lookup(parentIno, parts[i]);
+        const encodedPart = encodedParts[i];
+        const existing = this.tree.lookup(parentIno, encodedPart);
         if (existing !== undefined) {
           parentIno = existing;
         } else {
-          const dirIno = this.tree.addDir(parentIno, parts[i]);
+          const dirIno = this.tree.addDir(parentIno, encodedPart);
           const dirPath = [".src", ...parts.slice(0, i + 1)];
           annotator?.annotateJsonDirectory(dirIno, dirPath, {});
-          annotator?.annotateEntry(parentIno, parts[i], dirIno, {
+          annotator?.annotateEntry(parentIno, encodedPart, dirIno, {
             labelPath: dirPath,
           });
           parentIno = dirIno;
         }
       }
-      const fileName = parts[parts.length - 1];
+      const fileName = encodedParts[encodedParts.length - 1];
       const sourceIno = this.tree.addFile(
         parentIno,
         fileName,

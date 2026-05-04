@@ -2,11 +2,12 @@
  * UI Alert Component Export and Registration
  */
 
-import { AlertVariant, CFAlert } from "./cf-alert.ts";
+import { CFAlert } from "./cf-alert.ts";
+import type { StatusIntent } from "../theme-context.ts";
 
 if (!customElements.get("cf-alert")) {
   customElements.define("cf-alert", CFAlert);
 }
 
 export { CFAlert };
-export type { AlertVariant };
+export type { StatusIntent };

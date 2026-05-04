@@ -22,7 +22,7 @@ export function isCellRef(value: unknown): value is CellRef {
   if (!isRecord(value)) return false;
   return Array.isArray(value.path) && typeof value.id === "string" &&
     !!value.id &&
-    typeof value.type === "string" && isDID(value.space);
+    isDID(value.space);
 }
 
 export function isInitializationData(

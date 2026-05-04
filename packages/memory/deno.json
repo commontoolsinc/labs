@@ -1,11 +1,10 @@
 {
   "name": "@commonfabric/memory",
   "tasks": {
-    "dev": "deno run --allow-read --allow-write --allow-net --allow-ffi --allow-env deno.ts",
     "check": "deno check .",
     "just-test": {
-      "description": "Just run unit tests without type checking",
-      "command": "deno test --allow-read --allow-write --allow-net --allow-ffi --allow-env --no-check"
+      "description": "Run unit tests",
+      "command": "deno test --allow-read --allow-write --allow-net --allow-ffi --allow-env"
     },
     "test": {
       "description": "Type check & run tests",
@@ -14,13 +13,9 @@
         "just-test"
       ]
     },
-    "migrate": {
-      "description": "Performs database migration",
-      "command": "deno run -A ./migrate.ts"
-    },
     "bench": {
-      "description": "Run benchmarks for fact operations",
-      "command": "deno bench --allow-read --allow-write --allow-net --allow-ffi --allow-env --no-check test/memory_bench.ts"
+      "description": "Run memory benchmarks",
+      "command": "deno bench --allow-read --allow-write --allow-net --allow-ffi --allow-env"
     }
   },
   "test": {
@@ -31,18 +26,17 @@
   "exports": {
     ".": "./lib.ts",
     "./acl": "./acl.ts",
-    "./deno": "./deno.ts",
     "./interface": "./interface.ts",
     "./fact": "./fact.ts",
     "./changes": "./changes.ts",
     "./selection": "./selection.ts",
     "./consumer": "./consumer.ts",
-    "./provider": "./provider.ts",
     "./reference": "./reference.ts",
     "./v2": "./v2.ts",
     "./v2/client": "./v2/client.ts",
     "./v2/engine": "./v2/engine.ts",
     "./v2/server": "./v2/server.ts",
+    "./v2/storage-path": "./v2/storage-path.ts",
     "./commit": "./commit.ts",
     "./codec": "./codec.ts",
     "./schema": "./schema.ts"

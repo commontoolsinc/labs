@@ -40,6 +40,24 @@ interface PendingRequest<T = unknown> {
   timeoutId: ReturnType<typeof setTimeout>;
 }
 
+type SubscriptionCounterName =
+  | "localSubscribes"
+  | "localUnsubscribes"
+  | "backendSubscribes"
+  | "backendUnsubscribes";
+
+type SubscriptionCounterTotals = Record<SubscriptionCounterName, number>;
+
+export type CellSubscriptionDiagnostics = SubscriptionCounterTotals & {
+  key: string;
+  activeInstances: number;
+};
+
+export type SubscriptionDiagnostics = {
+  totals: SubscriptionCounterTotals & { activeInstances: number };
+  cells: Record<string, CellSubscriptionDiagnostics>;
+};
+
 export type RuntimeConnectionEvents = {
   console: [ConsoleNotification];
   navigaterequest: [NavigateRequestNotification];
@@ -57,10 +75,8 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
   #initialized = false;
   #disposed = false;
   #transport: RuntimeTransport;
-  #subscribed = new Map<
-    `${string}:${string}:${string}`,
-    Set<CellHandle>
-  >();
+  #subscribed = new Map<string, Set<CellHandle>>();
+  #subscriptionDiagnostics = new Map<string, SubscriptionCounterTotals>();
 
   constructor(transport: RuntimeTransport) {
     super();
@@ -128,6 +144,7 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
     let instances = this.#subscribed.get(key);
     if (instances) {
       if (!instances.has(cell)) {
+        this.#recordSubscriptionDiagnostic(key, "localSubscribes");
         instances.add(cell);
         // Copy the cached value from an existing subscriber to the new one
         // This ensures late subscribers get the initial value
@@ -141,8 +158,10 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
       }
       return;
     }
+    this.#recordSubscriptionDiagnostic(key, "localSubscribes");
     instances = new Set([cell]);
     this.#subscribed.set(key, instances);
+    this.#recordSubscriptionDiagnostic(key, "backendSubscribes");
     const _ = await this.request<RequestType.CellSubscribe>({
       type: RequestType.CellSubscribe,
       cell: cell.ref(),
@@ -161,12 +180,14 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
     if (!instances || !instances.has(cell)) {
       return;
     }
+    this.#recordSubscriptionDiagnostic(key, "localUnsubscribes");
     instances.delete(cell);
     if (instances.size > 0) {
       return;
     }
     this.#subscribed.delete(key);
     if (this.#disposed) return;
+    this.#recordSubscriptionDiagnostic(key, "backendUnsubscribes");
     const _ = await this.request<RequestType.CellUnsubscribe>({
       type: RequestType.CellUnsubscribe,
       cell: cell.ref(),
@@ -193,6 +214,44 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
 
   async [Symbol.asyncDispose]() {
     await this.dispose();
+  }
+
+  getSubscriptionDiagnostics(): SubscriptionDiagnostics {
+    const keys = new Set<string>([
+      ...this.#subscriptionDiagnostics.keys(),
+      ...this.#subscribed.keys(),
+    ]);
+    const totals: SubscriptionDiagnostics["totals"] = {
+      localSubscribes: 0,
+      localUnsubscribes: 0,
+      backendSubscribes: 0,
+      backendUnsubscribes: 0,
+      activeInstances: 0,
+    };
+    const cells: Record<string, CellSubscriptionDiagnostics> = {};
+
+    for (const key of [...keys].sort()) {
+      const counts = this.#subscriptionDiagnostics.get(key) ??
+        this.#emptySubscriptionCounters();
+      const activeInstances = this.#subscribed.get(key)?.size ?? 0;
+      const entry: CellSubscriptionDiagnostics = {
+        key,
+        ...counts,
+        activeInstances,
+      };
+      cells[key] = entry;
+      totals.localSubscribes += entry.localSubscribes;
+      totals.localUnsubscribes += entry.localUnsubscribes;
+      totals.backendSubscribes += entry.backendSubscribes;
+      totals.backendUnsubscribes += entry.backendUnsubscribes;
+      totals.activeInstances += entry.activeInstances;
+    }
+
+    return { totals, cells };
+  }
+
+  resetSubscriptionDiagnostics(): void {
+    this.#subscriptionDiagnostics.clear();
   }
 
   private _handleMessage = (message: IPCRemoteMessage): void => {
@@ -275,6 +334,25 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
         instance[$onCellUpdate](value);
       }
     }
+  }
+
+  #recordSubscriptionDiagnostic(
+    key: string,
+    counter: SubscriptionCounterName,
+  ): void {
+    const counts = this.#subscriptionDiagnostics.get(key) ??
+      this.#emptySubscriptionCounters();
+    counts[counter]++;
+    this.#subscriptionDiagnostics.set(key, counts);
+  }
+
+  #emptySubscriptionCounters(): SubscriptionCounterTotals {
+    return {
+      localSubscribes: 0,
+      localUnsubscribes: 0,
+      backendSubscribes: 0,
+      backendUnsubscribes: 0,
+    };
   }
 
   /**

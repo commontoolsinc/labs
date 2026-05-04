@@ -1,8 +1,9 @@
 import { assertEquals, assertExists } from "@std/assert";
 import { Server } from "../v2/server.ts";
 import {
-  getMemoryV2Flags,
-  MEMORY_V2_PROTOCOL,
+  encodeMemoryBoundary,
+  getMemoryProtocolFlags,
+  MEMORY_PROTOCOL,
   type ResponseMessage,
   type ServerMessage,
   type SessionEffectMessage,
@@ -10,8 +11,8 @@ import {
 
 const HELLO = {
   type: "hello",
-  protocol: MEMORY_V2_PROTOCOL,
-  flags: getMemoryV2Flags(),
+  protocol: MEMORY_PROTOCOL,
+  flags: getMemoryProtocolFlags(),
 } as const;
 
 const shiftMessage = (messages: ServerMessage[]): ServerMessage => {
@@ -45,12 +46,12 @@ Deno.test("memory v2 server replaces watch sets and emits session sync effects",
 
   try {
     for (const connection of [writer, watcher]) {
-      await connection.receive(JSON.stringify(HELLO));
+      await connection.receive(encodeMemoryBoundary(HELLO));
     }
     shiftMessage(writerMessages);
     shiftMessage(watcherMessages);
 
-    await writer.receive(JSON.stringify({
+    await writer.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "writer-open",
       space,
@@ -60,7 +61,7 @@ Deno.test("memory v2 server replaces watch sets and emits session sync effects",
       shiftMessage(writerMessages),
     );
 
-    await watcher.receive(JSON.stringify({
+    await watcher.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "watcher-open",
       space,
@@ -74,7 +75,7 @@ Deno.test("memory v2 server replaces watch sets and emits session sync effects",
     const writerSessionId = writerOpen.ok!.sessionId;
     const watcherSessionId = watcherOpen.ok!.sessionId;
 
-    await writer.receive(JSON.stringify({
+    await writer.receive(encodeMemoryBoundary({
       type: "transact",
       requestId: "tx-1",
       space,
@@ -111,7 +112,7 @@ Deno.test("memory v2 server replaces watch sets and emits session sync effects",
       }],
     });
 
-    await watcher.receive(JSON.stringify({
+    await watcher.receive(encodeMemoryBoundary({
       type: "session.watch.set",
       requestId: "watch-1",
       space,
@@ -159,7 +160,7 @@ Deno.test("memory v2 server replaces watch sets and emits session sync effects",
     }]);
     assertEquals(watchResponse.ok?.sync.removes, []);
 
-    await writer.receive(JSON.stringify({
+    await writer.receive(encodeMemoryBoundary({
       type: "transact",
       requestId: "tx-2",
       space,

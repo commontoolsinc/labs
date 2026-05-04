@@ -115,11 +115,11 @@ export function filter(
       // Skip sparse holes — don't create predicate runs for them
       if (!(i in list)) continue;
 
-      const { space: s, id, type, path } = list[i].getAsNormalizedFullLink();
-      const dedupKey = JSON.stringify([s, id, type, path]);
+      const { space: s, id, path } = list[i].getAsNormalizedFullLink();
+      const dedupKey = JSON.stringify([s, id, path]);
       const occurrence = keyCounts.get(dedupKey) ?? 0;
       keyCounts.set(dedupKey, occurrence + 1);
-      const elementKey = JSON.stringify([s, id, type, path, occurrence]);
+      const elementKey = JSON.stringify([s, id, path, occurrence]);
 
       if (elementRuns.has(elementKey)) {
         const existing = elementRuns.get(elementKey)!;

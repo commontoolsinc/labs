@@ -27,8 +27,6 @@ export function experimentalOptionsFromEnv(): ExperimentalOptions {
   const opts: ExperimentalOptions = {
     modernDataModel: read("EXPERIMENTAL_MODERN_DATA_MODEL"),
     unifiedJsonEncoding: read("EXPERIMENTAL_UNIFIED_JSON_ENCODING"),
-    modernHash: read("EXPERIMENTAL_MODERN_HASH"),
-    modernSchemaHash: read("EXPERIMENTAL_MODERN_SCHEMA_HASH"),
   };
 
   // Log any overridden experimental flags.
@@ -61,7 +59,7 @@ export async function awaitSyncWithTimeout(
         new Error(
           `Sync timed out after ${timeoutMs / 1000}s. ` +
             `This often indicates a client/server configuration mismatch ` +
-            `(e.g., EXPERIMENTAL_MODERN_HASH enabled on the server but not the CLI). ` +
+            `(e.g., EXPERIMENTAL_MODERN_DATA_MODEL enabled on the server but not the CLI). ` +
             `Check toolshed logs for AuthorizationError details.`,
         ),
       );

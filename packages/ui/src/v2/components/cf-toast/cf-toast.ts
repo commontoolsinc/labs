@@ -1,14 +1,16 @@
 import { css, html, nothing } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
+import type { StatusIntent } from "../theme-context.ts";
 
 /**
  * CFToast - Floating ephemeral notification component
  *
  * @element cf-toast
  *
- * @attr {string} variant - Visual style variant: "default" | "success" | "error" | "warning"
+ * @attr {string} status - Status intent: "info" | "success" | "error" | "warning"
  * @attr {number} duration - Auto-dismiss timeout in ms. 0 = persistent.
- * @attr {boolean} dismissable - Show the dismiss (X) button
+ * @attr {boolean} dismissible - Show the dismiss (X) button
+ * @attr {boolean} dismissable - Deprecated alias for dismissible
  * @attr {boolean} open - Controls visibility
  *
  * @slot - Default slot for notification message content
@@ -16,6 +18,7 @@ import { BaseElement } from "../../core/base-element.ts";
  * @slot action - Optional action button area (hidden when empty)
  *
  * @fires cf-toast-dismiss - Fired when toast is closed. Detail: { reason: "timeout" | "user" }
+ * @fires cf-dismiss - Fired when toast is closed. Detail: { reason: "timeout" | "user" }
  * @fires cf-toast-action - Fired when the action slot area is activated. Detail: {}
  *
  * @csspart toast - Root container div (the visible pill surface)
@@ -25,6 +28,7 @@ import { BaseElement } from "../../core/base-element.ts";
  * @csspart dismiss - Dismiss button (only present when dismissable)
  */
 export class CFToast extends BaseElement {
+  // deno-fmt-ignore
   static override styles = css`
     :host {
       --cf-toast-border-radius: var(
@@ -57,18 +61,39 @@ export class CFToast extends BaseElement {
       gap: 0.5rem;
       padding: var(--cf-toast-padding, 0.625rem 0.875rem);
       border-radius: var(--cf-toast-border-radius);
-      max-width: var(--cf-toast-max-width, 420px);
-      min-width: var(--cf-toast-min-width, 240px);
+      max-width: var(
+        --cf-toast-max-width,
+        var(--cf-layout-width-transient-max, 420px)
+      );
+      min-width: var(
+        --cf-toast-min-width,
+        var(--cf-layout-width-transient-min, 240px)
+      );
       box-shadow: var(--cf-toast-box-shadow);
       backdrop-filter: blur(var(--cf-toast-backdrop-blur, 8px));
       font-size: var(--cf-font-body-size, 0.875rem);
       font-family: inherit;
       border: var(--cf-toast-border);
+      --cf-toast-action-background: color-mix(
+        in srgb,
+        currentColor 10%,
+        transparent
+      );
+      --cf-toast-action-background-hover: color-mix(
+        in srgb,
+        currentColor 16%,
+        transparent
+      );
+      --cf-toast-action-border-color: color-mix(
+        in srgb,
+        currentColor 18%,
+        transparent
+      );
     }
 
-    /* Default variant */
-    :host([variant="default"]) .toast,
-    :host(:not([variant])) .toast {
+    /* Info status (default) */
+    :host([status="info"]) .toast,
+    :host(:not([status])) .toast {
       background: var(
         --cf-toast-background,
         var(--cf-surface-transient-background)
@@ -80,8 +105,8 @@ export class CFToast extends BaseElement {
       );
     }
 
-    /* Success variant */
-    :host([variant="success"]) .toast {
+    /* Success status */
+    :host([status="success"]) .toast {
       background: var(
         --cf-toast-background,
         var(--cf-theme-color-success, #10b981)
@@ -96,8 +121,8 @@ export class CFToast extends BaseElement {
       );
     }
 
-    /* Error variant */
-    :host([variant="error"]) .toast {
+    /* Error status */
+    :host([status="error"]) .toast {
       background: var(
         --cf-toast-background,
         var(--cf-theme-color-error, #dc2626)
@@ -112,8 +137,8 @@ export class CFToast extends BaseElement {
       );
     }
 
-    /* Warning variant */
-    :host([variant="warning"]) .toast {
+    /* Warning status */
+    :host([status="warning"]) .toast {
       background: var(
         --cf-toast-background,
         var(--cf-theme-color-warning, #f59e0b)
@@ -136,6 +161,26 @@ export class CFToast extends BaseElement {
     .message {
       flex: 1;
       min-width: 0;
+    }
+
+    .action {
+      display: inline-flex;
+      align-items: center;
+      flex-shrink: 0;
+    }
+
+    .action ::slotted(cf-button) {
+      color: inherit;
+      --cf-button-color-secondary: var(--cf-toast-action-background);
+      --cf-button-color-secondary-foreground: currentColor;
+      --cf-button-color-surface-hover: var(--cf-toast-action-background-hover);
+      --cf-button-color-border: var(--cf-toast-action-border-color);
+      --cf-size-sm-height: 1.75rem;
+      --cf-size-sm-padding-v: 0;
+      --cf-size-sm-padding-h: 0.625rem;
+      --cf-size-sm-radius: var(--cf-theme-border-radius, 0.5rem);
+      --cf-size-sm-font-size: var(--cf-font-body-size, 0.875rem);
+      --cf-size-sm-line-height: var(--cf-font-body-line-height, 1.25rem);
     }
 
     .dismiss {
@@ -164,7 +209,8 @@ export class CFToast extends BaseElement {
     }
 
     :host([open]) .toast {
-      animation: toast-in 200ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+      animation: toast-in var(--cf-transition-duration-base, 200ms)
+        var(--cf-transition-timing-ease, cubic-bezier(0.4, 0, 0.2, 1)) forwards;
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -176,17 +222,19 @@ export class CFToast extends BaseElement {
   `;
 
   static override properties = {
-    variant: { type: String, reflect: true },
+    status: { type: String, reflect: true },
     duration: { type: Number },
     dismissable: { type: Boolean, reflect: true },
+    dismissible: { type: Boolean, reflect: true },
     open: { type: Boolean, reflect: true },
     _hasIcon: { type: Boolean, state: true },
     _hasAction: { type: Boolean, state: true },
   };
 
-  declare variant: "default" | "success" | "error" | "warning";
+  declare status: StatusIntent;
   declare duration: number;
   declare dismissable: boolean;
+  declare dismissible: boolean;
   declare open: boolean;
 
   declare private _hasIcon: boolean;
@@ -196,9 +244,10 @@ export class CFToast extends BaseElement {
 
   constructor() {
     super();
-    this.variant = "default";
+    this.status = "info";
     this.duration = 5000;
     this.dismissable = false;
+    this.dismissible = false;
     this.open = false;
     this._hasIcon = false;
     this._hasAction = false;
@@ -217,7 +266,7 @@ export class CFToast extends BaseElement {
   override updated(changedProperties: Map<string, unknown>): void {
     super.updated(changedProperties);
 
-    if (changedProperties.has("variant")) {
+    if (changedProperties.has("status")) {
       this._updateAria();
     }
 
@@ -233,10 +282,22 @@ export class CFToast extends BaseElement {
     if (changedProperties.has("duration") && this.open) {
       this._startTimer();
     }
+
+    if (
+      changedProperties.has("dismissible") &&
+      this.dismissable !== this.dismissible
+    ) {
+      this.dismissable = this.dismissible;
+    } else if (
+      changedProperties.has("dismissable") &&
+      this.dismissible !== this.dismissable
+    ) {
+      this.dismissible = this.dismissable;
+    }
   }
 
   private _updateAria(): void {
-    if (this.variant === "error") {
+    if (this.status === "error") {
       this.setAttribute("role", "alert");
       this.setAttribute("aria-live", "assertive");
     } else {
@@ -252,7 +313,7 @@ export class CFToast extends BaseElement {
       this._timer = setTimeout(() => {
         this._timer = null;
         this.open = false;
-        this.emit("cf-toast-dismiss", { reason: "timeout" });
+        this._emitDismiss("timeout");
       }, this.duration);
     }
   }
@@ -267,8 +328,14 @@ export class CFToast extends BaseElement {
   private _handleDismiss = (): void => {
     this.open = false;
     this._clearTimer();
-    this.emit("cf-toast-dismiss", { reason: "user" });
+    this._emitDismiss("user");
   };
+
+  private _emitDismiss(reason: "timeout" | "user"): void {
+    const detail = { reason };
+    this.emit("cf-toast-dismiss", detail);
+    this.emit("cf-dismiss", detail);
+  }
 
   private _handleActionClick = (): void => {
     this.emit("cf-toast-action", {});
@@ -306,7 +373,7 @@ export class CFToast extends BaseElement {
             @slotchange="${this._handleActionSlotChange}"
           ></slot>
         </div>
-        ${this.dismissable
+        ${this.dismissible || this.dismissable
           ? html`
             <button
               class="dismiss"

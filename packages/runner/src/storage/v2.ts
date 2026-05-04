@@ -46,7 +46,6 @@ import type {
   IStorageProviderWithReplica,
   IStorageSubscription,
   IStorageTransaction,
-  MemoryVersion,
   NativeStorageCommit,
   PullError,
   PushError,
@@ -56,7 +55,7 @@ import type {
   StorageTransactionRejected,
   Unit,
 } from "./interface.ts";
-import { SelectorTracker } from "./cache.ts";
+import { SelectorTracker } from "./selector-tracker.ts";
 import * as SubscriptionManager from "./subscription.ts";
 import { getDirectTransactionReadActivities } from "./transaction-inspection.ts";
 import { toTransactionDocumentValue } from "./v2-document.ts";
@@ -361,7 +360,6 @@ export interface Options {
   address: URL;
   id?: string;
   settings?: IRemoteStorageProviderSettings;
-  memoryVersion?: MemoryVersion;
   spaceIdentity?: Signer;
 }
 
@@ -491,7 +489,6 @@ const toCommitReadPath = (
 ): DocumentPath => toDocumentPath(path.map(String));
 
 export class StorageManager implements IStorageManager {
-  readonly memoryVersion: MemoryVersion = "v2";
   readonly id: string;
   readonly as: Signer;
 
@@ -676,7 +673,6 @@ export class StorageManager implements IStorageManager {
       space,
       id: id as any,
       path: [],
-      type: DOCUMENT_MIME,
     };
     const promises: Promise<unknown>[] = [];
     this.collectLinkedCellSyncs(
@@ -997,8 +993,9 @@ class SpaceReplica implements ISpaceReplica {
     };
     const cfc = new ContextualFlowControl();
     const newEntries = normalizedEntries.filter(([address, selector]) => {
+      const baseAddress = { id: address.id, type: DOCUMENT_MIME };
       const [superset] = this.#watchSelectorTracker.getSupersetSelector(
-        { id: address.id, type: address.type },
+        baseAddress,
         selector,
         cfc,
       );
@@ -1012,8 +1009,9 @@ class SpaceReplica implements ISpaceReplica {
     const promise = this.enqueueWatchRefresh("pull", newEntries);
     task.promise = promise;
     for (const [address, selector] of newEntries) {
+      const baseAddress = { id: address.id, type: DOCUMENT_MIME };
       this.#watchSelectorTracker.add(
-        { id: address.id, type: address.type },
+        baseAddress,
         selector,
         promise,
       );
@@ -1027,8 +1025,9 @@ class SpaceReplica implements ISpaceReplica {
       const result = await Promise.resolve(task.promise);
       if (result.error) {
         for (const [address, selector] of newEntries) {
+          const baseAddress = { id: address.id, type: DOCUMENT_MIME };
           this.#watchSelectorTracker.delete(
-            { id: address.id, type: address.type },
+            baseAddress,
             selector,
           );
         }
@@ -1173,7 +1172,7 @@ class SpaceReplica implements ISpaceReplica {
     this.#queuedWatchRefreshScheduled = false;
     if (this.#queuedWatchRefresh !== null) {
       this.#queuedWatchRefresh.pending.resolve({
-        error: toConnectionError(new Error("memory/v2 replica closed")),
+        error: toConnectionError(new Error("memory replica closed")),
       });
       this.#queuedWatchRefresh = null;
     }
@@ -1345,7 +1344,7 @@ class SpaceReplica implements ISpaceReplica {
     for (const read of reads) {
       if (
         read.space !== this.#space ||
-        read.type !== DOCUMENT_MIME ||
+        (read.type ?? DOCUMENT_MIME) !== DOCUMENT_MIME ||
         read.id.startsWith("data:")
       ) {
         continue;

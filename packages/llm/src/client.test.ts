@@ -8,12 +8,35 @@ import {
   disableMockMode,
   enableMockMode,
   LLMClient,
+  LLMStreamError,
   loadConversationFixture,
   resetMockMode,
 } from "./client.ts";
 
 const GUARD_MESSAGE =
   "LLMClient: live LLM calls are blocked in test environments.";
+
+function streamFromChunks(chunks: string[]): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  return new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) {
+        controller.enqueue(encoder.encode(chunk));
+      }
+      controller.close();
+    },
+  });
+}
+
+function runClientStream(client: LLMClient, chunks: string[]) {
+  return (client as unknown as {
+    stream(
+      body: ReadableStream<Uint8Array>,
+      id: string,
+      callback?: (text: string) => void,
+    ): Promise<unknown>;
+  }).stream(streamFromChunks(chunks), "trace-1", () => {});
+}
 
 describe("LLMClient test-environment guard", () => {
   const client = new LLMClient();
@@ -319,5 +342,59 @@ describe("LLMClient test-environment guard", () => {
         () => {},
       ),
     ).rejects.toThrow("not configured as a stream");
+  });
+
+  it("throws LLMStreamError for streamed error events mid-stream", async () => {
+    for (
+      const chunks of [
+        [
+          JSON.stringify({ type: "text-delta", textDelta: "hello" }) + "\n",
+          JSON.stringify({ type: "error", error: "boom" }) + "\n",
+        ],
+        [
+          JSON.stringify({ type: "text-delta", textDelta: "hello" }) + "\n",
+          JSON.stringify({ type: "error", error: "boom" }),
+        ],
+      ]
+    ) {
+      try {
+        await runClientStream(client, chunks);
+      } catch (error) {
+        expect(error).toBeInstanceOf(LLMStreamError);
+        expect((error as Error).message).toBe("boom");
+        continue;
+      }
+
+      throw new Error("Expected LLMStreamError");
+    }
+  });
+
+  it("logs and ignores garbage lines mid-stream", async () => {
+    const originalConsoleError = console.error;
+    const loggedErrors: unknown[][] = [];
+    console.error = (...args: unknown[]) => {
+      loggedErrors.push(args);
+    };
+
+    try {
+      const result = await runClientStream(client, [
+        JSON.stringify("hello") + "\n",
+        "not json\n",
+        "not final json",
+      ]);
+
+      expect(result).toEqual({
+        role: "assistant",
+        content: [{ type: "text", text: "hello" }],
+        id: "trace-1",
+      });
+      expect(loggedErrors.length).toBe(2);
+      expect(loggedErrors[0][0]).toBe("Failed to parse JSON line:");
+      expect(loggedErrors[0][1]).toBe("not json");
+      expect(loggedErrors[1][0]).toBe("Failed to parse final JSON line:");
+      expect(loggedErrors[1][1]).toBe("not final json");
+    } finally {
+      console.error = originalConsoleError;
+    }
   });
 });

@@ -205,8 +205,6 @@ const EnvSchema = z.object({
   // ===========================================================================
   EXPERIMENTAL_MODERN_DATA_MODEL: flagValue(),
   EXPERIMENTAL_UNIFIED_JSON_ENCODING: flagValue(),
-  EXPERIMENTAL_MODERN_HASH: flagValue(),
-  EXPERIMENTAL_MODERN_SCHEMA_HASH: flagValue(),
 
   // ===========================================================================
   // Compilation cache flags (see docs/specs/compilation-cache.md)

@@ -181,8 +181,15 @@ declare module "@commonfabric/api" {
     argumentSchema?: JSONSchema;
     resultSchema?: JSONSchema;
     writableProxy?: boolean;
+    propagateInputIfc?: boolean;
     /** If true, this module is an effect (side-effectful) rather than a computation */
     isEffect?: boolean;
+    /** Optional scheduler debounce delay in milliseconds */
+    debounce?: number;
+    /** Opt out of scheduler auto-debounce */
+    noDebounce?: boolean;
+    /** Optional scheduler throttle period in milliseconds */
+    throttle?: number;
   }
 }
 
@@ -344,6 +351,12 @@ export interface BuilderFunctionsAndConstants {
   FabricEpochDays:
     typeof import("@commonfabric/data-model/fabric-epoch").FabricEpochDays;
   FabricHash: typeof import("@commonfabric/data-model/fabric-hash").FabricHash;
+
+  // Debug stringifiers
+  toCompactDebugString:
+    typeof import("@commonfabric/data-model/value-debug").toCompactDebugString;
+  toIndentedDebugString:
+    typeof import("@commonfabric/data-model/value-debug").toIndentedDebugString;
 }
 
 // Runtime interface needed by createCell

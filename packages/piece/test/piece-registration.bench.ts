@@ -5,10 +5,6 @@ import { createBuilder } from "../../runner/src/builder/factory.ts";
 import type { Cell } from "../../runner/src/builder/types.ts";
 import { PieceManager } from "../src/manager.ts";
 
-const BENCH_MEMORY_VERSION = Deno.env.get("BENCH_MEMORY_VERSION") === "v1"
-  ? "v1"
-  : "v2";
-
 const signer = await Identity.fromPassphrase("piece registration bench");
 
 type BenchEnv = {
@@ -58,12 +54,10 @@ const createCounterPattern = () => {
 async function createBenchEnv(pieceCount: number): Promise<BenchEnv> {
   const storageManager = StorageManager.emulate({
     as: signer,
-    memoryVersion: BENCH_MEMORY_VERSION,
   });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
-    memoryVersion: BENCH_MEMORY_VERSION,
   });
   const session = await createSession({
     identity: signer,

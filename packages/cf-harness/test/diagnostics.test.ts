@@ -3,10 +3,12 @@ import { createToolOutputId } from "../src/contracts/tool-result.ts";
 import {
   CAPABILITY_PROBE_SENTINEL,
   classifyBashToolFailure,
+  classifyBuiltinToolFailure,
   classifyHarnessPolicyEventFailure,
   classifyHarnessRunError,
   collectHarnessCapabilitySnapshot,
   createHarnessFailureRecord,
+  FABRIC_STATUS_PROBE_SENTINEL,
   selectPrimaryHarnessFailure,
 } from "../src/diagnostics.ts";
 import { createHarnessPolicyEvent } from "../src/contracts/policy.ts";
@@ -15,6 +17,7 @@ import type {
   SandboxCommandRequest,
   SandboxCommandResult,
   SandboxRuntime,
+  SandboxRuntimeDescription,
   SandboxShellRequest,
 } from "../src/sandbox/types.ts";
 
@@ -57,6 +60,45 @@ class FakeSandboxRuntime implements SandboxRuntime {
   }
 }
 
+class FakeFabricSandboxRuntime extends FakeSandboxRuntime {
+  constructor(private readonly fabricStatusJson?: string) {
+    super();
+  }
+
+  override runShell(
+    request: SandboxShellRequest,
+  ): Promise<SandboxCommandResult> {
+    if (request.command.includes(FABRIC_STATUS_PROBE_SENTINEL)) {
+      return Promise.resolve(
+        this.fabricStatusJson === undefined
+          ? { stdout: "missing\t\n", stderr: "", exitCode: 0 }
+          : {
+            stdout: `present\t${this.fabricStatusJson}\n`,
+            stderr: "",
+            exitCode: 0,
+          },
+      );
+    }
+    return super.runShell(request);
+  }
+
+  describe(): SandboxRuntimeDescription {
+    return {
+      kind: "docker-runsc-cfc",
+      defaultWorkingDirectory: "/workspace",
+      cfc: {
+        runtimeRequested: true,
+        runtimeName: "runsc-cfc",
+        workspaceMountPath: "/workspace",
+        mounts: [
+          { kind: "workspace", sandboxPath: "/workspace", readOnly: false },
+          { kind: "fabric-fuse", sandboxPath: "/fabric", readOnly: false },
+        ],
+      },
+    };
+  }
+}
+
 Deno.test("collectHarnessCapabilitySnapshot captures fixed sandbox capabilities", async () => {
   const snapshot = await collectHarnessCapabilitySnapshot(
     new FakeSandboxRuntime(),
@@ -67,6 +109,42 @@ Deno.test("collectHarnessCapabilitySnapshot captures fixed sandbox capabilities"
   assertEquals(snapshot, {
     type: "cf-harness.capability-snapshot",
     at: "2026-04-22T23:00:00.000Z",
+    cfc: {
+      enforcementMode: "enforce-explicit",
+      absenceBehavior: "permissive-if-absent",
+      substrateStatus: "not-attested",
+      runManifest: { present: false },
+      sandbox: {
+        kind: "docker-runsc-cfc",
+        defaultWorkingDirectory: "/workspace",
+        cfc: {
+          runtimeRequested: true,
+          workspaceMountPath: "/workspace",
+        },
+      },
+      mounts: {
+        workspace: {
+          kind: "workspace",
+          status: "configured",
+          sandboxPath: "/workspace",
+          readOnly: false,
+        },
+        fabric: {
+          kind: "fabric-fuse",
+          status: "not-configured",
+          sandboxPath: "/fabric",
+          writeGovernance: {
+            policy: "not-configured",
+            statusProbe: "not-probed",
+            delegatedToCfc: false,
+          },
+        },
+      },
+      protectedXattrs: {
+        expectedSandboxVisible: false,
+        sandboxVisibility: "not-probed",
+      },
+    },
     commands: {
       bash: {
         present: true,
@@ -96,6 +174,67 @@ Deno.test("collectHarnessCapabilitySnapshot captures fixed sandbox capabilities"
         version: "git version 2.45.1",
       },
     },
+  });
+});
+
+Deno.test("collectHarnessCapabilitySnapshot reports configured Fabric mounts", async () => {
+  const snapshot = await collectHarnessCapabilitySnapshot(
+    new FakeFabricSandboxRuntime(),
+    "/workspace",
+    "2026-04-29T23:00:00.000Z",
+  );
+
+  assertEquals(snapshot.cfc.mounts, {
+    workspace: {
+      kind: "workspace",
+      status: "configured",
+      sandboxPath: "/workspace",
+      readOnly: false,
+    },
+    fabric: {
+      kind: "fabric-fuse",
+      status: "configured",
+      sandboxPath: "/fabric",
+      readOnly: false,
+      writeGovernance: {
+        policy: "host-writable-non-strict",
+        statusProbe: "missing",
+        delegatedToCfc: false,
+      },
+    },
+  });
+});
+
+Deno.test("collectHarnessCapabilitySnapshot records strict CFC attestation for writable Fabric mounts", async () => {
+  const snapshot = await collectHarnessCapabilitySnapshot(
+    new FakeFabricSandboxRuntime(
+      JSON.stringify({ cfc: { mode: "enforce-strict" } }),
+    ),
+    "/workspace",
+    "2026-04-29T23:05:00.000Z",
+    { cfcEnforcementMode: "enforce-strict" },
+  );
+
+  assertEquals(snapshot.cfc.mounts.fabric.writeGovernance, {
+    policy: "host-writable-cfc-strict-attested",
+    statusProbe: "present",
+    delegatedToCfc: true,
+    attestedMode: "enforce-strict",
+  });
+});
+
+Deno.test("collectHarnessCapabilitySnapshot records strict writable Fabric mounts without attestation", async () => {
+  const snapshot = await collectHarnessCapabilitySnapshot(
+    new FakeFabricSandboxRuntime(),
+    "/workspace",
+    "2026-04-29T23:10:00.000Z",
+    { cfcEnforcementMode: "enforce-strict" },
+  );
+
+  assertEquals(snapshot.cfc.mounts.fabric.writeGovernance, {
+    policy: "host-writable-cfc-strict-unattested",
+    statusProbe: "missing",
+    delegatedToCfc: true,
   });
 });
 
@@ -190,6 +329,142 @@ Deno.test("classifyBashToolFailure prefers the missing subcommand from shell out
   });
 });
 
+Deno.test("classifyBuiltinToolFailure records host shell failures without sandbox capability claims", () => {
+  const failure = classifyBuiltinToolFailure(
+    "bash-no-sandbox",
+    { command: "agent-browser --help" },
+    {
+      outputId: createToolOutputId("run-host", "bash-no-sandbox", 1),
+      stdout: "",
+      stderr: "bash: agent-browser: command not found",
+      exitCode: 127,
+      cwd: "/workspace",
+    },
+    "2026-04-23T18:25:00.000Z",
+  );
+
+  assertEquals(failure, {
+    type: "cf-harness.failure-record",
+    kind: "missing_binary",
+    source: "tool_output",
+    detail: "agent-browser was not found while executing a shell command.",
+    at: "2026-04-23T18:25:00.000Z",
+    toolId: "bash-no-sandbox",
+    outputId: createToolOutputId("run-host", "bash-no-sandbox", 1),
+    command: "agent-browser --help",
+    commandName: "agent-browser",
+    exitCode: 127,
+  });
+});
+
+Deno.test("classifyBuiltinToolFailure records denied browser host commands", () => {
+  const failure = classifyBuiltinToolFailure(
+    "bash-no-sandbox",
+    { command: "git status" },
+    {
+      outputId: createToolOutputId("run-host", "bash-no-sandbox", 1),
+      stdout: "",
+      stderr:
+        "bash-no-sandbox command denied: git is not allowed in the browser host profile",
+      exitCode: 126,
+      cwd: "/workspace",
+    },
+    "2026-04-23T18:26:00.000Z",
+  );
+
+  assertEquals(failure, {
+    type: "cf-harness.failure-record",
+    kind: "tool_not_allowed",
+    source: "tool_output",
+    detail:
+      "bash-no-sandbox command denied: git is not allowed in the browser host profile",
+    at: "2026-04-23T18:26:00.000Z",
+    toolId: "bash-no-sandbox",
+    outputId: createToolOutputId("run-host", "bash-no-sandbox", 1),
+    command: "git status",
+    exitCode: 126,
+  });
+});
+
+Deno.test("classifyBuiltinToolFailure handles delegate_task outputs defensively", () => {
+  assertEquals(
+    classifyBuiltinToolFailure(
+      "delegate_task",
+      {},
+      {
+        type: "cf-harness.delegate-task-output",
+        outputId: createToolOutputId("run-delegate", "delegate_task", 1),
+      },
+      "2026-04-23T18:30:00.000Z",
+    ),
+    undefined,
+  );
+
+  assertEquals(
+    classifyBuiltinToolFailure(
+      "delegate_task",
+      {},
+      {
+        type: "cf-harness.delegate-task-output",
+        outputId: createToolOutputId("run-delegate", "delegate_task", 1),
+        subagent: {
+          type: "cf-harness.subagent-result",
+          childRunId: "run-delegate.subagent.1",
+          status: "failed",
+          summary: "child failed",
+          model: "gpt-5.4",
+          modelTurns: 1,
+          runState: {
+            status: "failed",
+            cfcEnforcementMode: "disabled",
+            policyEventCounts: { total: 0, warnings: 0, denied: 0 },
+            failureCount: 1,
+          },
+          manifest: {
+            type: "cf-harness.subagent-run-manifest",
+            version: 1,
+            parentRunId: "run-delegate",
+            parentToolCallId: "call-delegate",
+            childRunId: "run-delegate.subagent.1",
+            profile: "default",
+            depth: 1,
+            cfcEnforcementMode: "disabled",
+            model: "gpt-5.4",
+            allowedToolIds: ["bash", "read_file", "write_file"],
+            hostToolIds: [],
+            maxModelTurns: 8,
+            returnPolicy: {
+              type: "cf-harness.subagent-return-policy",
+              channel: "summary-and-sanitized-state",
+              includeSummary: true,
+              includeSanitizedRunState: true,
+              includeManifest: true,
+              includeTranscript: false,
+              includeRawFailureRecords: false,
+            },
+            createdAt: "2026-04-23T18:30:00.000Z",
+            inputSummary: {
+              type: "cf-harness.subagent-input-summary",
+              goalBytes: 4,
+              goalDigest: "sha256:test",
+            },
+          },
+        },
+      },
+      "2026-04-23T18:30:01.000Z",
+    ),
+    {
+      type: "cf-harness.failure-record",
+      kind: "harness_error",
+      source: "tool_output",
+      detail: "subagent run-delegate.subagent.1 failed: child failed",
+      at: "2026-04-23T18:30:01.000Z",
+      toolId: "delegate_task",
+      outputId: createToolOutputId("run-delegate", "delegate_task", 1),
+    },
+  );
+});
+
 Deno.test("classifyHarnessRunError maps timeouts and path escapes deterministically", () => {
   assertEquals(
     classifyHarnessRunError(
@@ -210,6 +485,17 @@ Deno.test("classifyHarnessRunError maps timeouts and path escapes deterministica
       },
     ).kind,
     "workspace_path_confusion",
+  );
+  assertEquals(
+    classifyHarnessRunError(
+      new Error(
+        "chat completion transport request failed after 2 attempts for https://llm.stage.commontools.dev/v1/chat/completions: error sending request from 100.87.21.105:52328 for https://llm.stage.commontools.dev/v1/chat/completions (10.128.15.193:443): client error (SendRequest): connection error: timed out",
+      ),
+      {
+        at: "2026-04-22T23:30:02.000Z",
+      },
+    ).kind,
+    "timeout",
   );
 });
 

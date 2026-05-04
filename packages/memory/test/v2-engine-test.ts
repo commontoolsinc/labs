@@ -6,10 +6,6 @@ import {
 } from "@commonfabric/data-model/fabric-value";
 import { setJsonEncodingConfig } from "@commonfabric/data-model/json-encoding";
 import {
-  resetModernHashConfig,
-  setModernHashConfig,
-} from "@commonfabric/data-model/value-hash";
-import {
   applyCommit,
   close,
   createBranch,
@@ -20,7 +16,7 @@ import {
   read,
 } from "../v2/engine.ts";
 import {
-  decodeMemoryV2Boundary,
+  decodeMemoryBoundary,
   DEFAULT_BRANCH,
   type EntityDocument,
   toDocumentPath,
@@ -63,7 +59,7 @@ const authorization = {
 };
 
 const decodeStored = <Value>(source: string | null | undefined): Value =>
-  decodeMemoryV2Boundary<Value>(source ?? "null");
+  decodeMemoryBoundary<Value>(source ?? "null");
 
 const toSourceLink = (id: string) => ({ "/": id } as const);
 
@@ -1130,7 +1126,6 @@ Deno.test("memory v2 engine rejects branch reads before createdSeq", async () =>
 Deno.test("memory v2 engine persists rich patch values at the storage boundary", async () => {
   setDataModelConfig(true);
   setJsonEncodingConfig(true);
-  setModernHashConfig(true);
   try {
     const { engine, path } = await createEngine();
 
@@ -1191,6 +1186,5 @@ Deno.test("memory v2 engine persists rich patch values at the storage boundary",
   } finally {
     resetDataModelConfig();
     setJsonEncodingConfig(false);
-    resetModernHashConfig();
   }
 });

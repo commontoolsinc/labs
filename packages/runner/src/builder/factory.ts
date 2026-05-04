@@ -57,6 +57,10 @@ import {
   FabricEpochNsec,
 } from "@commonfabric/data-model/fabric-epoch";
 import { FabricHash } from "@commonfabric/data-model/fabric-hash";
+import {
+  toCompactDebugString,
+  toIndentedDebugString,
+} from "@commonfabric/data-model/value-debug";
 import { freezeVerifiedPlainData } from "../sandbox/plain-data.ts";
 import { nonPrivateRandom, safeDateNow } from "./safe-builtins.ts";
 import {
@@ -214,6 +218,10 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     FabricEpochNsec,
     FabricEpochDays,
     FabricHash,
+
+    // Debug stringifiers (helpers exposed for pattern code)
+    toCompactDebugString,
+    toIndentedDebugString,
   } as BuilderFunctionsAndConstants & {
     __cfHelpers?: BuilderFunctionsAndConstants;
   };

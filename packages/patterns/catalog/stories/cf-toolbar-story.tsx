@@ -33,13 +33,19 @@ export default pattern<ToolbarStoryInput, ToolbarStoryOutput>(() => {
           </div>
           <div style="border: 1px solid #e2e8f0; border-radius: 4px; overflow: hidden;">
             <cf-toolbar>
-              <cf-button slot="start" variant="ghost" size="sm">Menu</cf-button>
+              <cf-button slot="start" color="neutral" variant="ghost" size="sm">
+                Menu
+              </cf-button>
               <span slot="center" style="font-size: 13px; font-weight: 600;">
                 Page Title
               </span>
               <cf-hstack slot="end" gap="2">
-                <cf-button variant="ghost" size="sm">Help</cf-button>
-                <cf-button variant="primary" size="sm">Save</cf-button>
+                <cf-button color="neutral" variant="ghost" size="sm">
+                  Help
+                </cf-button>
+                <cf-button color="primary" variant="solid" size="sm">
+                  Save
+                </cf-button>
               </cf-hstack>
             </cf-toolbar>
           </div>
@@ -58,11 +64,15 @@ export default pattern<ToolbarStoryInput, ToolbarStoryOutput>(() => {
           </div>
           <div style="border: 1px solid #e2e8f0; border-radius: 4px; overflow: hidden;">
             <cf-toolbar dense>
-              <cf-button slot="start" variant="ghost" size="sm">Back</cf-button>
+              <cf-button slot="start" color="neutral" variant="ghost" size="sm">
+                Back
+              </cf-button>
               <span slot="center" style="font-size: 13px; font-weight: 600;">
                 Compact
               </span>
-              <cf-button slot="end" variant="ghost" size="sm">Done</cf-button>
+              <cf-button slot="end" color="neutral" variant="ghost" size="sm">
+                Done
+              </cf-button>
             </cf-toolbar>
           </div>
         </div>

@@ -77,7 +77,9 @@ export function toJSONWithLegacyAliases(
             cell: cellName,
             path: restPath.map(String),
             ...(schema !== undefined &&
-              { schema: sanitizeSchemaForLinks(schema) }),
+              {
+                schema: sanitizeSchemaForLinks(schema, { keepStreams: true }),
+              }),
           },
         } satisfies LegacyAlias;
       } else {
@@ -85,7 +87,9 @@ export function toJSONWithLegacyAliases(
           $alias: {
             path: pathToCell as (string | number)[],
             ...(schema !== undefined &&
-              { schema: sanitizeSchemaForLinks(schema) }),
+              {
+                schema: sanitizeSchemaForLinks(schema, { keepStreams: true }),
+              }),
           },
         } satisfies LegacyAlias;
       }

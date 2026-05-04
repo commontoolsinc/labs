@@ -22,6 +22,20 @@ describe("CFTextarea", () => {
     expect(element).toBeInstanceOf(CFTextarea);
   });
 
+  if (typeof document !== "undefined") {
+    it("should be creatable via document.createElement", async () => {
+      const element = document.createElement("cf-textarea") as CFTextarea;
+      document.body.append(element);
+      await element.updateComplete;
+
+      expect(element).toBeInstanceOf(CFTextarea);
+      expect(element.getAttribute("role")).toBe("textbox");
+      expect(element.getAttribute("exportparts")).toBe("textarea");
+
+      element.remove();
+    });
+  }
+
   it("should have correct default properties", () => {
     const el = new CFTextarea();
     expect(el.placeholder).toBe("");
@@ -35,6 +49,72 @@ describe("CFTextarea", () => {
     expect(el.autoResize).toBe(false);
     expect(el.timingStrategy).toBe("debounce");
     expect(el.timingDelay).toBe(300);
+  });
+
+  it("should expose textbox semantics on the host", () => {
+    const el = new CFTextarea();
+    el.updated(new Map([["disabled", undefined]]));
+
+    expect(el.getAttribute("role")).toBe("textbox");
+    expect(el.getAttribute("aria-disabled")).toBe("false");
+    expect(el.getAttribute("aria-readonly")).toBe("false");
+    expect(el.getAttribute("aria-required")).toBe("false");
+    expect(el.getAttribute("aria-invalid")).toBe("false");
+    expect(el.getAttribute("exportparts")).toBe("textarea");
+    expect(el.tabIndex).toBe(0);
+  });
+
+  it("should expose control state on the host", () => {
+    const el = new CFTextarea();
+    el.disabled = true;
+    el.readonly = true;
+    el.required = true;
+    el.error = true;
+    el.updated(
+      new Map([["disabled", false], ["readonly", false], [
+        "required",
+        false,
+      ], ["error", false]]),
+    );
+
+    expect(el.getAttribute("aria-disabled")).toBe("true");
+    expect(el.getAttribute("aria-readonly")).toBe("true");
+    expect(el.getAttribute("aria-required")).toBe("true");
+    expect(el.getAttribute("aria-invalid")).toBe("true");
+    expect(el.tabIndex).toBe(-1);
+  });
+
+  it("should use placeholder as an accessible name fallback", () => {
+    const el = new CFTextarea();
+    el.placeholder = "Write your message";
+    el.updated(new Map([["placeholder", ""]]));
+
+    expect(el.getAttribute("aria-label")).toBe("Write your message");
+  });
+
+  it("should preserve author-provided accessible names", () => {
+    const el = new CFTextarea();
+    el.setAttribute("aria-label", "Custom name");
+    el.placeholder = "Write your message";
+    el.updated(new Map([["placeholder", ""]]));
+
+    expect(el.getAttribute("aria-label")).toBe("Custom name");
+  });
+
+  it("should be form-associated", () => {
+    expect(CFTextarea.formAssociated).toBe(true);
+  });
+
+  it("should delegate focus into the shadow textarea", () => {
+    expect(CFTextarea.shadowRootOptions.delegatesFocus).toBe(true);
+  });
+
+  it("should not set attributes in constructor (custom element spec)", () => {
+    // The custom element spec forbids setAttribute during construction.
+    // Attributes are set in connectedCallback instead.
+    const el = new CFTextarea();
+    expect(el.getAttribute("role")).toBeNull();
+    expect(el.getAttribute("exportparts")).toBeNull();
   });
 
   it("should accept a CellHandle as value property", () => {

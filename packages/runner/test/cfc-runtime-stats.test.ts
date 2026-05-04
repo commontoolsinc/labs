@@ -23,12 +23,10 @@ describe("CFC runtime stats", () => {
   it("tracks relevant, prepared, reject, invalidation, outbox, and sink dedupe counters", async () => {
     storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: "v2",
       cfcEnforcementMode: "enforce-explicit",
     });
 

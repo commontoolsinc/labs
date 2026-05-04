@@ -5,14 +5,36 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { Runtime } from "../src/runtime.ts";
-import { type Action, type EventHandler } from "../src/scheduler.ts";
-import { type JSONSchema } from "../src/builder/types.ts";
+import {
+  type Action,
+  type ErrorWithContext,
+  type EventHandler,
+  type TelemetryAnnotations,
+} from "../src/scheduler.ts";
+import type { RuntimeTelemetryMarker } from "../src/telemetry.ts";
+import { type Cell, type JSONSchema } from "../src/builder/types.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { toMemorySpaceAddress } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
+
+type StaleSchedulerInternals = {
+  isStale: (action: Action) => boolean;
+  getUpstreamStaleCount: (action: Action) => number;
+  clearDirectDirty: (action: Action) => boolean;
+  collectDirtyDependencies: (
+    action: Action,
+    workSet: Set<Action>,
+    memo?: Map<Action, boolean>,
+  ) => boolean;
+};
+
+type EventPreflightMarker = Extract<
+  RuntimeTelemetryMarker,
+  { type: "scheduler.event.preflight" }
+>;
 
 describe("pull-based scheduling", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -193,6 +215,266 @@ describe("pull-based scheduling", () => {
     await runtime.scheduler.idle();
 
     expect(writerRuns).toBe(0);
+  });
+
+  it("should not re-run an effect for unrelated pending dependency collection", async () => {
+    runtime.scheduler.enablePullMode();
+    expect(runtime.scheduler.isPullModeEnabled()).toBe(true);
+
+    const observed = runtime.getCell<number>(
+      space,
+      "pending-dep-unrelated-observed",
+      undefined,
+      tx,
+    );
+    observed.set(1);
+    const effectResult = runtime.getCell<number>(
+      space,
+      "pending-dep-unrelated-effect-result",
+      undefined,
+      tx,
+    );
+    effectResult.set(0);
+    const unrelatedSource = runtime.getCell<number>(
+      space,
+      "pending-dep-unrelated-source",
+      undefined,
+      tx,
+    );
+    unrelatedSource.set(1);
+    const unrelatedResult = runtime.getCell<number>(
+      space,
+      "pending-dep-unrelated-result",
+      undefined,
+      tx,
+    );
+    unrelatedResult.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let effectRuns = 0;
+    let unrelatedRuns = 0;
+
+    const unrelatedComputation = ((actionTx: IExtendedStorageTransaction) => {
+      unrelatedRuns++;
+      unrelatedResult.withTx(actionTx).send(
+        (unrelatedSource.withTx(actionTx).get() ?? 0) + 1,
+      );
+    }) as Action & Partial<TelemetryAnnotations>;
+    unrelatedComputation.writes = [unrelatedResult.getAsNormalizedFullLink()];
+
+    const effect: Action = (actionTx) => {
+      effectRuns++;
+      effectResult.withTx(actionTx).send(
+        observed.withTx(actionTx).get() ?? 0,
+      );
+
+      if (effectRuns === 1) {
+        runtime.scheduler.subscribe(
+          unrelatedComputation,
+          (depTx) => {
+            unrelatedSource.withTx(depTx).get();
+          },
+          {},
+        );
+      }
+    };
+
+    runtime.scheduler.subscribe(
+      effect,
+      {
+        reads: [toMemorySpaceAddress(observed.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(effectResult.getAsNormalizedFullLink())],
+      },
+      { isEffect: true },
+    );
+
+    await runtime.scheduler.idle();
+
+    expect(effectRuns).toBe(1);
+    expect(effectResult.get()).toBe(1);
+    expect(unrelatedRuns).toBe(0);
+  });
+
+  it("should re-run an effect for transitively related pending dependency collection", async () => {
+    runtime.scheduler.enablePullMode();
+    expect(runtime.scheduler.isPullModeEnabled()).toBe(true);
+
+    const source = runtime.getCell<number>(
+      space,
+      "pending-dep-transitive-source",
+      undefined,
+      tx,
+    );
+    source.set(2);
+    const childResult = runtime.getCell<number>(
+      space,
+      "pending-dep-transitive-child-result",
+      undefined,
+      tx,
+    );
+    const parentResult = runtime.getCell<number>(
+      space,
+      "pending-dep-transitive-parent-result",
+      undefined,
+      tx,
+    );
+    parentResult.set(0);
+    const effectResult = runtime.getCell<number>(
+      space,
+      "pending-dep-transitive-effect-result",
+      undefined,
+      tx,
+    );
+    effectResult.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let childSubscribed = false;
+    let childRuns = 0;
+    let parentRuns = 0;
+    let effectRuns = 0;
+
+    const childComputation = ((actionTx: IExtendedStorageTransaction) => {
+      childRuns++;
+      childResult.withTx(actionTx).send(
+        (source.withTx(actionTx).get() ?? 0) * 10,
+      );
+    }) as Action & Partial<TelemetryAnnotations>;
+    childComputation.writes = [childResult.getAsNormalizedFullLink()];
+
+    const parentComputation = ((actionTx: IExtendedStorageTransaction) => {
+      parentRuns++;
+
+      if (!childSubscribed) {
+        childSubscribed = true;
+        runtime.scheduler.subscribe(
+          childComputation,
+          (depTx) => {
+            source.withTx(depTx).get();
+          },
+          {},
+        );
+      }
+
+      parentResult.withTx(actionTx).send(
+        (childResult.withTx(actionTx).get() ?? 0) + 1,
+      );
+    }) as Action & Partial<TelemetryAnnotations>;
+    parentComputation.writes = [parentResult.getAsNormalizedFullLink()];
+
+    const effect: Action = (actionTx) => {
+      effectRuns++;
+      effectResult.withTx(actionTx).send(
+        parentResult.withTx(actionTx).get() ?? 0,
+      );
+    };
+
+    runtime.scheduler.subscribe(
+      parentComputation,
+      (depTx) => {
+        childResult.withTx(depTx).get();
+      },
+      {},
+    );
+
+    runtime.scheduler.subscribe(
+      effect,
+      {
+        reads: [toMemorySpaceAddress(parentResult.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(effectResult.getAsNormalizedFullLink())],
+      },
+      { isEffect: true },
+    );
+
+    await runtime.scheduler.idle();
+
+    expect(childRuns).toBe(1);
+    expect(parentRuns).toBe(2);
+    expect(effectRuns).toBe(2);
+    expect(effectResult.get()).toBe(21);
+  });
+
+  it("should not re-run an effect when pulled dirty computations do not change its inputs", async () => {
+    runtime.scheduler.enablePullMode();
+    expect(runtime.scheduler.isPullModeEnabled()).toBe(true);
+
+    const source = runtime.getCell<number>(
+      space,
+      "pull-effect-unchanged-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    const derived = runtime.getCell<number>(
+      space,
+      "pull-effect-unchanged-derived",
+      undefined,
+      tx,
+    );
+    derived.set(1);
+    const effectResult = runtime.getCell<number>(
+      space,
+      "pull-effect-unchanged-effect-result",
+      undefined,
+      tx,
+    );
+    effectResult.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let computationRuns = 0;
+    let effectRuns = 0;
+
+    const computation = ((actionTx: IExtendedStorageTransaction) => {
+      computationRuns++;
+      const value = source.withTx(actionTx).get() ?? 0;
+      derived.withTx(actionTx).send(value % 2);
+    }) as Action & Partial<TelemetryAnnotations>;
+    computation.writes = [derived.getAsNormalizedFullLink()];
+
+    const effect: Action = (actionTx) => {
+      effectRuns++;
+      effectResult.withTx(actionTx).send(
+        derived.withTx(actionTx).get() ?? 0,
+      );
+    };
+
+    runtime.scheduler.subscribe(
+      computation,
+      {
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(derived.getAsNormalizedFullLink())],
+      },
+      {},
+    );
+    runtime.scheduler.subscribe(
+      effect,
+      {
+        reads: [toMemorySpaceAddress(derived.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(effectResult.getAsNormalizedFullLink())],
+      },
+      { isEffect: true },
+    );
+    await runtime.scheduler.idle();
+
+    expect(computationRuns).toBe(1);
+    expect(effectRuns).toBe(1);
+    expect(effectResult.get()).toBe(1);
+
+    source.withTx(tx).send(3);
+    await tx.commit();
+    tx = runtime.edit();
+    await runtime.scheduler.idle();
+
+    expect(computationRuns).toBe(2);
+    expect(derived.get()).toBe(1);
+    expect(effectRuns).toBe(1);
+    expect(effectResult.get()).toBe(1);
   });
 
   it("should schedule effects when affected by dirty computations", async () => {
@@ -680,6 +962,836 @@ describe("pull-based scheduling", () => {
     expect(stats.effects).toBe(0);
   });
 
+  it("should track direct dirty and transitive stale separately", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const source = runtime.getCell<number>(
+      space,
+      "stale-state-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    const mid = runtime.getCell<number>(
+      space,
+      "stale-state-mid",
+      undefined,
+      tx,
+    );
+    mid.set(0);
+    const output = runtime.getCell<number>(
+      space,
+      "stale-state-output",
+      undefined,
+      tx,
+    );
+    output.set(0);
+    const sink = runtime.getCell<number>(
+      space,
+      "stale-state-sink",
+      undefined,
+      tx,
+    );
+    sink.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const actionA: Action = (actionTx) => {
+      mid.withTx(actionTx).send((source.withTx(actionTx).get() ?? 0) + 1);
+    };
+    const actionB: Action = (actionTx) => {
+      output.withTx(actionTx).send((mid.withTx(actionTx).get() ?? 0) + 1);
+    };
+    const effect: Action = (actionTx) => {
+      sink.withTx(actionTx).send(output.withTx(actionTx).get() ?? 0);
+    };
+
+    runtime.scheduler.subscribe(
+      actionA,
+      {
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(mid.getAsNormalizedFullLink())],
+      },
+      {},
+    );
+    runtime.scheduler.subscribe(
+      actionB,
+      {
+        reads: [toMemorySpaceAddress(mid.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
+      },
+      {},
+    );
+    runtime.scheduler.subscribe(
+      effect,
+      {
+        reads: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(sink.getAsNormalizedFullLink())],
+      },
+      { isEffect: true },
+    );
+    await sink.pull();
+
+    const updateTx = runtime.edit();
+    source.withTx(updateTx).send(2);
+    await updateTx.commit();
+
+    const schedulerInternal = runtime
+      .scheduler as unknown as StaleSchedulerInternals;
+    expect(runtime.scheduler.isDirty(actionA)).toBe(true);
+    expect(runtime.scheduler.isDirty(actionB)).toBe(false);
+    expect(schedulerInternal.isStale(actionA)).toBe(true);
+    expect(schedulerInternal.isStale(actionB)).toBe(true);
+    expect(schedulerInternal.getUpstreamStaleCount(actionB)).toBe(1);
+    expect(schedulerInternal.isStale(effect)).toBe(true);
+  });
+
+  it("should schedule a newly resubscribed shallow-read effect when its writer is stale", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const source = runtime.getCell<number>(
+      space,
+      "pull-shallow-resubscribe-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    const output = runtime.getCell<{ children: number[] }>(
+      space,
+      "pull-shallow-resubscribe-output",
+      undefined,
+      tx,
+    );
+    output.set({ children: [] });
+    await tx.commit();
+    tx = runtime.edit();
+
+    let computationRuns = 0;
+    const computation: Action = (actionTx) => {
+      computationRuns++;
+      output.withTx(actionTx).key("children").set([
+        source.withTx(actionTx).get() ?? 0,
+      ]);
+    };
+
+    runtime.scheduler.subscribe(
+      computation,
+      {
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [
+          toMemorySpaceAddress(
+            output.key("children").getAsNormalizedFullLink(),
+          ),
+        ],
+      },
+      {},
+    );
+
+    expect(runtime.scheduler.isDirty(computation)).toBe(true);
+    expect(computationRuns).toBe(0);
+
+    let effectRuns = 0;
+    const effect: Action = (effectTx) => {
+      effectRuns++;
+      output.withTx(effectTx).key("children").getRaw({
+        nonRecursive: true,
+      });
+    };
+
+    runtime.scheduler.resubscribe(
+      effect,
+      {
+        reads: [],
+        shallowReads: [
+          toMemorySpaceAddress(
+            output.key("children").getAsNormalizedFullLink(),
+          ),
+        ],
+        writes: [],
+      },
+      { isEffect: true },
+    );
+
+    expect(runtime.scheduler.isDirty(effect)).toBe(true);
+    await runtime.scheduler.idle();
+
+    expect(computationRuns).toBe(1);
+    expect(effectRuns).toBe(1);
+    expect(runtime.scheduler.isDirty(computation)).toBe(false);
+    expect(runtime.scheduler.isDirty(effect)).toBe(false);
+  });
+
+  it("should clear downstream stale state when upstream recomputes unchanged", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const source = runtime.getCell<number>(
+      space,
+      "stale-noop-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    const stable = runtime.getCell<number>(
+      space,
+      "stale-noop-stable",
+      undefined,
+      tx,
+    );
+    stable.set(0);
+    const output = runtime.getCell<number>(
+      space,
+      "stale-noop-output",
+      undefined,
+      tx,
+    );
+    output.set(0);
+    const sink = runtime.getCell<number>(
+      space,
+      "stale-noop-sink",
+      undefined,
+      tx,
+    );
+    sink.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let stableRuns = 0;
+    let downstreamRuns = 0;
+    let effectRuns = 0;
+    const stableAction: Action = (actionTx) => {
+      stableRuns++;
+      source.withTx(actionTx).get();
+      stable.withTx(actionTx).send(1);
+    };
+    const downstreamAction: Action = (actionTx) => {
+      downstreamRuns++;
+      output.withTx(actionTx).send((stable.withTx(actionTx).get() ?? 0) + 1);
+    };
+    const effect: Action = (actionTx) => {
+      effectRuns++;
+      sink.withTx(actionTx).send(output.withTx(actionTx).get() ?? 0);
+    };
+
+    runtime.scheduler.subscribe(
+      stableAction,
+      {
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(stable.getAsNormalizedFullLink())],
+      },
+      {},
+    );
+    runtime.scheduler.subscribe(
+      downstreamAction,
+      {
+        reads: [toMemorySpaceAddress(stable.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
+      },
+      {},
+    );
+    runtime.scheduler.subscribe(
+      effect,
+      {
+        reads: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(sink.getAsNormalizedFullLink())],
+      },
+      { isEffect: true },
+    );
+    await sink.pull();
+    expect(sink.get()).toBe(2);
+
+    stableRuns = 0;
+    downstreamRuns = 0;
+    effectRuns = 0;
+
+    const updateTx = runtime.edit();
+    source.withTx(updateTx).send(2);
+    await updateTx.commit();
+    await runtime.scheduler.idle();
+
+    expect(stableRuns).toBe(1);
+    expect(downstreamRuns).toBe(0);
+    expect(effectRuns).toBe(0);
+    expect(sink.get()).toBe(2);
+
+    const schedulerInternal = runtime
+      .scheduler as unknown as StaleSchedulerInternals;
+    expect(schedulerInternal.isStale(stableAction)).toBe(false);
+    expect(schedulerInternal.isStale(downstreamAction)).toBe(false);
+    expect(schedulerInternal.isStale(effect)).toBe(false);
+  });
+
+  it("should run downstream demand when upstream recompute changes output", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const source = runtime.getCell<number>(
+      space,
+      "stale-change-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    const mid = runtime.getCell<number>(
+      space,
+      "stale-change-mid",
+      undefined,
+      tx,
+    );
+    mid.set(0);
+    const output = runtime.getCell<number>(
+      space,
+      "stale-change-output",
+      undefined,
+      tx,
+    );
+    output.set(0);
+    const sink = runtime.getCell<number>(
+      space,
+      "stale-change-sink",
+      undefined,
+      tx,
+    );
+    sink.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let downstreamRuns = 0;
+    const upstreamAction: Action = (actionTx) => {
+      mid.withTx(actionTx).send((source.withTx(actionTx).get() ?? 0) * 10);
+    };
+    const downstreamAction: Action = (actionTx) => {
+      downstreamRuns++;
+      output.withTx(actionTx).send((mid.withTx(actionTx).get() ?? 0) + 1);
+    };
+    const effect: Action = (actionTx) => {
+      sink.withTx(actionTx).send(output.withTx(actionTx).get() ?? 0);
+    };
+
+    runtime.scheduler.subscribe(
+      upstreamAction,
+      {
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(mid.getAsNormalizedFullLink())],
+      },
+      {},
+    );
+    runtime.scheduler.subscribe(
+      downstreamAction,
+      {
+        reads: [toMemorySpaceAddress(mid.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
+      },
+      {},
+    );
+    runtime.scheduler.subscribe(
+      effect,
+      {
+        reads: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(sink.getAsNormalizedFullLink())],
+      },
+      { isEffect: true },
+    );
+    await sink.pull();
+    expect(sink.get()).toBe(11);
+
+    downstreamRuns = 0;
+    const updateTx = runtime.edit();
+    source.withTx(updateTx).send(2);
+    await updateTx.commit();
+    await sink.pull();
+
+    expect(downstreamRuns).toBe(1);
+    expect(sink.get()).toBe(21);
+    expect(runtime.scheduler.isDirty(downstreamAction)).toBe(false);
+  });
+
+  it("should keep event handlers behind stale dependencies", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const source = runtime.getCell<number>(
+      space,
+      "stale-event-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    const mid = runtime.getCell<number>(
+      space,
+      "stale-event-mid",
+      undefined,
+      tx,
+    );
+    mid.set(0);
+    const output = runtime.getCell<number>(
+      space,
+      "stale-event-output",
+      undefined,
+      tx,
+    );
+    output.set(0);
+    const eventStream = runtime.getCell<number>(
+      space,
+      "stale-event-stream",
+      undefined,
+      tx,
+    );
+    eventStream.set(0);
+    const result = runtime.getCell<number>(
+      space,
+      "stale-event-result",
+      undefined,
+      tx,
+    );
+    result.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let upstreamRuns = 0;
+    let downstreamRuns = 0;
+    let handlerRuns = 0;
+    const upstreamAction: Action = (actionTx) => {
+      upstreamRuns++;
+      mid.withTx(actionTx).send((source.withTx(actionTx).get() ?? 0) + 1);
+    };
+    const downstreamAction: Action = (actionTx) => {
+      downstreamRuns++;
+      output.withTx(actionTx).send((mid.withTx(actionTx).get() ?? 0) * 2);
+    };
+
+    runtime.scheduler.subscribe(
+      upstreamAction,
+      {
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(mid.getAsNormalizedFullLink())],
+      },
+      {},
+    );
+    runtime.scheduler.subscribe(
+      downstreamAction,
+      {
+        reads: [toMemorySpaceAddress(mid.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
+      },
+      {},
+    );
+    await output.pull();
+
+    const handler: EventHandler = (handlerTx, event: number) => {
+      handlerRuns++;
+      result.withTx(handlerTx).send(
+        (output.withTx(handlerTx).get() ?? 0) + event,
+      );
+    };
+    runtime.scheduler.addEventHandler(
+      handler,
+      eventStream.getAsNormalizedFullLink(),
+      (depTx) => output.withTx(depTx).get(),
+    );
+
+    upstreamRuns = 0;
+    downstreamRuns = 0;
+    const updateTx = runtime.edit();
+    source.withTx(updateTx).send(4);
+    await updateTx.commit();
+
+    runtime.scheduler.queueEvent(eventStream.getAsNormalizedFullLink(), 5);
+    await result.pull();
+
+    expect(upstreamRuns).toBe(1);
+    expect(downstreamRuns).toBe(1);
+    expect(handlerRuns).toBe(1);
+    expect(result.get()).toBe(((4 + 1) * 2) + 5);
+  });
+
+  it("should not recursively walk clean broad event preflight dependencies", async () => {
+    runtime.scheduler.enablePullMode();
+    runtime.scheduler.setEventPreflightTelemetryEnabled(true);
+
+    const preflights: EventPreflightMarker[] = [];
+    const listener = (event: Event) => {
+      const marker = (event as CustomEvent<{ marker: RuntimeTelemetryMarker }>)
+        .detail.marker;
+      if (marker.type === "scheduler.event.preflight") {
+        preflights.push(marker);
+      }
+    };
+    runtime.telemetry.addEventListener("telemetry", listener);
+
+    try {
+      const source = runtime.getCell<number>(
+        space,
+        "stale-clean-preflight-source",
+        undefined,
+        tx,
+      );
+      source.set(1);
+      const shared = runtime.getCell<number>(
+        space,
+        "stale-clean-preflight-shared",
+        undefined,
+        tx,
+      );
+      shared.set(0);
+      const target = runtime.getCell<number>(
+        space,
+        "stale-clean-preflight-target",
+        undefined,
+        tx,
+      );
+      target.set(0);
+      const eventStream = runtime.getCell<number>(
+        space,
+        "stale-clean-preflight-event",
+        undefined,
+        tx,
+      );
+      eventStream.set(0);
+      const result = runtime.getCell<number>(
+        space,
+        "stale-clean-preflight-result",
+        undefined,
+        tx,
+      );
+      result.set(0);
+      const fanCells: Cell<number>[] = [];
+      for (let i = 0; i < 32; i++) {
+        const cell = runtime.getCell<number>(
+          space,
+          `stale-clean-preflight-fan-${i}`,
+          undefined,
+          tx,
+        );
+        cell.set(0);
+        fanCells.push(cell);
+      }
+      await tx.commit();
+      tx = runtime.edit();
+
+      const sharedWriter: Action = (actionTx) => {
+        shared.withTx(actionTx).send((source.withTx(actionTx).get() ?? 0) + 1);
+      };
+      runtime.scheduler.subscribe(
+        sharedWriter,
+        {
+          reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+          shallowReads: [],
+          writes: [toMemorySpaceAddress(shared.getAsNormalizedFullLink())],
+        },
+        {},
+      );
+
+      for (const [index, fanCell] of fanCells.entries()) {
+        const fanWriter: Action = (actionTx) => {
+          fanCell.withTx(actionTx).send(
+            (shared.withTx(actionTx).get() ?? 0) + index,
+          );
+        };
+        runtime.scheduler.subscribe(
+          fanWriter,
+          {
+            reads: [toMemorySpaceAddress(shared.getAsNormalizedFullLink())],
+            shallowReads: [],
+            writes: [toMemorySpaceAddress(fanCell.getAsNormalizedFullLink())],
+          },
+          {},
+        );
+      }
+
+      const targetWriter: Action = (actionTx) => {
+        let sum = 0;
+        for (const fanCell of fanCells) {
+          sum += fanCell.withTx(actionTx).get() ?? 0;
+        }
+        target.withTx(actionTx).send(sum);
+      };
+      runtime.scheduler.subscribe(
+        targetWriter,
+        {
+          reads: fanCells.map((cell) =>
+            toMemorySpaceAddress(cell.getAsNormalizedFullLink())
+          ),
+          shallowReads: [],
+          writes: [toMemorySpaceAddress(target.getAsNormalizedFullLink())],
+        },
+        {},
+      );
+      await target.pull();
+
+      const handler: EventHandler = (handlerTx, event: number) => {
+        result.withTx(handlerTx).send(
+          (target.withTx(handlerTx).get() ?? 0) + event,
+        );
+      };
+      runtime.scheduler.addEventHandler(
+        handler,
+        eventStream.getAsNormalizedFullLink(),
+        (depTx) => target.withTx(depTx).get(),
+      );
+
+      runtime.scheduler.queueEvent(eventStream.getAsNormalizedFullLink(), 1);
+      await result.pull();
+
+      expect(preflights.length).toBe(1);
+      expect(preflights[0].skipped).toBe(false);
+      expect(preflights[0].hasDirtyDependencies).toBe(false);
+      expect(preflights[0].stats.visitCount).toBeLessThan(10);
+    } finally {
+      runtime.telemetry.removeEventListener("telemetry", listener);
+    }
+  });
+
+  it("should update stale counts when dynamic dependencies change", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const selector = runtime.getCell<number>(
+      space,
+      "stale-dynamic-selector",
+      undefined,
+      tx,
+    );
+    selector.set(0);
+    const sourceA = runtime.getCell<number>(
+      space,
+      "stale-dynamic-source-a",
+      undefined,
+      tx,
+    );
+    sourceA.set(1);
+    const sourceB = runtime.getCell<number>(
+      space,
+      "stale-dynamic-source-b",
+      undefined,
+      tx,
+    );
+    sourceB.set(10);
+    const output = runtime.getCell<number>(
+      space,
+      "stale-dynamic-output",
+      undefined,
+      tx,
+    );
+    output.set(0);
+    const sink = runtime.getCell<number>(
+      space,
+      "stale-dynamic-sink",
+      undefined,
+      tx,
+    );
+    sink.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const action: Action = (actionTx) => {
+      const useB = (selector.withTx(actionTx).get() ?? 0) === 1;
+      const sourceCell = useB ? sourceB : sourceA;
+      output.withTx(actionTx).send(sourceCell.withTx(actionTx).get() ?? 0);
+    };
+    const effect: Action = (actionTx) => {
+      sink.withTx(actionTx).send(output.withTx(actionTx).get() ?? 0);
+    };
+
+    runtime.scheduler.subscribe(
+      action,
+      {
+        reads: [
+          toMemorySpaceAddress(selector.getAsNormalizedFullLink()),
+          toMemorySpaceAddress(sourceA.getAsNormalizedFullLink()),
+        ],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
+      },
+      {},
+    );
+    runtime.scheduler.subscribe(
+      effect,
+      {
+        reads: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(sink.getAsNormalizedFullLink())],
+      },
+      { isEffect: true },
+    );
+    await sink.pull();
+
+    const switchTx = runtime.edit();
+    selector.withTx(switchTx).send(1);
+    await switchTx.commit();
+    await sink.pull();
+    expect(sink.get()).toBe(10);
+
+    const updateOldSourceTx = runtime.edit();
+    sourceA.withTx(updateOldSourceTx).send(2);
+    await updateOldSourceTx.commit();
+
+    const schedulerInternal = runtime
+      .scheduler as unknown as StaleSchedulerInternals;
+    expect(runtime.scheduler.isDirty(action)).toBe(false);
+    expect(schedulerInternal.isStale(action)).toBe(false);
+    expect(schedulerInternal.getUpstreamStaleCount(action)).toBe(0);
+
+    const updateNewSourceTx = runtime.edit();
+    sourceB.withTx(updateNewSourceTx).send(11);
+    await updateNewSourceTx.commit();
+    expect(runtime.scheduler.isDirty(action)).toBe(true);
+    expect(schedulerInternal.isStale(action)).toBe(true);
+  });
+
+  it("should clear stale counts when stale dependencies unsubscribe", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const source = runtime.getCell<number>(
+      space,
+      "stale-unsubscribe-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    const mid = runtime.getCell<number>(
+      space,
+      "stale-unsubscribe-mid",
+      undefined,
+      tx,
+    );
+    mid.set(0);
+    const output = runtime.getCell<number>(
+      space,
+      "stale-unsubscribe-output",
+      undefined,
+      tx,
+    );
+    output.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const upstreamAction: Action = (actionTx) => {
+      mid.withTx(actionTx).send((source.withTx(actionTx).get() ?? 0) + 1);
+    };
+    const downstreamAction: Action = (actionTx) => {
+      output.withTx(actionTx).send((mid.withTx(actionTx).get() ?? 0) + 1);
+    };
+
+    runtime.scheduler.subscribe(
+      upstreamAction,
+      {
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(mid.getAsNormalizedFullLink())],
+      },
+      {},
+    );
+    runtime.scheduler.subscribe(
+      downstreamAction,
+      {
+        reads: [toMemorySpaceAddress(mid.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
+      },
+      {},
+    );
+    await output.pull();
+
+    const updateTx = runtime.edit();
+    source.withTx(updateTx).send(2);
+    await updateTx.commit();
+
+    const schedulerInternal = runtime
+      .scheduler as unknown as StaleSchedulerInternals;
+    expect(schedulerInternal.isStale(downstreamAction)).toBe(true);
+
+    runtime.scheduler.unsubscribe(upstreamAction);
+    expect(schedulerInternal.isStale(downstreamAction)).toBe(false);
+    expect(schedulerInternal.getUpstreamStaleCount(downstreamAction)).toBe(0);
+  });
+
+  it("should handle stale cycles conservatively without negative counts", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const source = runtime.getCell<number>(
+      space,
+      "stale-cycle-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    const left = runtime.getCell<number>(
+      space,
+      "stale-cycle-left",
+      undefined,
+      tx,
+    );
+    left.set(0);
+    const right = runtime.getCell<number>(
+      space,
+      "stale-cycle-right",
+      undefined,
+      tx,
+    );
+    right.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const actionA: Action = () => {};
+    const actionB: Action = () => {};
+
+    runtime.scheduler.subscribe(
+      actionA,
+      {
+        reads: [
+          toMemorySpaceAddress(source.getAsNormalizedFullLink()),
+          toMemorySpaceAddress(right.getAsNormalizedFullLink()),
+        ],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(left.getAsNormalizedFullLink())],
+      },
+      {},
+    );
+    runtime.scheduler.subscribe(
+      actionB,
+      {
+        reads: [toMemorySpaceAddress(left.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(right.getAsNormalizedFullLink())],
+      },
+      {},
+    );
+
+    const schedulerInternal = runtime
+      .scheduler as unknown as StaleSchedulerInternals;
+    const workSet = new Set<Action>();
+    expect(
+      schedulerInternal.collectDirtyDependencies(
+        actionA,
+        workSet,
+        new Map(),
+      ),
+    ).toBe(true);
+    expect(workSet.has(actionA)).toBe(true);
+    expect(workSet.has(actionB)).toBe(true);
+
+    schedulerInternal.clearDirectDirty(actionA);
+    schedulerInternal.clearDirectDirty(actionB);
+
+    expect(schedulerInternal.getUpstreamStaleCount(actionA))
+      .toBeGreaterThanOrEqual(
+        0,
+      );
+    expect(schedulerInternal.getUpstreamStaleCount(actionB))
+      .toBeGreaterThanOrEqual(
+        0,
+      );
+  });
+
   it("should allow disabling pull mode", () => {
     runtime.scheduler.enablePullMode();
     expect(runtime.scheduler.isPullModeEnabled()).toBe(true);
@@ -1083,7 +2195,6 @@ describe("handler dependency pulling", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: "v2",
       cfcEnforcementMode: "enforce-explicit",
     });
     runtime.scheduler.enablePullMode();
@@ -1596,6 +2707,230 @@ describe("handler dependency pulling", () => {
     expect(computedRuns).toBe(2);
     expect(handlerRuns).toBe(1);
     expect(result.get()).toBe(23);
+  });
+
+  it("should keep parked event wake when unrelated work queues execution", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const source = runtime.getCell<number>(
+      space,
+      "handler-throttle-wake-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    const computed = runtime.getCell<number>(
+      space,
+      "handler-throttle-wake-computed",
+      undefined,
+      tx,
+    );
+    const unrelated = runtime.getCell<number>(
+      space,
+      "handler-throttle-wake-unrelated",
+      undefined,
+      tx,
+    );
+    unrelated.set(0);
+    const eventStream = runtime.getCell<number>(
+      space,
+      "handler-throttle-wake-events",
+      undefined,
+      tx,
+    );
+    eventStream.set(0);
+    const result = runtime.getCell<number>(
+      space,
+      "handler-throttle-wake-result",
+      undefined,
+      tx,
+    );
+    result.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let computedRuns = 0;
+    let handlerRuns = 0;
+    let unrelatedRuns = 0;
+
+    const computation: Action = (actionTx) => {
+      computedRuns++;
+      computed.withTx(actionTx).send(
+        (source.withTx(actionTx).get() ?? 0) * 10,
+      );
+    };
+    const unrelatedEffect: Action = (actionTx) => {
+      unrelatedRuns++;
+      unrelated.withTx(actionTx).send(unrelatedRuns);
+    };
+
+    runtime.scheduler.subscribe(
+      computation,
+      {
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(computed.getAsNormalizedFullLink())],
+      },
+      {},
+    );
+    runtime.scheduler.subscribe(
+      unrelatedEffect,
+      {
+        reads: [],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(unrelated.getAsNormalizedFullLink())],
+      },
+      { isEffect: true },
+    );
+
+    await computed.pull();
+    await unrelated.pull();
+    expect(computedRuns).toBe(1);
+
+    runtime.scheduler.setThrottle(computation, 100);
+    runtime.scheduler.addEventHandler(
+      (handlerTx, event: number) => {
+        handlerRuns++;
+        result.withTx(handlerTx).send(
+          (computed.withTx(handlerTx).get() ?? 0) + event,
+        );
+      },
+      eventStream.getAsNormalizedFullLink(),
+      (depTx) => {
+        computed.withTx(depTx).get();
+      },
+    );
+
+    source.withTx(tx).send(2);
+    await tx.commit();
+    tx = runtime.edit();
+
+    runtime.scheduler.queueEvent(eventStream.getAsNormalizedFullLink(), 3);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    runtime.scheduler.queueExecution();
+
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    await runtime.scheduler.idle();
+
+    expect(computedRuns).toBe(2);
+    expect(handlerRuns).toBe(1);
+    expect(result.get()).toBe(23);
+  });
+
+  it("should report preflight dependency errors without wedging the scheduler", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const eventStream = runtime.getCell<number>(
+      space,
+      "handler-preflight-error-events",
+      undefined,
+      tx,
+    );
+    eventStream.set(0);
+    const result = runtime.getCell<number>(
+      space,
+      "handler-preflight-error-result",
+      undefined,
+      tx,
+    );
+    result.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const errors: string[] = [];
+    runtime.scheduler.onError((error: ErrorWithContext) => {
+      errors.push(error.message);
+    });
+
+    let handlerRuns = 0;
+    runtime.scheduler.addEventHandler(
+      (handlerTx, event: number) => {
+        handlerRuns++;
+        result.withTx(handlerTx).send(event);
+      },
+      eventStream.getAsNormalizedFullLink(),
+      () => {
+        throw new Error("preflight dependency failed");
+      },
+    );
+
+    runtime.scheduler.queueEvent(eventStream.getAsNormalizedFullLink(), 7);
+    await runtime.scheduler.idle();
+
+    expect(handlerRuns).toBe(0);
+    expect(result.get()).toBe(0);
+    expect(
+      errors.some((message) => message.includes("preflight dependency failed")),
+    ).toBe(true);
+
+    const followup: Action = (actionTx) => {
+      result.withTx(actionTx).send(9);
+    };
+    runtime.scheduler.subscribe(
+      followup,
+      {
+        reads: [],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(result.getAsNormalizedFullLink())],
+      },
+      { isEffect: true },
+    );
+    await result.pull();
+    expect(result.get()).toBe(9);
+  });
+
+  it("should not emit event preflight telemetry unless enabled", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const preflights: EventPreflightMarker[] = [];
+    const listener = (event: Event) => {
+      const marker = (event as CustomEvent<{ marker: RuntimeTelemetryMarker }>)
+        .detail.marker;
+      if (marker.type === "scheduler.event.preflight") {
+        preflights.push(marker);
+      }
+    };
+    runtime.telemetry.addEventListener("telemetry", listener);
+
+    try {
+      const eventStream = runtime.getCell<number>(
+        space,
+        "handler-preflight-telemetry-events",
+        undefined,
+        tx,
+      );
+      eventStream.set(0);
+      const result = runtime.getCell<number>(
+        space,
+        "handler-preflight-telemetry-result",
+        undefined,
+        tx,
+      );
+      result.set(0);
+      await tx.commit();
+      tx = runtime.edit();
+
+      runtime.scheduler.addEventHandler(
+        (handlerTx, event: number) => {
+          result.withTx(handlerTx).send(event);
+        },
+        eventStream.getAsNormalizedFullLink(),
+        (depTx) => {
+          result.withTx(depTx).get();
+        },
+      );
+
+      runtime.scheduler.queueEvent(eventStream.getAsNormalizedFullLink(), 1);
+      await result.pull();
+      expect(preflights).toEqual([]);
+
+      runtime.scheduler.setEventPreflightTelemetryEnabled(true);
+      runtime.scheduler.queueEvent(eventStream.getAsNormalizedFullLink(), 2);
+      await result.pull();
+      expect(preflights.length).toBe(1);
+    } finally {
+      runtime.telemetry.removeEventListener("telemetry", listener);
+    }
   });
 
   it("should preserve FIFO order while the head event is parked", async () => {

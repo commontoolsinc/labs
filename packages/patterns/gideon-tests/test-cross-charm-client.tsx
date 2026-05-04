@@ -30,6 +30,8 @@ import {
   NAME,
   pattern,
   Stream,
+  toCompactDebugString,
+  toIndentedDebugString,
   UI,
   wish,
   Writable,
@@ -79,7 +81,7 @@ const invokeServerStream = handler<
       );
     } else {
       state.lastInvocationStatus.set(
-        `Stream not found or invalid: ${JSON.stringify(innerValue)}`,
+        `Stream not found or invalid: ${toCompactDebugString(innerValue)}`,
       );
     }
   } catch (error) {
@@ -237,7 +239,7 @@ export default pattern<Input, Output>(
                 Debug Info
               </summary>
               <pre style={{ fontSize: "10px", overflow: "auto" }}>
-              {JSON.stringify(
+              {toIndentedDebugString(
                 {
                   useCfRender,
                   invocationCount,
@@ -245,8 +247,6 @@ export default pattern<Input, Output>(
                   serverPieceExists: serverPiece !== undefined && serverPiece !== null,
                   serverStreamExists: serverStream !== undefined && serverStream !== null,
                 },
-                null,
-                2
               )}
               </pre>
             </details>

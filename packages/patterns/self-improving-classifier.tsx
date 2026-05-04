@@ -25,6 +25,7 @@ import {
   pattern,
   safeDateNow,
   Stream,
+  toIndentedDebugString,
   UI,
   Writable,
 } from "commonfabric";
@@ -2132,6 +2133,7 @@ Each suggestion should have:
                               })}
                             />
                             <cf-button
+                              color="neutral"
                               variant="ghost"
                               onClick={removeFieldHandler({
                                 entry,
@@ -2158,13 +2160,18 @@ Each suggestion should have:
                       placeholder="Field value"
                       style="flex: 1;"
                     />
-                    <cf-button variant="secondary" onClick={addFieldToNewItem}>
+                    <cf-button
+                      color="neutral"
+                      variant="outline"
+                      onClick={addFieldToNewItem}
+                    >
                       Add
                     </cf-button>
                   </cf-hstack>
 
                   <cf-button
-                    variant="primary"
+                    color="primary"
+                    variant="solid"
                     disabled={computed(() => {
                       const fields = newItemFields.get();
                       const fieldKeys = Object.keys(fields);
@@ -2189,10 +2196,10 @@ Each suggestion should have:
                       {computed(() => {
                         const result = currentClassificationResult;
                         if (result) {
-                          return JSON.stringify(result.item.fields, null, 2);
+                          return toIndentedDebugString(result.item.fields);
                         }
                         const item = currentItem.get();
-                        return item ? JSON.stringify(item.fields, null, 2) : "";
+                        return item ? toIndentedDebugString(item.fields) : "";
                       })}
                     </pre>
 
@@ -2246,13 +2253,15 @@ Each suggestion should have:
 
                         <cf-hstack gap="2">
                           <cf-button
-                            variant="primary"
+                            color="primary"
+                            variant="solid"
                             onClick={acceptCurrentClassification}
                           >
                             Accept
                           </cf-button>
                           <cf-button
-                            variant="secondary"
+                            color="neutral"
+                            variant="outline"
                             onClick={correctCurrentClassification}
                           >
                             Actually {ifElse(
@@ -2265,6 +2274,7 @@ Each suggestion should have:
                             )}
                           </cf-button>
                           <cf-button
+                            color="neutral"
                             variant="ghost"
                             onClick={dismissCurrentItem}
                           >
@@ -2300,7 +2310,7 @@ Each suggestion should have:
                       {computed(() => {
                         const undone = undoneAutoItem.get();
                         return undone
-                          ? JSON.stringify(undone.input.fields, null, 2)
+                          ? toIndentedDebugString(undone.input.fields)
                           : "";
                       })}
                     </pre>
@@ -2341,13 +2351,15 @@ Each suggestion should have:
 
                     <cf-hstack gap="2">
                       <cf-button
-                        variant="primary"
+                        color="primary"
+                        variant="solid"
                         onClick={acceptUndoneClassification}
                       >
                         Accept
                       </cf-button>
                       <cf-button
-                        variant="secondary"
+                        color="neutral"
+                        variant="outline"
                         onClick={correctUndoneClassification}
                       >
                         Actually {ifElse(
@@ -2356,7 +2368,11 @@ Each suggestion should have:
                           "YES",
                         )}
                       </cf-button>
-                      <cf-button variant="ghost" onClick={dismissUndoneItem}>
+                      <cf-button
+                        color="neutral"
+                        variant="ghost"
+                        onClick={dismissUndoneItem}
+                      >
                         Dismiss
                       </cf-button>
                     </cf-hstack>
@@ -2376,7 +2392,7 @@ Each suggestion should have:
                         <cf-vstack gap="2">
                           <pre style="font-size: 0.75rem; overflow: auto; max-height: 100px; margin: 0;">
                             {computed(() =>
-                              JSON.stringify(pending.input.fields, null, 2)
+                              toIndentedDebugString(pending.input.fields)
                             )}
                           </pre>
 
@@ -2411,7 +2427,8 @@ Each suggestion should have:
 
                           <cf-hstack gap="2">
                             <cf-button
-                              variant="primary"
+                              color="primary"
+                              variant="solid"
                               onClick={confirmPendingClassification({
                                 pending,
                                 examples,
@@ -2421,7 +2438,8 @@ Each suggestion should have:
                               Confirm
                             </cf-button>
                             <cf-button
-                              variant="secondary"
+                              color="neutral"
+                              variant="outline"
                               onClick={correctPendingClassification({
                                 pending,
                                 examples,
@@ -2435,6 +2453,7 @@ Each suggestion should have:
                               )}
                             </cf-button>
                             <cf-button
+                              color="neutral"
                               variant="ghost"
                               onClick={dismissPendingClassification({
                                 pending,
@@ -2500,6 +2519,7 @@ Each suggestion should have:
                           </span>
                         </cf-vstack>
                         <cf-button
+                          color="neutral"
                           variant="ghost"
                           onClick={removeRuleHandler({ rule, rules })}
                         >
@@ -2519,7 +2539,11 @@ Each suggestion should have:
                   <cf-vstack gap="2">
                     <cf-hstack gap="2" align="center" justify="between">
                       <cf-heading level={5}>Suggested Rules</cf-heading>
-                      <cf-button variant="ghost" onClick={refreshSuggestions}>
+                      <cf-button
+                        color="neutral"
+                        variant="ghost"
+                        onClick={refreshSuggestions}
+                      >
                         Refresh
                       </cf-button>
                     </cf-hstack>
@@ -2541,7 +2565,8 @@ Each suggestion should have:
                           </span>
                           <cf-hstack gap="2">
                             <cf-button
-                              variant="primary"
+                              color="primary"
+                              variant="solid"
                               onClick={acceptSuggestionHandler({
                                 suggestion,
                                 originalIndex,
@@ -2552,6 +2577,7 @@ Each suggestion should have:
                               Accept
                             </cf-button>
                             <cf-button
+                              color="neutral"
                               variant="ghost"
                               onClick={rejectSuggestionHandler({
                                 originalIndex,
@@ -2627,7 +2653,8 @@ Each suggestion should have:
                           })}
                         </span>
                         <cf-button
-                          variant="secondary"
+                          color="neutral"
+                          variant="outline"
                           size="sm"
                           onClick={undoAutoClassificationHandler({
                             autoItem,
@@ -2743,10 +2770,8 @@ Each suggestion should have:
                                 </span>
                                 <pre style="font-size: 0.75rem; overflow: auto; max-height: 150px; margin: 0; background: white; padding: 0.5rem; border-radius: 4px; border: 1px solid var(--cf-color-gray-200);">
                                   {computed(() =>
-                                    JSON.stringify(
+                                    toIndentedDebugString(
                                       example.input.fields,
-                                      null,
-                                      2,
                                     )
                                   )}
                                 </pre>
@@ -2842,7 +2867,8 @@ Each suggestion should have:
                               {/* Action buttons */}
                               <cf-hstack gap="2" style="margin-top: 0.5rem;">
                                 <cf-button
-                                  variant="secondary"
+                                  color="neutral"
+                                  variant="outline"
                                   size="sm"
                                   disabled={computed(() =>
                                     currentItem.get() !== null
@@ -2857,6 +2883,7 @@ Each suggestion should have:
                                   Reclassify
                                 </cf-button>
                                 <cf-button
+                                  color="neutral"
                                   variant="ghost"
                                   size="sm"
                                   onClick={removeExampleHandler({

@@ -1,15 +1,15 @@
 import {
   type ClientCommit,
-  decodeMemoryV2Boundary,
-  encodeMemoryV2Boundary,
+  decodeMemoryBoundary,
+  encodeMemoryBoundary,
   type EntitySnapshot,
-  getMemoryV2Flags,
+  getMemoryProtocolFlags,
   type GraphQuery,
   type GraphQueryResult,
-  isMemoryV2Flags,
-  MEMORY_V2_PROTOCOL,
+  isMemoryProtocolFlags,
+  MEMORY_PROTOCOL,
   type ResponseMessage,
-  sameMemoryV2Flags,
+  sameMemoryProtocolFlags,
   type ServerMessage,
   type SessionEffectMessage,
   type SessionOpenResult,
@@ -21,6 +21,7 @@ import {
 } from "../v2.ts";
 import type { Server } from "./server.ts";
 import type { AppliedCommit } from "./engine.ts";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 
 export interface Transport {
   send(payload: string): Promise<void>;
@@ -73,6 +74,12 @@ const reconnectDelayMs = (attempt: number): number => {
 
 const watchKey = (branch: string, id: string): string => `${branch}\0${id}`;
 
+const compareEntitySnapshot = (
+  left: EntitySnapshot,
+  right: EntitySnapshot,
+): number =>
+  left.branch.localeCompare(right.branch) || left.id.localeCompare(right.id);
+
 export class Client {
   #pending = new Map<string, PromiseWithResolvers<unknown>>();
   #spaces = new Set<SpaceSession>();
@@ -96,7 +103,7 @@ export class Client {
   async close(): Promise<void> {
     this.#closed = true;
     this.#connected = false;
-    this.rejectPending(new Error("memory/v2 client closed"));
+    this.rejectPending(new Error("memory client closed"));
     await Promise.all([...this.#spaces].map((space) => space.close()));
     this.#spaces.clear();
     await this.transport.close();
@@ -131,7 +138,7 @@ export class Client {
     const requestId = message.requestId as string;
     const pending = Promise.withResolvers<unknown>();
     this.#pending.set(requestId, pending);
-    await this.transport.send(encodeMemoryV2Boundary(message));
+    await this.transport.send(encodeMemoryBoundary(message));
     const result = await pending.promise as ResponseMessage<Result>;
     if (result.error) {
       const error = new Error(result.error.message);
@@ -166,10 +173,10 @@ export class Client {
   private async hello(): Promise<void> {
     const ack = Promise.withResolvers<void>();
     this.#helloPending = ack;
-    await this.transport.send(encodeMemoryV2Boundary({
+    await this.transport.send(encodeMemoryBoundary({
       type: "hello",
-      protocol: MEMORY_V2_PROTOCOL,
-      flags: getMemoryV2Flags(),
+      protocol: MEMORY_PROTOCOL,
+      flags: getMemoryProtocolFlags(),
     }));
     try {
       await ack.promise;
@@ -182,9 +189,9 @@ export class Client {
   private onMessage(payload: string): void {
     let message: unknown;
     try {
-      message = decodeMemoryV2Boundary(payload);
+      message = decodeMemoryBoundary(payload);
     } catch (cause) {
-      const error = new Error("Unable to parse memory/v2 server message", {
+      const error = new Error("Unable to parse memory server message", {
         cause,
       });
       error.name = "InvalidMessageError";
@@ -198,12 +205,12 @@ export class Client {
 
     if (this.#helloPending !== null) {
       if (isHelloOk(message)) {
-        const expectedFlags = getMemoryV2Flags();
-        if (!sameMemoryV2Flags(message.flags, expectedFlags)) {
+        const expectedFlags = getMemoryProtocolFlags();
+        if (!sameMemoryProtocolFlags(message.flags, expectedFlags)) {
           const error = new Error(
-            `memory/v2 flag mismatch: client=${
-              JSON.stringify(expectedFlags)
-            } server=${JSON.stringify(message.flags)}`,
+            `memory flag mismatch: client=${
+              toCompactDebugString(expectedFlags)
+            } server=${toCompactDebugString(message.flags)}`,
           );
           error.name = "ProtocolError";
           this.#helloPending.reject(error);
@@ -219,14 +226,14 @@ export class Client {
           error.name = message.error.name;
           this.#helloPending.reject(error);
         } else {
-          const error = new Error("memory/v2 handshake failed");
+          const error = new Error("memory handshake failed");
           error.name = "ProtocolError";
           this.#helloPending.reject(error);
         }
         return;
       }
 
-      const error = new Error("memory/v2 handshake expected hello.ok");
+      const error = new Error("memory handshake expected hello.ok");
       error.name = "ProtocolError";
       this.#helloPending.reject(error);
       return;
@@ -269,7 +276,7 @@ export class Client {
 
   private async ensureConnected(): Promise<void> {
     if (this.#closed) {
-      throw new Error("memory/v2 client is closed");
+      throw new Error("memory client is closed");
     }
     if (this.#connected) {
       return;
@@ -291,7 +298,7 @@ export class Client {
 
   private async reconnect(): Promise<void> {
     if (this.#closed) {
-      throw new Error("memory/v2 client is closed");
+      throw new Error("memory client is closed");
     }
     if (this.#reconnecting) {
       return await this.#reconnecting;
@@ -392,7 +399,7 @@ export class SpaceSession {
 
   #assertOpen(): void {
     if (this.#closed) {
-      throw this.#closeError ?? new Error("memory/v2 session closed");
+      throw this.#closeError ?? new Error("memory session closed");
     }
   }
 
@@ -609,14 +616,14 @@ export class SpaceSession {
       return;
     }
     this.#closed = true;
-    this.#closeError = new Error("memory/v2 session closed");
+    this.#closeError = new Error("memory session closed");
     this.#readyOnConnection = false;
     this.client.forgetSession(this);
     const background = [...this.#background];
     this.#background.clear();
     await Promise.allSettled(background);
     for (const pending of this.#outstandingCommits.values()) {
-      pending.pending.reject(new Error("memory/v2 session closed"));
+      pending.pending.reject(new Error("memory session closed"));
     }
     this.#outstandingCommits.clear();
     this.#watchSpecs = [];
@@ -628,7 +635,7 @@ export class SpaceSession {
     if (this.#closed) {
       return;
     }
-    const error = new Error(`memory/v2 session revoked: ${reason}`);
+    const error = new Error(`memory session revoked: ${reason}`);
     error.name = "SessionRevokedError";
     this.#closed = true;
     this.#closeError = error;
@@ -829,10 +836,11 @@ export class SpaceSession {
 export class WatchView {
   #queue: GraphQueryResult[] = [];
   #pending = new Set<PromiseWithResolvers<IteratorResult<GraphQueryResult>>>();
+  #subscribers = 0;
   #syncQueue: SessionSync[] = [];
   #syncPending = new Set<PromiseWithResolvers<IteratorResult<SessionSync>>>();
-  #entityPositions = new Map<string, number>();
-  #orderedEntities: EntitySnapshot[] = [];
+  #entities = new Map<string, EntitySnapshot>();
+  #orderedEntities: EntitySnapshot[] | null = null;
   #closed = false;
   #serverSeq = 0;
 
@@ -843,7 +851,7 @@ export class WatchView {
   }
 
   get entities(): EntitySnapshot[] {
-    return [...this.#orderedEntities];
+    return [...this.orderedEntities()];
   }
 
   get serverSeq(): number {
@@ -851,9 +859,14 @@ export class WatchView {
   }
 
   subscribe(): AsyncIterator<GraphQueryResult> {
+    this.#subscribers += 1;
+    let active = true;
+    const iteratorPending = new Set<
+      PromiseWithResolvers<IteratorResult<GraphQueryResult>>
+    >();
     return {
       next: async () => {
-        if (this.#closed) {
+        if (this.#closed || !active) {
           return {
             done: true,
             value: undefined as never,
@@ -867,23 +880,67 @@ export class WatchView {
           IteratorResult<GraphQueryResult>
         >();
         this.#pending.add(pending);
-        return await pending.promise;
+        iteratorPending.add(pending);
+        try {
+          return await pending.promise;
+        } finally {
+          iteratorPending.delete(pending);
+        }
+      },
+      return: () => {
+        if (active) {
+          active = false;
+          this.#subscribers = Math.max(0, this.#subscribers - 1);
+        }
+        for (const pending of iteratorPending) {
+          this.#pending.delete(pending);
+          pending.resolve({
+            done: true,
+            value: undefined as never,
+          });
+        }
+        iteratorPending.clear();
+        return Promise.resolve({
+          done: true,
+          value: undefined as never,
+        });
       },
     };
   }
 
   applySync(sync: SessionSync, emit: boolean): void {
+    const upserts = new Map<string, EntitySnapshot>();
     for (const upsert of sync.upserts) {
-      this.upsertEntity({
+      upserts.set(watchKey(upsert.branch, upsert.id), {
         branch: upsert.branch,
         id: upsert.id,
         seq: upsert.seq,
         document: upsert.doc ?? null,
       });
     }
+
+    const removeKeys = new Set<string>();
     for (const remove of sync.removes) {
-      this.removeEntity(remove.branch, remove.id);
+      const key = watchKey(remove.branch, remove.id);
+      removeKeys.add(key);
     }
+
+    let changedEntities = false;
+    for (const [key, entity] of upserts) {
+      if (!removeKeys.has(key)) {
+        this.#entities.set(key, entity);
+        changedEntities = true;
+      }
+    }
+
+    for (const key of removeKeys) {
+      changedEntities = this.#entities.delete(key) || changedEntities;
+    }
+
+    if (changedEntities) {
+      this.#orderedEntities = null;
+    }
+
     this.#serverSeq = Math.max(this.#serverSeq, sync.toSeq);
     if (emit) {
       this.emit(sync);
@@ -892,13 +949,17 @@ export class WatchView {
 
   emit(sync: SessionSync): void {
     this.pushSync(sync);
-    this.push(this.snapshot());
+    if (
+      this.#subscribers > 0 || this.#pending.size > 0 || this.#queue.length > 0
+    ) {
+      this.push(this.snapshot());
+    }
   }
 
   snapshot(): GraphQueryResult {
     return {
       serverSeq: this.#serverSeq,
-      entities: [...this.#orderedEntities],
+      entities: [...this.orderedEntities()],
     };
   }
 
@@ -960,6 +1021,7 @@ export class WatchView {
       });
     }
     this.#pending.clear();
+    this.#subscribers = 0;
     for (const pending of this.#syncPending) {
       pending.resolve({
         done: true,
@@ -971,56 +1033,12 @@ export class WatchView {
     this.#syncQueue = [];
   }
 
-  private upsertEntity(entity: EntitySnapshot): void {
-    const key = watchKey(entity.branch, entity.id);
-    const existingIndex = this.#entityPositions.get(key);
-    if (existingIndex !== undefined) {
-      this.#orderedEntities[existingIndex] = entity;
-      return;
+  private orderedEntities(): EntitySnapshot[] {
+    if (this.#orderedEntities === null) {
+      this.#orderedEntities = [...this.#entities.values()]
+        .sort(compareEntitySnapshot);
     }
-
-    const insertIndex = this.findInsertIndex(entity.branch, entity.id);
-    this.#orderedEntities.splice(insertIndex, 0, entity);
-    this.#entityPositions.set(key, insertIndex);
-    this.reindexFrom(insertIndex + 1);
-  }
-
-  private removeEntity(branch: string, id: string): void {
-    const key = watchKey(branch, id);
-    const existingIndex = this.#entityPositions.get(key);
-    if (existingIndex === undefined) {
-      return;
-    }
-
-    this.#orderedEntities.splice(existingIndex, 1);
-    this.#entityPositions.delete(key);
-    this.reindexFrom(existingIndex);
-  }
-
-  private findInsertIndex(branch: string, id: string): number {
-    let low = 0;
-    let high = this.#orderedEntities.length;
-
-    while (low < high) {
-      const mid = (low + high) >> 1;
-      const current = this.#orderedEntities[mid]!;
-      const compared = current.branch.localeCompare(branch) ||
-        current.id.localeCompare(id);
-      if (compared < 0) {
-        low = mid + 1;
-      } else {
-        high = mid;
-      }
-    }
-
-    return low;
-  }
-
-  private reindexFrom(start: number): void {
-    for (let index = start; index < this.#orderedEntities.length; index += 1) {
-      const entity = this.#orderedEntities[index]!;
-      this.#entityPositions.set(watchKey(entity.branch, entity.id), index);
-    }
+    return this.#orderedEntities;
   }
 }
 
@@ -1029,7 +1047,7 @@ export const connect = Client.connect;
 export const loopback = (server: Server): Transport => {
   let receiver = (_payload: string) => {};
   const connection = server.connect((message) => {
-    receiver(encodeMemoryV2Boundary(message));
+    receiver(encodeMemoryBoundary(message));
   });
   return {
     async send(payload: string) {
@@ -1048,7 +1066,7 @@ export const loopback = (server: Server): Transport => {
 
 const toConnectionError = (error?: Error): Error => {
   const connectionError = new Error(
-    error?.message ?? "memory/v2 transport closed",
+    error?.message ?? "memory transport closed",
     error ? { cause: error } : undefined,
   );
   connectionError.name = "ConnectionError";
@@ -1066,8 +1084,8 @@ const isHelloOk = (
 ): message is Extract<ServerMessage, { type: "hello.ok" }> => {
   return typeof message === "object" && message !== null &&
     (message as { type?: string }).type === "hello.ok" &&
-    (message as { protocol?: string }).protocol === MEMORY_V2_PROTOCOL &&
-    isMemoryV2Flags((message as { flags?: unknown }).flags);
+    (message as { protocol?: string }).protocol === MEMORY_PROTOCOL &&
+    isMemoryProtocolFlags((message as { flags?: unknown }).flags);
 };
 
 const isSessionEffect = (

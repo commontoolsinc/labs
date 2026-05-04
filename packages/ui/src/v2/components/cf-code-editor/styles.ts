@@ -34,7 +34,7 @@ export const styles = css`
     );
     --cf-code-editor-transition-duration: var(
       --cf-theme-animation-duration,
-      150ms
+      var(--cf-transition-duration-fast, 150ms)
     );
     --cf-code-editor-transition-ease: var(--cf-transition-timing-ease, ease);
 

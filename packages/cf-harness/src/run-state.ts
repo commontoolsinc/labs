@@ -1,5 +1,19 @@
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
+import type { HarnessCfcInvocationContext } from "./contracts/cfc-invocation-context.ts";
+import type { HarnessCfcPolicySnapshot } from "./contracts/cfc-policy-snapshot.ts";
 import type { HarnessPolicyEvent } from "./contracts/policy.ts";
+import type {
+  HarnessPolicyDecisionRecord,
+  HarnessPolicyTrace,
+} from "./contracts/policy-trace.ts";
+import type { HarnessRunManifest } from "./contracts/run-manifest.ts";
+import type { PromptSlotBinding } from "./contracts/prompt-slot.ts";
+import type {
+  HarnessSkillActivations,
+  HarnessSkillRegistry,
+  HarnessSkillResourceReads,
+} from "./contracts/skill.ts";
+import type { HarnessSubagentRunRef } from "./contracts/subagent.ts";
 import type { ToolResultRef } from "./contracts/tool-result.ts";
 import type {
   HarnessCapabilitySnapshot,
@@ -29,14 +43,31 @@ export interface HarnessRunState {
   endedAt?: string;
   terminalReason?: HarnessRunTerminalReason;
   cfcEnforcementMode: CfcEnforcementMode;
+  promptSlotBinding?: PromptSlotBinding;
   currentDir: string;
   model?: string;
   artifactRoot?: string;
+  runManifest?: HarnessRunManifest;
+  runManifestPath?: string;
+  skillRegistry?: HarnessSkillRegistry;
+  skillRegistryPath?: string;
+  skillActivations?: HarnessSkillActivations;
+  skillActivationsPath?: string;
+  skillResourceReads?: HarnessSkillResourceReads;
+  skillResourceReadsPath?: string;
   transcriptPath?: string;
+  runReportPath?: string;
   capabilitySnapshot?: HarnessCapabilitySnapshot;
   capabilitiesPath?: string;
+  cfcPolicySnapshot?: HarnessCfcPolicySnapshot;
+  cfcPolicySnapshotPath?: string;
+  policyTrace?: HarnessPolicyTrace;
+  policyTracePath?: string;
+  cfcInvocationContexts?: HarnessCfcInvocationContext[];
   policyEvents: HarnessPolicyEvent[];
+  policyDecisions?: HarnessPolicyDecisionRecord[];
   toolOutputs: ToolResultRef[];
+  subagentRuns?: HarnessSubagentRunRef[];
   failureRecords?: HarnessFailureRecord[];
   primaryFailure?: HarnessFailureRecord;
 }
@@ -47,12 +78,29 @@ export interface CreateHarnessRunStateOptions {
   endedAt?: string;
   terminalReason?: HarnessRunTerminalReason;
   cfcEnforcementMode: CfcEnforcementMode;
+  promptSlotBinding?: PromptSlotBinding;
   currentDir: string;
   model?: string;
   artifactRoot?: string;
+  runManifest?: HarnessRunManifest;
+  runManifestPath?: string;
+  skillRegistry?: HarnessSkillRegistry;
+  skillRegistryPath?: string;
+  skillActivations?: HarnessSkillActivations;
+  skillActivationsPath?: string;
+  skillResourceReads?: HarnessSkillResourceReads;
+  skillResourceReadsPath?: string;
   transcriptPath?: string;
+  runReportPath?: string;
   capabilitySnapshot?: HarnessCapabilitySnapshot;
   capabilitiesPath?: string;
+  cfcPolicySnapshot?: HarnessCfcPolicySnapshot;
+  cfcPolicySnapshotPath?: string;
+  policyTrace?: HarnessPolicyTrace;
+  policyTracePath?: string;
+  cfcInvocationContexts?: HarnessCfcInvocationContext[];
+  policyDecisions?: HarnessPolicyDecisionRecord[];
+  subagentRuns?: HarnessSubagentRunRef[];
   failureRecords?: HarnessFailureRecord[];
   primaryFailure?: HarnessFailureRecord;
   now?: string;
@@ -72,13 +120,43 @@ export const createHarnessRunState = (
       ? { terminalReason: options.terminalReason }
       : {}),
     cfcEnforcementMode: options.cfcEnforcementMode,
+    ...(options.promptSlotBinding !== undefined
+      ? { promptSlotBinding: options.promptSlotBinding }
+      : {}),
     currentDir: options.currentDir,
     ...(options.model !== undefined ? { model: options.model } : {}),
     ...(options.artifactRoot !== undefined
       ? { artifactRoot: options.artifactRoot }
       : {}),
+    ...(options.runManifest !== undefined
+      ? { runManifest: options.runManifest }
+      : {}),
+    ...(options.runManifestPath !== undefined
+      ? { runManifestPath: options.runManifestPath }
+      : {}),
+    ...(options.skillRegistry !== undefined
+      ? { skillRegistry: options.skillRegistry }
+      : {}),
+    ...(options.skillRegistryPath !== undefined
+      ? { skillRegistryPath: options.skillRegistryPath }
+      : {}),
+    ...(options.skillActivations !== undefined
+      ? { skillActivations: options.skillActivations }
+      : {}),
+    ...(options.skillActivationsPath !== undefined
+      ? { skillActivationsPath: options.skillActivationsPath }
+      : {}),
+    ...(options.skillResourceReads !== undefined
+      ? { skillResourceReads: options.skillResourceReads }
+      : {}),
+    ...(options.skillResourceReadsPath !== undefined
+      ? { skillResourceReadsPath: options.skillResourceReadsPath }
+      : {}),
     ...(options.transcriptPath !== undefined
       ? { transcriptPath: options.transcriptPath }
+      : {}),
+    ...(options.runReportPath !== undefined
+      ? { runReportPath: options.runReportPath }
       : {}),
     ...(options.capabilitySnapshot !== undefined
       ? { capabilitySnapshot: options.capabilitySnapshot }
@@ -86,8 +164,29 @@ export const createHarnessRunState = (
     ...(options.capabilitiesPath !== undefined
       ? { capabilitiesPath: options.capabilitiesPath }
       : {}),
+    ...(options.cfcPolicySnapshot !== undefined
+      ? { cfcPolicySnapshot: options.cfcPolicySnapshot }
+      : {}),
+    ...(options.cfcPolicySnapshotPath !== undefined
+      ? { cfcPolicySnapshotPath: options.cfcPolicySnapshotPath }
+      : {}),
+    ...(options.policyTrace !== undefined
+      ? { policyTrace: options.policyTrace }
+      : {}),
+    ...(options.policyTracePath !== undefined
+      ? { policyTracePath: options.policyTracePath }
+      : {}),
+    ...(options.cfcInvocationContexts !== undefined
+      ? { cfcInvocationContexts: [...options.cfcInvocationContexts] }
+      : {}),
     policyEvents: [],
+    ...(options.policyDecisions !== undefined
+      ? { policyDecisions: [...options.policyDecisions] }
+      : {}),
     toolOutputs: [],
+    ...(options.subagentRuns !== undefined
+      ? { subagentRuns: [...options.subagentRuns] }
+      : {}),
     failureRecords: [...(options.failureRecords ?? [])],
     ...(options.primaryFailure !== undefined
       ? { primaryFailure: options.primaryFailure }
@@ -140,6 +239,46 @@ export const appendHarnessPolicyEvent = (
   policyEvents: [...state.policyEvents, event],
 });
 
+export const appendHarnessPolicyDecision = (
+  state: HarnessRunState,
+  decision: HarnessPolicyDecisionRecord,
+  now = new Date().toISOString(),
+): HarnessRunState => ({
+  ...state,
+  updatedAt: now,
+  policyDecisions: [...(state.policyDecisions ?? []), decision],
+});
+
+export const appendHarnessCfcInvocationContext = (
+  state: HarnessRunState,
+  context: HarnessCfcInvocationContext,
+  now = new Date().toISOString(),
+): HarnessRunState => ({
+  ...state,
+  updatedAt: now,
+  cfcInvocationContexts: [...(state.cfcInvocationContexts ?? []), context],
+});
+
+export const appendHarnessSubagentRun = (
+  state: HarnessRunState,
+  subagentRun: HarnessSubagentRunRef,
+  now = new Date().toISOString(),
+): HarnessRunState => ({
+  ...state,
+  updatedAt: now,
+  subagentRuns: [...(state.subagentRuns ?? []), subagentRun],
+});
+
+export const setHarnessPromptSlotBinding = (
+  state: HarnessRunState,
+  promptSlotBinding: PromptSlotBinding,
+  now = new Date().toISOString(),
+): HarnessRunState => ({
+  ...state,
+  promptSlotBinding,
+  updatedAt: now,
+});
+
 export const appendHarnessFailureRecord = (
   state: HarnessRunState,
   failure: HarnessFailureRecord,
@@ -175,6 +314,62 @@ export const setHarnessTranscriptPath = (
   updatedAt: now,
 });
 
+export const setHarnessRunReportPath = (
+  state: HarnessRunState,
+  runReportPath: string,
+  now = new Date().toISOString(),
+): HarnessRunState => ({
+  ...state,
+  runReportPath,
+  updatedAt: now,
+});
+
+export const setHarnessRunManifestPath = (
+  state: HarnessRunState,
+  runManifestPath: string,
+  now = new Date().toISOString(),
+): HarnessRunState => ({
+  ...state,
+  runManifestPath,
+  updatedAt: now,
+});
+
+export const setHarnessSkillRegistry = (
+  state: HarnessRunState,
+  skillRegistry: HarnessSkillRegistry,
+  skillRegistryPath?: string,
+  now = new Date().toISOString(),
+): HarnessRunState => ({
+  ...state,
+  skillRegistry,
+  ...(skillRegistryPath !== undefined ? { skillRegistryPath } : {}),
+  updatedAt: now,
+});
+
+export const setHarnessSkillActivations = (
+  state: HarnessRunState,
+  skillActivations: HarnessSkillActivations,
+  skillActivationsPath?: string,
+  now = new Date().toISOString(),
+): HarnessRunState => ({
+  ...state,
+  skillActivations,
+  ...(skillActivationsPath !== undefined ? { skillActivationsPath } : {}),
+  updatedAt: now,
+});
+
+export const setHarnessSkillResourceReads = (
+  state: HarnessRunState,
+  skillResourceReads: HarnessSkillResourceReads,
+  skillResourceReadsPath?: string,
+  now = new Date().toISOString(),
+): HarnessRunState => ({
+  ...state,
+  skillResourceReads,
+  ...(skillResourceReadsPath !== undefined ? { skillResourceReadsPath } : {}),
+  updatedAt: now,
+});
+
 export const setHarnessCapabilitySnapshot = (
   state: HarnessRunState,
   capabilitySnapshot: HarnessCapabilitySnapshot,
@@ -184,5 +379,29 @@ export const setHarnessCapabilitySnapshot = (
   ...state,
   capabilitySnapshot,
   ...(capabilitiesPath !== undefined ? { capabilitiesPath } : {}),
+  updatedAt: now,
+});
+
+export const setHarnessCfcPolicySnapshot = (
+  state: HarnessRunState,
+  cfcPolicySnapshot: HarnessCfcPolicySnapshot,
+  cfcPolicySnapshotPath?: string,
+  now = new Date().toISOString(),
+): HarnessRunState => ({
+  ...state,
+  cfcPolicySnapshot,
+  ...(cfcPolicySnapshotPath !== undefined ? { cfcPolicySnapshotPath } : {}),
+  updatedAt: now,
+});
+
+export const setHarnessPolicyTrace = (
+  state: HarnessRunState,
+  policyTrace: HarnessPolicyTrace,
+  policyTracePath?: string,
+  now = new Date().toISOString(),
+): HarnessRunState => ({
+  ...state,
+  policyTrace,
+  ...(policyTracePath !== undefined ? { policyTracePath } : {}),
   updatedAt: now,
 });

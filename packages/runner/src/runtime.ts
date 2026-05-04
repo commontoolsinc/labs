@@ -19,20 +19,11 @@ import {
   setDataModelConfig,
 } from "@commonfabric/data-model/fabric-value";
 import {
-  resetModernHashConfig,
-  setModernHashConfig,
-} from "@commonfabric/data-model/value-hash";
-import {
   resetJsonEncodingConfig,
   setJsonEncodingConfig,
 } from "@commonfabric/data-model/json-encoding";
-import {
-  resetSchemaHashConfig,
-  setSchemaHashConfig,
-} from "@commonfabric/data-model/schema-hash";
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
 import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
-import { getDefaultMemoryVersion } from "./storage/interface.ts";
 import type {
   ChangeGroup,
   CommitError,
@@ -41,7 +32,6 @@ import type {
   IStorageManager,
   IStorageProvider,
   MemorySpace,
-  MemoryVersion,
 } from "./storage/interface.ts";
 import { type Cell, createCell } from "./cell.ts";
 import { createRef, EntityId } from "./create-ref.ts";
@@ -51,12 +41,18 @@ import {
   CellLink,
   isCellLink,
   isNormalizedFullLink,
+  isSigilLink,
   type NormalizedFullLink,
   NormalizedLink,
   parseLink,
 } from "./link-utils.ts";
+import { LINK_V1_TAG } from "./sigil-types.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { type CfcEnforcementMode, type TrustSnapshot } from "./cfc/mod.ts";
+import {
+  type CfcEnforcementMode,
+  type CfcLabelView,
+  type TrustSnapshot,
+} from "./cfc/mod.ts";
 import { PatternManager } from "./pattern-manager.ts";
 import { ModuleRegistry } from "./module.ts";
 import { Runner } from "./runner.ts";
@@ -156,12 +152,6 @@ export interface ExperimentalOptions {
   richStorableValues?: boolean | undefined;
   /** Enable `/<Type>@<Version>` JSON encoding, replacing legacy sigil/`@`-prefix/`$`-prefix conventions. */
   unifiedJsonEncoding?: boolean | undefined;
-  /** Enable canonical hashing, replacing merkle-reference CID-based hashing. */
-  modernHash?: boolean | undefined;
-  /** Enable modern schema hashing, replacing stableStringify-based schema hashing. */
-  modernSchemaHash?: boolean | undefined;
-  /** Backward-compat alias for `modernHash`. */
-  canonicalHashing?: boolean | undefined;
   /** Preserve cumulative scheduler write history instead of using current-known writes. */
   schedulerHistoricalMightWrite?: boolean | undefined;
 }
@@ -169,7 +159,6 @@ export interface ExperimentalOptions {
 export interface RuntimeOptions {
   apiUrl: URL;
   storageManager: IStorageManager;
-  memoryVersion?: MemoryVersion;
   consoleHandler?: ConsoleHandler;
   errorHandlers?: ErrorHandler[];
   patternEnvironment?: PatternEnvironment;
@@ -287,7 +276,6 @@ export class Runtime {
   readonly staticCache: StaticCache;
   readonly storageManager: IStorageManager;
   readonly trustSnapshotProvider: () => TrustSnapshot | undefined;
-  readonly memoryVersion: MemoryVersion;
   readonly telemetry: RuntimeTelemetry;
   readonly cachedCompiler?: CachedCompiler;
   /** Resolved experimental flags (all properties present, defaulting to `false`). */
@@ -300,29 +288,10 @@ export class Runtime {
   private cfcStats: CfcRuntimeStats = initialCfcRuntimeStats();
 
   constructor(options: RuntimeOptions) {
-    const defaultMemoryVersion = getDefaultMemoryVersion();
-    this.memoryVersion = options.memoryVersion ?? defaultMemoryVersion;
-    const storageManagerMemoryVersion = (
-      options.storageManager as { memoryVersion?: MemoryVersion }
-    ).memoryVersion;
-
-    if (
-      storageManagerMemoryVersion !== undefined &&
-      storageManagerMemoryVersion !== this.memoryVersion
-    ) {
-      throw new Error(
-        "Runtime memoryVersion does not match storage manager memoryVersion: " +
-          `${this.memoryVersion} !== ${storageManagerMemoryVersion}`,
-      );
-    }
-
     this.experimental = {
       modernDataModel: undefined,
       richStorableValues: undefined,
       unifiedJsonEncoding: undefined,
-      modernHash: undefined,
-      modernSchemaHash: undefined,
-      canonicalHashing: undefined,
       schedulerHistoricalMightWrite: undefined,
       ...options.experimental,
     };
@@ -333,23 +302,6 @@ export class Runtime {
     ) {
       this.experimental.modernDataModel =
         options.experimental.richStorableValues;
-    }
-
-    if (
-      options.experimental?.modernHash === undefined &&
-      options.experimental?.canonicalHashing !== undefined
-    ) {
-      this.experimental.modernHash = options.experimental.canonicalHashing;
-    }
-
-    if (
-      this.experimental.modernDataModel &&
-      !this.experimental.modernHash
-    ) {
-      throw new Error(
-        "ExperimentalOptions: `modernDataModel` requires " +
-          "`modernHash` to be enabled",
-      );
     }
 
     // Log any overridden experimental flags.
@@ -364,9 +316,7 @@ export class Runtime {
 
     // Propagate experimental flags to the memory layer's ambient config.
     setDataModelConfig(this.experimental.modernDataModel);
-    setModernHashConfig(this.experimental.modernHash);
     setJsonEncodingConfig(this.experimental.unifiedJsonEncoding);
-    setSchemaHashConfig(this.experimental.modernSchemaHash);
     this.id = options.storageManager.id;
     this.apiUrl = new URL(options.apiUrl);
     this.staticCache = isDeno()
@@ -429,7 +379,6 @@ export class Runtime {
     if (options.debug) {
       console.log("Runtime initialized with services:", {
         scheduler: !!this.scheduler,
-        memoryVersion: this.memoryVersion,
         storageManager: !!this.storageManager,
         patternManager: !!this.patternManager,
         moduleRegistry: !!this.moduleRegistry,
@@ -539,9 +488,7 @@ export class Runtime {
 
     // Reset experimental fabric config to defaults
     resetDataModelConfig();
-    resetModernHashConfig();
     resetJsonEncodingConfig();
-    resetSchemaHashConfig();
 
     // Clear the current runtime reference
     // Removed setCurrentRuntime call - no longer using singleton pattern
@@ -756,7 +703,6 @@ export class Runtime {
         id: toURI(createRef({}, cause)),
         path: [],
         space,
-        type: "application/json",
       },
       schema,
       tx,
@@ -818,7 +764,6 @@ export class Runtime {
         id: toURI(entityId),
         path: path?.map(String) ?? [],
         space,
-        type: "application/json",
       },
       schema,
       tx,
@@ -829,25 +774,49 @@ export class Runtime {
     cellLink: CellLink | NormalizedLink | AnyCell<unknown>,
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
+    cfcLabelView?: CfcLabelView,
   ): Cell<T>;
   getCellFromLink<S extends JSONSchema = JSONSchema>(
     cellLink: CellLink | NormalizedLink | AnyCell<unknown>,
     schema: S,
     tx?: IExtendedStorageTransaction,
+    cfcLabelView?: CfcLabelView,
   ): Cell<Schema<S>>;
   getCellFromLink(
     cellLink: CellLink | NormalizedLink | AnyCell<unknown>,
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
+    cfcLabelView?: CfcLabelView,
   ): Cell<any> {
+    const carriedLabelView = cfcLabelView ??
+      (isSigilLink(cellLink)
+        ? (cellLink["/"][LINK_V1_TAG] as { cfcLabelView?: CfcLabelView })
+          .cfcLabelView
+        : isNormalizedFullLink(cellLink)
+        ? (cellLink as NormalizedLink & { cfcLabelView?: CfcLabelView })
+          .cfcLabelView
+        : undefined);
     let link = isCellLink(cellLink)
       ? parseLink(cellLink)
       : isNormalizedFullLink(cellLink)
       ? cellLink
       : undefined;
     if (!link) throw new Error("Invalid cell link");
+    if ("cfcLabelView" in link) {
+      const { cfcLabelView: _cfcLabelView, ...cleanLink } = link as
+        & NormalizedLink
+        & { cfcLabelView?: CfcLabelView };
+      link = cleanLink;
+    }
     if (schema !== undefined) link = { ...link, schema };
-    return createCell(this, link as NormalizedFullLink, tx);
+    return createCell(
+      this,
+      link as NormalizedFullLink,
+      tx,
+      false,
+      undefined,
+      carriedLabelView,
+    );
   }
 
   getImmutableCell<T>(
@@ -855,29 +824,38 @@ export class Runtime {
     data: T,
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
+    cfcLabelView?: CfcLabelView,
   ): Cell<T>;
   getImmutableCell<S extends JSONSchema = JSONSchema>(
     space: MemorySpace,
     data: any,
     schema: S,
     tx?: IExtendedStorageTransaction,
+    cfcLabelView?: CfcLabelView,
   ): Cell<Schema<S>>;
   getImmutableCell(
     space: MemorySpace,
     data: any,
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
+    cfcLabelView?: CfcLabelView,
   ): Cell<any> {
     const asDataURI = `data:application/json,${
       encodeURIComponent(JSON.stringify({ value: data }))
     }` as const as `${string}:${string}`;
-    return createCell(this, {
-      space,
-      path: [],
-      id: asDataURI,
-      type: "application/json",
-      schema,
-    }, tx);
+    return createCell(
+      this,
+      {
+        space,
+        path: [],
+        id: asDataURI,
+        schema,
+      },
+      tx,
+      false,
+      undefined,
+      cfcLabelView,
+    );
   }
 
   getHomeSpaceCell(

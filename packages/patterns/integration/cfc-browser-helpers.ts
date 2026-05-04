@@ -1,4 +1,5 @@
 import { Page, waitFor } from "@commonfabric/integration";
+import { toIndentedDebugString } from "@commonfabric/data-model/value-debug";
 
 const DEFAULT_CFC_BROWSER_TIMEOUT = 30_000;
 const CLICK_TARGET_ATTR = "data-cfc-click-target";
@@ -32,9 +33,10 @@ export async function clickTrustedAction(
     }, { timeout, delay: 250 });
   } catch (cause) {
     probe ??= await readTrustedActionProbe(page, action).catch(() => undefined);
+    // Indented for readable test-log output
     throw new Error(
       `Timed out clicking trusted action "${action}". Last probe: ${
-        JSON.stringify(probe, null, 2)
+        toIndentedDebugString(probe)
       }`,
       { cause },
     );
@@ -79,7 +81,7 @@ export async function clickTrustedActionAndWaitForText(
     textProbe ??= await readTextProbe(page, selector).catch(() => undefined);
     throw new Error(
       `Timed out clicking trusted action "${action}" until "${selector}" contained "${text}". Last probes: ${
-        JSON.stringify({ actionProbe, textProbe }, null, 2)
+        toIndentedDebugString({ actionProbe, textProbe })
       }`,
       { cause },
     );
@@ -110,7 +112,7 @@ export async function waitForText(
     probe ??= await readTextProbe(page, selector).catch(() => undefined);
     throw new Error(
       `Timed out waiting for "${selector}" to contain "${text}". Last probe: ${
-        JSON.stringify(probe, null, 2)
+        toIndentedDebugString(probe)
       }`,
       { cause },
     );
@@ -141,7 +143,7 @@ export async function waitForTextAbsent(
     probe ??= await readTextProbe(page, selector).catch(() => undefined);
     throw new Error(
       `Timed out waiting for "${selector}" not to contain "${text}". Last probe: ${
-        JSON.stringify(probe, null, 2)
+        toIndentedDebugString(probe)
       }`,
       { cause },
     );
@@ -280,7 +282,7 @@ export async function fillCfInput(
   } catch (cause) {
     throw new Error(
       `Timed out filling cf input "${selector}" with "${value}". Last probe: ${
-        JSON.stringify(probe, null, 2)
+        toIndentedDebugString(probe)
       }`,
       { cause },
     );

@@ -8,13 +8,16 @@ import { h } from "@commonfabric/html";
 import { favoriteListSchema } from "@commonfabric/home-schemas";
 import { HttpProgramResolver } from "@commonfabric/js-compiler";
 import { type Cell } from "../cell.ts";
-import { type Action } from "../scheduler.ts";
+import { type Action, type ReactivityLog } from "../scheduler.ts";
 import { type Runtime, spaceCellSchema } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import { NAME, type Pattern, UI } from "../builder/types.ts";
+import { type JSONSchema, NAME, type Pattern, UI } from "../builder/types.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getPatternEnvironment } from "../env.ts";
 import { getLogger } from "@commonfabric/utils/logger";
+import { toMemorySpaceAddress } from "../link-utils.ts";
+import { setRunnableName } from "../runner-utils.ts";
 
 const SUGGESTION_TSX_PATH = getPatternEnvironment().apiUrl +
   "api/patterns/system/suggestion.tsx";
@@ -29,7 +32,11 @@ const wishFlowLogger = getLogger("runner.wish-flow", {
 const mentionableListSchema = internSchema(
   {
     type: "array",
-    items: { asCell: true },
+    items: {
+      type: "object",
+      properties: { [NAME]: { type: "string" } },
+      asCell: ["cell"],
+    },
   },
 );
 
@@ -45,40 +52,43 @@ export type ParsedWishTarget = {
   path: string[];
 };
 
-function getTxDebugActionId(
-  tx?: IExtendedStorageTransaction,
-): string | undefined {
-  return tx ? (tx.tx as { debugActionId?: string }).debugActionId : undefined;
-}
-
 function sanitizeQueryKey(query: string): string {
   const normalized = query.trim().replace(/[^a-zA-Z0-9#/_:-]+/g, "_");
   if (!normalized) return "empty";
   return normalized.slice(0, 80);
 }
 
-function sanitizeSourceKey(sourceKey: string): string {
-  const normalized = sourceKey.trim().replace(/[^a-zA-Z0-9#/_:-]+/g, "_");
-  if (!normalized) return "none";
-  return normalized.slice(0, 80);
+function recordWishPhaseTiming(
+  startedAt: number,
+  phase: string,
+  queryKey?: string,
+): number {
+  const endedAt = performance.now();
+  wishFlowLogger.time(startedAt, endedAt, "wish", "phase", phase);
+  if (queryKey) {
+    wishFlowLogger.time(
+      startedAt,
+      endedAt,
+      "wish",
+      "phase-query",
+      phase,
+      queryKey,
+    );
+  }
+  return endedAt - startedAt;
 }
 
-function formatScope(scope?: string[]): string {
-  return scope && scope.length > 0 ? scope.join(",") : "(default)";
-}
-
-function describeCell(cell: Cell<unknown>): string {
-  const link = cell.getAsNormalizedFullLink();
-  const path = link.path.length > 0 ? `/${link.path.join("/")}` : "";
-  return `${link.space}/${link.id}${path}`;
-}
-
-function bucketDuration(ms: number): string {
-  if (ms < 1) return "lt1ms";
-  if (ms < 5) return "1to5ms";
-  if (ms < 20) return "5to20ms";
-  if (ms < 100) return "20to100ms";
-  return "gte100ms";
+function measureWishPhase<T>(
+  phase: string,
+  queryKey: string | undefined,
+  fn: () => T,
+): T {
+  const startedAt = performance.now();
+  try {
+    return fn();
+  } finally {
+    recordWishPhaseTiming(startedAt, phase, queryKey);
+  }
 }
 
 function getResolutionKind(parsed: ParsedWishTarget): string {
@@ -154,6 +164,24 @@ type BaseResolution = {
   pathPrefix?: readonly string[];
 };
 
+type SharedHashtagState = {
+  result?: Cell<unknown>;
+  candidates: Cell<unknown>[];
+  error?: unknown;
+  [UI]?: VNode;
+};
+
+type SharedHashtagResolver = {
+  cell: Cell<SharedHashtagState>;
+  cancel: () => void;
+  refCount: number;
+};
+
+const sharedHashtagResolvers = new WeakMap<
+  Runtime,
+  Map<string, SharedHashtagResolver>
+>();
+
 function getSpaceCell(ctx: WishContext): Cell<unknown> {
   if (!ctx.spaceCell) {
     ctx.spaceCell = ctx.runtime.getCell(
@@ -207,27 +235,47 @@ function searchFavoritesForHashtag(
   searchTermWithoutHash: string,
   pathPrefix: string[],
 ): BaseResolution[] {
+  const queryKey = sanitizeQueryKey(`#${searchTermWithoutHash}`);
   const userDID = ctx.runtime.userIdentityDID;
   if (!userDID) return [];
 
-  const homeSpaceCell = ctx.runtime.getHomeSpaceCell(ctx.tx);
-  const favoritesCell = homeSpaceCell
-    .key("defaultPattern")
-    .key("favorites")
-    .asSchema(favoriteListSchema);
-  const favorites = favoritesCell.get() || [];
+  const favoritesCell = measureWishPhase(
+    "favorites-cell",
+    queryKey,
+    () => {
+      const homeSpaceCell = ctx.runtime.getHomeSpaceCell(ctx.tx);
+      return homeSpaceCell
+        .key("defaultPattern")
+        .key("favorites")
+        .asSchema(favoriteListSchema);
+    },
+  );
+  const favorites = measureWishPhase(
+    "favorites-get",
+    queryKey,
+    () => favoritesCell.get() || [],
+  );
 
-  const matches = favorites.filter((entry) => {
-    // Check userTags first (stored without # prefix)
-    const userTags = entry.userTags ?? [];
-    for (const t of userTags) {
-      if (t.toLowerCase() === searchTermWithoutHash) return true;
-    }
-    // Search schema tag for hashtags
-    return tagMatchesHashtag(entry.tag, searchTermWithoutHash);
-  });
+  const matches = measureWishPhase(
+    "favorites-filter",
+    queryKey,
+    () =>
+      favorites.filter((entry) => {
+        // Check userTags first (stored without # prefix)
+        const userTags = entry.userTags ?? [];
+        for (const t of userTags) {
+          if (t.toLowerCase() === searchTermWithoutHash) return true;
+        }
+        // Search schema tag for hashtags
+        return tagMatchesHashtag(entry.tag, searchTermWithoutHash);
+      }),
+  );
 
-  return matches.map((match) => ({ cell: match.cell, pathPrefix }));
+  return measureWishPhase(
+    "favorites-result-map",
+    queryKey,
+    () => matches.map((match) => ({ cell: match.cell, pathPrefix })),
+  );
 }
 
 type MentionableSearchResult = {
@@ -247,63 +295,89 @@ function searchMentionablesForHashtag(
   pathPrefix: string[],
   spaceCell?: Cell<unknown>,
 ): MentionableSearchResult {
-  const mentionableCell = (spaceCell ?? getSpaceCell(ctx))
-    .key("defaultPattern")
-    .key("backlinksIndex")
-    .key("mentionable")
-    .resolveAsCell()
-    .asSchema(mentionableListSchema);
-  const raw = mentionableCell.get();
+  const queryKey = sanitizeQueryKey(`#${searchTermWithoutHash}`);
+  const mentionableCell = measureWishPhase(
+    "mentionable-cell",
+    queryKey,
+    () =>
+      (spaceCell ?? getSpaceCell(ctx))
+        .key("defaultPattern")
+        .key("backlinksIndex")
+        .key("mentionable")
+        .resolveAsCell()
+        .asSchema(mentionableListSchema),
+  );
+  const raw = measureWishPhase(
+    "mentionable-get",
+    queryKey,
+    () => mentionableCell.get(),
+  );
   if (raw === undefined || raw === null) {
     // Data not loaded yet — reactive system will re-trigger when it arrives
     return { matches: [], loaded: false };
   }
   const mentionables = (raw || []) as Cell<any>[];
 
-  const matches = mentionables.filter((pieceCell: Cell<any>) => {
-    if (!pieceCell) return false;
+  const matches = measureWishPhase(
+    "mentionable-filter",
+    queryKey,
+    () =>
+      mentionables.filter((pieceCell: Cell<any>) => {
+        if (!pieceCell) return false;
 
-    const piece = pieceCell.get();
-    if (!piece) return false;
+        const piece = measureWishPhase(
+          "mentionable-piece-get",
+          queryKey,
+          () => pieceCell.get(),
+        );
+        if (!piece) return false;
 
-    // Check [NAME] field for exact match
-    const name = piece[NAME]?.toLowerCase() ?? "";
-    if (name === searchTermWithoutHash) return true;
+        // Check [NAME] field for exact match
+        const nameMatches = measureWishPhase(
+          "mentionable-name-check",
+          queryKey,
+          () => {
+            const name = piece[NAME]?.toLowerCase() ?? "";
+            return name === searchTermWithoutHash;
+          },
+        );
+        if (nameMatches) return true;
 
-    // Compute schema tag lazily from the cell
-    let tag: string | undefined;
-    try {
-      const schema = (pieceCell as any)?.resolveAsCell()?.asSchema(undefined)
-        .asSchemaFromLinks?.()?.schema;
-      if (typeof schema === "object") {
-        tag = JSON.stringify(schema);
-      }
-    } catch {
-      // Schema not available yet
-    }
+        // Compute schema tag lazily from the cell
+        let tag: string | undefined;
+        try {
+          const schema = measureWishPhase(
+            "mentionable-schema",
+            queryKey,
+            () =>
+              pieceCell.resolveAsCell()?.asSchema(undefined)
+                .asSchemaFromLinks?.()?.schema,
+          );
+          if (typeof schema === "object") {
+            tag = measureWishPhase(
+              "mentionable-schema-stringify",
+              queryKey,
+              () => JSON.stringify(schema),
+            );
+          }
+        } catch {
+          // Schema not available yet
+        }
 
-    return tagMatchesHashtag(tag, searchTermWithoutHash);
-  });
-
-  const sourceKey = getTxDebugActionId(ctx.tx) ?? "none";
-  const query = `#${searchTermWithoutHash}`;
-  wishFlowLogger.debug(`wish/search-hashtag/${sanitizeQueryKey(query)}`, () =>
-    [
-      `[WISH SEARCH] source=${sourceKey}`,
-      `query=${query}`,
-      `scope=${formatScope(ctx.scope)}`,
-      `space=${describeCell(spaceCell ?? getSpaceCell(ctx))}`,
-      `mentionableCount=${mentionables.length}`,
-      `matchCount=${matches.length}`,
-      matches.length > 0
-        ? `matches=${
-          matches.slice(0, 5).map((cell) => describeCell(cell)).join(", ")
-        }`
-        : undefined,
-    ].filter(Boolean));
+        return measureWishPhase(
+          "mentionable-tag-match",
+          queryKey,
+          () => tagMatchesHashtag(tag, searchTermWithoutHash),
+        );
+      }),
+  );
 
   return {
-    matches: matches.map((match) => ({ cell: match, pathPrefix })),
+    matches: measureWishPhase(
+      "mentionable-result-map",
+      queryKey,
+      () => matches.map((match) => ({ cell: match, pathPrefix })),
+    ),
     loaded: true,
   };
 }
@@ -582,6 +656,179 @@ function resolveBase(
   throw new WishError(`Wish target "${parsed.key}" is not recognized.`);
 }
 
+function isSharedHashtagSearchTarget(parsed: ParsedWishTarget): boolean {
+  if (!parsed.key.startsWith("#")) return false;
+  return getResolutionKind(parsed) === "hashtag-search";
+}
+
+function canUseSharedHashtagResult(
+  parsed: ParsedWishTarget,
+  options: { headless?: boolean },
+): boolean {
+  return isSharedHashtagSearchTarget(parsed) &&
+    options.headless === true;
+}
+
+function sharedHashtagResolverKey(
+  parentSpace: string,
+  parsed: ParsedWishTarget,
+  scope?: ("~" | "." | string)[],
+): string {
+  return JSON.stringify({
+    space: parentSpace,
+    query: formatTarget(parsed),
+    scope: scope ?? null,
+  });
+}
+
+function getRuntimeSharedHashtagResolvers(
+  runtime: Runtime,
+): Map<string, SharedHashtagResolver> {
+  let resolvers = sharedHashtagResolvers.get(runtime);
+  if (!resolvers) {
+    resolvers = new Map();
+    sharedHashtagResolvers.set(runtime, resolvers);
+  }
+  return resolvers;
+}
+
+function createSharedHashtagResolver(
+  ctx: WishContext,
+  parsed: ParsedWishTarget,
+): SharedHashtagResolver {
+  const sharedParsed: ParsedWishTarget = {
+    key: parsed.key,
+    path: [...parsed.path],
+  };
+  const sharedScope = ctx.scope ? [...ctx.scope] : undefined;
+  const query = formatTarget(sharedParsed);
+  const sharedCell = ctx.runtime.getCell<SharedHashtagState>(
+    ctx.parentCell.space,
+    {
+      wish: {
+        kind: "hashtag",
+        space: ctx.parentCell.space,
+        scope: sharedScope ?? null,
+        query,
+      },
+    },
+    undefined,
+    ctx.tx,
+  );
+
+  const action: Action = (tx: IExtendedStorageTransaction) => {
+    const actionStartedAt = performance.now();
+    const stateCell = sharedCell.withTx(tx);
+    const queryKey = sanitizeQueryKey(query);
+    try {
+      const baseResolutions = searchByHashtag(sharedParsed, {
+        runtime: ctx.runtime,
+        tx,
+        parentCell: ctx.parentCell,
+        scope: sharedScope,
+      });
+      if (baseResolutions.length === 0) {
+        stateCell.set({
+          result: undefined,
+          candidates: [],
+          [UI]: undefined,
+        });
+        return;
+      }
+
+      const resultCells = measureWishPhase(
+        "shared-resolve-paths",
+        queryKey,
+        () =>
+          baseResolutions.map((baseResolution) => {
+            const combinedPath = baseResolution.pathPrefix
+              ? [...baseResolution.pathPrefix, ...sharedParsed.path]
+              : sharedParsed.path;
+            return resolvePath(baseResolution.cell, combinedPath);
+          }),
+      );
+      const uniqueResultCells = measureWishPhase(
+        "shared-dedupe-results",
+        queryKey,
+        () =>
+          resultCells.filter(
+            (cell, index) =>
+              resultCells.findIndex((candidate) => candidate.equals(cell)) ===
+                index,
+          ),
+      );
+      const resultUI = measureWishPhase(
+        "shared-result-ui-get",
+        queryKey,
+        () => uniqueResultCells[0].key(UI).get(),
+      ) as VNode | undefined;
+
+      stateCell.set({
+        result: uniqueResultCells[0],
+        candidates: uniqueResultCells,
+        [UI]: resultUI ?? cellLinkUI(uniqueResultCells[0]),
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error
+        ? error.message
+        : String(error);
+      stateCell.set({
+        result: undefined,
+        candidates: [],
+        error: errorMessage,
+        [UI]: errorUI(errorMessage),
+      });
+    } finally {
+      recordWishPhaseTiming(
+        actionStartedAt,
+        "shared-action-total",
+        queryKey,
+      );
+    }
+  };
+  const actionName = `wish:hashtag:${ctx.parentCell.space}:${query}`;
+  setRunnableName(action, actionName, { setSrc: true });
+  Object.assign(action, {
+    writes: [sharedCell.getAsNormalizedFullLink()],
+  });
+
+  const initialLog: ReactivityLog = {
+    reads: [],
+    shallowReads: [],
+    writes: [toMemorySpaceAddress(sharedCell.getAsNormalizedFullLink())],
+  };
+  const cancel = ctx.runtime.scheduler.subscribe(action, initialLog);
+
+  return { cell: sharedCell, cancel, refCount: 0 };
+}
+
+function acquireSharedHashtagResolver(
+  ctx: WishContext,
+  parsed: ParsedWishTarget,
+): SharedHashtagResolver {
+  const key = sharedHashtagResolverKey(ctx.parentCell.space, parsed, ctx.scope);
+  const resolvers = getRuntimeSharedHashtagResolvers(ctx.runtime);
+  let resolver = resolvers.get(key);
+  if (!resolver) {
+    resolver = createSharedHashtagResolver(ctx, parsed);
+    resolvers.set(key, resolver);
+  }
+  resolver.refCount++;
+  return resolver;
+}
+
+function releaseSharedHashtagResolver(runtime: Runtime, key: string): void {
+  const resolvers = sharedHashtagResolvers.get(runtime);
+  const resolver = resolvers?.get(key);
+  if (!resolver) return;
+
+  resolver.refCount--;
+  if (resolver.refCount > 0) return;
+
+  resolver.cancel();
+  resolvers?.delete(key);
+}
+
 // fetchSuggestionPattern runs at runtime scope, shared across all wish invocations
 let suggestionPatternFetchPromise: Promise<Pattern | undefined> | undefined;
 let suggestionPattern: Pattern | undefined;
@@ -616,12 +863,77 @@ function cellLinkUI(cell: Cell<unknown>): VNode {
   return h("cf-cell-link", { $cell: cell });
 }
 
+function projectWishCellValue(
+  cell: Cell<unknown>,
+  schema: unknown,
+): unknown {
+  if (schema === undefined) return cell;
+  return cell.asSchema(schema as JSONSchema).getAsLink({ includeSchema: true });
+}
+
+function createWishCandidatesCell(
+  runtime: Runtime,
+  space: Cell<unknown>["space"],
+  candidates: Cell<unknown>[],
+  schema: unknown,
+  tx: IExtendedStorageTransaction,
+): Cell<unknown> {
+  const values = schema === undefined
+    ? candidates
+    : candidates.map((candidate) => projectWishCellValue(candidate, schema));
+  return runtime.getImmutableCell(space, values, undefined, tx);
+}
+
+function schemaAsCell(schema: unknown): JSONSchema {
+  if (schema && typeof schema === "object") {
+    return {
+      ...(JSON.parse(JSON.stringify(schema)) as Record<string, unknown>),
+      asCell: ["cell"],
+    };
+  }
+  return { asCell: ["cell"] };
+}
+
+function wishStateSchemaForResult(schema: unknown): JSONSchema | undefined {
+  if (schema === undefined) return undefined;
+  const resultSchema = schemaAsCell(schema);
+  const candidateSchema = schemaAsCell(schema);
+  return internSchema({
+    type: "object",
+    properties: {
+      result: {
+        anyOf: [
+          { type: "undefined" },
+          resultSchema,
+        ],
+      },
+      candidates: {
+        type: "array",
+        items: candidateSchema,
+      },
+      error: true,
+      [UI]: true,
+    },
+    required: ["result", "candidates"],
+  });
+}
+
+function sharedWishCellValue(
+  cell: Cell<SharedHashtagState>,
+  schema: unknown,
+): unknown {
+  const wishStateSchema = wishStateSchemaForResult(schema);
+  if (!wishStateSchema) return cell;
+  return cell.asSchema(wishStateSchema).getAsLink({ includeSchema: true });
+}
+
 const TARGET_SCHEMA = internSchema(
   {
     type: "object",
     properties: {
       query: { type: "string" },
       path: { type: "array", items: { type: "string" } },
+      schema: true,
       context: { type: "object", additionalProperties: { asCell: true } },
       scope: { type: "array", items: { type: "string" } },
       headless: { type: "boolean" },
@@ -642,6 +954,7 @@ export function wish(
   // Per-instance cached #now cell — prevents non-idempotent re-runs from
   // Date.now() producing a different value each time the sync action fires.
   let nowCell: Cell<unknown> | undefined;
+  let sharedHashtagKey: string | undefined;
 
   // Per-instance suggestion pattern result cell
   let suggestionPatternInput:
@@ -655,10 +968,35 @@ export function wish(
 
   addCancel(() => {
     cancelled = true;
+    releaseCurrentSharedHashtagResolver();
     if (suggestionPatternResultCell) {
       runtime.runner.stop(suggestionPatternResultCell);
     }
   });
+
+  function releaseCurrentSharedHashtagResolver(): void {
+    if (!sharedHashtagKey) return;
+    releaseSharedHashtagResolver(runtime, sharedHashtagKey);
+    sharedHashtagKey = undefined;
+  }
+
+  function getCurrentSharedHashtagResolver(
+    ctx: WishContext,
+    parsed: ParsedWishTarget,
+  ): SharedHashtagResolver {
+    const nextKey = sharedHashtagResolverKey(
+      ctx.parentCell.space,
+      parsed,
+      ctx.scope,
+    );
+    const existing = sharedHashtagResolvers.get(runtime)?.get(nextKey);
+    if (nextKey === sharedHashtagKey && existing) return existing;
+
+    releaseCurrentSharedHashtagResolver();
+    const resolver = acquireSharedHashtagResolver(ctx, parsed);
+    sharedHashtagKey = nextKey;
+    return resolver;
+  }
 
   function launchSuggestionPattern(
     input: {
@@ -669,10 +1007,6 @@ export function wish(
     providedTx?: IExtendedStorageTransaction,
   ) {
     suggestionPatternInput = input;
-    const sourceKey = getTxDebugActionId(providedTx) ?? "none";
-    const queryKey = sanitizeQueryKey(input.situation);
-    const sourceBucket = sanitizeSourceKey(sourceKey);
-
     const tx = providedTx || runtime.edit();
 
     if (!suggestionPatternResultCell) {
@@ -696,20 +1030,6 @@ export function wish(
       // Once fetch completes, run the pattern without a tx (it creates its own)
       void suggestionPatternFetchPromise.then((pattern) => {
         if (!cancelled && pattern && suggestionPatternResultCell) {
-          wishFlowLogger.debug(`wish/run-suggestion/${queryKey}`, () => [
-            `[WISH RUN SUGGESTION] source=${sourceKey}`,
-            `query=${input.situation}`,
-            `mode=fetch-then-run`,
-            `result=${
-              suggestionPatternResultCell
-                ? describeCell(suggestionPatternResultCell)
-                : "unknown"
-            }`,
-          ]);
-          wishFlowLogger.debug(
-            `wish/run-suggestion-source/${queryKey}/${sourceBucket}`,
-            () => [`source=${sourceKey}`],
-          );
           runtime.run(
             undefined,
             pattern,
@@ -720,20 +1040,6 @@ export function wish(
       });
     } else {
       if (!cancelled && suggestionPatternResultCell) {
-        wishFlowLogger.debug(`wish/run-suggestion/${queryKey}`, () => [
-          `[WISH RUN SUGGESTION] source=${sourceKey}`,
-          `query=${input.situation}`,
-          `mode=reuse-pattern`,
-          `result=${
-            suggestionPatternResultCell
-              ? describeCell(suggestionPatternResultCell)
-              : "unknown"
-          }`,
-        ]);
-        wishFlowLogger.debug(
-          `wish/run-suggestion-source/${queryKey}/${sourceBucket}`,
-          () => [`source=${sourceKey}`],
-        );
         runtime.run(
           tx,
           suggestionPattern,
@@ -756,255 +1062,312 @@ export function wish(
   // returns undefined if data isn't loaded yet. The reactive system re-triggers
   // wish when the data arrives.
   return (tx: IExtendedStorageTransaction) => {
-    const inputsWithTx = inputsCell.withTx(tx);
-    const targetValue = inputsWithTx.asSchema(TARGET_SCHEMA).get();
-    const sourceKey = getTxDebugActionId(tx) ?? "none";
-    const sourceBucket = sanitizeSourceKey(sourceKey);
+    const actionStartedAt = performance.now();
+    let actionQueryKey: string | undefined;
+    let usedSharedHashtagResolver = false;
 
-    if (typeof targetValue === "object") {
-      const { query, path, schema, context, scope, headless } =
-        targetValue as WishParams;
-      const queryKey = sanitizeQueryKey(String(query ?? ""));
+    try {
+      const targetValue = measureWishPhase(
+        "input-get",
+        undefined,
+        () => {
+          const inputsWithTx = inputsCell.withTx(tx);
+          return inputsWithTx.asSchema(TARGET_SCHEMA).get();
+        },
+      );
 
-      if (query === undefined || query === null || query === "") {
-        const errorMsg = `Wish target "${
-          JSON.stringify(targetValue)
-        }" has no query.`;
-        wishFlowLogger.debug(`wish/error/${queryKey}`, () => [
-          `[WISH ERROR] source=${sourceKey}`,
-          `query=${String(query ?? "")}`,
-          `error=${errorMsg}`,
-        ]);
-        sendResult(
-          tx,
-          {
-            result: undefined,
-            candidates: [],
-            error: errorMsg,
-            [UI]: errorUI(errorMsg),
-          } satisfies WishState<any>,
-        );
+      if (typeof targetValue === "object") {
+        const { query, path, schema, context, scope, headless } =
+          targetValue as WishParams;
+        const queryKey = sanitizeQueryKey(String(query ?? ""));
+        actionQueryKey = queryKey;
+
+        if (query === undefined || query === null || query === "") {
+          const errorMsg = `Wish target "${
+            toCompactDebugString(targetValue)
+          }" has no query.`;
+          measureWishPhase(
+            "send-error",
+            queryKey,
+            () =>
+              sendResult(
+                tx,
+                {
+                  result: undefined,
+                  candidates: [],
+                  error: errorMsg,
+                  [UI]: errorUI(errorMsg),
+                } satisfies WishState<any>,
+              ),
+          );
+          return;
+        }
+
+        // If the query is a path or a hash tag, resolve it directly
+        if (query.startsWith("/") || /^#[a-zA-Z0-9-]+/.test(query)) {
+          try {
+            const resolveStartedAt = performance.now();
+            const parsed = measureWishPhase(
+              "parse-target",
+              queryKey,
+              () => {
+                const parsed = parseWishTarget(query);
+                parsed.path = [...parsed.path, ...(path ?? [])];
+                return parsed;
+              },
+            );
+            const ctx: WishContext = {
+              runtime,
+              tx,
+              parentCell,
+              scope,
+              nowCell,
+            };
+            if (canUseSharedHashtagResult(parsed, { headless })) {
+              const shared = getCurrentSharedHashtagResolver(ctx, parsed);
+              usedSharedHashtagResolver = true;
+              measureWishPhase(
+                "send-shared-hashtag",
+                queryKey,
+                () =>
+                  sendResult(
+                    tx,
+                    sharedWishCellValue(shared.cell, schema),
+                  ),
+              );
+              return;
+            }
+
+            const baseResolutions = measureWishPhase(
+              "resolve-base",
+              queryKey,
+              () => resolveBase(parsed, ctx),
+            );
+            // Persist #now cell across re-runs to avoid non-idempotent loops
+            if (ctx.nowCell) nowCell = ctx.nowCell;
+
+            if (baseResolutions.length === 0) {
+              // No matches yet — data may still be loading. Send a pending
+              // result; the reactive system will re-trigger when cells update
+              // (dependencies were registered by the cell.get() calls in the
+              // search functions).
+              measureWishPhase(
+                "send-pending",
+                queryKey,
+                () =>
+                  sendResult(
+                    tx,
+                    {
+                      result: undefined,
+                      candidates: [],
+                      [UI]: undefined,
+                    } satisfies WishState<any>,
+                  ),
+              );
+              return;
+            }
+
+            const resultCells = measureWishPhase(
+              "resolve-paths",
+              queryKey,
+              () =>
+                baseResolutions.map((baseResolution) => {
+                  const combinedPath = baseResolution.pathPrefix
+                    ? [...baseResolution.pathPrefix, ...parsed.path]
+                    : parsed.path;
+                  const resolvedCell = resolvePath(
+                    baseResolution.cell,
+                    combinedPath,
+                  );
+                  return schema ? resolvedCell.asSchema(schema) : resolvedCell;
+                }),
+            );
+
+            // Deduplicate result cells using Cell.equals()
+            const uniqueResultCells = measureWishPhase(
+              "dedupe-results",
+              queryKey,
+              () =>
+                resultCells.filter(
+                  (cell, index) =>
+                    resultCells.findIndex((c) => c.equals(cell)) === index,
+                ),
+            );
+            wishFlowLogger.time(
+              resolveStartedAt,
+              "wish",
+              "resolve",
+              queryKey,
+            );
+
+            // Unified shape: always return { result, candidates, [UI] }
+            // For single result, use fast path (no picker needed)
+            // For multiple results, launch suggestion pattern for picker
+            const candidatesCell = measureWishPhase(
+              "candidates-cell",
+              queryKey,
+              () =>
+                createWishCandidatesCell(
+                  runtime,
+                  parentCell.space,
+                  uniqueResultCells,
+                  schema,
+                  tx,
+                ),
+            );
+
+            if (uniqueResultCells.length === 1 || headless) {
+              // Single result or headless mode - fast path with unified shape
+              // Prefer the result cell's own [UI]; fall back to cf-cell-link
+              const resultUI = measureWishPhase(
+                "result-ui-get",
+                queryKey,
+                () => uniqueResultCells[0].key(UI).get(),
+              );
+              measureWishPhase(
+                "send-fast",
+                queryKey,
+                () =>
+                  sendResult(tx, {
+                    result: projectWishCellValue(uniqueResultCells[0], schema),
+                    candidates: candidatesCell,
+                    [UI]: resultUI ?? cellLinkUI(uniqueResultCells[0]),
+                  }),
+              );
+            } else {
+              // Multiple results — if suggestion pattern is already loaded,
+              // launch it and send its result cell so the picker's output
+              // flows through. Otherwise fall back to first result and kick
+              // off the fetch for next time.
+              if (suggestionPattern) {
+                measureWishPhase(
+                  "send-suggestion",
+                  queryKey,
+                  () =>
+                    sendResult(
+                      tx,
+                      launchSuggestionPattern(
+                        {
+                          situation: query,
+                          context: context ?? {},
+                          initialResults: candidatesCell,
+                        },
+                        tx,
+                      ),
+                    ),
+                );
+              } else {
+                // Pattern not loaded yet — send first result, start fetch
+                const resultUI = measureWishPhase(
+                  "result-ui-get",
+                  queryKey,
+                  () => uniqueResultCells[0].key(UI).get(),
+                );
+                measureWishPhase(
+                  "send-fast-before-suggestion",
+                  queryKey,
+                  () =>
+                    sendResult(tx, {
+                      result: projectWishCellValue(
+                        uniqueResultCells[0],
+                        schema,
+                      ),
+                      candidates: candidatesCell,
+                      [UI]: resultUI ?? cellLinkUI(uniqueResultCells[0]),
+                    }),
+                );
+                measureWishPhase(
+                  "launch-suggestion",
+                  queryKey,
+                  () =>
+                    launchSuggestionPattern(
+                      {
+                        situation: query,
+                        context: context ?? {},
+                        initialResults: candidatesCell,
+                      },
+                      tx,
+                    ),
+                );
+              }
+            }
+          } catch (e) {
+            const errorMsg = e instanceof WishError ? e.message : String(e);
+            measureWishPhase(
+              "send-error",
+              queryKey,
+              () =>
+                sendResult(
+                  tx,
+                  {
+                    result: undefined,
+                    candidates: [],
+                    error: errorMsg,
+                    [UI]: errorUI(errorMsg),
+                  } satisfies WishState<any>,
+                ),
+            );
+          }
+        } else if (headless) {
+          // Headless mode with freeform query — no suggestion pattern
+          measureWishPhase(
+            "send-freeform",
+            queryKey,
+            () =>
+              sendResult(
+                tx,
+                {
+                  result: undefined,
+                  candidates: [],
+                  [UI]: undefined,
+                } satisfies WishState<any>,
+              ),
+          );
+        } else {
+          // Otherwise it's a generic query, instantiate suggestion.tsx
+          measureWishPhase(
+            "send-suggestion",
+            queryKey,
+            () =>
+              sendResult(
+                tx,
+                launchSuggestionPattern(
+                  { situation: query, context: context ?? {} },
+                  tx,
+                ),
+              ),
+          );
+        }
         return;
-      }
-
-      // If the query is a path or a hash tag, resolve it directly
-      if (query.startsWith("/") || /^#[a-zA-Z0-9-]+/.test(query)) {
-        wishFlowLogger.debug(`wish/start/${queryKey}`, () => [
-          `[WISH START] source=${sourceKey}`,
-          `query=${query}`,
-          `scope=${formatScope(scope)}`,
-          `headless=${Boolean(headless)}`,
-          `path=${JSON.stringify(path ?? [])}`,
-          `parent=${describeCell(parentCell)}`,
-        ]);
-        wishFlowLogger.debug(
-          `wish/start-source/${queryKey}/${sourceBucket}`,
-          () => [`source=${sourceKey}`],
-        );
-        try {
-          const resolveStartedAt = performance.now();
-          const parsed = parseWishTarget(query);
-          parsed.path = [...parsed.path, ...(path ?? [])];
-          const ctx: WishContext = { runtime, tx, parentCell, scope, nowCell };
-          const baseResolutions = resolveBase(parsed, ctx);
-          // Persist #now cell across re-runs to avoid non-idempotent loops
-          if (ctx.nowCell) nowCell = ctx.nowCell;
-
-          if (baseResolutions.length === 0) {
-            // No matches yet — data may still be loading. Send a pending
-            // result; the reactive system will re-trigger when cells update
-            // (dependencies were registered by the cell.get() calls in the
-            // search functions).
+      } else {
+        const errorMsg = `Wish target is not recognized: ${
+          toCompactDebugString(targetValue)
+        }`;
+        measureWishPhase(
+          "send-error",
+          undefined,
+          () =>
             sendResult(
               tx,
               {
                 result: undefined,
                 candidates: [],
-                [UI]: undefined,
+                error: errorMsg,
+                [UI]: errorUI(errorMsg),
               } satisfies WishState<any>,
-            );
-            return;
-          }
-
-          const resultCells = baseResolutions.map((baseResolution) => {
-            const combinedPath = baseResolution.pathPrefix
-              ? [...baseResolution.pathPrefix, ...parsed.path]
-              : parsed.path;
-            const resolvedCell = resolvePath(baseResolution.cell, combinedPath);
-            return schema ? resolvedCell.asSchema(schema) : resolvedCell;
-          });
-
-          // Deduplicate result cells using Cell.equals()
-          const uniqueResultCells = resultCells.filter(
-            (cell, index) =>
-              resultCells.findIndex((c) => c.equals(cell)) === index,
-          );
-          const resolveMs = Number(
-            (performance.now() - resolveStartedAt).toFixed(3),
-          );
-
-          wishFlowLogger.debug(`wish/resolve/${queryKey}`, () =>
-            [
-              `[WISH RESOLVE] source=${sourceKey}`,
-              `query=${query}`,
-              `kind=${getResolutionKind(parsed)}`,
-              `baseResolutions=${baseResolutions.length}`,
-              `uniqueResults=${uniqueResultCells.length}`,
-              `resolveMs=${resolveMs}`,
-              uniqueResultCells.length > 0
-                ? `results=${
-                  uniqueResultCells.slice(0, 5).map((cell) =>
-                    describeCell(cell)
-                  ).join(", ")
-                }`
-                : undefined,
-            ].filter(Boolean));
-          wishFlowLogger.debug(
-            `wish/resolve-source/${queryKey}/${sourceBucket}`,
-            () => [`source=${sourceKey}`, `resolveMs=${resolveMs}`],
-          );
-          wishFlowLogger.debug(
-            `wish/resolve-ms/${queryKey}/${bucketDuration(resolveMs)}`,
-            () => [`source=${sourceKey}`, `resolveMs=${resolveMs}`],
-          );
-          wishFlowLogger.time(
-            resolveStartedAt,
-            "wish",
-            "resolve",
-            queryKey,
-          );
-          wishFlowLogger.time(
-            resolveStartedAt,
-            "wish",
-            "resolve-source",
-            queryKey,
-            sourceBucket,
-          );
-
-          // Unified shape: always return { result, candidates, [UI] }
-          // For single result, use fast path (no picker needed)
-          // For multiple results, launch suggestion pattern for picker
-          const candidatesCell = runtime.getImmutableCell(
-            parentCell.space,
-            uniqueResultCells,
-            undefined,
-            tx,
-          );
-
-          if (uniqueResultCells.length === 1 || headless) {
-            // Single result or headless mode - fast path with unified shape
-            // Prefer the result cell's own [UI]; fall back to cf-cell-link
-            const resultUI = uniqueResultCells[0].key(UI).get();
-            wishFlowLogger.debug(`wish/send-fast/${queryKey}`, () => [
-              `[WISH FAST PATH] source=${sourceKey}`,
-              `query=${query}`,
-              `mode=${headless ? "headless" : "single-result"}`,
-              `result=${describeCell(uniqueResultCells[0])}`,
-            ]);
-            wishFlowLogger.debug(
-              `wish/send-fast-source/${queryKey}/${sourceBucket}`,
-              () => [`source=${sourceKey}`],
-            );
-            sendResult(tx, {
-              result: uniqueResultCells[0],
-              candidates: candidatesCell,
-              [UI]: resultUI ?? cellLinkUI(uniqueResultCells[0]),
-            });
-          } else {
-            // Multiple results — if suggestion pattern is already loaded,
-            // launch it and send its result cell so the picker's output
-            // flows through. Otherwise fall back to first result and kick
-            // off the fetch for next time.
-            if (suggestionPattern) {
-              sendResult(
-                tx,
-                launchSuggestionPattern(
-                  {
-                    situation: query,
-                    context: context ?? {},
-                    initialResults: candidatesCell,
-                  },
-                  tx,
-                ),
-              );
-            } else {
-              // Pattern not loaded yet — send first result, start fetch
-              const resultUI = uniqueResultCells[0].key(UI).get();
-              sendResult(tx, {
-                result: uniqueResultCells[0],
-                candidates: candidatesCell,
-                [UI]: resultUI ?? cellLinkUI(uniqueResultCells[0]),
-              });
-              launchSuggestionPattern(
-                {
-                  situation: query,
-                  context: context ?? {},
-                  initialResults: candidatesCell,
-                },
-                tx,
-              );
-            }
-          }
-        } catch (e) {
-          const errorMsg = e instanceof WishError ? e.message : String(e);
-          wishFlowLogger.debug(`wish/error/${queryKey}`, () => [
-            `[WISH ERROR] source=${sourceKey}`,
-            `query=${query}`,
-            `error=${errorMsg}`,
-          ]);
-          sendResult(
-            tx,
-            {
-              result: undefined,
-              candidates: [],
-              error: errorMsg,
-              [UI]: errorUI(errorMsg),
-            } satisfies WishState<any>,
-          );
-        }
-      } else if (headless) {
-        // Headless mode with freeform query — no suggestion pattern
-        wishFlowLogger.debug(`wish/freeform/${queryKey}`, () => [
-          `[WISH FREEFORM] source=${sourceKey}`,
-          `query=${query}`,
-          `mode=headless`,
-        ]);
-        sendResult(
-          tx,
-          {
-            result: undefined,
-            candidates: [],
-            [UI]: undefined,
-          } satisfies WishState<any>,
+            ),
         );
-      } else {
-        // Otherwise it's a generic query, instantiate suggestion.tsx
-        wishFlowLogger.debug(`wish/launch-suggestion/${queryKey}`, () => [
-          `[WISH LAUNCH SUGGESTION] source=${sourceKey}`,
-          `query=${query}`,
-          `mode=freeform`,
-        ]);
-        sendResult(
-          tx,
-          launchSuggestionPattern(
-            { situation: query, context: context ?? {} },
-            tx,
-          ),
-        );
+        return;
       }
-      return;
-    } else {
-      const errorMsg = `Wish target is not recognized: ${targetValue}`;
-      sendResult(
-        tx,
-        {
-          result: undefined,
-          candidates: [],
-          error: errorMsg,
-          [UI]: errorUI(errorMsg),
-        } satisfies WishState<any>,
+    } finally {
+      if (!usedSharedHashtagResolver) {
+        releaseCurrentSharedHashtagResolver();
+      }
+      recordWishPhaseTiming(
+        actionStartedAt,
+        "action-total",
+        actionQueryKey,
       );
-      return;
     }
   };
 }

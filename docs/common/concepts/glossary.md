@@ -75,8 +75,7 @@ field) is provided about subject entity (`of` field). Predominantly `the` is
 `is` field is a JSON value [cell]s hold at discrete points in time.
 
 The `of` field is a unique identifier represented via URI. In practice it
-usually a [merkle-reference] derived from some seed data with `of:` scheme
-prefix.
+usually a hash derived from some seed data with `of:` scheme prefix.
 
 ## Memory
 
@@ -225,6 +224,5 @@ turns into rendered HTML.
 [vdom]: #vdom-virtual-dom
 [memory protocol]: https://github.com/commontoolsinc/RFC/blob/main/rfc/memory.md
 [The Value of Values]: https://www.youtube.com/watch?v=-I-VpPMzG7c
-[merkle-reference]: https://github.com/Gozala/merkle-reference/blob/main/docs/spec.md
 [CAS]: https://en.wikipedia.org/wiki/Compare-and-swap
 [did:key]: https://w3c-ccg.github.io/did-key-spec

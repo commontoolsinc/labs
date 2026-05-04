@@ -3355,17 +3355,21 @@ interface CFSvgAttributes<T> extends CFHTMLAttributes<T> {
 }
 
 interface CFAlertAttributes<T> extends CFHTMLAttributes<T> {
-  "variant"?: "default" | "destructive" | "warning" | "success" | "info";
+  "status"?: "info" | "success" | "warning" | "error" | CellLike<string>;
   "dismissible"?: boolean;
+  "dismissable"?: boolean;
   "oncf-dismiss"?: EventHandler<{}>;
+  "oncf-alert-dismiss"?: EventHandler<{}>;
 }
 
 interface CFToastAttributes<T> extends CFHTMLAttributes<T> {
-  "variant"?: "default" | "success" | "error" | "warning";
+  "status"?: "info" | "success" | "warning" | "error" | CellLike<string>;
   "duration"?: number;
+  "dismissible"?: boolean;
   "dismissable"?: boolean;
   "open"?: boolean;
   "oncf-toast-dismiss"?: EventHandler<{ reason: string }>;
+  "oncf-dismiss"?: EventHandler<{ reason: string }>;
   "oncf-toast-action"?: EventHandler<{}>;
 }
 
@@ -3420,15 +3424,8 @@ interface CFQuestionAttributes<T> extends CFHTMLAttributes<T> {
 }
 
 interface CFButtonAttributes<T> extends CFHTMLAttributes<T> {
-  "variant"?:
-    | "default"
-    | "primary"
-    | "destructive"
-    | "outline"
-    | "secondary"
-    | "ghost"
-    | "link"
-    | "pill";
+  "color"?: "neutral" | "primary" | "accent" | "danger";
+  "variant"?: "solid" | "outline" | "ghost" | CellLike<string>;
   "size"?: "xs" | "sm" | "md" | "lg" | "xl" | "icon" | "default" | "sm" | "lg";
   "disabled"?: boolean;
   "outline"?: boolean;
@@ -3614,6 +3611,7 @@ interface CFFabAttributes<T> extends CFHTMLAttributes<T> {
 
 interface CFModalAttributes<T> extends CFHTMLAttributes<T> {
   "$open"?: CellLike<boolean> | boolean;
+  "dismissible"?: boolean;
   "dismissable"?: boolean;
   "size"?: "sm" | "md" | "lg" | "full";
   "presentation"?: "dialog" | "sheet";
@@ -3623,6 +3621,7 @@ interface CFModalAttributes<T> extends CFHTMLAttributes<T> {
   "label"?: string;
   "oncf-modal-open"?: EventHandler<void>;
   "oncf-modal-close"?: EventHandler<{ reason: string }>;
+  "oncf-dismiss"?: EventHandler<{ reason: string }>;
   "oncf-modal-opened"?: EventHandler<void>;
   "oncf-modal-closed"?: EventHandler<void>;
 }
@@ -3962,6 +3961,8 @@ interface CFCodeEditorAttributes<T> extends CFHTMLAttributes<T> {
   "tabIndent"?: boolean;
   "theme"?: "light" | "dark";
   "mode"?: "code" | "prose";
+  "autofocus"?: boolean;
+  "cursorPosition"?: "start" | "end";
   "oncf-change"?: any;
   "oncf-focus"?: any;
   "oncf-blur"?: any;
@@ -4003,6 +4004,10 @@ interface CFTabListAttributes<T> extends CFHTMLAttributes<T> {
     | "horizontal"
     | "vertical"
     | CellLike<"horizontal" | "vertical">;
+  "variant"?:
+    | "underline"
+    | "chip"
+    | CellLike<"underline" | "chip">;
 }
 
 interface CFTabPanelAttributes<T> extends CFHTMLAttributes<T> {
@@ -4171,12 +4176,11 @@ interface CFTextAttributes<T> extends CFHTMLAttributes<T> {
 }
 
 interface CFBadgeAttributes<T> extends CFHTMLAttributes<T> {
+  "color"?: "neutral" | "primary" | "accent" | "danger";
   "variant"?:
-    | "default"
-    | "secondary"
-    | "destructive"
+    | "solid"
     | "outline"
-    | CellLike<"default" | "secondary" | "destructive" | "outline">;
+    | CellLike<"solid" | "outline">;
   "size"?: "xs" | "sm" | "md" | "lg" | "xl" | CellLike<string>;
   "removable"?: boolean | CellLike<boolean>;
   "oncf-remove"?: EventHandler<{}>;
@@ -4184,6 +4188,8 @@ interface CFBadgeAttributes<T> extends CFHTMLAttributes<T> {
 
 interface CFChipAttributes<T> extends CFHTMLAttributes<T> {
   "label"?: string | CellLike<string>;
+  "color"?: "neutral" | "primary" | "accent" | "danger";
+  /** @deprecated Use color instead */
   "variant"?:
     | "default"
     | "primary"

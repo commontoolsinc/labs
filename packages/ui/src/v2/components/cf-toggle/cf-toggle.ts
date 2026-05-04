@@ -27,6 +27,10 @@ export type ToggleSize = "sm" | "md" | "lg";
 export type ToggleVariant = "default" | "outline";
 
 export class CFToggle extends BaseElement {
+  // No delegatesFocus — the host owns role="button", tabindex, and all
+  // event handlers. Focus stays on the host; the inner button is purely
+  // visual and aria-hidden.
+
   static override properties = {
     pressed: { type: Boolean, reflect: true },
     disabled: { type: Boolean, reflect: true },
@@ -62,28 +66,23 @@ export class CFToggle extends BaseElement {
   }
 
   override updated(changedProperties: PropertyValues) {
-    if (changedProperties.has("pressed")) {
-      const oldValue = changedProperties.get("pressed");
-      this.setAttribute("aria-pressed", this.pressed ? "true" : "false");
-      if (oldValue !== undefined) {
-        this.emit("cf-change", { pressed: this.pressed });
-      }
-    }
-    if (changedProperties.has("disabled")) {
-      this.setAttribute("aria-disabled", this.disabled ? "true" : "false");
-      this.setAttribute("tabindex", this.disabled ? "-1" : "0");
+    // cf-change is emitted from click/keydown handlers only — NOT here.
+    // Emitting from updated() causes infinite loops when a parent
+    // (cf-toggle-group) programmatically sets pressed.
+    if (changedProperties.has("pressed") || changedProperties.has("disabled")) {
+      this._updateAriaAttributes();
     }
   }
 
   override connectedCallback() {
-    super.connectedCallback();
-    // Set ARIA attributes
-    this.setAttribute("role", "button");
-    this.setAttribute("aria-pressed", this.pressed ? "true" : "false");
-    if (this.disabled) {
-      this.setAttribute("aria-disabled", "true");
+    if (!this.hasAttribute("role")) {
+      this.setAttribute("role", "button");
     }
-    this.setAttribute("tabindex", this.disabled ? "-1" : "0");
+    if (!this.hasAttribute("exportparts")) {
+      this.setAttribute("exportparts", "toggle");
+    }
+    super.connectedCallback();
+    this._updateAriaAttributes();
 
     // Add event listeners
     this.addEventListener("click", this.handleClick);
@@ -97,6 +96,12 @@ export class CFToggle extends BaseElement {
     this.removeEventListener("keydown", this.handleKeydown);
   }
 
+  private _updateAriaAttributes(): void {
+    this.setAttribute("aria-pressed", this.pressed ? "true" : "false");
+    this.setAttribute("aria-disabled", this.disabled ? "true" : "false");
+    this.tabIndex = this.disabled ? -1 : 0;
+  }
+
   override render() {
     const classes = {
       toggle: true,
@@ -106,12 +111,15 @@ export class CFToggle extends BaseElement {
     };
 
     return html`
+      <!-- aria-hidden and tabindex="-1" prevent the inner button from creating a
+        duplicate interactive role — the host element already exposes role="button"
+        with all ARIA attributes to the accessibility tree. -->
       <button
         type="button"
         class="${classMap(classes)}"
         ?disabled="${this.disabled}"
-        aria-pressed="${this.pressed ? "true" : "false"}"
-        aria-label="${this.ariaLabel || ""}"
+        aria-hidden="true"
+        tabindex="-1"
         part="toggle"
       >
         <slot></slot>
@@ -126,8 +134,8 @@ export class CFToggle extends BaseElement {
       return;
     }
 
-    // Toggle the pressed state
     this.pressed = !this.pressed;
+    this.emit("cf-change", { pressed: this.pressed });
   };
 
   private handleKeydown = (event: KeyboardEvent): void => {
@@ -136,6 +144,7 @@ export class CFToggle extends BaseElement {
     if (event.key === " " || event.key === "Enter") {
       event.preventDefault();
       this.pressed = !this.pressed;
+      this.emit("cf-change", { pressed: this.pressed });
     }
   };
 
@@ -152,14 +161,14 @@ export class CFToggle extends BaseElement {
    * Focus the toggle programmatically
    */
   override focus(): void {
-    this.buttonElement?.focus();
+    super.focus();
   }
 
   /**
    * Blur the toggle programmatically
    */
   override blur(): void {
-    this.buttonElement?.blur();
+    super.blur();
   }
 }
 

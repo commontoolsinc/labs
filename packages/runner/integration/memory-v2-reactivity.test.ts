@@ -25,9 +25,7 @@ const createRuntime = (identity: Identity, base: URL) =>
     storageManager: StorageManager.open({
       as: identity,
       address: new URL("/api/storage/memory", base),
-      memoryVersion: "v2",
     }),
-    memoryVersion: "v2",
   });
 
 Deno.test("memory v2 runner discovers newly linked documents", async () => {

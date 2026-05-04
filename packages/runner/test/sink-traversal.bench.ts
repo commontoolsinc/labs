@@ -2,7 +2,6 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
-import { BENCH_MEMORY_VERSION } from "./bench-memory-version.ts";
 
 const signer = await Identity.fromPassphrase("bench operator");
 const space = signer.did();
@@ -89,12 +88,10 @@ async function runSinkTraversalBench(
 ) {
   const storageManager = StorageManager.emulate({
     as: signer,
-    memoryVersion: BENCH_MEMORY_VERSION,
   });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
-    memoryVersion: BENCH_MEMORY_VERSION,
   });
 
   let tx = runtime.edit();

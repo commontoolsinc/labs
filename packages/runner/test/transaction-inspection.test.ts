@@ -45,14 +45,12 @@ describe("transaction inspection", () => {
         reads: [{
           space: "did:key:test" as any,
           id: "of:read" as any,
-          type: "application/json",
           path: ["field"],
         }],
         shallowReads: [],
         writes: [{
           space: "did:key:test" as any,
           id: "of:write" as any,
-          type: "application/json",
           path: ["field"],
         }],
       }),
@@ -64,14 +62,12 @@ describe("transaction inspection", () => {
       reads: [{
         space: "did:key:test",
         id: "of:read",
-        type: "application/json",
         path: ["field"],
       }],
       shallowReads: [],
       writes: [{
         space: "did:key:test",
         id: "of:write",
-        type: "application/json",
         path: ["field"],
       }],
     });
@@ -84,7 +80,6 @@ describe("transaction inspection", () => {
           read: {
             space: "did:key:test" as any,
             id: "of:read" as any,
-            type: "application/json",
             path: ["links", "peer"],
             meta: {},
           },
@@ -93,7 +88,6 @@ describe("transaction inspection", () => {
           read: {
             space: "did:key:test" as any,
             id: "of:shallow" as any,
-            type: "application/json",
             path: ["value", "items"],
             meta: {},
             nonRecursive: true,
@@ -103,7 +97,6 @@ describe("transaction inspection", () => {
           write: {
             space: "did:key:test" as any,
             id: "of:write" as any,
-            type: "application/json",
             path: ["meta", "updatedAt"],
           },
         },
@@ -112,19 +105,16 @@ describe("transaction inspection", () => {
         reads: [{
           space: "did:key:test",
           id: "of:read",
-          type: "application/json",
           path: ["links", "peer"],
         }],
         shallowReads: [{
           space: "did:key:test",
           id: "of:shallow",
-          type: "application/json",
           path: ["value", "items"],
         }],
         writes: [{
           space: "did:key:test",
           id: "of:write",
-          type: "application/json",
           path: ["meta", "updatedAt"],
         }],
       },
@@ -134,7 +124,6 @@ describe("transaction inspection", () => {
   it("uses the native v2 transaction reactivity log hook", async () => {
     const storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
 
     try {
@@ -143,13 +132,11 @@ describe("transaction inspection", () => {
       tx.write({
         space,
         id,
-        type: "application/json",
         path: [],
       }, { value: { count: 1 } });
       tx.read({
         space,
         id,
-        type: "application/json",
         path: ["value"],
       });
 
@@ -157,14 +144,12 @@ describe("transaction inspection", () => {
         reads: [{
           space,
           id,
-          type: "application/json",
           path: ["value"],
         }],
         shallowReads: [],
         writes: [{
           space,
           id,
-          type: "application/json",
           path: [],
         }],
       };
@@ -186,7 +171,6 @@ describe("transaction inspection", () => {
   it("preserves full-document paths in native v2 reactivity logs", async () => {
     const storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
 
     try {
@@ -197,7 +181,6 @@ describe("transaction inspection", () => {
       seed.write({
         space,
         id,
-        type: "application/json",
         path: [],
       }, {
         value: { count: 1 },
@@ -210,13 +193,11 @@ describe("transaction inspection", () => {
       tx.read({
         space,
         id,
-        type: "application/json",
         path: ["source"],
       });
       tx.write({
         space,
         id,
-        type: "application/json",
         path: ["meta", "updatedAt"],
       }, "after");
 
@@ -224,14 +205,12 @@ describe("transaction inspection", () => {
         reads: [{
           space,
           id,
-          type: "application/json",
           path: ["source"],
         }],
         shallowReads: [],
         writes: [{
           space,
           id,
-          type: "application/json",
           path: ["meta", "updatedAt"],
         }],
       };
@@ -245,7 +224,6 @@ describe("transaction inspection", () => {
   it("forwards native v2 hooks through extended transaction wrappers", async () => {
     const storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
 
     try {
@@ -254,13 +232,11 @@ describe("transaction inspection", () => {
       tx.write({
         space,
         id,
-        type: "application/json",
         path: [],
       }, { value: { count: 1 } });
       tx.read({
         space,
         id,
-        type: "application/json",
         path: ["value"],
       });
 
@@ -268,14 +244,12 @@ describe("transaction inspection", () => {
         reads: [{
           space,
           id,
-          type: "application/json",
           path: ["value"],
         }],
         shallowReads: [],
         writes: [{
           space,
           id,
-          type: "application/json",
           path: [],
         }],
       };
@@ -296,7 +270,6 @@ describe("transaction inspection", () => {
       address: {
         space,
         id: "test:transaction-wrapper-write-values-1" as const,
-        type: "application/json",
         path: ["count"],
       },
       value: 1,
@@ -304,7 +277,6 @@ describe("transaction inspection", () => {
       address: {
         space,
         id: "test:transaction-wrapper-write-values-2" as const,
-        type: "application/json",
         path: ["count"],
       },
       value: 2,
@@ -327,7 +299,6 @@ describe("transaction inspection", () => {
   it("uses the native v2 read activity hook without journal replay", async () => {
     const storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
 
     try {
@@ -336,14 +307,12 @@ describe("transaction inspection", () => {
       tx.read({
         space,
         id,
-        type: "application/json",
         path: ["value", "count"],
       }, { nonRecursive: true, meta: { source: "direct-hook" } });
 
       assertEquals([...getTransactionReadActivities(tx)], [{
         space,
         id,
-        type: "application/json",
         path: ["value", "count"],
         meta: { source: "direct-hook" },
         nonRecursive: true,
@@ -356,7 +325,6 @@ describe("transaction inspection", () => {
   it("throws when native v2 code tries to replay journal activity", async () => {
     const storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
 
     try {
@@ -365,19 +333,16 @@ describe("transaction inspection", () => {
       tx.write({
         space,
         id,
-        type: "application/json",
         path: [],
       }, { value: { count: 1 } });
       tx.read({
         space,
         id,
-        type: "application/json",
         path: ["value"],
       });
       tx.write({
         space,
         id,
-        type: "application/json",
         path: ["value", "count"],
       }, 2);
 
@@ -394,7 +359,6 @@ describe("transaction inspection", () => {
   it("preserves the original previousValue in native v2 write details", async () => {
     const storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
 
     try {
@@ -403,7 +367,6 @@ describe("transaction inspection", () => {
       seed.write({
         space,
         id,
-        type: "application/json",
         path: [],
       }, { value: { count: 1 } });
       await seed.commit();
@@ -412,13 +375,11 @@ describe("transaction inspection", () => {
       tx.write({
         space,
         id,
-        type: "application/json",
         path: ["value", "count"],
       }, 2);
       tx.write({
         space,
         id,
-        type: "application/json",
         path: ["value", "count"],
       }, 3);
 
@@ -426,7 +387,6 @@ describe("transaction inspection", () => {
         address: {
           space,
           id,
-          type: "application/json",
           path: ["value", "count"],
         },
         value: 3,
@@ -436,7 +396,6 @@ describe("transaction inspection", () => {
       assertEquals([...tx.journal.novelty(space)], [{
         address: {
           id,
-          type: "application/json",
           path: ["value", "count"],
         },
         value: 3,
@@ -445,7 +404,6 @@ describe("transaction inspection", () => {
       assertEquals([...tx.journal.history(space)], [{
         address: {
           id,
-          type: "application/json",
           path: ["value", "count"],
         },
         value: 1,
@@ -458,7 +416,6 @@ describe("transaction inspection", () => {
   it("records the rewritten parent path when a single native v2 batch write materializes missing parents", async () => {
     const storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
 
     try {
@@ -467,7 +424,6 @@ describe("transaction inspection", () => {
       seed.write({
         space,
         id,
-        type: "application/json",
         path: [],
       }, { value: { count: 1 } });
       await seed.commit();
@@ -478,7 +434,6 @@ describe("transaction inspection", () => {
         address: {
           space,
           id,
-          type: "application/json",
           path: ["profile", "name"],
         },
         value: "Ada",
@@ -490,17 +445,14 @@ describe("transaction inspection", () => {
         writes: [{
           space,
           id,
-          type: "application/json",
           path: ["value"],
         }, {
           space,
           id,
-          type: "application/json",
           path: ["value", "profile"],
         }, {
           space,
           id,
-          type: "application/json",
           path: ["value", "profile", "name"],
         }],
       });
@@ -512,7 +464,6 @@ describe("transaction inspection", () => {
         [{
           space,
           id,
-          type: "application/json",
           path: ["value"],
         }],
       );
@@ -524,7 +475,6 @@ describe("transaction inspection", () => {
   it("records the rewritten parent path during native v2 batch materialization before later leaf writes", async () => {
     const storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
 
     try {
@@ -534,7 +484,6 @@ describe("transaction inspection", () => {
       seed.write({
         space,
         id,
-        type: "application/json",
         path: [],
       }, { value: { count: 1 } });
       await seed.commit();
@@ -545,7 +494,6 @@ describe("transaction inspection", () => {
         address: {
           space,
           id,
-          type: "application/json",
           path: ["profile", "name"],
         },
         value: "Ada",
@@ -553,7 +501,6 @@ describe("transaction inspection", () => {
         address: {
           space,
           id,
-          type: "application/json",
           path: ["profile", "age"],
         },
         value: 42,
@@ -565,22 +512,18 @@ describe("transaction inspection", () => {
         writes: [{
           space,
           id,
-          type: "application/json",
           path: ["value"],
         }, {
           space,
           id,
-          type: "application/json",
           path: ["value", "profile"],
         }, {
           space,
           id,
-          type: "application/json",
           path: ["value", "profile", "age"],
         }, {
           space,
           id,
-          type: "application/json",
           path: ["value", "profile", "name"],
         }],
       });
@@ -592,12 +535,10 @@ describe("transaction inspection", () => {
         [{
           space,
           id,
-          type: "application/json",
           path: ["value"],
         }, {
           space,
           id,
-          type: "application/json",
           path: ["value", "profile", "age"],
         }],
       );
@@ -609,7 +550,6 @@ describe("transaction inspection", () => {
   it("derives precise array reactivity writes while keeping structural ancestors for length changes", async () => {
     const storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
 
     try {
@@ -618,7 +558,6 @@ describe("transaction inspection", () => {
       seed.write({
         space,
         id,
-        type: "application/json",
         path: [],
       }, { value: { tags: ["one", "two"] } });
       await seed.commit();
@@ -627,13 +566,11 @@ describe("transaction inspection", () => {
       tx.write({
         space,
         id,
-        type: "application/json",
         path: ["value", "tags", "0"],
       }, "zero");
       tx.write({
         space,
         id,
-        type: "application/json",
         path: ["value", "tags", "length"],
       }, 1);
 
@@ -643,17 +580,14 @@ describe("transaction inspection", () => {
         writes: [{
           space,
           id,
-          type: "application/json",
           path: ["value", "tags"],
         }, {
           space,
           id,
-          type: "application/json",
           path: ["value", "tags", "0"],
         }, {
           space,
           id,
-          type: "application/json",
           path: ["value", "tags", "length"],
         }],
       });
@@ -665,7 +599,6 @@ describe("transaction inspection", () => {
   it("keeps same-length array element writes exact in native v2 reactivity logs", async () => {
     const storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
 
     try {
@@ -675,7 +608,6 @@ describe("transaction inspection", () => {
       seed.write({
         space,
         id,
-        type: "application/json",
         path: [],
       }, { value: { tags: ["one", "two"] } });
       await seed.commit();
@@ -684,7 +616,6 @@ describe("transaction inspection", () => {
       tx.write({
         space,
         id,
-        type: "application/json",
         path: ["value", "tags", "0"],
       }, "zero");
 
@@ -694,7 +625,6 @@ describe("transaction inspection", () => {
         writes: [{
           space,
           id,
-          type: "application/json",
           path: ["value", "tags", "0"],
         }],
       });

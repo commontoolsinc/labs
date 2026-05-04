@@ -1,6 +1,6 @@
 import type { IMemoryAddress } from "../interface.ts";
 export const toString = (address: IMemoryAddress) =>
-  `/${address.id}/${address.type}/${JSON.stringify(address.path)}`;
+  `/${address.id}/${JSON.stringify(address.path)}`;
 
 /**
  * Returns true if `candidate` address references location within the
@@ -10,7 +10,7 @@ export const includes = (
   source: IMemoryAddress,
   candidate: IMemoryAddress,
 ) => {
-  if (source.id !== candidate.id || source.type !== candidate.type) {
+  if (source.id !== candidate.id) {
     return false;
   }
 
@@ -33,7 +33,7 @@ export const intersects = (
   source: IMemoryAddress,
   candidate: IMemoryAddress,
 ) => {
-  if (source.id !== candidate.id || source.type !== candidate.type) {
+  if (source.id !== candidate.id) {
     return false;
   }
 

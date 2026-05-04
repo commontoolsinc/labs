@@ -7,15 +7,12 @@ import {
   jsonFromValue,
   valueFromJson,
 } from "@commonfabric/data-model/json-encoding";
-import { getSchemaHashConfig } from "@commonfabric/data-model/schema-hash";
 import { internPathSelector } from "@commonfabric/data-model/schema-utils";
-import { getModernHashConfig } from "@commonfabric/data-model/value-hash";
 import type { FabricValue, SchemaPathSelector } from "./interface.ts";
 import type { ReconstructionContext } from "@commonfabric/data-model/interface";
 import { isObject, isRecord } from "@commonfabric/utils/types";
 
-export const MEMORY_V2_PROTOCOL = "memory/v2" as const;
-export const MEMORY_V2_CONTENT_TYPE = "merkle-reference/json" as const;
+export const MEMORY_PROTOCOL = "memory" as const;
 export const DEFAULT_BRANCH = "" as const;
 
 export type EntityId = string;
@@ -130,7 +127,7 @@ export interface SessionOpenArgs {
 export interface SessionOpenCommand {
   cmd: "session.open";
   id: JobId;
-  protocol: typeof MEMORY_V2_PROTOCOL;
+  protocol: typeof MEMORY_PROTOCOL;
   args: SessionOpenArgs;
 }
 
@@ -142,23 +139,21 @@ export interface SessionOpenResult {
   sync?: SessionSync;
 }
 
-export interface MemoryV2Flags {
+export interface MemoryProtocolFlags {
   richStorableValues: boolean;
   unifiedJsonEncoding: boolean;
-  canonicalHashing: boolean;
-  modernSchemaHash: boolean;
 }
 
 export interface HelloMessage {
   type: "hello";
-  protocol: typeof MEMORY_V2_PROTOCOL;
-  flags: MemoryV2Flags;
+  protocol: typeof MEMORY_PROTOCOL;
+  flags: MemoryProtocolFlags;
 }
 
 export interface HelloOkMessage {
   type: "hello.ok";
-  protocol: typeof MEMORY_V2_PROTOCOL;
-  flags: MemoryV2Flags;
+  protocol: typeof MEMORY_PROTOCOL;
+  flags: MemoryProtocolFlags;
 }
 
 export interface SessionDescriptor {
@@ -340,50 +335,46 @@ export type ServerMessage =
   | SessionEffectMessage
   | SessionRevokedMessage;
 
-const memoryV2ReconstructionContext: ReconstructionContext = {
+const memoryReconstructionContext: ReconstructionContext = {
   getCell() {
     throw new Error(
-      "getCell is not available at the memory/v2 boundary",
+      "getCell is not available at the memory boundary",
     );
   },
 };
 
-export const getMemoryV2Flags = (): MemoryV2Flags => ({
+export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   richStorableValues: getDataModelConfig(),
   unifiedJsonEncoding: getJsonEncodingConfig(),
-  canonicalHashing: getModernHashConfig(),
-  modernSchemaHash: getSchemaHashConfig(),
 });
 
-export const sameMemoryV2Flags = (
-  left: MemoryV2Flags,
-  right: MemoryV2Flags,
+export const sameMemoryProtocolFlags = (
+  left: MemoryProtocolFlags,
+  right: MemoryProtocolFlags,
 ): boolean =>
   left.richStorableValues === right.richStorableValues &&
-  left.unifiedJsonEncoding === right.unifiedJsonEncoding &&
-  left.canonicalHashing === right.canonicalHashing &&
-  left.modernSchemaHash === right.modernSchemaHash;
+  left.unifiedJsonEncoding === right.unifiedJsonEncoding;
 
-export const isMemoryV2Flags = (value: unknown): value is MemoryV2Flags => {
+export const isMemoryProtocolFlags = (
+  value: unknown,
+): value is MemoryProtocolFlags => {
   if (!isRecord(value) || Array.isArray(value)) {
     return false;
   }
 
   return typeof value.richStorableValues === "boolean" &&
-    typeof value.unifiedJsonEncoding === "boolean" &&
-    typeof value.canonicalHashing === "boolean" &&
-    typeof value.modernSchemaHash === "boolean";
+    typeof value.unifiedJsonEncoding === "boolean";
 };
 
-export const encodeMemoryV2Boundary = (value: unknown): string =>
+export const encodeMemoryBoundary = (value: unknown): string =>
   jsonFromValue(value as FabricValue);
 
-export const decodeMemoryV2Boundary = <Value = FabricValue>(
+export const decodeMemoryBoundary = <Value = FabricValue>(
   source: string,
 ): Value => {
   const decoded = valueFromJson(
     source,
-    memoryV2ReconstructionContext,
+    memoryReconstructionContext,
   ) as FabricValue;
 
   if (!getJsonEncodingConfig()) {
@@ -403,12 +394,9 @@ export const toValuePath = (path: readonly string[]): ValuePath =>
   path as ValuePath;
 
 /**
- * Builds a document-level selector (path rooted under `"value"`) from a
- * schema path selector. The result is interned-and-frozen via
- * `internPathSelector`, so callers can feed it directly to
- * `MapSetStringToPathSelectors` (or any other `hashSchemaItem`-keyed
- * cache) and get the `hashOfModernInternal` WeakMap fast-path on
- * repeat hashes.
+ * Builds a document-level selector (path rooted under `"value"`) from a schema
+ * path selector. The result is interned-and-frozen via `internPathSelector()`,
+ * to get the benefits of hash caching.
  */
 export const toDocumentSelector = (
   selector: Pick<SchemaPathSelector, "path" | "schema">,

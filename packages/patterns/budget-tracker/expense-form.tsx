@@ -14,6 +14,7 @@ import {
   NAME,
   pattern,
   Stream,
+  toIndentedDebugString,
   UI,
   Writable,
 } from "commonfabric";
@@ -278,7 +279,7 @@ export default pattern<Input>(({ expenses, budgets }) => {
             }}
           >
             {computed(() =>
-              JSON.stringify(
+              toIndentedDebugString(
                 {
                   newDescription: newDescription.get(),
                   newAmount: newAmount.get(),
@@ -286,8 +287,6 @@ export default pattern<Input>(({ expenses, budgets }) => {
                   budgetCategory: budgetCategory.get(),
                   budgetLimit: budgetLimit.get(),
                 },
-                null,
-                2
               )
             )}
           </pre>
@@ -305,13 +304,11 @@ export default pattern<Input>(({ expenses, budgets }) => {
             }}
           >
             {computed(() =>
-              JSON.stringify(
+              toIndentedDebugString(
                 {
                   expenses: expenses.get(),
                   budgets: budgets.get(),
                 },
-                null,
-                2
               )
             )}
           </pre>

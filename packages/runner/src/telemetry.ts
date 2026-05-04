@@ -29,6 +29,7 @@ export interface SchedulerGraphNode {
   preview?: string; // First ~200 chars of function body for hover tooltips
   // Diagnostic info: what cells this action reads and writes
   reads?: string[]; // space/entity paths this action reads
+  shallowReads?: string[]; // non-recursive reads used for structural invalidation
   writes?: string[]; // space/entity paths this action writes (mightWrite)
   // Timing controls
   debounceMs?: number; // Current debounce delay in ms (if set)
@@ -56,6 +57,43 @@ export interface SchedulerActionInfo {
   moduleName?: string;
   reads?: string[];
   writes?: string[];
+}
+
+export interface SchedulerEventPreflightStats {
+  visitCount: number;
+  memoHitCount: number;
+  cycleHitCount: number;
+  dirtyInputCount: number;
+  resultTrueCount: number;
+  workSetAddCount: number;
+  reverseDependencyActionCount: number;
+  reverseDependencyEdgeCount: number;
+  logFallbackCount: number;
+  logReadCount: number;
+  logShallowReadCount: number;
+  writerCandidateCount: number;
+  writerOverlapCount: number;
+  directWriterCount: number;
+  maxDepth: number;
+  hotActions?: SchedulerEventPreflightActionSummary[];
+  hotFanoutActions?: SchedulerEventPreflightActionSummary[];
+  rootDirectWriters?: SchedulerEventPreflightActionSummary[];
+}
+
+export interface SchedulerEventPreflightActionSummary {
+  actionId: string;
+  actionType: "effect" | "computation" | "unknown";
+  visitCount: number;
+  memoHitCount: number;
+  dirtyInputCount: number;
+  resultTrueCount: number;
+  reverseDependencyEdgeCount: number;
+  maxDirectWriterCount: number;
+  dirty: boolean;
+  pending: boolean;
+  readCount: number;
+  shallowReadCount: number;
+  writeCount: number;
 }
 
 // ============================================================
@@ -110,6 +148,24 @@ export type RuntimeTelemetryMarker = {
   type: "scheduler.invocation";
   handlerId: string;
   handlerInfo?: SchedulerActionInfo;
+  error?: string;
+} | {
+  type: "scheduler.event.preflight";
+  handlerId: string;
+  handlerInfo?: SchedulerActionInfo;
+  readCount: number;
+  shallowReadCount: number;
+  dirtySizeBefore: number;
+  pendingSizeBefore: number;
+  dirtyDependencyCount: number;
+  hasDirtyDependencies: boolean;
+  skipped: boolean;
+  populateMs: number;
+  txToLogMs: number;
+  depCommitMs: number;
+  collectMs: number;
+  scheduleMs: number;
+  stats: SchedulerEventPreflightStats;
   error?: string;
 } | {
   type: "storage.push.start";

@@ -148,7 +148,6 @@
     "dagre": "npm:dagre@^0.8.5",
     "hash-wasm": "npm:hash-wasm@^4.12.0",
     "lit": "npm:lit@^3.3.0",
-    "merkle-reference": "npm:merkle-reference@^2.2.0",
     "multiformats": "npm:multiformats@^13.3.2",
     "ses": "npm:ses@^1.15.0",
     "turndown": "npm:turndown@^7.1.2",

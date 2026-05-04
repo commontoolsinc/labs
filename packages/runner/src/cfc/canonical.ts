@@ -1,4 +1,4 @@
-import { hashOfModernAsString } from "@commonfabric/data-model/value-hash-modern";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { encodePointer } from "../../../memory/v2/path.ts";
 import { stableHash } from "../traverse.ts";
 import type {
@@ -10,6 +10,7 @@ import type {
   PreparedDigestInput,
   WritePolicyInput,
 } from "./types.ts";
+import { cloneCfcLabelView } from "./label-view-core.ts";
 
 export const canonicalizeLogicalPath = (path: readonly string[]): string[] =>
   path[0] === "value" ? [...path.slice(1)] : [...path];
@@ -18,10 +19,10 @@ export const logicalPathToPointer = (path: readonly string[]): string =>
   encodePointer(canonicalizeLogicalPath(path));
 
 const compareAddress = (left: CfcAddress, right: CfcAddress): number => {
-  const leftKey = `${left.space}\u0000${left.id}\u0000${left.type}\u0000${
+  const leftKey = `${left.space}\u0000${left.id}\u0000${
     logicalPathToPointer(left.path)
   }`;
-  const rightKey = `${right.space}\u0000${right.id}\u0000${right.type}\u0000${
+  const rightKey = `${right.space}\u0000${right.id}\u0000${
     logicalPathToPointer(right.path)
   }`;
   return leftKey.localeCompare(rightKey);
@@ -65,12 +66,15 @@ export const canonicalizeWritePolicyInput = (
       };
     case "trusted-event":
       return { ...input, target: canonicalizeAttemptedWrite(input.target) };
-    case "link-write":
+    case "link-write": {
+      const cfcLabelView = cloneCfcLabelView(input.cfcLabelView);
       return {
         ...input,
         target: canonicalizeAttemptedWrite(input.target),
         source: canonicalizeAttemptedWrite(input.source),
+        ...(cfcLabelView !== undefined && { cfcLabelView }),
       };
+    }
     case "custom":
       return input.target === undefined
         ? input
@@ -129,4 +133,4 @@ export const canonicalizePreparedDigestInput = (
 });
 
 export const preparedDigestFor = (input: PreparedDigestInput): string =>
-  hashOfModernAsString(canonicalizePreparedDigestInput(input));
+  hashStringOf(canonicalizePreparedDigestInput(input));

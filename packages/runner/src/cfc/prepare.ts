@@ -90,6 +90,26 @@ const hasLabelValues = (label: IFCLabel): boolean =>
   (label.confidentiality?.length ?? 0) > 0 ||
   (label.integrity?.length ?? 0) > 0;
 
+const metadataAppliesToPath = (
+  metadata: CfcMetadata,
+  path: readonly string[],
+): boolean => {
+  const logicalPath = canonicalizeLogicalPath(path);
+  // A labelMap entry is persisted whenever the source schema had label values
+  // OR a policy claim (writeAuthorizedBy / uiContract / exactCopyOf — see the
+  // entry-construction site). The mere presence of the entry signals "policy
+  // applies on this path"; do NOT filter on `hasLabelValues` here, or
+  // claim-only entries get silently bypassed.
+  return metadata.labelMap.entries.some((entry) =>
+    isPrefix(entry.path, logicalPath) || isPrefix(logicalPath, entry.path)
+  );
+};
+
+const metadataAppliesToAnyPath = (
+  metadata: CfcMetadata,
+  paths: readonly (readonly string[])[],
+): boolean => paths.some((path) => metadataAppliesToPath(metadata, path));
+
 const hasPersistedPolicyClaim = (schema: JSONSchema): boolean => {
   if (!isRecord(schema) || !isRecord(schema.ifc)) {
     return false;
@@ -230,7 +250,6 @@ const structuralProvenanceForPath = (
   target: {
     space: MemorySpace;
     id: URI;
-    type: MediaType;
   },
   path: readonly string[],
   claim: string,
@@ -243,7 +262,6 @@ const structuralProvenanceForPath = (
     input.claim === claim &&
     input.target.space === target.space &&
     input.target.id === target.id &&
-    input.target.type === target.type &&
     arraysEqual(canonicalizeLogicalPath(input.target.path), logicalPath)
   );
 };
@@ -253,7 +271,6 @@ const setupProjectionSourceMatchesValue = (
   target: {
     space: MemorySpace;
     id: URI;
-    type: MediaType;
   },
   path: readonly string[],
 ): boolean => {
@@ -278,7 +295,6 @@ const setupProjectionSourceMatchesValue = (
   return projection.sources.some((source) =>
     (projected.space === undefined || projected.space === source.space) &&
     (projected.id === undefined || projected.id === source.id) &&
-    (projected.type === undefined || projected.type === source.type) &&
     arraysEqual(projectedPath, source.path)
   );
 };
@@ -314,8 +330,7 @@ const candidateSchemasByTarget = (
     if (input.kind !== "schema" || input.schema === undefined) {
       continue;
     }
-    const key =
-      `${input.target.space}\u0000${input.target.id}\u0000${input.target.type}`;
+    const key = targetKey(input.target);
     const schema = rebindWriteAuthorizedByClaims(
       input.schema,
       implementationIdentity,
@@ -338,8 +353,7 @@ const candidateSchemasByTarget = (
 const targetKey = (target: {
   space: MemorySpace;
   id: string;
-  type: string;
-}): string => `${target.space}\u0000${target.id}\u0000${target.type}`;
+}): string => `${target.space}\u0000${target.id}`;
 
 const linkWritesByTarget = (
   inputs: readonly WritePolicyInput[],
@@ -507,7 +521,7 @@ const valueWriteTargets = (
         result.set(key, {
           space: write.address.space,
           id: write.address.id as URI,
-          type: write.address.type as MediaType,
+          type: (write.address.type ?? "application/json") as MediaType,
           paths: [writePath],
         });
       }
@@ -614,7 +628,6 @@ const writeValueForTarget = (
   target: {
     space: MemorySpace;
     id: URI;
-    type: MediaType;
     path: readonly string[];
   },
 ): FabricValue => {
@@ -623,7 +636,7 @@ const writeValueForTarget = (
     | {
       address: {
         id: URI;
-        type: MediaType;
+        type?: MediaType;
         path: readonly string[];
       };
       value?: FabricValue;
@@ -631,9 +644,7 @@ const writeValueForTarget = (
     | undefined;
   let matchingWritePath: string[] | undefined;
   for (const write of writeDetails) {
-    if (write.address.id !== target.id || write.address.type !== target.type) {
-      continue;
-    }
+    if (write.address.id !== target.id) continue;
     if (write.address.path[0] !== "value") {
       continue;
     }
@@ -671,7 +682,6 @@ const verifyInputRequirements = (
   target: {
     space: MemorySpace;
     id: URI;
-    type: MediaType;
   },
 ): string | undefined => {
   const consumed = [...(tx.getReadActivities?.() ?? [])].filter((read) =>
@@ -680,7 +690,12 @@ const verifyInputRequirements = (
     ...read,
     path: canonicalizeLogicalPath(read.path),
     label: labelAtPath(
-      storedMetadataFor(tx, read.space, read.id, read.type),
+      storedMetadataFor(
+        tx,
+        read.space,
+        read.id,
+        read.type ?? "application/json",
+      ),
       canonicalizeLogicalPath(read.path),
     ),
   })).filter((read) => read.label !== undefined);
@@ -741,7 +756,6 @@ const verifyTrustedEventRequirements = (
   target: {
     space: MemorySpace;
     id: URI;
-    type: MediaType;
   },
   schema: JSONSchema,
 ): string | undefined => {
@@ -753,7 +767,6 @@ const verifyTrustedEventRequirements = (
       input.kind === "trusted-event" &&
       input.target.space === target.space &&
       input.target.id === target.id &&
-      input.target.type === target.type &&
       arraysEqual(input.target.path, entry.path) &&
       recordedTrustedEventProvenanceMatchesUiContract(
         input.provenance,
@@ -774,7 +787,6 @@ const verifyExactCopyRequirements = (
   target: {
     space: MemorySpace;
     id: URI;
-    type: MediaType;
   },
   schema: JSONSchema,
 ): string | undefined => {
@@ -865,13 +877,11 @@ const linkReferenceIntegrity = (input: LinkWritePolicyInput): unknown => ({
   source: {
     space: input.source.space,
     id: input.source.id,
-    type: input.source.type,
     path: canonicalizeLogicalPath(input.source.path),
   },
   target: {
     space: input.target.space,
     id: input.target.id,
-    type: input.target.type,
     path: canonicalizeLogicalPath(input.target.path),
   },
 });
@@ -893,7 +903,7 @@ const derivePersistedLinkLabel = (
     tx,
     input.source.space,
     input.source.id as URI,
-    input.source.type as MediaType,
+    "application/json",
   );
   const pendingSourceLabel = candidateSchemas.get(targetKey(input.source)) !==
       undefined
@@ -902,12 +912,25 @@ const derivePersistedLinkLabel = (
       input.source.path,
     )
     : undefined;
-  if (sourceMetadata === undefined && pendingSourceLabel === undefined) {
+  const linkSchemaLabel = rootLabelFromSchema(input.linkSchema);
+  const hasCarriedLabel =
+    input.cfcLabelView?.entries.some((entry) => hasLabelValues(entry.label)) ??
+      false;
+  if (
+    sourceMetadata === undefined && pendingSourceLabel === undefined &&
+    !hasLabelValues(linkSchemaLabel) && !hasCarriedLabel
+  ) {
     return {
       reason: `missing link source metadata for ${input.target.id} at /${
         input.target.path.join("/")
       }`,
     };
+  }
+  if (
+    sourceMetadata === undefined && pendingSourceLabel === undefined &&
+    !hasLabelValues(linkSchemaLabel) && hasCarriedLabel
+  ) {
+    return {};
   }
   const sourceLabel = mergeLabels(
     sourceMetadata === undefined ? undefined : labelAtPath(
@@ -916,7 +939,6 @@ const derivePersistedLinkLabel = (
     ) ?? {},
     pendingSourceLabel,
   );
-  const linkSchemaLabel = rootLabelFromSchema(input.linkSchema);
   const label: IFCLabel = {
     confidentiality: mergeLabelValues(
       sourceLabel.confidentiality,
@@ -937,6 +959,24 @@ const cloneLabel = (label: IFCLabel): IFCLabel => ({
     : {}),
   ...(label.integrity !== undefined ? { integrity: [...label.integrity] } : {}),
 });
+
+const coalesceLabelEntries = (
+  entries: Array<{ path: string[]; label: IFCLabel }>,
+): Array<{ path: string[]; label: IFCLabel }> => {
+  const byPath = new Map<string, { path: string[]; label: IFCLabel }>();
+  for (const entry of entries) {
+    const path = [...entry.path];
+    const key = pathKey(path);
+    const existing = byPath.get(key);
+    byPath.set(key, {
+      path,
+      label: mergeLabels(existing?.label, cloneLabel(entry.label)),
+    });
+  }
+  return [...byPath.values()].sort((left, right) =>
+    pathKey(left.path).localeCompare(pathKey(right.path))
+  );
+};
 
 const ensureSchemaDocument = (
   tx: IExtendedStorageTransaction,
@@ -1010,6 +1050,9 @@ export const prepareBoundaryCommit = (
     if (existing === undefined) {
       continue;
     }
+    if (!metadataAppliesToAnyPath(existing, target.paths)) {
+      continue;
+    }
     const linkWriteInputs = linkWrites.get(key) ?? [];
     if (
       linkWriteInputs.length > 0 &&
@@ -1030,14 +1073,13 @@ export const prepareBoundaryCommit = (
     const candidateSchema = candidates.get(key);
     const schema = candidateSchema ?? emptySchemaObject();
     const undefinedCandidate = candidateSchema === undefined;
-    const [space, id, type] = key.split("\u0000") as [
+    const [space, id] = key.split("\u0000") as [
       MemorySpace,
       URI,
-      MediaType,
     ];
 
-    const target = { space, id, type };
-    const existing = storedMetadataFor(tx, space, id, type);
+    const target = { space, id };
+    const existing = storedMetadataFor(tx, space, id, "application/json");
     let storedSchema: JSONSchema | undefined;
     let mergedSchema = schema;
     if (existing !== undefined && undefinedCandidate) {
@@ -1155,9 +1197,24 @@ export const prepareBoundaryCommit = (
           label: result.label,
         });
       }
+      const targetPath = canonicalizeLogicalPath(input.target.path);
+      for (const entry of input.cfcLabelView?.entries ?? []) {
+        if (!hasLabelValues(entry.label)) {
+          continue;
+        }
+        persistedLabelEntries.push({
+          path: [
+            ...targetPath,
+            ...canonicalizeLogicalPath(entry.path),
+          ],
+          label: cloneLabel(entry.label),
+        });
+      }
     }
 
-    if (persistedLabelEntries.length === 0) {
+    const coalescedLabelEntries = coalesceLabelEntries(persistedLabelEntries);
+
+    if (coalescedLabelEntries.length === 0) {
       continue;
     }
 
@@ -1172,14 +1229,14 @@ export const prepareBoundaryCommit = (
       schemaHash: schemaAndHash.hashString,
       labelMap: {
         version: 1,
-        entries: persistedLabelEntries,
+        entries: coalescedLabelEntries,
       },
     };
 
     tx.writeOrThrow({
       space,
       id,
-      type,
+      type: "application/json",
       path: ["cfc"],
       // System-owned embedded metadata write. Boundary evaluation is driven by
       // user-surface reads/writes plus explicit policy inputs, not by recursive

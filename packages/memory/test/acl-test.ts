@@ -1,12 +1,8 @@
 import { assert, assertMatch } from "@std/assert";
-import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
+import { describe, it } from "@std/testing/bdd";
 import { alice, bob, space } from "./principal.ts";
 import * as Access from "../access.ts";
-import {
-  hashOf,
-  resetModernHashConfig,
-  setModernHashConfig,
-} from "@commonfabric/data-model/value-hash";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import { type ACL, type Invocation } from "../interface.ts";
 import { ANYONE_USER, checkACL } from "../acl.ts";
 
@@ -14,15 +10,6 @@ import { ANYONE_USER, checkACL } from "../acl.ts";
 const serviceDid = "did:key:z6MkfJPMCrTyDmurrAHPUsEjCgvcjvLtAuzyZ7nSqwZwb8KQ";
 
 describe("acl", () => {
-  // Explicitly pin canonical hashing off so these tests exercise the legacy
-  // hashOf() path regardless of what the ambient default is.
-  beforeAll(() => {
-    setModernHashConfig(false);
-  });
-  afterAll(() => {
-    resetModernHashConfig();
-  });
-
   it("checkACL - READ capability allows query commands", () => {
     const acl: ACL = {
       [bob.did()]: "READ",

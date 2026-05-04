@@ -29,8 +29,10 @@ export const stats = createRoute({
     [HttpStatusCodes.OK]: jsonContent(
       z.object({
         timestamp: z.number(),
+        serverStart: z.number(),
         logCounts: z.any(),
         timingStats: z.any(),
+        slowQueries: z.array(z.any()),
       }),
       "Logger counts and timing statistics",
     ),

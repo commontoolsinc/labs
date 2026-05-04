@@ -35,6 +35,7 @@ import {
   addressesToPathByEntity,
   arraysOverlap,
   determineTriggeredActions,
+  nonRecursiveReadMayOverlapWrite,
   sortAndCompactPaths,
   type SortedAndCompactPaths,
 } from "./reactive-dependencies.ts";
@@ -56,6 +57,8 @@ import type {
   NonIdempotentReport,
   SchedulerActionInfo,
   SchedulerDiagnosisResult,
+  SchedulerEventPreflightActionSummary,
+  SchedulerEventPreflightStats,
   SchedulerGraphEdge,
   SchedulerGraphNode,
   SchedulerGraphSnapshot,
@@ -67,11 +70,6 @@ ensureNotRenderThread();
 const logger = getLogger("scheduler", {
   enabled: true,
   level: "warn",
-});
-const triggerFlowLogger = getLogger("scheduler.trigger-flow", {
-  enabled: true,
-  level: "warn",
-  logCountEvery: 0,
 });
 
 // Re-export types that tests expect from scheduler
@@ -124,13 +122,12 @@ function trustedEventWriteCandidatesFromTransaction(
     const candidate: NormalizedFullLink = {
       space: write.space,
       id: write.id,
-      type: write.type ?? "application/json",
       path: [...path],
       ...("schema" in write && write.schema !== undefined
         ? { schema: write.schema }
         : {}),
     };
-    const key = `${candidate.space}/${candidate.id}/${candidate.type}/${
+    const key = `${candidate.space}/${candidate.id}/${
       candidate.path.join("/")
     }`;
     const existingIndex = seen.get(key);
@@ -168,7 +165,6 @@ function trustedEventWriteCandidatesFromTransaction(
       addCandidate({
         space: input.target.space,
         id: input.target.id as URI,
-        type: input.target.type as MediaType,
         path: input.target.path,
         ...(input.schema !== undefined ? { schema: input.schema } : {}),
       });
@@ -210,6 +206,35 @@ export type ReactivityLog = {
   /** Reads marked as potential writes (e.g., for diffAndUpdate which reads then conditionally writes) */
   potentialWrites?: IMemorySpaceAddress[];
 };
+
+type DirtyDependencyTraceContext = SchedulerEventPreflightStats & {
+  depth: number;
+  actionSummaries: Map<Action, SchedulerEventPreflightActionSummary>;
+  rootDirectWriterActions: Set<Action>;
+};
+
+function createDirtyDependencyTraceContext(): DirtyDependencyTraceContext {
+  return {
+    visitCount: 0,
+    memoHitCount: 0,
+    cycleHitCount: 0,
+    dirtyInputCount: 0,
+    resultTrueCount: 0,
+    workSetAddCount: 0,
+    reverseDependencyActionCount: 0,
+    reverseDependencyEdgeCount: 0,
+    logFallbackCount: 0,
+    logReadCount: 0,
+    logShallowReadCount: 0,
+    writerCandidateCount: 0,
+    writerOverlapCount: 0,
+    directWriterCount: 0,
+    maxDepth: 0,
+    depth: 0,
+    actionSummaries: new Map(),
+    rootDirectWriterActions: new Set(),
+  };
+}
 
 function addressMatchesLinkPrefix(
   address: IMemorySpaceAddress,
@@ -395,7 +420,12 @@ export class Scheduler {
   private reverseDependencies = new WeakMap<Action, Set<Action>>();
   // Track which actions are effects persistently (survives unsubscribe/re-subscribe)
   private isEffectAction = new WeakMap<Action, boolean>();
+  // In pull mode, `dirty` means direct dirty. `stale` additionally includes
+  // actions with dirty upstream computations.
   private dirty = new Set<Action>();
+  private stale = new Set<Action>();
+  private upstreamStaleWriters = new WeakMap<Action, Set<Action>>();
+  private upstreamStaleCount = new WeakMap<Action, number>();
   private pullMode = false;
 
   // Debugger breakpoints: action IDs that should trigger `debugger` before execution
@@ -408,6 +438,7 @@ export class Scheduler {
   private anonymousActionCounter = 0;
   // Cycle detection during dependency collection
   private collectStack = new Set<Action>();
+  private dirtyDependencyTraceContext?: DirtyDependencyTraceContext;
 
   // Cycle-aware debounce: track runs per action within current execute() call
   private runsThisExecute = new Map<Action, number>();
@@ -463,6 +494,10 @@ export class Scheduler {
   private eventQueueWakeTimer: ReturnType<typeof setTimeout> | null = null;
   private eventQueueWakeAt: number | null = null;
   private actionDebounce = new WeakMap<Action, number>();
+  private actionHasRun = new WeakSet<Action>();
+  private computationDebounceReady = new WeakSet<Action>();
+  private computationDebounceReadyAt = new WeakMap<Action, number>();
+  private computationDebounceFlushSeeds = new Set<Action>();
   // Actions that opt out of auto-debounce (inverted: true means NO auto-debounce)
   private noDebounce = new WeakMap<Action, boolean>();
 
@@ -494,6 +529,9 @@ export class Scheduler {
   private actionRunTrace: ActionRunTraceEntry[] = [];
   private collectTriggerTrace = false;
   private triggerTrace: TriggerTraceEntry[] = [];
+  private eventPreflightTelemetryEnabled = false;
+  private changedWritesHistory: IMemorySpaceAddress[] = [];
+  private conditionallyScheduledEffects = new Map<Action, number>();
 
   // Parent-child action tracking for proper execution ordering
   // When a child action is created during parent execution, parent must run first
@@ -945,7 +983,7 @@ export class Scheduler {
 
     // Mark as dirty and pending for first-time execution
     // In pull mode this still doesn't mean execution: There needs to be an effect to trigger it.
-    this.dirty.add(action);
+    this.markDirectDirty(action);
     this.pending.add(action);
     this.scheduledFirstTime.add(action);
 
@@ -1022,13 +1060,6 @@ export class Scheduler {
       `Reads: ${reads.length}`,
     ]);
 
-    for (const [spaceAndURI, triggerPaths] of triggerPathsByEntity) {
-      logger.debug("schedule-resubscribe-path", () => [
-        `Registered action for ${spaceAndURI}`,
-        `Paths: ${triggerPaths.map((p) => p.join("/")).join(", ")}`,
-      ]);
-    }
-
     this.setCancelForEntities(action, entities);
 
     // In pull mode: When an effect resubscribes, check if any non-throttled dirty
@@ -1036,40 +1067,55 @@ export class Scheduler {
     // pull those computations and see fresh data.
     // Skip throttled computations - they'll trigger via storage changes when unthrottled.
     // Use isEffectAction instead of effects because unsubscribe() clears effects before run()
-    if (this.pullMode && actionIsEffect && this.dirty.size > 0) {
-      const effectReads = log.reads ?? [];
+    if (this.pullMode && actionIsEffect && this.stale.size > 0) {
+      const effectReads = reads;
+      const effectShallowReads = shallowReads;
       let shouldMarkDirty = false;
 
-      // If there are pending computations whose dependencies haven't been collected yet,
-      // we can't know what they write. Be conservative and assume they might affect this effect.
-      if (this.pendingDependencyCollection.size > 0) {
+      // If there are pending computations whose dependencies haven't been
+      // collected yet, only fall back to conservatism for unknown writes or
+      // known writes that overlap what this effect reads.
+      if (
+        this.pendingDependencyCollectionMightAffect(
+          action,
+          effectReads,
+          effectShallowReads,
+        )
+      ) {
         shouldMarkDirty = true;
       }
 
       // Use writersByEntity index for efficient lookup
       if (!shouldMarkDirty) {
+        const entities = new Set<SpaceAndURI>();
         for (const read of effectReads) {
-          const entity = `${read.space}/${read.id}` as SpaceAndURI;
+          entities.add(`${read.space}/${read.id}` as SpaceAndURI);
+        }
+        for (const read of effectShallowReads) {
+          entities.add(`${read.space}/${read.id}` as SpaceAndURI);
+        }
+
+        for (const entity of entities) {
           const writers = this.writersByEntity.get(entity);
           if (!writers) continue;
 
           for (const writer of writers) {
             if (writer === action) continue;
-            if (!this.dirty.has(writer)) continue;
+            if (!this.isStale(writer)) continue;
             if (this.effects.has(writer)) continue; // Only check computations
             if (this.isThrottled(writer)) continue; // Skip throttled - they trigger via storage
 
             // Check path overlap
             const writerWrites = this.getSchedulingWrites(writer) ?? [];
-            for (const write of writerWrites) {
-              if (
-                write.space === read.space &&
-                write.id === read.id &&
-                arraysOverlap(write.path, read.path)
-              ) {
-                shouldMarkDirty = true;
-                break;
-              }
+            if (
+              this.readsOverlapWrites(
+                effectReads,
+                effectShallowReads,
+                writerWrites,
+              )
+            ) {
+              shouldMarkDirty = true;
+              break;
             }
             if (shouldMarkDirty) break;
           }
@@ -1078,7 +1124,8 @@ export class Scheduler {
       }
 
       if (shouldMarkDirty && !this.dirty.has(action)) {
-        this.dirty.add(action);
+        this.markEffectConditionallyScheduled(action);
+        this.markDirectDirty(action);
         this.pending.add(action);
         this.queueExecution();
       }
@@ -1105,6 +1152,11 @@ export class Scheduler {
       this.actionChangeGroups.delete(action);
     }
     this.pending.delete(action);
+    this.conditionallyScheduledEffects.delete(action);
+    // Clear direct/stale state before removing outgoing edges so downstream
+    // stale counts are decremented through normal propagation.
+    this.clearDirectDirty(action);
+    this.forceClearStale(action);
     const dependencies = this.reverseDependencies.get(action);
     if (dependencies) {
       for (const dependency of dependencies) {
@@ -1120,8 +1172,6 @@ export class Scheduler {
     // Clean up effect/computation tracking
     this.effects.delete(action);
     this.computations.delete(action);
-    // Clean up dirty tracking
-    this.dirty.delete(action);
     // Clean up writersByEntity index
     const writeEntities = this.actionWriteEntities.get(action);
     if (writeEntities) {
@@ -1141,6 +1191,7 @@ export class Scheduler {
     // garbage collected (WeakMap).
     // Cancel any pending debounce timer
     this.cancelDebounceTimer(action);
+    this.clearComputationDebounceState(action, { cancelTimer: false });
     // Clean up dependency collection tracking
     this.populateDependenciesCallbacks.delete(action);
     this.pendingDependencyCollection.delete(action);
@@ -1175,6 +1226,7 @@ export class Scheduler {
         // Record action execution time for cycle-aware scheduling
         const elapsed = performance.now() - actionStartTime;
         this.recordActionTime(action, elapsed);
+        this.actionHasRun.add(action);
 
         try {
           if (error) {
@@ -1215,7 +1267,7 @@ export class Scheduler {
                 // Use resubscribe to set up dependencies/triggers from the log,
                 // then mark as dirty/pending to ensure it runs again.
                 this.resubscribe(action, log);
-                this.dirty.add(action);
+                this.markDirectDirty(action);
                 this.pending.add(action);
                 this.queueExecution();
               }
@@ -1233,6 +1285,11 @@ export class Scheduler {
             );
           });
           const log = txToReactivityLog(tx);
+          const changedComputationWrites = this.recordChangedComputationWrites(
+            action,
+            tx,
+            log,
+          );
 
           logger.debug("schedule-run-complete", () => [
             `[RUN] Action completed: ${actionId}`,
@@ -1294,6 +1351,13 @@ export class Scheduler {
             this.resubscribe(action, log);
           } finally {
             logger.timeEnd("scheduler", "run", "resubscribe");
+          }
+          if (this.pullMode && this.computations.has(action)) {
+            this.clearDirectDirty(action);
+            this.markReadersDirtyForChangedWrites(
+              action,
+              changedComputationWrites,
+            );
           }
           resolve(result);
         }
@@ -1449,18 +1513,6 @@ export class Scheduler {
       next: (notification) => {
         const space = notification.space;
 
-        // Log notification details
-        triggerFlowLogger.debug("schedule-notification", () => [
-          `Type: ${notification.type}`,
-          `Space: ${space}`,
-          `Has source: ${
-            "source" in notification ? notification.source : "none"
-          }`,
-          `Changes: ${
-            "changes" in notification ? [...notification.changes].length : 0
-          }`,
-        ]);
-
         if ("changes" in notification) {
           const sourceChangeGroup = notification.type === "commit"
             ? notification.source?.changeGroup
@@ -1471,23 +1523,10 @@ export class Scheduler {
           let changeIndex = 0;
           for (const change of notification.changes) {
             changeIndex++;
-            triggerFlowLogger.debug("schedule-change", () => [
-              `Change #${changeIndex}`,
-              `Address: ${change.address.id}/${change.address.path.join("/")}`,
-              `Before: ${JSON.stringify(change.before)}`,
-              `After: ${JSON.stringify(change.after)}`,
-            ]);
             this.runtime.telemetry.submit({
               type: "cell.update",
               change: change,
             });
-
-            if (change.address.type !== "application/json") {
-              triggerFlowLogger.debug("schedule-change-skip", () => [
-                `Change #${changeIndex} skipping non-JSON type: ${change.address.type}`,
-              ]);
-              continue;
-            }
 
             if (
               this.triggers.size === 0 &&
@@ -1503,12 +1542,6 @@ export class Scheduler {
             );
 
             if (paths || nonRecursivePaths) {
-              triggerFlowLogger.debug("schedule-change-match", () => [
-                `Change #${changeIndex} found ${
-                  (paths?.size ?? 0) + (nonRecursivePaths?.size ?? 0)
-                } registered actions for ${spaceAndURI}`,
-              ]);
-
               const triggeredActionSet = new Set<Action>();
               if (paths) {
                 for (
@@ -1558,10 +1591,6 @@ export class Scheduler {
                   } satisfies TriggerTraceEntry
                   : null;
 
-              triggerFlowLogger.debug("schedule-change-trigger", () => [
-                `Change #${changeIndex} triggered ${triggeredActions.length} actions`,
-              ]);
-
               for (const action of triggeredActions) {
                 // Causal edge tracking for diagnosis
                 if (
@@ -1592,10 +1621,6 @@ export class Scheduler {
                   notification.source !== undefined &&
                   this.inFlightSources.get(action)?.has(notification.source);
                 if (isOwnCommitSource) {
-                  triggerFlowLogger.debug("schedule-change-skip-source", () => [
-                    `Change #${changeIndex} skipped action commit source`,
-                    `Action: ${actionId}`,
-                  ]);
                   triggerTraceEntry?.triggered.push({
                     actionId,
                     actionType,
@@ -1614,10 +1639,6 @@ export class Scheduler {
                   actionChangeGroup !== undefined &&
                   Object.is(actionChangeGroup, sourceChangeGroup)
                 ) {
-                  triggerFlowLogger.debug("schedule-change-skip-group", () => [
-                    `Change #${changeIndex} skipped action change group`,
-                    `Action: ${actionId}`,
-                  ]);
                   triggerTraceEntry?.triggered.push({
                     actionId,
                     actionType,
@@ -1632,18 +1653,12 @@ export class Scheduler {
                   continue;
                 }
 
-                triggerFlowLogger.debug("schedule-trigger", () => [
-                  `Action for ${spaceAndURI}/${change.address.path.join("/")}`,
-                  `Action: ${actionId}`,
-                  `Mode: ${this.pullMode ? "pull" : "push"}`,
-                  `Type: ${actionType}`,
-                ]);
-
                 let decision: TriggerTraceActionRecord["decision"];
                 let scheduledEffects: TriggerTraceScheduledEffect[] = [];
                 if (this.pullMode) {
                   // Pull mode: only schedule effects, mark computations as dirty
                   if (this.effects.has(action)) {
+                    this.conditionallyScheduledEffects.delete(action);
                     this.scheduleWithDebounce(action);
                     decision = "schedule-effect";
                   } else {
@@ -1678,10 +1693,6 @@ export class Scheduler {
               ) {
                 this.recordTriggerTrace(triggerTraceEntry);
               }
-            } else {
-              triggerFlowLogger.debug("schedule", () => [
-                `[CHANGE ${changeIndex}] No registered actions for ${spaceAndURI}`,
-              ]);
             }
           }
         }
@@ -1692,7 +1703,6 @@ export class Scheduler {
 
   queueExecution(): void {
     if (this.disposed) return;
-    this.cancelEventQueueWake();
     if (this.scheduled) return;
     this.pendingQueueTaskTimer = queueTask(() => {
       this.pendingQueueTaskTimer = null;
@@ -1731,8 +1741,11 @@ export class Scheduler {
     const shallowReads = sortAndCompactPaths(log.shallowReads, false);
     const ignoredSchedulingWrites =
       (action as Partial<TelemetryAnnotations>).ignoredSchedulingWrites ?? [];
-    const writes = sortAndCompactPaths(
-      filterIgnoredAddresses(log.writes, ignoredSchedulingWrites),
+    const writes = this.pruneStructuralAncestorWrites(
+      sortAndCompactPaths(
+        filterIgnoredAddresses(log.writes, ignoredSchedulingWrites),
+        false,
+      ),
     );
     const potentialWrites = sortAndCompactPaths(
       filterIgnoredAddresses(log.potentialWrites, ignoredSchedulingWrites),
@@ -1761,9 +1774,18 @@ export class Scheduler {
       rawExistingCurrentWrites,
       ignoredSchedulingWrites,
     );
+    const currentSeedWrites = writes.length > 0
+      ? writes
+      : existingCurrentWrites.length > 0
+      ? existingCurrentWrites
+      : declaredWrites;
+    const dynamicParentWrites = this.deriveDynamicCollectionParentWrites(
+      writes,
+      declaredWrites,
+    );
     const newCurrentKnownWrites = sortAndCompactPaths([
-      ...declaredWrites,
-      ...writes,
+      ...currentSeedWrites,
+      ...dynamicParentWrites,
       ...potentialWrites,
     ]);
     this.currentKnownWrites.set(action, newCurrentKnownWrites);
@@ -1791,7 +1813,6 @@ export class Scheduler {
       !previousSchedulingWrites.some((existing) =>
         existing.space === write.space &&
         existing.id === write.id &&
-        existing.type === write.type &&
         existing.path.length <= write.path.length &&
         arraysOverlap(existing.path, write.path)
       )
@@ -1800,7 +1821,6 @@ export class Scheduler {
       !nextSchedulingWrites.some((existing) =>
         existing.space === write.space &&
         existing.id === write.id &&
-        existing.type === write.type &&
         existing.path.length <= write.path.length &&
         arraysOverlap(existing.path, write.path)
       )
@@ -1855,6 +1875,58 @@ export class Scheduler {
     }
 
     return { reads, shallowReads, log: schedulingLog };
+  }
+
+  private pruneStructuralAncestorWrites(
+    writes: IMemorySpaceAddress[],
+  ): IMemorySpaceAddress[] {
+    // Transaction reactivity logs include ancestor paths when a child write
+    // changes shallow structure. For scheduling writes, the descendant path is
+    // precise enough; keeping the ancestor would make unrelated shallow root
+    // readers depend on this action.
+    return writes.filter((write) =>
+      !writes.some((other) =>
+        other !== write &&
+        other.space === write.space &&
+        other.id === write.id &&
+        other.type === write.type &&
+        write.path.length < other.path.length &&
+        arraysOverlap(write.path, other.path)
+      )
+    );
+  }
+
+  private deriveDynamicCollectionParentWrites(
+    writes: IMemorySpaceAddress[],
+    declaredWrites: IMemorySpaceAddress[],
+  ): IMemorySpaceAddress[] {
+    const parentWrites: IMemorySpaceAddress[] = [];
+    for (const declaredWrite of declaredWrites) {
+      for (const write of writes) {
+        if (
+          declaredWrite.space !== write.space ||
+          declaredWrite.id !== write.id ||
+          declaredWrite.type !== write.type ||
+          declaredWrite.path.length >= write.path.length ||
+          !arraysOverlap(declaredWrite.path, write.path)
+        ) {
+          continue;
+        }
+
+        const dynamicSegment = write.path[declaredWrite.path.length];
+        if (this.isDynamicCollectionSegment(dynamicSegment)) {
+          parentWrites.push(declaredWrite);
+        }
+      }
+    }
+    return parentWrites;
+  }
+
+  private isDynamicCollectionSegment(
+    segment: MemoryAddressPathComponent | undefined,
+  ): boolean {
+    if (typeof segment === "number") return Number.isInteger(segment);
+    return typeof segment === "string" && /^(0|[1-9]\d*)$/.test(segment);
   }
 
   private addTriggerPaths(
@@ -1981,12 +2053,8 @@ export class Scheduler {
     const actionId = this.getActionId(action);
     const previousDependencies = this.reverseDependencies.get(action);
     if (previousDependencies) {
-      for (const dependency of previousDependencies) {
-        const dependents = this.dependents.get(dependency);
-        dependents?.delete(action);
-        if (dependents && dependents.size === 0) {
-          this.dependents.delete(dependency);
-        }
+      for (const dependency of [...previousDependencies]) {
+        this.unregisterDependentEdge(dependency, action);
       }
       this.reverseDependencies.delete(action);
     }
@@ -2043,12 +2111,7 @@ export class Scheduler {
           )
         ) {
           // otherAction writes → this action reads, so this action depends on otherAction
-          let deps = this.dependents.get(otherAction);
-          if (!deps) {
-            deps = new Set();
-            this.dependents.set(otherAction, deps);
-          }
-          deps.add(action);
+          this.registerDependentEdge(otherAction, action);
           newDependencies.add(otherAction);
         }
       }
@@ -2075,6 +2138,7 @@ export class Scheduler {
       dependents = new Set();
       this.dependents.set(writer, dependents);
     }
+    const alreadyDependent = dependents.has(dependent);
     dependents.add(dependent);
 
     let reverse = this.reverseDependencies.get(dependent);
@@ -2083,17 +2147,35 @@ export class Scheduler {
       this.reverseDependencies.set(dependent, reverse);
     }
     reverse.add(writer);
+
+    if (!alreadyDependent && this.isStale(writer)) {
+      this.addStaleUpstream(writer, dependent);
+    }
+  }
+
+  private unregisterDependentEdge(writer: Action, dependent: Action): void {
+    const dependents = this.dependents.get(writer);
+    const hadDependent = dependents?.delete(dependent) ?? false;
+    if (dependents && dependents.size === 0) {
+      this.dependents.delete(writer);
+    }
+
+    const reverse = this.reverseDependencies.get(dependent);
+    reverse?.delete(writer);
+    if (reverse && reverse.size === 0) {
+      this.reverseDependencies.delete(dependent);
+    }
+
+    if (hadDependent) {
+      this.removeStaleUpstream(writer, dependent);
+    }
   }
 
   private pathMatchesWrite(
     readPath: readonly MemoryAddressPathComponent[],
     writePath: readonly MemoryAddressPathComponent[],
-    options: { nonRecursive?: boolean } = {},
   ): boolean {
-    return options.nonRecursive
-      ? writePath.length <= readPath.length + 1 &&
-        arraysOverlap(writePath, readPath)
-      : arraysOverlap(writePath, readPath);
+    return arraysOverlap(writePath, readPath);
   }
 
   private collectReadersForWrite(write: IMemorySpaceAddress): Set<Action> {
@@ -2111,10 +2193,10 @@ export class Scheduler {
 
     const nonRecursiveReaders = this.nonRecursiveTriggers.get(entity);
     if (nonRecursiveReaders) {
-      for (const [action, paths] of nonRecursiveReaders) {
+      for (const [action, reads] of nonRecursiveReaders) {
         if (
-          paths.some((path) =>
-            this.pathMatchesWrite(path, write.path, { nonRecursive: true })
+          reads.some((read) =>
+            nonRecursiveReadMayOverlapWrite(read, write.path)
           )
         ) {
           readers.add(action);
@@ -2159,16 +2241,7 @@ export class Scheduler {
         continue;
       }
 
-      dependents.delete(dependent);
-      const reverse = this.reverseDependencies.get(dependent);
-      reverse?.delete(writer);
-      if (reverse && reverse.size === 0) {
-        this.reverseDependencies.delete(dependent);
-      }
-    }
-
-    if (dependents.size === 0) {
-      this.dependents.delete(writer);
+      this.unregisterDependentEdge(writer, dependent);
     }
   }
 
@@ -2195,8 +2268,7 @@ export class Scheduler {
         if (
           read.space === write.space &&
           read.id === write.id &&
-          write.path.length <= read.path.length + 1 &&
-          arraysOverlap(write.path, read.path)
+          nonRecursiveReadMayOverlapWrite(read.path, write.path)
         ) {
           return true;
         }
@@ -2266,6 +2338,9 @@ export class Scheduler {
       const reads = deps?.reads.map((r) =>
         `${r.space}/${r.id}/${r.path.join("/")}`
       );
+      const shallowReads = deps?.shallowReads.map((r) =>
+        `${r.space}/${r.id}/${r.path.join("/")}`
+      );
       const writes = this.getSchedulingWrites(action)?.map((w) =>
         `${w.space}/${w.id}/${w.path.join("/")}`
       );
@@ -2292,6 +2367,7 @@ export class Scheduler {
           module?: { implementation?: { preview?: string } };
         }).module?.implementation?.preview,
         reads,
+        shallowReads,
         writes,
         debounceMs: debounceMs && debounceMs > 0 ? debounceMs : undefined,
         throttleMs: throttleMs && throttleMs > 0 ? throttleMs : undefined,
@@ -2460,6 +2536,9 @@ export class Scheduler {
    */
   enablePullMode(): void {
     this.pullMode = true;
+    this.stale.clear();
+    this.upstreamStaleWriters = new WeakMap();
+    this.upstreamStaleCount = new WeakMap();
 
     // Rebuild reverse dependency graph (dependents map) from current dependencies.
     // In push mode, processRun() doesn't update dependents, so the map may be stale.
@@ -2469,6 +2548,9 @@ export class Scheduler {
       if (log) {
         this.updateDependents(action, log);
       }
+    }
+    for (const action of this.dirty) {
+      this.setStaleFromInputs(action);
     }
 
     this.runtime.telemetry.submit({
@@ -2485,6 +2567,9 @@ export class Scheduler {
     this.pullMode = false;
     // Clear dirty set when switching back to push mode
     this.dirty.clear();
+    this.stale.clear();
+    this.upstreamStaleWriters = new WeakMap();
+    this.upstreamStaleCount = new WeakMap();
     this.runtime.telemetry.submit({
       type: "scheduler.mode.change",
       pullMode: false,
@@ -2499,6 +2584,14 @@ export class Scheduler {
     return this.pullMode;
   }
 
+  setEventPreflightTelemetryEnabled(enabled: boolean): void {
+    this.eventPreflightTelemetryEnabled = enabled;
+  }
+
+  isEventPreflightTelemetryEnabled(): boolean {
+    return this.eventPreflightTelemetryEnabled;
+  }
+
   /**
    * Marks an action as dirty.
    *
@@ -2507,9 +2600,159 @@ export class Scheduler {
    * on-demand by collectDirtyDependencies().
    */
   private markDirty(action: Action): void {
-    if (this.dirty.has(action)) return; // Already dirty, avoid infinite recursion
+    this.markDirectDirty(action);
+    this.scheduleComputationDebounce(action);
+  }
+
+  private markDirectDirty(action: Action): boolean {
+    if (this.dirty.has(action)) return false;
 
     this.dirty.add(action);
+    this.setStaleFromInputs(action);
+    return true;
+  }
+
+  private clearDirectDirty(action: Action): boolean {
+    if (!this.dirty.delete(action)) return false;
+    if (this.computations.has(action)) {
+      this.clearComputationDebounceState(action);
+    }
+    this.setStaleFromInputs(action);
+    return true;
+  }
+
+  private setStaleFromInputs(action: Action): void {
+    const shouldBeStale = this.dirty.has(action) ||
+      this.getUpstreamStaleCount(action) > 0;
+    const isCurrentlyStale = this.stale.has(action);
+    if (shouldBeStale === isCurrentlyStale) return;
+
+    if (shouldBeStale) {
+      this.stale.add(action);
+    } else {
+      this.stale.delete(action);
+    }
+    this.propagateStaleTransition(action, shouldBeStale);
+  }
+
+  private propagateStaleTransition(
+    action: Action,
+    becameStale: boolean,
+  ): void {
+    const dependents = this.dependents.get(action);
+    if (!dependents) return;
+
+    const delta = becameStale ? 1 : -1;
+    for (const dependent of dependents) {
+      if (delta > 0) {
+        this.addStaleUpstream(action, dependent);
+      } else {
+        this.removeStaleUpstream(action, dependent);
+      }
+    }
+  }
+
+  private addStaleUpstream(writer: Action, dependent: Action): void {
+    let writers = this.upstreamStaleWriters.get(dependent);
+    if (!writers) {
+      writers = new Set();
+      this.upstreamStaleWriters.set(dependent, writers);
+    }
+    if (writers.has(writer)) return;
+
+    writers.add(writer);
+    this.upstreamStaleCount.set(dependent, writers.size);
+    this.setStaleFromInputs(dependent);
+  }
+
+  private removeStaleUpstream(writer: Action, dependent: Action): void {
+    const writers = this.upstreamStaleWriters.get(dependent);
+    if (!writers?.delete(writer)) return;
+
+    if (writers.size === 0) {
+      this.upstreamStaleWriters.delete(dependent);
+      this.upstreamStaleCount.delete(dependent);
+    } else {
+      this.upstreamStaleCount.set(dependent, writers.size);
+    }
+    this.setStaleFromInputs(dependent);
+  }
+
+  private forceClearStale(action: Action): void {
+    this.upstreamStaleWriters.delete(action);
+    this.upstreamStaleCount.delete(action);
+    if (!this.stale.delete(action)) return;
+    this.propagateStaleTransition(action, false);
+  }
+
+  private getTraceActionSummary(
+    trace: DirtyDependencyTraceContext,
+    action: Action,
+  ): SchedulerEventPreflightActionSummary {
+    let summary = trace.actionSummaries.get(action);
+    if (!summary) {
+      const log = this.dependencies.get(action);
+      const writes = this.getSchedulingWrites(action) ?? [];
+      summary = {
+        actionId: this.getActionId(action),
+        actionType: this.effects.has(action)
+          ? "effect"
+          : this.computations.has(action)
+          ? "computation"
+          : "unknown",
+        visitCount: 0,
+        memoHitCount: 0,
+        dirtyInputCount: 0,
+        resultTrueCount: 0,
+        reverseDependencyEdgeCount: 0,
+        maxDirectWriterCount: 0,
+        dirty: this.dirty.has(action),
+        pending: this.pending.has(action),
+        readCount: log?.reads.length ?? 0,
+        shallowReadCount: log?.shallowReads.length ?? 0,
+        writeCount: writes.length,
+      };
+      trace.actionSummaries.set(action, summary);
+    } else {
+      summary.dirty ||= this.dirty.has(action);
+      summary.pending ||= this.pending.has(action);
+    }
+    return summary;
+  }
+
+  private snapshotDirtyDependencyTraceContext(
+    context: DirtyDependencyTraceContext,
+  ): SchedulerEventPreflightStats {
+    const {
+      depth: _depth,
+      actionSummaries,
+      rootDirectWriterActions,
+      ...stats
+    } = context;
+    const actionRows = [...actionSummaries.values()];
+    const topBy = (
+      rows: SchedulerEventPreflightActionSummary[],
+      key: "visitCount" | "reverseDependencyEdgeCount",
+    ) =>
+      rows
+        .filter((row) => row[key] > 0)
+        .sort((a, b) =>
+          b[key] - a[key] ||
+          b.visitCount - a.visitCount ||
+          a.actionId.localeCompare(b.actionId)
+        )
+        .slice(0, 12);
+
+    const rootDirectWriterRows = [...rootDirectWriterActions].map((action) =>
+      this.getTraceActionSummary(context, action)
+    );
+
+    return {
+      ...stats,
+      hotActions: topBy(actionRows, "visitCount"),
+      hotFanoutActions: topBy(actionRows, "reverseDependencyEdgeCount"),
+      rootDirectWriters: topBy(rootDirectWriterRows, "visitCount"),
+    };
   }
 
   /**
@@ -2519,11 +2762,19 @@ export class Scheduler {
     return this.dirty.has(action);
   }
 
+  private isStale(action: Action): boolean {
+    return this.stale.has(action);
+  }
+
+  private getUpstreamStaleCount(action: Action): number {
+    return this.upstreamStaleCount.get(action) ?? 0;
+  }
+
   /**
    * Clears the dirty flag for an action.
    */
   private clearDirty(action: Action): void {
-    this.dirty.delete(action);
+    this.clearDirectDirty(action);
   }
 
   /**
@@ -2541,18 +2792,41 @@ export class Scheduler {
   ): boolean {
     const collectStart = performance.now();
     let addedToStack = false;
+    const trace = this.dirtyDependencyTraceContext;
 
     try {
+      if (trace) {
+        trace.visitCount++;
+        trace.maxDepth = Math.max(trace.maxDepth, trace.depth);
+        const actionSummary = this.getTraceActionSummary(trace, action);
+        actionSummary.visitCount++;
+        if (this.dirty.has(action)) {
+          trace.dirtyInputCount++;
+          actionSummary.dirtyInputCount++;
+        }
+      }
+
       const cached = memo.get(action);
       if (cached !== undefined) {
-        if (cached && this.computations.has(action)) {
+        if (trace) {
+          trace.memoHitCount++;
+          this.getTraceActionSummary(trace, action).memoHitCount++;
+        }
+        if (cached && this.dirty.has(action) && this.computations.has(action)) {
+          if (!workSet.has(action) && trace) trace.workSetAddCount++;
           workSet.add(action);
         }
         return cached;
       }
 
+      if (!this.isStale(action)) {
+        memo.set(action, false);
+        return false;
+      }
+
       if (this.collectStack.has(action)) {
-        const cycleResult = this.dirty.has(action) || workSet.has(action);
+        if (trace) trace.cycleHitCount++;
+        const cycleResult = this.isStale(action) || workSet.has(action);
         memo.set(action, cycleResult);
         return cycleResult;
       }
@@ -2560,23 +2834,41 @@ export class Scheduler {
       this.collectStack.add(action);
       addedToStack = true;
 
-      let actionNeedsRun = this.dirty.has(action);
+      let actionNeedsRun = this.isStale(action);
       const directWriters = this.reverseDependencies.get(action);
       if (directWriters) {
-        for (const writer of directWriters) {
-          const writerNeedsRun = this.collectDirtyDependencies(
-            writer,
-            workSet,
-            memo,
+        if (trace) {
+          trace.reverseDependencyActionCount++;
+          trace.reverseDependencyEdgeCount += directWriters.size;
+          const actionSummary = this.getTraceActionSummary(trace, action);
+          actionSummary.reverseDependencyEdgeCount += directWriters.size;
+          actionSummary.maxDirectWriterCount = Math.max(
+            actionSummary.maxDirectWriterCount,
+            directWriters.size,
           );
+        }
+        for (const writer of directWriters) {
+          if (!this.isStale(writer)) {
+            memo.set(writer, false);
+            continue;
+          }
+          if (trace) trace.depth++;
+          let writerNeedsRun: boolean;
+          try {
+            writerNeedsRun = this.collectDirtyDependencies(
+              writer,
+              workSet,
+              memo,
+            );
+          } finally {
+            if (trace) trace.depth--;
+          }
           if (writerNeedsRun) {
             actionNeedsRun = true;
-            if (this.computations.has(writer)) {
-              workSet.add(writer);
-            }
           }
         }
       } else {
+        if (trace) trace.logFallbackCount++;
         const log = this.dependencies.get(action);
         if (log) {
           if (this.collectDirtyDependenciesForLog(log, workSet, memo)) {
@@ -2585,10 +2877,15 @@ export class Scheduler {
         }
       }
 
-      if (actionNeedsRun && this.computations.has(action)) {
+      if (this.dirty.has(action) && this.computations.has(action)) {
+        if (!workSet.has(action) && trace) trace.workSetAddCount++;
         workSet.add(action);
       }
 
+      if (actionNeedsRun && trace) {
+        trace.resultTrueCount++;
+        this.getTraceActionSummary(trace, action).resultTrueCount++;
+      }
       memo.set(action, actionNeedsRun);
       return actionNeedsRun;
     } finally {
@@ -2604,6 +2901,123 @@ export class Scheduler {
     }
   }
 
+  private pendingDependencyCollectionMightAffect(
+    action: Action,
+    reads: IMemorySpaceAddress[],
+    shallowReads: IMemorySpaceAddress[],
+  ): boolean {
+    if (reads.length === 0 && shallowReads.length === 0) return false;
+
+    for (const pendingAction of this.pendingDependencyCollection) {
+      if (pendingAction === action) continue;
+      if (this.effects.has(pendingAction)) continue;
+      if (this.isThrottled(pendingAction)) continue;
+
+      const writes = this.getSchedulingWrites(pendingAction);
+      if (!writes || writes.length === 0) return true;
+      if (this.hasDependentPath(pendingAction, action)) return true;
+      if (this.readsOverlapWrites(reads, shallowReads, writes)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private hasDependentPath(
+    from: Action,
+    to: Action,
+    visited = new Set<Action>(),
+  ): boolean {
+    if (from === to) return true;
+    if (visited.has(from)) return false;
+    visited.add(from);
+
+    const dependents = this.dependents.get(from);
+    if (!dependents) return false;
+
+    for (const dependent of dependents) {
+      if (this.hasDependentPath(dependent, to, visited)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private markEffectConditionallyScheduled(effect: Action): void {
+    if (!this.conditionallyScheduledEffects.has(effect)) {
+      this.conditionallyScheduledEffects.set(
+        effect,
+        this.changedWritesHistory.length,
+      );
+    }
+  }
+
+  private recordChangedComputationWrites(
+    action: Action,
+    tx: IExtendedStorageTransaction,
+    log: ReactivityLog,
+  ): IMemorySpaceAddress[] {
+    if (!this.pullMode || !this.computations.has(action)) return [];
+    if (log.writes.length === 0) return [];
+
+    const spaces = new Set(log.writes.map((write) => write.space));
+    const changedWrites: IMemorySpaceAddress[] = [];
+
+    for (const space of spaces) {
+      for (const detail of getTransactionWriteDetails(tx, space)) {
+        if (!deepEqual(detail.previousValue, detail.value)) {
+          changedWrites.push(detail.address);
+        }
+      }
+    }
+
+    if (changedWrites.length > 0) {
+      this.changedWritesHistory.push(...sortAndCompactPaths(changedWrites));
+    }
+    return changedWrites;
+  }
+
+  private conditionalEffectHasChangedInputs(effect: Action): boolean {
+    const changedWritesStart = this.conditionallyScheduledEffects.get(effect);
+    if (changedWritesStart === undefined) return true;
+
+    const changedWrites = this.changedWritesHistory.slice(changedWritesStart);
+    if (changedWrites.length === 0) return false;
+
+    const log = this.dependencies.get(effect);
+    if (!log) return false;
+
+    return this.readsOverlapWrites(log.reads, log.shallowReads, changedWrites);
+  }
+
+  private markReadersDirtyForChangedWrites(
+    sourceAction: Action,
+    changedWrites: IMemorySpaceAddress[],
+  ): void {
+    if (!this.pullMode || changedWrites.length === 0) return;
+
+    const readers = new Set<Action>();
+    for (const write of sortAndCompactPaths(changedWrites)) {
+      for (const reader of this.collectReadersForWrite(write)) {
+        if (reader !== sourceAction) {
+          readers.add(reader);
+        }
+      }
+    }
+
+    for (const reader of readers) {
+      if (this.effects.has(reader)) {
+        this.conditionallyScheduledEffects.delete(reader);
+        this.scheduleWithDebounce(reader);
+      } else if (this.computations.has(reader)) {
+        this.markDirty(reader);
+        this.scheduleAffectedEffects(reader);
+      }
+    }
+  }
+
   private collectDirtyDependenciesForLog(
     log: ReactivityLog,
     workSet: Set<Action>,
@@ -2611,6 +3025,11 @@ export class Scheduler {
   ): boolean {
     const lookupStart = performance.now();
     const directWriters = new Set<Action>();
+    const trace = this.dirtyDependencyTraceContext;
+    if (trace) {
+      trace.logReadCount += log.reads.length;
+      trace.logShallowReadCount += log.shallowReads.length;
+    }
     try {
       for (const read of log.reads) {
         const entity = `${read.space}/${read.id}` as SpaceAndURI;
@@ -2619,8 +3038,12 @@ export class Scheduler {
 
         for (const writer of writers) {
           if (this.effects.has(writer)) continue;
+          if (trace) trace.writerCandidateCount++;
           const writes = this.getSchedulingWrites(writer) ?? [];
           if (this.readsOverlapWrites([read], [], writes)) {
+            if (trace && !directWriters.has(writer)) {
+              trace.writerOverlapCount++;
+            }
             directWriters.add(writer);
           }
         }
@@ -2633,8 +3056,12 @@ export class Scheduler {
 
         for (const writer of writers) {
           if (this.effects.has(writer)) continue;
+          if (trace) trace.writerCandidateCount++;
           const writes = this.getSchedulingWrites(writer) ?? [];
           if (this.readsOverlapWrites([], [read], writes)) {
+            if (trace && !directWriters.has(writer)) {
+              trace.writerOverlapCount++;
+            }
             directWriters.add(writer);
           }
         }
@@ -2649,16 +3076,36 @@ export class Scheduler {
       );
     }
 
+    if (trace) trace.directWriterCount += directWriters.size;
+    if (trace && trace.depth === 0) {
+      for (const writer of directWriters) {
+        trace.rootDirectWriterActions.add(writer);
+        this.getTraceActionSummary(trace, writer);
+      }
+    }
+
     let hasDirtyDependencies = false;
     for (const writer of directWriters) {
-      const writerNeedsRun = this.collectDirtyDependencies(
-        writer,
-        workSet,
-        memo,
-      );
+      if (!this.isStale(writer)) {
+        memo.set(writer, false);
+        continue;
+      }
+
+      if (trace) trace.depth++;
+      let writerNeedsRun: boolean;
+      try {
+        writerNeedsRun = this.collectDirtyDependencies(
+          writer,
+          workSet,
+          memo,
+        );
+      } finally {
+        if (trace) trace.depth--;
+      }
       if (writerNeedsRun) {
         hasDirtyDependencies = true;
-        if (this.computations.has(writer)) {
+        if (this.dirty.has(writer) && this.computations.has(writer)) {
+          if (!workSet.has(writer) && trace) trace.workSetAddCount++;
           workSet.add(writer);
         }
       }
@@ -2683,7 +3130,10 @@ export class Scheduler {
 
     for (const action of this.dirty) {
       if (this.effects.has(action)) {
-        workSet.add(action);
+        if (!this.isThrottled(action)) {
+          this.pending.add(action);
+          workSet.add(action);
+        }
       }
     }
   }
@@ -2723,6 +3173,12 @@ export class Scheduler {
         const pendingBefore = this.pending.has(effect);
         const dirtyBefore = this.dirty.has(effect);
         const debounceMs = this.actionDebounce.get(effect);
+        if (
+          !pendingBefore && !dirtyBefore &&
+          !this.conditionallyScheduledEffects.has(effect)
+        ) {
+          this.markEffectConditionallyScheduled(effect);
+        }
         this.scheduleWithDebounce(effect);
         scheduledEffects.push({
           actionId: this.getActionId(effect),
@@ -2794,6 +3250,7 @@ export class Scheduler {
   setDebounce(action: Action, ms: number): void {
     if (ms <= 0) {
       this.actionDebounce.delete(action);
+      this.clearComputationDebounceState(action);
     } else {
       this.actionDebounce.set(action, ms);
     }
@@ -2812,6 +3269,19 @@ export class Scheduler {
   clearDebounce(action: Action): void {
     this.actionDebounce.delete(action);
     this.cancelDebounceTimer(action);
+    this.clearComputationDebounceState(action, { cancelTimer: false });
+  }
+
+  private clearComputationDebounceState(
+    action: Action,
+    options: { cancelTimer?: boolean } = {},
+  ): void {
+    this.computationDebounceReady.delete(action);
+    this.computationDebounceReadyAt.delete(action);
+    this.computationDebounceFlushSeeds.delete(action);
+    if (options.cancelTimer ?? true) {
+      this.cancelDebounceTimer(action);
+    }
   }
 
   /**
@@ -2837,6 +3307,71 @@ export class Scheduler {
       this.debounceTimers.delete(action);
       this.activeDebounceTimers.delete(timer);
     }
+  }
+
+  private shouldDebouncePullComputation(action: Action): boolean {
+    const debounceMs = this.actionDebounce.get(action);
+    return this.pullMode &&
+      this.computations.has(action) &&
+      !this.effects.has(action) &&
+      this.actionHasRun.has(action) &&
+      debounceMs !== undefined &&
+      debounceMs > 0;
+  }
+
+  private getNextDebounceRunTime(action: Action): number | undefined {
+    if (!this.shouldDebouncePullComputation(action)) return undefined;
+    if (!this.dirty.has(action)) return undefined;
+    if (this.computationDebounceReady.has(action)) return undefined;
+    return this.computationDebounceReadyAt.get(action);
+  }
+
+  private isDebouncedComputationWaiting(action: Action): boolean {
+    if (
+      this.shouldDebouncePullComputation(action) &&
+      this.dirty.has(action) &&
+      !this.computationDebounceReady.has(action) &&
+      this.computationDebounceReadyAt.get(action) === undefined
+    ) {
+      this.scheduleComputationDebounce(action);
+    }
+    const readyAt = this.getNextDebounceRunTime(action);
+    return readyAt !== undefined && readyAt > performance.now();
+  }
+
+  private scheduleComputationDebounce(action: Action): void {
+    if (!this.shouldDebouncePullComputation(action)) return;
+    const debounceMs = this.actionDebounce.get(action);
+    if (!debounceMs || debounceMs <= 0) return;
+
+    this.computationDebounceReady.delete(action);
+    this.cancelDebounceTimer(action);
+
+    const readyAt = performance.now() + debounceMs;
+    this.computationDebounceReadyAt.set(action, readyAt);
+    const timer = setTimeout(() => {
+      this.debounceTimers.delete(action);
+      this.activeDebounceTimers.delete(timer);
+      this.computationDebounceReadyAt.delete(action);
+
+      if (!this.computations.has(action) || !this.dirty.has(action)) {
+        return;
+      }
+
+      this.computationDebounceReady.add(action);
+      this.computationDebounceFlushSeeds.add(action);
+      this.pending.add(action);
+      this.queueExecution();
+    }, debounceMs);
+
+    this.debounceTimers.set(action, timer);
+    this.activeDebounceTimers.add(timer);
+
+    logger.debug("schedule-debounce", () => [
+      `[DEBOUNCE] Computation ${
+        this.getActionId(action)
+      } trailing flush scheduled for ${debounceMs}ms`,
+    ]);
   }
 
   /**
@@ -3239,7 +3774,6 @@ export class Scheduler {
           {
             space: read.space,
             id: read.id,
-            type: read.type ?? "application/json",
             path: [...read.path],
           },
           { meta: ignoreReadForScheduling },
@@ -3551,43 +4085,151 @@ export class Scheduler {
         // In pull mode, ensure handler dependencies are computed before running.
         let shouldSkipEvent = false;
         if (this.pullMode && handler.populateDependencies) {
+          const preflightStats = createDirtyDependencyTraceContext();
+          const dirtySizeBefore = this.dirty.size;
+          const pendingSizeBefore = this.pending.size;
+          let populateMs = 0;
+          let txToLogMs = 0;
+          let depCommitMs = 0;
+          let collectMs = 0;
+          let scheduleMs = 0;
           // Get the handler's dependencies (read-only, just capturing what will be read)
           const depTx = this.runtime.edit();
           depTx.setReadOnly?.("scheduler.populateDependencies()");
-          handler.populateDependencies(depTx, eventValue);
-          const deps = txToReactivityLog(depTx);
+          let stepStart = performance.now();
+          logger.timeStart(
+            "scheduler",
+            "execute",
+            "event",
+            "pullPopulateDependencies",
+          );
+          try {
+            handler.populateDependencies(depTx, eventValue);
+          } catch (error) {
+            this.eventQueue.shift();
+            this.handleError(error as Error, handler);
+            shouldSkipEvent = true;
+          } finally {
+            logger.timeEnd(
+              "scheduler",
+              "execute",
+              "event",
+              "pullPopulateDependencies",
+            );
+          }
+          populateMs = performance.now() - stepStart;
+          stepStart = performance.now();
+          logger.timeStart(
+            "scheduler",
+            "execute",
+            "event",
+            "pullTxToReactivityLog",
+          );
+          const deps: ReactivityLog = shouldSkipEvent
+            ? { reads: [], shallowReads: [], writes: [] }
+            : txToReactivityLog(depTx);
+          logger.timeEnd(
+            "scheduler",
+            "execute",
+            "event",
+            "pullTxToReactivityLog",
+          );
+          txToLogMs = performance.now() - stepStart;
+          // Commit even though we only read - the tx has no writes so this is safe
+          stepStart = performance.now();
+          logger.timeStart(
+            "scheduler",
+            "execute",
+            "event",
+            "pullDepCommitStart",
+          );
           // Commit the read-only inspection tx as a no-op so dependency discovery
-          // does not participate in CFC prepare or commit gating.
+          // does not participate in CFC prepare or commit gating. Do this even
+          // after populateDependencies errors so the transaction is closed.
           depTx.commit();
+          logger.timeEnd(
+            "scheduler",
+            "execute",
+            "event",
+            "pullDepCommitStart",
+          );
+          depCommitMs = performance.now() - stepStart;
 
           const dirtyDeps = new Set<Action>();
           const dirtyDepMemo = new Map<Action, boolean>();
-          const hasDirtyDependencies = this.collectDirtyDependenciesForLog(
-            deps,
-            dirtyDeps,
-            dirtyDepMemo,
+          stepStart = performance.now();
+          logger.timeStart(
+            "scheduler",
+            "execute",
+            "event",
+            "pullCollectDirtyDependencies",
           );
+          let hasDirtyDependencies = false;
+          this.dirtyDependencyTraceContext = preflightStats;
+          try {
+            hasDirtyDependencies = this.collectDirtyDependenciesForLog(
+              deps,
+              dirtyDeps,
+              dirtyDepMemo,
+            );
+          } finally {
+            this.dirtyDependencyTraceContext = undefined;
+            logger.timeEnd(
+              "scheduler",
+              "execute",
+              "event",
+              "pullCollectDirtyDependencies",
+            );
+          }
+          collectMs = performance.now() - stepStart;
 
-          if (hasDirtyDependencies) {
+          if (!shouldSkipEvent && hasDirtyDependencies) {
             let nextEligibleAt: number | undefined;
             let hasRunnableDirtyDependency = false;
 
-            for (const dep of dirtyDeps) {
-              const depNextEligibleAt = this.getNextEligibleRunTime(dep);
-              if (
-                depNextEligibleAt !== undefined &&
-                depNextEligibleAt > performance.now()
-              ) {
-                nextEligibleAt = nextEligibleAt === undefined
-                  ? depNextEligibleAt
-                  : Math.min(nextEligibleAt, depNextEligibleAt);
-                continue;
-              }
+            stepStart = performance.now();
+            logger.timeStart(
+              "scheduler",
+              "execute",
+              "event",
+              "pullScheduleDirtyDependencies",
+            );
+            try {
+              for (const dep of dirtyDeps) {
+                if (this.isDebouncedComputationWaiting(dep)) {
+                  const depNextDebounceAt = this.getNextDebounceRunTime(dep);
+                  if (depNextDebounceAt !== undefined) {
+                    nextEligibleAt = nextEligibleAt === undefined
+                      ? depNextDebounceAt
+                      : Math.min(nextEligibleAt, depNextDebounceAt);
+                    continue;
+                  }
+                }
 
-              hasRunnableDirtyDependency = true;
-              this.pending.add(dep);
-              eventBlockingDeps.add(dep);
+                const depNextEligibleAt = this.getNextEligibleRunTime(dep);
+                if (
+                  depNextEligibleAt !== undefined &&
+                  depNextEligibleAt > performance.now()
+                ) {
+                  nextEligibleAt = nextEligibleAt === undefined
+                    ? depNextEligibleAt
+                    : Math.min(nextEligibleAt, depNextEligibleAt);
+                  continue;
+                }
+
+                hasRunnableDirtyDependency = true;
+                this.pending.add(dep);
+                eventBlockingDeps.add(dep);
+              }
+            } finally {
+              logger.timeEnd(
+                "scheduler",
+                "execute",
+                "event",
+                "pullScheduleDirtyDependencies",
+              );
             }
+            scheduleMs = performance.now() - stepStart;
 
             if (hasRunnableDirtyDependency) {
               shouldSkipEvent = true;
@@ -3596,6 +4238,27 @@ export class Scheduler {
               this.scheduleEventQueueWake(nextEligibleAt);
               shouldSkipEvent = true;
             }
+          }
+
+          if (this.eventPreflightTelemetryEnabled) {
+            this.runtime.telemetry.submit({
+              type: "scheduler.event.preflight",
+              handlerId,
+              handlerInfo: this.getActionTelemetryInfo(handler),
+              readCount: deps.reads.length,
+              shallowReadCount: deps.shallowReads.length,
+              dirtySizeBefore,
+              pendingSizeBefore,
+              dirtyDependencyCount: dirtyDeps.size,
+              hasDirtyDependencies,
+              skipped: shouldSkipEvent,
+              populateMs,
+              txToLogMs,
+              depCommitMs,
+              collectMs,
+              scheduleMs,
+              stats: this.snapshotDirtyDependencyTraceContext(preflightStats),
+            });
           }
         }
 
@@ -3678,30 +4341,45 @@ export class Scheduler {
               recordTrustedEventPolicyInputs(tx, handler.writes, eventValue);
             }
             const actionStartTime = performance.now();
-            this.runningPromise = Promise.resolve(
-              this.runtime.harness.invoke(() => action(tx)),
-            ).then(() => {
-              const trustedEventCandidates =
-                trustedEventWriteCandidatesFromTransaction(tx, handler, [
-                  queuedEvent.eventLink.space,
-                ]);
-              recordTrustedEventPolicyInputs(
-                tx,
-                trustedEventCandidates,
-                eventValue,
+            logger.timeStart(
+              "scheduler",
+              "execute",
+              "event",
+              "handlerAction",
+            );
+            try {
+              this.runningPromise = Promise.resolve(
+                this.runtime.harness.invoke(() => action(tx)),
+              ).then(() => {
+                const trustedEventCandidates =
+                  trustedEventWriteCandidatesFromTransaction(tx, handler, [
+                    queuedEvent.eventLink.space,
+                  ]);
+                recordTrustedEventPolicyInputs(
+                  tx,
+                  trustedEventCandidates,
+                  eventValue,
+                );
+                const duration = (performance.now() - actionStartTime) / 1000;
+                if (duration > 10) {
+                  console.warn(`Slow action: ${duration.toFixed(3)}s`, action);
+                }
+                logger.debug("action-timing", () => {
+                  return [
+                    `Action ${actionId} completed in ${duration.toFixed(3)}s`,
+                  ];
+                });
+                finalize();
+              }).catch((error) => finalize(error));
+              await this.runningPromise;
+            } finally {
+              logger.timeEnd(
+                "scheduler",
+                "execute",
+                "event",
+                "handlerAction",
               );
-              const duration = (performance.now() - actionStartTime) / 1000;
-              if (duration > 10) {
-                console.warn(`Slow action: ${duration.toFixed(3)}s`, action);
-              }
-              logger.debug("action-timing", () => {
-                return [
-                  `Action ${actionId} completed in ${duration.toFixed(3)}s`,
-                ];
-              });
-              finalize();
-            }).catch((error) => finalize(error));
-            await this.runningPromise;
+            }
           } catch (error) {
             finalize(error);
           }
@@ -3759,6 +4437,11 @@ export class Scheduler {
       for (const action of eventBlockingDeps) {
         initialSeeds.add(action);
       }
+      // Add computations whose trailing debounce timer fired. These are pull
+      // computations, so they need an explicit demand seed to flush.
+      for (const action of this.computationDebounceFlushSeeds) {
+        initialSeeds.add(action);
+      }
     }
 
     // Settle loop: runs until no more dirty work is found.
@@ -3801,12 +4484,13 @@ export class Scheduler {
       let workSet: Set<Action>;
 
       if (this.pullMode) {
+        const buildPullWorkSetStart = performance.now();
         workSet = new Set<Action>();
         const iterationSeeds = new Set<Action>();
 
         // Every iteration needs to consider newly created pending effects.
         // Without this, nested/recursive patterns can stall after creating
-        // new `readResult`/pattern effects in an earlier iteration.
+        // new demand-root effects in an earlier iteration.
         this.collectPullIterationSeeds(iterationSeeds);
 
         // On first iteration, add special-case seeds discovered before settle
@@ -3833,6 +4517,12 @@ export class Scheduler {
             }`,
           ]);
         }
+        logger.time(
+          buildPullWorkSetStart,
+          "scheduler",
+          "execute",
+          "buildPullWorkSet",
+        );
       } else {
         // Push mode: work set is just the pending actions
         workSet = this.pending;
@@ -3857,12 +4547,19 @@ export class Scheduler {
       // which gets mutated during execution)
       const iterWorkSetSize = workSet.size;
 
+      const topologicalSortStart = performance.now();
       const order = topologicalSort(
         workSet,
         this.dependencies,
         this.getSchedulingWritesMap(),
         this.actionParent,
         this.pullMode ? this.dependents : undefined,
+      );
+      logger.time(
+        topologicalSortStart,
+        "scheduler",
+        "execute",
+        "topologicalSort",
       );
 
       logger.debug("schedule-execute", () => [
@@ -3917,6 +4614,17 @@ export class Scheduler {
           if (!isInPending) continue;
         }
 
+        if (this.isDebouncedComputationWaiting(fn)) {
+          logger.debug("schedule-debounce", () => [
+            `[DEBOUNCE] Skipping debounced computation: ${
+              this.getActionId(fn)
+            }`,
+          ]);
+          this.filterStats.filtered++;
+          this.pending.delete(fn);
+          continue;
+        }
+
         // Check throttle: skip recently-run actions but keep them dirty
         // They'll be pulled next time an effect needs them (if throttle expired)
         if (this.isThrottled(fn)) {
@@ -3927,13 +4635,33 @@ export class Scheduler {
           // Don't clear from pending or dirty - action stays in its current state
           // but we remove from pending so it doesn't run this cycle
           this.pending.delete(fn);
-          // Keep dirty flag so it can be pulled later
+          // Keep pull-mode effects dirty so they wake when the throttle expires.
+          if (this.pullMode && this.effects.has(fn)) {
+            this.markDirectDirty(fn);
+          }
+          continue;
+        }
+
+        if (
+          this.pullMode &&
+          this.effects.has(fn) &&
+          this.conditionallyScheduledEffects.has(fn) &&
+          !this.conditionalEffectHasChangedInputs(fn)
+        ) {
+          this.conditionallyScheduledEffects.delete(fn);
+          this.pending.delete(fn);
+          this.clearDirty(fn);
+          this.filterStats.filtered++;
           continue;
         }
 
         // Clean up from pending/dirty before running
         this.pending.delete(fn);
-        if (this.pullMode) {
+        this.conditionallyScheduledEffects.delete(fn);
+        if (this.computations.has(fn)) {
+          this.clearComputationDebounceState(fn);
+        }
+        if (this.pullMode && this.effects.has(fn)) {
           this.clearDirty(fn);
         }
 
@@ -4110,13 +4838,31 @@ export class Scheduler {
     const hasPendingEffects = this.pullMode
       ? [...this.pending].some((a) => this.effects.has(a))
       : this.pending.size > 0;
+    let nextDirtyEffectRunAt: number | undefined;
     const hasDirtyEffects = this.pullMode &&
-      [...this.dirty].some((a) => this.effects.has(a));
+      [...this.dirty].some((action) => {
+        if (!this.effects.has(action)) return false;
+        const nextEligibleAt = this.getNextEligibleRunTime(action);
+        if (
+          nextEligibleAt !== undefined &&
+          nextEligibleAt > performance.now()
+        ) {
+          nextDirtyEffectRunAt = nextDirtyEffectRunAt === undefined
+            ? nextEligibleAt
+            : Math.min(nextDirtyEffectRunAt, nextEligibleAt);
+          return false;
+        }
+        return true;
+      });
     const hasQueuedEventReadyNow = this.eventQueue.length > 0 &&
       !this.isHeadEventParked();
 
     if (!hasPendingEffects && !hasDirtyEffects && !hasQueuedEventReadyNow) {
-      if (this.eventQueueWakeTimer !== null) {
+      if (nextDirtyEffectRunAt !== undefined) {
+        this.scheduleEventQueueWake(nextDirtyEffectRunAt);
+        this.loopCounter = new WeakMap();
+        this.scheduled = false;
+      } else if (this.eventQueueWakeTimer !== null) {
         this.loopCounter = new WeakMap();
         this.scheduled = false;
 
@@ -4146,6 +4892,9 @@ export class Scheduler {
         };
 
         this.scheduledFirstTime.clear();
+        if (this.conditionallyScheduledEffects.size === 0) {
+          this.changedWritesHistory = [];
+        }
       }
     } else {
       // Keep scheduled = true since we're queuing another execution
@@ -4270,8 +5019,7 @@ function topologicalSort(
                 (addr) =>
                   addr.space === write.space &&
                   addr.id === write.id &&
-                  write.path.length <= addr.path.length + 1 &&
-                  arraysOverlap(write.path, addr.path),
+                  nonRecursiveReadMayOverlapWrite(addr.path, write.path),
               )
             ) {
               graphA.add(actionB);

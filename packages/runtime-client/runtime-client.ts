@@ -42,6 +42,7 @@ import { EventEmitter } from "./client/emitter.ts";
 import {
   InitializedRuntimeConnection,
   RuntimeConnection,
+  type SubscriptionDiagnostics,
 } from "./client/connection.ts";
 import { PageHandle } from "./page-handle.ts";
 
@@ -89,7 +90,6 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       spaceIdentity: options.spaceIdentity?.serialize(),
       spaceDid: options.spaceDid,
       spaceName: options.spaceName,
-      memoryVersion: options.memoryVersion,
       experimental: options.experimental,
       cfcEnforcementMode: options.cfcEnforcementMode,
       trustSnapshot: options.trustSnapshot,
@@ -251,6 +251,14 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       type: RequestType.SetPullMode,
       pullMode,
     });
+  }
+
+  getSubscriptionDiagnostics(): SubscriptionDiagnostics {
+    return this.#conn.getSubscriptionDiagnostics();
+  }
+
+  resetSubscriptionDiagnostics(): void {
+    this.#conn.resetSubscriptionDiagnostics();
   }
 
   async getLoggerCounts(): Promise<{

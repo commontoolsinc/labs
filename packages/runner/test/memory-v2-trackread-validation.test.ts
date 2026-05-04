@@ -14,7 +14,6 @@ describe("trackReadWithoutLoad validation", () => {
   beforeEach(() => {
     storage = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
   });
 
@@ -81,7 +80,6 @@ describe("multi-write previousValue tracking", () => {
   beforeEach(() => {
     storage = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
   });
 

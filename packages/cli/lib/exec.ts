@@ -1,10 +1,17 @@
+import type { PieceManager } from "@commonfabric/piece";
 import { PiecesController } from "@commonfabric/piece/ops";
 import { dirname, join, relative, resolve } from "@std/path";
 import {
   type MountedCallablePath,
   parseMountedCallablePath,
 } from "../../fuse/callable-path.ts";
-import { callableCommandSpec } from "./callable.ts";
+import {
+  type CallableCellLike,
+  callableCommandSpec,
+  type CallableManagerLike,
+  type CallablePieceLike,
+  detectCallableKind,
+} from "./callable.ts";
 import { executeCallableCommand } from "./callable-command.ts";
 import {
   type ExecCommandSpec,
@@ -29,22 +36,28 @@ export interface MountedPieceMeta {
 export interface ResolvedMountedCallableFile {
   absPath: string;
   callablePath: MountedCallablePath;
-  callableCell: any;
+  callableCell: CallableCellLike;
   commandSpec: ExecCommandSpec;
-  manager: any;
+  manager: CallableManagerLike;
   mount: { entry: MountStateEntry; path: string };
-  piece: any;
+  piece: CallablePieceLike;
   pieceId: string;
   pieceMeta: MountedPieceMeta;
 }
 
 export interface ExecDependencies {
   stateDir?: string;
-  loadManager?: (config: SpaceConfig) => Promise<any>;
-  loadPiece?: (manager: any, pieceId: string) => Promise<any>;
+  loadManager?: (config: SpaceConfig) => Promise<CallableManagerLike>;
+  loadPiece?: (
+    manager: CallableManagerLike,
+    pieceId: string,
+  ) => Promise<CallablePieceLike>;
   timeoutMs?: number;
   uuid?: () => string;
-  waitForResult?: (resultCell: any, timeoutMs: number) => Promise<unknown>;
+  waitForResult?: (
+    resultCell: CallableCellLike,
+    timeoutMs: number,
+  ) => Promise<unknown>;
   invocationStyle?: "cf" | "direct";
   readJsonInput?: () => Promise<unknown>;
   readTextInput?: () => Promise<string>;
@@ -59,14 +72,26 @@ export interface ExecutedMountedCallableFile {
   resolved: ResolvedMountedCallableFile;
 }
 
-async function defaultLoadPiece(manager: any, pieceId: string) {
-  return await new PiecesController(manager).get(pieceId, true);
+async function defaultLoadPiece(
+  manager: CallableManagerLike,
+  pieceId: string,
+): Promise<CallablePieceLike> {
+  return await new PiecesController(manager as unknown as PieceManager).get(
+    pieceId,
+    true,
+  );
 }
 
 async function readMountedPieceMeta(
   absFilePath: string,
+  callablePath: MountedCallablePath,
 ): Promise<MountedPieceMeta> {
-  const metaPath = join(dirname(dirname(absFilePath)), "meta.json");
+  const metaPath = join(
+    callablePath.rootLevel
+      ? dirname(absFilePath)
+      : dirname(dirname(absFilePath)),
+    "meta.json",
+  );
   let parsed: unknown;
   try {
     parsed = JSON.parse(await Deno.readTextFile(metaPath));
@@ -133,28 +158,45 @@ export async function resolveMountedCallableFile(
     );
   }
 
+  const canonicalMountpoint = await canonicalizeMountLookupPath(
+    mount.entry.mountpoint,
+  );
+  const canonicalAbsPath = await canonicalizeMountLookupPath(absPath);
   const relativePath = relative(
-    await canonicalizeMountLookupPath(mount.entry.mountpoint),
-    await canonicalizeMountLookupPath(absPath),
+    canonicalMountpoint,
+    canonicalAbsPath,
   );
   const callablePath = parseMountedCallablePath(relativePath);
   if (!callablePath) {
     throw new Error(`Path is not a mounted callable file: ${absPath}`);
   }
 
-  await assertMountedCallableFileExists(absPath);
-  const pieceMeta = await readMountedPieceMeta(absPath);
-  const manager = await (deps.loadManager ?? loadManager)({
-    apiUrl: mount.entry.apiUrl,
-    identity: mount.entry.identity,
-    space: callablePath.spaceName,
-  });
+  await assertMountedCallableFileExists(canonicalAbsPath);
+  const pieceMeta = await readMountedPieceMeta(canonicalAbsPath, callablePath);
+  const manager = deps.loadManager
+    ? await deps.loadManager({
+      apiUrl: mount.entry.apiUrl,
+      identity: mount.entry.identity,
+      space: callablePath.spaceName,
+    })
+    : await loadManager({
+      apiUrl: mount.entry.apiUrl,
+      identity: mount.entry.identity,
+      space: callablePath.spaceName,
+    }) as unknown as CallableManagerLike;
   const piece = await (deps.loadPiece ?? defaultLoadPiece)(
     manager,
     pieceMeta.id,
   );
   const rootCell = await piece[callablePath.cellProp].getCell();
-  const callableCell = rootCell.key(callablePath.cellKey).asSchemaFromLinks();
+  const childCell = rootCell.key(callablePath.cellKey);
+  const callableCell = childCell.asSchemaFromLinks?.() ?? childCell;
+  const actualKind = detectCallableKind(undefined, callableCell);
+  if (actualKind !== callablePath.callableKind) {
+    throw new Error(
+      `Mounted callable path "${absPath}" does not resolve to a ${callablePath.callableKind}`,
+    );
+  }
 
   return {
     absPath,
@@ -201,9 +243,12 @@ export async function executeMountedCallableFile(
 
   // Auto-step: trigger reactive recomputation after handler execution.
   // Skip if --help was shown — no mutation occurred.
-  if (!result.helpText && typeof resolved.piece?.getCell === "function") {
+  if (!result.helpText && typeof resolved.piece.getCell === "function") {
     try {
-      await resolved.piece.getCell().pull();
+      const pieceCell = resolved.piece.getCell();
+      if (typeof pieceCell.pull === "function") {
+        await pieceCell.pull();
+      }
       await resolved.manager.synced();
     } catch {
       // Auto-step is best-effort; the handler already executed successfully.

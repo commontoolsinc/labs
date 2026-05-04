@@ -10,6 +10,13 @@ import { type Cell, createCell, recursivelyAddIDIfNeeded } from "./cell.ts";
 import { type Runtime } from "./runtime.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { toURI } from "./uri-utils.ts";
+import {
+  type CfcLabelView,
+  cfcLabelViewForDereferenceTraces,
+  cloneCfcLabelView,
+  mergeCfcLabelViews,
+  rebaseCfcLabelView,
+} from "./cfc/label-view-state.ts";
 
 // Maximum recursion depth to prevent infinite loops
 const MAX_RECURSION_DEPTH = 100;
@@ -45,14 +52,20 @@ const getProxyCache = (
 const proxyCacheKey = (
   link: NormalizedFullLink,
   writable: boolean,
+  cfcLabelView: CfcLabelView | undefined,
 ): string =>
   JSON.stringify([
     writable,
     link.space,
     link.id,
-    link.type,
     link.path,
+    cfcLabelView ?? null,
   ]);
+
+const childLabelView = (
+  cfcLabelView: CfcLabelView | undefined,
+  segment: string,
+): CfcLabelView | undefined => rebaseCfcLabelView(cfcLabelView, [segment]);
 
 // Array.prototype's entries, and whether they modify the array
 enum ArrayMethodType {
@@ -113,6 +126,7 @@ export function createQueryResultProxy<T>(
   link: NormalizedFullLink,
   depth: number = 0,
   writable: boolean = false,
+  cfcLabelView?: CfcLabelView,
 ): T {
   // Check recursion depth
   if (depth > MAX_RECURSION_DEPTH) {
@@ -124,7 +138,15 @@ export function createQueryResultProxy<T>(
   // Resolve path and follow links to actual value.
   const readTx = tx === undefined ? runtime.edit() : runtime.readTx(tx);
   const proxyTx = tx ?? readTx;
+  const traceStart = readTx.getCfcState().dereferenceTraces.length;
   link = resolveLink(runtime, readTx, link);
+  cfcLabelView = mergeCfcLabelViews([
+    cloneCfcLabelView(cfcLabelView),
+    cfcLabelViewForDereferenceTraces(
+      readTx,
+      readTx.getCfcState().dereferenceTraces.slice(traceStart),
+    ),
+  ]);
   const value = readTx.readValueOrThrow(link) as any;
 
   // If the value is a stream marker ({ $stream: true }), return a Cell with
@@ -132,7 +154,7 @@ export function createQueryResultProxy<T>(
   // pattern's Output type wasn't explicitly specified, causing the capture
   // schema to lose the asStream information.
   if (isStreamValue(value)) {
-    return createCell(runtime, link, tx, false, "stream") as T;
+    return createCell(runtime, link, tx, false, "stream", cfcLabelView) as T;
   }
 
   if (!isRecord(value)) return value;
@@ -171,13 +193,13 @@ export function createQueryResultProxy<T>(
 
   // Get the appropriate cache index by log
   const txCache = getProxyCache(tx);
-  const cacheKey = proxyCacheKey(link, writable);
+  const cacheKey = proxyCacheKey(link, writable, cfcLabelView);
 
   // Check if we already have a proxy for this target in the cache.
   // The cache key is the original `value` (not the stub), ensuring that
   // the same frozen object always maps to the same proxy instance.
   const existingProxy = txCache.byLink.get(cacheKey) ??
-    txCache.byValue.get(value);
+    (cfcLabelView === undefined ? txCache.byValue.get(value) : undefined);
   if (existingProxy) return existingProxy;
 
   const proxy = new Proxy(proxyTarget as object, {
@@ -197,7 +219,8 @@ export function createQueryResultProxy<T>(
 
       if (typeof prop === "symbol") {
         if (prop === toCell) {
-          return () => createCell(runtime, link, tx);
+          return () =>
+            createCell(runtime, link, tx, false, undefined, cfcLabelView);
         } else if (prop === Symbol.iterator && Array.isArray(value)) {
           return function () {
             let index = 0;
@@ -219,6 +242,7 @@ export function createQueryResultProxy<T>(
                       },
                       depth + 1,
                       writable,
+                      childLabelView(cfcLabelView, String(index)),
                     ),
                     done: false,
                   };
@@ -276,6 +300,7 @@ export function createQueryResultProxy<T>(
                 { ...link, path: [...link.path, String(i)] },
                 depth + 1,
                 writable,
+                childLabelView(cfcLabelView, String(i)),
               );
             }
 
@@ -315,6 +340,7 @@ export function createQueryResultProxy<T>(
                   index,
                   { ...link, path: [...link.path, String(index)] },
                   writable,
+                  childLabelView(cfcLabelView, String(index)),
                 )
               );
             }
@@ -374,7 +400,6 @@ export function createQueryResultProxy<T>(
                 id: toURI(hashOf(cause)),
                 space: link.space,
                 path: [],
-                type: "application/json",
               };
 
               diffAndUpdate(runtime, tx, resultLink, result, cause);
@@ -398,6 +423,7 @@ export function createQueryResultProxy<T>(
         { ...link, path: [...link.path, prop] },
         depth + 1,
         writable,
+        childLabelView(cfcLabelView, String(prop)),
       );
     },
     set: (_, prop, value) => {
@@ -470,6 +496,7 @@ export function createQueryResultProxy<T>(
             { ...link, path: [...link.path, prop as string] },
             depth + 1,
             writable,
+            childLabelView(cfcLabelView, String(prop)),
           ),
         };
       }
@@ -490,7 +517,9 @@ export function createQueryResultProxy<T>(
 
   // Cache the proxy in the appropriate cache before returning
   txCache.byLink.set(cacheKey, proxy);
-  txCache.byValue.set(value, proxy);
+  if (cfcLabelView === undefined) {
+    txCache.byValue.set(value, proxy);
+  }
   return proxy;
 }
 
@@ -509,13 +538,23 @@ const createProxyForArrayValue = (
   source: number,
   link: NormalizedFullLink,
   writable: boolean = false,
+  cfcLabelView?: CfcLabelView,
 ): { [originalIndex]: number } => {
   const target = {
     valueOf: function () {
-      return createQueryResultProxy(runtime, tx, link, 0, writable);
+      return createQueryResultProxy(
+        runtime,
+        tx,
+        link,
+        0,
+        writable,
+        cfcLabelView,
+      );
     },
     toString: function () {
-      return String(createQueryResultProxy(runtime, tx, link, 0, writable));
+      return String(
+        createQueryResultProxy(runtime, tx, link, 0, writable, cfcLabelView),
+      );
     },
     [originalIndex]: source,
   };

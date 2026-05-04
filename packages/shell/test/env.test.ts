@@ -35,8 +35,6 @@ Deno.test({
       $API_URL: "http://shell.test/",
       $EXPERIMENTAL_MODERN_DATA_MODEL: "true",
       $EXPERIMENTAL_UNIFIED_JSON_ENCODING: "false",
-      $EXPERIMENTAL_MODERN_HASH: "true",
-      $EXPERIMENTAL_MODERN_SCHEMA_HASH: "false",
       $EXPERIMENTAL_RICH_STORABLE_VALUES: undefined,
       $EXPERIMENTAL_STORABLE_PROTOCOL: undefined,
       $EXPERIMENTAL_CANONICAL_HASHING: undefined,
@@ -45,8 +43,6 @@ Deno.test({
     expect(mod.EXPERIMENTAL).toEqual({
       modernDataModel: true,
       unifiedJsonEncoding: false,
-      modernHash: true,
-      modernSchemaHash: false,
     });
   },
 });
@@ -59,8 +55,6 @@ Deno.test({
       $API_URL: "http://shell.test/",
       $EXPERIMENTAL_MODERN_DATA_MODEL: undefined,
       $EXPERIMENTAL_UNIFIED_JSON_ENCODING: undefined,
-      $EXPERIMENTAL_MODERN_HASH: undefined,
-      $EXPERIMENTAL_MODERN_SCHEMA_HASH: undefined,
       $EXPERIMENTAL_RICH_STORABLE_VALUES: "true",
       $EXPERIMENTAL_STORABLE_PROTOCOL: "true",
       $EXPERIMENTAL_CANONICAL_HASHING: "true",
@@ -69,8 +63,6 @@ Deno.test({
     expect(mod.EXPERIMENTAL).toEqual({
       modernDataModel: undefined,
       unifiedJsonEncoding: undefined,
-      modernHash: undefined,
-      modernSchemaHash: undefined,
     });
   },
 });

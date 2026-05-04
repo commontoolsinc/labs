@@ -173,14 +173,14 @@ member of `FabricValue`.
 | `number` | Must be finite | `-0` normalized to `0`; `NaN`/`Infinity` rejected |
 | `string` | None | Unicode text |
 | `undefined` | None | First-class fabric value; see note below |
-| `bigint` | None | Large integers; JSON-encoded as base64url (RFC 4648, Section 5) of two's complement big-endian bytes (Section 5.3) |
+| `bigint` | None | Large integers; JSON-encoded as base64url (RFC 4648, Section 5) of two's complement big-endian bytes (Section 3 of `3-json-encoding.md`) |
 
 > **`undefined` as a first-class fabric value.** `undefined` is a first-class
 > fabric value that round-trips faithfully through serialization. Because most
 > wire formats (including JSON) have no native `undefined` representation, the
 > serialization system uses a dedicated tagged form for `undefined` — the same
 > tagged form regardless of context (array element, object property value, or
-> top-level value). See Section 5.3 for the specific JSON encoding. Deletion
+> top-level value). See Section 3 of `3-json-encoding.md` for the specific JSON encoding. Deletion
 > semantics (e.g., removing a cell's value when `undefined` is written at top
 > level) are an application-level concern, not a serialization concern: the
 > serializer faithfully records `undefined` and the application layer interprets
@@ -190,7 +190,7 @@ member of `FabricValue`.
 > (`0`) during fabric-value conversion (i.e., `shallowFabricFromNativeValue()`),
 > before the value reaches a serialization boundary. This matches
 > `JSON.stringify` behavior and ensures that `0` and `-0` produce the same
-> serialized form and canonical hash. In the current codebase, this
+> serialized form and hash. In the current codebase, this
 > normalization happens in `packages/data-model/fabric-value-modern.ts` at the
 > `shallowFabricFromNativeValueModern()` call site.
 
@@ -224,8 +224,8 @@ The **special primitive** types (`FabricEpochNsec`, `FabricEpochDays`,
 `FabricSpecialObject`, and the `FabricValue` union includes
 `FabricSpecialObject`, so all `FabricPrimitive` subclasses are implicitly
 members of `FabricValue`. They are always-frozen value types that bypass the
-`freeze` option in conversion functions. They have dedicated canonical hash
-tags and dedicated `TypeHandler`s for wire format serialization, but they do
+`freeze` option in conversion functions. They have dedicated hash tags and
+dedicated `TypeHandler`s for wire format serialization, but they do
 not implement `[DECONSTRUCT]`, `[RECONSTRUCT]`, or carry a `typeTag`
 property.
 
@@ -659,8 +659,7 @@ export class FabricEpochDays extends FabricPrimitive {
  * system (always frozen, passes through conversion unchanged).
  *
  * The first algorithm tag is `fid1` ("fabric ID, v1"), which corresponds
- * to the SHA-256-based canonical hash produced by `hashOfModern()`
- * (Section 6.4).
+ * to the SHA-256-based hash produced by `hashOf()` (Section 6.4).
  *
  * Stringification produces `<tag>:<base64urlHash>` where `<base64urlHash>`
  * is the unpadded base64url encoding (RFC 4648 Section 5) of the hash
@@ -701,7 +700,7 @@ export class FabricHash extends FabricPrimitive {
     return this.#hash.length;
   }
 
-  /** The algorithm tag (e.g., `"fid1"`, `"legacy"`). */
+  /** The algorithm tag (e.g., `"fid1"`). */
   get tag(): string {
     return this.#tag;
   }
@@ -860,7 +859,7 @@ Section 4.5.
 - Elements may be `undefined` (a first-class fabric value; see Section 1.3)
 - Sparse arrays (arrays with holes) are supported; holes are distinct from
   `undefined` and are represented using run-length encoding in serialized forms
-  (see below and Section 5.3 for the specific JSON encoding)
+  (see below and Section 3 of `3-json-encoding.md` for the specific JSON encoding)
 - Non-index keys (named properties on arrays) cause rejection
 
 > **Holes vs. `undefined`.** A hole (sparse slot) is distinct from an
@@ -876,13 +875,13 @@ Section 4.5.
 >
 > On deserialization, hole entries are reconstructed as true holes (absent
 > indices in the resulting array, not `undefined` assignments), preserving the
-> `in`-operator distinction. See Section 5.3 for the specific JSON encodings.
+> `in`-operator distinction. See Section 3 of `3-json-encoding.md` for the specific JSON encodings.
 
 > **Array serialization strategy.** Even when an array contains holes, it is
 > serialized as an array (not an object or other structure). Runs of consecutive
 > holes are replaced by a single hole marker carrying the run length, preserving
-> the array structure while efficiently encoding sparse arrays. See Section 5.3
-> for the specific JSON encoding and examples.
+> the array structure while efficiently encoding sparse arrays. See Section 3 of
+> `3-json-encoding.md` for the specific JSON encoding and examples.
 
 **Objects:**
 - Plain objects only (class instances must implement the fabric protocol)
@@ -1212,7 +1211,7 @@ The system follows an **immutable-forward** design:
 
 - **Plain objects and arrays** are frozen (`Object.freeze()`) upon
   reconstruction. This applies to all deserialization output paths, including
-  `/quote` (Section 5.6) — the freeze is a property of the deserialization
+  `/quote` (Section 6 of `3-json-encoding.md`) — the freeze is a property of the deserialization
   boundary, not of whether type-tag reconstruction occurred.
 - **`FabricInstance`s** should ideally be frozen as well — this is the north
   star, though not yet a strict requirement.
@@ -1560,7 +1559,7 @@ The context's private `serialize()` method walks the `FabricValue` tree:
 3. **Arrays** — serialized element-by-element; sparse arrays use run-length
    encoded `hole` entries (Section 1.5).
 4. **Plain objects** — serialized key-by-key; `/object` escaping applied per
-   Section 5.6.
+   Section 6 of `3-json-encoding.md`.
 
 Circular references are detected via a `Set<object>` tracked during the walk.
 
@@ -1569,8 +1568,8 @@ Circular references are detected via a `Set<object>` tracked during the walk.
 The context's private `deserialize()` method walks the `JsonWireValue` tree:
 
 1. **Tag unwrapping** — checks for single-key objects with `/`-prefixed keys.
-2. **Structural escapes** — handles `/object` (Section 5.6) and `/quote`
-   (Section 5.6).
+2. **Structural escapes** — handles `/object` (Section 6 of `3-json-encoding.md`) and `/quote`
+   (Section 6 of `3-json-encoding.md`).
 3. **Type handler dispatch** — looks up the tag in the registry; if found,
    delegates to the handler's `deserialize()`. When the context is in lenient
    mode, handler exceptions produce `ProblematicValue` (Section 3.5).
@@ -1767,248 +1766,21 @@ In the `Cell` implementation:
 
 ## 5. JSON Encoding for Special Types
 
-### 5.1 Overview
+The JSON encoding for fabric values — the `/<Type>@<Version>` wire format,
+type encodings, escaping mechanisms, and the `/`-key reservation rule — is
+specified in a dedicated document:
 
-This section specifies the JSON-compatible wire format for special types. While
-the system will maintain a JSON encoding indefinitely (for debugging and
-interoperability), other wire and storage formats (e.g., CBOR) may represent
-types more directly without layering on JSON.
-
-### 5.2 Key Convention: `/<Type>@<Version>`
-
-All special types in JSON use a single convention: single-key objects where the
-key follows the pattern `/<Type>@<Version>`.
-
-- `/` — sigil prefix (nodding to IPLD heritage)
-- `<Type>` — `UpperCamelCase` type name
-- `@<Version>` — version number (natural number, starting at 1)
-
-This convention does **not** prohibit storing plain objects that happen to have
-`/`-prefixed keys. The escaping mechanism in Section 5.6 (`/object` and
-`/quote`) handles this case: during serialization, plain objects whose shape
-would be ambiguous with a tagged type are automatically wrapped so they
-round-trip correctly.
-
-### 5.3 Standard Type Encodings
-
-> **Base64url encoding convention.** All base64-encoded values in the JSON wire
-> format use the URL-safe base64url alphabet (`A-Za-z0-9-_`, per RFC 4648
-> Section 5) and **must omit** trailing `=` padding characters. Encoders must
-> not emit padding; decoders must **reject** input containing `=` padding
-> characters or standard-base64 characters (`+`, `/`). This convention applies
-> to `Bytes@1`, `BigInt@1`, `EpochNsec@1`, and `EpochDays@1` state values.
-
-```typescript
-// file: packages/data-model/json-type-handlers.ts (illustrative -- tag-to-format map)
-
-/**
- * Standard JSON encodings for all built-in special types.
- *
- * In each case, the tag string (e.g. `"Link@1"`) is passed to the context's
- * internal `wrapTag()` method, which prepends `/` to produce the JSON key
- * (e.g. `"/Link@1"`).
- */
-
-// Cell references (links to other documents)
-// Tag: "Link@1"
-// { "/Link@1": { id: string, path: string[], space: string } }
-
-// Errors
-// Tag: "Error@1"
-// { "/Error@1": { type: string, name: string | null, message: string, stack?: string, cause?: ..., ... } }
-
-// Undefined (stateless -- value is null)
-// Tag: "Undefined@1"
-// { "/Undefined@1": null }
-
-// Array holes (run-length encoded; value is a positive integer; only valid
-// inside arrays)
-// Tag: "hole"
-// { "/hole": <count> }   e.g. { "/hole": 1 }, { "/hole": 5 }
-
-// Stream markers (stateless -- value is null)
-// Tag: "Stream@1"
-// { "/Stream@1": null }
-
-// Maps (entry pairs preserve insertion order)
-// Tag: "Map@1"
-// { "/Map@1": [[key, value], ...] }
-
-// Sets (values preserve insertion order)
-// Tag: "Set@1"
-// { "/Set@1": [value, ...] }
-
-// Binary data (base64url-encoded per the base64url convention above)
-// Tag: "Bytes@1"
-// { "/Bytes@1": string }
-
-// Epoch nanoseconds (bigint, encoded per BigInt@1 conventions)
-// Tag: "EpochNsec@1"
-// { "/EpochNsec@1": string }
-//
-// The state is the base64url encoding of the bigint value's minimal two's
-// complement representation in big-endian byte order — the same encoding
-// as BigInt@1.
-
-// Epoch days (bigint, encoded per BigInt@1 conventions)
-// Tag: "EpochDays@1"
-// { "/EpochDays@1": string }
-//
-// Same encoding convention as EpochNsec@1 (base64url of two's complement
-// big-endian bytes).
-
-// BigInts (base64url of two's complement big-endian bytes; see convention above)
-// Tag: "BigInt@1"
-// { "/BigInt@1": string }
-//
-// The state is the base64url encoding of the value's minimal two's complement
-// representation in big-endian byte order. The minimum byte length is 1 —
-// even `0n` produces a single `0x00` byte. Examples:
-//   - `0n`  → single byte 0x00 → "AA"
-//   - `1n`  → 0x01             → "AQ"
-//   - `-1n` → 0xFF             → "_w"
-//   - `128n` → 0x00 0x80       → "AIA"  (leading 0x00 needed: 0x80 alone would decode as -128)
-//   - `-128n` → 0x80           → "gA"
-// This matches the canonical hash byte format (Section 6.4), which already
-// uses two's complement big-endian for BigInt payloads.
-```
-
-> **Deserialization validation.** Deserialization cannot assume type safety from
-> the wire. Each type handler must validate the format of its state before
-> processing. For example, a handler whose state is a base64url string (such as
-> `BigInt@1`, `EpochNsec@1`, `EpochDays@1`, or `Bytes@1`) must validate that
-> its state is a `string` containing valid unpadded base64url before decoding. On
-> malformed input — wrong type, invalid format, or missing fields — the handler
-> should produce a `ProblematicValue` (Section 3.5) rather than throwing or
-> silently producing garbage. This principle applies to all type handlers. Wire
-> data is untrusted input. See Section 7.4 for the broader principle that
-> applies to all code consuming deserialized values.
-
-> **Sparse array encoding in JSON.** Even when an array contains holes, it is
-> serialized as a JSON array. Runs of consecutive holes are represented by
-> `hole` entries, each carrying the run length as a positive integer. This
-> preserves the array-as-array structure while efficiently encoding sparse
-> arrays:
->
-> - `[1, , undefined, 3]` serializes as
->   `[1, { "/hole": 1 }, { "/Undefined@1": null }, 3]`.
-> - `[1, , , , 5]` serializes as `[1, { "/hole": 3 }, 5]`.
-> - A very sparse array like `a = []; a[1000000] = 'x'` serializes as
->   `[{ "/hole": 1000000 }, "x"]`.
-
-### 5.4 Detection
-
-A value is a special type if:
-
-1. It is a plain object.
-2. It has exactly one key.
-3. That key starts with `/`.
-
-This rule is quick to check and provides maximum flexibility to evolve the key
-format.
-
-### 5.5 Stateless Types
-
-Types that require no reconstruction state use `null` as the value:
-
-```json
-{ "/Stream@1": null }
-```
-
-Both `null` and `{}` are acceptable for "no state needed." `null` is the
-conventional choice, as it is slightly more idiomatic for signaling absence.
-The distinction between "`null` state" and "no state needed" is implied by the
-type being represented, not by the wire encoding.
-
-### 5.6 Escaping
-
-Two escape mechanisms handle cases where user data might be mistaken for
-special types.
-
-#### `/object` — Single-Layer Escape
-
-Wraps a plain object whose key(s) might look like special types. The values
-are still processed normally during deserialization:
-
-```json
-{ "/object": { "/myKey": { "/Link@1": { "id": "..." } } } }
-```
-
-Deserializes to: `{ "/myKey": <reconstructed Link> }`. The `/object` wrapper
-is stripped; inner keys are taken literally; inner values go through normal
-deserialization.
-
-**When the serializer emits `/object`:** During serialization, if a plain object
-has exactly one string key that starts with `/`, the serializer wraps it in
-`/object` to prevent the deserializer from misinterpreting it as a tagged type.
-If the object has multiple keys, no wrapping is needed (since tagged types
-always have exactly one key).
-
-#### `/quote` — Fully Literal
-
-Wraps a value that should be returned exactly as-is, with no deserialization
-of any nested special forms:
-
-```json
-{ "/quote": { "/Link@1": { "id": "..." } } }
-```
-
-Deserializes to: `{ "/Link@1": { "id": "..." } }` — the inner structure is
-*not* reconstructed. It remains a plain object.
-
-**Freeze guarantee.** Although `/quote` skips type-tag interpretation, the
-result is still deep-frozen (arrays and plain objects within the quoted value
-are frozen via `Object.freeze()`). The immutability guarantee (Section 2.9)
-is a property of deserialization output, not of whether reconstruction
-occurred. A caller receiving a value from the context's `decode()` can always assume
-it is immutable, regardless of whether it came from a `/quote` path, a
-reconstructed type, or a plain literal.
-
-Use cases:
-- Storing schemas or examples that describe special types without instantiating
-  them
-- Metaprogramming and introspection
-- Optimization: skip deserialization when the subtree is known to be plain data
-- Round-tripping JSON structures that happen to look like special types
-
-#### When to Use Which
-
-- `/object`: You have a plain object with a slash-prefixed key, but values
-  should still be interpreted normally.
-- `/quote`: You want the entire subtree treated as literal JSON data.
-
-### 5.7 Serialization Context Responsibilities
-
-The JSON encoding context's internal `wrapTag()` / `unwrapTag()` methods
-generate and parse `/<Type>@<Version>` keys. The context is also responsible
-for:
-
-- Re-wrapping unknown types using the `typeTag` preserved in
-  `UnknownValue` and `ExplicitTagValue`.
-- Managing the class registry for deserialization of known `FabricInstance`
-  types (e.g., `FabricError`, `FabricMap`, `FabricSet`, `FabricRegExp`).
-- Providing a narrow `TypeHandlerCodec` view to type handlers during tree
-  walking, exposing only `wrapTag()` and `getTagFor()`.
-
-Note: `/object` escaping (Section 5.6) is applied directly by the context's
-private `serialize()` method in its plain-objects path, since it is structural
-escaping rather than type encoding.
-
-### 5.8 Unknown Type Handling
-
-When a JSON context encounters a `/<Type>@<Version>` key it doesn't recognize,
-it wraps the data in `UnknownValue` (see Section 3) to preserve it for
-round-tripping.
+**See [`3-json-encoding.md`](./3-json-encoding.md)**
 
 ---
 
-## 6. Canonical Hashing
+## 6. Hashing
 
 ### 6.1 Overview
 
-The system uses canonical hashing for content-based identity. The hashing
-scheme operates directly on the natural data structure without intermediate
-tree construction.
+The system uses hashing for content-based identity. The hashing scheme
+operates directly on the natural data structure without intermediate tree
+construction.
 
 ### 6.2 Design Principles
 
@@ -2023,8 +1795,8 @@ tree construction.
 
 ### 6.3 Suggested Tag Bytes
 
-The following single-byte type tags are used by the canonical hash byte format
-and are recommended for any binary encoding of `FabricValue`s. They are
+The following single-byte type tags are used by the hash byte format and are
+recommended for any binary encoding of `FabricValue`s. They are
 organized into four categories by high nibble:
 
 **Meta tags (`0x0N`)** — structural markers that are not themselves value types:
@@ -2071,19 +1843,19 @@ enforced by the encoding — a decoder should handle any tag byte it encounters
 regardless of nibble range.
 
 > **Scope.** These tag bytes are defined here for use by any wire format that
-> needs to distinguish `FabricValue` types at the byte level. The canonical
-> hash byte format (`2-canonical-hash-byte-format.md`) is the first consumer;
-> future binary serialization formats may reuse the same tag assignments.
+> needs to distinguish `FabricValue` types at the byte level. The hash byte
+> format (`2-hash-byte-format.md`) is the first consumer; future binary
+> serialization formats may reuse the same tag assignments.
 
 ### 6.4 Hashing Algorithm
 
 ```typescript
-// file: packages/data-model/value-hash-modern.ts
+// file: packages/data-model/value-hash.ts
 
 /**
- * Compute a canonical hash for a fabric value. The hash is
- * encoding-independent: the same identity whether later serialized
- * to JSON, CBOR, or any other format.
+ * Compute a hash for a fabric value. The hash is encoding-independent:
+ * the same identity whether later serialized to JSON, CBOR, or any
+ * other format.
  *
  * The digest algorithm is SHA-256. Future additions (e.g., BLAKE2b)
  * would use the same byte-level input format; only the digest function
@@ -2095,11 +1867,11 @@ regardless of nibble range.
  * need a string representation can call `toString()` on the result,
  * which produces `<tag>:<base64urlhash>` (unpadded base64url with the
  * URL-safe alphabet `A-Za-z0-9-_`, per RFC 4648 Section 5; see
- * Section 5.3).
+ * Section 3 of `3-json-encoding.md`).
  *
  * Two public entry points are provided:
- * - `hashOfModern(value)` — returns a `FabricHash`.
- * - `hashOfModernAsString(value)` — returns a plain `string` (the hash
+ * - `hashOf(value)` — returns a `FabricHash`.
+ * - `hashStringOf(value)` — returns a plain `string` (the hash
  *   as base64url, without the algorithm tag). This avoids `FabricHash`
  *   allocation when only the string form is needed.
  *
@@ -2112,7 +1884,7 @@ regardless of nibble range.
  * (`shallowFabricFromNativeValueModern`), then hashed in their converted
  * form.
  */
-export function hashOfModern(value: unknown): FabricHash {
+export function hashOf(value: unknown): FabricHash {
   // Type tag bytes — see Section 6.3 for the full table.
   // Tag categories: meta (0x0N), compound (0x1N), primitive (0x2N),
   // optimized (0xFN).
@@ -2148,7 +1920,7 @@ export function hashOfModern(value: unknown): FabricHash {
   //                        (algorithm tag as a tagged string, then raw hash bytes)
   // - array:               hash(TAG_ARRAY, ...elements, TAG_END)
   //                        Elements are hashed in index order:
-  //                          if `i in array`: hashOfModern(array[i])
+  //                          if `i in array`: hashOf(array[i])
   //                          else (hole run): hash(TAG_HOLE, leb128(N))
   //                        TAG_END marks the end of the element sequence.
   //                        (order-preserving)
@@ -2179,7 +1951,7 @@ export function hashOfModern(value: unknown): FabricHash {
   //                        Each pair: hashStr(key) + tagged value.
   //                        TAG_END marks the end of the pair sequence.
   // - `FabricInstance`:  hash(TAG_INSTANCE, hashStr(typeTag),
-  //                              hashOfModern(deconstructedState))
+  //                              hashOf(deconstructedState))
   //
   // The native object wrappers and temporal types are hashed as follows:
   //
@@ -2187,7 +1959,7 @@ export function hashOfModern(value: unknown): FabricHash {
   //   and other `FabricInstance`s with recursively-processable
   //   deconstructed state are hashed via TAG_INSTANCE:
   //     hash(TAG_INSTANCE, hashStr(typeTag),
-  //          hashOfModern(deconstructedState))
+  //          hashOf(deconstructedState))
   //
   // - `FabricBytes` uses TAG_BYTES (dedicated primitive tag).
   // - `FabricEpochNsec` uses TAG_EPOCH_NSEC (dedicated primitive tag).
@@ -2197,12 +1969,12 @@ export function hashOfModern(value: unknown): FabricHash {
   // Examples (existing type tags are all short enough for the direct
   // string form, so `hashStr(tag)` below expands to
   // `TAG_STRING, leb128(utf8ByteLen), utf8Bytes`):
-  // - `FabricError`:      hash(TAG_INSTANCE, hashStr("Error@1"), hashOfModern(errorState))
-  // - `FabricMap`:        hash(TAG_INSTANCE, hashStr("Map@1"), hashOfModern(entries))
+  // - `FabricError`:      hash(TAG_INSTANCE, hashStr("Error@1"), hashOf(errorState))
+  // - `FabricMap`:        hash(TAG_INSTANCE, hashStr("Map@1"), hashOf(entries))
   //                         where entries are hashed in insertion order
-  // - `FabricSet`:        hash(TAG_INSTANCE, hashStr("Set@1"), hashOfModern(elements))
+  // - `FabricSet`:        hash(TAG_INSTANCE, hashStr("Set@1"), hashOf(elements))
   //                         where elements are hashed in insertion order
-  // - `FabricRegExp`:     hash(TAG_INSTANCE, hashStr("RegExp@1"), hashOfModern({source, flags, flavor}))
+  // - `FabricRegExp`:     hash(TAG_INSTANCE, hashStr("RegExp@1"), hashOf({source, flags, flavor}))
   // - `FabricEpochNsec`:  hash(TAG_EPOCH_NSEC, leb128(byteLen), twosComplementBytes)
   // - `FabricEpochDays`:  hash(TAG_EPOCH_DAYS, leb128(byteLen), twosComplementBytes)
   // - `FabricHash`:  hash(TAG_CONTENT_ID, hashStr(algTag),
@@ -2215,8 +1987,8 @@ export function hashOfModern(value: unknown): FabricHash {
   // distinct hashes, ensuring `[1, , 3]`, `[1, undefined, 3]`, and
   // `[1, null, 3]` are distinguishable by hash.
   //
-  // Note: The canonical hash is a function of the logical value, not
-  // any particular wire format. Implementations that hash from an
+  // Note: The hash is a function of the logical value, not any
+  // particular wire format. Implementations that hash from an
   // in-memory array and implementations that hash from the wire
   // format must produce identical hashes. Both use maximal-run RLE
   // for holes in the hash stream.
@@ -2225,10 +1997,10 @@ export function hashOfModern(value: unknown): FabricHash {
 
 > **String encoding for hashing.** Strings are hashed as UTF-8 byte sequences,
 > prefixed by their byte length (unsigned LEB128). See the byte-level spec
-> (`2-canonical-hash-byte-format.md`, Section 4.4) for the precise encoding.
+> (`2-hash-byte-format.md`, Section 4.4) for the precise encoding.
 
-> **Map/Set ordering in hashing.** Canonical hashing preserves insertion order
-> for `FabricMap` entries and `FabricSet` elements, matching the serialized
+> **Map/Set ordering in hashing.** Hashing preserves insertion order for
+> `FabricMap` entries and `FabricSet` elements, matching the serialized
 > form. This means two `FabricMap`s or `FabricSet`s with the same elements
 > in different insertion order will hash differently. This is intentional:
 > insertion order is part of the observable semantics of `Map`/`Set` in
@@ -2238,15 +2010,15 @@ export function hashOfModern(value: unknown): FabricHash {
 
 ### 6.5 Relationship to Late Serialization
 
-Canonical hashing operates on `FabricValue` directly, using deconstructed
-state for `FabricInstance`s (including the native object wrappers) and
-type-specific handling for primitives and containers. This makes identity
-hashing independent of any particular wire encoding — the same hash whether
-later serialized to JSON, CBOR, or Automerge.
+Hashing operates on `FabricValue` directly, using deconstructed state for
+`FabricInstance`s (including the native object wrappers) and type-specific
+handling for primitives and containers. This makes identity hashing
+independent of any particular wire encoding — the same hash whether later
+serialized to JSON, CBOR, or Automerge.
 
 ### 6.6 Use Cases
 
-Canonical hashing is used for:
+Hashing is used for:
 - Pattern ID generation (derived from pattern definition)
 - Request deduplication
 - Causal chain references (hashing the causal tree of what led to the data's
@@ -2305,7 +2077,7 @@ Four legacy conventions in the current codebase must be migrated to the unified
 > **Note on `$stream`:** In the current codebase, `$stream` is a stateless
 > marker — it signals that a cell path is a stream endpoint rather than carrying
 > reconstructible state. Under the new encoding it becomes `{ "/Stream@1": null }`
-> (a stateless tagged type per Section 5.5), preserving its marker semantics.
+> (a stateless tagged type per Section 5 of `3-json-encoding.md`), preserving its marker semantics.
 >
 > **Note on `$alias`:** An alias is an internal cross-cell reference with an
 > optional schema filter. During migration it maps to `/Link@1` with the
@@ -2314,10 +2086,10 @@ Four legacy conventions in the current codebase must be migrated to the unified
 
 ### 7.3 Replacing CID-Based Hashing
 
-The canonical hashing approach (Section 6) replaces `merkle-reference` /
-CID-based hashing. Since the system does not participate in the IPFS network,
-CID formatting adds overhead without interoperability benefit. The canonical
-hash operates on the logical data structure directly.
+The hashing approach (Section 6) replaces `merkle-reference` / CID-based
+hashing. Since the system does not participate in the IPFS network, CID
+formatting adds overhead without interoperability benefit. The hash operates
+on the logical data structure directly.
 
 ### 7.4 Untrusted Deserialized Input
 
@@ -2337,11 +2109,11 @@ This applies at every point where deserialized data is consumed:
   cast (e.g., `state as { value: number }`). See the note in Section 2.7 for a
   concrete example.
 
-- **JSON type handlers** (Section 5.3) must validate the format of their state
+- **JSON type handlers** (Section 3 of `3-json-encoding.md`) must validate the format of their state
   before processing. Malformed input should produce a `ProblematicValue`
   rather than throwing or silently producing garbage.
 
-- **Canonical hashing** (Section 6.3) may operate on values that have been
+- **Hashing** (Section 6.3) may operate on values that have been
   through a deserialization round-trip. Code that extracts properties from
   `FabricInstance` values (e.g., casting to `{ typeTag: string }`) must
   validate those properties at runtime.
@@ -2757,10 +2529,10 @@ spec from being implementable.
   deconstructed state. How does this integrate with the schema language?
   Currently out of scope (schemas are listed as out-of-scope for this spec).
 
-- **Exact canonical hash specification**: The precise byte-level format is
-  defined in `2-canonical-hash-byte-format.md`. All lengths and counts use
-  unsigned LEB128 encoding; see that document for the complete specification
-  of type tags, encoding per type, and illustrative examples.
+- **Exact hash specification**: The precise byte-level format is defined in
+  `2-hash-byte-format.md`. All lengths and counts use unsigned LEB128
+  encoding; see that document for the complete specification of type tags,
+  encoding per type, and illustrative examples.
 
 - **Migration path**: Out of scope for this spec. The detailed migration plan
   (sequencing of flag introductions, criteria for graduating each flag to

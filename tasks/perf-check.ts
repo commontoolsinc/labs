@@ -38,6 +38,7 @@ import {
   MIN_SAMPLES,
   parseBaselineOverrides,
   type PRInfo,
+  readAndParseEvent,
   REPO,
   STDDEV_FACTOR,
   type TimingSample,
@@ -77,6 +78,11 @@ async function main() {
     console.error("GITHUB_RUN_ID is required.");
     Deno.exit(1);
   }
+
+  console.log(
+    "::group::Triggered by event:\n%o\n::endgroup::",
+    await readAndParseEvent(),
+  );
 
   // 1. Check PR description for overrides, if there's a PR to check.
   let prOverrides;

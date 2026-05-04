@@ -259,43 +259,7 @@ export const read = (
     return { error };
   } else {
     const { space: _, ...memoryAddress } = address;
-    const result = space.read(memoryAddress, options);
-
-    // Special handling for source path, API is to always return object
-    // We should return objects, but we get JSON strings from transaction, so we convert
-    if (
-      result.ok && address.path.length === 1 && address.path[0] === "source"
-    ) {
-      const value = result.ok.value;
-      logger.debug("storage-source-read", () => [
-        `Read source path for ${address.id}`,
-        `Value type: ${typeof value}`,
-        `Value: ${JSON.stringify(value)}`,
-      ]);
-
-      if (typeof value === "string" && value.startsWith('{"/":')) {
-        try {
-          // Parse the JSON string to return an object
-          const parsedValue = JSON.parse(value);
-          // Create a new attestation with the parsed value
-          result.ok = {
-            address: result.ok.address,
-            value: parsedValue,
-          };
-          logger.debug("storage-source-parse", () => [
-            `Parsed JSON string to object`,
-            `Result: ${JSON.stringify(parsedValue)}`,
-          ]);
-        } catch (e) {
-          // If parsing fails, leave it as is
-          logger.error("storage-error", () => [
-            `[SOURCE PATH] Failed to parse JSON string`,
-            `Error: ${e}`,
-          ]);
-        }
-      }
-    }
-    return result;
+    return space.read(memoryAddress, options);
   }
 };
 
