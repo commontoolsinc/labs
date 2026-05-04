@@ -4,7 +4,7 @@ import {
   REJECTING_SELECTOR,
 } from "@commonfabric/data-model/schema-utils";
 import type { MIME } from "@commonfabric/memory/interface";
-import { stableHash } from "../traverse.ts";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { ContextualFlowControl } from "../cfc.ts";
 import { SelectorTracker } from "./selector-tracker.ts";
 import type {
@@ -63,7 +63,7 @@ export const compactWatchEntries = (
 };
 
 const selectorIdentity = (selector: SchemaPathSelector): string =>
-  stableHash({
+  hashStringOf({
     path: selector.path,
     schemaHash: selector.schema === undefined
       ? ""
@@ -76,7 +76,7 @@ export const watchIdForEntry = (
   branch = "",
 ): string =>
   `replica:${
-    stableHash({
+    hashStringOf({
       branch,
       id: address.id,
       type: DOCUMENT_MIME,
