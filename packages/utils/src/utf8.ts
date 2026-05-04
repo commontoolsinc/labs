@@ -1,0 +1,103 @@
+/**
+ * UTF8 helper functions.
+ */
+
+/**
+ * `WeakMap` cache from frozen objects to already-calculated sorted keys. Used
+ * by `utf8SortedKeysOf()`.
+ */
+const sortedKeyCache = new WeakMap<object, readonly string[]>();
+
+/**
+ * Helper for `utf8Compare()`: Is the given character code a surrogate?
+ */
+function isSurrogateCharCode(c: number) {
+  return (c >= 0xd800) && (c <= 0xdfff);
+}
+
+/**
+ * Helper for `utf8Compare()`: Does the given string contain any surrogate code
+ * points?
+ */
+function hasSurrogateCharCode(value: string) {
+  return /[\ud800-\udfff]/.test(value);
+}
+
+/**
+ * Compares strings by UTF-8 sort order.
+ */
+export function utf8Compare(a: string, b: string): number {
+  // Credit where due: Though this started out as an independent implementation
+  // of the key insight for fast sorting, this incorporates ideas from
+  // <https://github.com/rocicorp/compare-utf8>.
+
+  // Here's what's going on: JS native string sort and UTF-8 sort can differ
+  // only when at least one of the JS-form strings contains a codepoint for a
+  // surrogate-pair. As long as we don't run into one of those, we can just
+  // do a regular difference-based comparison. But if we _do_ run into one, then
+  // we have to do something extra, one way or another.
+
+  if (a === b) {
+    // Easy out!
+    return 0;
+  }
+
+  const minCharLen = Math.min(a.length, b.length);
+
+  if (
+    (minCharLen >= 20) && !(hasSurrogateCharCode(a) || hasSurrogateCharCode(b))
+  ) {
+    // Strings are long enough that it's worth a preflight check for surrogate
+    // pairs, and it turns out that neither had them.
+    return (a < b) ? -1 : ((a > b) ? 1 : 0);
+  }
+
+  // No luck for us today. Gotta do it the hard way.
+
+  for (let i = 0; i < minCharLen; i++) {
+    const aChar = a.charCodeAt(i);
+    const bChar = b.charCodeAt(i);
+    if (aChar === bChar) {
+      continue;
+    } else if (!(isSurrogateCharCode(aChar) || isSurrogateCharCode(bChar))) {
+      return aChar - bChar;
+    } else {
+      // At least one is a surrogate. Use `codePointAt()` to decode whichever of
+      // the strings have surrogate characters. That method operates reasonably
+      // whether or not the code point is in the basic or astral plane, and it
+      // also returns a reasonable value given an invalid surrogate-pair
+      // sequence. Importantly, Unicode code-point order corresponds to UTF-8
+      // byte order.
+      const aPoint = a.codePointAt(i)!;
+      const bPoint = b.codePointAt(i)!;
+      return aPoint - bPoint;
+    }
+  }
+
+  return a.length - b.length;
+}
+
+/**
+ * Produces a frozen array containing the ordered keys of the given object,
+ * in UTF-8 sort order. If the given object is frozen, it gets cached for
+ * possible reuse.
+ */
+export function utf8SortedKeysOf(value: object): readonly string[] {
+  if (value === null) {
+    throw new TypeError("Value must not be `null`.");
+  }
+
+  const cached = sortedKeyCache.get(value);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  const unsorted = Object.keys(value);
+  const sorted = Object.freeze(unsorted.sort(utf8Compare));
+
+  if (Object.isFrozen(value)) {
+    sortedKeyCache.set(value, sorted);
+  }
+
+  return sorted;
+}
