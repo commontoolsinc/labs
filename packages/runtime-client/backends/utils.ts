@@ -32,7 +32,6 @@ export function cellRefToSigilLink(cell: CellRef): SigilLink {
         id: cell.id,
         space: cell.space,
         path: cell.path,
-        type: cell.type,
         ...(cell.schema !== undefined && { schema: cell.schema }),
         ...(cell.overwrite !== undefined && { overwrite: cell.overwrite }),
         ...(cell.cfcLabelView !== undefined && {
@@ -51,14 +50,13 @@ export function createCellRef(cell: Cell<unknown>, schema?: unknown): CellRef {
     }),
   );
   // Check before casting to a NormalizedFullLink
-  if (!link.id || !link.space || !link.type) {
-    throw new Error("Serialized links must contain id, space, type.");
+  if (!link.id || !link.space) {
+    throw new Error("Serialized links must contain id and space.");
   }
   const cellRef: CellRef = {
     id: link.id,
     space: link.space,
     path: link.path,
-    type: link.type as `${string}/${string}`,
   };
   if (link.schema != null) cellRef.schema = link.schema;
   if (link.overwrite != null) cellRef.overwrite = link.overwrite;

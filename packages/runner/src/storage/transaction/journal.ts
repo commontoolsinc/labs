@@ -112,9 +112,10 @@ export const read = (
     const meta = options?.trackReadWithoutLoad === true
       ? { ...(options?.meta ?? {}) }
       : (() => {
-        const loaded = branch.load({ id: address.id, type: address.type }) as {
-          since?: number;
-        };
+        const loaded = branch.load({
+          id: address.id,
+          type: address.type ?? "application/json",
+        }) as { since?: number };
         return {
           ...(options?.meta ?? {}),
           ...(typeof loaded.since === "number" ? { seq: loaded.since } : {}),

@@ -10,7 +10,6 @@ import { Runtime } from "../src/runtime.ts";
 import type { Action } from "../src/scheduler.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import type { IMemorySpaceAddress } from "../src/storage/interface.ts";
-import { BENCH_MEMORY_VERSION } from "./bench-memory-version.ts";
 import {
   addressesToPathByEntity,
   sortAndCompactPaths,
@@ -24,12 +23,10 @@ const space = signer.did();
 function setup() {
   const storageManager = StorageManager.emulate({
     as: signer,
-    memoryVersion: BENCH_MEMORY_VERSION,
   });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
-    memoryVersion: BENCH_MEMORY_VERSION,
   });
   runtime.scheduler.disablePullMode();
   const tx = runtime.edit();
@@ -691,7 +688,6 @@ Deno.bench(
         {
           space,
           id: `test:raw-write-${i}`,
-          type: "application/json",
           path: [],
         },
         { value: i },
@@ -718,7 +714,6 @@ function generateAddresses(
     addresses.push({
       space: space,
       id: `test:entity-${i % entitiesCount}`,
-      type: "application/json",
       path: ["field", `sub${i % 5}`, `deep${i % 3}`],
     });
   }
@@ -778,7 +773,6 @@ Deno.bench(
     const baseLink = {
       space,
       id: "test:entity" as const,
-      type: "application/json" as const,
       path: ["value"],
     };
 
@@ -814,7 +808,6 @@ Deno.bench(
     const sharedRead = {
       space,
       id: "test:shared-source" as const,
-      type: "application/json" as const,
       path: ["value"],
     };
 
@@ -829,7 +822,6 @@ Deno.bench(
           writes: [{
             space,
             id: `test:output-${i}` as const,
-            type: "application/json" as const,
             path: ["value"],
           }],
         },
@@ -856,7 +848,6 @@ Deno.bench(
       {
         space,
         id: "test:source",
-        type: "application/json",
         path: ["value"],
       },
     ];
@@ -864,7 +855,6 @@ Deno.bench(
       {
         space,
         id: "test:output",
-        type: "application/json",
         path: ["value"],
       },
     ];

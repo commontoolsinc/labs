@@ -1,5 +1,4 @@
 import { Command } from "@cliffy/command";
-import type { MemoryVersion } from "@commonfabric/memory/interface";
 import { resolve } from "@std/path";
 import { expandGlob } from "@std/fs";
 import { cliText } from "../lib/cli-name.ts";
@@ -44,18 +43,6 @@ export const test = new Command()
   .option(
     "--root <dir:string>",
     "Root directory for resolving imports. Enables imports like '../shared/utils.tsx'.",
-  )
-  .option(
-    "--memory-version <version:string>",
-    "Force the test harness storage/runtime implementation (v1 or v2).",
-    {
-      value: (value: string): MemoryVersion => {
-        if (value === "v1" || value === "v2") {
-          return value;
-        }
-        throw new Error(`Invalid memory version: ${value}`);
-      },
-    },
   )
   .option(
     "--stats-threshold <ms:number>",
@@ -164,7 +151,6 @@ export const test = new Command()
       timeout: options.timeout,
       verbose: options.verbose,
       root,
-      memoryVersion: options.memoryVersion,
       statsThreshold: options.statsThreshold,
       statsInclude,
       statsActionLimit: options.statsActionLimit,

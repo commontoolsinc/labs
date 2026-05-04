@@ -13,7 +13,6 @@ describe("Runtime v2 read transaction fallback", () => {
   it("creates a fresh read transaction for repeated reads", async () => {
     const storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     let editCalls = 0;
     const instrumented = storageManager as typeof storageManager & {
@@ -28,7 +27,6 @@ describe("Runtime v2 read transaction fallback", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: "v2",
     });
 
     try {
@@ -55,12 +53,10 @@ describe("Runtime v2 read transaction fallback", () => {
   it("uses a fresh read transaction for top-level query result proxy reads when no tx is provided", async () => {
     const storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: "v2",
     });
 
     try {
@@ -114,12 +110,10 @@ describe("Runtime v2 read transaction fallback", () => {
   it("returns fresh read-only fallback transactions", async () => {
     const storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: "v2",
     });
 
     try {

@@ -10,12 +10,10 @@ const space = signer.did();
 Deno.test("memory v2 root deletes stay undefined through sink and get", async () => {
   const storageManager = StorageManager.emulate({
     as: signer,
-    memoryVersion: "v2",
   });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
-    memoryVersion: "v2",
   });
 
   let tx: IExtendedStorageTransaction = runtime.edit();
@@ -58,12 +56,10 @@ Deno.test("memory v2 root deletes stay undefined through sink and get", async ()
 Deno.test("memory v2 source-backed cells clear to undefined", async () => {
   const storageManager = StorageManager.emulate({
     as: signer,
-    memoryVersion: "v2",
   });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
-    memoryVersion: "v2",
   });
 
   let tx: IExtendedStorageTransaction = runtime.edit();

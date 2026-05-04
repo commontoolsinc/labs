@@ -20,7 +20,6 @@ Deno.test("memory v2 raw reads freeze the returned subtree without exposing muta
   setDataModelConfig(true);
   const storage = StorageManager.emulate({
     as: signer,
-    memoryVersion: "v2",
   });
 
   try {
@@ -76,7 +75,6 @@ Deno.test("memory v2 raw reads reuse frozen snapshots until the document changes
   setDataModelConfig(true);
   const storage = StorageManager.emulate({
     as: signer,
-    memoryVersion: "v2",
   });
 
   try {
@@ -157,7 +155,6 @@ Deno.test("memory v2 raw reads keep prior frozen snapshots stable after sibling 
   setDataModelConfig(true);
   const storage = StorageManager.emulate({
     as: signer,
-    memoryVersion: "v2",
   });
 
   try {

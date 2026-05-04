@@ -50,7 +50,7 @@ async function commitAndReopen(
   return runtime.edit();
 }
 
-describe("frozen proxy target: v1 link resolution through frozen objects", () => {
+describe("frozen proxy target: link resolution through frozen objects", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -58,12 +58,10 @@ describe("frozen proxy target: v1 link resolution through frozen objects", () =>
   beforeEach(() => {
     storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v1",
     });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: "v1",
       experimental: {
         richStorableValues: true,
       },
@@ -122,7 +120,7 @@ describe("frozen proxy target: v1 link resolution through frozen objects", () =>
   });
 });
 
-describe("frozen proxy target: v1 proxy wrapping and trap behavior", () => {
+describe("frozen proxy target: proxy wrapping and trap behavior", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -130,12 +128,10 @@ describe("frozen proxy target: v1 proxy wrapping and trap behavior", () => {
   beforeEach(() => {
     storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v1",
     });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: "v1",
       experimental: {
         richStorableValues: true,
       },
@@ -458,12 +454,10 @@ describe("frozen proxy target: v2 committed reads with richStorableValues ON", (
   beforeEach(() => {
     storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: "v2",
       experimental: {
         richStorableValues: true,
       },
@@ -535,13 +529,11 @@ describe("frozen proxy target: committed reads with richStorableValues OFF", () 
   beforeEach(() => {
     storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     // No experimental flags -- richStorableValues defaults to false.
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: "v2",
     });
     tx = runtime.edit();
   });

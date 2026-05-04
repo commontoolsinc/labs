@@ -1,7 +1,6 @@
 import { Identity } from "@commonfabric/identity";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { BENCH_MEMORY_VERSION } from "./bench-memory-version.ts";
 
 const signer = await Identity.fromPassphrase("bench source topology refresh");
 const space = signer.did();
@@ -38,7 +37,6 @@ const pieceValue = (withPatternLink: boolean) =>
 const setup = async (withPatternLink: boolean) => {
   const storageManager = StorageManager.emulate({
     as: signer,
-    memoryVersion: BENCH_MEMORY_VERSION,
   });
   const provider = storageManager.open(space) as unknown as TestProvider;
 

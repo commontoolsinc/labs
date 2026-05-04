@@ -129,12 +129,10 @@ describe("Runtime.editWithRetry", () => {
 
     storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: "v2",
       cfcEnforcementMode: "enforce-explicit",
     });
 
@@ -171,12 +169,10 @@ describe("Runtime.editWithRetry", () => {
 
     storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: "v2",
       cfcEnforcementMode: "enforce-explicit",
     });
 
@@ -221,12 +217,10 @@ describe("Runtime.editWithRetry", () => {
     let snapshotCalls = 0;
     storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: "v2",
       cfcEnforcementMode: "enforce-explicit",
       trustSnapshotProvider: () => ({
         id: `trust-${++snapshotCalls}`,

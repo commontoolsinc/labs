@@ -1,10 +1,9 @@
-import * as Memory from "@commonfabric/memory";
-import { MEMORY_V2_PROTOCOL } from "@commonfabric/memory/v2";
+import { MEMORY_PROTOCOL } from "@commonfabric/memory/v2";
+import * as MemoryServer from "@commonfabric/memory/v2/server";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import * as FS from "@std/fs";
 import * as Path from "@std/path";
 import env from "@/env.ts";
-import { identity } from "@/lib/identity.ts";
 import { resolveMemoryEngineStoreRootUrl } from "./memory-path.ts";
 import { fromDID } from "../../../memory/util.ts";
 
@@ -69,7 +68,7 @@ const authorizeSessionOpen = async (
     !isRecord(message.authorization) ||
     signature === null
   ) {
-    throw authorizationError("memory/v2 session.open requires authorization");
+    throw authorizationError("memory session.open requires authorization");
   }
 
   const invocation = message.invocation;
@@ -79,11 +78,11 @@ const authorizeSessionOpen = async (
     invocation.cmd !== "session.open" ||
     invocation.sub !== message.space ||
     !isRecord(invocation.args) ||
-    invocation.args.protocol !== MEMORY_V2_PROTOCOL ||
+    invocation.args.protocol !== MEMORY_PROTOCOL ||
     !isRecord(invocation.args.session) ||
     !sameSessionDescriptor(invocation.args.session, message.session)
   ) {
-    throw authorizationError("memory/v2 session.open authorization mismatch");
+    throw authorizationError("memory session.open authorization mismatch");
   }
 
   const issuer = await fromDID(invocation.iss);
@@ -115,28 +114,21 @@ if (env.DB_PATH) {
   console.log(`Memory: Using directory mode: ${env.MEMORY_DIR}`);
 }
 
-// Initialize memory provider using top-level await
-console.log("Memory: Initializing provider...");
-const result = await Memory.Provider.open({
-  store: storeUrl,
-  serviceDid: identity.did(),
-  memoryVersion: "v1",
-});
-
-if (result.error) {
-  throw result.error;
-}
-
 const memoryEngineStoreUrl = resolveMemoryEngineStoreRootUrl(storeUrl, {
   singleFileMode: Boolean(env.DB_PATH),
 });
 await FS.ensureDir(memoryEngineStoreUrl);
 
-export const memory = result.ok;
-export const memoryV2Server = new Memory.V2Server.Server({
+export const memoryServer = new MemoryServer.Server({
   store: memoryEngineStoreUrl,
   authorizeSessionOpen,
 });
+export const memory = {
+  async close(): Promise<
+    { ok: Record<PropertyKey, never> } | { error: unknown }
+  > {
+    await memoryServer.close();
+    return { ok: {} };
+  },
+};
 console.log("Memory: Provider initialized successfully");
-
-export { Memory };

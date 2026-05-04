@@ -8,11 +8,9 @@ Deno.test("memory v2 treats an identical root write as a no-op", async () => {
   const signer = await Identity.fromPassphrase("memory-v2-noop-root-write");
   const storage = StorageManager.emulate({
     as: signer,
-    memoryVersion: "v2",
   });
   const runtime = new Runtime({
     storageManager: storage,
-    memoryVersion: "v2",
     apiUrl: new URL(import.meta.url),
   });
   const space = signer.did();
@@ -60,11 +58,9 @@ Deno.test("memory v2 no-op commits do not reopen storage for an empty native com
   const signer = await Identity.fromPassphrase("memory-v2-noop-commit-open");
   const storage = StorageManager.emulate({
     as: signer,
-    memoryVersion: "v2",
   });
   const runtime = new Runtime({
     storageManager: storage,
-    memoryVersion: "v2",
     apiUrl: new URL(import.meta.url),
   });
   const space = signer.did();
@@ -103,11 +99,9 @@ Deno.test("memory v2 no-op commits skip stale-read validation when there are no 
   const signer = await Identity.fromPassphrase("memory-v2-noop-stale-read");
   const storage = StorageManager.emulate({
     as: signer,
-    memoryVersion: "v2",
   });
   const runtime = new Runtime({
     storageManager: storage,
-    memoryVersion: "v2",
     apiUrl: new URL(import.meta.url),
   });
   const space = signer.did();
@@ -145,11 +139,9 @@ Deno.test("memory v2 treats an identical nested write as a no-op", async () => {
   const signer = await Identity.fromPassphrase("memory-v2-noop-nested-write");
   const storage = StorageManager.emulate({
     as: signer,
-    memoryVersion: "v2",
   });
   const runtime = new Runtime({
     storageManager: storage,
-    memoryVersion: "v2",
     apiUrl: new URL(import.meta.url),
   });
   const space = signer.did();

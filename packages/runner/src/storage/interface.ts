@@ -7,16 +7,11 @@ import {
   type AuthorizationError as IAuthorizationError,
   type ConflictError as IConflictError,
   type ConnectionError as IConnectionError,
-  DEFAULT_MEMORY_VERSION,
   type DID,
   type FabricValue,
   type Fact,
-  getDefaultMemoryVersion,
-  getIntegrationMemoryVersionOverride,
-  INTEGRATION_MEMORY_VERSION_ENV,
   type Invariant as IClaim,
   type MemorySpace,
-  type MemoryVersion,
   type QueryError as IQueryError,
   type Result,
   type SchemaPathSelector,
@@ -49,7 +44,6 @@ export type {
   IClaim,
   MediaType,
   MemorySpace,
-  MemoryVersion,
   Result,
   SchemaPathSelector,
   Signer,
@@ -57,13 +51,6 @@ export type {
   Unit,
   URI,
 };
-export {
-  DEFAULT_MEMORY_VERSION,
-  getDefaultMemoryVersion,
-  getIntegrationMemoryVersionOverride,
-  INTEGRATION_MEMORY_VERSION_ENV,
-};
-
 export type ChangeGroup = unknown;
 
 /**
@@ -123,7 +110,6 @@ export type OptStorageValue<T extends FabricValue = FabricValue> =
 
 export interface IStorageManager extends IStorageSubscriptionCapability {
   id: string;
-  readonly memoryVersion: MemoryVersion;
 
   /**
    * The signer used for authenticating storage operations.
@@ -624,13 +610,71 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   setCfcEnforcementMode(mode: CfcEnforcementMode): void;
   markCfcRelevant(reason?: string): void;
   invalidateCfc(reason: string): void;
+
+  /**
+   * CFC recording / ownership-transfer API.
+   *
+   * The methods below all hand a caller-constructed record into the CFC
+   * subsystem's transaction-scoped state. Each one establishes an
+   * ownership transfer at the call boundary: from the moment the call
+   * returns, the supplied record is owned by the transaction. Callers
+   * MUST NOT subsequently mutate it (or any object reachable from it),
+   * and MUST NOT retain it for use anywhere else that depends on it
+   * remaining mutable.
+   *
+   * The CFC subsystem treats these records as identity-stable structural
+   * fingerprints — they participate in canonicalization, sorting, and
+   * `hashStringOf()`-based equality. The CFC implementation is therefore
+   * permitted to `deepFreeze()` the record on entry, both as a tripwire
+   * for accidental mutation and to make it eligible for the
+   * `hashStringOf()` WeakMap cache. Today, only
+   * `recordCfcWritePolicyInput()` does this, but the contract applies
+   * uniformly to every method in this group.
+   *
+   * Callers do not need to freeze the record themselves — the CFC
+   * implementation will, where it's useful. Freezing on the caller side
+   * is equally welcome though, and is often a reasonable choice when
+   * the same record (or sub-objects) is also handed to other consumers
+   * with similar contracts; `deepFreeze()` short-circuits on input
+   * that's already deeply frozen, so a redundant freeze costs almost
+   * nothing.
+   */
+
+  /**
+   * Records a CFC dereference trace produced by following a write
+   * redirect or value reference. See ownership note above.
+   */
   recordCfcDereferenceTrace(trace: CfcDereferenceTrace): void;
+
   prepareCfc(input?: PreparedDigestInput): string;
+
+  /**
+   * Sets (or clears) the CFC trust snapshot for this transaction. See
+   * ownership note above.
+   */
   setCfcTrustSnapshot(snapshot: TrustSnapshot | undefined): void;
+
+  /**
+   * Sets (or clears) the implementation identity that will be folded
+   * into the CFC digest for this transaction. See ownership note above.
+   */
   setCfcImplementationIdentity(
     identity: ImplementationIdentity | undefined,
   ): void;
+
+  /**
+   * Records a write-policy input that will participate in the CFC
+   * commit-boundary digest. See ownership note above; this is currently
+   * the method that actively `deepFreeze()`s its argument on entry, in
+   * order to enable the within-sort tiebreaker cache in
+   * `compareWritePolicyInput`.
+   */
   recordCfcWritePolicyInput(input: WritePolicyInput): void;
+
+  /**
+   * Enqueues a side effect to run from the CFC outbox after a successful
+   * commit. See ownership note above.
+   */
   enqueuePostCommitEffect(effect: PostCommitSideEffect): void;
 
   /**
@@ -913,10 +957,10 @@ export interface IMemoryAddress {
    */
   id: URI;
   /**
-   * Media type under which data is stored. It corresponds to `the` field in the
-   * memory protocol.
+   * Protocol fact type. Document addresses omit this; storage boundaries use
+   * application/json.
    */
-  type: MediaType;
+  type?: MediaType;
   /**
    * Intra-value path to the {@link FabricValue} being referenced by this
    * address. It is a path within the `is` field of the fact in memory protocol.

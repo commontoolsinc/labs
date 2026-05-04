@@ -123,7 +123,6 @@ export type EntityDocumentWithCfc = {
 export type CfcAddress = {
   space: MemorySpace;
   id: string;
-  type: string;
   path: string[];
 };
 

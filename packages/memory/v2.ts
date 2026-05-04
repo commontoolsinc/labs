@@ -12,7 +12,7 @@ import type { FabricValue, SchemaPathSelector } from "./interface.ts";
 import type { ReconstructionContext } from "@commonfabric/data-model/interface";
 import { isObject, isRecord } from "@commonfabric/utils/types";
 
-export const MEMORY_V2_PROTOCOL = "memory/v2" as const;
+export const MEMORY_PROTOCOL = "memory" as const;
 export const DEFAULT_BRANCH = "" as const;
 
 export type EntityId = string;
@@ -127,7 +127,7 @@ export interface SessionOpenArgs {
 export interface SessionOpenCommand {
   cmd: "session.open";
   id: JobId;
-  protocol: typeof MEMORY_V2_PROTOCOL;
+  protocol: typeof MEMORY_PROTOCOL;
   args: SessionOpenArgs;
 }
 
@@ -139,21 +139,21 @@ export interface SessionOpenResult {
   sync?: SessionSync;
 }
 
-export interface MemoryV2Flags {
+export interface MemoryProtocolFlags {
   richStorableValues: boolean;
   unifiedJsonEncoding: boolean;
 }
 
 export interface HelloMessage {
   type: "hello";
-  protocol: typeof MEMORY_V2_PROTOCOL;
-  flags: MemoryV2Flags;
+  protocol: typeof MEMORY_PROTOCOL;
+  flags: MemoryProtocolFlags;
 }
 
 export interface HelloOkMessage {
   type: "hello.ok";
-  protocol: typeof MEMORY_V2_PROTOCOL;
-  flags: MemoryV2Flags;
+  protocol: typeof MEMORY_PROTOCOL;
+  flags: MemoryProtocolFlags;
 }
 
 export interface SessionDescriptor {
@@ -335,27 +335,29 @@ export type ServerMessage =
   | SessionEffectMessage
   | SessionRevokedMessage;
 
-const memoryV2ReconstructionContext: ReconstructionContext = {
+const memoryReconstructionContext: ReconstructionContext = {
   getCell() {
     throw new Error(
-      "getCell is not available at the memory/v2 boundary",
+      "getCell is not available at the memory boundary",
     );
   },
 };
 
-export const getMemoryV2Flags = (): MemoryV2Flags => ({
+export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   richStorableValues: getDataModelConfig(),
   unifiedJsonEncoding: getJsonEncodingConfig(),
 });
 
-export const sameMemoryV2Flags = (
-  left: MemoryV2Flags,
-  right: MemoryV2Flags,
+export const sameMemoryProtocolFlags = (
+  left: MemoryProtocolFlags,
+  right: MemoryProtocolFlags,
 ): boolean =>
   left.richStorableValues === right.richStorableValues &&
   left.unifiedJsonEncoding === right.unifiedJsonEncoding;
 
-export const isMemoryV2Flags = (value: unknown): value is MemoryV2Flags => {
+export const isMemoryProtocolFlags = (
+  value: unknown,
+): value is MemoryProtocolFlags => {
   if (!isRecord(value) || Array.isArray(value)) {
     return false;
   }
@@ -364,15 +366,15 @@ export const isMemoryV2Flags = (value: unknown): value is MemoryV2Flags => {
     typeof value.unifiedJsonEncoding === "boolean";
 };
 
-export const encodeMemoryV2Boundary = (value: unknown): string =>
+export const encodeMemoryBoundary = (value: unknown): string =>
   jsonFromValue(value as FabricValue);
 
-export const decodeMemoryV2Boundary = <Value = FabricValue>(
+export const decodeMemoryBoundary = <Value = FabricValue>(
   source: string,
 ): Value => {
   const decoded = valueFromJson(
     source,
-    memoryV2ReconstructionContext,
+    memoryReconstructionContext,
   ) as FabricValue;
 
   if (!getJsonEncodingConfig()) {

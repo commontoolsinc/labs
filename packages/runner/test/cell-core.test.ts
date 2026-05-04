@@ -1222,7 +1222,6 @@ for (const unifiedJsonEncoding of [false, true]) {
           const sourceAddress = {
             space,
             id: targetLink.id,
-            type: targetLink.type,
             path: ["source"],
           } as IMemorySpaceAddress;
           const readResult = tx.read(sourceAddress);

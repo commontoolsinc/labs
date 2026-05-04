@@ -69,7 +69,6 @@ export function isNormalizedFullLink(value: any): value is NormalizedFullLink {
     isRecord(value) &&
     typeof value.id === "string" &&
     typeof value.space === "string" &&
-    typeof value.type === "string" &&
     Array.isArray(value.path)
   );
 }
@@ -198,8 +197,7 @@ export function areNormalizedLinksSame(
   link2: NormalizedLink,
 ): boolean {
   return link1.id === link2.id && link1.space === link2.space &&
-    arrayEqual(link1.path, link2.path) &&
-    (link1.type ?? "application/json") === (link2.type ?? "application/json");
+    arrayEqual(link1.path, link2.path);
 }
 
 /**

@@ -26,7 +26,6 @@
  */
 
 import { Identity } from "@commonfabric/identity";
-import type { MemoryVersion } from "@commonfabric/memory/interface";
 import { Engine, Runtime } from "@commonfabric/runner";
 import type {
   Cell,
@@ -180,8 +179,6 @@ export interface TestRunnerOptions {
   verbose?: boolean;
   /** Root directory for resolving imports. If not provided, uses the test file's directory. */
   root?: string;
-  /** Force the storage/runtime memory implementation used by the test harness. */
-  memoryVersion?: MemoryVersion;
   /** Print logger stats for steps slower than this (ms). 0 = every step. Default 5000. Only applies when verbose is true. */
   statsThreshold?: number;
   /** Timing categories to always print in verbose stats output. Matched by exact name or prefix. */
@@ -820,7 +817,6 @@ export async function runTestPattern(
     () =>
       StorageManager.emulate({
         as: identity,
-        memoryVersion: options.memoryVersion,
       }),
   );
 
@@ -833,7 +829,6 @@ export async function runTestPattern(
     () =>
       new Runtime({
         storageManager,
-        memoryVersion: options.memoryVersion,
         // Pattern-native tests invoke returned action streams directly rather
         // than through the trusted renderer event path. Keep CFC visible while
         // avoiding false failures for tests that intentionally bypass the UI.
@@ -991,7 +986,6 @@ export async function runTestPattern(
     );
 
     if (options.verbose) {
-      console.log(`  Storage backend: ${storageManager.memoryVersion}`);
       console.log(`  Found ${testSteps.length} test steps`);
       printLoggerStats(
         performance.now() - startTime,

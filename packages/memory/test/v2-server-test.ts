@@ -2,10 +2,10 @@ import { assertEquals, assertExists } from "@std/assert";
 import { FakeTime } from "@std/testing/time";
 import { parseClientMessage, Server, SessionRegistry } from "../v2/server.ts";
 import {
-  encodeMemoryV2Boundary,
-  getMemoryV2Flags,
+  encodeMemoryBoundary,
+  getMemoryProtocolFlags,
   type GraphQueryResult,
-  MEMORY_V2_PROTOCOL,
+  MEMORY_PROTOCOL,
   type ResponseMessage,
   type ServerMessage,
   type SessionEffectMessage,
@@ -13,15 +13,15 @@ import {
 } from "../v2.ts";
 import { createGraphFixture } from "./v2-graph.fixture.ts";
 
-const HELLO_FLAGS = getMemoryV2Flags();
+const HELLO_FLAGS = getMemoryProtocolFlags();
 const HELLO = {
   type: "hello",
-  protocol: MEMORY_V2_PROTOCOL,
+  protocol: MEMORY_PROTOCOL,
   flags: HELLO_FLAGS,
 } as const;
 const HELLO_OK = {
   type: "hello.ok",
-  protocol: MEMORY_V2_PROTOCOL,
+  protocol: MEMORY_PROTOCOL,
   flags: HELLO_FLAGS,
 } as const;
 
@@ -57,7 +57,7 @@ const createServer = (store: string, refreshDelayMs = 0) =>
 
 Deno.test("memory v2 server parser ignores transact invocation and authorization payloads", () => {
   assertEquals(
-    parseClientMessage(encodeMemoryV2Boundary({
+    parseClientMessage(encodeMemoryBoundary({
       type: "transact",
       requestId: "tx-1",
       space: "did:key:z6Mk-space",
@@ -119,10 +119,10 @@ Deno.test("memory v2 server allows the same session id in different spaces", asy
   const connection = server.connect((message) => messages.push(message));
 
   try {
-    await connection.receive(encodeMemoryV2Boundary(HELLO));
+    await connection.receive(encodeMemoryBoundary(HELLO));
     assertEquals(shiftMessage(messages), HELLO_OK);
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-1",
       space: "did:key:z6Mk-space-one",
@@ -138,7 +138,7 @@ Deno.test("memory v2 server allows the same session id in different spaces", asy
     assertEquals(openedOne.ok?.serverSeq, 0);
     assertExists(openedOne.ok?.sessionToken);
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-2",
       space: "did:key:z6Mk-space-two",
@@ -179,10 +179,10 @@ Deno.test("memory v2 server binds resumed sessions to the original principal", a
   );
 
   try {
-    await firstConnection.receive(encodeMemoryV2Boundary(HELLO));
+    await firstConnection.receive(encodeMemoryBoundary(HELLO));
     assertEquals(shiftMessage(firstMessages), HELLO_OK);
 
-    await firstConnection.receive(encodeMemoryV2Boundary({
+    await firstConnection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-1",
       space: "did:key:z6Mk-space-one",
@@ -199,10 +199,10 @@ Deno.test("memory v2 server binds resumed sessions to the original principal", a
     assertEquals(opened.ok?.serverSeq, 0);
     assertExists(opened.ok?.sessionToken);
 
-    await secondConnection.receive(encodeMemoryV2Boundary(HELLO));
+    await secondConnection.receive(encodeMemoryBoundary(HELLO));
     assertEquals(shiftMessage(secondMessages), HELLO_OK);
 
-    await secondConnection.receive(encodeMemoryV2Boundary({
+    await secondConnection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-2",
       space: "did:key:z6Mk-space-one",
@@ -235,10 +235,10 @@ Deno.test("memory v2 server requires sessions to be opened on the current connec
   const space = "did:key:z6Mk-space-current-connection";
 
   try {
-    await firstConnection.receive(encodeMemoryV2Boundary(HELLO));
+    await firstConnection.receive(encodeMemoryBoundary(HELLO));
     assertEquals(shiftMessage(firstMessages), HELLO_OK);
 
-    await firstConnection.receive(encodeMemoryV2Boundary({
+    await firstConnection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-1",
       space,
@@ -249,10 +249,10 @@ Deno.test("memory v2 server requires sessions to be opened on the current connec
     );
     const sessionId = opened.ok!.sessionId;
 
-    await secondConnection.receive(encodeMemoryV2Boundary(HELLO));
+    await secondConnection.receive(encodeMemoryBoundary(HELLO));
     assertEquals(shiftMessage(secondMessages), HELLO_OK);
 
-    await secondConnection.receive(encodeMemoryV2Boundary({
+    await secondConnection.receive(encodeMemoryBoundary({
       type: "graph.query",
       requestId: "query-1",
       space,
@@ -268,7 +268,7 @@ Deno.test("memory v2 server requires sessions to be opened on the current connec
       },
     });
 
-    await secondConnection.receive(encodeMemoryV2Boundary({
+    await secondConnection.receive(encodeMemoryBoundary({
       type: "transact",
       requestId: "tx-1",
       space,
@@ -292,7 +292,7 @@ Deno.test("memory v2 server requires sessions to be opened on the current connec
       },
     });
 
-    await secondConnection.receive(encodeMemoryV2Boundary({
+    await secondConnection.receive(encodeMemoryBoundary({
       type: "session.watch.set",
       requestId: "watch-set-1",
       space,
@@ -308,7 +308,7 @@ Deno.test("memory v2 server requires sessions to be opened on the current connec
       },
     });
 
-    await secondConnection.receive(encodeMemoryV2Boundary({
+    await secondConnection.receive(encodeMemoryBoundary({
       type: "session.watch.add",
       requestId: "watch-add-1",
       space,
@@ -324,7 +324,7 @@ Deno.test("memory v2 server requires sessions to be opened on the current connec
       },
     });
 
-    await secondConnection.receive(encodeMemoryV2Boundary({
+    await secondConnection.receive(encodeMemoryBoundary({
       type: "session.ack",
       requestId: "ack-1",
       space,
@@ -357,12 +357,12 @@ Deno.test("memory v2 server transfers session ownership and rejects stale resume
   );
 
   try {
-    await firstConnection.receive(encodeMemoryV2Boundary(HELLO));
-    await secondConnection.receive(encodeMemoryV2Boundary(HELLO));
+    await firstConnection.receive(encodeMemoryBoundary(HELLO));
+    await secondConnection.receive(encodeMemoryBoundary(HELLO));
     assertEquals(shiftMessage(firstMessages), HELLO_OK);
     assertEquals(shiftMessage(secondMessages), HELLO_OK);
 
-    await firstConnection.receive(encodeMemoryV2Boundary({
+    await firstConnection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-1",
       space,
@@ -378,7 +378,7 @@ Deno.test("memory v2 server transfers session ownership and rejects stale resume
     assertEquals(openedFirst.ok?.serverSeq, 0);
     assertExists(initialToken);
 
-    await secondConnection.receive(encodeMemoryV2Boundary({
+    await secondConnection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-2",
       space,
@@ -407,7 +407,7 @@ Deno.test("memory v2 server transfers session ownership and rejects stale resume
     assertExists(openedSecond.ok?.sessionToken);
     assertEquals(openedSecond.ok?.sessionToken === initialToken, false);
 
-    await firstConnection.receive(encodeMemoryV2Boundary({
+    await firstConnection.receive(encodeMemoryBoundary({
       type: "graph.query",
       requestId: "query-1",
       space,
@@ -423,7 +423,7 @@ Deno.test("memory v2 server transfers session ownership and rejects stale resume
       },
     });
 
-    await firstConnection.receive(encodeMemoryV2Boundary({
+    await firstConnection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-3",
       space,
@@ -451,9 +451,9 @@ Deno.test("memory v2 server rejects handshakes when flags disagree", async () =>
   const connection = server.connect((message) => messages.push(message));
 
   try {
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "hello",
-      protocol: MEMORY_V2_PROTOCOL,
+      protocol: MEMORY_PROTOCOL,
       flags: {
         richStorableValues: !HELLO_FLAGS.richStorableValues,
         unifiedJsonEncoding: HELLO_FLAGS.unifiedJsonEncoding,
@@ -465,7 +465,7 @@ Deno.test("memory v2 server rejects handshakes when flags disagree", async () =>
       requestId: "handshake",
       error: {
         name: "ProtocolError",
-        message: `memory/v2 flag mismatch: client=${
+        message: `memory flag mismatch: client=${
           JSON.stringify({
             richStorableValues: !HELLO_FLAGS.richStorableValues,
             unifiedJsonEncoding: HELLO_FLAGS.unifiedJsonEncoding,
@@ -484,10 +484,10 @@ Deno.test("memory v2 server rejects unsafe spaces before opening a store", async
   const connection = server.connect((message) => messages.push(message));
 
   try {
-    await connection.receive(encodeMemoryV2Boundary(HELLO));
+    await connection.receive(encodeMemoryBoundary(HELLO));
     assertEquals(shiftMessage(messages), HELLO_OK);
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-unsafe",
       space: "../../evil",
@@ -513,10 +513,10 @@ Deno.test("memory v2 server opens sessions, commits documents, and answers graph
   const space = "did:key:z6Mk-memory-v2-server";
 
   try {
-    await connection.receive(encodeMemoryV2Boundary(HELLO));
+    await connection.receive(encodeMemoryBoundary(HELLO));
     assertEquals(shiftMessage(messages), HELLO_OK);
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-1",
       space,
@@ -527,7 +527,7 @@ Deno.test("memory v2 server opens sessions, commits documents, and answers graph
     );
     const sessionId = opened.ok!.sessionId;
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "transact",
       requestId: "tx-1",
       space,
@@ -564,7 +564,7 @@ Deno.test("memory v2 server opens sessions, commits documents, and answers graph
       },
     }]);
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "graph.query",
       requestId: "query-1",
       space,
@@ -607,10 +607,10 @@ Deno.test("memory v2 server rejects legacy live graph.query subscriptions", asyn
   const space = "did:key:z6Mk-memory-v2-server-subscribe-reject";
 
   try {
-    await connection.receive(encodeMemoryV2Boundary(HELLO));
+    await connection.receive(encodeMemoryBoundary(HELLO));
     shiftMessage(messages);
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-1",
       space,
@@ -620,7 +620,7 @@ Deno.test("memory v2 server rejects legacy live graph.query subscriptions", asyn
       shiftMessage(messages),
     );
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "graph.query",
       requestId: "query-1",
       space,
@@ -659,10 +659,10 @@ Deno.test("memory v2 server watch sets expand to previously hidden nodes after r
   const fixture = createGraphFixture(space);
 
   try {
-    await connection.receive(encodeMemoryV2Boundary(HELLO));
+    await connection.receive(encodeMemoryBoundary(HELLO));
     shiftMessage(messages);
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-1",
       space,
@@ -673,7 +673,7 @@ Deno.test("memory v2 server watch sets expand to previously hidden nodes after r
     );
     const sessionId = opened.ok!.sessionId;
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "transact",
       requestId: "seed",
       space,
@@ -690,7 +690,7 @@ Deno.test("memory v2 server watch sets expand to previously hidden nodes after r
     }));
     assertEquals(assertResponse<any>(shiftMessage(messages)).requestId, "seed");
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "session.watch.set",
       requestId: "watch-1",
       space,
@@ -716,7 +716,7 @@ Deno.test("memory v2 server watch sets expand to previously hidden nodes after r
     );
     assertEquals(watch.ok?.sync.removes, []);
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "transact",
       requestId: "expand",
       space,
@@ -773,10 +773,10 @@ Deno.test("memory v2 server does not emit delayed exact-reconcile removes after 
   assertExists(initialRoot);
 
   try {
-    await connection.receive(encodeMemoryV2Boundary(HELLO));
+    await connection.receive(encodeMemoryBoundary(HELLO));
     shiftMessage(messages);
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-1",
       space,
@@ -787,7 +787,7 @@ Deno.test("memory v2 server does not emit delayed exact-reconcile removes after 
     );
     const sessionId = opened.ok!.sessionId;
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "transact",
       requestId: "seed",
       space,
@@ -804,7 +804,7 @@ Deno.test("memory v2 server does not emit delayed exact-reconcile removes after 
     }));
     assertEquals(assertResponse<any>(shiftMessage(messages)).requestId, "seed");
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "session.watch.set",
       requestId: "watch-1",
       space,
@@ -830,7 +830,7 @@ Deno.test("memory v2 server does not emit delayed exact-reconcile removes after 
     );
     assertEquals(watch.ok?.sync.removes, []);
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "transact",
       requestId: "shrink",
       space,
@@ -876,10 +876,10 @@ Deno.test("memory v2 server does not send watch effects after a connection close
   let sessionId = "";
 
   try {
-    await connection.receive(encodeMemoryV2Boundary(HELLO));
+    await connection.receive(encodeMemoryBoundary(HELLO));
     shiftMessage(messages);
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-1",
       space,
@@ -925,10 +925,10 @@ Deno.test("memory v2 server refreshes watched docs by syncing only the touched e
   const space = "did:key:z6Mk-memory-v2-server-incremental-watch";
 
   try {
-    await connection.receive(encodeMemoryV2Boundary(HELLO));
+    await connection.receive(encodeMemoryBoundary(HELLO));
     shiftMessage(messages);
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-1",
       space,
@@ -939,7 +939,7 @@ Deno.test("memory v2 server refreshes watched docs by syncing only the touched e
     );
     const sessionId = opened.ok!.sessionId;
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "transact",
       requestId: "seed",
       space,
@@ -960,7 +960,7 @@ Deno.test("memory v2 server refreshes watched docs by syncing only the touched e
     }));
     assertEquals(assertResponse<any>(shiftMessage(messages)).requestId, "seed");
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "session.watch.set",
       requestId: "watch-1",
       space,
@@ -996,7 +996,7 @@ Deno.test("memory v2 server refreshes watched docs by syncing only the touched e
       "watch-1",
     );
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "transact",
       requestId: "update",
       space,
@@ -1032,10 +1032,10 @@ Deno.test("memory v2 server watch.add bootstraps only the newly added watch", as
   const space = "did:key:z6Mk-memory-v2-server-watch-add";
 
   try {
-    await connection.receive(encodeMemoryV2Boundary(HELLO));
+    await connection.receive(encodeMemoryBoundary(HELLO));
     shiftMessage(messages);
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-1",
       space,
@@ -1046,7 +1046,7 @@ Deno.test("memory v2 server watch.add bootstraps only the newly added watch", as
     );
     const sessionId = opened.ok!.sessionId;
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "transact",
       requestId: "seed",
       space,
@@ -1067,7 +1067,7 @@ Deno.test("memory v2 server watch.add bootstraps only the newly added watch", as
     }));
     assertEquals(assertResponse<any>(shiftMessage(messages)).requestId, "seed");
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "session.watch.set",
       requestId: "watch-1",
       space,
@@ -1094,7 +1094,7 @@ Deno.test("memory v2 server watch.add bootstraps only the newly added watch", as
       ],
     );
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "session.watch.add",
       requestId: "watch-2",
       space,
@@ -1133,10 +1133,10 @@ Deno.test("memory v2 server can bootstrap watches with session.watch.add", async
   const space = "did:key:z6Mk-memory-v2-server-watch-add-bootstrap";
 
   try {
-    await connection.receive(encodeMemoryV2Boundary(HELLO));
+    await connection.receive(encodeMemoryBoundary(HELLO));
     shiftMessage(messages);
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-1",
       space,
@@ -1147,7 +1147,7 @@ Deno.test("memory v2 server can bootstrap watches with session.watch.add", async
     );
     const sessionId = opened.ok!.sessionId;
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "transact",
       requestId: "seed",
       space,
@@ -1164,7 +1164,7 @@ Deno.test("memory v2 server can bootstrap watches with session.watch.add", async
     }));
     assertEquals(assertResponse<any>(shiftMessage(messages)).requestId, "seed");
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "session.watch.add",
       requestId: "watch-1",
       space,
@@ -1201,10 +1201,10 @@ Deno.test("memory v2 server treats duplicate watch ids in session.watch.add as n
   const space = "did:key:z6Mk-memory-v2-server-watch-add-replace";
 
   try {
-    await connection.receive(encodeMemoryV2Boundary(HELLO));
+    await connection.receive(encodeMemoryBoundary(HELLO));
     shiftMessage(messages);
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-1",
       space,
@@ -1215,7 +1215,7 @@ Deno.test("memory v2 server treats duplicate watch ids in session.watch.add as n
     );
     const sessionId = opened.ok!.sessionId;
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "transact",
       requestId: "seed",
       space,
@@ -1236,7 +1236,7 @@ Deno.test("memory v2 server treats duplicate watch ids in session.watch.add as n
     }));
     assertEquals(assertResponse<any>(shiftMessage(messages)).requestId, "seed");
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "session.watch.set",
       requestId: "watch-1",
       space,
@@ -1262,7 +1262,7 @@ Deno.test("memory v2 server treats duplicate watch ids in session.watch.add as n
       ["of:doc:1"],
     );
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "session.watch.add",
       requestId: "watch-2",
       space,
@@ -1297,7 +1297,7 @@ Deno.test("memory v2 server treats duplicate watch ids in session.watch.add as n
       },
     });
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "session.watch.add",
       requestId: "watch-3",
       space,
@@ -1320,7 +1320,7 @@ Deno.test("memory v2 server treats duplicate watch ids in session.watch.add as n
     assertEquals(unchanged.ok?.sync.upserts, []);
     assertEquals(unchanged.ok?.sync.removes, []);
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "session.watch.add",
       requestId: "watch-3b",
       space,
@@ -1343,7 +1343,7 @@ Deno.test("memory v2 server treats duplicate watch ids in session.watch.add as n
     assertEquals(reorderedEquivalent.ok?.sync.upserts, []);
     assertEquals(reorderedEquivalent.ok?.sync.removes, []);
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "session.watch.add",
       requestId: "watch-4",
       space,
@@ -1372,7 +1372,7 @@ Deno.test("memory v2 server treats duplicate watch ids in session.watch.add as n
       },
     });
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "transact",
       requestId: "update-doc-2",
       space,
@@ -1406,10 +1406,10 @@ Deno.test("memory v2 server rolls back failed watch.add mutations", async () => 
   const space = "did:key:z6Mk-memory-v2-server-watch-add-rollback";
 
   try {
-    await connection.receive(encodeMemoryV2Boundary(HELLO));
+    await connection.receive(encodeMemoryBoundary(HELLO));
     assertEquals(shiftMessage(messages), HELLO_OK);
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-1",
       space,
@@ -1420,7 +1420,7 @@ Deno.test("memory v2 server rolls back failed watch.add mutations", async () => 
     );
     const sessionId = opened.ok!.sessionId;
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "transact",
       requestId: "seed",
       space,
@@ -1441,7 +1441,7 @@ Deno.test("memory v2 server rolls back failed watch.add mutations", async () => 
     }));
     assertEquals(assertResponse<any>(shiftMessage(messages)).requestId, "seed");
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "session.watch.set",
       requestId: "watch-1",
       space,
@@ -1467,7 +1467,7 @@ Deno.test("memory v2 server rolls back failed watch.add mutations", async () => 
       ["of:doc:1"],
     );
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "session.watch.add",
       requestId: "watch-2",
       space,
@@ -1499,7 +1499,7 @@ Deno.test("memory v2 server rolls back failed watch.add mutations", async () => 
     assertEquals(failed.requestId, "watch-2");
     assertEquals(failed.error?.name, "QueryError");
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "transact",
       requestId: "update-doc-2",
       space,
@@ -1533,10 +1533,10 @@ Deno.test("memory v2 server watch set replacement emits removes for entities tha
   const space = "did:key:z6Mk-memory-v2-server-watch-replace";
 
   try {
-    await connection.receive(encodeMemoryV2Boundary(HELLO));
+    await connection.receive(encodeMemoryBoundary(HELLO));
     shiftMessage(messages);
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-1",
       space,
@@ -1547,7 +1547,7 @@ Deno.test("memory v2 server watch set replacement emits removes for entities tha
     );
     const sessionId = opened.ok!.sessionId;
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "transact",
       requestId: "seed",
       space,
@@ -1568,7 +1568,7 @@ Deno.test("memory v2 server watch set replacement emits removes for entities tha
     }));
     assertEquals(assertResponse<any>(shiftMessage(messages)).requestId, "seed");
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "session.watch.set",
       requestId: "watch-1",
       space,
@@ -1596,7 +1596,7 @@ Deno.test("memory v2 server watch set replacement emits removes for entities tha
     );
     assertEquals(first.ok?.sync.removes, []);
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "session.watch.set",
       requestId: "watch-2",
       space,
@@ -1638,10 +1638,10 @@ Deno.test("memory v2 server flushes session sync before returning conflicts", as
   const space = "did:key:z6Mk-memory-v2-conflict-flush";
 
   try {
-    await connection.receive(encodeMemoryV2Boundary(HELLO));
+    await connection.receive(encodeMemoryBoundary(HELLO));
     shiftMessage(messages);
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-1",
       space,
@@ -1652,7 +1652,7 @@ Deno.test("memory v2 server flushes session sync before returning conflicts", as
     );
     const sessionId = opened.ok!.sessionId;
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "session.watch.set",
       requestId: "watch-1",
       space,
@@ -1680,7 +1680,7 @@ Deno.test("memory v2 server flushes session sync before returning conflicts", as
       },
     ]);
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "transact",
       requestId: "tx-1",
       space,
@@ -1697,7 +1697,7 @@ Deno.test("memory v2 server flushes session sync before returning conflicts", as
     }));
     assertEquals(assertResponse<any>(shiftMessage(messages)).requestId, "tx-1");
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "transact",
       requestId: "tx-2",
       space,
@@ -1715,7 +1715,7 @@ Deno.test("memory v2 server flushes session sync before returning conflicts", as
     assertEquals(assertResponse<any>(shiftMessage(messages)).requestId, "tx-2");
     assertEquals(messages.length, 0);
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "transact",
       requestId: "tx-3",
       space,
@@ -1784,10 +1784,10 @@ Deno.test("memory v2 server processes back-to-back websocket messages in receive
   };
 
   try {
-    await connection.receive(encodeMemoryV2Boundary(HELLO));
+    await connection.receive(encodeMemoryBoundary(HELLO));
     shiftMessage(messages);
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-1",
       space,
@@ -1798,7 +1798,7 @@ Deno.test("memory v2 server processes back-to-back websocket messages in receive
     );
     const sessionId = opened.ok!.sessionId;
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "session.watch.set",
       requestId: "watch-1",
       space,
@@ -1819,7 +1819,7 @@ Deno.test("memory v2 server processes back-to-back websocket messages in receive
     }));
     shiftMessage(messages);
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "transact",
       requestId: "tx-1",
       space,
@@ -1836,7 +1836,7 @@ Deno.test("memory v2 server processes back-to-back websocket messages in receive
     }));
     assertEquals(assertResponse<any>(shiftMessage(messages)).requestId, "tx-1");
 
-    const tx2 = connection.receive(encodeMemoryV2Boundary({
+    const tx2 = connection.receive(encodeMemoryBoundary({
       type: "transact",
       requestId: "tx-2",
       space,
@@ -1853,7 +1853,7 @@ Deno.test("memory v2 server processes back-to-back websocket messages in receive
     }));
     await tick();
 
-    const tx3 = connection.receive(encodeMemoryV2Boundary({
+    const tx3 = connection.receive(encodeMemoryBoundary({
       type: "transact",
       requestId: "tx-3",
       space,
@@ -1943,10 +1943,10 @@ Deno.test("memory v2 server waits for queued receives before rerunning scheduled
   };
 
   try {
-    await connection.receive(encodeMemoryV2Boundary(HELLO));
+    await connection.receive(encodeMemoryBoundary(HELLO));
     shiftMessage(messages);
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-1",
       space,
@@ -1957,7 +1957,7 @@ Deno.test("memory v2 server waits for queued receives before rerunning scheduled
     );
     const sessionId = opened.ok!.sessionId;
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "session.watch.set",
       requestId: "watch-1",
       space,
@@ -1993,7 +1993,7 @@ Deno.test("memory v2 server waits for queued receives before rerunning scheduled
     }));
     shiftMessage(messages);
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "transact",
       requestId: "tx-1",
       space,
@@ -2013,7 +2013,7 @@ Deno.test("memory v2 server waits for queued receives before rerunning scheduled
     await time.tickAsync(1);
     await time.tickAsync(0);
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "transact",
       requestId: "tx-2",
       space,
@@ -2030,7 +2030,7 @@ Deno.test("memory v2 server waits for queued receives before rerunning scheduled
     }));
     assertEquals(assertResponse<any>(shiftMessage(messages)).requestId, "tx-2");
 
-    const tx3 = connection.receive(encodeMemoryV2Boundary({
+    const tx3 = connection.receive(encodeMemoryBoundary({
       type: "transact",
       requestId: "tx-3",
       space,
@@ -2130,10 +2130,10 @@ Deno.test("memory v2 server reruns scheduled watch refresh after max deferral", 
   };
 
   try {
-    await connection.receive(encodeMemoryV2Boundary(HELLO));
+    await connection.receive(encodeMemoryBoundary(HELLO));
     shiftMessage(messages);
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "session.open",
       requestId: "open-1",
       space,
@@ -2144,7 +2144,7 @@ Deno.test("memory v2 server reruns scheduled watch refresh after max deferral", 
     );
     const sessionId = opened.ok!.sessionId;
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "session.watch.set",
       requestId: "watch-1",
       space,
@@ -2180,7 +2180,7 @@ Deno.test("memory v2 server reruns scheduled watch refresh after max deferral", 
     }));
     shiftMessage(messages);
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "transact",
       requestId: "tx-1",
       space,
@@ -2200,7 +2200,7 @@ Deno.test("memory v2 server reruns scheduled watch refresh after max deferral", 
     await time.tickAsync(1);
     await time.tickAsync(0);
 
-    await connection.receive(encodeMemoryV2Boundary({
+    await connection.receive(encodeMemoryBoundary({
       type: "transact",
       requestId: "tx-2",
       space,
@@ -2217,7 +2217,7 @@ Deno.test("memory v2 server reruns scheduled watch refresh after max deferral", 
     }));
     assertEquals(assertResponse<any>(shiftMessage(messages)).requestId, "tx-2");
 
-    const tx3 = connection.receive(encodeMemoryV2Boundary({
+    const tx3 = connection.receive(encodeMemoryBoundary({
       type: "transact",
       requestId: "tx-3",
       space,

@@ -1,283 +1,1080 @@
 import { assert, assertEquals } from "@std/assert";
-import env from "@/env.ts";
 import app from "../../../app.ts";
-import { hashOf } from "@commonfabric/data-model/value-hash";
 import {
-  ChangesBuilder,
-  CommitBuilder,
-  Consumer,
-  Fact,
-  TransactionBuilder,
-} from "@commonfabric/memory";
-import * as Codec from "@commonfabric/memory/codec";
-import * as Commit from "@commonfabric/memory/commit";
-import { Identity } from "@commonfabric/identity";
-import { bufferTextMessagesUntilNegotiated } from "./memory.handlers.ts";
+  decodeMemoryBoundary,
+  encodeMemoryBoundary,
+  getMemoryProtocolFlags,
+  MEMORY_PROTOCOL,
+} from "@commonfabric/memory/v2";
+import { hashOf } from "@commonfabric/data-model/value-hash";
+import { createSession, Identity } from "@commonfabric/identity";
+import { type JSONSchema, Runtime } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
-if (env.ENV !== "test") {
-  throw new Error("ENV must be 'test'");
-}
+const HELLO = {
+  type: "hello",
+  protocol: MEMORY_PROTOCOL,
+  flags: getMemoryProtocolFlags(),
+} as const;
 
-const the = "application/json";
-const doc = `of:${hashOf({ hello: "world" })}` as const;
+const openSocket = async (url: URL): Promise<WebSocket> => {
+  const socket = new WebSocket(url);
+  await new Promise<void>((resolve, reject) => {
+    socket.addEventListener("open", () => resolve(), { once: true });
+    socket.addEventListener("error", (event) => reject(event), { once: true });
+  });
+  return socket;
+};
 
-export const alice = await Identity.fromString(
-  "MU+bzp2GaFQHso587iSFWPSeCzbSfn/CbNHEz7ilKRZ0=",
-);
-
-export const space = await Identity.fromString(
-  "MCl6B1cu1ZOP0I3BBovjAqo57VImrMVyfLiSmNKoddXs=",
-);
-
-class FakeSocket extends EventTarget {
-  readyState: number = WebSocket.OPEN;
-  closeCode?: number;
-  closeReason?: string;
-
-  send(_data: string): void {
-  }
-
-  close(code?: number, reason?: string): void {
-    this.closeCode = code;
-    this.closeReason = reason;
-    this.readyState = WebSocket.CLOSED;
-    this.dispatchEvent(new CloseEvent("close"));
-  }
-
-  emitMessage(data: unknown): void {
-    this.dispatchEvent(new MessageEvent("message", { data }));
-  }
-}
-
-Deno.test("memory websocket negotiation handoff preserves buffered and live frames", async () => {
-  const socket = new FakeSocket();
-  const negotiation = bufferTextMessagesUntilNegotiated(
-    socket as unknown as WebSocket,
-  );
-
-  socket.emitMessage("first");
-  assertEquals(await negotiation.firstMessage, "first");
-
-  socket.emitMessage("buffered-before-handoff");
-
-  const received: string[] = [];
-  negotiation.handoff({
-    onMessage(message) {
-      received.push(message);
+const createSessionOpenAuth = async (
+  identity: Identity,
+  space: string,
+  session: { sessionId?: string; seenSeq?: number } = {},
+) => {
+  const invocation = {
+    iss: identity.did(),
+    cmd: "session.open",
+    sub: space,
+    args: {
+      protocol: MEMORY_PROTOCOL,
+      session,
     },
+  };
+  const signature = await identity.sign(hashOf(invocation).bytes);
+  if (signature.error) {
+    throw signature.error;
+  }
+  return {
+    invocation,
+    authorization: {
+      signature: signature.ok,
+    },
+  };
+};
+
+const readJsonMessage = async <Message>(
+  socket: WebSocket,
+): Promise<Message> => {
+  const payload = await new Promise<string>((resolve, reject) => {
+    socket.addEventListener("message", (event) => {
+      if (typeof event.data !== "string") {
+        reject(new Error("Expected a string websocket message"));
+        return;
+      }
+      resolve(event.data);
+    }, { once: true });
+    socket.addEventListener(
+      "error",
+      () => reject(new Error("WebSocket error before message")),
+      { once: true },
+    );
   });
 
-  socket.emitMessage("after-handoff");
+  return decodeMemoryBoundary<Message>(payload);
+};
 
-  assertEquals(received, [
-    "buffered-before-handoff",
-    "after-handoff",
-  ]);
-});
+const waitFor = async (
+  predicate: () => boolean,
+  timeout = 5000,
+): Promise<void> => {
+  const started = Date.now();
+  while (!predicate()) {
+    if (Date.now() - started > timeout) {
+      throw new Error("Timed out waiting for condition");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+};
 
-Deno.test("memory websocket negotiation closes when the buffered byte budget is exceeded", async () => {
-  const socket = new FakeSocket();
-  const negotiation = bufferTextMessagesUntilNegotiated(
-    socket as unknown as WebSocket,
-    { maxBufferedBytes: 4 },
-  );
+const createRuntime = (identity: Identity, base: URL) =>
+  new Runtime({
+    apiUrl: base,
+    storageManager: StorageManager.open({
+      as: identity,
+      address: new URL("/api/storage/memory", base),
+    }),
+  });
 
-  socket.emitMessage("first");
-  assertEquals(await negotiation.firstMessage, "first");
+let routeTestQueue = Promise.resolve();
 
-  socket.emitMessage("12345");
+const serialTest = (
+  name: string,
+  fn: () => Promise<void>,
+) =>
+  Deno.test(name, async () => {
+    const previous = routeTestQueue;
+    const current = Promise.withResolvers<void>();
+    routeTestQueue = current.promise;
+    await previous;
+    try {
+      await fn();
+    } finally {
+      current.resolve();
+    }
+  });
 
-  assertEquals(socket.readyState, WebSocket.CLOSED);
-  assertEquals(socket.closeCode, 1009);
-  assertEquals(
-    socket.closeReason,
-    "Memory websocket negotiation buffer exceeded",
-  );
+serialTest(
+  "memory websocket authorizes session opens with a workspace spaceIdentity",
+  async () => {
+    const identity = await Identity.generate({ implementation: "noble" });
+    const session = await createSession({
+      identity,
+      spaceName: `memory-space-identity-${Date.now()}`,
+    });
+    const server = Deno.serve({ port: 0 }, app.fetch);
+    const base = new URL(`http://${server.addr.hostname}:${server.addr.port}`);
+    const storageManager = StorageManager.open({
+      as: session.as,
+      address: new URL("/api/storage/memory", base),
+      spaceIdentity: session.spaceIdentity,
+    });
+    const runtime = new Runtime({
+      apiUrl: base,
+      storageManager,
+    });
 
-  const errors: string[] = [];
-  negotiation.handoff({
-    onMessage() {
-      throw new Error(
-        "overflowed negotiation should not deliver buffered data",
+    try {
+      const tx = runtime.edit();
+      const cell = runtime.getCell(
+        session.space,
+        `memory-space-identity-cell-${Date.now()}`,
+        undefined,
+        tx,
       );
-    },
-    onError(error) {
-      errors.push(error.message);
-    },
-  });
+      cell.set({ hello: "workspace" });
 
-  assertEquals(errors, ["Memory websocket negotiation buffer exceeded"]);
-});
+      const result = await tx.commit();
+      assert("ok" in result);
 
-Deno.test("test transaction", async () => {
-  const server = Deno.serve({ port: 9000 }, app.fetch);
-  const address = new URL(
-    `http://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
-  );
+      await runtime.storageManager.synced();
+      const provider = runtime.storageManager.open(session.space);
+      assertEquals(
+        provider.replica.get({
+          id: cell.getAsNormalizedFullLink().id,
+          type: "application/json",
+        })?.is,
+        { value: { hello: "workspace" } },
+      );
+    } finally {
+      await runtime.dispose();
+      await server.shutdown();
+    }
+  },
+);
 
-  try {
-    const memory = Consumer.connect({
-      address,
-      as: space,
-    });
-    const home = memory.mount(space.did());
+serialTest(
+  "memory websocket supports a runtime using the memory path",
+  async () => {
+    const identity = await Identity.fromPassphrase("memory-route-traffic");
+    const server = Deno.serve({ port: 0 }, app.fetch);
+    const address = new URL(
+      `http://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
+    );
+    let runtime: Runtime | undefined;
+    let storageManager:
+      | ReturnType<typeof StorageManager.open>
+      | undefined;
 
-    const hello = Fact.assert({
-      the,
-      of: doc,
-      is: { hello: "world" },
-    });
+    try {
+      storageManager = StorageManager.open({
+        as: identity,
+        address,
+      });
+      runtime = new Runtime({
+        apiUrl: new URL(`http://${server.addr.hostname}:${server.addr.port}`),
+        storageManager,
+      });
+      const tx = runtime.edit();
+      const cell = runtime.getCell(
+        identity.did(),
+        `memory-toolshed-${Date.now()}`,
+        undefined,
+        tx,
+      );
 
-    const transaction = TransactionBuilder.create({
-      issuer: space.did(),
-      subject: space.did(),
-      changes: ChangesBuilder.from([hello]),
-    });
+      cell.set({ hello: "world" });
+      await tx.commit();
+      await runtime.idle();
+      await storageManager.synced();
 
-    const result = await home.transact({
-      changes: ChangesBuilder.from([hello]),
-    });
+      const provider = storageManager.open(identity.did());
+      await provider.sync(cell.getAsNormalizedFullLink().id);
+      await waitFor(() =>
+        provider.replica.get({
+          id: cell.getAsNormalizedFullLink().id,
+          type: "application/json",
+        })?.is !== undefined
+      );
+      const persisted = provider.replica.get({
+        id: cell.getAsNormalizedFullLink().id,
+        type: "application/json",
+      });
 
-    assertEquals(result, {
-      ok: ChangesBuilder.from([
-        CommitBuilder.create({
-          space: space.did(),
-          transaction,
+      assertEquals(persisted?.is, { value: { hello: "world" } });
+    } finally {
+      await runtime?.dispose();
+      await server.shutdown();
+    }
+  },
+);
+
+serialTest(
+  "memory websocket persists memory runtime data across fresh runtimes",
+  async () => {
+    const identity = await Identity.fromPassphrase("memory-route-persist");
+    const server = Deno.serve({ port: 0 }, app.fetch);
+    const base = new URL(`http://${server.addr.hostname}:${server.addr.port}`);
+    const address = new URL("/api/storage/memory", base);
+    const cause = `memory-toolshed-persist-${Date.now()}`;
+    let runtime1: Runtime | undefined;
+    let runtime2: Runtime | undefined;
+
+    try {
+      runtime1 = new Runtime({
+        apiUrl: base,
+        storageManager: StorageManager.open({
+          as: identity,
+          address,
         }),
-      ]),
-    });
+      });
+      const tx = runtime1.edit();
+      const writer = runtime1.getCell(identity.did(), cause, undefined, tx);
+      writer.set({ persisted: true, count: 1 });
+      await tx.commit();
+      await runtime1.idle();
+      await runtime1.storageManager.synced();
+      await runtime1.dispose();
+      runtime1 = undefined;
 
-    memory.close();
-  } finally {
-    await server.shutdown();
-    Deno.removeSync(new URL(`./${space.did()}.sqlite`, env.MEMORY_DIR));
-  }
-});
+      runtime2 = new Runtime({
+        apiUrl: base,
+        storageManager: StorageManager.open({
+          as: identity,
+          address,
+        }),
+      });
+      const reader = runtime2.getCell(identity.did(), cause);
+      await reader.sync();
+      await runtime2.storageManager.synced();
 
-Deno.test("test consumer", async () => {
-  const server = Deno.serve({ port: 9000 }, app.fetch);
-  const address = new URL(
-    `http://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
-  );
-  try {
-    const session = Consumer.connect({ address, as: alice });
-    const memory = session.mount(alice.did());
+      assertEquals(reader.get(), { persisted: true, count: 1 });
+    } finally {
+      await runtime2?.dispose();
+      await runtime1?.dispose();
+      await server.shutdown();
+    }
+  },
+);
 
-    const result = await memory.query({
-      select: {
-        [doc]: {
-          [the]: {},
-        },
-      },
-    });
-
-    assert(result.ok);
-    const query = result.ok;
-    assertEquals(query.facts, []);
-
-    const subscription = query.subscribe();
-
-    const fact = Fact.assert({ the, of: doc, is: { first: "doc" } });
-    const tr = await memory.transact({
-      changes: ChangesBuilder.from([fact]),
-    });
-
-    assert(tr.ok);
-    const commit = Commit.toRevision(tr.ok);
-
-    const message = await subscription.getReader().read();
-    assertEquals(message.done, false);
-
-    assertEquals(query.facts, [{ ...fact, since: commit.is.since }]);
-
-    session.close();
-  } finally {
-    await server.shutdown();
-    Deno.removeSync(new URL(`./${alice.did()}.sqlite`, env.MEMORY_DIR));
-  }
-});
-
-Deno.test("memory websocket preserves early v1 frames during negotiation", async () => {
-  const server = Deno.serve({ port: 9000 }, app.fetch);
+serialTest("memory websocket negotiates a session", async () => {
+  const identity = await Identity.fromPassphrase("memory-route-open-auth");
+  const server = Deno.serve({ port: 0 }, app.fetch);
   const address = new URL(
     `ws://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
   );
-  const docA = `of:${hashOf({ one: "a" })}` as const;
-  const docB = `of:${hashOf({ two: "b" })}` as const;
+  const space = identity.did();
 
   try {
-    const consumer = Consumer.create({ as: alice });
-    const memory = consumer.mount(alice.did());
-    const invocations = consumer.readable.getReader();
+    const socket = await openSocket(address);
+    socket.send(encodeMemoryBoundary(HELLO));
 
-    memory.query({
-      select: {
-        [docA]: {
-          [the]: {},
-        },
-      },
+    const message = await readJsonMessage<{
+      type: "hello.ok";
+      protocol: string;
+      flags: ReturnType<typeof getMemoryProtocolFlags>;
+    }>(socket);
+
+    assertEquals(message.type, "hello.ok");
+    assertEquals(message.protocol, MEMORY_PROTOCOL);
+    assertEquals(message.flags, getMemoryProtocolFlags());
+
+    const auth = await createSessionOpenAuth(identity, space);
+    socket.send(encodeMemoryBoundary({
+      type: "session.open",
+      requestId: "open-1",
+      space,
+      session: {},
+      ...auth,
+    }));
+
+    const opened = await readJsonMessage<{
+      type: "response";
+      requestId: string;
+      ok: { sessionId: string; serverSeq: number };
+    }>(socket);
+
+    assertEquals(opened.type, "response");
+    assertEquals(opened.requestId, "open-1");
+    assertEquals(opened.ok.serverSeq, 0);
+    assert(opened.ok.sessionId.length > 0);
+
+    socket.close();
+  } finally {
+    await server.shutdown();
+  }
+});
+
+serialTest("memory websocket rejects an unsigned session open", async () => {
+  const identity = await Identity.fromPassphrase("memory-route-open-reject");
+  const server = Deno.serve({ port: 0 }, app.fetch);
+  const address = new URL(
+    `ws://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
+  );
+  let socket: WebSocket | undefined;
+
+  try {
+    socket = await openSocket(address);
+    socket.send(encodeMemoryBoundary(HELLO));
+    await readJsonMessage(socket);
+
+    socket.send(encodeMemoryBoundary({
+      type: "session.open",
+      requestId: "open-1",
+      space: identity.did(),
+      session: {},
+    }));
+
+    const message = await readJsonMessage<{
+      type: "response";
+      requestId: string;
+      error: { name: string; message: string };
+    }>(socket);
+
+    assertEquals(message.type, "response");
+    assertEquals(message.requestId, "open-1");
+    assertEquals(message.error.name, "AuthorizationError");
+  } finally {
+    socket?.close();
+    await server.shutdown();
+  }
+});
+
+serialTest("memory websocket resumes a requested session id", async () => {
+  const identity = await Identity.fromPassphrase("memory-route-resume-auth");
+  const server = Deno.serve({ port: 0 }, app.fetch);
+  const address = new URL(
+    `ws://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
+  );
+  const space = identity.did();
+
+  try {
+    const socket = await openSocket(address);
+    socket.send(encodeMemoryBoundary(HELLO));
+
+    await readJsonMessage(socket);
+
+    const auth = await createSessionOpenAuth(identity, space, {
+      sessionId: "session:test-resume",
+      seenSeq: 7,
     });
-    memory.query({
-      select: {
-        [docB]: {
-          [the]: {},
-        },
+    socket.send(encodeMemoryBoundary({
+      type: "session.open",
+      requestId: "open-1",
+      space,
+      session: {
+        sessionId: "session:test-resume",
+        seenSeq: 7,
       },
-    });
+      ...auth,
+    }));
 
-    const first = await invocations.read();
-    const second = await invocations.read();
-    assert(!first.done);
-    assert(!second.done);
+    const message = await readJsonMessage<{
+      type: "response";
+      requestId: string;
+      ok: { sessionId: string; serverSeq: number };
+    }>(socket);
 
-    const socket = new WebSocket(address);
-    const receipts: { the?: string }[] = [];
-    const completion = Promise.withResolvers<void>();
-    const timeout = setTimeout(() => {
-      completion.reject(
-        new Error("Timed out waiting for two v1 task/return receipts"),
-      );
-    }, 3_000);
+    assertEquals(message.type, "response");
+    assertEquals(message.requestId, "open-1");
+    assertEquals(message.ok.sessionId, "session:test-resume");
+    assertEquals(message.ok.serverSeq, 0);
 
-    socket.addEventListener("message", (event) => {
-      if (typeof event.data !== "string") {
-        return;
-      }
-      const receipt = Codec.Receipt.fromString(event.data);
-      receipts.push(receipt);
-      const taskReturns = receipts.filter((entry) =>
-        entry.the === "task/return"
-      );
-      if (taskReturns.length >= 2) {
-        clearTimeout(timeout);
-        completion.resolve();
-      }
-    });
-    socket.addEventListener(
-      "open",
-      () => {
-        socket.send(Codec.UCAN.toString(first.value));
-        socket.send(Codec.UCAN.toString(second.value));
-      },
-      { once: true },
+    socket.close();
+  } finally {
+    await server.shutdown();
+  }
+});
+
+serialTest(
+  "memory websocket requires hello before opening a session",
+  async () => {
+    const server = Deno.serve({ port: 0 }, app.fetch);
+    const address = new URL(
+      `ws://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
     );
 
     try {
-      await completion.promise;
-      assertEquals(
-        receipts.filter((entry) => entry.the === "task/return").length,
-        2,
-      );
-    } finally {
-      consumer.close();
+      const socket = await openSocket(address);
+      socket.send(encodeMemoryBoundary({
+        type: "session.open",
+        requestId: "open-without-hello",
+        space: "did:key:z6Mk-toolshed-no-hello",
+        session: {},
+      }));
+
+      const message = await readJsonMessage<{
+        type: "response";
+        requestId: string;
+        error: { name: string; message: string };
+      }>(socket);
+
+      assertEquals(message.type, "response");
+      assertEquals(message.requestId, "handshake");
+      assertEquals(message.error.name, "ProtocolError");
+
       socket.close();
+    } finally {
+      await server.shutdown();
     }
-  } finally {
-    await server.shutdown();
+  },
+);
+
+serialTest(
+  "memory websocket discovers newly linked documents for a subscribed memory runtime",
+  async () => {
+    const identity = await Identity.fromPassphrase(
+      `memory-new-link-${Date.now()}`,
+    );
+    const server = Deno.serve({ port: 0 }, app.fetch);
+    const base = new URL(`http://${server.addr.hostname}:${server.addr.port}`);
+    const space = identity.did();
+
+    const addressSchema = {
+      type: "object",
+      properties: {
+        city: { type: "string" },
+      },
+      required: ["city"],
+    } as const satisfies JSONSchema;
+
+    const personSchema = {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        address: addressSchema,
+      },
+      required: ["name"],
+    } as const satisfies JSONSchema;
+
     try {
-      Deno.removeSync(new URL(`./${alice.did()}.sqlite`, env.MEMORY_DIR));
-    } catch (_error) {
-      // Ignore missing sqlite cleanup in read-only websocket test.
+      const runtime1 = createRuntime(identity, base);
+      let tx = runtime1.edit();
+      const addressCell = runtime1.getCell(
+        space,
+        "memory-link-address",
+        addressSchema,
+        tx,
+      );
+      addressCell.set({ city: "San Francisco" });
+      await tx.commit();
+
+      tx = runtime1.edit();
+      const personCell = runtime1.getCell(
+        space,
+        "memory-link-person",
+        personSchema,
+        tx,
+      );
+      personCell.set({ name: "Alice" });
+      await tx.commit();
+      await runtime1.storageManager.synced();
+      const addressLink = structuredClone(addressCell.getAsLink());
+      await runtime1.dispose();
+
+      const runtime2 = createRuntime(identity, base);
+      const personCell2 = runtime2.getCell(
+        space,
+        "memory-link-person",
+        personSchema,
+      );
+      await personCell2.sync();
+      await runtime2.storageManager.synced();
+      assertEquals(personCell2.get()?.address, undefined);
+
+      let receivedAddress = false;
+      personCell2.sink((value) => {
+        if (value?.address?.city === "San Francisco") {
+          receivedAddress = true;
+        }
+      });
+
+      const runtime3 = createRuntime(identity, base);
+      const personCell3 = runtime3.getCell(
+        space,
+        "memory-link-person",
+        personSchema,
+      );
+      await personCell3.sync();
+      tx = runtime3.edit();
+      personCell3.withTx(tx).setRawUntyped({
+        name: "Alice",
+        address: addressLink,
+      });
+      await tx.commit();
+      await runtime3.storageManager.synced();
+
+      await waitFor(() => receivedAddress);
+      assertEquals(personCell2.get(), {
+        name: "Alice",
+        address: { city: "San Francisco" },
+      });
+
+      await runtime3.dispose();
+      await runtime2.dispose();
+    } finally {
+      await server.shutdown();
     }
-  }
-});
+  },
+);
+
+serialTest(
+  "memory websocket propagates linked document changes to a subscribed memory runtime",
+  async () => {
+    const identity = await Identity.fromPassphrase(
+      `memory-linked-update-${Date.now()}`,
+    );
+    const server = Deno.serve({ port: 0 }, app.fetch);
+    const base = new URL(`http://${server.addr.hostname}:${server.addr.port}`);
+    const space = identity.did();
+
+    const addressSchema = {
+      type: "object",
+      properties: {
+        city: { type: "string" },
+      },
+      required: ["city"],
+    } as const satisfies JSONSchema;
+
+    const personSchema = {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        address: addressSchema,
+      },
+      required: ["name", "address"],
+    } as const satisfies JSONSchema;
+
+    try {
+      const runtime1 = createRuntime(identity, base);
+      let tx = runtime1.edit();
+      const addressCell = runtime1.getCell(
+        space,
+        "memory-linked-address",
+        addressSchema,
+        tx,
+      );
+      addressCell.set({ city: "New York" });
+      await tx.commit();
+      await addressCell.sync();
+      await runtime1.storageManager.synced();
+      const addressLink = structuredClone(addressCell.getAsLink());
+
+      tx = runtime1.edit();
+      const personCell = runtime1.getCell(
+        space,
+        "memory-linked-person",
+        personSchema,
+        tx,
+      );
+      personCell.setRawUntyped({
+        name: "Bob",
+        address: addressLink,
+      });
+      await tx.commit();
+      await runtime1.storageManager.synced();
+      await runtime1.dispose();
+
+      const runtime2 = createRuntime(identity, base);
+      const personCell2 = runtime2.getCell(
+        space,
+        "memory-linked-person",
+        personSchema,
+      );
+      await personCell2.sync();
+      await runtime2.storageManager.synced();
+      assertEquals(personCell2.get(), {
+        name: "Bob",
+        address: { city: "New York" },
+      });
+
+      let receivedNewCity = false;
+      personCell2.sink((value) => {
+        if (value?.address?.city === "Los Angeles") {
+          receivedNewCity = true;
+        }
+      });
+
+      const runtime3 = createRuntime(identity, base);
+      const addressCell3 = runtime3.getCell(
+        space,
+        "memory-linked-address",
+        addressSchema,
+      );
+      await addressCell3.sync();
+      tx = runtime3.edit();
+      addressCell3.withTx(tx).set({ city: "Los Angeles" });
+      await tx.commit();
+      await runtime3.storageManager.synced();
+
+      await waitFor(() => receivedNewCity);
+      assertEquals(personCell2.get(), {
+        name: "Bob",
+        address: { city: "Los Angeles" },
+      });
+
+      await runtime3.dispose();
+      await runtime2.dispose();
+    } finally {
+      await server.shutdown();
+    }
+  },
+);
+
+serialTest(
+  "memory websocket keeps deep linked chains live for a subscribed memory runtime",
+  async () => {
+    const identity = await Identity.fromPassphrase(
+      `memory-deep-link-${Date.now()}`,
+    );
+    const server = Deno.serve({ port: 0 }, app.fetch);
+    const base = new URL(`http://${server.addr.hostname}:${server.addr.port}`);
+    const space = identity.did();
+
+    const citySchema = {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        population: { type: "number" },
+      },
+      required: ["name"],
+    } as const satisfies JSONSchema;
+
+    const addressSchema = {
+      type: "object",
+      properties: {
+        street: { type: "string" },
+        city: citySchema,
+      },
+      required: ["street", "city"],
+    } as const satisfies JSONSchema;
+
+    const personSchema = {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        address: addressSchema,
+      },
+      required: ["name", "address"],
+    } as const satisfies JSONSchema;
+
+    try {
+      const runtime1 = createRuntime(identity, base);
+      let tx = runtime1.edit();
+      const cityCell = runtime1.getCell(
+        space,
+        "memory-deep-city",
+        citySchema,
+        tx,
+      );
+      cityCell.set({ name: "Seattle", population: 750000 });
+      await tx.commit();
+      await cityCell.sync();
+      await runtime1.storageManager.synced();
+      const cityLink = structuredClone(cityCell.getAsLink());
+
+      tx = runtime1.edit();
+      const addressCell = runtime1.getCell(
+        space,
+        "memory-deep-address",
+        addressSchema,
+        tx,
+      );
+      addressCell.setRawUntyped({
+        street: "123 Main St",
+        city: cityLink,
+      });
+      await tx.commit();
+      await addressCell.sync();
+      await runtime1.storageManager.synced();
+      const addressLink = structuredClone(addressCell.getAsLink());
+
+      tx = runtime1.edit();
+      const personCell = runtime1.getCell(
+        space,
+        "memory-deep-person",
+        personSchema,
+        tx,
+      );
+      personCell.setRawUntyped({
+        name: "Charlie",
+        address: addressLink,
+      });
+      await tx.commit();
+      await runtime1.storageManager.synced();
+      await runtime1.dispose();
+
+      const runtime2 = createRuntime(identity, base);
+      const personCell2 = runtime2.getCell(
+        space,
+        "memory-deep-person",
+        personSchema,
+      );
+      await personCell2.sync();
+      await runtime2.storageManager.synced();
+      assertEquals(personCell2.get(), {
+        name: "Charlie",
+        address: {
+          street: "123 Main St",
+          city: { name: "Seattle", population: 750000 },
+        },
+      });
+
+      let receivedPopulation = false;
+      personCell2.sink((value) => {
+        if (value?.address?.city?.population === 800000) {
+          receivedPopulation = true;
+        }
+      });
+
+      const runtime3 = createRuntime(identity, base);
+      const cityCell3 = runtime3.getCell(space, "memory-deep-city", citySchema);
+      await cityCell3.sync();
+      tx = runtime3.edit();
+      cityCell3.withTx(tx).set({ name: "Seattle", population: 800000 });
+      await tx.commit();
+      await runtime3.storageManager.synced();
+
+      await waitFor(() => receivedPopulation);
+      assertEquals(personCell2.get(), {
+        name: "Charlie",
+        address: {
+          street: "123 Main St",
+          city: { name: "Seattle", population: 800000 },
+        },
+      });
+
+      await runtime3.dispose();
+      await runtime2.dispose();
+    } finally {
+      await server.shutdown();
+    }
+  },
+);
+
+serialTest(
+  "memory websocket re-establishes subscribed memory runtimes after server restart",
+  async () => {
+    const identity = await Identity.fromPassphrase(
+      `memory-reconnect-runtime-${Date.now()}`,
+    );
+    let server = Deno.serve({ port: 0 }, app.fetch);
+    const port = server.addr.port;
+    const base = new URL(`http://${server.addr.hostname}:${port}`);
+    const space = identity.did();
+
+    const counterSchema = {
+      type: "object",
+      properties: {
+        count: { type: "number" },
+      },
+      required: ["count"],
+    } as const satisfies JSONSchema;
+
+    try {
+      const runtime1 = createRuntime(identity, base);
+      let tx = runtime1.edit();
+      const writer = runtime1.getCell(
+        space,
+        "memory-reconnect-counter",
+        counterSchema,
+        tx,
+      );
+      writer.set({ count: 1 });
+      await tx.commit();
+      await runtime1.storageManager.synced();
+      await runtime1.dispose();
+
+      const subscriberRuntime = createRuntime(identity, base);
+      const counterCell = subscriberRuntime.getCell(
+        space,
+        "memory-reconnect-counter",
+        counterSchema,
+      );
+      await counterCell.sync();
+      await subscriberRuntime.storageManager.synced();
+      assertEquals(counterCell.get(), { count: 1 });
+
+      let sawReconnectUpdate = false;
+      counterCell.sink((value) => {
+        if (value?.count === 2) {
+          sawReconnectUpdate = true;
+        }
+      });
+
+      await server.shutdown();
+      server = Deno.serve({ port }, app.fetch);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      const runtime2 = createRuntime(identity, base);
+      const counterWriter = runtime2.getCell(
+        space,
+        "memory-reconnect-counter",
+        counterSchema,
+      );
+      await counterWriter.sync();
+      tx = runtime2.edit();
+      counterWriter.withTx(tx).set({ count: 2 });
+      await tx.commit();
+      await runtime2.storageManager.synced();
+
+      await waitFor(() => sawReconnectUpdate);
+      assertEquals(counterCell.get(), { count: 2 });
+
+      await runtime2.dispose();
+      await subscriberRuntime.dispose();
+    } finally {
+      await server.shutdown();
+    }
+  },
+);
+
+serialTest(
+  "memory websocket round-trips alias schema metadata through synced memory runtimes",
+  async () => {
+    const identity = await Identity.fromPassphrase(
+      `memory-alias-schema-${Date.now()}`,
+    );
+    const server = Deno.serve({ port: 0 }, app.fetch);
+    const base = new URL(`http://${server.addr.hostname}:${server.addr.port}`);
+    const space = identity.did();
+
+    const schema = {
+      type: "object",
+      properties: {
+        count: { type: "number" },
+        label: { type: "string" },
+      },
+    } as const satisfies JSONSchema;
+
+    try {
+      const runtime1 = createRuntime(identity, base);
+      const tx = runtime1.edit();
+      const targetCell = runtime1.getCell(
+        space,
+        "memory-alias-schema-target",
+        undefined,
+        tx,
+      );
+      targetCell.set({ count: 42, label: "test" });
+
+      const aliasCell = runtime1.getCell(
+        space,
+        "memory-alias-schema-source",
+        undefined,
+        tx,
+      );
+      aliasCell.setRaw(
+        targetCell.asSchema(schema).getAsWriteRedirectLink({
+          includeSchema: true,
+        }),
+      );
+      await tx.commit();
+      await runtime1.storageManager.synced();
+      await runtime1.dispose();
+
+      const runtime2 = createRuntime(identity, base);
+      const aliasCell2 = runtime2.getCell<{ count: number; label: string }>(
+        space,
+        "memory-alias-schema-source",
+      );
+      await aliasCell2.sync();
+      await runtime2.storageManager.synced();
+      assertEquals(aliasCell2.schema, schema);
+      assertEquals(aliasCell2.key("count").schema, { type: "number" });
+      assertEquals(aliasCell2.get(), { count: 42, label: "test" });
+
+      await runtime2.dispose();
+    } finally {
+      await server.shutdown();
+    }
+  },
+);
+
+serialTest(
+  "memory websocket preserves alias-derived schemas after reconnect",
+  async () => {
+    const identity = await Identity.fromPassphrase(
+      `memory-alias-reconnect-${Date.now()}`,
+    );
+    let server = Deno.serve({ port: 0 }, app.fetch);
+    const port = server.addr.port;
+    const base = new URL(`http://${server.addr.hostname}:${port}`);
+    const space = identity.did();
+
+    const schema = {
+      type: "object",
+      properties: {
+        count: { type: "number" },
+        label: { type: "string" },
+      },
+    } as const satisfies JSONSchema;
+
+    try {
+      const runtime1 = createRuntime(identity, base);
+      let tx = runtime1.edit();
+      const targetCell = runtime1.getCell(
+        space,
+        "memory-alias-reconnect-target",
+        undefined,
+        tx,
+      );
+      targetCell.set({ count: 1, label: "start" });
+      const aliasCell = runtime1.getCell(
+        space,
+        "memory-alias-reconnect-source",
+        undefined,
+        tx,
+      );
+      aliasCell.setRaw(
+        targetCell.asSchema(schema).getAsWriteRedirectLink({
+          includeSchema: true,
+        }),
+      );
+      await tx.commit();
+      await runtime1.storageManager.synced();
+      await runtime1.dispose();
+
+      const subscriberRuntime = createRuntime(identity, base);
+      const aliasCell2 = subscriberRuntime.getCell<
+        { count: number; label: string }
+      >(
+        space,
+        "memory-alias-reconnect-source",
+      );
+      await aliasCell2.sync();
+      await subscriberRuntime.storageManager.synced();
+      assertEquals(aliasCell2.schema, schema);
+      assertEquals(aliasCell2.get(), { count: 1, label: "start" });
+
+      let sawUpdate = false;
+      aliasCell2.sink((value) => {
+        if (value?.count === 2 && value?.label === "after-restart") {
+          sawUpdate = true;
+        }
+      });
+
+      await server.shutdown();
+      server = Deno.serve({ port }, app.fetch);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      const runtime2 = createRuntime(identity, base);
+      const targetCell2 = runtime2.getCell(
+        space,
+        "memory-alias-reconnect-target",
+      );
+      await targetCell2.sync();
+      tx = runtime2.edit();
+      targetCell2.withTx(tx).set({ count: 2, label: "after-restart" });
+      await tx.commit();
+      await runtime2.storageManager.synced();
+
+      await waitFor(() => sawUpdate);
+      assertEquals(aliasCell2.schema, schema);
+      assertEquals(aliasCell2.key("count").schema, { type: "number" });
+      assertEquals(aliasCell2.get(), { count: 2, label: "after-restart" });
+
+      await runtime2.dispose();
+      await subscriberRuntime.dispose();
+    } finally {
+      await server.shutdown();
+    }
+  },
+);
+
+serialTest(
+  "memory websocket keeps retargeted aliases live for subscribed memory runtimes",
+  async () => {
+    const identity = await Identity.fromPassphrase(
+      `memory-alias-retarget-${Date.now()}`,
+    );
+    const server = Deno.serve({ port: 0 }, app.fetch);
+    const base = new URL(`http://${server.addr.hostname}:${server.addr.port}`);
+    const space = identity.did();
+
+    const schema = {
+      type: "object",
+      properties: {
+        count: { type: "number" },
+        label: { type: "string" },
+      },
+    } as const satisfies JSONSchema;
+
+    try {
+      const runtime1 = createRuntime(identity, base);
+      let tx = runtime1.edit();
+      const firstTarget = runtime1.getCell(
+        space,
+        "memory-alias-retarget-first",
+        undefined,
+        tx,
+      );
+      firstTarget.set({ count: 1, label: "first" });
+      const secondTarget = runtime1.getCell(
+        space,
+        "memory-alias-retarget-second",
+        undefined,
+        tx,
+      );
+      secondTarget.set({ count: 2, label: "second" });
+      const aliasCell = runtime1.getCell(
+        space,
+        "memory-alias-retarget-source",
+        undefined,
+        tx,
+      );
+      aliasCell.setRaw(
+        firstTarget.asSchema(schema).getAsWriteRedirectLink({
+          includeSchema: true,
+        }),
+      );
+      await tx.commit();
+      await runtime1.storageManager.synced();
+
+      const subscriberRuntime = createRuntime(identity, base);
+      const aliasCell2 = subscriberRuntime.getCell<
+        { count: number; label: string }
+      >(
+        space,
+        "memory-alias-retarget-source",
+      );
+      await aliasCell2.sync();
+      await subscriberRuntime.storageManager.synced();
+      assertEquals(aliasCell2.get(), { count: 1, label: "first" });
+
+      let sawRetarget = false;
+      aliasCell2.sink((value) => {
+        if (value?.count === 2 && value?.label === "second") {
+          sawRetarget = true;
+        }
+      });
+
+      tx = runtime1.edit();
+      aliasCell.withTx(tx).setRaw(
+        secondTarget.asSchema(schema).getAsWriteRedirectLink({
+          includeSchema: true,
+        }),
+      );
+      await tx.commit();
+      await runtime1.storageManager.synced();
+
+      await waitFor(() => sawRetarget);
+      assertEquals(aliasCell2.schema, schema);
+      assertEquals(aliasCell2.get(), { count: 2, label: "second" });
+
+      await subscriberRuntime.dispose();
+      await runtime1.dispose();
+    } finally {
+      await server.shutdown();
+    }
+  },
+);

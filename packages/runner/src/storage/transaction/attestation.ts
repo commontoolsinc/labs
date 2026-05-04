@@ -331,10 +331,11 @@ export const claim = (
   { address, value: expected }: IAttestation,
   replica: ISpaceReplica,
 ): Result<State, IStorageTransactionInconsistent> => {
+  const type = address.type ?? "application/json";
   const state = replica.get(address) ??
-    unclaimed({ of: address.id, the: address.type });
+    unclaimed({ of: address.id, the: type });
   const source = attest(state);
-  const actual = address.type === "application/json" &&
+  const actual = type === "application/json" &&
       address.path.length === 0 &&
       "getDocument" in replica &&
       typeof replica.getDocument === "function"
@@ -419,7 +420,7 @@ export const load = (
   address: Omit<IMemoryAddress, "path">,
 ): Result<IAttestation, IInvalidDataURIError | IUnsupportedMediaTypeError> => {
   // Check cache first
-  const cacheKey = `${address.id}::${address.type}`;
+  const cacheKey = address.id;
   const cached = dataURICache.get(cacheKey);
   if (cached) {
     cacheHitLogger.debug("cache-hit", "found cached result");
@@ -461,16 +462,7 @@ export const load = (
         // Decode data
         const content = isBase64 ? atob(data) : decodeURIComponent(data);
 
-        // Check if media type matches address.type
-        if (mediaType !== address.type) {
-          // Media type mismatch - return error
-          result = {
-            error: UnsupportedMediaTypeError(
-              `Media type mismatch: expected "${address.type}" but data URI contains "${mediaType}"`,
-            ),
-          };
-        } else if (mediaType === "application/json") {
-          // Handle JSON media type
+        if (mediaType === "application/json") {
           let value: FabricValue;
           try {
             value = JSON.parse(content);
@@ -483,12 +475,6 @@ export const load = (
               ),
             };
           }
-        } else if (mediaType.startsWith("text/")) {
-          // Handle other media types - store as string for now since we do not
-          // support blobs yet.
-          result = {
-            ok: { address: { ...address, path: [] }, value: content },
-          };
         } else {
           result = {
             error: UnsupportedMediaTypeError(
