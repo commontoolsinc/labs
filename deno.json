@@ -15,7 +15,6 @@
     "./packages/iframe-sandbox",
     "./packages/integration",
     "./packages/js-compiler",
-    "./packages/js-sandbox",
     "./packages/ts-transformers",
     "./packages/test-support",
     "./packages/schema-generator",
