@@ -245,8 +245,8 @@ export type MetaField =
   | "pattern"
   | "argument"
   | "internal"
-  | "cfc"
-  | "process";
+  | "result" // this lets us get from internal/argument back to result
+  | "cfc";
 
 export interface IMetaCell {
   getMetaRaw(metaField: MetaField, options?: unknown): FabricValue;

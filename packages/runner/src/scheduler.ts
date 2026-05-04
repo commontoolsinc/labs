@@ -18,6 +18,7 @@ import type {
 } from "./runtime.ts";
 import {
   areNormalizedLinksSame,
+  getMetaLink,
   type NormalizedFullLink,
   toMemorySpaceAddress,
 } from "./link-utils.ts";
@@ -60,8 +61,7 @@ import type {
   SchedulerGraphSnapshot,
 } from "./telemetry.ts";
 import { ensureNotRenderThread } from "@commonfabric/utils/env";
-import { processLinkSchema } from "@commonfabric/runner/schemas";
-import { getPatternIdFromSourceCell } from "./process-cell.ts";
+
 ensureNotRenderThread();
 
 const logger = getLogger("scheduler", {
@@ -4398,16 +4398,15 @@ function getPieceMetadataFromFrame(frame?: Frame): {
   // abstractions for context here as well.
   frame ??= getTopFrame();
 
-  const sourceAsProxy = frame?.unsafe_binding?.materialize([]);
+  const resultAsProxy = frame?.unsafe_binding?.materialize([]);
 
-  if (!isCellResultForDereferencing(sourceAsProxy)) {
+  if (!isCellResultForDereferencing(resultAsProxy)) {
     return {};
   }
   const result: ReturnType<typeof getPieceMetadataFromFrame> = {};
-  const source = getCellOrThrow(sourceAsProxy).asSchema(processLinkSchema);
-  result.patternId = getPatternIdFromSourceCell(source);
-  const resultCell = source.get()?.resultRef;
-  result.space = source.space;
+  const resultCell = getCellOrThrow(resultAsProxy);
+  result.patternId = getMetaLink(resultCell, "pattern")?.id;
+  result.space = resultCell.space;
   result.pieceId = JSON.parse(
     JSON.stringify(resultCell?.entityId ?? {}),
   )["/"];

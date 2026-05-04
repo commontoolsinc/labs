@@ -260,7 +260,7 @@ export class PatternManager {
 
   registerPattern(
     pattern: Pattern | Module,
-    src?: string | RuntimeProgram,
+    src?: RuntimeProgram,
   ): URI {
     // Walk up derivation copies to original
     pattern = this.findOriginalPattern(pattern as Pattern);

@@ -1,7 +1,7 @@
 import {
   Cell,
   type CellPath,
-  getPatternIdFromResultCell,
+  getMetaLink,
   NAME,
   type Pattern,
   type PatternMeta,
@@ -107,7 +107,7 @@ export class PieceController<T = unknown> {
   }
 
   async getPattern(): Promise<Pattern> {
-    const patternId = getPatternIdFromResultCell(this.#cell);
+    const patternId = getMetaLink(this.#cell, "pattern", {})?.id;
     if (!patternId) throw new Error("piece missing pattern ID");
     const runtime = this.#manager.runtime;
     const pattern = await runtime.patternManager.loadPattern(
@@ -118,7 +118,7 @@ export class PieceController<T = unknown> {
   }
 
   getPatternMeta(): Promise<PatternMeta> {
-    const patternId = getPatternIdFromResultCell(this.#cell);
+    const patternId = getMetaLink(this.#cell, "pattern", {})?.id;
     if (!patternId) throw new Error("piece missing pattern ID");
     const space = this.#manager.getSpace();
     return this.#manager.runtime.patternManager.loadPatternMeta(

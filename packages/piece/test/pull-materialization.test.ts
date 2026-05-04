@@ -23,7 +23,7 @@ function doublePattern(): Pattern {
       },
     },
     result: {
-      output: { $alias: { path: ["internal", "output"] } },
+      output: { $alias: { cell: "internal", path: ["output"] } },
     },
     nodes: [
       {
@@ -31,8 +31,8 @@ function doublePattern(): Pattern {
           type: "javascript",
           implementation: (input: number) => input * 2,
         },
-        inputs: { $alias: { path: ["argument", "input"] } },
-        outputs: { $alias: { path: ["internal", "output"] } },
+        inputs: { $alias: { cell: "argument", path: ["input"] } },
+        outputs: { $alias: { cell: "internal", path: ["output"] } },
       },
     ],
   };
@@ -53,7 +53,7 @@ function tenfoldPattern(): Pattern {
       },
     },
     result: {
-      output: { $alias: { path: ["internal", "output"] } },
+      output: { $alias: { cell: "internal", path: ["output"] } },
     },
     nodes: [
       {
@@ -61,8 +61,8 @@ function tenfoldPattern(): Pattern {
           type: "javascript",
           implementation: (input: number) => input * 10,
         },
-        inputs: { $alias: { path: ["argument", "input"] } },
-        outputs: { $alias: { path: ["internal", "output"] } },
+        inputs: { $alias: { cell: "argument", path: ["input"] } },
+        outputs: { $alias: { cell: "internal", path: ["output"] } },
       },
     ],
   };
@@ -86,7 +86,7 @@ function namedPattern(name: string, multiplier: number): Pattern {
     },
     result: {
       [NAME]: name,
-      output: { $alias: { path: ["internal", "output"] } },
+      output: { $alias: { cell: "internal", path: ["output"] } },
     },
     nodes: [
       {
@@ -94,8 +94,8 @@ function namedPattern(name: string, multiplier: number): Pattern {
           type: "javascript",
           implementation: (input: number) => input * multiplier,
         },
-        inputs: { $alias: { path: ["argument", "input"] } },
-        outputs: { $alias: { path: ["internal", "output"] } },
+        inputs: { $alias: { cell: "argument", path: ["input"] } },
+        outputs: { $alias: { cell: "internal", path: ["output"] } },
       },
     ],
   };

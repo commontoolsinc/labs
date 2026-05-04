@@ -1,8 +1,7 @@
 import { getLogger } from "@commonfabric/utils/logger";
 import type { Cell } from "./cell.ts";
-import { type NormalizedFullLink, parseLink } from "./link-utils.ts";
+import { getMetaLink, type NormalizedFullLink } from "./link-utils.ts";
 import type { Runtime } from "./runtime.ts";
-import { syncSourceCellChain } from "./source-cell.ts";
 
 const logger = getLogger("ensure-piece-running", {
   enabled: false,
@@ -48,49 +47,22 @@ export async function ensurePieceRunning(
         undefined,
         tx,
       );
-      const currentCell = await syncSourceCellChain(rootCell) ?? rootCell;
 
-      // currentCell is now the process cell (or the original cell if no sources)
-      // Check if it has the process metadata needed to resolve the pattern.
-      const processData = currentCell.getRaw();
+      // If this is an internal/argument cell, get the result cell instead
+      const resultLink = getMetaLink(rootCell, "result");
+      // If we have a link, use that; otherwise use the rootCell
+      const resultCell = (resultLink !== undefined)
+        ? runtime.getCellFromLink(resultLink)
+        : rootCell;
 
-      if (!processData || typeof processData !== "object") {
-        logger.debug("ensure-piece", () => [
-          `No process data found at ${currentCell.getAsNormalizedFullLink().id}`,
-        ]);
-        return false;
-      }
-
-      const patternLinkObj = (processData as Record<string, unknown>).pattern ??
-        (processData as Record<string, unknown>).spell;
-      const patternId = parseLink(patternLinkObj, currentCell)?.id;
-      const resultRef = (processData as Record<string, unknown>).resultRef;
-
+      // If rootCell is a result cell, it will have a patter
+      const patternId = getMetaLink(resultCell, "pattern")?.id;
       if (!patternId) {
         logger.debug("ensure-piece", () => [
           `No pattern ID (pattern) found in process cell`,
         ]);
         return false;
       }
-
-      if (!resultRef) {
-        logger.debug("ensure-piece", () => [
-          `No resultRef found in process cell`,
-        ]);
-        return false;
-      }
-
-      // resultRef should be a link to the result cell
-      // Parse it and get the result cell
-      const resultLink = parseLink(resultRef, currentCell);
-      if (!resultLink) {
-        logger.debug("ensure-piece", () => [
-          `Invalid resultRef: ${resultRef}`,
-        ]);
-        return false;
-      }
-
-      const resultCell = runtime.getCellFromLink(resultLink, undefined, tx);
 
       // Commit the read transaction before starting the piece
       runtime.prepareTxForCommit(tx);

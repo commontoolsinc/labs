@@ -1367,7 +1367,7 @@ function trackVisitedDoc(
     // happens in a non-reactive context.
     const { ok: fullDoc } = tx.read({ ...target, path: [] });
     if (fullDoc) {
-      loadSource(
+      loadMetaLinkedDocs(
         tx,
         {
           address: { ...fullDoc.address, space: target.space },
@@ -1380,59 +1380,62 @@ function trackVisitedDoc(
   }
 }
 
-// Recursively load the source from the doc ()
-// This will also load any patterns linked by the doc.
-export function loadSource(
+// These meta links don't have full link chains. We only follow the first link.
+export function loadMetaLinkedDoc(
+  tx: IExtendedStorageTransaction,
+  valueEntry: IMemorySpaceAttestation,
+  meta: "source" | "pattern" | "argument" | "internal",
+  schemaTracker: MapSet<string, SchemaPathSelector>,
+): IMemorySpaceAttestation | undefined {
+  if (!isRecord(valueEntry.value)) {
+    return undefined;
+  }
+  const targetObj = valueEntry.value as Immutable<JSONObject>;
+  const linkObj = (isRecord(targetObj) && meta in targetObj &&
+      isPrimitiveCellLink(targetObj[meta]))
+    ? targetObj[meta]
+    : undefined;
+  if (linkObj === undefined) {
+    return undefined;
+  }
+  const link = parseLink(linkObj, valueEntry.address)!;
+  const address = {
+    space: link.space,
+    id: link.id!,
+    type: link.type! as MIME,
+    path: [],
+  };
+  if (address === undefined) {
+    return undefined;
+  }
+  // This only happens in the query path, so don't worry about scheduler
+  const result = tx.read(address);
+  if (result.error) {
+    return undefined;
+  }
+  const docKey = getTrackerKey(address);
+  schemaTracker.add(docKey, REJECTING_SELECTOR);
+  return { address, value: result.ok.value };
+}
+
+// Recursively load the meta linked docs from the doc
+export function loadMetaLinkedDocs(
   tx: IExtendedStorageTransaction,
   valueEntry: IMemorySpaceAttestation,
   cycleCheck: Set<string> = new Set<string>(),
   schemaTracker: MapSet<string, SchemaPathSelector>,
 ) {
-  loadLinkedPattern(tx, valueEntry, schemaTracker);
-  if (!isRecord(valueEntry.value)) {
-    return;
-  }
-  const targetObj = valueEntry.value as Immutable<JSONObject>;
-  if (!(isRecord(targetObj) || !("source" in targetObj))) {
-    return;
-  }
-  // We also want to include the source cells
-  const source = targetObj["source"];
-  if (!isRecord(source) || !("/" in source) || !isString(source["/"])) {
-    // undefined is strange, but acceptable
-    if (source !== undefined) {
-      logger.warn(
-        "traverse",
-        () => ["Invalid source link", source, "in", valueEntry.address],
-      );
+  const pendingDocs = [valueEntry];
+  while (pendingDocs.length > 0) {
+    const currentDoc = pendingDocs.shift()!;
+    for (const meta of ["source", "pattern", "argument", "internal"] as const) {
+      const linkedDoc = loadMetaLinkedDoc(tx, currentDoc, meta, schemaTracker);
+      if (linkedDoc === undefined) continue;
+      if (cycleCheck.has(linkedDoc.address.id)) continue;
+      cycleCheck.add(linkedDoc.address.id);
+      pendingDocs.push(linkedDoc);
     }
-    return;
   }
-  const shortId: string = source["/"];
-  if (cycleCheck.has(shortId)) {
-    return;
-  }
-  cycleCheck.add(shortId);
-  const address: IMemorySpaceAddress = {
-    space: valueEntry.address.space,
-    id: `of:${shortId}`,
-    type: "application/json",
-    path: [],
-  };
-  // This only happens in the query path, so don't worry about scheduler
-  const { ok: entry, error } = tx.read(address);
-  if (error) {
-    return;
-  }
-  if (error || entry === null || entry.value === undefined) {
-    return;
-  }
-  const docKey = getTrackerKey(address);
-  schemaTracker.add(docKey, REJECTING_SELECTOR);
-
-  // We've lost the space from our address in the tx.read, so recreate
-  const fullEntry = { address: address, value: entry.value };
-  loadSource(tx, fullEntry, cycleCheck, schemaTracker);
 }
 
 // With unified traversal code, we don't need to worry about the server
@@ -1671,58 +1674,6 @@ function _combineSchemaUncached(
     }
   }
   return linkSchema;
-}
-
-// Load the linked pattern from the doc ()
-// We don't recurse, since that's not required for pattern links
-// We don't mark anything for reactivity, since this is for queries
-function loadLinkedPattern(
-  tx: IExtendedStorageTransaction,
-  valueEntry: IMemorySpaceAttestation,
-  schemaTracker: MapSet<string, SchemaPathSelector>,
-) {
-  if (!isRecord(valueEntry.value)) {
-    return;
-  }
-  const targetObj = valueEntry.value as Immutable<JSONObject>;
-  if (!(isRecord(targetObj) || !("value" in targetObj))) {
-    return;
-  }
-  // We also want to include the source cells
-  const value = targetObj["value"];
-  if (!isRecord(value)) {
-    return;
-  }
-  let address: IMemorySpaceAddress | undefined;
-  const patternLinkObj =
-    ("pattern" in value && isPrimitiveCellLink(value["pattern"]))
-      ? value["pattern"]
-      : ("spell" in value && isPrimitiveCellLink(value["spell"]))
-      ? value["spell"]
-      : undefined;
-  if (patternLinkObj !== undefined) {
-    const link = parseLink(patternLinkObj, valueEntry.address)!;
-    address = {
-      space: link.space,
-      id: link.id!,
-      type: link.type! as MIME,
-      path: [],
-    };
-  }
-  if (address === undefined) {
-    return;
-  }
-  // This only happens in the query path, so don't worry about scheduler
-  const result = tx.read(address);
-  if (result.error) {
-    return;
-  }
-  const entry = result.ok;
-  if (entry === null || entry.value === undefined) {
-    return;
-  }
-  const docKey = getTrackerKey(address);
-  schemaTracker.add(docKey, REJECTING_SELECTOR);
 }
 
 // docPath is where we found the pointer and are doing this work. It should

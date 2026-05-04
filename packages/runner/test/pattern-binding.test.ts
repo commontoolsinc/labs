@@ -8,7 +8,7 @@ import {
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { areLinksSame } from "../src/link-utils.ts";
+import { areLinksSame, getMetaCell } from "../src/link-utils.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -44,8 +44,15 @@ describe("pattern-binding", () => {
         undefined,
         tx,
       );
+
+      const argumentCellLink = getMetaCell(testCell, "argument", tx)
+        .getAsNormalizedFullLink();
+      const internalCellLink = getMetaCell(testCell, "internal", tx)
+        .getAsNormalizedFullLink();
       testCell.set({ value: 0 });
-      sendValueToBinding(tx, testCell, { $alias: { path: ["value"] } }, 42);
+      sendValueToBinding(tx, testCell, argumentCellLink, internalCellLink, {
+        $alias: { cell: "result", path: ["value"] },
+      }, 42);
       expect(testCell.getAsQueryResult()).toEqual({ value: 42 });
     });
 
@@ -57,10 +64,18 @@ describe("pattern-binding", () => {
         tx,
       );
       testCell.set({ arr: [0, 0, 0] });
+      const argumentCellLink = getMetaCell(testCell, "argument", tx)
+        .getAsNormalizedFullLink();
+      const internalCellLink = getMetaCell(testCell, "internal", tx)
+        .getAsNormalizedFullLink();
       sendValueToBinding(
         tx,
         testCell,
-        [{ $alias: { path: ["arr", 0] } }, { $alias: { path: ["arr", 2] } }],
+        argumentCellLink,
+        internalCellLink,
+        [{ $alias: { cell: "result", path: ["arr", 0] } }, {
+          $alias: { cell: "result", path: ["arr", 2] },
+        }],
         [1, 3],
       );
       expect(testCell.getAsQueryResult()).toEqual({ arr: [1, 0, 3] });
@@ -90,14 +105,22 @@ describe("pattern-binding", () => {
           age: 30,
         },
       });
+      const argumentCellLink = getMetaCell(testCell, "argument", tx)
+        .getAsNormalizedFullLink();
+      const internalCellLink = getMetaCell(testCell, "internal", tx)
+        .getAsNormalizedFullLink();
 
       const binding = {
         person: {
           fullName: {
-            firstName: { $alias: { path: ["user", "name", "first"] } },
-            lastName: { $alias: { path: ["user", "name", "last"] } },
+            firstName: {
+              $alias: { cell: "result", path: ["user", "name", "first"] },
+            },
+            lastName: {
+              $alias: { cell: "result", path: ["user", "name", "last"] },
+            },
           },
-          currentAge: { $alias: { path: ["user", "age"] } },
+          currentAge: { $alias: { cell: "result", path: ["user", "age"] } },
         },
       };
 
@@ -111,7 +134,14 @@ describe("pattern-binding", () => {
         },
       };
 
-      sendValueToBinding(tx, testCell, binding, value);
+      sendValueToBinding(
+        tx,
+        testCell,
+        argumentCellLink,
+        internalCellLink,
+        binding,
+        value,
+      );
 
       expect(testCell.getAsQueryResult()).toEqual({
         user: {
@@ -129,8 +159,8 @@ describe("pattern-binding", () => {
     it("should map bindings to cell aliases", () => {
       // Bindings are pseudo-links; the initial "internal" or "argument" determines how they are resolved
       const binding = {
-        x: { $alias: { path: ["internal", "a"] } },
-        y: { $alias: { path: ["argument", "b", "c"] } },
+        x: { $alias: { cell: "internal", path: ["a"] } },
+        y: { $alias: { cell: "argument", path: ["b", "c"] } },
         z: 3,
       };
       const argumentCell = runtime.getCell<{ b: { c: number } }>(
@@ -148,6 +178,7 @@ describe("pattern-binding", () => {
       );
       internalCell.set({ a: 1 });
       const result = unwrapOneLevelAndBindtoDoc(
+        runtime.cfc,
         binding,
         argumentCell.getAsNormalizedFullLink(),
         internalCell.getAsNormalizedFullLink(),

@@ -30,6 +30,8 @@ import {
   parseLinkPrimitive,
   PrimitiveCellLink,
 } from "./link-types.ts";
+import { MetaField } from "@commonfabric/api";
+import { ignoreReadForScheduling } from "./scheduler.ts";
 
 export * from "./link-types.ts";
 
@@ -612,4 +614,38 @@ function recursiveStripAsCellFromSchema(
   context.seen.set(schema, result);
 
   return result;
+}
+
+/** Get or create a cell using the resultCell as the cause. */
+export function getMetaCell(
+  resultCell: Cell,
+  type: "internal" | "argument",
+  tx: IExtendedStorageTransaction,
+  schema?: JSONSchema,
+): Cell {
+  const metaCell = resultCell.runtime.getCell<unknown>(
+    resultCell.space,
+    { type, parent: resultCell },
+    schema,
+    tx,
+  );
+  return metaCell;
+}
+
+const META_READ_OPTIONS = {
+  meta: ignoreReadForScheduling,
+  frozen: false,
+} as const;
+
+// Our internal and argument cells are linked to by the result cell.
+// TODO(@ubik2) - track down these calls, and determine which should ignoreRead
+export function getMetaLink(
+  resultCell: Cell<any>,
+  field: MetaField,
+  options: unknown = META_READ_OPTIONS,
+): NormalizedFullLink | undefined {
+  const linkObj = resultCell.getMetaRaw(field, options);
+  if (linkObj === undefined) return undefined;
+  const link = parseLink(linkObj, resultCell);
+  return link;
 }

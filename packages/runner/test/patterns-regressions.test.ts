@@ -304,7 +304,7 @@ describe("Pattern Runner - Regressions", () => {
       },
       result: {
         internalRecipe: {
-          $alias: { path: ["internal", "recipe"] },
+          $alias: { cell: "internal", path: ["recipe"] },
         },
         resultRecipe: resultRecipe as unknown,
       },

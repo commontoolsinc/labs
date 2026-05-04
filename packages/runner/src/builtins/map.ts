@@ -163,7 +163,6 @@ export function map(
           resultCell,
           { doNotUpdateOnPatternChange: true },
         );
-        resultCell.getSourceCell()!.setSourceCell(parentCell);
         // Link the new result cells to the pattern cell too
         setPatternCell(resultCell, parentCell.key("pattern"));
         addCancel(() => runtime.runner.stop(resultCell));

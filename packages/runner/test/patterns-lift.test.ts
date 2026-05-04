@@ -14,7 +14,7 @@ import { type ErrorWithContext } from "../src/scheduler.ts";
 import { isCell } from "../src/cell.ts";
 import { resolveLink } from "../src/link-resolution.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { getPatternIdFromResultCell } from "@commonfabric/runner";
+import { getMetaLink } from "@commonfabric/runner";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -241,7 +241,7 @@ describe("Pattern Runner - Lift", () => {
     expect(errors).toBe(1);
     expect(value.result).toBeUndefined();
 
-    const patternId = getPatternIdFromResultCell(piece);
+    const patternId = getMetaLink(piece, "pattern")?.id;
     expect(patternId).toBeDefined();
     expect(lastError?.patternId).toBe(patternId);
     expect(lastError?.space).toBe(space);
@@ -255,9 +255,6 @@ describe("Pattern Runner - Lift", () => {
     tx = runtime.edit();
 
     value = await piece.pull();
-    expect((piece.getRaw() as any).result.$alias.cell).toEqual(
-      piece.getSourceCell()?.entityId,
-    );
     expect(value).toMatchObject({ result: 5 });
   });
 

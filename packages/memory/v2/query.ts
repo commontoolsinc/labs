@@ -4,7 +4,7 @@ import {
   getAtPath,
   type IAttestation,
   type IMemorySpaceValueAttestation,
-  loadSource,
+  loadMetaLinkedDocs,
   ManagedStorageTransaction,
   MapSetStringToPathSelectors,
   type ObjectStorageManager,
@@ -504,7 +504,7 @@ const loadFactsForDoc = (
     traverser.traverse(nextDoc);
   }
 
-  loadSource(
+  loadMetaLinkedDocs(
     tx,
     {
       address: { ...fact.address, space: space as MemorySpace },

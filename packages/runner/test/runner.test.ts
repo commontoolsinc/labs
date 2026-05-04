@@ -14,6 +14,11 @@ import {
   type URI,
 } from "../src/storage/interface.ts";
 import { trustExecutable } from "./support/trusted-builder.ts";
+import {
+  createSigilLinkFromParsedLink,
+  getMetaLink,
+  parseLink,
+} from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -79,14 +84,16 @@ describe("runPattern", () => {
         description: "passthrough",
       },
       resultSchema: {},
-      result: { output: { $alias: { path: ["internal", "output"] } } },
+      result: { output: { $alias: { cell: "internal", path: ["output"] } } },
       nodes: [
         {
           module: {
             type: "passthrough",
           },
-          inputs: { value: { $alias: { path: ["argument", "input"] } } },
-          outputs: { value: { $alias: { path: ["internal", "output"] } } },
+          inputs: { value: { $alias: { cell: "argument", path: ["input"] } } },
+          outputs: {
+            value: { $alias: { cell: "internal", path: ["output"] } },
+          },
         },
       ],
     } as Pattern;
@@ -103,19 +110,20 @@ describe("runPattern", () => {
       resultCell,
     );
 
-    const sourceCell = result.getSourceCell();
-    const sourceCellValue = await sourceCell!.pull();
-    expect(sourceCellValue).toMatchObject({
-      argument: { input: 1 },
-      internal: { output: 1 },
-    });
+    await resultCell.pull();
+    const argumentCellValue = resultCell.getArgumentCell()?.get();
+    const internalLink = parseLink(resultCell.getMetaRaw("internal"));
+    expect(internalLink).toBeDefined();
+    const internalCell = runtime.getCellFromLink(internalLink!);
+    const internalCellValue = await internalCell.get();
+    expect(argumentCellValue).toEqual({ input: 1 });
+    expect(internalCellValue).toEqual({ output: 1 });
+
     expect(result.getRaw()).toEqual({
-      output: {
-        $alias: {
-          path: ["internal", "output"],
-          cell: result.getSourceCell()?.entityId,
-        },
-      },
+      output: createSigilLinkFromParsedLink({
+        ...internalLink,
+        path: ["output"],
+      }, { overwrite: "redirect" }),
     });
     const resultValue = await result.pull();
     expect(resultValue).toEqual({ output: 1 });
@@ -131,17 +139,17 @@ describe("runPattern", () => {
         },
       },
       resultSchema: {},
-      result: { $alias: { cell: 1, path: ["internal", "output"] } },
+      result: { $alias: { cell: [null, "internal"], path: ["output"] } },
       nodes: [
         {
           module: {
             type: "passthrough",
           },
           inputs: {
-            value: { $alias: { cell: 1, path: ["argument", "input"] } },
+            value: { $alias: { cell: [null, "argument"], path: ["input"] } },
           },
           outputs: {
-            value: { $alias: { cell: 1, path: ["internal", "output"] } },
+            value: { $alias: { cell: [null, "internal"], path: ["output"] } },
           },
         },
       ],
@@ -156,12 +164,12 @@ describe("runPattern", () => {
         },
       },
       resultSchema: {},
-      result: { result: { $alias: { path: ["internal", "output"] } } },
+      result: { result: { $alias: { cell: "internal", path: ["output"] } } },
       nodes: [
         {
           module: { type: "pattern", implementation: innerPattern },
-          inputs: { input: { $alias: { path: ["argument", "value"] } } },
-          outputs: { $alias: { path: ["internal", "output"] } },
+          inputs: { input: { $alias: { cell: "argument", path: ["value"] } } },
+          outputs: { $alias: { cell: "internal", path: ["output"] } },
         },
       ],
     } as Pattern;
@@ -186,15 +194,15 @@ describe("runPattern", () => {
     const mockPattern: Pattern = {
       argumentSchema: {},
       resultSchema: {},
-      result: { result: { $alias: { path: ["internal", "result"] } } },
+      result: { result: { $alias: { cell: "internal", path: ["result"] } } },
       nodes: [
         {
           module: {
             type: "javascript",
             implementation: (value: number) => value * 2,
           },
-          inputs: { $alias: { path: ["argument", "value"] } },
-          outputs: { $alias: { path: ["internal", "result"] } },
+          inputs: { $alias: { cell: "argument", path: ["value"] } },
+          outputs: { $alias: { cell: "internal", path: ["result"] } },
         },
       ],
     };
@@ -227,7 +235,7 @@ describe("runPattern", () => {
     const mockPattern: Pattern = {
       argumentSchema: {},
       resultSchema: {},
-      result: { result: { $alias: { path: ["internal", "result"] } } },
+      result: { result: { $alias: { cell: "internal", path: ["result"] } } },
       nodes: [
         {
           module: {
@@ -236,7 +244,7 @@ describe("runPattern", () => {
               ran = true;
             },
           },
-          inputs: { $alias: { path: ["argument", "value"] } },
+          inputs: { $alias: { cell: "argument", path: ["value"] } },
           outputs: {},
         },
       ],
@@ -264,7 +272,7 @@ describe("runPattern", () => {
     const mockPattern: Pattern = {
       argumentSchema: {},
       resultSchema: {},
-      result: { result: { $alias: { path: ["internal", "result"] } } },
+      result: { result: { $alias: { cell: "internal", path: ["result"] } } },
       nodes: [
         {
           module: {
@@ -273,7 +281,7 @@ describe("runPattern", () => {
               ran = true;
             },
           },
-          inputs: { $alias: { path: ["argument", "other"] } },
+          inputs: { $alias: { cell: "argument", path: ["other"] } },
           outputs: {},
         },
       ],
@@ -300,15 +308,15 @@ describe("runPattern", () => {
     const nestedPattern: Pattern = {
       argumentSchema: {},
       resultSchema: {},
-      result: { $alias: { cell: 1, path: ["internal", "result"] } },
+      result: { $alias: { cell: [null, "internal"], path: ["result"] } },
       nodes: [
         {
           module: {
             type: "javascript",
             implementation: (value: number) => value * 2,
           },
-          inputs: { $alias: { cell: 1, path: ["argument", "input"] } },
-          outputs: { $alias: { cell: 1, path: ["internal", "result"] } },
+          inputs: { $alias: { cell: [null, "argument"], path: ["input"] } },
+          outputs: { $alias: { cell: [null, "internal"], path: ["result"] } },
         },
       ],
     };
@@ -316,12 +324,12 @@ describe("runPattern", () => {
     const mockPattern: Pattern = {
       argumentSchema: {},
       resultSchema: {},
-      result: { result: { $alias: { path: ["internal", "result"] } } },
+      result: { result: { $alias: { cell: "internal", path: ["result"] } } },
       nodes: [
         {
           module: { type: "pattern", implementation: nestedPattern },
-          inputs: { input: { $alias: { path: ["argument", "value"] } } },
-          outputs: { $alias: { path: ["internal", "result"] } },
+          inputs: { input: { $alias: { cell: "argument", path: ["value"] } } },
+          outputs: { $alias: { cell: "internal", path: ["result"] } },
         },
       ],
     };
@@ -345,15 +353,15 @@ describe("runPattern", () => {
     const pattern: Pattern = {
       argumentSchema: {},
       resultSchema: {},
-      result: { output: { $alias: { path: ["argument", "output"] } } },
+      result: { output: { $alias: { cell: "argument", path: ["output"] } } },
       nodes: [
         {
           module: {
             type: "javascript",
             implementation: (value: number) => value * 2,
           },
-          inputs: { $alias: { path: ["argument", "input"] } },
-          outputs: { $alias: { path: ["argument", "output"] } },
+          inputs: { $alias: { cell: "argument", path: ["input"] } },
+          outputs: { $alias: { cell: "argument", path: ["output"] } },
         },
       ],
     };
@@ -402,15 +410,15 @@ describe("runPattern", () => {
     const pattern: Pattern = {
       argumentSchema: {},
       resultSchema: {},
-      result: { output: { $alias: { path: ["argument", "output"] } } },
+      result: { output: { $alias: { cell: "argument", path: ["output"] } } },
       nodes: [
         {
           module: {
             type: "javascript",
             implementation: (value: number) => value * 2,
           },
-          inputs: { $alias: { path: ["argument", "input"] } },
-          outputs: { $alias: { path: ["argument", "output"] } },
+          inputs: { $alias: { cell: "argument", path: ["input"] } },
+          outputs: { $alias: { cell: "argument", path: ["output"] } },
         },
       ],
     };
@@ -479,7 +487,7 @@ describe("runPattern", () => {
         required: ["input"],
       },
       resultSchema: {},
-      result: { result: { $alias: { path: ["internal", "result"] } } },
+      result: { result: { $alias: { cell: "internal", path: ["result"] } } },
       nodes: [
         {
           module: {
@@ -487,8 +495,8 @@ describe("runPattern", () => {
             implementation: (args: { input: number; multiplier: number }) =>
               args.input * args.multiplier,
           },
-          inputs: { $alias: { path: ["argument"] } },
-          outputs: { $alias: { path: ["internal", "result"] } },
+          inputs: { $alias: { cell: "argument", path: [] } },
+          outputs: { $alias: { cell: "internal", path: ["result"] } },
         },
       ],
     };
@@ -542,7 +550,7 @@ describe("runPattern", () => {
         required: ["config"],
       },
       resultSchema: {},
-      result: { result: { $alias: { path: ["internal", "result"] } } },
+      result: { result: { $alias: { cell: "internal", path: ["result"] } } },
       nodes: [
         {
           module: {
@@ -565,8 +573,8 @@ describe("runPattern", () => {
               }
             },
           },
-          inputs: { $alias: { path: ["argument"] } },
-          outputs: { $alias: { path: ["internal", "result"] } },
+          inputs: { $alias: { cell: "argument", path: [] } },
+          outputs: { $alias: { cell: "internal", path: ["result"] } },
         },
       ],
     };
@@ -607,8 +615,8 @@ describe("runPattern", () => {
       },
       resultSchema: {},
       result: {
-        result: { $alias: { path: ["internal", "result"] } },
-        options: { $alias: { path: ["argument", "options"] } },
+        result: { $alias: { cell: "internal", path: ["result"] } },
+        options: { $alias: { cell: "argument", path: ["options"] } },
       },
       nodes: [
         {
@@ -618,8 +626,8 @@ describe("runPattern", () => {
               return args.options.enabled ? args.input * args.options.value : 0;
             },
           },
-          inputs: { $alias: { path: ["argument"] } },
-          outputs: { $alias: { path: ["internal", "result"] } },
+          inputs: { $alias: { cell: "argument", path: [] } },
+          outputs: { $alias: { cell: "internal", path: ["result"] } },
         },
       ],
     };
@@ -650,7 +658,7 @@ describe("runPattern", () => {
       initial: { internal: { counter: 0 } },
       result: {
         [NAME]: "counter",
-        counter: { $alias: { path: ["internal", "counter"] } },
+        counter: { $alias: { cell: "internal", path: ["counter"] } },
       },
       nodes: [
         {
@@ -660,8 +668,8 @@ describe("runPattern", () => {
               return input.value;
             },
           },
-          inputs: { $alias: { path: ["argument"] } },
-          outputs: { $alias: { path: ["internal", "counter"] } },
+          inputs: { $alias: { cell: "argument", path: [] } },
+          outputs: { $alias: { cell: "internal", path: ["counter"] } },
         },
       ],
     };
@@ -696,7 +704,7 @@ describe("runPattern", () => {
       initial: { internal: { counter: 0 } },
       result: {
         [NAME]: "counter",
-        counter: { $alias: { path: ["internal", "counter"] } },
+        counter: { $alias: { cell: "internal", path: ["counter"] } },
       },
       nodes: [
         {
@@ -704,8 +712,8 @@ describe("runPattern", () => {
             type: "javascript",
             implementation: (input: any) => input.value,
           },
-          inputs: { $alias: { path: ["argument"] } },
-          outputs: { $alias: { path: ["internal", "counter"] } },
+          inputs: { $alias: { cell: "argument", path: [] } },
+          outputs: { $alias: { cell: "internal", path: ["counter"] } },
         },
       ],
     };
@@ -714,7 +722,7 @@ describe("runPattern", () => {
       ...pattern,
       result: {
         [NAME]: "renamed counter",
-        counter: { $alias: { path: ["internal", "counter"] } },
+        counter: { $alias: { cell: "internal", path: ["counter"] } },
       },
     };
 
@@ -759,8 +767,8 @@ describe("runPattern", () => {
       },
       resultSchema: {},
       result: {
-        counter: { $alias: { path: ["internal", "counter"] } },
-        nested: { $alias: { path: ["internal", "nested"] } },
+        counter: { $alias: { cell: "internal", path: ["counter"] } },
+        nested: { $alias: { cell: "internal", path: ["nested"] } },
       },
       nodes: [
         {
@@ -772,8 +780,8 @@ describe("runPattern", () => {
               };
             },
           },
-          inputs: { $alias: { path: ["argument", "input"] } },
-          outputs: { $alias: { path: ["internal", "counter"] } },
+          inputs: { $alias: { cell: "argument", path: ["input"] } },
+          outputs: { $alias: { cell: "internal", path: ["counter"] } },
         },
       ],
     };
@@ -808,8 +816,12 @@ describe("runPattern", () => {
 
     // Get the internal state objects
     // We cast away our Immutable, so we can do this test
-    const internal1 = (result1.getSourceCell()?.getRaw() as any).internal;
-    const internal2 = (result2.getSourceCell()?.getRaw() as any).internal;
+    const internal1 = localRuntime.getCellFromLink(
+      getMetaLink(result1, "internal")!,
+    ).getRaw() as any;
+    const internal2 = localRuntime.getCellFromLink(
+      getMetaLink(result2, "internal")!,
+    ).getRaw() as any;
 
     // Verify they are different objects
     expect(internal1).not.toBe(internal2);
@@ -853,8 +865,8 @@ describe("runPattern", () => {
       },
       resultSchema: {},
       result: {
-        counter: { $alias: { path: ["internal", "counter"] } },
-        nested: { $alias: { path: ["internal", "nested"] } },
+        counter: { $alias: { cell: "internal", path: ["counter"] } },
+        nested: { $alias: { cell: "internal", path: ["nested"] } },
       },
       nodes: [
         {
@@ -866,8 +878,8 @@ describe("runPattern", () => {
               };
             },
           },
-          inputs: { $alias: { path: ["argument", "input"] } },
-          outputs: { $alias: { path: ["internal", "counter"] } },
+          inputs: { $alias: { cell: "argument", path: ["input"] } },
+          outputs: { $alias: { cell: "internal", path: ["counter"] } },
         },
       ],
     };
@@ -901,22 +913,22 @@ describe("runPattern", () => {
     await result2.pull();
 
     // Use getRawUntyped({ frozen: false }) for mutable copies
-    const raw1 = result1.getSourceCell()?.getRawUntyped({
-      frozen: false,
-    }) as any;
-    const raw2 = result2.getSourceCell()?.getRawUntyped({
-      frozen: false,
-    }) as any;
+    const internal1 = localRuntime.getCellFromLink(
+      getMetaLink(result1, "internal")!,
+    ).getRawUntyped({ frozen: false }) as any;
+    const internal2 = localRuntime.getCellFromLink(
+      getMetaLink(result2, "internal")!,
+    ).getRawUntyped({ frozen: false }) as any;
 
     // Verify they are different objects
-    expect(raw1.internal).not.toBe(raw2.internal);
-    expect(raw1.internal.nested).not.toBe(raw2.internal.nested);
+    expect(internal1).not.toBe(internal2);
+    expect(internal1.nested).not.toBe(internal2.nested);
 
     // Modify nested object in first instance's mutable copy
-    raw1.internal.nested.value = "modified";
+    internal1.nested.value = "modified";
 
     // Verify second instance is unaffected
-    expect(raw2.internal.nested.value).toBe("initial");
+    expect(internal2.nested.value).toBe("initial");
 
     await localRuntime.storageManager.synced();
     await localRuntime.dispose();
@@ -999,12 +1011,14 @@ describe("setup/start", () => {
         properties: { input: { type: "number" }, output: { type: "number" } },
       },
       resultSchema: {},
-      result: { output: { $alias: { path: ["internal", "output"] } } },
+      result: { output: { $alias: { cell: "internal", path: ["output"] } } },
       nodes: [
         {
           module: { type: "passthrough" },
-          inputs: { value: { $alias: { path: ["argument", "input"] } } },
-          outputs: { value: { $alias: { path: ["internal", "output"] } } },
+          inputs: { value: { $alias: { cell: "argument", path: ["input"] } } },
+          outputs: {
+            value: { $alias: { cell: "internal", path: ["output"] } },
+          },
         },
       ],
     };
@@ -1031,7 +1045,7 @@ describe("setup/start", () => {
         properties: { input: { type: "number" } },
       },
       resultSchema: {},
-      result: { output: { $alias: { path: ["internal", "output"] } } },
+      result: { output: { $alias: { cell: "internal", path: ["output"] } } },
       nodes: [],
     };
 
@@ -1061,7 +1075,7 @@ describe("setup/start", () => {
         properties: { input: { type: "number" } },
       },
       resultSchema: {},
-      result: { output: { $alias: { path: ["internal", "output"] } } },
+      result: { output: { $alias: { cell: "internal", path: ["output"] } } },
       nodes: [],
     };
 
@@ -1092,12 +1106,14 @@ describe("setup/start", () => {
         properties: { input: { type: "number" }, output: { type: "number" } },
       },
       resultSchema: {},
-      result: { output: { $alias: { path: ["internal", "output"] } } },
+      result: { output: { $alias: { cell: "internal", path: ["output"] } } },
       nodes: [
         {
           module: { type: "passthrough" },
-          inputs: { value: { $alias: { path: ["argument", "input"] } } },
-          outputs: { value: { $alias: { path: ["internal", "output"] } } },
+          inputs: { value: { $alias: { cell: "argument", path: ["input"] } } },
+          outputs: {
+            value: { $alias: { cell: "internal", path: ["output"] } },
+          },
         },
       ],
     };
@@ -1121,15 +1137,15 @@ describe("setup/start", () => {
         properties: { input: { type: "number" } },
       },
       resultSchema: {},
-      result: { output: { $alias: { path: ["internal", "output"] } } },
+      result: { output: { $alias: { cell: "internal", path: ["output"] } } },
       nodes: [
         {
           module: {
             type: "javascript",
             implementation: (v: { input: number }) => v.input,
           },
-          inputs: { $alias: { path: ["argument"] } },
-          outputs: { $alias: { path: ["internal", "output"] } },
+          inputs: { $alias: { cell: "argument", path: [] } },
+          outputs: { $alias: { cell: "internal", path: ["output"] } },
         },
       ],
     };
@@ -1155,15 +1171,15 @@ describe("setup/start", () => {
         properties: { input: { type: "number" } },
       },
       resultSchema: {},
-      result: { output: { $alias: { path: ["internal", "output"] } } },
+      result: { output: { $alias: { cell: "internal", path: ["output"] } } },
       nodes: [
         {
           module: {
             type: "javascript",
             implementation: (v: { input: number }) => v.input,
           },
-          inputs: { $alias: { path: ["argument"] } },
-          outputs: { $alias: { path: ["internal", "output"] } },
+          inputs: { $alias: { cell: "argument", path: [] } },
+          outputs: { $alias: { cell: "internal", path: ["output"] } },
         },
       ],
     };
@@ -1220,12 +1236,14 @@ describe("setup/start", () => {
         properties: { input: { type: "number" }, output: { type: "number" } },
       },
       resultSchema: {},
-      result: { output: { $alias: { path: ["internal", "output"] } } },
+      result: { output: { $alias: { cell: "internal", path: ["output"] } } },
       nodes: [
         {
           module: { type: "passthrough" },
-          inputs: { value: { $alias: { path: ["argument", "input"] } } },
-          outputs: { value: { $alias: { path: ["internal", "output"] } } },
+          inputs: { value: { $alias: { cell: "argument", path: ["input"] } } },
+          outputs: {
+            value: { $alias: { cell: "internal", path: ["output"] } },
+          },
         },
       ],
     };
@@ -1248,17 +1266,19 @@ describe("setup/start", () => {
     // Not started yet; result still aliases internal and shows previous value
     const rawValue = resultCell.get();
     expect(rawValue).toMatchObjectIgnoringSymbols({
-      output: { $alias: { path: ["internal", "output"] } },
+      output: { $alias: { cell: "internal", path: ["output"] } },
     });
 
     // Verify a pattern link is present after setup without passing the pattern
-    const source = resultCell.getSourceCell()!;
-    const patternValue = source.key("pattern").getRaw();
+    const patternValue = resultCell.getMetaRaw("pattern");
     expect(patternValue).toBeDefined();
 
     // Also verify the argument was updated in the process cell
-    const sourceValue = await source.pull();
-    expect((sourceValue as any).argument.input).toEqual(10);
+    await resultCell.pull();
+    const argumentValue = runtime.getCellFromLink<{ input: number }>(
+      getMetaLink(resultCell, "argument")!,
+    ).get();
+    expect(argumentValue.input).toEqual(10);
 
     // Start again (scheduling) just to ensure no errors
     runtime.start(resultCell);
@@ -1272,15 +1292,15 @@ describe("setup/start", () => {
         properties: { input: { type: "number" }, output: { type: "number" } },
       },
       resultSchema: {},
-      result: { output: { $alias: { path: ["argument", "output"] } } },
+      result: { output: { $alias: { cell: "argument", path: ["output"] } } },
       nodes: [
         {
           module: {
             type: "javascript",
             implementation: (value: number) => value * 2,
           },
-          inputs: { $alias: { path: ["argument", "input"] } },
-          outputs: { $alias: { path: ["argument", "output"] } },
+          inputs: { $alias: { cell: "argument", path: ["input"] } },
+          outputs: { $alias: { cell: "argument", path: ["output"] } },
         },
       ],
     };
@@ -1423,15 +1443,15 @@ describe("runner utils", () => {
           properties: { input: { type: "number" } },
         },
         resultSchema: {},
-        result: { output: { $alias: { path: ["internal", "output"] } } },
+        result: { output: { $alias: { cell: "internal", path: ["output"] } } },
         nodes: [
           {
             module: {
               type: "javascript",
               implementation: (v: { input: number }) => v.input * 2,
             },
-            inputs: { $alias: { path: ["argument"] } },
-            outputs: { $alias: { path: ["internal", "output"] } },
+            inputs: { $alias: { cell: "argument", path: [] } },
+            outputs: { $alias: { cell: "internal", path: ["output"] } },
           },
         ],
       };
@@ -1452,15 +1472,15 @@ describe("runner utils", () => {
           properties: { input: { type: "number" } },
         },
         resultSchema: {},
-        result: { output: { $alias: { path: ["internal", "output"] } } },
+        result: { output: { $alias: { cell: "internal", path: ["output"] } } },
         nodes: [
           {
             module: {
               type: "javascript",
               implementation: (v: { input: number }) => v.input,
             },
-            inputs: { $alias: { path: ["argument"] } },
-            outputs: { $alias: { path: ["internal", "output"] } },
+            inputs: { $alias: { cell: "argument", path: [] } },
+            outputs: { $alias: { cell: "internal", path: ["output"] } },
           },
         ],
       };
@@ -1482,15 +1502,15 @@ describe("runner utils", () => {
           properties: { input: { type: "number" } },
         },
         resultSchema: {},
-        result: { output: { $alias: { path: ["internal", "output"] } } },
+        result: { output: { $alias: { cell: "internal", path: ["output"] } } },
         nodes: [
           {
             module: {
               type: "javascript",
               implementation: (v: { input: number }) => v.input * 3,
             },
-            inputs: { $alias: { path: ["argument"] } },
-            outputs: { $alias: { path: ["internal", "output"] } },
+            inputs: { $alias: { cell: "argument", path: [] } },
+            outputs: { $alias: { cell: "internal", path: ["output"] } },
           },
         ],
       };
@@ -1521,7 +1541,7 @@ describe("runner utils", () => {
         resultSchema: {},
         result: {
           nested: {
-            value: { $alias: { path: ["internal", "output"] } },
+            value: { $alias: { cell: "internal", path: ["output"] } },
           },
         },
         nodes: [
@@ -1530,8 +1550,8 @@ describe("runner utils", () => {
               type: "javascript",
               implementation: (v: { input: number }) => v.input * 2,
             },
-            inputs: { $alias: { path: ["argument"] } },
-            outputs: { $alias: { path: ["internal", "output"] } },
+            inputs: { $alias: { cell: "argument", path: [] } },
+            outputs: { $alias: { cell: "internal", path: ["output"] } },
           },
         ],
       };
@@ -1563,15 +1583,15 @@ describe("runner utils", () => {
           properties: { input: { type: "number" } },
         },
         resultSchema: {},
-        result: { output: { $alias: { path: ["internal", "output"] } } },
+        result: { output: { $alias: { cell: "internal", path: ["output"] } } },
         nodes: [
           {
             module: {
               type: "javascript",
               implementation: (v: { input: number }) => v.input * 2,
             },
-            inputs: { $alias: { path: ["argument"] } },
-            outputs: { $alias: { path: ["internal", "output"] } },
+            inputs: { $alias: { cell: "argument", path: [] } },
+            outputs: { $alias: { cell: "internal", path: ["output"] } },
           },
         ],
       };
@@ -1582,15 +1602,15 @@ describe("runner utils", () => {
           properties: { input: { type: "number" } },
         },
         resultSchema: {},
-        result: { output: { $alias: { path: ["internal", "output"] } } },
+        result: { output: { $alias: { cell: "internal", path: ["output"] } } },
         nodes: [
           {
             module: {
               type: "javascript",
               implementation: (v: { input: number }) => v.input * 10,
             },
-            inputs: { $alias: { path: ["argument"] } },
-            outputs: { $alias: { path: ["internal", "output"] } },
+            inputs: { $alias: { cell: "argument", path: [] } },
+            outputs: { $alias: { cell: "internal", path: ["output"] } },
           },
         ],
       };

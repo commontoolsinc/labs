@@ -218,7 +218,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           },
         },
         result: {
-          savedTitle: { $alias: { path: ["internal", "savedTitle"] } },
+          savedTitle: { $alias: { cell: "internal", path: ["savedTitle"] } },
         },
         nodes: [],
       } satisfies Pattern;
@@ -230,7 +230,10 @@ describe("ExtendedStorageTransaction CFC gate", () => {
 
       await runtime.setup(undefined, pattern, {}, resultCell);
 
-      expect(resultCell.getSourceCell()).toBeDefined();
+      expect(parseLink(resultCell.getMetaRaw("pattern"), resultCell))
+        .toBeDefined();
+      expect(parseLink(resultCell.getMetaRaw("argument"), resultCell))
+        .toBeDefined();
       const savedTitleLink = parseLink(resultCell.key("savedTitle").getRaw());
       const internalCellLink = parseLink(resultCell.getMetaRaw("internal"));
       expect(internalCellLink).toBeDefined();
@@ -304,7 +307,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           },
         },
         result: {
-          savedTitle: { $alias: { path: ["internal", "savedTitle"] } },
+          savedTitle: { $alias: { cell: "internal", path: ["savedTitle"] } },
         },
         nodes: [],
       } satisfies Pattern;
@@ -316,7 +319,11 @@ describe("ExtendedStorageTransaction CFC gate", () => {
 
       await runtime.setup(undefined, pattern, {}, resultCell);
 
-      expect(resultCell.getSourceCell()).toBeDefined();
+      expect(resultCell.getSourceCell()).toBeUndefined();
+      expect(parseLink(resultCell.getMetaRaw("pattern"), resultCell))
+        .toBeDefined();
+      expect(parseLink(resultCell.getMetaRaw("argument"), resultCell))
+        .toBeDefined();
       const savedTitleLink = parseLink(resultCell.key("savedTitle").getRaw());
       const internalCellLink = parseLink(resultCell.getMetaRaw("internal"));
       expect(internalCellLink).toBeDefined();

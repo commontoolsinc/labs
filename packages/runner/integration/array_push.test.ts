@@ -87,7 +87,10 @@ async function runTest(base: URL) {
     const pattern = await runtime.patternManager.compilePattern(patternSource);
     const patternId = runtime.patternManager.registerPattern(
       pattern,
-      patternSource,
+      {
+        main: "/main.tsx",
+        files: [{ name: "/main.tsx", contents: patternSource }],
+      },
     );
     await runtime.patternManager.saveAndSyncPattern({ patternId, space });
 

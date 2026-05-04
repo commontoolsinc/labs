@@ -4,8 +4,7 @@ import {
   cfcAtom,
   EntityId,
   getEntityId,
-  getPatternIdFromSourceCell,
-  getResultCellWithSourceSchema,
+  getMetaLink,
   isCell,
   isLink,
   isStream,
@@ -28,7 +27,6 @@ import {
   nameSchema,
   pieceListSchema,
   pieceSourceCellSchema,
-  processLinkSchema,
   processSchema,
 } from "@commonfabric/runner/schemas";
 ensureNotRenderThread();
@@ -306,19 +304,8 @@ export class PieceManager {
       return piece.asSchema<T>(asSchema);
     }
 
-    // Otherwise, get result cell with schema from processCell.resultRef
-    // The resultRef was created with includeSchema: true during setup
-    return getResultCellWithSourceSchema(piece as Cell<T>);
-  }
-
-  getLineage(piece: Cell<unknown>) {
-    return piece.getSourceCell(pieceSourceCellSchema)?.key("lineage").get() ??
-      [];
-  }
-
-  getLLMTrace(piece: Cell<unknown>): string | undefined {
-    return piece.getSourceCell(pieceSourceCellSchema)?.key("llmRequestId")
-      .get() ?? undefined;
+    // Otherwise, just return the piece as the result cell.
+    return piece as Cell<T>;
   }
 
   /**
@@ -726,42 +713,26 @@ export class PieceManager {
   }
 
   // Return Cell with argument content, loading the pattern if needed.
-  async getArgument<T = unknown>(
+  getArgument<T = unknown>(
     piece: Cell<unknown | T>,
-  ): Promise<Cell<T>> {
+  ): Cell<T> {
     // Currently, piece is a Result Cell, and we'll grab the source to get to
     // the Process Cell, then follow that to get to the argument value. With
     // the new model, we should be able to get the argument directly from the
     // Result Cell through getMetaRaw.
     // With this approach, we aren't using the argumentSchema from the pattern
     // but that should have been written into the Result Cell's argument link.
-    const argumentValue = piece.getMetaRaw("argument");
-    const pieceLink = piece.getAsNormalizedFullLink();
-    const argumentLink = parseLink(argumentValue, pieceLink);
+    const argumentLink = getMetaLink(piece, "argument", {});
     if (argumentLink === undefined) {
-      return await this.getLegacyArgument(piece);
+      throw new Error("piece missing argument cell");
     }
     return this.runtime.getCellFromLink(argumentLink);
-  }
-
-  async getLegacyArgument<T = unknown>(
-    piece: Cell<unknown | T>,
-  ): Promise<Cell<T>> {
-    const source = piece.getSourceCell(processLinkSchema);
-    if (!source) throw new Error("piece missing source cell");
-    const patternId = getPatternIdFromSourceCell(source);
-    if (!patternId) throw new Error("piece missing pattern ID");
-    const pattern = await this.runtime.patternManager.loadPattern(
-      patternId,
-      this.space,
-    );
-    return source.key("argument").asSchema<T>(pattern.argumentSchema);
   }
 
   getResult<T = unknown>(
     piece: Cell<T>,
   ): Cell<T> {
-    return getResultCellWithSourceSchema(piece);
+    return piece;
   }
 
   // note: removing a piece doesn't clean up the piece's cells
@@ -922,24 +893,16 @@ export class PieceManager {
   async syncPattern(piece: Cell<unknown>) {
     await timePiecePhase("syncPattern.piece.sync", () => piece.sync());
 
-    // When we subscribe to a doc, our subscription includes the doc's source,
+    // When we subscribe to a doc, our subscription includes the doc's pattern,
     // so get that.
-    const sourceCell = piece.getSourceCell(processLinkSchema);
-    if (!sourceCell) throw new Error("piece missing source cell");
-    await timePiecePhase("syncPattern.source.sync", () => sourceCell.sync());
-
-    let patternId = getPatternIdFromSourceCell(sourceCell);
+    let patternId = getMetaLink(piece, "pattern")?.id;
     if (!patternId) {
       // Under remote sync, the source cell can transiently lag the result cell
       // even though setup just wrote both. Wait for storage to settle and retry
       // once before treating the source metadata as missing.
       await timePiecePhase("syncPattern.retry.synced", () => this.synced());
       await timePiecePhase("syncPattern.retry.piece.sync", () => piece.sync());
-      await timePiecePhase(
-        "syncPattern.retry.source.sync",
-        () => sourceCell.sync(),
-      );
-      patternId = getPatternIdFromSourceCell(sourceCell);
+      patternId = getMetaLink(piece, "pattern")?.id;
     }
     if (!patternId) throw new Error("piece missing pattern ID");
 

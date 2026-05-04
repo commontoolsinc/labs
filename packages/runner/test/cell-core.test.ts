@@ -527,15 +527,15 @@ describe("Cell", () => {
         type: "object",
         properties: { output: { type: "number" } },
       },
-      result: { output: { $alias: { path: ["internal", "doubled"] } } },
+      result: { output: { $alias: { cell: "internal", path: ["doubled"] } } },
       nodes: [
         {
           module: {
             type: "javascript",
             implementation: (args: { input: number }) => (args.input * 2),
           },
-          inputs: { input: { $alias: { path: ["argument", "input"] } } },
-          outputs: { $alias: { path: ["internal", "doubled"] } },
+          inputs: { input: { $alias: { cell: "argument", path: ["input"] } } },
+          outputs: { $alias: { cell: "internal", path: ["doubled"] } },
         },
       ],
     } as Pattern);

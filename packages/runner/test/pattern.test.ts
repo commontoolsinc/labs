@@ -71,7 +71,7 @@ describe("pattern", () => {
     expect(isPattern(doublePattern)).toBe(true);
     expect(doublePattern.nodes.length).toBe(1);
     expect(doublePattern.nodes[0].inputs).toMatchObject({
-      x: { $alias: { path: ["internal", "x"] } },
+      x: { $alias: { cell: "internal", path: ["x"] } },
     });
   });
 
@@ -85,22 +85,24 @@ describe("pattern", () => {
     expect(isPattern(doublePattern)).toBe(true);
     expect(argumentSchema).toBe(true);
     expect(result).toEqual({
-      double: { $alias: { path: ["internal", "double"] } },
+      double: { $alias: { cell: "internal", path: ["double"] } },
     });
 
     expect(nodes.length).toBe(2);
     expect(isModule(nodes[0].module) && nodes[0].module.type).toBe(
       "javascript",
     );
-    expect(nodes[0].inputs).toEqual({ $alias: { path: ["argument", "x"] } });
+    expect(nodes[0].inputs).toEqual({
+      $alias: { cell: "argument", path: ["x"] },
+    });
     expect(nodes[0].outputs).toEqual({
-      $alias: { path: ["internal", "__#0"] },
+      $alias: { cell: "internal", path: ["__#0"] },
     });
     expect(nodes[1].inputs).toEqual({
-      $alias: { path: ["internal", "__#0"] },
+      $alias: { cell: "internal", path: ["__#0"] },
     });
     expect(nodes[1].outputs).toEqual({
-      $alias: { path: ["internal", "double"] },
+      $alias: { cell: "internal", path: ["double"] },
     });
   });
 
@@ -175,7 +177,7 @@ describe("pattern", () => {
     expect(isPattern(doublePattern)).toBe(true);
     expect(argumentSchema).toBe(true);
     expect(result).toEqual({
-      double: { $alias: { path: ["internal", "__#1", "doubled"] } },
+      double: { $alias: { cell: "internal", path: ["__#1", "doubled"] } },
     });
 
     expect(nodes.length).toBe(2);
@@ -183,16 +185,16 @@ describe("pattern", () => {
       "javascript",
     );
     expect(nodes[0].inputs).toEqual({
-      x: { $alias: { path: ["argument", "x"] } },
+      x: { $alias: { cell: "argument", path: ["x"] } },
     });
     expect(nodes[0].outputs).toEqual({
-      $alias: { path: ["internal", "__#0"] },
+      $alias: { cell: "internal", path: ["__#0"] },
     });
     expect(nodes[1].inputs).toEqual({
-      x: { $alias: { path: ["internal", "__#0", "doubled"] } },
+      x: { $alias: { cell: "internal", path: ["__#0", "doubled"] } },
     });
     expect(nodes[1].outputs).toEqual({
-      $alias: { path: ["internal", "__#1"] },
+      $alias: { cell: "internal", path: ["__#1"] },
     });
 
     const json = JSON.stringify(doublePattern);
@@ -221,7 +223,7 @@ describe("pattern", () => {
 
     const node = doubleArray.nodes[0];
     expect(node.inputs).toMatchObject({
-      list: { $alias: { path: ["argument", "values"] } },
+      list: { $alias: { cell: "argument", path: ["values"] } },
     });
 
     const inputs = doubleArray.nodes[0].inputs as unknown as { op: Pattern };
@@ -284,7 +286,8 @@ describe("pattern", () => {
     expect(result).toMatchObject({
       double: {
         $alias: {
-          path: ["internal", "__#1", "double"],
+          cell: "internal",
+          path: ["__#1", "double"],
           schema: {
             ifc: ArgumentSchema.properties.x.ifc,
           },
@@ -299,7 +302,8 @@ describe("pattern", () => {
     expect(nodes[0].inputs).toMatchObject({
       x: {
         $alias: {
-          path: ["argument", "x"],
+          cell: "argument",
+          path: ["x"],
           schema: ArgumentSchema.properties?.x,
         },
       },
@@ -307,14 +311,16 @@ describe("pattern", () => {
     // I don't like that we don't know the other properties of our output here
     expect(nodes[0].outputs).toMatchObject({
       $alias: {
-        path: ["internal", "__#0"],
+        cell: "internal",
+        path: ["__#0"],
         schema: { ifc: ArgumentSchema.properties.x.ifc },
       },
     });
     expect(nodes[1].inputs).toMatchObject({
       x: {
         $alias: {
-          path: ["internal", "__#0", "double"],
+          cell: "internal",
+          path: ["__#0", "double"],
           schema: {
             ifc: ArgumentSchema.properties.x.ifc,
           },
@@ -323,7 +329,8 @@ describe("pattern", () => {
     });
     expect(nodes[1].outputs).toMatchObject({
       $alias: {
-        path: ["internal", "__#1"],
+        cell: "internal",
+        path: ["__#1"],
         schema: {
           ifc: ArgumentSchema.properties.x.ifc,
         },
@@ -400,13 +407,15 @@ describe("pattern", () => {
     expect(nodes[0].outputs).toHaveProperty("$alias");
     const nodeOutputAlias = (nodes[0].outputs as any)["$alias"];
     expect(nodeOutputAlias).toMatchObject({
-      path: ["internal", "__#0"],
+      cell: "internal",
+      path: ["__#0"],
       schema: { ifc: { confidentiality: ["confidential"] } },
     });
     expect(result).toMatchObject({
       capitalized: {
         $alias: {
-          path: ["internal", "__#0", "capitalized"],
+          cell: "internal",
+          path: ["__#0", "capitalized"],
           schema: { ifc: { confidentiality: ["confidential"] } },
         },
       },

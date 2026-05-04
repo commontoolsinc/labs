@@ -88,6 +88,7 @@ import {
   type NormalizedLink,
   parseLink,
   type SanitizeSchemaForLinksOptions,
+  toMemorySpaceAddress,
 } from "./link-utils.ts";
 import type {
   ChangeGroup,
@@ -239,6 +240,11 @@ declare module "@commonfabric/api" {
     withTx(tx?: IExtendedStorageTransaction): Cell<T>;
     sink(
       callback: (value: Readonly<T>) => Cancel | undefined | void,
+      options?: SinkOptions,
+    ): Cancel;
+    sinkMeta(
+      metaField: MetaField,
+      callback: (value: Immutable<FabricValue>) => Cancel | undefined | void,
       options?: SinkOptions,
     ): Cancel;
     sync(): Promise<Cell<T>> | Cell<T>;
@@ -1183,25 +1189,11 @@ export class CellImpl<T extends FabricValue>
   asSchemaFromLinks<T = unknown>(): Cell<T> {
     if (!this.synced) this.sync(); // Auto-sync like .get() - matches framework pattern
 
-    let { schema } = resolveLink(
+    const { schema } = resolveLink(
       this.runtime,
       this.runtime.readTx(this.tx),
       this.link,
     );
-
-    if (!schema) {
-      const sourceCell = this.getSourceCell<{ resultRef: Cell<unknown> }>({
-        type: "object",
-        properties: { resultRef: { asCell: ["cell"] } },
-      });
-      const sourceCellSchema = sourceCell?.key("resultRef").get()?.schema;
-      if (sourceCellSchema !== undefined) {
-        schema = this.runtime.cfc.schemaAtPath(
-          sourceCellSchema,
-          this._link.path,
-        );
-      }
-    }
 
     return new CellImpl(
       this.runtime,
@@ -1259,6 +1251,25 @@ export class CellImpl<T extends FabricValue>
     this.synced = true;
     logger.info("sync", this.link);
     return this.runtime.storageManager.syncCell<T>(this as unknown as Cell<T>);
+  }
+
+  sinkMeta(
+    metaField: MetaField,
+    callback: (value: Immutable<FabricValue>) => Cancel | undefined | void,
+    options: SinkOptions = {},
+  ): Cancel {
+    if (!this.synced) this.sync();
+
+    const action: Action = (tx) => {
+      const value = this.withTx(tx).getMetaRaw(metaField);
+      return callback(value);
+    };
+
+    return sinkHelper(action, this.runtime, {
+      ...this.link,
+      type: this.link.type as MediaType,
+      path: [String(metaField)],
+    }, options);
   }
 
   resolveAsCell(): Cell<T> {
@@ -1901,11 +1912,7 @@ function subscribeToReferencedDocs<T>(
   link: NormalizedFullLink,
   options: SinkOptions = {},
 ): Cancel {
-  let cleanup: Cancel | undefined | void;
-
   const action: Action = (tx) => {
-    if (isCancel(cleanup)) cleanup();
-
     // Using a new transaction for child cells, as we're only interested in
     // dependencies for the initial get, not further cells the callback might
     // read. The callback is responsible for calling sink on those cells if it
@@ -1919,27 +1926,50 @@ function subscribeToReferencedDocs<T>(
     if (needsTraversal && newValue !== undefined && newValue !== null) {
       deepTraverse(newValue);
     }
-    cleanup = callback(newValue);
+    const cleanup = callback(newValue);
 
     // no async await here, but that also means no retry. TODO(seefeld): Should
     // we add a retry? So far all sinks are read-only, so they get re-triggered
     // on changes already.
     runtime.prepareTxForCommit(extraTx);
     extraTx.commit();
+
+    return cleanup;
   };
-  // Name the action for debugging
-  const sinkName = `sink:${link.space}/${link.id}/${link.path.join("/")}`;
-  Object.defineProperty(action, "name", {
+  return sinkHelper(
+    action,
+    runtime,
+    toMemorySpaceAddress(link),
+    options,
+  );
+}
+
+function sinkHelper<T>(
+  action: Action,
+  runtime: Runtime,
+  address: IMemorySpaceAddress,
+  options: SinkOptions = {},
+) {
+  let cleanup: Cancel | undefined | void;
+  const actionHelper: Action = (tx) => {
+    if (isCancel(cleanup)) cleanup();
+    cleanup = action(tx);
+  };
+  // Attach a name to the sink action
+  const sinkName = `sink:${address.space}/${address.id}/${
+    address.path.join("/")
+  }`;
+  Object.defineProperty(actionHelper, "name", {
     value: sinkName,
     configurable: true,
   });
-  (action as Action & { src?: string }).src = sinkName;
+  (actionHelper as Action & { src?: string }).src = sinkName;
 
   // Call action once immediately, which also defines what docs need to be
   // subscribed to. Wrap with withExecutingAction so that any child sinks
   // created during the callback see this action as their parent.
   const tx = runtime.edit();
-  runtime.scheduler.withExecutingAction(action, () => action(tx));
+  runtime.scheduler.withExecutingAction(actionHelper, () => actionHelper(tx));
   const log = txToReactivityLog(tx);
 
   // Technically unnecessary since we don't expect/allow callbacks to sink to
@@ -1956,11 +1986,12 @@ function subscribeToReferencedDocs<T>(
       changeGroup: options.changeGroup,
     }),
   };
-  runtime.scheduler.resubscribe(action, log, resubscribeOptions);
+  runtime.scheduler.resubscribe(actionHelper, log, resubscribeOptions);
 
   return () => {
-    runtime.scheduler.unsubscribe(action);
+    runtime.scheduler.unsubscribe(actionHelper);
     if (isCancel(cleanup)) cleanup();
+    cleanup = undefined;
   };
 }
 

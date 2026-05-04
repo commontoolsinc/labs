@@ -71,19 +71,6 @@ export function cellEntityIdString(cell: Cell<unknown>): string | undefined {
   return typeof idValue === "string" ? idValue : undefined;
 }
 
-export function getResultCellWithSourceSchema<T = unknown>(
-  cell: Cell<T>,
-): Cell<T> {
-  const processCell = cell.getSourceCell();
-  if (processCell) {
-    const resultRefCell = processCell.key("resultRef").resolveAsCell();
-    if (resultRefCell?.schema) {
-      return cell.asSchema<T>(resultRefCell.schema);
-    }
-  }
-  return cell;
-}
-
 export async function compileAndSavePattern(
   runtime: Runtime,
   patternSrc: string | RuntimeProgram,
@@ -93,6 +80,12 @@ export async function compileAndSavePattern(
     parents?: string[];
   },
 ): Promise<Pattern> {
+  if (typeof patternSrc === "string") {
+    patternSrc = {
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: patternSrc }],
+    };
+  }
   const pattern = await runtime.patternManager.compilePattern(patternSrc);
   if (!pattern) {
     throw new Error("No default pattern found in the compiled exports.");

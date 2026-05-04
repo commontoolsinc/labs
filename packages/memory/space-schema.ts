@@ -12,7 +12,7 @@ import {
   getAtPath,
   type IAttestation,
   IMemorySpaceValueAttestation,
-  loadSource,
+  loadMetaLinkedDocs,
   ManagedStorageTransaction,
   MapSetStringToPathSelectors,
   type ObjectStorageManager,
@@ -517,7 +517,7 @@ function loadFactsForDoc(
     }
     // Also load any source links and patterns
     const fullAddress = { ...fact.address, space: space };
-    loadSource(
+    loadMetaLinkedDocs(
       tx,
       { address: fullAddress, value: fact.value },
       new Set<string>(),

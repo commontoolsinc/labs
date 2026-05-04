@@ -44,10 +44,6 @@ export {
   isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
 export { effect } from "./reactivity.ts";
-export {
-  getPatternIdFromResultCell,
-  getPatternIdFromSourceCell,
-} from "./process-cell.ts";
 export { type AddCancel, type Cancel, noOp, useCancelGroup } from "./cancel.ts";
 export {
   Console,
@@ -61,6 +57,7 @@ export { addCommonIDfromObjectID } from "./data-updating.ts";
 export { resolveLink } from "./link-resolution.ts";
 export {
   areLinksSame,
+  getMetaLink,
   isCellLink as isLink,
   isWriteRedirectLink,
   parseLink,
@@ -162,7 +159,6 @@ export {
   cellEntityIdString,
   type CellPath,
   compileAndSavePattern,
-  getResultCellWithSourceSchema,
   parseCellPath,
   resolveCellPath,
 } from "./piece-helpers.ts";
