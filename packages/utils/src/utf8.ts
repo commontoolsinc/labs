@@ -6,17 +6,17 @@
  * `WeakMap` cache from frozen objects to already-calculated sorted keys. Used
  * by `utf8SortedKeysOf()`.
  */
-const sortedKeyCache = new WeakMap<object, string[]>();
+const sortedKeyCache = new WeakMap<object, readonly string[]>();
 
 /**
- * Helper for `compareUtf8()`: Is the given character code a surrogate?
+ * Helper for `utf8Compare()`: Is the given character code a surrogate?
  */
 function isSurrogateCharCode(c: number) {
   return (c >= 0xd800) && (c <= 0xdfff);
 }
 
 /**
- * Helper for `compareUtf8()`: Does the given string contain any surrogate code
+ * Helper for `utf8Compare()`: Does the given string contain any surrogate code
  * points?
  */
 function hasSurrogateCharCode(value: string) {
@@ -26,7 +26,7 @@ function hasSurrogateCharCode(value: string) {
 /**
  * Compares strings by UTF-8 sort order.
  */
-export function compareUtf8(a: string, b: string): number {
+export function utf8Compare(a: string, b: string): number {
   // Credit where due: Though this started out as an independent implementation
   // of the key insight for fast sorting, this incorporates ideas from
   // <https://github.com/rocicorp/compare-utf8>.
@@ -82,7 +82,7 @@ export function compareUtf8(a: string, b: string): number {
  * in UTF-8 sort order. If the given object is frozen, it gets cached for
  * possible reuse.
  */
-export function utf8SortedKeysOf(value: object): string[] {
+export function utf8SortedKeysOf(value: object): readonly string[] {
   if (value === null) {
     throw new TypeError("Value must not be `null`.");
   }
@@ -93,7 +93,7 @@ export function utf8SortedKeysOf(value: object): string[] {
   }
 
   const unsorted = Object.keys(value);
-  const sorted = unsorted.sort(compareUtf8);
+  const sorted = Object.freeze(unsorted.sort(utf8Compare));
 
   if (Object.isFrozen(value)) {
     sortedKeyCache.set(value, sorted);
