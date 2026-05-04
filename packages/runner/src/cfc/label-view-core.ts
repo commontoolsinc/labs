@@ -4,7 +4,7 @@ export type IFCLabel = {
 };
 
 export type CfcLabelViewEntry = {
-  path: string[];
+  path: readonly string[];
   label: IFCLabel;
 };
 

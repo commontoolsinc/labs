@@ -51,7 +51,7 @@ const freezePolicies = (
 // canonicalize cost paid once at the chokepoint; warm variants measure
 // the steady-state per-`preparedDigestFor` cost.
 const warm = (input: PreparedDigestInput): PreparedDigestInput => {
-  const warmAddr = <T extends { path: string[] }>(a: T): T =>
+  const warmAddr = <T extends { path: readonly string[] }>(a: T): T =>
     deepFreeze({ ...a, path: canonicalizeLogicalPath(a.path) });
   return deepFreeze({
     consumedReads: input.consumedReads.map(warmAddr),

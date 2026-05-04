@@ -60,7 +60,7 @@ const labelAtPath = (
   }
   let match:
     | {
-      path: string[];
+      path: readonly string[];
       label: IFCLabel;
     }
     | undefined;
@@ -121,7 +121,7 @@ const hasPersistedPolicyClaim = (schema: JSONSchema): boolean => {
 
 const claimPathToLogicalPath = (
   claim: unknown,
-): string[] | undefined => {
+): readonly string[] | undefined => {
   if (
     Array.isArray(claim) &&
     claim.every((segment) => typeof segment === "string")
@@ -392,7 +392,7 @@ const linkWriteCoversAffectedPath = (
 
 const linkWritesCoverCfcAffectedPaths = (
   metadata: CfcMetadata,
-  writePaths: readonly string[][],
+  writePaths: readonly (readonly string[])[],
   inputs: readonly LinkWritePolicyInput[],
 ): boolean =>
   writePaths.every((writePath) =>
@@ -487,11 +487,21 @@ const valueWriteTargets = (
   tx: IExtendedStorageTransaction,
 ): Map<
   string,
-  { space: MemorySpace; id: URI; type: MediaType; paths: string[][] }
+  {
+    space: MemorySpace;
+    id: URI;
+    type: MediaType;
+    paths: (readonly string[])[];
+  }
 > => {
   const result = new Map<
     string,
-    { space: MemorySpace; id: URI; type: MediaType; paths: string[][] }
+    {
+      space: MemorySpace;
+      id: URI;
+      type: MediaType;
+      paths: (readonly string[])[];
+    }
   >();
   const log = tx.getReactivityLog?.();
   const seenWriteSpaces = new Set<MemorySpace>(
@@ -532,8 +542,10 @@ const valueWriteTargets = (
 
 const walkIfcSchema = (
   schema: JSONSchema,
-  path: string[] = [],
-  entries: Array<{ path: string[]; label: IFCLabel; schema: JSONSchema }> = [],
+  path: readonly string[] = [],
+  entries: Array<
+    { path: readonly string[]; label: IFCLabel; schema: JSONSchema }
+  > = [],
 ): typeof entries => {
   if (typeof schema === "boolean") {
     return entries;
@@ -616,7 +628,7 @@ const unsupportedTrustSensitiveReason = (
 
 const exactCopySourcePath = (
   schema: JSONSchema,
-): string[] | undefined => {
+): readonly string[] | undefined => {
   if (!isRecord(schema) || !isRecord(schema.ifc)) {
     return undefined;
   }
@@ -842,7 +854,7 @@ const persistedLabelFromSchemaAtPath = (
   const logicalPath = canonicalizeLogicalPath(path);
   const entries = walkIfcSchema(schema);
   let match:
-    | { path: string[]; label: IFCLabel; schema: JSONSchema }
+    | { path: readonly string[]; label: IFCLabel; schema: JSONSchema }
     | undefined;
   for (const entry of entries) {
     if (!isPrefix(entry.path, logicalPath)) {
@@ -961,9 +973,12 @@ const cloneLabel = (label: IFCLabel): IFCLabel => ({
 });
 
 const coalesceLabelEntries = (
-  entries: Array<{ path: string[]; label: IFCLabel }>,
-): Array<{ path: string[]; label: IFCLabel }> => {
-  const byPath = new Map<string, { path: string[]; label: IFCLabel }>();
+  entries: ReadonlyArray<{ path: readonly string[]; label: IFCLabel }>,
+): Array<{ path: readonly string[]; label: IFCLabel }> => {
+  const byPath = new Map<
+    string,
+    { path: readonly string[]; label: IFCLabel }
+  >();
   for (const entry of entries) {
     const path = [...entry.path];
     const key = pathKey(path);
