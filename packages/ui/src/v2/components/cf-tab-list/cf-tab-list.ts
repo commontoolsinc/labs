@@ -66,6 +66,7 @@ export class CFTabList extends BaseElement {
 
       .tab-list[data-orientation="horizontal"] {
         flex-direction: row;
+        justify-content: flex-start;
         width: 100%;
         min-width: 0;
         overflow-x: auto;

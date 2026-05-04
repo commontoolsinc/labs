@@ -34,4 +34,11 @@ describe("CFTabList", () => {
     expect(element.orientation).toBe("horizontal");
     expect(element.variant).toBe("underline");
   });
+
+  it("should start-align horizontal tabs so overflow remains reachable", () => {
+    const styles = String(CFTabList.styles);
+
+    expect(styles).toContain('.tab-list[data-orientation="horizontal"]');
+    expect(styles).toContain("justify-content: flex-start");
+  });
 });
