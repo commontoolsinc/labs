@@ -21,6 +21,7 @@ import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { encodeULEB128 } from "@commonfabric/leb128";
 import { bigintToMinimalTwosComplement } from "./bigint-encoding.ts";
 import { LRUCache } from "@commonfabric/utils/cache";
+import { compareUtf8 } from "@commonfabric/utils/utf8";
 
 // ---------------------------------------------------------------------------
 // Type tag bytes (Section 2 of the byte-level spec)
@@ -141,82 +142,6 @@ function getStringRep(value: string) {
 
   stringRepCache.put(value, result);
   return result;
-}
-
-/**
- * Helper for `compareStrings()`: Is the given character code a surrogate?
- */
-function isSurrogateCharCode(c: number) {
-  return (c >= 0xd800) && (c <= 0xdfff);
-}
-
-/**
- * Helper for `compareStrings()`: Does the given string contain any surrogate
- * code points?
- */
-function hasSurrogateCharCode(value: string) {
-  return /[\ud800-\udfff]/.test(value);
-}
-
-/**
- * Compares strings by UTF-8 sort order.
- *
- * Note: Even though we could conceivably define the sort to be something
- * easier to calculate in JS, (a) ultimately we want this implementation to be
- * but one of several that aren't all written in JS, (b) those other languages
- * don't necessarily have the same encoding bias as JS, and (c) we want to make
- * the specification for hashing straightforward anyway (and are willing to pay
- * a performance cost because of it).
- */
-function compareStrings(a: string, b: string): number {
-  // Credit where due: Though this started out as an independent implementation
-  // of the key insight for fast sorting, this incorporates ideas from
-  // <https://github.com/rocicorp/compare-utf8>.
-
-  // Here's what's going on: JS native string sort and UTF-8 sort can differ
-  // only when at least one of the JS-form strings contains a codepoint for a
-  // surrogate-pair. As long as we don't run into one of those, we can just
-  // do a regular difference-based comparison. But if we _do_ run into one, then
-  // we have to do something extra, one way or another.
-
-  if (a === b) {
-    // Easy out!
-    return 0;
-  }
-
-  const minCharLen = Math.min(a.length, b.length);
-
-  if (
-    (minCharLen >= 20) && !(hasSurrogateCharCode(a) || hasSurrogateCharCode(b))
-  ) {
-    // Strings are long enough that it's worth a preflight check for surrogate
-    // pairs, and it turns out that neither had them.
-    return (a < b) ? -1 : ((a > b) ? 1 : 0);
-  }
-
-  // No luck for us today. Gotta do it the hard way.
-
-  for (let i = 0; i < minCharLen; i++) {
-    const aChar = a.charCodeAt(i);
-    const bChar = b.charCodeAt(i);
-    if (aChar === bChar) {
-      continue;
-    } else if (!(isSurrogateCharCode(aChar) || isSurrogateCharCode(bChar))) {
-      return aChar - bChar;
-    } else {
-      // At least one is a surrogate. Use `codePointAt()` to decode whichever of
-      // the strings have surrogate characters. That method operates reasonably
-      // whether or not the code point is in the basic or astral plane, and it
-      // also returns a reasonable value given an invalid surrogate-pair
-      // sequence. Importantly, Unicode code-point order corresponds to UTF-8
-      // byte order.
-      const aPoint = a.codePointAt(i)!;
-      const bPoint = b.codePointAt(i)!;
-      return aPoint - bPoint;
-    }
-  }
-
-  return a.length - b.length;
 }
 
 /**
@@ -415,7 +340,13 @@ function feedPlainObject(
   hasher: IncrementalHasher,
   value: Record<string, unknown>,
 ): void {
-  const keys = Object.keys(value).sort(compareStrings);
+  // Note: Even though we could conceivably define the key sort order to be
+  // something easier to calculate in JS, (a) ultimately we want this
+  // implementation to be but one of several that aren't all written in JS, (b)
+  // those other languages don't necessarily have the same encoding bias as JS,
+  // and (c) we want to make the specification for hashing straightforward
+  // anyway (and are willing to pay a performance cost because of it).
+  const keys = Object.keys(value).sort(compareUtf8);
 
   hasher.update(TAG_OBJECT_BYTES);
   for (const key of keys) {
