@@ -11,8 +11,26 @@ import type {
 } from "./types.ts";
 import { cloneCfcLabelView } from "./label-view-core.ts";
 
-export const canonicalizeLogicalPath = (path: readonly string[]): string[] =>
-  path[0] === "value" ? [...path.slice(1)] : [...path];
+/**
+ * Returns a canonical-form logical path: any leading `"value"` element
+ * stripped, deep-frozen so the array is safe to use as a cache key or
+ * to retain in long-lived data structures. Callers may rely on
+ * "canonical paths are immutable" as a system invariant.
+ *
+ * The result is normally a fresh array. As a fast path, if the input
+ * is already frozen and already in canonical form (no leading
+ * `"value"`), the input is returned unchanged — useful when
+ * canonicalize* re-runs on already-canonical input (e.g. during a CFC
+ * commit-recheck pass).
+ */
+export const canonicalizeLogicalPath = (path: readonly string[]): string[] => {
+  if (path[0] !== "value" && Object.isFrozen(path)) {
+    return path as string[];
+  }
+  const next = path[0] === "value" ? path.slice(1) : path.slice();
+  Object.freeze(next);
+  return next;
+};
 
 export const logicalPathToPointer = (path: readonly string[]): string =>
   encodePointer(canonicalizeLogicalPath(path));
@@ -68,6 +86,15 @@ const compareWritePolicyInput = (
   return leftHash < rightHash ? -1 : leftHash > rightHash ? 1 : 0;
 };
 
+// Note: these `canonicalize*` helpers don't freeze their output. Records
+// destined for CFC state are frozen at their entry chokepoints
+// (`buildPreparedDigestInput`, `recordCfcDereferenceTrace`,
+// `recordCfcWritePolicyInput`); `canonicalize*` is also called during
+// `canonicalizePreparedDigestInput` re-canonicalization, where freezing
+// every fresh wrapper would add measurable cost without a correctness
+// benefit. The path-array invariant — every canonical path is frozen and
+// safe to use as a cache key — is held by `canonicalizeLogicalPath`
+// itself.
 export const canonicalizeConsumedRead = (
   read: ConsumedRead,
 ): ConsumedRead => ({
