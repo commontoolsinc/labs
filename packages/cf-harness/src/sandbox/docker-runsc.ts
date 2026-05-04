@@ -526,6 +526,7 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
       cfc: {
         runtimeRequested: true,
         runtimeName: this.config.runtimeName,
+        image: this.config.image,
         workspaceMountPath: this.config.workspaceMountPath,
         mounts: this.#mountDescriptions(),
         networkMode: this.config.dockerNetworkMode,

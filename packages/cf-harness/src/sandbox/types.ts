@@ -99,6 +99,7 @@ export interface SandboxRuntimeDescription {
   cfc?: {
     runtimeRequested: boolean;
     runtimeName?: string;
+    image?: string;
     workspaceMountPath?: string;
     mounts?: readonly SandboxRuntimeMountDescription[];
     networkMode?: DockerNetworkMode;
