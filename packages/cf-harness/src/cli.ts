@@ -208,6 +208,7 @@ Options:
 Environment:
   CF_HARNESS_API_KEY            Preferred API key for the OpenAI-compatible gateway
   OPENAI_API_KEY                Fallback API key if CF_HARNESS_API_KEY is unset
+  CF_HARNESS_DOCKER_NETWORK_MODE none | bridge | host (default: bridge)
 `;
 
 const parsePositiveInteger = (

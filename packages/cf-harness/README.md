@@ -27,6 +27,11 @@ The current design direction is:
 What works today:
 
 - shell-centric execution against the local `runsc-cfc` sandbox path
+- sandbox containers default to Docker `--network bridge` so local Loom/Fabric
+  helper services can be reached through Docker Desktop's `host.docker.internal`
+  host alias during early integration work; set
+  `CF_HARNESS_DOCKER_NETWORK_MODE=host` when a runtime should explicitly use
+  host networking
 - default sandbox image aligned with the public CFC kitchen-sink image published
   from the sibling `gvisor` repo:
   - `us-docker.pkg.dev/commontools-core/common-fabric/sandbox-kitchensink:latest`
@@ -57,6 +62,14 @@ What works today:
 - runtime-generated supporting-resource indexes in `skill-registry.json`
 - text-first supporting-resource reads through `read_skill_resource`, recorded
   in `skill-resource-reads.json`
+
+The sandbox `bash` tool has a provisional direct-`curl` guard while sandbox
+networking is enabled: explicit `curl` invocations may target loopback HTTP(S)
+hosts such as `localhost`, `127.0.0.1`, and Docker Desktop's
+`host.docker.internal` host alias, but obvious external `curl` targets are
+denied before sandbox execution. This is an integration unblock, not a complete
+network confinement model.
+
 - CFC mode plumbing with:
   - `disabled`
   - `observe`
