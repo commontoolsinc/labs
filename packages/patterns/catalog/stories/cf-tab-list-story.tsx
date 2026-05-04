@@ -93,6 +93,8 @@ export default pattern<TabListStoryInput, TabListStoryOutput>(() => {
                   <cf-tab value="bookmarks">Bookmarks</cf-tab>
                   <cf-tab value="highlights">Highlights</cf-tab>
                   <cf-tab value="summaries">Summaries</cf-tab>
+                  <cf-tab value="drafts">Drafts</cf-tab>
+                  <cf-tab value="archived">Archived</cf-tab>
                 </cf-tab-list>
               </cf-tabs>
               <cf-button variant="ghost" size="icon">+</cf-button>
