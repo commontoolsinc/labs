@@ -89,6 +89,10 @@ describe("shell blob upload", () => {
 
       const image = document.createElement("img");
       image.setAttribute("data-blob-upload-test", "true");
+      image.alt = "Uploaded blob test image";
+      image.style.width = "16px";
+      image.style.height = "16px";
+      image.style.imageRendering = "pixelated";
       image.src = upload.url;
       document.body.append(image);
 
@@ -110,17 +114,71 @@ describe("shell blob upload", () => {
       return {
         relativeUrl: upload.url,
         currentSrc: image.currentSrc,
-        width: image.naturalWidth,
-        height: image.naturalHeight,
       };
     });
 
-    await waitFor(() => Promise.resolve(result.width === 1));
+    const image = await shell.page().waitForSelector(
+      "[data-blob-upload-test='true']",
+    );
+
+    await waitFor(async () =>
+      await shell.page().evaluate(() => {
+        const image = document.querySelector<HTMLImageElement>(
+          "[data-blob-upload-test='true']",
+        );
+        if (!image) return false;
+        const rect = image.getBoundingClientRect();
+        return image.complete &&
+          image.naturalWidth === 1 &&
+          image.naturalHeight === 1 &&
+          rect.width === 16 &&
+          rect.height === 16;
+      })
+    );
+    const box = await image.boundingBox();
+
+    const rendered = await shell.page().evaluate(() => {
+      const image = document.querySelector<HTMLImageElement>(
+        "[data-blob-upload-test='true']",
+      );
+      if (!image) {
+        throw new Error("Uploaded image was not added to the document");
+      }
+
+      const canvas = document.createElement("canvas");
+      canvas.width = 1;
+      canvas.height = 1;
+      const context = canvas.getContext("2d");
+      if (!context) {
+        throw new Error("Could not read uploaded image pixels");
+      }
+      context.drawImage(image, 0, 0, 1, 1);
+      const [red, green, blue, alpha] = context.getImageData(0, 0, 1, 1).data;
+      const rect = image.getBoundingClientRect();
+
+      return {
+        complete: image.complete,
+        currentSrc: image.currentSrc,
+        naturalWidth: image.naturalWidth,
+        naturalHeight: image.naturalHeight,
+        renderedWidth: rect.width,
+        renderedHeight: rect.height,
+        pixel: { red, green, blue, alpha },
+      };
+    });
 
     expect(result.relativeUrl.startsWith("blobs/")).toBe(true);
     expect(result.currentSrc).toContain("/did:key:");
     expect(result.currentSrc).toContain("/blobs/");
-    expect(result.width).toBe(1);
-    expect(result.height).toBe(1);
+    expect(Boolean(box)).toBe(true);
+    expect(box?.width).toBe(16);
+    expect(box?.height).toBe(16);
+    expect(rendered.complete).toBe(true);
+    expect(rendered.currentSrc).toBe(result.currentSrc);
+    expect(rendered.naturalWidth).toBe(1);
+    expect(rendered.naturalHeight).toBe(1);
+    expect(rendered.renderedWidth).toBe(16);
+    expect(rendered.renderedHeight).toBe(16);
+    expect(rendered.pixel.alpha).toBe(255);
   });
 });
