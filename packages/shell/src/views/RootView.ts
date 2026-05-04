@@ -40,6 +40,26 @@ function getCommonfabricGlobal(): typeof globalThis & {
   };
 }
 
+const SPACE_BASE_SELECTOR = 'base[data-commonfabric-space-base="true"]';
+
+function setSpaceBaseHref(space?: DID): void {
+  const existing = document.head.querySelector<HTMLBaseElement>(
+    SPACE_BASE_SELECTOR,
+  );
+  if (!space) {
+    existing?.remove();
+    return;
+  }
+
+  const href = `/${space}/`;
+  const base = existing ?? document.createElement("base");
+  base.setAttribute("data-commonfabric-space-base", "true");
+  base.href = href;
+  if (!existing) {
+    document.head.prepend(base);
+  }
+}
+
 // The root element for the shell application.
 //
 // Derives `RuntimeInternals` for the application from its `AppState`.
@@ -101,6 +121,7 @@ export class XRootView extends BaseView {
           // Clear the runtime and space when no app state
           this.runtime = undefined;
           this.space = undefined;
+          setSpaceBaseHref();
           const global = getCommonfabricGlobal();
           if (global.commonfabric) {
             global.commonfabric.rt = undefined;
@@ -118,6 +139,7 @@ export class XRootView extends BaseView {
           rt.dispose().catch(console.error);
           this.runtime = undefined;
           this.space = undefined;
+          setSpaceBaseHref();
           const global = getCommonfabricGlobal();
           if (global.commonfabric) {
             global.commonfabric.rt = undefined;
@@ -128,6 +150,7 @@ export class XRootView extends BaseView {
         // Update the provided runtime and space values
         this.runtime = rt.runtime();
         this.space = rt.space() as DID;
+        setSpaceBaseHref(this.space);
 
         // Expose RuntimeClient for console debugging
         // (e.g. commonfabric.rt.setLoggerLevel("debug"))
@@ -183,6 +206,7 @@ export class XRootView extends BaseView {
       "theme-preference-changed",
       this._onThemeChanged,
     );
+    setSpaceBaseHref();
     super.disconnectedCallback();
   }
 
