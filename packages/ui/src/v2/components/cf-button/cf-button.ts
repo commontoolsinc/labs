@@ -1,9 +1,10 @@
-import { html } from "lit";
+import { html, type PropertyValues } from "lit";
 import { styles } from "./styles.ts";
 import { property } from "lit/decorators.js";
 import { classMap } from "lit/directives/class-map.js";
 import { consume } from "@lit/context";
 import { BaseElement } from "../../core/base-element.ts";
+import { oneOf } from "../../core/property-guards.ts";
 import {
   applyThemeToElement,
   type CFTheme,
@@ -33,6 +34,11 @@ import {
 export type ButtonVariant = "solid" | "outline" | "ghost";
 
 export type ButtonSize = ComponentSize | "icon";
+
+const buttonVariants = ["solid", "outline", "ghost"] as const;
+const buttonColors = ["neutral", "primary", "accent", "danger"] as const;
+const buttonSizes = ["xs", "sm", "md", "lg", "xl", "icon"] as const;
+const buttonTypes = ["button", "submit", "reset"] as const;
 
 // ── Accessibility strategy ───────────────────────────────────────────
 //
@@ -149,6 +155,21 @@ export class CFButton extends BaseElement {
     }
     if (changedProperties.has("theme")) {
       this._updateThemeProperties();
+    }
+  }
+
+  protected override willUpdate(changedProperties: PropertyValues): void {
+    super.willUpdate(changedProperties);
+    if (
+      changedProperties.has("color") ||
+      changedProperties.has("variant") ||
+      changedProperties.has("size") ||
+      changedProperties.has("type")
+    ) {
+      this.color = oneOf(this.color, buttonColors, "primary");
+      this.variant = oneOf(this.variant, buttonVariants, "solid");
+      this.size = oneOf(this.size, buttonSizes, "md");
+      this.type = oneOf(this.type, buttonTypes, "button");
     }
   }
 

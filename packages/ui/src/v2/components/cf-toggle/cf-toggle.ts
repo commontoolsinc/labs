@@ -1,6 +1,7 @@
 import { html, PropertyValues, unsafeCSS } from "lit";
 import { classMap } from "lit/directives/class-map.js";
 import { BaseElement } from "../../core/base-element.ts";
+import { oneOf } from "../../core/property-guards.ts";
 import { toggleStyles } from "./styles.ts";
 
 /** @deprecated Use ComponentSize instead */
@@ -25,6 +26,9 @@ export type ToggleSize = "sm" | "md" | "lg";
  * <cf-toggle pressed>Bold</cf-toggle>
  */
 export type ToggleVariant = "default" | "outline";
+
+const toggleVariants = ["default", "outline"] as const;
+const toggleSizes = ["sm", "md", "lg"] as const;
 
 export class CFToggle extends BaseElement {
   // No delegatesFocus — the host owns role="button", tabindex, and all
@@ -71,6 +75,14 @@ export class CFToggle extends BaseElement {
     // (cf-toggle-group) programmatically sets pressed.
     if (changedProperties.has("pressed") || changedProperties.has("disabled")) {
       this._updateAriaAttributes();
+    }
+  }
+
+  protected override willUpdate(changedProperties: PropertyValues): void {
+    super.willUpdate(changedProperties);
+    if (changedProperties.has("variant") || changedProperties.has("size")) {
+      this.variant = oneOf(this.variant, toggleVariants, "default");
+      this.size = oneOf(this.size, toggleSizes, "md");
     }
   }
 
