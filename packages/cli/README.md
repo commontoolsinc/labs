@@ -7,8 +7,27 @@ to run the Common Fabric CLI from another repo or from a sandbox. It keeps the
 selected Labs checkout as the source of truth while making the child CLI process
 use an explicit Deno config/import map.
 
-The launcher itself intentionally uses only Deno and Node built-ins so callers
-can invoke it before the Labs import map is active.
+The launcher itself intentionally uses only Deno built-ins so callers can invoke
+it before the Labs import map is active.
+
+Launcher options are parsed before the first non-launcher argument or `--`. Use
+`--` when a `cf` argument has the same name as a launcher option:
+
+```bash
+deno task cf -- --config piece-config.json
+```
+
+Launcher `--config` is the child Deno config/import map used to start the CLI.
+It is not a `cf` command or pattern config.
+
+The child CLI working directory defaults to `INIT_CWD` when present, otherwise
+the launcher's current directory. This preserves `deno task cf` behavior from a
+caller directory. Direct sandbox or wrapper callers should pass `--cwd` when
+they need to ignore a stale inherited `INIT_CWD`.
+
+The child CLI process inherits the parent environment. The launcher only adds
+`CF_CLI_NAME=cf`, so caller-provided `CF_API_URL`, `CF_IDENTITY`, experimental
+flags, and CFC/sandbox-related environment variables continue to flow through.
 
 From the Labs checkout:
 

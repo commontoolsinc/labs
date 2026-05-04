@@ -158,13 +158,22 @@ const usage =
 Options:
   --deno <path>              Deno executable to use for the child CLI process
   --labs-root <path>         Labs checkout root (defaults to this script's repo)
-  --config <path>            Deno config path (defaults to <labs-root>/deno.json)
+  --config <path>            Child Deno config/import-map path (defaults to <labs-root>/deno.json)
   --cli-entrypoint <path>    CF CLI entrypoint (defaults to <labs-root>/packages/cli/mod.ts)
-  --cwd <path>               Caller working directory for the CF CLI child process
+  --cwd <path>               Working directory for the CF CLI child process (defaults to INIT_CWD or current cwd)
   --launcher-help            Show this help text
 `;
 
 export const formatCfLauncherUsage = (): string => usage;
+
+export const formatCfLauncherError = (error: unknown): string => {
+  const message = error instanceof Error ? error.message : String(error);
+  const missingOption = message.match(/^(--[A-Za-z0-9-]+) requires a value$/);
+  const hint = missingOption === null
+    ? ""
+    : `; use -- to pass ${missingOption[1]} to cf`;
+  return `cf launcher: ${message}${hint}`;
+};
 
 export const parseCfLauncherArgs = (
   options: ParseCfLauncherArgsOptions,
@@ -278,5 +287,10 @@ const run = async (): Promise<number> => {
 };
 
 if (import.meta.main) {
-  Deno.exit(await run());
+  try {
+    Deno.exit(await run());
+  } catch (error) {
+    console.error(formatCfLauncherError(error));
+    Deno.exit(1);
+  }
 }

@@ -3,9 +3,14 @@ import {
   buildCfLauncherCommand,
   defaultLabsRootFromModulePath,
   fileUrlToPath,
+  formatCfLauncherError,
   formatCfLauncherUsage,
   parseCfLauncherArgs,
 } from "../launcher.ts";
+
+const launcherPath = fileUrlToPath(
+  new URL("../launcher.ts", import.meta.url).href,
+);
 
 Deno.test("defaultLabsRootFromModulePath resolves from packages/cli", () => {
   assertEquals(
@@ -57,6 +62,23 @@ Deno.test("parseCfLauncherArgs defaults to the launcher labs checkout", () => {
     cwd: "/workspace/pattern-factory",
     cfArgs: ["--help"],
   });
+});
+
+Deno.test("parseCfLauncherArgs lets explicit --cwd override INIT_CWD", () => {
+  const parsed = parseCfLauncherArgs({
+    argv: ["--cwd", "/workspace/explicit", "--", "check", "pattern.tsx"],
+    cwd: "/workspace/labs",
+    initCwd: "/workspace/stale-task-cwd",
+    denoPath: "/usr/local/bin/deno",
+    modulePath: "/workspace/labs/packages/cli/launcher.ts",
+  });
+
+  assertEquals("help" in parsed, false);
+  if ("help" in parsed) {
+    throw new Error("unexpected help result");
+  }
+  assertEquals(parsed.cwd, "/workspace/explicit");
+  assertEquals(parsed.cfArgs, ["check", "pattern.tsx"]);
 });
 
 Deno.test("parseCfLauncherArgs supports explicit consumer config", () => {
@@ -198,6 +220,115 @@ Deno.test("parseCfLauncherArgs rejects missing option values", () => {
     Error,
     "--config requires a value",
   );
+});
+
+Deno.test("formatCfLauncherError adds cf passthrough hint for launcher options", () => {
+  assertEquals(
+    formatCfLauncherError(new Error("--config requires a value")),
+    "cf launcher: --config requires a value; use -- to pass --config to cf",
+  );
+});
+
+Deno.test("launcher main renders launcher-scoped diagnostics without a stack", async () => {
+  const command = new Deno.Command(Deno.execPath(), {
+    args: [
+      "run",
+      "--allow-run",
+      "--allow-env",
+      "--allow-read",
+      launcherPath,
+      "--config",
+    ],
+    stdout: "piped",
+    stderr: "piped",
+  });
+
+  const output = await command.output();
+  assertEquals(output.code, 1);
+  assertEquals(new TextDecoder().decode(output.stdout), "");
+  const stderr = new TextDecoder().decode(output.stderr);
+  assertEquals(
+    stderr,
+    "cf launcher: --config requires a value; use -- to pass --config to cf\n",
+  );
+});
+
+Deno.test("launcher runs an outside-Labs consumer config and inherits env", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const expectedCwd = (await Deno.realPath(tempDir)).replaceAll("\\", "/");
+    await Deno.writeTextFile(
+      `${tempDir}/deno.json`,
+      JSON.stringify({
+        imports: {
+          "consumer-alias": "./consumer-alias.ts",
+        },
+      }),
+    );
+    await Deno.writeTextFile(
+      `${tempDir}/consumer-alias.ts`,
+      `export const value = "consumer-config";\n`,
+    );
+    await Deno.writeTextFile(
+      `${tempDir}/child.ts`,
+      `
+import { value } from "consumer-alias";
+
+console.log(JSON.stringify({
+  args: Deno.args,
+  cwd: Deno.cwd().replaceAll("\\\\", "/"),
+  configValue: value,
+  cfApiUrl: Deno.env.get("CF_API_URL"),
+  cfCliName: Deno.env.get("CF_CLI_NAME"),
+  initCwd: Deno.env.get("INIT_CWD"),
+}));
+`,
+    );
+
+    const command = new Deno.Command(Deno.execPath(), {
+      args: [
+        "run",
+        "--allow-run",
+        "--allow-env",
+        "--allow-read",
+        launcherPath,
+        "--deno",
+        Deno.execPath(),
+        "--labs-root",
+        ".",
+        "--config",
+        "deno.json",
+        "--cli-entrypoint",
+        "child.ts",
+        "--cwd",
+        ".",
+        "--",
+        "check",
+        "pattern.tsx",
+      ],
+      cwd: tempDir,
+      env: {
+        CF_API_URL: "http://example.invalid",
+        INIT_CWD: "/stale/init/cwd",
+      },
+      stdout: "piped",
+      stderr: "piped",
+    });
+
+    const output = await command.output();
+    assertEquals(new TextDecoder().decode(output.stderr), "");
+    assertEquals(output.code, 0);
+    assertEquals(JSON.parse(new TextDecoder().decode(output.stdout)), {
+      args: ["check", "pattern.tsx"],
+      cwd: expectedCwd,
+      configValue: "consumer-config",
+      cfApiUrl: "http://example.invalid",
+      cfCliName: "cf",
+      initCwd: "/stale/init/cwd",
+    });
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
 });
 
 Deno.test("buildCfLauncherCommand builds the child deno invocation", () => {
