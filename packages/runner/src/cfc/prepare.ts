@@ -23,6 +23,7 @@ import {
   parseLink,
 } from "../link-utils.ts";
 import { getValueAtPath } from "../path-utils.ts";
+import { encodePointer } from "../../../memory/v2/path.ts";
 import { canonicalizeLogicalPath } from "./canonical.ts";
 import { mergeCfcSchemaEnvelopes } from "./schema-merge.ts";
 import {
@@ -372,7 +373,7 @@ const linkWritesByTarget = (
 };
 
 const pathKey = (path: readonly string[]): string =>
-  canonicalizeLogicalPath(path).join("\u0000");
+  encodePointer(canonicalizeLogicalPath(path));
 
 const pathsOverlap = (
   left: readonly string[],
@@ -830,9 +831,7 @@ const derivePersistedLabel = (
 ): IFCLabel => {
   const ifc = isRecord(schema) ? schema.ifc : undefined;
   const copiedInputLabel = sourceEntryLabels && exactCopySourcePath(schema)
-    ? sourceEntryLabels.get(
-      canonicalizeLogicalPath(exactCopySourcePath(schema)!).join("\u0000"),
-    )
+    ? sourceEntryLabels.get(pathKey(exactCopySourcePath(schema)!))
     : undefined;
   return {
     confidentiality: mergeLabelValues(
@@ -988,9 +987,11 @@ const coalesceLabelEntries = (
       label: mergeLabels(existing?.label, cloneLabel(entry.label)),
     });
   }
-  return [...byPath.values()].sort((left, right) =>
-    pathKey(left.path).localeCompare(pathKey(right.path))
-  );
+  return [...byPath.values()].sort((left, right) => {
+    const leftKey = pathKey(left.path);
+    const rightKey = pathKey(right.path);
+    return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
+  });
 };
 
 const ensureSchemaDocument = (
