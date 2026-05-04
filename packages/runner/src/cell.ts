@@ -89,11 +89,11 @@ import {
   type NormalizedFullLink,
   type NormalizedLink,
   type SanitizeSchemaForLinksOptions,
+  toMemorySpaceAddress,
 } from "./link-utils.ts";
 import type {
   ChangeGroup,
   IExtendedStorageTransaction,
-  IMemorySpaceAddress,
   IReadOptions,
 } from "./storage/interface.ts";
 import {
@@ -147,7 +147,6 @@ const recordSchemaWritePolicyInput = (
     target: {
       space: link.space,
       id: link.id,
-      type: link.type,
       path: [...link.path],
     },
     schemaHash: schemaAndHash.hashString,
@@ -493,10 +492,7 @@ export class CellImpl<T extends FabricValue>
     this._frame = getTopFrame();
 
     // Store this cell's own link
-    this._link = link ?? { path: [], type: "application/json" };
-    if (!this._link.type) {
-      this._link = { ...this._link, type: "application/json" };
-    }
+    this._link = link ?? { path: [] };
 
     // Use provided container or create one
     // If link has an id, extract it to the container
@@ -1446,7 +1442,7 @@ export class CellImpl<T extends FabricValue>
   getSourceCell(schema?: JSONSchema): Cell<any> | undefined {
     if (!this.synced) this.sync(); // No await, just kicking this off
     const sourceCellId = this.runtime.readTx(this.tx).readOrThrow(
-      { ...this.link, path: ["source"] } as IMemorySpaceAddress,
+      { ...toMemorySpaceAddress(this.link), path: ["source"] },
       {
         meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
       },
@@ -1463,7 +1459,6 @@ export class CellImpl<T extends FabricValue>
       space: this.link.space,
       path: [],
       id: sourceCellIdString,
-      type: "application/json",
       schema: schema,
     }, this.tx) as Cell<any>;
   }
@@ -1481,7 +1476,7 @@ export class CellImpl<T extends FabricValue>
     }
     // System-owned provenance metadata, not user-surface value data.
     this.tx.writeOrThrow(
-      { ...this.link, path: ["source"] } as IMemorySpaceAddress,
+      { ...toMemorySpaceAddress(this.link), path: ["source"] },
       // TODO(@ubik2): Transition source links to sigil links?
       { "/": fromURI(sourceLink.id) },
     );

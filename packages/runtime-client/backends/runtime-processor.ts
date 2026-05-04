@@ -123,7 +123,6 @@ export function runtimeOptionsFromInitializationData(
     storageManager,
     patternEnvironment: { apiUrl: apiUrlObj },
     telemetry,
-    memoryVersion: data.memoryVersion,
     experimental: data.experimental,
     cfcEnforcementMode: data.cfcEnforcementMode,
     trustSnapshotProvider: data.trustSnapshot
@@ -306,25 +305,11 @@ export class RuntimeProcessor {
       spaceName: data.spaceName,
     };
 
-    const storageManager = data.memoryVersion === "v1"
-      ? StorageManager.open({
-        as: identity,
-        spaceIdentity: spaceIdentity,
-        address: new URL("/api/storage/memory", data.apiUrl),
-        memoryVersion: "v1",
-      })
-      : data.memoryVersion === "v2"
-      ? StorageManager.open({
-        as: identity,
-        spaceIdentity: spaceIdentity,
-        address: new URL("/api/storage/memory", data.apiUrl),
-        memoryVersion: "v2",
-      })
-      : StorageManager.open({
-        as: identity,
-        spaceIdentity: spaceIdentity,
-        address: new URL("/api/storage/memory", data.apiUrl),
-      });
+    const storageManager = StorageManager.open({
+      as: identity,
+      spaceIdentity: spaceIdentity,
+      address: new URL("/api/storage/memory", data.apiUrl),
+    });
 
     // Construct compilation cache if a build hash was provided (browser path).
     const cachedCompiler = data.buildHash

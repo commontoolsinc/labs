@@ -1637,7 +1637,6 @@ describe("Schema - Link Resolution", () => {
           id: dataCellURI,
           path: [],
           space,
-          type: "application/json",
         },
         cellASchema,
       );

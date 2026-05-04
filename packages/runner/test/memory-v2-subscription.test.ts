@@ -76,12 +76,10 @@ describe("Memory v2 storage notifications", () => {
   beforeEach(async () => {
     storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: "v2",
     });
     tx = runtime.edit();
 

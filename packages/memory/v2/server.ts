@@ -1,17 +1,16 @@
 import * as FS from "@std/fs";
 import * as Path from "@std/path";
-import { resolveSpaceStoreUrl } from "../memory.ts";
-import type { Protocol, Provider } from "../provider.ts";
+import { resolveSpaceStoreUrl } from "./storage-path.ts";
 import {
   type ClientCommit,
   type ClientMessage,
-  decodeMemoryV2Boundary,
-  encodeMemoryV2Boundary,
+  decodeMemoryBoundary,
+  encodeMemoryBoundary,
   type GraphQuery,
   type GraphQueryRequest,
   type GraphQueryResult,
   type HelloMessage,
-  isMemoryV2Flags,
+  isMemoryProtocolFlags,
   type ResponseMessage,
   type ServerMessage,
   type SessionAckRequest,
@@ -32,6 +31,7 @@ import * as Engine from "./engine.ts";
 import {
   cloneTrackedGraphState,
   extendTrackedGraph,
+  isGraphQueryCoveredByState,
   queryGraph,
   type QueryGraphReuseContext,
   refreshTrackedGraph,
@@ -58,6 +58,49 @@ export { SessionRegistry } from "./session-registry.ts";
 
 const SUBSCRIPTION_REFRESH_DELAY_MS = 5;
 const MIN_REFRESH_QUEUE_DRAIN_WAIT_MS = 500;
+const SLOW_QUERY_THRESHOLD_MS = 100;
+const SLOW_QUERY_BUFFER_SIZE = 100;
+
+export interface SlowQuery {
+  timestamp: number;
+  elapsed: number;
+  operation: string;
+  space: string;
+  roots?: number;
+  watches?: number;
+}
+
+const slowQueries: SlowQuery[] = [];
+
+const recordSlowQuery = (entry: SlowQuery): void => {
+  slowQueries.push(entry);
+  if (slowQueries.length > SLOW_QUERY_BUFFER_SIZE) {
+    slowQueries.shift();
+  }
+};
+
+const recordSlowQueryDuration = (
+  operation: string,
+  space: string,
+  startedAt: number,
+  details: Omit<SlowQuery, "timestamp" | "elapsed" | "operation" | "space"> =
+    {},
+): void => {
+  const elapsed = performance.now() - startedAt;
+  if (elapsed <= SLOW_QUERY_THRESHOLD_MS) {
+    return;
+  }
+  recordSlowQuery({
+    timestamp: Date.now(),
+    elapsed,
+    operation,
+    space,
+    ...details,
+  });
+};
+
+/** Returns the last N slow query/watch operations (>100ms). */
+export const getSlowQueries = (): readonly SlowQuery[] => slowQueries;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -202,7 +245,7 @@ class Connection {
         requestId: "invalid",
         error: toError(
           "InvalidMessageError",
-          "Unable to parse memory/v2 message",
+          "Unable to parse memory message",
         ),
       });
       return;
@@ -213,7 +256,7 @@ class Connection {
         this.send({
           type: "response",
           requestId: "handshake",
-          error: toError("ProtocolError", "memory/v2 hello is required first"),
+          error: toError("ProtocolError", "memory hello is required first"),
         });
         return;
       }
@@ -356,7 +399,6 @@ export class Server {
 
   constructor(
     readonly options: {
-      memory?: Provider<Protocol>;
       sessions?: SessionRegistry;
       store?: URL;
       subscriptionRefreshDelayMs?: number;
@@ -625,6 +667,7 @@ export class Server {
     }
 
     try {
+      const startedAt = performance.now();
       const engine = await this.openEngine(message.space);
       const existingById = new Map(
         session.watches.map((watch) => [watch.id, watch] as const),
@@ -684,6 +727,10 @@ export class Server {
           continue;
         }
 
+        if (isGraphQueryCoveredByState(message.space, existing, query)) {
+          continue;
+        }
+
         const staged = cloneTrackedGraphState(engine, existing);
         graphs.set(branch, staged);
         const extended = extendTrackedGraph(
@@ -713,6 +760,12 @@ export class Server {
       session.graphs = graphs;
       session.watches = nextWatches;
       session.lastSyncedSeq = serverSeq;
+      recordSlowQueryDuration(
+        "session.watch.add",
+        message.space,
+        startedAt,
+        { watches: message.watches.length },
+      );
       return {
         type: "response",
         requestId: message.requestId,
@@ -747,12 +800,17 @@ export class Server {
     engine?: Engine.Engine,
     reuse?: QueryGraphReuseContext,
   ): Promise<GraphQueryResult> {
-    return queryGraph(
+    const startedAt = performance.now();
+    const result = queryGraph(
       space,
       engine ?? await this.openEngine(space),
       query,
       reuse,
     );
+    recordSlowQueryDuration("graph.query", space, startedAt, {
+      roots: query.roots.length,
+    });
+    return result;
   }
 
   async evaluateWatchSet(
@@ -764,6 +822,7 @@ export class Server {
     graphs: Map<string, TrackedGraphState>;
     entities: Map<string, SessionCacheEntry>;
   }> {
+    const startedAt = performance.now();
     const resolvedEngine = engine ?? await this.openEngine(space);
     const reuse: QueryGraphReuseContext = {
       managers: new Map(),
@@ -795,6 +854,9 @@ export class Server {
       }
     }
 
+    recordSlowQueryDuration("session.watch.set", space, startedAt, {
+      watches: watches.length,
+    });
     return {
       serverSeq,
       graphs,
@@ -812,6 +874,7 @@ export class Server {
       return null;
     }
     if (dirtyIds !== undefined) {
+      const startedAt = performance.now();
       let touched = false;
       for (const dirtyId of dirtyIds) {
         if (session.trackedIds.has(dirtyId)) {
@@ -861,6 +924,9 @@ export class Server {
       if (upserts.length === 0) {
         return null;
       }
+      recordSlowQueryDuration("session.watch.refresh", space, startedAt, {
+        watches: session.watches.length,
+      });
       return {
         type: "session/effect",
         space,
@@ -1065,7 +1131,7 @@ export class Server {
   respond(payload: string): Promise<string | null> {
     const parsed = parseClientMessage(payload);
     if (parsed?.type === "hello") {
-      return Promise.resolve(encodeMemoryV2Boundary(respondToHello(parsed)));
+      return Promise.resolve(encodeMemoryBoundary(respondToHello(parsed)));
     }
     return Promise.resolve(null);
   }
@@ -1077,7 +1143,10 @@ export class Server {
     }
 
     const url = this.#store
-      ? resolveSpaceStoreUrl(this.#store, space as any, "v2")
+      ? resolveSpaceStoreUrl(
+        this.#store,
+        space as `did:${string}:${string}`,
+      )
       : new URL(`memory:///${encodeURIComponent(space)}`);
     const opened = (async () => {
       if (url.protocol === "file:") {
@@ -1100,7 +1169,7 @@ export const parseClientMessage = (
 ): ClientMessage | null => {
   let parsed: unknown;
   try {
-    parsed = decodeMemoryV2Boundary(payload);
+    parsed = decodeMemoryBoundary(payload);
   } catch {
     return null;
   }
@@ -1112,7 +1181,7 @@ export const parseClientMessage = (
   if (
     parsed.type === "hello" &&
     typeof parsed.protocol === "string" &&
-    isMemoryV2Flags(parsed.flags)
+    isMemoryProtocolFlags(parsed.flags)
   ) {
     return {
       type: "hello",

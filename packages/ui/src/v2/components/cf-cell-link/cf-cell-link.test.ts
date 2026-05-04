@@ -49,7 +49,6 @@ describe("CFCellLink", () => {
       id: "of:test-cell" as CellRef["id"],
       space: "did:key:test-space" as CellRef["space"],
       path: [],
-      type: "application/json" as CellRef["type"],
       schema: { type: "object" },
     };
     let subscribeCount = 0;
@@ -91,7 +90,6 @@ describe("CFCellLink", () => {
       id: "of:test-cell" as CellRef["id"],
       space: "did:key:test-space" as CellRef["space"],
       path: [],
-      type: "application/json" as CellRef["type"],
       schema: { type: "object" },
     };
     const activeSubscriptions = new Set<string>();
@@ -128,7 +126,6 @@ describe("CFCellLink", () => {
       id: "of:slow-cell" as CellRef["id"],
       space: "did:key:test-space" as CellRef["space"],
       path: [],
-      type: "application/json" as CellRef["type"],
       schema: { type: "object" },
     };
     const refB: CellRef = {
@@ -197,7 +194,6 @@ describe("CFCellLink", () => {
       id: "of:detached-cell" as CellRef["id"],
       space: "did:key:test-space" as CellRef["space"],
       path: [],
-      type: "application/json" as CellRef["type"],
       schema: { type: "object" },
     };
     let subscribeCount = 0;

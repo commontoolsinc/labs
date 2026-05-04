@@ -99,7 +99,7 @@ const handleShutdown = async () => {
 
         console.log("Closing memory system...");
         const result = await memory.close();
-        if (result.error) {
+        if ("error" in result) {
           console.error("Error closing memory:", result.error);
         } else {
           console.log("Memory system closed successfully");

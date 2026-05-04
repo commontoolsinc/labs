@@ -61,7 +61,6 @@ type TrustedEventPolicyTx = Pick<
 type AddressLike = {
   space: string;
   id: string;
-  type: string;
   path: readonly unknown[];
 };
 
@@ -455,7 +454,6 @@ const targetMatchesWrite = (
 ): boolean =>
   target.space === write.space &&
   target.id === write.id &&
-  target.type === write.type &&
   pathsEqual(target.path, write.path);
 
 const sameDocument = (
@@ -463,8 +461,7 @@ const sameDocument = (
   write: AddressLike,
 ): boolean =>
   target.space === write.space &&
-  target.id === write.id &&
-  target.type === write.type;
+  target.id === write.id;
 
 const contractCandidatesForWrite = (
   tx: TrustedEventPolicyTx,
@@ -618,7 +615,6 @@ export const recordTrustedEventPolicyInputs = (
       const target = {
         space: write.space,
         id: write.id,
-        type: write.type,
         path: [...write.path],
       };
       const eventId = trustedEventId(matchingEvent, write);

@@ -4,9 +4,9 @@ import {
   REJECTING_SELECTOR,
 } from "@commonfabric/data-model/schema-utils";
 import type { MIME } from "@commonfabric/memory/interface";
-import { stableHash } from "../traverse.ts";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { ContextualFlowControl } from "../cfc.ts";
-import { SelectorTracker } from "./cache.ts";
+import { SelectorTracker } from "./selector-tracker.ts";
 import type {
   PullError,
   Result,
@@ -14,6 +14,8 @@ import type {
   Unit,
   URI,
 } from "./interface.ts";
+
+const DOCUMENT_MIME = "application/json" as const;
 
 export const normalizeSyncSelector = (
   selector: SchemaPathSelector | undefined,
@@ -40,7 +42,7 @@ export const compactWatchEntries = (
 
   for (const entry of entries) {
     const [address, selector] = entry;
-    const baseAddress = { id: address.id, type: address.type, path: [] };
+    const baseAddress = { id: address.id, type: DOCUMENT_MIME, path: [] };
     const [superset] = tracker.getSupersetSelector(
       baseAddress,
       selector,
@@ -61,7 +63,7 @@ export const compactWatchEntries = (
 };
 
 const selectorIdentity = (selector: SchemaPathSelector): string =>
-  stableHash({
+  hashStringOf({
     path: selector.path,
     schemaHash: selector.schema === undefined
       ? ""
@@ -74,10 +76,10 @@ export const watchIdForEntry = (
   branch = "",
 ): string =>
   `replica:${
-    stableHash({
+    hashStringOf({
       branch,
       id: address.id,
-      type: address.type,
+      type: DOCUMENT_MIME,
       selector: selectorIdentity(selector),
     })
   }`;

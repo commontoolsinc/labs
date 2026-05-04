@@ -5,9 +5,9 @@ import { parentPath, parsePointer, pathsOverlap } from "./path.ts";
 import {
   type BranchName,
   type ClientCommit,
-  decodeMemoryV2Boundary,
+  decodeMemoryBoundary,
   DEFAULT_BRANCH,
-  encodeMemoryV2Boundary,
+  encodeMemoryBoundary,
   type EntityDocument,
   type EntityId,
   isEntityDocument,
@@ -811,15 +811,15 @@ const applyCommitTransaction = (
   const authorizationRef = engine.legacyCommitMetadataRefsRequired
     ? LEGACY_EMPTY_AUTHORIZATION_REF
     : null;
-  const original = encodeMemoryV2Boundary(commit);
-  const resolution = encodeMemoryV2Boundary(
+  const original = encodeMemoryBoundary(commit);
+  const resolution = encodeMemoryBoundary(
     resolvedPendingReads.length > 0 ? { seq, resolvedPendingReads } : { seq },
   );
 
   if (engine.legacyCommitMetadataRefsRequired) {
     engine.statements.insertAuthorization.run({
       ref: LEGACY_EMPTY_AUTHORIZATION_REF,
-      authorization: encodeMemoryV2Boundary(LEGACY_EMPTY_AUTHORIZATION),
+      authorization: encodeMemoryBoundary(LEGACY_EMPTY_AUTHORIZATION),
     });
     engine.statements.insertInvocation.run({
       ref: LEGACY_EMPTY_INVOCATION_REF,
@@ -827,7 +827,7 @@ const applyCommitTransaction = (
       aud: LEGACY_EMPTY_INVOCATION.aud ?? null,
       cmd: LEGACY_EMPTY_INVOCATION.cmd,
       sub: LEGACY_EMPTY_INVOCATION.sub,
-      invocation: encodeMemoryV2Boundary(LEGACY_EMPTY_INVOCATION),
+      invocation: encodeMemoryBoundary(LEGACY_EMPTY_INVOCATION),
     });
   }
   engine.statements.insertCommit.run({
@@ -881,7 +881,7 @@ const writeOperation = (
         seq,
         op_index: opIndex,
         op: "set",
-        data: encodeMemoryV2Boundary(operation.value),
+        data: encodeMemoryBoundary(operation.value),
         commit_seq: seq,
       });
       engine.statements.upsertHead.run({
@@ -907,7 +907,7 @@ const writeOperation = (
         seq,
         op_index: opIndex,
         op: "patch",
-        data: encodeMemoryV2Boundary(operation.patches),
+        data: encodeMemoryBoundary(operation.patches),
         commit_seq: seq,
       });
       engine.statements.upsertHead.run({
@@ -1167,7 +1167,7 @@ const maybeMaterializeSnapshot = (
     branch,
     id,
     seq: current.seq,
-    value: encodeMemoryV2Boundary(current.document),
+    value: encodeMemoryBoundary(current.document),
   });
   compactSnapshots(engine, branch, id);
 };
@@ -1356,7 +1356,7 @@ const ensureActiveBranch = (engine: Engine, branch: BranchName): void => {
 const emptyEntityDocument = (): EntityDocument => ({});
 
 const decodeStoredDocument = (data: string | null): EntityDocument => {
-  const parsed = decodeMemoryV2Boundary<unknown>(data ?? "null");
+  const parsed = decodeMemoryBoundary<unknown>(data ?? "null");
   if (!isEntityDocument(parsed)) {
     throw new Error("memory v2 stored documents must be plain object roots");
   }
@@ -1364,7 +1364,7 @@ const decodeStoredDocument = (data: string | null): EntityDocument => {
 };
 
 const decodeStoredPatchList = (data: string | null): PatchOp[] => {
-  const parsed = decodeMemoryV2Boundary<unknown>(data ?? "[]");
+  const parsed = decodeMemoryBoundary<unknown>(data ?? "[]");
   if (!Array.isArray(parsed)) {
     throw new Error("memory v2 stored patches must be arrays");
   }
@@ -1381,7 +1381,7 @@ const sameStoredOriginal = (
   stored: string,
   incoming: ClientCommit,
 ): boolean => {
-  return stored === encodeMemoryV2Boundary(incoming);
+  return stored === encodeMemoryBoundary(incoming);
 };
 
 const revisionKey = (branch: BranchName, id: EntityId): string =>

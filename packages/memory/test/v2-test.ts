@@ -9,12 +9,12 @@ import {
   setJsonEncodingConfig,
 } from "@commonfabric/data-model/json-encoding";
 import {
-  decodeMemoryV2Boundary,
+  decodeMemoryBoundary,
   DEFAULT_BRANCH,
-  encodeMemoryV2Boundary,
-  getMemoryV2Flags,
+  encodeMemoryBoundary,
+  getMemoryProtocolFlags,
   isSourceLink,
-  MEMORY_V2_PROTOCOL,
+  MEMORY_PROTOCOL,
   toDocumentPath,
   toDocumentSelector,
   toValuePath,
@@ -43,7 +43,7 @@ const toEntityDocument = (
 
 describe("memory v2 protocol constants", () => {
   it("exports the phase-1 protocol constants", () => {
-    assertEquals(MEMORY_V2_PROTOCOL, "memory/v2");
+    assertEquals(MEMORY_PROTOCOL, "memory");
     assertEquals(DEFAULT_BRANCH, "");
   });
 });
@@ -116,7 +116,7 @@ describe("memory v2 flags", () => {
     setDataModelConfig(false);
     setJsonEncodingConfig(false);
 
-    assertEquals(getMemoryV2Flags(), {
+    assertEquals(getMemoryProtocolFlags(), {
       richStorableValues: false,
       unifiedJsonEncoding: false,
     });
@@ -124,7 +124,7 @@ describe("memory v2 flags", () => {
     setDataModelConfig(true);
     setJsonEncodingConfig(true);
 
-    assertEquals(getMemoryV2Flags(), {
+    assertEquals(getMemoryProtocolFlags(), {
       richStorableValues: true,
       unifiedJsonEncoding: true,
     });
@@ -148,16 +148,16 @@ describe("memory v2 boundary encoding dispatch", () => {
     };
 
     setJsonEncodingConfig(false);
-    const legacyEncoded = encodeMemoryV2Boundary(document);
+    const legacyEncoded = encodeMemoryBoundary(document);
     assertEquals(legacyEncoded, JSON.stringify({ value: { present: 1 } }));
-    assertEquals(decodeMemoryV2Boundary(legacyEncoded), {
+    assertEquals(decodeMemoryBoundary(legacyEncoded), {
       value: { present: 1 },
     });
 
     setJsonEncodingConfig(true);
-    const unifiedEncoded = encodeMemoryV2Boundary(document);
+    const unifiedEncoded = encodeMemoryBoundary(document);
     assertEquals(
-      decodeMemoryV2Boundary(unifiedEncoded),
+      decodeMemoryBoundary(unifiedEncoded),
       document,
     );
 
@@ -182,14 +182,14 @@ describe("memory v2 boundary decode", () => {
       });
 
       it("returns mutable plain JSON trees", () => {
-        const decoded = decodeMemoryV2Boundary<{
+        const decoded = decodeMemoryBoundary<{
           value: {
             nested: {
               count: number;
             };
           };
         }>(
-          encodeMemoryV2Boundary({
+          encodeMemoryBoundary({
             value: {
               nested: {
                 count: 1,

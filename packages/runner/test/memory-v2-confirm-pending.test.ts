@@ -13,7 +13,6 @@ describe("concurrent commits via emulated v2 storage", () => {
   beforeEach(() => {
     storage = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
   });
 

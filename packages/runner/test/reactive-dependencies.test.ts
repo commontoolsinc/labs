@@ -212,7 +212,7 @@ describe("sortAndCompactPaths", () => {
     ]));
   });
 
-  it("sorts by space, id, type, then path", () => {
+  it("sorts by space, id, then path", () => {
     const addresses: IMemorySpaceAddress[] = [
       createAddress(
         ["a"],
@@ -260,13 +260,13 @@ describe("sortAndCompactPaths", () => {
         "test://entity1",
         "application/json",
       ),
+      createAddress(["e"], "did:test:space1", "test://entity1", "text/plain"),
       createAddress(
         ["f"],
         "did:test:space1",
         "test://entity1",
         "application/json",
       ),
-      createAddress(["e"], "did:test:space1", "test://entity1", "text/plain"),
       createAddress(
         ["c"],
         "did:test:space1",
@@ -412,7 +412,7 @@ describe("addresssesToPathByEntity", () => {
     expect(space2Entity1[0]).toEqual(["d"]);
   });
 
-  it("filters out non-JSON types", () => {
+  it("groups document addresses without considering type", () => {
     const addresses: IMemorySpaceAddress[] = [
       createAddress(
         ["a"],
@@ -447,8 +447,10 @@ describe("addresssesToPathByEntity", () => {
     const space1Entity1 = result.get(
       "did:test:space1/https://example.com/entity1" as SpaceAndURI,
     )!;
-    expect(space1Entity1).toHaveLength(1);
+    expect(space1Entity1).toHaveLength(3);
     expect(space1Entity1[0]).toEqual(["a"]);
+    expect(space1Entity1[1]).toEqual(["b"]);
+    expect(space1Entity1[2]).toEqual(["c"]);
 
     const space1Entity2 = result.get(
       "did:test:space1/https://example.com/entity2" as SpaceAndURI,
@@ -524,7 +526,7 @@ describe("addresssesToPathByEntity", () => {
         "did:test:space1",
         "https://api.example.com/settings",
         "text/plain",
-      ), // Filtered out
+      ),
 
       // Space 2, Entity 1 (same URI as space1 but different space)
       createAddress(
@@ -562,8 +564,9 @@ describe("addresssesToPathByEntity", () => {
     const s1e2 = result.get(
       "did:test:space1/https://api.example.com/settings" as SpaceAndURI,
     )!;
-    expect(s1e2).toHaveLength(1);
+    expect(s1e2).toHaveLength(2);
     expect(s1e2[0]).toEqual(["config"]);
+    expect(s1e2[1]).toEqual(["theme"]);
 
     // Check Space 2, Entity 1
     const s2e1 = result.get(

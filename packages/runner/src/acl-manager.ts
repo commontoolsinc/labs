@@ -1,4 +1,4 @@
-import { ACL, ACL_TYPE, ACLUser, DID } from "@commonfabric/memory/acl";
+import { ACL, ACLUser, DID } from "@commonfabric/memory/acl";
 import { Capability } from "@commonfabric/memory/interface";
 import type { Cell } from "./cell.ts";
 import type { Runtime } from "./runtime.ts";
@@ -50,7 +50,6 @@ export class ACLManager {
       id: this.#spaceDid,
       path: [],
       space: this.#spaceDid,
-      type: ACL_TYPE,
     });
   }
 }

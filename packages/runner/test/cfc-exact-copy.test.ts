@@ -11,12 +11,10 @@ describe("CFC exact copy claims", () => {
   const createRuntime = () => {
     const storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: "v2",
       cfcEnforcementMode: "enforce-explicit",
     });
     return { runtime, storageManager };

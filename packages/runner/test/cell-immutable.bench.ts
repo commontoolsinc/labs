@@ -4,7 +4,6 @@ import { createDataCellURI } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
-import { BENCH_MEMORY_VERSION } from "./bench-memory-version.ts";
 
 const signer = await Identity.fromPassphrase("cell-immutable-bench");
 const space = signer.did();
@@ -21,12 +20,10 @@ const makeData = (index: number) => ({ value: index });
 const setup = () => {
   const storageManager = StorageManager.emulate({
     as: signer,
-    memoryVersion: BENCH_MEMORY_VERSION,
   });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
-    memoryVersion: BENCH_MEMORY_VERSION,
   });
   return { runtime, storageManager };
 };
@@ -34,7 +31,6 @@ const setup = () => {
 const setupStorageManager = () =>
   StorageManager.emulate({
     as: signer,
-    memoryVersion: BENCH_MEMORY_VERSION,
   });
 
 const cleanup = async (

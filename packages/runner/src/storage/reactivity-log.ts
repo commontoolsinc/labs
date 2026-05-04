@@ -69,7 +69,6 @@ export function reactivityLogFromActivities(
       const address: IMemorySpaceAddress = {
         space: activity.read.space,
         id: activity.read.id,
-        type: activity.read.type,
         path: [...activity.read.path],
       };
       if (activity.read.nonRecursive === true) {
@@ -87,7 +86,6 @@ export function reactivityLogFromActivities(
       log.writes.push({
         space: activity.write.space,
         id: activity.write.id,
-        type: activity.write.type,
         path: [...activity.write.path],
       });
     }

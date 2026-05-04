@@ -61,7 +61,6 @@ describe("Cell array element conversion", () => {
     tx = runtime.edit();
     const { ok: entry } = tx.read({
       space,
-      type: "application/json",
       id: refCell.getAsNormalizedFullLink().id,
       path: ["value"],
     });
@@ -81,7 +80,6 @@ describe("Cell array element conversion", () => {
       expect(typeof link.id).toBe("string");
       expect(link.id.startsWith("of:")).toBe(true);
       expect(link.id.length).toBeGreaterThan(3);
-      expect(link.type).toBe("application/json");
       expect(link.path).toEqual(["0"]);
       expect(link.schema).toEqual(
         { type: "object", properties: { foo: { type: "number" } } },

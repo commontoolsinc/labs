@@ -19,8 +19,8 @@ class MockReplica implements ISpaceReplica {
     return this.space;
   }
 
-  get(entry: { id: string; type: string }) {
-    const key = `${entry.id}:${entry.type}`;
+  get(entry: { id: string; type?: string }) {
+    const key = `${entry.id}:${entry.type ?? "application/json"}`;
     return this.data.get(key);
   }
 
@@ -38,7 +38,6 @@ class MockReplica implements ISpaceReplica {
 // Mock storage manager
 class MockStorageManager implements IStorageManager {
   id = "test-storage";
-  memoryVersion = "v1" as const;
   replicas = new Map<MemorySpace, MockReplica>();
   as = { did: () => "did:test:user" as const } as unknown as Signer;
 

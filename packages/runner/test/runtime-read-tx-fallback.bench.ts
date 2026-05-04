@@ -3,7 +3,6 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { BENCH_MEMORY_VERSION } from "./bench-memory-version.ts";
 
 const signer = await Identity.fromPassphrase("runtime read tx fallback bench");
 const space = signer.did();
@@ -11,12 +10,10 @@ const space = signer.did();
 function setup() {
   const storageManager = StorageManager.emulate({
     as: signer,
-    memoryVersion: BENCH_MEMORY_VERSION,
   });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
-    memoryVersion: BENCH_MEMORY_VERSION,
   });
   const tx = runtime.edit();
   return { runtime, storageManager, tx };
