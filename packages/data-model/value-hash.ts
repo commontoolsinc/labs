@@ -544,9 +544,17 @@ export function hashOf(value: unknown): FabricHash {
 
 /**
  * Like `hashOf()`, except always returns a plain string of the hash, encoded as
- * base64url (no `<type>:` prefix).
+ * base64url, _without_ a `<type>:` prefix.
  */
 export function hashStringOf(value: unknown): string {
   const result = hashOfInternal(value, true);
   return (typeof result === "string") ? result : result.hashString;
+}
+
+/**
+ * Like `hashOf()`, except always returns a plain string of the hash, encoded as
+ * base64url, with the `<type>:` prefix.
+ */
+export function taggedHashStringOf(value: unknown): string {
+  return hashOfInternal(value, false).toString();
 }

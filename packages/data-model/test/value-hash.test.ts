@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { hashOf, hashStringOf } from "../value-hash.ts";
+import { hashOf, hashStringOf, taggedHashStringOf } from "../value-hash.ts";
 import { createHasher } from "@commonfabric/content-hash";
 import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
 import { FabricHash } from "../fabric-hash.ts";
@@ -1142,6 +1142,29 @@ describe("hashStringOf", () => {
     expect(result.includes("=")).toBe(false);
     // Only base64url characters.
     expect(/^[A-Za-z0-9_-]+$/.test(result)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// taggedHashStringOf
+// ---------------------------------------------------------------------------
+
+describe("taggedHashStringOf", () => {
+  it("returns a string", () => {
+    const result = taggedHashStringOf(42);
+    expect(typeof result).toBe("string");
+  });
+
+  it("returns a string that starts with a `tag:`", () => {
+    const result = taggedHashStringOf(42);
+    expect(result.startsWith("fid1:")).toBe(true);
+  });
+
+  it("returns a hash portion that matches that of `hashStringOf()`", () => {
+    const value = 42;
+    const result = taggedHashStringOf(value);
+    const sansTag = result.replace(/^[a-z0-9]+:/, "");
+    expect(sansTag).toBe(hashStringOf(value));
   });
 });
 
