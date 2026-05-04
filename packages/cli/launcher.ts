@@ -50,13 +50,16 @@ const normalizePath = (path: string): string => {
     : normalized;
   const isAbsolute = hasUncPrefix || withoutPrefix.startsWith("/");
   const parts: string[] = [];
+  const minPartCount = hasUncPrefix ? 2 : 0;
 
   for (const part of withoutPrefix.split("/")) {
     if (part === "" || part === ".") {
       continue;
     }
     if (part === "..") {
-      if (parts.length > 0 && parts[parts.length - 1] !== "..") {
+      if (
+        parts.length > minPartCount && parts[parts.length - 1] !== ".."
+      ) {
         parts.pop();
       } else if (!isAbsolute) {
         parts.push(part);
@@ -88,7 +91,10 @@ const dirnamePath = (path: string): string => {
   if (trimmed.startsWith("//")) {
     const withoutUncPrefix = trimmed.slice(2);
     const uncIndex = withoutUncPrefix.lastIndexOf("/");
-    return uncIndex < 0 ? trimmed : `//${withoutUncPrefix.slice(0, uncIndex)}`;
+    const shareIndex = withoutUncPrefix.indexOf("/");
+    return uncIndex <= shareIndex
+      ? trimmed
+      : `//${withoutUncPrefix.slice(0, uncIndex)}`;
   }
   const index = trimmed.lastIndexOf("/");
   if (index < 0) {

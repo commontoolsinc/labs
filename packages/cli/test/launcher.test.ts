@@ -21,6 +21,12 @@ Deno.test("defaultLabsRootFromModulePath preserves UNC roots", () => {
     ),
     "//server/share/labs",
   );
+  assertEquals(
+    defaultLabsRootFromModulePath(
+      "//server/share/packages/cli/launcher.ts",
+    ),
+    "//server/share",
+  );
 });
 
 Deno.test("fileUrlToPath converts drive and UNC file URLs", () => {
@@ -80,6 +86,34 @@ Deno.test("parseCfLauncherArgs supports explicit consumer config", () => {
     cliEntrypoint: "/workspace/loom/vendor/labs/packages/cli/mod.ts",
     cwd: "/workspace/loom",
     cfArgs: ["piece", "apply", "--config", "piece-config.json"],
+  });
+});
+
+Deno.test("parseCfLauncherArgs preserves explicit UNC share roots", () => {
+  const parsed = parseCfLauncherArgs({
+    argv: [
+      "--labs-root",
+      "//server/share",
+      "--config",
+      "//server/share/deno.json",
+      "--cwd",
+      "//server/share",
+      "--",
+      "check",
+      "pattern.tsx",
+    ],
+    cwd: "/workspace/labs",
+    denoPath: "/usr/local/bin/deno",
+    modulePath: "/workspace/labs/packages/cli/launcher.ts",
+  });
+
+  assertEquals(parsed, {
+    denoPath: "/usr/local/bin/deno",
+    labsRoot: "//server/share",
+    configPath: "//server/share/deno.json",
+    cliEntrypoint: "//server/share/packages/cli/mod.ts",
+    cwd: "//server/share",
+    cfArgs: ["check", "pattern.tsx"],
   });
 });
 
