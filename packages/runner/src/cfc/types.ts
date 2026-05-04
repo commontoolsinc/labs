@@ -1,5 +1,6 @@
 import type { JSONSchema } from "../builder/types.ts";
 import type { FabricValue, MemorySpace } from "@commonfabric/memory/interface";
+import type { Immutable } from "@commonfabric/utils/types";
 import type { Metadata } from "../storage/interface.ts";
 import type { CfcLabelView, IFCLabel } from "./label-view-core.ts";
 
@@ -108,7 +109,7 @@ export type CfcMetadata = {
   labelMap: {
     version: 1;
     entries: Array<{
-      path: string[];
+      path: readonly string[];
       label: IFCLabel;
     }>;
   };
@@ -120,24 +121,32 @@ export type EntityDocumentWithCfc = {
   cfc?: CfcMetadata;
 };
 
-export type CfcAddress = {
+// CFC value types are deeply immutable by contract. The chokepoints
+// that produce them (`canonicalizeLogicalPath()`, the `record*` /
+// `set*` methods on `IExtendedStorageTransaction`, and
+// `buildPreparedDigestInput()`) deep-freeze every record they emit,
+// and the `Immutable<>` wrappers below pin the same shape into the
+// type system so consumers see the invariant statically.
+export type CfcAddress = Immutable<{
   space: MemorySpace;
   id: string;
   path: string[];
-};
+}>;
 
-export type ConsumedRead = CfcAddress & {
-  meta?: Metadata;
-  nonRecursive?: boolean;
-};
+export type ConsumedRead =
+  & CfcAddress
+  & Immutable<{
+    meta?: Metadata;
+    nonRecursive?: boolean;
+  }>;
 
 export type AttemptedWrite = CfcAddress;
 
-export type CfcDereferenceTrace = {
+export type CfcDereferenceTrace = Immutable<{
   source: CfcAddress;
   target: CfcAddress;
   kind: "value" | "write-redirect";
-};
+}>;
 
 export type ImplementationIdentity =
   | { kind: "builtin"; builtinId: string }
@@ -157,53 +166,61 @@ export type TrustSnapshot = {
   revision?: string;
 };
 
+// `WritePolicyInput` is field-level `readonly` rather than `Immutable<>`
+// because its `link-write` variant carries a `CfcLabelView` whose
+// implementation-side helpers (`cloneCfcLabelView()`,
+// `hasCfcLabelValues()`, etc.) operate on the mutable shape; pulling
+// those into `Immutable<>` would cascade further than this cleanup
+// pass. The runtime invariant still holds (the chokepoint
+// `deepFreeze()` covers the whole record); this just keeps the type
+// surface narrower.
 export type WritePolicyInput =
   | {
-    kind: "schema";
-    target: CfcAddress;
-    schemaHash?: string;
-    schema?: JSONSchema;
+    readonly kind: "schema";
+    readonly target: CfcAddress;
+    readonly schemaHash?: string;
+    readonly schema?: JSONSchema;
   }
   | {
-    kind: "structural-provenance";
-    target: CfcAddress;
-    claim: string;
-    sources: CfcAddress[];
+    readonly kind: "structural-provenance";
+    readonly target: CfcAddress;
+    readonly claim: string;
+    readonly sources: readonly CfcAddress[];
   }
   | {
-    kind: "trusted-event";
-    target: CfcAddress;
-    eventId: string;
-    provenance?: FabricValue;
+    readonly kind: "trusted-event";
+    readonly target: CfcAddress;
+    readonly eventId: string;
+    readonly provenance?: FabricValue;
   }
   | {
-    kind: "link-write";
-    target: CfcAddress;
-    source: CfcAddress;
-    linkSchema?: JSONSchema;
-    cfcLabelView?: CfcLabelView;
+    readonly kind: "link-write";
+    readonly target: CfcAddress;
+    readonly source: CfcAddress;
+    readonly linkSchema?: JSONSchema;
+    readonly cfcLabelView?: CfcLabelView;
   }
   | {
-    kind: "sink-request";
-    effectId: string;
-    sink: string;
-    request: FabricValue;
+    readonly kind: "sink-request";
+    readonly effectId: string;
+    readonly sink: string;
+    readonly request: FabricValue;
   }
   | {
-    kind: "custom";
-    target?: CfcAddress;
-    name: string;
-    value: FabricValue;
+    readonly kind: "custom";
+    readonly target?: CfcAddress;
+    readonly name: string;
+    readonly value: FabricValue;
   };
 
 export type PreparedDigestInput = {
-  consumedReads: ConsumedRead[];
-  potentialWrites: AttemptedWrite[];
-  writes: AttemptedWrite[];
-  dereferenceTraces: CfcDereferenceTrace[];
-  writePolicyInputs: WritePolicyInput[];
-  implementationIdentity?: ImplementationIdentity;
-  trustSnapshot?: TrustSnapshot;
+  readonly consumedReads: readonly ConsumedRead[];
+  readonly potentialWrites: readonly AttemptedWrite[];
+  readonly writes: readonly AttemptedWrite[];
+  readonly dereferenceTraces: readonly CfcDereferenceTrace[];
+  readonly writePolicyInputs: readonly WritePolicyInput[];
+  readonly implementationIdentity?: ImplementationIdentity;
+  readonly trustSnapshot?: TrustSnapshot;
 };
 
 export type PostCommitSideEffect = {

@@ -23,9 +23,11 @@ import { cloneCfcLabelView } from "./label-view-core.ts";
  * canonicalize* re-runs on already-canonical input (e.g. during a CFC
  * commit-recheck pass).
  */
-export const canonicalizeLogicalPath = (path: readonly string[]): string[] => {
+export const canonicalizeLogicalPath = (
+  path: readonly string[],
+): readonly string[] => {
   if (path[0] !== "value" && Object.isFrozen(path)) {
-    return path as string[];
+    return path;
   }
   const next = path[0] === "value" ? path.slice(1) : path.slice();
   Object.freeze(next);
