@@ -1,4 +1,16 @@
 import { DID, Identity, type Session } from "@commonfabric/identity";
+import {
+  getDataModelConfig,
+  resetDataModelConfig,
+  setDataModelConfig,
+} from "@commonfabric/data-model/fabric-value";
+import { FabricBytes } from "@commonfabric/data-model/fabric-bytes";
+import {
+  getJsonEncodingConfig,
+  resetJsonEncodingConfig,
+  setJsonEncodingConfig,
+} from "@commonfabric/data-model/json-encoding";
+import { encodeMemoryBoundary } from "@commonfabric/memory/v2";
 import { PieceManager } from "@commonfabric/piece";
 import { PiecesController } from "@commonfabric/piece/ops";
 import {
@@ -89,6 +101,8 @@ import {
   type SetTriggerTraceEnabledRequest,
   type SetWriteStackTraceMatchersRequest,
   type TriggerTraceResponse,
+  type UploadBlobRequest,
+  type UploadBlobResponse,
   type VDomEventRequest,
   type VDomMountRequest,
   type VDomMountResponse,
@@ -110,6 +124,27 @@ import type { VDomOp } from "../protocol/types.ts";
 import type { RuntimeOptions } from "@commonfabric/runner";
 
 const MAX_SERIALIZATION_DEPTH = 5;
+
+const withUnifiedEncoding = <T>(fn: () => T): T => {
+  const previousDataModel = getDataModelConfig();
+  const previousJson = getJsonEncodingConfig();
+  setDataModelConfig(true);
+  setJsonEncodingConfig(true);
+  try {
+    return fn();
+  } finally {
+    if (previousDataModel) {
+      setDataModelConfig(true);
+    } else {
+      resetDataModelConfig();
+    }
+    if (previousJson) {
+      setJsonEncodingConfig(true);
+    } else {
+      resetJsonEncodingConfig();
+    }
+  }
+};
 
 export function runtimeOptionsFromInitializationData(
   data: InitializationData,
@@ -254,6 +289,7 @@ export class RuntimeProcessor {
   private runtime: Runtime;
   private pieceManager: PieceManager;
   private cc: PiecesController;
+  private apiUrl: URL;
   private space: DID;
   private identity: Identity;
   private _isDisposed = false;
@@ -273,6 +309,7 @@ export class RuntimeProcessor {
     runtime: Runtime,
     pieceManager: PieceManager,
     cc: PiecesController,
+    apiUrl: URL,
     space: DID,
     identity: Identity,
     telemetry: RuntimeTelemetry,
@@ -280,6 +317,7 @@ export class RuntimeProcessor {
     this.runtime = runtime;
     this.pieceManager = pieceManager;
     this.cc = cc;
+    this.apiUrl = apiUrl;
     this.space = space;
     this.identity = identity;
     this.telemetry = telemetry;
@@ -392,6 +430,7 @@ export class RuntimeProcessor {
       runtime,
       pieceManager,
       cc,
+      apiUrlObj,
       space,
       identity,
       telemetry,
@@ -824,6 +863,38 @@ export class RuntimeProcessor {
   setBreakpoints(request: SetBreakpointsRequest): void {
     this.runtime.scheduler.setBreakpoints(request.actionIds);
   }
+
+  async handleUploadBlob(
+    request: UploadBlobRequest,
+  ): Promise<UploadBlobResponse> {
+    const suffix = (request.suffix ?? "bin").replace(/^\./, "") || "bin";
+    const target = new URL(
+      `/${this.space}/blobs/upload.${encodeURIComponent(suffix)}`,
+      this.apiUrl,
+    );
+    const body = withUnifiedEncoding(() =>
+      encodeMemoryBoundary({
+        type: request.contentType,
+        body: new FabricBytes(request.body),
+      })
+    );
+    const response = await fetch(target, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+    });
+    if (!response.ok) {
+      throw new Error(
+        `Blob upload failed: ${response.status} ${await response.text()}`,
+      );
+    }
+    const result = await response.json() as Partial<UploadBlobResponse>;
+    if (typeof result.id !== "string" || typeof result.url !== "string") {
+      throw new Error("Blob upload returned an invalid response");
+    }
+    return { id: result.id, url: result.url };
+  }
+
   async detectNonIdempotent(
     request: DetectNonIdempotentRequest,
   ): Promise<DetectNonIdempotentResponse> {
@@ -987,6 +1058,8 @@ export class RuntimeProcessor {
         return this.getPatternSources(request);
       case RequestType.SetBreakpoints:
         return this.setBreakpoints(request);
+      case RequestType.UploadBlob:
+        return await this.handleUploadBlob(request);
       case RequestType.VDomEvent:
         return this.handleVDomEvent(request);
       case RequestType.VDomMount:

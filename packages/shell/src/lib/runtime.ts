@@ -208,6 +208,15 @@ export class RuntimeInternals extends EventTarget {
     await this.#client.idle();
   }
 
+  async uploadBlob(options: {
+    contentType: string;
+    body: Uint8Array;
+    suffix?: string;
+  }): Promise<{ id: string; url: string }> {
+    this.#check();
+    return await this.#client.uploadBlob(options);
+  }
+
   async dispose(): Promise<void> {
     if (this.#disposed) return;
     this.#disposed = true;
