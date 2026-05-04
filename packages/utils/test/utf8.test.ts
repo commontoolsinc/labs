@@ -41,11 +41,13 @@ describe("compareUtf8", () => {
     });
 
     it("returns a negative number if `first < second` for multi-character strings with _same_ astral-plane characters", () => {
-      expect(compareUtf8("What 😊 is a biscuit?", "What 😊 is a muffin?")).toBeLessThan(0);
+      expect(compareUtf8("What 😊 is a biscuit?", "What 😊 is a muffin?"))
+        .toBeLessThan(0);
     });
 
     it("returns a positive number if `first > second` for multi-character strings with _same_ astral-plane characters", () => {
-      expect(compareUtf8("What 😊 is a muffin?", "What 😊 is a biscuit?")).toBeGreaterThan(0);
+      expect(compareUtf8("What 😊 is a muffin?", "What 😊 is a biscuit?"))
+        .toBeGreaterThan(0);
     });
 
     it("sorts astral plane characters after non-astral-plane characters", () => {
@@ -62,5 +64,33 @@ describe("compareUtf8", () => {
         expect(compareUtf8(firstAstral, str)).toBeGreaterThan(0);
       }
     });
+  });
+});
+
+describe("utf8SortedKeys", () => {
+  it("returns a sorted array of keys for an object", () => {
+    const obj = { b: 2, a: 1, c: 3 };
+    const sorted = utf8SortedKeys(obj);
+    expect(sorted).toEqual(["a", "b", "c"]);
+  });
+
+  it("returns a frozen value", () => {
+    const obj = { beep: "x", bop: "y", awOOOOga: "z" };
+    const sorted = utf8SortedKeys(obj);
+    expect(sorted).toBeFrozen();
+  });
+
+  it("returns the same (`===`) value on two different calls, given the same frozen object", () => {
+    const obj = Object.freeze({
+      "what": [],
+      "a": [1, 2, 3],
+      "feeling": [4],
+      "to": -99,
+      "be": null,
+      "alive": true,
+    });
+    const sorted1 = utf8SortedKeys(obj);
+    const sorted2 = utf8SortedKeys(obj);
+    expect(sorted1).toBe(sorted2);
   });
 });

@@ -3,6 +3,12 @@
  */
 
 /**
+ * `WeakMap` cache from frozen objects to already-calculated sorted keys. Used
+ * by `utf8SortedKeysOf()`.
+ */
+const sortedKeyCache = new WeakMap<object, string[]>();
+
+/**
  * Helper for `compareUtf8()`: Is the given character code a surrogate?
  */
 function isSurrogateCharCode(c: number) {
@@ -69,4 +75,29 @@ export function compareUtf8(a: string, b: string): number {
   }
 
   return a.length - b.length;
+}
+
+/**
+ * Produces a frozen array containing the ordered keys of the given object,
+ * in UTF-8 sort order. If the given object is frozen, it gets cached for
+ * possible reuse.
+ */
+export function utf8SortedKeysOf(value: object): string[] {
+  if (value === null) {
+    throw new TypeError("Value must not be `null`.");
+  }
+
+  const cached = sortedKeyCache.get(value);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  const unsorted = Object.keys(value);
+  const sorted = unsorted.sort(compareUtf8);
+
+  if (Object.isFrozen(value)) {
+    sortedKeyCache.set(value, sorted);
+  }
+
+  return sorted;
 }
