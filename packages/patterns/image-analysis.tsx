@@ -62,8 +62,9 @@ export default pattern<ImageChatInput, ImageChatOutput>(
       }
 
       for (const img of images.get() || []) {
-        if (img.url) {
-          parts.push({ type: "image", image: img.url });
+        const image = img.data || img.url;
+        if (image) {
+          parts.push({ type: "image", image });
         }
       }
 
@@ -77,7 +78,6 @@ export default pattern<ImageChatInput, ImageChatOutput>(
         "You are a helpful assistant that can analyze images. Describe what you see."
       ),
       prompt: contentParts,
-      model: computed(() => model || "anthropic:claude-sonnet-4-5"),
     });
 
     const ui = (
@@ -96,6 +96,7 @@ export default pattern<ImageChatInput, ImageChatOutput>(
                   <cf-image-input
                     multiple
                     maxImages={5}
+                    includeData
                     showPreview
                     previewSize="md"
                     removable

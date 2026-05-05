@@ -332,13 +332,14 @@ export const SmartTextInput = pattern<
     const images = imageArray.get();
     const image = images.length > 0 ? images[0] : null;
 
-    if (!image || !image.url) {
+    const imagePayload = image?.data || image?.url;
+    if (!imagePayload) {
       // Return undefined when no image - generateText will early-exit gracefully
       return undefined;
     }
 
     return [
-      { type: "image" as const, image: image.url },
+      { type: "image" as const, image: imagePayload },
       {
         type: "text" as const,
         text: "Extract all text from this image exactly as written.",
