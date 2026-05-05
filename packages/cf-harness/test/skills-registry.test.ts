@@ -337,6 +337,12 @@ Deno.test({
           "Read docs/common/ai/pattern-development-guide.md first.",
         ].join("\n"),
       );
+      await writeSkillResource(
+        root,
+        "pattern-dev",
+        "references/schema.md",
+        "# Schema reference\n",
+      );
       const registry = await discoverHarnessSkills({
         skillsRoot: root,
         sandboxSkillsRoot: "/workspace/labs/skills",
@@ -377,6 +383,24 @@ Deno.test({
       assertEquals(
         context.contextText.includes(
           "Skill directory: /workspace/labs/skills/pattern-dev",
+        ),
+        true,
+      );
+      assertEquals(
+        context.contextText.includes(
+          "Indexed skill resources available through read_skill_resource:",
+        ),
+        true,
+      );
+      assertEquals(
+        context.contextText.includes(
+          "- references/schema.md (reference, text, 19 bytes,",
+        ),
+        true,
+      );
+      assertEquals(
+        context.contextText.includes(
+          'Use read_skill_resource with skill="pattern-dev" and path set to one of the listed resource paths',
         ),
         true,
       );

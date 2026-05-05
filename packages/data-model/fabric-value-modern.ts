@@ -148,15 +148,9 @@ export function shallowFabricFromNativeValueModern(
           // Only null reaches here (typeof null === "object").
           return null;
         case "undefined":
-          return undefined;
         case "boolean":
         case "string":
-          return value;
         case "number":
-          if (Number.isFinite(value)) {
-            return Object.is(value, -0) ? 0 : value;
-          }
-          throw new Error("Cannot store non-finite number");
         case "bigint":
           return value;
         case "function":
@@ -472,12 +466,10 @@ export function isFabricValueModern(
   switch (typeof value) {
     case "boolean":
     case "string":
+    case "number":
+    case "bigint":
     case "undefined": {
       return true;
-    }
-
-    case "number": {
-      return Number.isFinite(value);
     }
 
     case "object": {
@@ -497,10 +489,6 @@ export function isFabricValueModern(
       // FabricInstance, handled above).
       const proto = Object.getPrototypeOf(value);
       return proto === null || proto === Object.prototype;
-    }
-
-    case "bigint": {
-      return true;
     }
 
     case "function":
@@ -712,19 +700,16 @@ function isFabricCompatibleInternal(
   value: unknown,
   seen: Set<object>,
 ): boolean {
-  // Primitives: null, boolean, string, number (finite), bigint, undefined.
+  // Primitives: null, boolean, string, number, bigint, undefined.
   if (value === null || value === undefined) return true;
 
   switch (typeof value) {
     case "boolean":
     case "string":
+    case "number":
     case "bigint":
     case "undefined": {
       return true;
-    }
-
-    case "number": {
-      return Number.isFinite(value);
     }
 
     case "symbol":
