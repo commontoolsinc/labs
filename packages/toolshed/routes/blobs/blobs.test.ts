@@ -202,6 +202,50 @@ describe("Blob Routes", () => {
     });
   });
 
+  it("rejects oversized blob uploads before decoding", async () => {
+    const identity = await Identity.fromPassphrase(
+      "toolshed-blob-route-too-large",
+    );
+
+    const post = await app.request(`/${identity.did()}/blobs/image.png`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": String(10 * 1024 * 1024 + 1),
+      },
+      body: "not decoded",
+    });
+
+    expect(post.status).toBe(413);
+  });
+
+  it("serves unsafe blob MIME types as octet-stream", async () => {
+    const identity = await Identity.fromPassphrase(
+      "toolshed-blob-route-unsafe-mime",
+    );
+    const bytes = new TextEncoder().encode("<script>alert(1)</script>");
+    const contents = {
+      type: "text/html",
+      body: new FabricBytes(bytes),
+    };
+    const id = hashOf(contents).toString();
+    const hash = id.slice("fid1:".length);
+
+    await withUnifiedJsonEncoding(async () => {
+      const post = await app.request(`/${identity.did()}/blobs/page.html`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: encodeBlobPayload(contents),
+      });
+      expect(post.status).toBe(201);
+
+      const get = await app.request(`/${identity.did()}/blobs/${hash}.html`);
+      expect(get.status).toBe(200);
+      expect(get.headers.get("Content-Type")).toBe("application/octet-stream");
+      expect(new Uint8Array(await get.arrayBuffer())).toEqual(bytes);
+    });
+  });
+
   it("rejects invalid blob payloads", async () => {
     const identity = await Identity.fromPassphrase("toolshed-blob-route-400");
     const post = await app.request(`/${identity.did()}/blobs/image.gif`, {

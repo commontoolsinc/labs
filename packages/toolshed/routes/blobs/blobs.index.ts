@@ -25,7 +25,21 @@ const DEFAULT_SUFFIX_BY_TYPE: Record<string, string> = {
   "image/svg+xml": "svg",
 };
 
+const MAX_BLOB_UPLOAD_BYTES = 10 * 1024 * 1024;
+const SAFE_RESPONSE_TYPES = new Set([
+  "image/gif",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+]);
 const VALID_SUFFIX = /^[A-Za-z0-9]{1,8}$/;
+
+class BlobPayloadTooLarge extends Error {
+  constructor() {
+    super("Blob payload too large");
+    this.name = "BlobPayloadTooLarge";
+  }
+}
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -62,8 +76,46 @@ const suffixFor = (blobName: string | undefined, type: string): string => {
   return DEFAULT_SUFFIX_BY_TYPE[type] ?? "bin";
 };
 
+const safeResponseType = (type: string): string =>
+  SAFE_RESPONSE_TYPES.has(type) ? type : "application/octet-stream";
+
+const readLimitedText = async (request: Request): Promise<string> => {
+  const contentLength = Number(request.headers.get("Content-Length"));
+  if (Number.isFinite(contentLength) && contentLength > MAX_BLOB_UPLOAD_BYTES) {
+    throw new BlobPayloadTooLarge();
+  }
+
+  const reader = request.body?.getReader();
+  if (!reader) {
+    return "";
+  }
+
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    total += value.byteLength;
+    if (total > MAX_BLOB_UPLOAD_BYTES) {
+      await reader.cancel();
+      throw new BlobPayloadTooLarge();
+    }
+    chunks.push(value);
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
+};
+
 const readRequestContents = async (request: Request) => {
-  const source = await request.text();
+  const source = await readLimitedText(request);
   if (!source) {
     return undefined;
   }
@@ -90,7 +142,10 @@ const upload = async (c: Context) => {
   let contents: BlobContents | undefined;
   try {
     contents = await readRequestContents(c.req.raw);
-  } catch {
+  } catch (error) {
+    if (error instanceof BlobPayloadTooLarge) {
+      return c.text("Blob payload too large", 413);
+    }
     return c.text("Invalid blob payload", 400);
   }
   if (!contents) {
@@ -134,7 +189,7 @@ router.get("/:spaceDid/blobs/:blobName", async (c) => {
   return new Response(body, {
     status: 200,
     headers: {
-      "Content-Type": contents.type,
+      "Content-Type": safeResponseType(contents.type),
       "Cache-Control": "public, max-age=31536000, immutable",
     },
   });
