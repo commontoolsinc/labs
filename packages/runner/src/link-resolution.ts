@@ -5,6 +5,7 @@ import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { LINK_V1_TAG, type LinkV1Inner } from "./sigil-types.ts";
 import {
   type CellLink,
+  createDataCellURI,
   type NormalizedFullLink,
   parseLink,
   toMemorySpaceAddress,
@@ -16,6 +17,7 @@ import type {
 import { ContextualFlowControl } from "./cfc.ts";
 import type { Runtime } from "./runtime.ts";
 import type { CfcAddress } from "./cfc/types.ts";
+import { canFollowScopedLink, isSchemaScope } from "./scope.ts";
 
 const logger = getLogger("link-resolution");
 
@@ -60,6 +62,22 @@ const recordDereferenceHop = (
     kind: hop.kind,
   });
 };
+
+const schemaScopeForLink = (link: NormalizedFullLink) =>
+  isRecord(link.schema) && isSchemaScope(link.schema.scope)
+    ? link.schema.scope
+    : undefined;
+
+const undefinedDataLink = (link: NormalizedFullLink): NormalizedFullLink => ({
+  ...link,
+  id: createDataCellURI(undefined, link),
+  path: [],
+});
+
+const canFollowLinkHop = (
+  source: NormalizedFullLink,
+  target: NormalizedFullLink,
+): boolean => canFollowScopedLink(schemaScopeForLink(source), target.scope);
 
 /**
  * Resolves a document path with support for links inside documents.
@@ -112,7 +130,7 @@ export function resolveLink(
     }
 
     // Detect cycles.
-    const key = JSON.stringify([link.space, link.id, link.path]);
+    const key = JSON.stringify([link.space, link.id, link.scope, link.path]);
     if (seen.has(key)) {
       logger.error(
         "link-res-error",
@@ -227,6 +245,16 @@ export function resolveLink(
     }
 
     if (nextHop !== undefined) {
+      if (!canFollowLinkHop(link, nextHop.link)) {
+        logger.info("scope: blocked narrower link follow", () => [{
+          schemaScope: schemaScopeForLink(link),
+          linkScope: nextHop.link.scope,
+          source: cfcAddressFromLink(link),
+          target: cfcAddressFromLink(nextHop.link),
+        }]);
+        link = undefinedDataLink(link);
+        break;
+      }
       recordDereferenceHop(tx, nextHop);
       const nextLink = nextHop.link;
       const crossSpace = nextLink.space !== link.space;

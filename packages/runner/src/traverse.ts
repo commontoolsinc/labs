@@ -45,6 +45,7 @@ import {
   NormalizedFullLink,
   parseLink,
 } from "./link-utils.ts";
+import { canFollowScopedLink, isSchemaScope } from "./scope.ts";
 import type {
   Activity,
   CommitError,
@@ -1190,6 +1191,11 @@ function notFound(
   };
 }
 
+const schemaScopeForSelector = (selector?: SchemaPathSelector) =>
+  isRecord(selector?.schema) && isSchemaScope(selector.schema.scope)
+    ? selector.schema.scope
+    : undefined;
+
 /**
  * Get a string to use as a key for the specified address
  *
@@ -1259,10 +1265,24 @@ function followPointer(
   const target: IMemorySpaceValueAddress = {
     space: link.space,
     id: link.id,
+    scope: link.scope,
     type: "application/json",
     // The link.path doesn't include the initial "value", so prepend it
     path: ["value", ...link.path as string[]],
   };
+  const schemaScope = schemaScopeForSelector(selector);
+  if (!canFollowScopedLink(schemaScope, link.scope)) {
+    logger.info("traverse", () => [
+      "blocked narrower-scope link follow",
+      {
+        schemaScope,
+        linkScope: link.scope,
+        source: doc.address,
+        target,
+      },
+    ]);
+    return [notFound(target), selector];
+  }
   if (selector !== undefined) {
     // We'll need to re-root the selector for the target doc
     // Remove the portions of doc.path from selector.path, limiting schema if
