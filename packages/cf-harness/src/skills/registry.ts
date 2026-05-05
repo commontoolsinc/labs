@@ -101,6 +101,27 @@ const escapeContextAttribute = (value: string): string =>
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
 
+const formatSkillResourceIndex = (
+  skill: HarnessSkillRecord,
+): string[] => {
+  if (skill.resources.length === 0) {
+    return ["Indexed skill resources: none."];
+  }
+  const lines = [
+    "Indexed skill resources available through read_skill_resource:",
+  ];
+  for (const resource of skill.resources) {
+    lines.push(
+      `- ${resource.path} (${resource.kind}, ${resource.contentKind}, ${resource.sizeBytes} bytes, ${resource.digest})`,
+    );
+  }
+  lines.push(
+    `Use read_skill_resource with skill="${skill.name}" and path set to one of the listed resource paths when a supporting skill resource is relevant.`,
+    "Repo docs or packages referenced by this skill are not skill resources; use read_file or another allowed workspace tool for repo paths.",
+  );
+  return lines;
+};
+
 const parseScalarFrontmatterValue = (
   rawValue: string,
 ): HarnessSkillFrontmatterValue => {
@@ -725,6 +746,7 @@ export const loadHarnessSkillContext = async (
       "",
       `Skill directory: ${skill.sandboxSkillDir}`,
       "Relative paths in this skill resolve against that directory unless stated otherwise.",
+      ...formatSkillResourceIndex(skill),
       "</skill_context>",
     );
     activations.push({
