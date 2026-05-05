@@ -109,22 +109,34 @@ Bytes: TAG_NUMBER  IEEE_754_FLOAT64_BE
 Total: 9 bytes.
 
 The payload is the IEEE 754 binary64 representation of the number, in
-big-endian byte order.
+big-endian byte order. All JavaScript numbers are accepted, including the
+four special values that JSON cannot represent natively (`-0`, `NaN`,
+`+Infinity`, `-Infinity`).
 
-**Normalization rules:**
+**Encoding rules:**
 
-- **Negative zero (`-0`)** must be normalized to positive zero (`+0`) before
-  encoding. That is, the 8-byte payload for `-0` is
-  `00 00 00 00 00 00 00 00`, not `80 00 00 00 00 00 00 00`. This ensures `-0`
-  and `+0` produce identical hashes, matching JavaScript semantics where
-  `-0 === 0` is `true`.
+- **Negative zero (`-0`)** is encoded with its natural sign bit. The 8-byte
+  payload for `-0` is `80 00 00 00 00 00 00 00`, distinct from the payload
+  for `+0` (`00 00 00 00 00 00 00 00`). The two values therefore produce
+  different hashes.
 
-- **`NaN`** must not appear. `fabricFromNativeValue()` rejects `NaN` values; a
-  conforming hasher may assume `NaN` is never encountered. If a hasher does
-  encounter `NaN`, it should throw rather than produce a hash.
+- **`+Infinity`** is encoded as `7F F0 00 00 00 00 00 00`.
 
-- **`Infinity` / `-Infinity`** must not appear. Like `NaN`, these are rejected
-  by `fabricFromNativeValue()`. A conforming hasher should throw if encountered.
+- **`-Infinity`** is encoded as `FF F0 00 00 00 00 00 00`.
+
+- **`NaN`** is canonicalized to a single representation: the **quiet NaN**
+  payload `7F F8 00 00 00 00 00 00`. Any input NaN bit pattern (signaling,
+  quiet, with arbitrary payload bits) hashes via this canonical 8-byte
+  sequence. This ensures all NaN values produce identical hashes,
+  consistent with JavaScript semantics where every NaN compares unequal
+  to itself but is observationally indistinguishable from every other NaN
+  at the language level.
+
+> **Conversion-gate cross-reference.** Whether `-0`, `NaN`, or `±Infinity`
+> reach this layer in a given run depends on the `modernDataModel` flag at
+> the fabric-value conversion gate; see `1-fabric-values.md` Section 4.9.
+> The byte-level encoding above is the hasher's contract regardless of how
+> the values arrived.
 
 ### 4.4 `string`
 
@@ -481,7 +493,8 @@ IEEE 754 binary64 for `42.0` is `0x4045000000000000`.
 23  00 00 00 00 00 00 00 00
 ```
 
-Note: `-0` produces the same byte stream (normalized to `+0`).
+`-0` produces a distinct byte stream `23  80 00 00 00 00 00 00 00` (sign
+bit set; see Section 4.3).
 
 ### 7.6 `"hello"` (string)
 
@@ -668,17 +681,15 @@ sequence.
 
 ## 8. Rejected Values
 
-The following JavaScript values are rejected by `fabricFromNativeValue()` and must
-never be passed to the hasher:
+The following JavaScript values are rejected by `fabricFromNativeValue()` and
+must never be passed to the hasher:
 
-- `NaN`
-- `Infinity`
-- `-Infinity`
 - `Symbol` values
 - `Function` values
 
-A conforming implementation should throw an error if it encounters any of these
-rather than producing a hash.
+A conforming implementation should throw an error if it encounters either
+of these rather than producing a hash. (`NaN`, `±Infinity`, and `-0` are
+**not** rejected; they have well-defined byte encodings — see Section 4.3.)
 
 ---
 
