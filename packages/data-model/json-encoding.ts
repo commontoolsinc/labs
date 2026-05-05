@@ -22,7 +22,7 @@ import {
  * symbols dispatch to the `JsonEncodingContext` codec instead of plain
  * JSON.stringify / JSON.parse.
  */
-let jsonEncodingEnabled = false;
+let jsonEncodingEnabled = true;
 
 /**
  * Activates or deactivates unified JSON encoding mode. Called by the
@@ -41,12 +41,12 @@ export function getJsonEncodingConfig(): boolean {
 }
 
 /**
- * Restores unified JSON encoding mode to its default (disabled). Called by
+ * Restores unified JSON encoding mode to its default (enabled). Called by
  * `Runtime.dispose()` to avoid leaking flags between runtime instances or
  * test runs.
  */
 export function resetJsonEncodingConfig(): void {
-  jsonEncodingEnabled = false;
+  jsonEncodingEnabled = true;
 }
 
 // ---------------------------------------------------------------------------
