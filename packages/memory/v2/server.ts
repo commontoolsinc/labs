@@ -1052,9 +1052,6 @@ export class Server {
   }
 
   markSpaceDirty(space: string, dirtyIds?: Iterable<string>): void {
-    if (this.#connections.size === 0) {
-      return;
-    }
     if (dirtyIds !== undefined) {
       let ids = this.#dirtyDocsBySpace.get(space);
       if (ids === undefined) {

@@ -1,3 +1,7 @@
+// Blob routes are intentionally unauthenticated for the MVP. Anyone can POST a
+// blob into any space DID; content addressing prevents overwriting a different
+// payload, but callers can inject blobs and consume storage. Anyone with a hash
+// can GET the blob. Revisit this before any production exposure.
 import { createRouter } from "@/lib/create-app.ts";
 import { memoryServer } from "@/routes/storage/memory.ts";
 import { isDID } from "@commonfabric/identity";

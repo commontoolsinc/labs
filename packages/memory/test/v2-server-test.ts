@@ -158,6 +158,49 @@ Deno.test("memory v2 server allows the same session id in different spaces", asy
   }
 });
 
+Deno.test("memory v2 server direct writes schedule dirty refreshes without connections", async () => {
+  const time = new FakeTime();
+  const server = createServer(
+    "memory://memory-v2-server-direct-write-no-connections",
+    1,
+  );
+  const space = "did:key:z6Mk-memory-v2-server-direct-write-no-connections";
+  const id = "cid:fid1:direct-write-no-connections";
+  const originalFlush = server.flushSessions.bind(server);
+  let flushCalls = 0;
+
+  (server as unknown as {
+    flushSessions(
+      ...args: Parameters<Server["flushSessions"]>
+    ): ReturnType<Server["flushSessions"]>;
+  }).flushSessions = async (...args) => {
+    flushCalls += 1;
+    return await originalFlush(...args);
+  };
+
+  try {
+    await server.writeDocument(space, id, {
+      type: "text/plain",
+      body: "hello",
+    });
+    assertEquals(flushCalls, 0);
+
+    await time.tickAsync(1);
+    await time.tickAsync(0);
+
+    assertEquals(flushCalls, 1);
+    assertEquals(await server.readDocument(space, id), {
+      value: {
+        type: "text/plain",
+        body: "hello",
+      },
+    });
+  } finally {
+    await server.close();
+    time.restore();
+  }
+});
+
 Deno.test("memory v2 server binds resumed sessions to the original principal", async () => {
   const server = new Server({
     store: new URL("memory://memory-v2-server-session-principal"),
