@@ -1,6 +1,7 @@
 import {
   computed,
   generateText,
+  handler,
   ifElse,
   ImageData,
   NAME,
@@ -27,8 +28,26 @@ type ImageChatOutput = {
   ui: VNode;
 };
 
+type ImageUploadEvent = {
+  detail?: {
+    images?: ImageData[];
+    allImages?: ImageData[];
+    files?: ImageData[];
+    allFiles?: ImageData[];
+  };
+};
+
+const syncUploadedImages = handler<
+  ImageUploadEvent,
+  { images: Writable<ImageData[]> }
+>(({ detail }, { images }) => {
+  const uploaded = detail?.allImages ?? detail?.allFiles ?? detail?.images ??
+    detail?.files ?? [];
+  images.set(uploaded);
+});
+
 export default pattern<ImageChatInput, ImageChatOutput>(
-  ({ systemPrompt, model }) => {
+  ({ systemPrompt }) => {
     const images = Writable.of<ImageData[]>([]);
     const prompt = Writable.of<string>("");
 
@@ -43,7 +62,10 @@ export default pattern<ImageChatInput, ImageChatOutput>(
       }
 
       for (const img of images.get() || []) {
-        parts.push({ type: "image", image: img.data });
+        const image = img.data || img.url;
+        if (image) {
+          parts.push({ type: "image", image });
+        }
       }
 
       return parts;
@@ -56,7 +78,6 @@ export default pattern<ImageChatInput, ImageChatOutput>(
         "You are a helpful assistant that can analyze images. Describe what you see."
       ),
       prompt: contentParts,
-      model: computed(() => model || "anthropic:claude-sonnet-4-5"),
     });
 
     const ui = (
@@ -75,10 +96,12 @@ export default pattern<ImageChatInput, ImageChatOutput>(
                   <cf-image-input
                     multiple
                     maxImages={5}
+                    includeData
                     showPreview
                     previewSize="md"
                     removable
-                    $images={images}
+                    oncf-change={syncUploadedImages({ images })}
+                    oncf-remove={syncUploadedImages({ images })}
                   />
                 </cf-vstack>
               </cf-card>

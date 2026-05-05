@@ -27,8 +27,11 @@
 import { css, html } from "lit";
 import { styleMap } from "lit/directives/style-map.js";
 import { BaseElement } from "../../core/base-element.ts";
+import { oneOf } from "../../core/property-guards.ts";
 
 export type SkeletonVariant = "default" | "text" | "circular";
+
+const skeletonVariants = ["default", "text", "circular"] as const;
 
 /**
  * CFSkeleton displays an animated loading placeholder.
@@ -142,6 +145,15 @@ export class CFSkeleton extends BaseElement {
     this.animated = true;
     this.width = null;
     this.height = null;
+  }
+
+  protected override willUpdate(
+    changedProperties: Map<string | number | symbol, unknown>,
+  ): void {
+    super.willUpdate(changedProperties);
+    if (changedProperties.has("variant")) {
+      this.variant = oneOf(this.variant, skeletonVariants, "default");
+    }
   }
 
   override render() {

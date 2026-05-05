@@ -291,6 +291,52 @@ Deno.test("bash tool preserves currentDir inside a configured Fabric mount", asy
   assertEquals(context.currentDir, "/fabric/home");
 });
 
+Deno.test("bash tool allows curl to localhost through the sandbox shell runtime", async () => {
+  const sandbox = new FakeSandboxRuntime([{
+    stdout: "pong\n",
+    stderr: "",
+    exitCode: 0,
+  }]);
+  const context = createContext(sandbox);
+  const output = await bashTool.invoke(context, {
+    command: "curl -fsS http://localhost:8000/health",
+  });
+
+  assertEquals(output.stdout, "pong\n");
+  assertEquals(stripCfcInvocationContexts(sandbox.calls), [{
+    type: "runShell",
+    request: {
+      command: [
+        '__cf_harness_cwd_marker="__CF_HARNESS_CWD__run-1:bash:1__"',
+        'trap \'__cf_harness_status=$?; trap - EXIT; printf "%s%s" "$__cf_harness_cwd_marker" "$(pwd)"; exit "$__cf_harness_status"\' EXIT',
+        "curl -fsS http://localhost:8000/health",
+      ].join("\n"),
+      cwd: "/workspace",
+      timeoutMs: undefined,
+    },
+  }]);
+});
+
+Deno.test("bash tool denies curl to non-localhost targets before sandbox execution", async () => {
+  const sandbox = new FakeSandboxRuntime();
+  const context = createContext(sandbox, "/workspace/old");
+  const output = await bashTool.invoke(context, {
+    command: "curl https://example.com",
+    cwd: "/workspace/new",
+  });
+
+  assertEquals(output, {
+    outputId: "run-1:bash:1",
+    stdout: "",
+    stderr:
+      "bash command denied: curl host example.com is not allowed from cf-harness bash; use localhost or host.docker.internal",
+    exitCode: 126,
+    cwd: "/workspace/new",
+  });
+  assertEquals(sandbox.calls, []);
+  assertEquals(context.currentDir, "/workspace/new");
+});
+
 Deno.test("bash tool updates currentDir in enforce mode from observed CFC stdout", async () => {
   const outputId = createToolOutputId("run-1", "bash", 1);
   const cwdMarker = `__CF_HARNESS_CWD__${outputId}__`;

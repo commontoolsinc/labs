@@ -54,4 +54,19 @@ describe("CFCodeEditor", () => {
     expect(element.autofocus).toBe(true);
     expect(element.cursorPosition).toBe("end");
   });
+
+  it("should focus the editor when autofocus becomes true", () => {
+    const element = new CFCodeEditor();
+    let focused = false;
+    (element as any)._editorView = {
+      focus: () => {
+        focused = true;
+      },
+    };
+
+    element.autofocus = true;
+    (element as any).updated(new Map([["autofocus", false]]));
+
+    expect(focused).toBe(true);
+  });
 });

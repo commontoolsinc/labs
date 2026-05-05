@@ -63,6 +63,7 @@ Deno.test("parseCfHarnessCliArgs resolves defaults from cwd and positional promp
   assertEquals(parsed.artifactRoot, "/tmp/project/.cf-harness-artifacts");
   assertEquals(parsed.maxModelTurns, 8);
   assertEquals(parsed.printTranscript, false);
+  assertEquals(parsed.sandboxImage, undefined);
 });
 
 Deno.test("parseCfHarnessCliArgs supports prompt files and mode overrides", async () => {
@@ -1969,6 +1970,51 @@ Deno.test("parseCfHarnessCliArgs resolves fabric-mount to an absolute path", asy
   assertEquals(parsed.fabricMount, "/tmp/cf-fuse");
 });
 
+Deno.test("parseCfHarnessCliArgs supports sandbox image flag", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--prompt", "hi", "--sandbox-image", "registry.example/cf:deno2"],
+    { cwd: "/tmp/project", env: {} },
+  );
+  if ("help" in parsed) throw new Error("expected config result");
+  assertEquals(parsed.sandboxImage, "registry.example/cf:deno2");
+});
+
+Deno.test("parseCfHarnessCliArgs supports sandbox image environment default", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--prompt", "hi"],
+    {
+      cwd: "/tmp/project",
+      env: { CF_HARNESS_SANDBOX_IMAGE: "registry.example/cf:local" },
+    },
+  );
+  if ("help" in parsed) throw new Error("expected config result");
+  assertEquals(parsed.sandboxImage, "registry.example/cf:local");
+});
+
+Deno.test("parseCfHarnessCliArgs prefers sandbox image flag over environment", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--prompt", "hi", "--sandbox-image", "registry.example/cf:flag"],
+    {
+      cwd: "/tmp/project",
+      env: { CF_HARNESS_SANDBOX_IMAGE: "registry.example/cf:env" },
+    },
+  );
+  if ("help" in parsed) throw new Error("expected config result");
+  assertEquals(parsed.sandboxImage, "registry.example/cf:flag");
+});
+
+Deno.test("parseCfHarnessCliArgs rejects empty sandbox image value", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--prompt", "hi", "--sandbox-image", ""],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--sandbox-image requires a non-empty image reference",
+  );
+});
+
 Deno.test("parseCfHarnessCliArgs omits fabricMount when flag is absent", async () => {
   const parsed = await parseCfHarnessCliArgs(
     ["--prompt", "hi"],
@@ -2086,5 +2132,63 @@ Deno.test("runCfHarnessCli threads fabric-mount into engine additionalMounts", a
       "A Common Fabric space is mounted at /fabric",
     ),
     true,
+  );
+});
+
+Deno.test("runCfHarnessCli threads sandbox-image into engine sandbox config", async () => {
+  const { io, stderr } = createIoBuffers();
+  let createdOptions: Record<string, unknown> | undefined;
+  const exitCode = await runCfHarnessCli(
+    [
+      "--workspace",
+      "/tmp/project",
+      "--prompt",
+      "Inspect the workspace",
+      "--sandbox-image",
+      "registry.example/cf:deno2",
+      "--gateway-auth-mode",
+      "none",
+    ],
+    {
+      io,
+      env: {},
+      createPromptLoop: (options) => {
+        createdOptions = options as Record<string, unknown>;
+        return {
+          runPrompt: () =>
+            Promise.resolve(
+              ({
+                model: "gpt-5.4",
+                finalAssistantText: "Done.",
+                transcript: [
+                  { role: "user", content: "Inspect the workspace" },
+                  { role: "assistant", content: "Done." },
+                ],
+                modelTurns: 1,
+                runState: {
+                  runId: "run-sandbox-image",
+                  status: "completed",
+                  createdAt: "2026-05-01T00:00:00.000Z",
+                  updatedAt: "2026-05-01T00:00:01.000Z",
+                  cfcEnforcementMode: "disabled",
+                  currentDir: "/workspace",
+                  policyEvents: [],
+                  toolOutputs: [],
+                },
+              }) satisfies HarnessPromptLoopResult,
+            ),
+          runTranscript: () =>
+            Promise.reject(new Error("unexpected resume path")),
+        };
+      },
+    },
+  );
+
+  assertEquals(exitCode, 0);
+  assertEquals(stderr, []);
+  const engine = createdOptions?.engine as CfHarnessEngine | undefined;
+  assertEquals(
+    engine?.sandbox.describe?.()?.cfc?.image,
+    "registry.example/cf:deno2",
   );
 });

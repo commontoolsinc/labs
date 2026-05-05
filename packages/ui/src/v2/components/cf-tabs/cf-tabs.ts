@@ -43,6 +43,8 @@ export class CFTabs extends BaseElement {
         display: flex;
         flex-direction: column;
         width: var(--cf-tabs-width, 100%);
+        max-width: 100%;
+        min-width: 0;
         min-height: 0;
         flex: var(--cf-tabs-flex, 1);
       }
@@ -51,6 +53,8 @@ export class CFTabs extends BaseElement {
         display: flex;
         flex-direction: column;
         width: 100%;
+        max-width: 100%;
+        min-width: 0;
         flex: 1;
         min-height: 0;
       }
@@ -65,7 +69,9 @@ export class CFTabs extends BaseElement {
 
       /* Ensure proper layout for slotted content */
       ::slotted(cf-tab-list) {
-        flex-shrink: 0;
+        flex: 0 1 auto;
+        min-width: 0;
+        max-width: 100%;
       }
 
       ::slotted(cf-tab-panel) {

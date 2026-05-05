@@ -95,9 +95,28 @@ type ItemsByPos = Record<
 interface ImageData {
   id: string;
   name: string;
-  url?: string; // data URL (preferred)
-  data?: string; // data URL (for compatibility)
+  url?: string;
+  data?: string;
 }
+
+type ImageUploadEvent = {
+  detail?: {
+    images?: ImageData[];
+    files?: ImageData[];
+  };
+};
+
+const appendUploadedPhotos = handler<
+  ImageUploadEvent,
+  { uploadedPhotos: Writable<ImageData[]> }
+>(({ detail }, { uploadedPhotos }) => {
+  const uploaded = detail?.images ?? detail?.files ?? [];
+  if (uploaded.length === 0) return;
+  uploadedPhotos.set([
+    ...(uploadedPhotos.get() ?? []),
+    ...uploaded,
+  ]);
+});
 
 interface ExtractedAisle {
   name: string;
@@ -310,9 +329,10 @@ export default pattern<Input, Output>(
           'You are analyzing photos from a grocery store. Your task is to extract ALL visible aisle signs and return them as JSON.\n\nIMPORTANT: You MUST return a JSON object with an "aisles" array, even if you only see one aisle or partial information.\n\nFor each aisle sign you see:\n- Extract ONLY the aisle number (e.g., "8", "12", "5A", "5B") - DO NOT include the word "Aisle"\n- Extract each product category as a separate item in the products array\n- Include partially visible signs - do your best to read them\n\nExample output:\n{\n  "aisles": [\n    {"name": "8", "products": ["Bread", "Cereal", "Coffee"]},\n    {"name": "9", "products": ["Snacks", "Chips"]}\n  ]\n}',
         prompt: derive(photo, (p) => {
           // Safety check: photo might be undefined after deletion
-          if (!p || !p.data) return [];
+          const image = p?.data || p?.url;
+          if (!image) return [];
           return [
-            { type: "image" as const, image: p.data },
+            { type: "image" as const, image },
             {
               type: "text" as const,
               text:
@@ -1509,10 +1529,13 @@ export default pattern<Input, Output>(
                         multiple
                         maxImages={20}
                         maxSizeBytes={4000000}
+                        includeData
                         showPreview={false}
                         buttonText="📷 Scan Aisle Signs"
                         variant="secondary"
-                        $images={uploadedPhotos}
+                        oncf-change={appendUploadedPhotos({
+                          uploadedPhotos,
+                        })}
                       />
 
                       {/* Photo extraction results */}

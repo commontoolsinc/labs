@@ -136,6 +136,7 @@ export interface CreateHarnessEngineOptions
   runId?: string;
   runState?: HarnessRunState;
   workspaceHostPath?: string;
+  sandboxImage?: string;
   additionalMounts?: readonly DockerRunscAdditionalMountConfig[];
   sandboxRuntime?: SandboxRuntime;
   artifactStore?: HarnessArtifactStore;
@@ -160,6 +161,7 @@ const isToolOutputWithId = (value: unknown): value is ToolOutputWithId =>
 const resolveSandboxConfig = (
   config: HarnessConfig,
   workspaceHostPath?: string,
+  sandboxImage?: string,
   additionalMounts?: readonly DockerRunscAdditionalMountConfig[],
 ): HarnessSandboxConfig => {
   if (config.sandbox !== undefined) {
@@ -172,6 +174,7 @@ const resolveSandboxConfig = (
   }
   return resolveDockerRunscSandboxConfig({
     workspaceHostPath,
+    ...(sandboxImage !== undefined ? { image: sandboxImage } : {}),
     ...(additionalMounts !== undefined && additionalMounts.length > 0
       ? { additionalMounts }
       : {}),
@@ -258,6 +261,7 @@ export class CfHarnessEngine {
       ? resolveSandboxConfig(
         this.config,
         options.workspaceHostPath,
+        options.sandboxImage,
         options.additionalMounts,
       )
       : this.config.sandbox;

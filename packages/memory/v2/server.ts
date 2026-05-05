@@ -6,6 +6,7 @@ import {
   type ClientMessage,
   decodeMemoryBoundary,
   encodeMemoryBoundary,
+  type EntityDocument,
   type GraphQuery,
   type GraphQueryRequest,
   type GraphQueryResult,
@@ -390,6 +391,9 @@ export class Server {
   #sessions: SessionRegistry;
   #connections = new Map<string, Connection>();
   #engines = new Map<string, Promise<Engine.Engine>>();
+  // Synthesized session state for direct out-of-band document writes, such as blob uploads.
+  #directSessionId = `server:${crypto.randomUUID()}`;
+  #directLocalSeq = 0;
   #dirtySpaces = new Set<string>();
   #dirtyDocsBySpace = new Map<string, Set<string>>();
   #refreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -440,6 +444,36 @@ export class Server {
     }
     this.#engines.clear();
     this.#connections.clear();
+  }
+
+  async readDocument(
+    space: string,
+    id: string,
+  ): Promise<EntityDocument | null> {
+    const engine = await this.openEngine(space);
+    return Engine.read(engine, { id });
+  }
+
+  async writeDocument(
+    space: string,
+    id: string,
+    value: EntityDocument["value"],
+  ): Promise<Engine.AppliedCommit> {
+    const engine = await this.openEngine(space);
+    const commit = Engine.applyCommit(engine, {
+      sessionId: this.#directSessionId,
+      commit: {
+        localSeq: ++this.#directLocalSeq,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id,
+          value: { value },
+        }],
+      },
+    });
+    this.markSpaceDirty(space, [id]);
+    return commit;
   }
 
   async openSession(

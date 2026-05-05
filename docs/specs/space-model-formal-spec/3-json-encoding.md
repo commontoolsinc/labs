@@ -350,3 +350,51 @@ The `/object` escape (Section 6) ensures that legitimate plain objects with
 encoder will never emit a plain-object form that violates this rule. A
 conforming decoder that encounters a violation should treat it as an encoding
 error.
+
+## 10. Plain Object Key Ordering
+
+A conforming encoder **must** emit the keys of every plain object in **UTF-8
+byte order**, using the same comparison defined for hashing in
+`2-hash-byte-format.md` Section 5:
+
+1. Compare byte-by-byte, treating each byte as an unsigned integer (0--255).
+2. At each position, the byte with the smaller unsigned value comes first.
+3. If one key is a prefix of another, the shorter key comes first.
+
+This requirement applies to every plain object that reaches the wire,
+including:
+
+- Bare plain objects (no `/`-prefixed keys).
+- Plain objects wrapped in `/object` (Section 6) — the keys of the wrapped
+  inner object must be sorted.
+- Plain objects wrapped in `/quote` (Section 6) — the keys of the quoted
+  literal must be sorted.
+
+> **Why sort.** Sorting makes the JSON wire form **canonical**: two plain
+> objects with the same keys and values produce the same JSON bytes regardless
+> of the order in which their keys were inserted. This in turn lets two
+> independently-built encoders agree on a single byte-for-byte encoding for the
+> same logical value, which simplifies content addressing, deduplication, and
+> diffing. The sort key is the same UTF-8 byte order used by hashing, so the
+> two systems share one specification of "canonical key order."
+>
+> The keys of a single-key tagged object (`/<Type>@<Version>`, `/object`,
+> `/quote`, `/hole`, etc.) are trivially "sorted" — there is only one key.
+> The requirement is meaningful only for plain objects with two or more keys,
+> and for the inner contents of `/object` and `/quote` wrappers.
+
+> **JS implementation note.** JavaScript's native string comparison (`<`, `>`,
+> `Array.prototype.sort` with no comparator) sorts by UTF-16 code units, which
+> differs from UTF-8 byte order when supplementary characters (U+10000 and
+> above) are present. An implementation must use a UTF-8-aware comparator
+> (or equivalently, sort by Unicode code point) when supplementary characters
+> may appear in keys. See `2-hash-byte-format.md` Section 5 for the detailed
+> rationale and example.
+
+> **Decoder behavior.** A decoder is **not** required to validate that incoming
+> keys are sorted. The host language's own object representation may impose its
+> own iteration order on the decoded value (for example, in JavaScript,
+> integer-index-like keys iterate in numeric order ahead of other string keys,
+> regardless of the order in which they appeared on the wire). A conforming
+> encoder re-establishes UTF-8 canonical key order on output regardless of the
+> order in which keys were received or the host language's iteration rules.

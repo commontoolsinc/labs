@@ -2,6 +2,11 @@ import type { JSONSchema } from "@commonfabric/api";
 import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import {
+  BASH_COMMAND_DENIED_EXIT_CODE,
+  BASH_COMMAND_DENIED_PREFIX,
+  validateBashCurlCommand,
+} from "./bash-curl-policy.ts";
+import {
   commandWithFinalWorkingDirectoryMarker,
   cwdMarkerForOutput,
   extractFinalWorkingDirectory,
@@ -71,6 +76,19 @@ export const bashTool: HarnessToolDefinition<BashToolInput, BashToolOutput> = {
     const commandCwd = input.cwd !== undefined
       ? context.resolvePath(input.cwd)
       : context.currentDir;
+    const curlPolicy = validateBashCurlCommand(input.command);
+    if (!curlPolicy.allowed) {
+      context.setCurrentDir(commandCwd);
+      return {
+        outputId,
+        stdout: "",
+        stderr: `${BASH_COMMAND_DENIED_PREFIX}: ${
+          curlPolicy.reason ?? "curl is not allowed"
+        }`,
+        exitCode: BASH_COMMAND_DENIED_EXIT_CODE,
+        cwd: commandCwd,
+      };
+    }
     const cwdMarker = cwdMarkerForOutput(CWD_MARKER_PREFIX, outputId);
     const command = commandWithFinalWorkingDirectoryMarker(
       input.command,

@@ -48,7 +48,6 @@ DIRS=(
   "packages/memory"
   "packages/runner"
   "packages/runtime-client"
-  "packages/seeder"
   "packages/shell"
   "packages/static/scripts"
   "packages/static/test"

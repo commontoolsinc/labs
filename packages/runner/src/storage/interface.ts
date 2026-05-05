@@ -627,9 +627,11 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * `hashStringOf()`-based equality. The CFC implementation is therefore
    * permitted to `deepFreeze()` the record on entry, both as a tripwire
    * for accidental mutation and to make it eligible for the
-   * `hashStringOf()` WeakMap cache. Today, only
-   * `recordCfcWritePolicyInput()` does this, but the contract applies
-   * uniformly to every method in this group.
+   * `hashStringOf()` WeakMap cache. The
+   * `record*` methods that take a structurally-shaped record
+   * (`recordCfcDereferenceTrace()` and `recordCfcWritePolicyInput()`)
+   * actively do this on entry; the contract applies uniformly to every
+   * method in the group.
    *
    * Callers do not need to freeze the record themselves — the CFC
    * implementation will, where it's useful. Freezing on the caller side
@@ -642,7 +644,9 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
 
   /**
    * Records a CFC dereference trace produced by following a write
-   * redirect or value reference. See ownership note above.
+   * redirect or value reference. See ownership note above; the
+   * argument is `deepFreeze()`d on entry so every CfcAddress that
+   * flows into the digest input is immutable.
    */
   recordCfcDereferenceTrace(trace: CfcDereferenceTrace): void;
 
@@ -664,9 +668,9 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
 
   /**
    * Records a write-policy input that will participate in the CFC
-   * commit-boundary digest. See ownership note above; this is currently
-   * the method that actively `deepFreeze()`s its argument on entry, in
-   * order to enable the within-sort tiebreaker cache in
+   * commit-boundary digest. See ownership note above; the argument is
+   * `deepFreeze()`d on entry, both to honor the ownership-transfer
+   * contract and to enable the within-sort tiebreaker cache in
    * `compareWritePolicyInput`.
    */
   recordCfcWritePolicyInput(input: WritePolicyInput): void;
