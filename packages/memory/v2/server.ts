@@ -499,7 +499,7 @@ export class Server {
   async writeDocument(
     space: string,
     id: string,
-    document: EntityDocument,
+    value: EntityDocument["value"],
     options: { unifiedJsonEncoding?: boolean } = {},
   ): Promise<Engine.AppliedCommit> {
     return await withEncodingConfig(
@@ -514,7 +514,7 @@ export class Server {
             operations: [{
               op: "set",
               id,
-              value: document,
+              value: { value },
             }],
           },
         });

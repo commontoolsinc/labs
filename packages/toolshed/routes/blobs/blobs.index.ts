@@ -128,7 +128,7 @@ const upload = async (c: any) => {
   await memoryServer.writeDocument(
     spaceDid,
     `cid:${id}`,
-    { value: contents },
+    contents,
     { unifiedJsonEncoding: true },
   );
 
