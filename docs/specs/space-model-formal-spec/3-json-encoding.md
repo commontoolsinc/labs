@@ -392,7 +392,9 @@ including:
 > rationale and example.
 
 > **Decoder behavior.** A decoder is **not** required to validate that incoming
-> keys are sorted. The deserialized value is a plain JS object whose
-> own-property iteration order will reflect whatever order the encoder used.
-> Re-encoding a decoded value through a conforming encoder restores canonical
-> sorted order regardless of the order in which keys were received.
+> keys are sorted. The host language's own object representation may impose its
+> own iteration order on the decoded value (for example, in JavaScript,
+> integer-index-like keys iterate in numeric order ahead of other string keys,
+> regardless of the order in which they appeared on the wire). A conforming
+> encoder re-establishes UTF-8 canonical key order on output regardless of the
+> order in which keys were received or the host language's iteration rules.
