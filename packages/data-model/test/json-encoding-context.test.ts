@@ -936,6 +936,62 @@ describe("JsonEncodingContext", () => {
       expect(result.b).toBe(undefined);
       expect("b" in result).toBe(true);
     });
+
+    // --- Key ordering (Section 10) ---
+
+    it("emits keys in UTF-8 byte order for a bare plain object", () => {
+      const obj = { c: 3, a: 1, b: 2 } as unknown as FabricValue;
+      const wire = toWireFormat(obj) as Record<string, JsonWireValue>;
+      expect(Object.keys(wire)).toEqual(["a", "b", "c"]);
+    });
+
+    it("emits keys in UTF-8 byte order regardless of insertion order", () => {
+      const obj1 = { x: 1, y: 2, z: 3 } as unknown as FabricValue;
+      const obj2 = { z: 3, x: 1, y: 2 } as unknown as FabricValue;
+      const obj3 = { y: 2, z: 3, x: 1 } as unknown as FabricValue;
+      const ctx = new JsonEncodingContext();
+      expect(ctx.encode(obj1)).toBe(ctx.encode(obj2));
+      expect(ctx.encode(obj1)).toBe(ctx.encode(obj3));
+    });
+
+    it("sorts keys in nested plain objects", () => {
+      const obj = {
+        b: { z: 1, a: 2 },
+        a: 0,
+      } as unknown as FabricValue;
+      const wire = toWireFormat(obj) as Record<string, JsonWireValue>;
+      expect(Object.keys(wire)).toEqual(["a", "b"]);
+      const inner = wire.b as Record<string, JsonWireValue>;
+      expect(Object.keys(inner)).toEqual(["a", "z"]);
+    });
+
+    it("sorts keys correctly for supplementary characters (UTF-8 vs UTF-16)", () => {
+      // U+10000 (UTF-16: D800 DC00; UTF-8: F0 90 80 80) sorts AFTER U+E000
+      // (UTF-16: E000; UTF-8: EE 80 80) in UTF-8 byte order, but BEFORE it in
+      // JS native (UTF-16) order. The encoder must use UTF-8 order.
+      const obj = {
+        ["\u{10000}"]: 1,
+        [""]: 2,
+      } as unknown as FabricValue;
+      const wire = toWireFormat(obj) as Record<string, JsonWireValue>;
+      expect(Object.keys(wire)).toEqual(["", "\u{10000}"]);
+    });
+
+    it("matches the key order used by `value-hash.ts`", async () => {
+      // Both subsystems must agree on the canonical sort order. Cross-check
+      // via `utf8SortedKeysOf`, which is the function value-hash.ts uses.
+      const { utf8SortedKeysOf } = await import(
+        "@commonfabric/utils/utf8"
+      );
+      const obj = {
+        ["\u{1F600}"]: 1,
+        b: 2,
+        ["﻿"]: 3,
+        a: 4,
+      } as unknown as FabricValue;
+      const wire = toWireFormat(obj) as Record<string, JsonWireValue>;
+      expect(Object.keys(wire)).toEqual([...utf8SortedKeysOf(obj as object)]);
+    });
   });
 
   // --------------------------------------------------------------------------
