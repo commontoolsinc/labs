@@ -48,12 +48,12 @@ describe("toDeepFrozenSchema", () => {
       const result = toDeepFrozenSchema(schema, true);
 
       // Top-level should be the same reference — frozen in place.
-      assert(result === schema);
+      expect(result).toBe(schema);
       assert(Object.isFrozen(schema));
 
       // Property values are replaced with frozen clones (not the originals).
       assert(Object.isFrozen(schema.properties));
-      assert(schema.properties !== originalProperties);
+      expect(schema.properties).not.toBe(originalProperties);
       assert(Object.isFrozen(schema.properties!.name));
     });
 
@@ -67,7 +67,7 @@ describe("toDeepFrozenSchema", () => {
       const result = toDeepFrozenSchema(schema, true);
 
       // Same reference — frozen in place, not cloned.
-      assert(result === schema);
+      expect(result).toBe(schema);
       assert(Object.isFrozen(result));
     });
   });
@@ -84,7 +84,7 @@ describe("toDeepFrozenSchema", () => {
       const result = toDeepFrozenSchema(schema, false);
 
       // Should NOT be the same reference.
-      assert(result !== schema);
+      expect(result).not.toBe(schema);
 
       // Original should NOT be frozen.
       assert(!Object.isFrozen(schema));
@@ -237,7 +237,7 @@ describe("toDeepFrozenSchema", () => {
     it("already-frozen schema is handled", () => {
       const schema: JSONSchemaObj = Object.freeze({ type: "string" as const });
       const result = toDeepFrozenSchema(schema, true);
-      assert(result === schema);
+      expect(result).toBe(schema);
       assert(Object.isFrozen(result));
     });
 
@@ -248,7 +248,7 @@ describe("toDeepFrozenSchema", () => {
       });
 
       const result = toDeepFrozenSchema(schema, true);
-      assert(result === schema);
+      expect(result).toBe(schema);
     });
 
     it("already-deep-frozen returns same reference (canShare=false)", () => {
@@ -258,7 +258,7 @@ describe("toDeepFrozenSchema", () => {
       });
 
       const result = toDeepFrozenSchema(schema, false);
-      assert(result === schema);
+      expect(result).toBe(schema);
     });
 
     it("frozen but not deep-frozen schema is shallow-cloned even with canShare=true", () => {
@@ -273,7 +273,7 @@ describe("toDeepFrozenSchema", () => {
 
       // Must be a different reference (shallow-cloned) since original is
       // frozen and can't be mutated.
-      assert(result !== schema);
+      expect(result).not.toBe(schema);
 
       // Result must be deeply frozen.
       assert(Object.isFrozen(result));
@@ -300,10 +300,10 @@ describe("toDeepFrozenSchema", () => {
       const result = toDeepFrozenSchema(schema, true) as JSONSchemaObj;
 
       // The already-deep-frozen "properties" value should be the same reference.
-      assert(result.properties === frozenProperties);
+      expect(result.properties).toBe(frozenProperties);
 
       // The unfrozen "required" should be a different reference (cloned).
-      assert(result.required !== unfrozenRequired);
+      expect(result.required).not.toBe(unfrozenRequired);
 
       // Both should be deeply frozen in the result.
       assert(Object.isFrozen(result.properties));
@@ -416,12 +416,12 @@ describe("cloneSchemaMutable", () => {
     const result = cloneSchemaMutable(schema) as JSONSchemaObj;
 
     // Different top-level reference.
-    assert(result !== schema);
+    expect(result).not.toBe(schema);
     // Content is equal.
     expect(result.type).toBe("object");
     expect((result.properties!.name as JSONSchemaObj).type).toBe("string");
     // Nested objects share references (shallow).
-    assert(result.properties === schema.properties);
+    expect(result.properties).toBe(schema.properties);
   });
 
   it("returns a deep copy when deep=true", () => {
@@ -434,12 +434,12 @@ describe("cloneSchemaMutable", () => {
     const result = cloneSchemaMutable(schema, true) as JSONSchemaObj;
 
     // Different top-level reference.
-    assert(result !== schema);
+    expect(result).not.toBe(schema);
     // Content is equal.
     expect(result.type).toBe("object");
     expect((result.properties!.name as JSONSchemaObj).type).toBe("string");
     // Nested objects are also cloned (deep).
-    assert(result.properties !== schema.properties);
+    expect(result.properties).not.toBe(schema.properties);
   });
 
   it("result is deeply mutable when deep=true", () => {
@@ -496,16 +496,16 @@ describe("cloneSchemaMutable", () => {
 
     const result = cloneSchemaMutable(schema, true) as JSONSchemaObj;
 
-    assert(result !== schema);
+    expect(result).not.toBe(schema);
     expect(result.anyOf!.length).toBe(2);
-    assert(result.anyOf !== schema.anyOf);
+    expect(result.anyOf).not.toBe(schema.anyOf);
   });
 
   it("handles empty object schema", () => {
     const schema: JSONSchemaObj = {};
     const result = cloneSchemaMutable(schema) as JSONSchemaObj;
 
-    assert(result !== schema);
+    expect(result).not.toBe(schema);
     expect(Object.keys(result).length).toBe(0);
   });
 });
@@ -517,7 +517,7 @@ describe("schemaWithProperties", () => {
       description: "new",
     }) as JSONSchemaObj;
 
-    assert(result !== schema);
+    expect(result).not.toBe(schema);
     expect(result.type).toBe("object");
     expect(result.description).toBe("new");
   });

@@ -348,9 +348,6 @@ describe("schema-hash dispatch", () => {
 
   it("hashSchema returns base64url strings (no algorithm prefix)", () => {
     const result = hashSchema({ type: "number" });
-    assert(
-      /^[A-Za-z0-9_-]+$/.test(result),
-      `Expected plain base64url, got: ${result}`,
-    );
+    expect(result).toMatch(/^[A-Za-z0-9_-]+$/);
   });
 });
