@@ -462,6 +462,8 @@ export class CFFileInput extends BaseElement {
         }
       }
 
+      if (newFiles.length === 0) return;
+
       // When multiple is false, replace existing files instead of appending
       const updatedFiles = this.multiple
         ? [...currentFiles, ...newFiles]

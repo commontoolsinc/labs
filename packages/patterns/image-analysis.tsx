@@ -31,20 +31,19 @@ type ImageChatOutput = {
 type ImageUploadEvent = {
   detail?: {
     images?: ImageData[];
+    allImages?: ImageData[];
     files?: ImageData[];
+    allFiles?: ImageData[];
   };
 };
 
-const appendUploadedImages = handler<
+const syncUploadedImages = handler<
   ImageUploadEvent,
   { images: Writable<ImageData[]> }
 >(({ detail }, { images }) => {
-  const uploaded = detail?.images ?? detail?.files ?? [];
-  if (uploaded.length === 0) return;
-  images.set([
-    ...(images.get() ?? []),
-    ...uploaded,
-  ]);
+  const uploaded = detail?.allImages ?? detail?.allFiles ?? detail?.images ??
+    detail?.files ?? [];
+  images.set(uploaded);
 });
 
 export default pattern<ImageChatInput, ImageChatOutput>(
@@ -100,7 +99,8 @@ export default pattern<ImageChatInput, ImageChatOutput>(
                     showPreview
                     previewSize="md"
                     removable
-                    oncf-change={appendUploadedImages({ images })}
+                    oncf-change={syncUploadedImages({ images })}
+                    oncf-remove={syncUploadedImages({ images })}
                   />
                 </cf-vstack>
               </cf-card>
