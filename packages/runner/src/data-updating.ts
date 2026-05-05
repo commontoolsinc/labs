@@ -63,6 +63,7 @@ const NO_PRECOMPUTED = Symbol("no-precomputed");
 const cfcAddressFromLink = (link: NormalizedFullLink): CfcAddress => ({
   space: link.space,
   id: link.id,
+  scope: link.scope,
   path: [...link.path],
 });
 

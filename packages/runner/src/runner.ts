@@ -169,6 +169,7 @@ const recordOutputSchemaPolicyInputs = (
         target: {
           space: targetLink.space,
           id: targetLink.id,
+          scope: targetLink.scope,
           path: [...targetLink.path],
         },
         schema,
@@ -218,6 +219,7 @@ const recordSchemaPolicyInputForLink = (
     target: {
       space: link.space,
       id: link.id,
+      scope: link.scope,
       path: [...link.path],
     },
     schema,
@@ -347,12 +349,14 @@ const recordSetupProjectionPolicyInputs = (
       target: {
         space: target.space,
         id: target.id,
+        scope: target.scope,
         path: [...target.path, ...schemaPath],
       },
       claim: CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
       sources: [{
         space: source.space,
         id: source.id,
+        scope: source.scope,
         path: [...source.path],
       }],
     });

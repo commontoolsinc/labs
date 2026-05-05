@@ -26,6 +26,7 @@ import {
 const DEFAULT_REF: CellRef = {
   id: "of:mock-cell" as CellRef["id"],
   space: "did:key:mock" as CellRef["space"],
+  scope: "space",
   path: [],
   schema: { type: "object" },
 };

@@ -56,6 +56,9 @@ export function createCellRef(cell: Cell<unknown>, schema?: unknown): CellRef {
   const cellRef: CellRef = {
     id: link.id,
     space: link.space,
+    scope: link.scope === "inherit" || link.scope === undefined
+      ? "space"
+      : link.scope,
     path: link.path,
   };
   if (link.schema != null) cellRef.schema = link.schema;

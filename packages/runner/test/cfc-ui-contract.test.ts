@@ -375,6 +375,7 @@ describe("CFC trusted UI event enforcement", () => {
       kind: "schema",
       target: {
         space,
+        scope: "space",
         id: "of:cfc-ui-contract-nested-document",
         path: [],
       },
@@ -406,6 +407,7 @@ describe("CFC trusted UI event enforcement", () => {
       tx as unknown as IExtendedStorageTransaction,
       [{
         space,
+        scope: "space",
         id: "of:cfc-ui-contract-nested-document",
         path: ["argument", "savedTitle"],
       }],
@@ -444,6 +446,7 @@ describe("CFC trusted UI event enforcement", () => {
       kind: "schema",
       target: {
         space,
+        scope: "space",
         id: "of:cfc-ui-contract-linked-event-document",
         path: [],
       },
@@ -502,6 +505,7 @@ describe("CFC trusted UI event enforcement", () => {
       tx as unknown as IExtendedStorageTransaction,
       [{
         space,
+        scope: "space",
         id: "of:cfc-ui-contract-linked-event-document",
         path: ["argument", "savedTitle"],
       }],
@@ -581,6 +585,7 @@ describe("CFC trusted UI event enforcement", () => {
       tx as unknown as IExtendedStorageTransaction,
       [{
         space,
+        scope: "space",
         id: "of:cfc-ui-contract-context-document",
         path: ["argument", "savedTitle"],
       }],
@@ -607,6 +612,7 @@ describe("CFC trusted UI event enforcement", () => {
       kind: "schema",
       target: {
         space,
+        scope: "space",
         id: "of:cfc-ui-contract-leaf-defs-document",
         path: ["argument", "savedTitle"],
       },
@@ -631,6 +637,7 @@ describe("CFC trusted UI event enforcement", () => {
       tx as unknown as IExtendedStorageTransaction,
       [{
         space,
+        scope: "space",
         id: "of:cfc-ui-contract-leaf-defs-document",
         path: ["argument", "savedTitle"],
       }],

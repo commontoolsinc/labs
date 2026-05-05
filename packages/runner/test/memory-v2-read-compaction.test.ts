@@ -6,6 +6,7 @@ import { Runtime } from "../src/runtime.ts";
 const DOCUMENT_ADDRESS = {
   id: "bench:read-compaction" as const,
   type: "application/json" as const,
+  scope: "space" as const,
   path: [] as string[],
 };
 
@@ -133,6 +134,7 @@ Deno.test("memory v2 excludes inline data URI reads from tracked commit dependen
   tx.readValueOrThrow({
     ...DOCUMENT_ADDRESS,
     space,
+    scope: "space",
     id: dataUri,
     path: [],
   });

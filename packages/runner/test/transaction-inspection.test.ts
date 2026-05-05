@@ -18,6 +18,8 @@ import {
   getTransactionReadActivities,
   getTransactionWriteDetails,
 } from "../src/storage/transaction-inspection.ts";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { NormalizedFullLink } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("transaction-inspection");
 const space = signer.did();
@@ -44,12 +46,14 @@ describe("transaction inspection", () => {
       getReactivityLog: () => ({
         reads: [{
           space: "did:key:test" as any,
+          scope: "space",
           id: "of:read" as any,
           path: ["field"],
         }],
         shallowReads: [],
         writes: [{
           space: "did:key:test" as any,
+          scope: "space",
           id: "of:write" as any,
           path: ["field"],
         }],
@@ -61,12 +65,14 @@ describe("transaction inspection", () => {
     assertEquals(txToReactivityLog(tx), {
       reads: [{
         space: "did:key:test",
+        scope: "space",
         id: "of:read",
         path: ["field"],
       }],
       shallowReads: [],
       writes: [{
         space: "did:key:test",
+        scope: "space",
         id: "of:write",
         path: ["field"],
       }],
@@ -79,6 +85,7 @@ describe("transaction inspection", () => {
         {
           read: {
             space: "did:key:test" as any,
+            scope: "space",
             id: "of:read" as any,
             path: ["links", "peer"],
             meta: {},
@@ -87,6 +94,7 @@ describe("transaction inspection", () => {
         {
           read: {
             space: "did:key:test" as any,
+            scope: "space",
             id: "of:shallow" as any,
             path: ["value", "items"],
             meta: {},
@@ -96,6 +104,7 @@ describe("transaction inspection", () => {
         {
           write: {
             space: "did:key:test" as any,
+            scope: "space",
             id: "of:write" as any,
             path: ["meta", "updatedAt"],
           },
@@ -104,16 +113,19 @@ describe("transaction inspection", () => {
       {
         reads: [{
           space: "did:key:test",
+          scope: "space",
           id: "of:read",
           path: ["links", "peer"],
         }],
         shallowReads: [{
           space: "did:key:test",
+          scope: "space",
           id: "of:shallow",
           path: ["value", "items"],
         }],
         writes: [{
           space: "did:key:test",
+          scope: "space",
           id: "of:write",
           path: ["meta", "updatedAt"],
         }],
@@ -131,11 +143,13 @@ describe("transaction inspection", () => {
       const id = "test:transaction-inspection-direct-v2" as const;
       tx.write({
         space,
+        scope: "space",
         id,
         path: [],
       }, { value: { count: 1 } });
       tx.read({
         space,
+        scope: "space",
         id,
         path: ["value"],
       });
@@ -143,12 +157,14 @@ describe("transaction inspection", () => {
       const expected: TransactionReactivityLog = {
         reads: [{
           space,
+          scope: "space",
           id,
           path: ["value"],
         }],
         shallowReads: [],
         writes: [{
           space,
+          scope: "space",
           id,
           path: [],
         }],
@@ -180,6 +196,7 @@ describe("transaction inspection", () => {
       const seed = storageManager.edit();
       seed.write({
         space,
+        scope: "space",
         id,
         path: [],
       }, {
@@ -192,11 +209,13 @@ describe("transaction inspection", () => {
       const tx = storageManager.edit();
       tx.read({
         space,
+        scope: "space",
         id,
         path: ["source"],
       });
       tx.write({
         space,
+        scope: "space",
         id,
         path: ["meta", "updatedAt"],
       }, "after");
@@ -204,12 +223,14 @@ describe("transaction inspection", () => {
       const expected: TransactionReactivityLog = {
         reads: [{
           space,
+          scope: "space",
           id,
           path: ["source"],
         }],
         shallowReads: [],
         writes: [{
           space,
+          scope: "space",
           id,
           path: ["meta", "updatedAt"],
         }],
@@ -231,11 +252,13 @@ describe("transaction inspection", () => {
       const id = "test:transaction-inspection-wrapped-v2" as const;
       tx.write({
         space,
+        scope: "space",
         id,
         path: [],
       }, { value: { count: 1 } });
       tx.read({
         space,
+        scope: "space",
         id,
         path: ["value"],
       });
@@ -243,12 +266,14 @@ describe("transaction inspection", () => {
       const expected: TransactionReactivityLog = {
         reads: [{
           space,
+          scope: "space",
           id,
           path: ["value"],
         }],
         shallowReads: [],
         writes: [{
           space,
+          scope: "space",
           id,
           path: [],
         }],
@@ -266,21 +291,26 @@ describe("transaction inspection", () => {
   });
 
   it("does not fan out batch writes when the wrapped transaction already handles them", () => {
-    const writes: ITransactionWriteRequest[] = [{
-      address: {
-        space,
-        id: "test:transaction-wrapper-write-values-1" as const,
-        path: ["count"],
+    const writes: Array<{ address: NormalizedFullLink; value: FabricValue }> = [
+      {
+        address: {
+          space,
+          scope: "space",
+          id: "test:transaction-wrapper-write-values-1" as const,
+          path: ["count"],
+        },
+        value: 1,
       },
-      value: 1,
-    }, {
-      address: {
-        space,
-        id: "test:transaction-wrapper-write-values-2" as const,
-        path: ["count"],
+      {
+        address: {
+          space,
+          scope: "space",
+          id: "test:transaction-wrapper-write-values-2" as const,
+          path: ["count"],
+        },
+        value: 2,
       },
-      value: 2,
-    }];
+    ];
     const observed: ITransactionWriteRequest[] = [];
     const wrapped = new TransactionWrapper({
       writeValuesOrThrow(batch: Iterable<ITransactionWriteRequest>) {
@@ -306,12 +336,14 @@ describe("transaction inspection", () => {
       const id = "test:transaction-inspection-read-activities-v2" as const;
       tx.read({
         space,
+        scope: "space",
         id,
         path: ["value", "count"],
       }, { nonRecursive: true, meta: { source: "direct-hook" } });
 
       assertEquals([...getTransactionReadActivities(tx)], [{
         space,
+        scope: "space",
         id,
         path: ["value", "count"],
         meta: { source: "direct-hook" },
@@ -332,16 +364,19 @@ describe("transaction inspection", () => {
       const id = "test:transaction-inspection-activity-order-v2" as const;
       tx.write({
         space,
+        scope: "space",
         id,
         path: [],
       }, { value: { count: 1 } });
       tx.read({
         space,
+        scope: "space",
         id,
         path: ["value"],
       });
       tx.write({
         space,
+        scope: "space",
         id,
         path: ["value", "count"],
       }, 2);
@@ -366,6 +401,7 @@ describe("transaction inspection", () => {
       const id = "test:transaction-inspection-write-details-v2" as const;
       seed.write({
         space,
+        scope: "space",
         id,
         path: [],
       }, { value: { count: 1 } });
@@ -374,11 +410,13 @@ describe("transaction inspection", () => {
       const tx = storageManager.edit();
       tx.write({
         space,
+        scope: "space",
         id,
         path: ["value", "count"],
       }, 2);
       tx.write({
         space,
+        scope: "space",
         id,
         path: ["value", "count"],
       }, 3);
@@ -386,6 +424,7 @@ describe("transaction inspection", () => {
       assertEquals([...getTransactionWriteDetails(tx, space)], [{
         address: {
           space,
+          scope: "space",
           id,
           path: ["value", "count"],
         },
@@ -423,6 +462,7 @@ describe("transaction inspection", () => {
       const seed = storageManager.edit();
       seed.write({
         space,
+        scope: "space",
         id,
         path: [],
       }, { value: { count: 1 } });
@@ -433,6 +473,7 @@ describe("transaction inspection", () => {
       extended.writeValuesOrThrow([{
         address: {
           space,
+          scope: "space",
           id,
           path: ["profile", "name"],
         },
@@ -444,14 +485,17 @@ describe("transaction inspection", () => {
         shallowReads: [],
         writes: [{
           space,
+          scope: "space",
           id,
           path: ["value"],
         }, {
           space,
+          scope: "space",
           id,
           path: ["value", "profile"],
         }, {
           space,
+          scope: "space",
           id,
           path: ["value", "profile", "name"],
         }],
@@ -463,6 +507,7 @@ describe("transaction inspection", () => {
         ),
         [{
           space,
+          scope: "space",
           id,
           path: ["value"],
         }],
@@ -483,6 +528,7 @@ describe("transaction inspection", () => {
       const seed = storageManager.edit();
       seed.write({
         space,
+        scope: "space",
         id,
         path: [],
       }, { value: { count: 1 } });
@@ -493,6 +539,7 @@ describe("transaction inspection", () => {
       extended.writeValuesOrThrow([{
         address: {
           space,
+          scope: "space",
           id,
           path: ["profile", "name"],
         },
@@ -500,6 +547,7 @@ describe("transaction inspection", () => {
       }, {
         address: {
           space,
+          scope: "space",
           id,
           path: ["profile", "age"],
         },
@@ -511,18 +559,22 @@ describe("transaction inspection", () => {
         shallowReads: [],
         writes: [{
           space,
+          scope: "space",
           id,
           path: ["value"],
         }, {
           space,
+          scope: "space",
           id,
           path: ["value", "profile"],
         }, {
           space,
+          scope: "space",
           id,
           path: ["value", "profile", "age"],
         }, {
           space,
+          scope: "space",
           id,
           path: ["value", "profile", "name"],
         }],
@@ -534,10 +586,12 @@ describe("transaction inspection", () => {
         ),
         [{
           space,
+          scope: "space",
           id,
           path: ["value"],
         }, {
           space,
+          scope: "space",
           id,
           path: ["value", "profile", "age"],
         }],
@@ -557,6 +611,7 @@ describe("transaction inspection", () => {
       const seed = storageManager.edit();
       seed.write({
         space,
+        scope: "space",
         id,
         path: [],
       }, { value: { tags: ["one", "two"] } });
@@ -565,11 +620,13 @@ describe("transaction inspection", () => {
       const tx = storageManager.edit();
       tx.write({
         space,
+        scope: "space",
         id,
         path: ["value", "tags", "0"],
       }, "zero");
       tx.write({
         space,
+        scope: "space",
         id,
         path: ["value", "tags", "length"],
       }, 1);
@@ -579,14 +636,17 @@ describe("transaction inspection", () => {
         shallowReads: [],
         writes: [{
           space,
+          scope: "space",
           id,
           path: ["value", "tags"],
         }, {
           space,
+          scope: "space",
           id,
           path: ["value", "tags", "0"],
         }, {
           space,
+          scope: "space",
           id,
           path: ["value", "tags", "length"],
         }],
@@ -607,6 +667,7 @@ describe("transaction inspection", () => {
       const seed = storageManager.edit();
       seed.write({
         space,
+        scope: "space",
         id,
         path: [],
       }, { value: { tags: ["one", "two"] } });
@@ -615,6 +676,7 @@ describe("transaction inspection", () => {
       const tx = storageManager.edit();
       tx.write({
         space,
+        scope: "space",
         id,
         path: ["value", "tags", "0"],
       }, "zero");
@@ -624,6 +686,7 @@ describe("transaction inspection", () => {
         shallowReads: [],
         writes: [{
           space,
+          scope: "space",
           id,
           path: ["value", "tags", "0"],
         }],

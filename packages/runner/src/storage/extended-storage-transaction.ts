@@ -47,6 +47,7 @@ import {
   type NormalizedFullLink,
   toMemorySpaceAddress,
 } from "../link-types.ts";
+import { normalizeCellScope } from "../scope.ts";
 import { ignoreReadForScheduling } from "../scheduler.ts";
 import {
   type AttemptedWrite,
@@ -208,6 +209,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       }
       consumedReads.push(deepFreeze({
         ...read,
+        scope: normalizeCellScope(read.scope),
         path: canonicalizeLogicalPath(read.path),
       }));
     }
@@ -217,6 +219,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       (address) =>
         deepFreeze({
           ...address,
+          scope: normalizeCellScope(address.scope),
           path: canonicalizeLogicalPath(address.path),
         }),
     );
@@ -229,6 +232,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       for (const write of this.getWriteDetails(space)) {
         writes.push(deepFreeze({
           ...write.address,
+          scope: normalizeCellScope(write.address.scope),
           path: canonicalizeLogicalPath(write.address.path),
         }));
       }

@@ -44,6 +44,7 @@ type LinkHop = {
 const cfcAddressFromLink = (link: NormalizedFullLink): CfcAddress => ({
   space: link.space,
   id: link.id,
+  scope: link.scope,
   path: [...link.path],
 });
 

@@ -85,6 +85,7 @@ describe("generateObject with tools", () => {
     const rootLink = {
       id: "of:llm-wildcard-label-root",
       space,
+      scope: "space",
       type: "application/json",
       path: [],
     } as const;

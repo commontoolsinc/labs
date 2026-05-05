@@ -150,6 +150,7 @@ const recordSchemaWritePolicyInput = (
     target: {
       space: link.space,
       id: link.id,
+      scope: link.scope,
       path: [...link.path],
     },
     schemaHash: schemaAndHash.hashString,
