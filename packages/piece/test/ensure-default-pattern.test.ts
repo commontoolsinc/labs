@@ -275,8 +275,10 @@ describe("PiecesController.recreateDefaultPattern", () => {
       message: "commit rejected for test",
       reason: new Error("storage reason"),
     };
-    runtime.editWithRetry = (() => Promise.resolve({ error: storageError })) as
-      typeof runtime.editWithRetry;
+    runtime.editWithRetry = (() =>
+      Promise.resolve({
+        error: storageError,
+      })) as typeof runtime.editWithRetry;
 
     try {
       await controller.recreateDefaultPattern({
