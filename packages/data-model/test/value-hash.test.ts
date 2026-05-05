@@ -1278,3 +1278,61 @@ describe("IncrementalHasher digest base64url", () => {
     expect(h1.digest("base64url")).not.toBe(h2.digest("base64url"));
   });
 });
+
+// Registry-interned symbols: hashed via TAG_SYMBOL (0x2a) followed by
+// ULEB128(byteLength) and the UTF-8 bytes of `Symbol.keyFor(s)`. Unique
+// (uninterned) symbols have no portable key and throw.
+describe("hashOf() interned symbols", () => {
+  it("Symbol.for('foo') produces TAG_SYMBOL + ULEB128(3) + 'foo' bytes", () => {
+    // [0x2a, 0x03, 0x66, 0x6f, 0x6f]
+    const expected = sha256([0x2a, 0x03, 0x66, 0x6f, 0x6f]);
+    expect(hashBytesOf(Symbol.for("foo") as FabricValue)).toEqual(expected);
+  });
+
+  it("Symbol.for('') produces TAG_SYMBOL + ULEB128(0)", () => {
+    // [0x2a, 0x00]
+    const expected = sha256([0x2a, 0x00]);
+    expect(hashBytesOf(Symbol.for("") as FabricValue)).toEqual(expected);
+  });
+
+  it("equal-keyed interned symbols hash identically", () => {
+    expect(hex(hashBytesOf(Symbol.for("hello") as FabricValue)))
+      .toBe(hex(hashBytesOf(Symbol.for("hello") as FabricValue)));
+  });
+
+  it("differently-keyed interned symbols hash differently", () => {
+    expect(hex(hashBytesOf(Symbol.for("a") as FabricValue)))
+      .not.toBe(hex(hashBytesOf(Symbol.for("b") as FabricValue)));
+  });
+
+  it("interned symbol does not collide with the same-key string", () => {
+    // The TAG_SYMBOL prefix must distinguish a symbol from its key string.
+    expect(hex(hashBytesOf(Symbol.for("x") as FabricValue)))
+      .not.toBe(hex(hashBytesOf("x")));
+  });
+
+  it("interned symbol nested in an object hashes deterministically", () => {
+    const a = { tag: Symbol.for("nested-tag") } as unknown as FabricValue;
+    const b = { tag: Symbol.for("nested-tag") } as unknown as FabricValue;
+    expect(hex(hashBytesOf(a))).toBe(hex(hashBytesOf(b)));
+  });
+
+  it("interned symbol nested in an array hashes deterministically", () => {
+    const a = [Symbol.for("x"), 1] as unknown as FabricValue;
+    const b = [Symbol.for("x"), 1] as unknown as FabricValue;
+    expect(hex(hashBytesOf(a))).toBe(hex(hashBytesOf(b)));
+  });
+
+  it("Symbol(desc) (unique / uninterned) throws", () => {
+    expect(() => hashOf(Symbol("nope") as FabricValue)).toThrow(
+      "Cannot hash unique (uninterned) symbol",
+    );
+  });
+
+  it("unique symbol nested in an object also throws", () => {
+    const value = { tag: Symbol("nope") } as unknown as FabricValue;
+    expect(() => hashOf(value)).toThrow(
+      "Cannot hash unique (uninterned) symbol",
+    );
+  });
+});

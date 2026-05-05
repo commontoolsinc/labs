@@ -36,7 +36,7 @@ const TAG_ARRAY = 0x10;
 const TAG_OBJECT = 0x11;
 const TAG_INSTANCE = 0x12;
 
-// Primitive (0x2N) -- ordered by conceptual size
+// Primitive (0x2N)
 const TAG_NULL = 0x20;
 const TAG_UNDEFINED = 0x21;
 const TAG_BOOLEAN = 0x22;
@@ -47,6 +47,7 @@ const TAG_BIGINT = 0x26;
 const TAG_EPOCH_NSEC = 0x27;
 const TAG_EPOCH_DAYS = 0x28;
 const TAG_CONTENT_HASH = 0x29;
+const TAG_SYMBOL = 0x2a;
 
 // Special for hashing:
 const TAG_STRING_HASH = 0xf0;
@@ -70,6 +71,7 @@ const TAG_BIGINT_BYTES = new Uint8Array([TAG_BIGINT]);
 const TAG_EPOCH_NSEC_BYTES = new Uint8Array([TAG_EPOCH_NSEC]);
 const TAG_EPOCH_DAYS_BYTES = new Uint8Array([TAG_EPOCH_DAYS]);
 const TAG_CONTENT_HASH_BYTES = new Uint8Array([TAG_CONTENT_HASH]);
+const TAG_SYMBOL_BYTES = new Uint8Array([TAG_SYMBOL]);
 
 // ---------------------------------------------------------------------------
 // Core: recursive value feeding
@@ -201,6 +203,18 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
       const bytes = bigintToMinimalTwosComplement(value);
       feedLength(hasher, bytes.length);
       hasher.update(bytes);
+      break;
+    }
+
+    case "symbol": {
+      const key = Symbol.keyFor(value);
+      if (key === undefined) {
+        throw new Error("Cannot hash unique (uninterned) symbol");
+      }
+      hasher.update(TAG_SYMBOL_BYTES);
+      const utf8 = encoder.encode(key);
+      feedLength(hasher, utf8.length);
+      hasher.update(utf8);
       break;
     }
 
@@ -407,11 +421,12 @@ const NEGATIVE_ZERO_HASH = computeHash(-0);
 
 /**
  * LRU cache for primitive value hashes. Primitives (strings, numbers,
- * bigints) can't be WeakMap keys, so they use a bounded cache. Sizing is based
- * on historical testing (expected ~97% hit rate in practice).
+ * bigints, registry-interned symbols) can't be WeakMap keys, so they use a
+ * bounded cache. Sizing is based on historical testing (expected ~97% hit
+ * rate in practice).
  */
 const primitiveHashCache = new LRUCache<
-  string | number | bigint,
+  string | number | bigint | symbol,
   FabricHash
 >({
   capacity: 50_000,
@@ -429,7 +444,9 @@ const frozenObjectHashCache = new WeakMap<object, FabricHash>();
  * miss. Caller must filter out values that don't behave under `Map`'s
  * SameValueZero keying (notably `-0`, which collides with `+0`).
  */
-function cachedPrimitiveHash(value: string | number | bigint): FabricHash {
+function cachedPrimitiveHash(
+  value: string | number | bigint | symbol,
+): FabricHash {
   const cached = primitiveHashCache.get(value);
   if (cached !== undefined) return cached;
   const result = computeHash(value);
@@ -472,6 +489,16 @@ function hashOfInternal(
 
     case "undefined":
       return UNDEFINED_HASH;
+
+    case "symbol": {
+      // Only registry-interned symbols are hashable; unique symbols have
+      // no portable representation. The throw inside `feedValue` covers the
+      // unique case structurally; check here so that the cache key is sound.
+      if (Symbol.keyFor(value) === undefined) {
+        throw new Error("Cannot hash unique (uninterned) symbol");
+      }
+      return cachedPrimitiveHash(value);
+    }
 
     case "object": {
       if (value === null) return NULL_HASH;
