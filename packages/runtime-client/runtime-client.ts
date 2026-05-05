@@ -452,7 +452,9 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   }): Promise<UploadBlobResponse> {
     return await this.#conn.request<RequestType.UploadBlob>({
       type: RequestType.UploadBlob,
-      ...options,
+      contentType: options.contentType,
+      body: Array.from(options.body),
+      suffix: options.suffix,
     });
   }
 

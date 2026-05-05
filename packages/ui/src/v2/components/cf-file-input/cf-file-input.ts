@@ -1,10 +1,8 @@
 import { css, html, type TemplateResult } from "lit";
-import { property } from "lit/decorators.js";
+import { property, state } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
 import type { ButtonSize, ButtonVariant } from "../cf-button/cf-button.ts";
-import { type CellHandle, type JSONSchema } from "@commonfabric/runtime-client";
-import type { Schema } from "@commonfabric/api/schema";
-import { createArrayCellController } from "../../core/cell-controller.ts";
+import type { RuntimeClient } from "@commonfabric/runtime-client";
 import { consume } from "@lit/context";
 import {
   applyThemeToElement,
@@ -13,52 +11,15 @@ import {
   defaultTheme,
 } from "../theme-context.ts";
 import { formatFileSize } from "../../utils/image-compression.ts";
+import { runtimeContext } from "../../runtime-context.ts";
+import {
+  type StoredFile,
+  type StoreFileOptions,
+  uploadFile,
+} from "../../utils/file-cell-storage.ts";
 import "../cf-button/cf-button.ts";
 
-// Schema for FileData array
-const FileDataArraySchema = {
-  type: "array",
-  items: {
-    type: "object",
-    properties: {
-      id: { type: "string" },
-      name: { type: "string" },
-      url: { type: "string" },
-      data: { type: "string" },
-      timestamp: { type: "number" },
-      size: { type: "number" },
-      type: { type: "string" },
-      width: { type: "number" },
-      height: { type: "number" },
-      metadata: { type: "object" },
-    },
-    required: ["id", "name", "url", "data", "timestamp", "size", "type"],
-  },
-} as const satisfies JSONSchema;
-
-/**
- * Generic file data structure
- */
-export interface FileData {
-  id: string;
-  name: string;
-  url: string; // data URL
-  data: string; // data URL (kept for compatibility)
-  timestamp: number;
-  size: number;
-  type: string; // MIME type
-
-  // Optional metadata (can be populated by subclasses)
-  width?: number;
-  height?: number;
-  metadata?: Record<string, unknown>;
-}
-
-// Type validation: ensure schema matches interface
-type _ValidateFileData = Schema<
-  typeof FileDataArraySchema
->[number] extends FileData ? true : never;
-const _validateFileData: _ValidateFileData = true;
+export type FileData = StoredFile;
 
 /**
  * CFFileInput - Generic file upload component
@@ -76,9 +37,10 @@ const _validateFileData: _ValidateFileData = true;
  * @attr {boolean} removable - Allow removing files (default: true)
  * @attr {boolean} disabled - Disable the input
  * @attr {number} maxSizeBytes - Max size warning threshold (default: none)
+ * @attr {boolean} includeData - Include a data URL in emitted file descriptors
  *
- * @fires cf-change - Fired when file(s) are added. detail: { files: FileData[] }
- * @fires cf-remove - Fired when a file is removed. detail: { id: string, files: FileData[] }
+ * @fires cf-change - Fired when file(s) are added or removed. On add, files contains the newly added files. On remove, files contains the updated full list for compatibility. detail: { files: StoredFile[], allFiles: StoredFile[] }
+ * @fires cf-remove - Fired when a file is removed. detail: { id: string, files: StoredFile[], allFiles: StoredFile[] }
  * @fires cf-error - Fired when an error occurs. detail: { error: Error, message: string }
  *
  * @example
@@ -261,52 +223,53 @@ export class CFFileInput extends BaseElement {
   @property({ type: Number })
   accessor maxSizeBytes: number | undefined = undefined;
 
-  @property({ type: Array })
-  accessor files: CellHandle<FileData[]> | FileData[] = [];
+  @property({ type: Boolean })
+  accessor includeData = false;
 
   @property({ type: Boolean })
   protected accessor loading = false;
+
+  @state()
+  protected accessor storedFiles: StoredFile[] = [];
 
   // Theme consumption
   @consume({ context: cfThemeContext, subscribe: true })
   @property({ attribute: false })
   accessor theme: CFTheme = defaultTheme;
 
-  protected _cellController = createArrayCellController<FileData>(this, {
-    onChange: (_newFiles: FileData[], _oldFiles: FileData[]) => {
-      this.requestUpdate();
-    },
-  });
+  @consume({ context: runtimeContext, subscribe: true })
+  @property({ attribute: false })
+  accessor runtime: RuntimeClient | undefined = undefined;
 
-  protected _generateId(): string {
-    return `file-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+  protected getFiles(): StoredFile[] {
+    return [...this.storedFiles];
   }
 
-  protected getFiles(): FileData[] {
-    return [...this._cellController.getValue()];
-  }
-
-  protected setFiles(newFiles: FileData[]): void {
-    this._cellController.setValue(newFiles);
+  protected setFiles(newFiles: StoredFile[]): void {
+    this.storedFiles = newFiles;
   }
 
   /**
-   * Process a file and return FileData
+   * Process a file and return a stored file descriptor link.
    * Subclasses can override this to add custom processing
    */
-  protected async processFile(file: File): Promise<FileData> {
-    const id = this._generateId();
-    const dataUrl = await this._readFileAsDataURL(file);
+  protected async processFile(file: File): Promise<StoredFile> {
+    return await this.storeFile(file);
+  }
 
-    return {
-      id,
-      name: file.name,
-      url: dataUrl,
-      data: dataUrl,
-      timestamp: Date.now(),
-      size: file.size,
-      type: file.type,
-    };
+  protected async storeFile(
+    file: File,
+    metadata?: Partial<Pick<StoreFileOptions, "width" | "height" | "metadata">>,
+  ): Promise<StoredFile> {
+    if (!this.runtime) {
+      throw new Error("Runtime is not available for file storage");
+    }
+    return await uploadFile({
+      file,
+      runtime: this.runtime,
+      includeDataUrl: this.includeData,
+      ...metadata,
+    });
   }
 
   /**
@@ -329,7 +292,7 @@ export class CFFileInput extends BaseElement {
    * Render preview for a file
    * Subclasses can override for custom preview rendering
    */
-  protected renderPreview(file: FileData): TemplateResult {
+  protected renderPreview(file: StoredFile): TemplateResult {
     // Smart default preview based on MIME type
     if (file.type.startsWith("image/")) {
       return html`
@@ -433,15 +396,6 @@ export class CFFileInput extends BaseElement {
     return "📎";
   }
 
-  private _readFileAsDataURL(file: Blob): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = () => reject(new Error("Failed to read file"));
-      reader.readAsDataURL(file);
-    });
-  }
-
   private _handleButtonClick() {
     this.emit("cf-click"); // Emit before opening file picker
     const input = this.shadowRoot?.querySelector(
@@ -474,7 +428,7 @@ export class CFFileInput extends BaseElement {
     this.loading = true;
 
     try {
-      const newFiles: FileData[] = [];
+      const newFiles: StoredFile[] = [];
 
       for (const file of Array.from(files)) {
         try {
@@ -508,12 +462,14 @@ export class CFFileInput extends BaseElement {
         }
       }
 
+      if (newFiles.length === 0) return;
+
       // When multiple is false, replace existing files instead of appending
       const updatedFiles = this.multiple
         ? [...currentFiles, ...newFiles]
         : newFiles;
       this.setFiles(updatedFiles);
-      this.emit("cf-change", { files: updatedFiles });
+      this.emit("cf-change", { files: newFiles, allFiles: updatedFiles });
     } finally {
       this.loading = false;
       // Reset input so same file can be selected again
@@ -525,28 +481,8 @@ export class CFFileInput extends BaseElement {
     const currentFiles = this.getFiles();
     const updatedFiles = currentFiles.filter((file) => file.id !== id);
     this.setFiles(updatedFiles);
-    this.emit("cf-remove", { id, files: updatedFiles });
-    this.emit("cf-change", { files: updatedFiles });
-  }
-
-  override connectedCallback() {
-    super.connectedCallback();
-    // CellController handles subscription automatically via ReactiveController
-  }
-
-  override disconnectedCallback() {
-    super.disconnectedCallback();
-    // CellController handles cleanup automatically via ReactiveController
-  }
-
-  override willUpdate(changedProperties: Map<string, any>) {
-    super.willUpdate(changedProperties);
-
-    // If the files property itself changed (e.g., switched to a different cell)
-    if (changedProperties.has("files")) {
-      // Bind the new value (Cell or plain array) to the controller
-      this._cellController.bind(this.files, FileDataArraySchema);
-    }
+    this.emit("cf-remove", { id, files: updatedFiles, allFiles: updatedFiles });
+    this.emit("cf-change", { files: updatedFiles, allFiles: updatedFiles });
   }
 
   override updated(changedProperties: Map<string, any>) {
@@ -558,9 +494,6 @@ export class CFFileInput extends BaseElement {
   }
 
   override firstUpdated() {
-    // Bind the initial value to the cell controller
-    this._cellController.bind(this.files, FileDataArraySchema);
-
     // Apply theme after first render
     applyThemeToElement(this, this.theme ?? defaultTheme);
   }

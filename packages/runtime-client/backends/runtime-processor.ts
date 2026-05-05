@@ -839,6 +839,7 @@ export class RuntimeProcessor {
     request: UploadBlobRequest,
   ): Promise<UploadBlobResponse> {
     const suffix = (request.suffix ?? "bin").replace(/^\./, "") || "bin";
+    const bytes = Uint8Array.from(request.body);
     const target = new URL(
       `/${this.space}/blobs/upload.${encodeURIComponent(suffix)}`,
       this.apiUrl,
@@ -847,7 +848,7 @@ export class RuntimeProcessor {
     // process is running with legacy memory JSON flags.
     const body = blobUploadEncoding.encode({
       type: request.contentType,
-      body: new FabricBytes(request.body),
+      body: new FabricBytes(bytes),
     } as FabricValue);
     const response = await fetch(target, {
       method: "POST",
