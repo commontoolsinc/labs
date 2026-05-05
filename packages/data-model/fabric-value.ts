@@ -138,8 +138,8 @@ export function nativeFromFabricValue(
  * fabric wrappers), this function assumes the input is already a valid
  * `FabricValue` and only adjusts frozenness by cloning where necessary.
  *
- * Flag OFF (legacy): identity passthrough (legacy values are not frozen).
- * Flag ON (modern): delegates to `cloneIfNecessaryModern`.
+ * Both flag states use modern clone semantics; the legacy dispatch target
+ * delegates to the modern implementation.
  *
  * @param value - An already-valid `FabricValue`.
  * @param options - See `CloneOptions`. Defaults: `{ frozen: true, deep: true }`.
