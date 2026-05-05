@@ -307,49 +307,6 @@ describe("Cell", () => {
     expect(result?.arr).toBe("custom-array-value");
   });
 
-  it("should convert -0 to 0 during set", () => {
-    const c = runtime.getCell<unknown>(
-      space,
-      "should convert -0 to 0 during set",
-      undefined,
-      tx,
-    );
-    c.set({ value: -0 });
-
-    const result = c.get() as { value: number } | undefined;
-    expect(result?.value).toBe(0);
-    // Verify it's actually 0, not -0
-    expect(Object.is(result?.value, 0)).toBe(true);
-    expect(Object.is(result?.value, -0)).toBe(false);
-  });
-
-  it("should throw when setting NaN", () => {
-    const c = runtime.getCell<unknown>(
-      space,
-      "should throw when setting NaN",
-      undefined,
-      tx,
-    );
-    expect(() => c.set({ value: NaN })).toThrow(
-      "Cannot store non-finite number",
-    );
-  });
-
-  it("should throw when setting Infinity", () => {
-    const c = runtime.getCell<unknown>(
-      space,
-      "should throw when setting Infinity",
-      undefined,
-      tx,
-    );
-    expect(() => c.set({ value: Infinity })).toThrow(
-      "Cannot store non-finite number",
-    );
-    expect(() => c.set({ value: -Infinity })).toThrow(
-      "Cannot store non-finite number",
-    );
-  });
-
   it("should throw when setting Symbol", () => {
     const c = runtime.getCell<unknown>(
       space,
@@ -1234,6 +1191,128 @@ for (const unifiedJsonEncoding of [false, true]) {
           expect(Object.prototype.hasOwnProperty.call(value, "/")).toBe(true);
         },
       );
+    },
+  );
+}
+
+// Cell-storage behavior for the four "weird" numeric values: `-0`, `NaN`,
+// `+Infinity`, `-Infinity`. The two data-model paths diverge sharply here:
+//
+// * Legacy (`modernDataModel = false`): `-0` is normalized to `0` on set, and
+//   any non-finite number throws `"Cannot store non-finite number"` at the
+//   fabric-value boundary inside `cell.set()`.
+// * Modern  (`modernDataModel = true`): all four values flow through end-to-end
+//   (PRs #3492/#3493/#3495). `-0` keeps its sign; `NaN` and `±Infinity` are
+//   stored faithfully and read back as themselves.
+//
+// These tests pin both behaviors so a future flag-default change can't quietly
+// regress either path.
+for (const modernDataModel of [false, true]) {
+  describe(
+    `Cell special-number storage with \`modernDataModel = ${modernDataModel}\``,
+    () => {
+      let runtime: Runtime;
+      let storageManager: ReturnType<typeof StorageManager.emulate>;
+      let tx: IExtendedStorageTransaction;
+
+      beforeEach(() => {
+        storageManager = StorageManager.emulate({ as: signer });
+        runtime = new Runtime({
+          apiUrl: new URL(import.meta.url),
+          storageManager,
+          experimental: { modernDataModel },
+        });
+        tx = runtime.edit();
+      });
+
+      afterEach(async () => {
+        await tx.commit();
+        await runtime?.dispose();
+        await storageManager?.close();
+      });
+
+      if (modernDataModel) {
+        it("preserves the sign of -0 on set", () => {
+          const c = runtime.getCell<unknown>(
+            space,
+            "modern: preserve -0",
+            undefined,
+            tx,
+          );
+          c.set({ value: -0 });
+          const result = c.get() as { value: number } | undefined;
+          expect(Object.is(result?.value, -0)).toBe(true);
+          expect(Object.is(result?.value, 0)).toBe(false);
+        });
+
+        it("stores NaN", () => {
+          const c = runtime.getCell<unknown>(
+            space,
+            "modern: store NaN",
+            undefined,
+            tx,
+          );
+          c.set({ value: NaN });
+          const result = c.get() as { value: number } | undefined;
+          expect(Number.isNaN(result?.value)).toBe(true);
+        });
+
+        it("stores +Infinity and -Infinity", () => {
+          const c = runtime.getCell<unknown>(
+            space,
+            "modern: store infinities",
+            undefined,
+            tx,
+          );
+          c.set({ pos: Infinity, neg: -Infinity });
+          const result = c.get() as
+            | { pos: number; neg: number }
+            | undefined;
+          expect(result?.pos).toBe(Infinity);
+          expect(result?.neg).toBe(-Infinity);
+        });
+      } else {
+        it("converts -0 to 0 on set", () => {
+          const c = runtime.getCell<unknown>(
+            space,
+            "legacy: -0 to 0",
+            undefined,
+            tx,
+          );
+          c.set({ value: -0 });
+          const result = c.get() as { value: number } | undefined;
+          expect(result?.value).toBe(0);
+          expect(Object.is(result?.value, 0)).toBe(true);
+          expect(Object.is(result?.value, -0)).toBe(false);
+        });
+
+        it("throws when setting NaN", () => {
+          const c = runtime.getCell<unknown>(
+            space,
+            "legacy: throw on NaN",
+            undefined,
+            tx,
+          );
+          expect(() => c.set({ value: NaN })).toThrow(
+            "Cannot store non-finite number",
+          );
+        });
+
+        it("throws when setting +Infinity or -Infinity", () => {
+          const c = runtime.getCell<unknown>(
+            space,
+            "legacy: throw on infinities",
+            undefined,
+            tx,
+          );
+          expect(() => c.set({ value: Infinity })).toThrow(
+            "Cannot store non-finite number",
+          );
+          expect(() => c.set({ value: -Infinity })).toThrow(
+            "Cannot store non-finite number",
+          );
+        });
+      }
     },
   );
 }
