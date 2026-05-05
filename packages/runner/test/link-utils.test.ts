@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
+  areNormalizedLinksSame,
+  areNormalizedLinksSameIgnoringScope,
   areLinksSame,
   createDataCellURI,
   createLLMFriendlyLink,
@@ -217,6 +219,7 @@ describe("link-utils", () => {
         id: expect.stringContaining("of:"),
         path: [],
         space: space,
+        scope: "space",
         schema: undefined,
       });
     });
@@ -231,6 +234,7 @@ describe("link-utils", () => {
         id: expect.stringContaining("of:"),
         path: ["nested"],
         space: space,
+        scope: "space",
         schema: undefined,
       });
     });
@@ -243,6 +247,7 @@ describe("link-utils", () => {
         id: expect.stringContaining("of:"),
         path: [],
         space: space,
+        scope: "space",
         schema: undefined,
       });
     });
@@ -329,6 +334,7 @@ describe("link-utils", () => {
         id: expect.stringContaining("of:"),
         path: ["nested", "value"],
         space: space,
+        scope: "space",
         schema: undefined,
       });
     });
@@ -362,6 +368,7 @@ describe("link-utils", () => {
         id: expect.stringContaining("of:"),
         path: [],
         space: space,
+        scope: "space",
         schema: undefined,
       });
     });
@@ -381,6 +388,7 @@ describe("link-utils", () => {
         id: expect.stringContaining("of:"),
         path: ["nested", "value"],
         space: space,
+        scope: "space",
         schema: { type: "number" },
         overwrite: "redirect",
       });
@@ -399,6 +407,7 @@ describe("link-utils", () => {
         id: expect.stringContaining("of:"),
         path: ["nested", "value"],
         space: space,
+        scope: "space",
         schema: undefined,
         overwrite: "redirect",
       });
@@ -502,6 +511,67 @@ describe("link-utils", () => {
           },
         },
       });
+    });
+
+    it("serializes scoped links and parses inherited link scope from the base", () => {
+      const normalizedLink: NormalizedLink = {
+        id: "of:test",
+        path: ["nested"],
+        space,
+        scope: "session",
+      };
+
+      const result = createSigilLinkFromParsedLink(normalizedLink);
+      expect(result["/"][LINK_V1_TAG].scope).toBe("session");
+
+      expect(parseLink(result, {
+        id: "of:base",
+        path: [],
+        space,
+        scope: "user",
+      })).toEqual({
+        id: "of:test",
+        path: ["nested"],
+        space,
+        scope: "session",
+      });
+
+      expect(parseLink({
+        "/": {
+          [LINK_V1_TAG]: {
+            id: "of:relative",
+            path: [],
+          },
+        },
+      }, {
+        id: "of:base",
+        path: [],
+        space,
+        scope: "user",
+      })).toEqual({
+        id: "of:relative",
+        path: [],
+        space,
+        scope: "user",
+      });
+    });
+
+    it("includes scope in normal equality but exposes scope-insensitive equality for cause generation", () => {
+      const userLink: NormalizedLink = {
+        id: "of:test",
+        path: ["value"],
+        space,
+        scope: "user",
+      };
+      const sessionLink: NormalizedLink = {
+        ...userLink,
+        scope: "session",
+      };
+
+      expect(areNormalizedLinksSame(userLink, sessionLink)).toBe(false);
+      expect(areNormalizedLinksSameIgnoringScope(userLink, sessionLink)).toBe(
+        true,
+      );
     });
 
     it("should omit space when same as base", () => {

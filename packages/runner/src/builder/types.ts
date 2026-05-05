@@ -124,6 +124,7 @@ export type {
   JSONValue,
   KeyResultType,
   LinkScope,
+  SchemaScope,
   Module,
   ModuleFactory,
   NodeFactory,
