@@ -99,6 +99,21 @@ const f64View = new DataView(f64Buf);
 /** Byte-array "view" of `f64Buf`. */
 const f64Bytes = new Uint8Array(f64Buf);
 
+/**
+ * Canonical quiet-NaN payload (big-endian `7F F8 00 00 00 00 00 00`). All NaN
+ * bit patterns hash to this single representation.
+ */
+const CANONICAL_NAN_BYTES = new Uint8Array([
+  0x7f,
+  0xf8,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+]);
+
 /** LRU cache for string representations. */
 const stringRepCache = new LRUCache<string, Uint8Array>({
   capacity: 50_000,
@@ -167,15 +182,13 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
       break;
 
     case "number":
-      if (!Number.isFinite(value)) {
-        throw new Error(
-          `hashOf: non-finite number not allowed: ${value}`,
-        );
-      }
       hasher.update(TAG_NUMBER_BYTES);
-      // Normalize -0 to +0.
-      f64View.setFloat64(0, value === 0 ? 0 : value, false); // big-endian
-      hasher.update(f64Bytes);
+      if (Number.isNaN(value)) {
+        hasher.update(CANONICAL_NAN_BYTES);
+      } else {
+        f64View.setFloat64(0, value, false); // big-endian
+        hasher.update(f64Bytes);
+      }
       break;
 
     case "string": {
@@ -390,6 +403,7 @@ const NULL_HASH = computeHash(null);
 const UNDEFINED_HASH = computeHash(undefined);
 const TRUE_HASH = computeHash(true);
 const FALSE_HASH = computeHash(false);
+const NEGATIVE_ZERO_HASH = computeHash(-0);
 
 /**
  * LRU cache for primitive value hashes. Primitives (strings, numbers,
@@ -409,6 +423,19 @@ const primitiveHashCache = new LRUCache<
  * Mutable objects are always recomputed.
  */
 const frozenObjectHashCache = new WeakMap<object, FabricHash>();
+
+/**
+ * Looks up the given primitive in the LRU cache, computing and storing on
+ * miss. Caller must filter out values that don't behave under `Map`'s
+ * SameValueZero keying (notably `-0`, which collides with `+0`).
+ */
+function cachedPrimitiveHash(value: string | number | bigint): FabricHash {
+  const cached = primitiveHashCache.get(value);
+  if (cached !== undefined) return cached;
+  const result = computeHash(value);
+  primitiveHashCache.put(value, result);
+  return result;
+}
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -432,14 +459,16 @@ function hashOfInternal(
       return value ? TRUE_HASH : FALSE_HASH;
 
     case "string":
+    case "bigint":
+      return cachedPrimitiveHash(value);
+
     case "number":
-    case "bigint": {
-      const cached = primitiveHashCache.get(value);
-      if (cached !== undefined) return cached;
-      const result = computeHash(value);
-      primitiveHashCache.put(value, result);
-      return result;
-    }
+      // `Map` keys via SameValueZero, which conflates `-0` with `+0`. Use the
+      // pre-computed hash for `-0` so it doesn't collide with (or pollute)
+      // the `+0` cache entry.
+      return Object.is(value, -0)
+        ? NEGATIVE_ZERO_HASH
+        : cachedPrimitiveHash(value);
 
     case "undefined":
       return UNDEFINED_HASH;

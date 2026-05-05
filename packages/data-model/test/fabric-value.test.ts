@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import {
   fabricFromNativeValue,
   isArrayIndexPropertyName,
+  isFabricCompatible,
   isFabricValue,
   resetDataModelConfig,
   setDataModelConfig,
@@ -1361,6 +1362,232 @@ describe("fabric-value", () => {
       expect(result).toBeInstanceOf(FabricError);
       const se = result as FabricError;
       expect(se.error.cause).toBeInstanceOf(FabricError);
+    });
+  });
+
+  // =========================================================================
+  // Special numbers (modern path)
+  //
+  // The modern path embraces -0, NaN, +Infinity, and -Infinity as valid
+  // FabricValue members. The legacy path continues to reject and normalize
+  // (covered above).
+  // =========================================================================
+
+  describe("special numbers (modern path)", () => {
+    beforeEach(() => {
+      setDataModelConfig(true);
+    });
+    afterEach(() => {
+      resetDataModelConfig();
+    });
+
+    it("isFabricValue accepts NaN", () => {
+      expect(isFabricValue(NaN)).toBe(true);
+    });
+
+    it("isFabricValue accepts +/-Infinity", () => {
+      expect(isFabricValue(Infinity)).toBe(true);
+      expect(isFabricValue(-Infinity)).toBe(true);
+    });
+
+    it("isFabricValue accepts -0", () => {
+      expect(isFabricValue(-0)).toBe(true);
+    });
+
+    it("shallowFabricFromNativeValue passes NaN through", () => {
+      expect(Number.isNaN(shallowFabricFromNativeValue(NaN))).toBe(true);
+    });
+
+    it("shallowFabricFromNativeValue passes +/-Infinity through", () => {
+      expect(shallowFabricFromNativeValue(Infinity)).toBe(Infinity);
+      expect(shallowFabricFromNativeValue(-Infinity)).toBe(-Infinity);
+    });
+
+    it("shallowFabricFromNativeValue preserves the sign of -0", () => {
+      expect(Object.is(shallowFabricFromNativeValue(-0), -0)).toBe(true);
+    });
+
+    it("fabricFromNativeValue passes special numbers through", () => {
+      expect(Number.isNaN(fabricFromNativeValue(NaN))).toBe(true);
+      expect(fabricFromNativeValue(Infinity)).toBe(Infinity);
+      expect(fabricFromNativeValue(-Infinity)).toBe(-Infinity);
+      expect(Object.is(fabricFromNativeValue(-0), -0)).toBe(true);
+    });
+
+    it("fabricFromNativeValue preserves special numbers nested in objects", () => {
+      const result = fabricFromNativeValue({
+        nz: -0,
+        nan: NaN,
+        pinf: Infinity,
+        ninf: -Infinity,
+      }) as Record<string, number>;
+      expect(Object.is(result.nz, -0)).toBe(true);
+      expect(Number.isNaN(result.nan)).toBe(true);
+      expect(result.pinf).toBe(Infinity);
+      expect(result.ninf).toBe(-Infinity);
+    });
+
+    it("fabricFromNativeValue preserves special numbers in arrays", () => {
+      const result = fabricFromNativeValue(
+        [1, -0, NaN, Infinity, -Infinity, 2],
+      ) as number[];
+      expect(result[0]).toBe(1);
+      expect(Object.is(result[1], -0)).toBe(true);
+      expect(Number.isNaN(result[2])).toBe(true);
+      expect(result[3]).toBe(Infinity);
+      expect(result[4]).toBe(-Infinity);
+      expect(result[5]).toBe(2);
+    });
+  });
+
+  // =========================================================================
+  // isFabricCompatible: deep storability check (modern path)
+  // =========================================================================
+
+  describe("isFabricCompatible", () => {
+    beforeEach(() => {
+      setDataModelConfig(true);
+    });
+    afterEach(() => {
+      resetDataModelConfig();
+    });
+
+    // -- Primitives that ARE fabric-compatible --
+    it("accepts null", () => {
+      expect(isFabricCompatible(null)).toBe(true);
+    });
+
+    it("accepts boolean", () => {
+      expect(isFabricCompatible(true)).toBe(true);
+      expect(isFabricCompatible(false)).toBe(true);
+    });
+
+    it("accepts numbers (including -0, NaN, and infinities)", () => {
+      expect(isFabricCompatible(42)).toBe(true);
+      expect(isFabricCompatible(0)).toBe(true);
+      expect(isFabricCompatible(-0)).toBe(true);
+      expect(isFabricCompatible(-3.14)).toBe(true);
+      expect(isFabricCompatible(NaN)).toBe(true);
+      expect(isFabricCompatible(Infinity)).toBe(true);
+      expect(isFabricCompatible(-Infinity)).toBe(true);
+    });
+
+    it("accepts strings", () => {
+      expect(isFabricCompatible("hello")).toBe(true);
+      expect(isFabricCompatible("")).toBe(true);
+    });
+
+    it("accepts undefined", () => {
+      expect(isFabricCompatible(undefined)).toBe(true);
+    });
+
+    it("accepts bigint", () => {
+      expect(isFabricCompatible(42n)).toBe(true);
+      expect(isFabricCompatible(0n)).toBe(true);
+    });
+
+    // -- Primitives that are NOT fabric-compatible --
+
+    it("rejects symbols", () => {
+      expect(isFabricCompatible(Symbol("test"))).toBe(false);
+    });
+
+    it("rejects functions without toJSON", () => {
+      expect(isFabricCompatible(() => 42)).toBe(false);
+    });
+
+    // -- FabricNativeObject types (would be wrapped) --
+    it("accepts Error instances", () => {
+      expect(isFabricCompatible(new Error("test"))).toBe(true);
+      expect(isFabricCompatible(new TypeError("test"))).toBe(true);
+    });
+
+    it("accepts Map instances", () => {
+      expect(isFabricCompatible(new Map())).toBe(true);
+    });
+
+    it("accepts Set instances", () => {
+      expect(isFabricCompatible(new Set())).toBe(true);
+    });
+
+    it("accepts Date instances", () => {
+      expect(isFabricCompatible(new Date())).toBe(true);
+    });
+
+    it("accepts Uint8Array instances", () => {
+      expect(isFabricCompatible(new Uint8Array([1, 2, 3]))).toBe(true);
+    });
+
+    // -- FabricInstance values --
+    it("accepts FabricError wrappers", () => {
+      expect(isFabricCompatible(new FabricError(new Error("test")))).toBe(true);
+    });
+
+    // -- Containers --
+    it("accepts plain objects with fabric values", () => {
+      expect(isFabricCompatible({ a: 1, b: "hello", c: null })).toBe(true);
+    });
+
+    it("accepts arrays with fabric values", () => {
+      expect(isFabricCompatible([1, "hello", null, true])).toBe(true);
+    });
+
+    it("accepts nested structures", () => {
+      expect(isFabricCompatible({
+        users: [{ name: "Alice", age: 30 }],
+        meta: { version: 1 },
+      })).toBe(true);
+    });
+
+    // -- Deep checks with FabricNativeObject --
+    it("accepts objects containing Error values", () => {
+      expect(isFabricCompatible({ error: new Error("test"), code: 500 })).toBe(
+        true,
+      );
+    });
+
+    it("accepts arrays containing Error values", () => {
+      expect(isFabricCompatible([1, new Error("test"), "hello"])).toBe(true);
+    });
+
+    // -- Rejections --
+    it("rejects class instances without toJSON", () => {
+      class Foo {
+        x = 1;
+      }
+      expect(isFabricCompatible(new Foo())).toBe(false);
+    });
+
+    it("rejects objects with non-fabric nested values", () => {
+      expect(isFabricCompatible({ a: 1, b: Symbol("bad") })).toBe(false);
+    });
+
+    it("rejects arrays with non-fabric elements", () => {
+      expect(isFabricCompatible([1, Symbol("bad")])).toBe(false);
+    });
+
+    it("rejects deeply nested non-fabric values", () => {
+      expect(isFabricCompatible({
+        a: { b: { c: [1, 2, { d: Symbol("bad") }] } },
+      })).toBe(false);
+    });
+
+    // -- Circular references --
+    it("returns false for circular references", () => {
+      const obj: Record<string, unknown> = { a: 1 };
+      obj.self = obj;
+      expect(isFabricCompatible(obj)).toBe(false);
+    });
+
+    // -- toJSON support --
+    it("accepts objects with toJSON returning fabric values", () => {
+      const obj = { toJSON: () => ({ x: 1 }) };
+      expect(isFabricCompatible(obj)).toBe(true);
+    });
+
+    it("rejects objects with toJSON returning non-fabric values", () => {
+      const obj = { toJSON: () => Symbol("bad") };
+      expect(isFabricCompatible(obj)).toBe(false);
     });
   });
 });
