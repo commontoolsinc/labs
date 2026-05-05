@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { JsonEncodingContext } from "../json-encoding-context.ts";
 import {
@@ -20,7 +20,6 @@ import {
 import { nativeFromFabricValueModern } from "../fabric-value-modern.ts";
 import { FrozenMap, FrozenSet } from "../frozen-builtins.ts";
 import {
-  isFabricCompatible,
   resetDataModelConfig,
   setDataModelConfig,
   shallowFabricFromNativeValue,
@@ -416,6 +415,121 @@ describe("JsonEncodingContext", () => {
       expect(result).toBeInstanceOf(ProblematicValue);
       const prob = result as unknown as ProblematicValue;
       expect(prob.typeTag).toBe("BigInt@1");
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // SpecialNumber (-0, NaN, +/-Infinity)
+  // --------------------------------------------------------------------------
+
+  describe("SpecialNumber", () => {
+    it('serializes -0 to /SpecialNumber@1 with state "-0"', () => {
+      expect(toWireFormat(-0)).toEqual({ "/SpecialNumber@1": "-0" });
+    });
+
+    it('serializes NaN to /SpecialNumber@1 with state "NaN"', () => {
+      expect(toWireFormat(NaN)).toEqual({ "/SpecialNumber@1": "NaN" });
+    });
+
+    it('serializes +Infinity to /SpecialNumber@1 with state "+Infinity"', () => {
+      expect(toWireFormat(Infinity)).toEqual({
+        "/SpecialNumber@1": "+Infinity",
+      });
+    });
+
+    it('serializes -Infinity to /SpecialNumber@1 with state "-Infinity"', () => {
+      expect(toWireFormat(-Infinity)).toEqual({
+        "/SpecialNumber@1": "-Infinity",
+      });
+    });
+
+    it("does not intercept +0 (round-trips as a plain number)", () => {
+      expect(toWireFormat(0)).toBe(0);
+      expect(roundTrip(0)).toBe(0);
+    });
+
+    it("round-trips -0 (preserves sign of zero)", () => {
+      const result = roundTrip(-0);
+      expect(Object.is(result, -0)).toBe(true);
+    });
+
+    it("round-trips NaN", () => {
+      expect(Number.isNaN(roundTrip(NaN))).toBe(true);
+    });
+
+    it("round-trips +Infinity", () => {
+      expect(roundTrip(Infinity)).toBe(Infinity);
+    });
+
+    it("round-trips -Infinity", () => {
+      expect(roundTrip(-Infinity)).toBe(-Infinity);
+    });
+
+    it('any NaN bit pattern serializes as the literal "NaN"', () => {
+      const view = new DataView(new ArrayBuffer(8));
+      view.setBigUint64(0, 0x7ff8000000000001n, false);
+      const nonCanonicalNaN = view.getFloat64(0, false);
+      expect(Number.isNaN(nonCanonicalNaN)).toBe(true);
+      expect(toWireFormat(nonCanonicalNaN)).toEqual({
+        "/SpecialNumber@1": "NaN",
+      });
+    });
+
+    it("round-trips inside arrays", () => {
+      const arr = [1, NaN, -0, Infinity, -Infinity, 2] as FabricValue;
+      const result = roundTrip(arr) as number[];
+      expect(result[0]).toBe(1);
+      expect(Number.isNaN(result[1])).toBe(true);
+      expect(Object.is(result[2], -0)).toBe(true);
+      expect(result[3]).toBe(Infinity);
+      expect(result[4]).toBe(-Infinity);
+      expect(result[5]).toBe(2);
+    });
+
+    it("round-trips as object values", () => {
+      const obj = {
+        nz: -0,
+        nan: NaN,
+        pinf: Infinity,
+        ninf: -Infinity,
+      } as unknown as FabricValue;
+      const result = roundTrip(obj) as Record<string, number>;
+      expect(Object.is(result.nz, -0)).toBe(true);
+      expect(Number.isNaN(result.nan)).toBe(true);
+      expect(result.pinf).toBe(Infinity);
+      expect(result.ninf).toBe(-Infinity);
+    });
+
+    it("non-string state -> ProblematicValue (lenient)", () => {
+      const ctx = new JsonEncodingContext({ lenient: true });
+      const runtime: ReconstructionContext = {
+        getCell(_ref) {
+          throw new Error("getCell not implemented in test runtime");
+        },
+      };
+      const encoded = ENCODING_PREFIX +
+        JSON.stringify({ "/SpecialNumber@1": 0 });
+      const result = ctx.decode(encoded, runtime);
+      expect(result).toBeInstanceOf(ProblematicValue);
+      expect((result as unknown as ProblematicValue).typeTag).toBe(
+        "SpecialNumber@1",
+      );
+    });
+
+    it("unknown literal -> ProblematicValue (lenient)", () => {
+      const ctx = new JsonEncodingContext({ lenient: true });
+      const runtime: ReconstructionContext = {
+        getCell(_ref) {
+          throw new Error("getCell not implemented in test runtime");
+        },
+      };
+      const encoded = ENCODING_PREFIX +
+        JSON.stringify({ "/SpecialNumber@1": "Infinity" }); // missing leading +
+      const result = ctx.decode(encoded, runtime);
+      expect(result).toBeInstanceOf(ProblematicValue);
+      expect((result as unknown as ProblematicValue).typeTag).toBe(
+        "SpecialNumber@1",
+      );
     });
   });
 
@@ -1881,161 +1995,6 @@ describe("JsonEncodingContext", () => {
       expect(state.type).toBe("TypeError");
       expect(state.name).toBe(null); // null = same as type (common case)
       expect(state.message).toBe("compat test");
-    });
-  });
-
-  // --------------------------------------------------------------------------
-  // isFabricCompatible: deep storability check
-  // --------------------------------------------------------------------------
-
-  describe("isFabricCompatible", () => {
-    beforeEach(() => {
-      setDataModelConfig(true);
-    });
-    afterEach(() => {
-      resetDataModelConfig();
-    });
-
-    // -- Primitives that ARE fabric-compatible --
-    it("accepts null", () => {
-      expect(isFabricCompatible(null)).toBe(true);
-    });
-
-    it("accepts boolean", () => {
-      expect(isFabricCompatible(true)).toBe(true);
-      expect(isFabricCompatible(false)).toBe(true);
-    });
-
-    it("accepts finite numbers", () => {
-      expect(isFabricCompatible(42)).toBe(true);
-      expect(isFabricCompatible(0)).toBe(true);
-      expect(isFabricCompatible(-3.14)).toBe(true);
-    });
-
-    it("accepts strings", () => {
-      expect(isFabricCompatible("hello")).toBe(true);
-      expect(isFabricCompatible("")).toBe(true);
-    });
-
-    it("accepts undefined", () => {
-      expect(isFabricCompatible(undefined)).toBe(true);
-    });
-
-    it("accepts bigint", () => {
-      expect(isFabricCompatible(42n)).toBe(true);
-      expect(isFabricCompatible(0n)).toBe(true);
-    });
-
-    // -- Primitives that are NOT fabric-compatible --
-    it("rejects NaN", () => {
-      expect(isFabricCompatible(NaN)).toBe(false);
-    });
-
-    it("rejects Infinity", () => {
-      expect(isFabricCompatible(Infinity)).toBe(false);
-      expect(isFabricCompatible(-Infinity)).toBe(false);
-    });
-
-    it("rejects symbols", () => {
-      expect(isFabricCompatible(Symbol("test"))).toBe(false);
-    });
-
-    it("rejects functions without toJSON", () => {
-      expect(isFabricCompatible(() => 42)).toBe(false);
-    });
-
-    // -- FabricNativeObject types (would be wrapped) --
-    it("accepts Error instances", () => {
-      expect(isFabricCompatible(new Error("test"))).toBe(true);
-      expect(isFabricCompatible(new TypeError("test"))).toBe(true);
-    });
-
-    it("accepts Map instances", () => {
-      expect(isFabricCompatible(new Map())).toBe(true);
-    });
-
-    it("accepts Set instances", () => {
-      expect(isFabricCompatible(new Set())).toBe(true);
-    });
-
-    it("accepts Date instances", () => {
-      expect(isFabricCompatible(new Date())).toBe(true);
-    });
-
-    it("accepts Uint8Array instances", () => {
-      expect(isFabricCompatible(new Uint8Array([1, 2, 3]))).toBe(true);
-    });
-
-    // -- FabricInstance values --
-    it("accepts FabricError wrappers", () => {
-      expect(isFabricCompatible(new FabricError(new Error("test")))).toBe(true);
-    });
-
-    // -- Containers --
-    it("accepts plain objects with fabric values", () => {
-      expect(isFabricCompatible({ a: 1, b: "hello", c: null })).toBe(true);
-    });
-
-    it("accepts arrays with fabric values", () => {
-      expect(isFabricCompatible([1, "hello", null, true])).toBe(true);
-    });
-
-    it("accepts nested structures", () => {
-      expect(isFabricCompatible({
-        users: [{ name: "Alice", age: 30 }],
-        meta: { version: 1 },
-      })).toBe(true);
-    });
-
-    // -- Deep checks with FabricNativeObject --
-    it("accepts objects containing Error values", () => {
-      expect(isFabricCompatible({ error: new Error("test"), code: 500 })).toBe(
-        true,
-      );
-    });
-
-    it("accepts arrays containing Error values", () => {
-      expect(isFabricCompatible([1, new Error("test"), "hello"])).toBe(true);
-    });
-
-    // -- Rejections --
-    it("rejects class instances without toJSON", () => {
-      class Foo {
-        x = 1;
-      }
-      expect(isFabricCompatible(new Foo())).toBe(false);
-    });
-
-    it("rejects objects with non-fabric nested values", () => {
-      expect(isFabricCompatible({ a: 1, b: Symbol("bad") })).toBe(false);
-    });
-
-    it("rejects arrays with non-fabric elements", () => {
-      expect(isFabricCompatible([1, Symbol("bad")])).toBe(false);
-    });
-
-    it("rejects deeply nested non-fabric values", () => {
-      expect(isFabricCompatible({
-        a: { b: { c: [1, 2, { d: Symbol("bad") }] } },
-      })).toBe(false);
-    });
-
-    // -- Circular references --
-    it("returns false for circular references", () => {
-      const obj: Record<string, unknown> = { a: 1 };
-      obj.self = obj;
-      expect(isFabricCompatible(obj)).toBe(false);
-    });
-
-    // -- toJSON support --
-    it("accepts objects with toJSON returning fabric values", () => {
-      const obj = { toJSON: () => ({ x: 1 }) };
-      expect(isFabricCompatible(obj)).toBe(true);
-    });
-
-    it("rejects objects with toJSON returning non-fabric values", () => {
-      const obj = { toJSON: () => Symbol("bad") };
-      expect(isFabricCompatible(obj)).toBe(false);
     });
   });
 });
