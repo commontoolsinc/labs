@@ -93,6 +93,7 @@ import {
   type SanitizeSchemaForLinksOptions,
   toMemorySpaceAddress,
 } from "./link-utils.ts";
+import { isCellScope } from "./scope.ts";
 import type {
   ChangeGroup,
   IExtendedStorageTransaction,
@@ -1164,7 +1165,15 @@ export class CellImpl<T extends FabricValue>
       const asCellValues = ContextualFlowControl.getAsCellValues(childSchema);
       // we can override the kind of cell we use for a key
       if (asCellValues.length > 0) {
-        kind = asCellValues[0];
+        const asCellEntry = asCellValues[0];
+        const asCellKind = ContextualFlowControl.getAsCellKind(asCellEntry);
+        if (asCellKind !== undefined) {
+          kind = asCellKind;
+        }
+        const asCellScope = ContextualFlowControl.getAsCellScope(asCellEntry);
+        if (isCellScope(asCellScope)) {
+          currentLink = { ...currentLink, scope: asCellScope };
+        }
       }
     }
 

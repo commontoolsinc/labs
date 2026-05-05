@@ -2420,7 +2420,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     const schemaObj = resolved;
     const asCellValues = ContextualFlowControl.getAsCellValues(schemaObj);
     // Don't walk into opaque cells
-    if (asCellValues.at(0) === "opaque") {
+    if (ContextualFlowControl.getAsCellKind(asCellValues.at(0)) === "opaque") {
       const newLink = link ?? getNormalizedLink(
         doc.address,
         schemaObj,
@@ -3059,7 +3059,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     // In the case of an opaque cell, we want to skip any deeper reads
     // This means we don't follow any redirects
     const asCellValues = ContextualFlowControl.getAsCellValues(schema);
-    if (asCellValues.at(0) === "opaque") {
+    if (ContextualFlowControl.getAsCellKind(asCellValues.at(0)) === "opaque") {
       const cellLink = getNextCellLink(doc, schema);
       return { ok: this.objectCreator.createObject(cellLink, undefined) };
     }
@@ -3096,7 +3096,10 @@ export class SchemaObjectTraverser<V extends FabricValue>
         const asCellValues = ContextualFlowControl.getAsCellValues(
           schema,
         );
-        if (schema !== undefined && asCellValues.at(0) === "stream") {
+        if (
+          schema !== undefined &&
+          ContextualFlowControl.getAsCellKind(asCellValues.at(0)) === "stream"
+        ) {
           const cellLink = getNormalizedLink(
             redirDoc.address,
             schema,

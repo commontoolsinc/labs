@@ -1,7 +1,12 @@
 import { type ImmutableJSONValue, JSONSchemaObj } from "@commonfabric/api";
 import { isRecord } from "@commonfabric/utils/types";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
-import type { CellKind, JSONSchema } from "./builder/types.ts";
+import type {
+  AsCellEntry,
+  CellKind,
+  JSONSchema,
+  LinkScope,
+} from "./builder/types.ts";
 import { CycleTracker } from "./traverse.ts";
 import { isArrayIndexPropertyName } from "@commonfabric/data-model/fabric-value";
 import { uniqueCfcAtoms } from "./cfc/observation.ts";
@@ -482,7 +487,9 @@ export class ContextualFlowControl {
 
   // Utility function to handle the legacy asCell and asStream tags, as well
   // as the modern asCell array tag.
-  static getAsCellValues(schema: JSONSchema | undefined): readonly CellKind[] {
+  static getAsCellValues(
+    schema: JSONSchema | undefined,
+  ): readonly AsCellEntry[] {
     // Support both modern and legacy versions
     if (isRecord(schema)) {
       if (Array.isArray(schema.asCell)) {
@@ -494,5 +501,15 @@ export class ContextualFlowControl {
       }
     }
     return [];
+  }
+
+  static getAsCellKind(entry: AsCellEntry | undefined): CellKind | undefined {
+    return typeof entry === "string" ? entry : entry?.kind;
+  }
+
+  static getAsCellScope(
+    entry: AsCellEntry | undefined,
+  ): LinkScope | "any" | undefined {
+    return typeof entry === "string" ? undefined : entry?.scope;
   }
 }
