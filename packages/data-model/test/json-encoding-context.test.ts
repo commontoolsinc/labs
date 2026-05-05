@@ -420,6 +420,121 @@ describe("JsonEncodingContext", () => {
   });
 
   // --------------------------------------------------------------------------
+  // SpecialNumber (-0, NaN, +/-Infinity)
+  // --------------------------------------------------------------------------
+
+  describe("SpecialNumber", () => {
+    it('serializes -0 to /SpecialNumber@1 with state "-0"', () => {
+      expect(toWireFormat(-0)).toEqual({ "/SpecialNumber@1": "-0" });
+    });
+
+    it('serializes NaN to /SpecialNumber@1 with state "NaN"', () => {
+      expect(toWireFormat(NaN)).toEqual({ "/SpecialNumber@1": "NaN" });
+    });
+
+    it('serializes +Infinity to /SpecialNumber@1 with state "+Infinity"', () => {
+      expect(toWireFormat(Infinity)).toEqual({
+        "/SpecialNumber@1": "+Infinity",
+      });
+    });
+
+    it('serializes -Infinity to /SpecialNumber@1 with state "-Infinity"', () => {
+      expect(toWireFormat(-Infinity)).toEqual({
+        "/SpecialNumber@1": "-Infinity",
+      });
+    });
+
+    it("does not intercept +0 (round-trips as a plain number)", () => {
+      expect(toWireFormat(0)).toBe(0);
+      expect(roundTrip(0)).toBe(0);
+    });
+
+    it("round-trips -0 (preserves sign of zero)", () => {
+      const result = roundTrip(-0);
+      expect(Object.is(result, -0)).toBe(true);
+    });
+
+    it("round-trips NaN", () => {
+      expect(Number.isNaN(roundTrip(NaN))).toBe(true);
+    });
+
+    it("round-trips +Infinity", () => {
+      expect(roundTrip(Infinity)).toBe(Infinity);
+    });
+
+    it("round-trips -Infinity", () => {
+      expect(roundTrip(-Infinity)).toBe(-Infinity);
+    });
+
+    it('any NaN bit pattern serializes as the literal "NaN"', () => {
+      const view = new DataView(new ArrayBuffer(8));
+      view.setBigUint64(0, 0x7ff8000000000001n, false);
+      const nonCanonicalNaN = view.getFloat64(0, false);
+      expect(Number.isNaN(nonCanonicalNaN)).toBe(true);
+      expect(toWireFormat(nonCanonicalNaN)).toEqual({
+        "/SpecialNumber@1": "NaN",
+      });
+    });
+
+    it("round-trips inside arrays", () => {
+      const arr = [1, NaN, -0, Infinity, -Infinity, 2] as FabricValue;
+      const result = roundTrip(arr) as number[];
+      expect(result[0]).toBe(1);
+      expect(Number.isNaN(result[1])).toBe(true);
+      expect(Object.is(result[2], -0)).toBe(true);
+      expect(result[3]).toBe(Infinity);
+      expect(result[4]).toBe(-Infinity);
+      expect(result[5]).toBe(2);
+    });
+
+    it("round-trips as object values", () => {
+      const obj = {
+        nz: -0,
+        nan: NaN,
+        pinf: Infinity,
+        ninf: -Infinity,
+      } as unknown as FabricValue;
+      const result = roundTrip(obj) as Record<string, number>;
+      expect(Object.is(result.nz, -0)).toBe(true);
+      expect(Number.isNaN(result.nan)).toBe(true);
+      expect(result.pinf).toBe(Infinity);
+      expect(result.ninf).toBe(-Infinity);
+    });
+
+    it("non-string state -> ProblematicValue (lenient)", () => {
+      const ctx = new JsonEncodingContext({ lenient: true });
+      const runtime: ReconstructionContext = {
+        getCell(_ref) {
+          throw new Error("getCell not implemented in test runtime");
+        },
+      };
+      const encoded = ENCODING_PREFIX +
+        JSON.stringify({ "/SpecialNumber@1": 0 });
+      const result = ctx.decode(encoded, runtime);
+      expect(result).toBeInstanceOf(ProblematicValue);
+      expect((result as unknown as ProblematicValue).typeTag).toBe(
+        "SpecialNumber@1",
+      );
+    });
+
+    it("unknown literal -> ProblematicValue (lenient)", () => {
+      const ctx = new JsonEncodingContext({ lenient: true });
+      const runtime: ReconstructionContext = {
+        getCell(_ref) {
+          throw new Error("getCell not implemented in test runtime");
+        },
+      };
+      const encoded = ENCODING_PREFIX +
+        JSON.stringify({ "/SpecialNumber@1": "Infinity" }); // missing leading +
+      const result = ctx.decode(encoded, runtime);
+      expect(result).toBeInstanceOf(ProblematicValue);
+      expect((result as unknown as ProblematicValue).typeTag).toBe(
+        "SpecialNumber@1",
+      );
+    });
+  });
+
+  // --------------------------------------------------------------------------
   // FabricEpochNsec
   // --------------------------------------------------------------------------
 
