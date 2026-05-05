@@ -584,7 +584,7 @@ export const parseCfHarnessCliArgs = async (
     imagePaths.map((path) =>
       createHarnessImageAttachment({
         workspaceHostPath: workspace,
-        cwd,
+        cwd: workspace,
         path,
       })
     ),

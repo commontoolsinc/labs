@@ -1,5 +1,5 @@
 import { encodeBase64 } from "@std/encoding/base64";
-import { extname, relative, resolve } from "@std/path";
+import { extname, isAbsolute, relative, resolve } from "@std/path";
 import {
   HARNESS_IMAGE_ATTACHMENT_TYPE,
   type HarnessImageAttachment,
@@ -14,6 +14,7 @@ const IMAGE_MEDIA_TYPES = new Set<HarnessImageMediaType>([
   "image/png",
   "image/webp",
 ]);
+const WINDOWS_ABSOLUTE_PATH_PATTERN = /^(?:[A-Za-z]:[\\/]|[\\/]{2})/;
 
 const sha256Digest = async (content: Uint8Array): Promise<string> => {
   const digestInput = new ArrayBuffer(content.byteLength);
@@ -102,16 +103,23 @@ const detectImageMediaType = (
   return mediaTypeFromExtension(path);
 };
 
+export const isRelativePathWithinWorkspace = (
+  relativePath: string,
+): boolean =>
+  relativePath === "" ||
+  !(
+    relativePath === ".." ||
+    relativePath.startsWith("../") ||
+    relativePath.startsWith("..\\") ||
+    isAbsolute(relativePath) ||
+    WINDOWS_ABSOLUTE_PATH_PATTERN.test(relativePath)
+  );
+
 const assertPathWithinWorkspace = (
   workspaceHostPath: string,
   hostPath: string,
 ): void => {
-  const relativePath = relative(workspaceHostPath, hostPath);
-  if (
-    relativePath === ".." ||
-    relativePath.startsWith("../") ||
-    relativePath.startsWith("..\\")
-  ) {
+  if (!isRelativePathWithinWorkspace(relative(workspaceHostPath, hostPath))) {
     throw new Error("--image paths must stay within the workspace");
   }
 };

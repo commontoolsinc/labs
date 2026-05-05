@@ -166,9 +166,9 @@ deno task run -- \
 ```
 
 `--image` is repeatable and accepts `png`, `jpeg`, `gif`, and `webp` files
-inside the workspace. The transcript retains only image metadata (`hostPath`,
-media type, byte count, digest); base64 pixels are materialized only for the
-gateway request.
+inside the workspace. Relative image paths are resolved from `--workspace`. The
+transcript retains only image metadata (`hostPath`, media type, byte count,
+digest); base64 pixels are materialized only for the gateway request.
 
 Explicit skill preload:
 

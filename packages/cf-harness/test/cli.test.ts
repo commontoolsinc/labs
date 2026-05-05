@@ -76,6 +76,7 @@ Deno.test("parseCfHarnessCliArgs resolves defaults from cwd and positional promp
 
 Deno.test("parseCfHarnessCliArgs resolves image attachments within the workspace", async () => {
   const workspace = await Deno.makeTempDir();
+  const launcherCwd = await Deno.makeTempDir();
   await Deno.writeFile(join(workspace, "capture.png"), ONE_PIXEL_PNG);
 
   const parsed = await parseCfHarnessCliArgs(
@@ -88,7 +89,7 @@ Deno.test("parseCfHarnessCliArgs resolves image attachments within the workspace
       "Describe the image",
     ],
     {
-      cwd: workspace,
+      cwd: launcherCwd,
       env: {},
     },
   );
