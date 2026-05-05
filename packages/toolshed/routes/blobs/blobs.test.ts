@@ -8,6 +8,7 @@ import env from "@/env.ts";
 import { Identity } from "@commonfabric/identity";
 import { FabricBytes } from "@commonfabric/data-model/fabric-bytes";
 import { hashOf } from "@commonfabric/data-model/value-hash";
+import { JsonEncodingContext } from "@commonfabric/data-model/json-encoding-context";
 import { encodeMemoryBoundary } from "@commonfabric/memory/v2";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -17,6 +18,7 @@ import {
   setJsonEncodingConfig,
 } from "@commonfabric/data-model/json-encoding";
 import {
+  type FabricValue,
   getDataModelConfig,
   resetDataModelConfig,
   setDataModelConfig,
@@ -56,6 +58,8 @@ const withUnifiedJsonEncoding = async <T>(
 const encodeBlobPayload = (payload: { type: string; body: FabricBytes }) =>
   encodeMemoryBoundary(payload);
 
+const blobUploadEncoding = new JsonEncodingContext();
+
 describe("Blob Routes", () => {
   afterEach(async () => {
     await memoryServer.flushSessions();
@@ -88,6 +92,41 @@ describe("Blob Routes", () => {
       expect(get.headers.get("Content-Type")).toBe("image/gif");
       expect(new Uint8Array(await get.arrayBuffer())).toEqual(bytes);
     });
+  });
+
+  it("accepts blob upload encoding without ambient unified JSON flags", async () => {
+    const identity = await Identity.fromPassphrase(
+      "toolshed-blob-route-explicit-codec",
+    );
+    const bytes = new Uint8Array([71, 73, 70, 56, 57, 97]);
+    const contents = {
+      type: "image/gif",
+      body: new FabricBytes(bytes),
+    };
+    const id = hashOf(contents).toString();
+    const hash = id.slice("fid1:".length);
+
+    setDataModelConfig(false);
+    setJsonEncodingConfig(false);
+    try {
+      const post = await app.request(`/${identity.did()}/blobs/image.gif`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: blobUploadEncoding.encode(contents as FabricValue),
+      });
+      expect(post.status).toBe(201);
+      expect(await post.json()).toEqual({
+        id,
+        url: `blobs/${hash}.gif`,
+      });
+
+      const get = await app.request(`/${identity.did()}/blobs/${hash}.gif`);
+      expect(get.status).toBe(200);
+      expect(new Uint8Array(await get.arrayBuffer())).toEqual(bytes);
+    } finally {
+      resetDataModelConfig();
+      resetJsonEncodingConfig();
+    }
   });
 
   it("stores blob contents as a cell document value", async () => {

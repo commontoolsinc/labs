@@ -9,7 +9,10 @@ import { FabricBytes } from "@commonfabric/data-model/fabric-bytes";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { JsonEncodingContext } from "@commonfabric/data-model/json-encoding-context";
 import type { ReconstructionContext } from "@commonfabric/data-model/fabric-value";
-import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
+import {
+  decodeMemoryBoundary,
+  encodeMemoryBoundary,
+} from "@commonfabric/memory/v2";
 import type { Context } from "@hono/hono";
 
 const router = createRouter();
@@ -52,6 +55,37 @@ class BlobPayloadTooLarge extends Error {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
+const toByteArray = (value: unknown): Uint8Array | undefined => {
+  if (value instanceof Uint8Array) {
+    return value;
+  }
+  if (
+    Array.isArray(value) &&
+    value.every((item) => Number.isInteger(item) && item >= 0 && item <= 255)
+  ) {
+    return Uint8Array.from(value);
+  }
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const entries = Object.entries(value)
+    .map(([key, item]) => [Number(key), item] as const)
+    .filter(([index, item]) =>
+      Number.isInteger(index) && index >= 0 &&
+      typeof item === "number" && Number.isInteger(item) &&
+      item >= 0 && item <= 255
+    )
+    .toSorted(([left], [right]) => left - right);
+  if (
+    entries.length === 0 ||
+    entries.some(([index], position) => index !== position)
+  ) {
+    return undefined;
+  }
+  return Uint8Array.from(entries.map(([, item]) => item as number));
+};
+
 const asBlobContents = (value: unknown): BlobContents | undefined => {
   if (!isRecord(value) || typeof value.type !== "string") {
     return undefined;
@@ -59,8 +93,24 @@ const asBlobContents = (value: unknown): BlobContents | undefined => {
   if (value.body instanceof FabricBytes) {
     return { type: value.type, body: value.body };
   }
+  const bytes = toByteArray(value.body);
+  if (bytes) {
+    return { type: value.type, body: new FabricBytes(bytes) };
+  }
   return undefined;
 };
+
+const memoryBoundaryPreservesBlobContents = (contents: BlobContents): boolean =>
+  asBlobContents(decodeMemoryBoundary(encodeMemoryBoundary(contents))) !==
+    undefined;
+
+const storedBlobValue = (contents: BlobContents): BlobContents | {
+  type: string;
+  body: number[];
+} =>
+  memoryBoundaryPreservesBlobContents(contents)
+    ? contents
+    : { type: contents.type, body: Array.from(contents.body.slice()) };
 
 const parseBlobName = (
   blobName: string,
@@ -173,7 +223,7 @@ const upload = async (c: Context) => {
   await memoryServer.writeDocument(
     spaceDid,
     `cid:${id}`,
-    contents,
+    storedBlobValue(contents),
   );
 
   return c.json({ id, url: `blobs/${hash}.${suffix}` }, 201);
