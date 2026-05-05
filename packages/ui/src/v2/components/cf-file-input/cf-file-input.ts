@@ -39,8 +39,8 @@ export type FileData = StoredFile;
  * @attr {number} maxSizeBytes - Max size warning threshold (default: none)
  * @attr {boolean} includeData - Include a data URL in emitted file descriptors
  *
- * @fires cf-change - Fired when file(s) are added. detail: { files: StoredFile[], allFiles: StoredFile[] }
- * @fires cf-remove - Fired when a file is removed. detail: { id: string, files: FileData[] }
+ * @fires cf-change - Fired when file(s) are added or removed. On add, files contains the newly added files. On remove, files contains the updated full list for compatibility. detail: { files: StoredFile[], allFiles: StoredFile[] }
+ * @fires cf-remove - Fired when a file is removed. detail: { id: string, files: StoredFile[], allFiles: StoredFile[] }
  * @fires cf-error - Fired when an error occurs. detail: { error: Error, message: string }
  *
  * @example
@@ -481,11 +481,8 @@ export class CFFileInput extends BaseElement {
     const currentFiles = this.getFiles();
     const updatedFiles = currentFiles.filter((file) => file.id !== id);
     this.setFiles(updatedFiles);
-    this.emit("cf-remove", { id, files: updatedFiles });
-  }
-
-  override willUpdate(changedProperties: Map<string, any>) {
-    super.willUpdate(changedProperties);
+    this.emit("cf-remove", { id, files: updatedFiles, allFiles: updatedFiles });
+    this.emit("cf-change", { files: updatedFiles, allFiles: updatedFiles });
   }
 
   override updated(changedProperties: Map<string, any>) {

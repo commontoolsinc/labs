@@ -84,6 +84,13 @@ import {
 } from "./features/backlinks.ts";
 import { createProseMarkdownPlugin } from "./features/prose-markdown.ts";
 
+function escapeMarkdownImageAltText(text: string): string {
+  return text.replace(/\\/g, "\\\\")
+    .replace(/\[/g, "\\[")
+    .replace(/\]/g, "\\]")
+    .replace(/\r?\n/g, " ");
+}
+
 /**
  * Supported MIME types for syntax highlighting
  */
@@ -1523,7 +1530,9 @@ export class CFCodeEditor extends BaseElement {
       }
 
       const markdown = storedFiles
-        .map((file) => `![${file.name}](${file.url})`)
+        .map((file) =>
+          `![${escapeMarkdownImageAltText(file.name)}](${file.url})`
+        )
         .join("\n");
       const selection = view.state.selection.main;
       view.dispatch({

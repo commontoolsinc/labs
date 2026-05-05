@@ -71,8 +71,8 @@ export interface ImageData extends StoredFile {
  * @attr {boolean} removable - Allow removing images (default: true)
  * @attr {boolean} disabled - Disable the input
  *
- * @fires cf-change - Fired when image(s) are added. detail: { images: ImageData[], allImages: ImageData[] }
- * @fires cf-remove - Fired when an image is removed. detail: { id: string, images: ImageData[] }
+ * @fires cf-change - Fired when image(s) are added or removed. On add, images contains the newly added images. On remove, images contains the updated full list for compatibility. detail: { images: ImageData[], allImages: ImageData[] }
+ * @fires cf-remove - Fired when an image is removed. detail: { id: string, images: ImageData[], allImages: ImageData[] }
  * @fires cf-error - Fired when an error occurs. detail: { error: Error, message: string }
  *
  * @example
@@ -211,25 +211,20 @@ function readImageDimensions(
   file: File,
 ): Promise<Pick<ImageData, "width" | "height">> {
   const objectUrl = URL.createObjectURL(file);
-  try {
-    return new Promise((resolve, reject) => {
-      const img = new Image();
+  return new Promise((resolve, reject) => {
+    const img = new Image();
 
-      img.onload = () => {
-        URL.revokeObjectURL(objectUrl);
-        resolve({ width: img.width, height: img.height });
-      };
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve({ width: img.width, height: img.height });
+    };
 
-      img.onerror = () => {
-        URL.revokeObjectURL(objectUrl);
-        reject(new Error("Failed to load image"));
-      };
-      img.src = objectUrl;
-    });
-  } catch (error) {
-    URL.revokeObjectURL(objectUrl);
-    throw error;
-  }
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("Failed to load image"));
+    };
+    img.src = objectUrl;
+  });
 }
 
 customElements.define("cf-image-input", CFImageInput);
