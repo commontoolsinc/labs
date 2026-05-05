@@ -7,20 +7,8 @@ import { memoryServer } from "@/routes/storage/memory.ts";
 import { isDID } from "@commonfabric/identity";
 import { FabricBytes } from "@commonfabric/data-model/fabric-bytes";
 import { hashOf } from "@commonfabric/data-model/value-hash";
-import {
-  getDataModelConfig,
-  resetDataModelConfig,
-  setDataModelConfig,
-} from "@commonfabric/data-model/fabric-value";
-import {
-  decodeMemoryBoundary,
-  encodeMemoryBoundary,
-} from "@commonfabric/memory/v2";
-import {
-  getJsonEncodingConfig,
-  resetJsonEncodingConfig,
-  setJsonEncodingConfig,
-} from "@commonfabric/data-model/json-encoding";
+import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
+import type { Context } from "@hono/hono";
 
 const router = createRouter();
 
@@ -37,28 +25,7 @@ const DEFAULT_SUFFIX_BY_TYPE: Record<string, string> = {
   "image/svg+xml": "svg",
 };
 
-const withUnifiedJsonEncoding = async <T>(
-  fn: () => Promise<T> | T,
-): Promise<T> => {
-  const previous = getJsonEncodingConfig();
-  const previousDataModel = getDataModelConfig();
-  setDataModelConfig(true);
-  setJsonEncodingConfig(true);
-  try {
-    return await fn();
-  } finally {
-    if (previousDataModel) {
-      setDataModelConfig(true);
-    } else {
-      resetDataModelConfig();
-    }
-    if (previous) {
-      setJsonEncodingConfig(true);
-    } else {
-      resetJsonEncodingConfig();
-    }
-  }
-};
+const VALID_SUFFIX = /^[A-Za-z0-9]{1,8}$/;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -73,9 +40,17 @@ const asBlobContents = (value: unknown): BlobContents | undefined => {
   return undefined;
 };
 
-const parseBlobName = (blobName: string): { id: string; hash: string } => {
-  const hash = blobName.split(".")[0] ?? "";
-  const id = hash.startsWith("fid1:") ? hash : `fid1:${hash}`;
+const parseBlobName = (
+  blobName: string,
+): { id: string; hash: string } | undefined => {
+  const hashSegment = blobName.split(".")[0] ?? "";
+  const id = hashSegment.startsWith("fid1:")
+    ? hashSegment
+    : `fid1:${hashSegment}`;
+  const hash = id.slice("fid1:".length);
+  if (hash.length === 0) {
+    return undefined;
+  }
   return { id, hash: id.slice("fid1:".length) };
 };
 
@@ -83,7 +58,7 @@ const suffixFor = (blobName: string | undefined, type: string): string => {
   const extension = blobName?.includes(".")
     ? blobName.split(".").pop()
     : undefined;
-  if (extension) return extension;
+  if (extension && VALID_SUFFIX.test(extension)) return extension;
   return DEFAULT_SUFFIX_BY_TYPE[type] ?? "bin";
 };
 
@@ -92,9 +67,7 @@ const readRequestContents = async (request: Request) => {
   if (!source) {
     return undefined;
   }
-  return await withUnifiedJsonEncoding(() =>
-    asBlobContents(decodeMemoryBoundary(source))
-  );
+  return asBlobContents(decodeMemoryBoundary(source));
 };
 
 const loadBlobContents = async (
@@ -104,12 +77,11 @@ const loadBlobContents = async (
   const document = await memoryServer.readDocument(
     spaceDid,
     `cid:${id}`,
-    { unifiedJsonEncoding: true },
   );
   return asBlobContents(document?.value);
 };
 
-const upload = async (c: any) => {
+const upload = async (c: Context) => {
   const spaceDid = c.req.param("spaceDid");
   if (!isDID(spaceDid)) {
     return c.text("Invalid space DID", 400);
@@ -133,7 +105,6 @@ const upload = async (c: any) => {
     spaceDid,
     `cid:${id}`,
     contents,
-    { unifiedJsonEncoding: true },
   );
 
   return c.json({ id, url: `blobs/${hash}.${suffix}` }, 201);
@@ -148,7 +119,11 @@ router.get("/:spaceDid/blobs/:blobName", async (c) => {
     return c.text("Invalid space DID", 400);
   }
 
-  const { id } = parseBlobName(c.req.param("blobName"));
+  const parsed = parseBlobName(c.req.param("blobName"));
+  if (!parsed) {
+    return c.text("Invalid blob name", 400);
+  }
+  const { id } = parsed;
   const contents = await loadBlobContents(spaceDid, id);
   if (!contents) {
     return c.text("Blob not found", 404);
@@ -164,8 +139,5 @@ router.get("/:spaceDid/blobs/:blobName", async (c) => {
     },
   });
 });
-
-export const encodeBlobContents = (contents: BlobContents): string =>
-  encodeMemoryBoundary(contents);
 
 export default router;

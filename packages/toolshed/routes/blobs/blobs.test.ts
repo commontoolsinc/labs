@@ -1,4 +1,4 @@
-import { describe, it } from "@std/testing/bdd";
+import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import createApp from "@/lib/create-app.ts";
 import router from "./blobs.index.ts";
@@ -30,20 +30,22 @@ const app = createApp()
   .route("/", memory)
   .route("/", router);
 
-const withUnifiedJsonEncoding = <T>(fn: () => T): T => {
-  const previous = getJsonEncodingConfig();
+const withUnifiedJsonEncoding = async <T>(
+  fn: () => Promise<T> | T,
+): Promise<T> => {
+  const previousJson = getJsonEncodingConfig();
   const previousDataModel = getDataModelConfig();
   setDataModelConfig(true);
   setJsonEncodingConfig(true);
   try {
-    return fn();
+    return await fn();
   } finally {
     if (previousDataModel) {
       setDataModelConfig(true);
     } else {
       resetDataModelConfig();
     }
-    if (previous) {
+    if (previousJson) {
       setJsonEncodingConfig(true);
     } else {
       resetJsonEncodingConfig();
@@ -52,9 +54,13 @@ const withUnifiedJsonEncoding = <T>(fn: () => T): T => {
 };
 
 const encodeBlobPayload = (payload: { type: string; body: FabricBytes }) =>
-  withUnifiedJsonEncoding(() => encodeMemoryBoundary(payload));
+  encodeMemoryBoundary(payload);
 
 describe("Blob Routes", () => {
+  afterEach(async () => {
+    await memoryServer.flushSessions();
+  });
+
   it("stores and serves a FabricBytes blob by content id", async () => {
     const identity = await Identity.fromPassphrase("toolshed-blob-route");
     const bytes = new Uint8Array([71, 73, 70, 56, 57, 97]);
@@ -65,21 +71,23 @@ describe("Blob Routes", () => {
     const id = hashOf(contents).toString();
     const hash = id.slice("fid1:".length);
 
-    const post = await app.request(`/${identity.did()}/blobs/image.gif`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: encodeBlobPayload(contents),
-    });
-    expect(post.status).toBe(201);
-    expect(await post.json()).toEqual({
-      id,
-      url: `blobs/${hash}.gif`,
-    });
+    await withUnifiedJsonEncoding(async () => {
+      const post = await app.request(`/${identity.did()}/blobs/image.gif`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: encodeBlobPayload(contents),
+      });
+      expect(post.status).toBe(201);
+      expect(await post.json()).toEqual({
+        id,
+        url: `blobs/${hash}.gif`,
+      });
 
-    const get = await app.request(`/${identity.did()}/blobs/${hash}.png`);
-    expect(get.status).toBe(200);
-    expect(get.headers.get("Content-Type")).toBe("image/gif");
-    expect(new Uint8Array(await get.arrayBuffer())).toEqual(bytes);
+      const get = await app.request(`/${identity.did()}/blobs/${hash}.png`);
+      expect(get.status).toBe(200);
+      expect(get.headers.get("Content-Type")).toBe("image/gif");
+      expect(new Uint8Array(await get.arrayBuffer())).toEqual(bytes);
+    });
   });
 
   it("stores blob contents as a cell document value", async () => {
@@ -93,68 +101,105 @@ describe("Blob Routes", () => {
     const cid = `cid:${id}` as const;
     const hash = id.slice("fid1:".length);
 
-    const post = await app.request(`/${identity.did()}/blobs/image.png`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: encodeBlobPayload(contents),
-    });
-    expect(post.status).toBe(201);
-
-    const document = await memoryServer.readDocument(
-      identity.did(),
-      cid,
-      { unifiedJsonEncoding: true },
-    );
-    expect(document?.value).toEqual(contents);
-
-    const server = Deno.serve({ port: 0 }, app.fetch);
-    const base = new URL(`http://${server.addr.hostname}:${server.addr.port}`);
-    const runtime = new Runtime({
-      apiUrl: base,
-      storageManager: StorageManager.open({
-        as: identity,
-        address: new URL("/api/storage/memory", base),
-      }),
-      experimental: {
-        modernDataModel: true,
-        unifiedJsonEncoding: true,
-      },
-    });
-
-    try {
-      const provider = runtime.storageManager.open(identity.did());
-      const sync = await provider.sync(cid, {
-        path: [],
-        schema: false,
+    await withUnifiedJsonEncoding(async () => {
+      const post = await app.request(`/${identity.did()}/blobs/image.png`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: encodeBlobPayload(contents),
       });
-      expect(sync).toEqual({ ok: {} });
+      expect(post.status).toBe(201);
 
-      const cell = runtime.getCellFromLink<{
-        type: string;
-        body: FabricBytes;
-      }>({
-        id: cid,
-        path: [],
-        space: identity.did(),
+      const document = await memoryServer.readDocument(
+        identity.did(),
+        cid,
+      );
+      expect(document?.value).toEqual(contents);
+
+      const server = Deno.serve({ port: 0 }, app.fetch);
+      const base = new URL(
+        `http://${server.addr.hostname}:${server.addr.port}`,
+      );
+      const runtime = new Runtime({
+        apiUrl: base,
+        storageManager: StorageManager.open({
+          as: identity,
+          address: new URL("/api/storage/memory", base),
+        }),
+        experimental: {
+          modernDataModel: true,
+          unifiedJsonEncoding: true,
+        },
       });
-      await cell.sync();
-      await runtime.storageManager.synced();
 
-      const value = cell.get();
-      expect(value.type).toBe("image/png");
-      expect(value.body).toBeTruthy();
-      expect(value.body.constructor.name).toBe("FabricBytes");
-      expect((await post.json()).url).toBe(`blobs/${hash}.png`);
-    } finally {
-      await runtime.dispose();
-      await server.shutdown();
-    }
+      try {
+        const provider = runtime.storageManager.open(identity.did());
+        const sync = await provider.sync(cid, {
+          path: [],
+          schema: false,
+        });
+        expect(sync).toEqual({ ok: {} });
+
+        const cell = runtime.getCellFromLink<{
+          type: string;
+          body: FabricBytes;
+        }>({
+          id: cid,
+          path: [],
+          space: identity.did(),
+        });
+        await cell.sync();
+        await runtime.storageManager.synced();
+
+        const value = cell.get();
+        expect(value.type).toBe("image/png");
+        expect(value.body).toBeTruthy();
+        expect(value.body.constructor.name).toBe("FabricBytes");
+        expect((await post.json()).url).toBe(`blobs/${hash}.png`);
+      } finally {
+        await runtime.dispose();
+        await server.shutdown();
+      }
+    });
   });
 
   it("returns 404 for an absent blob", async () => {
     const identity = await Identity.fromPassphrase("toolshed-blob-route-404");
     const get = await app.request(`/${identity.did()}/blobs/missing.png`);
     expect(get.status).toBe(404);
+  });
+
+  it("returns 400 for a malformed blob name", async () => {
+    const identity = await Identity.fromPassphrase(
+      "toolshed-blob-route-bad-name",
+    );
+    const get = await app.request(`/${identity.did()}/blobs/.png`);
+    expect(get.status).toBe(400);
+  });
+
+  it("falls back to the MIME default for invalid upload suffixes", async () => {
+    const identity = await Identity.fromPassphrase(
+      "toolshed-blob-route-suffix",
+    );
+    const contents = {
+      type: "image/png",
+      body: new FabricBytes(new Uint8Array([1, 2, 3])),
+    };
+    const id = hashOf(contents).toString();
+    const hash = id.slice("fid1:".length);
+
+    const post = await withUnifiedJsonEncoding(() =>
+      app.request(`/${identity.did()}/blobs/image.toolonggg`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: encodeBlobPayload(contents),
+      })
+    );
+
+    expect(post.status).toBe(201);
+    expect(await post.json()).toEqual({
+      id,
+      url: `blobs/${hash}.png`,
+    });
   });
 
   it("rejects invalid blob payloads", async () => {

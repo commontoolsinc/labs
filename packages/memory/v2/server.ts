@@ -2,16 +2,6 @@ import * as FS from "@std/fs";
 import * as Path from "@std/path";
 import { resolveSpaceStoreUrl } from "./storage-path.ts";
 import {
-  getDataModelConfig,
-  resetDataModelConfig,
-  setDataModelConfig,
-} from "@commonfabric/data-model/fabric-value";
-import {
-  getJsonEncodingConfig,
-  resetJsonEncodingConfig,
-  setJsonEncodingConfig,
-} from "@commonfabric/data-model/json-encoding";
-import {
   type ClientCommit,
   type ClientMessage,
   decodeMemoryBoundary,
@@ -120,33 +110,6 @@ const toError = (name: string, message: string): V2Error => ({
   name,
   message,
 });
-
-const withEncodingConfig = async <T>(
-  enabled: boolean | undefined,
-  fn: () => Promise<T> | T,
-): Promise<T> => {
-  if (enabled === undefined) {
-    return await fn();
-  }
-  const previous = getJsonEncodingConfig();
-  const previousDataModel = getDataModelConfig();
-  setDataModelConfig(enabled);
-  setJsonEncodingConfig(enabled);
-  try {
-    return await fn();
-  } finally {
-    if (previousDataModel) {
-      setDataModelConfig(true);
-    } else {
-      resetDataModelConfig();
-    }
-    if (previous) {
-      setJsonEncodingConfig(true);
-    } else {
-      resetJsonEncodingConfig();
-    }
-  }
-};
 
 const respondTypedError = <Result>(
   requestId: string,
@@ -428,6 +391,7 @@ export class Server {
   #sessions: SessionRegistry;
   #connections = new Map<string, Connection>();
   #engines = new Map<string, Promise<Engine.Engine>>();
+  // Synthesized session state for direct out-of-band document writes, such as blob uploads.
   #directSessionId = `server:${crypto.randomUUID()}`;
   #directLocalSeq = 0;
   #dirtySpaces = new Set<string>();
@@ -485,43 +449,31 @@ export class Server {
   async readDocument(
     space: string,
     id: string,
-    options: { unifiedJsonEncoding?: boolean } = {},
   ): Promise<EntityDocument | null> {
-    return await withEncodingConfig(
-      options.unifiedJsonEncoding,
-      async () => {
-        const engine = await this.openEngine(space);
-        return Engine.read(engine, { id });
-      },
-    );
+    const engine = await this.openEngine(space);
+    return Engine.read(engine, { id });
   }
 
   async writeDocument(
     space: string,
     id: string,
     value: EntityDocument["value"],
-    options: { unifiedJsonEncoding?: boolean } = {},
   ): Promise<Engine.AppliedCommit> {
-    return await withEncodingConfig(
-      options.unifiedJsonEncoding,
-      async () => {
-        const engine = await this.openEngine(space);
-        const commit = Engine.applyCommit(engine, {
-          sessionId: this.#directSessionId,
-          commit: {
-            localSeq: ++this.#directLocalSeq,
-            reads: { confirmed: [], pending: [] },
-            operations: [{
-              op: "set",
-              id,
-              value: { value },
-            }],
-          },
-        });
-        this.markSpaceDirty(space, [id]);
-        return commit;
+    const engine = await this.openEngine(space);
+    const commit = Engine.applyCommit(engine, {
+      sessionId: this.#directSessionId,
+      commit: {
+        localSeq: ++this.#directLocalSeq,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id,
+          value: { value },
+        }],
       },
-    );
+    });
+    this.markSpaceDirty(space, [id]);
+    return commit;
   }
 
   async openSession(

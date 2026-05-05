@@ -12,16 +12,6 @@ import {
 } from "../protocol/mod.ts";
 import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
 import { FabricBytes } from "@commonfabric/data-model/fabric-bytes";
-import {
-  getDataModelConfig,
-  resetDataModelConfig,
-  setDataModelConfig,
-} from "@commonfabric/data-model/fabric-value";
-import {
-  getJsonEncodingConfig,
-  resetJsonEncodingConfig,
-  setJsonEncodingConfig,
-} from "@commonfabric/data-model/json-encoding";
 import { cellRefToSigilLink } from "./utils.ts";
 
 describe("sanitizeForPostMessage", () => {
@@ -398,36 +388,13 @@ describe("RuntimeProcessor diagnosis helpers", () => {
 });
 
 describe("RuntimeProcessor blob upload IPC", () => {
-  const withUnifiedEncoding = <T>(fn: () => T): T => {
-    const previousDataModel = getDataModelConfig();
-    const previousJson = getJsonEncodingConfig();
-    setDataModelConfig(true);
-    setJsonEncodingConfig(true);
-    try {
-      return fn();
-    } finally {
-      if (previousDataModel) {
-        setDataModelConfig(true);
-      } else {
-        resetDataModelConfig();
-      }
-      if (previousJson) {
-        setJsonEncodingConfig(true);
-      } else {
-        resetJsonEncodingConfig();
-      }
-    }
-  };
-
   it("posts FabricBytes contents to the blob route and returns its URL", async () => {
     const originalFetch = globalThis.fetch;
     let requestedUrl: string | undefined;
     let requestedPayload: unknown;
     globalThis.fetch = (input, init) => {
       requestedUrl = input.toString();
-      requestedPayload = withUnifiedEncoding(() =>
-        decodeMemoryBoundary(init?.body as string)
-      );
+      requestedPayload = decodeMemoryBoundary(init?.body as string);
       return Promise.resolve(
         new Response(
           JSON.stringify({
@@ -441,6 +408,8 @@ describe("RuntimeProcessor blob upload IPC", () => {
         ),
       );
     };
+    // The constructor performs full runtime initialization; this focused unit
+    // test calls the handler with the fields it reads directly.
     const processor = {
       apiUrl: new URL("http://toolshed.test/base"),
       space: "did:key:test-space",

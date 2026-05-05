@@ -1,5 +1,16 @@
 import { assertEquals, assertExists } from "@std/assert";
 import { FakeTime } from "@std/testing/time";
+import { FabricBytes } from "@commonfabric/data-model/fabric-bytes";
+import {
+  getDataModelConfig,
+  resetDataModelConfig,
+  setDataModelConfig,
+} from "@commonfabric/data-model/fabric-value";
+import {
+  getJsonEncodingConfig,
+  resetJsonEncodingConfig,
+  setJsonEncodingConfig,
+} from "@commonfabric/data-model/json-encoding";
 import { parseClientMessage, Server, SessionRegistry } from "../v2/server.ts";
 import {
   encodeMemoryBoundary,
@@ -27,6 +38,29 @@ const HELLO_OK = {
 
 const tick = async () => {
   await new Promise((resolve) => setTimeout(resolve, 0));
+};
+
+const withUnifiedJsonEncoding = async <T>(
+  fn: () => Promise<T> | T,
+): Promise<T> => {
+  const previousJson = getJsonEncodingConfig();
+  const previousDataModel = getDataModelConfig();
+  setDataModelConfig(true);
+  setJsonEncodingConfig(true);
+  try {
+    return await fn();
+  } finally {
+    if (previousDataModel) {
+      setDataModelConfig(true);
+    } else {
+      resetDataModelConfig();
+    }
+    if (previousJson) {
+      setJsonEncodingConfig(true);
+    } else {
+      resetJsonEncodingConfig();
+    }
+  }
 };
 
 const shiftMessage = (messages: ServerMessage[]): ServerMessage => {
@@ -198,6 +232,32 @@ Deno.test("memory v2 server direct writes schedule dirty refreshes without conne
   } finally {
     await server.close();
     time.restore();
+  }
+});
+
+Deno.test("memory v2 server direct document helpers round-trip values", async () => {
+  const server = createServer("memory://memory-v2-server-direct-documents");
+  const space = "did:key:z6Mk-memory-v2-server-direct-documents";
+  const id = "cid:fid1:direct-document";
+  const contents = {
+    type: "image/png",
+    body: new FabricBytes(new Uint8Array([1, 2, 3, 4])),
+  };
+
+  try {
+    await withUnifiedJsonEncoding(async () => {
+      await server.writeDocument(space, id, contents);
+
+      assertEquals(await server.readDocument(space, id), {
+        value: contents,
+      });
+      assertEquals(
+        await server.readDocument(space, "cid:fid1:missing-document"),
+        null,
+      );
+    });
+  } finally {
+    await server.close();
   }
 });
 

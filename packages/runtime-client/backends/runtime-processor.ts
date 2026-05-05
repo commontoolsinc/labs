@@ -1,15 +1,5 @@
 import { DID, Identity, type Session } from "@commonfabric/identity";
-import {
-  getDataModelConfig,
-  resetDataModelConfig,
-  setDataModelConfig,
-} from "@commonfabric/data-model/fabric-value";
 import { FabricBytes } from "@commonfabric/data-model/fabric-bytes";
-import {
-  getJsonEncodingConfig,
-  resetJsonEncodingConfig,
-  setJsonEncodingConfig,
-} from "@commonfabric/data-model/json-encoding";
 import { encodeMemoryBoundary } from "@commonfabric/memory/v2";
 import { PieceManager } from "@commonfabric/piece";
 import { PiecesController } from "@commonfabric/piece/ops";
@@ -124,27 +114,6 @@ import type { VDomOp } from "../protocol/types.ts";
 import type { RuntimeOptions } from "@commonfabric/runner";
 
 const MAX_SERIALIZATION_DEPTH = 5;
-
-const withUnifiedEncoding = <T>(fn: () => T): T => {
-  const previousDataModel = getDataModelConfig();
-  const previousJson = getJsonEncodingConfig();
-  setDataModelConfig(true);
-  setJsonEncodingConfig(true);
-  try {
-    return fn();
-  } finally {
-    if (previousDataModel) {
-      setDataModelConfig(true);
-    } else {
-      resetDataModelConfig();
-    }
-    if (previousJson) {
-      setJsonEncodingConfig(true);
-    } else {
-      resetJsonEncodingConfig();
-    }
-  }
-};
 
 export function runtimeOptionsFromInitializationData(
   data: InitializationData,
@@ -872,12 +841,10 @@ export class RuntimeProcessor {
       `/${this.space}/blobs/upload.${encodeURIComponent(suffix)}`,
       this.apiUrl,
     );
-    const body = withUnifiedEncoding(() =>
-      encodeMemoryBoundary({
-        type: request.contentType,
-        body: new FabricBytes(request.body),
-      })
-    );
+    const body = encodeMemoryBoundary({
+      type: request.contentType,
+      body: new FabricBytes(request.body),
+    });
     const response = await fetch(target, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
