@@ -8,6 +8,11 @@ import {
   parseHarnessGatewayAuthMode,
 } from "./config.ts";
 import {
+  createHarnessImageAttachment,
+  parseImageAttachmentPaths,
+} from "./image-attachments.ts";
+import type { HarnessImageAttachment } from "./contracts/image.ts";
+import {
   readHarnessRunArtifacts,
   resolveHarnessRunPaths,
 } from "./artifacts.ts";
@@ -65,6 +70,7 @@ export interface CfHarnessCliConfig {
   streamEvents: boolean;
   promptSlotRole: PromptSlotRole;
   prompt?: string;
+  imageAttachments: readonly HarnessImageAttachment[];
   resumeRun?: string;
   systemPrompt?: string;
   skillsRoot?: string;
@@ -192,6 +198,7 @@ Options:
   --prompt-slot-role <role>     direct-command | context | quote (default: direct-command)
   --prompt <text>               Prompt text to run
   --prompt-file <path>          Read prompt text from a file
+  --image <path>                Attach an image file to the initial prompt (repeatable; png/jpeg/gif/webp)
   --resume-run <path>           Resume from a run root or run-state.json path
   --system-prompt <text>        Optional system prompt
   --skills-root <path>          Skill root containing <name>/SKILL.md
@@ -425,6 +432,7 @@ export const parseCfHarnessCliArgs = async (
       "prompt-slot-role",
       "prompt",
       "prompt-file",
+      "image",
       "system-prompt",
       "resume-run",
       "model",
@@ -446,7 +454,7 @@ export const parseCfHarnessCliArgs = async (
       "stream-events",
       "no-skill-catalog",
     ],
-    collect: ["allow-tool", "allow-subagent-profile", "skill"],
+    collect: ["allow-tool", "allow-subagent-profile", "skill", "image"],
     alias: {
       h: "help",
     },
@@ -533,6 +541,12 @@ export const parseCfHarnessCliArgs = async (
   if (resumeRun !== undefined && skillNames.length > 0) {
     throw new Error("--skill preloading is not supported with --resume-run");
   }
+  const imagePaths = parseImageAttachmentPaths(
+    args.image as string | readonly string[] | undefined,
+  );
+  if (resumeRun !== undefined && imagePaths.length > 0) {
+    throw new Error("--image is not supported with --resume-run");
+  }
   if (skillsRoot !== undefined) {
     await assertSkillsRootRealPathWithinWorkspace(workspace, skillsRoot);
   }
@@ -566,6 +580,15 @@ export const parseCfHarnessCliArgs = async (
   const gatewayAuthMode = parsedGatewayAuthMode ?? "bearer";
   const readTextFile = deps.readTextFile ?? Deno.readTextFile;
   const prompt = await resolvePrompt(args, cwd, readTextFile);
+  const imageAttachments = await Promise.all(
+    imagePaths.map((path) =>
+      createHarnessImageAttachment({
+        workspaceHostPath: workspace,
+        cwd,
+        path,
+      })
+    ),
+  );
   const env = deps.env ??
     {
       CF_HARNESS_API_KEY: Deno.env.get("CF_HARNESS_API_KEY"),
@@ -625,6 +648,7 @@ export const parseCfHarnessCliArgs = async (
     streamEvents: Boolean(args["stream-events"]),
     promptSlotRole: promptSlotRole ?? "direct-command",
     ...(prompt !== undefined ? { prompt } : {}),
+    imageAttachments,
     ...(resumeRun !== undefined ? { resumeRun } : {}),
     ...(typeof args["system-prompt"] === "string"
       ? { systemPrompt: args["system-prompt"] }
@@ -906,8 +930,12 @@ export const formatCfHarnessTranscriptEvent = (
   switch (message.role) {
     case "system":
       return undefined;
-    case "user":
-      return `user: ${message.content}\n`;
+    case "user": {
+      const imageCount = message.imageAttachments?.length ?? 0;
+      return imageCount > 0
+        ? `user: ${message.content}\nuser images: ${imageCount}\n`
+        : `user: ${message.content}\n`;
+    }
     case "assistant":
       if (message.toolCalls !== undefined && message.toolCalls.length > 0) {
         const tools = message.toolCalls.map((toolCall) => {
@@ -1176,6 +1204,7 @@ export const runCfHarnessCli = async (
       const contextMessages = await prepareSkillContextMessages(engine);
       result = await loop.runPrompt({
         prompt: parsed.prompt!,
+        imageAttachments: parsed.imageAttachments,
         systemPrompt: resolveCfHarnessCliSystemPrompt({
           ...parsed,
           fabricMountPath: parsed.fabricMount !== undefined
