@@ -83,7 +83,7 @@ type FabricValue =
   // (a) Primitives
   | null
   | boolean
-  | number    // finite only; `NaN` and `Infinity` rejected
+  | number    // any number, including `-0`, `NaN`, and `±Infinity`; see Section 1.3
   | string
   | undefined // first-class fabric value; requires tagged representation in formats lacking native `undefined`
   | bigint    // large integers; rides through without wrapping (like `undefined`)
@@ -170,7 +170,7 @@ member of `FabricValue`.
 |------|-------------|-------|
 | `null` | None | The null value |
 | `boolean` | None | `true` or `false` |
-| `number` | Must be finite | `-0` normalized to `0`; `NaN`/`Infinity` rejected |
+| `number` | None | Any IEEE 754 binary64 value, including `-0`, `NaN`, and `±Infinity`. Conversion-gate behavior is flag-bifurcated; see Section 4.9 and the callout below. |
 | `string` | None | Unicode text |
 | `undefined` | None | First-class fabric value; see note below |
 | `bigint` | None | Large integers; JSON-encoded as base64url (RFC 4648, Section 5) of two's complement big-endian bytes (Section 3 of `3-json-encoding.md`) |
@@ -186,19 +186,27 @@ member of `FabricValue`.
 > serializer faithfully records `undefined` and the application layer interprets
 > the result.
 
-> **`-0` normalization:** Negative zero (`-0`) is normalized to positive zero
-> (`0`) during fabric-value conversion (i.e., `shallowFabricFromNativeValue()`),
-> before the value reaches a serialization boundary. This matches
-> `JSON.stringify` behavior and ensures that `0` and `-0` produce the same
-> serialized form and hash. In the current codebase, this
-> normalization happens in `packages/data-model/fabric-value-modern.ts` at the
-> `shallowFabricFromNativeValueModern()` call site.
-
-> **Future: `-0` and non-finite numbers.** The current design normalizes `-0`
-> and rejects `NaN`/`Infinity`/`-Infinity`. Because the serialization system
-> uses typed tags (Section 5), a future version could represent these values
-> with full fidelity via dedicated type tags, without ambiguity. This option is
-> preserved by the architecture but not currently needed.
+> **`-0`, `NaN`, and `±Infinity`.** The hashing layer (Section 6.4 and
+> `2-hash-byte-format.md` Section 4.3) and the JSON wire format (Section 5;
+> `3-json-encoding.md` Section 3, `SpecialNumber@1`) both faithfully
+> represent `-0`, `NaN`, `+Infinity`, and `-Infinity` as first-class
+> values, distinct from `0` and from each other. Whether such values reach
+> those layers is gated by the `modernDataModel` conversion path
+> (Section 4.9):
+>
+> - **Modern path (`modernDataModel: true`):** All four values pass
+>   through `shallowFabricFromNativeValueModern()` and
+>   `fabricFromNativeValueModern()` unchanged — `-0` retains its sign
+>   (`Object.is(result, -0) === true`), and `NaN` / `±Infinity`
+>   round-trip through hashing and JSON encoding via the byte-level
+>   forms in `2-hash-byte-format.md` Section 4.3 and the
+>   `SpecialNumber@1` envelope in `3-json-encoding.md` Section 3.
+> - **Legacy path (`modernDataModel: false`):**
+>   `fabricFromNativeValueLegacy()` normalizes `-0` to `+0` and rejects
+>   `NaN` / `±Infinity` with a thrown error. Code paths that bypass the
+>   conversion gate (direct callers of the hasher or the JSON encoder)
+>   see the modern-path behavior regardless of the flag, since the
+>   lower-layer specs describe their own behavior unconditionally.
 
 ### 1.4 Native Object Wrapper Classes
 
@@ -1661,16 +1669,17 @@ The dispatch is configured by `setJsonEncodingConfig(enabled)` /
 `resetJsonEncodingConfig()`, called from the `Runtime` constructor and
 `Runtime.dispose()` respectively:
 
-- **Flag OFF (default):** `jsonFromValue` wraps `JSON.stringify` with a
+- **Flag ON (current default):** `jsonFromValue` routes through
+  `JsonEncodingContext.encode()`, `valueFromJson` routes through
+  `JsonEncodingContext.decode()`. Modern types are preserved across the
+  storage boundary.
+- **Flag OFF (legacy path):** `jsonFromValue` wraps `JSON.stringify` with a
   defensive guard that throws if the result is `undefined` — this can happen
   when the input is `undefined` (a first-class `FabricValue` per Section
   1.3), since `JSON.stringify(undefined)` returns `undefined` rather than a
   string. The guard ensures `jsonFromValue` always returns a `string` as its
-  type signature promises. `valueFromJson` = `JSON.parse`. This is the legacy
-  path — the storage layer sees plain JSON values with no tagged types.
-- **Flag ON:** `jsonFromValue` routes through `JsonEncodingContext.encode()`,
-  `valueFromJson` routes through `JsonEncodingContext.decode()`. Modern types
-  are preserved across the storage boundary.
+  type signature promises. `valueFromJson` = `JSON.parse`. The storage layer
+  sees plain JSON values with no tagged types.
 
 The dispatch module creates a single stateless `JsonEncodingContext` instance at
 module load time and reuses it for all encode/decode operations.
@@ -1816,18 +1825,18 @@ organized into four categories by high nibble:
 
 **Primitive tags (`0x2N`)** — leaf value types:
 
-| Tag               | Hex    | Decimal | Used for                        |
-|:------------------|:-------|:--------|:--------------------------------|
-| `TAG_NULL`        | `0x20` | 32      | `null`                          |
-| `TAG_UNDEFINED`   | `0x21` | 33      | `undefined`                     |
-| `TAG_BOOLEAN`     | `0x22` | 34      | `boolean`                       |
-| `TAG_NUMBER`      | `0x23` | 35      | `number` (finite, non-NaN)      |
-| `TAG_STRING`      | `0x24` | 36      | `string` (direct form)          |
-| `TAG_BYTES`       | `0x25` | 37      | `FabricBytes`                 |
-| `TAG_BIGINT`      | `0x26` | 38      | `bigint`                        |
-| `TAG_EPOCH_NSEC`  | `0x27` | 39      | `FabricEpochNsec`             |
-| `TAG_EPOCH_DAYS`  | `0x28` | 40      | `FabricEpochDays`             |
-| `TAG_CONTENT_ID`  | `0x29` | 41      | `FabricHash`             |
+| Tag               | Hex    | Decimal | Used for                          |
+|:------------------|:-------|:--------|:----------------------------------|
+| `TAG_NULL`        | `0x20` | 32      | `null`                            |
+| `TAG_UNDEFINED`   | `0x21` | 33      | `undefined`                       |
+| `TAG_BOOLEAN`     | `0x22` | 34      | `boolean`                         |
+| `TAG_NUMBER`      | `0x23` | 35      | `number` (any IEEE 754 binary64)  |
+| `TAG_STRING`      | `0x24` | 36      | `string` (direct form)            |
+| `TAG_BYTES`       | `0x25` | 37      | `FabricBytes`                     |
+| `TAG_BIGINT`      | `0x26` | 38      | `bigint`                          |
+| `TAG_EPOCH_NSEC`  | `0x27` | 39      | `FabricEpochNsec`                 |
+| `TAG_EPOCH_DAYS`  | `0x28` | 40      | `FabricEpochDays`                 |
+| `TAG_CONTENT_ID`  | `0x29` | 41      | `FabricHash`                      |
 
 **Optimized tags (`0xFN`)** — hash-level substitutes that replace the raw
 payload of a primitive type with a digest, when doing so shortens the byte
@@ -2199,7 +2208,7 @@ export function fabricFromNativeValue(
 
 | Input Type | Output |
 |------------|--------|
-| `null`, `boolean`, `number`, `string`, `undefined`, `bigint` | Returned as-is (primitives are `FabricValue` directly). `-0` is normalized to `0`. Non-finite numbers (`NaN`, `Infinity`) cause rejection. |
+| `null`, `boolean`, `number`, `string`, `undefined`, `bigint` | Returned as-is (primitives are `FabricValue` directly). Modern path passes all numbers through unchanged, including `-0`, `NaN`, and `±Infinity`. Legacy path normalizes `-0` to `0` and rejects `NaN` / `±Infinity` with a thrown error. See Section 1.3 callout for layer-by-layer details. |
 | `FabricPrimitive` (`FabricEpochNsec`, `FabricEpochDays`, `FabricHash`, `FabricBytes`) | Returned as-is. Always-frozen: the `freeze` option has no effect on these types (see Section 1.4.6). |
 | `FabricInstance` (including wrapper classes) | Returned as-is (already `FabricValue`). |
 | `Error` | Wrapped into `FabricError`. Before wrapping, `cause` and custom enumerable properties are recursively converted to `FabricValue` (deep variant) or left as-is (shallow variant). Extra enumerable properties are preserved (see Section 1.4.1). This ensures that by the time `FabricError.[DECONSTRUCT]` runs, all nested values are already valid `FabricValue`. |
@@ -2338,8 +2347,10 @@ export function isFabricCompatible(
 The function recursively checks the value tree. It returns `true` if and only
 if the value is:
 
-- A primitive (`null`, `boolean`, `number` (finite), `string`, `undefined`,
-  `bigint`)
+- A primitive (`null`, `boolean`, `number`, `string`, `undefined`, `bigint`).
+  All numbers are accepted on the modern path, including `-0`, `NaN`, and
+  `±Infinity`. On the legacy path, `NaN` and `±Infinity` are rejected; see
+  Section 1.3 callout for the per-path detail.
 - A `FabricInstance` (including the native object wrapper classes)
 - A `FabricNativeObject` (`Error`, `Map`, `Set`, `Date`, `RegExp`,
   `Uint8Array`, or an object with a `toJSON()` method — legacy)
@@ -2347,8 +2358,9 @@ if the value is:
 - A plain object where every value satisfies `isFabricCompatible()`
 
 It returns `false` for unsupported types (`WeakMap`, `Promise`, DOM nodes,
-class instances that don't implement `FabricInstance`, non-finite numbers,
-etc.).
+class instances that don't implement `FabricInstance`, etc.). On the legacy
+path it additionally returns `false` for non-finite numbers; the modern path
+accepts them.
 
 > **Performance note.** `isFabricCompatible()` walks the value tree without
 > allocating wrappers or frozen copies. For large trees, this is cheaper than
