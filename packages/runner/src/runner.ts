@@ -84,6 +84,7 @@ import {
 } from "./cfc/types.ts";
 import { setVerifiedFunctionRegistrar } from "./sandbox/function-hardening.ts";
 import { diffAndUpdate } from "./data-updating.ts";
+import { setResultCell } from "./result-utils.ts";
 export {
   cellAwareDeepCopy,
   extractDefaultValues,
@@ -117,7 +118,7 @@ const EAGER_RESULT_BUILTIN_REFS = new Set([
 const recordOutputSchemaPolicyInputs = (
   tx: IExtendedStorageTransaction,
   runtime: Runtime,
-  processCell: Cell<any>,
+  resultCell: Cell<any>, // used as the base for output bindings
   outputBinding: unknown,
   resultSchema: JSONSchema | undefined,
   schemaPath: readonly string[] = [],
@@ -127,7 +128,7 @@ const recordOutputSchemaPolicyInputs = (
   }
 
   if (isWriteRedirectLink(outputBinding)) {
-    const bindingLink = parseLink(outputBinding, processCell);
+    const bindingLink = parseLink(outputBinding, resultCell);
     const link = resolveLink(
       runtime,
       tx,
@@ -159,7 +160,7 @@ const recordOutputSchemaPolicyInputs = (
       recordOutputSchemaPolicyInputs(
         tx,
         runtime,
-        processCell,
+        resultCell,
         child,
         resultSchema,
         [...schemaPath, String(index)],
@@ -173,7 +174,7 @@ const recordOutputSchemaPolicyInputs = (
       recordOutputSchemaPolicyInputs(
         tx,
         runtime,
-        processCell,
+        resultCell,
         child,
         resultSchema,
         [...schemaPath, key],
@@ -608,8 +609,6 @@ export class Runner {
     const defaults = extractDefaultValues(pattern.argumentSchema) as Partial<T>;
     const internalLink = getMetaLink(resultCell, "internal");
     const argumentLink = getMetaLink(resultCell, "argument");
-    const resultLink = resultCell.asSchema(pattern.resultSchema)
-      .getAsWriteRedirectLink({ includeSchema: true });
     if (internalLink === undefined) {
       const newInternalCell = getMetaCell(
         resultCell,
@@ -617,7 +616,7 @@ export class Runner {
         tx,
         pattern.internalSchema,
       );
-      newInternalCell.setMetaRaw("result", resultLink);
+      setResultCell(newInternalCell, resultCell.asSchema(pattern.resultSchema));
       const internal = Object.assign(
         {},
         cellAwareDeepCopy(
@@ -646,7 +645,7 @@ export class Runner {
         tx,
         pattern.argumentSchema,
       );
-      newArgumentCell.setMetaRaw("result", resultLink);
+      setResultCell(newArgumentCell, resultCell.asSchema(pattern.resultSchema));
       nextArgument = mergeObjects<T>(argument, defaults);
       newArgumentCell.set(nextArgument);
       resultCell.withTx(tx).setMetaRaw(
@@ -1343,38 +1342,7 @@ export class Runner {
     syncAllMentionedCells(inputs);
     await Promise.all(promises);
 
-    // TODO(@ubik2): Move this to a more general method in schema.ts or cfc.ts
-    const processCellSchema: any = {
-      type: "object",
-      properties: {
-        pattern: { type: "object", asCell: ["readonly"] },
-        argument: pattern.argumentSchema ?? true,
-        ...(isPattern(pattern) && pattern.internalSchema !== undefined
-          ? { internal: pattern.internalSchema }
-          : {}),
-      },
-      required: ["pattern"],
-    };
-
-    if (
-      isRecord(processCellSchema) && "properties" in processCellSchema &&
-      isRecord(pattern.argumentSchema)
-    ) {
-      // extract $defs and definitions and remove them from argumentSchema
-      const { $defs, definitions, ...rest } = pattern.argumentSchema;
-      (processCellSchema as any).properties.argument = rest ?? true;
-      if (isRecord($defs)) {
-        processCellSchema.$defs = { ...$defs };
-      }
-      if (isRecord(definitions)) {
-        processCellSchema.definitions = { ...definitions };
-      }
-    }
-
-    const sourceCell = resultCell.getSourceCell(processCellSchema);
-    if (!sourceCell) return false;
-
-    await sourceCell.sync();
+    await resultCell.sync();
 
     // We could support this by replicating what happens in runner, but since
     // we're calling this again when returning false, this is good enough for now.
@@ -1384,8 +1352,8 @@ export class Runner {
 
     // Sync all the inputs and outputs of the pattern nodes.
     for (const node of pattern.nodes) {
-      const inputs = findAllWriteRedirectCells(node.inputs, sourceCell);
-      const outputs = findAllWriteRedirectCells(node.outputs, sourceCell);
+      const inputs = findAllWriteRedirectCells(node.inputs, resultCell);
+      const outputs = findAllWriteRedirectCells(node.outputs, resultCell);
 
       // TODO(seefeld): This ignores schemas provided by modules, so it might
       // still fetch a lot.
@@ -2019,13 +1987,11 @@ export class Runner {
     result: any,
     name: string | undefined,
     frame: Frame,
-    processCell: Cell<any>,
     resultCell: Cell<any>,
     outputs: FabricValue,
     addCancel: AddCancel,
-    resultFor: { inputs: FabricValue; outputs: FabricValue; fn: string },
+    _resultFor: { inputs: FabricValue; outputs: FabricValue; fn: string },
     previousResultCellRef: { current?: Cell<any> },
-    recordIgnoredSchedulingWrite?: (link: NormalizedFullLink) => void,
   ): any {
     if (
       !validateAndCheckOpaqueRefs(result, name) &&
@@ -2034,7 +2000,7 @@ export class Runner {
       recordOutputSchemaPolicyInputs(
         tx,
         this.runtime,
-        processCell,
+        resultCell,
         outputs,
         resultSchema,
       );
@@ -2069,12 +2035,6 @@ export class Runner {
         undefined,
         resultCell,
       );
-      const childProcessCell = resultCell.withTx(tx).getSourceCell();
-      if (childProcessCell) {
-        recordIgnoredSchedulingWrite?.(
-          childProcessCell.getAsNormalizedFullLink(),
-        );
-      }
       addCancel(() => this.stop(resultCell));
 
       tx.addCommitCallback((_committedTx, result) => {
@@ -2090,7 +2050,7 @@ export class Runner {
     recordOutputSchemaPolicyInputs(
       tx,
       this.runtime,
-      processCell,
+      resultCell,
       outputs,
       effectiveResultSchema,
     );
@@ -2100,7 +2060,7 @@ export class Runner {
       getMetaLink(resultCell, "argument")!,
       getMetaLink(resultCell, "internal")!,
       outputs,
-      resultCell.getAsLink({ base: processCell }),
+      resultCell.getAsLink(),
     );
     return result;
   }
@@ -2462,13 +2422,11 @@ export class Runner {
               result,
               name,
               frame,
-              processCell,
               resultCell,
               outputs,
               addCancel,
               resultFor,
               previousResultCellRef,
-              (link) => action.ignoredSchedulingWrites?.push(link),
             );
           } finally {
             logger.timeEnd("action", "postRun");

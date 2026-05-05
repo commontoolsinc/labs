@@ -1,11 +1,10 @@
 import { toIndentedDebugString } from "@commonfabric/data-model/value-debug";
-import { hashOf, hashStringOf } from "@commonfabric/data-model/value-hash";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import {
   hashSchema,
   internSchema,
   internSchemaAsHashString,
 } from "@commonfabric/data-model/schema-hash";
-import { MIME } from "@commonfabric/memory/interface";
 import type { JSONSchemaObj } from "@commonfabric/api";
 import type {
   MemorySpace,
@@ -1029,7 +1028,7 @@ export abstract class BaseObjectTraverser {
 
     return schemaTrackerCoversSelector(
       this.schemaTracker,
-      `${link.space}/${link.id}/application/json`,
+      `${link.space}/${link.id}`,
       this.internCoverageSelector(targetSelector),
     );
   }
@@ -1238,7 +1237,7 @@ function notFound(
 function getTrackerKey(
   address: IMemorySpaceAddress,
 ): string {
-  return `${address.space}/${address.id}/${address.type}`;
+  return `${address.space}/${address.id}`;
 }
 
 /**
@@ -1464,7 +1463,7 @@ function trackVisitedDoc(
 export function loadMetaLinkedDoc(
   tx: IExtendedStorageTransaction,
   valueEntry: IMemorySpaceAttestation,
-  meta: "source" | "pattern" | "argument" | "internal",
+  meta: "result" | "pattern" | "argument" | "internal",
   schemaTracker: MapSet<string, SchemaPathSelector>,
 ): IMemorySpaceAttestation | undefined {
   if (!isRecord(valueEntry.value)) {
@@ -1507,7 +1506,7 @@ export function loadMetaLinkedDocs(
   const pendingDocs = [valueEntry];
   while (pendingDocs.length > 0) {
     const currentDoc = pendingDocs.shift()!;
-    for (const meta of ["pattern", "argument", "internal"] as const) {
+    for (const meta of ["result", "pattern", "argument", "internal"] as const) {
       const linkedDoc = loadMetaLinkedDoc(tx, currentDoc, meta, schemaTracker);
       if (linkedDoc === undefined) continue;
       if (cycleCheck.has(linkedDoc.address.id)) continue;

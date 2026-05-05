@@ -152,7 +152,6 @@ describe("piece pull materialization", () => {
       trustPattern(runtime, doublePattern()),
       { input: 5 },
       undefined,
-      undefined,
       { start: true },
     );
     const controller = new PieceController(manager, piece);
@@ -170,7 +169,6 @@ describe("piece pull materialization", () => {
       trustPattern(runtime, doublePattern()),
       { input: 5 },
       undefined,
-      undefined,
       { start: true },
     );
     const controller = new PieceController(manager, piece);
@@ -184,7 +182,6 @@ describe("piece pull materialization", () => {
     const piece = await manager.runPersistent(
       trustPattern(runtime, doublePattern()),
       { input: 5 },
-      undefined,
       undefined,
       { start: true },
     );
@@ -252,7 +249,6 @@ describe("piece pull materialization", () => {
       trustPattern(runtime, doublePattern()),
       { input: 5 },
       undefined,
-      undefined,
       { start: true },
     );
 
@@ -277,7 +273,6 @@ describe("piece pull materialization", () => {
     const piece = await manager.runPersistent(
       trustPattern(runtime, namedPattern("double", 2)),
       { input: 5 },
-      undefined,
       undefined,
       { start: true },
     );

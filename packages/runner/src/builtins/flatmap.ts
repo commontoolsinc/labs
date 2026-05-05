@@ -17,7 +17,7 @@ import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { trustedFlowPrecisionSchemaForBuiltin } from "../cfc/flow-precision.ts";
 import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
-import { setPatternCell } from "../result-utils.ts";
+import { setPatternCell, setResultCell } from "../result-utils.ts";
 
 /**
  * Implementation of built-in flatMap module. Like map, this is called once at
@@ -77,7 +77,8 @@ export function flatMap(
         tx,
       );
       result.send([]);
-      result.setSourceCell(parentCell);
+      // Link this cell to the parent cell
+      setResultCell(result, parentCell);
       // Link the new result cells to the pattern cell too
       setPatternCell(result, parentCell.key("pattern"));
       sendResult(tx, result);

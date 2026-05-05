@@ -30,10 +30,10 @@ import {
 import { NameSchema, rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { StorageManager } from "../../runner/src/storage/cache.ts";
 import {
+  getMetaLink,
   type NormalizedFullLink,
   parseLink,
 } from "../../runner/src/link-utils.ts";
-import { syncSourceCellChain } from "../../runner/src/source-cell.ts";
 import {
   type ActionRunTraceResponse,
   BooleanResponse,
@@ -539,7 +539,7 @@ export class RuntimeProcessor {
       ...cell.getAsNormalizedFullLink(),
       path: [],
     });
-    await syncSourceCellChain(rootCell);
+    await syncMetaLinkedDocs(rootCell);
     await cell.sync();
     return {
       cfcLabel: cfcLabelViewForCell(cell),
@@ -581,14 +581,16 @@ export class RuntimeProcessor {
     await defaultPatternCell.sync();
 
     // Fast path: pattern already exists
-    // (Value is a Cell itself, and source cell means it's instantiated)
-    if (defaultPatternCell.getSourceCell()) {
-      await this.runtime.start(defaultPatternCell);
-      await this.runtime.idle();
-      return {
-        cell: createCellRef(defaultPatternCell),
-      };
-    }
+    // (Value is a Cell itself, and pattern metadata means it's instantiated)
+    // FIXME(@ubik2): Need to handle this some other way. We don't generally link patterns
+    // to a result.
+    // if (getMetaLink(defaultPatternCell, "pattern")) {
+    //   await this.runtime.start(defaultPatternCell);
+    //   await this.runtime.idle();
+    //   return {
+    //     cell: createCellRef(defaultPatternCell),
+    //   };
+    // }
 
     // Pattern doesn't exist - create it via home space PieceController
     const homeSession: Session = {
@@ -1082,5 +1084,31 @@ export class RuntimeProcessor {
     mount.cancel();
     mount.reconciler.unmount();
     this.vdomMounts.delete(mountId);
+  }
+}
+
+/**
+ * Sync a root cell and each meta cell reachable from it.
+ *
+ * Callers that need a transactional root cell can create it first and pass it.
+ */
+async function syncMetaLinkedDocs(
+  cell: Cell<any>,
+  cycleCheck: Set<string> = new Set<string>(),
+) {
+  const pendingCells = [cell];
+  cycleCheck.add(cell.sourceURI);
+  while (pendingCells.length > 0) {
+    const currentCell = pendingCells.shift()!;
+    await currentCell.sync();
+    for (const meta of ["pattern", "argument", "internal"] as const) {
+      const link = getMetaLink(currentCell, meta);
+      if (link === undefined) continue;
+      const linkedCell = currentCell.runtime.getCellFromLink(link, undefined);
+      if (linkedCell === undefined) continue;
+      if (cycleCheck.has(linkedCell.sourceURI)) continue;
+      cycleCheck.add(linkedCell.sourceURI);
+      pendingCells.push(linkedCell);
+    }
   }
 }

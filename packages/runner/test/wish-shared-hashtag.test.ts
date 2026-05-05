@@ -61,11 +61,6 @@ function rawLinkSchema(value: unknown): unknown {
   return (value as Record<string, any>)?.["/"]?.[LINK_V1_TAG]?.schema;
 }
 
-function rawWishResultSchema(value: unknown): unknown {
-  return (rawLinkSchema(value) as Record<string, any>)?.properties?.result
-    ?.anyOf?.[1];
-}
-
 Deno.test(
   "shared hashtag wish node scans mentionables once for repeated identical wishes",
   async () => {

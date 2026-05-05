@@ -15,16 +15,15 @@ const logger = getLogger("ensure-piece-running", {
  * runtime.runSynced() on an already-running piece is idempotent - it simply
  * returns without doing anything. This keeps the code simple and stateless.
  *
- * This function traverses the source cell chain to find the root process cell,
- * then starts the piece if it's not already running.
+ * This function follows result metadata from argument/internal cells back to
+ * the root result cell, then starts the piece if it's not already running.
  *
  * The traversal logic:
  * 1. Start with the cell at the cellLink location
- * 2. While getSourceCell() returns something, follow it (this traverses
- *    through linked cells to find the process cell)
- * 3. Once there's no source cell, look at resultRef in the resulting document
- * 4. If resultRef is a link, that's the result cell - call runtime.runSynced()
- *    on it to start the piece
+ * 2. If getMetaLink(cell, "result") returns something, follow it to the
+ *    owning result cell
+ * 3. Read the result cell's pattern metadata
+ * 4. Start the existing result cell
  *
  * @param runtime - The runtime instance
  * @param cellLink - The location that received an event or should be current

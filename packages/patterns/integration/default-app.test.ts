@@ -1208,8 +1208,11 @@ async function collectWriteTraceOrderSummary(page: Page): Promise<unknown> {
 
     function classifyStack(stack?: string): string {
       if (!stack) return "unknown";
-      if (stack.includes("_CellImpl.setSourceCell")) {
-        return "setup:setSourceCell";
+      if (
+        stack.includes("_CellImpl.setMetaRaw") &&
+        stack.includes("Runner.setupInternal")
+      ) {
+        return "setup:setMetaRaw";
       }
       if (
         stack.includes("_CellImpl.setRawUntyped") &&
@@ -1263,7 +1266,7 @@ async function collectWriteTraceOrderSummary(page: Page): Promise<unknown> {
         line.includes("applyChangeSet") ||
         line.includes("_CellImpl.push") ||
         line.includes("_CellImpl.send") ||
-        line.includes("_CellImpl.setSourceCell") ||
+        line.includes("_CellImpl.setMetaRaw") ||
         line.includes("_CellImpl.setRawUntyped") ||
         line.includes("_CellImpl.set")
       );

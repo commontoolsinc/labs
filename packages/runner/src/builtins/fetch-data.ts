@@ -13,7 +13,7 @@ import {
   tryClaimMutex,
   tryWriteResult,
 } from "./fetch-utils.ts";
-import { setPatternCell } from "../result-utils.ts";
+import { setPatternCell, setResultCell } from "../result-utils.ts";
 
 /** The shape of fetchData's input cell. */
 type FetchDataInputs = {
@@ -155,11 +155,11 @@ export function fetchData(
         internalSchema,
         tx,
       );
-
-      pending.setSourceCell(parentCell);
-      result.setSourceCell(parentCell);
-      error.setSourceCell(parentCell);
-      internal.setSourceCell(parentCell);
+      // Link the new result cells to the parent result cell
+      setResultCell(pending, parentCell);
+      setResultCell(result, parentCell);
+      setResultCell(error, parentCell);
+      setResultCell(internal, parentCell);
       // Link the new result cells to the pattern cell too
       const patternCellPtr = parentCell.key("pattern");
       setPatternCell(pending, patternCellPtr);

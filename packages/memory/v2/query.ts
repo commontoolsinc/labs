@@ -25,7 +25,7 @@ import {
 } from "../v2.ts";
 import * as Engine from "./engine.ts";
 
-export type QueryDocKey = `${string}/${string}/${string}`;
+export type QueryDocKey = `${string}/${string}`;
 
 export interface TrackedGraphState {
   branch: string;
@@ -299,7 +299,7 @@ export const trackGraph = (
       );
     } else {
       schemaTracker.add(
-        toDocKey(space, root.id, "application/json"),
+        toDocKey(space, root.id),
         selector,
       );
     }
@@ -345,7 +345,7 @@ export const extendTrackedGraph = (
 
   for (const root of query.roots) {
     const selector = toDocumentSelector(root.selector);
-    const rootKey = toDocKey(space, root.id, "application/json");
+    const rootKey = toDocKey(space, root.id);
     touched.add(rootKey);
     evaluateTrackedDocument(
       space,
@@ -363,7 +363,7 @@ export const extendTrackedGraph = (
     if (previouslyLoaded.has(key)) {
       continue;
     }
-    touched.add(toDocKey(space, address.id, "application/json"));
+    touched.add(toDocKey(space, address.id));
   }
 
   const updates = new Map<QueryDocKey, EntitySnapshot>();
@@ -400,7 +400,7 @@ export const isGraphQueryCoveredByState = (
 ): boolean =>
   query.roots.every((root) => {
     const selector = toDocumentSelector(root.selector);
-    const rootKey = toDocKey(space, root.id, "application/json");
+    const rootKey = toDocKey(space, root.id);
     return schemaTrackerCoversSelector(state.tracker, rootKey, selector);
   });
 
@@ -435,7 +435,7 @@ export const refreshTrackedGraph = (
 } | null => {
   const affectedDocs = new Map<QueryDocKey, Set<SchemaPathSelector>>();
   for (const dirtyId of dirtyIds) {
-    const key = toDocKey(space, dirtyId, "application/json");
+    const key = toDocKey(space, dirtyId);
     const selectors = state.tracker.get(key);
     if (selectors !== undefined && selectors.size > 0) {
       affectedDocs.set(key, new Set(selectors));
@@ -455,12 +455,12 @@ export const refreshTrackedGraph = (
   }
 
   for (const [key, selectors] of affectedDocs) {
-    const { id, type } = fromDocKey(key);
+    const { id } = fromDocKey(key);
     for (const selector of selectors) {
       evaluateTrackedDocument(
         space,
         manager,
-        { id, type },
+        { id },
         selector,
         state.tracker,
         sharedMemo,
@@ -471,7 +471,7 @@ export const refreshTrackedGraph = (
 
   const touched = new Set<QueryDocKey>(affectedDocs.keys());
   for (const address of manager.loadedAddresses()) {
-    const key = toDocKey(space, address.id, "application/json");
+    const key = toDocKey(space, address.id);
     const previous = state.entities.get(key);
     const detail = manager.detail({ id: address.id });
     if (previous !== undefined && detail?.seq === previous.seq) {
@@ -528,11 +528,7 @@ const loadFactsForDoc = (
     selector = { ...selector, schema: false };
   }
 
-  const docKey = toDocKey(
-    space,
-    fact.address.id,
-    fact.address.type ?? "application/json",
-  );
+  const docKey = toDocKey(space, fact.address.id);
   const internedSelector = internPathSelector(selector);
   if (schemaTrackerCoversSelector(schemaTracker, docKey, internedSelector)) {
     stats.coveredSelectorSkips++;
@@ -598,7 +594,7 @@ const loadFactsForDoc = (
 const evaluateTrackedDocument = (
   space: string,
   manager: EngineObjectManager,
-  address: { id: string; type: string },
+  address: { id: string; type?: string },
   selector: SchemaPathSelector,
   schemaTracker: MapSetStringToPathSelectors,
   sharedMemo: ReturnType<typeof createSchemaMemo>,
@@ -607,7 +603,7 @@ const evaluateTrackedDocument = (
   const loaded = manager.load(address);
   if (loaded === null || loaded.value === undefined) {
     schemaTracker.add(
-      toDocKey(space, address.id, "application/json"),
+      toDocKey(space, address.id),
       internPathSelector(selector),
     );
     return;
@@ -633,15 +629,16 @@ const evaluateTrackedDocument = (
 export const toDocKey = (
   space: string,
   id: string,
-  type: string,
-): QueryDocKey => `${space}/${id}/${type}`;
+): QueryDocKey => `${space}/${id}`;
 
 export const fromDocKey = (key: QueryDocKey) => {
-  const match = /^([^/]+)\/(.+)\/application\/json$/.exec(key);
-  if (match !== null) {
-    const [, space, id] = match;
-    return { space, id, type: "application/json" };
+  const separator = key.indexOf("/");
+  if (separator === -1) {
+    return { space: key, id: "", type: "application/json" };
   }
-  const [space, id, type] = key.split("/", 3);
-  return { space, id, type };
+  return {
+    space: key.slice(0, separator),
+    id: key.slice(separator + 1),
+    type: "application/json",
+  };
 };

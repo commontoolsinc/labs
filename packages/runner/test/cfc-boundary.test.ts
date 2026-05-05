@@ -10,7 +10,11 @@ import * as V2Storage from "../src/storage/v2.ts";
 import { raw } from "../src/module.ts";
 import { storedCfcMetadataAppliesToPath } from "../src/cfc/metadata.ts";
 import { Runtime } from "../src/runtime.ts";
-import { parseLink, toMemorySpaceAddress } from "../src/link-utils.ts";
+import {
+  getMetaLink,
+  parseLink,
+  toMemorySpaceAddress,
+} from "../src/link-utils.ts";
 import {
   canonicalizeCfcMetadata,
   canonicalizePreparedDigestInput,
@@ -21,6 +25,9 @@ import { flowPrecisionSchemaForBuiltin } from "../src/cfc/flow-precision.ts";
 import { CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION } from "../src/cfc/types.ts";
 import type { JSONSchema, Pattern } from "../src/builder/types.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
+import { ignoreReadForScheduling } from "../src/scheduler.ts";
+import { internalVerifierRead } from "../src/storage/reactivity-log.ts";
+import { setResultCell } from "../src/result-utils.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-boundary-tests");
 
@@ -307,7 +314,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
 
       await runtime.setup(undefined, pattern, {}, resultCell);
 
-      expect(resultCell.getSourceCell()).toBeUndefined();
+      expect(getMetaLink(resultCell, "result")).toBeUndefined();
       expect(parseLink(resultCell.getMetaRaw("pattern"), resultCell))
         .toBeDefined();
       expect(parseLink(resultCell.getMetaRaw("argument"), resultCell))
@@ -390,7 +397,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
 
       await expect(runtime.setup(undefined, pattern, {}, resultCell)).rejects
         .toThrow("CFC enforcement rejected commit");
-      expect(resultCell.getSourceCell()).toBeUndefined();
+      expect(getMetaLink(resultCell, "result")).toBeUndefined();
     } finally {
       await runtime.dispose();
       await storageManager.close();
@@ -3219,7 +3226,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         setupTx,
       );
       targetCell.set({ bar: "seed" });
-      targetCell.setSourceCell(sourceCell);
+      setResultCell(targetCell, sourceCell);
       setupTx.prepareCfc();
       expect((await setupTx.commit()).ok).toBeDefined();
 
@@ -3264,7 +3271,10 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         },
         tx2,
       );
-      expect(plainTarget2.getSourceCell()).toBeDefined();
+      expect(getMetaLink(plainTarget2, "result", {
+        meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
+        frozen: false,
+      })).toBeDefined();
       plainTarget2.set({ bar: "updated" });
       tx2.prepareCfc();
       const prepared2 = tx2.getCfcState().prepare;

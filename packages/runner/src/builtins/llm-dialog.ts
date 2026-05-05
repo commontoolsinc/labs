@@ -28,13 +28,14 @@ import type { Cell, MemorySpace, Stream } from "../cell.ts";
 import { isCell, isStream } from "../cell.ts";
 import { ID, NAME, type Pattern } from "../builder/types.ts";
 import { type Action, ignoreReadForScheduling } from "../scheduler.ts";
-import type { Runtime } from "../runtime.ts";
+import { Runtime } from "../runtime.ts";
 import { spaceCellSchema } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { schemaToTypeString } from "../schema-format.ts";
 import { formatTransactionSummary } from "../storage/transaction-summary.ts";
 import {
   createLLMFriendlyLink,
+  getMetaLink,
   matchLLMFriendlyLink,
   type NormalizedFullLink,
   parseLink,
@@ -2172,12 +2173,13 @@ async function handleRead(
   schema = cell.schema ?? schema;
   let value = schema ? cell.get() : cell.getRaw();
   if (value === undefined) {
-    const sourceCell = cell.getSourceCell()?.resolveAsCell()
-      .asSchemaFromLinks();
-    if (sourceCell) {
-      await sourceCell.pull();
-      schema = sourceCell.schema ?? getCellSchema(sourceCell);
-      cell = schema ? sourceCell.asSchema(schema) : sourceCell;
+    // If our cell is an intermediate with a parent result, follow that
+    const parentLink = getMetaLink(cell, "result");
+    if (parentLink !== undefined) {
+      const parentCell = cell.runtime.getCellFromLink(parentLink);
+      await parentCell.pull();
+      schema = parentCell.schema ?? getCellSchema(parentCell);
+      cell = schema ? parentCell.asSchema(schema) : parentCell;
       value = schema ? cell.get() : cell.getRaw();
     }
   }
@@ -2212,17 +2214,16 @@ function handleUpdateArgument(
   const cell = resolved.cellRef;
   const updates = resolved.updates;
 
-  // Get the source cell (process cell) that stores the pattern metadata
-  const sourceCell = cell.getSourceCell();
-  if (!sourceCell) {
+  const argumentLink = getMetaLink(cell, "argument");
+  if (argumentLink === undefined) {
     throw new Error(
-      "Target is not a pattern instance - no source cell found. " +
+      "Target is not a pattern instance - no argument cell found. " +
         "updateArgument only works with running patterns (e.g., from invoke() or attached patterns).",
     );
   }
 
   // Access the argument cell
-  const argumentCell = sourceCell.key("argument");
+  const argumentCell = runtime.getCellFromLink(argumentLink);
   const cellifiedValue = traverseAndCellify(
     runtime,
     argumentCell.space,

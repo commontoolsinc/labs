@@ -306,23 +306,6 @@ declare module "@commonfabric/api" {
      * Prefer `setRaw()` when the value matches `T`.
      */
     setRawUntyped(value: FabricValue): void;
-    getSourceCell<T>(
-      schema?: JSONSchema,
-    ):
-      | Cell<
-        & T
-        & ("argument" extends keyof T ? unknown : { argument: any })
-      >
-      | undefined;
-    getSourceCell<S extends JSONSchema = JSONSchema>(
-      schema: S,
-    ):
-      | Cell<
-        & Schema<S>
-        & ("argument" extends keyof Schema<S> ? unknown : { argument: any })
-      >
-      | undefined;
-    setSourceCell(sourceCell: Cell<any>): void;
     freeze(reason: string): void;
     isFrozen(): boolean;
     setSchema(newSchema: JSONSchema): void;
@@ -410,8 +393,6 @@ const cellMethods = new Set<
   "getRawUntyped",
   "setRaw",
   "setRawUntyped",
-  "getSourceCell",
-  "setSourceCell",
   "getArgumentCell",
   "freeze",
   "isFrozen",
@@ -1423,72 +1404,6 @@ export class CellImpl<T extends FabricValue>
       this.link.schema ?? this.schema,
     );
     this.tx.writeValueOrThrow(this.link, findAndInlineDataURILinks(value));
-  }
-
-  // TODO(@ubik2) - this should go away
-  getSourceCell<T>(
-    schema?: JSONSchema,
-  ):
-    | Cell<
-      & T
-      // Add a default type for `argument`. A more specific type in T will take
-      // precedence.
-      & ("argument" extends keyof T ? unknown : { argument: any })
-    >
-    | undefined;
-  getSourceCell<S extends JSONSchema = JSONSchema>(
-    schema: S,
-  ):
-    | Cell<
-      & Schema<S>
-      // Add a default type for `argument`. A more specific type in `schema`
-      // will take precedence.
-      & ("argument" extends keyof Schema<S> ? unknown
-        : { argument: any })
-    >
-    | undefined;
-  getSourceCell(schema?: JSONSchema): Cell<any> | undefined {
-    if (!this.synced) this.sync(); // No await, just kicking this off
-    const sourceCellId = this.runtime.readTx(this.tx).readOrThrow(
-      { ...toMemorySpaceAddress(this.link), path: ["source"] },
-      {
-        meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
-      },
-    );
-    if (!sourceCellId) return undefined;
-    if (!isRecord(sourceCellId)) {
-      throw new Error(
-        `Source cell ID expected to be a record link, got: ${typeof sourceCellId}`,
-      );
-    }
-    const sourceCellIdString = toURI(sourceCellId);
-
-    return createCell(this.runtime, {
-      space: this.link.space,
-      path: [],
-      id: sourceCellIdString,
-      schema: schema,
-    }, this.tx) as Cell<any>;
-  }
-
-  // TODO(@ubik2) - this should go away
-  setSourceCell(sourceCell: Cell<any>): void {
-    if (!this.tx) throw new Error("Transaction required for setSourceCell");
-
-    // No await for the sync, just kicking this off, so we have the data to
-    // retry on conflict.
-    if (!this.synced) this.sync();
-
-    const sourceLink = sourceCell.getAsNormalizedFullLink();
-    if (sourceLink.path.length > 0) {
-      throw new Error("Source cell must have empty path for now");
-    }
-    // System-owned provenance metadata, not user-surface value data.
-    this.tx.writeOrThrow(
-      { ...toMemorySpaceAddress(this.link), path: ["source"] },
-      // TODO(@ubik2): Transition source links to sigil links?
-      { "/": fromURI(sourceLink.id) },
-    );
   }
 
   getArgumentCell<U>(schema?: JSONSchema): Cell<U> | undefined {

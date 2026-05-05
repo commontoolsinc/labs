@@ -9,6 +9,7 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { ensurePieceRunning } from "../src/ensure-piece-running.ts";
 import { trustPattern } from "./support/trusted-builder.ts";
 import { getMetaCell } from "../src/link-utils.ts";
+import { setResultCell } from "../src/result-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -55,8 +56,8 @@ describe("ensurePieceRunning", () => {
     expect(result).toBe(false);
   });
 
-  it("should return false for cells without pattern in process cell", async () => {
-    // Create a result cell that points to a process cell without a pattern.
+  it("should return false for cells without pattern metadata", async () => {
+    // Create a result cell with no pattern metadata.
     const resultCell = runtime.getCell(
       space,
       "no-pattern-test-result",
@@ -64,28 +65,13 @@ describe("ensurePieceRunning", () => {
       tx,
     );
 
-    const processCell = runtime.getCell(
-      space,
-      "no-pattern-test-process",
-      undefined,
-      tx,
-    );
-
-    // Set up the result cell to point to the process cell
     resultCell.set({ value: 1 });
-    resultCell.setSourceCell(processCell);
     resultCell.setMetaRaw("argument", { value: 1 });
-
-    // Process cell has no pattern
-    processCell.set({
-      argument: { value: 1 },
-      resultRef: resultCell.getAsLink({ base: processCell }),
-    });
 
     await tx.commit();
     tx = runtime.edit();
 
-    // ensurePieceRunning should return false - no pattern in cell
+    // ensurePieceRunning should return false - no pattern in result metadata
     const result = await ensurePieceRunning(
       runtime,
       resultCell.getAsNormalizedFullLink(),
@@ -94,20 +80,8 @@ describe("ensurePieceRunning", () => {
     expect(result).toBe(false);
   });
 
-  it("should return false for cells without pattern in result cell", async () => {
-    // Create a simple pattern
-    const pattern: Pattern = {
-      argumentSchema: { type: "object" },
-      resultSchema: { type: "object" },
-      result: {},
-      nodes: [],
-    };
-
-    const patternId = runtime.patternManager.registerPattern(
-      trustPattern(runtime, pattern),
-    );
-
-    // Create a result cell that points to a process cell without resultRef
+  it("should return false when result cell pattern cannot be loaded", async () => {
+    // Create a result cell whose pattern metadata points at a missing pattern.
     const resultCell = runtime.getCell(
       space,
       "no-resultref-test-result",
@@ -115,28 +89,14 @@ describe("ensurePieceRunning", () => {
       tx,
     );
 
-    const processCell = runtime.getCell(
-      space,
-      "no-resultref-test-process",
-      undefined,
-      tx,
-    );
-
     resultCell.set({ value: 1 });
-    resultCell.setSourceCell(processCell);
+    resultCell.setMetaRaw("pattern", getSigilLink("of:missing-pattern-test"));
     resultCell.setMetaRaw("argument", { value: 1 });
-
-    // Process cell has a pattern but no resultRef
-    processCell.set({
-      pattern: getSigilLink(patternId),
-      argument: { value: 1 },
-      // Missing resultRef!
-    });
 
     await tx.commit();
     tx = runtime.edit();
 
-    // ensurePieceRunning should return false - no resultRef
+    // ensurePieceRunning should return false - pattern cannot be loaded
     const result = await ensurePieceRunning(
       runtime,
       resultCell.getAsNormalizedFullLink(),
@@ -187,14 +147,6 @@ describe("ensurePieceRunning", () => {
       tx,
     );
 
-    // Create process cell
-    const processCell = runtime.getCell(
-      space,
-      "valid-piece-test-process",
-      undefined,
-      tx,
-    );
-
     // Set up the structure
     // FIXME: Because this is a regular link, we aren't doing that special alias parsing we do for bindings,
     // so I don't really expect this to work.
@@ -211,26 +163,14 @@ describe("ensurePieceRunning", () => {
     );
     const internalCell = getMetaCell(resultCell, "internal", tx);
 
-    resultCell.setSourceCell(processCell);
     resultCell.setMetaRaw("pattern", getSigilLink(patternId));
     resultCell.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
     resultCell.setMetaRaw("internal", internalCell.getAsWriteRedirectLink());
     argumentCell.set({ value: 5 });
     internalCell.set({});
 
-    // TODO: should remove this
-    processCell.set({
-      pattern: getSigilLink(patternId),
-      argument: { value: 5 },
-      resultRef: resultCell.getAsLink({ base: processCell }),
-      internal: {},
-    });
-
     await tx.commit();
     tx = runtime.edit();
-
-    // We used to follow resultCell.source -> processCell, and then that had
-    // the pattern (TYPE) and also resultRef to get back to our result cell.
 
     // ensurePieceRunning should return true and start the piece
     const result = await ensurePieceRunning(
@@ -278,25 +218,20 @@ describe("ensurePieceRunning", () => {
       tx,
     );
 
-    const processCell = runtime.getCell(
-      space,
-      "idempotent-start-test-process",
-      undefined,
+    const argumentCell = getMetaCell(
+      resultCell,
+      "argument",
       tx,
+      pattern.argumentSchema,
     );
+    const internalCell = getMetaCell(resultCell, "internal", tx);
 
     resultCell.set({});
-    resultCell.setSourceCell(processCell);
     resultCell.setMetaRaw("pattern", getSigilLink(patternId));
-    resultCell.setMetaRaw("argument", {});
-    resultCell.setMetaRaw("internal", {});
-
-    processCell.set({
-      pattern: getSigilLink(patternId),
-      argument: {},
-      resultRef: resultCell.getAsLink({ base: processCell }),
-      internal: {},
-    });
+    resultCell.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
+    resultCell.setMetaRaw("internal", internalCell.getAsWriteRedirectLink());
+    argumentCell.set({});
+    internalCell.set({});
 
     await tx.commit();
     tx = runtime.edit();
@@ -354,23 +289,20 @@ describe("ensurePieceRunning", () => {
       tx,
     );
 
-    const processCell = runtime.getCell(
-      space,
-      "restart-after-stop-test-process",
-      undefined,
+    const argumentCell = getMetaCell(
+      resultCell,
+      "argument",
       tx,
+      pattern.argumentSchema,
     );
+    const internalCell = getMetaCell(resultCell, "internal", tx);
 
     resultCell.set({});
-    resultCell.setSourceCell(processCell);
     resultCell.setMetaRaw("pattern", getSigilLink(patternId));
-
-    processCell.set({
-      pattern: getSigilLink(patternId),
-      argument: {},
-      resultRef: resultCell.getAsLink({ base: processCell }),
-      internal: {},
-    });
+    resultCell.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
+    resultCell.setMetaRaw("internal", internalCell.getAsWriteRedirectLink());
+    argumentCell.set({});
+    internalCell.set({});
 
     await tx.commit();
     tx = runtime.edit();
@@ -506,14 +438,6 @@ describe("queueEvent with auto-start", () => {
       tx,
     );
 
-    // Create process cell
-    const processCell = runtime.getCell(
-      space,
-      "no-handler-start-test-process",
-      undefined,
-      tx,
-    );
-
     // Create a internal and argument cells, and attach them to resultCell.
     // This would be done inside setupInternal, but we want to proactively set up links
     // to that internal cell in our result cell.
@@ -525,7 +449,6 @@ describe("queueEvent with auto-start", () => {
       doubled: internalCell.key("doubled").getAsWriteRedirectLink(),
       events: internalCell.key("events").getAsWriteRedirectLink(),
     });
-    resultCell.setSourceCell(processCell);
     resultCell.setMetaRaw("pattern", getSigilLink(patternId));
     resultCell.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
     resultCell.setMetaRaw("internal", internalCell.getAsWriteRedirectLink());
@@ -541,7 +464,7 @@ describe("queueEvent with auto-start", () => {
     // Send an event to the result cell's events path
     // ensurePieceRunning will:
     // 1. Get cell at resultCell (with path removed)
-    // 2. Find pattern and resultRef in resultCell
+    // 2. Find pattern metadata in resultCell
     // 3. Start the piece
     const eventsLink = resultCell.key("events").getAsNormalizedFullLink();
     runtime.scheduler.queueEvent(eventsLink, { type: "click" });
@@ -650,14 +573,6 @@ describe("queueEvent with auto-start", () => {
       tx,
     );
 
-    // Create process cell
-    const processCell = runtime.getCell(
-      space,
-      "with-handler-start-test-process",
-      undefined,
-      tx,
-    );
-
     // Create a internal and argument cells, and attach them to resultCell.
     // This would be done inside setupInternal, but we want to proactively set up links
     // to that internal cell in our result cell.
@@ -670,14 +585,13 @@ describe("queueEvent with auto-start", () => {
       events: internalCell.key("events").getAsWriteRedirectLink(),
       eventCount: internalCell.key("eventCount").getAsWriteRedirectLink(),
     });
-    resultCell.setSourceCell(processCell);
     resultCell.setMetaRaw("pattern", getSigilLink(patternId));
     resultCell.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
     resultCell.setMetaRaw("internal", internalCell.getAsWriteRedirectLink());
     argumentCell.set({ value: 5 });
     // Set up internal cell - events must be set to $stream: true
     internalCell.setRaw({ events: { $stream: true }, eventCount: 0 });
-    internalCell.setMetaRaw("result", resultCell.getAsWriteRedirectLink());
+    setResultCell(internalCell, resultCell);
 
     await tx.commit();
     tx = runtime.edit();

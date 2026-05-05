@@ -357,7 +357,7 @@ Deno.test("memory v2 query reuses a persistent manager cache for shared source g
   const space = "did:key:z6Mk-memory-v2-query-manager-growth";
   const pieceA = "of:piece-a";
   const pieceB = "of:piece-b";
-  const process = "of:process";
+  const result = "of:result";
   const base = "of:base";
 
   try {
@@ -374,21 +374,21 @@ Deno.test("memory v2 query reuses a persistent manager cache for shared source g
           value: { value: { label: "base" } },
         }, {
           op: "set",
-          id: process,
+          id: result,
           value: {
-            source: { "/": "base" },
+            result: { "/": { "link@1": { id: base, path: [] } } },
           },
         }, {
           op: "set",
           id: pieceA,
           value: {
-            source: { "/": "process" },
+            result: { "/": { "link@1": { id: result, path: [] } } },
           },
         }, {
           op: "set",
           id: pieceB,
           value: {
-            source: { "/": "process" },
+            result: { "/": { "link@1": { id: result, path: [] } } },
           },
         }],
       },
@@ -527,7 +527,7 @@ Deno.test("memory v2 query treats schema true as covering narrower selectors", a
         },
       }],
     });
-    const rootKey = `${space}/${rootId}/application/json`;
+    const rootKey = `${space}/${rootId}`;
     assertEquals(tracked.state.tracker.get(rootKey)?.size, 1);
 
     extendTrackedGraph(space, engine, tracked.state, {
@@ -710,7 +710,7 @@ Deno.test("memory v2 query refresh updates the growth manager cache for later wa
   const space = "did:key:z6Mk-memory-v2-query-manager-refresh";
   const pieceA = "of:piece-a";
   const pieceB = "of:piece-b";
-  const process = "of:process";
+  const result = "of:result";
   const base1 = "of:base-1";
   const base2 = "of:base-2";
 
@@ -732,21 +732,21 @@ Deno.test("memory v2 query refresh updates the growth manager cache for later wa
           value: { value: { label: "base-2" } },
         }, {
           op: "set",
-          id: process,
+          id: result,
           value: {
-            source: { "/": "base-1" },
+            result: { "/": { "link@1": { id: base1, path: [] } } },
           },
         }, {
           op: "set",
           id: pieceA,
           value: {
-            source: { "/": "process" },
+            result: { "/": { "link@1": { id: result, path: [] } } },
           },
         }, {
           op: "set",
           id: pieceB,
           value: {
-            source: { "/": "process" },
+            result: { "/": { "link@1": { id: result, path: [] } } },
           },
         }],
       },
@@ -773,9 +773,9 @@ Deno.test("memory v2 query refresh updates the growth manager cache for later wa
         reads: { confirmed: [], pending: [] },
         operations: [{
           op: "set",
-          id: process,
+          id: result,
           value: {
-            source: { "/": "base-2" },
+            result: { "/": { "link@1": { id: base2, path: [] } } },
           },
         }],
       },
@@ -785,7 +785,7 @@ Deno.test("memory v2 query refresh updates the growth manager cache for later wa
       space,
       engine,
       tracked.state,
-      new Set([process]),
+      new Set([result]),
     );
     assertExists(refreshed);
 

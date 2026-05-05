@@ -372,49 +372,6 @@ export class PieceManager {
         }
       };
 
-      // Helper function to follow alias chain to its source
-      const followSourceToResultRef = (
-        cell: Cell<unknown>,
-        visited = new Set<string>(),
-        depth = 0,
-      ): EntityId | undefined => {
-        if (depth > maxDepth) return undefined; // Prevent infinite recursion
-
-        try {
-          const docId = cell.entityId;
-          if (!docId || !docId["/"]) return undefined;
-
-          const docIdStr = typeof docId["/"] === "string"
-            ? docId["/"]
-            : JSON.stringify(docId["/"]);
-
-          // Prevent cycles
-          if (visited.has(docIdStr)) return undefined;
-          visited.add(docIdStr);
-
-          try {
-            // If document has a sourceCell, follow it
-            const value = cell.getRaw();
-            const sourceCell = cell.getSourceCell();
-            if (sourceCell) {
-              return followSourceToResultRef(sourceCell, visited, depth + 1);
-            } else if (isRecord(value) && value.resultRef) {
-              // If we've reached the end and have a resultRef, return it
-              const { id: source } = parseLink(value.resultRef, cell)!;
-              if (source) return getEntityId(source);
-            }
-          } catch (err) {
-            // Ignore errors getting doc value
-            console.debug("Error getting doc value:", err);
-          }
-
-          return docId; // Return the current document's ID if no further references
-        } catch (err) {
-          console.debug("Error in followSourceToResultRef:", err);
-          return undefined;
-        }
-      };
-
       // Find references in the argument structure
       const processValue = (
         value: unknown,
@@ -436,12 +393,12 @@ export class PieceManager {
               addMatchingPiece(getEntityId(link.id)!);
             }
 
-            const sourceRefId = followSourceToResultRef(
+            const resultCell = followCellToResult(
               this.runtime.getCellFromLink(link),
               new Set(),
               0,
             );
-            if (sourceRefId) addMatchingPiece(sourceRefId);
+            if (resultCell !== undefined) addMatchingPiece(resultCell.entityId);
           } else if (Array.isArray(value)) {
             // Safe recursive processing of arrays
             for (let i = 0; i < value.length; i++) {
@@ -547,35 +504,6 @@ export class PieceManager {
       }
     };
 
-    // Helper function to follow alias chain to its source
-    const followSourceToResultRef = (
-      cell: Cell<unknown>,
-      visited = new Set<string>(),
-      depth = 0,
-    ): URI | undefined => {
-      if (depth > maxDepth) return undefined; // Prevent infinite recursion
-
-      const cellURI = cell.sourceURI;
-
-      // Prevent cycles
-      if (visited.has(cellURI)) return undefined;
-      visited.add(cellURI);
-
-      // If document has a sourceCell, follow it
-      const value = cell.getRaw();
-      const sourceCell = cell.getSourceCell();
-      if (sourceCell) {
-        return followSourceToResultRef(sourceCell, visited, depth + 1);
-      }
-
-      // If we've reached the end and have a resultRef, return it
-      if (isRecord(value) && value.resultRef) {
-        return parseLink(value.resultRef, cell)?.id;
-      }
-
-      return cellURI; // Return the current document's ID if no further references
-    };
-
     // Helper to check if a document refers to our target piece
     const checkRefersToTarget = (
       value: unknown,
@@ -598,12 +526,12 @@ export class PieceManager {
             if (link.id === piece.sourceURI) return true;
 
             // Check if cell link's source chain leads to our target
-            const sourceResultRefURI = followSourceToResultRef(
+            const resultCell = followCellToResult(
               this.runtime.getCellFromLink(link),
               new Set(),
               0,
             );
-            if (sourceResultRefURI === piece.sourceURI) return true;
+            if (resultCell?.sourceURI === piece.sourceURI) return true;
           } catch (err) {
             console.debug(
               "Error handling cell link in checkRefersToTarget:",
@@ -769,7 +697,6 @@ export class PieceManager {
     pattern: Pattern | Module,
     inputs?: unknown,
     cause?: unknown,
-    llmRequestId?: string,
     options?: { start?: boolean },
   ): Promise<Cell<T>> {
     const start = options?.start ?? true;
@@ -777,7 +704,6 @@ export class PieceManager {
       pattern,
       inputs,
       cause,
-      llmRequestId,
     );
     if (start) {
       await this.startPiece(piece);
@@ -821,7 +747,6 @@ export class PieceManager {
     pattern: Pattern | Module,
     inputs?: unknown,
     cause?: unknown,
-    llmRequestId?: string,
   ): Promise<Cell<T>> {
     await timePiecePhase(
       "setupPersistent.runtime.idle",
@@ -850,14 +775,6 @@ export class PieceManager {
           ? this.syncPatternById(knownPatternId)
           : this.syncPattern(piece),
     );
-
-    if (llmRequestId) {
-      this.runtime.editWithRetry((tx) => {
-        piece.getSourceCell(pieceSourceCellSchema)?.key("llmRequestId")
-          .withTx(tx)
-          .set(llmRequestId);
-      });
-    }
 
     return piece;
   }
@@ -935,6 +852,16 @@ export class PieceManager {
     );
   }
 
+  /**
+   * Set the target cell's argument cell at target path to be a link to the
+   * link cell's content at linkPath.
+   *
+   * @param linkPieceId
+   * @param linkPath
+   * @param targetPieceId
+   * @param targetPath
+   * @param options
+   */
   async link(
     linkPieceId: string,
     linkPath: (string | number)[],
@@ -962,12 +889,18 @@ export class PieceManager {
     await this.runtime.editWithRetry((tx) => {
       let targetInputCell = targetCell.withTx(tx);
       if (targetIsPiece) {
-        // For pieces, target fields are in the source cell's argument
-        const sourceCell = targetInputCell.getSourceCell(processSchema);
-        if (!sourceCell) {
-          throw new Error("Target piece has no source cell");
+        // For pieces, target fields are in the result cell's argument
+        const resultCell = followCellToResult(targetInputCell);
+        if (!resultCell) {
+          throw new Error("Target piece has no result cell");
         }
-        targetInputCell = sourceCell.key("argument");
+        const targetArgumentLink = getMetaLink(resultCell, "argument");
+        if (targetArgumentLink === undefined) {
+          throw new Error("Target piece has no argument cell");
+        }
+        targetInputCell = resultCell.runtime.getCellFromLink(
+          targetArgumentLink,
+        );
       }
 
       targetInputCell.key(...targetPath).setRawUntyped(
@@ -1014,10 +947,49 @@ async function getCellByIdOrPiece(
         if (!id) return false;
         return id === cellId;
       });
-
       return { cell, isPiece: isActuallyPiece };
     } catch (_) {
       throw new Error(`${label} "${cellId}" not found as piece or cell`);
     }
+  }
+}
+
+// Helper function to follow alias chain to its source
+const MAX_DEPTH = 10;
+function followCellToResult(
+  cell: Cell<unknown>,
+  visited = new Set<string>(),
+  depth = 0,
+): Cell<unknown> | undefined {
+  if (depth > MAX_DEPTH) return undefined; // Prevent infinite recursion
+
+  try {
+    const docId = cell.entityId;
+    if (!docId || !docId["/"]) return undefined;
+
+    const docIdStr = typeof docId["/"] === "string"
+      ? docId["/"]
+      : JSON.stringify(docId["/"]);
+
+    // Prevent cycles
+    if (visited.has(docIdStr)) return undefined;
+    visited.add(docIdStr);
+
+    try {
+      // If document has a sourceCell, follow it
+      const resultLink = getMetaLink(cell, "result");
+      if (resultLink !== undefined) {
+        const resultCell = cell.runtime.getCellFromLink(resultLink);
+        return followCellToResult(resultCell, visited, depth + 1);
+      }
+    } catch (err) {
+      // Ignore errors getting doc value
+      console.debug("Error getting doc value:", err);
+    }
+
+    return cell; // Return the current document's ID if no further references
+  } catch (err) {
+    console.debug("Error in followCellToResult:", err);
+    return undefined;
   }
 }

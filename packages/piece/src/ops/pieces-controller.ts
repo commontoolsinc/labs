@@ -64,7 +64,6 @@ export class PiecesController<T = unknown> {
       pattern,
       options.input,
       cause,
-      undefined,
       { start },
     );
     if (!start) {

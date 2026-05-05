@@ -17,3 +17,10 @@ export function setPatternCell(
     resultCell.setMetaRaw("pattern", parentPattern);
   }
 }
+
+export function setResultCell(cell: Cell<unknown>, resultCell: Cell<unknown>) {
+  cell.setMetaRaw(
+    "result",
+    resultCell.getAsWriteRedirectLink({ includeSchema: true }),
+  );
+}

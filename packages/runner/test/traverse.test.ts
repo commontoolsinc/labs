@@ -2251,7 +2251,7 @@ describe("anyOf fast-reject reactivity invariants (traverseCells)", () => {
 
   /** Build a tracker key matching the internal getTrackerKey() format. */
   function trackerKey(id: string): string {
-    return `${SPACE}/${id}/${TYPE}`;
+    return `${SPACE}/${id}`;
   }
 
   /** Shortcut: store a document in the map-based store. */

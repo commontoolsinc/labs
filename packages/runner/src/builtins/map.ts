@@ -18,7 +18,7 @@ import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { trustedFlowPrecisionSchemaForBuiltin } from "../cfc/flow-precision.ts";
 import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
-import { setPatternCell } from "../result-utils.ts";
+import { setPatternCell, setResultCell } from "../result-utils.ts";
 
 /**
  * Implementation of built-in map module. Unlike regular modules, this will be
@@ -84,7 +84,7 @@ export function map(
         tx,
       );
       result.send([]);
-      result.setSourceCell(parentCell);
+      setResultCell(result, parentCell);
       // Link the new result cells to the pattern cell too
       setPatternCell(result, parentCell.key("pattern"));
       sendResult(tx, result);
@@ -163,6 +163,8 @@ export function map(
           resultCell,
           { doNotUpdateOnPatternChange: true },
         );
+        // Link these individual cells to the top cell
+        setResultCell(resultCell, parentCell);
         // Link the new result cells to the pattern cell too
         setPatternCell(resultCell, parentCell.key("pattern"));
         addCancel(() => runtime.runner.stop(resultCell));
