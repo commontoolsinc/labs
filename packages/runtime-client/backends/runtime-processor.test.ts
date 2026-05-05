@@ -13,6 +13,29 @@ import {
 import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
 import { FabricBytes } from "@commonfabric/data-model/fabric-bytes";
 import { cellRefToSigilLink } from "./utils.ts";
+import {
+  getJsonEncodingConfig,
+  setJsonEncodingConfig,
+} from "@commonfabric/data-model/json-encoding";
+import {
+  getDataModelConfig,
+  setDataModelConfig,
+} from "@commonfabric/data-model/fabric-value";
+
+const withUnifiedJsonEncoding = async <T>(
+  fn: () => Promise<T> | T,
+): Promise<T> => {
+  const previousJson = getJsonEncodingConfig();
+  const previousDataModel = getDataModelConfig();
+  setDataModelConfig(true);
+  setJsonEncodingConfig(true);
+  try {
+    return await fn();
+  } finally {
+    setDataModelConfig(previousDataModel);
+    setJsonEncodingConfig(previousJson);
+  }
+};
 
 describe("sanitizeForPostMessage", () => {
   describe("primitives", () => {
@@ -416,16 +439,18 @@ describe("RuntimeProcessor blob upload IPC", () => {
     } as unknown as RuntimeProcessor;
 
     try {
-      await expect(
-        RuntimeProcessor.prototype.handleUploadBlob.call(processor, {
-          type: RequestType.UploadBlob,
-          contentType: "image/png",
-          body: new Uint8Array([1, 2, 3]),
-          suffix: "png",
-        }),
-      ).resolves.toEqual({
-        id: "fid1:test",
-        url: "blobs/test.png",
+      await withUnifiedJsonEncoding(async () => {
+        await expect(
+          RuntimeProcessor.prototype.handleUploadBlob.call(processor, {
+            type: RequestType.UploadBlob,
+            contentType: "image/png",
+            body: new Uint8Array([1, 2, 3]),
+            suffix: "png",
+          }),
+        ).resolves.toEqual({
+          id: "fid1:test",
+          url: "blobs/test.png",
+        });
       });
     } finally {
       globalThis.fetch = originalFetch;
