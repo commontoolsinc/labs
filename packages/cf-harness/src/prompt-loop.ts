@@ -439,6 +439,54 @@ const summarizeToolInput = async (
           ? { maxBytes: input.maxBytes }
           : {}),
       };
+    case "edit_file": {
+      let oldTextBytes = 0;
+      let newTextBytes = 0;
+      const oldTextDigests: string[] = [];
+      const newTextDigests: string[] = [];
+      const edits = Array.isArray(input.edits) ? input.edits : [];
+      for (const edit of edits) {
+        if (
+          typeof edit === "object" && edit !== null &&
+          "oldText" in edit &&
+          typeof edit.oldText === "string"
+        ) {
+          const summary = await summarizeSensitiveText(edit.oldText);
+          oldTextBytes += summary.bytes;
+          oldTextDigests.push(summary.digest);
+        }
+        if (
+          typeof edit === "object" && edit !== null &&
+          "newText" in edit &&
+          typeof edit.newText === "string"
+        ) {
+          const summary = await summarizeSensitiveText(edit.newText);
+          newTextBytes += summary.bytes;
+          newTextDigests.push(summary.digest);
+        }
+      }
+      return {
+        type: "cf-harness.tool-input-summary",
+        toolId,
+        ...(typeof input.path === "string" ? { path: input.path } : {}),
+        ...(edits.length > 0 ? { editCount: edits.length } : {}),
+        ...(typeof input.expectedDigest === "string"
+          ? { expectedDigest: input.expectedDigest }
+          : {}),
+        ...(oldTextDigests.length > 0
+          ? {
+            oldTextBytes,
+            oldTextDigest: await digestJsonValue(oldTextDigests),
+          }
+          : {}),
+        ...(newTextDigests.length > 0
+          ? {
+            newTextBytes,
+            newTextDigest: await digestJsonValue(newTextDigests),
+          }
+          : {}),
+      };
+    }
     case "write_file": {
       const contentSummary = typeof input.content === "string"
         ? await summarizeSensitiveText(input.content)

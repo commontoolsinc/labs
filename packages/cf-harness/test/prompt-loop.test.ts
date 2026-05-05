@@ -356,7 +356,14 @@ Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant 
 
   assertEquals(
     firstRequest.tools.map((tool) => tool.function.name),
-    ["bash", "read_file", "read_skill_resource", "write_file", "delegate_task"],
+    [
+      "bash",
+      "read_file",
+      "read_skill_resource",
+      "edit_file",
+      "write_file",
+      "delegate_task",
+    ],
   );
   assertEquals(
     secondRequest.messages.at(-1),
@@ -704,11 +711,18 @@ Deno.test("CfHarnessPromptLoop delegates one fresh child run and returns a summa
   assertEquals(result.finalAssistantText, "Parent received the child summary.");
   assertEquals(
     requestBodies[0].tools.map((tool) => tool.function.name),
-    ["bash", "read_file", "read_skill_resource", "write_file", "delegate_task"],
+    [
+      "bash",
+      "read_file",
+      "read_skill_resource",
+      "edit_file",
+      "write_file",
+      "delegate_task",
+    ],
   );
   assertEquals(
     requestBodies[1].tools.map((tool) => tool.function.name),
-    ["bash", "read_file", "write_file"],
+    ["bash", "read_file", "edit_file", "write_file"],
   );
   assertEquals(
     requestBodies[1].messages.map((message) => message.role),
@@ -774,6 +788,7 @@ Deno.test("CfHarnessPromptLoop delegates one fresh child run and returns a summa
   assertEquals(output.subagent.manifest.allowedToolIds, [
     "bash",
     "read_file",
+    "edit_file",
     "write_file",
   ]);
   assertEquals(output.subagent.manifest.hostToolIds, []);
@@ -1327,7 +1342,7 @@ Deno.test("CfHarnessPromptLoop lets an explicit subagent profile expand child to
   );
   assertEquals(
     requestBodies[1].tools.map((tool) => tool.function.name),
-    ["bash", "read_file", "write_file"],
+    ["bash", "read_file", "edit_file", "write_file"],
   );
   assertEquals(result.runState.cfcPolicySnapshot?.parentTools, {
     allowance: "restricted",
@@ -1354,6 +1369,7 @@ Deno.test("CfHarnessPromptLoop lets an explicit subagent profile expand child to
   assertEquals(output.subagent.manifest.allowedToolIds, [
     "bash",
     "read_file",
+    "edit_file",
     "write_file",
   ]);
   assertEquals(output.subagent.manifest.hostToolIds, []);
@@ -1422,7 +1438,14 @@ Deno.test("CfHarnessPromptLoop keeps bash-no-sandbox unavailable to the parent b
 
   assertEquals(
     firstRequest.tools.map((tool) => tool.function.name),
-    ["bash", "read_file", "read_skill_resource", "write_file", "delegate_task"],
+    [
+      "bash",
+      "read_file",
+      "read_skill_resource",
+      "edit_file",
+      "write_file",
+      "delegate_task",
+    ],
   );
   assertEquals(denied.detail, "bash-no-sandbox is not allowed in this run");
   assertEquals(result.runState.toolOutputs, []);
@@ -2038,7 +2061,7 @@ Deno.test("CfHarnessPromptLoop reports child run failures through delegate_task 
   );
   assertEquals(
     requestBodies[1].tools.map((tool) => tool.function.name),
-    ["bash", "read_file", "write_file"],
+    ["bash", "read_file", "edit_file", "write_file"],
   );
   const toolMessage = result.transcript.at(-2);
   if (toolMessage?.role !== "tool") {
@@ -2101,7 +2124,7 @@ Deno.test("CfHarnessPromptLoop continues subagent ids from retained run state", 
       depth: 1,
       cfcEnforcementMode: "disabled",
       model: "gpt-5.4",
-      allowedToolIds: ["bash", "read_file", "write_file"],
+      allowedToolIds: ["bash", "read_file", "edit_file", "write_file"],
       hostToolIds: [],
       maxModelTurns: 8,
       returnPolicy: {

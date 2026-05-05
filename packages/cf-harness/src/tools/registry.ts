@@ -2,6 +2,7 @@ import type { BuiltinToolId } from "../contracts/tool-descriptor.ts";
 import { bashTool } from "./bash.ts";
 import { bashNoSandboxTool } from "./bash-no-sandbox.ts";
 import { delegateTaskTool } from "./delegate-task.ts";
+import { editFileTool } from "./edit-file.ts";
 import { readFileTool } from "./read-file.ts";
 import { readSkillResourceTool } from "./read-skill-resource.ts";
 import { writeFileTool } from "./write-file.ts";
@@ -12,6 +13,7 @@ export const BUILTIN_TOOLS = [
   bashNoSandboxTool,
   readFileTool,
   readSkillResourceTool,
+  editFileTool,
   writeFileTool,
   delegateTaskTool,
 ] as const;
