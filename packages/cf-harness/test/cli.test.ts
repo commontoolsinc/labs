@@ -1,6 +1,8 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import { join } from "@std/path";
 import {
+  buildCfHarnessBaseSystemPrompt,
+  buildCfHarnessBatchSystemPrompt,
   buildCfHarnessOperatorSystemPrompt,
   type CfHarnessCliIO,
   type CfHarnessCliSignalHandler,
@@ -1346,7 +1348,12 @@ Deno.test("runCfHarnessCli uses plain stdout and no operator guidance in batch m
   );
 
   assertEquals(exitCode, 0);
-  assertEquals(runPromptOptions?.systemPrompt, "You are a Loom batch worker.");
+  assertEquals(
+    runPromptOptions?.systemPrompt,
+    buildCfHarnessBatchSystemPrompt({
+      systemPrompt: "You are a Loom batch worker.",
+    }),
+  );
   assertEquals(stdout, ["Batch result.\n"]);
   assertEquals(stderr, []);
 });
@@ -1577,6 +1584,8 @@ Deno.test("buildCfHarnessOperatorSystemPrompt appends user instructions after gu
       systemPrompt: "Use bash and read_file only. Do not modify files.",
     }),
     [
+      buildCfHarnessBaseSystemPrompt(),
+      "",
       "Operator guidance for cf-harness runs:",
       "- Prefer exploration within /workspace/packages/cf-harness.",
       "- Start from README files and the package manifest before reading source files.",
@@ -1598,7 +1607,9 @@ Deno.test("resolveCfHarnessCliSystemPrompt bypasses operator guidance in batch m
       systemPrompt: "You are a Loom batch worker.",
       outputMode: "batch",
     }),
-    "You are a Loom batch worker.",
+    buildCfHarnessBatchSystemPrompt({
+      systemPrompt: "You are a Loom batch worker.",
+    }),
   );
 });
 
@@ -2064,8 +2075,7 @@ Deno.test("buildCfHarnessOperatorSystemPrompt omits fabric guidance without moun
     workspace: "/tmp/project",
     systemPrompt: undefined,
   });
-  assertEquals(prompt.includes("fabric"), false);
-  assertEquals(prompt.includes("Fabric"), false);
+  assertEquals(prompt.includes("mounted at"), false);
 });
 
 Deno.test("runCfHarnessCli threads fabric-mount into engine additionalMounts", async () => {
