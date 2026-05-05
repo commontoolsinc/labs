@@ -26,6 +26,7 @@ import {
   type NormalizedFullLink,
   toMemorySpaceAddress,
 } from "./link-utils.ts";
+import { normalizeCellScope } from "./scope.ts";
 import type {
   ChangeGroup,
   IExtendedStorageTransaction,
@@ -1516,10 +1517,11 @@ export class Scheduler {
     if (populateDependencies) {
       handler.populateDependencies = populateDependencies;
     }
-    this.eventHandlers.push([ref, handler]);
+    const normalizedRef = { ...ref, scope: normalizeCellScope(ref.scope) };
+    this.eventHandlers.push([normalizedRef, handler]);
     return () => {
       const index = this.eventHandlers.findIndex(([r, h]) =>
-        r === ref && h === handler
+        r === normalizedRef && h === handler
       );
       if (index !== -1) this.eventHandlers.splice(index, 1);
     };

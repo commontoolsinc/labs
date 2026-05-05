@@ -1,4 +1,4 @@
-import { type Cell } from "../cell.ts";
+import { createCell, type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import { type RawBuiltinResult } from "../module.ts";
 import { type Runtime } from "../runtime.ts";
@@ -32,10 +32,18 @@ export function navigateTo(
 
     // Initialize the result cell if it hasn't been initialized yet.
     if (!isInitialized) {
-      resultCell = runtime.getCell<any>(
+      const baseResultCell = runtime.getCell<any>(
         parentCell.space,
         { navigateTo: { result: cause } },
         { type: "boolean" },
+        tx,
+      );
+      resultCell = createCell(
+        runtime,
+        {
+          ...baseResultCell.getAsNormalizedFullLink(),
+          scope: "session",
+        },
         tx,
       );
 
