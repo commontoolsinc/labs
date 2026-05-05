@@ -256,3 +256,9 @@ metadata) is stored as regular entities with well-known ID conventions:
 
 These are regular entities. They benefit from versioning, causal validation,
 branch isolation, and session-scoped sync without a separate storage dimension.
+
+## Related Cross-Cutting Specs
+
+| File | Content |
+| ---- | ------- |
+| [Scoped Cell Instances](../scoped-cell-instances.md) | Scope dimensions for causal cell ids across storage, links, schemas, traversal, and built-ins |
