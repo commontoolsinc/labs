@@ -609,29 +609,34 @@ export class Runner {
     const defaults = extractDefaultValues(pattern.argumentSchema) as Partial<T>;
     const internalLink = getMetaLink(resultCell, "internal");
     const argumentLink = getMetaLink(resultCell, "argument");
+    const internalCell = getMetaCell(
+      resultCell,
+      "internal",
+      tx,
+      pattern.internalSchema,
+    );
+    const previousInternal = internalCell.getRawUntyped({
+      meta: ignoreReadForScheduling,
+      frozen: false,
+    });
+    const internal = Object.assign(
+      {},
+      cellAwareDeepCopy(
+        (defaults as unknown as { internal: FabricValue })?.internal,
+      ),
+      cellAwareDeepCopy(
+        isRecord(pattern.initial) && isRecord(pattern.initial.internal)
+          ? pattern.initial.internal
+          : {},
+      ),
+      isRecord(previousInternal) ? previousInternal : {},
+    ) as FabricValue;
+    internalCell.setRawUntyped(fabricFromNativeValue(internal, false));
     if (internalLink === undefined) {
-      const newInternalCell = getMetaCell(
-        resultCell,
-        "internal",
-        tx,
-        pattern.internalSchema,
-      );
-      setResultCell(newInternalCell, resultCell.asSchema(pattern.resultSchema));
-      const internal = Object.assign(
-        {},
-        cellAwareDeepCopy(
-          (defaults as unknown as { internal: FabricValue })?.internal,
-        ),
-        cellAwareDeepCopy(
-          isRecord(pattern.initial) && isRecord(pattern.initial.internal)
-            ? pattern.initial.internal
-            : {},
-        ),
-      ) as FabricValue;
-      newInternalCell.setRawUntyped(fabricFromNativeValue(internal, false));
+      setResultCell(internalCell, resultCell.asSchema(pattern.resultSchema));
       resultCell.withTx(tx).setMetaRaw(
         "internal",
-        newInternalCell.getAsLink({ includeSchema: true }),
+        internalCell.getAsLink({ includeSchema: true }),
       );
     }
 
