@@ -97,20 +97,88 @@ describe("hashOf()", () => {
     expect(hashBytesOf(0)).toEqual(expected);
   });
 
-  it("-0 normalizes to +0 (same hash)", () => {
-    expect(hashBytesOf(-0)).toEqual(hashBytesOf(0));
+  it("-0 produces TAG_NUMBER + IEEE 754 negative-zero bit pattern", () => {
+    // 80 00 00 00 00 00 00 00
+    const expected = sha256([
+      0x23,
+      0x80,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+    ]);
+    expect(hashBytesOf(-0)).toEqual(expected);
   });
 
-  it("NaN throws", () => {
-    expect(() => hashBytesOf(NaN)).toThrow("non-finite");
+  it("-0 and +0 produce different hashes", () => {
+    expect(hex(hashBytesOf(-0))).not.toBe(hex(hashBytesOf(0)));
   });
 
-  it("Infinity throws", () => {
-    expect(() => hashBytesOf(Infinity)).toThrow("non-finite");
+  it("NaN produces TAG_NUMBER + canonical quiet NaN bytes", () => {
+    // 7F F8 00 00 00 00 00 00
+    const expected = sha256([
+      0x23,
+      0x7f,
+      0xf8,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+    ]);
+    expect(hashBytesOf(NaN)).toEqual(expected);
   });
 
-  it("-Infinity throws", () => {
-    expect(() => hashBytesOf(-Infinity)).toThrow("non-finite");
+  it("non-canonical NaN bit patterns hash to the canonical NaN", () => {
+    // Construct a NaN with a non-zero payload (still a valid quiet NaN) and
+    // confirm it canonicalizes. The hashed bytes must match the literal `NaN`.
+    const view = new DataView(new ArrayBuffer(8));
+    view.setBigUint64(0, 0x7ff8000000000001n, false);
+    const nonCanonicalNaN = view.getFloat64(0, false);
+    expect(Number.isNaN(nonCanonicalNaN)).toBe(true);
+    expect(hex(hashBytesOf(nonCanonicalNaN))).toBe(hex(hashBytesOf(NaN)));
+  });
+
+  it("Infinity produces TAG_NUMBER + IEEE 754 +Infinity bit pattern", () => {
+    // 7F F0 00 00 00 00 00 00
+    const expected = sha256([
+      0x23,
+      0x7f,
+      0xf0,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+    ]);
+    expect(hashBytesOf(Infinity)).toEqual(expected);
+  });
+
+  it("-Infinity produces TAG_NUMBER + IEEE 754 -Infinity bit pattern", () => {
+    // FF F0 00 00 00 00 00 00
+    const expected = sha256([
+      0x23,
+      0xff,
+      0xf0,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+    ]);
+    expect(hashBytesOf(-Infinity)).toEqual(expected);
+  });
+
+  it("NaN, +Infinity, and -Infinity produce distinct hashes", () => {
+    expect(hex(hashBytesOf(NaN))).not.toBe(hex(hashBytesOf(Infinity)));
+    expect(hex(hashBytesOf(NaN))).not.toBe(hex(hashBytesOf(-Infinity)));
+    expect(hex(hashBytesOf(Infinity))).not.toBe(hex(hashBytesOf(-Infinity)));
   });
 
   it("different numbers produce different hashes", () => {
