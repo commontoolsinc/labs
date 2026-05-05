@@ -1458,7 +1458,14 @@ export function loadSource(
   }
   // We also want to include the source cells
   const source = targetObj["source"];
-  if (!isRecord(source) || !("/" in source) || !isString(source["/"])) {
+  const sourceLink = isRecord(source)
+    ? parseLink(source, valueEntry.address)
+    : undefined;
+  const legacyShortId = isRecord(source) && "/" in source &&
+      isString(source["/"])
+    ? source["/"]
+    : undefined;
+  if (!sourceLink && legacyShortId === undefined) {
     // undefined is strange, but acceptable
     if (source !== undefined) {
       logger.warn(
@@ -1468,17 +1475,26 @@ export function loadSource(
     }
     return;
   }
-  const shortId: string = source["/"];
-  if (cycleCheck.has(shortId)) {
+  const address: IMemorySpaceAddress = sourceLink
+    ? {
+      space: sourceLink.space!,
+      id: sourceLink.id!,
+      scope: sourceLink.scope,
+      type: "application/json",
+      path: [],
+    }
+    : {
+      space: valueEntry.address.space,
+      id: `of:${legacyShortId}`,
+      type: "application/json",
+      path: [],
+      scope: valueEntry.address.scope,
+    };
+  const cycleKey = JSON.stringify([address.space, address.id, address.scope]);
+  if (cycleCheck.has(cycleKey)) {
     return;
   }
-  cycleCheck.add(shortId);
-  const address: IMemorySpaceAddress = {
-    space: valueEntry.address.space,
-    id: `of:${shortId}`,
-    type: "application/json",
-    path: [],
-  };
+  cycleCheck.add(cycleKey);
   // This only happens in the query path, so don't worry about scheduler
   const { ok: entry, error } = tx.read(address);
   if (error) {

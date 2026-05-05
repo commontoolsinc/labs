@@ -10,6 +10,7 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { isRecord } from "@commonfabric/utils/types";
 import { rendererVDOMSchema } from "./schemas.ts";
 import {
+  type CellScope,
   type Frame,
   isModule,
   isPattern,
@@ -29,7 +30,7 @@ import {
   popFrame,
   pushFrameFromCause,
 } from "./builder/pattern.ts";
-import { type Cell, isCell } from "./cell.ts";
+import { type Cell, createCell, isCell } from "./cell.ts";
 import { type Action } from "./scheduler.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import {
@@ -67,6 +68,7 @@ import { FunctionCache } from "./function-cache.ts";
 import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import "./builtins/index.ts";
 import { isCellResult } from "./query-result-proxy.ts";
+import { isCellScope } from "./scope.ts";
 import {
   cellAwareDeepCopy,
   describePatternOrModule,
@@ -136,6 +138,18 @@ const processCellSetupSchema = (pattern: Pattern): JSONSchema => ({
   },
   required: [TYPE] as const,
 });
+
+function schemaCellScope(
+  schema: JSONSchema | undefined,
+): CellScope | undefined {
+  return isRecord(schema) && isCellScope(schema.scope)
+    ? schema.scope
+    : undefined;
+}
+
+function patternDefaultScope(pattern: Pattern): CellScope | undefined {
+  return schemaCellScope(pattern.resultSchema) ?? pattern.defaultScope;
+}
 
 const recordOutputSchemaPolicyInputs = (
   tx: IExtendedStorageTransaction,
@@ -534,12 +548,21 @@ export class Runner {
       return sourceCell as Cell<ProcessCellData<T>>;
     }
 
-    const processCell = this.runtime.getCell<ProcessCellData<T>>(
+    const baseProcessCell = this.runtime.getCell<ProcessCellData<T>>(
       resultCell.space,
       resultCell,
       undefined,
       tx,
     );
+    const resultScope = resultCell.getAsNormalizedFullLink().scope;
+    const processCell = resultScope === "space" ? baseProcessCell : createCell(
+      this.runtime,
+      {
+        ...baseProcessCell.getAsNormalizedFullLink(),
+        scope: resultScope,
+      },
+      tx,
+    ) as Cell<ProcessCellData<T>>;
     resultCell.withTx(tx).setSourceCell(processCell);
     return processCell;
   }
@@ -2935,7 +2958,9 @@ export class Runner {
       );
       sendToBindings = false;
     } else {
-      resultCell = this.runtime.getCell(
+      const resultScope = patternDefaultScope(patternImpl) ??
+        module.defaultScope;
+      const baseResultCell = this.runtime.getCell(
         processCell.space,
         {
           pattern: module.implementation,
@@ -2946,6 +2971,16 @@ export class Runner {
         patternImpl.resultSchema,
         tx,
       );
+      resultCell = resultScope === undefined || resultScope === "space"
+        ? baseResultCell
+        : createCell(
+          this.runtime,
+          {
+            ...baseResultCell.getAsNormalizedFullLink(),
+            scope: resultScope,
+          },
+          tx,
+        );
       sendToBindings = true;
     }
 

@@ -90,6 +90,7 @@ import {
   isCellLink,
   type NormalizedFullLink,
   type NormalizedLink,
+  parseLink,
   type SanitizeSchemaForLinksOptions,
   toMemorySpaceAddress,
 } from "./link-utils.ts";
@@ -1474,12 +1475,20 @@ export class CellImpl<T extends FabricValue>
         `Source cell ID expected to be a record link, got: ${typeof sourceCellId}`,
       );
     }
+    const sourceLink = parseLink(sourceCellId, this.link);
+    if (sourceLink) {
+      return createCell(this.runtime, {
+        ...sourceLink,
+        schema,
+      }, this.tx) as Cell<any>;
+    }
     const sourceCellIdString = toURI(sourceCellId);
 
     return createCell(this.runtime, {
       space: this.link.space,
       path: [],
       id: sourceCellIdString,
+      scope: this.link.scope,
       schema: schema,
     }, this.tx) as Cell<any>;
   }
@@ -1498,8 +1507,7 @@ export class CellImpl<T extends FabricValue>
     // System-owned provenance metadata, not user-surface value data.
     this.tx.writeOrThrow(
       { ...toMemorySpaceAddress(this.link), path: ["source"] },
-      // TODO(@ubik2): Transition source links to sigil links?
-      { "/": fromURI(sourceLink.id) },
+      createSigilLinkFromParsedLink(sourceLink, { base: this.link }),
     );
   }
 

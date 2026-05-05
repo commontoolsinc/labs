@@ -1,8 +1,8 @@
 import { isRecord } from "@commonfabric/utils/types";
 import {
+  type CellScope,
   type Frame,
   type ICell,
-  type CellScope,
   isOpaqueRef,
   type JSONSchema,
   type Module,
@@ -361,6 +361,7 @@ function factoryFromPattern<T, R>(
     return { module, inputs, outputs } satisfies Node;
   });
 
+  let patternFactory: PatternFactory<T, R>;
   const pattern: Pattern & toJSON = {
     argumentSchema: sanitizeSchemaForLinks(argumentSchema, {
       keepStreams: true,
@@ -382,29 +383,45 @@ function factoryFromPattern<T, R>(
     toJSON: () => patternToJSON(patternFactory),
   };
 
-  const patternFactory = Object.assign((inputs: Opaque<T>): OpaqueRef<R> => {
-    const module: Module & toJSON = {
-      type: "pattern",
-      implementation: patternFactory,
-      toJSON: () => moduleToJSON(module),
+  const makePatternFactory = (
+    defaultScope?: CellScope,
+  ): PatternFactory<T, R> => {
+    let factory: PatternFactory<T, R>;
+    const scopedPattern: Pattern & toJSON = {
+      ...pattern,
+      ...(defaultScope !== undefined ? { defaultScope } : {}),
+      toJSON: () => patternToJSON(factory),
     };
 
-    const outputs = opaqueRef<R>();
-    const node: NodeRef = {
-      module,
-      inputs,
-      outputs,
-      frame: getTopFrame(),
-    };
+    factory = Object.assign((inputs: Opaque<T>): OpaqueRef<R> => {
+      const module: Module & toJSON = {
+        type: "pattern",
+        implementation: factory,
+        ...(factory.defaultScope !== undefined
+          ? { defaultScope: factory.defaultScope }
+          : {}),
+        toJSON: () => moduleToJSON(module),
+      };
 
-    connectInputAndOutputs(node);
-    (outputs as OpaqueCell<R>).connect(node);
+      const outputs = opaqueRef<R>();
+      const node: NodeRef = {
+        module,
+        inputs,
+        outputs,
+        frame: getTopFrame(),
+      };
 
-    return outputs;
-  }, pattern) as PatternFactory<T, R>;
+      connectInputAndOutputs(node);
+      (outputs as OpaqueCell<R>).connect(node);
 
-  patternFactory.asScope = (scope: CellScope) =>
-    Object.assign(patternFactory, { defaultScope: scope });
+      return outputs;
+    }, scopedPattern) as PatternFactory<T, R>;
+
+    factory.asScope = (scope: CellScope) => makePatternFactory(scope);
+    return factory;
+  };
+
+  patternFactory = makePatternFactory();
 
   return patternFactory;
 }
