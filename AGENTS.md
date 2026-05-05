@@ -14,7 +14,8 @@ This repository contains many packages that compose and stack to create the
 Common Fabric product.
 
 1. Foundation: api, runtime, identity, memory
-2. System: schema-generator, iframe-sandbox, ts-transformers, js-compiler
+2. System: schema-generator, iframe-sandbox, ts-transformers, js-compiler,
+   js-sandbox
 3. Capabilities: piece, html, llm
 4. Operation: background-piece-service, cli
 5. Deployed Product: toolshed, shell
