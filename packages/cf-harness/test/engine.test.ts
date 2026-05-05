@@ -113,6 +113,18 @@ Deno.test("CfHarnessEngine builds a default docker-runsc sandbox when given a wo
   });
 });
 
+Deno.test("CfHarnessEngine accepts a default sandbox image override", () => {
+  const engine = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    sandboxImage: "registry.example/cf:deno2",
+  });
+
+  assertEquals(
+    engine.sandbox.describe?.()?.cfc?.image,
+    "registry.example/cf:deno2",
+  );
+});
+
 Deno.test("CfHarnessEngine lets bash-no-sandbox host commands handle missing workspace paths", async () => {
   const workspaceHostPath = await Deno.makeTempDir({
     prefix: "cf-harness-engine-missing-",

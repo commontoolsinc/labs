@@ -13,7 +13,10 @@
  */
 
 import { preparedDigestFor, type PreparedDigestInput } from "../src/cfc/mod.ts";
-import { canonicalizePreparedDigestInput } from "../src/cfc/canonical.ts";
+import {
+  canonicalizeLogicalPath,
+  canonicalizePreparedDigestInput,
+} from "../src/cfc/canonical.ts";
 import { watchIdForEntry } from "../src/storage/v2-watch.ts";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
@@ -39,6 +42,32 @@ const freezePolicies = (
 ): WritePolicyInput[] => {
   for (const p of policies) deepFreeze(p);
   return policies;
+};
+
+// Produce a "warm" copy of an input — paths canonicalized + frozen, every
+// record deep-frozen — mirroring the post-`buildPreparedDigestInput` shape
+// that `preparedDigestFor` actually sees in production. The cold variants
+// (no leading-`"value"` strip, unfrozen) measure the first-time
+// canonicalize cost paid once at the chokepoint; warm variants measure
+// the steady-state per-`preparedDigestFor` cost.
+const warm = (input: PreparedDigestInput): PreparedDigestInput => {
+  const warmAddr = <T extends { path: readonly string[] }>(a: T): T =>
+    deepFreeze({ ...a, path: canonicalizeLogicalPath(a.path) });
+  return deepFreeze({
+    consumedReads: input.consumedReads.map(warmAddr),
+    potentialWrites: input.potentialWrites.map(warmAddr),
+    writes: input.writes.map(warmAddr),
+    dereferenceTraces: input.dereferenceTraces.map((t) =>
+      deepFreeze({
+        ...t,
+        source: warmAddr(t.source),
+        target: warmAddr(t.target),
+      })
+    ),
+    writePolicyInputs: input.writePolicyInputs,
+    implementationIdentity: input.implementationIdentity,
+    trustSnapshot: input.trustSnapshot,
+  });
 };
 
 // A small `PreparedDigestInput` that approximates a typical pattern-tick
@@ -144,6 +173,52 @@ const TIEBREAK_HEAVY_INPUT: PreparedDigestInput = {
   trustSnapshot: undefined,
 };
 
+// A path-heavy fixture: every read / write / trace shares the same
+// `(space, id)`, so `compareAddress()` always falls through to the path
+// step and `logicalPathToPointer()` fires on every comparator pair. This
+// is realistic for a pattern-tick that touches many fields of a single
+// document. Per runner-test instrumentation, ~82% of `compareAddress()`
+// calls in real workloads reach the path step, so this fixture is closer
+// to "production shape" than `LARGE_INPUT` (which has all-distinct ids).
+// Included so any future regression in path-canonicalization or the
+// path-step compare pathway will surface in the hourly drift detector.
+const PATH_HEAVY_INPUT: PreparedDigestInput = {
+  consumedReads: Array.from({ length: 12 }, (_, i) => ({
+    space: SPACE,
+    id: "of:doc-shared",
+    path: ["value", "items", String(i), "field", String(i)],
+  })),
+  potentialWrites: Array.from({ length: 4 }, (_, i) => ({
+    space: SPACE,
+    id: "of:doc-shared",
+    path: ["value", "out", String(i)],
+  })),
+  writes: Array.from({ length: 4 }, (_, i) => ({
+    space: SPACE,
+    id: "of:doc-shared",
+    path: ["value", "out", String(i)],
+  })),
+  dereferenceTraces: Array.from({ length: 6 }, (_, i) => ({
+    source: {
+      space: SPACE,
+      id: "of:doc-shared",
+      path: ["value", "src", String(i)],
+    },
+    target: {
+      space: SPACE,
+      id: "of:doc-shared",
+      path: ["value", "dst", String(i)],
+    },
+    kind: i % 2 === 0 ? "value" as const : "write-redirect" as const,
+  })),
+  writePolicyInputs: [],
+  implementationIdentity: { kind: "builtin", builtinId: "test-builtin" },
+  trustSnapshot: undefined,
+};
+
+const WARM_LARGE_INPUT = warm(LARGE_INPUT);
+const WARM_PATH_HEAVY_INPUT = warm(PATH_HEAVY_INPUT);
+
 Deno.bench(
   "preparedDigestFor — small (typical pattern-tick boundary)",
   { group: "preparedDigestFor" },
@@ -173,6 +248,54 @@ Deno.bench(
   { group: "preparedDigestFor" },
   () => {
     preparedDigestFor(TIEBREAK_HEAVY_INPUT);
+  },
+);
+
+Deno.bench(
+  "preparedDigestFor — path-heavy (all addresses share space+id; differ by path)",
+  { group: "preparedDigestFor" },
+  () => {
+    preparedDigestFor(PATH_HEAVY_INPUT);
+  },
+);
+
+Deno.bench(
+  "canonicalizePreparedDigestInput only — path-heavy",
+  { group: "preparedDigestFor" },
+  () => {
+    canonicalizePreparedDigestInput(PATH_HEAVY_INPUT);
+  },
+);
+
+Deno.bench(
+  "preparedDigestFor — large WARM (post-build-chokepoint shape)",
+  { group: "preparedDigestFor" },
+  () => {
+    preparedDigestFor(WARM_LARGE_INPUT);
+  },
+);
+
+Deno.bench(
+  "canonicalizePreparedDigestInput only — large WARM",
+  { group: "preparedDigestFor" },
+  () => {
+    canonicalizePreparedDigestInput(WARM_LARGE_INPUT);
+  },
+);
+
+Deno.bench(
+  "preparedDigestFor — path-heavy WARM",
+  { group: "preparedDigestFor" },
+  () => {
+    preparedDigestFor(WARM_PATH_HEAVY_INPUT);
+  },
+);
+
+Deno.bench(
+  "canonicalizePreparedDigestInput only — path-heavy WARM",
+  { group: "preparedDigestFor" },
+  () => {
+    canonicalizePreparedDigestInput(WARM_PATH_HEAVY_INPUT);
   },
 );
 

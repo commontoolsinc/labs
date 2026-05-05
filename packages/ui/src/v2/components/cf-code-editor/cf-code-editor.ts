@@ -1,4 +1,5 @@
 import { html, PropertyValues } from "lit";
+import { property } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { styles } from "./styles.ts";
 import {
@@ -62,10 +63,14 @@ import {
   type CellHandle,
   isCellHandle,
   NAME,
+  type RuntimeClient,
 } from "@commonfabric/runtime-client";
 import { stringSchema } from "@commonfabric/runner/schemas";
 import { type InputTimingOptions } from "../../core/input-timing-controller.ts";
 import { createStringCellController } from "../../core/cell-controller.ts";
+import { consume } from "@lit/context";
+import { runtimeContext } from "../../runtime-context.ts";
+import { type StoredFile, uploadFile } from "../../utils/file-cell-storage.ts";
 import {
   Mentionable,
   MentionableArray,
@@ -78,6 +83,13 @@ import {
   createBacklinkDecorationPlugin,
 } from "./features/backlinks.ts";
 import { createProseMarkdownPlugin } from "./features/prose-markdown.ts";
+
+function escapeMarkdownImageAltText(text: string): string {
+  return text.replace(/\\/g, "\\\\")
+    .replace(/\[/g, "\\[")
+    .replace(/\]/g, "\\]")
+    .replace(/\r?\n/g, " ");
+}
 
 /**
  * Supported MIME types for syntax highlighting
@@ -217,6 +229,10 @@ export class CFCodeEditor extends BaseElement {
   declare autofocus: boolean;
   declare cursorPosition: "start" | "end";
 
+  @consume({ context: runtimeContext, subscribe: true })
+  @property({ attribute: false })
+  accessor runtime: RuntimeClient | undefined = undefined;
+
   private _editorView: EditorView | undefined;
   private _lang = new Compartment();
   private _readonly = new Compartment();
@@ -233,6 +249,10 @@ export class CFCodeEditor extends BaseElement {
   private _cleanupFns: Array<() => void> = [];
   private _mentionableUnsub: (() => void) | null = null;
   private _mentionedUnsub: (() => void) | null = null;
+  private _autofocusPending = false;
+  private _autofocusFrame: number | null = null;
+  private _autofocusIntersectionObserver: IntersectionObserver | null = null;
+  private _autofocusResizeObserver: ResizeObserver | null = null;
   // Track previous backlink names to detect changes for syncing to piece NAME
   private _previousBacklinkNames = new Map<string, string>();
   // Track subscriptions to piece NAME cells for bidirectional sync
@@ -764,6 +784,9 @@ export class CFCodeEditor extends BaseElement {
 
   override connectedCallback() {
     super.connectedCallback();
+    if (this.autofocus && this._editorView) {
+      this._queueAutofocus();
+    }
   }
 
   override disconnectedCallback() {
@@ -890,6 +913,7 @@ export class CFCodeEditor extends BaseElement {
   }
 
   private _cleanup(): void {
+    this._cancelAutofocus();
     this._cleanupCellSyncHandler();
     this._cleanupPieceNameSubscriptions();
     this._resolvedPieceIds.clear();
@@ -1049,6 +1073,14 @@ export class CFCodeEditor extends BaseElement {
         ],
       });
     }
+
+    if (changedProperties.has("autofocus")) {
+      if (this.autofocus) {
+        this._queueAutofocus();
+      } else {
+        this._cancelAutofocus();
+      }
+    }
   }
 
   protected override firstUpdated(_changedProperties: PropertyValues): void {
@@ -1078,9 +1110,98 @@ export class CFCodeEditor extends BaseElement {
     // Set up subscriptions for bidirectional NAME sync
     this._setupPieceNameSubscriptions();
 
-    if (this.autofocus) {
-      this._editorView?.focus();
+    this._queueAutofocus();
+  }
+
+  private _queueAutofocus(): void {
+    if (!this.autofocus) return;
+    this._autofocusPending = true;
+    this._observeAutofocusVisibility();
+    this._scheduleAutofocusAttempt();
+  }
+
+  private _scheduleAutofocusAttempt(): void {
+    if (!this._autofocusPending || this._autofocusFrame !== null) return;
+    if (typeof requestAnimationFrame !== "function") {
+      this._attemptAutofocus();
+      return;
     }
+    this._autofocusFrame = requestAnimationFrame(() => {
+      this._autofocusFrame = null;
+      this._attemptAutofocus();
+    });
+  }
+
+  private _attemptAutofocus(): void {
+    if (!this._autofocusPending || !this.autofocus) {
+      this._cancelAutofocus();
+      return;
+    }
+    if (!this._editorView) return;
+    if (typeof document !== "undefined" && !this.isConnected) return;
+
+    if (!this._isVisibleForAutofocus()) {
+      this._observeAutofocusVisibility();
+      return;
+    }
+
+    this._editorView.focus();
+    this._autofocusPending = false;
+    this._teardownAutofocusObservers();
+  }
+
+  private _isVisibleForAutofocus(): boolean {
+    if (typeof document === "undefined") return true;
+    const rect = this.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }
+
+  private _observeAutofocusVisibility(): void {
+    if (typeof document === "undefined") return;
+
+    if (
+      !this._autofocusIntersectionObserver &&
+      typeof IntersectionObserver !== "undefined"
+    ) {
+      this._autofocusIntersectionObserver = new IntersectionObserver(
+        (entries) => {
+          if (entries.some((entry) => entry.isIntersecting)) {
+            this._scheduleAutofocusAttempt();
+          }
+        },
+      );
+      this._autofocusIntersectionObserver.observe(this);
+    }
+
+    if (
+      !this._autofocusResizeObserver && typeof ResizeObserver !== "undefined"
+    ) {
+      this._autofocusResizeObserver = new ResizeObserver(() => {
+        if (this._isVisibleForAutofocus()) {
+          this._scheduleAutofocusAttempt();
+        }
+      });
+      this._autofocusResizeObserver.observe(this);
+    }
+  }
+
+  private _cancelAutofocus(): void {
+    this._autofocusPending = false;
+    if (
+      this._autofocusFrame !== null &&
+      typeof cancelAnimationFrame === "function"
+    ) {
+      cancelAnimationFrame(this._autofocusFrame);
+    }
+    this._autofocusFrame = null;
+    this._teardownAutofocusObservers();
+  }
+
+  private _teardownAutofocusObservers(): void {
+    this._autofocusIntersectionObserver?.disconnect();
+    this._autofocusIntersectionObserver = null;
+    this._autofocusResizeObserver?.disconnect();
+    this._autofocusResizeObserver = null;
   }
 
   /**
@@ -1249,6 +1370,16 @@ export class CFCodeEditor extends BaseElement {
           this.emit("cf-blur");
           return false;
         },
+        paste: (event, view) => {
+          if (this.readonly || this.disabled) return false;
+          const files = Array.from(event.clipboardData?.files ?? [])
+            .filter((file) => file.type.startsWith("image/"));
+          if (files.length === 0) return false;
+
+          event.preventDefault();
+          this._handleImagePaste(files, view);
+          return true;
+        },
       }),
       // Add backlink click handler for Cmd/Ctrl+Click
       this.createBacklinkClickHandler(),
@@ -1374,6 +1505,52 @@ export class CFCodeEditor extends BaseElement {
    */
   get editorView(): EditorView | undefined {
     return this._editorView;
+  }
+
+  private async _handleImagePaste(
+    files: File[],
+    view: EditorView,
+  ): Promise<void> {
+    const runtime = isCellHandle(this.value)
+      ? this.value.runtime()
+      : this.runtime;
+
+    if (!runtime) {
+      this.emit("cf-error", {
+        error: new Error("Runtime is not available for pasted image storage"),
+        message: "Runtime is not available for pasted image storage",
+      });
+      return;
+    }
+
+    try {
+      const storedFiles: StoredFile[] = [];
+      for (const file of files) {
+        storedFiles.push(await uploadFile({ file, runtime }));
+      }
+
+      const markdown = storedFiles
+        .map((file) =>
+          `![${escapeMarkdownImageAltText(file.name)}](${file.url})`
+        )
+        .join("\n");
+      const selection = view.state.selection.main;
+      view.dispatch({
+        changes: {
+          from: selection.from,
+          to: selection.to,
+          insert: markdown,
+        },
+        selection: { anchor: selection.from + markdown.length },
+      });
+
+      this.emit("cf-file-paste", { files: storedFiles });
+    } catch (error) {
+      this.emit("cf-error", {
+        error: error as Error,
+        message: "Failed to store pasted image",
+      });
+    }
   }
 
   /**

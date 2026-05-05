@@ -1,5 +1,6 @@
 import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
+import { oneOf } from "../../core/property-guards.ts";
 import type { ColorIntent, ComponentSize } from "../theme-context.ts";
 
 /**
@@ -21,6 +22,10 @@ import type { ColorIntent, ComponentSize } from "../theme-context.ts";
  */
 
 export type BadgeVariant = "solid" | "outline";
+
+const badgeVariants = ["solid", "outline"] as const;
+const badgeColors = ["neutral", "primary", "accent", "danger"] as const;
+const badgeSizes = ["xs", "sm", "md", "lg", "xl"] as const;
 
 export class CFBadge extends BaseElement {
   static override styles = [
@@ -262,6 +267,21 @@ export class CFBadge extends BaseElement {
       this.variant = "solid";
       this.removable = false;
       this.size = "sm";
+    }
+
+    protected override willUpdate(
+      changedProperties: Map<string | number | symbol, unknown>,
+    ): void {
+      super.willUpdate(changedProperties);
+      if (
+        changedProperties.has("color") ||
+        changedProperties.has("variant") ||
+        changedProperties.has("size")
+      ) {
+        this.color = oneOf(this.color, badgeColors, "neutral");
+        this.variant = oneOf(this.variant, badgeVariants, "solid");
+        this.size = oneOf(this.size, badgeSizes, "sm");
+      }
     }
 
     override render() {

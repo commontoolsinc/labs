@@ -33,7 +33,10 @@ import type {
   HarnessTranscriptMessage,
 } from "./contracts/transcript.ts";
 import { CfHarnessEngine } from "./engine.ts";
-import { DEFAULT_FABRIC_MOUNT_PATH } from "./sandbox/docker-runsc.ts";
+import {
+  DEFAULT_DOCKER_RUNSC_IMAGE,
+  DEFAULT_FABRIC_MOUNT_PATH,
+} from "./sandbox/docker-runsc.ts";
 import {
   CfHarnessPromptLoop,
   type CreateHarnessPromptLoopOptions,
@@ -79,6 +82,7 @@ export interface CfHarnessCliConfig {
   printTranscript: boolean;
   apiKey?: string;
   apiKeySource?: "CF_HARNESS_API_KEY" | "OPENAI_API_KEY";
+  sandboxImage?: string;
   fabricMount?: string;
 }
 
@@ -200,6 +204,7 @@ Options:
   --result-json-path <path>     Optional structured result sidecar path
   --run-manifest <path>         Optional Loom run manifest JSON path
   --cfc-enforcement-mode <mode> disabled | observe | enforce-explicit | enforce-strict
+  --sandbox-image <image>       Docker image for the runsc-cfc sandbox (default: ${DEFAULT_DOCKER_RUNSC_IMAGE})
   --fabric-mount <path>         Host path for a Fabric FUSE mount (mounted at /fabric in the sandbox)
   --max-model-turns <n>         Maximum model turns before aborting
   --print-transcript            Print the final transcript JSON after the response
@@ -208,6 +213,8 @@ Options:
 Environment:
   CF_HARNESS_API_KEY            Preferred API key for the OpenAI-compatible gateway
   OPENAI_API_KEY                Fallback API key if CF_HARNESS_API_KEY is unset
+  CF_HARNESS_DOCKER_NETWORK_MODE none | bridge | host (default: bridge)
+  CF_HARNESS_SANDBOX_IMAGE      Default value for --sandbox-image
 `;
 
 const parsePositiveInteger = (
@@ -429,6 +436,7 @@ export const parseCfHarnessCliArgs = async (
       "result-json-path",
       "run-manifest",
       "cfc-enforcement-mode",
+      "sandbox-image",
       "max-model-turns",
       "fabric-mount",
     ],
@@ -566,7 +574,16 @@ export const parseCfHarnessCliArgs = async (
         "CF_HARNESS_CFC_ENFORCEMENT_MODE",
       ),
       CF_CFC_MODE: Deno.env.get("CF_CFC_MODE"),
+      CF_HARNESS_SANDBOX_IMAGE: Deno.env.get("CF_HARNESS_SANDBOX_IMAGE"),
     };
+  const rawSandboxImage = typeof args["sandbox-image"] === "string"
+    ? args["sandbox-image"].trim()
+    : undefined;
+  if (rawSandboxImage !== undefined && rawSandboxImage === "") {
+    throw new Error("--sandbox-image requires a non-empty image reference");
+  }
+  const sandboxImage = rawSandboxImage ??
+    nonEmptyEnvValue(env.CF_HARNESS_SANDBOX_IMAGE);
   const explicitCfcMode = typeof args["cfc-enforcement-mode"] === "string"
     ? args["cfc-enforcement-mode"]
     : undefined;
@@ -638,6 +655,7 @@ export const parseCfHarnessCliArgs = async (
     printTranscript: Boolean(args["print-transcript"]),
     ...(apiKey !== undefined ? { apiKey } : {}),
     ...(apiKeySource !== undefined ? { apiKeySource } : {}),
+    ...(sandboxImage !== undefined ? { sandboxImage } : {}),
     ...(fabricMount !== undefined ? { fabricMount } : {}),
   };
 };
@@ -1000,6 +1018,9 @@ export const runCfHarnessCli = async (
         runState: artifacts.runState,
         artifactRoot: parsed.artifactRoot,
         workspaceHostPath: parsed.workspace,
+        ...(parsed.sandboxImage !== undefined
+          ? { sandboxImage: parsed.sandboxImage }
+          : {}),
         model: parsed.model ?? artifacts.runState.model,
         gatewayBaseUrl: parsed.gatewayBaseUrl,
         gatewayAuthMode: parsed.gatewayAuthMode,
@@ -1063,6 +1084,9 @@ export const runCfHarnessCli = async (
       const engine = new CfHarnessEngine({
         workspaceHostPath: parsed.workspace,
         artifactRoot: parsed.artifactRoot,
+        ...(parsed.sandboxImage !== undefined
+          ? { sandboxImage: parsed.sandboxImage }
+          : {}),
         model: parsed.model,
         gatewayBaseUrl: parsed.gatewayBaseUrl,
         gatewayAuthMode: parsed.gatewayAuthMode,

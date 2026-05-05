@@ -3771,8 +3771,7 @@ interface CFFileInputAttributes<T> extends CFHTMLAttributes<T> {
   "removable"?: boolean;
   "disabled"?: boolean;
   "maxSizeBytes"?: number;
-  "files"?: any[]; // FileData[]
-  "$files"?: any; // CellLike<FileData[]>
+  "includeData"?: boolean;
   "oncf-click"?: EventHandler<any>;
   "oncf-change"?: EventHandler<any>;
   "oncf-remove"?: EventHandler<any>;
@@ -3798,8 +3797,7 @@ interface CFImageInputAttributes<T> extends CFHTMLAttributes<T> {
   "previewSize"?: "sm" | "md" | "lg";
   "removable"?: boolean;
   "disabled"?: boolean;
-  "images"?: any[]; // ImageData[]
-  "$images"?: any; // CellLike<ImageData[]>
+  "includeData"?: boolean;
   "oncf-click"?: EventHandler<any>;
   "oncf-change"?: EventHandler<any>;
   "oncf-remove"?: EventHandler<any>;
@@ -3966,6 +3964,8 @@ interface CFCodeEditorAttributes<T> extends CFHTMLAttributes<T> {
   "oncf-change"?: any;
   "oncf-focus"?: any;
   "oncf-blur"?: any;
+  "oncf-file-paste"?: any;
+  "oncf-error"?: any;
   "onbacklink-click"?: any;
   "onbacklink-create"?: any;
 }

@@ -23,6 +23,7 @@ import {
   FabricSet,
 } from "./fabric-native-instances.ts";
 import { TAGS } from "./fabric-type-tags.ts";
+import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 
 /**
  * Tag prefix for the encoded form used by this module. We use this explicit
@@ -339,13 +340,14 @@ export class JsonEncodingContext implements SerializationContext<string> {
     }
     seen.add(value as object);
 
+    // Iterate keys in UTF-8 byte order. This matches the canonical key order
+    // used by `value-hash.ts`, and makes JSON encoding deterministic across
+    // implementations and across objects whose keys differ only in insertion
+    // order. See `3-json-encoding.md` Section 10 for the spec.
     const result: Record<string, JsonWireValue> = {};
-    for (
-      const [key, val] of Object.entries(
-        value as Record<string, FabricValue>,
-      )
-    ) {
-      result[key] = this.serialize(val, seen, registry);
+    const valueRec = value as Record<string, FabricValue>;
+    for (const key of utf8SortedKeysOf(valueRec)) {
+      result[key] = this.serialize(valueRec[key], seen, registry);
     }
     seen.delete(value as object);
 

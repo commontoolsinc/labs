@@ -270,15 +270,17 @@ metadata-only `setattr` attempts such as chmod/chown/timestamp updates. In
 trusted prepare metadata. In `enforce-strict`, projected writes fail closed when
 annotations or prepare metadata are missing, malformed, or stale. Direct
 pre-gVisor testing can enable the temporary xattr prepare/finalize path with
-`--cfc-writeback-xattrs`; this accepts only `trusted.cfc.writeback.prepare` and
-`trusted.cfc.writeback.finalize` and is not a sandbox trust boundary.
-Prepared/fail-closed writeback records are persisted outside the mount so a
-daemon restart or subtree rebuild can reconcile them without exposing lower
-labels. Use `--cfc-writeback-state=<path>` to choose the recovery file;
-otherwise CFC modes use a mountpoint-derived file under
-`$CF_CFC_WRITEBACK_STATE_DIR`, `$XDG_STATE_HOME/commonfabric-fuse`, or
-`~/.cache/commonfabric-fuse`, in that order. The mount `.status` file includes a
-`cfc` section with writeback phase counts and recent diagnostics.
+`--cfc-writeback-xattrs`; this accepts `trusted.cfc.writeback.prepare` and
+`trusted.cfc.writeback.finalize`, plus their `user.commonfabric.cfc.*`
+compatibility spellings for host transports that cannot carry `trusted.*`
+xattrs. It is not a sandbox trust boundary. Prepared/fail-closed writeback
+records are persisted outside the mount so a daemon restart or subtree rebuild
+can reconcile them without exposing lower labels. Use
+`--cfc-writeback-state=<path>` to choose the recovery file; otherwise CFC modes
+use a mountpoint-derived file under `$CF_CFC_WRITEBACK_STATE_DIR`,
+`$XDG_STATE_HOME/commonfabric-fuse`, or `~/.cache/commonfabric-fuse`, in that
+order. The mount `.status` file includes a `cfc` section with writeback phase
+counts and recent diagnostics.
 
 Arbitrary symlink targets and callable-send writeback are still out of scope for
 CFC enforcing modes and are rejected there. gVisor remains responsible for

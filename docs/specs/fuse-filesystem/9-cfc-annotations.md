@@ -44,6 +44,11 @@ symlinks, truncates, and metadata mutations while recording diagnostics.
 Enforce-* modes require the prepare/finalize flow before those operations
 proceed. The existing non-CFC behavior is unchanged.
 
+The temporary writeback xattr bridge accepts the trusted prepare/finalize names
+and the equivalent `user.commonfabric.cfc.*` compatibility spellings when a host
+transport cannot carry `trusted.*` xattrs. gVisor remains responsible for
+exposing only the trusted logical namespace to the sandbox.
+
 Derived slot metadata is emitted as an explicit empty `no-trusted-derived-slots`
 structure. Digest-looking names therefore remain ordinary names unless a future
 trusted-derived identifier source supplies evidence.

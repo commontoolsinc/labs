@@ -1,5 +1,9 @@
 import { css, html } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
+import { oneOf } from "../../core/property-guards.ts";
+
+const tabListOrientations = ["horizontal", "vertical"] as const;
+const tabListVariants = ["underline", "chip"] as const;
 
 /**
  * CFTabList - Container component for tab buttons
@@ -35,7 +39,15 @@ export class CFTabList extends BaseElement {
         --cf-tab-list-color-surface: var(--cf-theme-color-surface, #f1f5f9);
 
         display: flex;
+        flex-shrink: 1;
+        min-width: 0;
+        max-width: 100%;
+        box-sizing: border-box;
+      }
+
+      :host([orientation="vertical"]) {
         flex-shrink: 0;
+        max-width: none;
       }
 
       .tab-list {
@@ -47,10 +59,15 @@ export class CFTabList extends BaseElement {
         padding: var(--cf-spacing-1);
         height: 2.5rem;
         gap: 0.125rem;
+        max-width: 100%;
+        min-width: 0;
+        box-sizing: border-box;
       }
 
       .tab-list[data-orientation="horizontal"] {
         flex-direction: row;
+        justify-content: flex-start;
+        width: 100%;
         min-width: 0;
         overflow-x: auto;
         overflow-y: hidden;
@@ -93,7 +110,7 @@ export class CFTabList extends BaseElement {
   ];
 
   static override properties = {
-    orientation: { type: String },
+    orientation: { type: String, reflect: true },
     variant: { type: String, reflect: true },
   };
 
@@ -128,6 +145,22 @@ export class CFTabList extends BaseElement {
     }
     if (changedProperties.has("variant")) {
       this._propagateVariant();
+    }
+  }
+
+  protected override willUpdate(
+    changedProperties: Map<string | number | symbol, unknown>,
+  ): void {
+    super.willUpdate(changedProperties);
+    if (
+      changedProperties.has("orientation") || changedProperties.has("variant")
+    ) {
+      this.orientation = oneOf(
+        this.orientation,
+        tabListOrientations,
+        "horizontal",
+      );
+      this.variant = oneOf(this.variant, tabListVariants, "underline");
     }
   }
 

@@ -42,6 +42,28 @@ describe("CFButton", () => {
     expect(element.type).toBe("button");
   });
 
+  it("should normalize invalid enum-like properties to defaults", () => {
+    const element = new CFButton();
+    element.color = "unexpected" as never;
+    element.variant = "secondary" as never;
+    element.size = "xxl" as never;
+    element.type = "menu" as never;
+
+    (element as any).willUpdate(
+      new Map([
+        ["color", "primary"],
+        ["variant", "solid"],
+        ["size", "md"],
+        ["type", "button"],
+      ]),
+    );
+
+    expect(element.color).toBe("primary");
+    expect(element.variant).toBe("solid");
+    expect(element.size).toBe("md");
+    expect(element.type).toBe("button");
+  });
+
   it("should expose button semantics on the host", () => {
     const element = new CFButton();
     element.updated(new Map([["disabled", undefined]]));

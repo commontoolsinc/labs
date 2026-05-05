@@ -9,6 +9,7 @@ import {
 } from "@std/path/posix";
 import { DenoProcessRunner, type ProcessRunner } from "./process-runner.ts";
 import type {
+  DockerNetworkMode,
   DockerRunscAdditionalMount,
   DockerRunscAdditionalMountConfig,
   DockerRunscCfcInvocationContextTransport,
@@ -34,8 +35,9 @@ export const DEFAULT_DOCKER_RUNTIME_NAME = "runsc-cfc";
 export const DEFAULT_DOCKER_BINARY = "docker";
 export const DEFAULT_WORKSPACE_MOUNT_PATH = "/workspace";
 export const DEFAULT_SANDBOX_SHELL = "/bin/sh";
-export const DEFAULT_DOCKER_NETWORK_MODE = "none" as const;
+export const DEFAULT_DOCKER_NETWORK_MODE = "bridge" as const;
 export const DEFAULT_FABRIC_MOUNT_PATH = "/fabric";
+export const DOCKER_NETWORK_MODE_ENV = "CF_HARNESS_DOCKER_NETWORK_MODE";
 export const CFC_RESULT_DIR_ENV = "CF_HARNESS_RUNSC_CFC_RESULT_DIR";
 export const CFC_INVOCATION_CONTEXT_DIR_ENV =
   "CF_HARNESS_RUNSC_CFC_INVOCATION_CONTEXT_DIR";
@@ -67,6 +69,20 @@ const optionalNonEmptyString = (
   value: string | undefined,
 ): string | undefined =>
   value !== undefined && value.length > 0 ? value : undefined;
+
+const parseDockerNetworkMode = (
+  value: string | undefined,
+): DockerNetworkMode | undefined => {
+  if (value === undefined || value === "") {
+    return undefined;
+  }
+  if (value === "none" || value === "bridge" || value === "host") {
+    return value;
+  }
+  throw new Error(
+    `${DOCKER_NETWORK_MODE_ENV} must be one of none, bridge, or host`,
+  );
+};
 
 const validateAbsoluteHostDir = (path: string, label: string): string => {
   if (path.trim() === "") {
@@ -240,7 +256,9 @@ export const resolveDockerRunscSandboxConfig = (
     workspaceHostPath: options.workspaceHostPath,
     workspaceMountPath,
     shellPath: options.shellPath ?? DEFAULT_SANDBOX_SHELL,
-    dockerNetworkMode: options.dockerNetworkMode ?? DEFAULT_DOCKER_NETWORK_MODE,
+    dockerNetworkMode: options.dockerNetworkMode ??
+      parseDockerNetworkMode(readEnvVar(DOCKER_NETWORK_MODE_ENV)) ??
+      DEFAULT_DOCKER_NETWORK_MODE,
     additionalMounts,
     extraDockerArgs: options.extraDockerArgs ?? [],
     ...(cfcResultDir !== undefined ? { cfcResultDir } : {}),
@@ -508,6 +526,7 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
       cfc: {
         runtimeRequested: true,
         runtimeName: this.config.runtimeName,
+        image: this.config.image,
         workspaceMountPath: this.config.workspaceMountPath,
         mounts: this.#mountDescriptions(),
         networkMode: this.config.dockerNetworkMode,
