@@ -35,6 +35,7 @@ import {
   type PatternSourcesResponse,
   RequestType,
   TelemetryNotification,
+  type UploadBlobResponse,
 } from "./protocol/mod.ts";
 import { NameSchema } from "@commonfabric/runner/schemas";
 import { RuntimeTransport } from "./client/transport.ts";
@@ -441,6 +442,17 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     await this.#conn.request<RequestType.SetBreakpoints>({
       type: RequestType.SetBreakpoints,
       actionIds,
+    });
+  }
+
+  async uploadBlob(options: {
+    contentType: string;
+    body: Uint8Array;
+    suffix?: string;
+  }): Promise<UploadBlobResponse> {
+    return await this.#conn.request<RequestType.UploadBlob>({
+      type: RequestType.UploadBlob,
+      ...options,
     });
   }
 
