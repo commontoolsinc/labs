@@ -1,6 +1,7 @@
 import { DID, Identity, type Session } from "@commonfabric/identity";
 import { FabricBytes } from "@commonfabric/data-model/fabric-bytes";
-import { encodeMemoryBoundary } from "@commonfabric/memory/v2";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { JsonEncodingContext } from "@commonfabric/data-model/json-encoding-context";
 import { PieceManager } from "@commonfabric/piece";
 import { PiecesController } from "@commonfabric/piece/ops";
 import {
@@ -114,6 +115,7 @@ import type { VDomOp } from "../protocol/types.ts";
 import type { RuntimeOptions } from "@commonfabric/runner";
 
 const MAX_SERIALIZATION_DEPTH = 5;
+const blobUploadEncoding = new JsonEncodingContext();
 
 export function runtimeOptionsFromInitializationData(
   data: InitializationData,
@@ -841,10 +843,12 @@ export class RuntimeProcessor {
       `/${this.space}/blobs/upload.${encodeURIComponent(suffix)}`,
       this.apiUrl,
     );
-    const body = encodeMemoryBoundary({
+    // Blob upload payloads must preserve FabricBytes even when the wider
+    // process is running with legacy memory JSON flags.
+    const body = blobUploadEncoding.encode({
       type: request.contentType,
       body: new FabricBytes(request.body),
-    });
+    } as FabricValue);
     const response = await fetch(target, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

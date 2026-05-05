@@ -7,10 +7,18 @@ import { memoryServer } from "@/routes/storage/memory.ts";
 import { isDID } from "@commonfabric/identity";
 import { FabricBytes } from "@commonfabric/data-model/fabric-bytes";
 import { hashOf } from "@commonfabric/data-model/value-hash";
+import { JsonEncodingContext } from "@commonfabric/data-model/json-encoding-context";
+import type { ReconstructionContext } from "@commonfabric/data-model/fabric-value";
 import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
 import type { Context } from "@hono/hono";
 
 const router = createRouter();
+const blobUploadEncoding = new JsonEncodingContext();
+const blobReconstructionContext: ReconstructionContext = {
+  getCell() {
+    throw new Error("Blob upload payloads cannot contain cell references");
+  },
+};
 
 type BlobContents = {
   type: string;
@@ -119,7 +127,13 @@ const readRequestContents = async (request: Request) => {
   if (!source) {
     return undefined;
   }
-  return asBlobContents(decodeMemoryBoundary(source));
+  try {
+    return asBlobContents(
+      blobUploadEncoding.decode(source, blobReconstructionContext),
+    );
+  } catch {
+    return asBlobContents(decodeMemoryBoundary(source));
+  }
 };
 
 const loadBlobContents = async (
