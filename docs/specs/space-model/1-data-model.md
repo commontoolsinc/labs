@@ -25,16 +25,28 @@ Fabric values are JSON-compatible with specific constraints:
 |------|-------|
 | `null` | JSON null |
 | `boolean` | `true` or `false` |
-| `number` | Finite only; `NaN` and `Infinity` rejected |
+| `number` | Legacy path: finite only; `NaN` and `Infinity` rejected. Modern path: any IEEE 754 binary64 (see Numbers below). |
 | `string` | Unicode text |
 | `array` | Ordered sequence of fabric values |
 | `object` | String-keyed map of fabric values |
 
 #### Numbers
 
-- Only finite numbers are fabric-compatible
-- `-0` is normalized to `0` during conversion
-- `NaN` and `Infinity` throw errors
+Number handling is bifurcated by the `modernDataModel` flag at the
+fabric-value conversion gate:
+
+- **Legacy path (`modernDataModel: false`):**
+  - Only finite numbers are fabric-compatible
+  - `-0` is normalized to `0` during conversion
+  - `NaN` and `Infinity` throw errors
+- **Modern path (`modernDataModel: true`):**
+  - All IEEE 754 binary64 values are accepted, including `-0`, `NaN`,
+    `+Infinity`, and `-Infinity`
+  - `-0` retains its sign
+  - `NaN` and `±Infinity` round-trip via the `SpecialNumber@1` JSON
+    envelope (see `space-model-formal-spec/3-json-encoding.md` Section 3)
+    and via the byte-level forms in
+    `space-model-formal-spec/2-hash-byte-format.md` Section 4.3
 
 #### Arrays
 
