@@ -47,7 +47,7 @@ const syncUploadedImages = handler<
 });
 
 export default pattern<ImageChatInput, ImageChatOutput>(
-  ({ systemPrompt, model }) => {
+  ({ systemPrompt }) => {
     const images = Writable.of<ImageData[]>([]);
     const prompt = Writable.of<string>("");
 
