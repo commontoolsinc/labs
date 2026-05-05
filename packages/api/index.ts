@@ -184,6 +184,26 @@ export type CellKind =
   | "readonly"
   | "writeonly";
 
+export type CellScope = "space" | "user" | "session";
+export type SchemaScope = CellScope | "any";
+export type LinkScope = "inherit" | CellScope;
+
+export type AsCellEntry =
+  | CellKind
+  | {
+    readonly kind: CellKind;
+    readonly scope?: LinkScope | "any";
+  };
+
+export declare const SCOPE_BRAND: unique symbol;
+export type Scoped<T, Scope extends SchemaScope> = T & {
+  readonly [SCOPE_BRAND]?: Scope;
+};
+export type PerSpace<T> = Scoped<T, "space">;
+export type PerUser<T> = Scoped<T, "user">;
+export type PerSession<T> = Scoped<T, "session">;
+export type PerAny<T> = Scoped<T, "any">;
+
 // `string` acts as `any`, e.g. when wanting to match any kind of cell
 // The [CELL_INNER_TYPE] property is a phantom property that enables TypeScript
 // to infer T when using `AnyBrandedCell<infer U>`. Without it, T is a phantom
@@ -1198,9 +1218,11 @@ export interface Pattern {
   argumentSchema: JSONSchema;
   resultSchema: JSONSchema;
   internalSchema?: JSONSchema;
+  defaultScope?: CellScope;
 }
 export interface Module {
   type: "ref" | "javascript" | "pattern" | "raw" | "isolated" | "passthrough";
+  defaultScope?: CellScope;
 }
 
 export type toJSON = {
@@ -1214,17 +1236,26 @@ export type Handler<T = any, R = any> = Module & {
 export type NodeFactory<T, R> =
   & ((inputs: Opaque<T>) => OpaqueRef<R>)
   & (Module | Handler | Pattern)
-  & toJSON;
+  & toJSON
+  & {
+    asScope(scope: CellScope): NodeFactory<T, R>;
+  };
 
 export type PatternFactory<T, R> =
   & ((inputs: Opaque<T>) => OpaqueRef<R>)
   & Pattern
-  & toJSON;
+  & toJSON
+  & {
+    asScope(scope: CellScope): PatternFactory<T, R>;
+  };
 
 export type ModuleFactory<T, R> =
   & ((inputs: Opaque<T>) => OpaqueRef<R>)
   & Module
-  & toJSON;
+  & toJSON
+  & {
+    asScope(scope: CellScope): ModuleFactory<T, R>;
+  };
 
 export type HandlerFactory<T, R> =
   & ((inputs: Opaque<StripCell<T>>) => Stream<R>)
@@ -1287,7 +1318,7 @@ export type JSONSchemaTypes =
 // We can also do an `{ asCell: ["stream"] }` or `{ asCell: ["opaque"] }`.
 // While this is currently tightly coupled to the CellKind type, we can restrict it
 // to a subset
-export type AsCellType = CellKind;
+export type AsCellType = AsCellEntry;
 
 // See https://json-schema.org/draft/2020-12/json-schema-core
 // See https://json-schema.org/draft/2020-12/json-schema-validation
@@ -1372,6 +1403,7 @@ export type JSONSchemaObj = {
   // Common Fabric extensions
   readonly [ID]?: unknown;
   readonly [ID_FIELD]?: unknown;
+  readonly scope?: SchemaScope;
   // makes it so that your handler gets a Cell object for that property. So you can call .set()/.update()/.push()/etc on it.
   // A value of `true` is treated the same as `["cell"]`
   readonly asCell?: boolean | readonly AsCellType[];

@@ -2,6 +2,7 @@ import { isRecord } from "@commonfabric/utils/types";
 import {
   type Frame,
   type ICell,
+  type CellScope,
   isOpaqueRef,
   type JSONSchema,
   type Module,
@@ -400,7 +401,10 @@ function factoryFromPattern<T, R>(
     (outputs as OpaqueCell<R>).connect(node);
 
     return outputs;
-  }, pattern) satisfies PatternFactory<T, R>;
+  }, pattern) as PatternFactory<T, R>;
+
+  patternFactory.asScope = (scope: CellScope) =>
+    Object.assign(patternFactory, { defaultScope: scope });
 
   return patternFactory;
 }

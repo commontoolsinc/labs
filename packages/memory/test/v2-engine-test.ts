@@ -77,6 +77,186 @@ const toEntityDocument = (
   return document as EntityDocument;
 };
 
+Deno.test("memory v2 engine stores independent scoped instances for the same id", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:alice",
+      principal: "did:key:alice",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:scoped",
+          value: toEntityDocument({ scope: "space" }),
+        }],
+      },
+    });
+    applyCommit(engine, {
+      sessionId: "session:alice",
+      principal: "did:key:alice",
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:scoped",
+          scope: "user",
+          value: toEntityDocument({ scope: "alice" }),
+        }],
+      },
+    });
+    applyCommit(engine, {
+      sessionId: "session:alice",
+      principal: "did:key:alice",
+      commit: {
+        localSeq: 3,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:scoped",
+          scope: "session",
+          value: toEntityDocument({ scope: "alice-session" }),
+        }],
+      },
+    });
+
+    assertEquals(read(engine, { id: "entity:scoped" }), {
+      value: { scope: "space" },
+    });
+    assertEquals(
+      read(engine, {
+        id: "entity:scoped",
+        scope: "user",
+        principal: "did:key:alice",
+        sessionId: "session:alice",
+      }),
+      { value: { scope: "alice" } },
+    );
+    assertEquals(
+      read(engine, {
+        id: "entity:scoped",
+        scope: "session",
+        principal: "did:key:alice",
+        sessionId: "session:alice",
+      }),
+      { value: { scope: "alice-session" } },
+    );
+    assertEquals(
+      read(engine, {
+        id: "entity:scoped",
+        scope: "user",
+        principal: "did:key:bob",
+        sessionId: "session:bob",
+      }),
+      null,
+    );
+    assertEquals(
+      read(engine, {
+        id: "entity:scoped",
+        scope: "session",
+        principal: "did:key:alice",
+        sessionId: "session:other",
+      }),
+      null,
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 engine conflicts are scoped by declared scope", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:alice",
+      principal: "did:key:alice",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:conflict",
+          scope: "user",
+          value: toEntityDocument({ count: 1 }),
+        }],
+      },
+    });
+
+    const spaceWrite = applyCommit(engine, {
+      sessionId: "session:alice",
+      principal: "did:key:alice",
+      commit: {
+        localSeq: 2,
+        reads: {
+          confirmed: [{
+            id: "entity:conflict",
+            path: toDocumentPath(["value"]),
+            seq: 0,
+          }],
+          pending: [],
+        },
+        operations: [{
+          op: "set",
+          id: "entity:space-only",
+          value: toEntityDocument("ok"),
+        }],
+      },
+    });
+    assertEquals(spaceWrite.seq, 2);
+
+    applyCommit(engine, {
+      sessionId: "session:alice",
+      principal: "did:key:alice",
+      commit: {
+        localSeq: 3,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:conflict",
+          scope: "user",
+          value: toEntityDocument({ count: 2 }),
+        }],
+      },
+    });
+
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:alice",
+          principal: "did:key:alice",
+          commit: {
+            localSeq: 4,
+            reads: {
+              confirmed: [{
+                id: "entity:conflict",
+                scope: "user",
+                path: toDocumentPath(["value"]),
+                seq: 1,
+              }],
+              pending: [],
+            },
+            operations: [{
+              op: "set",
+              id: "entity:conflict-result",
+              scope: "user",
+              value: toEntityDocument("stale"),
+            }],
+          },
+        }),
+      Error,
+      "stale confirmed read",
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 engine persists set and delete commits as seq revisions", async () => {
   const { engine, path } = await createEngine();
 

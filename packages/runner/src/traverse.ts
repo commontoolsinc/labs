@@ -673,6 +673,7 @@ function getNormalizedLink(
   return {
     space,
     id,
+    scope: address.scope ?? "space",
     path: path.slice(1),
     ...(schema !== undefined && { schema }),
   };
@@ -745,7 +746,7 @@ export abstract class BaseObjectTraverser {
       // doc.path can be [] here, so we can't just normalize the link, which
       // would trim "value". This does impact the back to cell symbols.
       return this.objectCreator.applyDefault(
-        doc.address,
+        { ...doc.address, scope: doc.address.scope ?? "space" },
         defaultValue,
       );
     } else if (isPrimitive(doc.value)) {

@@ -1,5 +1,5 @@
 import { isObject, isRecord } from "@commonfabric/utils/types";
-import { type JSONSchema } from "./builder/types.ts";
+import { type CellScope, type JSONSchema, type LinkScope } from "./builder/types.ts";
 import { type MemorySpace } from "./cell.ts";
 import {
   type LegacyAlias,
@@ -23,6 +23,7 @@ export type NormalizedLink = {
   id?: URI; // URI format with "of:" prefix
   path: readonly MemoryAddressPathComponent[];
   space?: MemorySpace;
+  scope?: LinkScope;
   schema?: JSONSchema;
   overwrite?: "redirect"; // "this" gets normalized away to undefined
 };
@@ -37,6 +38,7 @@ export type NormalizedLink = {
 export type NormalizedFullLink = NormalizedLink & {
   id: URI;
   space: MemorySpace;
+  scope: CellScope;
 };
 
 export type ValuePath = readonly ["value", ...string[]];
@@ -52,6 +54,7 @@ export function toMemorySpaceAddress(
   return {
     space: link.space,
     id: link.id,
+    scope: link.scope,
     path: ["value", ...link.path],
   };
 }
@@ -98,10 +101,12 @@ export function isPrimitiveCellLink(
 
 export function isNormalizedLink(value: any): value is NormalizedLink {
   if (!isRecord(value)) return false;
-  const { path, id, space } = value;
+  const { path, id, space, scope } = value;
   return Array.isArray(path) &&
     (typeof id === "string" || id === undefined) &&
-    (typeof space === "string" || space === undefined);
+    (typeof space === "string" || space === undefined) &&
+    (scope === undefined || scope === "inherit" || scope === "space" ||
+      scope === "user" || scope === "session");
 }
 
 /**
@@ -116,6 +121,8 @@ export function isNormalizedFullLink(value: any): value is NormalizedFullLink {
     isRecord(value) &&
     typeof value.id === "string" &&
     typeof value.space === "string" &&
+    (value.scope === "space" || value.scope === "user" ||
+      value.scope === "session") &&
     Array.isArray(value.path)
   );
 }
@@ -165,6 +172,9 @@ export function parseLinkPrimitive(
     let id = link.id;
     const path = link.path || [];
     const resolvedSpace = link.space || base?.space;
+    const resolvedScope = link.scope === undefined || link.scope === "inherit"
+      ? base?.scope
+      : link.scope;
 
     // If no id provided, use base cell's document
     if (!id && base) {
@@ -175,6 +185,7 @@ export function parseLinkPrimitive(
       ...(id && { id }),
       path: path.map((p) => p.toString()),
       ...(resolvedSpace && { space: resolvedSpace }),
+      ...(resolvedScope && { scope: resolvedScope }),
       ...(link.schema !== undefined && { schema: link.schema }),
       ...(link.overwrite === "redirect" && { overwrite: "redirect" }),
     };
@@ -200,6 +211,7 @@ export function parseLinkPrimitive(
         ? alias.path.map((p) => p.toString())
         : [],
       ...(base?.space && { space: base.space }),
+      ...(base?.scope && { scope: base.scope }),
       ...(alias.schema !== undefined && { schema: alias.schema }),
       overwrite: "redirect",
     };
@@ -211,6 +223,15 @@ export function parseLinkPrimitive(
  * Compare two normalized links for equality
  */
 export function areNormalizedLinksSame(
+  link1: NormalizedLink,
+  link2: NormalizedLink,
+): boolean {
+  return link1.id === link2.id && link1.space === link2.space &&
+    link1.scope === link2.scope &&
+    arrayEqual(link1.path, link2.path);
+}
+
+export function areNormalizedLinksSameIgnoringScope(
   link1: NormalizedLink,
   link2: NormalizedLink,
 ): boolean {
@@ -230,7 +251,7 @@ export function areNormalizedLinksSame(
 export function addressKey(
   addr: IMemorySpaceAddress | NormalizedFullLink,
 ): string {
-  return JSON.stringify([addr.space, addr.id, addr.path]);
+  return JSON.stringify([addr.space, addr.id, addr.scope ?? "space", addr.path]);
 }
 
 /**

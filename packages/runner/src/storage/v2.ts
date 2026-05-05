@@ -13,6 +13,7 @@ import {
 import { assert, unclaimed } from "@commonfabric/memory/fact";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import {
+  type CellScope,
   type DocumentPath,
   type EntityDocument,
   type PatchOp,
@@ -75,6 +76,7 @@ import {
   type SessionFactory,
 } from "./v2-remote-session.ts";
 import * as V2Transaction from "./v2-transaction.ts";
+import { normalizeCellScope } from "../scope.ts";
 
 export { watchIdForEntry } from "./v2-watch.ts";
 export type { SessionFactory } from "./v2-remote-session.ts";
@@ -158,6 +160,7 @@ type DocumentRecord = {
 
 type ConfirmedCommitRead = {
   id: URI;
+  scope?: CellScope;
   path: DocumentPath;
   seq: number;
   nonRecursive?: boolean;
@@ -165,6 +168,7 @@ type ConfirmedCommitRead = {
 
 type PendingCommitRead = {
   id: URI;
+  scope?: CellScope;
   path: DocumentPath;
   localSeq: number;
   nonRecursive?: boolean;
@@ -390,6 +394,12 @@ const compactCommitReads = <
   reads: Read[],
 ): Read[] => {
   const sorted = [...reads].sort((left, right) => {
+    const leftScope = normalizeCellScope(left.scope);
+    const rightScope = normalizeCellScope(right.scope);
+    if (leftScope !== rightScope) {
+      return leftScope < rightScope ? -1 : 1;
+    }
+
     if (left.id !== right.id) {
       return left.id < right.id ? -1 : 1;
     }
@@ -418,8 +428,8 @@ const compactCommitReads = <
   }>();
   for (const candidate of sorted) {
     const dependencyKey = "seq" in candidate
-      ? `confirmed:${candidate.id}:${candidate.seq}`
-      : `pending:${candidate.id}:${candidate.localSeq}`;
+      ? `confirmed:${normalizeCellScope(candidate.scope)}:${candidate.id}:${candidate.seq}`
+      : `pending:${normalizeCellScope(candidate.scope)}:${candidate.id}:${candidate.localSeq}`;
     let group = grouped.get(dependencyKey);
     if (!group) {
       group = {
@@ -446,6 +456,7 @@ const compactCommitReads = <
       [...group.recursiveByPath.values()].map((read) => ({
         space,
         id: read.id,
+        scope: read.scope,
         type: DOCUMENT_MIME,
         path: read.path,
       })),
@@ -460,6 +471,12 @@ const compactCommitReads = <
   }
 
   return compacted.toSorted((left, right) => {
+    const leftScope = normalizeCellScope(left.scope);
+    const rightScope = normalizeCellScope(right.scope);
+    if (leftScope !== rightScope) {
+      return leftScope < rightScope ? -1 : 1;
+    }
+
     if (left.id !== right.id) {
       return left.id < right.id ? -1 : 1;
     }
@@ -823,15 +840,21 @@ class Provider implements IStorageProviderWithReplica {
 }
 
 type SyncTask = {
-  entries: [{ id: URI; type: MIME }, SchemaPathSelector][];
+  entries: [{ id: URI; type: MIME; scope?: CellScope }, SchemaPathSelector][];
   promise: Promise<Result<Unit, PullError>>;
 };
 
 type WatchRefreshBatch = {
   type: "pull" | "integrate";
-  entries: Map<string, [{ id: URI; type: MIME }, SchemaPathSelector]>;
+  entries: Map<
+    string,
+    [{ id: URI; type: MIME; scope?: CellScope }, SchemaPathSelector]
+  >;
   pending: PromiseWithResolvers<Result<Unit, PullError>>;
 };
+
+const docKey = (id: URI, scope?: CellScope): string =>
+  `${normalizeCellScope(scope)}\0${id}`;
 
 class SpaceReplica implements ISpaceReplica {
   readonly #space: MemorySpace;

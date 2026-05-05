@@ -237,7 +237,8 @@ function getWrappedTypeString(
   wrapper: AsCellType,
   innerType: string,
 ): string {
-  switch (wrapper) {
+  const kind = typeof wrapper === "string" ? wrapper : wrapper.kind;
+  switch (kind) {
     case "cell":
       return `Cell<${innerType}>`;
     case "readonly":

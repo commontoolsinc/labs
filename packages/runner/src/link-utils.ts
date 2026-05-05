@@ -69,6 +69,8 @@ export function isNormalizedFullLink(value: any): value is NormalizedFullLink {
     isRecord(value) &&
     typeof value.id === "string" &&
     typeof value.space === "string" &&
+    (value.scope === "space" || value.scope === "user" ||
+      value.scope === "session") &&
     Array.isArray(value.path)
   );
 }
@@ -197,6 +199,7 @@ export function areNormalizedLinksSame(
   link2: NormalizedLink,
 ): boolean {
   return link1.id === link2.id && link1.space === link2.space &&
+    link1.scope === link2.scope &&
     arrayEqual(link1.path, link2.path);
 }
 
@@ -236,11 +239,15 @@ export function createSigilLinkFromParsedLink(
     if (link.space && link.space !== baseLink.space) {
       reference.space = link.space;
     }
+    if (link.scope && link.scope !== baseLink.scope) {
+      reference.scope = link.scope;
+    }
   } else {
     reference.id = link.id;
 
     // Handle baseSpace option - only include space if different from baseSpace
     if (link.space !== options.baseSpace) reference.space = link.space;
+    if (link.scope) reference.scope = link.scope;
   }
 
   // Include schema if requested. Empty `{}` and JSON Schema `true` are

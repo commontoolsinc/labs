@@ -642,6 +642,7 @@ export function normalizeAndDiff(
     const newEntryLink: NormalizedFullLink = {
       id: toURI(entityId),
       space: link.space,
+      scope: link.scope,
       path: [],
     };
 

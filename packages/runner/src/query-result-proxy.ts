@@ -391,6 +391,7 @@ export function createQueryResultProxy<T>(
               const resultLink: NormalizedFullLink = {
                 id: toURI(hashOf(cause)),
                 space: link.space,
+                scope: link.scope,
                 path: [],
               };
 

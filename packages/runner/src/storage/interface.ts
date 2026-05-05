@@ -1,5 +1,5 @@
 import type { Immutable } from "@commonfabric/utils/types";
-import type { ImmutableJSONValue } from "@commonfabric/api";
+import type { CellScope, ImmutableJSONValue } from "@commonfabric/api";
 import type { PatchOp } from "@commonfabric/memory/v2";
 import type { EntityId } from "../create-ref.ts";
 import {
@@ -970,6 +970,10 @@ export interface IMemoryAddress {
    */
   type?: MediaType;
   /**
+   * Declared scoped cell instance. Storage defaults omitted scope to `space`.
+   */
+  scope?: CellScope;
+  /**
    * Intra-value path to the {@link FabricValue} being referenced by this
    * address. It is a path within the `is` field of the fact in memory protocol.
    */
@@ -1078,17 +1082,20 @@ export type NativeStorageCommitOperation =
     op: "set";
     id: URI;
     type: MediaType;
+    scope?: CellScope;
     value: FabricValue;
   }
   | {
     op: "delete";
     id: URI;
     type: MediaType;
+    scope?: CellScope;
   }
   | {
     op: "patch";
     id: URI;
     type: MediaType;
+    scope?: CellScope;
     patches: PatchOp[];
     value: FabricValue;
   };

@@ -125,6 +125,7 @@ function trustedEventWriteCandidatesFromTransaction(
     const candidate: NormalizedFullLink = {
       space: write.space,
       id: write.id,
+      scope: write.scope ?? "space",
       path: [...path],
       ...("schema" in write && write.schema !== undefined
         ? { schema: write.schema }

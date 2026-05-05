@@ -43,6 +43,64 @@ const authorization = {
   access: { "proof:1": {} },
 };
 
+Deno.test("memory v2 queryGraph reads the declared scoped root instance", async () => {
+  const { engine, path } = await createEngine();
+  const space = "did:key:z6Mk-memory-v2-query-scopes";
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:alice",
+      principal: "did:key:alice",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:scoped-query-root",
+          value: { value: { name: "space" } },
+        }, {
+          op: "set",
+          id: "of:scoped-query-root",
+          scope: "user",
+          value: { value: { name: "alice" } },
+        }],
+      },
+    });
+
+    const result = queryGraph(
+      space,
+      engine,
+      {
+        roots: [{
+          id: "of:scoped-query-root",
+          scope: "user",
+          selector: {
+            path: [],
+            schema: {
+              type: "object",
+              properties: { name: { type: "string" } },
+              required: ["name"],
+            },
+          },
+        }],
+      },
+      undefined,
+      { principal: "did:key:alice", sessionId: "session:alice" },
+    );
+
+    assertEquals(result.entities, [{
+      branch: "",
+      id: "of:scoped-query-root",
+      scope: "user",
+      seq: 1,
+      document: { value: { name: "alice" } },
+    }]);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 query retains a persistent memo for incremental watch growth", async () => {
   const { engine, path } = await createEngine();
   const space = "did:key:z6Mk-memory-v2-query-watch-growth";

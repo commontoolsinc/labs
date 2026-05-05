@@ -15,6 +15,7 @@ export type EntityId = string;
 export type BranchName = string;
 export type SessionId = string;
 export type SessionToken = string;
+export type CellScope = "space" | "user" | "session";
 export type JobId = `job:${string}`;
 export type Reference = string & {
   readonly __memoryV2Reference: unique symbol;
@@ -68,24 +69,28 @@ export type PatchOp =
 export interface SetOperation {
   op: "set";
   id: EntityId;
+  scope?: CellScope;
   value: EntityDocument;
 }
 
 export interface PatchOperation {
   op: "patch";
   id: EntityId;
+  scope?: CellScope;
   patches: PatchOp[];
 }
 
 export interface DeleteOperation {
   op: "delete";
   id: EntityId;
+  scope?: CellScope;
 }
 
 export type Operation = SetOperation | PatchOperation | DeleteOperation;
 
 export interface ConfirmedRead {
   id: EntityId;
+  scope?: CellScope;
   branch?: BranchName;
   path: ReadPath;
   seq: number;
@@ -93,6 +98,7 @@ export interface ConfirmedRead {
 
 export interface PendingRead {
   id: EntityId;
+  scope?: CellScope;
   path: ReadPath;
   localSeq: number;
 }
@@ -168,6 +174,7 @@ export interface SessionOpenRequest {
 
 export interface GraphQueryRoot {
   id: EntityId;
+  scope?: CellScope;
   selector: SchemaPathSelector;
 }
 
@@ -181,6 +188,7 @@ export interface GraphQuery {
 export interface EntitySnapshot {
   branch: BranchName;
   id: EntityId;
+  scope?: CellScope;
   seq: number;
   document: EntityDocument | null;
 }
@@ -207,6 +215,7 @@ export type WatchSpec = QueryWatchSpec | GraphWatchSpec;
 export interface SessionSyncUpsert {
   branch: BranchName;
   id: EntityId;
+  scope?: CellScope;
   seq: number;
   doc?: EntityDocument;
   deleted?: true;
@@ -215,6 +224,7 @@ export interface SessionSyncUpsert {
 export interface SessionSyncRemove {
   branch: BranchName;
   id: EntityId;
+  scope?: CellScope;
 }
 
 export interface SessionSync {

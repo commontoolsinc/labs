@@ -226,18 +226,21 @@ type FirstWrapper<T extends readonly AsCellType[]> = T extends
   ? First
   : T[number];
 
+type WrapperKind<W extends AsCellType> = W extends { kind: infer K } ? K : W;
+
 type ReapplyWrappers<
   T extends JSONSchema,
   Wrappers extends readonly AsCellType[],
 > = Wrappers extends readonly [] ? StripWrappers<T>
   : StripWrappers<T> & { asCell: Wrappers };
 
-type ApplyWrapper<W extends AsCellType, T> = W extends "cell" ? Cell<T>
-  : W extends "stream" ? Stream<T>
-  : W extends "opaque" ? OpaqueCell<T>
-  : W extends "readonly" ? ReadonlyCell<T>
-  : W extends "writeonly" ? WriteonlyCell<T>
-  : W extends "comparable" ? ComparableCell<T>
+type ApplyWrapper<W extends AsCellType, T> = WrapperKind<W> extends "cell"
+  ? Cell<T>
+  : WrapperKind<W> extends "stream" ? Stream<T>
+  : WrapperKind<W> extends "opaque" ? OpaqueCell<T>
+  : WrapperKind<W> extends "readonly" ? ReadonlyCell<T>
+  : WrapperKind<W> extends "writeonly" ? WriteonlyCell<T>
+  : WrapperKind<W> extends "comparable" ? ComparableCell<T>
   : T;
 
 type SchemaInner<
