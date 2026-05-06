@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import type { EntityDocument } from "@commonfabric/memory/v2";
+import type { CellScope, EntityDocument } from "@commonfabric/memory/v2";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -20,7 +20,7 @@ type TestProvider = {
       error?: { name?: string; message?: string };
     }
   >;
-  sync(uri: string): Promise<unknown>;
+  sync(uri: string, selector?: unknown, scope?: CellScope): Promise<unknown>;
 };
 
 const signer = await Identity.fromPassphrase("memory-v2-emulation");
@@ -82,6 +82,30 @@ describe("Memory v2 emulation", () => {
       value: { hello: "labels" },
       labels: { confidentiality: ["confidential"] },
     });
+  });
+
+  it("passes declared cell scope to provider syncs", async () => {
+    const provider = storageManager.open(space) as unknown as TestProvider;
+    const originalSync = provider.sync.bind(provider);
+    const syncs: Array<{ uri: string; scope?: CellScope }> = [];
+    provider.sync = async (uri, selector, scope) => {
+      syncs.push({ uri, scope });
+      return await originalSync(uri, selector, scope);
+    };
+
+    const scopedCell = runtime.getCellFromLink({
+      space,
+      id: "of:memory-v2-scoped-sync",
+      path: [],
+      scope: "user",
+    });
+
+    await storageManager.syncCell(scopedCell);
+
+    expect(syncs).toEqual([{
+      uri: "of:memory-v2-scoped-sync",
+      scope: "user",
+    }]);
   });
 
   it("preserves root objects whose data is exactly a value key on provider sends", async () => {

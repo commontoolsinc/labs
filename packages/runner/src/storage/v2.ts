@@ -595,7 +595,7 @@ export class StorageManager implements IStorageManager {
   }
 
   async syncCell<T>(cell: Cell<T>): Promise<Cell<T>> {
-    const { space, id, schema } = cell.getAsNormalizedFullLink();
+    const { space, id, schema, scope } = cell.getAsNormalizedFullLink();
     if (!space) {
       throw new Error("No space set");
     }
@@ -608,7 +608,7 @@ export class StorageManager implements IStorageManager {
     await provider.sync(id, {
       path: cell.path.map((segment) => segment.toString()),
       schema: schema ?? false,
-    });
+    }, scope);
     await this.syncCfcSchemaDocument(
       space,
       (provider as { get?: (uri: URI) => EntityDocument | undefined }).get?.(
@@ -810,8 +810,14 @@ class Provider implements IStorageProviderWithReplica {
     }))) as Promise<Result<Unit, Error>>;
   }
 
-  sync(uri: URI, selector?: SchemaPathSelector): Promise<Result<Unit, Error>> {
-    return this.replica.sync(uri, selector) as Promise<Result<Unit, Error>>;
+  sync(
+    uri: URI,
+    selector?: SchemaPathSelector,
+    scope?: CellScope,
+  ): Promise<Result<Unit, Error>> {
+    return this.replica.sync(uri, selector, scope) as Promise<
+      Result<Unit, Error>
+    >;
   }
 
   synced(): Promise<void> {
@@ -906,9 +912,10 @@ class SpaceReplica implements ISpaceReplica {
   async sync(
     uri: URI,
     selector?: SchemaPathSelector,
+    scope?: CellScope,
   ): Promise<Result<Unit, PullError>> {
     return await this.pull([[
-      { id: uri, type: DOCUMENT_MIME as MIME },
+      { id: uri, type: DOCUMENT_MIME as MIME, scope },
       selector,
     ]]);
   }

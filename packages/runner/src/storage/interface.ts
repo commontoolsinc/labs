@@ -191,6 +191,7 @@ export interface IStorageProvider {
   sync(
     uri: URI,
     selector?: SchemaPathSelector,
+    scope?: CellScope,
   ): Promise<Result<Unit, Error>>;
 
   /**
