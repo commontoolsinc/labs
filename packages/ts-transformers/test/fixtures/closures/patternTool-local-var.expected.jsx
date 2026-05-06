@@ -124,9 +124,15 @@ export default pattern(() => {
             properties: {
                 argumentSchema: true,
                 resultSchema: true,
-                internalSchema: true
+                internalSchema: true,
+                defaultScope: {
+                    $ref: "#/$defs/CellScope"
+                }
             },
             required: ["argumentSchema", "resultSchema"]
+        },
+        CellScope: {
+            "enum": ["space", "user", "session"]
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);

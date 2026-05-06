@@ -39,8 +39,18 @@ import {
   isCellLikeTypeNode,
   printTypeNode,
 } from "./type-shrinking.ts";
+import { isPatternFactoryCalleeExpression } from "./structural-reactive-factory.ts";
 
 type UiContractHint = NonNullable<SchemaHint["cfcUiContract"]>;
+type CellScope = "space" | "user" | "session";
+
+const SCOPE_ALIAS_TO_CELL_SCOPE: ReadonlyMap<string, CellScope | "any"> =
+  new Map([
+    ["PerSpace", "space"],
+    ["PerUser", "user"],
+    ["PerSession", "session"],
+    ["PerAny", "any"],
+  ]);
 
 /**
  * Schema Injection Transformer - TypeRegistry Integration
@@ -681,6 +691,102 @@ function inferSchemaContextualType(
   checker: ts.TypeChecker,
 ): ts.Type | undefined {
   return checker.getContextualType(node) ?? inferContextualType(node, checker);
+}
+
+function scopedFactoryContextualScope(
+  node: ts.Expression,
+  checker: ts.TypeChecker,
+): CellScope | undefined {
+  const contextualType = checker.getContextualType(node) ??
+    inferContextualType(node, checker);
+  if (!contextualType) return undefined;
+  return cellScopeFromType(contextualType, checker, node);
+}
+
+function cellScopeFromType(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+  location: ts.Node,
+): CellScope | undefined {
+  const aliasScope = type.aliasSymbol
+    ? SCOPE_ALIAS_TO_CELL_SCOPE.get(type.aliasSymbol.name)
+    : undefined;
+  if (aliasScope && aliasScope !== "any") {
+    return aliasScope;
+  }
+
+  for (const prop of type.getProperties()) {
+    if (!isScopeBrandProperty(prop)) continue;
+    const scope = cellScopeFromScopeBrandType(
+      checker.getTypeOfSymbolAtLocation(prop, location),
+    );
+    if (scope) return scope;
+  }
+
+  return undefined;
+}
+
+function isScopeBrandProperty(prop: ts.Symbol): boolean {
+  if (prop.getName().includes("SCOPE_BRAND")) return true;
+  return (prop.declarations ?? []).some((declaration) => {
+    const name = "name" in declaration
+      ? (declaration as { name?: ts.Node }).name
+      : undefined;
+    return !!name && name.getText().includes("SCOPE_BRAND");
+  });
+}
+
+function cellScopeFromScopeBrandType(type: ts.Type): CellScope | undefined {
+  if (type.isStringLiteral()) {
+    return isCellScopeValue(type.value) ? type.value : undefined;
+  }
+  if (type.isUnion()) {
+    for (const member of type.types) {
+      const scope = cellScopeFromScopeBrandType(member);
+      if (scope) return scope;
+    }
+  }
+  return undefined;
+}
+
+function isCellScopeValue(value: string): value is CellScope {
+  return value === "space" || value === "user" || value === "session";
+}
+
+function isAlreadyScopedFactoryCall(node: ts.CallExpression): boolean {
+  const callee = unwrapExpression(node.expression);
+  return ts.isCallExpression(callee) &&
+    ts.isPropertyAccessExpression(callee.expression) &&
+    callee.expression.name.text === "asScope";
+}
+
+function maybeApplyFactoryContextualScope(
+  node: ts.CallExpression,
+  context: TransformationContext,
+): ts.CallExpression | undefined {
+  const { checker, factory } = context;
+  if (isAlreadyScopedFactoryCall(node)) return undefined;
+  if (!isPatternFactoryCalleeExpression(node.expression, checker)) {
+    return undefined;
+  }
+
+  const scope = scopedFactoryContextualScope(node, checker);
+  if (!scope) return undefined;
+
+  const scopedFactory = factory.createCallExpression(
+    factory.createPropertyAccessExpression(
+      node.expression,
+      factory.createIdentifier("asScope"),
+    ),
+    undefined,
+    [factory.createStringLiteral(scope)],
+  );
+  return factory.updateCallExpression(
+    node,
+    scopedFactory,
+    node.typeArguments,
+    node.arguments,
+  );
 }
 
 interface ResolvedInjectableSchemaType {
@@ -2487,6 +2593,10 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
       }
 
       const callKind = detectCallKind(node, checker);
+      const scopedFactoryCall = maybeApplyFactoryContextualScope(node, context);
+      if (scopedFactoryCall) {
+        return ts.visitEachChild(scopedFactoryCall, visit, transformation);
+      }
 
       if (callKind?.kind === "builder" && callKind.builderName === "pattern") {
         const result = handlePatternSchemaInjection(
