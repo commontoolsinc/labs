@@ -482,3 +482,55 @@ Deno.test("fetchData state cells use narrowest input scope", async () => {
     await storageManager.close();
   }
 });
+
+Deno.test("generateText result cell uses narrowest input scope", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+
+  try {
+    const { generateText, pattern } = createTrustedBuilder(runtime)
+      .commonfabric;
+    const promptBase = runtime.getCell<string>(
+      space,
+      "generateText user scoped empty prompt",
+      undefined,
+      tx,
+    );
+    const prompt = createCell<string>(
+      runtime,
+      { ...promptBase.getAsNormalizedFullLink(), scope: "user" },
+      tx,
+    );
+    prompt.set("");
+
+    const Root = pattern<{ prompt: string }>(({ prompt }) => ({
+      text: generateText({ prompt }),
+    }));
+
+    const resultCell = runtime.getCell(
+      space,
+      "generateText result cell uses narrowest input scope",
+      undefined,
+      tx,
+    );
+
+    const result = runtime.run(tx, Root, { prompt }, resultCell);
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+
+    const rawText = result.key("text").getRaw();
+    const textLink = parseLink(rawText, result);
+    assertEquals(textLink?.scope, "user");
+    assertEquals(result.key("text").key("pending").get() as unknown, false);
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
