@@ -1111,13 +1111,48 @@ export class Runner {
       }
     }
 
-    // Step 5: Check whether the pattern is available, otherwise load it
-    const patternId = processCell.key(TYPE).getRaw() as string | undefined;
+    // Step 5: Check whether the pattern is available, otherwise load it. In a
+    // fresh runtime the result cell may have synced only the source link; sync
+    // the process cell before deciding its persisted $TYPE is absent.
+    const getPatternId = () =>
+      processCell.key(TYPE).getRaw() as string | undefined;
+    const patternId = getPatternId();
     if (!patternId) {
-      return Promise.reject(
-        new Error(`Cannot start: no pattern ID ($TYPE)`),
-      );
+      return Promise.resolve(processCell.sync()).then(() => {
+        const syncedPatternId = getPatternId();
+        if (!syncedPatternId) {
+          return Promise.reject(
+            new Error(`Cannot start: no pattern ID ($TYPE)`),
+          );
+        }
+        return this.startAvailablePattern(
+          rootCell,
+          processCell,
+          syncedPatternId,
+          wasSyncedAtEntry,
+          wasPreparedLocally,
+          seenCells,
+        );
+      });
     }
+    return this.startAvailablePattern(
+      rootCell,
+      processCell,
+      patternId,
+      wasSyncedAtEntry,
+      wasPreparedLocally,
+      seenCells,
+    );
+  }
+
+  private startAvailablePattern<T = any>(
+    rootCell: Cell<T>,
+    processCell: Cell<any>,
+    patternId: string,
+    wasSyncedAtEntry: boolean,
+    wasPreparedLocally: boolean,
+    seenCells: Set<Cell>,
+  ): Promise<boolean> {
     const pattern = this.runtime.patternManager.patternById(patternId);
     if (!pattern) {
       return this.runtime.patternManager.loadPattern(
