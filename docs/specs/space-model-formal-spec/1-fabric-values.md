@@ -87,6 +87,7 @@ type FabricValue =
   | string
   | undefined // first-class fabric value; requires tagged representation in formats lacking native `undefined`
   | bigint    // large integers; rides through without wrapping (like `undefined`)
+  | symbol    // registry-interned symbols only (`Symbol.keyFor(s)` returns a string); see Section 1.3
 
   // (b) Special primitives (FabricPrimitive subclasses — always frozen)
   | FabricEpochNsec
@@ -107,22 +108,31 @@ type FabricValue =
   | { [key: string]: FabricValue };
 ```
 
-> **Excluded JS types.** The following JavaScript types are explicitly **not**
-> representable as fabric values, eliciting a thrown error from
-> `fabricFromNativeValue()` and a `false` return value from
-> `isFabricCompatible()`:
+> **Restricted and excluded JS types.**
 >
-> - `symbol` — Symbols are inherently local (not serializable across realms or
->   processes). Symbol-keyed properties on objects are silently ignored; a bare
->   `symbol` value is rejected outright.
-> - `function` — Functions are opaque closures with no portable representation.
->   Objects with a `[DECONSTRUCT]` method are not functions in this sense — they
->   are `FabricInstance`s.
+> - `symbol` — **Conditionally** part of the universe. Registry-interned
+>   symbols (`Symbol.for(key)`, where `Symbol.keyFor(s)` returns a string)
+>   are first-class fabric values: they are portable across realms and
+>   processes via their registry key. **Unique** symbols (`Symbol(desc)`,
+>   where `Symbol.keyFor(s)` returns `undefined`) have no portable
+>   representation and are rejected. The TypeScript `symbol` type cannot
+>   express this distinction, so it is enforced at runtime by the
+>   conversion, hashing, and serialization boundaries (Sections 4.9, 6,
+>   and 5). Symbol-keyed *properties* on plain objects are a separate
+>   matter — see Section 1.5 (Recursive Containers / Objects).
+> - `function` — Functions are opaque closures with no portable
+>   representation. They are explicitly **not** representable as fabric
+>   values, eliciting a thrown error from `fabricFromNativeValue()` and a
+>   `false` return value from `isFabricCompatible()`. Objects with a
+>   `[DECONSTRUCT]` method are not functions in this sense — they are
+>   `FabricInstance`s.
 >
-> These are the two JS primitive types (`typeof` returns `"symbol"` or
-> `"function"`) that are absent from the `FabricValue` union. All other
-> `typeof` results (`"undefined"`, `"boolean"`, `"number"`, `"string"`,
-> `"bigint"`, `"object"`) have corresponding `FabricValue` arms.
+> Of the two JS primitive types whose `typeof` results (`"symbol"` and
+> `"function"`) describe non-data values, `symbol` has a corresponding
+> `FabricValue` arm (with the runtime interned-vs-unique restriction
+> above) and `"function"` does not. All other `typeof` results
+> (`"undefined"`, `"boolean"`, `"number"`, `"string"`, `"bigint"`,
+> `"object"`) have unconditional `FabricValue` arms.
 
 #### `FabricNativeObject`
 
@@ -174,6 +184,7 @@ member of `FabricValue`.
 | `string` | None | Unicode text |
 | `undefined` | None | First-class fabric value; see note below |
 | `bigint` | None | Large integers; JSON-encoded as base64url (RFC 4648, Section 5) of two's complement big-endian bytes (Section 3 of `3-json-encoding.md`) |
+| `symbol` | Registry-interned only | Only symbols for which `Symbol.keyFor(s)` returns a string (i.e., `Symbol.for(key)` symbols) are admitted. Unique symbols (`Symbol(desc)`) are rejected. Conversion-gate behavior is flag-bifurcated; see Section 4.9 and the callout below. |
 
 > **`undefined` as a first-class fabric value.** `undefined` is a first-class
 > fabric value that round-trips faithfully through serialization. Because most
@@ -204,6 +215,29 @@ member of `FabricValue`.
 > - **Legacy path (`modernDataModel: false`):**
 >   `fabricFromNativeValueLegacy()` normalizes `-0` to `+0` and rejects
 >   `NaN` / `±Infinity` with a thrown error. Code paths that bypass the
+>   conversion gate (direct callers of the hasher or the JSON encoder)
+>   see the modern-path behavior regardless of the flag, since the
+>   lower-layer specs describe their own behavior unconditionally.
+
+> **Interned vs. unique symbols.** The hashing layer (Section 6.4 and
+> `2-hash-byte-format.md` Section 4.6) and the JSON wire format
+> (Section 5; `3-json-encoding.md` Section 3, `Symbol@1`) both faithfully
+> represent registry-interned symbols, identifying them by their registry
+> key (`Symbol.keyFor(s)`). Unique symbols (`Symbol(desc)` — those for
+> which `Symbol.keyFor(s)` returns `undefined`) have no portable
+> representation and are rejected at every layer. Whether a symbol value
+> reaches those layers at all is gated by the `modernDataModel` conversion
+> path (Section 4.9):
+>
+> - **Modern path (`modernDataModel: true`):** Interned symbols pass
+>   through `shallowFabricFromNativeValueModern()` and
+>   `fabricFromNativeValueModern()` unchanged. Round-trip via
+>   `Symbol.for(key)` yields a result that is `===` to any other
+>   `Symbol.for(key)` in the same realm. Unique symbols throw with the
+>   message `"Cannot store unique (uninterned) symbol"`.
+> - **Legacy path (`modernDataModel: false`):**
+>   `fabricFromNativeValueLegacy()` rejects all symbols (interned and
+>   unique alike) with a thrown error. Code paths that bypass the
 >   conversion gate (direct callers of the hasher or the JSON encoder)
 >   see the modern-path behavior regardless of the flag, since the
 >   lower-layer specs describe their own behavior unconditionally.
@@ -893,7 +927,9 @@ Section 4.5.
 
 **Objects:**
 - Plain objects only (class instances must implement the fabric protocol)
-- Keys must be strings; symbol keys cause rejection
+- Keys must be strings; symbol-keyed *properties* cause rejection (this
+  is distinct from symbol *values*, which are admitted per Section 1.2
+  with the runtime restriction in Section 1.3)
 - Values must be valid fabric values; properties whose value is `undefined` are preserved
   (not omitted) — `undefined` is a first-class value, not a signal for deletion
 - No distinction between regular and null-prototype objects; reconstruction
@@ -1837,6 +1873,7 @@ organized into four categories by high nibble:
 | `TAG_EPOCH_NSEC`  | `0x27` | 39      | `FabricEpochNsec`                 |
 | `TAG_EPOCH_DAYS`  | `0x28` | 40      | `FabricEpochDays`                 |
 | `TAG_CONTENT_ID`  | `0x29` | 41      | `FabricHash`                      |
+| `TAG_SYMBOL`      | `0x2A` | 42      | `symbol` (registry-interned only) |
 
 **Optimized tags (`0xFN`)** — hash-level substitutes that replace the raw
 payload of a primitive type with a digest, when doing so shortens the byte
@@ -2209,6 +2246,7 @@ export function fabricFromNativeValue(
 | Input Type | Output |
 |------------|--------|
 | `null`, `boolean`, `number`, `string`, `undefined`, `bigint` | Returned as-is (primitives are `FabricValue` directly). Modern path passes all numbers through unchanged, including `-0`, `NaN`, and `±Infinity`. Legacy path normalizes `-0` to `0` and rejects `NaN` / `±Infinity` with a thrown error. See Section 1.3 callout for layer-by-layer details. |
+| `symbol` | Modern path: registry-interned symbols (`Symbol.keyFor(s)` returns a string) returned as-is; unique symbols (`Symbol(desc)`) throw with the message `"Cannot store unique (uninterned) symbol"`. Legacy path: all symbols throw. See Section 1.3 callout for layer-by-layer details. |
 | `FabricPrimitive` (`FabricEpochNsec`, `FabricEpochDays`, `FabricHash`, `FabricBytes`) | Returned as-is. Always-frozen: the `freeze` option has no effect on these types (see Section 1.4.6). |
 | `FabricInstance` (including wrapper classes) | Returned as-is (already `FabricValue`). |
 | `Error` | Wrapped into `FabricError`. Before wrapping, `cause` and custom enumerable properties are recursively converted to `FabricValue` (deep variant) or left as-is (shallow variant). Extra enumerable properties are preserved (see Section 1.4.1). This ensures that by the time `FabricError.[DECONSTRUCT]` runs, all nested values are already valid `FabricValue`. |
@@ -2351,6 +2389,10 @@ if the value is:
   All numbers are accepted on the modern path, including `-0`, `NaN`, and
   `±Infinity`. On the legacy path, `NaN` and `±Infinity` are rejected; see
   Section 1.3 callout for the per-path detail.
+- A registry-interned `symbol` (one for which `Symbol.keyFor(s)` returns a
+  string), on the modern path only. Unique symbols return `false` on
+  either path; all symbols return `false` on the legacy path. See
+  Section 1.3 callout for the per-path detail.
 - A `FabricInstance` (including the native object wrapper classes)
 - A `FabricNativeObject` (`Error`, `Map`, `Set`, `Date`, `RegExp`,
   `Uint8Array`, or an object with a `toJSON()` method — legacy)
@@ -2358,9 +2400,10 @@ if the value is:
 - A plain object where every value satisfies `isFabricCompatible()`
 
 It returns `false` for unsupported types (`WeakMap`, `Promise`, DOM nodes,
-class instances that don't implement `FabricInstance`, etc.). On the legacy
-path it additionally returns `false` for non-finite numbers; the modern path
-accepts them.
+class instances that don't implement `FabricInstance`, etc.) and for unique
+symbols. On the legacy path it additionally returns `false` for non-finite
+numbers and for all symbols (interned and unique alike); the modern path
+accepts non-finite numbers and registry-interned symbols.
 
 > **Performance note.** `isFabricCompatible()` walks the value tree without
 > allocating wrappers or frozen copies. For large trees, this is cheaper than
