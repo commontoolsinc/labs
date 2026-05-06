@@ -324,3 +324,109 @@ Deno.test("flatMap narrows output list when scoped element controls cardinality"
     await storageManager.close();
   }
 });
+
+Deno.test("ifElse output follows condition scope", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+
+  try {
+    const { ifElse, pattern } = createTrustedBuilder(runtime).commonfabric;
+    const conditionBase = runtime.getCell<boolean>(
+      space,
+      "ifElse user scoped condition",
+      undefined,
+      tx,
+    );
+    const condition = createCell<boolean>(
+      runtime,
+      { ...conditionBase.getAsNormalizedFullLink(), scope: "user" },
+      tx,
+    );
+    condition.set(true);
+
+    const Root = pattern<{ condition: boolean }>(({ condition }) => ({
+      value: ifElse(condition, "yes", "no"),
+    }));
+
+    const resultCell = runtime.getCell(
+      space,
+      "ifElse output follows condition scope",
+      undefined,
+      tx,
+    );
+
+    const result = runtime.run(tx, Root, { condition }, resultCell);
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+
+    const rawValue = result.key("value").getRaw();
+    const valueLink = parseLink(rawValue, result);
+    assertEquals(valueLink?.scope, "user");
+    assertEquals(result.key("value").get() as unknown, "yes");
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("when keeps condition scope while selecting narrower value link", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+
+  try {
+    const { pattern, when } = createTrustedBuilder(runtime).commonfabric;
+    const valueBase = runtime.getCell<string>(
+      space,
+      "when user scoped selected value",
+      undefined,
+      tx,
+    );
+    const value = createCell<string>(
+      runtime,
+      { ...valueBase.getAsNormalizedFullLink(), scope: "user" },
+      tx,
+    );
+    value.set("selected");
+
+    const Root = pattern<{ value: string }>(({ value }) => ({
+      value: when(true, value),
+    }));
+
+    const resultCell = runtime.getCell(
+      space,
+      "when keeps condition scope while selecting narrower value link",
+      undefined,
+      tx,
+    );
+
+    const result = runtime.run(tx, Root, { value }, resultCell);
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+
+    const rawValue = result.key("value").getRaw();
+    const whenLink = parseLink(rawValue, result);
+    assertEquals(whenLink?.scope, "space");
+
+    const whenCell = runtime.getCellFromLink(whenLink!);
+    const selectedLink = parseLink(whenCell.getRaw(), whenCell);
+    assertEquals(selectedLink?.scope, "user");
+    assertEquals(result.key("value").get() as unknown, "selected");
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
