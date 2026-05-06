@@ -150,6 +150,132 @@ Deno.test("broad computed output links to narrower scoped result", async () => {
   }
 });
 
+Deno.test("opaque JS action result uses narrowest effective output scope", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+
+  try {
+    const { computed, lift, pattern } =
+      createTrustedBuilder(runtime).commonfabric;
+    const baseSecret = runtime.getCell<number>(
+      space,
+      "opaque user scoped computation input",
+      undefined,
+      tx,
+    );
+    const secret = createCell(
+      runtime,
+      { ...baseSecret.getAsNormalizedFullLink(), scope: "user" },
+      tx,
+    );
+    secret.set(41);
+
+    const structured = lift(
+      { type: "number" },
+      {
+        type: "object",
+        properties: { nested: { type: "number" } },
+      },
+      (_x: number) => ({
+        nested: computed(() => 42),
+      }),
+    );
+    const Root = pattern<{ secret: number }>(({ secret }) => ({
+      value: structured(secret),
+    }));
+
+    const resultCell = runtime.getCell(
+      space,
+      "opaque action result links to narrower scoped result",
+      undefined,
+      tx,
+    );
+
+    const result = runtime.run(tx, Root, { secret }, resultCell);
+    await tx.commit();
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+
+    const sourceCell = result.getSourceCell();
+    const rawValue = sourceCell?.key("internal").key("value").getRaw();
+    const outputLink = parseLink(rawValue, sourceCell!);
+    assertEquals(outputLink?.scope, "user");
+
+    const scopedOutputCell = runtime.getCellFromLink(outputLink!);
+    const auxiliaryLink = parseLink(
+      scopedOutputCell.getRaw(),
+      scopedOutputCell,
+    );
+    assertEquals(auxiliaryLink?.scope, "user");
+    assertEquals(result.key("value").get() as unknown, { nested: 42 });
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("opaque JS action result schema scope participates in effective output scope", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+
+  try {
+    const { computed, lift, pattern } =
+      createTrustedBuilder(runtime).commonfabric;
+    const structured = lift(
+      { type: "number" },
+      {
+        type: "object",
+        properties: { nested: { type: "number" } },
+        scope: "session",
+      },
+      (_x: number) => ({
+        nested: computed(() => 42),
+      }),
+    );
+    const Root = pattern<{ value: number }>(({ value }) => ({
+      value: structured(value),
+    }));
+
+    const resultCell = runtime.getCell(
+      space,
+      "opaque action result schema scope",
+      undefined,
+      tx,
+    );
+
+    const result = runtime.run(tx, Root, { value: 41 }, resultCell);
+    await tx.commit();
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+
+    const sourceCell = result.getSourceCell();
+    const rawValue = sourceCell?.key("internal").key("value").getRaw();
+    const outputLink = parseLink(rawValue, sourceCell!);
+    assertEquals(outputLink?.scope, "session");
+
+    const scopedOutputCell = runtime.getCellFromLink(outputLink!);
+    const auxiliaryLink = parseLink(
+      scopedOutputCell.getRaw(),
+      scopedOutputCell,
+    );
+    assertEquals(auxiliaryLink?.scope, "session");
+    assertEquals(result.key("value").get() as unknown, { nested: 42 });
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
 Deno.test("map keeps outer list scope and narrows per-element result cells", async () => {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({

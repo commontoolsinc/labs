@@ -428,6 +428,13 @@ The narrower scoped result is a separate storage instance for the same causal
 id. The broader output document stores a scoped link to that instance rather
 than copying the narrower value into the broader document.
 
+This applies to auxiliary result cells created to represent structured or
+captured reactive outputs as well as direct scalar outputs. Any intermediate or
+result cell allocated for the computation must use the effective output scope,
+defined as the narrower of the concrete result-schema scope and the narrowest
+scope read by the computation; broader output locations then store links to that
+scoped instance with the same causal id.
+
 For handlers and for lifts that write into a passed-in cell, the passed-in
 cell's scope is not changed. This is the explicit path by which data can move
 from narrower scopes to wider scopes. The scope system itself permits this

@@ -68,7 +68,7 @@ import { FunctionCache } from "./function-cache.ts";
 import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import "./builtins/index.ts";
 import { isCellResult } from "./query-result-proxy.ts";
-import { isCellScope } from "./scope.ts";
+import { isCellScope, narrowestScope } from "./scope.ts";
 import {
   cellAwareDeepCopy,
   describePatternOrModule,
@@ -438,6 +438,10 @@ type JavaScriptNodeContext = BoundNodeIO & {
   verifiedLoadId: string | undefined;
 };
 
+type JavaScriptActionResultCells = {
+  byScope: Map<CellScope, Cell<any>>;
+};
+
 export class Runner {
   readonly cancels = new Map<`${MemorySpace}/${URI}`, Cancel>();
   private allCancels = new Set<Cancel>();
@@ -445,7 +449,10 @@ export class Runner {
   private locallyPreparedResults = new Set<`${MemorySpace}/${URI}`>();
   // Map whose key is the result cell's full key, and whose values are the
   // patterns as strings
-  private resultPatternCache = new Map<`${MemorySpace}/${URI}`, string>();
+  private resultPatternCache = new Map<
+    `${MemorySpace}/${CellScope}/${URI}`,
+    string
+  >();
 
   constructor(readonly runtime: Runtime) {
     this.runtime.storageManager.subscribe(this.createStorageSubscription());
@@ -466,7 +473,11 @@ export class Runner {
         const space = notification.space;
         if ("changes" in notification) {
           for (const change of notification.changes) {
-            this.resultPatternCache.delete(`${space}/${change.address.id}`);
+            this.resultPatternCache.delete(
+              `${space}/${
+                change.address.scope ?? "space"
+              }/${change.address.id}`,
+            );
           }
         } else if (notification.type === "reset") {
           // copy keys, since we'll mutate the collection while iterating
@@ -2146,7 +2157,7 @@ export class Runner {
     outputs: FabricValue,
     addCancel: AddCancel,
     resultFor: { inputs: FabricValue; outputs: FabricValue; fn: string },
-    previousResultCellRef: { current?: Cell<any> },
+    previousResultCellRef: JavaScriptActionResultCells,
     recordIgnoredSchedulingWrite?: (link: NormalizedFullLink) => void,
     narrowestReadScope?: CellScope,
   ): any {
@@ -2168,16 +2179,34 @@ export class Runner {
     }
 
     const resultPattern = patternFromFrame(() => result);
-    const resultCell = previousResultCellRef.current ??
-      this.runtime.getCell(
+    const effectiveOutputScope = narrowestScope([
+      schemaCellScope(resultSchema),
+      schemaCellScope(resultPattern.resultSchema),
+      narrowestReadScope,
+    ]);
+    let resultCell = previousResultCellRef.byScope.get(effectiveOutputScope);
+    if (resultCell === undefined) {
+      const baseResultCell = this.runtime.getCell(
         processCell.space,
         { resultFor },
         undefined,
         tx,
       );
+      resultCell = effectiveOutputScope === "space"
+        ? baseResultCell
+        : createCell(
+          this.runtime,
+          {
+            ...baseResultCell.getAsNormalizedFullLink(),
+            scope: effectiveOutputScope,
+          },
+          tx,
+        );
+      previousResultCellRef.byScope.set(effectiveOutputScope, resultCell);
+    }
 
     const resultPatternAsString = JSON.stringify(resultPattern);
-    const cacheKey = `${resultCell.space}/${resultCell.sourceURI}` as const;
+    const cacheKey = this.getDocKey(resultCell);
     const previousResultPatternAsString = this.resultPatternCache.get(cacheKey);
     const patternUnchanged =
       previousResultPatternAsString === resultPatternAsString;
@@ -2210,7 +2239,6 @@ export class Runner {
       this.pullCellOnceAfterSuccessfulCommit(tx, resultCell);
     }
 
-    previousResultCellRef.current ??= resultCell;
     const effectiveResultSchema = resultSchema ?? resultPattern.resultSchema ??
       resultCell.schema;
     recordOutputSchemaPolicyInputs(
@@ -2225,6 +2253,7 @@ export class Runner {
       processCell,
       outputs,
       resultCell.getAsLink({ base: processCell }),
+      { narrowestReadScope: effectiveOutputScope },
     );
     return result;
   }
@@ -2443,7 +2472,9 @@ export class Runner {
       undefined,
       tx,
     );
-    const previousResultCellRef: { current?: Cell<any> } = {};
+    const previousResultCellRef: JavaScriptActionResultCells = {
+      byScope: new Map(),
+    };
     let previouslyInvalidArgument = false;
     const fnSource = fn.toString();
 
