@@ -17,17 +17,21 @@ Treat the design inputs as the product contract. Treat the loaded skills and
 their referenced docs as the implementation contract.
 
 Before writing build artifacts, read the `Read First` references from the
-configured build skills that apply to the current work. At minimum this usually
-means:
+configured build skills that apply to the current work. At minimum this means:
 
 - the shared pattern development guide
 - the shared testing guide
+- `docs/common/concepts/reactivity.md`
+- `docs/common/patterns/new-cells.md`
 - type/schema docs for `Default<>`, `Writable<>`, and pattern Input/Output
-- action/handler/reactivity docs when the pattern has interactions or local
-  state changes
+- action/handler docs when the pattern has interactions or local state changes
 - UI/component docs when implementing the visual design
 - debugging docs after any compile, test, or runtime failure that is not
   immediately obvious
+
+Treat `reactivity.md` and `new-cells.md` as baseline Build reads, not optional
+references. Pattern Factory outputs are reactive patterns; top-level patterns
+commonly render reactive fields, create local draft state, and bind controls.
 
 Record the docs consulted in `notes/pattern-maker.md` so the run is auditable.
 
@@ -70,11 +74,27 @@ gates only when the available tools or context are genuinely insufficient to
 continue, or when the surrounding harness imposes an explicit turn/time
 boundary; record the exact evidence and required next input.
 
+## Failure Recovery Discipline
+
+After any failed `cf check`, `cf test`, CLI runtime check, or browser smoke:
+
+1. Preserve the exact failing command and relevant output in
+   `reviews/test-report.md`.
+2. Read `docs/development/debugging/README.md`.
+3. Match the exact error text or symptom to the matrix and read the linked
+   gotcha, workflow, or topic page before making the next repair.
+4. If the failure mentions Cell, Writable, `Cell.of()`, `Writable.of()`,
+   reactive references, `.get()`, or a plain JavaScript string/array method
+   failing on a field, reread:
+   - `docs/common/concepts/reactivity.md`
+   - `docs/common/patterns/new-cells.md`
+5. Form a narrow hypothesis, make a targeted edit, and rerun the failed gate.
+
+Record any additional docs consulted in `notes/pattern-maker.md`.
+
 When stuck:
 
-- preserve the exact failing command and relevant output in
-  `reviews/test-report.md`
-- inspect the relevant skill docs instead of guessing
+- inspect the relevant skill/docs path instead of guessing
 - use `cf check --show-transformed` or `--verbose-errors` when compiler
   lowering or error simplification is ambiguous
 - simplify to the smallest failing pattern or test step when a test failure is

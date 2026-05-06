@@ -33,25 +33,37 @@ testability.
 
 - `docs/common/ai/pattern-factory-build-guide.md` - when working in a Pattern
   Factory Build workspace
+- `docs/common/concepts/reactivity.md` - Cell behavior, reactive values, and
+  `.get()` / `.set()` boundaries
+- `docs/common/patterns/new-cells.md` - when and how to create pattern-owned
+  writable cells with static initial values
 - `docs/common/ai/pattern-development-guide.md` - especially the SES authoring
   limits and escape-hatch guidance
 - `docs/common/patterns/` - especially `meta/` for generalizable idioms
 - `docs/common/concepts/action.md` - action() for local state
 - `docs/common/concepts/handler.md` - handler() for reusable logic
-- `docs/common/concepts/reactivity.md` - Cell behavior, .get()/.set()
 - `docs/common/concepts/identity.md` - equals() for object comparison
+
+For Pattern Factory Build, do not start implementation until you have read the
+Build guide plus the two foundational reactivity/local-cell references above.
 
 ## Key Patterns
 
 **action()** - Closes over local state in pattern body:
 
 ```tsx
-const inputValue = Cell.of("");
+const inputValue = Writable.of("");
 const submit = action(() => {
   items.push({ text: inputValue.get() });
   inputValue.set("");
 });
 ```
+
+Use `Writable.of()` only for pattern-owned local cells initialized from static
+values. Do not pass an input prop, mapped field, computed value, or other
+reactive value into `Writable.of()`. If the pattern receives writable state, use
+that input cell directly; if a draft needs to copy from input state, copy in an
+action or another valid reactive/event context.
 
 Use `safeDateNow()` and `nonPrivateRandom()` instead of ambient `Date.now()` and
 `Math.random()` when a pattern needs explicit time or randomness. If a control
