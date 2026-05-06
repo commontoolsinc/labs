@@ -249,6 +249,7 @@ function addressMatchesLinkPrefix(
   const documentAddress = toMemorySpaceAddress(link);
   return address.space === link.space &&
     address.id === link.id &&
+    normalizeCellScope(address.scope) === link.scope &&
     arraysOverlap(documentAddress.path, address.path);
 }
 
@@ -270,8 +271,14 @@ export {
   markReadAsPotentialWrite,
 };
 
-export type SpaceAndURI = `${MemorySpace}/${URI}`;
+export type SpaceAndURI = `${MemorySpace}/${URI}/${string}`;
 export type SpaceURIAndType = `${MemorySpace}/${URI}/${MediaType}`;
+
+function entityKey(
+  address: Pick<IMemorySpaceAddress, "space" | "id" | "scope">,
+): SpaceAndURI {
+  return `${address.space}/${address.id}/${normalizeCellScope(address.scope)}`;
+}
 
 /** Per-iteration stats captured during the settle loop. */
 export interface SettleIterationStats {
@@ -1110,10 +1117,10 @@ export class Scheduler {
       if (!shouldMarkDirty) {
         const entities = new Set<SpaceAndURI>();
         for (const read of effectReads) {
-          entities.add(`${read.space}/${read.id}` as SpaceAndURI);
+          entities.add(entityKey(read));
         }
         for (const read of effectShallowReads) {
-          entities.add(`${read.space}/${read.id}` as SpaceAndURI);
+          entities.add(entityKey(read));
         }
 
         for (const entity of entities) {
@@ -1568,7 +1575,7 @@ export class Scheduler {
               continue;
             }
 
-            const spaceAndURI = `${space}/${change.address.id}` as SpaceAndURI;
+            const spaceAndURI = entityKey({ ...change.address, space });
             const paths = this.triggers.get(spaceAndURI);
             const nonRecursivePaths = this.nonRecursiveTriggers.get(
               spaceAndURI,
@@ -1851,6 +1858,7 @@ export class Scheduler {
       !previousSchedulingWrites.some((existing) =>
         existing.space === write.space &&
         existing.id === write.id &&
+        normalizeCellScope(existing.scope) === normalizeCellScope(write.scope) &&
         existing.path.length <= write.path.length &&
         arraysOverlap(existing.path, write.path)
       )
@@ -1859,6 +1867,7 @@ export class Scheduler {
       !nextSchedulingWrites.some((existing) =>
         existing.space === write.space &&
         existing.id === write.id &&
+        normalizeCellScope(existing.scope) === normalizeCellScope(write.scope) &&
         existing.path.length <= write.path.length &&
         arraysOverlap(existing.path, write.path)
       )
@@ -1871,7 +1880,7 @@ export class Scheduler {
     const addedEntities = new Set<SpaceAndURI>();
     const removedEntities = new Set<SpaceAndURI>();
     for (const write of nextSchedulingWrites) {
-      const entity: SpaceAndURI = `${write.space}/${write.id}`;
+      const entity = entityKey(write);
       nextEntities.add(entity);
       if (!existingEntities.has(entity)) {
         addedEntities.add(entity);
@@ -2102,7 +2111,7 @@ export class Scheduler {
     // Group reads by entity for efficient lookup
     const readsByEntity = new Map<SpaceAndURI, IMemorySpaceAddress[]>();
     for (const read of log.reads) {
-      const entity: SpaceAndURI = `${read.space}/${read.id}`;
+      const entity = entityKey(read);
       let entityReads = readsByEntity.get(entity);
       if (!entityReads) {
         entityReads = [];
@@ -2112,7 +2121,7 @@ export class Scheduler {
     }
     const nonRecursiveByEntity = new Map<SpaceAndURI, IMemorySpaceAddress[]>();
     for (const read of log.shallowReads) {
-      const entity: SpaceAndURI = `${read.space}/${read.id}`;
+      const entity = entityKey(read);
       let entityReads = nonRecursiveByEntity.get(entity);
       if (!entityReads) {
         entityReads = [];
@@ -2220,7 +2229,7 @@ export class Scheduler {
   }
 
   private collectReadersForWrite(write: IMemorySpaceAddress): Set<Action> {
-    const entity = `${write.space}/${write.id}` as SpaceAndURI;
+    const entity = entityKey(write);
     const readers = new Set<Action>();
 
     const recursiveReaders = this.triggers.get(entity);
@@ -2296,6 +2305,7 @@ export class Scheduler {
         if (
           read.space === write.space &&
           read.id === write.id &&
+          normalizeCellScope(read.scope) === normalizeCellScope(write.scope) &&
           arraysOverlap(write.path, read.path)
         ) {
           return true;
@@ -2309,6 +2319,7 @@ export class Scheduler {
         if (
           read.space === write.space &&
           read.id === write.id &&
+          normalizeCellScope(read.scope) === normalizeCellScope(write.scope) &&
           nonRecursiveReadMayOverlapWrite(read.path, write.path)
         ) {
           return true;
@@ -2377,13 +2388,15 @@ export class Scheduler {
       // Get reads and writes for diagnostics
       const deps = this.dependencies.get(action);
       const reads = deps?.reads.map((r) =>
-        `${r.space}/${r.id}/${r.path.join("/")}`
+        `${r.space}/${r.id}/${normalizeCellScope(r.scope)}/${r.path.join("/")}`
       );
       const shallowReads = deps?.shallowReads.map((r) =>
-        `${r.space}/${r.id}/${r.path.join("/")}`
+        `${r.space}/${r.id}/${normalizeCellScope(r.scope)}/${
+          r.path.join("/")
+        }`
       );
       const writes = this.getSchedulingWrites(action)?.map((w) =>
-        `${w.space}/${w.id}/${w.path.join("/")}`
+        `${w.space}/${w.id}/${normalizeCellScope(w.scope)}/${w.path.join("/")}`
       );
 
       // Get timing controls
@@ -2462,7 +2475,7 @@ export class Scheduler {
       const deps = this.dependencies.get(action);
       if (deps) {
         for (const read of deps.reads) {
-          const entity = `${read.space}/${read.id}`;
+          const entity = entityKey(read);
           if (!entityReaders.has(entity)) {
             entityReaders.set(entity, new Set());
           }
@@ -2473,7 +2486,7 @@ export class Scheduler {
       const writes = this.getSchedulingWrites(action);
       if (writes) {
         for (const write of writes) {
-          writtenEntities.add(`${write.space}/${write.id}`);
+          writtenEntities.add(entityKey(write));
         }
       }
     }
@@ -2554,9 +2567,10 @@ export class Scheduler {
         if (
           write.space === read.space &&
           write.id === read.id &&
+          normalizeCellScope(write.scope) === normalizeCellScope(read.scope) &&
           arraysOverlap(write.path, read.path)
         ) {
-          overlapping.push(`${write.space}/${write.id}`);
+          overlapping.push(entityKey(write));
         }
       }
     }
@@ -3183,7 +3197,7 @@ export class Scheduler {
     }
     try {
       for (const read of log.reads) {
-        const entity = `${read.space}/${read.id}` as SpaceAndURI;
+        const entity = entityKey(read);
         const writers = this.writersByEntity.get(entity);
         if (!writers) continue;
 
@@ -3201,7 +3215,7 @@ export class Scheduler {
       }
 
       for (const read of log.shallowReads) {
-        const entity = `${read.space}/${read.id}` as SpaceAndURI;
+        const entity = entityKey(read);
         const writers = this.writersByEntity.get(entity);
         if (!writers) continue;
 

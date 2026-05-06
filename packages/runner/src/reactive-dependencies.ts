@@ -2,6 +2,7 @@ import { isRecord } from "@commonfabric/utils/types";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { isPrimitiveCellLink } from "./link-utils.ts";
+import { normalizeCellScope } from "./scope.ts";
 import { arrayEqual } from "./path-utils.ts";
 import type { Action, SpaceAndURI } from "./scheduler.ts";
 import type {
@@ -38,19 +39,22 @@ export function sortAndCompactPaths(
 ): IMemorySpaceAddress[] {
   if (unsorted.length === 0) return [];
 
-  const sorted = unsorted.toSorted((a, b) =>
-    a.space === b.space
-      ? a.id === b.id ? comparePaths(a.path, b.path) : a.id < b.id ? -1 : 1
-      : a.space < b.space
-      ? -1
-      : 1
-  );
+  const sorted = unsorted.toSorted((a, b) => {
+    if (a.space !== b.space) return a.space < b.space ? -1 : 1;
+    if (a.id !== b.id) return a.id < b.id ? -1 : 1;
+    const aScope = normalizeCellScope(a.scope);
+    const bScope = normalizeCellScope(b.scope);
+    if (aScope !== bScope) return aScope < bScope ? -1 : 1;
+    return comparePaths(a.path, b.path);
+  });
   const result: IMemorySpaceAddress[] = [sorted[0]];
   let previous = sorted[0];
   for (let i = 1; i < sorted.length; i++) {
     if (
       sorted[i].space === previous.space &&
       sorted[i].id === previous.id &&
+      normalizeCellScope(sorted[i].scope) ===
+        normalizeCellScope(previous.scope) &&
       // Is the previous path a prefix of the current path?
       previous.path.every((value, index) => value === sorted[i].path[index]) &&
       // If we compactifyChildren, or the paths are identical, skip this
@@ -75,7 +79,8 @@ export function addressesToPathByEntity(
 ): Map<SpaceAndURI, SortedAndCompactPaths> {
   const map = new Map<SpaceAndURI, SortedAndCompactPaths>();
   for (const address of addresses) {
-    const key: SpaceAndURI = `${address.space}/${address.id}`;
+    const key: SpaceAndURI =
+      `${address.space}/${address.id}/${normalizeCellScope(address.scope)}`;
     if (!map.has(key)) map.set(key, []);
     map.get(key)!.push(address.path);
   }

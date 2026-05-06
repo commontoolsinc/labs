@@ -584,6 +584,168 @@ Deno.test("ifElse output follows condition scope", async () => {
   }
 });
 
+Deno.test("session scoped derived chains update when broad inputs change", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+
+  type RoomId = "lobby" | "workshop";
+  type Conversation = {
+    rooms: Record<RoomId, { body: string }[]>;
+  };
+
+  try {
+    const { ifElse, lift, pattern } = createTrustedBuilder(runtime)
+      .commonfabric;
+    const conversationSchema = {
+      type: "object",
+      properties: {
+        rooms: {
+          type: "object",
+          properties: {
+            lobby: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: { body: { type: "string" } },
+                required: ["body"],
+              },
+            },
+            workshop: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: { body: { type: "string" } },
+                required: ["body"],
+              },
+            },
+          },
+          required: ["lobby", "workshop"],
+        },
+      },
+      required: ["rooms"],
+    } as const;
+    const messageListSchema = {
+      type: "array",
+      items: {
+        type: "object",
+        properties: { body: { type: "string" } },
+        required: ["body"],
+      },
+    } as const;
+    const selectMessages = lift(
+      {
+        type: "object",
+        properties: {
+          conversation: conversationSchema,
+          room: { enum: ["lobby", "workshop"] },
+        },
+        required: ["conversation", "room"],
+      } as const,
+      messageListSchema,
+      (
+        { conversation, room }: {
+          conversation: Conversation;
+          room: RoomId;
+        },
+      ) => conversation.rooms[room] ?? [],
+    );
+    const countMessages = lift(
+      messageListSchema,
+      { type: "number" } as const,
+      (messages: { body: string }[]) => messages.length,
+    );
+    const countLobby = lift(
+      conversationSchema,
+      { type: "number" } as const,
+      (conversation: Conversation) => conversation.rooms.lobby.length,
+    );
+    const isZero = lift(
+      { type: "number" } as const,
+      { type: "boolean" } as const,
+      (count: number) => count === 0,
+    );
+    const conversation = runtime.getCell<Conversation>(
+      space,
+      "session derived chain broad conversation",
+      undefined,
+      tx,
+    );
+    conversation.set({ rooms: { lobby: [], workshop: [] } });
+
+    const roomBase = runtime.getCell<RoomId>(
+      space,
+      "session derived chain room",
+      undefined,
+      tx,
+    );
+    const room = createCell<RoomId>(
+      runtime,
+      { ...roomBase.getAsNormalizedFullLink(), scope: "session" },
+      tx,
+    );
+    room.set("lobby");
+
+    const Root = pattern<{
+      conversation: Conversation;
+      room: RoomId;
+    }>(({ conversation, room }) => {
+      const messages = selectMessages({ conversation, room });
+      const messageCount = countMessages(messages);
+      const isEmpty = isZero(messageCount);
+
+      return {
+        lobbyCount: countLobby(conversation),
+        messageCount,
+        isEmpty,
+        branch: ifElse(isEmpty, "empty", "messages"),
+      };
+    });
+
+    const resultCell = runtime.getCell(
+      space,
+      "session derived chain result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(
+      tx,
+      Root,
+      { conversation, room },
+      resultCell,
+    );
+    await tx.commit();
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+
+    assertEquals(result.key("lobbyCount").get() as unknown, 0);
+    assertEquals(result.key("messageCount").get() as unknown, 0);
+    assertEquals(result.key("isEmpty").get() as unknown, true);
+    assertEquals(result.key("branch").get() as unknown, "empty");
+
+    const updateTx = runtime.edit();
+    conversation.withTx(updateTx).set({
+      rooms: { lobby: [{ body: "hello" }], workshop: [] },
+    });
+    await updateTx.commit();
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+
+    assertEquals(result.key("lobbyCount").get() as unknown, 1);
+    assertEquals(result.key("messageCount").get() as unknown, 1);
+    assertEquals(result.key("isEmpty").get() as unknown, false);
+    assertEquals(result.key("branch").get() as unknown, "messages");
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
 Deno.test("when keeps condition scope while selecting narrower value link", async () => {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({

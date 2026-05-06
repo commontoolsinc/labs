@@ -15,8 +15,21 @@ export function ifElse(
   parentCell: Cell<any>,
   runtime: Runtime, // Runtime will be injected by the registration function
 ): RawBuiltinResult {
-  const action: Action = (tx: IExtendedStorageTransaction) => {
+  const readCondition = (
+    tx: IExtendedStorageTransaction,
+  ): { cell: Cell<any>; value: unknown } => {
     const conditionCell = inputsCell.key("condition");
+    const resolvedCondition = resolveLink(
+      runtime,
+      tx,
+      conditionCell.getAsNormalizedFullLink(),
+    );
+    const cell = runtime.getCellFromLink(resolvedCondition).withTx(tx);
+    return { cell, value: cell.get() };
+  };
+
+  const action: Action = (tx: IExtendedStorageTransaction) => {
+    const { cell: conditionCell, value: condition } = readCondition(tx);
     const resultScope = resolvedCellScope(runtime, tx, conditionCell);
     const baseResult = runtime.getCell<any>(
       parentCell.space,
@@ -28,8 +41,6 @@ export function ifElse(
     sendResult(tx, result);
     const resultWithLog = result.withTx(tx);
     const inputsWithLog = inputsCell.withTx(tx);
-
-    const condition = inputsWithLog.key("condition").get();
 
     const ref = inputsWithLog.key(condition ? "ifTrue" : "ifFalse")
       .getAsLink({ base: result });
@@ -46,7 +57,7 @@ export function ifElse(
   // This way, if condition is false, we don't trigger ifTrue's computation,
   // and if condition is true, we don't trigger ifFalse's computation.
   const populateDependencies = (depTx: IExtendedStorageTransaction) => {
-    inputsCell.withTx(depTx).key("condition").get();
+    readCondition(depTx);
   };
 
   return {
