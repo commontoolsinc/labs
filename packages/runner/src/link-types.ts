@@ -1,5 +1,9 @@
 import { isObject, isRecord } from "@commonfabric/utils/types";
-import { type CellScope, type JSONSchema, type LinkScope } from "./builder/types.ts";
+import {
+  type CellScope,
+  type JSONSchema,
+  type LinkScope,
+} from "./builder/types.ts";
 import { type MemorySpace } from "./cell.ts";
 import {
   type LegacyAlias,
@@ -227,7 +231,7 @@ export function areNormalizedLinksSame(
   link2: NormalizedLink,
 ): boolean {
   return link1.id === link2.id && link1.space === link2.space &&
-    link1.scope === link2.scope &&
+    (link1.scope ?? "space") === (link2.scope ?? "space") &&
     arrayEqual(link1.path, link2.path);
 }
 
@@ -251,7 +255,12 @@ export function areNormalizedLinksSameIgnoringScope(
 export function addressKey(
   addr: IMemorySpaceAddress | NormalizedFullLink,
 ): string {
-  return JSON.stringify([addr.space, addr.id, addr.scope ?? "space", addr.path]);
+  return JSON.stringify([
+    addr.space,
+    addr.id,
+    addr.scope ?? "space",
+    addr.path,
+  ]);
 }
 
 /**

@@ -562,6 +562,7 @@ Deno.test("memory v2 transactions preserve the original previousValue across rep
     assertEquals(Array.from(tx.getWriteDetails?.(space) ?? []), [{
       address: {
         space,
+        scope: "space",
         id: "of:memory-v2-primitive-rewrite",
         path: ["value", "count"],
       },
@@ -595,6 +596,7 @@ Deno.test("memory v2 writeBatch keeps fine-grained patches and original previous
       {
         address: {
           space,
+          scope: "space",
           id: "of:memory-v2-batched-patch",
           path: ["value", "profile", "name"],
         },
@@ -603,6 +605,7 @@ Deno.test("memory v2 writeBatch keeps fine-grained patches and original previous
       {
         address: {
           space,
+          scope: "space",
           id: "of:memory-v2-batched-patch",
           path: ["value", "profile", "title"],
         },
@@ -623,6 +626,7 @@ Deno.test("memory v2 writeBatch keeps fine-grained patches and original previous
       {
         address: {
           space,
+          scope: "space",
           id: "of:memory-v2-batched-patch",
           path: ["value", "profile", "name"],
         },
@@ -632,6 +636,7 @@ Deno.test("memory v2 writeBatch keeps fine-grained patches and original previous
       {
         address: {
           space,
+          scope: "space",
           id: "of:memory-v2-batched-patch",
           path: ["value", "profile", "title"],
         },

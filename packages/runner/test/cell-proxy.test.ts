@@ -539,8 +539,8 @@ describe("Proxy", () => {
     const { id } = c2.getAsNormalizedFullLink();
     expect(lastEventSeen).toEqual(
       {
-        a: { "/": { [LINK_V1_TAG]: { id, path: [], space } } },
-        b: { "/": { [LINK_V1_TAG]: { id, path: [], space } } },
+        a: { "/": { [LINK_V1_TAG]: { id, path: [], scope: "space", space } } },
+        b: { "/": { [LINK_V1_TAG]: { id, path: [], scope: "space", space } } },
         c: { "/": { [LINK_V1_TAG]: { path: [] } } },
       },
     );

@@ -1051,6 +1051,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     if (!address.id.startsWith("data:")) {
       const readActivity = {
         space: address.space,
+        scope: normalizeCellScope(address.scope),
         id: address.id,
         path: address.path,
         meta: readMeta,
@@ -1547,6 +1548,7 @@ export class V2StorageTransaction implements IStorageTransaction {
   ): void {
     const writeActivity = {
       space,
+      scope: normalizeCellScope(address.scope),
       id: address.id,
       path: address.path,
     };
@@ -1676,6 +1678,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
       const address = {
         space: read.space,
+        scope: read.scope,
         id: read.id,
         path: read.path,
       };
@@ -1699,7 +1702,7 @@ export class V2StorageTransaction implements IStorageTransaction {
           continue;
         }
 
-        const { id } = this.parseDocKey(key);
+        const { id, scope } = this.parseDocKey(key);
         const reactivityPaths = new Map<string, readonly string[]>();
         for (const detail of doc.patchDetails.values()) {
           for (
@@ -1718,6 +1721,7 @@ export class V2StorageTransaction implements IStorageTransaction {
         ) {
           writes.push({
             space,
+            scope,
             id,
             path,
           });

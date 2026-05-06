@@ -297,6 +297,7 @@ export class CellHandle<T = unknown> {
         [LINK_V1_TAG]: {
           id: this.#ref.id,
           space: this.#ref.space,
+          scope: this.#ref.scope,
           path: this.#ref.path,
           ...(this.#ref.schema !== undefined && { schema: this.#ref.schema }),
           ...(this.#ref.overwrite !== undefined &&

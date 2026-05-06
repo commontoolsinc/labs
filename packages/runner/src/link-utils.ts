@@ -199,7 +199,7 @@ export function areNormalizedLinksSame(
   link2: NormalizedLink,
 ): boolean {
   return link1.id === link2.id && link1.space === link2.space &&
-    link1.scope === link2.scope &&
+    (link1.scope ?? "space") === (link2.scope ?? "space") &&
     arrayEqual(link1.path, link2.path);
 }
 

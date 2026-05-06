@@ -94,7 +94,7 @@ import {
   type SanitizeSchemaForLinksOptions,
   toMemorySpaceAddress,
 } from "./link-utils.ts";
-import { isCellScope } from "./scope.ts";
+import { isCellScope, normalizeCellScope } from "./scope.ts";
 import type {
   ChangeGroup,
   IExtendedStorageTransaction,
@@ -497,7 +497,12 @@ export class CellImpl<T extends FabricValue>
     this._frame = getTopFrame();
 
     // Store this cell's own link
-    this._link = link ?? { path: [] };
+    this._link = {
+      ...(link ?? { path: [] }),
+      scope: isCellScope(link?.scope) ? link.scope : normalizeCellScope(
+        undefined,
+      ),
+    };
 
     // Use provided container or create one
     // If link has an id, extract it to the container

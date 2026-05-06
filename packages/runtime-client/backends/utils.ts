@@ -31,6 +31,7 @@ export function cellRefToSigilLink(cell: CellRef): SigilLink {
       [LINK_V1_TAG]: {
         id: cell.id,
         space: cell.space,
+        scope: cell.scope,
         path: cell.path,
         ...(cell.schema !== undefined && { schema: cell.schema }),
         ...(cell.overwrite !== undefined && { overwrite: cell.overwrite }),
