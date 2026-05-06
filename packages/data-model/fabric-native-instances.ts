@@ -50,7 +50,7 @@ export const UNSAFE_KEYS: FrozenSet<string> = new FrozenSet([
 ]);
 
 /**
- * Copy own enumerable properties from `source` to `target`, skipping
+ * Copies own enumerable properties from `source` to `target`, skipping
  * prototype-sensitive keys (`__proto__`, `constructor`). When `noOverride`
  * is `true`, keys already present on `target` are also skipped.
  */
@@ -67,7 +67,7 @@ function copyOwnSafeProperties(
 }
 
 /**
- * Create a shallow copy of an Error, preserving constructor, name, message,
+ * Creates a shallow copy of an Error, preserving constructor, name, message,
  * stack, cause, and custom enumerable properties. Used by `toNativeValue()`
  * when the freeze state of the wrapped Error doesn't match the requested state.
  */
@@ -99,7 +99,7 @@ const ERROR_CLASS_BY_TYPE: ReadonlyMap<string, ErrorConstructor> = new Map([
 ]);
 
 /**
- * Return the `Error` constructor for the given type string (e.g. `"TypeError"`).
+ * Returns the `Error` constructor for the given type string (e.g. `"TypeError"`).
  * Falls back to the base `Error` constructor for unknown types.
  */
 function errorClassFromType(type: string): ErrorConstructor {
@@ -124,13 +124,13 @@ export abstract class FabricNativeWrapper<T extends object>
   /** The wrapped native value, used by `toNativeValue` for freeze-state checks. */
   protected abstract get wrappedValue(): T;
 
-  /** Convert the wrapped value to frozen form (only called on state mismatch). */
+  /** Converts the wrapped value to frozen form (only called on state mismatch). */
   protected abstract toNativeFrozen(): T;
 
-  /** Convert the wrapped value to thawed form (only called on state mismatch). */
+  /** Converts the wrapped value to thawed form (only called on state mismatch). */
   protected abstract toNativeThawed(): T;
 
-  /** Return the underlying native value, optionally frozen. */
+  /** Returns the underlying native value, optionally frozen. */
   toNativeValue(frozen: boolean): T {
     const value = this.wrappedValue;
     if (frozen === Object.isFrozen(value)) return value;
@@ -161,7 +161,7 @@ export class FabricError extends FabricNativeWrapper<Error> {
   }
 
   /**
-   * Deconstruct into essential state for serialization. Returns type, name,
+   * Deconstructs into essential state for serialization. Returns type, name,
    * message, stack, cause, and custom enumerable properties. Does NOT recurse
    * into nested values -- the serialization system handles that.
    *
@@ -214,7 +214,7 @@ export class FabricError extends FabricNativeWrapper<Error> {
   }
 
   /**
-   * Reconstruct a `FabricError` from its essential state. Nested values
+   * Reconstructs a `FabricError` from its essential state. Nested values
    * in `state` have already been reconstructed by the serialization system.
    * Returns a `FabricError` wrapping the reconstructed `Error`; callers
    * who need the native `Error` use `nativeFromFabricValue()`.
@@ -361,7 +361,7 @@ export class FabricRegExp extends FabricNativeWrapper<RegExp> {
   }
 
   /**
-   * Deconstruct into essential state for serialization. Returns
+   * Deconstructs into essential state for serialization. Returns
    * `{ source, flags, flavor }` -- the values needed to reconstruct the
    * RegExp. Extra enumerable properties on the RegExp cause rejection.
    */
@@ -383,7 +383,7 @@ export class FabricRegExp extends FabricNativeWrapper<RegExp> {
   }
 
   /**
-   * Return a frozen copy of the RegExp. A frozen RegExp has an immutable
+   * Returns a frozen copy of the RegExp. A frozen RegExp has an immutable
    * `lastIndex`, so stateful methods (`exec()`, `test()`) won't work
    * correctly -- but that matches the "death before confusion" principle.
    */
@@ -396,7 +396,7 @@ export class FabricRegExp extends FabricNativeWrapper<RegExp> {
   }
 
   /**
-   * Reconstruct a `FabricRegExp` from its essential state
+   * Reconstructs a `FabricRegExp` from its essential state
    * (`{ source, flags, flavor }`).
    */
   static [RECONSTRUCT](
@@ -412,7 +412,7 @@ export class FabricRegExp extends FabricNativeWrapper<RegExp> {
 }
 
 /**
- * Reject RegExp instances with extra enumerable properties. The built-in
+ * Rejects RegExp instances with extra enumerable properties. The built-in
  * `lastIndex` property is not enumerable, so `Object.keys()` won't see it.
  * Any enumerable own property is therefore user-added and causes rejection.
  */

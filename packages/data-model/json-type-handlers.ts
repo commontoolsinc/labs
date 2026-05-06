@@ -40,9 +40,9 @@ import {
  * passed to type handlers by the internal tree-walking engine.
  */
 export interface TypeHandlerCodec {
-  /** Wrap a tag and state into the wire format's tagged representation. */
+  /** Wraps a tag and state into the wire format's tagged representation. */
   wrapTag(tag: string, state: JsonWireValue): JsonWireValue;
-  /** Get the wire format tag for a fabric instance's type. */
+  /** Returns the wire format tag for a fabric instance's type. */
   getTagFor(value: FabricInstance): string;
 }
 
@@ -64,7 +64,7 @@ export interface TypeHandler {
   canSerialize(value: FabricValue): boolean;
 
   /**
-   * Serialize the value. Only called after `canSerialize` returned `true`.
+   * Serializes the value. Only called after `canSerialize` returned `true`.
    * The handler is responsible for tag wrapping via `codec.wrapTag()` and for
    * recursively serializing nested values via the provided `recurse` callback.
    */
@@ -75,7 +75,7 @@ export interface TypeHandler {
   ): JsonWireValue;
 
   /**
-   * Deserialize a value from its wire format state. The state has already been
+   * Deserializes a value from its wire format state. The state has already been
    * unwrapped (tag stripped) but inner values have NOT been recursively
    * deserialized -- the handler must call `recurse` on nested values.
    */
@@ -97,7 +97,7 @@ export class TypeHandlerRegistry {
   /** Tag -> handler map for O(1) deserialization dispatch. */
   private readonly tagMap = new Map<string, TypeHandler>();
 
-  /** Register a handler. Handlers with non-empty tags are indexed for
+  /** Registers a handler. Handlers with non-empty tags are indexed for
    *  O(1) deserialization lookup. Handlers with empty tags (like
    *  `FabricInstanceHandler`) participate in serialization matching only. */
   register(handler: TypeHandler): void {
@@ -108,7 +108,7 @@ export class TypeHandlerRegistry {
   }
 
   /**
-   * Find a handler that can serialize the given value. Returns `undefined`
+   * Finds a handler that can serialize the given value. Returns `undefined`
    * if no handler matches (the caller should fall through to structural
    * handling for primitives, arrays, and plain objects).
    */
@@ -121,7 +121,7 @@ export class TypeHandlerRegistry {
     return undefined;
   }
 
-  /** Look up a handler by tag for deserialization. */
+  /** Looks up a handler by tag for deserialization. */
   getDeserializer(tag: string): TypeHandler | undefined {
     return this.tagMap.get(tag);
   }
@@ -132,7 +132,7 @@ export class TypeHandlerRegistry {
 // ---------------------------------------------------------------------------
 
 /**
- * Create a `ProblematicValue` for a deserialization failure. The type tag
+ * Creates a `ProblematicValue` for a deserialization failure. The type tag
  * is preserved for round-tripping; the message provides human-readable
  * diagnostics.
  */
@@ -551,7 +551,7 @@ export const FabricInstanceHandler: TypeHandler = {
 };
 
 /**
- * Create a registry with the built-in type handlers. The order matters for
+ * Creates a registry with the built-in type handlers. The order matters for
  * serialization: `FabricPrimitive` subclasses are checked first (direct
  * `FabricValue` members matched by `instanceof`), then `FabricInstance`
  * (generic protocol types), then `bigint` and `undefined`. Primitives

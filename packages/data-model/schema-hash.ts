@@ -14,7 +14,7 @@ import { hashOf, hashStringOf } from "./value-hash.ts";
 // ---------------------------------------------------------------------------
 
 /**
- * Compute a deterministic hash of a JSONSchema. Structurally-equal schemas
+ * Computes a deterministic hash of a JSONSchema. Structurally-equal schemas
  * always produce the same hash. Returns a string for use as a map key or cache
  * key.
  *
@@ -68,7 +68,7 @@ hashToRef.set(booleanInterns.true.hashString, true);
 hashToRef.set(booleanInterns.false.hashString, false);
 
 /**
- * Helper for `internSchema()` which always returns a `SchemaAndHash`.
+ * Helper for `internSchema()`, which always returns a `SchemaAndHash`.
  */
 function internSchemaReturningSchemaAndHash(schema: JSONSchema): SchemaAndHash {
   // Boolean schemas are primitives — return prefab instances.
@@ -132,7 +132,7 @@ function internSchemaReturningSchemaAndHash(schema: JSONSchema): SchemaAndHash {
 }
 
 /**
- * Intern a schema: Freeze it, compute its hash, and cache the bidirectional
+ * Interns a schema: freezes it, computes its hash, and caches the bidirectional
  * mapping. Returns the actual interned schema object or, optionally, the full
  * `SchemaAndHash`. The returned schema object is the same as (`===` to) the
  * given `schema` only if an identical schema was not already interned.
@@ -166,7 +166,7 @@ export function internSchema<T extends JSONSchema>(
 }
 
 /**
- * Look up a previously interned schema by its hash. Accepts a
+ * Looks up a previously interned schema by its hash. Accepts a
  * `FabricHash` or a plain string. Returns `undefined` if the schema
  * has not been interned or has been garbage-collected. If found, returns either
  * the `schema` or full `SchemaAndHash` depending on the `wantSchemaAndHash`

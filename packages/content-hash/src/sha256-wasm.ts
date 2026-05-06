@@ -32,8 +32,8 @@ class HasherPool extends InstancePool<IHasher> {
 const hasherPool = new HasherPool();
 
 /**
- * A hasher instance which _isn't_ allowed to be acquired for concurrent use.
- * This is the one used to serve one-shot hash requests.
+ * The one-shot hasher instance, _not_ allowed to be acquired for concurrent
+ * use. Used to serve one-shot hash requests.
  */
 const theOneShotHasher: IHasher[] = [];
 
@@ -44,7 +44,7 @@ const theOneShotHasher: IHasher[] = [];
 let initResult: Promise<boolean> | null = null;
 
 /**
- * Is this module actually usable?
+ * Whether this module is actually usable.
  */
 let moduleIsUsable: boolean = false;
 

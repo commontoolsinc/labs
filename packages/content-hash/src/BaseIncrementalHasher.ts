@@ -51,15 +51,15 @@ export abstract class BaseIncrementalHasher implements IncrementalHasher {
   }
 
   /**
-   * This is called by the base class when there is data to be passed to the
-   * underlying hash implementation.
+   * Passes data to the underlying hash implementation. Called by the base
+   * class when there is data to be hashed.
    */
   protected abstract _rawUpdate(data: Uint8Array): void;
 
   /**
-   * This is called by the base class to perform a digest operation using the
-   * underlying hash implementation. It is allowed to ignore the `encoding` and
-   * always return a `Uint8Array`.
+   * Performs a digest operation using the underlying hash implementation.
+   * Called by the base class. May ignore the `encoding` and always return a
+   * `Uint8Array`.
    */
   protected abstract _rawDigest(
     encoding: string | undefined,

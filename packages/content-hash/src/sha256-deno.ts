@@ -60,7 +60,7 @@ class DenoHasher extends BaseIncrementalHasher {
 }
 
 /**
- * Is this module usable?
+ * Indicates whether this module is usable.
  */
 export function canUseDeno() {
   return crypto !== null;

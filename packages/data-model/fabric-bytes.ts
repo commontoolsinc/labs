@@ -37,7 +37,7 @@ export class FabricBytes extends FabricPrimitive {
   }
 
   /**
-   * Return a copy of the bytes (or a sub-range). The returned array is
+   * Returns a copy of the bytes (or a sub-range). The returned array is
    * unshared -- the caller may mutate it freely.
    *
    * @param start - Start index (inclusive, default 0).
@@ -48,7 +48,7 @@ export class FabricBytes extends FabricPrimitive {
   }
 
   /**
-   * Copy bytes from this instance into a caller-provided buffer.
+   * Copies bytes from this instance into a caller-provided buffer.
    *
    * @param target - The destination buffer.
    * @param offset - Byte offset in the source to start copying from (default 0).

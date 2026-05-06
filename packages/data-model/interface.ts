@@ -161,11 +161,11 @@ export type FabricValue =
   // -- undefined --
   | undefined;
 
-/** An array of fabric values. */
+/** Array of fabric values. */
 export interface FabricArray extends ArrayLike<FabricValue> {}
 
 /**
- * An object/record of fabric values.
+ * Object/record of fabric values.
  *
  * Note: `__proto__` and `constructor` properties are not currently guarded
  * against at the type level or at runtime in clone/conversion internals.
@@ -175,7 +175,7 @@ export interface FabricArray extends ArrayLike<FabricValue> {}
 export interface FabricObject extends Record<string, FabricValue> {}
 
 /**
- * A single "layer" of fabric conversion -- the result of shallow conversion
+ * Single "layer" of fabric conversion -- the result of shallow conversion
  * via `shallowFabricFromNativeValue()`. Arrays and objects have the right
  * shape but their contents may still contain values requiring further
  * conversion (e.g., Error instances in a `cause` chain).
@@ -216,14 +216,14 @@ export type FabricNativeObject =
 // ===========================================================================
 
 /**
- * A class that can reconstruct fabric instances from essential state. The
- * static `[RECONSTRUCT]` method is separate from the constructor to support
- * reconstruction-specific context and instance interning.
+ * Interface for classes that can reconstruct fabric instances from essential
+ * state. The static `[RECONSTRUCT]` method is separate from the constructor
+ * to support reconstruction-specific context and instance interning.
  * See Section 2.4 of the formal spec.
  */
 export interface FabricClass<T extends FabricInstance> {
   /**
-   * Reconstruct an instance from essential state. Nested values in `state`
+   * Reconstructs an instance from essential state. Nested values in `state`
    * have already been reconstructed by the serialization system. May return
    * an existing instance (interning) rather than creating a new one.
    */
@@ -231,14 +231,14 @@ export interface FabricClass<T extends FabricInstance> {
 }
 
 /**
- * A converter that can reconstruct arbitrary values (not necessarily
+ * Converter that can reconstruct arbitrary values (not necessarily
  * `FabricInstance`s) from essential state. Used for built-in JS types like
  * `Error` that participate in the serialization protocol but don't implement
  * `FabricInstance`. See Section 1.4.1 of the formal spec.
  */
 export interface FabricValueConverter<T> {
   /**
-   * Reconstruct a value from essential state. Nested values in `state`
+   * Reconstructs a value from essential state. Nested values in `state`
    * have already been reconstructed by the serialization system.
    */
   [RECONSTRUCT](state: FabricValue, context: ReconstructionContext): T;
@@ -251,7 +251,7 @@ export interface FabricValueConverter<T> {
  * See Section 2.5 of the formal spec.
  */
 export interface ReconstructionContext {
-  /** Resolve a cell reference. Used by types that need to intern or look up
+  /** Resolves a cell reference. Used by types that need to intern or look up
    *  existing instances during reconstruction. */
   getCell(
     ref: { id: string; path: string[]; space: string },
@@ -272,10 +272,10 @@ export interface SerializationContext<SerializedForm = unknown> {
    *  throwing. @default false */
   readonly lenient: boolean;
 
-  /** Encode a fabric value into serialized form for boundary crossing. */
+  /** Encodes a fabric value into serialized form for boundary crossing. */
   encode(value: FabricValue): SerializedForm;
 
-  /** Decode a serialized form back into a fabric value. */
+  /** Decodes a serialized form back into a fabric value. */
   decode(
     data: SerializedForm,
     runtime: ReconstructionContext,

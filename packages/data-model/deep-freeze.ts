@@ -65,7 +65,7 @@ export function isDeepFrozen(value: unknown): boolean {
 }
 
 /**
- * Internal recursive deep-frozen check with cycle detection.
+ * Performs the recursive deep-frozen check with cycle detection.
  */
 function isDeepFrozenInProgress(
   value: unknown,
