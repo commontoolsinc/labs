@@ -10,6 +10,7 @@ import * as V2Storage from "../src/storage/v2.ts";
 import { raw } from "../src/module.ts";
 import { storedCfcMetadataAppliesToPath } from "../src/cfc/metadata.ts";
 import { Runtime } from "../src/runtime.ts";
+import { createCell } from "../src/cell.ts";
 import { parseLink, toMemorySpaceAddress } from "../src/link-utils.ts";
 import {
   canonicalizeCfcMetadata,
@@ -1632,6 +1633,70 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         readTx,
       );
       expect(readCell.get()).toEqual({ secret: "hello" });
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("persists CFC metadata on the scoped document instance", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const baseCell = runtime.getCell(
+        signer.did(),
+        "cfc-scoped-persisted-write",
+        {
+          type: "object",
+          properties: {
+            secret: {
+              type: "string",
+              ifc: { confidentiality: ["secret"], integrity: ["trusted"] },
+            },
+          },
+        },
+        tx,
+      );
+      const scopedCell = createCell(
+        runtime,
+        { ...baseCell.getAsNormalizedFullLink(), scope: "user" },
+        tx,
+      );
+      scopedCell.set({ secret: "hello" });
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.ok).toBeDefined();
+      const persistedId = parseLink(scopedCell.getAsLink()).id!;
+
+      const replica = storageManager.open(signer.did()).replica as unknown as {
+        getDocument(id: string, scope?: "space" | "user" | "session"): {
+          value?: unknown;
+          cfc?: { schemaHash: string; labelMap?: { entries: unknown[] } };
+        } | undefined;
+      };
+      const scopedPersisted = replica.getDocument(persistedId, "user");
+      const spacePersisted = replica.getDocument(persistedId, "space");
+
+      expect(scopedPersisted?.value).toEqual({ secret: "hello" });
+      expect(scopedPersisted?.cfc?.schemaHash).toBeDefined();
+      expect(scopedPersisted?.cfc?.labelMap?.entries).toContainEqual({
+        path: ["secret"],
+        label: {
+          confidentiality: ["secret"],
+          integrity: ["trusted"],
+        },
+      });
+      expect(spacePersisted?.cfc).toBeUndefined();
+
+      const verify = runtime.edit();
+      expect(
+        storedCfcMetadataAppliesToPath(verify, {
+          ...scopedCell.getAsNormalizedFullLink(),
+          path: ["secret"],
+        }),
+      ).toBe(true);
+      verify.abort();
     } finally {
       await runtime.dispose();
       await storageManager.close();
