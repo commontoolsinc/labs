@@ -1,10 +1,13 @@
 import {
   computed,
+  Default,
   handler,
-  type JSONSchema,
   NAME,
   nonPrivateRandom,
   pattern,
+  type PerSession,
+  type PerSpace,
+  type PerUser,
   safeDateNow,
   Stream,
   UI,
@@ -120,82 +123,24 @@ const metaTextStyle = {
   fontSize: "13px",
 };
 
-type ScopedGroupChatInput = Record<string, never>;
-
-const STATE_SCHEMA = {
-  type: "object",
-  properties: {
-    name: {
-      type: "string",
-      default: "",
-      asCell: [{ kind: "cell", scope: "user" }],
-    },
-    selectedRoom: {
-      $ref: "#/$defs/RoomId",
-      default: "lobby",
-      asCell: [{ kind: "cell", scope: "session" }],
-    },
-    conversation: {
-      $ref: "#/$defs/Conversation",
-      default: DEFAULT_CONVERSATION,
-      asCell: [{ kind: "cell", scope: "space" }],
-    },
-    draft: {
-      type: "string",
-      default: "",
-      asCell: [{ kind: "cell", scope: "user" }],
-    },
-  },
-  required: ["name", "selectedRoom", "conversation", "draft"],
-  $defs: {
-    RoomId: {
-      enum: ["lobby", "workshop", "afterparty"],
-    },
-    Conversation: {
-      type: "object",
-      properties: {
-        rooms: {
-          type: "object",
-          properties: {
-            lobby: {
-              type: "array",
-              items: { $ref: "#/$defs/ChatMessage" },
-            },
-            workshop: {
-              type: "array",
-              items: { $ref: "#/$defs/ChatMessage" },
-            },
-            afterparty: {
-              type: "array",
-              items: { $ref: "#/$defs/ChatMessage" },
-            },
-          },
-          required: ["lobby", "workshop", "afterparty"],
-        },
-      },
-      required: ["rooms"],
-    },
-    ChatMessage: {
-      type: "object",
-      properties: {
-        id: { type: "string" },
-        room: { $ref: "#/$defs/RoomId" },
-        author: { type: "string" },
-        body: { type: "string" },
-        sentAt: { type: "number" },
-      },
-      required: ["id", "room", "author", "body", "sentAt"],
-    },
-  },
-} as const satisfies JSONSchema;
+interface ScopedGroupChatInput {
+  name?: PerUser<Writable<string | Default<"">>>;
+  selectedRoom?: PerSession<Writable<RoomId | Default<"lobby">>>;
+  conversation?: PerSpace<
+    Writable<Conversation | Default<typeof DEFAULT_CONVERSATION>>
+  >;
+  draft?: PerUser<Writable<string | Default<"">>>;
+}
 
 interface ScopedGroupChatOutput {
   [NAME]: string;
   [UI]: VNode;
-  name: Writable<string>;
-  selectedRoom: Writable<RoomId>;
-  conversation: Writable<Conversation>;
-  draft: Writable<string>;
+  name: PerUser<Writable<string | Default<"">>>;
+  selectedRoom: PerSession<Writable<RoomId | Default<"lobby">>>;
+  conversation: PerSpace<
+    Writable<Conversation | Default<typeof DEFAULT_CONVERSATION>>
+  >;
+  draft: PerUser<Writable<string | Default<"">>>;
   currentName: string;
   currentRoom: RoomId;
   currentDraft: string;
@@ -293,21 +238,18 @@ const selectRoom = handler<
 );
 
 export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
-  () => {
-    const state = Writable.of<Partial<{
-      name: string;
-      selectedRoom: RoomId;
-      conversation: Conversation;
-      draft: string;
-    }>>({}, STATE_SCHEMA).for("state");
-    const name = state.key("name") as Writable<string>;
-    const selectedRoom = state.key("selectedRoom") as Writable<RoomId>;
-    const conversation = state.key("conversation") as Writable<Conversation>;
-    const draft = state.key("draft") as Writable<string>;
-    const send = sendMessage({ name, selectedRoom, conversation, draft });
-    const boundSetName = setName({ name });
-    const boundSetDraft = setDraft({ draft });
-    const boundSelectRoom = selectRoom({ selectedRoom });
+  ({ name, selectedRoom, conversation, draft }) => {
+    const send = sendMessage({
+      name: name as Writable<string>,
+      selectedRoom: selectedRoom as Writable<RoomId>,
+      conversation: conversation as Writable<Conversation>,
+      draft: draft as Writable<string>,
+    });
+    const boundSetName = setName({ name: name as Writable<string> });
+    const boundSetDraft = setDraft({ draft: draft as Writable<string> });
+    const boundSelectRoom = selectRoom({
+      selectedRoom: selectedRoom as Writable<RoomId>,
+    });
     const currentName = computed(() => plainString(name.get()));
     const currentRoom = computed(() => plainRoom(selectedRoom.get()));
     const currentDraft = computed(() => plainString(draft.get()));

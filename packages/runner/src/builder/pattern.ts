@@ -371,6 +371,7 @@ function factoryFromPattern<T, R>(
   const pattern: Pattern & toJSON = {
     argumentSchema: sanitizeSchemaForLinks(argumentSchema, {
       keepStreams: true,
+      keepAsCell: true,
     }),
     resultSchema: sanitizeSchemaForLinks(resultSchema, { keepStreams: true }),
     ...(hasInternalSchema

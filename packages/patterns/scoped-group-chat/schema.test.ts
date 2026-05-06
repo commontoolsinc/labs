@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
 
-Deno.test("scoped group chat pattern schema preserves cell scopes", async () => {
+Deno.test("scoped group chat pattern schema generates scoped input cells", async () => {
   const command = new Deno.Command(Deno.execPath(), {
     args: [
       "task",
@@ -18,7 +18,7 @@ Deno.test("scoped group chat pattern schema preserves cell scopes", async () => 
   const stdout = new TextDecoder().decode(output.stdout);
   const jsonStart = stdout.indexOf("{");
   const pattern = JSON.parse(stdout.slice(jsonStart));
-  const properties = pattern.internalSchema.properties.state.properties;
+  const properties = pattern.argumentSchema.properties;
 
   assertEquals(properties.name.asCell, [{ kind: "cell", scope: "user" }]);
   assertEquals(properties.selectedRoom.asCell, [
