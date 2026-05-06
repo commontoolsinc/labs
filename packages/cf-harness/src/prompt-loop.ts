@@ -892,6 +892,11 @@ type RecordHarnessPolicyEvent = (
   event: Parameters<CfHarnessEngine["recordPolicyEvent"]>[0],
 ) => Promise<void>;
 
+const MODEL_FACING_BASH_STREAM_HEAD_CHARS = 60_000;
+const MODEL_FACING_BASH_STREAM_TAIL_CHARS = 20_000;
+const MODEL_FACING_BASH_STREAM_MAX_CHARS = MODEL_FACING_BASH_STREAM_HEAD_CHARS +
+  MODEL_FACING_BASH_STREAM_TAIL_CHARS;
+
 interface InvokedToolCallMessages {
   toolMessage: HarnessToolTranscriptMessage;
   followupMessages?: readonly HarnessTranscriptMessage[];
@@ -981,6 +986,68 @@ const stripBashCwdMarker = (
     stdout,
     cwdMarkerForOutput(BASH_CWD_MARKER_PREFIX, outputId),
   ).stdout;
+};
+
+const truncateModelFacingBashStream = (
+  value: string | ObservationDenied,
+  channel: "stdout" | "stderr",
+  resultRef: ToolResultRef,
+): {
+  value: string | ObservationDenied;
+  truncated?: boolean;
+  originalLength?: number;
+} => {
+  if (
+    typeof value !== "string" ||
+    value.length <= MODEL_FACING_BASH_STREAM_MAX_CHARS
+  ) {
+    return { value };
+  }
+  const omitted = value.length - MODEL_FACING_BASH_STREAM_MAX_CHARS;
+  return {
+    value: `${value.slice(0, MODEL_FACING_BASH_STREAM_HEAD_CHARS)}\n\n` +
+      `[cf-harness: ${channel} truncated for model context; omitted ${omitted} characters. ` +
+      `Full ${channel} is preserved in tool output ${resultRef.outputId}.]\n\n` +
+      value.slice(-MODEL_FACING_BASH_STREAM_TAIL_CHARS),
+    truncated: true,
+    originalLength: value.length,
+  };
+};
+
+const truncateModelFacingBashOutput = (
+  output: unknown,
+  resultRef: ToolResultRef,
+): unknown => {
+  if (!isObjectRecord(output)) {
+    return output;
+  }
+  const stdout = truncateModelFacingBashStream(
+    typeof output.stdout === "string" ? output.stdout : "",
+    "stdout",
+    resultRef,
+  );
+  const stderr = truncateModelFacingBashStream(
+    typeof output.stderr === "string" ? output.stderr : "",
+    "stderr",
+    resultRef,
+  );
+  return {
+    ...output,
+    stdout: stdout.value,
+    stderr: stderr.value,
+    ...(stdout.truncated === true
+      ? {
+        stdoutTruncated: true,
+        stdoutOriginalLength: stdout.originalLength,
+      }
+      : {}),
+    ...(stderr.truncated === true
+      ? {
+        stderrTruncated: true,
+        stderrOriginalLength: stderr.originalLength,
+      }
+      : {}),
+  };
 };
 
 const renderExitCodeObservation = (
@@ -1074,17 +1141,41 @@ const renderMediatedBashOutput = (
   output: Record<string, unknown>,
   cfcResult: CfcSandboxResult,
   resultRef: ToolResultRef,
-): ModelFacingToolOutput => ({
-  outputId: output.outputId,
-  stdout: stripBashCwdMarker(
-    renderStreamObservation(cfcResult.stdout, resultRef),
-    output.outputId,
-  ),
-  stderr: renderStreamObservation(cfcResult.stderr, resultRef),
-  exitCode: renderExitCodeObservation(cfcResult.exitCode, resultRef),
-  cwd: output.cwd,
-  cfc: summarizeCfcSandboxResult(cfcResult),
-});
+): ModelFacingToolOutput => {
+  const stdout = truncateModelFacingBashStream(
+    stripBashCwdMarker(
+      renderStreamObservation(cfcResult.stdout, resultRef),
+      output.outputId,
+    ),
+    "stdout",
+    resultRef,
+  );
+  const stderr = truncateModelFacingBashStream(
+    renderStreamObservation(cfcResult.stderr, resultRef),
+    "stderr",
+    resultRef,
+  );
+  return {
+    outputId: output.outputId,
+    stdout: stdout.value,
+    stderr: stderr.value,
+    exitCode: renderExitCodeObservation(cfcResult.exitCode, resultRef),
+    cwd: output.cwd,
+    cfc: summarizeCfcSandboxResult(cfcResult),
+    ...(stdout.truncated === true
+      ? {
+        stdoutTruncated: true,
+        stdoutOriginalLength: stdout.originalLength,
+      }
+      : {}),
+    ...(stderr.truncated === true
+      ? {
+        stderrTruncated: true,
+        stderrOriginalLength: stderr.originalLength,
+      }
+      : {}),
+  };
+};
 
 const hasDirectCommandBinding = (
   promptSlotBinding?: PromptSlotBinding,
@@ -1898,7 +1989,12 @@ export class CfHarnessPromptLoop {
       const detail =
         `${toolId} output did not include trusted CFC mediation metadata`;
       if (mode === "disabled") {
-        return stripInternalCfcFields(output);
+        return toolId === "bash"
+          ? truncateModelFacingBashOutput(
+            stripInternalCfcFields(output),
+            resultRef,
+          )
+          : stripInternalCfcFields(output);
       }
       if (mode === "observe") {
         await writePolicyEvent({
@@ -1909,7 +2005,12 @@ export class CfHarnessPromptLoop {
           detail:
             `${detail}; raw output was exposed because CFC is in observe mode`,
         });
-        return stripInternalCfcFields(output);
+        return toolId === "bash"
+          ? truncateModelFacingBashOutput(
+            stripInternalCfcFields(output),
+            resultRef,
+          )
+          : stripInternalCfcFields(output);
       }
       const denial = makeObservationDenied("not-observable", {
         detail,

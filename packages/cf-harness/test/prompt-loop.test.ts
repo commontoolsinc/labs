@@ -2989,6 +2989,80 @@ Deno.test("CfHarnessPromptLoop records observe-mode warnings and still executes 
   );
 });
 
+Deno.test("CfHarnessPromptLoop truncates large model-facing bash output in observe mode", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const hugeStdout = `${"a".repeat(90_000)}MIDDLE${"z".repeat(30_000)}`;
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime([
+        { stdout: hugeStdout, stderr: "", exitCode: 0 },
+      ]),
+      runId: "run-large-bash-output",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "observe",
+    }),
+    fetchFn: (_input, init) => {
+      fetchCalls.push(init ?? {});
+      const payload = fetchCalls.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-large-bash",
+                type: "function",
+                function: {
+                  name: "bash",
+                  arguments: JSON.stringify({ command: "grep big" }),
+                },
+              }],
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Handled large output.",
+            },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Run a noisy shell command.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+
+  assertEquals(result.finalAssistantText, "Handled large output.");
+  const secondRequest = JSON.parse(String(fetchCalls[1]?.body)) as {
+    messages: Array<{ role: string; content: string }>;
+  };
+  const toolMessage = secondRequest.messages.at(-1);
+  assertEquals(toolMessage?.role, "tool");
+  const content = JSON.parse(toolMessage!.content);
+  assertEquals(
+    content.outputId,
+    createToolOutputId("run-large-bash-output", "bash", 1),
+  );
+  assertEquals(content.stdoutTruncated, true);
+  assertEquals(content.stdoutOriginalLength, hugeStdout.length);
+  assert(content.stdout.length < hugeStdout.length);
+  assert(content.stdout.startsWith("a".repeat(100)));
+  assert(content.stdout.includes("omitted 40006 characters"));
+  assert(content.stdout.endsWith("z".repeat(100)));
+  assertEquals(content.stderr, "");
+  assertEquals(content.exitCode, 0);
+});
+
 Deno.test("CfHarnessPromptLoop denies bash output without CFC metadata in enforce mode", async () => {
   const fetchCalls: RequestInit[] = [];
   const loop = new CfHarnessPromptLoop({
