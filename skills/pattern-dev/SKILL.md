@@ -9,6 +9,15 @@ Start with the shared pattern development guidance in:
 
 Read that guide first. It is the canonical reference.
 
+Also read the foundational reactivity references before implementing or
+debugging pattern state:
+
+- `docs/common/concepts/reactivity.md`
+- `docs/common/patterns/new-cells.md`
+
+These are required context for Common Fabric pattern work. TypeScript surface
+types can look like plain values even when runtime values are reactive cells.
+
 When working in a Pattern Factory Build workspace, also read:
 
 - `docs/common/ai/pattern-factory-build-guide.md`
@@ -81,6 +90,8 @@ Task({
 Phase skills consult as needed:
 
 - Pattern Factory Build: `docs/common/ai/pattern-factory-build-guide.md`
+- Reactivity and local cells: `docs/common/concepts/reactivity.md`,
+  `docs/common/patterns/new-cells.md`
 - Types: `docs/common/concepts/types-and-schemas/`
 - Actions/handlers: `docs/common/concepts/action.md`,
   `docs/common/concepts/handler.md`
@@ -89,4 +100,5 @@ Phase skills consult as needed:
   type-checked component catalog. Story files in
   `packages/patterns/catalog/stories/` show live usage for each component. Also
   see `docs/common/components/COMPONENTS.md` for narrative docs.
-- Debugging: `docs/development/debugging/`
+- Debugging: start with `docs/development/debugging/README.md`, then follow the
+  linked gotcha or workflow doc for the exact failure.

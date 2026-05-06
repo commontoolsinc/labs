@@ -50,6 +50,14 @@ either the implementation or an invalid test contract, and rerun the test. A
 failing pattern test is not a valid done state unless a concrete external,
 tooling, or environment blocker prevents further repair.
 
+For non-obvious `cf test` failures, read
+`docs/development/debugging/README.md` before changing the test shape. Match the
+exact error to the matrix and follow the linked doc. For Cell, Writable, or
+reactive-value failures, also reread:
+
+- `docs/common/concepts/reactivity.md`
+- `docs/common/patterns/new-cells.md`
+
 ## Test File Shape
 
 The usual shape is:

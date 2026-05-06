@@ -9,7 +9,9 @@ Quick error reference and debugging workflows. For detailed explanations, see li
 | "Property 'set' does not exist" | Missing `Writable<>` in signature | Add `Writable<T>` for write access ([@writeable](../../common/concepts/types-and-schemas/writable.md)) |
 | "X.get is not a function" | Calling `.get()` on computed/lift result | Access directly without `.get()` - only `Writable<>` has `.get()` ([gotchas/get-is-not-a-function](gotchas/get-is-not-a-function.md)) |
 | "X.filter is not a function" | Value isn't an array (yet) | Check `Default<>`, don't assume `.get()` is the fix ([gotchas/filter-map-find-not-a-function](gotchas/filter-map-find-not-a-function.md)) |
+| "Cell.of() only accepts static data" | Passing an input prop, mapped field, or computed/reactive value into `Writable.of()` / `Cell.of()` | Use the input writable cell directly, or initialize pattern-owned local cells from static values only ([new-cells](../../common/patterns/new-cells.md), [@reactivity](../../common/concepts/reactivity.md)) |
 | "Tried to access a reactive reference outside a reactive context" | Accessing reactive value at init time (in `[NAME]`, `Writable.of()`, or object indexing) | Wrap in `computed()`, use `lift()`, or set in event handler ([gotchas/reactive-reference-outside-context](gotchas/reactive-reference-outside-context.md)) |
+| ".trim is not a function" / ".replace is not a function" / ".includes is not a function" | Calling plain string helpers on reactive fields, often from JSX or `.map()` render contexts | Render reactive values directly when possible, or derive labels/branches in `computed()` ([reactivity-issues](reactivity-issues.md), [@reactivity](../../common/concepts/reactivity.md)) |
 | "Type 'string' is not assignable to type 'CSSProperties'" | String style on HTML element | Use object syntax `style={{ ... }}` ([style-errors](style-errors.md)) |
 | Type mismatch binding item to `$checked` | Binding whole item, not property | Bind `item.done`, not `item` ([type-errors](type-errors.md)) |
 | "ReadOnlyAddressError" | onClick inside computed() | Move button outside, use disabled ([gotchas/onclick-inside-computed](gotchas/onclick-inside-computed.md)) |
@@ -41,6 +43,8 @@ These issues compile without errors but fail at runtime.
 - [.get() is Not a Function](gotchas/get-is-not-a-function.md) - Only `Writable<>` has `.get()`
 - [filter/map/find is Not a Function](gotchas/filter-map-find-not-a-function.md) - Value isn't an array yet
 - [Reactive Reference Outside Context](gotchas/reactive-reference-outside-context.md) - Use `lift()` for object indexing
+- [Local Cells](../../common/patterns/new-cells.md) - `Writable.of()` is for
+  new pattern-owned cells initialized from static values
 - [onClick Inside computed()](gotchas/onclick-inside-computed.md) - ReadOnlyAddressError
 - [ifElse with Composed Pattern Cells](gotchas/ifelse-composed-pattern-cells.md) - Piece hangs
 - [lift() Returns Stale/Empty Data](gotchas/lift-returns-stale-data.md) - Closure limitations
