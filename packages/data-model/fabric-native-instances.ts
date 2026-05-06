@@ -119,6 +119,7 @@ function errorClassFromType(type: string): ErrorConstructor {
  */
 export abstract class FabricNativeWrapper<T extends object>
   extends FabricInstance {
+  /** The wire format tag for this wrapper's type (e.g. `TAGS.Error`). */
   abstract readonly typeTag: string;
 
   /** The wrapped native value, used by `toNativeValue` for freeze-state checks. */

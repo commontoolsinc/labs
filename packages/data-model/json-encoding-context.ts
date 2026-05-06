@@ -101,6 +101,10 @@ export class JsonEncodingContext implements SerializationContext<string> {
   /** Narrow codec view for type handlers (avoids exposing private methods). */
   private readonly codec: TypeHandlerCodec;
 
+  /**
+   * Constructs an instance, optionally configured for lenient mode (which
+   * produces `ProblematicValue` on failed reconstruction instead of throwing).
+   */
   constructor(options?: { lenient?: boolean }) {
     this.lenient = options?.lenient ?? false;
 

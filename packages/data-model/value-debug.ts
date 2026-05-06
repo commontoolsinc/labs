@@ -45,6 +45,10 @@ class DebugStringifier {
     this.#indent = indent;
   }
 
+  /**
+   * Renders the debug-string form of the configured value, with the configured
+   * indentation if any.
+   */
   render() {
     this.#findCircles(this.#value);
 

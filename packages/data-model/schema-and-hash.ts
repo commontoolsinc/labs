@@ -1,5 +1,9 @@
+import type { JSONSchema } from "@commonfabric/api";
+import { isDeepFrozen } from "./deep-freeze.ts";
+import type { FabricHash } from "./fabric-hash.ts";
+
 /**
- * A deep-frozen container pairing a `JSONSchema` with its content hash.
+ * Deep-frozen container pairing a `JSONSchema` with its content hash.
  * Ensures that schemas are always stored in their canonical deep-frozen
  * form and that the hash is computed once.
  *
@@ -7,10 +11,6 @@
  * it handles freezing, hashing, and caching. The constructor is public
  * for direct use when both the frozen schema and hash are already in hand.
  */
-import type { JSONSchema } from "@commonfabric/api";
-import { isDeepFrozen } from "./deep-freeze.ts";
-import type { FabricHash } from "./fabric-hash.ts";
-
 export class SchemaAndHash {
   readonly #schema: JSONSchema;
   readonly #hash: FabricHash;
