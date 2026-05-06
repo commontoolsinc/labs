@@ -1422,9 +1422,9 @@ export class Runner {
       : resultCell;
   }
 
-  private getDocKey(cell: Cell<any>): `${MemorySpace}/${URI}` {
-    const { space, id } = cell.getAsNormalizedFullLink();
-    return `${space}/${id}`;
+  private getDocKey(cell: Cell<any>): `${MemorySpace}/${CellScope}/${URI}` {
+    const { space, id, scope } = cell.getAsNormalizedFullLink();
+    return `${space}/${scope}/${id}`;
   }
 
   private async syncCellsForRunningPattern(

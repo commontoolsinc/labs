@@ -149,3 +149,178 @@ Deno.test("broad computed output links to narrower scoped result", async () => {
     await storageManager.close();
   }
 });
+
+Deno.test("map keeps outer list scope and narrows per-element result cells", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+
+  try {
+    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
+    const itemBase = runtime.getCell<number>(
+      space,
+      "map scoped item input",
+      undefined,
+      tx,
+    );
+    const item = createCell<number>(
+      runtime,
+      { ...itemBase.getAsNormalizedFullLink(), scope: "user" },
+      tx,
+    );
+    item.set(20);
+
+    const increment = lift(
+      { type: "number" },
+      { type: "number" },
+      (x: number) => x + 1,
+    );
+    const Root = pattern<{ values: number[] }>(({ values }) => ({
+      mapped: values.map((value) => increment(value)),
+    }));
+
+    const resultCell = runtime.getCell(
+      space,
+      "map keeps outer list scope and narrows per-element result cells",
+      undefined,
+      tx,
+    );
+
+    const result = runtime.run(tx, Root, { values: [item as any] }, resultCell);
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+
+    const rawMapped = result.key("mapped").getRaw();
+    const mappedLink = parseLink(rawMapped, result);
+    assertEquals(mappedLink?.scope, "space");
+
+    const mappedResultCell = runtime.getCellFromLink(mappedLink!);
+    const mappedRaw = mappedResultCell.getRaw();
+    const itemLink = Array.isArray(mappedRaw)
+      ? parseLink(mappedRaw[0], mappedResultCell)
+      : undefined;
+    assertEquals(itemLink?.scope, "user");
+    assertEquals(result.key("mapped").get() as unknown, [21]);
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("filter narrows output list when scoped element controls cardinality", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+
+  try {
+    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
+    const itemBase = runtime.getCell<number>(
+      space,
+      "filter scoped item input",
+      undefined,
+      tx,
+    );
+    const item = createCell<number>(
+      runtime,
+      { ...itemBase.getAsNormalizedFullLink(), scope: "user" },
+      tx,
+    );
+    item.set(20);
+
+    const positive = lift(
+      { type: "number" },
+      { type: "boolean" },
+      (x: number) => x > 0,
+    );
+    const Root = pattern<{ values: number[] }>(({ values }) => ({
+      filtered: values.filter((value) => positive(value)),
+    }));
+
+    const resultCell = runtime.getCell(
+      space,
+      "filter narrows output list when scoped element controls cardinality",
+      undefined,
+      tx,
+    );
+
+    const result = runtime.run(tx, Root, { values: [item as any] }, resultCell);
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+
+    const rawFiltered = result.key("filtered").getRaw();
+    const filteredLink = parseLink(rawFiltered, result);
+    assertEquals(filteredLink?.scope, "user");
+    assertEquals(result.key("filtered").get() as unknown, [20]);
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("flatMap narrows output list when scoped element controls cardinality", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+
+  try {
+    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
+    const itemBase = runtime.getCell<number>(
+      space,
+      "flatMap scoped item input",
+      undefined,
+      tx,
+    );
+    const item = createCell<number>(
+      runtime,
+      { ...itemBase.getAsNormalizedFullLink(), scope: "user" },
+      tx,
+    );
+    item.set(20);
+
+    const expand = lift(
+      { type: "number" },
+      { type: "array", items: { type: "number" } },
+      (x: number) => [x, x + 1],
+    );
+    const Root = pattern<{ values: number[] }>(({ values }) => ({
+      expanded: values.flatMap((value) => expand(value)),
+    }));
+
+    const resultCell = runtime.getCell(
+      space,
+      "flatMap narrows output list when scoped element controls cardinality",
+      undefined,
+      tx,
+    );
+
+    const result = runtime.run(tx, Root, { values: [item as any] }, resultCell);
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+
+    const rawExpanded = result.key("expanded").getRaw();
+    const expandedLink = parseLink(rawExpanded, result);
+    assertEquals(expandedLink?.scope, "user");
+    assertEquals(result.key("expanded").get() as unknown, [20, 21]);
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
