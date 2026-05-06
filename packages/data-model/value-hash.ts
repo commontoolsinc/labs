@@ -212,9 +212,12 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
         throw new Error("Cannot hash unique (uninterned) symbol");
       }
       hasher.update(TAG_SYMBOL_BYTES);
-      const utf8 = encoder.encode(key);
-      feedLength(hasher, utf8.length);
-      hasher.update(utf8);
+      // Delegate to `getStringRep()` so the key encoding picks up the
+      // same LRU cache and long-string-hashing fallback that string
+      // values get. The emitted bytes are `TAG_SYMBOL` followed by a
+      // self-tagged string-rep (`TAG_STRING + len + utf8` for short
+      // keys; `TAG_STRING_HASH + hash` for long ones).
+      hasher.update(getStringRep(key));
       break;
     }
 

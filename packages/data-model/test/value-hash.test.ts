@@ -1279,20 +1279,43 @@ describe("IncrementalHasher digest base64url", () => {
   });
 });
 
-// Registry-interned symbols: hashed via TAG_SYMBOL (0x2a) followed by
-// ULEB128(byteLength) and the UTF-8 bytes of `Symbol.keyFor(s)`. Unique
-// (uninterned) symbols have no portable key and throw.
+// Registry-interned symbols: hashed via TAG_SYMBOL (0x2a) followed by a
+// self-tagged string-rep of `Symbol.keyFor(s)` (i.e., the same byte stream
+// that a plain string of that key would feed). Unique (uninterned) symbols
+// have no portable key and throw.
 describe("hashOf() interned symbols", () => {
-  it("Symbol.for('foo') produces TAG_SYMBOL + ULEB128(3) + 'foo' bytes", () => {
-    // [0x2a, 0x03, 0x66, 0x6f, 0x6f]
-    const expected = sha256([0x2a, 0x03, 0x66, 0x6f, 0x6f]);
+  it("short key takes the inline TAG_STRING path", () => {
+    // utf8Length(3) <= MAX_DIRECT_STRING_LENGTH(64), so the key is fed as
+    // [TAG_STRING][len][utf8].
+    // Final stream: [TAG_SYMBOL=0x2a, TAG_STRING=0x24, len=0x03, 'f','o','o']
+    const expected = sha256([0x2a, 0x24, 0x03, 0x66, 0x6f, 0x6f]);
     expect(hashBytesOf(Symbol.for("foo") as FabricValue)).toEqual(expected);
   });
 
-  it("Symbol.for('') produces TAG_SYMBOL + ULEB128(0)", () => {
-    // [0x2a, 0x00]
-    const expected = sha256([0x2a, 0x00]);
+  it("empty-key Symbol.for('') has length zero, not absent", () => {
+    // [TAG_SYMBOL=0x2a, TAG_STRING=0x24, len=0x00]
+    const expected = sha256([0x2a, 0x24, 0x00]);
     expect(hashBytesOf(Symbol.for("") as FabricValue)).toEqual(expected);
+  });
+
+  it("long key takes the TAG_STRING_HASH path", () => {
+    // utf8Length(100) > MAX_DIRECT_STRING_LENGTH(64), so the key is fed as
+    // [TAG_STRING_HASH][sha256(utf8)] -- a fixed-length compaction.
+    // Final stream: [TAG_SYMBOL=0x2a, TAG_STRING_HASH=0xf0, ...keyHash]
+    const key = "x".repeat(100);
+    const keyHash = sha256(new TextEncoder().encode(key));
+    const expected = sha256([0x2a, 0xf0, ...keyHash]);
+    expect(hashBytesOf(Symbol.for(key) as FabricValue)).toEqual(expected);
+  });
+
+  it("long-key path is deterministic and key-distinct", () => {
+    // Two different keys both > 64 utf8 bytes should hash differently;
+    // identical long keys should hash the same.
+    const a1 = Symbol.for("a".repeat(100)) as FabricValue;
+    const a2 = Symbol.for("a".repeat(100)) as FabricValue;
+    const b = Symbol.for("b".repeat(100)) as FabricValue;
+    expect(hex(hashBytesOf(a1))).toBe(hex(hashBytesOf(a2)));
+    expect(hex(hashBytesOf(a1))).not.toBe(hex(hashBytesOf(b)));
   });
 
   it("equal-keyed interned symbols hash identically", () => {
