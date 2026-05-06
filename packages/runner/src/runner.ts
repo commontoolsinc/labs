@@ -2113,6 +2113,7 @@ export class Runner {
     resultFor: { inputs: FabricValue; outputs: FabricValue; fn: string },
     previousResultCellRef: { current?: Cell<any> },
     recordIgnoredSchedulingWrite?: (link: NormalizedFullLink) => void,
+    narrowestReadScope?: CellScope,
   ): any {
     if (
       !validateAndCheckOpaqueRefs(result, name) &&
@@ -2125,7 +2126,9 @@ export class Runner {
         outputs,
         resultSchema,
       );
-      sendValueToBinding(tx, processCell, outputs, result);
+      sendValueToBinding(tx, processCell, outputs, result, {
+        narrowestReadScope,
+      });
       return result;
     }
 
@@ -2457,6 +2460,7 @@ export class Runner {
 
       try {
         logger.timeStart("action", "readInputs");
+        tx.resetNarrowestReadScope();
         const { argument, isValidArgument } = (() => {
           try {
             return this.readJavaScriptArgument(
@@ -2537,6 +2541,7 @@ export class Runner {
               resultFor,
               previousResultCellRef,
               (link) => action.ignoredSchedulingWrites?.push(link),
+              tx.getNarrowestReadScope(),
             );
           } finally {
             logger.timeEnd("action", "postRun");

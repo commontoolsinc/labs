@@ -615,6 +615,9 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   markCfcRelevant(reason?: string): void;
   invalidateCfc(reason: string): void;
 
+  getNarrowestReadScope(): CellScope;
+  resetNarrowestReadScope(scope?: CellScope): void;
+
   /**
    * CFC recording / ownership-transfer API.
    *

@@ -428,8 +428,12 @@ const compactCommitReads = <
   }>();
   for (const candidate of sorted) {
     const dependencyKey = "seq" in candidate
-      ? `confirmed:${normalizeCellScope(candidate.scope)}:${candidate.id}:${candidate.seq}`
-      : `pending:${normalizeCellScope(candidate.scope)}:${candidate.id}:${candidate.localSeq}`;
+      ? `confirmed:${
+        normalizeCellScope(candidate.scope)
+      }:${candidate.id}:${candidate.seq}`
+      : `pending:${
+        normalizeCellScope(candidate.scope)
+      }:${candidate.id}:${candidate.localSeq}`;
     let group = grouped.get(dependencyKey);
     if (!group) {
       group = {
@@ -867,7 +871,7 @@ class SpaceReplica implements ISpaceReplica {
     client: MemoryV2Client.Client;
     session: MemoryV2Client.SpaceSession;
   }>;
-  readonly #docs = new Map<URI, DocumentRecord>();
+  readonly #docs = new Map<string, DocumentRecord>();
   readonly #syncTasks = new Map<string, SyncTask>();
   readonly #commitPromises = new Set<
     Promise<Result<Unit, StorageTransactionRejected>>
@@ -875,12 +879,12 @@ class SpaceReplica implements ISpaceReplica {
   readonly #syncPromises = new Set<Promise<Result<Unit, PullError>>>();
   readonly #updatePromises = new Set<Promise<void>>();
   readonly #sinks = new Map<
-    URI,
+    string,
     Set<(document: EntityDocument | undefined) => void>
   >();
   #watchView: MemoryV2Client.WatchView | null = null;
   #watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>();
-  #watchedIds = new Set<URI>();
+  #watchedIds = new Set<string>();
   #nextLocalSeq = 1;
   #queuedWatchRefresh: WatchRefreshBatch | null = null;
   #queuedWatchRefreshScheduled = false;
@@ -896,7 +900,7 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   get(entry: IMemoryAddress): State | undefined {
-    return this.getState(entry.id as URI);
+    return this.getState(entry.id as URI, entry.scope);
   }
 
   async sync(
@@ -913,18 +917,19 @@ class SpaceReplica implements ISpaceReplica {
     uri: URI,
     callback: (document: EntityDocument | undefined) => void,
   ): Cancel {
-    let subscribers = this.#sinks.get(uri);
+    const key = docKey(uri);
+    let subscribers = this.#sinks.get(key);
     if (!subscribers) {
       subscribers = new Set();
-      this.#sinks.set(uri, subscribers);
+      this.#sinks.set(key, subscribers);
     }
     subscribers.add(callback);
     void this.sync(uri);
     return () => {
-      const current = this.#sinks.get(uri);
+      const current = this.#sinks.get(key);
       current?.delete(callback);
       if (current && current.size === 0) {
-        this.#sinks.delete(uri);
+        this.#sinks.delete(key);
       }
     };
   }
@@ -946,8 +951,8 @@ class SpaceReplica implements ISpaceReplica {
     await Promise.all([...this.#syncPromises, ...this.#commitPromises]);
   }
 
-  getDocument(uri: URI): EntityDocument | undefined {
-    return this.visibleDocument(uri);
+  getDocument(uri: URI, scope?: CellScope): EntityDocument | undefined {
+    return this.visibleDocument(uri, scope);
   }
 
   async close(): Promise<void> {
@@ -979,10 +984,13 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   async load(
-    entries: [{ id: URI; type: MIME }, SchemaPathSelector | undefined][],
+    entries: [
+      { id: URI; type: MIME; scope?: CellScope },
+      SchemaPathSelector | undefined,
+    ][],
   ): Promise<Result<Unit, PullError>> {
     const known = entries
-      .map(([address]) => this.getState(address.id))
+      .map(([address]) => this.getState(address.id, address.scope))
       .filter((state): state is State => state !== undefined);
     this.#subscription.next({
       type: "load",
@@ -993,7 +1001,10 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   async pull(
-    entries: [{ id: URI; type: MIME }, SchemaPathSelector | undefined][],
+    entries: [
+      { id: URI; type: MIME; scope?: CellScope },
+      SchemaPathSelector | undefined,
+    ][],
   ): Promise<Result<Unit, PullError>> {
     if (entries.length === 0) {
       return { ok: {} };
@@ -1002,6 +1013,7 @@ class SpaceReplica implements ISpaceReplica {
     const normalizedEntries = normalizeSyncEntries(entries);
     const key = hashStringOf(normalizedEntries.map(([address, selector]) => ({
       id: address.id,
+      scope: normalizeCellScope(address.scope),
       selector,
     })));
     const existing = this.#syncTasks.get(key);
@@ -1015,7 +1027,11 @@ class SpaceReplica implements ISpaceReplica {
     };
     const cfc = new ContextualFlowControl();
     const newEntries = normalizedEntries.filter(([address, selector]) => {
-      const baseAddress = { id: address.id, type: DOCUMENT_MIME };
+      const baseAddress = {
+        id: address.id,
+        type: DOCUMENT_MIME,
+        scope: normalizeCellScope(address.scope),
+      };
       const [superset] = this.#watchSelectorTracker.getSupersetSelector(
         baseAddress,
         selector,
@@ -1031,7 +1047,11 @@ class SpaceReplica implements ISpaceReplica {
     const promise = this.enqueueWatchRefresh("pull", newEntries);
     task.promise = promise;
     for (const [address, selector] of newEntries) {
-      const baseAddress = { id: address.id, type: DOCUMENT_MIME };
+      const baseAddress = {
+        id: address.id,
+        type: DOCUMENT_MIME,
+        scope: normalizeCellScope(address.scope),
+      };
       this.#watchSelectorTracker.add(
         baseAddress,
         selector,
@@ -1047,7 +1067,11 @@ class SpaceReplica implements ISpaceReplica {
       const result = await Promise.resolve(task.promise);
       if (result.error) {
         for (const [address, selector] of newEntries) {
-          const baseAddress = { id: address.id, type: DOCUMENT_MIME };
+          const baseAddress = {
+            id: address.id,
+            type: DOCUMENT_MIME,
+            scope: normalizeCellScope(address.scope),
+          };
           this.#watchSelectorTracker.delete(
             baseAddress,
             selector,
@@ -1068,17 +1092,23 @@ class SpaceReplica implements ISpaceReplica {
           .filter((operation) => operation.type === DOCUMENT_MIME)
           .map((operation) =>
             operation.op === "delete"
-              ? { op: "delete" as const, id: operation.id }
+              ? {
+                op: "delete" as const,
+                id: operation.id,
+                scope: operation.scope,
+              }
               : operation.op === "patch"
               ? {
                 op: "patch" as const,
                 id: operation.id,
+                scope: operation.scope,
                 patches: operation.patches,
                 value: toExplicitDocument(operation.value),
               }
               : {
                 op: "set" as const,
                 id: operation.id,
+                scope: operation.scope,
                 value: toExplicitDocument(operation.value),
               }
           ),
@@ -1106,7 +1136,9 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   private async refreshWatchSet(
-    entries: Iterable<[{ id: URI; type: MIME }, SchemaPathSelector]>,
+    entries: Iterable<
+      [{ id: URI; type: MIME; scope?: CellScope }, SchemaPathSelector]
+    >,
     type: "pull" | "integrate" = "pull",
   ): Promise<Result<Unit, PullError>> {
     try {
@@ -1123,6 +1155,7 @@ class SpaceReplica implements ISpaceReplica {
         query: {
           roots: [{
             id: address.id,
+            scope: normalizeCellScope(address.scope),
             selector,
           }],
         },
@@ -1145,7 +1178,7 @@ class SpaceReplica implements ISpaceReplica {
 
   private enqueueWatchRefresh(
     type: "pull" | "integrate",
-    entries: [{ id: URI; type: MIME }, SchemaPathSelector][],
+    entries: [{ id: URI; type: MIME; scope?: CellScope }, SchemaPathSelector][],
   ): Promise<Result<Unit, PullError>> {
     if (this.#queuedWatchRefresh !== null) {
       for (const [address, selector] of entries) {
@@ -1161,7 +1194,10 @@ class SpaceReplica implements ISpaceReplica {
       type,
       entries: new Map(entries.map(([address, selector]) => [
         watchIdForEntry(address, selector, ""),
-        [address, selector] as [{ id: URI; type: MIME }, SchemaPathSelector],
+        [address, selector] as [
+          { id: URI; type: MIME; scope?: CellScope },
+          SchemaPathSelector,
+        ],
       ])),
       pending: Promise.withResolvers<Result<Unit, PullError>>(),
     };
@@ -1214,9 +1250,15 @@ class SpaceReplica implements ISpaceReplica {
 
   private async commitOperations(
     operations: Array<
-      | { op: "set"; id: URI; value: EntityDocument }
-      | { op: "patch"; id: URI; patches: PatchOp[]; value: EntityDocument }
-      | { op: "delete"; id: URI }
+      | { op: "set"; id: URI; scope?: CellScope; value: EntityDocument }
+      | {
+        op: "patch";
+        id: URI;
+        scope?: CellScope;
+        patches: PatchOp[];
+        value: EntityDocument;
+      }
+      | { op: "delete"; id: URI; scope?: CellScope }
     >,
     source?: IStorageTransaction,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
@@ -1234,19 +1276,24 @@ class SpaceReplica implements ISpaceReplica {
               return {
                 op: "patch" as const,
                 id: operation.id,
+                scope: operation.scope,
                 patches: operation.patches,
               };
             case "set":
               return {
                 op: "set" as const,
                 id: operation.id,
+                scope: operation.scope,
                 value: operation.value,
               };
           }
         }),
       }),
     );
-    const touched = operations.map((operation) => operation.id);
+    const touched = operations.map((operation) => ({
+      id: operation.id,
+      scope: operation.scope,
+    }));
     const shouldNotifySubscribers = this.hasNotificationSubscribers();
     const shouldNotifySinks = this.hasSinkSubscribers(touched);
     const before = withCommitTiming(
@@ -1255,7 +1302,7 @@ class SpaceReplica implements ISpaceReplica {
         shouldNotifySubscribers
           ? Differential.checkout(
             this,
-            touched.map((id) => snapshotState(this, id)),
+            touched.map(({ id, scope }) => snapshotState(this, id, scope)),
           )
           : undefined,
     );
@@ -1302,9 +1349,15 @@ class SpaceReplica implements ISpaceReplica {
   private async pushCommit(
     localSeq: number,
     operations: Array<
-      | { op: "set"; id: URI; value: EntityDocument }
-      | { op: "patch"; id: URI; patches: PatchOp[]; value: EntityDocument }
-      | { op: "delete"; id: URI }
+      | { op: "set"; id: URI; scope?: CellScope; value: EntityDocument }
+      | {
+        op: "patch";
+        id: URI;
+        scope?: CellScope;
+        patches: PatchOp[];
+        value: EntityDocument;
+      }
+      | { op: "delete"; id: URI; scope?: CellScope }
     >,
     commit: any,
     source?: IStorageTransaction,
@@ -1316,13 +1369,16 @@ class SpaceReplica implements ISpaceReplica {
       return { ok: {} };
     } catch (error) {
       const rejection = toRejectedError(error, commit);
-      const touched = operations.map((operation) => operation.id);
+      const touched = operations.map((operation) => ({
+        id: operation.id,
+        scope: operation.scope,
+      }));
       const shouldNotifySubscribers = this.hasNotificationSubscribers();
       const shouldNotifySinks = this.hasSinkSubscribers(touched);
       const before = shouldNotifySubscribers
         ? Differential.checkout(
           this,
-          touched.map((operationId) => snapshotState(this, operationId)),
+          touched.map(({ id, scope }) => snapshotState(this, id, scope)),
         )
         : undefined;
       this.dropPending(localSeq);
@@ -1372,13 +1428,15 @@ class SpaceReplica implements ISpaceReplica {
         continue;
       }
 
-      const record = this.#docs.get(read.id as URI);
+      const scope = normalizeCellScope(read.scope);
+      const record = this.#docs.get(docKey(read.id as URI, scope));
       const pendingLocalSeq = record?.pending
         .filter((version) => version.localSeq < localSeq)
         .at(-1)?.localSeq;
       if (pendingLocalSeq !== undefined) {
         pending.push({
           id: read.id as URI,
+          scope,
           path: toCommitReadPath(read.path),
           localSeq: pendingLocalSeq,
           ...(read.nonRecursive === true ? { nonRecursive: true } : {}),
@@ -1386,6 +1444,7 @@ class SpaceReplica implements ISpaceReplica {
       } else {
         confirmed.push({
           id: read.id as URI,
+          scope,
           path: toCommitReadPath(read.path),
           seq: typeof read.meta?.seq === "number"
             ? read.meta.seq
@@ -1412,35 +1471,41 @@ class SpaceReplica implements ISpaceReplica {
       return;
     }
 
-    const touchedIds = new Set<URI>([
-      ...sync.upserts.map((upsert) => upsert.id as URI),
-      ...sync.removes.map((remove) => remove.id as URI),
-    ]);
+    const touched = [
+      ...sync.upserts.map((upsert) => ({
+        id: upsert.id as URI,
+        scope: upsert.scope,
+      })),
+      ...sync.removes.map((remove) => ({
+        id: remove.id as URI,
+        scope: remove.scope,
+      })),
+    ];
 
     const shouldNotifySubscribers = this.hasNotificationSubscribers();
-    const shouldNotifySinks = this.hasSinkSubscribers(touchedIds);
+    const shouldNotifySinks = this.hasSinkSubscribers(touched);
     const before = shouldNotifySubscribers
       ? Differential.checkout(
         this,
-        [...touchedIds].map((id) => snapshotState(this, id)),
+        touched.map(({ id, scope }) => snapshotState(this, id, scope)),
       )
       : undefined;
 
     for (const upsert of sync.upserts) {
-      const record = this.record(upsert.id as URI);
+      const record = this.record(upsert.id as URI, upsert.scope);
       record.confirmed = confirmedVersion(
         upsert.seq,
         upsert.deleted === true ? undefined : upsert.doc,
       );
       record.materialized = undefined;
-      this.#watchedIds.add(upsert.id as URI);
+      this.#watchedIds.add(docKey(upsert.id as URI, upsert.scope));
     }
     for (const remove of sync.removes) {
       const id = remove.id as URI;
-      const record = this.record(id);
+      const record = this.record(id, remove.scope);
       record.confirmed = confirmedVersion(0, undefined);
       record.materialized = undefined;
-      this.#watchedIds.delete(id);
+      this.#watchedIds.delete(docKey(id, remove.scope));
     }
 
     if (before !== undefined) {
@@ -1456,46 +1521,65 @@ class SpaceReplica implements ISpaceReplica {
         }
       }
     } else if (shouldNotifySinks) {
-      this.notifySinksForIds(touchedIds);
+      this.notifySinksForIds(touched);
     }
   }
 
-  private record(id: URI): DocumentRecord {
-    let record = this.#docs.get(id);
+  private record(id: URI, scope?: CellScope): DocumentRecord {
+    const key = docKey(id, scope);
+    let record = this.#docs.get(key);
     if (!record) {
       record = {
         confirmed: confirmedVersion(0, undefined),
         pending: [],
         materialized: undefined,
       };
-      this.#docs.set(id, record);
+      this.#docs.set(key, record);
     }
     return record;
   }
 
   private applyPending(
     operation:
-      | { op: "set"; id: URI; value: EntityDocument }
-      | { op: "patch"; id: URI; patches: PatchOp[]; value: EntityDocument }
-      | { op: "delete"; id: URI },
+      | { op: "set"; id: URI; scope?: CellScope; value: EntityDocument }
+      | {
+        op: "patch";
+        id: URI;
+        scope?: CellScope;
+        patches: PatchOp[];
+        value: EntityDocument;
+      }
+      | { op: "delete"; id: URI; scope?: CellScope },
     localSeq: number,
   ): void {
-    const { id, ...pending } = operation;
-    const record = this.record(id);
+    const { id, scope, ...pending } = operation;
+    const record = this.record(id, scope);
     record.pending.push(pendingVersion(localSeq, pending));
   }
 
   private confirmPending(
     localSeq: number,
     operations: Array<
-      | { op: "set"; id: URI; value: EntityDocument }
-      | { op: "patch"; id: URI; patches: PatchOp[]; value: EntityDocument }
-      | { op: "delete"; id: URI }
+      | { op: "set"; id: URI; scope?: CellScope; value: EntityDocument }
+      | {
+        op: "patch";
+        id: URI;
+        scope?: CellScope;
+        patches: PatchOp[];
+        value: EntityDocument;
+      }
+      | { op: "delete"; id: URI; scope?: CellScope }
     >,
     applied: AppliedCommit,
   ): void {
-    for (const id of new Set(operations.map((operation) => operation.id))) {
-      const record = this.record(id);
+    const keys = new Map(
+      operations.map((operation) => [
+        docKey(operation.id, operation.scope),
+        { id: operation.id, scope: operation.scope },
+      ]),
+    );
+    for (const { id, scope } of keys.values()) {
+      const record = this.record(id, scope);
       const pendingIndexes = record.pending.flatMap((entry, index) =>
         entry.localSeq === localSeq ? [index] : []
       );
@@ -1569,11 +1653,11 @@ class SpaceReplica implements ISpaceReplica {
     }
   }
 
-  private visibleVersion(id: URI): {
+  private visibleVersion(id: URI, scope?: CellScope): {
     record: DocumentRecord;
     version: MaterializedVersion;
   } | undefined {
-    const record = this.#docs.get(id);
+    const record = this.#docs.get(docKey(id, scope));
     if (!record) {
       return undefined;
     }
@@ -1583,16 +1667,16 @@ class SpaceReplica implements ISpaceReplica {
     };
   }
 
-  private visibleValue(id: URI): FabricValue | undefined {
-    const visible = this.visibleVersion(id);
+  private visibleValue(id: URI, scope?: CellScope): FabricValue | undefined {
+    const visible = this.visibleVersion(id, scope);
     if (!visible) {
       return undefined;
     }
     return transactionValueForVersion(visible.version);
   }
 
-  private getState(id: URI): State | undefined {
-    const visible = this.visibleVersion(id);
+  private getState(id: URI, scope?: CellScope): State | undefined {
+    const visible = this.visibleVersion(id, scope);
     if (!visible) {
       return undefined;
     }
@@ -1607,26 +1691,34 @@ class SpaceReplica implements ISpaceReplica {
         is: value,
         cause: null,
       }),
+      scope: normalizeCellScope(scope),
       since: visible.record.confirmed.seq,
     } as State;
   }
 
-  private visibleDocument(id: URI): EntityDocument | undefined {
-    return this.visibleVersion(id)?.version.value;
+  private visibleDocument(
+    id: URI,
+    scope?: CellScope,
+  ): EntityDocument | undefined {
+    return this.visibleVersion(id, scope)?.version.value;
   }
 
   private notifySinks(changes: IMergedChanges): void {
-    const ids = new Set<URI>();
+    const touched = new Map<string, { id: URI; scope?: CellScope }>();
     for (const change of changes) {
-      ids.add(change.address.id as URI);
+      const id = change.address.id as URI;
+      const scope = change.address.scope;
+      touched.set(docKey(id, scope), { id, scope });
     }
-    this.notifySinksForIds(ids);
+    this.notifySinksForIds(touched.values());
   }
 
-  private notifySinksForIds(ids: Iterable<URI>): void {
-    for (const id of ids) {
-      const current = this.visibleDocument(id);
-      for (const callback of this.#sinks.get(id) ?? []) {
+  private notifySinksForIds(
+    entries: Iterable<{ id: URI; scope?: CellScope }>,
+  ): void {
+    for (const { id, scope } of entries) {
+      const current = this.visibleDocument(id, scope);
+      for (const callback of this.#sinks.get(docKey(id, scope)) ?? []) {
         try {
           callback(current);
         } catch (error) {
@@ -1646,9 +1738,11 @@ class SpaceReplica implements ISpaceReplica {
     return true;
   }
 
-  private hasSinkSubscribers(ids: Iterable<URI>): boolean {
-    for (const id of ids) {
-      if ((this.#sinks.get(id)?.size ?? 0) > 0) {
+  private hasSinkSubscribers(
+    entries: Iterable<{ id: URI; scope?: CellScope }>,
+  ): boolean {
+    for (const { id, scope } of entries) {
+      if ((this.#sinks.get(docKey(id, scope))?.size ?? 0) > 0) {
         return true;
       }
     }
@@ -1672,8 +1766,12 @@ class SpaceReplica implements ISpaceReplica {
   }
 }
 
-const snapshotState = (replica: SpaceReplica, id: URI): State => {
-  return replica.get({ id, type: DOCUMENT_MIME, path: [] }) ??
+const snapshotState = (
+  replica: SpaceReplica,
+  id: URI,
+  scope?: CellScope,
+): State => {
+  return replica.get({ id, type: DOCUMENT_MIME, path: [], scope }) ??
     unclaimed({ of: id, the: DOCUMENT_MIME });
 };
 

@@ -47,7 +47,8 @@ import {
   type NormalizedFullLink,
   toMemorySpaceAddress,
 } from "../link-types.ts";
-import { normalizeCellScope } from "../scope.ts";
+import { normalizeCellScope, scopeRank } from "../scope.ts";
+import type { CellScope } from "../builder/types.ts";
 import { ignoreReadForScheduling } from "../scheduler.ts";
 import {
   type AttemptedWrite,
@@ -91,6 +92,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   private commitCallbacksDispatched = false;
   private outboxIdempotencyKeys = new Set<string>();
   private readOnlySource?: string;
+  private narrowestReadScope: CellScope = "space";
   private cfcState: CfcTxState = {
     relevant: false,
     enforcementMode: DEFAULT_CFC_ENFORCEMENT_MODE,
@@ -144,6 +146,21 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     };
     if (wasPrepared) {
       this.cfcInstrumentation.onDigestInvalidation?.(reason);
+    }
+  }
+
+  getNarrowestReadScope(): CellScope {
+    return this.narrowestReadScope;
+  }
+
+  resetNarrowestReadScope(scope: CellScope = "space"): void {
+    this.narrowestReadScope = scope;
+  }
+
+  private recordReadScope(address: IMemorySpaceAddress): void {
+    const scope = normalizeCellScope(address.scope);
+    if (scopeRank(scope) > scopeRank(this.narrowestReadScope)) {
+      this.narrowestReadScope = scope;
     }
   }
 
@@ -334,6 +351,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     if (this.cfcState.prepare.status === "prepared") {
       this.invalidateCfc("read-after-prepare");
     }
+    this.recordReadScope(address);
     return this.tx.read(address, options);
   }
 
@@ -344,6 +362,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     if (this.cfcState.prepare.status === "prepared") {
       this.invalidateCfc("read-after-prepare");
     }
+    this.recordReadScope(address);
     const readResult = this.tx.read(address, options);
     if (
       readResult.error &&
@@ -712,6 +731,14 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   invalidateCfc(reason: string): void {
     this.wrapped.invalidateCfc(reason);
+  }
+
+  getNarrowestReadScope(): CellScope {
+    return this.wrapped.getNarrowestReadScope();
+  }
+
+  resetNarrowestReadScope(scope?: CellScope): void {
+    this.wrapped.resetNarrowestReadScope(scope);
   }
 
   recordCfcDereferenceTrace(trace: CfcDereferenceTrace): void {

@@ -4,6 +4,7 @@ import {
   REJECTING_SELECTOR,
 } from "@commonfabric/data-model/schema-utils";
 import type { MIME } from "@commonfabric/memory/interface";
+import type { CellScope } from "@commonfabric/memory/v2";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { ContextualFlowControl } from "../cfc.ts";
 import { SelectorTracker } from "./selector-tracker.ts";
@@ -16,6 +17,7 @@ import type {
 } from "./interface.ts";
 
 const DOCUMENT_MIME = "application/json" as const;
+type ScopedWatchAddress = { id: URI; type: MIME; scope?: CellScope };
 
 export const normalizeSyncSelector = (
   selector: SchemaPathSelector | undefined,
@@ -27,22 +29,27 @@ export const normalizeSyncSelector = (
 };
 
 export const normalizeSyncEntries = (
-  entries: [{ id: URI; type: MIME }, SchemaPathSelector | undefined][],
-): [{ id: URI; type: MIME }, SchemaPathSelector][] =>
+  entries: [ScopedWatchAddress, SchemaPathSelector | undefined][],
+): [ScopedWatchAddress, SchemaPathSelector][] =>
   entries.map((
     [address, selector],
   ) => [address, normalizeSyncSelector(selector)]);
 
 export const compactWatchEntries = (
-  entries: [{ id: URI; type: MIME }, SchemaPathSelector][],
-): [{ id: URI; type: MIME }, SchemaPathSelector][] => {
+  entries: [ScopedWatchAddress, SchemaPathSelector][],
+): [ScopedWatchAddress, SchemaPathSelector][] => {
   const tracker = new SelectorTracker<Result<Unit, PullError>>();
   const cfc = new ContextualFlowControl();
-  const compacted: [{ id: URI; type: MIME }, SchemaPathSelector][] = [];
+  const compacted: [ScopedWatchAddress, SchemaPathSelector][] = [];
 
   for (const entry of entries) {
     const [address, selector] = entry;
-    const baseAddress = { id: address.id, type: DOCUMENT_MIME, path: [] };
+    const baseAddress = {
+      id: address.id,
+      type: DOCUMENT_MIME,
+      path: [],
+      scope: address.scope ?? "space",
+    };
     const [superset] = tracker.getSupersetSelector(
       baseAddress,
       selector,
@@ -71,7 +78,7 @@ const selectorIdentity = (selector: SchemaPathSelector): string =>
   });
 
 export const watchIdForEntry = (
-  address: { id: URI; type: MIME },
+  address: ScopedWatchAddress,
   selector: SchemaPathSelector,
   branch = "",
 ): string =>
@@ -79,6 +86,7 @@ export const watchIdForEntry = (
     hashStringOf({
       branch,
       id: address.id,
+      scope: address.scope ?? "space",
       type: DOCUMENT_MIME,
       selector: selectorIdentity(selector),
     })

@@ -12,6 +12,7 @@ import { resolveLink } from "./link-resolution.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import {
   areNormalizedLinksSame,
+  createSigilLinkFromParsedLink,
   isCellLink,
   isLegacyAlias,
   isWriteRedirectLink,
@@ -20,6 +21,12 @@ import {
 } from "./link-utils.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import { ignoreReadForScheduling } from "./scheduler.ts";
+import type { CellScope } from "./builder/types.ts";
+import { scopeRank } from "./scope.ts";
+
+type SendValueToBindingOptions = {
+  narrowestReadScope?: CellScope;
+};
 
 /**
  * Sends a value to a binding. If the binding is an array or object, it'll
@@ -37,6 +44,7 @@ export function sendValueToBinding<T>(
   cell: AnyCell<T>,
   binding: unknown,
   value: unknown,
+  options: SendValueToBindingOptions = {},
 ): void {
   // Handle both legacy $alias format and new sigil link format
   if (isWriteRedirectLink(binding)) {
@@ -46,6 +54,25 @@ export function sendValueToBinding<T>(
       parseLink(binding, cell),
       "writeRedirect",
     );
+    const outputScope = options.narrowestReadScope;
+    if (
+      outputScope !== undefined &&
+      scopeRank(outputScope) > scopeRank(ref.scope)
+    ) {
+      const scopedRef = { ...ref, scope: outputScope };
+      const valueLink = isCellLink(value) ? parseLink(value, ref) : undefined;
+      if (
+        valueLink === undefined ||
+        !areNormalizedLinksSame(valueLink, scopedRef)
+      ) {
+        tx.writeValueOrThrow(scopedRef, value as FabricValue);
+      }
+      tx.writeValueOrThrow(
+        ref,
+        createSigilLinkFromParsedLink(scopedRef, { base: ref }) as FabricValue,
+      );
+      return;
+    }
     diffAndUpdate(
       cell.runtime,
       tx,
@@ -57,13 +84,13 @@ export function sendValueToBinding<T>(
   } else if (Array.isArray(binding)) {
     if (Array.isArray(value)) {
       for (let i = 0; i < Math.min(binding.length, value.length); i++) {
-        sendValueToBinding(tx, cell, binding[i], value[i]);
+        sendValueToBinding(tx, cell, binding[i], value[i], options);
       }
     }
   } else if (isRecord(binding) && isRecord(value)) {
     for (const key of Object.keys(binding)) {
       if (key in value) {
-        sendValueToBinding(tx, cell, binding[key], value[key]);
+        sendValueToBinding(tx, cell, binding[key], value[key], options);
       }
     }
   } else if (!isRecord(binding) || Object.keys(binding).length !== 0) {
