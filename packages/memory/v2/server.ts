@@ -2,6 +2,7 @@ import * as FS from "@std/fs";
 import * as Path from "@std/path";
 import { resolveSpaceStoreUrl } from "./storage-path.ts";
 import {
+  type CellScope,
   type ClientCommit,
   type ClientMessage,
   decodeMemoryBoundary,
@@ -62,6 +63,11 @@ const SUBSCRIPTION_REFRESH_DELAY_MS = 5;
 const MIN_REFRESH_QUEUE_DRAIN_WAIT_MS = 500;
 const SLOW_QUERY_THRESHOLD_MS = 100;
 const SLOW_QUERY_BUFFER_SIZE = 100;
+
+// Memory v2 wire values may omit scope for default-space entries; storage and
+// watch keys need an explicit declared scope.
+const declaredScope = (scope: CellScope | undefined): CellScope =>
+  scope ?? "space";
 
 export interface SlowQuery {
   timestamp: number;
@@ -607,7 +613,7 @@ export class Server {
       this.markSpaceDirty(
         message.space,
         message.commit.operations.map((operation) =>
-          toDirtyKey(operation.id, operation.scope ?? "space")
+          toDirtyKey(operation.id, declaredScope(operation.scope))
         ),
       );
       return {
@@ -807,7 +813,7 @@ export class Server {
               cacheKeyForEntity(
                 entry.branch,
                 entry.id,
-                entry.scope ?? "space",
+                declaredScope(entry.scope),
               ),
               entry,
             );
@@ -830,7 +836,11 @@ export class Server {
         for (const entity of extended.updates.values()) {
           const entry = toCacheEntry(entity);
           updates.set(
-            cacheKeyForEntity(entry.branch, entry.id, entry.scope ?? "space"),
+            cacheKeyForEntity(
+              entry.branch,
+              entry.id,
+              declaredScope(entry.scope),
+            ),
             entry,
           );
         }
@@ -840,7 +850,9 @@ export class Server {
       for (const [key, entry] of updates) {
         const previous = session.entities.get(key);
         session.entities.set(key, entry);
-        session.trackedIds.add(toDirtyKey(entry.id, entry.scope ?? "space"));
+        session.trackedIds.add(
+          toDirtyKey(entry.id, declaredScope(entry.scope)),
+        );
         if (!sameSnapshot(previous, entry)) {
           upserts.push(entry);
         }
@@ -940,7 +952,7 @@ export class Server {
         const key = cacheKeyForEntity(
           entry.branch,
           entry.id,
-          entry.scope ?? "space",
+          declaredScope(entry.scope),
         );
         const existing = entities.get(key);
         if (
@@ -1002,7 +1014,11 @@ export class Server {
         for (const entity of refreshed.updates.values()) {
           const entry = toCacheEntry(entity);
           updates.set(
-            cacheKeyForEntity(entry.branch, entry.id, entry.scope ?? "space"),
+            cacheKeyForEntity(
+              entry.branch,
+              entry.id,
+              declaredScope(entry.scope),
+            ),
             entry,
           );
         }
@@ -1016,7 +1032,9 @@ export class Server {
       for (const [key, entry] of updates) {
         const previous = session.entities.get(key);
         session.entities.set(key, entry);
-        session.trackedIds.add(toDirtyKey(entry.id, entry.scope ?? "space"));
+        session.trackedIds.add(
+          toDirtyKey(entry.id, declaredScope(entry.scope)),
+        );
         if (!sameSnapshot(previous, entry)) {
           upserts.push(entry);
         }
@@ -1097,13 +1115,13 @@ export class Server {
   ): void {
     const ids = new Set<string>();
     for (const operation of commit.operations) {
-      ids.add(toDirtyKey(operation.id, operation.scope ?? "space"));
+      ids.add(toDirtyKey(operation.id, declaredScope(operation.scope)));
     }
     for (const read of commit.reads.confirmed) {
-      ids.add(toDirtyKey(read.id, read.scope ?? "space"));
+      ids.add(toDirtyKey(read.id, declaredScope(read.scope)));
     }
     for (const read of commit.reads.pending) {
-      ids.add(toDirtyKey(read.id, read.scope ?? "space"));
+      ids.add(toDirtyKey(read.id, declaredScope(read.scope)));
     }
     this.markSpaceDirty(space, ids);
   }

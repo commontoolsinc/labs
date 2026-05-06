@@ -615,7 +615,7 @@ export const recordTrustedEventPolicyInputs = (
       const target = {
         space: write.space,
         id: write.id,
-        scope: write.scope ?? "space",
+        scope: write.scope,
         path: [...write.path],
       };
       const eventId = trustedEventId(matchingEvent, write);

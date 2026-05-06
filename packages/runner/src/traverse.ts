@@ -37,7 +37,7 @@ import {
   REJECTING_SELECTOR,
   schemaWithProperties,
 } from "@commonfabric/data-model/schema-utils";
-import type { JSONObject, JSONSchema } from "./builder/types.ts";
+import type { CellScope, JSONObject, JSONSchema } from "./builder/types.ts";
 import {
   addressKey,
   createDataCellURI,
@@ -74,6 +74,18 @@ import type { LastNode } from "./link-resolution.ts";
 import type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
 
 const logger = getLogger("traverse", { enabled: true, level: "warn" });
+
+type ScopedMemorySpaceValueAddress = IMemorySpaceValueAddress & {
+  scope: CellScope;
+};
+
+const scopedAddressForKey = (
+  address: IMemorySpaceValueAddress,
+): ScopedMemorySpaceValueAddress => ({
+  ...address,
+  // Storage value addresses may omit scope on legacy/default-space paths.
+  scope: address.scope ?? "space",
+});
 
 const READ_NON_RECURSIVE: IReadOptions = {
   nonRecursive: true,
@@ -734,8 +746,9 @@ export abstract class BaseObjectTraverser {
     // Skip when defaultValue is provided since it can alter the result.
     if (defaultValue === undefined) {
       const memoKey = itemLink
-        ? addressKey(doc.address) + "|" + addressKey(itemLink)
-        : addressKey(doc.address);
+        ? addressKey(scopedAddressForKey(doc.address)) + "|" +
+          addressKey(itemLink)
+        : addressKey(scopedAddressForKey(doc.address));
       const cached = this.dagMemo.get(memoKey);
       if (cached !== undefined) {
         return cached;
@@ -812,8 +825,9 @@ export abstract class BaseObjectTraverser {
       const arrayResult = this.objectCreator.createObject(newLink, newValue);
       if (defaultValue === undefined) {
         const memoKey = itemLink
-          ? addressKey(doc.address) + "|" + addressKey(itemLink)
-          : addressKey(doc.address);
+          ? addressKey(scopedAddressForKey(doc.address)) + "|" +
+            addressKey(itemLink)
+          : addressKey(scopedAddressForKey(doc.address));
         this.dagMemo.set(memoKey, arrayResult);
       }
       return arrayResult;
@@ -902,8 +916,9 @@ export abstract class BaseObjectTraverser {
         const recordResult = this.objectCreator.createObject(newLink, newValue);
         if (defaultValue === undefined) {
           const memoKey = itemLink
-            ? addressKey(doc.address) + "|" + addressKey(itemLink)
-            : addressKey(doc.address);
+            ? addressKey(scopedAddressForKey(doc.address)) + "|" +
+              addressKey(itemLink)
+            : addressKey(scopedAddressForKey(doc.address));
           this.dagMemo.set(memoKey, recordResult);
         }
         return recordResult;

@@ -165,6 +165,7 @@ type WishContext = {
   scope?: ("~" | "." | string)[];
   /** Cached #now cell to avoid non-idempotent re-runs from Date.now() */
   nowCell?: Cell<unknown>;
+  usedHomeSpace?: boolean;
 };
 
 type BaseResolution = {
@@ -230,6 +231,11 @@ function resolvePath(
   return current.resolveAsCell();
 }
 
+function getHomeSpaceCell(ctx: WishContext): Cell<unknown> {
+  ctx.usedHomeSpace = true;
+  return ctx.runtime.getHomeSpaceCell(ctx.tx);
+}
+
 function formatTarget(parsed: ParsedWishTarget): string {
   return parsed.key +
     (parsed.path.length > 0 ? "/" + parsed.path.join("/") : "");
@@ -251,7 +257,7 @@ function searchFavoritesForHashtag(
     "favorites-cell",
     queryKey,
     () => {
-      const homeSpaceCell = ctx.runtime.getHomeSpaceCell(ctx.tx);
+      const homeSpaceCell = getHomeSpaceCell(ctx);
       return homeSpaceCell
         .key("defaultPattern")
         .key("favorites")
@@ -472,7 +478,7 @@ function resolveHomeSpaceTarget(
       if (!userDID) {
         throw new WishError("User identity DID not available for #favorites");
       }
-      const homeSpaceCell = ctx.runtime.getHomeSpaceCell(ctx.tx);
+      const homeSpaceCell = getHomeSpaceCell(ctx);
 
       // No path = return favorites list
       if (parsed.path.length === 0) {
@@ -527,7 +533,7 @@ function resolveHomeSpaceTarget(
         throw new WishError("User identity DID not available for #journal");
       }
       return [{
-        cell: ctx.runtime.getHomeSpaceCell(ctx.tx),
+        cell: getHomeSpaceCell(ctx),
         pathPrefix: ["defaultPattern", "journal"],
       }];
     }
@@ -538,7 +544,7 @@ function resolveHomeSpaceTarget(
         throw new WishError("User identity DID not available for #learned");
       }
       return [{
-        cell: ctx.runtime.getHomeSpaceCell(ctx.tx),
+        cell: getHomeSpaceCell(ctx),
         pathPrefix: ["defaultPattern", "learned"],
       }];
     }
@@ -548,7 +554,7 @@ function resolveHomeSpaceTarget(
       if (!userDID) {
         throw new WishError("User identity DID not available for #profile");
       }
-      const learnedCell = ctx.runtime.getHomeSpaceCell(ctx.tx)
+      const learnedCell = getHomeSpaceCell(ctx)
         .key("defaultPattern")
         .key("learned")
         .resolveAsCell();
@@ -614,7 +620,7 @@ function resolveSpaceTarget(
 
   // "~" → include home space
   if (ctx.scope?.includes("~") && ctx.runtime.userIdentityDID) {
-    const homeSpaceCell = ctx.runtime.getHomeSpaceCell(ctx.tx);
+    const homeSpaceCell = getHomeSpaceCell(ctx);
     results.push({ cell: homeSpaceCell, pathPrefix: [...pathPrefix] });
   }
 
@@ -938,30 +944,14 @@ function explicitWishSchemaScope(schema: unknown): CellScope | undefined {
   return undefined;
 }
 
-function parsedWishTargetUsesHomeSpace(
-  parsed: ParsedWishTarget,
-  scope?: ("~" | "." | string)[],
-): boolean {
-  if (
-    parsed.key === "#favorites" ||
-    parsed.key === "#journal" ||
-    parsed.key === "#learned" ||
-    parsed.key === "#profile"
-  ) {
-    return true;
-  }
-  return (scope ?? []).includes("~");
-}
-
 function wishOutputScope(
-  parsed: ParsedWishTarget | undefined,
   schema: unknown,
-  scope: ("~" | "." | string)[] | undefined,
   inputScope: CellScope,
+  usedHomeSpace: boolean,
 ): CellScope {
   const explicitScope = explicitWishSchemaScope(schema);
   if (explicitScope) return explicitScope;
-  if (parsed && parsedWishTargetUsesHomeSpace(parsed, scope)) {
+  if (usedHomeSpace) {
     return narrowestScope([inputScope, "user"]);
   }
   return inputScope;
@@ -1156,10 +1146,9 @@ export function wish(
             toCompactDebugString(targetValue)
           }" has no query.`;
           const outputScope = wishOutputScope(
-            undefined,
             schema,
-            scope,
             inputScope,
+            false,
           );
           measureWishPhase(
             "send-error",
@@ -1182,6 +1171,13 @@ export function wish(
 
         // If the query is a path or a hash tag, resolve it directly
         if (query.startsWith("/") || /^#[a-zA-Z0-9-]+/.test(query)) {
+          const ctx: WishContext = {
+            runtime,
+            tx,
+            parentCell,
+            scope,
+            nowCell,
+          };
           try {
             const resolveStartedAt = performance.now();
             const parsed = measureWishPhase(
@@ -1193,19 +1189,6 @@ export function wish(
                 return parsed;
               },
             );
-            const outputScope = wishOutputScope(
-              parsed,
-              schema,
-              scope,
-              inputScope,
-            );
-            const ctx: WishContext = {
-              runtime,
-              tx,
-              parentCell,
-              scope,
-              nowCell,
-            };
             if (canUseSharedHashtagResult(parsed, { headless })) {
               const shared = getCurrentSharedHashtagResolver(ctx, parsed);
               usedSharedHashtagResolver = true;
@@ -1225,6 +1208,11 @@ export function wish(
               "resolve-base",
               queryKey,
               () => resolveBase(parsed, ctx),
+            );
+            const outputScope = wishOutputScope(
+              schema,
+              inputScope,
+              ctx.usedHomeSpace === true,
             );
             // Persist #now cell across re-runs to avoid non-idempotent loops
             if (ctx.nowCell) nowCell = ctx.nowCell;
@@ -1403,7 +1391,11 @@ export function wish(
                     error: errorMsg,
                     [UI]: errorUI(errorMsg),
                   } satisfies WishState<any>,
-                  wishOutputScope(undefined, schema, scope, inputScope),
+                  wishOutputScope(
+                    schema,
+                    inputScope,
+                    ctx.usedHomeSpace === true,
+                  ),
                   schema,
                 ),
             );
@@ -1421,7 +1413,7 @@ export function wish(
                   candidates: [],
                   [UI]: undefined,
                 } satisfies WishState<any>,
-                wishOutputScope(undefined, schema, scope, inputScope),
+                wishOutputScope(schema, inputScope, false),
                 schema,
               ),
           );

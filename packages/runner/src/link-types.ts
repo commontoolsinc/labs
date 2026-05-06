@@ -252,13 +252,15 @@ export function areNormalizedLinksSameIgnoringScope(
  * NormalizedFullLink version of the same address will return different
  * keys, so they should not be mixed up.
  */
+type ScopedMemorySpaceAddress = IMemorySpaceAddress & { scope: CellScope };
+
 export function addressKey(
-  addr: IMemorySpaceAddress | NormalizedFullLink,
+  addr: ScopedMemorySpaceAddress | NormalizedFullLink,
 ): string {
   return JSON.stringify([
     addr.space,
     addr.id,
-    addr.scope ?? "space",
+    addr.scope,
     addr.path,
   ]);
 }

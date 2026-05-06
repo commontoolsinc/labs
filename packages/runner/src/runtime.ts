@@ -85,11 +85,15 @@ const isFullNormalizedLinkShape = (
 } => {
   if (typeof value !== "object" || value === null) return false;
   const link = value as NormalizedLink;
+  if (link.scope === "inherit") {
+    throw new Error(
+      "NormalizedFullLink.scope cannot be 'inherit'; resolve scope before creating a full link",
+    );
+  }
   return typeof link.id === "string" &&
     typeof link.space === "string" &&
     Array.isArray(link.path) &&
-    (link.scope === undefined || link.scope === "inherit" ||
-      isCellScope(link.scope));
+    (link.scope === undefined || isCellScope(link.scope));
 };
 
 interface WriteDebugContextStore<T> {

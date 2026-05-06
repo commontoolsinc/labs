@@ -126,6 +126,7 @@ function trustedEventWriteCandidatesFromTransaction(
     const candidate: NormalizedFullLink = {
       space: write.space,
       id: write.id,
+      // Transaction memory addresses may omit scope for legacy/default-space writes.
       scope: write.scope ?? "space",
       path: [...path],
       ...("schema" in write && write.schema !== undefined

@@ -2,7 +2,7 @@ import { assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
-import { parseLink } from "../src/link-utils.ts";
+import { parseLink, toMemorySpaceAddress } from "../src/link-utils.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { createCell } from "../src/cell.ts";
 
@@ -89,6 +89,87 @@ Deno.test("pattern result schema scope overrides factory .asScope()", async () =
 
     const childLink = parseLink(result.key("child").getRaw(), result);
     assertEquals(childLink?.scope, "session");
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("runtime rejects inherit scope on full normalized links", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+
+  try {
+    assertEquals(
+      (() => {
+        try {
+          runtime.getCellFromLink({
+            id: "of:unresolved-inherit-scope",
+            space,
+            scope: "inherit",
+            path: [],
+          } as any);
+          return undefined;
+        } catch (error) {
+          return error instanceof Error ? error.message : String(error);
+        }
+      })(),
+      "NormalizedFullLink.scope cannot be 'inherit'; resolve scope before creating a full link",
+    );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("cross-space scoped links preserve target space and resolved scope", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+  const otherSigner = await Identity.fromPassphrase(
+    "cross-space scoped link target",
+  );
+  const targetSpace = otherSigner.did();
+
+  try {
+    const setupTx = runtime.edit();
+    const baseTarget = runtime.getCell<string>(
+      targetSpace,
+      "cross-space user scoped target",
+      undefined,
+      setupTx,
+    );
+    const target = createCell<string>(
+      runtime,
+      { ...baseTarget.getAsNormalizedFullLink(), scope: "user" },
+      setupTx,
+    );
+    target.set("target value");
+    await setupTx.commit();
+
+    const source = runtime.getCell<{ linked?: unknown }>(
+      space,
+      "cross-space scoped link source",
+      undefined,
+      tx,
+    );
+    source.set({ linked: target.getAsLink({ base: source.key("linked") }) });
+
+    const resolved = parseLink(
+      source.key("linked").getRaw(),
+      source.key("linked"),
+    );
+    assertEquals(resolved?.space, targetSpace);
+    assertEquals(resolved?.scope, "user");
+    assertEquals(toMemorySpaceAddress(resolved!).space, targetSpace);
+    assertEquals(toMemorySpaceAddress(resolved!).scope, "user");
+    assertEquals(source.key("linked").get(), "target value");
   } finally {
     await runtime.dispose();
     await storageManager.close();
@@ -332,6 +413,7 @@ Deno.test("map keeps outer list scope and narrows per-element result cells", asy
       ? parseLink(mappedRaw[0], mappedResultCell)
       : undefined;
     assertEquals(itemLink?.scope, "user");
+    assertEquals(runtime.getCellFromLink(itemLink!).getRaw(), 21);
     assertEquals(result.key("mapped").get() as unknown, [21]);
   } finally {
     await runtime.dispose();
