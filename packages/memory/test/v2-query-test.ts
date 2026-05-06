@@ -585,7 +585,7 @@ Deno.test("memory v2 query treats schema true as covering narrower selectors", a
         },
       }],
     });
-    const rootKey = `${space}/${rootId}/application/json`;
+    const rootKey = `${space}/space/${rootId}/application/json`;
     assertEquals(tracked.state.tracker.get(rootKey)?.size, 1);
 
     extendTrackedGraph(space, engine, tracked.state, {
