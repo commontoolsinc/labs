@@ -430,3 +430,55 @@ Deno.test("when keeps condition scope while selecting narrower value link", asyn
     await storageManager.close();
   }
 });
+
+Deno.test("fetchData state cells use narrowest input scope", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+
+  try {
+    const { fetchData, pattern } = createTrustedBuilder(runtime).commonfabric;
+    const urlBase = runtime.getCell<string>(
+      space,
+      "fetchData user scoped url",
+      undefined,
+      tx,
+    );
+    const url = createCell<string>(
+      runtime,
+      { ...urlBase.getAsNormalizedFullLink(), scope: "user" },
+      tx,
+    );
+    url.set("");
+
+    const Root = pattern<{ url: string }>(({ url }) => fetchData({ url }));
+
+    const resultCell = runtime.getCell(
+      space,
+      "fetchData state cells use narrowest input scope",
+      undefined,
+      tx,
+    );
+
+    const result = runtime.run(tx, Root, { url }, resultCell);
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+
+    const pendingLink = parseLink(result.key("pending").getRaw(), result);
+    const resultLink = parseLink(result.key("result").getRaw(), result);
+    const errorLink = parseLink(result.key("error").getRaw(), result);
+    assertEquals(pendingLink?.scope, "user");
+    assertEquals(resultLink?.scope, "user");
+    assertEquals(errorLink?.scope, "user");
+    assertEquals(result.key("pending").get() as unknown, false);
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});

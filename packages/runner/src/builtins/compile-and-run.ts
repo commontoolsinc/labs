@@ -6,6 +6,9 @@ import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { Program } from "@commonfabric/js-compiler";
 import { CompilerError } from "@commonfabric/js-compiler/typescript";
+import type { CellScope } from "../builder/types.ts";
+import { resolvedCellScope, scopedCell } from "./scope-policy.ts";
+import { narrowestScope } from "../scope.ts";
 
 /**
  * Compile a pattern/module and run it.
@@ -52,6 +55,7 @@ export function compileAndRun(
     >
     | undefined
   >;
+  let cellScope: CellScope | undefined;
 
   // This is called when the pattern containing this node is being stopped.
   addCancel(() => {
@@ -60,56 +64,7 @@ export function compileAndRun(
   });
 
   return (tx: IExtendedStorageTransaction) => {
-    if (!cellsInitialized) {
-      pending = runtime.getCell<boolean>(
-        parentCell.space,
-        { compile: { pending: cause } },
-        undefined,
-        tx,
-      );
-      pending.send(false);
-
-      result = runtime.getCell<string | undefined>(
-        parentCell.space,
-        { compile: { result: cause } },
-        undefined,
-        tx,
-      );
-
-      error = runtime.getCell<string | undefined>(
-        parentCell.space,
-        { compile: { error: cause } },
-        undefined,
-        tx,
-      );
-
-      errors = runtime.getCell<
-        | Array<
-          {
-            line: number;
-            column: number;
-            message: string;
-            type: string;
-            file?: string;
-          }
-        >
-        | undefined
-      >(
-        parentCell.space,
-        { compile: { errors: cause } },
-        undefined,
-        tx,
-      );
-
-      sendResult(tx, { pending, result, error, errors });
-      cellsInitialized = true;
-    }
-
-    const pendingWithLog = pending.withTx(tx);
-    const resultWithLog = result.withTx(tx);
-    const errorWithLog = error.withTx(tx);
-    const errorsWithLog = errors.withTx(tx);
-
+    tx.resetNarrowestReadScope();
     // TODO(seefeld): Ideally, this cell already has this schema, because we set
     // it on the node itself.
     const program: Program = inputsCell.asSchema({
@@ -132,6 +87,65 @@ export function compileAndRun(
       required: ["files", "main"],
     }).withTx(tx).get();
     const input = inputsCell.withTx(tx).key("input");
+    const outputScope = narrowestScope([
+      tx.getNarrowestReadScope(),
+      resolvedCellScope(runtime, tx, input),
+    ]);
+
+    if (!cellsInitialized || cellScope !== outputScope) {
+      const basePending = runtime.getCell<boolean>(
+        parentCell.space,
+        { compile: { pending: cause } },
+        undefined,
+        tx,
+      );
+      pending = scopedCell(runtime, tx, basePending, outputScope);
+      pending.send(false);
+
+      const baseResult = runtime.getCell<string | undefined>(
+        parentCell.space,
+        { compile: { result: cause } },
+        undefined,
+        tx,
+      );
+      result = scopedCell(runtime, tx, baseResult, outputScope);
+
+      const baseError = runtime.getCell<string | undefined>(
+        parentCell.space,
+        { compile: { error: cause } },
+        undefined,
+        tx,
+      );
+      error = scopedCell(runtime, tx, baseError, outputScope);
+
+      const baseErrors = runtime.getCell<
+        | Array<
+          {
+            line: number;
+            column: number;
+            message: string;
+            type: string;
+            file?: string;
+          }
+        >
+        | undefined
+      >(
+        parentCell.space,
+        { compile: { errors: cause } },
+        undefined,
+        tx,
+      );
+      errors = scopedCell(runtime, tx, baseErrors, outputScope);
+
+      sendResult(tx, { pending, result, error, errors });
+      cellsInitialized = true;
+      cellScope = outputScope;
+    }
+
+    const pendingWithLog = pending.withTx(tx);
+    const resultWithLog = result.withTx(tx);
+    const errorWithLog = error.withTx(tx);
+    const errorsWithLog = errors.withTx(tx);
 
     const hash = hashOf(program ?? { files: [], main: "" }).toString();
 
