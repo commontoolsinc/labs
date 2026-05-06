@@ -192,7 +192,7 @@ export type AsCellEntry =
   | CellKind
   | {
     readonly kind: CellKind;
-    readonly scope?: LinkScope | "any";
+    readonly scope?: SchemaScope;
   };
 
 export declare const SCOPE_BRAND: unique symbol;

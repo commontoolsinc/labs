@@ -283,12 +283,11 @@ narrower scoped computation result.
 `JSONSchemaObj` gains an optional Common Fabric extension:
 
 ```ts
-type AsCellScope = LinkScope | "any";
 type AsCellEntry =
   | CellKind
   | {
     kind: CellKind;
-    scope?: AsCellScope;
+    scope?: SchemaScope;
   };
 
 type JSONSchemaObj = {

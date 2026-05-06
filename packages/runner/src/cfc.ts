@@ -5,7 +5,7 @@ import type {
   AsCellEntry,
   CellKind,
   JSONSchema,
-  LinkScope,
+  SchemaScope,
 } from "./builder/types.ts";
 import { CycleTracker } from "./traverse.ts";
 import { isArrayIndexPropertyName } from "@commonfabric/data-model/fabric-value";
@@ -509,7 +509,7 @@ export class ContextualFlowControl {
 
   static getAsCellScope(
     entry: AsCellEntry | undefined,
-  ): LinkScope | "any" | undefined {
+  ): SchemaScope | undefined {
     return typeof entry === "string" ? undefined : entry?.scope;
   }
 }
