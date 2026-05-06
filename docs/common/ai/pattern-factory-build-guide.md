@@ -56,6 +56,66 @@ piece. Sub-patterns often receive caller-owned writable inputs and must include
 top-level deliverable to require external writable inputs when the brief expects
 a standalone pattern.
 
+## Top-Level State Ownership
+
+Decide what owns state before creating cells. Pattern Factory Build usually
+produces a top-level pattern whose inputs and outputs are the pattern contract.
+Those input fields are already reactive at runtime.
+
+Do not mirror reactive pattern inputs into new local cells during pattern
+initialization. In particular, do not write `Writable.of(input.field)`,
+`Writable.of(input.field || fallback)`, `Cell.of(input.field)`, or helper calls
+around `input.field` inside `Writable.of(...)`. `Writable.of()` and `Cell.of()`
+are only for new pattern-owned cells initialized from static values.
+
+Wrong:
+
+```tsx
+export default pattern<DeviceInput>((input) => {
+  const name = Writable.of(input.name || ""); // input.name is reactive
+  const capabilities = Writable.of(input.capabilities || []);
+  // ...
+});
+```
+
+Prefer one of these designs instead:
+
+- If the field is the pattern's primary state, model it in the input/output
+  contract with `Default<>` and `Writable<>` as needed, then use that reactive
+  input cell directly.
+- If the field is independent local UI state, initialize it from a static value:
+  `Writable.of("")`, `Writable.of(false)`, or `Writable.of<Item[]>([])`.
+- If the field is draft/editing state seeded from input state, initialize the
+  draft from a static value and copy the current input value inside an `action()`
+  or another valid event/reactive context.
+
+Example:
+
+```tsx
+interface DeviceInput {
+  name: Writable<string | Default<"">>;
+}
+
+export default pattern<DeviceInput, DeviceOutput>(({ name }) => {
+  const draftName = Writable.of("");
+
+  const startEditing = action(() => {
+    draftName.set(name.get());
+  });
+
+  const saveDraft = action(() => {
+    name.set(draftName.get());
+  });
+
+  return {
+    name,
+    startEditing,
+    saveDraft,
+    [UI]: <cf-input $value={name} />,
+  };
+});
+```
+
 ## Build Verification
 
 Build is complete only when the generated pattern compiles and its pattern tests
