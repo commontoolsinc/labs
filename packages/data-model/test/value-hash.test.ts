@@ -254,6 +254,26 @@ describe("hashOf()", () => {
     expect(hashBytesOf(emoji)).toEqual(expected);
   });
 
+  it("long string takes the TAG_STRING_HASH path", () => {
+    // utf8Length(100) > MAX_DIRECT_STRING_LENGTH(64), so the value is fed
+    // as [TAG_STRING_HASH][sha256(utf8)] -- a fixed-length compaction in
+    // place of the inline `[TAG_STRING][len][utf8]` form.
+    const value = "x".repeat(100);
+    const valueHash = sha256(new TextEncoder().encode(value));
+    const expected = sha256([0xf0, ...valueHash]);
+    expect(hashBytesOf(value)).toEqual(expected);
+  });
+
+  it("long-string path is deterministic and value-distinct", () => {
+    // Two different strings both > 64 utf8 bytes should hash differently;
+    // identical long strings should hash the same.
+    const a1 = "a".repeat(100);
+    const a2 = "a".repeat(100);
+    const b = "b".repeat(100);
+    expect(hex(hashBytesOf(a1))).toBe(hex(hashBytesOf(a2)));
+    expect(hex(hashBytesOf(a1))).not.toBe(hex(hashBytesOf(b)));
+  });
+
   // --- bigint ---
 
   it("0n encodes as TAG_BIGINT + LEB128 length 1 + [0x00]", () => {
@@ -896,6 +916,41 @@ describe("hashOf()", () => {
       0x00,
     ]);
     expect(hex(hashBytesOf(obj))).not.toBe(hex(wrongOrder));
+  });
+
+  it("long object key takes the TAG_STRING_HASH path", () => {
+    // utf8Length(100) > MAX_DIRECT_STRING_LENGTH(64). Object keys go through
+    // the same `getStringRep()` codepath as bare string values, so a long
+    // key is fed as `[TAG_STRING_HASH][sha256(utf8)]`.
+    const longKey = "x".repeat(100);
+    const obj = { [longKey]: 1 } as unknown as FabricValue;
+    const keyHash = sha256(new TextEncoder().encode(longKey));
+    // Stream: TAG_OBJECT, [TAG_STRING_HASH, keyHash], value(1.0), TAG_END
+    const expected = sha256([
+      0x11, // TAG_OBJECT
+      0xf0, // TAG_STRING_HASH
+      ...keyHash,
+      // Value `1`: TAG_NUMBER + IEEE-754 BE bit pattern for 1.0
+      0x23,
+      0x3f,
+      0xf0,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00, // TAG_END
+    ]);
+    expect(hashBytesOf(obj)).toEqual(expected);
+  });
+
+  it("long object keys are deterministic and key-distinct", () => {
+    const a1 = { ["a".repeat(100)]: 1 } as unknown as FabricValue;
+    const a2 = { ["a".repeat(100)]: 1 } as unknown as FabricValue;
+    const b = { ["b".repeat(100)]: 1 } as unknown as FabricValue;
+    expect(hex(hashBytesOf(a1))).toBe(hex(hashBytesOf(a2)));
+    expect(hex(hashBytesOf(a1))).not.toBe(hex(hashBytesOf(b)));
   });
 
   // =========================================================================
