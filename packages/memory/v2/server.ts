@@ -657,17 +657,17 @@ export class Server {
     try {
       return {
         type: "response",
-          requestId: message.requestId,
-          ok: await this.evaluateGraphQuery(
-            message.space,
-            message.query,
-            undefined,
-            undefined,
-            {
-              principal: session.principal,
-              sessionId: message.sessionId,
-            },
-          ),
+        requestId: message.requestId,
+        ok: await this.evaluateGraphQuery(
+          message.space,
+          message.query,
+          undefined,
+          undefined,
+          {
+            principal: session.principal,
+            sessionId: message.sessionId,
+          },
+        ),
       };
     } catch (error) {
       return respondTypedError<GraphQueryResult>(

@@ -1,4 +1,4 @@
-import { createCell, type Cell } from "../cell.ts";
+import { type Cell, createCell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import { type RawBuiltinResult } from "../module.ts";
 import { type Runtime } from "../runtime.ts";

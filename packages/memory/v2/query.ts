@@ -92,7 +92,10 @@ export class EngineObjectManager implements ObjectStorageManager {
     private readonly readSeq?: number,
   ) {}
 
-  readState(id: string, scope: CellScope = DEFAULT_SCOPE): Engine.EntityState | null {
+  readState(
+    id: string,
+    scope: CellScope = DEFAULT_SCOPE,
+  ): Engine.EntityState | null {
     return Engine.readState(this.engine, {
       id,
       scope,
@@ -566,7 +569,8 @@ export const refreshTrackedGraph = (
     if (
       !state.tracker.has(key) && address.scope === DEFAULT_SCOPE
     ) {
-      const legacyKey = `${space}/${address.id}/application/json` as QueryDocKey;
+      const legacyKey =
+        `${space}/${address.id}/application/json` as QueryDocKey;
       if (state.tracker.has(legacyKey)) {
         key = legacyKey;
       }

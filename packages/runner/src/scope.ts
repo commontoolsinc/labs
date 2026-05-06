@@ -61,4 +61,3 @@ export function canFollowScopedLink(
   }
   return scopeRank(linkScope) <= scopeRank(schemaScope);
 }
-

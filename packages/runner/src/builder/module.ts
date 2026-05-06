@@ -1,7 +1,7 @@
 import type {
+  CellScope,
   Handler,
   HandlerFactory,
-  CellScope,
   JSONSchema,
   Module,
   ModuleFactory,

@@ -24,6 +24,20 @@ const DEFAULT_SCOPE_KEY = "space" as const;
 const normalizeScope = (scope: CellScope | undefined): CellScope =>
   scope ?? DEFAULT_SCOPE;
 
+const encodeScopeKeyPart = (value: string): string => encodeURIComponent(value);
+
+const resolvePrincipalSessionKey = (
+  principal: string,
+  sessionId: SessionId,
+): string =>
+  `session:${encodeScopeKeyPart(principal)}:${encodeScopeKeyPart(sessionId)}`;
+
+const resolveCommitSessionKey = (
+  sessionId: SessionId,
+  principal?: string,
+): string =>
+  principal ? resolvePrincipalSessionKey(principal, sessionId) : sessionId;
+
 const resolveScopeKey = (
   scope: CellScope | undefined,
   options: { principal?: string; sessionId?: SessionId },
@@ -34,17 +48,23 @@ const resolveScopeKey = (
       return DEFAULT_SCOPE_KEY;
     case "user":
       if (!options.principal) {
-        throw new ProtocolError("user scoped memory operations require a principal");
+        throw new ProtocolError(
+          "user scoped memory operations require a principal",
+        );
       }
       return `user:${options.principal}`;
     case "session":
       if (!options.principal) {
-        throw new ProtocolError("session scoped memory operations require a principal");
+        throw new ProtocolError(
+          "session scoped memory operations require a principal",
+        );
       }
       if (!options.sessionId) {
-        throw new ProtocolError("session scoped memory operations require a session id");
+        throw new ProtocolError(
+          "session scoped memory operations require a session id",
+        );
       }
-      return `session:${options.sessionId}`;
+      return resolvePrincipalSessionKey(options.principal, options.sessionId);
   }
 };
 
@@ -852,7 +872,8 @@ export const listBranches = (engine: Engine): BranchState[] => {
 
 export const read = (
   engine: Engine,
-  { id, branch = DEFAULT_BRANCH, seq, scope, principal, sessionId }: ReadOptions,
+  { id, branch = DEFAULT_BRANCH, seq, scope, principal, sessionId }:
+    ReadOptions,
 ): EntityDocument | null => {
   return readState(engine, { id, branch, seq, scope, principal, sessionId })
     ?.document ?? null;
@@ -860,7 +881,8 @@ export const read = (
 
 export const readState = (
   engine: Engine,
-  { id, branch = DEFAULT_BRANCH, seq, scope, principal, sessionId }: ReadOptions,
+  { id, branch = DEFAULT_BRANCH, seq, scope, principal, sessionId }:
+    ReadOptions,
 ): EntityState | null => {
   const declaredScope = normalizeScope(scope);
   const scopeKey = resolveScopeKey(scope, { principal, sessionId });
@@ -965,6 +987,7 @@ const applyCommitTransaction = (
     commit,
   }: ApplyCommitOptions,
 ): AppliedCommit => {
+  const sessionKey = resolveCommitSessionKey(sessionId, principal);
   if (commit.operations.length === 0) {
     throw new Error("memory v2 commit requires at least one operation");
   }
@@ -973,7 +996,7 @@ const applyCommitTransaction = (
   ensureActiveBranch(engine, branch);
 
   const existing = engine.statements.selectExistingCommit.get({
-    session_id: sessionId,
+    session_id: sessionKey,
     local_seq: commit.localSeq,
   }) as CommitRow | undefined;
   if (existing) {
@@ -992,6 +1015,7 @@ const applyCommitTransaction = (
   validateConfirmedReads(engine, branch, commit, { principal, sessionId });
   const resolvedPendingReads = resolvePendingReads(
     engine,
+    sessionKey,
     sessionId,
     principal,
     branch,
@@ -1027,7 +1051,7 @@ const applyCommitTransaction = (
   engine.statements.insertCommit.run({
     seq,
     branch,
-    session_id: sessionId,
+    session_id: sessionKey,
     local_seq: commit.localSeq,
     invocation_ref: invocationRef,
     authorization_ref: authorizationRef,
@@ -1194,6 +1218,7 @@ const validateConfirmedReads = (
 
 const resolvePendingReads = (
   engine: Engine,
+  sessionKey: string,
   sessionId: SessionId,
   principal: string | undefined,
   branch: BranchName,
@@ -1205,7 +1230,7 @@ const resolvePendingReads = (
     let resolution = resolutions.get(read.localSeq);
     if (!resolution) {
       const row = engine.statements.selectPendingResolution.get({
-        session_id: sessionId,
+        session_id: sessionKey,
         local_seq: read.localSeq,
       }) as { seq: number } | undefined;
       if (!row) {

@@ -168,6 +168,63 @@ Deno.test("memory v2 engine stores independent scoped instances for the same id"
   }
 });
 
+Deno.test("memory v2 engine binds session scoped instances to the principal", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:shared",
+      principal: "did:key:alice",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:session-principal",
+          scope: "session",
+          value: toEntityDocument({ owner: "alice" }),
+        }],
+      },
+    });
+    applyCommit(engine, {
+      sessionId: "session:shared",
+      principal: "did:key:bob",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:session-principal",
+          scope: "session",
+          value: toEntityDocument({ owner: "bob" }),
+        }],
+      },
+    });
+
+    assertEquals(
+      read(engine, {
+        id: "entity:session-principal",
+        scope: "session",
+        principal: "did:key:alice",
+        sessionId: "session:shared",
+      }),
+      { value: { owner: "alice" } },
+    );
+    assertEquals(
+      read(engine, {
+        id: "entity:session-principal",
+        scope: "session",
+        principal: "did:key:bob",
+        sessionId: "session:shared",
+      }),
+      { value: { owner: "bob" } },
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 engine conflicts are scoped by declared scope", async () => {
   const { engine, path } = await createEngine();
 

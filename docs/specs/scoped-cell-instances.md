@@ -76,7 +76,8 @@ implementation uses an opaque, prefixed string:
 
 - `space` for per-space data
 - `user:<did>` for per-user data
-- `session:<session-id>` for per-session data
+- `session:<did>:<session-id>` for per-session data, with the DID and session
+  id encoded as opaque key parts
 
 The prefix determines the key kind. The rest of the string is runtime identity
 material and is not serialized into links. Future scope kinds can use additional
@@ -100,9 +101,10 @@ user DID is an invalid runtime state.
 
 `sessionId` is required when resolving, creating, reading, or writing a
 session-scoped instance. A session id is always bound to exactly one user DID;
-the same session id must not be usable for another user. The storage key for a
-session-scoped instance is still only `session:<session-id>` because the session
-registry already prevents the illegal same-session/different-user state.
+the same session id must not be usable for another user within the session
+registry. Storage does not rely on that registry invariant for isolation:
+the effective session scope key also includes the authenticated user DID so two
+users reusing the same caller-supplied session id cannot collide.
 
 Scope is data scope. Pattern code, schemas, and link structure may be shared
 across scopes, but the data object addressed by `(space, id, scope_key)` is
@@ -110,8 +112,9 @@ scope-specific.
 
 The runtime must not read across effective scope keys. A user-scoped read for
 one DID cannot read another user's `user:<did>` instance, and a session-scoped
-read cannot read another session's `session:<session-id>` instance. Links do
-not encode the DID or session id; the runtime context supplies those values.
+read cannot read another session scope key for a different user DID or memory
+session id. Links do not encode the DID or session id; the runtime context
+supplies those values.
 
 Writing follows the target cell's effective scope. Writing to a broader scoped
 cell from a narrower scoped computation is allowed by the scope system and is
@@ -490,10 +493,13 @@ where:
 
 - per-space data uses `scope_key = "space"`
 - per-user data uses `scope_key = "user:<authenticated DID>"`
-- per-session data uses `scope_key = "session:<memory session id>"`
+- per-session data uses
+  `scope_key = "session:<authenticated DID>:<memory session id>"`
 
 The memory session id must already be bound to a user. The same session id must
-not be usable by another user.
+not be usable by another user, and the storage key still includes the
+authenticated DID so storage isolation does not depend on caller-supplied
+session ids being globally unique.
 
 Commits already carry a memory session id; scoped storage must also have access
 to the authenticated user DID. The system already requires a user DID
