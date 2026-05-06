@@ -22,6 +22,7 @@ import {
   type Apply,
   type Cell,
   type CellKind,
+  type CellScope,
   type CellTypeConstructor,
   type Frame,
   type HKT,
@@ -331,6 +332,7 @@ declare module "@commonfabric/api" {
       cell: OpaqueCell<any>;
       path: readonly PropertyKey[];
       schema?: JSONSchema;
+      scope?: CellScope;
       nodes: Set<NodeRef>;
       frame: Frame;
       value?: Opaque<T> | T;
@@ -1580,6 +1582,7 @@ export class CellImpl<T extends FabricValue>
     cell: OpaqueCell<unknown>;
     path: readonly PropertyKey[];
     schema?: JSONSchema;
+    scope?: CellScope;
     nodes: Set<NodeRef>;
     frame: Frame;
     value?: Opaque<T> | T;
@@ -1593,6 +1596,7 @@ export class CellImpl<T extends FabricValue>
       cell: this._causeContainer.cell,
       path: this.path,
       schema: this.schema,
+      scope: isCellScope(this._link.scope) ? this._link.scope : undefined,
       nodes: cellNodes.get(this._causeContainer.cell) ?? new Set(),
       frame: this._frame,
       // Cast needed: stream sentinel marker isn't actually of type T

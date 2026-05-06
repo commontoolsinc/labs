@@ -215,7 +215,11 @@ export function parseLinkPrimitive(
         ? alias.path.map((p) => p.toString())
         : [],
       ...(base?.space && { space: base.space }),
-      ...(base?.scope && { scope: base.scope }),
+      ...(alias.scope !== undefined
+        ? { scope: alias.scope }
+        : base?.scope
+        ? { scope: base.scope }
+        : {}),
       ...(alias.schema !== undefined && { schema: alias.schema }),
       overwrite: "redirect",
     };

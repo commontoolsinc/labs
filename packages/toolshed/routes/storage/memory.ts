@@ -74,7 +74,6 @@ const authorizeSessionOpen = async (
   const invocation = message.invocation;
   if (
     typeof invocation.iss !== "string" ||
-    invocation.iss !== message.space ||
     invocation.cmd !== "session.open" ||
     invocation.sub !== message.space ||
     !isRecord(invocation.args) ||

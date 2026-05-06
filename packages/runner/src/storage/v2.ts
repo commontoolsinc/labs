@@ -540,9 +540,10 @@ export class StorageManager implements IStorageManager {
   open(space: MemorySpace): IStorageProviderWithReplica {
     let provider = this.#providers.get(space);
     if (!provider) {
-      const signer = this.#spaceIdentity?.did() === space
-        ? this.#spaceIdentity
-        : this.as;
+      // Session principal drives user/session scoped storage. Even when we have
+      // a derived space key for named spaces, the connection must authenticate
+      // as the active user.
+      const signer = this.as;
       provider = new Provider({
         as: signer,
         space,

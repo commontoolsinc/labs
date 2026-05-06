@@ -60,6 +60,7 @@ export type LegacyAlias = {
   $alias: {
     cell?: number | { "/": string };
     path: readonly PropertyKey[];
+    scope?: LinkScope;
     schema?: JSONSchema;
   };
 };

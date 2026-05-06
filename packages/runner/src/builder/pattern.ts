@@ -332,7 +332,14 @@ function factoryFromPattern<T, R>(
     properties: {},
   };
   let hasInternalSchema = false;
+  const allCellsAndInternalRoots = new Set<ICell<unknown> | OpaqueRef<any>>(
+    allCells,
+  );
   allCells.forEach((cell) => {
+    const { cell: top } = cell.export();
+    if (paths.has(top)) allCellsAndInternalRoots.add(top);
+  });
+  allCellsAndInternalRoots.forEach((cell) => {
     // Only process roots of extra cells:
     if (cell === (inputs as unknown)) return;
     const { path, value, schema, external } = cell.export();
@@ -370,7 +377,7 @@ function factoryFromPattern<T, R>(
       ? {
         internalSchema: sanitizeSchemaForLinks(
           internalSchema as JSONSchema,
-          { keepStreams: true },
+          { keepStreams: true, keepAsCell: true },
         ),
       }
       : {}),

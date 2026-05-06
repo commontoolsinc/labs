@@ -3145,13 +3145,18 @@ export class SchemaObjectTraverser<V extends FabricValue>
         redirSelector?.schema === undefined ||
         SchemaObjectTraverser.hasAsCell(redirSelector.schema)
       ) {
-        const schema = redirSelector?.schema;
+        const schema = combineOptionalSchema(
+          redirSelector?.schema,
+          doc.value && isPrimitiveCellLink(doc.value)
+            ? parseLink(doc.value, doc.address)?.schema
+            : undefined,
+        ) ?? redirSelector?.schema;
         const asCellValues = ContextualFlowControl.getAsCellValues(
           schema,
         );
         if (
           schema !== undefined &&
-          ContextualFlowControl.getAsCellKind(asCellValues.at(0)) === "stream"
+          ContextualFlowControl.getAsCellKind(asCellValues.at(0)) !== undefined
         ) {
           const cellLink = getNormalizedLink(
             redirDoc.address,

@@ -1,13 +1,10 @@
 import {
   computed,
-  Default,
   handler,
+  type JSONSchema,
   NAME,
   nonPrivateRandom,
   pattern,
-  type PerSession,
-  type PerSpace,
-  type PerUser,
   safeDateNow,
   Stream,
   UI,
@@ -123,24 +120,82 @@ const metaTextStyle = {
   fontSize: "13px",
 };
 
-interface ScopedGroupChatInput {
-  name?: PerUser<Writable<string | Default<"">>>;
-  selectedRoom?: PerSession<Writable<RoomId | Default<"lobby">>>;
-  conversation?: PerSpace<
-    Writable<Conversation | Default<typeof DEFAULT_CONVERSATION>>
-  >;
-  draft?: PerUser<Writable<string | Default<"">>>;
-}
+type ScopedGroupChatInput = Record<string, never>;
+
+const STATE_SCHEMA = {
+  type: "object",
+  properties: {
+    name: {
+      type: "string",
+      default: "",
+      asCell: [{ kind: "cell", scope: "user" }],
+    },
+    selectedRoom: {
+      $ref: "#/$defs/RoomId",
+      default: "lobby",
+      asCell: [{ kind: "cell", scope: "session" }],
+    },
+    conversation: {
+      $ref: "#/$defs/Conversation",
+      default: DEFAULT_CONVERSATION,
+      asCell: [{ kind: "cell", scope: "space" }],
+    },
+    draft: {
+      type: "string",
+      default: "",
+      asCell: [{ kind: "cell", scope: "user" }],
+    },
+  },
+  required: ["name", "selectedRoom", "conversation", "draft"],
+  $defs: {
+    RoomId: {
+      enum: ["lobby", "workshop", "afterparty"],
+    },
+    Conversation: {
+      type: "object",
+      properties: {
+        rooms: {
+          type: "object",
+          properties: {
+            lobby: {
+              type: "array",
+              items: { $ref: "#/$defs/ChatMessage" },
+            },
+            workshop: {
+              type: "array",
+              items: { $ref: "#/$defs/ChatMessage" },
+            },
+            afterparty: {
+              type: "array",
+              items: { $ref: "#/$defs/ChatMessage" },
+            },
+          },
+          required: ["lobby", "workshop", "afterparty"],
+        },
+      },
+      required: ["rooms"],
+    },
+    ChatMessage: {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        room: { $ref: "#/$defs/RoomId" },
+        author: { type: "string" },
+        body: { type: "string" },
+        sentAt: { type: "number" },
+      },
+      required: ["id", "room", "author", "body", "sentAt"],
+    },
+  },
+} as const satisfies JSONSchema;
 
 interface ScopedGroupChatOutput {
   [NAME]: string;
   [UI]: VNode;
-  name: PerUser<Writable<string | Default<"">>>;
-  selectedRoom: PerSession<Writable<RoomId | Default<"lobby">>>;
-  conversation: PerSpace<
-    Writable<Conversation | Default<typeof DEFAULT_CONVERSATION>>
-  >;
-  draft: PerUser<Writable<string | Default<"">>>;
+  name: Writable<string>;
+  selectedRoom: Writable<RoomId>;
+  conversation: Writable<Conversation>;
+  draft: Writable<string>;
   currentName: string;
   currentRoom: RoomId;
   currentDraft: string;
@@ -162,7 +217,23 @@ interface ScopedGroupChatOutput {
 const roomMessages = (
   conversation: Conversation | undefined,
   room: RoomId,
-): ChatMessage[] => (conversation ?? DEFAULT_CONVERSATION).rooms[room] ?? [];
+): ChatMessage[] => {
+  const rooms = plainConversation(conversation).rooms;
+  return rooms[room] ?? [];
+};
+
+const plainString = (value: unknown): string =>
+  typeof value === "string" ? value : "";
+const plainRoom = (value: unknown): RoomId =>
+  value === "workshop" || value === "afterparty" ? value : "lobby";
+const plainConversation = (value: unknown): Conversation =>
+  value &&
+    typeof value === "object" &&
+    "rooms" in value &&
+    (value as { rooms?: unknown }).rooms &&
+    typeof (value as { rooms?: unknown }).rooms === "object"
+    ? value as Conversation
+    : DEFAULT_CONVERSATION;
 
 const sendMessage = handler<SendEvent, {
   name: Writable<string>;
@@ -170,12 +241,12 @@ const sendMessage = handler<SendEvent, {
   conversation: Writable<Conversation>;
   draft: Writable<string>;
 }>((_, { name, selectedRoom, conversation, draft }) => {
-  const body = draft.get().trim();
+  const body = plainString(draft.get()).trim();
   if (!body) return;
 
-  const room = selectedRoom.get() || "lobby";
-  const author = name.get().trim() || "Anonymous";
-  const current = conversation.get() || DEFAULT_CONVERSATION;
+  const room = plainRoom(selectedRoom.get());
+  const author = plainString(name.get()).trim() || "Anonymous";
+  const current = plainConversation(conversation.get());
   const currentRooms = current.rooms ?? DEFAULT_CONVERSATION.rooms;
   const existingMessages = currentRooms[room] ?? [];
   const sentAt = safeDateNow();
@@ -222,42 +293,54 @@ const selectRoom = handler<
 );
 
 export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
-  ({ name, selectedRoom, conversation, draft }) => {
+  () => {
+    const state = Writable.of<Partial<{
+      name: string;
+      selectedRoom: RoomId;
+      conversation: Conversation;
+      draft: string;
+    }>>({}, STATE_SCHEMA).for("state");
+    const name = state.key("name") as Writable<string>;
+    const selectedRoom = state.key("selectedRoom") as Writable<RoomId>;
+    const conversation = state.key("conversation") as Writable<Conversation>;
+    const draft = state.key("draft") as Writable<string>;
     const send = sendMessage({ name, selectedRoom, conversation, draft });
     const boundSetName = setName({ name });
     const boundSetDraft = setDraft({ draft });
     const boundSelectRoom = selectRoom({ selectedRoom });
-    const currentName = computed(() => name.get() ?? "");
-    const currentRoom = computed(() => selectedRoom.get() ?? "lobby");
-    const currentDraft = computed(() => draft.get() ?? "");
+    const currentName = computed(() => plainString(name.get()));
+    const currentRoom = computed(() => plainRoom(selectedRoom.get()));
+    const currentDraft = computed(() => plainString(draft.get()));
     const conversationSnapshot = computed(() =>
-      conversation.get() ?? DEFAULT_CONVERSATION
+      plainConversation(conversation.get())
     );
     const messagesInSelectedRoom = computed(() =>
       roomMessages(conversationSnapshot, currentRoom)
     );
     const messageCount = computed(() => messagesInSelectedRoom.length);
     const currentRoomLabel = computed(() => ROOM_LABELS[currentRoom]);
-    const lobbyCount = computed(() => conversationSnapshot.rooms.lobby.length);
+    const lobbyCount = computed(() =>
+      plainConversation(conversationSnapshot).rooms.lobby.length
+    );
     const workshopCount = computed(() =>
-      conversationSnapshot.rooms.workshop.length
+      plainConversation(conversationSnapshot).rooms.workshop.length
     );
     const afterpartyCount = computed(() =>
-      conversationSnapshot.rooms.afterparty.length
+      plainConversation(conversationSnapshot).rooms.afterparty.length
     );
     const lastLobbyAuthor = computed(() =>
-      conversationSnapshot.rooms.lobby[
-        conversationSnapshot.rooms.lobby.length - 1
+      plainConversation(conversationSnapshot).rooms.lobby[
+        plainConversation(conversationSnapshot).rooms.lobby.length - 1
       ]?.author ?? ""
     );
     const lastLobbyBody = computed(() =>
-      conversationSnapshot.rooms.lobby[
-        conversationSnapshot.rooms.lobby.length - 1
+      plainConversation(conversationSnapshot).rooms.lobby[
+        plainConversation(conversationSnapshot).rooms.lobby.length - 1
       ]?.body ?? ""
     );
     const lastWorkshopBody = computed(() =>
-      conversationSnapshot.rooms.workshop[
-        conversationSnapshot.rooms.workshop.length - 1
+      plainConversation(conversationSnapshot).rooms.workshop[
+        plainConversation(conversationSnapshot).rooms.workshop.length - 1
       ]?.body ?? ""
     );
 
