@@ -990,7 +990,7 @@ export abstract class BaseObjectTraverser {
 
     return schemaTrackerCoversSelector(
       this.schemaTracker,
-      `${link.space}/${link.id}/application/json`,
+      `${link.space}/${link.scope}/${link.id}/application/json`,
       this.internCoverageSelector(targetSelector),
     );
   }
@@ -1204,7 +1204,9 @@ const schemaScopeForSelector = (selector?: SchemaPathSelector) =>
 function getTrackerKey(
   address: IMemorySpaceAddress,
 ): string {
-  return `${address.space}/${address.id}/${address.type}`;
+  return `${address.space}/${
+    address.scope ?? "space"
+  }/${address.id}/${address.type}`;
 }
 
 /**

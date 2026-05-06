@@ -2392,8 +2392,8 @@ describe("anyOf fast-reject reactivity invariants (traverseCells)", () => {
   const TYPE = "application/json" as const;
 
   /** Build a tracker key matching the internal getTrackerKey() format. */
-  function trackerKey(id: string): string {
-    return `${SPACE}/${id}/${TYPE}`;
+  function trackerKey(id: string, scope = "space"): string {
+    return `${SPACE}/${scope}/${id}/${TYPE}`;
   }
 
   /** Shortcut: store a document in the map-based store. */
@@ -2413,10 +2413,14 @@ describe("anyOf fast-reject reactivity invariants (traverseCells)", () => {
   }
 
   /** Create a link value (sigil v1 format). */
-  function makeLink(targetId: string, path: string[] = []) {
+  function makeLink(
+    targetId: string,
+    path: string[] = [],
+    scope?: "space" | "user" | "session",
+  ) {
     return {
       "/": {
-        [LINK_V1_TAG]: { id: targetId, path },
+        [LINK_V1_TAG]: { id: targetId, path, ...(scope && { scope }) },
       },
     };
   }
@@ -2427,6 +2431,43 @@ describe("anyOf fast-reject reactivity invariants (traverseCells)", () => {
   ): MapSet<string, SchemaPathSelector> {
     return (traverser as any).schemaTracker;
   }
+
+  it("tracks same-id linked docs in different scopes separately", () => {
+    const store = new Map<string, Revision<State>>();
+    const rootUri = "of:scoped-coverage-root" as URI;
+    const sharedUri = "of:scoped-coverage-shared" as URI;
+
+    putDoc(store, rootUri, {
+      user: makeLink(sharedUri, [], "user"),
+      session: makeLink(sharedUri, [], "session"),
+    });
+    putDoc(store, sharedUri, { label: "same causal id" });
+
+    const linkedSchema = {
+      type: "object",
+      properties: { label: { type: "string" } },
+    } as const;
+    const schema = {
+      type: "object",
+      properties: {
+        user: linkedSchema,
+        session: linkedSchema,
+      },
+    } as JSONSchema;
+
+    const traverser = getTraverser(store, { path: ["value"], schema });
+    traverser.traverse({
+      address: { space: SPACE, id: rootUri, type: TYPE, path: ["value"] },
+      value: {
+        user: makeLink(sharedUri, [], "user"),
+        session: makeLink(sharedUri, [], "session"),
+      },
+    });
+
+    const tracker = getSchemaTracker(traverser);
+    expect(tracker.has(trackerKey(sharedUri, "user"))).toBe(true);
+    expect(tracker.has(trackerKey(sharedUri, "session"))).toBe(true);
+  });
 
   it("tracks the root document even when all anyOf branches are fast-rejected", () => {
     const store = new Map<string, Revision<State>>();
