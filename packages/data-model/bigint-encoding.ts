@@ -13,9 +13,10 @@
 // ---------------------------------------------------------------------------
 
 /**
- * Converts a hex digit char code to its 4-bit numeric value. Handles '0'-'9'
- * (0x30-0x39) and 'a'-'f' (0x61-0x66). Used instead of `parseInt` for ~2x
- * faster hex-to-byte conversion (see bigint-hashing-performance.md).
+ * Helper for `bigintToMinimalTwosComplement()`, which converts a hex digit
+ * char code to its 4-bit numeric value. Handles '0'-'9' (0x30-0x39) and
+ * 'a'-'f' (0x61-0x66). Used instead of `parseInt` for ~2x faster
+ * hex-to-byte conversion (see bigint-hashing-performance.md).
  */
 function hexToNibble(c: number): number {
   // '0'-'9' = 0x30-0x39, 'a'-'f' = 0x61-0x66

@@ -19,7 +19,10 @@ import { FabricBytes } from "./fabric-bytes.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { isArrayWithOnlyIndexProperties } from "./array-utils.ts";
 
-/** Rejects native objects with extra enumerable properties. */
+/**
+ * Helper for `shallowFabricFromNativeValueModern()`, which rejects native
+ * objects with extra enumerable properties.
+ */
 function rejectExtraProperties(value: object, typeName: string): void {
   if (Object.keys(value).length > 0) {
     throw new Error(
@@ -246,9 +249,10 @@ export function fabricFromNativeValueModern(
 }
 
 /**
- * Indicates whether the value is a deep-frozen FabricValue (naive recursive
- * check). Returns `true` if the value is a primitive, or a frozen object/array
- * whose children are all also deep-frozen FabricValues.
+ * Helper for `fabricFromNativeValueModern()` and `cloneHelper()`, which
+ * indicates whether the value is a deep-frozen FabricValue (naive recursive
+ * check). Returns `true` if the value is a primitive, or a frozen
+ * object/array whose children are all also deep-frozen FabricValues.
  */
 function isDeepFrozenFabricValue(value: unknown): boolean {
   if (value === null || (typeof value !== "object")) return true; // primitives
@@ -280,11 +284,11 @@ function isDeepFrozenFabricValue(value: unknown): boolean {
 }
 
 /**
- * Performs the recursive conversion for the modern path. Single-pass: checks,
- * wraps, and optionally freezes each node as it's built. By the time this
- * returns, the whole tree is converted and (if `freeze` is true) deep-frozen.
- * Unlike the legacy version, this never returns OMIT -- `undefined` values
- * are preserved.
+ * Helper for `fabricFromNativeValueModern()`, which performs the recursive
+ * conversion for the modern path. Single-pass: checks, wraps, and optionally
+ * freezes each node as it's built. By the time this returns, the whole tree
+ * is converted and (if `freeze` is true) deep-frozen. Unlike the legacy
+ * version, this never returns OMIT -- `undefined` values are preserved.
  */
 function fabricFromNativeValueModernInternal(
   original: unknown,

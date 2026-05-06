@@ -50,7 +50,8 @@ export const UNSAFE_KEYS: FrozenSet<string> = new FrozenSet([
 ]);
 
 /**
- * Copies own enumerable properties from `source` to `target`, skipping
+ * Helper for `copyError()` and `FabricError.[DECONSTRUCT]()`, which copies
+ * own enumerable properties from `source` to `target`, skipping
  * prototype-sensitive keys (`__proto__`, `constructor`). When `noOverride`
  * is `true`, keys already present on `target` are also skipped.
  */
@@ -99,8 +100,9 @@ const ERROR_CLASS_BY_TYPE: ReadonlyMap<string, ErrorConstructor> = new Map([
 ]);
 
 /**
- * Returns the `Error` constructor for the given type string (e.g. `"TypeError"`).
- * Falls back to the base `Error` constructor for unknown types.
+ * Helper for `FabricError.[RECONSTRUCT]()`, which returns the `Error`
+ * constructor for the given type string (e.g. `"TypeError"`). Falls back
+ * to the base `Error` constructor for unknown types.
  */
 function errorClassFromType(type: string): ErrorConstructor {
   return ERROR_CLASS_BY_TYPE.get(type) ?? Error;
@@ -413,9 +415,10 @@ export class FabricRegExp extends FabricNativeWrapper<RegExp> {
 }
 
 /**
- * Rejects RegExp instances with extra enumerable properties. The built-in
- * `lastIndex` property is not enumerable, so `Object.keys()` won't see it.
- * Any enumerable own property is therefore user-added and causes rejection.
+ * Helper for `FabricRegExp.[DECONSTRUCT]()`, which rejects RegExp instances
+ * with extra enumerable properties. The built-in `lastIndex` property is not
+ * enumerable, so `Object.keys()` won't see it. Any enumerable own property
+ * is therefore user-added and causes rejection.
  */
 function rejectExtraRegExpProperties(regex: RegExp): void {
   if (Object.keys(regex).length > 0) {
