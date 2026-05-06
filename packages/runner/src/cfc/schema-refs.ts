@@ -27,7 +27,8 @@ export const cfcSchemaToObject = (schema?: JSONSchema): JSONSchemaObj =>
     : schema;
 
 export const cfcSchemaIsInternalKey = (key: string): boolean =>
-  key === "ifc" || key === "asCell" || key === "asStream";
+  key === "ifc" || key === "asCell" || key === "asStream" ||
+  key === "scope";
 
 export const cfcSchemaIsTrue = (schema: JSONSchema): boolean => {
   if (schema === true) {

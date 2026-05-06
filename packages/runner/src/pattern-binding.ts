@@ -65,7 +65,14 @@ export function sendValueToBinding<T>(
         valueLink === undefined ||
         !areNormalizedLinksSame(valueLink, scopedRef)
       ) {
-        tx.writeValueOrThrow(scopedRef, value as FabricValue);
+        diffAndUpdate(
+          cell.runtime,
+          tx,
+          scopedRef,
+          value as FabricValue,
+          { cell: cell.getAsNormalizedFullLink(), binding },
+          { meta: ignoreReadForScheduling },
+        );
       }
       tx.writeValueOrThrow(
         ref,
