@@ -307,18 +307,6 @@ describe("Cell", () => {
     expect(result?.arr).toBe("custom-array-value");
   });
 
-  it("should throw when setting Symbol", () => {
-    const c = runtime.getCell<unknown>(
-      space,
-      "should throw when setting Symbol",
-      undefined,
-      tx,
-    );
-    expect(() => c.set({ value: Symbol("test") })).toThrow(
-      "Cannot store symbol",
-    );
-  });
-
   it("should throw when setting BigInt with modernDataModel OFF", async () => {
     const sm = StorageManager.emulate({ as: signer });
     const rt = new Runtime({
@@ -1310,6 +1298,108 @@ for (const modernDataModel of [false, true]) {
           );
           expect(() => c.set({ value: -Infinity })).toThrow(
             "Cannot store non-finite number",
+          );
+        });
+      }
+    },
+  );
+}
+
+// Cell-storage behavior for symbols. The two data-model paths diverge:
+//
+// * Legacy (`modernDataModel = false`): any symbol -- registry-interned or
+//   unique -- throws `"Cannot store symbol"` at the fabric-value boundary
+//   inside `cell.set()`.
+// * Modern  (`modernDataModel = true`): registry-interned symbols
+//   (`Symbol.for(key)`) round-trip end-to-end, with `Object.is` identity
+//   preserved against any same-key `Symbol.for` in the same realm. Unique
+//   symbols (`Symbol(desc)`) throw the more specific `"Cannot store unique
+//   (uninterned) symbol"` (PRs #3503/#3510).
+for (const modernDataModel of [false, true]) {
+  describe(
+    `Cell symbol storage with \`modernDataModel = ${modernDataModel}\``,
+    () => {
+      let runtime: Runtime;
+      let storageManager: ReturnType<typeof StorageManager.emulate>;
+      let tx: IExtendedStorageTransaction;
+
+      beforeEach(() => {
+        storageManager = StorageManager.emulate({ as: signer });
+        runtime = new Runtime({
+          apiUrl: new URL(import.meta.url),
+          storageManager,
+          experimental: { modernDataModel },
+        });
+        tx = runtime.edit();
+      });
+
+      afterEach(async () => {
+        await tx.commit();
+        await runtime?.dispose();
+        await storageManager?.close();
+      });
+
+      if (modernDataModel) {
+        it("round-trips an interned symbol with stable identity", () => {
+          const c = runtime.getCell<unknown>(
+            space,
+            "modern: interned symbol round-trip",
+            undefined,
+            tx,
+          );
+          c.set({ tag: Symbol.for("status") });
+          const result = c.get() as { tag: symbol } | undefined;
+          // Same registry key in the same realm yields the same symbol
+          // instance, so the round-tripped value is `Object.is` to the
+          // constructed sentinel.
+          expect(Object.is(result?.tag, Symbol.for("status"))).toBe(true);
+        });
+
+        it("round-trips an interned symbol with an empty key", () => {
+          const c = runtime.getCell<unknown>(
+            space,
+            "modern: interned empty-key symbol",
+            undefined,
+            tx,
+          );
+          c.set({ tag: Symbol.for("") });
+          const result = c.get() as { tag: symbol } | undefined;
+          expect(Object.is(result?.tag, Symbol.for(""))).toBe(true);
+        });
+
+        it("throws on a unique (uninterned) symbol", () => {
+          const c = runtime.getCell<unknown>(
+            space,
+            "modern: throw on unique symbol",
+            undefined,
+            tx,
+          );
+          expect(() => c.set({ value: Symbol("nope") })).toThrow(
+            "Cannot store unique (uninterned) symbol",
+          );
+        });
+      } else {
+        it("throws on an interned symbol", () => {
+          const c = runtime.getCell<unknown>(
+            space,
+            "legacy: throw on interned symbol",
+            undefined,
+            tx,
+          );
+          expect(() => c.set({ tag: Symbol.for("status") })).toThrow(
+            "Cannot store symbol",
+          );
+        });
+
+        it("throws on a unique (uninterned) symbol", () => {
+          const c = runtime.getCell<unknown>(
+            space,
+            "legacy: throw on unique symbol",
+            undefined,
+            tx,
+          );
+          expect(() => c.set({ value: Symbol("nope") })).toThrow(
+            "Cannot store symbol",
           );
         });
       }
