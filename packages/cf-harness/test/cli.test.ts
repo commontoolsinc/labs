@@ -1,4 +1,5 @@
 import { assertEquals, assertRejects } from "@std/assert";
+import { decodeBase64 } from "@std/encoding/base64";
 import { join } from "@std/path";
 import {
   buildCfHarnessBaseSystemPrompt,
@@ -22,6 +23,10 @@ import type {
   RunHarnessPromptOptions,
   RunHarnessTranscriptOptions,
 } from "../src/prompt-loop.ts";
+
+const ONE_PIXEL_PNG = decodeBase64(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p94AAAAASUVORK5CYII=",
+);
 
 const createIoBuffers = (): {
   io: CfHarnessCliIO;
@@ -66,6 +71,124 @@ Deno.test("parseCfHarnessCliArgs resolves defaults from cwd and positional promp
   assertEquals(parsed.maxModelTurns, 8);
   assertEquals(parsed.printTranscript, false);
   assertEquals(parsed.sandboxImage, undefined);
+  assertEquals(parsed.imageAttachments, []);
+});
+
+Deno.test("parseCfHarnessCliArgs resolves image attachments within the workspace", async () => {
+  const workspace = await Deno.makeTempDir();
+  const launcherCwd = await Deno.makeTempDir();
+  await Deno.writeFile(join(workspace, "capture.png"), ONE_PIXEL_PNG);
+
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--workspace",
+      workspace,
+      "--image",
+      "capture.png",
+      "--prompt",
+      "Describe the image",
+    ],
+    {
+      cwd: launcherCwd,
+      env: {},
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.imageAttachments.length, 1);
+  assertEquals(
+    parsed.imageAttachments[0].hostPath,
+    await Deno.realPath(join(workspace, "capture.png")),
+  );
+  assertEquals(parsed.imageAttachments[0].mediaType, "image/png");
+  assertEquals(parsed.imageAttachments[0].bytes, ONE_PIXEL_PNG.byteLength);
+  assertEquals(
+    parsed.imageAttachments[0].digest.startsWith("sha256:"),
+    true,
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects image attachments outside the workspace", async () => {
+  const workspace = await Deno.makeTempDir();
+  const outside = await Deno.makeTempDir();
+  const outsideImage = join(outside, "capture.png");
+  await Deno.writeFile(outsideImage, ONE_PIXEL_PNG);
+
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--workspace",
+          workspace,
+          "--image",
+          outsideImage,
+          "--prompt",
+          "Describe the image",
+        ],
+        {
+          cwd: workspace,
+          env: {},
+        },
+      ),
+    Error,
+    "--image paths must stay within the workspace",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects image symlinks that resolve outside the workspace", async () => {
+  const workspace = await Deno.makeTempDir();
+  const outside = await Deno.makeTempDir();
+  const outsideImage = join(outside, "capture.png");
+  const linkedImage = join(workspace, "linked.png");
+  await Deno.writeFile(outsideImage, ONE_PIXEL_PNG);
+  await Deno.symlink(outsideImage, linkedImage);
+
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--workspace",
+          workspace,
+          "--image",
+          linkedImage,
+          "--prompt",
+          "Describe the image",
+        ],
+        {
+          cwd: workspace,
+          env: {},
+        },
+      ),
+    Error,
+    "--image paths must stay within the workspace",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects image attachments while resuming", async () => {
+  const workspace = await Deno.makeTempDir();
+  await Deno.writeFile(join(workspace, "capture.png"), ONE_PIXEL_PNG);
+
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--workspace",
+          workspace,
+          "--resume-run",
+          "run-state.json",
+          "--image",
+          "capture.png",
+        ],
+        {
+          cwd: workspace,
+          env: {},
+        },
+      ),
+    Error,
+    "--image is not supported with --resume-run",
+  );
 });
 
 Deno.test("parseCfHarnessCliArgs supports prompt files and mode overrides", async () => {
@@ -954,6 +1077,68 @@ Deno.test("runCfHarnessCli executes the prompt loop and prints result metadata",
     ],
   );
   assertEquals(stderr, []);
+});
+
+Deno.test("runCfHarnessCli passes image attachments to the prompt loop", async () => {
+  const workspace = await Deno.makeTempDir();
+  await Deno.writeFile(join(workspace, "capture.png"), ONE_PIXEL_PNG);
+  const { io, stderr } = createIoBuffers();
+  let runPromptOptions: RunHarnessPromptOptions | undefined;
+  const exitCode = await runCfHarnessCli(
+    [
+      "--workspace",
+      workspace,
+      "--image",
+      "capture.png",
+      "--prompt",
+      "Describe the image",
+    ],
+    {
+      io,
+      cwd: workspace,
+      env: { CF_HARNESS_API_KEY: "test-key" },
+      createPromptLoop: () => ({
+        runPrompt: (options) => {
+          runPromptOptions = options;
+          return Promise.resolve(
+            ({
+              model: "gpt-5.4",
+              finalAssistantText: "Image described.",
+              transcript: [
+                {
+                  role: "user",
+                  content: "Describe the image",
+                  imageAttachments: options.imageAttachments,
+                },
+                { role: "assistant", content: "Image described." },
+              ],
+              modelTurns: 1,
+              runState: {
+                runId: "run-cli-image",
+                status: "completed",
+                createdAt: "2026-05-05T22:00:00.000Z",
+                updatedAt: "2026-05-05T22:00:01.000Z",
+                cfcEnforcementMode: "disabled",
+                currentDir: "/workspace",
+                policyEvents: [],
+                toolOutputs: [],
+              },
+            }) satisfies HarnessPromptLoopResult,
+          );
+        },
+        runTranscript: () =>
+          Promise.reject(new Error("unexpected resume path")),
+      }),
+    },
+  );
+
+  assertEquals(exitCode, 0);
+  assertEquals(stderr, []);
+  assertEquals(runPromptOptions?.imageAttachments?.length, 1);
+  assertEquals(
+    runPromptOptions?.imageAttachments?.[0].hostPath,
+    await Deno.realPath(join(workspace, "capture.png")),
+  );
 });
 
 Deno.test("runCfHarnessCli passes tool and subagent profile allowlists", async () => {
