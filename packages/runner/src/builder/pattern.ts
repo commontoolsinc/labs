@@ -361,7 +361,6 @@ function factoryFromPattern<T, R>(
     return { module, inputs, outputs } satisfies Node;
   });
 
-  let patternFactory: PatternFactory<T, R>;
   const pattern: Pattern & toJSON = {
     argumentSchema: sanitizeSchemaForLinks(argumentSchema, {
       keepStreams: true,
@@ -386,42 +385,42 @@ function factoryFromPattern<T, R>(
   const makePatternFactory = (
     defaultScope?: CellScope,
   ): PatternFactory<T, R> => {
-    let factory: PatternFactory<T, R>;
-    const scopedPattern: Pattern & toJSON = {
-      ...pattern,
-      ...(defaultScope !== undefined ? { defaultScope } : {}),
-      toJSON: () => patternToJSON(factory),
-    };
+    const factory = Object.assign(
+      (inputs: Opaque<T>): OpaqueRef<R> => {
+        const module: Module & toJSON = {
+          type: "pattern",
+          implementation: factory,
+          ...(factory.defaultScope !== undefined
+            ? { defaultScope: factory.defaultScope }
+            : {}),
+          toJSON: () => moduleToJSON(module),
+        };
 
-    factory = Object.assign((inputs: Opaque<T>): OpaqueRef<R> => {
-      const module: Module & toJSON = {
-        type: "pattern",
-        implementation: factory,
-        ...(factory.defaultScope !== undefined
-          ? { defaultScope: factory.defaultScope }
-          : {}),
-        toJSON: () => moduleToJSON(module),
-      };
+        const outputs = opaqueRef<R>();
+        const node: NodeRef = {
+          module,
+          inputs,
+          outputs,
+          frame: getTopFrame(),
+        };
 
-      const outputs = opaqueRef<R>();
-      const node: NodeRef = {
-        module,
-        inputs,
-        outputs,
-        frame: getTopFrame(),
-      };
+        connectInputAndOutputs(node);
+        (outputs as OpaqueCell<R>).connect(node);
 
-      connectInputAndOutputs(node);
-      (outputs as OpaqueCell<R>).connect(node);
-
-      return outputs;
-    }, scopedPattern) as PatternFactory<T, R>;
+        return outputs;
+      },
+      {
+        ...pattern,
+        ...(defaultScope !== undefined ? { defaultScope } : {}),
+        toJSON: () => patternToJSON(factory),
+      } as Pattern & toJSON,
+    ) as PatternFactory<T, R>;
 
     factory.asScope = (scope: CellScope) => makePatternFactory(scope);
     return factory;
   };
 
-  patternFactory = makePatternFactory();
+  const patternFactory = makePatternFactory();
 
   return patternFactory;
 }

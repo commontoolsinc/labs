@@ -4,7 +4,6 @@ import type { PatternBuilder } from "./pattern.ts";
 import type {
   ActionFunction,
   AsCell,
-  AsCellEntry,
   AsComparableCell,
   AsOpaqueCell,
   AsReadonlyCell,
@@ -93,7 +92,6 @@ export type {
   AnyCellWrapping,
   Apply,
   AsCell,
-  AsCellEntry,
   AsComparableCell,
   AsOpaqueCell,
   AsReadonlyCell,
@@ -150,6 +148,7 @@ export type {
   UnwrapCell,
   VNode,
 } from "@commonfabric/api";
+export type { AsCellEntry } from "@commonfabric/api";
 export type { Schema, SchemaWithoutCell } from "@commonfabric/api/schema";
 
 export const isOpaqueRefMarker = Symbol("isOpaqueRef");
