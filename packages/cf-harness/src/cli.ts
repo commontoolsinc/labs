@@ -191,7 +191,7 @@ Options:
   --workspace <path>            Workspace host path (defaults to current directory)
   --cwd <path>                  Initial working directory inside the workspace
   --focus-root <path>           Narrow exploration to a workspace subpath when possible
-  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | read_skill_resource | write_file | delegate_task)
+  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | read_skill_resource | edit_file | write_file | delegate_task)
   --allow-subagent-profile <p>  Authorize delegate_task to spawn a profile (repeatable: default | browser)
   --output-mode <mode>          operator | batch (default: operator)
   --stream-events               Print transcript events as they happen
@@ -889,6 +889,18 @@ const summarizeToolCallArguments = (
         return typeof parsed.path === "string"
           ? `path=${JSON.stringify(parsed.path)}`
           : undefined;
+      case "edit_file": {
+        const path = typeof parsed.path === "string"
+          ? `path=${JSON.stringify(parsed.path)}`
+          : undefined;
+        const editCount = Array.isArray(parsed.edits)
+          ? `edits=${parsed.edits.length}`
+          : undefined;
+        return [path, editCount].filter((value): value is string =>
+          value !== undefined
+        )
+          .join(" ");
+      }
       case "read_skill_resource": {
         const skill = typeof parsed.skill === "string"
           ? `skill=${JSON.stringify(parsed.skill)}`

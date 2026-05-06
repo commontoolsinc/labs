@@ -12,6 +12,7 @@ export const DEFAULT_SUBAGENT_RETURN_CHANNEL =
 export const DEFAULT_SUBAGENT_ALLOWED_TOOL_IDS = [
   "bash",
   "read_file",
+  "edit_file",
   "write_file",
 ] as const satisfies readonly BuiltinToolId[];
 export const BROWSER_SUBAGENT_ALLOWED_TOOL_IDS = [
