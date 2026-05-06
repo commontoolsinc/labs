@@ -153,7 +153,7 @@ export abstract class FabricNativeWrapper<T extends object>
  * See Section 1.4.1 of the formal spec.
  */
 export class FabricError extends FabricNativeWrapper<Error> {
-  /** The type tag used in the wire format (`TAGS.Error`). */
+  /** @inheritDoc */
   readonly typeTag = TAGS.Error;
 
   constructor(
@@ -200,18 +200,22 @@ export class FabricError extends FabricNativeWrapper<Error> {
     return state as FabricValue;
   }
 
+  /** @inheritDoc */
   protected shallowUnfrozenClone(): FabricError {
     return new FabricError(this.error);
   }
 
+  /** @inheritDoc */
   protected get wrappedValue(): Error {
     return this.error;
   }
 
+  /** @inheritDoc */
   protected toNativeFrozen(): Error {
     return Object.freeze(copyError(this.error));
   }
 
+  /** @inheritDoc */
   protected toNativeThawed(): Error {
     return copyError(this.error);
   }
@@ -271,6 +275,7 @@ export class FabricError extends FabricNativeWrapper<Error> {
  */
 export class FabricMap
   extends FabricNativeWrapper<Map<FabricValue, FabricValue>> {
+  /** @inheritDoc */
   readonly typeTag = TAGS.Map;
   constructor(readonly map: Map<FabricValue, FabricValue>) {
     super();
@@ -280,18 +285,22 @@ export class FabricMap
     throw new Error("FabricMap: not yet implemented");
   }
 
+  /** @inheritDoc */
   protected shallowUnfrozenClone(): FabricMap {
     return new FabricMap(this.map);
   }
 
+  /** @inheritDoc */
   protected get wrappedValue(): Map<FabricValue, FabricValue> {
     return this.map;
   }
 
+  /** @inheritDoc */
   protected toNativeFrozen(): FrozenMap<FabricValue, FabricValue> {
     return new FrozenMap(this.map);
   }
 
+  /** @inheritDoc */
   protected toNativeThawed(): Map<FabricValue, FabricValue> {
     return new Map(this.map);
   }
@@ -310,6 +319,7 @@ export class FabricMap
  * wrapped collection are not supported on non-Error wrappers.
  */
 export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
+  /** @inheritDoc */
   readonly typeTag = TAGS.Set;
   constructor(readonly set: Set<FabricValue>) {
     super();
@@ -319,18 +329,22 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
     throw new Error("FabricSet: not yet implemented");
   }
 
+  /** @inheritDoc */
   protected shallowUnfrozenClone(): FabricSet {
     return new FabricSet(this.set);
   }
 
+  /** @inheritDoc */
   protected get wrappedValue(): Set<FabricValue> {
     return this.set;
   }
 
+  /** @inheritDoc */
   protected toNativeFrozen(): FrozenSet<FabricValue> {
     return new FrozenSet(this.set);
   }
 
+  /** @inheritDoc */
   protected toNativeThawed(): Set<FabricValue> {
     return new Set(this.set);
   }
@@ -351,7 +365,7 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
  * See Section 1.4.1 of the formal spec.
  */
 export class FabricRegExp extends FabricNativeWrapper<RegExp> {
-  /** The type tag used in the wire format (`TAGS.RegExp`). */
+  /** @inheritDoc */
   readonly typeTag = TAGS.RegExp;
 
   constructor(
@@ -377,10 +391,12 @@ export class FabricRegExp extends FabricNativeWrapper<RegExp> {
     } as FabricValue;
   }
 
+  /** @inheritDoc */
   protected shallowUnfrozenClone(): FabricRegExp {
     return new FabricRegExp(this.regex, this.flavor);
   }
 
+  /** @inheritDoc */
   protected get wrappedValue(): RegExp {
     return this.regex;
   }
@@ -394,6 +410,7 @@ export class FabricRegExp extends FabricNativeWrapper<RegExp> {
     return Object.freeze(new RegExp(this.regex));
   }
 
+  /** @inheritDoc */
   protected toNativeThawed(): RegExp {
     return new RegExp(this.regex);
   }

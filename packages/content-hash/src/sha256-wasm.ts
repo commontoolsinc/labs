@@ -23,6 +23,7 @@ const HASHER_POOL_SIZE = 5;
  * used synchronously).
  */
 class HasherPool extends InstancePool<IHasher> {
+  /** @inheritDoc */
   protected override _initInstance(instance: IHasher) {
     instance.init();
   }
