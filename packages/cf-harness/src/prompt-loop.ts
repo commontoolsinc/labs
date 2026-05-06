@@ -19,11 +19,13 @@ import {
   type OpenAIChatMessageContent,
   OpenAICompatibleGatewayClient,
 } from "./gateway/openai-client.ts";
+import { materializeImageAttachmentContentPart } from "./image-attachments.ts";
 import {
   createObservationDenied as makeObservationDenied,
   createOpaqueHandle,
   type ObservationDenied,
 } from "./contracts/observation.ts";
+import type { HarnessImageAttachment } from "./contracts/image.ts";
 import type { PromptSlotBinding } from "./contracts/prompt-slot.ts";
 import {
   createHarnessCfcPolicySnapshot,
@@ -104,6 +106,7 @@ export interface RunHarnessPromptOptions {
   prompt: string;
   systemPrompt?: string;
   contextMessages?: readonly string[];
+  imageAttachments?: readonly HarnessImageAttachment[];
   maxModelTurns?: number;
   model?: string;
   promptSlotBinding?: PromptSlotBinding;
@@ -154,13 +157,30 @@ const normalizeTextContent = (content: OpenAIChatMessageContent): string => {
     .join("");
 };
 
-const toOpenAIChatMessage = (
+const toOpenAIChatMessage = async (
   message: HarnessTranscriptMessage,
-): OpenAIChatCompletionMessage => {
+): Promise<OpenAIChatCompletionMessage> => {
   switch (message.role) {
     case "system":
-    case "user":
       return { role: message.role, content: message.content };
+    case "user":
+      if (
+        message.imageAttachments === undefined ||
+        message.imageAttachments.length === 0
+      ) {
+        return { role: message.role, content: message.content };
+      }
+      return {
+        role: message.role,
+        content: [
+          ...(message.content.length > 0
+            ? [{ type: "text" as const, text: message.content }]
+            : []),
+          ...(await Promise.all(
+            message.imageAttachments.map(materializeImageAttachmentContentPart),
+          )),
+        ],
+      };
     case "assistant":
       return {
         role: "assistant",
@@ -419,6 +439,54 @@ const summarizeToolInput = async (
           ? { maxBytes: input.maxBytes }
           : {}),
       };
+    case "edit_file": {
+      let oldTextBytes = 0;
+      let newTextBytes = 0;
+      const oldTextDigests: string[] = [];
+      const newTextDigests: string[] = [];
+      const edits = Array.isArray(input.edits) ? input.edits : [];
+      for (const edit of edits) {
+        if (
+          typeof edit === "object" && edit !== null &&
+          "oldText" in edit &&
+          typeof edit.oldText === "string"
+        ) {
+          const summary = await summarizeSensitiveText(edit.oldText);
+          oldTextBytes += summary.bytes;
+          oldTextDigests.push(summary.digest);
+        }
+        if (
+          typeof edit === "object" && edit !== null &&
+          "newText" in edit &&
+          typeof edit.newText === "string"
+        ) {
+          const summary = await summarizeSensitiveText(edit.newText);
+          newTextBytes += summary.bytes;
+          newTextDigests.push(summary.digest);
+        }
+      }
+      return {
+        type: "cf-harness.tool-input-summary",
+        toolId,
+        ...(typeof input.path === "string" ? { path: input.path } : {}),
+        ...(edits.length > 0 ? { editCount: edits.length } : {}),
+        ...(typeof input.expectedDigest === "string"
+          ? { expectedDigest: input.expectedDigest }
+          : {}),
+        ...(oldTextDigests.length > 0
+          ? {
+            oldTextBytes,
+            oldTextDigest: await digestJsonValue(oldTextDigests),
+          }
+          : {}),
+        ...(newTextDigests.length > 0
+          ? {
+            newTextBytes,
+            newTextDigest: await digestJsonValue(newTextDigests),
+          }
+          : {}),
+      };
+    }
     case "write_file": {
       const contentSummary = typeof input.content === "string"
         ? await summarizeSensitiveText(input.content)
@@ -1216,7 +1284,14 @@ export class CfHarnessPromptLoop {
         ...(options.contextMessages ?? []).map((
           content,
         ) => ({ role: "user", content } as const)),
-        { role: "user", content: options.prompt },
+        {
+          role: "user",
+          content: options.prompt,
+          ...(options.imageAttachments !== undefined &&
+              options.imageAttachments.length > 0
+            ? { imageAttachments: options.imageAttachments }
+            : {}),
+        },
       ],
       model: options.model,
       maxModelTurns: options.maxModelTurns,
@@ -1323,7 +1398,7 @@ export class CfHarnessPromptLoop {
       while (modelTurns < maxModelTurns) {
         modelTurns += 1;
         const response = await this.gatewayClient.createChatCompletionJson(
-          this.#buildChatCompletionRequest(model, transcript),
+          await this.#buildChatCompletionRequest(model, transcript),
           { onChatCompletionAttempt: recordGatewayAttempt },
         );
         const assistantMessage = createAssistantTranscriptMessage(response);
@@ -1399,13 +1474,13 @@ export class CfHarnessPromptLoop {
     throw turnLimitError;
   }
 
-  #buildChatCompletionRequest(
+  async #buildChatCompletionRequest(
     model: string,
     transcript: readonly HarnessTranscriptMessage[],
-  ): OpenAIChatCompletionRequest {
+  ): Promise<OpenAIChatCompletionRequest> {
     return {
       model,
-      messages: transcript.map(toOpenAIChatMessage),
+      messages: await Promise.all(transcript.map(toOpenAIChatMessage)),
       tools: toOpenAITools(this.#allowedToolIds),
       tool_choice: "auto",
     };

@@ -96,6 +96,10 @@ import {
   type DelegateTaskToolOutput,
 } from "./contracts/subagent.ts";
 import {
+  type EditFileToolInput,
+  type EditFileToolOutput,
+} from "./tools/edit-file.ts";
+import {
   type ReadFileToolInput,
   type ReadFileToolOutput,
 } from "./tools/read-file.ts";
@@ -114,6 +118,7 @@ export interface BuiltinToolInputMap {
   "bash-no-sandbox": BashToolInput;
   read_file: ReadFileToolInput;
   read_skill_resource: ReadSkillResourceToolInput;
+  edit_file: EditFileToolInput;
   write_file: WriteFileToolInput;
   delegate_task: DelegateTaskToolInput;
 }
@@ -123,6 +128,7 @@ export interface BuiltinToolOutputMap {
   "bash-no-sandbox": BashToolOutput;
   read_file: ReadFileToolOutput;
   read_skill_resource: ReadSkillResourceToolOutput;
+  edit_file: EditFileToolOutput;
   write_file: WriteFileToolOutput;
   delegate_task: DelegateTaskToolOutput;
 }

@@ -1,10 +1,13 @@
 import { assert, assertEquals, assertRejects } from "@std/assert";
 import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
+import { decodeBase64 } from "@std/encoding/base64";
+import { join } from "@std/path";
 import { normalize } from "@std/path/posix";
 import type { HarnessArtifactStore } from "../src/artifacts.ts";
 import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
 import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
+import { createHarnessImageAttachment } from "../src/image-attachments.ts";
 import {
   CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
   type PromptSlotBinding,
@@ -33,6 +36,10 @@ const directPromptSlotBinding: PromptSlotBinding = {
   subject: "direct-test",
   eventId: "event-direct",
 };
+
+const ONE_PIXEL_PNG = decodeBase64(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p94AAAAASUVORK5CYII=",
+);
 
 const contextPromptSlotBinding: PromptSlotBinding = {
   type: CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
@@ -349,7 +356,14 @@ Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant 
 
   assertEquals(
     firstRequest.tools.map((tool) => tool.function.name),
-    ["bash", "read_file", "read_skill_resource", "write_file", "delegate_task"],
+    [
+      "bash",
+      "read_file",
+      "read_skill_resource",
+      "edit_file",
+      "write_file",
+      "delegate_task",
+    ],
   );
   assertEquals(
     secondRequest.messages.at(-1),
@@ -407,6 +421,64 @@ Deno.test("CfHarnessPromptLoop inserts context messages before the user prompt",
   ]);
   assertEquals(request?.messages[1].content, "Configured skills context.");
   assertEquals(request?.messages[2].content, "Do the task.");
+});
+
+Deno.test("CfHarnessPromptLoop materializes image attachments for gateway requests only", async () => {
+  const workspace = await Deno.makeTempDir();
+  const imagePath = join(workspace, "capture.png");
+  await Deno.writeFile(imagePath, ONE_PIXEL_PNG);
+  const imageAttachment = await createHarnessImageAttachment({
+    workspaceHostPath: workspace,
+    cwd: workspace,
+    path: "capture.png",
+  });
+  let request: OpenAIChatCompletionRequest | undefined;
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-image",
+      model: "gpt-5.4",
+    }),
+    fetchFn: (_input, init) => {
+      request = JSON.parse(String(init?.body)) as OpenAIChatCompletionRequest;
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "The image is visible.",
+              },
+            }],
+          }),
+          { status: 200 },
+        ),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Describe the image.",
+    imageAttachments: [imageAttachment],
+    model: "gpt-5.4",
+  });
+
+  const content = request?.messages[0].content;
+  assert(Array.isArray(content));
+  assertEquals(content[0], { type: "text", text: "Describe the image." });
+  assertEquals((content[1] as Record<string, unknown>).type, "image_url");
+  assert(
+    ((content[1] as { image_url?: { url?: string } }).image_url?.url ?? "")
+      .startsWith("data:image/png;base64,"),
+  );
+  assertEquals(result.transcript[0], {
+    role: "user",
+    content: "Describe the image.",
+    imageAttachments: [imageAttachment],
+  });
+  assertEquals(JSON.stringify(result.transcript).includes("iVBOR"), false);
 });
 
 Deno.test("CfHarnessPromptLoop surfaces recoverable file-tool failures to the model", async () => {
@@ -639,11 +711,18 @@ Deno.test("CfHarnessPromptLoop delegates one fresh child run and returns a summa
   assertEquals(result.finalAssistantText, "Parent received the child summary.");
   assertEquals(
     requestBodies[0].tools.map((tool) => tool.function.name),
-    ["bash", "read_file", "read_skill_resource", "write_file", "delegate_task"],
+    [
+      "bash",
+      "read_file",
+      "read_skill_resource",
+      "edit_file",
+      "write_file",
+      "delegate_task",
+    ],
   );
   assertEquals(
     requestBodies[1].tools.map((tool) => tool.function.name),
-    ["bash", "read_file", "write_file"],
+    ["bash", "read_file", "edit_file", "write_file"],
   );
   assertEquals(
     requestBodies[1].messages.map((message) => message.role),
@@ -709,6 +788,7 @@ Deno.test("CfHarnessPromptLoop delegates one fresh child run and returns a summa
   assertEquals(output.subagent.manifest.allowedToolIds, [
     "bash",
     "read_file",
+    "edit_file",
     "write_file",
   ]);
   assertEquals(output.subagent.manifest.hostToolIds, []);
@@ -1262,7 +1342,7 @@ Deno.test("CfHarnessPromptLoop lets an explicit subagent profile expand child to
   );
   assertEquals(
     requestBodies[1].tools.map((tool) => tool.function.name),
-    ["bash", "read_file", "write_file"],
+    ["bash", "read_file", "edit_file", "write_file"],
   );
   assertEquals(result.runState.cfcPolicySnapshot?.parentTools, {
     allowance: "restricted",
@@ -1289,6 +1369,7 @@ Deno.test("CfHarnessPromptLoop lets an explicit subagent profile expand child to
   assertEquals(output.subagent.manifest.allowedToolIds, [
     "bash",
     "read_file",
+    "edit_file",
     "write_file",
   ]);
   assertEquals(output.subagent.manifest.hostToolIds, []);
@@ -1357,7 +1438,14 @@ Deno.test("CfHarnessPromptLoop keeps bash-no-sandbox unavailable to the parent b
 
   assertEquals(
     firstRequest.tools.map((tool) => tool.function.name),
-    ["bash", "read_file", "read_skill_resource", "write_file", "delegate_task"],
+    [
+      "bash",
+      "read_file",
+      "read_skill_resource",
+      "edit_file",
+      "write_file",
+      "delegate_task",
+    ],
   );
   assertEquals(denied.detail, "bash-no-sandbox is not allowed in this run");
   assertEquals(result.runState.toolOutputs, []);
@@ -1973,7 +2061,7 @@ Deno.test("CfHarnessPromptLoop reports child run failures through delegate_task 
   );
   assertEquals(
     requestBodies[1].tools.map((tool) => tool.function.name),
-    ["bash", "read_file", "write_file"],
+    ["bash", "read_file", "edit_file", "write_file"],
   );
   const toolMessage = result.transcript.at(-2);
   if (toolMessage?.role !== "tool") {
@@ -2036,7 +2124,7 @@ Deno.test("CfHarnessPromptLoop continues subagent ids from retained run state", 
       depth: 1,
       cfcEnforcementMode: "disabled",
       model: "gpt-5.4",
-      allowedToolIds: ["bash", "read_file", "write_file"],
+      allowedToolIds: ["bash", "read_file", "edit_file", "write_file"],
       hostToolIds: [],
       maxModelTurns: 8,
       returnPolicy: {

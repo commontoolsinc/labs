@@ -254,6 +254,26 @@ describe("hashOf()", () => {
     expect(hashBytesOf(emoji)).toEqual(expected);
   });
 
+  it("long string takes the TAG_STRING_HASH path", () => {
+    // utf8Length(100) > MAX_DIRECT_STRING_LENGTH(64), so the value is fed
+    // as [TAG_STRING_HASH][sha256(utf8)] -- a fixed-length compaction in
+    // place of the inline `[TAG_STRING][len][utf8]` form.
+    const value = "x".repeat(100);
+    const valueHash = sha256(new TextEncoder().encode(value));
+    const expected = sha256([0xf0, ...valueHash]);
+    expect(hashBytesOf(value)).toEqual(expected);
+  });
+
+  it("long-string path is deterministic and value-distinct", () => {
+    // Two different strings both > 64 utf8 bytes should hash differently;
+    // identical long strings should hash the same.
+    const a1 = "a".repeat(100);
+    const a2 = "a".repeat(100);
+    const b = "b".repeat(100);
+    expect(hex(hashBytesOf(a1))).toBe(hex(hashBytesOf(a2)));
+    expect(hex(hashBytesOf(a1))).not.toBe(hex(hashBytesOf(b)));
+  });
+
   // --- bigint ---
 
   it("0n encodes as TAG_BIGINT + LEB128 length 1 + [0x00]", () => {
@@ -898,6 +918,41 @@ describe("hashOf()", () => {
     expect(hex(hashBytesOf(obj))).not.toBe(hex(wrongOrder));
   });
 
+  it("long object key takes the TAG_STRING_HASH path", () => {
+    // utf8Length(100) > MAX_DIRECT_STRING_LENGTH(64). Object keys go through
+    // the same `getStringRep()` codepath as bare string values, so a long
+    // key is fed as `[TAG_STRING_HASH][sha256(utf8)]`.
+    const longKey = "x".repeat(100);
+    const obj = { [longKey]: 1 } as unknown as FabricValue;
+    const keyHash = sha256(new TextEncoder().encode(longKey));
+    // Stream: TAG_OBJECT, [TAG_STRING_HASH, keyHash], value(1.0), TAG_END
+    const expected = sha256([
+      0x11, // TAG_OBJECT
+      0xf0, // TAG_STRING_HASH
+      ...keyHash,
+      // Value `1`: TAG_NUMBER + IEEE-754 BE bit pattern for 1.0
+      0x23,
+      0x3f,
+      0xf0,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00, // TAG_END
+    ]);
+    expect(hashBytesOf(obj)).toEqual(expected);
+  });
+
+  it("long object keys are deterministic and key-distinct", () => {
+    const a1 = { ["a".repeat(100)]: 1 } as unknown as FabricValue;
+    const a2 = { ["a".repeat(100)]: 1 } as unknown as FabricValue;
+    const b = { ["b".repeat(100)]: 1 } as unknown as FabricValue;
+    expect(hex(hashBytesOf(a1))).toBe(hex(hashBytesOf(a2)));
+    expect(hex(hashBytesOf(a1))).not.toBe(hex(hashBytesOf(b)));
+  });
+
   // =========================================================================
   // FabricHash hashing (TAG_CONTENT_ID = 0x29)
   // =========================================================================
@@ -1276,5 +1331,86 @@ describe("IncrementalHasher digest base64url", () => {
     const h2 = createHasher();
     h2.update(new Uint8Array([2]));
     expect(h1.digest("base64url")).not.toBe(h2.digest("base64url"));
+  });
+});
+
+// Registry-interned symbols: hashed via TAG_SYMBOL (0x2a) followed by a
+// self-tagged string-rep of `Symbol.keyFor(s)` (i.e., the same byte stream
+// that a plain string of that key would feed). Unique (uninterned) symbols
+// have no portable key and throw.
+describe("hashOf() interned symbols", () => {
+  it("short key takes the inline TAG_STRING path", () => {
+    // utf8Length(3) <= MAX_DIRECT_STRING_LENGTH(64), so the key is fed as
+    // [TAG_STRING][len][utf8].
+    // Final stream: [TAG_SYMBOL=0x2a, TAG_STRING=0x24, len=0x03, 'f','o','o']
+    const expected = sha256([0x2a, 0x24, 0x03, 0x66, 0x6f, 0x6f]);
+    expect(hashBytesOf(Symbol.for("foo") as FabricValue)).toEqual(expected);
+  });
+
+  it("empty-key Symbol.for('') has length zero, not absent", () => {
+    // [TAG_SYMBOL=0x2a, TAG_STRING=0x24, len=0x00]
+    const expected = sha256([0x2a, 0x24, 0x00]);
+    expect(hashBytesOf(Symbol.for("") as FabricValue)).toEqual(expected);
+  });
+
+  it("long key takes the TAG_STRING_HASH path", () => {
+    // utf8Length(100) > MAX_DIRECT_STRING_LENGTH(64), so the key is fed as
+    // [TAG_STRING_HASH][sha256(utf8)] -- a fixed-length compaction.
+    // Final stream: [TAG_SYMBOL=0x2a, TAG_STRING_HASH=0xf0, ...keyHash]
+    const key = "x".repeat(100);
+    const keyHash = sha256(new TextEncoder().encode(key));
+    const expected = sha256([0x2a, 0xf0, ...keyHash]);
+    expect(hashBytesOf(Symbol.for(key) as FabricValue)).toEqual(expected);
+  });
+
+  it("long-key path is deterministic and key-distinct", () => {
+    // Two different keys both > 64 utf8 bytes should hash differently;
+    // identical long keys should hash the same.
+    const a1 = Symbol.for("a".repeat(100)) as FabricValue;
+    const a2 = Symbol.for("a".repeat(100)) as FabricValue;
+    const b = Symbol.for("b".repeat(100)) as FabricValue;
+    expect(hex(hashBytesOf(a1))).toBe(hex(hashBytesOf(a2)));
+    expect(hex(hashBytesOf(a1))).not.toBe(hex(hashBytesOf(b)));
+  });
+
+  it("equal-keyed interned symbols hash identically", () => {
+    expect(hex(hashBytesOf(Symbol.for("hello") as FabricValue)))
+      .toBe(hex(hashBytesOf(Symbol.for("hello") as FabricValue)));
+  });
+
+  it("differently-keyed interned symbols hash differently", () => {
+    expect(hex(hashBytesOf(Symbol.for("a") as FabricValue)))
+      .not.toBe(hex(hashBytesOf(Symbol.for("b") as FabricValue)));
+  });
+
+  it("interned symbol does not collide with the same-key string", () => {
+    // The TAG_SYMBOL prefix must distinguish a symbol from its key string.
+    expect(hex(hashBytesOf(Symbol.for("x") as FabricValue)))
+      .not.toBe(hex(hashBytesOf("x")));
+  });
+
+  it("interned symbol nested in an object hashes deterministically", () => {
+    const a = { tag: Symbol.for("nested-tag") } as unknown as FabricValue;
+    const b = { tag: Symbol.for("nested-tag") } as unknown as FabricValue;
+    expect(hex(hashBytesOf(a))).toBe(hex(hashBytesOf(b)));
+  });
+
+  it("interned symbol nested in an array hashes deterministically", () => {
+    const a = [Symbol.for("x"), 1] as unknown as FabricValue;
+    const b = [Symbol.for("x"), 1] as unknown as FabricValue;
+    expect(hex(hashBytesOf(a))).toBe(hex(hashBytesOf(b)));
+  });
+
+  it("Symbol(desc) (unique / uninterned) throws", () => {
+    expect(() => hashOf(Symbol("nope") as FabricValue)).toThrow(
+      "Cannot hash unique (uninterned) symbol",
+    );
+  });
+
+  it("unique symbol nested in an object also throws", () => {
+    const value = { tag: Symbol("nope") } as unknown as FabricValue;
+    expect(() => hashOf(value)).toThrow(
+      "Cannot hash unique (uninterned) symbol",
+    );
   });
 });

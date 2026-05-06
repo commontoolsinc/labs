@@ -1,4 +1,4 @@
-import { assertEquals, assertRejects } from "@std/assert";
+import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
 import { join } from "@std/path";
 import { normalize } from "@std/path/posix";
 import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
@@ -11,6 +11,7 @@ import { createToolOutputId } from "../src/contracts/tool-result.ts";
 import { discoverHarnessSkills } from "../src/skills/registry.ts";
 import { bashTool } from "../src/tools/bash.ts";
 import { bashNoSandboxTool } from "../src/tools/bash-no-sandbox.ts";
+import { editFileTool } from "../src/tools/edit-file.ts";
 import { readFileTool } from "../src/tools/read-file.ts";
 import { RESERVED_ARTIFACT_PATH_DETAIL } from "../src/tools/reserved-artifacts.ts";
 import { readSkillResourceTool } from "../src/tools/read-skill-resource.ts";
@@ -228,6 +229,20 @@ const observedCfcResult = (stdout: string): CfcSandboxResult => ({
     value: 0,
   },
 });
+
+const digestText = async (text: string): Promise<string> => {
+  const bytes = new TextEncoder().encode(text);
+  const digestInput = bytes.buffer.slice(
+    bytes.byteOffset,
+    bytes.byteOffset + bytes.byteLength,
+  ) as ArrayBuffer;
+  const digest = await crypto.subtle.digest("SHA-256", digestInput);
+  return `sha256:${
+    [...new Uint8Array(digest)]
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("")
+  }`;
+};
 
 Deno.test("bash tool executes the command through the sandbox shell runtime", async () => {
   const sandbox = new FakeSandboxRuntime([{
@@ -1038,6 +1053,197 @@ Deno.test({
       await Deno.remove(root, { recursive: true });
     }
   },
+});
+
+Deno.test("edit_file applies exact replacements and returns a unified diff", async () => {
+  const original = "one\ntwo\nthree\n";
+  const edited = "one\nTWO\nthree\n";
+  const sandbox = new FakeSandboxRuntime([
+    { stdout: original, stderr: "", exitCode: 0 },
+    { stdout: "", stderr: "", exitCode: 0 },
+    { stdout: edited, stderr: "", exitCode: 0 },
+  ]);
+
+  const output = await editFileTool.invoke(createContext(sandbox), {
+    path: "notes/log.txt",
+    edits: [{ oldText: "two\n", newText: "TWO\n" }],
+  });
+
+  assertEquals(output, {
+    outputId: "run-1:edit_file:1",
+    path: "/workspace/notes/log.txt",
+    editsApplied: 1,
+    replacements: 1,
+    oldDigest: await digestText(original),
+    newDigest: await digestText(edited),
+    oldSizeBytes: original.length,
+    newSizeBytes: edited.length,
+    diff: [
+      "--- /workspace/notes/log.txt",
+      "+++ /workspace/notes/log.txt",
+      "@@ -1,3 +1,3 @@",
+      " one",
+      "-two",
+      "+TWO",
+      " three",
+      "",
+    ].join("\n"),
+  });
+  const calls = stripCfcInvocationContexts(sandbox.calls);
+  assertEquals(calls.map((call) => call.type), [
+    "runShell",
+    "runShell",
+    "runShell",
+  ]);
+  if (calls[1]?.type !== "runShell") {
+    throw new Error("expected edit_file write shell call");
+  }
+  assertEquals(calls[1].request.args, ["/workspace/notes/log.txt"]);
+  assertEquals(calls[1].request.cwd, "/workspace");
+  assertEquals(calls[1].request.stdinText, edited);
+  assertEquals(
+    sandbox.calls[1]?.request.cfcInvocationContext?.toolId,
+    "edit_file",
+  );
+  assertEquals(
+    sandbox.calls[1]?.request.cfcInvocationContext?.inputs.stdin?.bytes,
+    edited.length,
+  );
+});
+
+Deno.test("edit_file returns separate hunks for distant edits", async () => {
+  const original = Array.from(
+    { length: 30 },
+    (_, index) => `line ${String(index + 1).padStart(2, "0")}\n`,
+  ).join("");
+  const edited = original
+    .replace("line 02\n", "line 02 changed\n")
+    .replace("line 29\n", "line 29 changed\n");
+  const sandbox = new FakeSandboxRuntime([
+    { stdout: original, stderr: "", exitCode: 0 },
+    { stdout: "", stderr: "", exitCode: 0 },
+    { stdout: edited, stderr: "", exitCode: 0 },
+  ]);
+
+  const output = await editFileTool.invoke(createContext(sandbox), {
+    path: "notes/distant.txt",
+    edits: [
+      { oldText: "line 02\n", newText: "line 02 changed\n" },
+      { oldText: "line 29\n", newText: "line 29 changed\n" },
+    ],
+  });
+
+  if ("ok" in output) {
+    throw new Error("expected successful edit_file output");
+  }
+  assertStringIncludes(output.diff, "@@ -1,5 +1,5 @@");
+  assertStringIncludes(output.diff, "-line 02");
+  assertStringIncludes(output.diff, "+line 02 changed");
+  assertStringIncludes(output.diff, "@@ -26,5 +26,5 @@");
+  assertStringIncludes(output.diff, "-line 29");
+  assertStringIncludes(output.diff, "+line 29 changed");
+  assertEquals(output.diff.includes("line 15"), false);
+  assertEquals(output.diff.match(/^@@ /gm)?.length, 2);
+});
+
+Deno.test("edit_file caps oversized diff output", async () => {
+  const original = Array.from(
+    { length: 450 },
+    (_, index) => `old ${String(index + 1).padStart(3, "0")}\n`,
+  ).join("");
+  const edited = Array.from(
+    { length: 450 },
+    (_, index) => `new ${String(index + 1).padStart(3, "0")}\n`,
+  ).join("");
+  const sandbox = new FakeSandboxRuntime([
+    { stdout: original, stderr: "", exitCode: 0 },
+    { stdout: "", stderr: "", exitCode: 0 },
+    { stdout: edited, stderr: "", exitCode: 0 },
+  ]);
+
+  const output = await editFileTool.invoke(createContext(sandbox), {
+    path: "notes/large.txt",
+    edits: [{ oldText: original, newText: edited }],
+  });
+
+  if ("ok" in output) {
+    throw new Error("expected successful edit_file output");
+  }
+  assertStringIncludes(output.diff, "[diff truncated:");
+  assertEquals(output.diff.split("\n").length, 401);
+});
+
+Deno.test("edit_file applies replaceAll edits with expected replacement counts", async () => {
+  const original = "red blue red\n";
+  const edited = "green blue green\n";
+  const sandbox = new FakeSandboxRuntime([
+    { stdout: original, stderr: "", exitCode: 0 },
+    { stdout: "", stderr: "", exitCode: 0 },
+    { stdout: edited, stderr: "", exitCode: 0 },
+  ]);
+
+  const output = await editFileTool.invoke(createContext(sandbox), {
+    path: "notes/colors.txt",
+    edits: [{
+      oldText: "red",
+      newText: "green",
+      replaceAll: true,
+      expectedReplacements: 2,
+    }],
+    expectedDigest: await digestText(original),
+  });
+
+  if ("ok" in output) {
+    throw new Error("expected successful edit_file output");
+  }
+  assertEquals(output.path, "/workspace/notes/colors.txt");
+  assertEquals(output.replacements, 2);
+  assertEquals(output.editsApplied, 1);
+});
+
+Deno.test("edit_file rejects ambiguous single replacements without writing", async () => {
+  const sandbox = new FakeSandboxRuntime([{
+    stdout: "name: alpha\nname: beta\n",
+    stderr: "",
+    exitCode: 0,
+  }]);
+
+  const output = await editFileTool.invoke(createContext(sandbox), {
+    path: "notes/names.txt",
+    edits: [{ oldText: "name:", newText: "label:" }],
+  });
+
+  assertEquals(output.outputId, "run-1:edit_file:1");
+  assertEquals(output.path, "/workspace/notes/names.txt");
+  if (!("ok" in output) || output.ok !== false) {
+    throw new Error("expected edit_file conflict output");
+  }
+  assertEquals(output.error.code, "edit_conflict");
+  assertStringIncludes(output.error.detail ?? "", "matched 2 times");
+  assertEquals(sandbox.calls.length, 1);
+});
+
+Deno.test("edit_file rejects stale expected digests without writing", async () => {
+  const sandbox = new FakeSandboxRuntime([{
+    stdout: "hello\n",
+    stderr: "",
+    exitCode: 0,
+  }]);
+
+  const output = await editFileTool.invoke(createContext(sandbox), {
+    path: "notes/hello.txt",
+    expectedDigest: "sha256:not-current",
+    edits: [{ oldText: "hello", newText: "hi" }],
+  });
+
+  assertEquals(output.outputId, "run-1:edit_file:1");
+  assertEquals(output.path, "/workspace/notes/hello.txt");
+  if (!("ok" in output) || output.ok !== false) {
+    throw new Error("expected edit_file conflict output");
+  }
+  assertEquals(output.error.code, "edit_conflict");
+  assertStringIncludes(output.error.detail ?? "", "expected digest");
+  assertEquals(sandbox.calls.length, 1);
 });
 
 Deno.test("write_file tool supports append mode and passes content over stdin", async () => {

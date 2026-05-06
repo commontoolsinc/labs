@@ -5,6 +5,7 @@ export type BuiltinToolId =
   | "bash-no-sandbox"
   | "read_file"
   | "read_skill_resource"
+  | "edit_file"
   | "write_file"
   | "delegate_task";
 
@@ -12,6 +13,7 @@ export const DEFAULT_PARENT_TOOL_IDS = [
   "bash",
   "read_file",
   "read_skill_resource",
+  "edit_file",
   "write_file",
   "delegate_task",
 ] as const satisfies readonly BuiltinToolId[];

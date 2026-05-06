@@ -40,6 +40,18 @@ export interface HarnessWriteFileToolInputSummary {
   contentDigest?: string;
 }
 
+export interface HarnessEditFileToolInputSummary {
+  type: "cf-harness.tool-input-summary";
+  toolId: "edit_file";
+  path?: string;
+  editCount?: number;
+  expectedDigest?: string;
+  oldTextBytes?: number;
+  oldTextDigest?: string;
+  newTextBytes?: number;
+  newTextDigest?: string;
+}
+
 export interface HarnessDelegateTaskToolInputSummary {
   type: "cf-harness.tool-input-summary";
   toolId: "delegate_task";
@@ -57,6 +69,7 @@ export type HarnessToolInputSummary =
   | HarnessBashToolInputSummary
   | HarnessReadFileToolInputSummary
   | HarnessReadSkillResourceToolInputSummary
+  | HarnessEditFileToolInputSummary
   | HarnessWriteFileToolInputSummary
   | HarnessDelegateTaskToolInputSummary
   | {

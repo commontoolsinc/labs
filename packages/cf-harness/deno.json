@@ -17,6 +17,7 @@
     "./gateway/openai-client": "./src/gateway/openai-client.ts",
     "./contracts/prompt-slot": "./src/contracts/prompt-slot.ts",
     "./contracts/cfc-invocation-context": "./src/contracts/cfc-invocation-context.ts",
+    "./contracts/image": "./src/contracts/image.ts",
     "./contracts/run-manifest": "./src/contracts/run-manifest.ts",
     "./contracts/observation": "./src/contracts/observation.ts",
     "./contracts/policy": "./src/contracts/policy.ts",

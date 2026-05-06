@@ -446,6 +446,23 @@ export class Server {
     this.#connections.clear();
   }
 
+  /**
+   * Drains any in-flight or scheduled subscription refresh, returning when
+   * the server has no pending work. Tests use this to drain the
+   * module-level singleton's `#refreshTimer` between cases so it doesn't
+   * leak across the Deno test boundary -- the singleton survives across
+   * tests but its pending timer must not.
+   *
+   * `flushSessions()` (called with no `spaces` argument) cancels any
+   * pending timer, runs the refresh loop to completion, and intentionally
+   * does not reschedule, so a single call is sufficient.
+   */
+  async idle(): Promise<void> {
+    if (this.#refreshTimer !== null || this.#refreshing !== null) {
+      await this.flushSessions();
+    }
+  }
+
   async readDocument(
     space: string,
     id: string,

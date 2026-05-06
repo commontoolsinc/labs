@@ -134,6 +134,16 @@ export abstract class FabricPrimitive extends FabricSpecialObject {
  * `undefined` is preserved when the `modernDataModel` flag is ON. When the
  * flag is OFF, `undefined` in arrays is converted to `null` and `undefined`
  * object properties are omitted -- matching legacy behavior.
+ *
+ * `symbol` values are restricted at runtime to **registry-interned** symbols
+ * -- those for which `Symbol.keyFor(s)` returns a string. These are
+ * portable across realms and processes via their registry key. Unique
+ * symbols (`Symbol(desc)`) are not portable and are rejected at the fabric
+ * boundary. TypeScript's `symbol` type cannot distinguish the two, so the
+ * gate is a runtime one. Note also that the modern fabric-value path
+ * separately rejects all symbols at the entrance (relaxation deferred to a
+ * follow-up); the type union admits `symbol` so the lower layers (hashing,
+ * JSON encoding) can be written and tested ahead of that gate change.
  */
 export type FabricValue =
   // -- Primitives --
@@ -142,6 +152,7 @@ export type FabricValue =
   | number
   | string
   | bigint
+  | symbol
   // -- Fabric special objects --
   | FabricSpecialObject
   // -- Containers --

@@ -165,14 +165,76 @@ export function apiHeaders(): Record<string, string> {
   };
 }
 
+const GITHUB_GET_MAX_ATTEMPTS = 4;
+const GITHUB_GET_RETRY_BASE_DELAY_MS = 250;
+const GITHUB_GET_RETRY_MAX_DELAY_MS = 5_000;
+const RETRYABLE_GITHUB_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
+
+function retryAfterDelayMs(value: string | null): number | undefined {
+  if (value == null) return undefined;
+
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) {
+    return Math.max(0, seconds * 1_000);
+  }
+
+  const dateMs = Date.parse(value);
+  if (Number.isFinite(dateMs)) {
+    return Math.max(0, dateMs - Date.now());
+  }
+
+  return undefined;
+}
+
+function githubRetryDelayMs(resp: Response, attempt: number): number {
+  return Math.min(
+    retryAfterDelayMs(resp.headers.get("retry-after")) ??
+      GITHUB_GET_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1),
+    GITHUB_GET_RETRY_MAX_DELAY_MS,
+  );
+}
+
+function sleep(ms: number): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export async function githubGet<T>(path: string): Promise<T> {
   const url = path.startsWith("http") ? path : `https://api.github.com${path}`;
-  const resp = await fetch(url, { headers: apiHeaders() });
-  if (!resp.ok) {
-    const body = await resp.text();
-    throw new Error(`GitHub API ${resp.status}: ${path}\n${body}`);
+  for (let attempt = 1; attempt <= GITHUB_GET_MAX_ATTEMPTS; attempt++) {
+    let resp: Response;
+    try {
+      resp = await fetch(url, { headers: apiHeaders() });
+    } catch (error) {
+      if (attempt === GITHUB_GET_MAX_ATTEMPTS) {
+        throw error;
+      }
+      await sleep(
+        Math.min(
+          GITHUB_GET_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1),
+          GITHUB_GET_RETRY_MAX_DELAY_MS,
+        ),
+      );
+      continue;
+    }
+
+    if (resp.ok) {
+      return resp.json();
+    }
+
+    if (
+      !RETRYABLE_GITHUB_STATUSES.has(resp.status) ||
+      attempt === GITHUB_GET_MAX_ATTEMPTS
+    ) {
+      const body = await resp.text();
+      throw new Error(`GitHub API ${resp.status}: ${path}\n${body}`);
+    }
+
+    await resp.body?.cancel();
+    await sleep(githubRetryDelayMs(resp, attempt));
   }
-  return resp.json();
+
+  throw new Error(`GitHub API GET retry loop exhausted unexpectedly: ${path}`);
 }
 
 export async function githubPost<T>(
