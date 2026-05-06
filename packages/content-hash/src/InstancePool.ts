@@ -39,7 +39,7 @@ export class InstancePool<T extends WeakKey> {
   }
 
   /**
-   * Is there an instance available for acquisition?
+   * Indicates whether an instance is available for acquisition.
    */
   canAcquire() {
     return this.#pool.length !== 0;

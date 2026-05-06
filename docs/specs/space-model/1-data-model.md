@@ -78,9 +78,33 @@ fabric-value conversion gate:
 These types cannot be stored directly:
 
 - `bigint` — throws error
-- `symbol` — throws error
+- `symbol` — bifurcated by the `modernDataModel` flag (see Symbols below)
 - `function` — throws error unless it has a `toJSON()` method
 - Class instances — throws error unless they have `toJSON()` or special handling
+
+#### Symbols
+
+Symbol handling is bifurcated by the `modernDataModel` flag at the
+fabric-value conversion gate:
+
+- **Legacy path (`modernDataModel: false`):**
+  - All symbols throw errors during conversion
+- **Modern path (`modernDataModel: true`):**
+  - Registry-interned symbols (`Symbol.for(key)`, where
+    `Symbol.keyFor(s)` returns a string) are first-class fabric values,
+    portable across realms and processes via their registry key
+  - Unique symbols (`Symbol(desc)`) throw with the message
+    `"Cannot store unique (uninterned) symbol"`
+  - Round-trip via the `Symbol@1` JSON envelope (see
+    `space-model-formal-spec/3-json-encoding.md` Section 3) and via the
+    byte-level form in `space-model-formal-spec/2-hash-byte-format.md`
+    Section 4.6, both of which describe the lower-layer behavior
+    unconditionally; the formal `1-fabric-values.md` Section 4.9 carries
+    the conversion-gate flag-bifurcation language
+
+Note: this is about symbol *values*. Symbol-keyed *properties* on plain
+objects continue to cause rejection regardless of the flag (see "Objects"
+above), because plain-object keys must be strings.
 
 ### Special Object Shapes
 

@@ -65,7 +65,7 @@ export function isDeepFrozen(value: unknown): boolean {
 }
 
 /**
- * Internal recursive deep-frozen check with cycle detection.
+ * Performs the recursive deep-frozen check with cycle detection.
  */
 function isDeepFrozenInProgress(
   value: unknown,
@@ -120,6 +120,12 @@ function isDeepFrozenInProgress(
   return result;
 }
 
+/**
+ * Recursively freezes the given value in place: arrays and plain objects are
+ * frozen after their children are recursively frozen. Primitives pass through
+ * unchanged. Records the result in the deep-frozen cache so subsequent
+ * `isDeepFrozen()` checks return in O(1). Returns the (now-frozen) value.
+ */
 export function deepFreeze<T>(value: T): T {
   if (isNecessarilyOrKnownDeepFrozen(value)) {
     return value;

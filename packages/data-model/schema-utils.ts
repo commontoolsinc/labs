@@ -25,8 +25,8 @@ import { type FabricValue } from "./interface.ts";
 const BASIC_SCHEMAS: Record<string, JSONSchemaObj> = {};
 
 /**
- * Helper for `schemaForValueType()` and `emptySchemaObject()` to do the
- * lookup and interning as necessary.
+ * Helper for `schemaForValueType()` and `emptySchemaObject()`, which does
+ * the lookup and interning as necessary.
  */
 function getBasicSchema(key: string) {
   const found = BASIC_SCHEMAS[key];
@@ -65,7 +65,7 @@ export function isNontrivialSchema(
 }
 
 /**
- * Return a deep-frozen copy of (or reference to) a JSONSchema.
+ * Returns a deep-frozen copy of (or reference to) a JSONSchema.
  *
  * - When `canShare` is `true`, the input `schema` is allowed to be modified,
  *   including freezing it in place and returning it directly. Use this when the
@@ -126,7 +126,7 @@ export function toDeepFrozenSchema<T extends JSONSchema>(
 }
 
 /**
- * Return a mutable object copy of a JSONSchema. Boolean schemas (`true` and
+ * Returns a mutable object copy of a JSONSchema. Boolean schemas (`true` and
  * `false`) and `undefined` are converted to their object-form equivalents:
  * `undefined` and `true` become `{}` (accept any value), `false` becomes
  * `{ not: true }` (reject all values).
@@ -152,7 +152,7 @@ export function cloneSchemaMutable(
 }
 
 /**
- * Return a deep-frozen shallow copy of a schema with the given property
+ * Returns a deep-frozen shallow copy of a schema with the given property
  * overrides applied. This function provides "intern contagion:" If the given
  * `schema` is interned, then the result of this function will also be interned.
  *
@@ -204,7 +204,7 @@ export function schemaWithProperties(
 }
 
 /**
- * Return a deep-frozen shallow copy of a schema with the named properties
+ * Returns a deep-frozen shallow copy of a schema with the named properties
  * removed. This function provides "intern contagion:" If the given
  * `schema` is interned, then the result of this function will also be interned.
  *
@@ -303,7 +303,7 @@ export function emptySchemaObject() {
 }
 
 /**
- * Return the given `SchemaPathSelector` with its `schema` (if any) interned
+ * Returns the given `SchemaPathSelector` with its `schema` (if any) interned
  * and with both its `path` array and the selector object itself deep-frozen
  * in place. The input reference is returned — this function does not clone.
  * Idempotent on repeat calls: `internPathSelector(internPathSelector(x)) ===

@@ -48,6 +48,8 @@ function specialInstanceToFabricValue(
  *
  * @param value - The value to check.
  * @returns `true` if the value has a `toJSON` method that is a function.
+ *
+ * This function is a TypeScript type guard for `{ toJSON: () => unknown }`.
  */
 function hasToJSONMethod(
   value: unknown,
@@ -66,6 +68,8 @@ function hasToJSONMethod(
  *
  * @param value - The value to check.
  * @returns `true` if the value is fabric-compatible per se, `false` otherwise.
+ *
+ * This function is a TypeScript type guard for `FabricValueLayer`.
  */
 export function isFabricValueLegacy(
   value: unknown,
@@ -110,6 +114,8 @@ export function isFabricValueLegacy(
  *
  * @param value - The value to check.
  * @returns `true` if the value can be stored, `false` otherwise.
+ *
+ * This function is a TypeScript type guard for `FabricValue | FabricNativeObject`.
  */
 export function isFabricCompatibleLegacy(
   value: unknown,

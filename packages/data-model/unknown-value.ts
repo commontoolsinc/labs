@@ -7,10 +7,11 @@ import {
 import { ExplicitTagValue } from "./explicit-tag-value.ts";
 
 /**
- * Holds an unrecognized type's data for round-tripping. When the serialization
- * system encounters an unknown tag during deserialization, it wraps the tag and
- * state here; on re-serialization, it uses the preserved `typeTag` to produce
- * the original wire format. See Section 3.3 of the formal spec.
+ * Container for an unrecognized type's data, used for round-tripping. When
+ * the serialization system encounters an unknown tag during deserialization,
+ * it wraps the tag and state here; on re-serialization, it uses the preserved
+ * `typeTag` to produce the original wire format. See Section 3.3 of the
+ * formal spec.
  */
 export class UnknownValue extends ExplicitTagValue {
   constructor(typeTag: string, state: FabricValue) {

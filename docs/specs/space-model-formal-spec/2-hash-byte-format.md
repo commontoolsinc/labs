@@ -191,9 +191,9 @@ type tags (`0x24` vs. `0xF0`), they are unambiguous and cannot collide.
 must use the threshold when deciding which form to emit.
 
 The hashed form applies everywhere this spec encodes a string via the
-`TAG_STRING` layout: standalone strings (this section), object keys (Section
-4.12), `FabricInstance` type tags (Section 4.13), and `FabricHash` algorithm
-tags (Section 4.10).
+`TAG_STRING` layout: standalone strings (this section), `symbol` keys
+(Section 4.6), object keys (Section 4.13), `FabricInstance` type tags
+(Section 4.14), and `FabricHash` algorithm tags (Section 4.11).
 
 ### 4.5 `bigint`
 
@@ -217,7 +217,37 @@ Total: 1 + len(LEB128) + N bytes, where N is the minimal encoding length.
     byte is `1`. For example, `-1n` is `0xFF` (1 byte), `-128n` is `0x80`
     (1 byte), and `-129n` is `0xFF 0x7F` (2 bytes).
 
-### 4.6 `undefined`
+### 4.6 `symbol`
+
+```
+Bytes: TAG_SYMBOL  KEY_STRING
+       0x2A        <string, §4.4>
+```
+
+- **Key string**: The result of `Symbol.keyFor(s)` — a JavaScript string —
+  encoded as a complete tagged string value per Section 4.4. Concretely,
+  this emits either the direct form (`TAG_STRING` + LEB128 length + UTF-8
+  bytes) for keys whose UTF-8 encoding is 64 bytes or fewer, or the hashed
+  form (`TAG_STRING_HASH` + 32-byte SHA-256 of the UTF-8) for longer keys.
+
+Only **registry-interned** symbols (those for which `Symbol.keyFor(s)`
+returns a string) are hashable. **Unique** symbols (`Symbol(desc)`, where
+`Symbol.keyFor(s)` returns `undefined`) have no portable representation; a
+conforming implementation must throw rather than producing a hash. The
+required error message is `"Cannot hash unique (uninterned) symbol"`.
+
+The two-tag encoding (`TAG_SYMBOL` followed by `TAG_STRING` / `TAG_STRING_HASH`)
+ensures that a `Symbol.for("foo")` and the string `"foo"` produce different
+hashes, while inheriting the short/long string-encoding delegation
+unchanged.
+
+> **Conversion-gate cross-reference.** Whether a symbol value reaches this
+> layer in a given run depends on the `modernDataModel` flag at the
+> fabric-value conversion gate; see `1-fabric-values.md` Section 4.9. The
+> byte-level encoding above is the hasher's contract regardless of how the
+> value arrived.
+
+### 4.7 `undefined`
 
 ```
 Bytes: TAG_UNDEFINED
@@ -226,7 +256,7 @@ Bytes: TAG_UNDEFINED
 
 Total: 1 byte. No payload.
 
-### 4.7 `FabricBytes`
+### 4.8 `FabricBytes`
 
 ```
 Bytes: TAG_BYTES  LENGTH_LEB128  RAW_BYTES
@@ -241,7 +271,7 @@ Total: 1 + len(LEB128) + N bytes, where N is the byte array length.
 Empty byte array is encoded as `0x25 0x00` — the tag plus a zero-length prefix
 and no payload bytes.
 
-### 4.8 `FabricEpochNsec`
+### 4.9 `FabricEpochNsec`
 
 ```
 Bytes: TAG_EPOCH_NSEC  LENGTH_LEB128  TWO_COMP_BYTES
@@ -262,7 +292,7 @@ The encoding is structurally identical to `TAG_BIGINT` but uses a different type
 tag (`0x27` instead of `0x26`), ensuring that `FabricEpochNsec(42n)` and
 `42n` produce distinct hashes.
 
-### 4.9 `FabricEpochDays`
+### 4.10 `FabricEpochDays`
 
 ```
 Bytes: TAG_EPOCH_DAYS  LENGTH_LEB128  TWO_COMP_BYTES
@@ -284,7 +314,7 @@ tag (`0x28` instead of `0x26`), ensuring that `FabricEpochDays(42n)` and
 `42n` produce distinct hashes. It also differs from `FabricEpochNsec` (`0x27`)
 so the two temporal types are always distinguishable.
 
-### 4.10 `FabricHash`
+### 4.11 `FabricHash`
 
 ```
 Bytes: TAG_CONTENT_ID  ALG_TAG_STRING   HASH_LEN_LEB128  HASH_BYTES
@@ -307,7 +337,7 @@ tag. It is a `FabricPrimitive` subclass and has a dedicated type tag.
 The two-field encoding ensures that content IDs with different algorithm tags
 but identical hash bytes produce different hashes, and vice versa.
 
-### 4.11 Array
+### 4.12 Array
 
 ```
 Bytes: TAG_ARRAY  ELEMENT_0  ELEMENT_1  ...  ELEMENT_N-1  TAG_END
@@ -317,7 +347,7 @@ Bytes: TAG_ARRAY  ELEMENT_0  ELEMENT_1  ...  ELEMENT_N-1  TAG_END
 - **Elements**: Each element is hashed recursively in index order (0, 1, 2,
   ...). Present elements are fed to the hasher as complete tagged values
   (starting with their own type tag). Holes are encoded using run-length
-  encoding (see Section 4.14).
+  encoding (see Section 4.15).
 - **Terminator**: `TAG_END` (`0x00`) marks the end of the element sequence.
   This is unambiguous because `TAG_END` cannot appear as the start of any
   element value.
@@ -325,7 +355,7 @@ Bytes: TAG_ARRAY  ELEMENT_0  ELEMENT_1  ...  ELEMENT_N-1  TAG_END
 Empty array (`[]`) is encoded as `0x10 0x00` — the tag immediately followed by
 `TAG_END`.
 
-### 4.12 Object
+### 4.13 Object
 
 ```
 Bytes: TAG_OBJECT  KEY_0  VALUE_0  KEY_1  VALUE_1  ...  TAG_END
@@ -348,7 +378,7 @@ Bytes: TAG_OBJECT  KEY_0  VALUE_0  KEY_1  VALUE_1  ...  TAG_END
 Empty object (`{}`) is encoded as `0x11 0x00` — the tag immediately followed by
 `TAG_END`.
 
-### 4.13 `FabricInstance`
+### 4.14 `FabricInstance`
 
 ```
 Bytes: TAG_INSTANCE  TYPE_TAG_STRING  STATE
@@ -368,10 +398,10 @@ Bytes: TAG_INSTANCE  TYPE_TAG_STRING  STATE
 > **Note on types with dedicated tags.** `FabricBytes`,
 > `FabricEpochNsec`, `FabricEpochDays`, and `FabricHash` are **not**
 > hashed via `TAG_INSTANCE`. Each has a dedicated type tag and is encoded
-> directly (see Sections 4.7, 4.8, 4.9, and 4.10 respectively). These are
+> directly (see Sections 4.8, 4.9, 4.10, and 4.11 respectively). These are
 > all `FabricPrimitive` subclasses — they do not implement `[DECONSTRUCT]`.
 
-### 4.14 Holes (sparse array elements)
+### 4.15 Holes (sparse array elements)
 
 ```
 Bytes: TAG_HOLE  RUN_COUNT_LEB128
@@ -380,7 +410,7 @@ Bytes: TAG_HOLE  RUN_COUNT_LEB128
 
 Total: 1 + len(LEB128) bytes per run (typically 2 bytes for small runs).
 
-Holes appear only within array encodings (Section 4.11). Consecutive holes are
+Holes appear only within array encodings (Section 4.12). Consecutive holes are
 **always coalesced** into maximal runs:
 
 - A single hole at index `i` with present elements at `i-1` and `i+1` is
@@ -671,25 +701,28 @@ the rule is "64 bytes or fewer → direct". A 65-byte UTF-8 string uses the
 hashed form.
 
 This rule applies to every string the hasher feeds, including standalone
-strings (Section 4.4), object keys (Section 4.12), `FabricInstance` type
-tags (Section 4.13), and `FabricHash` algorithm tags (Section 4.10). The
-threshold is evaluated per-string independently: an object may mix short
-keys (direct form) and long keys (hashed form) in the same key-value
-sequence.
+strings (Section 4.4), `symbol` keys (Section 4.6), object keys (Section
+4.13), `FabricInstance` type tags (Section 4.14), and `FabricHash`
+algorithm tags (Section 4.11). The threshold is evaluated per-string
+independently: an object may mix short keys (direct form) and long keys
+(hashed form) in the same key-value sequence.
 
 ---
 
 ## 8. Rejected Values
 
-The following JavaScript values are rejected by `fabricFromNativeValue()` and
-must never be passed to the hasher:
+The following JavaScript values must never be passed to the hasher:
 
-- `Symbol` values
-- `Function` values
+- **Unique (uninterned) `Symbol` values** — those for which
+  `Symbol.keyFor(s)` returns `undefined`. Registry-interned symbols
+  (`Symbol.for(key)`) **are** hashable; see Section 4.6. The required
+  error message is `"Cannot hash unique (uninterned) symbol"`.
+- **`Function` values** — opaque closures with no portable representation.
 
 A conforming implementation should throw an error if it encounters either
 of these rather than producing a hash. (`NaN`, `±Infinity`, and `-0` are
-**not** rejected; they have well-defined byte encodings — see Section 4.3.)
+**not** rejected; they have well-defined byte encodings — see Section
+4.3.)
 
 ---
 
@@ -706,6 +739,7 @@ of these rather than producing a hash. (`NaN`, `±Infinity`, and `-0` are
 | `FabricHash` algorithm tag        | string (§4.4)   | Emitted as a complete tagged string value (direct or hashed form) |
 | `FabricHash` hash bytes           | unsigned LEB128 | Byte count of raw hash payload   |
 | `FabricInstance` type tag         | string (§4.4)   | Emitted as a complete tagged string value (direct or hashed form) |
+| `symbol` registry key             | string (§4.4)   | Emitted as a complete tagged string value (direct or hashed form), prefixed by `TAG_SYMBOL` |
 | Object keys                       | string (§4.4)   | Emitted as complete tagged string values (direct or hashed form per key) |
 | Hole run count                    | unsigned LEB128 | Number of consecutive holes      |
 | Array elements                    | `TAG_END`       | Sentinel after last element      |

@@ -19,7 +19,10 @@ import { FabricBytes } from "./fabric-bytes.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { isArrayWithOnlyIndexProperties } from "./array-utils.ts";
 
-/** Reject native objects with extra enumerable properties. */
+/**
+ * Helper for `shallowFabricFromNativeValueModern()`, which rejects native
+ * objects with extra enumerable properties.
+ */
 function rejectExtraProperties(value: object, typeName: string): void {
   if (Object.keys(value).length > 0) {
     throw new Error(
@@ -29,7 +32,7 @@ function rejectExtraProperties(value: object, typeName: string): void {
 }
 
 /**
- * Shallow conversion from JS values to `FabricValue`. Wraps `Error`
+ * Performs shallow conversion from JS values to `FabricValue`. Wraps `Error`
  * instances into `FabricError`; preserves `undefined`; optionally freezes
  * the result if it is an object or array. If the value is already a frozen
  * `FabricValue`, returns it as-is (identity optimization).
@@ -197,6 +200,8 @@ export function shallowFabricFromNativeValueModern(
  *
  * TODO: Remove `toJSON()` support once all callers have migrated to
  * `[DECONSTRUCT]`. See spec Section 7.1.
+ *
+ * This function is a TypeScript type guard for `{ toJSON: () => unknown }`.
  */
 function hasToJSONMethod(
   value: unknown,
@@ -214,7 +219,7 @@ function hasToJSONMethod(
 const PROCESSING = Symbol("PROCESSING");
 
 /**
- * Recursive conversion from JS values to `FabricValue`. Single-pass:
+ * Performs recursive conversion from JS values to `FabricValue`. Single-pass:
  * wraps `Error` instances into `FabricError`, preserves `undefined`, and
  * deep-freezes each node as it's built (no separate freeze pass). If the
  * input is already a deep-frozen `FabricValue`, returns it as-is (identity
@@ -244,9 +249,10 @@ export function fabricFromNativeValueModern(
 }
 
 /**
- * Naive recursive check: is the value a deep-frozen FabricValue?
- * Returns `true` if the value is a primitive, or a frozen object/array
- * whose children are all also deep-frozen FabricValues.
+ * Helper for `fabricFromNativeValueModern()` and `cloneHelper()`, which
+ * indicates whether the value is a deep-frozen FabricValue (naive recursive
+ * check). Returns `true` if the value is a primitive, or a frozen
+ * object/array whose children are all also deep-frozen FabricValues.
  */
 function isDeepFrozenFabricValue(value: unknown): boolean {
   if (value === null || (typeof value !== "object")) return true; // primitives
@@ -278,11 +284,11 @@ function isDeepFrozenFabricValue(value: unknown): boolean {
 }
 
 /**
- * Internal recursive implementation for the modern path. Single-pass: checks,
- * wraps, and optionally freezes each node as it's built. By the time this
- * returns, the whole tree is converted and (if `freeze` is true) deep-frozen.
- * Unlike the legacy version, this never returns OMIT -- `undefined` values
- * are preserved.
+ * Helper for `fabricFromNativeValueModern()`, which performs the recursive
+ * conversion for the modern path. Single-pass: checks, wraps, and optionally
+ * freezes each node as it's built. By the time this returns, the whole tree
+ * is converted and (if `freeze` is true) deep-frozen. Unlike the legacy
+ * version, this never returns OMIT -- `undefined` values are preserved.
  */
 function fabricFromNativeValueModernInternal(
   original: unknown,
@@ -455,15 +461,18 @@ function convertErrorInternals(
 }
 
 /**
- * Type guard that accepts `FabricInstance` values, `undefined`, and arrays
- * with `undefined` elements or sparse holes -- in addition to the base fabric
- * types (null, boolean, number, string, plain objects, dense arrays).
+ * Indicates whether the value is a fabric value, accepting `FabricInstance`
+ * values, `undefined`, and arrays with `undefined` elements or sparse holes
+ * -- in addition to the base fabric types (null, boolean, number, string,
+ * plain objects, dense arrays).
  *
  * MUST be self-contained (inline base-type checks, does NOT delegate back to
  * `isFabricValue()`) to avoid circular dispatch when the `modernDataModel`
  * flag is ON. See session 2 notes about the stack overflow this caused.
  *
  * Used when the `modernDataModel` flag is ON.
+ *
+ * This function is a TypeScript type guard for `FabricValueLayer`.
  */
 export function isFabricValueModern(
   value: unknown,
@@ -526,6 +535,8 @@ export function isFabricValueModern(
  * objects/functions with `toJSON()` methods
  * that return fabric values. It checks recursively, so all nested values in
  * arrays and objects must also be fabric-compatible or convertible.
+ *
+ * This function is a TypeScript type guard for `FabricValue | FabricNativeObject`.
  */
 export function isFabricCompatibleModern(
   value: unknown,
@@ -564,7 +575,7 @@ export interface CloneOptions {
 }
 
 /**
- * Clone an already-valid `FabricValue` to achieve a desired frozenness,
+ * Clones an already-valid `FabricValue` to achieve a desired frozenness,
  * with control over depth and copy semantics.
  *
  * Unlike `fabricFromNativeValue` (which converts native JS values into
@@ -589,7 +600,7 @@ export function cloneIfNecessaryModern(
 }
 
 /**
- * Track an object for circular reference detection during deep cloning.
+ * Tracks an object for circular reference detection during deep cloning.
  * Lazily allocates the `seen` set on first use, throws if a cycle is
  * detected, and adds the object to the set. Returns the (possibly
  * newly-allocated) set.
@@ -607,7 +618,7 @@ function trackForCircularity(
 }
 
 /**
- * Unified clone helper for both shallow and deep modes.
+ * Performs the unified clone for both shallow and deep modes.
  *
  * When `deep` is true, recursively clones containers and detects circular
  * references via `seen`. When `deep` is false, copies only the top-level
@@ -801,7 +812,7 @@ function isFabricCompatibleInternal(
 // ---------------------------------------------------------------------------
 
 /**
- * Deep unwrap: recursively walk a `FabricValue` tree, unwrapping any
+ * Recursively walks a `FabricValue` tree, unwrapping any
  * `FabricNativeWrapper` values to their underlying native types via
  * `toNativeValue()`. Non-native `FabricInstance` values (Cell, Stream,
  * UnknownValue, etc.) pass through as-is.
