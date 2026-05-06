@@ -1441,6 +1441,80 @@ describe("fabric-value", () => {
   });
 
   // =========================================================================
+  // Interned symbols (modern path)
+  //
+  // Modern mode admits registry-interned symbols (`Symbol.for(key)`, where
+  // `Symbol.keyFor(s)` returns a string) as fabric primitives. Unique
+  // symbols (`Symbol(desc)`) have no portable representation and continue
+  // to be rejected. The legacy path is unchanged (covered above).
+  // =========================================================================
+
+  describe("interned symbols (modern path)", () => {
+    beforeEach(() => {
+      setDataModelConfig(true);
+    });
+    afterEach(() => {
+      resetDataModelConfig();
+    });
+
+    it("isFabricValue accepts an interned symbol", () => {
+      expect(isFabricValue(Symbol.for("k"))).toBe(true);
+    });
+
+    it("isFabricValue rejects a unique symbol", () => {
+      expect(isFabricValue(Symbol("k"))).toBe(false);
+    });
+
+    it("shallowFabricFromNativeValue passes an interned symbol through", () => {
+      const sym = Symbol.for("k");
+      // Interned symbols are primitives -- pass-through, no wrapping.
+      expect(shallowFabricFromNativeValue(sym)).toBe(sym);
+    });
+
+    it("shallowFabricFromNativeValue throws on a unique symbol", () => {
+      expect(() => shallowFabricFromNativeValue(Symbol("nope"))).toThrow(
+        "Cannot store unique (uninterned) symbol",
+      );
+    });
+
+    it("fabricFromNativeValue passes an interned symbol through", () => {
+      const sym = Symbol.for("top-level");
+      expect(fabricFromNativeValue(sym)).toBe(sym);
+    });
+
+    it("fabricFromNativeValue preserves interned symbols in objects", () => {
+      const result = fabricFromNativeValue({
+        kind: Symbol.for("event"),
+        flag: Symbol.for("ready"),
+      }) as Record<string, symbol>;
+      expect(result.kind).toBe(Symbol.for("event"));
+      expect(result.flag).toBe(Symbol.for("ready"));
+    });
+
+    it("fabricFromNativeValue preserves interned symbols in arrays", () => {
+      const result = fabricFromNativeValue(
+        [Symbol.for("a"), 1, Symbol.for("b")],
+      ) as unknown[];
+      expect(result[0]).toBe(Symbol.for("a"));
+      expect(result[1]).toBe(1);
+      expect(result[2]).toBe(Symbol.for("b"));
+    });
+
+    it("fabricFromNativeValue throws on a nested unique symbol", () => {
+      expect(() => fabricFromNativeValue({ k: Symbol("nope") })).toThrow(
+        "Cannot store unique (uninterned) symbol",
+      );
+    });
+
+    it("interned symbols round-trip with stable identity", () => {
+      // Same registry key in any realm yields the same symbol instance
+      // -- so the result equals the constructed sentinel by identity.
+      const out = fabricFromNativeValue(Symbol.for("identity-check"));
+      expect(Object.is(out, Symbol.for("identity-check"))).toBe(true);
+    });
+  });
+
+  // =========================================================================
   // isFabricCompatible: deep storability check (modern path)
   // =========================================================================
 
@@ -1486,9 +1560,14 @@ describe("fabric-value", () => {
       expect(isFabricCompatible(0n)).toBe(true);
     });
 
+    it("accepts interned symbols", () => {
+      expect(isFabricCompatible(Symbol.for("k"))).toBe(true);
+      expect(isFabricCompatible(Symbol.for(""))).toBe(true);
+    });
+
     // -- Primitives that are NOT fabric-compatible --
 
-    it("rejects symbols", () => {
+    it("rejects unique (uninterned) symbols", () => {
       expect(isFabricCompatible(Symbol("test"))).toBe(false);
     });
 

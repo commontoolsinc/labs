@@ -167,7 +167,12 @@ export function shallowFabricFromNativeValueModern(
             "Cannot store function per se (needs to have a `toJSON()` method)",
           );
         case "symbol":
-          throw new Error(`Cannot store ${typeof value}`);
+          // Registry-interned symbols are valid fabric primitives; unique
+          // ones have no portable representation and are rejected.
+          if (Symbol.keyFor(value) === undefined) {
+            throw new Error("Cannot store unique (uninterned) symbol");
+          }
+          return value;
         default:
           throw new Error(
             `Shouldn't happen: Unrecognized type ${typeof value}`,
@@ -491,8 +496,12 @@ export function isFabricValueModern(
       return proto === null || proto === Object.prototype;
     }
 
+    case "symbol": {
+      // Registry-interned symbols are valid fabric values; unique ones are not.
+      return Symbol.keyFor(value) !== undefined;
+    }
+
     case "function":
-    case "symbol":
     default: {
       return false;
     }
@@ -712,10 +721,14 @@ function isFabricCompatibleInternal(
       return true;
     }
 
-    case "symbol":
+    case "symbol": {
+      // Registry-interned symbols are fabric-compatible; unique ones are not.
+      return Symbol.keyFor(value) !== undefined;
+    }
+
     case "function": {
       // Functions are only fabric-compatible if they have toJSON().
-      if (typeof value === "function" && hasToJSONMethod(value)) {
+      if (hasToJSONMethod(value)) {
         const converted = value.toJSON();
         return isFabricCompatibleInternal(converted, seen);
       }
