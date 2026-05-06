@@ -522,6 +522,88 @@ describe("JsonEncodingContext", () => {
   });
 
   // --------------------------------------------------------------------------
+  // Symbol (registry-interned)
+  // --------------------------------------------------------------------------
+
+  describe("Symbol", () => {
+    it("serializes Symbol.for('foo') to /Symbol@1 with the key as state", () => {
+      expect(toWireFormat(Symbol.for("foo") as FabricValue)).toEqual({
+        "/Symbol@1": "foo",
+      });
+    });
+
+    it("serializes Symbol.for('') (empty key)", () => {
+      expect(toWireFormat(Symbol.for("") as FabricValue)).toEqual({
+        "/Symbol@1": "",
+      });
+    });
+
+    it("round-trips an interned symbol to the same registry instance", () => {
+      const result = roundTrip(Symbol.for("hello") as FabricValue);
+      expect(typeof result).toBe("symbol");
+      expect(result).toBe(Symbol.for("hello"));
+    });
+
+    it("round-trips a key with non-ASCII characters", () => {
+      const key = "café-☕-\u{1F600}";
+      const result = roundTrip(Symbol.for(key) as FabricValue);
+      expect(result).toBe(Symbol.for(key));
+    });
+
+    it("round-trips inside arrays", () => {
+      const arr = [
+        Symbol.for("a"),
+        1,
+        Symbol.for("b"),
+      ] as unknown as FabricValue;
+      const result = roundTrip(arr) as unknown[];
+      expect(result[0]).toBe(Symbol.for("a"));
+      expect(result[1]).toBe(1);
+      expect(result[2]).toBe(Symbol.for("b"));
+    });
+
+    it("round-trips as object values", () => {
+      const obj = {
+        kind: Symbol.for("event"),
+        flag: Symbol.for("ready"),
+      } as unknown as FabricValue;
+      const result = roundTrip(obj) as Record<string, unknown>;
+      expect(result.kind).toBe(Symbol.for("event"));
+      expect(result.flag).toBe(Symbol.for("ready"));
+    });
+
+    it("does not intercept Symbol(desc) (unique / uninterned)", () => {
+      // canSerialize() returns false for unique symbols. The handler does not
+      // claim them, which means they fall through to the registry's default
+      // unhandled-value treatment rather than being silently coerced into a
+      // registry symbol.
+      const uniq = Symbol("nope") as FabricValue;
+      const wire = toWireFormat(uniq);
+      // The result should NOT be a Symbol@1 wrapping. (It will be an
+      // UnknownValue or similar; the precise shape isn't what matters here --
+      // what matters is that we didn't spuriously fabricate a registry key.)
+      expect(typeof wire === "object" && wire !== null && "/Symbol@1" in wire)
+        .toBe(false);
+    });
+
+    it("non-string state -> ProblematicValue (lenient)", () => {
+      const ctx = new JsonEncodingContext({ lenient: true });
+      const runtime: ReconstructionContext = {
+        getCell(_ref) {
+          throw new Error("getCell not implemented in test runtime");
+        },
+      };
+      const encodedJson = ENCODING_PREFIX +
+        JSON.stringify({ "/Symbol@1": 42 });
+      const result = ctx.decode(encodedJson, runtime);
+      expect(result).toBeInstanceOf(ProblematicValue);
+      expect((result as unknown as ProblematicValue).typeTag).toBe(
+        "Symbol@1",
+      );
+    });
+  });
+
+  // --------------------------------------------------------------------------
   // FabricEpochNsec
   // --------------------------------------------------------------------------
 
