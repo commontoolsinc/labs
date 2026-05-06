@@ -1,4 +1,5 @@
 import { Database } from "@db/sqlite";
+import { getLogger } from "@commonfabric/utils/logger";
 import type { FabricValue } from "../interface.ts";
 import { applyPatch } from "./patch.ts";
 import { parentPath, parsePointer, pathsOverlap } from "./path.ts";
@@ -16,6 +17,12 @@ import {
   type Reference,
   type SessionId,
 } from "../v2.ts";
+
+const logger = getLogger("memory-v2-engine", {
+  enabled: true,
+  level: "error",
+  logCountEvery: 0,
+});
 
 const PRAGMAS = `
   PRAGMA journal_mode = WAL;
@@ -716,7 +723,14 @@ export const readState = (
   let document: EntityDocument | null;
   switch (row.op) {
     case "set":
-      document = decodeStoredDocument(row.data);
+      document = decodeStoredDocument(row.data, {
+        table: "revision",
+        branch: resolvedBranch,
+        id,
+        seq: row.seq,
+        opIndex: row.op_index,
+        op: row.op,
+      });
       break;
     case "delete":
       document = null;
@@ -1044,12 +1058,20 @@ const findConflictSeq = (
       after_seq: afterSeq,
     }) as Iterable<{
       seq: number;
+      op_index: number;
       data: string | null;
     }>
   ) {
     if (
       patchOverlapsRead(
-        decodeStoredPatchList(conflict.data),
+        decodeStoredPatchList(conflict.data, {
+          table: "revision",
+          branch,
+          id,
+          seq: conflict.seq,
+          opIndex: conflict.op_index,
+          op: "patch",
+        }),
         readPath,
       )
     ) {
@@ -1107,13 +1129,29 @@ const selectCommitRevisions = (
     if (row.op === "set") {
       return {
         ...base,
-        document: decodeStoredDocument(row.data),
+        document: decodeStoredDocument(row.data, {
+          table: "revision",
+          branch: row.branch,
+          id: row.id,
+          seq: row.seq,
+          opIndex: row.op_index,
+          op: row.op,
+          commitSeq: row.commit_seq,
+        }),
       } satisfies AppliedRevision;
     }
     if (row.op === "patch") {
       return {
         ...base,
-        patches: decodeStoredPatchList(row.data),
+        patches: decodeStoredPatchList(row.data, {
+          table: "revision",
+          branch: row.branch,
+          id: row.id,
+          seq: row.seq,
+          opIndex: row.op_index,
+          op: row.op,
+          commitSeq: row.commit_seq,
+        }),
       } satisfies AppliedRevision;
     }
     return base as AppliedRevision;
@@ -1235,12 +1273,24 @@ const reconstructPatchedDocument = (
   if (snapshotRow && (!baseRow || snapshotRow.seq >= baseRow.seq)) {
     baseSeq = snapshotRow.seq;
     baseOpIndex = Number.MAX_SAFE_INTEGER;
-    document = decodeStoredDocument(snapshotRow.value);
+    document = decodeStoredDocument(snapshotRow.value, {
+      table: "snapshot",
+      branch,
+      id,
+      seq: snapshotRow.seq,
+    });
   } else if (baseRow) {
     baseSeq = baseRow.seq;
     baseOpIndex = baseRow.op_index;
     if (baseRow.op === "set") {
-      document = decodeStoredDocument(baseRow.data);
+      document = decodeStoredDocument(baseRow.data, {
+        table: "revision",
+        branch,
+        id,
+        seq: baseRow.seq,
+        opIndex: baseRow.op_index,
+        op: baseRow.op,
+      });
     }
   }
 
@@ -1256,7 +1306,14 @@ const reconstructPatchedDocument = (
   for (const patch of patches) {
     document = applyPatchDocument(
       document,
-      decodeStoredPatchList(patch.data),
+      decodeStoredPatchList(patch.data, {
+        table: "revision",
+        branch,
+        id,
+        seq: patch.seq,
+        opIndex: patch.op_index,
+        op: "patch",
+      }),
     );
   }
 
@@ -1355,18 +1412,97 @@ const ensureActiveBranch = (engine: Engine, branch: BranchName): void => {
 
 const emptyEntityDocument = (): EntityDocument => ({});
 
-const decodeStoredDocument = (data: string | null): EntityDocument => {
-  const parsed = decodeMemoryBoundary<unknown>(data ?? "null");
+type DecodeStoredContext = {
+  table: "revision" | "snapshot";
+  branch: BranchName;
+  id: EntityId;
+  seq: number;
+  opIndex?: number;
+  op?: Operation["op"];
+  commitSeq?: number;
+};
+
+const summarizeStoredData = (data: string | null): {
+  length: number;
+  prefix: string | null;
+} => ({
+  length: data?.length ?? 0,
+  prefix: data?.slice(0, 160) ?? null,
+});
+
+const classifyValue = (value: unknown): string => {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  return typeof value;
+};
+
+const logStoredDecodeFailure = (
+  key: string,
+  context: DecodeStoredContext,
+  data: string | null,
+  error: unknown,
+): void => {
+  logger.error(key, {
+    context,
+    storedData: summarizeStoredData(data),
+    error: error instanceof Error
+      ? { name: error.name, message: error.message, stack: error.stack }
+      : String(error),
+  });
+};
+
+const decodeStoredDocument = (
+  data: string | null,
+  context: DecodeStoredContext,
+): EntityDocument => {
+  let parsed: unknown;
+  try {
+    parsed = decodeMemoryBoundary<unknown>(data ?? "null");
+  } catch (error) {
+    logStoredDecodeFailure(
+      "stored-document-decode-failed",
+      context,
+      data,
+      error,
+    );
+    throw error;
+  }
   if (!isEntityDocument(parsed)) {
-    throw new Error("memory v2 stored documents must be plain object roots");
+    const error = new Error(
+      "memory v2 stored documents must be plain object roots",
+    );
+    logStoredDecodeFailure("stored-document-invalid-root", context, data, {
+      message: error.message,
+      decodedType: classifyValue(parsed),
+    });
+    throw error;
   }
   return parsed;
 };
 
-const decodeStoredPatchList = (data: string | null): PatchOp[] => {
-  const parsed = decodeMemoryBoundary<unknown>(data ?? "[]");
+const decodeStoredPatchList = (
+  data: string | null,
+  context: DecodeStoredContext,
+): PatchOp[] => {
+  let parsed: unknown;
+  try {
+    parsed = decodeMemoryBoundary<unknown>(data ?? "[]");
+  } catch (error) {
+    logStoredDecodeFailure(
+      "stored-patch-list-decode-failed",
+      context,
+      data,
+      error,
+    );
+    throw error;
+  }
   if (!Array.isArray(parsed)) {
-    throw new Error("memory v2 stored patches must be arrays");
+    const error = new Error("memory v2 stored patches must be arrays");
+    logStoredDecodeFailure("stored-patch-list-invalid-root", context, data, {
+      message: error.message,
+      decodedType: classifyValue(parsed),
+    });
+    throw error;
   }
   return parsed as PatchOp[];
 };

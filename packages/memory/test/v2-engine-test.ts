@@ -1,4 +1,9 @@
-import { assertEquals, assertExists, assertThrows } from "@std/assert";
+import {
+  assertEquals,
+  assertExists,
+  assertStringIncludes,
+  assertThrows,
+} from "@std/assert";
 import { toFileUrl } from "@std/path";
 import {
   resetDataModelConfig,
@@ -77,6 +82,15 @@ const toEntityDocument = (
   }
   return document as EntityDocument;
 };
+
+const serializeConsoleArgs = (calls: unknown[][]): string =>
+  JSON.stringify(
+    calls,
+    (_key, value) =>
+      value instanceof Error
+        ? { name: value.name, message: value.message, stack: value.stack }
+        : value,
+  );
 
 Deno.test("memory v2 engine persists set and delete commits as seq revisions", async () => {
   const { engine, path } = await createEngine();
@@ -251,6 +265,115 @@ Deno.test("memory v2 engine preserves source-only entity documents", async () =>
       toEntityDocument(undefined, toSourceLink("process:1")),
     );
   } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 engine logs stored document decode failures with row context", async () => {
+  const { engine, path } = await createEngine();
+  const consoleErrors: unknown[][] = [];
+  const originalConsoleError = console.error;
+  console.error = (...args: unknown[]) => {
+    consoleErrors.push(args);
+  };
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:bad-document",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:bad-document",
+          value: toEntityDocument({ ok: true }),
+        }],
+      },
+    });
+
+    engine.database.prepare(
+      `UPDATE revision
+       SET data = :data
+       WHERE branch = '' AND id = :id AND seq = 1 AND op_index = 0`,
+    ).run({
+      data: `fvj1:{"value":`,
+      id: "entity:bad-document",
+    });
+
+    assertThrows(() => read(engine, { id: "entity:bad-document" }));
+
+    const serialized = serializeConsoleArgs(consoleErrors);
+    assertStringIncludes(serialized, "stored-document-decode-failed");
+    assertStringIncludes(serialized, "entity:bad-document");
+    assertStringIncludes(serialized, "revision");
+    assertStringIncludes(serialized, "fvj1");
+  } finally {
+    console.error = originalConsoleError;
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 engine logs stored patch decode failures with row context", async () => {
+  const { engine, path } = await createEngine();
+  const consoleErrors: unknown[][] = [];
+  const originalConsoleError = console.error;
+  console.error = (...args: unknown[]) => {
+    consoleErrors.push(args);
+  };
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:bad-patch",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:bad-patch",
+          value: toEntityDocument({ count: 1 }),
+        }],
+      },
+    });
+    applyCommit(engine, {
+      sessionId: "session:bad-patch",
+      invocation: invocationFor(2),
+      authorization,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "entity:bad-patch",
+          patches: [{ op: "replace", path: "/value/count", value: 2 }],
+        }],
+      },
+    });
+
+    engine.database.prepare(
+      `UPDATE revision
+       SET data = :data
+       WHERE branch = '' AND id = :id AND seq = 2 AND op_index = 0`,
+    ).run({
+      data: `fvj1:[`,
+      id: "entity:bad-patch",
+    });
+
+    assertThrows(() => read(engine, { id: "entity:bad-patch" }));
+
+    const serialized = serializeConsoleArgs(consoleErrors);
+    assertStringIncludes(serialized, "stored-patch-list-decode-failed");
+    assertStringIncludes(serialized, "entity:bad-patch");
+    assertStringIncludes(serialized, "revision");
+    assertStringIncludes(serialized, "patch");
+    assertStringIncludes(serialized, "fvj1");
+  } finally {
+    console.error = originalConsoleError;
     close(engine);
     await Deno.remove(path);
   }
