@@ -535,6 +535,57 @@ Deno.test("generateText result cell uses narrowest input scope", async () => {
   }
 });
 
+Deno.test("llmDialog result cell uses narrowest input scope", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+
+  try {
+    const { pattern, llmDialog } = createTrustedBuilder(runtime).commonfabric;
+
+    const messagesBase = runtime.getCell<any[]>(
+      space,
+      "llmDialog user scoped messages",
+      undefined,
+      tx,
+    );
+    const messages = createCell<any[]>(
+      runtime,
+      { ...messagesBase.getAsNormalizedFullLink(), scope: "user" },
+      tx,
+    );
+    messages.set([]);
+
+    const Root = pattern<{ messages: any[] }>(({ messages }) => ({
+      dialog: llmDialog({ messages }),
+    }));
+
+    const resultCell = runtime.getCell(
+      space,
+      "llmDialog result cell uses narrowest input scope",
+      undefined,
+      tx,
+    );
+
+    const result = runtime.run(tx, Root, { messages }, resultCell);
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+
+    const rawDialog = result.key("dialog").getRaw();
+    const dialogLink = parseLink(rawDialog, result);
+    assertEquals(dialogLink?.scope, "user");
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
 Deno.test("wish current-space output follows query input scope", async () => {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({
