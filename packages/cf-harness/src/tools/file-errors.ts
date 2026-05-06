@@ -101,7 +101,7 @@ const messageForFileToolError = (
 
 export const createStructuredFileToolErrorOutput = (
   context: HarnessToolContext,
-  toolId: "read_file" | "write_file" | "edit_file",
+  toolId: "read_file" | "view_image" | "write_file" | "edit_file",
   options: {
     path: string;
     code: StructuredFileToolErrorCode;

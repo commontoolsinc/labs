@@ -703,6 +703,7 @@ export const classifyBuiltinToolFailure = (
         toolId,
       );
     case "read_file":
+    case "view_image":
     case "edit_file":
     case "write_file":
       return classifyStructuredFileToolFailure(toolId, output, at);
@@ -775,7 +776,7 @@ const fileFailureKindForCode = (
 };
 
 const classifyStructuredFileToolFailure = (
-  toolId: "read_file" | "write_file" | "edit_file",
+  toolId: "read_file" | "view_image" | "write_file" | "edit_file",
   output: unknown,
   at: string,
 ): HarnessFailureRecord | undefined => {

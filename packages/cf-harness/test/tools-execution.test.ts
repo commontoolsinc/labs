@@ -1,4 +1,5 @@
 import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
+import { decodeBase64 } from "@std/encoding/base64";
 import { join } from "@std/path";
 import { normalize } from "@std/path/posix";
 import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
@@ -15,6 +16,7 @@ import { editFileTool } from "../src/tools/edit-file.ts";
 import { readFileTool } from "../src/tools/read-file.ts";
 import { RESERVED_ARTIFACT_PATH_DETAIL } from "../src/tools/reserved-artifacts.ts";
 import { readSkillResourceTool } from "../src/tools/read-skill-resource.ts";
+import { viewImageTool } from "../src/tools/view-image.ts";
 import { writeFileTool } from "../src/tools/write-file.ts";
 import type { HarnessToolContext } from "../src/tools/types.ts";
 import type {
@@ -28,6 +30,10 @@ import type {
   SandboxRuntime,
   SandboxShellRequest,
 } from "../src/sandbox/types.ts";
+
+const ONE_PIXEL_PNG = decodeBase64(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p94AAAAASUVORK5CYII=",
+);
 
 class FakeSandboxRuntime implements SandboxRuntime {
   readonly kind = "docker-runsc-cfc" as const;
@@ -116,14 +122,15 @@ const createContext = (
   artifactRootHostPath?: string,
   skillRegistry?: HarnessSkillRegistry,
   skillResourceReads: HarnessSkillResourceRead[] = [],
+  workspaceHostPath = "/tmp/cf-harness-workspace",
 ): HarnessToolContext => {
   let currentDir = initialCurrentDir;
   let sequence = 0;
   let cfcInvocationSequence = 0;
-  const workspaceHostPath = "/tmp/cf-harness-workspace";
   return {
     runId: "run-1",
     cfcEnforcementMode,
+    workspaceHostPath,
     skillRegistry,
     get currentDir() {
       return currentDir;
@@ -1448,6 +1455,73 @@ Deno.test("write_file tool denies reserved artifact paths before shelling out", 
       message:
         "permission denied: /workspace/.cf-harness-artifacts/run-1/tool-output.json",
       path: "/workspace/.cf-harness-artifacts/run-1/tool-output.json",
+      detail: RESERVED_ARTIFACT_PATH_DETAIL,
+    },
+  });
+  assertEquals(sandbox.calls, []);
+});
+
+Deno.test("view_image tool attaches a workspace image without shelling out", async () => {
+  const workspace = await Deno.realPath(await Deno.makeTempDir());
+  await Deno.writeFile(join(workspace, "capture.png"), ONE_PIXEL_PNG);
+  const sandbox = new FakeSandboxRuntime();
+
+  const output = await viewImageTool.invoke(
+    createContext(
+      sandbox,
+      "/workspace",
+      new FakeProcessRunner(),
+      "observe",
+      undefined,
+      undefined,
+      [],
+      workspace,
+    ),
+    { path: "capture.png" },
+  );
+
+  assertEquals(output.outputId, "run-1:view_image:1");
+  assertEquals(output.path, "/workspace/capture.png");
+  if (!("imageAttachment" in output)) {
+    throw new Error("expected view_image success output");
+  }
+  assertEquals(output.mediaType, "image/png");
+  assertEquals(output.bytes, ONE_PIXEL_PNG.byteLength);
+  assertEquals(output.imageAttachment.hostPath, join(workspace, "capture.png"));
+  assertEquals(sandbox.calls, []);
+});
+
+Deno.test("view_image tool denies reserved artifact paths", async () => {
+  const workspace = await Deno.realPath(await Deno.makeTempDir());
+  const artifactRoot = join(workspace, ".cf-harness-artifacts");
+  await Deno.mkdir(artifactRoot, { recursive: true });
+  await Deno.writeFile(join(artifactRoot, "capture.png"), ONE_PIXEL_PNG);
+  const sandbox = new FakeSandboxRuntime();
+
+  const output = await viewImageTool.invoke(
+    createContext(
+      sandbox,
+      "/workspace",
+      new FakeProcessRunner(),
+      "observe",
+      artifactRoot,
+      undefined,
+      [],
+      workspace,
+    ),
+    { path: ".cf-harness-artifacts/capture.png" },
+  );
+
+  assertEquals(output, {
+    outputId: "run-1:view_image:1",
+    path: "/workspace/.cf-harness-artifacts/capture.png",
+    ok: false,
+    error: {
+      type: "cf-harness.structured-file-tool-error",
+      code: "permission_denied",
+      message:
+        "permission denied: /workspace/.cf-harness-artifacts/capture.png",
+      path: "/workspace/.cf-harness-artifacts/capture.png",
       detail: RESERVED_ARTIFACT_PATH_DETAIL,
     },
   });
