@@ -198,6 +198,8 @@ export function cloneIfNecessary<T extends FabricValue>(
  *
  * @param value - The value to check.
  * @returns `true` if the value is fabric-compatible per se, `false` otherwise.
+ *
+ * This function is a TypeScript type guard for `FabricValueLayer`.
  */
 export function isFabricValue(
   value: unknown,
@@ -218,6 +220,8 @@ export function isFabricValue(
  *
  * @param value - The value to check.
  * @returns `true` if the value can be stored, `false` otherwise.
+ *
+ * This function is a TypeScript type guard for `FabricValue | FabricNativeObject`.
  */
 export function isFabricCompatible(
   value: unknown,

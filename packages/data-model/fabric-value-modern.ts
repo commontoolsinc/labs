@@ -197,6 +197,8 @@ export function shallowFabricFromNativeValueModern(
  *
  * TODO: Remove `toJSON()` support once all callers have migrated to
  * `[DECONSTRUCT]`. See spec Section 7.1.
+ *
+ * This function is a TypeScript type guard for `{ toJSON: () => unknown }`.
  */
 function hasToJSONMethod(
   value: unknown,
@@ -465,6 +467,8 @@ function convertErrorInternals(
  * flag is ON. See session 2 notes about the stack overflow this caused.
  *
  * Used when the `modernDataModel` flag is ON.
+ *
+ * This function is a TypeScript type guard for `FabricValueLayer`.
  */
 export function isFabricValueModern(
   value: unknown,
@@ -527,6 +531,8 @@ export function isFabricValueModern(
  * objects/functions with `toJSON()` methods
  * that return fabric values. It checks recursively, so all nested values in
  * arrays and objects must also be fabric-compatible or convertible.
+ *
+ * This function is a TypeScript type guard for `FabricValue | FabricNativeObject`.
  */
 export function isFabricCompatibleModern(
   value: unknown,
