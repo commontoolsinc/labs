@@ -7,16 +7,16 @@ import {
 import { ExplicitTagValue } from "./explicit-tag-value.ts";
 
 /**
- * Holds a value whose deconstruction or reconstruction failed. Preserves the
- * original tag and raw state for round-tripping and debugging. Used in lenient
- * mode to allow graceful degradation rather than hard failures.
- * See Section 3.5 of the formal spec.
+ * Container for a value whose deconstruction or reconstruction failed.
+ * Preserves the original tag and raw state for round-tripping and debugging.
+ * Used in lenient mode to allow graceful degradation rather than hard
+ * failures. See Section 3.5 of the formal spec.
  */
 export class ProblematicValue extends ExplicitTagValue {
   constructor(
     typeTag: string,
     state: FabricValue,
-    /** A description of what went wrong. */
+    /** Description of what went wrong. */
     readonly error: string,
   ) {
     super(typeTag, state);

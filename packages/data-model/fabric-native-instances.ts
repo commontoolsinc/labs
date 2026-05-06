@@ -50,7 +50,8 @@ export const UNSAFE_KEYS: FrozenSet<string> = new FrozenSet([
 ]);
 
 /**
- * Copy own enumerable properties from `source` to `target`, skipping
+ * Helper for `copyError()` and `FabricError.[DECONSTRUCT]()`, which copies
+ * own enumerable properties from `source` to `target`, skipping
  * prototype-sensitive keys (`__proto__`, `constructor`). When `noOverride`
  * is `true`, keys already present on `target` are also skipped.
  */
@@ -67,7 +68,7 @@ function copyOwnSafeProperties(
 }
 
 /**
- * Create a shallow copy of an Error, preserving constructor, name, message,
+ * Creates a shallow copy of an Error, preserving constructor, name, message,
  * stack, cause, and custom enumerable properties. Used by `toNativeValue()`
  * when the freeze state of the wrapped Error doesn't match the requested state.
  */
@@ -99,8 +100,9 @@ const ERROR_CLASS_BY_TYPE: ReadonlyMap<string, ErrorConstructor> = new Map([
 ]);
 
 /**
- * Return the `Error` constructor for the given type string (e.g. `"TypeError"`).
- * Falls back to the base `Error` constructor for unknown types.
+ * Helper for `FabricError.[RECONSTRUCT]()`, which returns the `Error`
+ * constructor for the given type string (e.g. `"TypeError"`). Falls back
+ * to the base `Error` constructor for unknown types.
  */
 function errorClassFromType(type: string): ErrorConstructor {
   return ERROR_CLASS_BY_TYPE.get(type) ?? Error;
@@ -119,18 +121,19 @@ function errorClassFromType(type: string): ErrorConstructor {
  */
 export abstract class FabricNativeWrapper<T extends object>
   extends FabricInstance {
+  /** The wire format tag for this wrapper's type (e.g. `TAGS.Error`). */
   abstract readonly typeTag: string;
 
   /** The wrapped native value, used by `toNativeValue` for freeze-state checks. */
   protected abstract get wrappedValue(): T;
 
-  /** Convert the wrapped value to frozen form (only called on state mismatch). */
+  /** Converts the wrapped value to frozen form (only called on state mismatch). */
   protected abstract toNativeFrozen(): T;
 
-  /** Convert the wrapped value to thawed form (only called on state mismatch). */
+  /** Converts the wrapped value to thawed form (only called on state mismatch). */
   protected abstract toNativeThawed(): T;
 
-  /** Return the underlying native value, optionally frozen. */
+  /** Returns the underlying native value, optionally frozen. */
   toNativeValue(frozen: boolean): T {
     const value = this.wrappedValue;
     if (frozen === Object.isFrozen(value)) return value;
@@ -150,7 +153,7 @@ export abstract class FabricNativeWrapper<T extends object>
  * See Section 1.4.1 of the formal spec.
  */
 export class FabricError extends FabricNativeWrapper<Error> {
-  /** The type tag used in the wire format (`TAGS.Error`). */
+  /** @inheritDoc */
   readonly typeTag = TAGS.Error;
 
   constructor(
@@ -161,7 +164,7 @@ export class FabricError extends FabricNativeWrapper<Error> {
   }
 
   /**
-   * Deconstruct into essential state for serialization. Returns type, name,
+   * Deconstructs into essential state for serialization. Returns type, name,
    * message, stack, cause, and custom enumerable properties. Does NOT recurse
    * into nested values -- the serialization system handles that.
    *
@@ -197,24 +200,28 @@ export class FabricError extends FabricNativeWrapper<Error> {
     return state as FabricValue;
   }
 
+  /** @inheritDoc */
   protected shallowUnfrozenClone(): FabricError {
     return new FabricError(this.error);
   }
 
+  /** @inheritDoc */
   protected get wrappedValue(): Error {
     return this.error;
   }
 
+  /** @inheritDoc */
   protected toNativeFrozen(): Error {
     return Object.freeze(copyError(this.error));
   }
 
+  /** @inheritDoc */
   protected toNativeThawed(): Error {
     return copyError(this.error);
   }
 
   /**
-   * Reconstruct a `FabricError` from its essential state. Nested values
+   * Reconstructs a `FabricError` from its essential state. Nested values
    * in `state` have already been reconstructed by the serialization system.
    * Returns a `FabricError` wrapping the reconstructed `Error`; callers
    * who need the native `Error` use `nativeFromFabricValue()`.
@@ -268,6 +275,7 @@ export class FabricError extends FabricNativeWrapper<Error> {
  */
 export class FabricMap
   extends FabricNativeWrapper<Map<FabricValue, FabricValue>> {
+  /** @inheritDoc */
   readonly typeTag = TAGS.Map;
   constructor(readonly map: Map<FabricValue, FabricValue>) {
     super();
@@ -277,18 +285,22 @@ export class FabricMap
     throw new Error("FabricMap: not yet implemented");
   }
 
+  /** @inheritDoc */
   protected shallowUnfrozenClone(): FabricMap {
     return new FabricMap(this.map);
   }
 
+  /** @inheritDoc */
   protected get wrappedValue(): Map<FabricValue, FabricValue> {
     return this.map;
   }
 
+  /** @inheritDoc */
   protected toNativeFrozen(): FrozenMap<FabricValue, FabricValue> {
     return new FrozenMap(this.map);
   }
 
+  /** @inheritDoc */
   protected toNativeThawed(): Map<FabricValue, FabricValue> {
     return new Map(this.map);
   }
@@ -307,6 +319,7 @@ export class FabricMap
  * wrapped collection are not supported on non-Error wrappers.
  */
 export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
+  /** @inheritDoc */
   readonly typeTag = TAGS.Set;
   constructor(readonly set: Set<FabricValue>) {
     super();
@@ -316,18 +329,22 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
     throw new Error("FabricSet: not yet implemented");
   }
 
+  /** @inheritDoc */
   protected shallowUnfrozenClone(): FabricSet {
     return new FabricSet(this.set);
   }
 
+  /** @inheritDoc */
   protected get wrappedValue(): Set<FabricValue> {
     return this.set;
   }
 
+  /** @inheritDoc */
   protected toNativeFrozen(): FrozenSet<FabricValue> {
     return new FrozenSet(this.set);
   }
 
+  /** @inheritDoc */
   protected toNativeThawed(): Set<FabricValue> {
     return new Set(this.set);
   }
@@ -348,7 +365,7 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
  * See Section 1.4.1 of the formal spec.
  */
 export class FabricRegExp extends FabricNativeWrapper<RegExp> {
-  /** The type tag used in the wire format (`TAGS.RegExp`). */
+  /** @inheritDoc */
   readonly typeTag = TAGS.RegExp;
 
   constructor(
@@ -361,7 +378,7 @@ export class FabricRegExp extends FabricNativeWrapper<RegExp> {
   }
 
   /**
-   * Deconstruct into essential state for serialization. Returns
+   * Deconstructs into essential state for serialization. Returns
    * `{ source, flags, flavor }` -- the values needed to reconstruct the
    * RegExp. Extra enumerable properties on the RegExp cause rejection.
    */
@@ -374,16 +391,18 @@ export class FabricRegExp extends FabricNativeWrapper<RegExp> {
     } as FabricValue;
   }
 
+  /** @inheritDoc */
   protected shallowUnfrozenClone(): FabricRegExp {
     return new FabricRegExp(this.regex, this.flavor);
   }
 
+  /** @inheritDoc */
   protected get wrappedValue(): RegExp {
     return this.regex;
   }
 
   /**
-   * Return a frozen copy of the RegExp. A frozen RegExp has an immutable
+   * Returns a frozen copy of the RegExp. A frozen RegExp has an immutable
    * `lastIndex`, so stateful methods (`exec()`, `test()`) won't work
    * correctly -- but that matches the "death before confusion" principle.
    */
@@ -391,12 +410,13 @@ export class FabricRegExp extends FabricNativeWrapper<RegExp> {
     return Object.freeze(new RegExp(this.regex));
   }
 
+  /** @inheritDoc */
   protected toNativeThawed(): RegExp {
     return new RegExp(this.regex);
   }
 
   /**
-   * Reconstruct a `FabricRegExp` from its essential state
+   * Reconstructs a `FabricRegExp` from its essential state
    * (`{ source, flags, flavor }`).
    */
   static [RECONSTRUCT](
@@ -412,9 +432,10 @@ export class FabricRegExp extends FabricNativeWrapper<RegExp> {
 }
 
 /**
- * Reject RegExp instances with extra enumerable properties. The built-in
- * `lastIndex` property is not enumerable, so `Object.keys()` won't see it.
- * Any enumerable own property is therefore user-added and causes rejection.
+ * Helper for `FabricRegExp.[DECONSTRUCT]()`, which rejects RegExp instances
+ * with extra enumerable properties. The built-in `lastIndex` property is not
+ * enumerable, so `Object.keys()` won't see it. Any enumerable own property
+ * is therefore user-added and causes rejection.
  */
 function rejectExtraRegExpProperties(regex: RegExp): void {
   if (Object.keys(regex).length > 0) {
