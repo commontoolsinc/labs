@@ -1,18 +1,24 @@
 ---
 name: pattern-implement
-description: Build sub-patterns with minimal UI
+description: Build Common Fabric patterns and sub-patterns
 user-invocable: false
 ---
 
 Use the `cf` skill, or read `skills/cf/SKILL.md`, for CLI documentation when
 running commands.
 
-# Implement Sub-Pattern
+# Implement Pattern
 
 ## Core Rule
 
-Write ONE sub-pattern with minimal stub UI. No styling, just basic
-inputs/buttons to verify data flow.
+Match the implementation mode to the task.
+
+For Pattern Factory Build, implement the top-level pattern deliverable described
+by the brief, spec, UX design, and UI design. Use sub-patterns only when they
+make the implementation clearer.
+
+For an isolated sub-pattern task, write one sub-pattern with minimal UI first so
+data flow can be verified before polish.
 
 **Always use `pattern<Input, Output>()`** - expose actions as `Stream<T>` for
 testability.
@@ -25,6 +31,8 @@ testability.
 
 ## Read First
 
+- `docs/common/ai/pattern-factory-build-guide.md` - when working in a Pattern
+  Factory Build workspace
 - `docs/common/ai/pattern-development-guide.md` - especially the SES authoring
   limits and escape-hatch guidance
 - `docs/common/patterns/` - especially `meta/` for generalizable idioms
@@ -51,6 +59,12 @@ is already bound to a cell, usually via `$value` or `$checked`, let that binding
 own the control value. Use `oncf-change` / `oncf-input` only for dependent state
 or other side effects.
 
+Do not invoke streams or writes while assigning JSX event props. For example,
+`onClick={selectItem.send(index)}` runs during render; use
+`onClick={() => selectItem.send(index)}` or a bound `handler()` instead. This is
+especially important inside `.map()` bodies because render-time writes can make
+`raw:map` non-idempotent.
+
 **handler()** - Reused with different bindings:
 
 ```tsx
@@ -73,5 +87,5 @@ return <>{items.map((item) => <ItemPattern item={item} />)}</>;
 ## Done When
 
 - Pattern compiles: `deno task cf check pattern.tsx --no-run`
-- Minimal UI renders inputs/buttons
+- The top-level UI or sub-pattern UI renders the behavior needed for the task
 - Ready for testing

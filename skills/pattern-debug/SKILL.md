@@ -29,6 +29,7 @@ piece issues.
    - `docs/development/debugging/gotchas/handler-inside-pattern.md`
    - `docs/development/debugging/gotchas/filter-map-find-not-a-function.md`
    - `docs/development/debugging/gotchas/onclick-inside-computed.md`
+   - `docs/development/debugging/gotchas/immediate-event-invocation.md`
 
 4. **Simplify to minimal reproduction:**
    - Comment out code until error disappears
@@ -54,6 +55,14 @@ piece issues.
 
 - Ensure Output type includes action as Stream<void>
 - Use .send() not .get() to trigger
+
+**`raw:map` never settles:**
+
+- Inspect `.map()` bodies for event props that invoke streams or writes during
+  render, such as `onClick={stream.send(index)}`
+- Wrap argument-bearing sends in a callback, such as
+  `onClick={() => stream.send(index)}`
+- See `docs/development/debugging/gotchas/immediate-event-invocation.md`
 
 **Browser UI stays stale after a write:**
 
