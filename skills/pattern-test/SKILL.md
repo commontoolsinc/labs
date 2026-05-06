@@ -10,6 +10,12 @@ Start with the shared testing guidance in:
 
 Read that guide first. It is the canonical reference.
 
+When working in a Pattern Factory Build workspace, also read:
+
+- `docs/common/ai/pattern-factory-build-guide.md`
+
+It defines Pattern Factory's build completion gate and expected coverage shape.
+
 For patterns that stamp timestamps or IDs, prefer deterministic assertions over
 recomputing time/random values inside the test itself.
 

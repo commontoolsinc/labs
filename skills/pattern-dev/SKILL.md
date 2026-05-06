@@ -9,6 +9,13 @@ Start with the shared pattern development guidance in:
 
 Read that guide first. It is the canonical reference.
 
+When working in a Pattern Factory Build workspace, also read:
+
+- `docs/common/ai/pattern-factory-build-guide.md`
+
+That guide defines the top-level build contract, verification posture, and
+documentation discipline for Pattern Factory runs.
+
 When you're unsure whether a reactive expression site lowers the way you expect,
 inspect the emitted source directly with:
 
@@ -73,6 +80,7 @@ Task({
 
 Phase skills consult as needed:
 
+- Pattern Factory Build: `docs/common/ai/pattern-factory-build-guide.md`
 - Types: `docs/common/concepts/types-and-schemas/`
 - Actions/handlers: `docs/common/concepts/action.md`,
   `docs/common/concepts/handler.md`
