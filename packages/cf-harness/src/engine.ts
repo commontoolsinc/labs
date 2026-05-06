@@ -104,6 +104,10 @@ import {
   type ReadFileToolOutput,
 } from "./tools/read-file.ts";
 import {
+  type ViewImageToolInput,
+  type ViewImageToolOutput,
+} from "./tools/view-image.ts";
+import {
   type ReadSkillResourceToolInput,
   type ReadSkillResourceToolOutput,
 } from "./tools/read-skill-resource.ts";
@@ -117,6 +121,7 @@ export interface BuiltinToolInputMap {
   bash: BashToolInput;
   "bash-no-sandbox": BashToolInput;
   read_file: ReadFileToolInput;
+  view_image: ViewImageToolInput;
   read_skill_resource: ReadSkillResourceToolInput;
   edit_file: EditFileToolInput;
   write_file: WriteFileToolInput;
@@ -127,6 +132,7 @@ export interface BuiltinToolOutputMap {
   bash: BashToolOutput;
   "bash-no-sandbox": BashToolOutput;
   read_file: ReadFileToolOutput;
+  view_image: ViewImageToolOutput;
   read_skill_resource: ReadSkillResourceToolOutput;
   edit_file: EditFileToolOutput;
   write_file: WriteFileToolOutput;
@@ -1004,6 +1010,7 @@ export class CfHarnessEngine {
       runId: this.#runState.runId,
       cfcEnforcementMode: this.#runState.cfcEnforcementMode,
       currentDir: this.#runState.currentDir,
+      workspaceHostPath: this.workspaceHostPath,
       skillRegistry: this.#runState.skillRegistry,
       sandbox: this.sandbox,
       hostProcessRunner: this.hostProcessRunner,

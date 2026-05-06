@@ -359,6 +359,7 @@ Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant 
     [
       "bash",
       "read_file",
+      "view_image",
       "read_skill_resource",
       "edit_file",
       "write_file",
@@ -377,6 +378,110 @@ Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant 
       }),
     },
   );
+});
+
+Deno.test("CfHarnessPromptLoop attaches images loaded by view_image on the next model turn", async () => {
+  const workspace = await Deno.realPath(await Deno.makeTempDir());
+  await Deno.writeFile(join(workspace, "capture.png"), ONE_PIXEL_PNG);
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      workspaceHostPath: workspace,
+      runId: "run-view-image",
+      model: "gpt-5.4",
+    }),
+    fetchFn: (_input, init) => {
+      fetchCalls.push(init ?? {});
+      const payload = fetchCalls.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-image",
+                type: "function",
+                function: {
+                  name: "view_image",
+                  arguments: JSON.stringify({ path: "capture.png" }),
+                },
+              }],
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "The image was available on the second turn.",
+            },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    systemPrompt: "You are a test harness.",
+    prompt: "Inspect the image if needed.",
+  });
+
+  assertEquals(
+    result.finalAssistantText,
+    "The image was available on the second turn.",
+  );
+  const toolMessage = result.transcript.at(-3);
+  if (toolMessage?.role !== "tool") {
+    throw new Error("expected view_image tool message");
+  }
+  const modelFacingOutput = JSON.parse(toolMessage.content) as {
+    outputId: string;
+    path: string;
+    mediaType: string;
+    bytes: number;
+    digest: string;
+    imageAttached: boolean;
+    imageAttachment?: unknown;
+  };
+  assertEquals(modelFacingOutput.outputId, "run-view-image:view_image:1");
+  assertEquals(modelFacingOutput.path, "/workspace/capture.png");
+  assertEquals(modelFacingOutput.mediaType, "image/png");
+  assertEquals(modelFacingOutput.bytes, ONE_PIXEL_PNG.byteLength);
+  assertEquals(modelFacingOutput.imageAttached, true);
+  assertEquals(modelFacingOutput.imageAttachment, undefined);
+
+  const followup = result.transcript.at(-2);
+  if (followup?.role !== "user") {
+    throw new Error("expected view_image followup user message");
+  }
+  assertEquals(
+    followup.imageAttachments?.[0]?.hostPath,
+    join(workspace, "capture.png"),
+  );
+
+  const secondRequest = JSON.parse(String(fetchCalls[1]?.body)) as {
+    messages: Array<{ role: string; content: unknown }>;
+  };
+  const requestFollowup = secondRequest.messages.at(-1);
+  assertEquals(requestFollowup?.role, "user");
+  assert(Array.isArray(requestFollowup?.content));
+  assertEquals(requestFollowup.content[0], {
+    type: "text",
+    text:
+      "Image loaded by view_image from /workspace/capture.png (outputId: run-view-image:view_image:1).",
+  });
+  const imagePart = requestFollowup.content[1] as {
+    type?: string;
+    image_url?: { url?: string };
+  };
+  assertEquals(imagePart.type, "image_url");
+  assert(imagePart.image_url?.url?.startsWith("data:image/png;base64,"));
 });
 
 Deno.test("CfHarnessPromptLoop inserts context messages before the user prompt", async () => {
@@ -714,6 +819,7 @@ Deno.test("CfHarnessPromptLoop delegates one fresh child run and returns a summa
     [
       "bash",
       "read_file",
+      "view_image",
       "read_skill_resource",
       "edit_file",
       "write_file",
@@ -722,7 +828,7 @@ Deno.test("CfHarnessPromptLoop delegates one fresh child run and returns a summa
   );
   assertEquals(
     requestBodies[1].tools.map((tool) => tool.function.name),
-    ["bash", "read_file", "edit_file", "write_file"],
+    ["bash", "read_file", "view_image", "edit_file", "write_file"],
   );
   assertEquals(
     requestBodies[1].messages.map((message) => message.role),
@@ -788,6 +894,7 @@ Deno.test("CfHarnessPromptLoop delegates one fresh child run and returns a summa
   assertEquals(output.subagent.manifest.allowedToolIds, [
     "bash",
     "read_file",
+    "view_image",
     "edit_file",
     "write_file",
   ]);
@@ -1342,7 +1449,7 @@ Deno.test("CfHarnessPromptLoop lets an explicit subagent profile expand child to
   );
   assertEquals(
     requestBodies[1].tools.map((tool) => tool.function.name),
-    ["bash", "read_file", "edit_file", "write_file"],
+    ["bash", "read_file", "view_image", "edit_file", "write_file"],
   );
   assertEquals(result.runState.cfcPolicySnapshot?.parentTools, {
     allowance: "restricted",
@@ -1369,6 +1476,7 @@ Deno.test("CfHarnessPromptLoop lets an explicit subagent profile expand child to
   assertEquals(output.subagent.manifest.allowedToolIds, [
     "bash",
     "read_file",
+    "view_image",
     "edit_file",
     "write_file",
   ]);
@@ -1441,6 +1549,7 @@ Deno.test("CfHarnessPromptLoop keeps bash-no-sandbox unavailable to the parent b
     [
       "bash",
       "read_file",
+      "view_image",
       "read_skill_resource",
       "edit_file",
       "write_file",
@@ -1545,7 +1654,7 @@ Deno.test("CfHarnessPromptLoop gives bash-no-sandbox only to the authorized brow
   );
   assertEquals(
     requestBodies[1].tools.map((tool) => tool.function.name),
-    ["bash-no-sandbox", "read_file"],
+    ["bash-no-sandbox", "read_file", "view_image"],
   );
   assertEquals(
     requestBodies[1].messages[0].content.includes(
@@ -1563,6 +1672,7 @@ Deno.test("CfHarnessPromptLoop gives bash-no-sandbox only to the authorized brow
   assertEquals(output.subagent.manifest.allowedToolIds, [
     "bash-no-sandbox",
     "read_file",
+    "view_image",
   ]);
   assertEquals(output.subagent.manifest.hostToolIds, ["bash-no-sandbox"]);
   assertEquals(result.finalAssistantText, "Browser-profile parent completed.");
@@ -1710,7 +1820,7 @@ Deno.test("CfHarnessPromptLoop keeps browser subagent observations behind struct
     );
     assertEquals(
       requestBodies[1].tools.map((tool) => tool.function.name),
-      ["bash-no-sandbox", "read_file"],
+      ["bash-no-sandbox", "read_file", "view_image"],
     );
     assertEquals(
       requestBodies[1].messages[0].content.includes(
@@ -2061,7 +2171,7 @@ Deno.test("CfHarnessPromptLoop reports child run failures through delegate_task 
   );
   assertEquals(
     requestBodies[1].tools.map((tool) => tool.function.name),
-    ["bash", "read_file", "edit_file", "write_file"],
+    ["bash", "read_file", "view_image", "edit_file", "write_file"],
   );
   const toolMessage = result.transcript.at(-2);
   if (toolMessage?.role !== "tool") {
@@ -2124,7 +2234,13 @@ Deno.test("CfHarnessPromptLoop continues subagent ids from retained run state", 
       depth: 1,
       cfcEnforcementMode: "disabled",
       model: "gpt-5.4",
-      allowedToolIds: ["bash", "read_file", "edit_file", "write_file"],
+      allowedToolIds: [
+        "bash",
+        "read_file",
+        "view_image",
+        "edit_file",
+        "write_file",
+      ],
       hostToolIds: [],
       maxModelTurns: 8,
       returnPolicy: {

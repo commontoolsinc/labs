@@ -5,6 +5,7 @@ import { delegateTaskTool } from "./delegate-task.ts";
 import { editFileTool } from "./edit-file.ts";
 import { readFileTool } from "./read-file.ts";
 import { readSkillResourceTool } from "./read-skill-resource.ts";
+import { viewImageTool } from "./view-image.ts";
 import { writeFileTool } from "./write-file.ts";
 import type { HarnessToolDefinition } from "./types.ts";
 
@@ -12,6 +13,7 @@ export const BUILTIN_TOOLS = [
   bashTool,
   bashNoSandboxTool,
   readFileTool,
+  viewImageTool,
   readSkillResourceTool,
   editFileTool,
   writeFileTool,
