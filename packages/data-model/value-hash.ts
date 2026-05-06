@@ -212,11 +212,6 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
         throw new Error("Cannot hash unique (uninterned) symbol");
       }
       hasher.update(TAG_SYMBOL_BYTES);
-      // Delegate to `getStringRep()` so the key encoding picks up the
-      // same LRU cache and long-string-hashing fallback that string
-      // values get. The emitted bytes are `TAG_SYMBOL` followed by a
-      // self-tagged string-rep (`TAG_STRING + len + utf8` for short
-      // keys; `TAG_STRING_HASH + hash` for long ones).
       hasher.update(getStringRep(key));
       break;
     }
@@ -495,7 +490,7 @@ function hashOfInternal(
 
     case "symbol": {
       // Only registry-interned symbols are hashable; unique symbols have
-      // no portable representation. The throw inside `feedValue` covers the
+      // no portable representation. The throw inside `feedValue()` covers the
       // unique case structurally; check here so that the cache key is sound.
       if (Symbol.keyFor(value) === undefined) {
         throw new Error("Cannot hash unique (uninterned) symbol");
