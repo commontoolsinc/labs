@@ -41,9 +41,10 @@ What works today:
   - `bash-no-sandbox` (provisional host shell for named subagent profiles only)
   - `read_file`
   - `read_skill_resource`
+  - `edit_file`
   - `write_file`
   - `delegate_task`
-- whole-file replace/create plus append writes
+- targeted exact-string edits plus whole-file replace/create and append writes
 - bounded OpenAI-compatible prompt/tool loop
 - single-child subagent delegation with fresh child prompt context, explicit
   default/browser child profiles, retained child run references, and a sanitized
@@ -226,9 +227,9 @@ The provisional browser profile is the only CLI-supported path to
 subagent result. Browser/page output is treated as untrusted child-local data;
 with a `returnSchema`, parent-visible free-form strings are replaced by opaque
 links while raw observations stay in child artifacts. The browser child can read
-workspace files but does not receive `write_file`, so it should return findings
-through the structured return channel rather than by writing browser
-observations into the workspace. The host shell is policy-restricted to
+workspace files but does not receive `edit_file` or `write_file`, so it should
+return findings through the structured return channel rather than by writing
+browser observations into the workspace. The host shell is policy-restricted to
 `agent-browser`, `agent-browser` discovery (`which agent-browser`,
 `command -v agent-browser`), `pwd`, `ls`, and bounded workspace-local `find`
 commands. `agent-browser eval` is not available in this profile; browser
@@ -239,8 +240,8 @@ For browser-profile runs, prefer a host artifact root outside the workspace. Raw
 child artifacts are retained for operator analysis, but they are not meant to
 become ordinary workspace inputs for the parent model. If an artifact root is
 physically placed under the workspace, `read_file`, `write_file`, and
-browser-profile `ls`/`find` treat that artifact tree as reserved from
-model-facing file and discovery tools.
+`edit_file`, plus browser-profile `ls`/`find`, treat that artifact tree as
+reserved from model-facing file and discovery tools.
 
 ```bash
 ROOT=/tmp/cf-harness-browser-demo

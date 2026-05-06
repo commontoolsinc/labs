@@ -54,7 +54,23 @@ interface ApplyEditsResult {
   replacements: number;
 }
 
+interface ChangedLineSpan {
+  oldStart: number;
+  oldEnd: number;
+  newStart: number;
+  newEnd: number;
+}
+
+interface UnifiedDiffHunk {
+  oldStart: number;
+  oldEnd: number;
+  newStart: number;
+  newEnd: number;
+  spans: ChangedLineSpan[];
+}
+
 const textEncoder = new TextEncoder();
+const MAX_UNIFIED_DIFF_LINES = 400;
 
 const bytesForText = (text: string): Uint8Array => textEncoder.encode(text);
 
@@ -196,7 +212,201 @@ const renderDiffLine = (prefix: string, line: string): string =>
   `${prefix}${line.endsWith("\n") ? line.slice(0, -1) : line}`;
 
 const rangeHeader = (startZeroBased: number, count: number): string =>
-  `${startZeroBased + 1},${count}`;
+  count === 0 ? `${startZeroBased},0` : `${startZeroBased + 1},${count}`;
+
+const findUniqueCommonAnchor = (
+  oldLines: readonly string[],
+  newLines: readonly string[],
+  oldStart: number,
+  oldEnd: number,
+  newStart: number,
+  newEnd: number,
+): { oldIndex: number; newIndex: number } | undefined => {
+  const oldOccurrences = new Map<string, { count: number; index: number }>();
+  const newOccurrences = new Map<string, { count: number; index: number }>();
+
+  for (let index = oldStart; index < oldEnd; index += 1) {
+    const line = oldLines[index]!;
+    const occurrence = oldOccurrences.get(line);
+    oldOccurrences.set(line, {
+      count: (occurrence?.count ?? 0) + 1,
+      index,
+    });
+  }
+  for (let index = newStart; index < newEnd; index += 1) {
+    const line = newLines[index]!;
+    const occurrence = newOccurrences.get(line);
+    newOccurrences.set(line, {
+      count: (occurrence?.count ?? 0) + 1,
+      index,
+    });
+  }
+
+  const oldMidpoint = (oldStart + oldEnd) / 2;
+  const newMidpoint = (newStart + newEnd) / 2;
+  let best:
+    | { oldIndex: number; newIndex: number; score: number }
+    | undefined;
+  for (const [line, oldOccurrence] of oldOccurrences) {
+    const newOccurrence = newOccurrences.get(line);
+    if (
+      oldOccurrence.count !== 1 ||
+      newOccurrence === undefined ||
+      newOccurrence.count !== 1
+    ) {
+      continue;
+    }
+    const score = Math.abs(oldOccurrence.index - oldMidpoint) +
+      Math.abs(newOccurrence.index - newMidpoint);
+    if (best === undefined || score < best.score) {
+      best = {
+        oldIndex: oldOccurrence.index,
+        newIndex: newOccurrence.index,
+        score,
+      };
+    }
+  }
+  return best;
+};
+
+const collectChangedLineSpans = (
+  oldLines: readonly string[],
+  newLines: readonly string[],
+  oldStart = 0,
+  oldEnd = oldLines.length,
+  newStart = 0,
+  newEnd = newLines.length,
+): ChangedLineSpan[] => {
+  while (
+    oldStart < oldEnd &&
+    newStart < newEnd &&
+    oldLines[oldStart] === newLines[newStart]
+  ) {
+    oldStart += 1;
+    newStart += 1;
+  }
+  while (
+    oldEnd > oldStart &&
+    newEnd > newStart &&
+    oldLines[oldEnd - 1] === newLines[newEnd - 1]
+  ) {
+    oldEnd -= 1;
+    newEnd -= 1;
+  }
+  if (oldStart === oldEnd && newStart === newEnd) {
+    return [];
+  }
+
+  const anchor = findUniqueCommonAnchor(
+    oldLines,
+    newLines,
+    oldStart,
+    oldEnd,
+    newStart,
+    newEnd,
+  );
+  if (anchor === undefined) {
+    return [{ oldStart, oldEnd, newStart, newEnd }];
+  }
+
+  return [
+    ...collectChangedLineSpans(
+      oldLines,
+      newLines,
+      oldStart,
+      anchor.oldIndex,
+      newStart,
+      anchor.newIndex,
+    ),
+    ...collectChangedLineSpans(
+      oldLines,
+      newLines,
+      anchor.oldIndex + 1,
+      oldEnd,
+      anchor.newIndex + 1,
+      newEnd,
+    ),
+  ];
+};
+
+const createUnifiedDiffHunks = (
+  spans: readonly ChangedLineSpan[],
+  oldLineCount: number,
+  newLineCount: number,
+  contextLineCount: number,
+): UnifiedDiffHunk[] => {
+  const hunks: UnifiedDiffHunk[] = [];
+  for (const span of spans) {
+    const hunk: UnifiedDiffHunk = {
+      oldStart: Math.max(0, span.oldStart - contextLineCount),
+      oldEnd: Math.min(oldLineCount, span.oldEnd + contextLineCount),
+      newStart: Math.max(0, span.newStart - contextLineCount),
+      newEnd: Math.min(newLineCount, span.newEnd + contextLineCount),
+      spans: [span],
+    };
+    const previous = hunks.at(-1);
+    if (
+      previous !== undefined &&
+      hunk.oldStart <= previous.oldEnd &&
+      hunk.newStart <= previous.newEnd
+    ) {
+      previous.oldEnd = Math.max(previous.oldEnd, hunk.oldEnd);
+      previous.newEnd = Math.max(previous.newEnd, hunk.newEnd);
+      previous.spans.push(span);
+    } else {
+      hunks.push(hunk);
+    }
+  }
+  return hunks;
+};
+
+const renderUnifiedDiffHunk = (
+  lines: string[],
+  oldLines: readonly string[],
+  newLines: readonly string[],
+  hunk: UnifiedDiffHunk,
+): void => {
+  lines.push(
+    `@@ -${rangeHeader(hunk.oldStart, hunk.oldEnd - hunk.oldStart)} +${
+      rangeHeader(hunk.newStart, hunk.newEnd - hunk.newStart)
+    } @@`,
+  );
+
+  let oldCursor = hunk.oldStart;
+  let newCursor = hunk.newStart;
+  for (const span of hunk.spans) {
+    while (oldCursor < span.oldStart && newCursor < span.newStart) {
+      lines.push(renderDiffLine(" ", oldLines[oldCursor]!));
+      oldCursor += 1;
+      newCursor += 1;
+    }
+    for (let index = span.oldStart; index < span.oldEnd; index += 1) {
+      lines.push(renderDiffLine("-", oldLines[index]!));
+    }
+    for (let index = span.newStart; index < span.newEnd; index += 1) {
+      lines.push(renderDiffLine("+", newLines[index]!));
+    }
+    oldCursor = span.oldEnd;
+    newCursor = span.newEnd;
+  }
+  while (oldCursor < hunk.oldEnd && newCursor < hunk.newEnd) {
+    lines.push(renderDiffLine(" ", oldLines[oldCursor]!));
+    oldCursor += 1;
+    newCursor += 1;
+  }
+};
+
+const truncateUnifiedDiffLines = (lines: readonly string[]): string[] => {
+  if (lines.length <= MAX_UNIFIED_DIFF_LINES) {
+    return [...lines];
+  }
+  const retainedLineCount = MAX_UNIFIED_DIFF_LINES - 1;
+  const omittedLineCount = lines.length - retainedLineCount;
+  return [
+    ...lines.slice(0, retainedLineCount),
+    `[diff truncated: ${omittedLineCount} additional line(s) omitted]`,
+  ];
+};
 
 const createUnifiedDiff = (
   path: string,
@@ -209,55 +419,21 @@ const createUnifiedDiff = (
   }
   const oldLines = splitLines(oldContent);
   const newLines = splitLines(newContent);
-  let prefix = 0;
-  while (
-    prefix < oldLines.length &&
-    prefix < newLines.length &&
-    oldLines[prefix] === newLines[prefix]
-  ) {
-    prefix += 1;
-  }
-  let oldSuffix = oldLines.length;
-  let newSuffix = newLines.length;
-  while (
-    oldSuffix > prefix &&
-    newSuffix > prefix &&
-    oldLines[oldSuffix - 1] === newLines[newSuffix - 1]
-  ) {
-    oldSuffix -= 1;
-    newSuffix -= 1;
-  }
-
-  const oldHunkStart = Math.max(0, prefix - contextLineCount);
-  const newHunkStart = Math.max(0, prefix - contextLineCount);
-  const oldHunkEnd = Math.min(
+  const spans = collectChangedLineSpans(oldLines, newLines);
+  const hunks = createUnifiedDiffHunks(
+    spans,
     oldLines.length,
-    oldSuffix + contextLineCount,
-  );
-  const newHunkEnd = Math.min(
     newLines.length,
-    newSuffix + contextLineCount,
+    contextLineCount,
   );
   const lines = [
     `--- ${path}`,
     `+++ ${path}`,
-    `@@ -${rangeHeader(oldHunkStart, oldHunkEnd - oldHunkStart)} +${
-      rangeHeader(newHunkStart, newHunkEnd - newHunkStart)
-    } @@`,
   ];
-  for (let index = oldHunkStart; index < prefix; index += 1) {
-    lines.push(renderDiffLine(" ", oldLines[index]!));
+  for (const hunk of hunks) {
+    renderUnifiedDiffHunk(lines, oldLines, newLines, hunk);
   }
-  for (let index = prefix; index < oldSuffix; index += 1) {
-    lines.push(renderDiffLine("-", oldLines[index]!));
-  }
-  for (let index = prefix; index < newSuffix; index += 1) {
-    lines.push(renderDiffLine("+", newLines[index]!));
-  }
-  for (let index = oldSuffix; index < oldHunkEnd; index += 1) {
-    lines.push(renderDiffLine(" ", oldLines[index]!));
-  }
-  return `${lines.join("\n")}\n`;
+  return `${truncateUnifiedDiffLines(lines).join("\n")}\n`;
 };
 
 const READ_FILE_COMMAND = [

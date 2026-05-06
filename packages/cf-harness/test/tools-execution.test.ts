@@ -1111,6 +1111,68 @@ Deno.test("edit_file applies exact replacements and returns a unified diff", asy
   );
 });
 
+Deno.test("edit_file returns separate hunks for distant edits", async () => {
+  const original = Array.from(
+    { length: 30 },
+    (_, index) => `line ${String(index + 1).padStart(2, "0")}\n`,
+  ).join("");
+  const edited = original
+    .replace("line 02\n", "line 02 changed\n")
+    .replace("line 29\n", "line 29 changed\n");
+  const sandbox = new FakeSandboxRuntime([
+    { stdout: original, stderr: "", exitCode: 0 },
+    { stdout: "", stderr: "", exitCode: 0 },
+    { stdout: edited, stderr: "", exitCode: 0 },
+  ]);
+
+  const output = await editFileTool.invoke(createContext(sandbox), {
+    path: "notes/distant.txt",
+    edits: [
+      { oldText: "line 02\n", newText: "line 02 changed\n" },
+      { oldText: "line 29\n", newText: "line 29 changed\n" },
+    ],
+  });
+
+  if ("ok" in output) {
+    throw new Error("expected successful edit_file output");
+  }
+  assertStringIncludes(output.diff, "@@ -1,5 +1,5 @@");
+  assertStringIncludes(output.diff, "-line 02");
+  assertStringIncludes(output.diff, "+line 02 changed");
+  assertStringIncludes(output.diff, "@@ -26,5 +26,5 @@");
+  assertStringIncludes(output.diff, "-line 29");
+  assertStringIncludes(output.diff, "+line 29 changed");
+  assertEquals(output.diff.includes("line 15"), false);
+  assertEquals(output.diff.match(/^@@ /gm)?.length, 2);
+});
+
+Deno.test("edit_file caps oversized diff output", async () => {
+  const original = Array.from(
+    { length: 450 },
+    (_, index) => `old ${String(index + 1).padStart(3, "0")}\n`,
+  ).join("");
+  const edited = Array.from(
+    { length: 450 },
+    (_, index) => `new ${String(index + 1).padStart(3, "0")}\n`,
+  ).join("");
+  const sandbox = new FakeSandboxRuntime([
+    { stdout: original, stderr: "", exitCode: 0 },
+    { stdout: "", stderr: "", exitCode: 0 },
+    { stdout: edited, stderr: "", exitCode: 0 },
+  ]);
+
+  const output = await editFileTool.invoke(createContext(sandbox), {
+    path: "notes/large.txt",
+    edits: [{ oldText: original, newText: edited }],
+  });
+
+  if ("ok" in output) {
+    throw new Error("expected successful edit_file output");
+  }
+  assertStringIncludes(output.diff, "[diff truncated:");
+  assertEquals(output.diff.split("\n").length, 401);
+});
+
 Deno.test("edit_file applies replaceAll edits with expected replacement counts", async () => {
   const original = "red blue red\n";
   const edited = "green blue green\n";
