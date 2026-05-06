@@ -534,3 +534,182 @@ Deno.test("generateText result cell uses narrowest input scope", async () => {
     await storageManager.close();
   }
 });
+
+Deno.test("wish current-space output follows query input scope", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+
+  try {
+    const { pattern, wish } = createTrustedBuilder(runtime).commonfabric;
+
+    const spaceCell = runtime.getCell(space, space, undefined, tx);
+    spaceCell.key("config").set({ value: "scoped" });
+
+    const queryBase = runtime.getCell<string>(
+      space,
+      "wish user scoped current-space query",
+      undefined,
+      tx,
+    );
+    const query = createCell<string>(
+      runtime,
+      { ...queryBase.getAsNormalizedFullLink(), scope: "user" },
+      tx,
+    );
+    query.set("/config");
+
+    const Root = pattern<{ query: string }>(({ query }) => ({
+      found: wish({ query }),
+    }));
+
+    const resultCell = runtime.getCell(
+      space,
+      "wish current-space output follows query input scope",
+      undefined,
+      tx,
+    );
+
+    const result = runtime.run(tx, Root, { query }, resultCell);
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+
+    const foundLink = parseLink(result.key("found").getRaw(), result);
+    assertEquals(foundLink?.scope, "user");
+    assertEquals(result.key("found").key("result").get() as unknown, {
+      value: "scoped",
+    });
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("wish home-space output is at least user scoped", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+
+  try {
+    const { pattern, wish } = createTrustedBuilder(runtime).commonfabric;
+
+    const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+    const defaultPatternCell = runtime.getCell(
+      space,
+      "wish home scoped default pattern",
+      undefined,
+      tx,
+    );
+    const favoriteItem = runtime.getCell(
+      space,
+      "wish home scoped favorite item",
+      undefined,
+      tx,
+    );
+    favoriteItem.set({ name: "Favorite" });
+    defaultPatternCell.key("favorites").set([
+      { cell: favoriteItem, tag: "#favorite" },
+    ]);
+    homeSpaceCell.key("defaultPattern").set(defaultPatternCell);
+
+    const Root = pattern(() => ({
+      favorites: wish({ query: "#favorites" }),
+    }));
+
+    const resultCell = runtime.getCell(
+      space,
+      "wish home-space output is at least user scoped",
+      undefined,
+      tx,
+    );
+
+    const result = runtime.run(tx, Root, {}, resultCell);
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+
+    const favoritesLink = parseLink(result.key("favorites").getRaw(), result);
+    assertEquals(favoritesLink?.scope, "user");
+    assertEquals(
+      result.key("favorites").key("result").get() as unknown,
+      [{ cell: favoriteItem.get(), tag: "#favorite" }],
+    );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("wish result schema scope overrides query-derived scope", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+
+  try {
+    const { pattern, wish } = createTrustedBuilder(runtime).commonfabric;
+
+    const spaceCell = runtime.getCell(space, space, undefined, tx);
+    spaceCell.key("sessionConfig").set({ value: "scoped" });
+
+    const queryBase = runtime.getCell<string>(
+      space,
+      "wish schema scoped current-space query",
+      undefined,
+      tx,
+    );
+    const query = createCell<string>(
+      runtime,
+      { ...queryBase.getAsNormalizedFullLink(), scope: "user" },
+      tx,
+    );
+    query.set("/sessionConfig");
+
+    const Root = pattern<{ query: string }>(({ query }) => ({
+      found: wish({
+        query,
+        schema: {
+          type: "object",
+          properties: { value: { type: "string" } },
+          scope: "session",
+        },
+      }),
+    }));
+
+    const resultCell = runtime.getCell(
+      space,
+      "wish result schema scope overrides query-derived scope",
+      undefined,
+      tx,
+    );
+
+    const result = runtime.run(tx, Root, { query }, resultCell);
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+
+    const foundLink = parseLink(result.key("found").getRaw(), result);
+    assertEquals(foundLink?.scope, "session");
+    assertEquals(result.key("found").key("result").get() as unknown, {
+      value: "scoped",
+    });
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});

@@ -11,13 +11,21 @@ import { type Cell } from "../cell.ts";
 import { type Action, type ReactivityLog } from "../scheduler.ts";
 import { type Runtime, spaceCellSchema } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import { type JSONSchema, NAME, type Pattern, UI } from "../builder/types.ts";
+import {
+  type CellScope,
+  type JSONSchema,
+  NAME,
+  type Pattern,
+  UI,
+} from "../builder/types.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getPatternEnvironment } from "../env.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { toMemorySpaceAddress } from "../link-utils.ts";
 import { setRunnableName } from "../runner-utils.ts";
+import { isCellScope, narrowestScope } from "../scope.ts";
+import { scopedCell } from "./scope-policy.ts";
 
 const SUGGESTION_TSX_PATH = getPatternEnvironment().apiUrl +
   "api/patterns/system/suggestion.tsx";
@@ -918,6 +926,47 @@ function wishStateSchemaForResult(schema: unknown): JSONSchema | undefined {
   });
 }
 
+function explicitWishSchemaScope(schema: unknown): CellScope | undefined {
+  if (
+    schema &&
+    typeof schema === "object" &&
+    "scope" in schema &&
+    isCellScope((schema as { scope?: unknown }).scope)
+  ) {
+    return (schema as { scope: CellScope }).scope;
+  }
+  return undefined;
+}
+
+function parsedWishTargetUsesHomeSpace(
+  parsed: ParsedWishTarget,
+  scope?: ("~" | "." | string)[],
+): boolean {
+  if (
+    parsed.key === "#favorites" ||
+    parsed.key === "#journal" ||
+    parsed.key === "#learned" ||
+    parsed.key === "#profile"
+  ) {
+    return true;
+  }
+  return (scope ?? []).includes("~");
+}
+
+function wishOutputScope(
+  parsed: ParsedWishTarget | undefined,
+  schema: unknown,
+  scope: ("~" | "." | string)[] | undefined,
+  inputScope: CellScope,
+): CellScope {
+  const explicitScope = explicitWishSchemaScope(schema);
+  if (explicitScope) return explicitScope;
+  if (parsed && parsedWishTargetUsesHomeSpace(parsed, scope)) {
+    return narrowestScope([inputScope, "user"]);
+  }
+  return inputScope;
+}
+
 function sharedWishCellValue(
   cell: Cell<SharedHashtagState>,
   schema: unknown,
@@ -998,6 +1047,24 @@ export function wish(
     return resolver;
   }
 
+  function sendWishState(
+    tx: IExtendedStorageTransaction,
+    value: unknown,
+    outputScope: CellScope,
+    schema: unknown,
+  ): void {
+    const baseCell = runtime.getCell(
+      parentCell.space,
+      { wish: { state: cause } },
+      wishStateSchemaForResult(schema),
+      tx,
+    );
+    const scoped = scopedCell(runtime, tx, baseCell, outputScope);
+    scoped.setSourceCell(parentCell);
+    scoped.set(value);
+    sendResult(tx, scoped);
+  }
+
   function launchSuggestionPattern(
     input: {
       situation: string;
@@ -1067,6 +1134,7 @@ export function wish(
     let usedSharedHashtagResolver = false;
 
     try {
+      tx.resetNarrowestReadScope();
       const targetValue = measureWishPhase(
         "input-get",
         undefined,
@@ -1081,16 +1149,23 @@ export function wish(
           targetValue as WishParams;
         const queryKey = sanitizeQueryKey(String(query ?? ""));
         actionQueryKey = queryKey;
+        const inputScope = tx.getNarrowestReadScope();
 
         if (query === undefined || query === null || query === "") {
           const errorMsg = `Wish target "${
             toCompactDebugString(targetValue)
           }" has no query.`;
+          const outputScope = wishOutputScope(
+            undefined,
+            schema,
+            scope,
+            inputScope,
+          );
           measureWishPhase(
             "send-error",
             queryKey,
             () =>
-              sendResult(
+              sendWishState(
                 tx,
                 {
                   result: undefined,
@@ -1098,6 +1173,8 @@ export function wish(
                   error: errorMsg,
                   [UI]: errorUI(errorMsg),
                 } satisfies WishState<any>,
+                outputScope,
+                schema,
               ),
           );
           return;
@@ -1115,6 +1192,12 @@ export function wish(
                 parsed.path = [...parsed.path, ...(path ?? [])];
                 return parsed;
               },
+            );
+            const outputScope = wishOutputScope(
+              parsed,
+              schema,
+              scope,
+              inputScope,
             );
             const ctx: WishContext = {
               runtime,
@@ -1155,13 +1238,15 @@ export function wish(
                 "send-pending",
                 queryKey,
                 () =>
-                  sendResult(
+                  sendWishState(
                     tx,
                     {
                       result: undefined,
                       candidates: [],
                       [UI]: undefined,
                     } satisfies WishState<any>,
+                    outputScope,
+                    schema,
                   ),
               );
               return;
@@ -1228,11 +1313,19 @@ export function wish(
                 "send-fast",
                 queryKey,
                 () =>
-                  sendResult(tx, {
-                    result: projectWishCellValue(uniqueResultCells[0], schema),
-                    candidates: candidatesCell,
-                    [UI]: resultUI ?? cellLinkUI(uniqueResultCells[0]),
-                  }),
+                  sendWishState(
+                    tx,
+                    {
+                      result: projectWishCellValue(
+                        uniqueResultCells[0],
+                        schema,
+                      ),
+                      candidates: candidatesCell,
+                      [UI]: resultUI ?? cellLinkUI(uniqueResultCells[0]),
+                    },
+                    outputScope,
+                    schema,
+                  ),
               );
             } else {
               // Multiple results — if suggestion pattern is already loaded,
@@ -1267,14 +1360,19 @@ export function wish(
                   "send-fast-before-suggestion",
                   queryKey,
                   () =>
-                    sendResult(tx, {
-                      result: projectWishCellValue(
-                        uniqueResultCells[0],
-                        schema,
-                      ),
-                      candidates: candidatesCell,
-                      [UI]: resultUI ?? cellLinkUI(uniqueResultCells[0]),
-                    }),
+                    sendWishState(
+                      tx,
+                      {
+                        result: projectWishCellValue(
+                          uniqueResultCells[0],
+                          schema,
+                        ),
+                        candidates: candidatesCell,
+                        [UI]: resultUI ?? cellLinkUI(uniqueResultCells[0]),
+                      },
+                      outputScope,
+                      schema,
+                    ),
                 );
                 measureWishPhase(
                   "launch-suggestion",
@@ -1297,7 +1395,7 @@ export function wish(
               "send-error",
               queryKey,
               () =>
-                sendResult(
+                sendWishState(
                   tx,
                   {
                     result: undefined,
@@ -1305,6 +1403,8 @@ export function wish(
                     error: errorMsg,
                     [UI]: errorUI(errorMsg),
                   } satisfies WishState<any>,
+                  wishOutputScope(undefined, schema, scope, inputScope),
+                  schema,
                 ),
             );
           }
@@ -1314,13 +1414,15 @@ export function wish(
             "send-freeform",
             queryKey,
             () =>
-              sendResult(
+              sendWishState(
                 tx,
                 {
                   result: undefined,
                   candidates: [],
                   [UI]: undefined,
                 } satisfies WishState<any>,
+                wishOutputScope(undefined, schema, scope, inputScope),
+                schema,
               ),
           );
         } else {
@@ -1343,11 +1445,12 @@ export function wish(
         const errorMsg = `Wish target is not recognized: ${
           toCompactDebugString(targetValue)
         }`;
+        const inputScope = tx.getNarrowestReadScope();
         measureWishPhase(
           "send-error",
           undefined,
           () =>
-            sendResult(
+            sendWishState(
               tx,
               {
                 result: undefined,
@@ -1355,6 +1458,8 @@ export function wish(
                 error: errorMsg,
                 [UI]: errorUI(errorMsg),
               } satisfies WishState<any>,
+              inputScope,
+              undefined,
             ),
         );
         return;
