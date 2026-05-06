@@ -52,7 +52,7 @@ const resolveScopeKey = (
           "user scoped memory operations require a principal",
         );
       }
-      return `user:${options.principal}`;
+      return `user:${encodeScopeKeyPart(options.principal)}`;
     case "session":
       if (!options.principal) {
         throw new ProtocolError(
@@ -1196,6 +1196,10 @@ const validateConfirmedReads = (
   commit: ClientCommit,
   scopeContext: { principal?: string; sessionId: SessionId },
 ): void => {
+  // A commit is evaluated under one connection principal/session context.
+  // Every confirmed read in the commit resolves declared user/session scope
+  // against that writer identity, even when the read points at another branch.
+  // Cross-branch reads inherit this same principal context.
   for (const read of commit.reads.confirmed) {
     const readBranch = read.branch ?? branch;
     ensureReadableBranch(engine, readBranch);

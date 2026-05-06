@@ -1,5 +1,6 @@
 import { assertEquals, assertExists, assertThrows } from "@std/assert";
 import { toFileUrl } from "@std/path";
+import { Database } from "@db/sqlite";
 import {
   resetDataModelConfig,
   setDataModelConfig,
@@ -12,11 +13,13 @@ import {
   type Engine,
   listBranches,
   open,
+  ProtocolError,
   read,
 } from "../v2/engine.ts";
 import {
   decodeMemoryBoundary,
   DEFAULT_BRANCH,
+  encodeMemoryBoundary,
   type EntityDocument,
   toDocumentPath,
 } from "../v2.ts";
@@ -219,6 +222,242 @@ Deno.test("memory v2 engine binds session scoped instances to the principal", as
       }),
       { value: { owner: "bob" } },
     );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 engine encodes user and session scoped principal keys symmetrically", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    const principals = ["did:key:foo", "did:key:bar"];
+    for (const [index, principal] of principals.entries()) {
+      applyCommit(engine, {
+        sessionId: "session:shared",
+        principal,
+        commit: {
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [
+            {
+              op: "set",
+              id: "entity:encoded-user",
+              scope: "user",
+              value: toEntityDocument({ owner: principal }),
+            },
+            {
+              op: "set",
+              id: "entity:encoded-session",
+              scope: "session",
+              value: toEntityDocument({ owner: principal }),
+            },
+          ],
+        },
+      });
+
+      assertEquals(
+        read(engine, {
+          id: "entity:encoded-user",
+          scope: "user",
+          principal,
+          sessionId: "session:shared",
+        }),
+        { value: { owner: principal } },
+      );
+      assertEquals(
+        read(engine, {
+          id: "entity:encoded-session",
+          scope: "session",
+          principal,
+          sessionId: "session:shared",
+        }),
+        { value: { owner: principal } },
+      );
+      assertEquals(
+        read(engine, {
+          id: "entity:encoded-user",
+          scope: "user",
+          principal: principals[1 - index],
+          sessionId: "session:shared",
+        }),
+        index === 0 ? null : { value: { owner: principals[0] } },
+      );
+    }
+
+    const scopeKeys = (
+      engine.database.prepare(
+        `SELECT DISTINCT scope_key FROM revision WHERE id IN ('entity:encoded-user', 'entity:encoded-session') ORDER BY scope_key`,
+      ).all() as Array<{ scope_key: string }>
+    ).map((row) => row.scope_key);
+    assertEquals(scopeKeys, [
+      "session:did%3Akey%3Abar:session%3Ashared",
+      "session:did%3Akey%3Afoo:session%3Ashared",
+      "user:did%3Akey%3Abar",
+      "user:did%3Akey%3Afoo",
+    ]);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 engine requires principal context for user and session scoped reads", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    assertThrows(
+      () => read(engine, { id: "entity:principal-required", scope: "user" }),
+      ProtocolError,
+      "user scoped memory operations require a principal",
+    );
+    assertThrows(
+      () =>
+        read(engine, {
+          id: "entity:principal-required",
+          scope: "session",
+          sessionId: "session:present",
+        }),
+      ProtocolError,
+      "session scoped memory operations require a principal",
+    );
+    assertThrows(
+      () =>
+        read(engine, {
+          id: "entity:principal-required",
+          scope: "session",
+          principal: "did:key:foo",
+        }),
+      ProtocolError,
+      "session scoped memory operations require a session id",
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 engine migrates pre-scope entity tables to space scope", async () => {
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+  const url = toFileUrl(path);
+  const legacyDb = new Database(path, { create: true });
+  try {
+    legacyDb.exec(`
+      CREATE TABLE "commit" (
+        seq                INTEGER NOT NULL PRIMARY KEY,
+        branch             TEXT    NOT NULL DEFAULT '',
+        session_id         TEXT    NOT NULL,
+        local_seq          INTEGER NOT NULL,
+        invocation_ref     TEXT,
+        authorization_ref  TEXT,
+        original           JSON    NOT NULL,
+        resolution         JSON    NOT NULL,
+        created_at         TEXT    NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE UNIQUE INDEX idx_commit_session_local_seq
+        ON "commit" (session_id, local_seq);
+      CREATE TABLE revision (
+        branch      TEXT    NOT NULL DEFAULT '',
+        id          TEXT    NOT NULL,
+        seq         INTEGER NOT NULL,
+        op_index    INTEGER NOT NULL,
+        op          TEXT    NOT NULL,
+        data        JSON,
+        commit_seq  INTEGER NOT NULL,
+        PRIMARY KEY (branch, id, seq, op_index)
+      );
+      CREATE INDEX idx_revision_branch_id_seq
+        ON revision (branch, id, seq, op_index);
+      CREATE INDEX idx_revision_commit ON revision (commit_seq);
+      CREATE INDEX idx_revision_branch ON revision (branch, seq);
+      CREATE TABLE head (
+        branch    TEXT    NOT NULL,
+        id        TEXT    NOT NULL,
+        seq       INTEGER NOT NULL,
+        op_index  INTEGER NOT NULL,
+        PRIMARY KEY (branch, id)
+      );
+      CREATE INDEX idx_head_branch ON head (branch);
+      CREATE TABLE snapshot (
+        branch  TEXT    NOT NULL DEFAULT '',
+        id      TEXT    NOT NULL,
+        seq     INTEGER NOT NULL,
+        value   JSON    NOT NULL,
+        PRIMARY KEY (branch, id, seq)
+      );
+      CREATE INDEX idx_snapshot_lookup ON snapshot (branch, id, seq);
+      CREATE TABLE branch (
+        name           TEXT    NOT NULL PRIMARY KEY,
+        parent_branch  TEXT,
+        fork_seq       INTEGER,
+        created_seq    INTEGER NOT NULL DEFAULT 0,
+        head_seq       INTEGER NOT NULL DEFAULT 0,
+        status         TEXT    NOT NULL DEFAULT 'active',
+        created_at     TEXT    NOT NULL DEFAULT (datetime('now')),
+        deleted_at     TEXT
+      );
+      INSERT INTO branch (name, created_seq, head_seq, status)
+      VALUES ('', 0, 1, 'active');
+      INSERT INTO "commit" (seq, branch, session_id, local_seq, original, resolution)
+      VALUES (1, '', 'legacy-session', 1, '{}', '{}');
+    `);
+    legacyDb.prepare(
+      `INSERT INTO revision (branch, id, seq, op_index, op, data, commit_seq)
+       VALUES ('', 'entity:legacy', 1, 0, 'set', ?, 1)`,
+    ).run(encodeMemoryBoundary(toEntityDocument({ migrated: true })));
+    legacyDb.prepare(
+      `INSERT INTO head (branch, id, seq, op_index)
+       VALUES ('', 'entity:legacy', 1, 0)`,
+    ).run();
+    legacyDb.prepare(
+      `INSERT INTO snapshot (branch, id, seq, value)
+       VALUES ('', 'entity:legacy', 1, ?)`,
+    ).run(encodeMemoryBoundary(toEntityDocument({ migrated: true })));
+  } finally {
+    legacyDb.close();
+  }
+
+  let engine = await open({ url });
+  try {
+    assertEquals(read(engine, { id: "entity:legacy", scope: "space" }), {
+      value: { migrated: true },
+    });
+    applyCommit(engine, {
+      sessionId: "session:scoped",
+      principal: "did:key:scoped",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:legacy",
+          scope: "user",
+          value: toEntityDocument({ migrated: false, scoped: true }),
+        }],
+      },
+    });
+    assertEquals(read(engine, { id: "entity:legacy", scope: "space" }), {
+      value: { migrated: true },
+    });
+    assertEquals(
+      read(engine, {
+        id: "entity:legacy",
+        scope: "user",
+        principal: "did:key:scoped",
+        sessionId: "session:scoped",
+      }),
+      { value: { migrated: false, scoped: true } },
+    );
+  } finally {
+    close(engine);
+  }
+
+  engine = await open({ url });
+  try {
+    assertEquals(read(engine, { id: "entity:legacy", scope: "space" }), {
+      value: { migrated: true },
+    });
   } finally {
     close(engine);
     await Deno.remove(path);
