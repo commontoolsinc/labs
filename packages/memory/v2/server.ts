@@ -205,10 +205,15 @@ class Connection {
         this.#receiveIdle = Promise.withResolvers<void>();
       }
       const idle = this.#receiveIdle.promise.then(() => true);
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
       const timeout = new Promise<boolean>((resolve) => {
-        setTimeout(() => resolve(false), remainingMs);
+        timeoutId = setTimeout(() => resolve(false), remainingMs);
       });
-      if (!await Promise.race([idle, timeout])) {
+      const drained = await Promise.race([idle, timeout]);
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
+      }
+      if (!drained) {
         return this.#pendingReceives === 0;
       }
     }
