@@ -19,7 +19,8 @@ interface Memory {
 const stateScope = (state: State) =>
   normalizeCellScope((state as State & Pick<IMemoryAddress, "scope">).scope);
 
-const toKey = (state: State) => `/${stateScope(state)}/${state.the}/${state.of}`;
+const toKey = (state: State) =>
+  `/${stateScope(state)}/${state.the}/${state.of}`;
 const toAddress = (
   state: State,
   path: readonly string[] = [],

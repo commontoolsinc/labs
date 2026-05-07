@@ -1858,7 +1858,8 @@ export class Scheduler {
       !previousSchedulingWrites.some((existing) =>
         existing.space === write.space &&
         existing.id === write.id &&
-        normalizeCellScope(existing.scope) === normalizeCellScope(write.scope) &&
+        normalizeCellScope(existing.scope) ===
+          normalizeCellScope(write.scope) &&
         existing.path.length <= write.path.length &&
         arraysOverlap(existing.path, write.path)
       )
@@ -1867,7 +1868,8 @@ export class Scheduler {
       !nextSchedulingWrites.some((existing) =>
         existing.space === write.space &&
         existing.id === write.id &&
-        normalizeCellScope(existing.scope) === normalizeCellScope(write.scope) &&
+        normalizeCellScope(existing.scope) ===
+          normalizeCellScope(write.scope) &&
         existing.path.length <= write.path.length &&
         arraysOverlap(existing.path, write.path)
       )
@@ -2391,9 +2393,7 @@ export class Scheduler {
         `${r.space}/${r.id}/${normalizeCellScope(r.scope)}/${r.path.join("/")}`
       );
       const shallowReads = deps?.shallowReads.map((r) =>
-        `${r.space}/${r.id}/${normalizeCellScope(r.scope)}/${
-          r.path.join("/")
-        }`
+        `${r.space}/${r.id}/${normalizeCellScope(r.scope)}/${r.path.join("/")}`
       );
       const writes = this.getSchedulingWrites(action)?.map((w) =>
         `${w.space}/${w.id}/${normalizeCellScope(w.scope)}/${w.path.join("/")}`

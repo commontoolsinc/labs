@@ -85,7 +85,12 @@ describe("data URI sync", () => {
   });
 
   it("sync on a data: URI cell preserves linked cell scope", async () => {
-    const linkedCell = runtime.getCell(space, "scoped-linked-target", undefined, tx);
+    const linkedCell = runtime.getCell(
+      space,
+      "scoped-linked-target",
+      undefined,
+      tx,
+    );
     linkedCell.set({ value: "target data" });
     const linkedId = linkedCell.getAsNormalizedFullLink().id;
 

@@ -79,8 +79,9 @@ export function addressesToPathByEntity(
 ): Map<SpaceAndURI, SortedAndCompactPaths> {
   const map = new Map<SpaceAndURI, SortedAndCompactPaths>();
   for (const address of addresses) {
-    const key: SpaceAndURI =
-      `${address.space}/${address.id}/${normalizeCellScope(address.scope)}`;
+    const key: SpaceAndURI = `${address.space}/${address.id}/${
+      normalizeCellScope(address.scope)
+    }`;
     if (!map.has(key)) map.set(key, []);
     map.get(key)!.push(address.path);
   }
