@@ -71,6 +71,7 @@ const NEGATIVE_ONE_BYTES = new Uint8Array([0xFF]);
  *   when the high bit would otherwise be clear (sign extension for negative).
  */
 export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
+  // Converts a value that fits into 64 bits.
   const convertSmallValue = (negative: boolean) => {
     dv64View.setBigUint64(0, value, false); // big-endian
 
@@ -93,6 +94,22 @@ export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
     }
   };
 
+  // Converts a positive value to a hex string.
+  const hexStringFromPositiveValue = (value: bigint) => {
+    const hex = value.toString(16);
+    if ((hex.length & 1) === 1) {
+      // Round up to an even number of nibbles.
+      return "0" + hex;
+    } else if (nibbleValueAt(hex, 0) >= 8) {
+      // Add an extra `0x00` byte, because the high-order bit would otherwise
+      // be `1` and therefore the encoded result would be negative, which
+      // would be wrong.
+      return "00" + hex;
+    } else {
+      return hex;
+    }
+  };
+
   if (value >= 0n) {
     if (value === 0n) {
       return ZERO_BYTES.slice();
@@ -106,21 +123,7 @@ export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
     // BigInt.bitLength() which would eliminate this string round-trip. See:
     // https://github.com/tc39/proposal-bigint-math
 
-    const hex = (() => {
-      const hex = value.toString(16);
-      if ((hex.length & 1) === 1) {
-        // Round up to an even number of nibbles.
-        return "0" + hex;
-      } else if (nibbleValueAt(hex, 0) >= 8) {
-        // Add an extra `0x00` byte, because the high-order bit would otherwise
-        // be `1` and therefore the encoded result would be negative, which
-        // would be wrong.
-        return "00" + hex;
-      } else {
-        return hex;
-      }
-    })();
-
+    const hex = hexStringFromPositiveValue(value);
     const byteLen = hex.length >> 1;
     const bytes = new Uint8Array(byteLen);
 
@@ -136,37 +139,21 @@ export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
       return convertSmallValue(true);
     }
 
-    // Slow path for negative numbers. See above for details.
+    // Slow path for negative numbers. See above for details. The extra twist
+    // here is that we need to end up with a string that correctly represents
+    // `value` as a twos-complement negative value. The trick we do here is
+    // convert the _ones_-complement of `value` to a string, and then undo it
+    // byte-by-byte when storing the result.
 
-    // Compute two's complement.
-    const abs = -value;
-    const absHex = abs.toString(16);
-    // Number of bits for the magnitude.
-    const bitLen = absHex.length * 4;
-    // We need enough bytes to represent the value, rounded up.
-    let byteLen = Math.ceil(bitLen / 8);
-    // Two's complement of -abs is 2^n - abs where n is the byte-aligned size.
-    let twos = (1n << BigInt(byteLen * 8)) - abs;
-    // Verify the high bit of byte 0 of the encoded form is set (value must
-    // look negative). It is *not* set if either:
-    //   (a) `twosHex` is shorter than `byteLen * 2` (so byte 0 starts with a
-    //       padding-zero nibble), or
-    //   (b) `twosHex.length === byteLen * 2` but its leading nibble is < 8.
-    // In either case we need one more byte to keep the high bit set.
-    const twosHex = twos.toString(16);
-    if (
-      twosHex.length < byteLen * 2 || nibbleValueAt(twosHex, 0) < 8
-    ) {
-      byteLen++;
-      twos = (1n << BigInt(byteLen * 8)) - abs;
-    }
-
-    let hex = twos.toString(16);
-    while (hex.length < byteLen * 2) hex = "0" + hex;
+    const hex = hexStringFromPositiveValue(~value);
+    const byteLen = hex.length >> 1;
     const bytes = new Uint8Array(byteLen);
+
     for (let i = 0; i < bytes.length; i++) {
-      bytes[i] = byteValueAt(hex, i * 2);
+      // `0xff - value` to undo the ones-complement in `~value` above.
+      bytes[i] = 0xff - byteValueAt(hex, i * 2);
     }
+
     return bytes;
   }
 }
