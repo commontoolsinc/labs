@@ -2743,6 +2743,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     this.traverseArrayCalls++;
     const docArray = doc.value as Immutable<FabricValue>[];
     const arrayObj = new Array<Immutable<FabricValue>>(docArray.length);
+    this.tx.read(doc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
 
     // Rendering or otherwise consuming a schema-backed array depends on its
     // direct structure, not just the indices that exist right now. Record a
