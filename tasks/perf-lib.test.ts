@@ -6,6 +6,7 @@ import {
   githubGet,
   type Job,
   type Step,
+  timingArtifactLabel,
   type WorkflowRun,
 } from "./perf-lib.ts";
 
@@ -86,6 +87,65 @@ Deno.test("extractMetrics keeps CLI core and fuse timings separate", () => {
   );
   assertEquals(metrics.has("job: CLI Integration Tests"), false);
   assertEquals(metrics.has("step: CLI integration"), false);
+});
+
+Deno.test("extractMetrics aggregates pattern integration matrix shards", () => {
+  const metrics = extractMetrics(makeRun(), [
+    makeJob(
+      1,
+      "Pattern Integration Tests (1/4)",
+      "2026-01-01T00:00:00Z",
+      "2026-01-01T00:01:40Z",
+      [
+        makeStep(
+          "🧩 Run end-to-end patterns integration tests",
+          "2026-01-01T00:00:10Z",
+          "2026-01-01T00:01:30Z",
+        ),
+      ],
+    ),
+    makeJob(
+      2,
+      "Pattern Integration Tests (2/4)",
+      "2026-01-01T00:00:00Z",
+      "2026-01-01T00:01:10Z",
+      [
+        makeStep(
+          "🧩 Run end-to-end patterns integration tests",
+          "2026-01-01T00:00:10Z",
+          "2026-01-01T00:01:00Z",
+        ),
+      ],
+    ),
+  ]);
+
+  assertEquals(
+    metrics.get("job: Pattern Integration Tests (1/4)")?.durationSeconds,
+    100,
+  );
+  assertEquals(
+    metrics.get("job: Pattern Integration Tests (2/4)")?.durationSeconds,
+    70,
+  );
+  assertEquals(
+    metrics.get("job: Pattern Integration Tests")?.durationSeconds,
+    100,
+  );
+  assertEquals(
+    metrics.get("step: patterns integration")?.durationSeconds,
+    80,
+  );
+});
+
+Deno.test("timingArtifactLabel normalizes pattern integration shard artifacts", () => {
+  assertEquals(
+    timingArtifactLabel("test-timing-pattern-integration-1"),
+    "pattern-integration",
+  );
+  assertEquals(
+    timingArtifactLabel("test-timing-package-integration"),
+    "package-integration",
+  );
 });
 
 Deno.test("computeBaseline enforces the 15 percent floor for low-variance samples", () => {

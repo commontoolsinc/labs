@@ -59,6 +59,7 @@ import {
   type Regression,
   REPO,
   STDDEV_FACTOR,
+  timingArtifactLabel,
   TOKEN,
   WORKFLOW_FILE,
   type WorkflowRun,
@@ -459,7 +460,7 @@ async function main() {
               artifactRunsProcessed++;
               const testMetrics = extractTestFileMetrics(
                 run,
-                artifact.name.replace("test-timing-", ""),
+                timingArtifactLabel(artifact.name),
                 suites,
               );
               for (const [name, sample] of testMetrics) {
