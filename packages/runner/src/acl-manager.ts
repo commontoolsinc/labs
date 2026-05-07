@@ -26,11 +26,7 @@ export class ACLManager {
       throw new Error("No ACL initialized for space.");
     }
 
-    return cloneIfNecessary(aclData as FabricValue, {
-      frozen: false,
-      deep: true,
-      force: true,
-    }) as ACL;
+    return cloneIfNecessary(aclData as FabricValue, { frozen: false }) as ACL;
   }
 
   async set(user: ACLUser, capability: Capability): Promise<void> {
