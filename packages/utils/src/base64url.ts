@@ -48,7 +48,7 @@ export function toBase64Polyfill(bytes: Uint8Array): string {
 
   // Process 3 bytes at a time -> 4 base64 chars.
   for (; i + 2 < len; i += 3) {
-    const n = (bytes[i] << 16) | (bytes[i + 1] << 8) | bytes[i + 2];
+    const n = (bytes[i]! << 16) | (bytes[i + 1]! << 8) | bytes[i + 2]!;
     result += B64_CHARS[(n >> 18) & 0x3f];
     result += B64_CHARS[(n >> 12) & 0x3f];
     result += B64_CHARS[(n >> 6) & 0x3f];
@@ -57,11 +57,11 @@ export function toBase64Polyfill(bytes: Uint8Array): string {
 
   // Handle remaining 1 or 2 bytes (no padding appended).
   if (i < len) {
-    const n1 = bytes[i];
+    const n1 = bytes[i]!;
     result += B64_CHARS[(n1 >> 2) & 0x3f];
     if (i + 1 < len) {
       // 2 remaining bytes -> 3 base64 chars.
-      const n2 = bytes[i + 1];
+      const n2 = bytes[i + 1]!;
       result += B64_CHARS[((n1 & 0x03) << 4) | ((n2 >> 4) & 0x0f)];
       result += B64_CHARS[(n2 & 0x0f) << 2];
     } else {
