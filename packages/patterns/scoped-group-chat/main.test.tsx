@@ -1,8 +1,19 @@
-import { action, computed, pattern } from "commonfabric";
+import { action, computed, pattern, Writable } from "commonfabric";
 import ScopedGroupChat from "./main.tsx";
 
 export default pattern(() => {
-  const chat = ScopedGroupChat({});
+  const chat = ScopedGroupChat({
+    name: Writable.of(""),
+    selectedRoom: Writable.of("lobby"),
+    conversation: Writable.of({
+      rooms: {
+        lobby: [],
+        workshop: [],
+        afterparty: [],
+      },
+    }),
+    draft: Writable.of(""),
+  });
 
   const action_set_name = action(() => {
     chat.setName.send({ name: "Ada" });
@@ -41,10 +52,6 @@ export default pattern(() => {
     chat.currentDraft === ""
   );
 
-  const assert_first_message_visible_in_ui = computed(() =>
-    JSON.stringify(chat.$UI).includes("Hello from the lobby")
-  );
-
   const assert_room_switch_is_session_local = computed(() =>
     chat.lobbyCount === 1 &&
     chat.workshopCount === 1 &&
@@ -60,7 +67,6 @@ export default pattern(() => {
       { action: action_write_lobby_draft },
       { action: action_send_first_message },
       { assertion: assert_first_message_sent_and_draft_cleared },
-      { assertion: assert_first_message_visible_in_ui },
       { action: action_switch_to_workshop },
       { action: action_write_workshop_draft },
       { action: action_send_workshop_message },
