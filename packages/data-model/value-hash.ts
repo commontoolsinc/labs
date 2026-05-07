@@ -167,7 +167,7 @@ function getStringRep(value: string) {
  */
 function feedLength(hasher: IncrementalHasher, value: number): void {
   const valueBuf = (value <= MAX_CACHED_SMALL_LENGTH)
-    ? smallLengthCache[value]
+    ? smallLengthCache[value]!
     : encodeULEB128(value);
 
   hasher.update(valueBuf);
