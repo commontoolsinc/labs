@@ -13,18 +13,15 @@
 // ---------------------------------------------------------------------------
 
 /**
- * Helper for `bigintToMinimalTwosComplement()`, which converts a hex digit
- * char code to its 4-bit numeric value. Handles '0'-'9' (0x30-0x39) and
- * 'a'-'f' (0x61-0x66). Used instead of `parseInt` for ~2x faster
- * hex-to-byte conversion (see bigint-hashing-performance.md).
+ * Helper for `bigintToMinimalTwosComplement()`, which converts a hex digit char
+ * code at a particular index in a string to its 4-bit numeric value. Handles
+ * '0'-'9' (0x30-0x39) and 'a'-'f' (0x61-0x66).
  */
-function hexToNibble(c: number): number {
+function hexValueAt(hex: string, at: number): number {
+  const c = hex.charCodeAt(at);
+
   // '0'-'9' = 0x30-0x39, 'a'-'f' = 0x61-0x66
   return c < 0x3a ? c - 0x30 : c - 0x57;
-}
-
-function hexValueAt(hex: string, at: number): number {
-  return hexToNibble(hex.charCodeAt(at));
 }
 
 /**
@@ -149,7 +146,7 @@ export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
     // In either case we need one more byte to keep the high bit set.
     const twosHex = twos.toString(16);
     if (
-      twosHex.length < byteLen * 2 || hexToNibble(twosHex.charCodeAt(0)) < 8
+      twosHex.length < byteLen * 2 || hexValueAt(twosHex, 0) < 8
     ) {
       byteLen++;
       twos = (1n << BigInt(byteLen * 8)) - abs;
@@ -160,8 +157,7 @@ export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
     const bytes = new Uint8Array(byteLen);
     for (let i = 0; i < bytes.length; i++) {
       const j = i * 2;
-      bytes[i] = (hexToNibble(hex.charCodeAt(j)) << 4) |
-        hexToNibble(hex.charCodeAt(j + 1));
+      bytes[i] = (hexValueAt(hex, j) << 4) | hexValueAt(hex, j + 1);
     }
     return bytes;
   }
