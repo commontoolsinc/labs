@@ -3,7 +3,6 @@ import {
   Default,
   handler,
   NAME,
-  nonPrivateRandom,
   pattern,
   type PerSession,
   type PerSpace,
@@ -18,7 +17,6 @@ import {
 export type RoomId = "lobby" | "workshop" | "afterparty";
 
 export interface ChatMessage {
-  id: string;
   room: RoomId;
   author: string;
   body: string;
@@ -193,7 +191,6 @@ const sendMessage = handler<SendEvent, {
   const author = name.get().trim() || "Anonymous";
   const sentAt = safeDateNow();
   const message = {
-    id: `msg-${sentAt}-${nonPrivateRandom().toString(36).slice(2, 8)}`,
     room,
     author,
     body,
