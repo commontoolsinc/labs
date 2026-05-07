@@ -13,15 +13,25 @@
 // ---------------------------------------------------------------------------
 
 /**
- * Helper for `bigintToMinimalTwosComplement()`, which converts a hex digit char
- * code at a particular index in a string to its 4-bit numeric value. Handles
- * '0'-'9' (0x30-0x39) and 'a'-'f' (0x61-0x66).
+ * Helper for `bigintToMinimalTwosComplement()`, which converts a hex digit at a
+ * particular index in a string to its 4-bit (nibble-sized) numeric value.
+ * Handles '0'-'9' (0x30-0x39) and 'a'-'f' (0x61-0x66).
+ *
  */
-function hexValueAt(hex: string, at: number): number {
+function nibbleValueAt(hex: string, at: number): number {
   const c = hex.charCodeAt(at);
 
   // '0'-'9' = 0x30-0x39, 'a'-'f' = 0x61-0x66
   return c < 0x3a ? c - 0x30 : c - 0x57;
+}
+
+/**
+ * Helper for `bigintToMinimalTwosComplement()`, which converts a pair of hex
+ * digits at a particular index in a string to its 8-bit (byte-sized) numeric
+ * value. Handles '0'-'9' (0x30-0x39) and 'a'-'f' (0x61-0x66).
+ */
+function byteValueAt(hex: string, at: number): number {
+  return (nibbleValueAt(hex, at) << 4) | nibbleValueAt(hex, at + 1);
 }
 
 /**
@@ -101,7 +111,7 @@ export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
       if ((hex.length & 1) === 1) {
         // Round up to an even number of nibbles.
         return "0" + hex;
-      } else if (hexValueAt(hex, 0) >= 8) {
+      } else if (nibbleValueAt(hex, 0) >= 8) {
         // Add an extra `0x00` byte, because the high-order bit would otherwise
         // be `1` and therefore the encoded result would be negative, which
         // would be wrong.
@@ -115,8 +125,7 @@ export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
     const bytes = new Uint8Array(byteLen);
 
     for (let i = 0; i < bytes.length; i++) {
-      const j = i * 2;
-      bytes[i] = (hexValueAt(hex, j) << 4) | hexValueAt(hex, j + 1);
+      bytes[i] = byteValueAt(hex, i * 2);
     }
 
     return bytes;
@@ -146,7 +155,7 @@ export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
     // In either case we need one more byte to keep the high bit set.
     const twosHex = twos.toString(16);
     if (
-      twosHex.length < byteLen * 2 || hexValueAt(twosHex, 0) < 8
+      twosHex.length < byteLen * 2 || nibbleValueAt(twosHex, 0) < 8
     ) {
       byteLen++;
       twos = (1n << BigInt(byteLen * 8)) - abs;
@@ -156,8 +165,7 @@ export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
     while (hex.length < byteLen * 2) hex = "0" + hex;
     const bytes = new Uint8Array(byteLen);
     for (let i = 0; i < bytes.length; i++) {
-      const j = i * 2;
-      bytes[i] = (hexValueAt(hex, j) << 4) | hexValueAt(hex, j + 1);
+      bytes[i] = byteValueAt(hex, i * 2);
     }
     return bytes;
   }
