@@ -115,11 +115,6 @@ const panelStyle = {
   boxShadow: "0 12px 32px rgba(31, 55, 49, 0.10)",
 };
 
-const messageStyle = {
-  borderLeft: "4px solid var(--cf-theme-color-primary)",
-  background: "var(--cf-theme-color-surface)",
-};
-
 const composerStyle = {
   padding: "14px 16px",
   borderTop: "1px solid var(--cf-theme-color-border-muted)",
@@ -274,13 +269,6 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
       const messages = selectedRoomRef.get()?.messages ?? [];
       return messages[messages.length - 1]?.body ?? "";
     });
-    const selectedRoomTranscript = computed(() => {
-      const messages = selectedRoomRef.get()?.messages ?? [];
-      return messages
-        .map((message) => `${message.author}: ${message.body}`)
-        .join("\n");
-    });
-
     return {
       [NAME]: "Scoped group chat",
       [UI]: (
@@ -350,20 +338,16 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
                       )
                       : (
                         <cf-vstack gap="2">
-                          <cf-card style={messageStyle}>
-                            <cf-vstack slot="content" gap="2">
-                              <div
-                                style={{
-                                  fontSize: "16px",
-                                  lineHeight: "1.5",
-                                  color: "var(--cf-theme-color-text)",
-                                  whiteSpace: "pre-wrap",
-                                }}
-                              >
-                                {selectedRoomTranscript}
-                              </div>
-                            </cf-vstack>
-                          </cf-card>
+                          {messagesInSelectedRoom.map((message) => (
+                            <cf-chat-message
+                              role={message.author ===
+                                  (currentName || "Anonymous")
+                                ? "user"
+                                : "assistant"}
+                              content={message.body}
+                              name={message.author}
+                            />
+                          ))}
                         </cf-vstack>
                       )}
                   </cf-vstack>
