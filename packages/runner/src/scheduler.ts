@@ -1034,6 +1034,13 @@ export class Scheduler {
 
     this.updateChangeGroup(action, options);
 
+    // Track action type before rebuilding reverse dependencies. When a new
+    // edge is registered against an already-stale writer, the edge registration
+    // path needs to know whether this action is an effect or computation so it
+    // can schedule the downstream pull.
+    const actionIsEffect = this.updateActionType(action, isEffect);
+    const actionId = this.getActionId(action);
+
     const { reads, shallowReads, log: schedulingLog } = this.setDependencies(
       action,
       log,
@@ -1041,11 +1048,6 @@ export class Scheduler {
 
     // Update reverse dependency graph
     if (this.pullMode) this.updateDependents(action, schedulingLog);
-
-    // Track action type for pull-based scheduling
-    // Once an action is marked as an effect, it stays an effect
-    const actionIsEffect = this.updateActionType(action, isEffect);
-    const actionId = this.getActionId(action);
 
     // Track parent-child relationship if action is created during another action's execution
     // Only set if not already set (resubscribe can be called multiple times)
@@ -2153,6 +2155,14 @@ export class Scheduler {
 
     if (!alreadyDependent && this.isStale(writer)) {
       this.addStaleUpstream(writer, dependent);
+      if (this.pullMode) {
+        if (this.effects.has(dependent)) {
+          this.conditionallyScheduledEffects.delete(dependent);
+          this.scheduleWithDebounce(dependent);
+        } else if (this.computations.has(dependent)) {
+          this.scheduleAffectedEffects(dependent);
+        }
+      }
     }
   }
 
