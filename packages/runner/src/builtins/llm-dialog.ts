@@ -26,7 +26,13 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { isBoolean, isObject, isRecord } from "@commonfabric/utils/types";
 import type { Cell, MemorySpace, Stream } from "../cell.ts";
 import { isCell, isStream } from "../cell.ts";
-import { type CellScope, ID, NAME, type Pattern } from "../builder/types.ts";
+import {
+  type CellScope,
+  ID,
+  NAME,
+  type Pattern,
+  TYPE,
+} from "../builder/types.ts";
 import { type Action, ignoreReadForScheduling } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
 import { spaceCellSchema } from "../runtime.ts";
@@ -233,6 +239,11 @@ function prepareSchemaForLLM(schema: JSONSchema): JSONSchema {
 function getCellSchema(
   cell: Cell<unknown>,
 ): JSONSchema | undefined {
+  const internalProcessSchema = getInternalProcessCellSchema(cell);
+  if (isNontrivialSchema(internalProcessSchema)) {
+    return internalProcessSchema;
+  }
+
   // Extract schema from cell, including from resultSchema of associated pattern
   const { schema } = cell.asSchemaFromLinks().getAsNormalizedFullLink();
 
@@ -259,6 +270,40 @@ function getCellSchema(
 
   // Fall back to minimal schema based on current value
   return buildMinimalSchemaFromValue(cell);
+}
+
+function getInternalProcessCellSchema(
+  cell: Cell<unknown>,
+): JSONSchema | undefined {
+  const link = cell.getAsNormalizedFullLink();
+  if (link.path[0] !== "internal") {
+    return undefined;
+  }
+
+  try {
+    const tx = cell.runtime.readTx(
+      (cell as unknown as { tx?: IExtendedStorageTransaction }).tx,
+    );
+    const patternId = tx.readValueOrThrow(
+      { ...link, path: [TYPE] },
+      { meta: { ...ignoreReadForScheduling, ...internalVerifierRead } },
+    );
+    if (typeof patternId !== "string") {
+      return undefined;
+    }
+
+    const pattern = cell.runtime.patternManager.patternById(patternId);
+    if (pattern?.internalSchema === undefined) {
+      return undefined;
+    }
+    return cell.runtime.cfc.schemaAtPath(
+      pattern.internalSchema,
+      link.path.slice(1),
+    );
+  } catch (e) {
+    logger.debug("llm", "getInternalProcessCellSchema failed:", e);
+    return undefined;
+  }
 }
 
 function buildMinimalSchemaFromValue(piece: Cell<any>): JSONSchema | undefined {
@@ -788,16 +833,19 @@ function resolveContextCellRef(cell: unknown): Cell<any> | undefined {
 function readCellValueForObservation(
   cell: Cell<unknown>,
 ): unknown {
-  const readTx = cell.runtime.readTx();
+  const readTx = cell.runtime.readTx(
+    (cell as unknown as { tx?: IExtendedStorageTransaction }).tx,
+  );
   const link = resolveLink(
     cell.runtime,
     readTx,
     cell.getAsNormalizedFullLink(),
     "top",
   );
-  return readTx.readValueOrThrow(link, {
+  const value = readTx.readValueOrThrow(link, {
     meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
   });
+  return value === undefined ? cell.get() ?? cell.getRaw() : value;
 }
 
 function collectToolEntries(

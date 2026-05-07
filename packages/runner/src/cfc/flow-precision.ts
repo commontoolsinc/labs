@@ -76,9 +76,22 @@ export const flowPrecisionSchemaForBuiltin = (
     return schema;
   }
   if (typeof schema === "boolean") return schema;
+  if (typeof itemSchema === "boolean") {
+    return internSchema({
+      ...schema,
+      items: itemSchema,
+    });
+  }
+  const { $defs, ...itemSchemaWithoutDefs } = itemSchema;
   return internSchema({
     ...schema,
-    items: itemSchema,
+    items: itemSchemaWithoutDefs,
+    ...($defs !== undefined && {
+      $defs: {
+        ...schema.$defs,
+        ...$defs,
+      },
+    }),
   });
 };
 

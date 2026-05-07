@@ -1847,7 +1847,8 @@ describe("generateObject with tools", () => {
     );
 
     runtime.run(tx, testPattern, {}, resultCell);
-    tx.commit();
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
 
     await expect(waitForCondition(() => capturedSystem.length > 0)).resolves
       .toBeUndefined();
@@ -1916,7 +1917,8 @@ describe("generateObject with tools", () => {
     );
 
     runtime.run(tx, testPattern, {}, resultCell);
-    tx.commit();
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
 
     await expect(waitForCondition(() => capturedSystem.length > 0)).resolves
       .toBeUndefined();

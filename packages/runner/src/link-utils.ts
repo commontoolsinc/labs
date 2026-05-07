@@ -379,7 +379,10 @@ export function createDataCellURI(
     try {
       if (isPrimitiveCellLink(value)) {
         const link = parseLink(value, baseLink);
-        return createSigilLinkFromParsedLink(link);
+        return createSigilLinkFromParsedLink(link, {
+          includeSchema: true,
+          keepAsCell: true,
+        });
       } else if (Array.isArray(value)) {
         return value.map((item) =>
           traverseAndAddBaseIdToRelativeLinks(item, seen)
