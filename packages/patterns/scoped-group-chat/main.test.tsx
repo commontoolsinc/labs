@@ -49,7 +49,8 @@ export default pattern(() => {
     chat.conversationSnapshot.rooms[1]?.messages?.[0]?.body ===
       "Hello Library" &&
     chat.messageCount === 1 &&
-    chat.lastCurrentRoomBody === "Hello Library"
+    chat.lastCurrentRoomBody === "Hello Library" &&
+    chat.roomSummaryText === "Garden: 0\nLibrary: 1"
   );
 
   return {

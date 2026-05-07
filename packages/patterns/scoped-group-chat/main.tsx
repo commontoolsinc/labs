@@ -37,6 +37,11 @@ interface ConversationSnapshot {
   rooms: readonly Room[];
 }
 
+interface RoomSummary {
+  name: string;
+  messageCount: number;
+}
+
 export interface SendMessageEvent {
   message?: string;
   room?: Room;
@@ -208,6 +213,8 @@ interface ScopedGroupChatOutput {
   lastCurrentRoomAuthor: string;
   lastCurrentRoomBody: string;
   roomItems: readonly { label: string; value: string }[];
+  roomSummaries: readonly RoomSummary[];
+  roomSummaryText: string;
   sendMessage: Stream<SendMessageEvent>;
   addRoom: Stream<AddRoomEvent>;
   setName: Stream<{ name: string }>;
@@ -310,6 +317,17 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
         value: String(index),
       }))
     );
+    const roomSummaries = computed<readonly RoomSummary[]>(() =>
+      rooms.map((room) => ({
+        name: room.name,
+        messageCount: room.messages?.length ?? 0,
+      }))
+    );
+    const roomSummaryText = computed(() =>
+      rooms
+        .map((room) => `${room.name}: ${room.messages?.length ?? 0}`)
+        .join("\n")
+    );
     const roomCount = computed(() => rooms.length);
     const currentRoomMessageCount = messageCount;
     const lastRoom = computed(() => rooms[rooms.length - 1] ?? EMPTY_ROOM);
@@ -389,10 +407,15 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
             <cf-vscroll flex showScrollbar fadeEdges>
               <cf-vstack gap="3" padding="4">
                 <cf-hstack gap="3">
-                  {rooms.map((room) => (
+                  {rooms.map((room, roomIndex) => (
                     <cf-card style="flex: 1; min-width: 120px;">
                       <cf-vstack slot="content" gap="1">
                         <cf-label>{room.name}</cf-label>
+                        <cf-heading level={3}>
+                          {roomIndex === selectedRoomIndex
+                            ? messageCount
+                            : room.messages?.length ?? 0}
+                        </cf-heading>
                       </cf-vstack>
                     </cf-card>
                   ))}
@@ -484,6 +507,8 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
       lastCurrentRoomAuthor,
       lastCurrentRoomBody,
       roomItems,
+      roomSummaries,
+      roomSummaryText,
       sendMessage: send,
       addRoom: boundAddRoom,
       setName: boundSetName,
