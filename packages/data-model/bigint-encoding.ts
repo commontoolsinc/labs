@@ -172,25 +172,25 @@ export function bigintFromMinimalTwosComplement(bytes: Uint8Array): bigint {
   // Determine sign from the high bit of the first byte.
   const negative = (bytes[0]! & 0x80) !== 0;
 
-  // Fast path: use DataView.getBigUint64() for values that fit in 8 bytes.
   if (bytes.length <= 8) {
-    dv64Bytes.fill(0);
+    // Fast path for `bytes.length <= 8`.
+    dv64Bytes.fill(negative ? 0xff : 0);
     dv64Bytes.set(bytes, 8 - bytes.length);
-    const raw = dv64View.getBigUint64(0, false); // big-endian
-    if (!negative) return raw;
-    return raw - (1n << BigInt(bytes.length * 8));
-  }
-
-  // Fallback: per-byte shift loop for larger values.
-  let result = 0n;
-  for (let i = 0; i < bytes.length; i++) {
-    result = (result << 8n) | BigInt(bytes[i]!);
-  }
-
-  if (!negative) {
+    return dv64View.getBigInt64(0, false); // `false` means big-endian.
+  } else if (negative) {
+    // Slow path for negative values. This uses a similar ones-complement trick
+    // as is done in the encoder function, above.
+    let result = 0n;
+    for (let i = 0; i < bytes.length; i++) {
+      result = (result << 8n) | BigInt(0xff - bytes[i]!);
+    }
+    return ~result;
+  } else {
+    // Slow path for positive values.
+    let result = 0n;
+    for (let i = 0; i < bytes.length; i++) {
+      result = (result << 8n) | BigInt(bytes[i]!);
+    }
     return result;
   }
-
-  // Two's complement: subtract 2^(byteLen*8) to get the negative value.
-  return result - (1n << BigInt(bytes.length * 8));
 }
