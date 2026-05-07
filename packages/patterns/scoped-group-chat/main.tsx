@@ -256,10 +256,6 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
       selectedRoom,
       draft,
     });
-    const roomItems = roomCells.map((room) => ({
-      label: room.name,
-      value: room,
-    }));
     const roomSummaryText = computed(() =>
       rooms
         .map((room) => `${room.name}: ${room.messages?.length ?? 0}`)
@@ -294,22 +290,8 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
               <cf-hstack justify="between" align="center" gap="4">
                 <div>
                   <cf-heading level={2}>Group chat</cf-heading>
-                  <div style={metaTextStyle}>
-                    {messageCount} messages in {displayedRoomLabel}
-                  </div>
                 </div>
-                <cf-hstack gap="2" align="center">
-                  <cf-badge color="neutral" variant="outline">
-                    {displayedRoomLabel}
-                  </cf-badge>
-                  <cf-badge color="primary" variant="solid">
-                    {currentName || "Anonymous"}
-                  </cf-badge>
-                </cf-hstack>
-              </cf-hstack>
-
-              <cf-hstack gap="3" align="end">
-                <cf-vstack gap="1" style="flex: 1; min-width: 180px;">
+                <cf-vstack gap="1" style="width: 220px;">
                   <cf-label>Your name</cf-label>
                   <cf-input
                     $value={name}
@@ -318,18 +300,24 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
                     timing-strategy="immediate"
                   />
                 </cf-vstack>
-                <cf-vstack gap="1" style="width: 220px;">
-                  <cf-label>Room</cf-label>
-                  <cf-select
-                    $value={selectedRoomRef}
-                    items={roomItems}
-                    placeholder="Choose room"
-                    aria-label="Room"
-                  />
-                </cf-vstack>
-                <cf-vstack gap="1" style="width: 280px;">
-                  <cf-label>New room</cf-label>
-                  <cf-hstack gap="2" align="center">
+              </cf-hstack>
+            </cf-vstack>
+
+            <cf-vscroll flex showScrollbar fadeEdges>
+              <cf-vstack gap="3" padding="4">
+                <cf-hstack gap="3" align="center">
+                  <cf-tab-list variant="chip">
+                    {roomCells.map((room) => (
+                      <cf-tab
+                        value={room.name}
+                        selected={selectedRoomRef.equals(room)}
+                        onClick={selectRoomRef({ selectedRoom, room })}
+                      >
+                        {room.name} · {room.messages?.length ?? 0}
+                      </cf-tab>
+                    ))}
+                  </cf-tab-list>
+                  <cf-hstack gap="2" align="center" style="width: 280px;">
                     <cf-input
                       $value={newRoomName}
                       placeholder="Room name"
@@ -340,23 +328,7 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
                       Add
                     </cf-button>
                   </cf-hstack>
-                </cf-vstack>
-              </cf-hstack>
-            </cf-vstack>
-
-            <cf-vscroll flex showScrollbar fadeEdges>
-              <cf-vstack gap="3" padding="4">
-                <cf-tab-list variant="chip">
-                  {roomCells.map((room) => (
-                    <cf-tab
-                      value={room.name}
-                      selected={selectedRoomRef.equals(room)}
-                      onClick={selectRoomRef({ selectedRoom, room })}
-                    >
-                      {room.name} · {room.messages?.length ?? 0}
-                    </cf-tab>
-                  ))}
-                </cf-tab-list>
+                </cf-hstack>
 
                 <section style={panelStyle}>
                   <cf-vstack gap="3" style="padding: 16px;">
@@ -380,12 +352,6 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
                         <cf-vstack gap="2">
                           <cf-card style={messageStyle}>
                             <cf-vstack slot="content" gap="2">
-                              <cf-hstack justify="between" align="center">
-                                <cf-label>{currentRoomLabel}</cf-label>
-                                <span style={metaTextStyle}>
-                                  {messageCount} total
-                                </span>
-                              </cf-hstack>
                               <div
                                 style={{
                                   fontSize: "16px",
