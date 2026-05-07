@@ -2952,6 +2952,100 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("syncs cfc schema documents for scoped v2 documents", async () => {
+    const server = new MemoryV2Server.Server({
+      authorizeSessionOpen: () => signer.did(),
+    });
+    const createStorageManager = () =>
+      new SharedV2StorageManager({
+        as: signer,
+        address: new URL("memory://"),
+      }, server);
+    const storageManager1 = createStorageManager();
+    const runtime1 = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager: storageManager1,
+    });
+    const cellSchema = {
+      type: "object",
+      properties: {
+        secret: {
+          type: "string",
+          ifc: { confidentiality: ["secret"] },
+        },
+      },
+      required: ["secret"],
+    } as const satisfies JSONSchema;
+    try {
+      const firstTx = runtime1.edit();
+      firstTx.setCfcEnforcementMode("enforce-explicit");
+      const firstBaseCell = runtime1.getCell(
+        signer.did(),
+        "cfc-scoped-schema-remote-sync",
+        cellSchema,
+        firstTx,
+      );
+      const firstCell = createCell(
+        runtime1,
+        { ...firstBaseCell.getAsNormalizedFullLink(), scope: "user" },
+        firstTx,
+      );
+      firstCell.set({ secret: "hello" });
+      firstTx.prepareCfc();
+      const firstResult = await firstTx.commit();
+      expect(firstResult.error).toBeUndefined();
+      expect(firstResult.ok).toBeDefined();
+      await storageManager1.synced();
+    } finally {
+      await runtime1.dispose();
+      await storageManager1.close();
+    }
+
+    const storageManager2 = createStorageManager();
+    const runtime2 = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager: storageManager2,
+    });
+    try {
+      const secondSchema = {
+        type: "object",
+        properties: {
+          secret: {
+            type: "string",
+            ifc: { confidentiality: ["secret"] },
+          },
+          title: { type: "string", default: "" },
+        },
+        required: ["secret", "title"],
+      } as const satisfies JSONSchema;
+      const secondBaseCell = runtime2.getCell(
+        signer.did(),
+        "cfc-scoped-schema-remote-sync",
+        secondSchema,
+      );
+      const secondCell = createCell(
+        runtime2,
+        { ...secondBaseCell.getAsNormalizedFullLink(), scope: "user" },
+      );
+      await secondCell.sync();
+
+      const secondTx = runtime2.edit();
+      secondTx.setCfcEnforcementMode("enforce-explicit");
+      secondCell.withTx(secondTx).set({
+        secret: "hello",
+        title: "synced",
+      });
+      secondTx.prepareCfc();
+      const secondResult = await secondTx.commit();
+      expect(secondResult.error).toBeUndefined();
+      expect(secondResult.ok).toBeDefined();
+    } finally {
+      await runtime2.dispose();
+      await storageManager2.close();
+      await server.close();
+    }
+  });
+
   it("rejects later writes when stored schemaHash documents are missing", async () => {
     const { runtime, storageManager } = createRuntime();
     try {

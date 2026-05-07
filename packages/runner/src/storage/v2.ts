@@ -612,9 +612,9 @@ export class StorageManager implements IStorageManager {
     }, scope);
     await this.syncCfcSchemaDocument(
       space,
-      (provider as { get?: (uri: URI) => EntityDocument | undefined }).get?.(
-        id,
-      ),
+      (provider as {
+        get?: (uri: URI, scope?: CellScope) => EntityDocument | undefined;
+      }).get?.(id, scope),
     );
     return cell;
   }
@@ -836,8 +836,8 @@ class Provider implements IStorageProviderWithReplica {
     return this.replica.synced();
   }
 
-  get(uri: URI): EntityDocument | undefined {
-    return this.replica.getDocument(uri);
+  get(uri: URI, scope?: CellScope): EntityDocument | undefined {
+    return this.replica.getDocument(uri, scope);
   }
 
   sink(
