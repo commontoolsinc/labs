@@ -25,14 +25,8 @@ export interface Room {
   messages: ChatMessage[] | Default<[]>;
 }
 
-type DefaultRooms = [
-  { name: "Lobby"; messages: [] },
-  { name: "Workshop"; messages: [] },
-  { name: "Afterparty"; messages: [] },
-];
-
 export interface Conversation {
-  rooms: Room[] | Default<DefaultRooms>;
+  rooms: Room[] | Default<[]>;
 }
 
 export interface SelectedRoom {
@@ -43,8 +37,13 @@ interface ConversationSnapshot {
   rooms: readonly Room[];
 }
 
-export interface SendEvent {
-  submit: true;
+export interface SendMessageEvent {
+  message?: string;
+  room?: Room;
+}
+
+export interface AddRoomEvent {
+  name?: string;
 }
 
 export interface SelectRoomEvent {
@@ -54,14 +53,10 @@ export interface SelectRoomEvent {
 }
 
 const DEFAULT_CONVERSATION = {
-  rooms: [
-    { name: "Lobby", messages: [] },
-    { name: "Workshop", messages: [] },
-    { name: "Afterparty", messages: [] },
-  ],
+  rooms: [],
 } satisfies Conversation;
 
-const DEFAULT_ROOMS = DEFAULT_CONVERSATION.rooms;
+const EMPTY_ROOM = { name: "", messages: [] } satisfies Room;
 
 type NameCell = Writable<string | Default<"">>;
 type SelectedRoomCell = Writable<SelectedRoom | Default<{}>>;
@@ -137,6 +132,53 @@ const metaTextStyle = {
   fontSize: "13px",
 };
 
+const sendMessage = handler<SendMessageEvent, {
+  name: NameCell;
+  selectedRoom: SelectedRoomCell;
+  conversation: ConversationCell;
+  draft: DraftCell;
+}>(({ message, room }, { name, selectedRoom, conversation, draft }) => {
+  const body = (message ?? draft.get()).trim();
+  if (!body) return;
+
+  const author = name.get().trim() || "Anonymous";
+  const sentAt = safeDateNow();
+  const rooms = (conversation.get() as Conversation | undefined)?.rooms ?? [];
+  if (rooms.length === 0) return;
+
+  const roomRef = room ?? selectedRoom.key("room");
+  const targetIndex = rooms.findIndex((_candidate, index) =>
+    conversation.key("rooms", index).equals(roomRef)
+  );
+  if (targetIndex < 0) return;
+
+  (conversation.key(
+    "rooms",
+    targetIndex,
+    "messages",
+  ) as Writable<ChatMessage[] | Default<[]>>).push({
+    author,
+    body,
+    sentAt,
+  });
+  draft.set("");
+});
+
+const addRoom = handler<AddRoomEvent, {
+  conversation: ConversationCell;
+  selectedRoom: SelectedRoomCell;
+  newRoomName: NewRoomNameCell;
+}>(({ name: eventName }, { conversation, selectedRoom, newRoomName }) => {
+  const name = (eventName ?? newRoomName.get()).trim();
+  if (!name) return;
+
+  const rooms = (conversation.get() as Conversation | undefined)?.rooms ?? [];
+  const nextIndex = rooms.length;
+  conversation.key("rooms").push({ name, messages: [] });
+  selectedRoom.set({ room: conversation.key("rooms", nextIndex) });
+  newRoomName.set("");
+});
+
 interface ScopedGroupChatInput {
   name?: PerUser<NameCell>;
   selectedRoom?: PerSession<SelectedRoomCell>;
@@ -166,60 +208,13 @@ interface ScopedGroupChatOutput {
   lastCurrentRoomAuthor: string;
   lastCurrentRoomBody: string;
   roomItems: readonly { label: string; value: string }[];
-  sendMessage: Stream<SendEvent>;
-  addRoom: Stream<SendEvent>;
+  sendMessage: Stream<SendMessageEvent>;
+  addRoom: Stream<AddRoomEvent>;
   setName: Stream<{ name: string }>;
   setDraft: Stream<{ draft: string }>;
   setNewRoomName: Stream<{ name: string }>;
   selectRoom: Stream<SelectRoomEvent>;
 }
-
-const sendMessage = handler<SendEvent, {
-  name: NameCell;
-  selectedRoom: SelectedRoomCell;
-  conversation: ConversationCell;
-  draft: DraftCell;
-}>((_, { name, selectedRoom, conversation, draft }) => {
-  const body = draft.get().trim();
-  if (!body) return;
-
-  const author = name.get().trim() || "Anonymous";
-  const sentAt = safeDateNow();
-  const message = {
-    author,
-    body,
-    sentAt,
-  };
-  const selected = (selectedRoom.get() as SelectedRoom | undefined)?.room;
-  const rooms = (conversation.get() as Conversation | undefined)?.rooms ?? [];
-  const selectedIndex = selected
-    ? rooms.findIndex((room) => room.name === selected.name)
-    : 0;
-  const targetRoom = conversation.key(
-    "rooms",
-    selectedIndex >= 0 ? selectedIndex : 0,
-  );
-
-  (targetRoom.key("messages") as Writable<ChatMessage[] | Default<[]>>).push(
-    message,
-  );
-  draft.set("");
-});
-
-const addRoom = handler<SendEvent, {
-  conversation: ConversationCell;
-  selectedRoom: SelectedRoomCell;
-  newRoomName: NewRoomNameCell;
-}>((_, { conversation, selectedRoom, newRoomName }) => {
-  const name = newRoomName.get().trim();
-  if (!name) return;
-
-  const rooms = (conversation.get() as Conversation | undefined)?.rooms ?? [];
-  const nextIndex = rooms.length;
-  conversation.key("rooms").push({ name, messages: [] });
-  selectedRoom.set({ room: conversation.key("rooms", nextIndex) });
-  newRoomName.set("");
-});
 
 const setName = handler<{ name: string }, { name: Writable<string> }>(
   ({ name: nextName }, { name }) => {
@@ -261,12 +256,6 @@ const selectRoom = handler<
 
 export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
   ({ name, selectedRoom, conversation, draft, newRoomName }) => {
-    const send = sendMessage({
-      name,
-      selectedRoom,
-      conversation,
-      draft,
-    });
     const boundAddRoom = addRoom({
       conversation,
       selectedRoom,
@@ -279,7 +268,7 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
     const currentName = computed(() => name.get());
     const currentDraft = computed(() => draft.get());
     const rooms: Room[] = computed(() =>
-      (conversation.get() as Conversation | undefined)?.rooms ?? DEFAULT_ROOMS
+      (conversation.get() as Conversation | undefined)?.rooms ?? []
     );
     const conversationSnapshot = computed(() => ({
       rooms,
@@ -287,17 +276,33 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
     const currentRoom: { room: Room } = computed(() => ({
       room: (selectedRoom.get() as SelectedRoom | undefined)?.room ??
         rooms[0] ??
-        DEFAULT_ROOMS[0],
+        EMPTY_ROOM,
     }));
-    const messagesInSelectedRoom: ChatMessage[] = computed(() =>
-      currentRoom.room.messages ?? []
+    const selectedRoomRef = selectedRoom.key("room");
+    const selectedRoomIndex = computed(() => {
+      const index = rooms.findIndex((_room, roomIndex) =>
+        conversation.key("rooms", roomIndex).equals(selectedRoomRef)
+      );
+      return index < 0 ? 0 : index;
+    });
+    const messagesInSelectedRoom = computed<readonly ChatMessage[]>(() =>
+      rooms[selectedRoomIndex]?.messages ?? []
     );
-    const messageCount = computed(() => messagesInSelectedRoom.length);
-    const currentRoomLabel = computed(() => currentRoom.room.name);
-    const currentRoomIndex = computed(() => {
-      const name = currentRoom.room.name;
-      const index = rooms.findIndex((room) => room.name === name);
-      return String(index < 0 ? 0 : index);
+    const messageCount = computed(() =>
+      rooms[selectedRoomIndex]?.messages?.length ?? 0
+    );
+    const currentRoomLabel = computed(() =>
+      rooms[selectedRoomIndex]?.name ?? currentRoom.room.name ?? "No room"
+    );
+    const displayedRoomLabel = computed(() => currentRoomLabel || "No room");
+    const currentRoomIndex = computed(() =>
+      rooms.length === 0 ? "" : String(selectedRoomIndex)
+    );
+    const send = sendMessage({
+      name,
+      selectedRoom,
+      conversation,
+      draft,
     });
     const roomItems = computed(() =>
       rooms.map((room, index) => ({
@@ -305,52 +310,25 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
         value: String(index),
       }))
     );
-    const messageCards = computed(() =>
-      messagesInSelectedRoom.map((message) => (
-        <cf-card style={messageStyle}>
-          <cf-vstack slot="content" gap="2">
-            <cf-hstack justify="between" align="center">
-              <cf-label>{message.author}</cf-label>
-              <span style={metaTextStyle}>{currentRoomLabel}</span>
-            </cf-hstack>
-            <div
-              style={{
-                fontSize: "16px",
-                lineHeight: "1.45",
-                color: "var(--cf-theme-color-text)",
-              }}
-            >
-              {message.body}
-            </div>
-          </cf-vstack>
-        </cf-card>
-      ))
-    );
-    const roomSummaryCards = computed(() =>
-      rooms.map((room) => (
-        <cf-card style="flex: 1; min-width: 120px;">
-          <cf-vstack slot="content" gap="1">
-            <cf-label>{room.name}</cf-label>
-            <cf-heading level={3}>{room.messages?.length ?? 0}</cf-heading>
-          </cf-vstack>
-        </cf-card>
-      ))
-    );
     const roomCount = computed(() => rooms.length);
-    const currentRoomMessageCount = computed(() =>
-      messagesInSelectedRoom.length
-    );
-    const lastRoom = computed(() =>
-      rooms[rooms.length - 1] ?? DEFAULT_ROOMS[0]
-    );
+    const currentRoomMessageCount = messageCount;
+    const lastRoom = computed(() => rooms[rooms.length - 1] ?? EMPTY_ROOM);
     const lastRoomName = computed(() => lastRoom.name);
     const lastRoomMessageCount = computed(() => lastRoom.messages?.length ?? 0);
-    const lastCurrentRoomAuthor = computed(() =>
-      messagesInSelectedRoom[messagesInSelectedRoom.length - 1]?.author ?? ""
-    );
-    const lastCurrentRoomBody = computed(() =>
-      messagesInSelectedRoom[messagesInSelectedRoom.length - 1]?.body ?? ""
-    );
+    const lastCurrentRoomAuthor = computed(() => {
+      const messages = rooms[selectedRoomIndex]?.messages ?? [];
+      return messages[messages.length - 1]?.author ?? "";
+    });
+    const lastCurrentRoomBody = computed(() => {
+      const messages = rooms[selectedRoomIndex]?.messages ?? [];
+      return messages[messages.length - 1]?.body ?? "";
+    });
+    const selectedRoomTranscript = computed(() => {
+      const messages = rooms[selectedRoomIndex]?.messages ?? [];
+      return messages
+        .map((message) => `${message.author}: ${message.body}`)
+        .join("\n");
+    });
 
     return {
       [NAME]: "Scoped group chat",
@@ -362,12 +340,12 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
                 <div>
                   <cf-heading level={2}>Group chat</cf-heading>
                   <div style={metaTextStyle}>
-                    {messageCount} messages in {currentRoomLabel}
+                    {messageCount} messages in {displayedRoomLabel}
                   </div>
                 </div>
                 <cf-hstack gap="2" align="center">
                   <cf-badge color="neutral" variant="outline">
-                    {currentRoomLabel}
+                    {displayedRoomLabel}
                   </cf-badge>
                   <cf-badge color="primary" variant="solid">
                     {currentName || "Anonymous"}
@@ -382,6 +360,7 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
                     $value={name}
                     placeholder="Ada Lovelace"
                     aria-label="Your name"
+                    timing-strategy="immediate"
                   />
                 </cf-vstack>
                 <cf-vstack gap="1" style="width: 220px;">
@@ -395,18 +374,14 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
                 </cf-vstack>
                 <cf-vstack gap="1" style="width: 280px;">
                   <cf-label>New room</cf-label>
-                  <cf-hstack gap="2">
-                    <cf-input
-                      $value={newRoomName}
-                      placeholder="Room name"
-                      aria-label="New room name"
-                    />
-                    <cf-button
-                      onClick={() => boundAddRoom.send({ submit: true })}
-                    >
-                      Add Room
-                    </cf-button>
-                  </cf-hstack>
+                  <cf-message-input
+                    placeholder="Room name"
+                    button-text="Add Room"
+                    oncf-send={(e: { detail?: { message?: string } }) => {
+                      const roomName = e.detail?.message?.trim();
+                      if (roomName) boundAddRoom.send({ name: roomName });
+                    }}
+                  />
                 </cf-vstack>
               </cf-hstack>
             </cf-vstack>
@@ -414,13 +389,19 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
             <cf-vscroll flex showScrollbar fadeEdges>
               <cf-vstack gap="3" padding="4">
                 <cf-hstack gap="3">
-                  {roomSummaryCards}
+                  {rooms.map((room) => (
+                    <cf-card style="flex: 1; min-width: 120px;">
+                      <cf-vstack slot="content" gap="1">
+                        <cf-label>{room.name}</cf-label>
+                      </cf-vstack>
+                    </cf-card>
+                  ))}
                 </cf-hstack>
 
                 <section style={panelStyle}>
                   <cf-vstack gap="3" style="padding: 16px;">
                     <cf-hstack justify="between" align="center">
-                      <cf-heading level={3}>{currentRoomLabel}</cf-heading>
+                      <cf-heading level={3}>{displayedRoomLabel}</cf-heading>
                       <div style={metaTextStyle}>{messageCount} total</div>
                     </cf-hstack>
 
@@ -437,7 +418,26 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
                       )
                       : (
                         <cf-vstack gap="2">
-                          {messageCards}
+                          <cf-card style={messageStyle}>
+                            <cf-vstack slot="content" gap="2">
+                              <cf-hstack justify="between" align="center">
+                                <cf-label>{currentRoomLabel}</cf-label>
+                                <span style={metaTextStyle}>
+                                  {messageCount} total
+                                </span>
+                              </cf-hstack>
+                              <div
+                                style={{
+                                  fontSize: "16px",
+                                  lineHeight: "1.5",
+                                  color: "var(--cf-theme-color-text)",
+                                  whiteSpace: "pre-wrap",
+                                }}
+                              >
+                                {selectedRoomTranscript}
+                              </div>
+                            </cf-vstack>
+                          </cf-card>
                         </cf-vstack>
                       )}
                   </cf-vstack>
@@ -448,16 +448,20 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
             <cf-hstack slot="footer" gap="3" align="end" style={composerStyle}>
               <cf-vstack gap="1" style="flex: 1;">
                 <cf-label>Message</cf-label>
-                <cf-textarea
-                  $value={draft}
-                  rows={2}
-                  placeholder={`Message ${currentRoomLabel}`}
-                  aria-label="Message draft"
+                <cf-message-input
+                  placeholder={`Message ${displayedRoomLabel}`}
+                  button-text="Send"
+                  oncf-send={(e: { detail?: { message?: string } }) => {
+                    const message = e.detail?.message?.trim();
+                    if (message) {
+                      send.send({
+                        message,
+                        room: currentRoom.room,
+                      });
+                    }
+                  }}
                 />
               </cf-vstack>
-              <cf-button onClick={() => send.send({ submit: true })}>
-                Send
-              </cf-button>
             </cf-hstack>
           </cf-screen>
         </cf-theme>
