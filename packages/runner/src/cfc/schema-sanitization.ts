@@ -41,11 +41,7 @@ const isPrimitiveJsonValue = (value: unknown): boolean =>
   typeof value === "boolean";
 
 const cloneJson = <T>(value: T): T =>
-  cloneIfNecessary(value as FabricValue, {
-    frozen: false,
-    deep: true,
-    force: true,
-  }) as T;
+  cloneIfNecessary(value as FabricValue, { frozen: true }) as T;
 
 const uniqueAtoms = (
   atoms: Iterable<unknown>,
