@@ -14,71 +14,62 @@ import {
   Writable,
 } from "commonfabric";
 
-export type RoomId = "lobby" | "workshop" | "afterparty";
-
 export interface ChatMessage {
-  room: RoomId;
   author: string;
   body: string;
   sentAt: number;
 }
 
-type DefaultConversationRooms = {
-  lobby: [];
-  workshop: [];
-  afterparty: [];
-};
-
-export interface ConversationRooms {
-  lobby: ChatMessage[] | Default<[]>;
-  workshop: ChatMessage[] | Default<[]>;
-  afterparty: ChatMessage[] | Default<[]>;
+export interface Room {
+  name: string;
+  messages: ChatMessage[] | Default<[]>;
 }
 
+type DefaultRooms = [
+  { name: "Lobby"; messages: [] },
+  { name: "Workshop"; messages: [] },
+  { name: "Afterparty"; messages: [] },
+];
+
 export interface Conversation {
-  rooms: ConversationRooms | Default<DefaultConversationRooms>;
+  rooms: Room[] | Default<DefaultRooms>;
+}
+
+export interface SelectedRoom {
+  room?: Room;
 }
 
 interface ConversationSnapshot {
-  rooms: {
-    lobby: readonly ChatMessage[];
-    workshop: readonly ChatMessage[];
-    afterparty: readonly ChatMessage[];
-  };
+  rooms: readonly Room[];
 }
 
 export interface SendEvent {
   submit: true;
 }
 
-const DEFAULT_ROOMS = {
-  lobby: [],
-  workshop: [],
-  afterparty: [],
-} satisfies ConversationRooms;
+export interface SelectRoomEvent {
+  roomIndex?: number;
+  target?: { value?: string };
+  detail?: { value?: string };
+}
 
 const DEFAULT_CONVERSATION = {
-  rooms: DEFAULT_ROOMS,
+  rooms: [
+    { name: "Lobby", messages: [] },
+    { name: "Workshop", messages: [] },
+    { name: "Afterparty", messages: [] },
+  ],
 } satisfies Conversation;
 
+const DEFAULT_ROOMS = DEFAULT_CONVERSATION.rooms;
+
 type NameCell = Writable<string | Default<"">>;
-type RoomCell = Writable<RoomId | Default<"lobby">>;
+type SelectedRoomCell = Writable<SelectedRoom | Default<{}>>;
 type ConversationCell = Writable<
   Conversation | Default<typeof DEFAULT_CONVERSATION>
 >;
 type DraftCell = Writable<string | Default<"">>;
-
-const ROOM_ITEMS = [
-  { label: "Lobby", value: "lobby" },
-  { label: "Workshop", value: "workshop" },
-  { label: "Afterparty", value: "afterparty" },
-];
-
-const ROOM_LABELS: Record<RoomId, string> = {
-  lobby: "Lobby",
-  workshop: "Workshop",
-  afterparty: "Afterparty",
-};
+type NewRoomNameCell = Writable<string | Default<"">>;
 
 const CHAT_THEME = {
   fontFamily:
@@ -148,63 +139,86 @@ const metaTextStyle = {
 
 interface ScopedGroupChatInput {
   name?: PerUser<NameCell>;
-  selectedRoom?: PerSession<RoomCell>;
+  selectedRoom?: PerSession<SelectedRoomCell>;
   conversation?: PerSpace<ConversationCell>;
   draft?: PerUser<DraftCell>;
+  newRoomName?: PerSession<NewRoomNameCell>;
 }
 
 interface ScopedGroupChatOutput {
   [NAME]: string;
   [UI]: VNode;
   name: PerUser<NameCell>;
-  selectedRoom: PerSession<RoomCell>;
+  selectedRoom: PerSession<SelectedRoomCell>;
   conversation: PerSpace<ConversationCell>;
   draft: PerUser<DraftCell>;
+  newRoomName: PerSession<NewRoomNameCell>;
   currentName: string;
-  currentRoom: RoomId;
+  currentRoom: { room: Room };
   currentDraft: string;
   conversationSnapshot: ConversationSnapshot;
   messagesInSelectedRoom: readonly ChatMessage[];
   messageCount: number;
-  lobbyCount: number;
-  workshopCount: number;
-  afterpartyCount: number;
-  lastLobbyAuthor: string;
-  lastLobbyBody: string;
-  lastWorkshopBody: string;
+  roomCount: number;
+  currentRoomMessageCount: number;
+  lastRoomName: string;
+  lastRoomMessageCount: number;
+  lastCurrentRoomAuthor: string;
+  lastCurrentRoomBody: string;
+  roomItems: readonly { label: string; value: string }[];
   sendMessage: Stream<SendEvent>;
+  addRoom: Stream<SendEvent>;
   setName: Stream<{ name: string }>;
   setDraft: Stream<{ draft: string }>;
-  selectRoom: Stream<{ room: RoomId }>;
+  setNewRoomName: Stream<{ name: string }>;
+  selectRoom: Stream<SelectRoomEvent>;
 }
 
 const sendMessage = handler<SendEvent, {
   name: NameCell;
-  selectedRoom: RoomCell;
+  selectedRoom: SelectedRoomCell;
   conversation: ConversationCell;
   draft: DraftCell;
 }>((_, { name, selectedRoom, conversation, draft }) => {
   const body = draft.get().trim();
   if (!body) return;
 
-  const room = selectedRoom.get();
   const author = name.get().trim() || "Anonymous";
   const sentAt = safeDateNow();
   const message = {
-    room,
     author,
     body,
     sentAt,
   };
+  const selected = (selectedRoom.get() as SelectedRoom | undefined)?.room;
+  const rooms = (conversation.get() as Conversation | undefined)?.rooms ?? [];
+  const selectedIndex = selected
+    ? rooms.findIndex((room) => room.name === selected.name)
+    : 0;
+  const targetRoom = conversation.key(
+    "rooms",
+    selectedIndex >= 0 ? selectedIndex : 0,
+  );
 
-  if (room === "workshop") {
-    conversation.key("rooms", "workshop").push(message);
-  } else if (room === "afterparty") {
-    conversation.key("rooms", "afterparty").push(message);
-  } else {
-    conversation.key("rooms", "lobby").push(message);
-  }
+  (targetRoom.key("messages") as Writable<ChatMessage[] | Default<[]>>).push(
+    message,
+  );
   draft.set("");
+});
+
+const addRoom = handler<SendEvent, {
+  conversation: ConversationCell;
+  selectedRoom: SelectedRoomCell;
+  newRoomName: NewRoomNameCell;
+}>((_, { conversation, selectedRoom, newRoomName }) => {
+  const name = newRoomName.get().trim();
+  if (!name) return;
+
+  const rooms = (conversation.get() as Conversation | undefined)?.rooms ?? [];
+  const nextIndex = rooms.length;
+  conversation.key("rooms").push({ name, messages: [] });
+  selectedRoom.set({ room: conversation.key("rooms", nextIndex) });
+  newRoomName.set("");
 });
 
 const setName = handler<{ name: string }, { name: Writable<string> }>(
@@ -219,63 +233,85 @@ const setDraft = handler<{ draft: string }, { draft: Writable<string> }>(
   },
 );
 
-const selectRoom = handler<
-  { room: RoomId },
-  { selectedRoom: Writable<RoomId> }
+const setNewRoomName = handler<
+  { name: string },
+  { newRoomName: Writable<string> }
 >(
-  ({ room }, { selectedRoom }) => {
-    selectedRoom.set(room);
+  ({ name }, { newRoomName }) => {
+    newRoomName.set(name);
+  },
+);
+
+const selectRoom = handler<
+  SelectRoomEvent,
+  { conversation: ConversationCell; selectedRoom: SelectedRoomCell }
+>(
+  (event, { conversation, selectedRoom }) => {
+    const rawIndex = event.roomIndex ?? event.target?.value ??
+      event.detail?.value;
+    const index = typeof rawIndex === "number"
+      ? rawIndex
+      : parseInt(String(rawIndex ?? ""), 10);
+    const rooms = (conversation.get() as Conversation | undefined)?.rooms ?? [];
+    if (!Number.isFinite(index) || index < 0 || index >= rooms.length) return;
+
+    selectedRoom.set({ room: conversation.key("rooms", index) });
   },
 );
 
 export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
-  ({ name, selectedRoom, conversation, draft }) => {
+  ({ name, selectedRoom, conversation, draft, newRoomName }) => {
     const send = sendMessage({
       name,
       selectedRoom,
       conversation,
       draft,
     });
+    const boundAddRoom = addRoom({
+      conversation,
+      selectedRoom,
+      newRoomName,
+    });
     const boundSetName = setName({ name });
     const boundSetDraft = setDraft({ draft });
-    const boundSelectRoom = selectRoom({ selectedRoom });
+    const boundSetNewRoomName = setNewRoomName({ newRoomName });
+    const boundSelectRoom = selectRoom({ conversation, selectedRoom });
     const currentName = computed(() => name.get());
-    const currentRoom = computed(() => selectedRoom.get());
     const currentDraft = computed(() => draft.get());
-    const lobbyMessages: ChatMessage[] = computed(() =>
-      (conversation.get() as Conversation | undefined)?.rooms?.lobby ?? []
-    );
-    const workshopMessages: ChatMessage[] = computed(() =>
-      (conversation.get() as Conversation | undefined)?.rooms?.workshop ?? []
-    );
-    const afterpartyMessages: ChatMessage[] = computed(() =>
-      (conversation.get() as Conversation | undefined)?.rooms?.afterparty ?? []
+    const rooms: Room[] = computed(() =>
+      (conversation.get() as Conversation | undefined)?.rooms ?? DEFAULT_ROOMS
     );
     const conversationSnapshot = computed(() => ({
-      rooms: {
-        lobby: lobbyMessages,
-        workshop: workshopMessages,
-        afterparty: afterpartyMessages,
-      },
+      rooms,
+    }));
+    const currentRoom: { room: Room } = computed(() => ({
+      room: (selectedRoom.get() as SelectedRoom | undefined)?.room ??
+        rooms[0] ??
+        DEFAULT_ROOMS[0],
     }));
     const messagesInSelectedRoom: ChatMessage[] = computed(() =>
-      currentRoom === "workshop"
-        ? workshopMessages
-        : currentRoom === "afterparty"
-        ? afterpartyMessages
-        : lobbyMessages
+      currentRoom.room.messages ?? []
     );
     const messageCount = computed(() => messagesInSelectedRoom.length);
-    const currentRoomLabel = computed(() => ROOM_LABELS[currentRoom]);
+    const currentRoomLabel = computed(() => currentRoom.room.name);
+    const currentRoomIndex = computed(() => {
+      const name = currentRoom.room.name;
+      const index = rooms.findIndex((room) => room.name === name);
+      return String(index < 0 ? 0 : index);
+    });
+    const roomItems = computed(() =>
+      rooms.map((room, index) => ({
+        label: room.name,
+        value: String(index),
+      }))
+    );
     const messageCards = computed(() =>
       messagesInSelectedRoom.map((message) => (
         <cf-card style={messageStyle}>
           <cf-vstack slot="content" gap="2">
             <cf-hstack justify="between" align="center">
               <cf-label>{message.author}</cf-label>
-              <span style={metaTextStyle}>
-                {message.room}
-              </span>
+              <span style={metaTextStyle}>{currentRoomLabel}</span>
             </cf-hstack>
             <div
               style={{
@@ -290,17 +326,30 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
         </cf-card>
       ))
     );
-    const lobbyCount = computed(() => lobbyMessages.length);
-    const workshopCount = computed(() => workshopMessages.length);
-    const afterpartyCount = computed(() => afterpartyMessages.length);
-    const lastLobbyAuthor = computed(() =>
-      lobbyMessages[lobbyMessages.length - 1]?.author ?? ""
+    const roomSummaryCards = computed(() =>
+      rooms.map((room) => (
+        <cf-card style="flex: 1; min-width: 120px;">
+          <cf-vstack slot="content" gap="1">
+            <cf-label>{room.name}</cf-label>
+            <cf-heading level={3}>{room.messages?.length ?? 0}</cf-heading>
+          </cf-vstack>
+        </cf-card>
+      ))
     );
-    const lastLobbyBody = computed(() =>
-      lobbyMessages[lobbyMessages.length - 1]?.body ?? ""
+    const roomCount = computed(() => rooms.length);
+    const currentRoomMessageCount = computed(() =>
+      messagesInSelectedRoom.length
     );
-    const lastWorkshopBody = computed(() =>
-      workshopMessages[workshopMessages.length - 1]?.body ?? ""
+    const lastRoom = computed(() =>
+      rooms[rooms.length - 1] ?? DEFAULT_ROOMS[0]
+    );
+    const lastRoomName = computed(() => lastRoom.name);
+    const lastRoomMessageCount = computed(() => lastRoom.messages?.length ?? 0);
+    const lastCurrentRoomAuthor = computed(() =>
+      messagesInSelectedRoom[messagesInSelectedRoom.length - 1]?.author ?? ""
+    );
+    const lastCurrentRoomBody = computed(() =>
+      messagesInSelectedRoom[messagesInSelectedRoom.length - 1]?.body ?? ""
     );
 
     return {
@@ -338,10 +387,26 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
                 <cf-vstack gap="1" style="width: 220px;">
                   <cf-label>Room</cf-label>
                   <cf-select
-                    $value={selectedRoom}
-                    items={ROOM_ITEMS}
+                    $value={currentRoomIndex}
+                    items={roomItems}
                     aria-label="Room"
+                    onChange={boundSelectRoom}
                   />
+                </cf-vstack>
+                <cf-vstack gap="1" style="width: 280px;">
+                  <cf-label>New room</cf-label>
+                  <cf-hstack gap="2">
+                    <cf-input
+                      $value={newRoomName}
+                      placeholder="Room name"
+                      aria-label="New room name"
+                    />
+                    <cf-button
+                      onClick={() => boundAddRoom.send({ submit: true })}
+                    >
+                      Add Room
+                    </cf-button>
+                  </cf-hstack>
                 </cf-vstack>
               </cf-hstack>
             </cf-vstack>
@@ -349,24 +414,7 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
             <cf-vscroll flex showScrollbar fadeEdges>
               <cf-vstack gap="3" padding="4">
                 <cf-hstack gap="3">
-                  <cf-card style="flex: 1; min-width: 120px;">
-                    <cf-vstack slot="content" gap="1">
-                      <cf-label>Lobby</cf-label>
-                      <cf-heading level={3}>{lobbyCount}</cf-heading>
-                    </cf-vstack>
-                  </cf-card>
-                  <cf-card style="flex: 1; min-width: 120px;">
-                    <cf-vstack slot="content" gap="1">
-                      <cf-label>Workshop</cf-label>
-                      <cf-heading level={3}>{workshopCount}</cf-heading>
-                    </cf-vstack>
-                  </cf-card>
-                  <cf-card style="flex: 1; min-width: 120px;">
-                    <cf-vstack slot="content" gap="1">
-                      <cf-label>Afterparty</cf-label>
-                      <cf-heading level={3}>{afterpartyCount}</cf-heading>
-                    </cf-vstack>
-                  </cf-card>
+                  {roomSummaryCards}
                 </cf-hstack>
 
                 <section style={panelStyle}>
@@ -418,21 +466,25 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
       selectedRoom,
       conversation,
       draft,
+      newRoomName,
       currentName,
       currentRoom,
       currentDraft,
       conversationSnapshot,
       messagesInSelectedRoom,
       messageCount,
-      lobbyCount,
-      workshopCount,
-      afterpartyCount,
-      lastLobbyAuthor,
-      lastLobbyBody,
-      lastWorkshopBody,
+      roomCount,
+      currentRoomMessageCount,
+      lastRoomName,
+      lastRoomMessageCount,
+      lastCurrentRoomAuthor,
+      lastCurrentRoomBody,
+      roomItems,
       sendMessage: send,
+      addRoom: boundAddRoom,
       setName: boundSetName,
       setDraft: boundSetDraft,
+      setNewRoomName: boundSetNewRoomName,
       selectRoom: boundSelectRoom,
     };
   },

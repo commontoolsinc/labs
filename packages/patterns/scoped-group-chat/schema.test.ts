@@ -28,4 +28,7 @@ Deno.test("scoped group chat pattern schema generates scoped input cells", async
     { kind: "cell", scope: "space" },
   ]);
   assertEquals(properties.draft.asCell, [{ kind: "cell", scope: "user" }]);
+  assertEquals(properties.newRoomName.asCell, [
+    { kind: "cell", scope: "session" },
+  ]);
 });
