@@ -1,8 +1,8 @@
 import type { JSONSchema } from "@commonfabric/api";
 import {
   type SchemaOpaqueLinkSanitizationResult,
-  validateAgainstSchema,
-  validateAndSanitizeSchemaValueWithOpaqueLinks,
+  validateAndSanitizeStructuredResultValue,
+  validateStructuredResultValue as validateCfcStructuredResultValue,
 } from "@commonfabric/runner/cfc";
 
 export const DEFAULT_STRUCTURED_RESULT_SCHEMA_MAX_BYTES = 32 * 1024;
@@ -105,12 +105,7 @@ export const validateStructuredResultValue = (
     schema: JSONSchema;
     value: unknown;
   },
-): void => {
-  const failure = validateAgainstSchema(options.schema, options.value);
-  if (failure !== undefined) {
-    throw new Error(failure);
-  }
-};
+): void => validateCfcStructuredResultValue(options);
 
 export const validateAndSanitizeStructuredResult = (
   options: {
@@ -119,4 +114,4 @@ export const validateAndSanitizeStructuredResult = (
     opaqueHandleId: string;
   },
 ): SanitizedStructuredResult =>
-  validateAndSanitizeSchemaValueWithOpaqueLinks(options);
+  validateAndSanitizeStructuredResultValue(options);

@@ -7,7 +7,7 @@ import {
   schemaWithInjectionSafeAnnotations,
   validateAgainstSchema,
   validateAndSanitizeSchemaValueWithOpaqueLinks,
-} from "../src/cfc/schema-sanitization.ts";
+} from "../src/cfc/mod.ts";
 
 const promptRisk = {
   type: "https://commonfabric.org/cfc/atom/Caveat",
