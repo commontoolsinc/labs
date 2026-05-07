@@ -35,6 +35,27 @@ function byteValueAt(hex: string, at: number): number {
 }
 
 /**
+ * Helper for `bigintToMinimalTwosComplement()`, which converts a positive
+ * `bigint` to a hex string with an even number of digits, _and_ a leading
+ * `00` if it would otherwise be interpreted as a negative number in
+ * twos-complement.
+ */
+function hexStringFromPositiveValue(value: bigint): string {
+  const hex = value.toString(16);
+  if ((hex.length & 1) === 1) {
+    // Round up to an even number of nibbles.
+    return "0" + hex;
+  } else if (nibbleValueAt(hex, 0) >= 8) {
+    // Add an extra `0x00` byte, because the high-order bit would otherwise
+    // be `1` and therefore the encoded result would be negative, which
+    // would be wrong.
+    return "00" + hex;
+  } else {
+    return hex;
+  }
+}
+
+/**
  * Shared 8-byte scratch buffer for the DataView fast path. A single
  * `setBigUint64()` call writes all 8 bytes at once, avoiding hex string
  * processing for values that fit in 64 bits. Same shared-buffer pattern as
@@ -94,22 +115,6 @@ export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
     }
   };
 
-  // Converts a positive value to a hex string.
-  const hexStringFromPositiveValue = (value: bigint) => {
-    const hex = value.toString(16);
-    if ((hex.length & 1) === 1) {
-      // Round up to an even number of nibbles.
-      return "0" + hex;
-    } else if (nibbleValueAt(hex, 0) >= 8) {
-      // Add an extra `0x00` byte, because the high-order bit would otherwise
-      // be `1` and therefore the encoded result would be negative, which
-      // would be wrong.
-      return "00" + hex;
-    } else {
-      return hex;
-    }
-  };
-
   if (value >= 0n) {
     if (value === 0n) {
       return ZERO_BYTES.slice();
@@ -124,8 +129,7 @@ export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
     // https://github.com/tc39/proposal-bigint-math
 
     const hex = hexStringFromPositiveValue(value);
-    const byteLen = hex.length >> 1;
-    const bytes = new Uint8Array(byteLen);
+    const bytes = new Uint8Array(hex.length >> 1);
 
     for (let i = 0; i < bytes.length; i++) {
       bytes[i] = byteValueAt(hex, i * 2);
@@ -146,8 +150,7 @@ export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
     // byte-by-byte when storing the result.
 
     const hex = hexStringFromPositiveValue(~value);
-    const byteLen = hex.length >> 1;
-    const bytes = new Uint8Array(byteLen);
+    const bytes = new Uint8Array(hex.length >> 1);
 
     for (let i = 0; i < bytes.length; i++) {
       // `0xff - value` to undo the ones-complement in `~value` above.
