@@ -634,4 +634,116 @@ describe("queueEvent with auto-start", () => {
     // Lift should still only have run once (piece only started once)
     expect(liftRunCount).toBe(1);
   });
+
+  it("should follow chained result metadata before auto-starting for an event", async () => {
+    let liftRunCount = 0;
+    let handlerRunCount = 0;
+    const receivedEvents: any[] = [];
+
+    const pattern: Pattern = {
+      argumentSchema: {
+        type: "object",
+        properties: {
+          value: { type: "number" },
+        },
+      },
+      resultSchema: {
+        type: "object",
+        properties: {
+          doubled: { type: "number" },
+          events: { type: "object" },
+        },
+      },
+      initial: {
+        internal: {
+          events: { $stream: true },
+        },
+      },
+      result: {
+        doubled: { $alias: { cell: "internal", path: ["doubled"] } },
+        events: { $alias: { cell: "internal", path: ["events"] } },
+      },
+      nodes: [
+        {
+          module: {
+            type: "javascript",
+            implementation: (value: number) => {
+              liftRunCount++;
+              return value * 2;
+            },
+          },
+          inputs: { $alias: { cell: "argument", path: ["value"] } },
+          outputs: { $alias: { cell: "internal", path: ["doubled"] } },
+        },
+        {
+          module: {
+            type: "javascript",
+            wrapper: "handler",
+            implementation: (event: any) => {
+              handlerRunCount++;
+              receivedEvents.push(event);
+            },
+          },
+          inputs: {
+            $event: { $alias: { cell: "internal", path: ["events"] } },
+          },
+          outputs: {},
+        },
+      ],
+    };
+
+    const patternId = runtime.patternManager.registerPattern(
+      trustPattern(runtime, pattern),
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "with-handler-chained-result-test-result",
+      undefined,
+      tx,
+    );
+    const intermediateCell = runtime.getCell(
+      space,
+      "with-handler-chained-result-test-intermediate",
+      undefined,
+      tx,
+    );
+
+    const internalCell = getMetaCell(resultCell, "internal", tx);
+    const argumentCell = getMetaCell(resultCell, "argument", tx);
+
+    resultCell.setRaw({
+      doubled: internalCell.key("doubled").getAsWriteRedirectLink(),
+      events: internalCell.key("events").getAsWriteRedirectLink(),
+    });
+    resultCell.setMetaRaw("pattern", getSigilLink(patternId));
+    resultCell.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
+    resultCell.setMetaRaw("internal", internalCell.getAsWriteRedirectLink());
+    argumentCell.set({ value: 6 });
+    internalCell.setRaw({ events: { $stream: true } });
+    intermediateCell.setRaw({});
+
+    setResultCell(internalCell, intermediateCell);
+    setResultCell(intermediateCell, resultCell);
+
+    await tx.commit();
+    tx = runtime.edit();
+
+    expect(liftRunCount).toBe(0);
+    expect(handlerRunCount).toBe(0);
+
+    const eventsLink = internalCell.key("events").getAsNormalizedFullLink();
+    runtime.scheduler.queueEvent(eventsLink, { type: "click", x: 42 });
+
+    await resultCell.pull();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await runtime.idle();
+
+    expect(liftRunCount).toBe(1);
+    expect(handlerRunCount).toBe(1);
+    expect(receivedEvents).toEqual([{ type: "click", x: 42 }]);
+    expect(resultCell.getAsQueryResult()).toMatchObject({
+      doubled: 12,
+    });
+  });
 });

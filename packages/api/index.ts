@@ -235,11 +235,12 @@ export interface IReadable<T> {
 }
 
 /**
- * Some of these values may not stick around.
- * The graph-snapshot doc adds the `process` field for a graph snapshot.
+ * The `pattern` field links a result cell to its pattern
+ * The `argument` field links a result cell to its argument cell
+ * The `internal` field links a result cell to its internal cell for state
+ * The `result` field lets a result cell link to its parent result cell,
+ * and also lets the argument and internal cells link back to the result cell.
  * The cfc code accesses the `cfc` field directly, but I include it here too.
- * I didn't include `source`, since we have other methods that expose that,
- * and I think we're going to eliminate the process cell.
  */
 export type MetaField =
   | "pattern"

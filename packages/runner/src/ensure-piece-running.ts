@@ -2,11 +2,53 @@ import { getLogger } from "@commonfabric/utils/logger";
 import type { Cell } from "./cell.ts";
 import { getMetaLink, type NormalizedFullLink } from "./link-utils.ts";
 import type { Runtime } from "./runtime.ts";
+import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 
 const logger = getLogger("ensure-piece-running", {
   enabled: false,
   level: "debug",
 });
+
+const MAX_RESULT_LINK_DEPTH = 10;
+
+function cellTraversalKey(cell: Cell<any>): string {
+  const { space, id, path } = cell.getAsNormalizedFullLink();
+  return JSON.stringify([space, id, path]);
+}
+
+function followResultCellChain(
+  runtime: Runtime,
+  rootCell: Cell<any>,
+  tx: IExtendedStorageTransaction,
+): Cell<any> | undefined {
+  let currentCell = rootCell;
+  const visited = new Set<string>();
+  let depth = 0;
+
+  while (true) {
+    const key = cellTraversalKey(currentCell);
+    if (visited.has(key)) {
+      logger.debug("ensure-piece", () => [
+        `Cycle found while following result metadata at ${currentCell.getAsNormalizedFullLink().id}`,
+      ]);
+      return undefined;
+    }
+    visited.add(key);
+
+    const resultLink = getMetaLink(currentCell, "result");
+    if (resultLink === undefined) return currentCell;
+
+    if (depth >= MAX_RESULT_LINK_DEPTH) {
+      logger.debug("ensure-piece", () => [
+        `Exceeded result metadata traversal depth from ${rootCell.getAsNormalizedFullLink().id}`,
+      ]);
+      return undefined;
+    }
+
+    currentCell = runtime.getCellFromLink(resultLink, undefined, tx);
+    depth++;
+  }
+}
 
 /**
  * Ensures the piece responsible for a given storage location is running.
@@ -20,10 +62,9 @@ const logger = getLogger("ensure-piece-running", {
  *
  * The traversal logic:
  * 1. Start with the cell at the cellLink location
- * 2. If getMetaLink(cell, "result") returns something, follow it to the
- *    owning result cell
- * 3. Read the result cell's pattern metadata
- * 4. Start the existing result cell
+ * 2. Follow result metadata until it reaches the owning result cell
+ * 3. Read the owning result cell's pattern metadata
+ * 4. Start the existing owning result cell
  *
  * @param runtime - The runtime instance
  * @param cellLink - The location that received an event or should be current
@@ -47,14 +88,12 @@ export async function ensurePieceRunning(
         tx,
       );
 
-      // If this is an internal/argument cell, get the result cell instead
-      const resultLink = getMetaLink(rootCell, "result");
-      // If we have a link, use that; otherwise use the rootCell
-      const resultCell = (resultLink !== undefined)
-        ? runtime.getCellFromLink(resultLink)
-        : rootCell;
+      // If this is an internal/argument/derived cell, find the result cell that
+      // owns the chain.
+      const resultCell = followResultCellChain(runtime, rootCell, tx);
+      if (resultCell === undefined) return false;
 
-      // If rootCell is a result cell, it will have a patter
+      // If rootCell is a result cell, it will have a pattern
       const patternId = getMetaLink(resultCell, "pattern")?.id;
       if (!patternId) {
         logger.debug("ensure-piece", () => [
