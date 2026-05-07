@@ -421,6 +421,8 @@ export class Scheduler {
   private computations = new Set<Action>();
   private dependents = new WeakMap<Action, Set<Action>>();
   private reverseDependencies = new WeakMap<Action, Set<Action>>();
+  private activePullDemandActions = new WeakSet<Action>();
+  private pullDemandedFirstRunComputations = new WeakSet<Action>();
   // Track which actions are effects persistently (survives unsubscribe/re-subscribe)
   private isEffectAction = new WeakMap<Action, boolean>();
   // In pull mode, `dirty` means direct dirty. `stale` additionally includes
@@ -429,7 +431,7 @@ export class Scheduler {
   private stale = new Set<Action>();
   private upstreamStaleWriters = new WeakMap<Action, Set<Action>>();
   private upstreamStaleCount = new WeakMap<Action, number>();
-  private pullMode = true;
+  private pullMode = false;
 
   // Debugger breakpoints: action IDs that should trigger `debugger` before execution
   private breakpoints = new Set<string>();
@@ -446,6 +448,7 @@ export class Scheduler {
   // Cycle-aware debounce: track runs per action within current execute() call
   private runsThisExecute = new Map<Action, number>();
   private executeStartTime = 0;
+  private rerunAfterCurrentExecute = false;
 
   // Non-settling heuristic (Phase 1): detects when the system is churning
   private settlingTracker = {
@@ -931,6 +934,16 @@ export class Scheduler {
 
     // Track parent-child relationship if action is created during another action's execution
     this.registerParentChild(action);
+    const parent = this.actionParent.get(action);
+    if (
+      this.pullMode &&
+      !actionIsEffect &&
+      parent &&
+      this.activePullDemandActions.has(parent)
+    ) {
+      this.pullDemandedFirstRunComputations.add(action);
+      this.queueExecution();
+    }
 
     logger.debug(
       "schedule",
@@ -1039,13 +1052,15 @@ export class Scheduler {
       log,
     );
 
-    // Update reverse dependency graph
-    if (this.pullMode) this.updateDependents(action, schedulingLog);
-
     // Track action type for pull-based scheduling
     // Once an action is marked as an effect, it stays an effect
     const actionIsEffect = this.updateActionType(action, isEffect);
     const actionId = this.getActionId(action);
+
+    // Update reverse dependency graph after the action type is restored. In
+    // pull mode, registering a new edge to a live effect can be the moment a
+    // stale upstream computation becomes demanded.
+    if (this.pullMode) this.updateDependents(action, schedulingLog);
 
     // Track parent-child relationship if action is created during another action's execution
     // Only set if not already set (resubscribe can be called multiple times)
@@ -1175,6 +1190,7 @@ export class Scheduler {
     // Clean up effect/computation tracking
     this.effects.delete(action);
     this.computations.delete(action);
+    this.pullDemandedFirstRunComputations.delete(action);
     // Clean up writersByEntity index
     const writeEntities = this.actionWriteEntities.get(action);
     if (writeEntities) {
@@ -1230,6 +1246,7 @@ export class Scheduler {
         const elapsed = performance.now() - actionStartTime;
         this.recordActionTime(action, elapsed);
         this.actionHasRun.add(action);
+        this.pullDemandedFirstRunComputations.delete(action);
 
         try {
           if (error) {
@@ -1417,11 +1434,20 @@ export class Scheduler {
         Promise.allSettled([...this.backgroundTasks]).then(() =>
           this.idle().then(resolve)
         );
-      } else if (this.eventQueueWakeTimer !== null) {
+      } else if (
+        this.eventQueueWakeTimer !== null &&
+        ((this.eventQueue.length > 0 && this.isHeadEventParked()) ||
+          this.hasDeferredDirtyEffectWork())
+      ) {
         // A queued event is parked behind a throttled dependency. Wait for the
         // wake timer to re-schedule the queue and then re-check.
         this.idlePromises.push(resolve);
       } else if (!this.scheduled) {
+        if (this.pullMode && this.hasRunnablePullWork()) {
+          this.queueExecution();
+          this.idlePromises.push(resolve);
+          return;
+        }
         // Nothing is scheduled to run - we're idle.
         // In pull mode, pending computations won't run without an effect to pull them,
         // so we don't wait for them.
@@ -1706,7 +1732,12 @@ export class Scheduler {
 
   queueExecution(): void {
     if (this.disposed) return;
-    if (this.scheduled) return;
+    if (this.scheduled) {
+      if (this.pendingQueueTaskTimer === null) {
+        this.rerunAfterCurrentExecute = true;
+      }
+      return;
+    }
     this.pendingQueueTaskTimer = queueTask(() => {
       this.pendingQueueTaskTimer = null;
       this.execute();
@@ -2153,6 +2184,9 @@ export class Scheduler {
 
     if (!alreadyDependent && this.isStale(writer)) {
       this.addStaleUpstream(writer, dependent);
+      if (this.isDemandedPullComputation(writer)) {
+        this.queueExecution();
+      }
     }
   }
 
@@ -2605,6 +2639,9 @@ export class Scheduler {
   private markDirty(action: Action): void {
     this.markDirectDirty(action);
     this.scheduleComputationDebounce(action);
+    if (this.isDemandedPullComputation(action)) {
+      this.queueExecution();
+    }
   }
 
   private markDirectDirty(action: Action): boolean {
@@ -2948,6 +2985,83 @@ export class Scheduler {
     return false;
   }
 
+  private hasTransitiveEffectDependent(
+    action: Action,
+    visited = new Set<Action>(),
+  ): boolean {
+    if (visited.has(action)) return false;
+    visited.add(action);
+
+    const dependents = this.dependents.get(action);
+    if (!dependents) return false;
+
+    for (const dependent of dependents) {
+      if (this.isLiveEffect(dependent)) return true;
+      if (this.hasTransitiveEffectDependent(dependent, visited)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private isDemandedPullComputation(
+    action: Action,
+    visited = new Set<Action>(),
+  ): boolean {
+    if (
+      !this.pullMode ||
+      !this.computations.has(action) ||
+      this.isLiveEffect(action)
+    ) {
+      return false;
+    }
+    if (visited.has(action)) return false;
+    visited.add(action);
+
+    return this.hasTransitiveEffectDependent(action) ||
+      this.hasDemandedParentContext(action, visited);
+  }
+
+  private hasDemandedParentContext(
+    action: Action,
+    visited = new Set<Action>(),
+  ): boolean {
+    const parent = this.actionParent.get(action);
+    if (!parent) return false;
+
+    if (this.isLiveEffect(parent)) {
+      return (this.getSchedulingWrites(parent)?.length ?? 0) === 0;
+    }
+
+    return this.isDemandedPullComputation(parent, visited);
+  }
+
+  private isLiveEffect(action: Action): boolean {
+    if (this.effects.has(action)) return true;
+
+    // During resubscribe, dependencies can be registered before all effect
+    // bookkeeping is restored. Treat only dependency-bearing historical effects
+    // as live so unsubscribed effects do not keep old pull graphs demanded.
+    return (this.isEffectAction.get(action) ?? false) &&
+      this.dependencies.has(action);
+  }
+
+  private shouldRunFirstPullComputationInDemandContext(
+    action: Action,
+  ): boolean {
+    if (
+      !this.pullMode ||
+      !this.computations.has(action) ||
+      this.effects.has(action) ||
+      this.actionHasRun.has(action)
+    ) {
+      return false;
+    }
+
+    return this.pullDemandedFirstRunComputations.has(action);
+  }
+
   private markEffectConditionallyScheduled(effect: Action): void {
     if (!this.conditionallyScheduledEffects.has(effect)) {
       this.conditionallyScheduledEffects.set(
@@ -3126,19 +3240,56 @@ export class Scheduler {
    */
   private collectPullIterationSeeds(workSet: Set<Action>): void {
     for (const action of this.pending) {
-      if (this.effects.has(action)) {
+      if (
+        this.effects.has(action) ||
+        this.isDemandedPullComputation(action) ||
+        this.shouldRunFirstPullComputationInDemandContext(action)
+      ) {
         workSet.add(action);
       }
     }
 
     for (const action of this.dirty) {
-      if (this.effects.has(action)) {
+      if (
+        this.effects.has(action) ||
+        this.isDemandedPullComputation(action)
+      ) {
         if (!this.isThrottled(action)) {
           this.pending.add(action);
           workSet.add(action);
         }
       }
     }
+  }
+
+  private hasRunnablePullWork(): boolean {
+    for (const action of this.pending) {
+      if (this.effects.has(action) || this.isDemandedPullComputation(action)) {
+        return true;
+      }
+      if (this.shouldRunFirstPullComputationInDemandContext(action)) {
+        return true;
+      }
+    }
+
+    for (const action of this.dirty) {
+      if (
+        (this.effects.has(action) || this.isDemandedPullComputation(action)) &&
+        !this.isThrottled(action) &&
+        !this.isDebouncedComputationWaiting(action)
+      ) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private hasDeferredDirtyEffectWork(): boolean {
+    for (const action of this.dirty) {
+      if (this.effects.has(action)) return true;
+    }
+    return false;
   }
 
   /**
@@ -4688,7 +4839,20 @@ export class Scheduler {
           }
           this.handleError(error, fn);
         } else {
-          await this.run(fn);
+          const activePullDemand = this.pullMode &&
+            (this.computations.has(fn) ||
+              (this.effects.has(fn) &&
+                (this.getSchedulingWrites(fn)?.length ?? 0) === 0));
+          if (activePullDemand) {
+            this.activePullDemandActions.add(fn);
+          }
+          try {
+            await this.run(fn);
+          } finally {
+            if (activePullDemand) {
+              this.activePullDemandActions.delete(fn);
+            }
+          }
         }
       }
 
@@ -4749,7 +4913,8 @@ export class Scheduler {
       for (const comp of earlyIterationComputations) {
         if (
           lastWorkSet.has(comp) && this.dirty.has(comp) &&
-          !this.isThrottled(comp)
+          !this.isThrottled(comp) &&
+          (this.runsThisExecute.get(comp) ?? 0) > 1
         ) {
           logger.debug("schedule-cycle", () => [
             `[CYCLE-BREAK] Clearing cyclic computation: ${
@@ -4777,11 +4942,18 @@ export class Scheduler {
       }
     }
 
-    // Apply cycle-aware debounce to actions that ran multiple times this execute()
+    // Apply cycle-aware debounce to effects that ran multiple times this execute().
+    // Pull computations are already demand-gated; debouncing them can leave a
+    // live renderer observing stale materialized data until an arbitrary timer
+    // fires.
     const executeElapsed = performance.now() - this.executeStartTime;
     if (this.pullMode && executeElapsed >= CYCLE_DEBOUNCE_THRESHOLD_MS) {
       for (const [action, runs] of this.runsThisExecute) {
-        if (runs >= CYCLE_DEBOUNCE_MIN_RUNS && !this.noDebounce.get(action)) {
+        if (
+          this.effects.has(action) &&
+          runs >= CYCLE_DEBOUNCE_MIN_RUNS &&
+          !this.noDebounce.get(action)
+        ) {
           // This action is cycling - apply adaptive debounce
           const adaptiveDelay = Math.round(
             CYCLE_DEBOUNCE_MULTIPLIER * executeElapsed,
@@ -4835,35 +5007,70 @@ export class Scheduler {
       }
     }
 
-    // In pull mode, we consider ourselves done when there are no effects to execute.
-    // Check both pending AND dirty effects - dirty effects may exist from:
-    // - Cycle detection (effect re-dirtied, skipped to prevent infinite loop)
-    // - Throttling (effect throttled, kept dirty for later)
-    const hasPendingEffects = this.pullMode
-      ? [...this.pending].some((a) => this.effects.has(a))
+    // In pull mode, we consider ourselves done when there are no effects or
+    // effect-demanded computations to execute.
+    const hasPendingPullWork = this.pullMode
+      ? [...this.pending].some((a) =>
+        this.effects.has(a) ||
+        this.isDemandedPullComputation(a) ||
+        this.shouldRunFirstPullComputationInDemandContext(a)
+      )
       : this.pending.size > 0;
-    let nextDirtyEffectRunAt: number | undefined;
-    const hasDirtyEffects = this.pullMode &&
+    let nextDirtyPullRunAt: number | undefined;
+    let nextDirtyPullRunWaitsForIdle = false;
+    const hasDirtyPullWork = this.pullMode &&
       [...this.dirty].some((action) => {
-        if (!this.effects.has(action)) return false;
+        if (
+          !this.effects.has(action) &&
+          !this.isDemandedPullComputation(action)
+        ) {
+          return false;
+        }
+        if (this.isDebouncedComputationWaiting(action)) {
+          const nextDebounceAt = this.getNextDebounceRunTime(action);
+          if (nextDebounceAt !== undefined) {
+            nextDirtyPullRunAt = nextDirtyPullRunAt === undefined
+              ? nextDebounceAt
+              : Math.min(nextDirtyPullRunAt, nextDebounceAt);
+            nextDirtyPullRunWaitsForIdle ||= this.effects.has(action);
+          }
+          return false;
+        }
         const nextEligibleAt = this.getNextEligibleRunTime(action);
         if (
           nextEligibleAt !== undefined &&
           nextEligibleAt > performance.now()
         ) {
-          nextDirtyEffectRunAt = nextDirtyEffectRunAt === undefined
+          nextDirtyPullRunAt = nextDirtyPullRunAt === undefined
             ? nextEligibleAt
-            : Math.min(nextDirtyEffectRunAt, nextEligibleAt);
+            : Math.min(nextDirtyPullRunAt, nextEligibleAt);
+          nextDirtyPullRunWaitsForIdle ||= this.effects.has(action);
           return false;
         }
         return true;
       });
     const hasQueuedEventReadyNow = this.eventQueue.length > 0 &&
       !this.isHeadEventParked();
+    const hasParkedHeadEvent = this.eventQueue.length > 0 &&
+      this.isHeadEventParked();
+    const shouldRerunAfterCurrentExecute = this.rerunAfterCurrentExecute;
+    this.rerunAfterCurrentExecute = false;
+    const hasImmediateRerunRequest = shouldRerunAfterCurrentExecute &&
+      nextDirtyPullRunAt === undefined;
 
-    if (!hasPendingEffects && !hasDirtyEffects && !hasQueuedEventReadyNow) {
-      if (nextDirtyEffectRunAt !== undefined) {
-        this.scheduleEventQueueWake(nextDirtyEffectRunAt);
+    if (
+      !hasImmediateRerunRequest &&
+      !hasPendingPullWork &&
+      !hasDirtyPullWork &&
+      !hasQueuedEventReadyNow
+    ) {
+      if (nextDirtyPullRunAt !== undefined) {
+        this.scheduleEventQueueWake(nextDirtyPullRunAt);
+        const promises = this.idlePromises;
+        if (!hasParkedHeadEvent && !nextDirtyPullRunWaitsForIdle) {
+          for (const resolve of promises) resolve();
+          this.idlePromises.length = 0;
+        }
         this.loopCounter = new WeakMap();
         this.scheduled = false;
       } else if (this.eventQueueWakeTimer !== null) {

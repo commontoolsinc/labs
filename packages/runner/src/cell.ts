@@ -685,6 +685,15 @@ export class CellImpl<T extends FabricValue>
       resolvedToValueLink = resolveLink(this.runtime, tx, this.link);
     }
 
+    if (
+      ContextualFlowControl.getAsCellValues(resolvedToValueLink.schema).at(
+        0,
+      ) ===
+        "stream"
+    ) {
+      return true;
+    }
+
     const value = tx.readValueOrThrow(resolvedToValueLink, {
       meta: ignoreReadForScheduling,
     });

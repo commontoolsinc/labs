@@ -578,22 +578,19 @@ describe("default-app flow test", () => {
 
   it("should render every rapidly created notebook note", async () => {
     identity = await Identity.generate({ implementation: "noble" });
+    const notebookSpaceName = globalThis.crypto.randomUUID();
 
     const page = shell.page();
     await shell.goto({
       frontendUrl: FRONTEND_URL,
-      view: { spaceName },
+      view: { spaceName: notebookSpaceName },
       identity,
     });
 
-    if (SCHEDULER_PULL_MODE !== undefined) {
-      console.log(
-        `Set scheduler mode: ${SCHEDULER_PULL_MODE ? "pull" : "push"}...`,
-      );
-      await waitFor(async () => {
-        return await setSchedulerPullMode(page, SCHEDULER_PULL_MODE);
-      });
-    }
+    console.log("Set scheduler mode: pull for notebook regression...");
+    await waitFor(async () => {
+      return await setSchedulerPullMode(page, true);
+    });
 
     await waitFor(async () => {
       return !!(await clickButtonWithText(page, "Notes"));
@@ -601,13 +598,18 @@ describe("default-app flow test", () => {
     await waitFor(async () => {
       return !!(await clickButtonWithText(page, "New Notebook"));
     });
-    await waitFor(async () => {
-      return await waitForRuntimeIdle(page);
-    });
-    await waitFor(async () => {
-      const diagnostics = await collectNotebookDiagnostics(page);
-      return diagnostics.isNotebook;
-    });
+    try {
+      await waitFor(async () => {
+        const state = await collectNotebookRenderState(page);
+        return state.isNotebook;
+      });
+    } catch (error) {
+      console.log(
+        "Notebook navigation diagnostics:",
+        JSON.stringify(await collectNavigationDiagnostics(page), null, 2),
+      );
+      throw error;
+    }
 
     await waitFor(async () => {
       return !!(await clickButtonWithTitle(page, "New Note"));
@@ -615,7 +617,6 @@ describe("default-app flow test", () => {
     await waitFor(async () => {
       return !!(await findButtonWithText(page, "Create Another"));
     });
-    await armActionRunTrace(page);
 
     const noteCreates = 7;
     for (let i = 0; i < noteCreates - 1; i++) {
@@ -629,27 +630,29 @@ describe("default-app flow test", () => {
       "Expected final Create click to succeed",
     );
 
-    await waitFor(async () => {
-      return await waitForRuntimeIdle(page);
-    });
     try {
       await waitFor(async () => {
-        const diagnostics = await collectNotebookDiagnostics(page);
-        return diagnostics.noteCount === noteCreates &&
-          diagnostics.renderedNoteChips === noteCreates;
+        const state = await collectNotebookRenderState(page);
+        return state.noteCount === noteCreates &&
+          state.renderedNoteChips === noteCreates;
       });
     } catch (_) {
       // Keep the final assertions below so failures include diagnostics.
     }
 
-    const diagnostics = await collectNotebookDiagnostics(page);
-    console.log(
-      "Notebook rapid create diagnostics:",
-      JSON.stringify(diagnostics, null, 2),
-    );
+    const summary = await collectNotebookRenderState(page);
+    if (
+      summary.noteCount !== noteCreates ||
+      summary.renderedNoteChips !== noteCreates
+    ) {
+      console.log(
+        "Notebook rapid create diagnostics:",
+        JSON.stringify(await collectNotebookDiagnostics(page), null, 2),
+      );
+    }
 
-    assertEquals(diagnostics.noteCount, noteCreates);
-    assertEquals(diagnostics.renderedNoteChips, noteCreates);
+    assertEquals(summary.noteCount, noteCreates);
+    assertEquals(summary.renderedNoteChips, noteCreates);
   });
 });
 
@@ -2631,47 +2634,73 @@ async function clickButtonWithTitle(
   }
 }
 
-async function collectNotebookDiagnostics(page: Page): Promise<{
+async function collectNotebookRenderState(page: Page): Promise<{
   isNotebook: boolean;
   noteCount: number;
   notesLength: number;
   renderedNoteChips: number;
   renderedNoteLabels: string[];
-  dirtyComputations?: Array<{
-    id: string;
-    preview?: string;
-    isPending: boolean;
-    reads: string[];
-    writes: string[];
-    outgoing: Array<{ to: string; cells?: string[]; edgeType?: string }>;
-  }>;
-  pendingEffects?: Array<{ id: string; preview?: string }>;
-  actionTraceTail?: Array<{ id: string; type: string; writes: string[] }>;
 }> {
   return await page.evaluate(async () => {
     const commonfabric = globalThis.commonfabric as any;
     const current = await commonfabric?.readCell?.();
-    const graph = await commonfabric?.rt?.getGraphSnapshot?.();
-    const actionTrace = await commonfabric?.rt?.getActionRunTrace?.();
     const notes = Array.isArray(current?.notes) ? current.notes : [];
-    const noteLabels: string[] = [];
+    const collectRenderedNoteLabels = (root: Document | ShadowRoot) => {
+      const labels: string[] = [];
 
-    function collectNoteLabels(root: Document | ShadowRoot): void {
-      for (const el of root.querySelectorAll("*")) {
-        if (el.localName === "cf-chip") {
-          const label = ((el as any).label ?? el.getAttribute("label") ?? "")
-            .trim();
-          if (label.startsWith("📝 New Note")) {
-            noteLabels.push(label);
+      function collect(currentRoot: Document | ShadowRoot): void {
+        for (const el of currentRoot.querySelectorAll("*")) {
+          if (el.localName === "cf-chip") {
+            const label = ((el as any).label ?? el.getAttribute("label") ?? "")
+              .trim();
+            if (label.startsWith("📝 New Note")) {
+              labels.push(label);
+            }
+          }
+          if ((el as HTMLElement).shadowRoot) {
+            collect((el as HTMLElement).shadowRoot!);
           }
         }
-        if ((el as HTMLElement).shadowRoot) {
-          collectNoteLabels((el as HTMLElement).shadowRoot!);
-        }
       }
-    }
 
-    collectNoteLabels(document);
+      collect(root);
+      return labels;
+    };
+    const noteLabels = collectRenderedNoteLabels(document);
+
+    return {
+      isNotebook: current?.isNotebook === true,
+      noteCount: typeof current?.noteCount === "number"
+        ? current.noteCount
+        : -1,
+      notesLength: notes.length,
+      renderedNoteChips: noteLabels.length,
+      renderedNoteLabels: noteLabels,
+    };
+  });
+}
+
+async function collectNotebookDiagnostics(
+  page: Page,
+): Promise<
+  Awaited<ReturnType<typeof collectNotebookRenderState>> & {
+    dirtyComputations?: Array<{
+      id: string;
+      preview?: string;
+      isPending: boolean;
+      reads: string[];
+      writes: string[];
+      outgoing: Array<{ to: string; cells?: string[]; edgeType?: string }>;
+    }>;
+    pendingEffects?: Array<{ id: string; preview?: string }>;
+    actionTraceTail?: Array<{ id: string; type: string; writes: string[] }>;
+  }
+> {
+  const renderState = await collectNotebookRenderState(page);
+  const graphState = await page.evaluate(async () => {
+    const commonfabric = globalThis.commonfabric as any;
+    const graph = await commonfabric?.rt?.getGraphSnapshot?.();
+    const actionTrace = await commonfabric?.rt?.getActionRunTrace?.();
     const edgesByFrom = new Map<string, any[]>();
     for (const edge of graph?.edges ?? []) {
       const edges = edgesByFrom.get(edge.from) ?? [];
@@ -2710,16 +2739,43 @@ async function collectNotebookDiagnostics(page: Page): Promise<{
     }));
 
     return {
-      isNotebook: current?.isNotebook === true,
-      noteCount: typeof current?.noteCount === "number"
-        ? current.noteCount
-        : -1,
-      notesLength: notes.length,
-      renderedNoteChips: noteLabels.length,
-      renderedNoteLabels: noteLabels,
       dirtyComputations,
       pendingEffects,
       actionTraceTail,
+    };
+  });
+
+  return { ...renderState, ...graphState };
+}
+
+async function collectNavigationDiagnostics(page: Page): Promise<unknown> {
+  return await page.evaluate(async () => {
+    const commonfabric = globalThis.commonfabric as any;
+    const current = await commonfabric?.readCell?.();
+    const appState = globalThis.app?.serialize?.();
+    const buttonTexts: string[] = [];
+
+    function collectButtonTexts(root: Document | ShadowRoot): void {
+      for (const el of root.querySelectorAll("cf-button, button, a")) {
+        const text = (el.textContent ?? "").trim().replace(/\s+/g, " ");
+        if (text) buttonTexts.push(text);
+        if ((el as HTMLElement).shadowRoot) {
+          collectButtonTexts((el as HTMLElement).shadowRoot!);
+        }
+      }
+    }
+
+    collectButtonTexts(document);
+
+    return {
+      location: globalThis.location.href,
+      appState,
+      currentName: current?.$NAME,
+      currentIsNotebook: current?.isNotebook === true,
+      currentKeys: current && typeof current === "object"
+        ? Object.keys(current).slice(0, 30)
+        : [],
+      buttonTexts: buttonTexts.slice(0, 40),
     };
   });
 }
