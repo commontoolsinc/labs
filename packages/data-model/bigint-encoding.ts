@@ -16,7 +16,6 @@
  * Helper for `bigintToMinimalTwosComplement()`, which converts a hex digit at a
  * particular index in a string to its 4-bit (nibble-sized) numeric value.
  * Handles '0'-'9' (0x30-0x39) and 'a'-'f' (0x61-0x66).
- *
  */
 function nibbleValueAt(hex: string, at: number): number {
   const c = hex.charCodeAt(at);
