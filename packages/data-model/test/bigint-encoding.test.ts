@@ -80,11 +80,11 @@ const rawFixtures: bigint[] = [
   -(2n ** 128n),
   0x112233445566778899abcdefn,
   -0x112233445566778899abcdefn,
-  // Byte-length corner cases that exercised historical encoder bugs (see
-  // PR #3527): odd-hex-length positive with high nibble in 8..F, and
-  // negatives whose two's-complement remainder would have leading-zero
-  // padding in its byte form.
-  0xcf1205dn,
+  // Negatives whose two's-complement remainder has leading-zero padding in
+  // its byte form -- a corner case that exercised a historical encoder bug
+  // (see PR #3527). The corresponding positive case (odd-hex-length with
+  // high nibble in 8..F) is reached via the recurrence below at iteration
+  // 2, where `n = 217129053n` (= `0xCF1205D`).
   -241n,
   -242n,
   -243n,
