@@ -533,6 +533,11 @@ export const JOB_TO_LABEL: Record<string, string> = {
   "Generated Patterns Integration Tests": "generated-patterns",
 };
 
+export function timingArtifactLabel(artifactName: string): string {
+  const label = artifactName.replace(/^test-timing-/, "");
+  return label.replace(/^pattern-integration-\d+$/, "pattern-integration");
+}
+
 // ---------------------------------------------------------------------------
 // Benchmark results parsing
 // ---------------------------------------------------------------------------
@@ -604,6 +609,8 @@ const JOB_METRIC_NAMES: Record<string, string> = {
 
 /** Pattern for matrix jobs like "Pattern Unit Tests (1/5)". */
 export const PATTERN_UNIT_RE = /Pattern Unit Tests\s*\((\d+)\/(\d+)\)/;
+export const PATTERN_INTEGRATION_RE =
+  /Pattern Integration Tests\s*\((\d+)\/(\d+)\)/;
 
 interface StepMetricMatcher {
   jobName: string;
@@ -693,6 +700,13 @@ export function extractMetrics(
     durationSeconds: duration,
   });
 
+  const setMaxMetric = (name: string, sample: TimingSample) => {
+    const existing = metrics.get(name);
+    if (!existing || sample.durationSeconds > existing.durationSeconds) {
+      metrics.set(name, sample);
+    }
+  };
+
   for (const job of jobs) {
     const jobDuration = durationSeconds(job.started_at, job.completed_at);
     if (jobDuration <= 0) continue;
@@ -704,16 +718,33 @@ export function extractMetrics(
       metrics.set(jobMetricName, makeSample(jobDuration));
     }
 
-    const matcherJobName = normalizedJobName.startsWith("Pattern Unit Tests")
+    const unitMatch = PATTERN_UNIT_RE.exec(normalizedJobName);
+    const patternIntegrationMatch = PATTERN_INTEGRATION_RE.exec(
+      normalizedJobName,
+    );
+
+    const matcherJobName = unitMatch
       ? "Pattern Unit Tests"
+      : patternIntegrationMatch
+      ? "Pattern Integration Tests"
       : normalizedJobName;
 
-    const unitMatch = PATTERN_UNIT_RE.exec(normalizedJobName);
     if (unitMatch) {
       metrics.set(
         `job: Pattern Unit Tests (${unitMatch[1]}/${unitMatch[2]})`,
         makeSample(jobDuration),
       );
+    }
+
+    if (patternIntegrationMatch) {
+      const sample = makeSample(jobDuration);
+      metrics.set(
+        `job: Pattern Integration Tests (${patternIntegrationMatch[1]}/${
+          patternIntegrationMatch[2]
+        })`,
+        sample,
+      );
+      setMaxMetric("job: Pattern Integration Tests", sample);
     }
 
     if (normalizedJobName.includes("Test and Build")) {
@@ -730,7 +761,12 @@ export function extractMetrics(
           matcher.jobName === matcherJobName &&
           normalizedStepName.includes(matcher.stepKeyword)
         ) {
-          metrics.set(matcher.metricName, makeSample(stepDuration));
+          const sample = makeSample(stepDuration);
+          if (patternIntegrationMatch) {
+            setMaxMetric(matcher.metricName, sample);
+          } else {
+            metrics.set(matcher.metricName, sample);
+          }
         }
       }
     }
