@@ -3,8 +3,8 @@ name: Manual Production Deployment
 on:
   workflow_dispatch:
     inputs:
-      commit_sha:
-        description: "Git commit SHA to deploy"
+      ref:
+        description: "Git commit SHA or tag to deploy"
         required: true
         type: string
 
@@ -15,15 +15,17 @@ jobs:
     environment: estuary # Protection rules configured in GitHub repo settings
 
     steps:
-      - name: 📥 Checkout specific commit
+      - name: 📥 Checkout specific ref
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.commit_sha }}
+          ref: ${{ github.event.inputs.ref }}
 
-      - name: 🔍 Validate commit SHA
+      - name: 🔍 Resolve ref to commit SHA
+        id: resolve
         run: |
-          echo "Deploying commit: ${{ github.event.inputs.commit_sha }}"
-          git rev-parse --verify ${{ github.event.inputs.commit_sha }}
+          SHA=$(git rev-parse HEAD)
+          echo "Deploying ref: ${{ github.event.inputs.ref }} (commit: $SHA)"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
 
       # Download the artifacts for this specific SHA from the artifact storage
       - name: 🔑 Authenticate to Google Cloud
@@ -37,11 +39,11 @@ jobs:
       - name: 📥 Download tarball from GCS
         run: |
           mkdir -p downloaded-artifacts
-          gsutil cp gs://commontools-build-artifacts/workspace-artifacts/labs-${{ github.event.inputs.commit_sha }}.tar.gz downloaded-artifacts/
+          gsutil cp gs://commontools-build-artifacts/workspace-artifacts/labs-${{ steps.resolve.outputs.sha }}.tar.gz downloaded-artifacts/
 
           # Verify the tarball exists
-          if [ ! -f downloaded-artifacts/labs-${{ github.event.inputs.commit_sha }}.tar.gz ]; then
-            echo "::error::Artifact tarball for commit ${{ github.event.inputs.commit_sha }} not found!"
+          if [ ! -f downloaded-artifacts/labs-${{ steps.resolve.outputs.sha }}.tar.gz ]; then
+            echo "::error::Artifact tarball for commit ${{ steps.resolve.outputs.sha }} not found!"
             echo "Make sure this commit was successfully built and artifacts were uploaded."
             exit 1
           fi
@@ -58,4 +60,4 @@ jobs:
           host: ${{ secrets.BASTION_HOST }}
           username: bastion
           key: ${{ secrets.BASTION_SSH_PRIVATE_KEY }}
-          script: /opt/cf/deploy.sh ${{ vars.DEPLOYMENT_ENVIRONMENT }} ${{ github.event.inputs.commit_sha }}
+          script: /opt/cf/deploy.sh ${{ vars.DEPLOYMENT_ENVIRONMENT }} ${{ steps.resolve.outputs.sha }}
