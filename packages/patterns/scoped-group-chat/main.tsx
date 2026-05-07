@@ -56,7 +56,8 @@ const DEFAULT_CONVERSATION = {
 const EMPTY_ROOM = { name: "", messages: [] } satisfies Room;
 
 type NameCell = Writable<string | Default<"">>;
-type SelectedRoomCell = Writable<SelectedRoom | Default<{}>>;
+type EmptySelectedRoom = Record<PropertyKey, never>;
+type SelectedRoomCell = Writable<SelectedRoom | Default<EmptySelectedRoom>>;
 type ConversationCell = Writable<
   Conversation | Default<typeof DEFAULT_CONVERSATION>
 >;
