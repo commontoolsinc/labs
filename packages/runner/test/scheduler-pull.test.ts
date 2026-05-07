@@ -56,6 +56,10 @@ describe("pull-based scheduling", () => {
     await storageManager?.close();
   });
 
+  it("should default to pull mode", () => {
+    expect(runtime.scheduler.isPullModeEnabled()).toBe(true);
+  });
+
   it("should have unchanged behavior with pullMode = false", async () => {
     // Explicitly set push mode for this test
     runtime.scheduler.disablePullMode();
