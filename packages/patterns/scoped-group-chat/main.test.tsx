@@ -2,12 +2,14 @@ import { action, computed, pattern, Writable } from "commonfabric";
 import ScopedGroupChat from "./main.tsx";
 
 export default pattern(() => {
+  const selectedRoom = Writable.of({});
+  const conversation = Writable.of({
+    rooms: [],
+  });
   const chat = ScopedGroupChat({
     name: Writable.of(""),
-    selectedRoom: Writable.of({}),
-    conversation: Writable.of({
-      rooms: [],
-    }),
+    selectedRoom,
+    conversation,
     draft: Writable.of(""),
     newRoomName: Writable.of(""),
   });
@@ -27,7 +29,9 @@ export default pattern(() => {
   });
 
   const action_select_first_room = action(() => {
-    chat.selectRoom.send({ roomIndex: 0 });
+    chat.selectRoom.send({
+      room: conversation.key("rooms", 0),
+    });
   });
 
   const assert_initial_scoped_fields = computed(() =>
@@ -62,6 +66,10 @@ export default pattern(() => {
     chat.roomSummaryText === "Garden: 0\nLibrary: 1"
   );
 
+  const assert_selected_room_reference_changed = computed(() =>
+    chat.currentRoom.room.name === "Garden"
+  );
+
   return {
     tests: [
       { assertion: assert_initial_scoped_fields },
@@ -73,6 +81,7 @@ export default pattern(() => {
       { assertion: assert_message_was_sent },
       { action: action_select_first_room },
       { assertion: assert_room_counts_do_not_follow_selection },
+      { assertion: assert_selected_room_reference_changed },
     ],
     chat,
   };
