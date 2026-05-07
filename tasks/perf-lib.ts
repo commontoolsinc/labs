@@ -535,7 +535,9 @@ export const JOB_TO_LABEL: Record<string, string> = {
 
 export function timingArtifactLabel(artifactName: string): string {
   const label = artifactName.replace(/^test-timing-/, "");
-  return label.replace(/^pattern-integration-\d+$/, "pattern-integration");
+  return label
+    .replace(/^pattern-integration-\d+$/, "pattern-integration")
+    .replace(/^generated-patterns-\d+$/, "generated-patterns");
 }
 
 // ---------------------------------------------------------------------------
@@ -611,6 +613,8 @@ const JOB_METRIC_NAMES: Record<string, string> = {
 export const PATTERN_UNIT_RE = /Pattern Unit Tests\s*\((\d+)\/(\d+)\)/;
 export const PATTERN_INTEGRATION_RE =
   /Pattern Integration Tests\s*\((\d+)\/(\d+)\)/;
+export const GENERATED_PATTERNS_RE =
+  /Generated Patterns Integration Tests\s*\((\d+)\/(\d+)\)/;
 
 interface StepMetricMatcher {
   jobName: string;
@@ -722,11 +726,16 @@ export function extractMetrics(
     const patternIntegrationMatch = PATTERN_INTEGRATION_RE.exec(
       normalizedJobName,
     );
+    const generatedPatternsMatch = GENERATED_PATTERNS_RE.exec(
+      normalizedJobName,
+    );
 
     const matcherJobName = unitMatch
       ? "Pattern Unit Tests"
       : patternIntegrationMatch
       ? "Pattern Integration Tests"
+      : generatedPatternsMatch
+      ? "Generated Patterns Integration Tests"
       : normalizedJobName;
 
     if (unitMatch) {
@@ -747,6 +756,17 @@ export function extractMetrics(
       setMaxMetric("job: Pattern Integration Tests", sample);
     }
 
+    if (generatedPatternsMatch) {
+      const sample = makeSample(jobDuration);
+      metrics.set(
+        `job: Generated Patterns Integration Tests (${
+          generatedPatternsMatch[1]
+        }/${generatedPatternsMatch[2]})`,
+        sample,
+      );
+      setMaxMetric("job: Generated Patterns Integration Tests", sample);
+    }
+
     if (normalizedJobName.includes("Test and Build")) {
       metrics.set("job: Test and Build", makeSample(jobDuration));
     }
@@ -762,7 +782,7 @@ export function extractMetrics(
           normalizedStepName.includes(matcher.stepKeyword)
         ) {
           const sample = makeSample(stepDuration);
-          if (patternIntegrationMatch) {
+          if (patternIntegrationMatch || generatedPatternsMatch) {
             setMaxMetric(matcher.metricName, sample);
           } else {
             metrics.set(matcher.metricName, sample);
