@@ -26,6 +26,10 @@ export default pattern(() => {
     });
   });
 
+  const action_select_first_room = action(() => {
+    chat.selectRoom.send({ roomIndex: 0 });
+  });
+
   const assert_initial_scoped_fields = computed(() =>
     chat.roomCount === 0 &&
     chat.lastRoomName === ""
@@ -53,6 +57,11 @@ export default pattern(() => {
     chat.roomSummaryText === "Garden: 0\nLibrary: 1"
   );
 
+  const assert_room_counts_do_not_follow_selection = computed(() =>
+    chat.messageCount === 0 &&
+    chat.roomSummaryText === "Garden: 0\nLibrary: 1"
+  );
+
   return {
     tests: [
       { assertion: assert_initial_scoped_fields },
@@ -62,6 +71,8 @@ export default pattern(() => {
       { assertion: assert_second_room_is_selected },
       { action: action_send_message },
       { assertion: assert_message_was_sent },
+      { action: action_select_first_room },
+      { assertion: assert_room_counts_do_not_follow_selection },
     ],
     chat,
   };
