@@ -602,7 +602,7 @@ export class StorageManager implements IStorageManager {
     }
 
     if (id.startsWith("data:")) {
-      return this.syncDataURICell(cell, space, id, schema);
+      return this.syncDataURICell(cell, space, id, schema, scope);
     }
 
     const provider = this.open(space);
@@ -656,15 +656,24 @@ export class StorageManager implements IStorageManager {
     space: MemorySpace,
     id: string,
     schema: JSONSchema | undefined,
+    scope: CellScope | undefined,
   ): Promise<Cell<T>> {
     const pathStr = JSON.stringify(cell.path);
     const schemaStr = schema ? hashStringOf(schema) : "";
-    const cacheKey = `${id}|${schemaStr}|${pathStr}|${space}`;
+    const cacheKey = `${id}|${schemaStr}|${pathStr}|${space}|${
+      normalizeCellScope(scope)
+    }`;
     const existing = dataURISyncCache.get(cacheKey);
     if (existing) {
       return existing as Promise<Cell<T>>;
     }
-    const promise = this.syncDataURICellUncached(cell, space, id, schema);
+    const promise = this.syncDataURICellUncached(
+      cell,
+      space,
+      id,
+      schema,
+      scope,
+    );
     if (dataURISyncCache.size >= DATA_URI_SYNC_CACHE_MAX) {
       dataURISyncCache.clear();
     }
@@ -677,6 +686,7 @@ export class StorageManager implements IStorageManager {
     space: MemorySpace,
     id: string,
     schema: JSONSchema | undefined,
+    scope: CellScope | undefined,
   ): Promise<Cell<T>> {
     const json = getJSONFromDataURI(id);
     if (!isRecord(json)) {
@@ -693,6 +703,7 @@ export class StorageManager implements IStorageManager {
     const base: NormalizedLink = {
       space,
       id: id as any,
+      scope: normalizeCellScope(scope),
       path: [],
     };
     const promises: Promise<unknown>[] = [];
@@ -733,7 +744,7 @@ export class StorageManager implements IStorageManager {
           this.open(link.space ?? base.space!).sync(link.id, {
             path: link.path.map((segment) => segment.toString()),
             schema: link.schema ?? schema ?? false,
-          }),
+          }, normalizeCellScope(link.scope as CellScope | undefined)),
         );
       }
       return;

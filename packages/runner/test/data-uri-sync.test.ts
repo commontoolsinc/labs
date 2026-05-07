@@ -84,6 +84,43 @@ describe("data URI sync", () => {
     expect(syncedIds).toContain(linkedId);
   });
 
+  it("sync on a data: URI cell preserves linked cell scope", async () => {
+    const linkedCell = runtime.getCell(space, "scoped-linked-target", undefined, tx);
+    linkedCell.set({ value: "target data" });
+    const linkedId = linkedCell.getAsNormalizedFullLink().id;
+
+    const dataURI = createDataCellURI({
+      ref: {
+        "/": {
+          [LINK_V1_TAG]: {
+            id: linkedId,
+            path: [],
+            scope: "user",
+          },
+        },
+      },
+    });
+    const dataCell = runtime.getCellFromEntityId(
+      space,
+      dataURI,
+      [],
+      undefined,
+      tx,
+    );
+
+    const provider = storageManager.open(space);
+    const originalSync = provider.sync.bind(provider);
+    const synced: Array<{ id: string; scope?: string }> = [];
+    provider.sync = (id: any, selector?: any, scope?: any) => {
+      synced.push({ id, scope });
+      return originalSync(id, selector, scope);
+    };
+
+    await dataCell.sync();
+
+    expect(synced).toContainEqual({ id: linkedId, scope: "user" });
+  });
+
   it("sync on a data: URI cell with multiple links syncs all of them", async () => {
     const cell1 = runtime.getCell(space, "multi-1", undefined, tx);
     cell1.set("first");
