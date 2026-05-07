@@ -41,6 +41,10 @@ export default pattern(() => {
     chat.currentDraft === ""
   );
 
+  const assert_first_message_visible_in_ui = computed(() =>
+    JSON.stringify(chat.$UI).includes("Hello from the lobby")
+  );
+
   const assert_room_switch_is_session_local = computed(() =>
     chat.lobbyCount === 1 &&
     chat.workshopCount === 1 &&
@@ -56,6 +60,7 @@ export default pattern(() => {
       { action: action_write_lobby_draft },
       { action: action_send_first_message },
       { assertion: assert_first_message_sent_and_draft_cleared },
+      { assertion: assert_first_message_visible_in_ui },
       { action: action_switch_to_workshop },
       { action: action_write_workshop_draft },
       { action: action_send_workshop_message },

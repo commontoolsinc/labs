@@ -261,6 +261,29 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
     );
     const messageCount = computed(() => messagesInSelectedRoom.length);
     const currentRoomLabel = computed(() => ROOM_LABELS[currentRoom]);
+    const messageCards = computed(() =>
+      messagesInSelectedRoom.map((message) => (
+        <cf-card style={messageStyle}>
+          <cf-vstack slot="content" gap="2">
+            <cf-hstack justify="between" align="center">
+              <cf-label>{message.author}</cf-label>
+              <span style={metaTextStyle}>
+                {message.room}
+              </span>
+            </cf-hstack>
+            <div
+              style={{
+                fontSize: "16px",
+                lineHeight: "1.45",
+                color: "var(--cf-theme-color-text)",
+              }}
+            >
+              {message.body}
+            </div>
+          </cf-vstack>
+        </cf-card>
+      ))
+    );
     const lobbyCount = computed(() =>
       plainConversation(conversationSnapshot).rooms.lobby.length
     );
@@ -372,27 +395,7 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
                       )
                       : (
                         <cf-vstack gap="2">
-                          {messagesInSelectedRoom.map((message) => (
-                            <cf-card style={messageStyle}>
-                              <cf-vstack slot="content" gap="2">
-                                <cf-hstack justify="between" align="center">
-                                  <cf-label>{message.author}</cf-label>
-                                  <span style={metaTextStyle}>
-                                    {message.room}
-                                  </span>
-                                </cf-hstack>
-                                <div
-                                  style={{
-                                    fontSize: "16px",
-                                    lineHeight: "1.45",
-                                    color: "var(--cf-theme-color-text)",
-                                  }}
-                                >
-                                  {message.body}
-                                </div>
-                              </cf-vstack>
-                            </cf-card>
-                          ))}
+                          {messageCards}
                         </cf-vstack>
                       )}
                   </cf-vstack>

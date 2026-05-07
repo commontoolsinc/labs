@@ -26,6 +26,7 @@ import type { JSONSchema } from "../src/builder/types.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { createCell } from "../src/cell.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -1119,6 +1120,32 @@ describe("link-utils", () => {
         "value",
       ]);
       expect(parsed.value.link["/"][LINK_V1_TAG].id).toBe(baseId);
+    });
+
+    it("should rewrite relative links with base scope", () => {
+      const baseCell = runtime.getCell(space, "scoped base", undefined, tx);
+      const scopedBaseCell = createCell(runtime, {
+        ...baseCell.getAsNormalizedFullLink(),
+        scope: "session",
+      }, tx);
+      const baseId = scopedBaseCell.getAsNormalizedFullLink().id;
+
+      const relativeLink = {
+        "/": {
+          [LINK_V1_TAG]: {
+            path: ["nested", "value"],
+          },
+        },
+      };
+
+      const dataURI = createDataCellURI(
+        { link: relativeLink },
+        scopedBaseCell,
+      );
+      const parsed = getJSONFromDataURI(dataURI);
+
+      expect(parsed.value.link["/"][LINK_V1_TAG].id).toBe(baseId);
+      expect(parsed.value.link["/"][LINK_V1_TAG].scope).toBe("session");
     });
 
     it("should rewrite nested relative links with base id", () => {

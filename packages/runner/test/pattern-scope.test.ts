@@ -4,7 +4,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { parseLink, toMemorySpaceAddress } from "../src/link-utils.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { createCell, type Cell } from "../src/cell.ts";
+import { type Cell, createCell } from "../src/cell.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -518,6 +518,9 @@ Deno.test("map updates when derived list is narrowed by session input", async ()
     await runtime.storageManager.synced();
     await result.pull();
 
+    const rawBodies = result.key("bodies").getRaw();
+    const bodiesLink = parseLink(rawBodies, result);
+    assertEquals(bodiesLink?.scope, "session");
     assertEquals(result.key("bodies").get() as unknown, []);
 
     result.key("setConversation").send({
@@ -533,6 +536,85 @@ Deno.test("map updates when derived list is narrowed by session input", async ()
     assertEquals(
       result.key("bodies").get() as unknown,
       ["hello from scoped lobby"],
+    );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("map materializes initially populated list selected by session input", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+
+  try {
+    const { derive, pattern } = createTrustedBuilder(runtime).commonfabric;
+
+    const selectedRoomBase = runtime.getCell<string>(
+      space,
+      "map initial session selected room",
+      undefined,
+      tx,
+    );
+    const selectedRoom = createCell<string>(
+      runtime,
+      { ...selectedRoomBase.getAsNormalizedFullLink(), scope: "session" },
+      tx,
+    );
+    selectedRoom.set("lobby");
+
+    interface Message {
+      body: string;
+    }
+
+    interface Conversation {
+      rooms: Record<string, Message[]>;
+    }
+
+    const Root = pattern<{
+      conversation: Conversation;
+      selectedRoom: string;
+    }>(({ conversation, selectedRoom }) => {
+      const messages = derive(
+        { conversation, selectedRoom },
+        (
+          current: { conversation: Conversation; selectedRoom: string },
+        ) => current.conversation.rooms[current.selectedRoom] ?? [],
+      );
+      const bodies = messages.map((message) =>
+        derive(message, (current: Message) => current.body)
+      );
+      return { messages, bodies };
+    });
+
+    const resultCell = runtime.getCell(
+      space,
+      "map materializes initially populated session list",
+      undefined,
+      tx,
+    );
+
+    const result = runtime.run(tx, Root, {
+      conversation: {
+        rooms: {
+          lobby: [{ body: "initial scoped lobby" }],
+        },
+      },
+      selectedRoom,
+    }, resultCell);
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+
+    assertEquals(
+      result.key("bodies").get() as unknown,
+      ["initial scoped lobby"],
     );
   } finally {
     await runtime.dispose();

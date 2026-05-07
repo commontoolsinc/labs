@@ -18,10 +18,10 @@ import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { trustedFlowPrecisionSchemaForBuiltin } from "../cfc/flow-precision.ts";
 import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
+import { parseLink } from "../link-utils.ts";
 import {
   cellIdentityKey,
   exposedResultCell,
-  resolvedCellScope,
   scopedCell,
 } from "./scope-policy.ts";
 
@@ -75,12 +75,19 @@ export function map(
   return (tx: IExtendedStorageTransaction) => {
     const { list, op } = inputsCell.asSchema(MAP_INPUT_SCHEMA)
       .withTx(tx).get();
-    const listScope = resolvedCellScope(runtime, tx, inputsCell.key("list"));
+    const listCell = inputsCell.key("list");
+    const listLink = parseLink(listCell.withTx(tx).getRaw(), listCell);
+    const listScope = listLink?.scope ??
+      listCell.getAsNormalizedFullLink().scope;
+    // .getRaw() because we want the pattern itself and avoid following the
+    // aliases in the pattern.
+    const opPattern = op.getRaw();
 
     if (!result || result.getAsNormalizedFullLink().scope !== listScope) {
       const resultSchema = trustedFlowPrecisionSchemaForBuiltin(
         tx.getCfcState().implementationIdentity,
         "map",
+        opPattern.resultSchema,
       );
       const baseResult = runtime.getCell<any[]>(
         parentCell.space,
@@ -99,9 +106,6 @@ export function map(
     }
     const resultWithLog = result.withTx(tx);
 
-    // .getRaw() because we want the pattern itself and avoid following the
-    // aliases in the pattern
-    const opPattern = op.getRaw();
     const argumentUsage = inferListOpArgumentUsage(runtime.cfc, opPattern);
     const createRunInput = (element: Cell<any>, index: number) => ({
       ...(argumentUsage.usesElement ? { element } : {}),

@@ -365,7 +365,7 @@ export function createDataCellURI(
   data: any,
   base?: Cell | NormalizedLink,
 ): URI {
-  const baseId = isCell(base) ? base.getAsNormalizedFullLink().id : base?.id;
+  const baseLink = isCell(base) ? base.getAsNormalizedFullLink() : base;
 
   function traverseAndAddBaseIdToRelativeLinks(
     value: any,
@@ -378,12 +378,8 @@ export function createDataCellURI(
     seen.add(value);
     try {
       if (isPrimitiveCellLink(value)) {
-        const link = parseLink(value);
-        if (!link.id) {
-          return createSigilLinkFromParsedLink({ ...link, id: baseId });
-        } else {
-          return value;
-        }
+        const link = parseLink(value, baseLink);
+        return createSigilLinkFromParsedLink(link);
       } else if (Array.isArray(value)) {
         return value.map((item) =>
           traverseAndAddBaseIdToRelativeLinks(item, seen)

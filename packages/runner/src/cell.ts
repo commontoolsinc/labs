@@ -1700,13 +1700,14 @@ export class CellImpl<T extends FabricValue>
         implementation: "map",
       });
     }
+    const op = pattern(
+      ({ element, index, array }: Opaque<any>) => fn(element, index, array),
+    );
     const result = mapFactory({
       list: this as unknown as OpaqueRef<T>,
-      op: pattern(
-        ({ element, index, array }: Opaque<any>) => fn(element, index, array),
-      ),
+      op,
     });
-    const schema = flowPrecisionSchemaForBuiltin("map");
+    const schema = flowPrecisionSchemaForBuiltin("map", op.resultSchema);
     if (schema !== undefined) {
       result.setSchema(schema);
     }
@@ -1735,7 +1736,7 @@ export class CellImpl<T extends FabricValue>
       op: op,
       params: params,
     });
-    const schema = flowPrecisionSchemaForBuiltin("map");
+    const schema = flowPrecisionSchemaForBuiltin("map", op.resultSchema);
     if (schema !== undefined) {
       result.setSchema(schema);
     }
