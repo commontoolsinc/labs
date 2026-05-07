@@ -64,8 +64,13 @@ export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
     const hex = value.toString(16);
     // Determine minimal byte length from hex digit count.
     let byteLen = (hex.length + 1) >> 1; // ceil(hex.length / 2)
-    // If high nibble has bit 7 set, need a sign-extension zero byte.
-    if (hexToNibble(hex.charCodeAt(0)) >= 8) byteLen++;
+    // If the high nibble of byte 0 has bit 3 set, we need a sign-extension
+    // zero byte. For odd hex length the byte's high nibble is 0 (from the
+    // implicit leading-zero pad), so the check only applies for even
+    // hex.length, where `hex[0]` *is* the leading byte's high nibble.
+    if ((hex.length & 1) === 0 && hexToNibble(hex.charCodeAt(0)) >= 8) {
+      byteLen++;
+    }
 
     // Fast path: use DataView.setBigUint64() for values that fit in 8 bytes.
     if (byteLen <= 8) {
@@ -95,10 +100,16 @@ export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
   let byteLen = Math.ceil(bitLen / 8);
   // Two's complement of -abs is 2^n - abs where n is the byte-aligned size.
   let twos = (1n << BigInt(byteLen * 8)) - abs;
-  // Verify the high bit is set (value must look negative).
+  // Verify the high bit of byte 0 of the encoded form is set (value must
+  // look negative). It is *not* set if either:
+  //   (a) `twosHex` is shorter than `byteLen * 2` (so byte 0 starts with a
+  //       padding-zero nibble), or
+  //   (b) `twosHex.length === byteLen * 2` but its leading nibble is < 8.
+  // In either case we need one more byte to keep the high bit set.
   const twosHex = twos.toString(16);
-  if (hexToNibble(twosHex.charCodeAt(0)) < 8) {
-    // High bit not set -- need one more byte.
+  if (
+    twosHex.length < byteLen * 2 || hexToNibble(twosHex.charCodeAt(0)) < 8
+  ) {
     byteLen++;
     twos = (1n << BigInt(byteLen * 8)) - abs;
   }
