@@ -53,7 +53,7 @@ let moduleIsUsable: boolean = false;
  * Gets and initializes the unique one-shot hasher instance.
  */
 function getOneShotHasher(): IHasher {
-  const result = theOneShotHasher[0];
+  const result = theOneShotHasher[0]!;
   result.init();
   return result;
 }
