@@ -13,14 +13,45 @@
 // ---------------------------------------------------------------------------
 
 /**
- * Helper for `bigintToMinimalTwosComplement()`, which converts a hex digit
- * char code to its 4-bit numeric value. Handles '0'-'9' (0x30-0x39) and
- * 'a'-'f' (0x61-0x66). Used instead of `parseInt` for ~2x faster
- * hex-to-byte conversion (see bigint-hashing-performance.md).
+ * Helper for `bigintToMinimalTwosComplement()`, which converts a hex digit at a
+ * particular index in a string to its 4-bit (nibble-sized) numeric value.
+ * Handles '0'-'9' (0x30-0x39) and 'a'-'f' (0x61-0x66).
  */
-function hexToNibble(c: number): number {
+function nibbleValueAt(hex: string, at: number): number {
+  const c = hex.charCodeAt(at);
+
   // '0'-'9' = 0x30-0x39, 'a'-'f' = 0x61-0x66
   return c < 0x3a ? c - 0x30 : c - 0x57;
+}
+
+/**
+ * Helper for `bigintToMinimalTwosComplement()`, which converts a pair of hex
+ * digits at a particular index in a string to its 8-bit (byte-sized) numeric
+ * value. Handles '0'-'9' (0x30-0x39) and 'a'-'f' (0x61-0x66).
+ */
+function byteValueAt(hex: string, at: number): number {
+  return (nibbleValueAt(hex, at) << 4) | nibbleValueAt(hex, at + 1);
+}
+
+/**
+ * Helper for `bigintToMinimalTwosComplement()`, which converts a positive
+ * `bigint` to a hex string with an even number of digits, _and_ a leading
+ * `00` if it would otherwise be interpreted as a negative number in
+ * twos-complement.
+ */
+function hexStringFromPositiveValue(value: bigint): string {
+  const hex = value.toString(16);
+  if ((hex.length & 1) === 1) {
+    // Round up to an even number of nibbles.
+    return "0" + hex;
+  } else if (nibbleValueAt(hex, 0) >= 8) {
+    // Add an extra `0x00` byte, because the high-order bit would otherwise
+    // be `1` and therefore the encoded result would be negative, which
+    // would be wrong.
+    return "00" + hex;
+  } else {
+    return hex;
+  }
 }
 
 /**
@@ -34,13 +65,19 @@ const dv64View = new DataView(dv64Buf);
 const dv64Bytes = new Uint8Array(dv64Buf);
 
 /**
+ * Cached result of `0n` as a `Uint8Array`.
+ */
+const ZERO_BYTES = new Uint8Array([0x00]);
+
+/**
+ * Cached result of `-1n` as a `Uint8Array`.
+ */
+const NEGATIVE_ONE_BYTES = new Uint8Array([0xFF]);
+
+/**
  * Converts a bigint to its minimal two's-complement big-endian byte
  * representation. The encoding is the same one used by the hash
  * byte-level spec (Section 3.7).
- *
- * Uses a hybrid strategy: values that fit in 64 bits (the common case) are
- * extracted via a single `DataView.setBigUint64()` call (~2x faster), while
- * larger values fall back to hex+nibble conversion.
  *
  * Edge cases:
  * - `0n` -> `[0x00]` (single zero byte)
@@ -50,86 +87,73 @@ const dv64Bytes = new Uint8Array(dv64Buf);
  *   when the high bit would otherwise be clear (sign extension for negative).
  */
 export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
-  if (value === 0n) {
-    return new Uint8Array([0]);
-  }
+  // Converts a value that fits into 64 bits.
+  const convertSmallValue = (negative: boolean) => {
+    dv64View.setBigInt64(0, value, false); // `false` means big-endian.
 
-  const negative = value < 0n;
+    // Note: Loop necessarily ends before running off the end of the array
+    // because by virtue of the caller's up-front check, there's definitely a
+    // non-skipped byte).
+    const skipByte = negative ? 0xff : 0x00;
+    for (let i = 0; true; i++) {
+      const byte = dv64Bytes[i];
+      if (byte !== skipByte) {
+        // Adjust starting index backwards if the non-skipped byte would flip
+        // the sign of the result.
+        if (negative) {
+          if (byte <= 0x7f) i--;
+        } else {
+          if (byte >= 0x80) i--;
+        }
+        return dv64Bytes.slice(i);
+      }
+    }
+  };
 
-  if (!negative) {
-    // We use toString(16).length to determine byte count because V8 has no
-    // BigInt bit-length API. The TC39 BigInt Math proposal (Stage 1) includes
-    // BigInt.bitLength() which would eliminate this string round-trip.
-    // See: https://github.com/tc39/proposal-bigint-math
-    const hex = value.toString(16);
-    // Determine minimal byte length from hex digit count.
-    let byteLen = (hex.length + 1) >> 1; // ceil(hex.length / 2)
-    // If the high nibble of byte 0 has bit 3 set, we need a sign-extension
-    // zero byte. For odd hex length the byte's high nibble is 0 (from the
-    // implicit leading-zero pad), so the check only applies for even
-    // hex.length, where `hex[0]` *is* the leading byte's high nibble.
-    if ((hex.length & 1) === 0 && hexToNibble(hex.charCodeAt(0)) >= 8) {
-      byteLen++;
+  if (value >= 0n) {
+    if (value === 0n) {
+      return ZERO_BYTES.slice();
+    } else if (value <= 0x7fff_ffff_ffff_ffffn) {
+      return convertSmallValue(false);
     }
 
-    // Fast path: use DataView.setBigUint64() for values that fit in 8 bytes.
-    if (byteLen <= 8) {
-      dv64View.setBigUint64(0, value, false); // big-endian
-      return dv64Bytes.slice(8 - byteLen);
-    }
+    // Slow path for positive numbers: This stringifies and then parses back the
+    // `value`, to work around JS's very limited set of `bigint` functionality.
+    // If and when the TC39 BigInt Math proposal lands, this code could be
+    // reworked to be much more performant. See:
+    // <https://github.com/tc39/proposal-bigint-math>.
 
-    // Fallback: hex+nibble for larger values.
-    let padded = hex;
-    if (padded.length % 2 !== 0) padded = "0" + padded;
-    if (hexToNibble(padded.charCodeAt(0)) >= 8) padded = "00" + padded;
-    const bytes = new Uint8Array(padded.length / 2);
+    const hex = hexStringFromPositiveValue(value);
+    const bytes = new Uint8Array(hex.length >> 1);
+
     for (let i = 0; i < bytes.length; i++) {
-      const j = i * 2;
-      bytes[i] = (hexToNibble(padded.charCodeAt(j)) << 4) |
-        hexToNibble(padded.charCodeAt(j + 1));
+      bytes[i] = byteValueAt(hex, i * 2);
     }
+
+    return bytes;
+  } else {
+    if (value === -1n) {
+      return NEGATIVE_ONE_BYTES.slice();
+    } else if (value >= -0x8000_0000_0000_0000n) {
+      return convertSmallValue(true);
+    }
+
+    // Slow path for negative numbers. See above for details. The extra twist
+    // here is that we need to end up with a string that correctly represents
+    // `value` as a twos-complement negative value. The trick we do here is
+    // convert the _ones_-complement of `value` to a string, and then undo it
+    // byte-by-byte when storing the result.
+
+    const hex = hexStringFromPositiveValue(~value);
+    const bytes = new Uint8Array(hex.length >> 1);
+
+    for (let i = 0; i < bytes.length; i++) {
+      // `0xff - value` to undo the ones-complement in `~value` above.
+      bytes[i] = 0xff - byteValueAt(hex, i * 2);
+    }
+
     return bytes;
   }
-
-  // For negative numbers, compute two's complement.
-  const abs = -value;
-  const absHex = abs.toString(16);
-  // Number of bits for the magnitude.
-  const bitLen = absHex.length * 4;
-  // We need enough bytes to represent the value, rounded up.
-  let byteLen = Math.ceil(bitLen / 8);
-  // Two's complement of -abs is 2^n - abs where n is the byte-aligned size.
-  let twos = (1n << BigInt(byteLen * 8)) - abs;
-  // Verify the high bit of byte 0 of the encoded form is set (value must
-  // look negative). It is *not* set if either:
-  //   (a) `twosHex` is shorter than `byteLen * 2` (so byte 0 starts with a
-  //       padding-zero nibble), or
-  //   (b) `twosHex.length === byteLen * 2` but its leading nibble is < 8.
-  // In either case we need one more byte to keep the high bit set.
-  const twosHex = twos.toString(16);
-  if (
-    twosHex.length < byteLen * 2 || hexToNibble(twosHex.charCodeAt(0)) < 8
-  ) {
-    byteLen++;
-    twos = (1n << BigInt(byteLen * 8)) - abs;
-  }
-
-  // Fast path: use DataView.setBigUint64() for values that fit in 8 bytes.
-  if (byteLen <= 8) {
-    dv64View.setBigUint64(0, twos, false); // big-endian
-    return dv64Bytes.slice(8 - byteLen);
-  }
-
-  // Fallback: hex+nibble for larger values.
-  let hex = twos.toString(16);
-  while (hex.length < byteLen * 2) hex = "0" + hex;
-  const bytes = new Uint8Array(byteLen);
-  for (let i = 0; i < bytes.length; i++) {
-    const j = i * 2;
-    bytes[i] = (hexToNibble(hex.charCodeAt(j)) << 4) |
-      hexToNibble(hex.charCodeAt(j + 1));
-  }
-  return bytes;
 }
 
 // ---------------------------------------------------------------------------
