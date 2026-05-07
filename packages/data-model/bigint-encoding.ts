@@ -23,6 +23,10 @@ function hexToNibble(c: number): number {
   return c < 0x3a ? c - 0x30 : c - 0x57;
 }
 
+function hexValueAt(hex: string, at: number): number {
+  return hexToNibble(hex.charCodeAt(at));
+}
+
 /**
  * Shared 8-byte scratch buffer for the DataView fast path. A single
  * `setBigUint64()` call writes all 8 bytes at once, avoiding hex string
@@ -67,7 +71,7 @@ export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
     // because by virtue of the caller's up-front check, there's definitely a
     // non-skipped byte).
     const skipByte = negative ? 0xff : 0x00;
-    for (let i = 0; /*i*/; i++) {
+    for (let i = 0; true; i++) {
       const byte = dv64Bytes[i];
       if (byte !== skipByte) {
         // Adjust starting index backwards if the non-skipped byte would flip
@@ -95,28 +99,27 @@ export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
     // BigInt.bitLength() which would eliminate this string round-trip. See:
     // https://github.com/tc39/proposal-bigint-math
 
-    const hex = value.toString(16);
+    const hex = (() => {
+      const hex = value.toString(16);
+      if ((hex.length & 1) === 1) {
+        // Round up to an even number of nibbles.
+        return "0" + hex;
+      } else if (hexValueAt(hex, 0) >= 8) {
+        // Add an extra `0x00` byte, because the high-order bit would otherwise
+        // be `1` and therefore the encoded result would be negative, which
+        // would be wrong.
+        return "00" + hex;
+      } else {
+        return hex;
+      }
+    })();
 
-    // Determine minimal byte length from hex digit count.
-    let byteLen = (hex.length + 1) >> 1; // ceil(hex.length / 2)
-
-    // If the high nibble of byte 0 has bit 3 set, we need a sign-extension
-    // zero byte. For odd hex length the byte's high nibble is 0 (from the
-    // implicit leading-zero pad), so the check only applies for even
-    // hex.length, where `hex[0]` *is* the leading byte's high nibble.
-    if ((hex.length & 1) === 0 && hexToNibble(hex.charCodeAt(0)) >= 8) {
-      byteLen++;
-    }
-
-    let padded = hex;
-    if (padded.length % 2 !== 0) padded = "0" + padded;
-    if (hexToNibble(padded.charCodeAt(0)) >= 8) padded = "00" + padded;
-    const bytes = new Uint8Array(padded.length / 2);
+    const byteLen = hex.length >> 1;
+    const bytes = new Uint8Array(byteLen);
 
     for (let i = 0; i < bytes.length; i++) {
       const j = i * 2;
-      bytes[i] = (hexToNibble(padded.charCodeAt(j)) << 4) |
-        hexToNibble(padded.charCodeAt(j + 1));
+      bytes[i] = (hexValueAt(hex, j) << 4) | hexValueAt(hex, j + 1);
     }
 
     return bytes;
