@@ -93,6 +93,13 @@ const rawFixtures: bigint[] = [
   -246n,
   -247n,
   -248n,
+  // Boundaries of the 64-bit fast path in `convertSmallValue()`: the
+  // largest positive and the most-negative value it handles, plus one
+  // step beyond each into the slow path.
+  0x7fff_ffff_ffff_ffffn, //  2^63 - 1,  max fast-path positive
+  0x8000_0000_0000_0000n, //  2^63,      first slow-path positive
+  -0x8000_0000_0000_0000n, // -2^63,     most-negative fast-path
+  -0x8000_0000_0000_0001n, // -2^63 - 1, first slow-path negative
 ];
 
 // Programmatic expansion via a deterministic recurrence. The multiplier `99`
