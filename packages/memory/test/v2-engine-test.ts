@@ -23,6 +23,7 @@ import {
 import {
   decodeMemoryBoundary,
   DEFAULT_BRANCH,
+  encodeMemoryBoundary,
   type EntityDocument,
   toDocumentPath,
 } from "../v2.ts";
@@ -372,6 +373,119 @@ Deno.test("memory v2 engine logs stored patch decode failures with row context",
     assertStringIncludes(serialized, "revision");
     assertStringIncludes(serialized, "patch");
     assertStringIncludes(serialized, "fvj1");
+  } finally {
+    console.error = originalConsoleError;
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 engine preserves structured invalid stored document details in logs", async () => {
+  const { engine, path } = await createEngine();
+  const consoleErrors: unknown[][] = [];
+  const originalConsoleError = console.error;
+  console.error = (...args: unknown[]) => {
+    consoleErrors.push(args);
+  };
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:invalid-document-root",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:invalid-document-root",
+          value: toEntityDocument({ ok: true }),
+        }],
+      },
+    });
+
+    engine.database.prepare(
+      `UPDATE revision
+       SET data = :data
+       WHERE branch = '' AND id = :id AND seq = 1 AND op_index = 0`,
+    ).run({
+      data: encodeMemoryBoundary(["not", "a", "document"]),
+      id: "entity:invalid-document-root",
+    });
+
+    assertThrows(() => read(engine, { id: "entity:invalid-document-root" }));
+
+    const serialized = serializeConsoleArgs(consoleErrors);
+    assertStringIncludes(serialized, "stored-document-invalid-root");
+    assertStringIncludes(serialized, "entity:invalid-document-root");
+    assertStringIncludes(
+      serialized,
+      "memory v2 stored documents must be plain object roots",
+    );
+    assertStringIncludes(serialized, "decodedType");
+    assertStringIncludes(serialized, "array");
+  } finally {
+    console.error = originalConsoleError;
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 engine preserves structured invalid stored patch details in logs", async () => {
+  const { engine, path } = await createEngine();
+  const consoleErrors: unknown[][] = [];
+  const originalConsoleError = console.error;
+  console.error = (...args: unknown[]) => {
+    consoleErrors.push(args);
+  };
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:invalid-patch-root",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:invalid-patch-root",
+          value: toEntityDocument({ count: 1 }),
+        }],
+      },
+    });
+    applyCommit(engine, {
+      sessionId: "session:invalid-patch-root",
+      invocation: invocationFor(2),
+      authorization,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "entity:invalid-patch-root",
+          patches: [{ op: "replace", path: "/value/count", value: 2 }],
+        }],
+      },
+    });
+
+    engine.database.prepare(
+      `UPDATE revision
+       SET data = :data
+       WHERE branch = '' AND id = :id AND seq = 2 AND op_index = 0`,
+    ).run({
+      data: encodeMemoryBoundary({ not: "patches" }),
+      id: "entity:invalid-patch-root",
+    });
+
+    assertThrows(() => read(engine, { id: "entity:invalid-patch-root" }));
+
+    const serialized = serializeConsoleArgs(consoleErrors);
+    assertStringIncludes(serialized, "stored-patch-list-invalid-root");
+    assertStringIncludes(serialized, "entity:invalid-patch-root");
+    assertStringIncludes(serialized, "memory v2 stored patches must be arrays");
+    assertStringIncludes(serialized, "decodedType");
+    assertStringIncludes(serialized, "object");
   } finally {
     console.error = originalConsoleError;
     close(engine);

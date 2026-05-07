@@ -1447,6 +1447,8 @@ const logStoredDecodeFailure = (
     storedData: summarizeStoredData(data),
     error: error instanceof Error
       ? { name: error.name, message: error.message, stack: error.stack }
+      : typeof error === "object" && error !== null
+      ? error
       : String(error),
   });
 };
