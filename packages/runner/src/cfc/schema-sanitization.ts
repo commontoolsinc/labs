@@ -1,4 +1,8 @@
 import type { ImmutableJSONValue, JSONSchema } from "@commonfabric/api";
+import {
+  cloneIfNecessary,
+  type FabricValue,
+} from "@commonfabric/data-model/fabric-value";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
 import { ContextualFlowControl } from "../cfc.ts";
@@ -36,7 +40,8 @@ const isPrimitiveJsonValue = (value: unknown): boolean =>
   typeof value === "number" ||
   typeof value === "boolean";
 
-const cloneJson = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+const cloneJson = <T>(value: T): T =>
+  cloneIfNecessary(value as FabricValue, { frozen: true }) as T;
 
 const uniqueAtoms = (
   atoms: Iterable<unknown>,
