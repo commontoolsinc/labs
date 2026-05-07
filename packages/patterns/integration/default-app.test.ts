@@ -2578,9 +2578,11 @@ async function clickButtonWithExactText(
           return true;
         } catch (_) {
           return await page.evaluate((searchText: string) => {
-            for (const el of document.querySelectorAll(
-              "cf-button, button, a",
-            )) {
+            for (
+              const el of document.querySelectorAll(
+                "cf-button, button, a",
+              )
+            ) {
               if (el.textContent?.trim() === searchText) {
                 (el as HTMLElement).click();
                 return true;
@@ -2657,8 +2659,8 @@ async function collectNotebookDiagnostics(page: Page): Promise<{
     function collectNoteLabels(root: Document | ShadowRoot): void {
       for (const el of root.querySelectorAll("*")) {
         if (el.localName === "cf-chip") {
-          const label =
-            ((el as any).label ?? el.getAttribute("label") ?? "").trim();
+          const label = ((el as any).label ?? el.getAttribute("label") ?? "")
+            .trim();
           if (label.startsWith("📝 New Note")) {
             noteLabels.push(label);
           }
@@ -2697,7 +2699,9 @@ async function collectNotebookDiagnostics(page: Page): Promise<{
       .filter((node: any) => node.type === "effect" && node.isPending)
       .slice(0, 20)
       .map((node: any) => ({ id: node.id, preview: node.preview }));
-    const actionTraceTail = (actionTrace ?? []).slice(-20).map((entry: any) => ({
+    const actionTraceTail = (actionTrace ?? []).slice(-20).map((
+      entry: any,
+    ) => ({
       id: entry.actionId,
       type: entry.actionType,
       writes: (entry.actualWrites ?? []).slice(0, 4).map((write: any) =>
