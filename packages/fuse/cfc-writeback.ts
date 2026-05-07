@@ -3,6 +3,10 @@ import {
   DEFAULT_CFC_ENFORCEMENT_MODE,
 } from "@commonfabric/runner/cfc";
 import { sha256 } from "@commonfabric/content-hash";
+import {
+  cloneIfNecessary,
+  type FabricValue,
+} from "@commonfabric/data-model/fabric-value";
 import { encodeHex } from "@std/encoding/hex";
 import {
   canonicalCfcJsonStringify,
@@ -1369,7 +1373,11 @@ function applyPreparedForRecovery(
 function cloneRecoveryRecord(
   record: CfcWritebackRecoveryRecord,
 ): CfcWritebackRecoveryRecord {
-  return JSON.parse(JSON.stringify(record)) as CfcWritebackRecoveryRecord;
+  return cloneIfNecessary(record as FabricValue, {
+    frozen: false,
+    deep: true,
+    force: true,
+  }) as CfcWritebackRecoveryRecord;
 }
 
 function isRecoveryRecord(
