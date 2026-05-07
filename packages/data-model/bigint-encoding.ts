@@ -89,7 +89,7 @@ const NEGATIVE_ONE_BYTES = new Uint8Array([0xFF]);
 export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
   // Converts a value that fits into 64 bits.
   const convertSmallValue = (negative: boolean) => {
-    dv64View.setBigUint64(0, value, false); // big-endian
+    dv64View.setBigInt64(0, value, false); // `false` means big-endian.
 
     // Note: Loop necessarily ends before running off the end of the array
     // because by virtue of the caller's up-front check, there's definitely a
