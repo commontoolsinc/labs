@@ -122,11 +122,11 @@ export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
       return convertSmallValue(false);
     }
 
-    // Slow path for positive numbers: Stringify and parse. We use
-    // toString(16).length to determine byte count because V8 has no BigInt
-    // bit-length API. The TC39 BigInt Math proposal (Stage 1) includes
-    // BigInt.bitLength() which would eliminate this string round-trip. See:
-    // https://github.com/tc39/proposal-bigint-math
+    // Slow path for positive numbers: This stringifies and then parses back the
+    // `value`, to work around JS's very limited set of `bigint` functionality.
+    // If and when the TC39 BigInt Math proposal lands, this code could be
+    // reworked to be muchb more performant. See:
+    // <https://github.com/tc39/proposal-bigint-math>.
 
     const hex = hexStringFromPositiveValue(value);
     const bytes = new Uint8Array(hex.length >> 1);
