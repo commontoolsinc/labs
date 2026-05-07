@@ -69,5 +69,7 @@ export {
 export { markRendererTrustedEvent } from "./ui-contract.ts";
 export {
   resolveSchemaForValidation,
+  type SchemaOpaqueLinkSanitizationResult,
   validateAgainstSchema,
+  validateAndSanitizeSchemaValueWithOpaqueLinks,
 } from "./schema-sanitization.ts";
