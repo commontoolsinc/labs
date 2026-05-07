@@ -743,8 +743,8 @@ describe("runPattern", () => {
   });
 
   it("should create separate copies of initial values for each pattern instance", async () => {
-    // Use a local runtime with modernDataModel OFF so getRaw() returns
-    // mutable objects (the legacy behavior this test was written for).
+    // Use a local runtime with modernDataModel OFF and mutable raw copies
+    // to verify legacy-mode initial values are independent.
     const sm = StorageManager.emulate({ as: signer });
     const localRuntime = new Runtime({
       apiUrl: new URL(import.meta.url),
@@ -814,14 +814,13 @@ describe("runPattern", () => {
     );
     await result2.pull();
 
-    // Get the internal state objects
-    // We cast away our Immutable, so we can do this test
+    // Use getRawUntyped({ frozen: false }) for mutable copies
     const internal1 = localRuntime.getCellFromLink(
       getMetaLink(result1, "internal")!,
-    ).getRaw() as any;
+    ).getRawUntyped({ frozen: false }) as any;
     const internal2 = localRuntime.getCellFromLink(
       getMetaLink(result2, "internal")!,
-    ).getRaw() as any;
+    ).getRawUntyped({ frozen: false }) as any;
 
     // Verify they are different objects
     expect(internal1).not.toBe(internal2);

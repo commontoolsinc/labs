@@ -26,8 +26,6 @@ import {
   NameSchema,
   nameSchema,
   pieceListSchema,
-  pieceSourceCellSchema,
-  processSchema,
 } from "@commonfabric/runner/schemas";
 ensureNotRenderThread();
 
