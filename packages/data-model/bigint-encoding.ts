@@ -60,21 +60,33 @@ const NEGATIVE_ONE_BYTES = new Uint8Array([0xFF]);
  *   when the high bit would otherwise be clear (sign extension for negative).
  */
 export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
+  const convertSmallValue = (negative: boolean) => {
+    dv64View.setBigUint64(0, value, false); // big-endian
+
+    // Note: Loop necessarily ends before running off the end of the array
+    // because by virtue of the caller's up-front check, there's definitely a
+    // non-skipped byte).
+    const skipByte = negative ? 0xff : 0x00;
+    for (let i = 0; /*i*/; i++) {
+      const byte = dv64Bytes[i];
+      if (byte !== skipByte) {
+        // Adjust starting index backwards if the non-skipped byte would flip
+        // the sign of the result.
+        if (negative) {
+          if (byte <= 0x7f) i--;
+        } else {
+          if (byte >= 0x80) i--;
+        }
+        return dv64Bytes.slice(i);
+      }
+    }
+  };
+
   if (value >= 0n) {
     if (value === 0n) {
       return ZERO_BYTES.slice();
     } else if (value <= 0x7fff_ffff_ffff_ffffn) {
-      dv64View.setBigUint64(0, value, false); // big-endian
-
-      // Note: Loop necessarily ends before running off the end of the array
-      // because `value !== 0n` (that is, there's definitely a non-skipped
-      // byte).
-      for (let i = 0; /*i*/; i++) {
-        const byte = dv64Bytes[i];
-        if (byte !== 0) {
-          return dv64Bytes.slice((byte <= 0x7f) ? i : i - 1);
-        }
-      }
+      return convertSmallValue(false);
     }
 
     // Slow path for positive numbers: Stringify and parse. We use
@@ -112,17 +124,7 @@ export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
     if (value === -1n) {
       return NEGATIVE_ONE_BYTES.slice();
     } else if (value >= -0x8000_0000_0000_0000n) {
-      dv64View.setBigUint64(0, value, false); // big-endian
-
-      // Note: Loop necessarily ends before running off the end of the array
-      // because `value !== -1n` (that is, there's definitely a non-skipped
-      // byte).
-      for (let i = 0; /*i*/; i++) {
-        const byte = dv64Bytes[i];
-        if (byte !== 0xff) {
-          return dv64Bytes.slice((byte >= 0x80) ? i : i - 1);
-        }
-      }
+      return convertSmallValue(true);
     }
 
     // Slow path for negative numbers. See above for details.
