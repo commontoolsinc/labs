@@ -1098,7 +1098,7 @@ export class CfcWritebackStore {
 
   snapshot(): CfcWritebackSnapshot {
     const records = [...this.records.values()].map((record) =>
-      cloneRecoveryRecord(record)
+      cloneRecoveryRecord(record, true)
     );
     const counts = Object.fromEntries(
       RECOVERY_STATUSES.map((status) => [status, 0]),
@@ -1201,7 +1201,7 @@ export class CfcWritebackStore {
     }
     for (const record of parsed.records) {
       if (!isRecoveryRecord(record)) continue;
-      const cloned = cloneRecoveryRecord(record);
+      const cloned = cloneRecoveryRecord(record, false);
       this.records.set(cloned.key, cloned);
       if (cloned.prepared) this.prepared.set(cloned.key, cloned.prepared);
     }
@@ -1372,11 +1372,10 @@ function applyPreparedForRecovery(
 
 function cloneRecoveryRecord(
   record: CfcWritebackRecoveryRecord,
+  frozen: boolean,
 ): CfcWritebackRecoveryRecord {
   return cloneIfNecessary(record as FabricValue, {
-    frozen: false,
-    deep: true,
-    force: true,
+    frozen,
   }) as CfcWritebackRecoveryRecord;
 }
 
