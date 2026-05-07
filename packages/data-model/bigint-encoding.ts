@@ -79,10 +79,6 @@ const NEGATIVE_ONE_BYTES = new Uint8Array([0xFF]);
  * representation. The encoding is the same one used by the hash
  * byte-level spec (Section 3.7).
  *
- * Uses a hybrid strategy: values that fit in 64 bits (the common case) are
- * extracted via a single `DataView.setBigUint64()` call (~2x faster), while
- * larger values fall back to hex+nibble conversion.
- *
  * Edge cases:
  * - `0n` -> `[0x00]` (single zero byte)
  * - Positive values get a leading `0x00` byte when the high bit would
