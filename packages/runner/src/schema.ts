@@ -725,10 +725,6 @@ export function validateAndTransform(
     // We check for a link value, since we will follow links one step in get
     // We've already followed all the writeRedirect links above.
     const next = readMaybeLink(tx, link);
-    // FIXME(@ubik2): this is a simple approach, but we should really
-    // resolve the path. For example, if we have link to x.foo.bar,
-    // but x.foo is link to y.baz, we really want y.baz.bar.
-    // I'm not currently handling this, because it doesn't come up.
     if (next !== undefined) {
       cfcLabelView = mergeCfcLabelViews([
         cfcLabelView,

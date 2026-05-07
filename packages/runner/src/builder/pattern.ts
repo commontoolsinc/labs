@@ -286,7 +286,7 @@ function factoryFromPattern<T, R>(
   // So we need to get the underlying cell for comparison
   const selfRefCell = getCellOrThrow(selfRef);
   if (allCells.has(selfRefCell)) {
-    paths.set(selfRefCell, ["resultRef"]);
+    paths.set(selfRefCell, ["result"]);
   }
 
   // Add paths for all the internal cells

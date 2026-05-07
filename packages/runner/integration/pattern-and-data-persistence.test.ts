@@ -203,6 +203,8 @@ async function phase2LoadAndVerify(
     resultCell,
   );
   await tx.commit();
+  // FIXME(@ubik2) - Why is the tx.commit insufficient?
+  await ctx.runtime.storageManager.synced();
   const pulled = await runResult.pull();
 
   const output = runResult.getAsQueryResult();

@@ -1268,12 +1268,17 @@ export class CellImpl<T extends FabricValue>
   ): Cancel {
     if (!this.synced) this.sync();
 
-    const action: Action = (tx) => {
-      const value = this.withTx(tx).getMetaRaw(metaField);
-      return callback(value);
+    const sink: SinkAction = {
+      cleanup: undefined,
+      action: (tx) => {
+        if (isCancel(sink.cleanup)) sink.cleanup();
+
+        const value = this.withTx(tx).getMetaRaw(metaField);
+        sink.cleanup = callback(value);
+      },
     };
 
-    return sinkHelper(action, this.runtime, {
+    return sinkHelper(sink, this.runtime, {
       ...this.link,
       path: [String(metaField)],
     }, options);
@@ -1863,64 +1868,67 @@ function subscribeToReferencedDocs<T>(
   options: SinkOptions = {},
 ): Cancel {
   const link = ref.link;
-  const action: Action = (tx) => {
-    // Using a new transaction for child cells, as we're only interested in
-    // dependencies for the initial get, not further cells the callback might
-    // read. The callback is responsible for calling sink on those cells if it
-    // wants to stay updated.
-    const extraTx = runtime.edit();
-    const wrappedTx = createChildCellTransaction(tx, extraTx);
-    const schema = link.schema;
-    const needsTraversal = schema === undefined ||
-      ContextualFlowControl.isTrueSchema(schema);
-    const newValue = validateAndTransform(runtime, wrappedTx, ref);
-    if (needsTraversal && newValue !== undefined && newValue !== null) {
-      deepTraverse(newValue);
-    }
-    const cleanup = callback(newValue);
+  const sink: SinkAction = {
+    cleanup: undefined,
+    action: (tx) => {
+      if (isCancel(sink.cleanup)) sink.cleanup();
 
-    // no async await here, but that also means no retry. TODO(seefeld): Should
-    // we add a retry? So far all sinks are read-only, so they get re-triggered
-    // on changes already.
-    runtime.prepareTxForCommit(extraTx);
-    extraTx.commit();
+      // Using a new transaction for child cells, as we're only interested in
+      // dependencies for the initial get, not further cells the callback might
+      // read. The callback is responsible for calling sink on those cells if it
+      // wants to stay updated.
+      const extraTx = runtime.edit();
+      const wrappedTx = createChildCellTransaction(tx, extraTx);
+      const schema = link.schema;
+      const needsTraversal = schema === undefined ||
+        ContextualFlowControl.isTrueSchema(schema);
+      const newValue = validateAndTransform(runtime, wrappedTx, ref);
+      if (needsTraversal && newValue !== undefined && newValue !== null) {
+        deepTraverse(newValue);
+      }
+      sink.cleanup = callback(newValue);
 
-    return cleanup;
+      // no async await here, but that also means no retry. TODO(seefeld): Should
+      // we add a retry? So far all sinks are read-only, so they get re-triggered
+      // on changes already.
+      runtime.prepareTxForCommit(extraTx);
+      extraTx.commit();
+    },
   };
   return sinkHelper(
-    action,
+    sink,
     runtime,
     toMemorySpaceAddress(link),
     options,
   );
 }
 
-function sinkHelper<T>(
-  action: Action,
+type SinkAction = {
+  action: Action;
+  cleanup: Cancel | undefined | void;
+};
+
+function sinkHelper(
+  sink: SinkAction,
   runtime: Runtime,
   address: IMemorySpaceAddress,
   options: SinkOptions = {},
 ) {
-  let cleanup: Cancel | undefined | void;
-  const actionHelper: Action = (tx) => {
-    if (isCancel(cleanup)) cleanup();
-    cleanup = action(tx);
-  };
   // Attach a name to the sink action
   const sinkName = `sink:${address.space}/${address.id}/${
     address.path.join("/")
   }`;
-  Object.defineProperty(actionHelper, "name", {
+  Object.defineProperty(sink.action, "name", {
     value: sinkName,
     configurable: true,
   });
-  (actionHelper as Action & { src?: string }).src = sinkName;
+  (sink.action as Action & { src?: string }).src = sinkName;
 
   // Call action once immediately, which also defines what docs need to be
   // subscribed to. Wrap with withExecutingAction so that any child sinks
   // created during the callback see this action as their parent.
   const tx = runtime.edit();
-  runtime.scheduler.withExecutingAction(actionHelper, () => actionHelper(tx));
+  runtime.scheduler.withExecutingAction(sink.action, () => sink.action(tx));
   const log = txToReactivityLog(tx);
 
   // Technically unnecessary since we don't expect/allow callbacks to sink to
@@ -1937,12 +1945,12 @@ function sinkHelper<T>(
       changeGroup: options.changeGroup,
     }),
   };
-  runtime.scheduler.resubscribe(actionHelper, log, resubscribeOptions);
+  runtime.scheduler.resubscribe(sink.action, log, resubscribeOptions);
 
   return () => {
-    runtime.scheduler.unsubscribe(actionHelper);
-    if (isCancel(cleanup)) cleanup();
-    cleanup = undefined;
+    runtime.scheduler.unsubscribe(sink.action);
+    if (isCancel(sink.cleanup)) sink.cleanup();
+    sink.cleanup = undefined;
   };
 }
 

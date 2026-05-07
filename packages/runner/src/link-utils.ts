@@ -638,11 +638,15 @@ export function getMetaCell(
 
 const META_READ_OPTIONS = {
   meta: ignoreReadForScheduling,
-  frozen: false,
 } as const;
 
-// Our internal and argument cells are linked to by the result cell.
-// TODO(@ubik2) - track down these calls, and determine which should ignoreRead
+/**
+ * Our internal and argument cells are linked to by the result cell.
+ * This gets those links from the meta fields, and returns a link if present.
+ *
+ * By default, the meta reads are ignored for scheduling, and the schema
+ * will be frozen.
+ */
 export function getMetaLink(
   resultCell: Cell<any>,
   field: MetaField,

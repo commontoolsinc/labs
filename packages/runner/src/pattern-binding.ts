@@ -139,6 +139,7 @@ export function sendValueToBinding<T>(
  * @param binding - The binding to unwrap.
  * @param argumentCellLink - The link to the argument cell
  * @param internalCellLink - The link to the internal cell
+ * @param resultCellLink - The link to the result cell
  * @param options - Optional configuration.
  * @param options.bindPatterns - If false, skip binding aliases inside pattern values.
  *   This is used by raw/map nodes to prevent premature alias binding. Default: true.
@@ -149,6 +150,7 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
   binding: T,
   argumentCellLink: NormalizedFullLink,
   internalCellLink: NormalizedFullLink,
+  resultCellLink: NormalizedFullLink,
   options?: { bindPatterns?: boolean },
 ): T {
   const bindPatterns = options?.bindPatterns !== false;
@@ -171,6 +173,8 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
           ? argumentCellLink
           : alias.cell === "internal"
           ? internalCellLink
+          : alias.cell === "result"
+          ? resultCellLink
           : undefined;
         if (link === undefined) {
           throw new Error("Invalid pseudo-alias cell: " + alias.cell);

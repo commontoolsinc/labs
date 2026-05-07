@@ -545,7 +545,12 @@ export class Runner {
     if (previousPatternId === patternId) {
       const argumentLink = getMetaLink(resultCell, "argument");
       if (argumentLink !== undefined) {
-        this.runtime.getCellFromLink(argumentLink)?.withTx(tx).set(argument);
+        const argumentCell = this.runtime.getCellFromLink(
+          argumentLink,
+          undefined,
+          tx,
+        );
+        argumentCell.set(argument);
       }
       return { resultCell, needsStart: false };
     }
@@ -564,11 +569,13 @@ export class Runner {
       : resultCell.withTx(tx).asSchema(pattern.resultSchema);
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
     const internalCellLink = getMetaLink(resultCell, "internal")!;
+    const resultCellLink = resultCell.getAsNormalizedFullLink();
     let result = unwrapOneLevelAndBindtoDoc<R, any>(
       this.runtime.cfc,
       pattern.result as R,
       argumentCellLink,
       internalCellLink,
+      resultCellLink,
     );
     const previousResult = writableResultCell.getRaw({
       meta: ignoreReadForScheduling,
@@ -643,31 +650,28 @@ export class Runner {
     let nextArgument = argument;
     // The argument meta field of the result cell should be a link to the
     // argument cell. If it doesn't exist, we need to apply the defaults
+    // I don't include the schema here, since I don't want cfc enforcement yet
     if (argumentLink === undefined) {
       const newArgumentCell = getMetaCell(
         resultCell,
         "argument",
         tx,
-        pattern.argumentSchema,
       );
       setResultCell(newArgumentCell, resultCell.asSchema(pattern.resultSchema));
       nextArgument = mergeObjects<T>(argument, defaults);
       newArgumentCell.set(nextArgument);
-      resultCell.withTx(tx).setMetaRaw(
-        "argument",
-        newArgumentCell.getAsLink({ includeSchema: true }),
-      );
-    } else if (nextArgument !== argument) {
-      const argumentCell = this.runtime.getCellFromLink<T>(argumentLink);
-      argumentCell.withTx(tx).set(nextArgument);
+      const newArgumentCellLink = newArgumentCell.asSchema(
+        pattern.argumentSchema,
+      ).getAsLink({ includeSchema: true });
+      resultCell.withTx(tx).setMetaRaw("argument", newArgumentCellLink);
     }
-    if (argumentLink !== undefined && nextArgument !== undefined) {
+    if (nextArgument !== undefined) {
       diffAndUpdate(
         this.runtime,
         tx,
-        argumentLink!,
+        getMetaLink(resultCell.withTx(tx), "argument")!,
         nextArgument,
-        argumentLink,
+        resultCell.getAsNormalizedFullLink(),
       );
     }
 
@@ -694,7 +698,7 @@ export class Runner {
       `resultCell: ${resultCell.getAsNormalizedFullLink().id}`,
     ]);
 
-    const previousPatternId = getPatternId(resultCell);
+    const previousPatternId = getPatternId(resultCell.withTx(tx));
     const resolvedPattern = this.resolveSetupPattern(
       patternOrModule,
       previousPatternId,
@@ -1636,17 +1640,20 @@ export class Runner {
   ): BoundNodeIO {
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
     const internalCellLink = getMetaLink(resultCell, "internal")!;
+    const resultCellLink = resultCell.getAsNormalizedFullLink();
     const inputs = unwrapOneLevelAndBindtoDoc(
       this.runtime.cfc,
       inputBindings,
       argumentCellLink,
       internalCellLink,
+      resultCellLink,
     );
     const outputs = unwrapOneLevelAndBindtoDoc(
       this.runtime.cfc,
       outputBindings,
       argumentCellLink,
       internalCellLink,
+      resultCellLink,
     );
     return {
       inputs,
@@ -2620,6 +2627,7 @@ export class Runner {
     }
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
     const internalCellLink = getMetaLink(resultCell, "internal")!;
+    const resultCellLink = resultCell.getAsNormalizedFullLink();
     // CT-1230: Pass bindPatterns: false to prevent premature alias binding in pattern
     // arguments. When a subpattern is passed to map(), its aliases should not be
     // bound to the current doc yet - they need to remain unbound until the pattern
@@ -2629,6 +2637,7 @@ export class Runner {
       inputBindings,
       argumentCellLink,
       internalCellLink,
+      resultCellLink,
       { bindPatterns: false },
     );
     const mappedOutputBindings = unwrapOneLevelAndBindtoDoc(
@@ -2636,6 +2645,7 @@ export class Runner {
       outputBindings,
       argumentCellLink,
       internalCellLink,
+      resultCellLink,
     );
 
     // For `map` and future other node types that take closures, we need to
@@ -2837,11 +2847,13 @@ export class Runner {
   ) {
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
     const internalCellLink = getMetaLink(resultCell, "internal")!;
+    const resultCellLink = resultCell.getAsNormalizedFullLink();
     const inputs = unwrapOneLevelAndBindtoDoc(
       this.runtime.cfc,
       inputBindings,
       argumentCellLink,
       internalCellLink,
+      resultCellLink,
     );
 
     sendValueToBinding(
@@ -2865,18 +2877,21 @@ export class Runner {
   ) {
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
     const internalCellLink = getMetaLink(resultCell, "internal")!;
+    const resultCellLink = resultCell.getAsNormalizedFullLink();
     if (!isPattern(module.implementation)) throw new Error(`Invalid pattern`);
     const patternImpl = unwrapOneLevelAndBindtoDoc(
       this.runtime.cfc,
       module.implementation,
       argumentCellLink,
       internalCellLink,
+      resultCellLink,
     );
     const inputs = unwrapOneLevelAndBindtoDoc(
       this.runtime.cfc,
       inputBindings,
       argumentCellLink,
       internalCellLink,
+      resultCellLink,
     );
 
     // If output bindings is a link to a non-redirect cell,
@@ -2884,7 +2899,6 @@ export class Runner {
     let nextResultCell;
     let sendToBindings: boolean;
     if (isSigilLink(outputBindings) && !isWriteRedirectLink(outputBindings)) {
-      console.log("Resolving link in context of processCell", outputBindings);
       nextResultCell = this.runtime.getCellFromLink(
         parseLink(outputBindings, resultCell),
         patternImpl.resultSchema,

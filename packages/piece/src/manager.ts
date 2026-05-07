@@ -886,7 +886,7 @@ export class PieceManager {
         options,
       );
 
-    await this.runtime.editWithRetry((tx) => {
+    const result = await this.runtime.editWithRetry((tx) => {
       let targetInputCell = targetCell.withTx(tx);
       if (targetIsPiece) {
         // For pieces, target fields are in the result cell's argument
@@ -900,6 +900,8 @@ export class PieceManager {
         }
         targetInputCell = resultCell.runtime.getCellFromLink(
           targetArgumentLink,
+          undefined,
+          tx,
         );
       }
 
@@ -911,6 +913,7 @@ export class PieceManager {
         }),
       );
     });
+    if (result.error) throw result.error;
 
     if (targetIsPiece && start) {
       await this.getResult(targetCell).pull();
