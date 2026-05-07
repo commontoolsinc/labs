@@ -1,5 +1,9 @@
 import { ACL, ACLUser, DID } from "@commonfabric/memory/acl";
 import { Capability } from "@commonfabric/memory/interface";
+import {
+  cloneIfNecessary,
+  type FabricValue,
+} from "@commonfabric/data-model/fabric-value";
 import type { Cell } from "./cell.ts";
 import type { Runtime } from "./runtime.ts";
 
@@ -22,7 +26,11 @@ export class ACLManager {
       throw new Error("No ACL initialized for space.");
     }
 
-    return JSON.parse(JSON.stringify(aclData)) as ACL;
+    return cloneIfNecessary(aclData as FabricValue, {
+      frozen: false,
+      deep: true,
+      force: true,
+    }) as ACL;
   }
 
   async set(user: ACLUser, capability: Capability): Promise<void> {
