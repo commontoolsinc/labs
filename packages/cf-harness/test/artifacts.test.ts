@@ -430,6 +430,7 @@ Deno.test({
         allowedToolIds: [
           "bash",
           "read_file",
+          "view_image",
           "read_skill_resource",
           "edit_file",
           "write_file",
@@ -441,7 +442,7 @@ Deno.test({
       ]);
       assertEquals(
         persistedPolicySnapshot.subagents.profileConfigs[0].allowedToolIds,
-        ["bash", "read_file", "edit_file", "write_file"],
+        ["bash", "read_file", "view_image", "edit_file", "write_file"],
       );
       assertEquals(
         persistedPolicySnapshot.substrate?.sandbox?.kind,
@@ -566,7 +567,7 @@ Deno.test({
         {
           model: "gpt-5.4",
           messageCount: 1,
-          toolCount: 6,
+          toolCount: 7,
         },
       );
       assert(
@@ -773,6 +774,7 @@ Deno.test({
       assertEquals(subagentRun.manifest.allowedToolIds, [
         "bash",
         "read_file",
+        "view_image",
         "edit_file",
         "write_file",
       ]);

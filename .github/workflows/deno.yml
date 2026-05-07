@@ -8,6 +8,10 @@ on:
     branches:
       - main
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 # Define the list of binaries we're building
 # This makes it easy to add more binaries in the future
 env:
@@ -286,10 +290,15 @@ jobs:
         run: cat ~/.cf/fuse/fuse-daemon.log 2>/dev/null || echo "No daemon log found"
 
   pattern-integration-test:
-    name: "Pattern Integration Tests"
+    name: "Pattern Integration Tests (${{ matrix.shard }}/${{ matrix.total }})"
     runs-on: ubuntu-latest
     needs: ["build-binaries"]
     environment: ci
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+        total: [4]
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
@@ -314,17 +323,21 @@ jobs:
       - name: 🧩 Run end-to-end patterns integration tests
         working-directory: packages/patterns
         run: |
+          mapfile -t TEST_FILES < <(deno run --allow-read ../../tasks/select-pattern-integration-files.ts ${{ matrix.shard }}/${{ matrix.total }})
+          printf 'Pattern integration shard ${{ matrix.shard }}/${{ matrix.total }} files:\n'
+          printf '  %s\n' "${TEST_FILES[@]}"
           mkdir -p ../../test-results
           HEADLESS=1 \
           API_URL=http://localhost:8000/ \
-          INTEGRATION_TEST_FLAGS="--junit-path=../../test-results/patterns.xml" \
-          deno task integration
+          deno test --v8-flags=--max-old-space-size=4096 --trace-leaks -A \
+            --junit-path=../../test-results/patterns-${{ matrix.shard }}.xml \
+            "${TEST_FILES[@]}"
 
       - name: 📤 Upload test timing data
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-timing-pattern-integration
+          name: test-timing-pattern-integration-${{ matrix.shard }}
           path: test-results/
           retention-days: 90
           if-no-files-found: ignore

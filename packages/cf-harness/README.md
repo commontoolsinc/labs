@@ -40,11 +40,13 @@ What works today:
   - `bash`
   - `bash-no-sandbox` (provisional host shell for named subagent profiles only)
   - `read_file`
+  - `view_image`
   - `read_skill_resource`
   - `edit_file`
   - `write_file`
   - `delegate_task`
 - targeted exact-string edits plus whole-file replace/create and append writes
+- initial and in-run image attachments for model vision-capable flows
 - bounded OpenAI-compatible prompt/tool loop
 - single-child subagent delegation with fresh child prompt context, explicit
   default/browser child profiles, retained child run references, and a sanitized
@@ -239,8 +241,8 @@ locator actions, and normal browser interactions.
 For browser-profile runs, prefer a host artifact root outside the workspace. Raw
 child artifacts are retained for operator analysis, but they are not meant to
 become ordinary workspace inputs for the parent model. If an artifact root is
-physically placed under the workspace, `read_file`, `write_file`, and
-`edit_file`, plus browser-profile `ls`/`find`, treat that artifact tree as
+physically placed under the workspace, `read_file`, `view_image`, `write_file`,
+and `edit_file`, plus browser-profile `ls`/`find`, treat that artifact tree as
 reserved from model-facing file and discovery tools.
 
 ```bash

@@ -316,6 +316,12 @@ left ephemeral.
 Start with `docs/common/patterns/`, especially the meta guidance under
 `docs/common/patterns/meta/`.
 
+For Pattern Factory Build and other implementation work that creates or
+debugs stateful UI, read these foundational references before coding:
+
+- `docs/common/concepts/reactivity.md`
+- `docs/common/patterns/new-cells.md`
+
 Then consult the targeted references as needed:
 
 - `docs/common/concepts/types-and-schemas/`

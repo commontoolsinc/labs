@@ -41,6 +41,7 @@ import {
   readAndParseEvent,
   REPO,
   STDDEV_FACTOR,
+  timingArtifactLabel,
   type TimingSample,
   TOKEN,
   WORKFLOW_FILE,
@@ -126,7 +127,7 @@ async function main() {
       const suites = await downloadAndParseJUnit(artifact.id);
       const testMetrics = extractTestFileMetrics(
         currentRunInfo,
-        artifact.name.replace("test-timing-", ""),
+        timingArtifactLabel(artifact.name),
         suites,
       );
       for (const [name, sample] of testMetrics) {
@@ -191,7 +192,7 @@ async function main() {
         if (suites.length > 0) {
           const testMetrics = extractTestFileMetrics(
             run,
-            artifact.name.replace("test-timing-", ""),
+            timingArtifactLabel(artifact.name),
             suites,
           );
           for (const [name, sample] of testMetrics) {

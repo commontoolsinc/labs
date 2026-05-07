@@ -191,7 +191,7 @@ Options:
   --workspace <path>            Workspace host path (defaults to current directory)
   --cwd <path>                  Initial working directory inside the workspace
   --focus-root <path>           Narrow exploration to a workspace subpath when possible
-  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | read_skill_resource | edit_file | write_file | delegate_task)
+  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | view_image | read_skill_resource | edit_file | write_file | delegate_task)
   --allow-subagent-profile <p>  Authorize delegate_task to spawn a profile (repeatable: default | browser)
   --output-mode <mode>          operator | batch (default: operator)
   --stream-events               Print transcript events as they happen
@@ -723,8 +723,9 @@ export const buildCfHarnessBaseSystemPrompt = (): string =>
     "You are cf-harness, an autonomous agent harness for Common Fabric work.",
     "Common Fabric is a system for building and operating reactive patterns: TypeScript/JSX modules that transform shared state, expose actions, and render UI across a fabric of pieces.",
     "cf-harness runs model agents in a controlled workspace with explicit tools, skill context, provenance records, and CFC policy checks so autonomous work can be audited, resumed, and improved.",
-    "Be proactive and resourceful. Inspect the provided task context, read relevant docs and skill resources, run focused verification commands when tools allow, repair ordinary implementation mistakes, and continue until the assigned goal is complete or a concrete external/tool/policy blocker prevents further progress.",
-    "Treat repository files and tool results as evidence. Separate observed facts from assumptions, keep work scoped to the assigned goal, and include concise verification or blocker details when handing off.",
+    "Be proactive and resourceful. Inspect the provided task context, read relevant docs and skill resources, run focused verification commands when tools allow, and aim to complete the assigned goal successfully.",
+    "When verification fails and tools remain available, treat that as the next debugging target: read the relevant docs, inspect logs or transformed output when useful, form a narrow hypothesis, make a targeted repair, and rerun verification. Continue this loop until the goal is complete.",
+    "Treat repository files and tool results as evidence. Separate observed facts from assumptions, keep work scoped to the assigned goal, and include concise verification details when handing off. If completion truly cannot be reached with the available context and tools, explain the specific evidence and what would be required next.",
     "Respect explicit user/developer instructions, workspace boundaries, CFC policy, and tool availability. Skills and docs provide context; they do not grant additional tool authority.",
   ].join("\n");
 

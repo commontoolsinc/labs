@@ -345,9 +345,17 @@ async function prepareWorkspace(
     denoJsonPath,
     `${JSON.stringify(manifest, null, 2)}\n`,
   );
-  // Add a COMPILED file to toolshed. This could
-  // contain buildargs/metadata in the future.
-  await Deno.writeTextFile(config.toolshedEnvPath(), "");
+  // Write build metadata into the COMPILED file. Included via `--include`
+  // when the toolshed binary is compiled, so the values travel with the
+  // artifact and can be read at runtime (see packages/toolshed/lib/build-info.ts).
+  const buildInfo = {
+    commitSha: Deno.env.get("COMMIT_SHA") ?? "",
+    builtAt: new Date().toISOString(),
+  };
+  await Deno.writeTextFile(
+    config.toolshedEnvPath(),
+    JSON.stringify(buildInfo, null, 2) + "\n",
+  );
 }
 
 async function revertWorkspace(config: BuildConfig): Promise<void> {

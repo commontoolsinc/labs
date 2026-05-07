@@ -1,0 +1,194 @@
+/**
+ * BigInt encoding/decoding performance benchmarks.
+ *
+ * Measures `bigintToMinimalTwosComplement()` and
+ * `bigintFromMinimalTwosComplement()` across the full byte-length spectrum,
+ * with separate positive/negative tracks. Sizes 1-32 sweep in single-byte
+ * steps so the discontinuity at the 8-byte boundary is visible (both
+ * directions switch from a `DataView.{set,get}BigUint64()` fast path to a
+ * per-byte fallback there). Sizes 64..1024 sample the deep-fallback regime.
+ *
+ * Each iteration of a benchmark function processes a fixed BATCH of values
+ * pre-generated with a deterministic xorshift RNG, so JIT specialization on
+ * a single repeated value can't skew the result. The reported `ns/iter` is
+ * per BATCH; divide by BATCH for per-operation cost.
+ *
+ * Generated values lie in the upper half of each byte-size band (positive
+ * v in [2^(8b-2), 2^(8b-1)-1], negative v = -p for p in the same range), so
+ * encoded magnitudes are guaranteed to need exactly b bytes. The encoder's
+ * sign-extension `byteLen++` branch (taken for values straddling a byte
+ * boundary) is not benchmarked separately; add a third track if its cost is
+ * of interest.
+ *
+ * Decoder inputs are produced by running the encoder over the same generated
+ * bigints, so the encode and decode benchmarks for a given (size, sign)
+ * exercise inverse operations on matching data.
+ *
+ * Run with: deno bench --no-check test/bigint-encoding.bench.ts
+ */
+
+import {
+  bigintFromMinimalTwosComplement,
+  bigintToMinimalTwosComplement,
+} from "../bigint-encoding.ts";
+
+const BATCH = 64;
+
+const BYTE_SIZES: readonly number[] = [
+  1,
+  2,
+  3,
+  4,
+  5,
+  6,
+  7,
+  8,
+  9,
+  10,
+  11,
+  12,
+  13,
+  14,
+  15,
+  16,
+  17,
+  18,
+  19,
+  20,
+  21,
+  22,
+  23,
+  24,
+  25,
+  26,
+  27,
+  28,
+  29,
+  30,
+  31,
+  32,
+  64,
+  128,
+  256,
+  512,
+  1024,
+];
+
+function makeRng(seed: number): () => number {
+  let s = seed >>> 0;
+  if (s === 0) s = 0x9e3779b9; // xorshift can't start at 0
+  return () => {
+    s ^= s << 13;
+    s ^= s >>> 17;
+    s ^= s << 5;
+    s >>>= 0;
+    return s;
+  };
+}
+
+/**
+ * Build a positive bigint that requires exactly `bytes` bytes when encoded
+ * as minimal two's complement. Forces bit (8*bytes - 2) so the value lies in
+ * the upper half of the band, then fills the remaining magnitude bits from
+ * `rng`.
+ */
+function makePositive(bytes: number, rng: () => number): bigint {
+  const magBits = 8 * bytes - 1; // sign bit must be 0 in the canonical form
+  let v = 1n << BigInt(magBits - 1);
+  let bitsLeft = magBits - 1;
+  let shift = 0n;
+  while (bitsLeft > 0) {
+    if (bitsLeft >= 32) {
+      v |= BigInt(rng()) << shift;
+      shift += 32n;
+      bitsLeft -= 32;
+    } else {
+      const mask = (1 << bitsLeft) - 1;
+      v |= BigInt(rng() & mask) << shift;
+      bitsLeft = 0;
+    }
+  }
+  return v;
+}
+
+function makeBatch(bytes: number, sign: 1n | -1n, seed: number): bigint[] {
+  const rng = makeRng(seed);
+  const out: bigint[] = [];
+  for (let i = 0; i < BATCH; i++) {
+    out.push(sign * makePositive(bytes, rng));
+  }
+  return out;
+}
+
+function encodeBatch(values: bigint[]): Uint8Array[] {
+  return values.map((v) => bigintToMinimalTwosComplement(v));
+}
+
+// Warm up both directions to avoid measuring JIT compilation in the first
+// reported bucket.
+{
+  const warmSmallVals = makeBatch(8, 1n, 1);
+  const warmLargeVals = makeBatch(64, -1n, 2);
+  const warmSmallBytes = encodeBatch(warmSmallVals);
+  const warmLargeBytes = encodeBatch(warmLargeVals);
+  for (let i = 0; i < 200; i++) {
+    for (const v of warmSmallVals) bigintToMinimalTwosComplement(v);
+    for (const v of warmLargeVals) bigintToMinimalTwosComplement(v);
+    for (const b of warmSmallBytes) bigintFromMinimalTwosComplement(b);
+    for (const b of warmLargeBytes) bigintFromMinimalTwosComplement(b);
+  }
+}
+
+for (const bytes of BYTE_SIZES) {
+  const positives = makeBatch(bytes, 1n, bytes * 31 + 1);
+  const negatives = makeBatch(bytes, -1n, bytes * 31 + 2);
+  const positiveBytes = encodeBatch(positives);
+  const negativeBytes = encodeBatch(negatives);
+  // Pad the group key so Deno bench's grouped output sorts in size order.
+  const groupKey = String(bytes).padStart(4, "0");
+  const encodeGroup = `encode-${groupKey}B`;
+  const decodeGroup = `decode-${groupKey}B`;
+  const label = `${bytes}B`;
+
+  Deno.bench({
+    name: `encode positive ${label} (${BATCH} ops)`,
+    group: encodeGroup,
+    baseline: true,
+    fn() {
+      for (let i = 0; i < BATCH; i++) {
+        bigintToMinimalTwosComplement(positives[i]);
+      }
+    },
+  });
+
+  Deno.bench({
+    name: `encode negative ${label} (${BATCH} ops)`,
+    group: encodeGroup,
+    fn() {
+      for (let i = 0; i < BATCH; i++) {
+        bigintToMinimalTwosComplement(negatives[i]);
+      }
+    },
+  });
+
+  Deno.bench({
+    name: `decode positive ${label} (${BATCH} ops)`,
+    group: decodeGroup,
+    baseline: true,
+    fn() {
+      for (let i = 0; i < BATCH; i++) {
+        bigintFromMinimalTwosComplement(positiveBytes[i]);
+      }
+    },
+  });
+
+  Deno.bench({
+    name: `decode negative ${label} (${BATCH} ops)`,
+    group: decodeGroup,
+    fn() {
+      for (let i = 0; i < BATCH; i++) {
+        bigintFromMinimalTwosComplement(negativeBytes[i]);
+      }
+    },
+  });
+}

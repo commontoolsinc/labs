@@ -1,5 +1,6 @@
 import app from "@/app.ts";
 import env from "@/env.ts";
+import { resolveGitSha } from "@/lib/build-info.ts";
 import { identity } from "@/lib/identity.ts";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -20,10 +21,14 @@ const initializeRuntime = async () => {
     console.log(`Initializing runtime with signer ${identity.did()}...`);
 
     // Construct server-side compilation cache if enabled.
-    // Fingerprint priority: TOOLSHED_GIT_SHA > live git repo > disabled.
+    // Fingerprint priority: TOOLSHED_GIT_SHA > build-baked SHA >
+    // live git repo > disabled. `resolveGitSha()` covers the first
+    // two; `computeGitFingerprint` does the live-git fallback.
     let cachedCompiler: CachedCompiler | undefined;
     if (env.COMPILATION_CACHE_SERVER) {
-      const fingerprint = await computeGitFingerprint(env.TOOLSHED_GIT_SHA);
+      const fingerprint = await computeGitFingerprint(
+        resolveGitSha() ?? undefined,
+      );
       if (fingerprint) {
         cachedCompiler = new CachedCompiler(
           new FileSystemCompilationCache(env.COMPILATION_CACHE_FS_DIR),

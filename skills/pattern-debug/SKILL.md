@@ -13,6 +13,10 @@ piece issues.
 
 - `docs/development/debugging/workflow.md` - 5-step debugging process
 - `docs/development/debugging/README.md` - Error reference matrix
+- `docs/common/concepts/reactivity.md` - reactive values, Cell behavior, and
+  `.get()` / `.set()` boundaries
+- `docs/common/patterns/new-cells.md` - `Writable.of()` and local cell
+  initialization rules
 
 ## Process
 
@@ -26,9 +30,11 @@ piece issues.
    - Check `docs/development/debugging/README.md` for matching errors
 
 3. **Check gotchas:**
+   - `docs/development/debugging/gotchas/reactive-reference-outside-context.md`
    - `docs/development/debugging/gotchas/handler-inside-pattern.md`
    - `docs/development/debugging/gotchas/filter-map-find-not-a-function.md`
    - `docs/development/debugging/gotchas/onclick-inside-computed.md`
+   - `docs/development/debugging/gotchas/immediate-event-invocation.md`
 
 4. **Simplify to minimal reproduction:**
    - Comment out code until error disappears
@@ -50,10 +56,37 @@ piece issues.
 - Check if field needs write access → use Writable<>
 - Check if field could be undefined → use Default<T, value>
 
+**`Cell.of() only accepts static data`:**
+
+- Do not pass input props, mapped fields, or computed/reactive values into
+  `Writable.of()` / `Cell.of()`
+- Use an input writable cell directly when the caller owns the state
+- For pattern-owned draft state, initialize from a static value and copy from
+  input state inside an action or another valid reactive/event context
+- See `docs/common/patterns/new-cells.md` and
+  `docs/common/concepts/reactivity.md`
+
+**String helper throws, such as `.trim()` / `.replace()` / `.includes()` is not
+a function:**
+
+- Treat the value as reactive even if TypeScript's surface type is `string`
+- Render the reactive value directly when no derivation is needed
+- Move derived labels or branch conditions into `computed()` or another valid
+  reactive expression site
+- See `docs/common/concepts/reactivity.md` and the debugging matrix
+
 **Action not triggering:**
 
 - Ensure Output type includes action as Stream<void>
 - Use .send() not .get() to trigger
+
+**`raw:map` never settles:**
+
+- Inspect `.map()` bodies for event props that invoke streams or writes during
+  render, such as `onClick={stream.send(index)}`
+- Wrap argument-bearing sends in a callback, such as
+  `onClick={() => stream.send(index)}`
+- See `docs/development/debugging/gotchas/immediate-event-invocation.md`
 
 **Browser UI stays stale after a write:**
 
