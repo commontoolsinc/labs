@@ -146,7 +146,7 @@ export function bigintFromMinimalTwosComplement(bytes: Uint8Array): bigint {
   }
 
   // Determine sign from the high bit of the first byte.
-  const negative = (bytes[0] & 0x80) !== 0;
+  const negative = (bytes[0]! & 0x80) !== 0;
 
   // Fast path: use DataView.getBigUint64() for values that fit in 8 bytes.
   if (bytes.length <= 8) {
@@ -160,7 +160,7 @@ export function bigintFromMinimalTwosComplement(bytes: Uint8Array): bigint {
   // Fallback: per-byte shift loop for larger values.
   let result = 0n;
   for (let i = 0; i < bytes.length; i++) {
-    result = (result << 8n) | BigInt(bytes[i]);
+    result = (result << 8n) | BigInt(bytes[i]!);
   }
 
   if (!negative) {
