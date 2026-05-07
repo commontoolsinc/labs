@@ -18,31 +18,47 @@ export interface BuildInfo {
   builtAt: string | null;
 }
 
-function normalize(s: string | null | undefined): string | null {
+export function normalize(s: string | null | undefined): string | null {
   const trimmed = s?.trim();
   return trimmed ? trimmed : null;
 }
 
-function read(): BuildInfo {
+export function readBuildInfoFrom(path: URL | string): BuildInfo {
   let raw: string;
   try {
-    raw = Deno.readTextFileSync(COMPILED_PATH);
+    raw = Deno.readTextFileSync(path);
   } catch {
     return { commitSha: null, builtAt: null };
   }
   if (!raw.trim()) return { commitSha: null, builtAt: null };
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(raw) as Partial<BuildInfo>;
-    return {
-      commitSha: normalize(parsed.commitSha),
-      builtAt: normalize(parsed.builtAt),
-    };
+    parsed = JSON.parse(raw);
   } catch {
     return { commitSha: null, builtAt: null };
   }
+  if (typeof parsed !== "object" || parsed === null) {
+    return { commitSha: null, builtAt: null };
+  }
+  const obj = parsed as Partial<BuildInfo>;
+  return {
+    commitSha: normalize(obj.commitSha),
+    builtAt: normalize(obj.builtAt),
+  };
 }
 
-export const buildInfo: BuildInfo = read();
+export const buildInfo: BuildInfo = readBuildInfoFrom(COMPILED_PATH);
+
+/**
+ * Pure precedence function used by `resolveGitSha()`. Exposed so it can be
+ * tested without manipulating env or filesystem state.
+ */
+export function resolveGitShaFrom(
+  envValue: string | null | undefined,
+  baked: string | null,
+): string | null {
+  return normalize(envValue) ?? baked;
+}
 
 /**
  * Canonical git SHA for this server. Used by both `/api/meta` (to surface
@@ -60,5 +76,5 @@ export const buildInfo: BuildInfo = read();
  * Empty / whitespace-only values at any level are treated as unset.
  */
 export function resolveGitSha(): string | null {
-  return normalize(env.TOOLSHED_GIT_SHA) ?? buildInfo.commitSha;
+  return resolveGitShaFrom(env.TOOLSHED_GIT_SHA, buildInfo.commitSha);
 }
