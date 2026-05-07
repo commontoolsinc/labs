@@ -208,6 +208,7 @@ export class PiecesController<T = unknown> {
     // We need to stop it to prevent resource leaks or duplicate behavior from the old pattern
     // Access the space cell directly to get the pattern reference without running it
     const spaceCellContents = this.#manager.getSpaceCellContents();
+    await spaceCellContents.sync();
     const defaultPatternRef = spaceCellContents.key("defaultPattern").get();
     if (defaultPatternRef) {
       // Stop the existing pattern (no-op if not running)
@@ -266,7 +267,7 @@ export class PiecesController<T = unknown> {
     // Create new piece cell
     let pieceCell: Cell<NameSchema>;
 
-    await this.#manager.runtime.editWithRetry((tx) => {
+    const { error } = await this.#manager.runtime.editWithRetry((tx) => {
       // Create piece cell within this transaction
       pieceCell = this.#manager.runtime.getCell<NameSchema>(
         this.#manager.getSpace(),
@@ -279,10 +280,16 @@ export class PiecesController<T = unknown> {
       this.#manager.runtime.run(tx, pattern, {}, pieceCell);
 
       // Link as default pattern within same transaction
-      const spaceCellWithTx = this.#manager.getSpaceCellContents().withTx(tx);
+      const spaceCellWithTx = spaceCellContents.withTx(tx);
       const defaultPatternCell = spaceCellWithTx.key("defaultPattern");
       defaultPatternCell.set(pieceCell.withTx(tx));
     });
+    if (error) {
+      throw new Error(
+        `Updating the default pattern failed because storage returned ${error.name}: ${error.message}`,
+        { cause: error },
+      );
+    }
 
     // Fetch the final result
     const finalPattern = await this.#manager.getDefaultPattern(false);

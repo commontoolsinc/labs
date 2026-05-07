@@ -19,11 +19,13 @@ import {
   type OpenAIChatMessageContent,
   OpenAICompatibleGatewayClient,
 } from "./gateway/openai-client.ts";
+import { materializeImageAttachmentContentPart } from "./image-attachments.ts";
 import {
   createObservationDenied as makeObservationDenied,
   createOpaqueHandle,
   type ObservationDenied,
 } from "./contracts/observation.ts";
+import type { HarnessImageAttachment } from "./contracts/image.ts";
 import type { PromptSlotBinding } from "./contracts/prompt-slot.ts";
 import {
   createHarnessCfcPolicySnapshot,
@@ -82,6 +84,7 @@ import {
   cwdMarkerForOutput,
   extractFinalWorkingDirectory,
 } from "./tools/shell-cwd.ts";
+import { isViewImageToolSuccessOutput } from "./tools/view-image.ts";
 import type { HarnessFailureRecord } from "./diagnostics.ts";
 import { DEFAULT_PARENT_TOOL_IDS as DEFAULT_PROMPT_LOOP_TOOL_IDS } from "./contracts/tool-descriptor.ts";
 
@@ -104,6 +107,7 @@ export interface RunHarnessPromptOptions {
   prompt: string;
   systemPrompt?: string;
   contextMessages?: readonly string[];
+  imageAttachments?: readonly HarnessImageAttachment[];
   maxModelTurns?: number;
   model?: string;
   promptSlotBinding?: PromptSlotBinding;
@@ -154,13 +158,30 @@ const normalizeTextContent = (content: OpenAIChatMessageContent): string => {
     .join("");
 };
 
-const toOpenAIChatMessage = (
+const toOpenAIChatMessage = async (
   message: HarnessTranscriptMessage,
-): OpenAIChatCompletionMessage => {
+): Promise<OpenAIChatCompletionMessage> => {
   switch (message.role) {
     case "system":
-    case "user":
       return { role: message.role, content: message.content };
+    case "user":
+      if (
+        message.imageAttachments === undefined ||
+        message.imageAttachments.length === 0
+      ) {
+        return { role: message.role, content: message.content };
+      }
+      return {
+        role: message.role,
+        content: [
+          ...(message.content.length > 0
+            ? [{ type: "text" as const, text: message.content }]
+            : []),
+          ...(await Promise.all(
+            message.imageAttachments.map(materializeImageAttachmentContentPart),
+          )),
+        ],
+      };
     case "assistant":
       return {
         role: "assistant",
@@ -401,11 +422,12 @@ const summarizeToolInput = async (
       };
     }
     case "read_file":
+    case "view_image":
       return {
         type: "cf-harness.tool-input-summary",
         toolId,
         ...(typeof input.path === "string" ? { path: input.path } : {}),
-        ...(isSafeNonNegativeInteger(input.maxBytes)
+        ...(toolId === "read_file" && isSafeNonNegativeInteger(input.maxBytes)
           ? { maxBytes: input.maxBytes }
           : {}),
       };
@@ -419,6 +441,54 @@ const summarizeToolInput = async (
           ? { maxBytes: input.maxBytes }
           : {}),
       };
+    case "edit_file": {
+      let oldTextBytes = 0;
+      let newTextBytes = 0;
+      const oldTextDigests: string[] = [];
+      const newTextDigests: string[] = [];
+      const edits = Array.isArray(input.edits) ? input.edits : [];
+      for (const edit of edits) {
+        if (
+          typeof edit === "object" && edit !== null &&
+          "oldText" in edit &&
+          typeof edit.oldText === "string"
+        ) {
+          const summary = await summarizeSensitiveText(edit.oldText);
+          oldTextBytes += summary.bytes;
+          oldTextDigests.push(summary.digest);
+        }
+        if (
+          typeof edit === "object" && edit !== null &&
+          "newText" in edit &&
+          typeof edit.newText === "string"
+        ) {
+          const summary = await summarizeSensitiveText(edit.newText);
+          newTextBytes += summary.bytes;
+          newTextDigests.push(summary.digest);
+        }
+      }
+      return {
+        type: "cf-harness.tool-input-summary",
+        toolId,
+        ...(typeof input.path === "string" ? { path: input.path } : {}),
+        ...(edits.length > 0 ? { editCount: edits.length } : {}),
+        ...(typeof input.expectedDigest === "string"
+          ? { expectedDigest: input.expectedDigest }
+          : {}),
+        ...(oldTextDigests.length > 0
+          ? {
+            oldTextBytes,
+            oldTextDigest: await digestJsonValue(oldTextDigests),
+          }
+          : {}),
+        ...(newTextDigests.length > 0
+          ? {
+            newTextBytes,
+            newTextDigest: await digestJsonValue(newTextDigests),
+          }
+          : {}),
+      };
+    }
     case "write_file": {
       const contentSummary = typeof input.content === "string"
         ? await summarizeSensitiveText(input.content)
@@ -822,6 +892,11 @@ type RecordHarnessPolicyEvent = (
   event: Parameters<CfHarnessEngine["recordPolicyEvent"]>[0],
 ) => Promise<void>;
 
+interface InvokedToolCallMessages {
+  toolMessage: HarnessToolTranscriptMessage;
+  followupMessages?: readonly HarnessTranscriptMessage[];
+}
+
 interface CfcSandboxResultCarrier {
   cfcResult?: CfcSandboxResult;
 }
@@ -1216,7 +1291,14 @@ export class CfHarnessPromptLoop {
         ...(options.contextMessages ?? []).map((
           content,
         ) => ({ role: "user", content } as const)),
-        { role: "user", content: options.prompt },
+        {
+          role: "user",
+          content: options.prompt,
+          ...(options.imageAttachments !== undefined &&
+              options.imageAttachments.length > 0
+            ? { imageAttachments: options.imageAttachments }
+            : {}),
+        },
       ],
       model: options.model,
       maxModelTurns: options.maxModelTurns,
@@ -1323,7 +1405,7 @@ export class CfHarnessPromptLoop {
       while (modelTurns < maxModelTurns) {
         modelTurns += 1;
         const response = await this.gatewayClient.createChatCompletionJson(
-          this.#buildChatCompletionRequest(model, transcript),
+          await this.#buildChatCompletionRequest(model, transcript),
           { onChatCompletionAttempt: recordGatewayAttempt },
         );
         const assistantMessage = createAssistantTranscriptMessage(response);
@@ -1352,14 +1434,16 @@ export class CfHarnessPromptLoop {
             runState: this.engine.getRunState(),
           };
         }
+        const followupMessages: HarnessTranscriptMessage[] = [];
         for (const toolCall of toolCalls) {
-          const toolMessage = await this.#invokeToolCall(
+          const invokedToolCall = await this.#invokeToolCall(
             toolCall,
             model,
             promptSlotBinding,
             toolActivity.length + 1,
             (activity) => toolActivity.push(activity),
           );
+          const toolMessage = invokedToolCall.toolMessage;
           transcript.push(toolMessage);
           await this.engine.persistTranscript(transcript);
           reportTimeline.push(transcriptTimelineEntry(
@@ -1370,6 +1454,23 @@ export class CfHarnessPromptLoop {
           ));
           await options.onTranscriptEvent?.({
             message: toolMessage,
+            transcript,
+          });
+          if (invokedToolCall.followupMessages !== undefined) {
+            followupMessages.push(...invokedToolCall.followupMessages);
+          }
+        }
+        for (const followupMessage of followupMessages) {
+          transcript.push(followupMessage);
+          await this.engine.persistTranscript(transcript);
+          reportTimeline.push(transcriptTimelineEntry(
+            followupMessage,
+            transcript.length - 1,
+            this.engine.getRunState().updatedAt,
+            modelTurns,
+          ));
+          await options.onTranscriptEvent?.({
+            message: followupMessage,
             transcript,
           });
         }
@@ -1399,13 +1500,13 @@ export class CfHarnessPromptLoop {
     throw turnLimitError;
   }
 
-  #buildChatCompletionRequest(
+  async #buildChatCompletionRequest(
     model: string,
     transcript: readonly HarnessTranscriptMessage[],
-  ): OpenAIChatCompletionRequest {
+  ): Promise<OpenAIChatCompletionRequest> {
     return {
       model,
-      messages: transcript.map(toOpenAIChatMessage),
+      messages: await Promise.all(transcript.map(toOpenAIChatMessage)),
       tools: toOpenAITools(this.#allowedToolIds),
       tool_choice: "auto",
     };
@@ -1417,7 +1518,7 @@ export class CfHarnessPromptLoop {
     promptSlotBinding?: PromptSlotBinding,
     sequence = 1,
     recordActivity: (activity: HarnessToolActivity) => void = () => {},
-  ): Promise<HarnessToolTranscriptMessage> {
+  ): Promise<InvokedToolCallMessages> {
     if (!isBuiltinToolId(toolCall.function.name)) {
       throw new Error(
         `unknown builtin tool requested: ${toolCall.function.name}`,
@@ -1508,10 +1609,12 @@ export class CfHarnessPromptLoop {
         ...optionalPolicyEventIndexes(policyEventIndexes),
       });
       return {
-        role: "tool",
-        toolCallId: toolCall.id,
-        toolName: toolCall.function.name,
-        content: JSON.stringify(denial),
+        toolMessage: {
+          role: "tool",
+          toolCallId: toolCall.id,
+          toolName: toolCall.function.name,
+          content: JSON.stringify(denial),
+        },
       };
     }
     const input = parsedInputForDeniedTool ?? parseToolArguments(toolCall);
@@ -1580,10 +1683,12 @@ export class CfHarnessPromptLoop {
         ...optionalPolicyEventIndexes(policyEventIndexes),
       });
       return {
-        role: "tool",
-        toolCallId: toolCall.id,
-        toolName: toolCall.function.name,
-        content: JSON.stringify(denial),
+        toolMessage: {
+          role: "tool",
+          toolCallId: toolCall.id,
+          toolName: toolCall.function.name,
+          content: JSON.stringify(denial),
+        },
       };
     }
     let delegateInput: DelegateTaskToolInput | undefined;
@@ -1659,10 +1764,12 @@ export class CfHarnessPromptLoop {
           ...optionalPolicyEventIndexes(policyEventIndexes),
         });
         return {
-          role: "tool",
-          toolCallId: toolCall.id,
-          toolName: toolCall.function.name,
-          content: JSON.stringify(denial),
+          toolMessage: {
+            role: "tool",
+            toolCallId: toolCall.id,
+            toolName: toolCall.function.name,
+            content: JSON.stringify(denial),
+          },
         };
       }
       policyDecisionReasonCodes.push("subagent_profile_allowed");
@@ -1742,13 +1849,25 @@ export class CfHarnessPromptLoop {
       ...optionalPolicyEventIndexes(policyEventIndexes),
       resultRef: result.resultRef,
     });
-    return {
+    const toolMessage: HarnessToolTranscriptMessage = {
       role: "tool",
       toolCallId: toolCall.id,
       toolName: toolCall.function.name,
       content: JSON.stringify(modelOutput),
       resultRef: result.resultRef,
     };
+    if (isViewImageToolSuccessOutput(result.output)) {
+      return {
+        toolMessage,
+        followupMessages: [{
+          role: "user",
+          content:
+            `Image loaded by view_image from ${result.output.path} (outputId: ${result.output.outputId}).`,
+          imageAttachments: [result.output.imageAttachment],
+        }],
+      };
+    }
+    return { toolMessage };
   }
 
   async #modelFacingToolOutput(
@@ -1762,6 +1881,16 @@ export class CfHarnessPromptLoop {
       ((event) => this.engine.recordPolicyEvent(event));
     const mode = this.engine.getRunState().cfcEnforcementMode;
     const cfcResult = cfcResultFromOutput(output);
+    if (toolId === "view_image" && isViewImageToolSuccessOutput(output)) {
+      return {
+        outputId: output.outputId,
+        path: output.path,
+        mediaType: output.mediaType,
+        bytes: output.bytes,
+        digest: output.digest,
+        imageAttached: true,
+      };
+    }
     if (!toolOutputNeedsSandboxMediation(toolId)) {
       return stripInternalCfcFields(output);
     }

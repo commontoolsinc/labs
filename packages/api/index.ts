@@ -745,17 +745,9 @@ export interface IEquatable {
 
 /**
  * Cells that allow deriving new cells from existing cells via array methods:
- * .map() and their WithPattern variants.
- *
- * Note: .filter() and .flatMap() are deliberately omitted from the type
- * interface to avoid conflicting with Array.prototype.filter/flatMap on
- * OpaqueRef<T[]> (which is an intersection of OpaqueCell<T[]> & Array<…>).
- * The runtime methods exist on Cell and are intercepted by the proxy; they
- * just don't have type declarations here until the compiler transform
- * (Phase 3) resolves the ambiguity. This means pattern authors won't get
- * autocomplete for .filter()/.flatMap() — they'll see Array.prototype
- * signatures instead. The proxy intercepts correctly at runtime, but
- * TypeScript won't type-check the reactive return type.
+ * direct helpers mirror supported Array methods and return OpaqueRef results.
+ * The WithPattern variants accept pre-defined patterns for per-element
+ * operations.
  */
 export interface IDerivable<T> {
   map<S>(
@@ -781,11 +773,35 @@ export interface IDerivable<T> {
     ) => S,
     initialValue: S,
   ): OpaqueRef<S>;
+  findIndex(
+    this: IsThisObject,
+    fn: (
+      element: T extends Array<infer U> ? U : T,
+      index: number,
+      array: (T extends Array<infer U> ? U : T)[],
+    ) => boolean,
+  ): OpaqueRef<number>;
+  filter(
+    this: IsThisObject,
+    fn: (
+      element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
+      index: OpaqueRef<number>,
+      array: OpaqueRef<T>,
+    ) => Opaque<boolean>,
+  ): OpaqueRef<(T extends Array<infer U> ? U : T)[]>;
   filterWithPattern<S>(
     this: IsThisObject,
     op: PatternFactory<T extends Array<infer U> ? U : T, S>,
     params: Record<string, any>,
   ): OpaqueRef<(T extends Array<infer U> ? U : T)[]>;
+  flatMap<S>(
+    this: IsThisObject,
+    fn: (
+      element: T extends Array<infer U> ? OpaqueRef<U> : OpaqueRef<T>,
+      index: OpaqueRef<number>,
+      array: OpaqueRef<T>,
+    ) => Opaque<S[]>,
+  ): OpaqueRef<S[]>;
   flatMapWithPattern<S>(
     this: IsThisObject,
     op: PatternFactory<T extends Array<infer U> ? U : T, S[]>,

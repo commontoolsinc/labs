@@ -1,4 +1,7 @@
 import { DID, Identity, type Session } from "@commonfabric/identity";
+import { FabricBytes } from "@commonfabric/data-model/fabric-bytes";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { JsonEncodingContext } from "@commonfabric/data-model/json-encoding-context";
 import { PieceManager } from "@commonfabric/piece";
 import { PiecesController } from "@commonfabric/piece/ops";
 import {
@@ -89,6 +92,8 @@ import {
   type SetTriggerTraceEnabledRequest,
   type SetWriteStackTraceMatchersRequest,
   type TriggerTraceResponse,
+  type UploadBlobRequest,
+  type UploadBlobResponse,
   type VDomEventRequest,
   type VDomMountRequest,
   type VDomMountResponse,
@@ -110,6 +115,7 @@ import type { VDomOp } from "../protocol/types.ts";
 import type { RuntimeOptions, URI } from "@commonfabric/runner";
 
 const MAX_SERIALIZATION_DEPTH = 5;
+const blobUploadEncoding = new JsonEncodingContext();
 
 export function runtimeOptionsFromInitializationData(
   data: InitializationData,
@@ -254,6 +260,7 @@ export class RuntimeProcessor {
   private runtime: Runtime;
   private pieceManager: PieceManager;
   private cc: PiecesController;
+  private apiUrl: URL;
   private space: DID;
   private identity: Identity;
   private _isDisposed = false;
@@ -273,6 +280,7 @@ export class RuntimeProcessor {
     runtime: Runtime,
     pieceManager: PieceManager,
     cc: PiecesController,
+    apiUrl: URL,
     space: DID,
     identity: Identity,
     telemetry: RuntimeTelemetry,
@@ -280,6 +288,7 @@ export class RuntimeProcessor {
     this.runtime = runtime;
     this.pieceManager = pieceManager;
     this.cc = cc;
+    this.apiUrl = apiUrl;
     this.space = space;
     this.identity = identity;
     this.telemetry = telemetry;
@@ -392,6 +401,7 @@ export class RuntimeProcessor {
       runtime,
       pieceManager,
       cc,
+      apiUrlObj,
       space,
       identity,
       telemetry,
@@ -826,6 +836,39 @@ export class RuntimeProcessor {
   setBreakpoints(request: SetBreakpointsRequest): void {
     this.runtime.scheduler.setBreakpoints(request.actionIds);
   }
+
+  async handleUploadBlob(
+    request: UploadBlobRequest,
+  ): Promise<UploadBlobResponse> {
+    const suffix = (request.suffix ?? "bin").replace(/^\./, "") || "bin";
+    const bytes = Uint8Array.from(request.body);
+    const target = new URL(
+      `/${this.space}/blobs/upload.${encodeURIComponent(suffix)}`,
+      this.apiUrl,
+    );
+    // Blob upload payloads must preserve FabricBytes even when the wider
+    // process is running with legacy memory JSON flags.
+    const body = blobUploadEncoding.encode({
+      type: request.contentType,
+      body: new FabricBytes(bytes),
+    } as FabricValue);
+    const response = await fetch(target, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+    });
+    if (!response.ok) {
+      throw new Error(
+        `Blob upload failed: ${response.status} ${await response.text()}`,
+      );
+    }
+    const result = await response.json() as Partial<UploadBlobResponse>;
+    if (typeof result.id !== "string" || typeof result.url !== "string") {
+      throw new Error("Blob upload returned an invalid response");
+    }
+    return { id: result.id, url: result.url };
+  }
+
   async detectNonIdempotent(
     request: DetectNonIdempotentRequest,
   ): Promise<DetectNonIdempotentResponse> {
@@ -989,6 +1032,8 @@ export class RuntimeProcessor {
         return this.getPatternSources(request);
       case RequestType.SetBreakpoints:
         return this.setBreakpoints(request);
+      case RequestType.UploadBlob:
+        return await this.handleUploadBlob(request);
       case RequestType.VDomEvent:
         return this.handleVDomEvent(request);
       case RequestType.VDomMount:

@@ -1,4 +1,5 @@
 import type { ToolResultRef } from "./tool-result.ts";
+import type { HarnessImageAttachment } from "./image.ts";
 
 export interface HarnessToolCall {
   id: string;
@@ -17,6 +18,7 @@ export interface HarnessSystemTranscriptMessage {
 export interface HarnessUserTranscriptMessage {
   role: "user";
   content: string;
+  imageAttachments?: readonly HarnessImageAttachment[];
 }
 
 export interface HarnessAssistantTranscriptMessage {

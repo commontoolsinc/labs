@@ -55,11 +55,10 @@ interface TextImportModuleOutput {
  * Handles data URLs like "data:text/plain;base64,SGVsbG8gV29ybGQ="
  */
 function decodeBase64ToText(dataUrl: string): string {
-  // Extract the base64 portion after the comma
   const commaIndex = dataUrl.indexOf(",");
-  if (commaIndex === -1) return dataUrl; // Not a data URL, return as-is
-
-  const base64Data = dataUrl.slice(commaIndex + 1);
+  const base64Data = commaIndex === -1
+    ? dataUrl
+    : dataUrl.slice(commaIndex + 1);
 
   try {
     // Decode base64 to binary string, then convert to UTF-8
@@ -82,8 +81,8 @@ interface FileUploadEvent {
       name: string;
       type: string;
       size: number;
-      data: string; // data URL
       url: string;
+      data?: string;
     }>;
   };
 }
@@ -94,9 +93,8 @@ const handleFileUpload = handler<
   { content: Writable<string>; filename: Writable<string> }
 >(({ detail }, state) => {
   const file = detail?.files?.[0];
-  if (!file) return;
+  if (!file?.data) return;
 
-  // Decode the base64 data URL to text
   const textContent = decodeBase64ToText(file.data);
 
   state.content.set(textContent);
@@ -248,6 +246,7 @@ export const TextImportModule = pattern<
           // No file yet - show upload input
           <cf-file-input
             accept=".txt,.md,.csv,.json,text/plain,text/markdown,text/csv,application/json"
+            includeData
             buttonText={`${MODULE_METADATA.icon} Import Text File`}
             showPreview={false}
             oncf-change={handleFileUpload({ content, filename })}

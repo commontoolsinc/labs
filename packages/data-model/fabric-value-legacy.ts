@@ -4,6 +4,7 @@ import type {
   FabricValue,
   FabricValueLayer,
 } from "./fabric-value.ts";
+import { cloneIfNecessaryModern } from "./fabric-value-modern.ts";
 import { isArrayWithOnlyIndexProperties } from "./array-utils.ts";
 
 /**
@@ -47,6 +48,8 @@ function specialInstanceToFabricValue(
  *
  * @param value - The value to check.
  * @returns `true` if the value has a `toJSON` method that is a function.
+ *
+ * This function is a TypeScript type guard for `{ toJSON: () => unknown }`.
  */
 function hasToJSONMethod(
   value: unknown,
@@ -65,6 +68,8 @@ function hasToJSONMethod(
  *
  * @param value - The value to check.
  * @returns `true` if the value is fabric-compatible per se, `false` otherwise.
+ *
+ * This function is a TypeScript type guard for `FabricValueLayer`.
  */
 export function isFabricValueLegacy(
   value: unknown,
@@ -109,6 +114,8 @@ export function isFabricValueLegacy(
  *
  * @param value - The value to check.
  * @returns `true` if the value can be stored, `false` otherwise.
+ *
+ * This function is a TypeScript type guard for `FabricValue | FabricNativeObject`.
  */
 export function isFabricCompatibleLegacy(
   value: unknown,
@@ -117,21 +124,18 @@ export function isFabricCompatibleLegacy(
 }
 
 /**
- * Legacy implementation of `cloneIfNecessary()`. As a legacy version, this is
- * an intentionally simplified implementation meant to capture only the truly
- * necessary behavior to keep the system running without the modern-data flag
- * turned on. Details:
+ * Legacy implementation of `cloneIfNecessary()`. Delegates to
+ * `cloneIfNecessaryModern()`: the modern clone semantics (deep freeze,
+ * circular-reference detection, identity optimization for already-correctly-
+ * frozen subtrees) are durable under legacy values, since legacy values are a
+ * subset of modern values. Adopting modern cloning here unconditionally
+ * removes the legacy path's prior identity-passthrough behavior, which was an
+ * intentional simplification that no longer pays its way once modern cloning
+ * is the source of truth.
  *
- * * This function just returns the given `value` in many cases that ideally
- *   would do something else. Specifically, this function _only_ ever does
- *   something nontrivial when asked for a mutable (`frozen === false`) result. *
- * * This function does not try to do anything smart about circular values; they
- *   _will_ cause the stack to blow out.
- * * Given a plain object which is to be cloned, this function always returns
- *   a result which has a non-`null` prototype.
- * * When producing a clone with `deep === true`, this just uses the built-in
- *   `structuredClone()` function (which would be incorrect given arbitrary
- *   modern-data values).
+ * This function still exists rather than being deleted because it is the
+ * legacy-flag dispatch target in `fabric-value.ts`; collapsing the dispatcher
+ * is a separate cleanup.
  *
  * Callers must resolve `CloneOptions` defaults and validate before calling;
  * the dispatcher in `fabric-value.ts` handles that.
@@ -147,23 +151,7 @@ export function cloneIfNecessaryLegacy(
   deep: boolean,
   force: boolean,
 ): FabricValue {
-  const needClone = force || Object.isFrozen(value);
-  if (frozen || !needClone) {
-    return value;
-  }
-
-  if (deep) {
-    return structuredClone(value);
-  } else if (Array.isArray(value)) {
-    const arr = value as FabricValue[];
-    const copy: FabricValue[] = new Array(arr.length);
-    for (let i = 0; i < arr.length; i++) {
-      if (i in arr) copy[i] = arr[i];
-    }
-    return copy;
-  } else {
-    return { ...(value as Record<string, unknown>) } as FabricValue;
-  }
+  return cloneIfNecessaryModern(value, frozen, deep, force);
 }
 
 /**

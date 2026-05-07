@@ -13,9 +13,10 @@
 // ---------------------------------------------------------------------------
 
 /**
- * Convert a hex digit char code to its 4-bit numeric value. Handles '0'-'9'
- * (0x30-0x39) and 'a'-'f' (0x61-0x66). Used instead of `parseInt` for ~2x
- * faster hex-to-byte conversion (see bigint-hashing-performance.md).
+ * Helper for `bigintToMinimalTwosComplement()`, which converts a hex digit
+ * char code to its 4-bit numeric value. Handles '0'-'9' (0x30-0x39) and
+ * 'a'-'f' (0x61-0x66). Used instead of `parseInt` for ~2x faster
+ * hex-to-byte conversion (see bigint-hashing-performance.md).
  */
 function hexToNibble(c: number): number {
   // '0'-'9' = 0x30-0x39, 'a'-'f' = 0x61-0x66
@@ -33,7 +34,7 @@ const dv64View = new DataView(dv64Buf);
 const dv64Bytes = new Uint8Array(dv64Buf);
 
 /**
- * Convert a bigint to its minimal two's-complement big-endian byte
+ * Converts a bigint to its minimal two's-complement big-endian byte
  * representation. The encoding is the same one used by the hash
  * byte-level spec (Section 3.7).
  *
@@ -125,7 +126,7 @@ export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
 // ---------------------------------------------------------------------------
 
 /**
- * Interpret a byte array as a two's-complement big-endian integer and return
+ * Interprets a byte array as a two's-complement big-endian integer and returns
  * the corresponding bigint. Empty input throws.
  */
 export function bigintFromMinimalTwosComplement(bytes: Uint8Array): bigint {

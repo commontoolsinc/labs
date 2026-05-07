@@ -41,9 +41,9 @@ export const NATIVE_TAGS = Object.freeze(
 export type NativeTag = typeof NATIVE_TAGS[keyof typeof NATIVE_TAGS];
 
 /**
- * Canonical mapping from a constructor to its native-instance tag. Returns the
- * tag string if the constructor is a recognized type (JS builtins or
- * system-defined special primitives), or `null` otherwise.
+ * Maps a constructor to its native-instance tag. Returns the tag string if
+ * the constructor is a recognized type (JS builtins or system-defined
+ * special primitives), or `null` otherwise.
  *
  * Uses a `switch` on the constructor identity for O(1) dispatch (instead of
  * sequential `instanceof` checks). Falls back to `instanceof Error` on the
@@ -112,10 +112,9 @@ export function tagFromNativeClass(
 }
 
 /**
- * Canonical mapping from a JS value to its native-instance tag. Returns the
- * tag string if the value is a recognized convertible native instance, or
- * `null` otherwise. Non-object types (null, undefined, primitives) return
- * `Primitive`.
+ * Maps a JS value to its native-instance tag. Returns the tag string if the
+ * value is a recognized convertible native instance, or `null` otherwise.
+ * Non-object types (null, undefined, primitives) return `Primitive`.
  *
  * Dispatches via the value's constructor (O(1) switch in `tagFromNativeClass`).
  * Falls back to `Error.isError()` for exotic Error subclasses, `Array.isArray`

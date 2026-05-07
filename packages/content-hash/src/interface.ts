@@ -3,8 +3,16 @@
  * `digest()`. A hasher must not be reused after `digest()` is called.
  */
 export interface IncrementalHasher {
+  /** Feeds the given data into the hasher. Must not be called after `digest()`. */
   update(data: Uint8Array): void;
+
+  /** Finalizes the hash and returns the digest as a `Uint8Array`. */
   digest(): Uint8Array;
+
+  /**
+   * Finalizes the hash and returns the digest as a string in the given
+   * encoding. Currently only `"base64url"` (unpadded) is supported.
+   */
   digest(encoding: "base64url"): string;
 }
 

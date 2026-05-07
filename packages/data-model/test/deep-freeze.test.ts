@@ -1,90 +1,90 @@
 import { describe, it } from "@std/testing/bdd";
-import { assertEquals } from "@std/assert";
+import { expect } from "@std/expect";
 import { deepFreeze, isDeepFrozen } from "../deep-freeze.ts";
 
 describe("isDeepFrozen", () => {
   describe("primitives", () => {
     it("null returns true", () => {
-      assertEquals(isDeepFrozen(null), true);
+      expect(isDeepFrozen(null)).toBe(true);
     });
 
     it("undefined returns true", () => {
-      assertEquals(isDeepFrozen(undefined), true);
+      expect(isDeepFrozen(undefined)).toBe(true);
     });
 
     it("number returns true", () => {
-      assertEquals(isDeepFrozen(42), true);
+      expect(isDeepFrozen(42)).toBe(true);
     });
 
     it("string returns true", () => {
-      assertEquals(isDeepFrozen("hello"), true);
+      expect(isDeepFrozen("hello")).toBe(true);
     });
 
     it("boolean returns true", () => {
-      assertEquals(isDeepFrozen(true), true);
+      expect(isDeepFrozen(true)).toBe(true);
     });
 
     it("bigint returns true", () => {
-      assertEquals(isDeepFrozen(42n), true);
+      expect(isDeepFrozen(42n)).toBe(true);
     });
 
     it("symbol returns true", () => {
-      assertEquals(isDeepFrozen(Symbol("test")), true);
+      expect(isDeepFrozen(Symbol("test"))).toBe(true);
     });
   });
 
   describe("objects", () => {
     it("unfrozen empty object returns false", () => {
-      assertEquals(isDeepFrozen({}), false);
+      expect(isDeepFrozen({})).toBe(false);
     });
 
     it("frozen empty object returns true", () => {
-      assertEquals(isDeepFrozen(Object.freeze({})), true);
+      expect(isDeepFrozen(Object.freeze({}))).toBe(true);
     });
 
     it("frozen object with primitive values returns true", () => {
       const obj = Object.freeze({ a: 1, b: "hello", c: true, d: null });
-      assertEquals(isDeepFrozen(obj), true);
+      expect(isDeepFrozen(obj)).toBe(true);
     });
 
     it("frozen object with unfrozen child returns false", () => {
       const obj = Object.freeze({ a: 1, child: { b: 2 } });
-      assertEquals(isDeepFrozen(obj), false);
+      expect(isDeepFrozen(obj)).toBe(false);
     });
 
     it("deep-frozen nested object returns true", () => {
       const obj = deepFreeze({ a: 1, child: { b: 2, inner: { c: 3 } } });
-      assertEquals(isDeepFrozen(obj), true);
+      expect(isDeepFrozen(obj)).toBe(true);
     });
 
     it("frozen object with frozen array child returns true", () => {
       const obj = Object.freeze({ a: 1, items: Object.freeze([1, 2, 3]) });
-      assertEquals(isDeepFrozen(obj), true);
+      expect(isDeepFrozen(obj)).toBe(true);
     });
 
     it("frozen object with unfrozen array child returns false", () => {
       const obj = Object.freeze({ a: 1, items: [1, 2, 3] });
-      assertEquals(isDeepFrozen(obj), false);
+      expect(isDeepFrozen(obj)).toBe(false);
     });
   });
 
   describe("arrays", () => {
     it("unfrozen array returns false", () => {
-      assertEquals(isDeepFrozen([1, 2, 3]), false);
+      expect(isDeepFrozen([1, 2, 3])).toBe(false);
     });
 
     it("frozen array of primitives returns true", () => {
-      assertEquals(isDeepFrozen(Object.freeze([1, "a", true, null])), true);
+      expect(isDeepFrozen(Object.freeze([1, "a", true, null]))).toBe(true);
     });
 
     it("frozen array with unfrozen object returns false", () => {
       const arr = Object.freeze([1, { x: 2 }]);
-      assertEquals(isDeepFrozen(arr), false);
+      expect(isDeepFrozen(arr)).toBe(false);
     });
 
     it("deep-frozen array returns true", () => {
       const arr = deepFreeze([1, { x: 2 }, [3, 4]]);
-      assertEquals(isDeepFrozen(arr), true);
+      expect(isDeepFrozen(arr)).toBe(true);
     });
   });
 
@@ -95,7 +95,7 @@ describe("isDeepFrozen", () => {
       arr[3] = "hello";
       // Holes at indices 1, 2, 4
       Object.freeze(arr);
-      assertEquals(isDeepFrozen(arr), true);
+      expect(isDeepFrozen(arr)).toBe(true);
     });
 
     it("frozen sparse array with unfrozen object returns false", () => {
@@ -103,7 +103,7 @@ describe("isDeepFrozen", () => {
       arr[0] = 1;
       arr[2] = { x: 2 }; // unfrozen object
       Object.freeze(arr);
-      assertEquals(isDeepFrozen(arr), false);
+      expect(isDeepFrozen(arr)).toBe(false);
     });
   });
 
@@ -114,7 +114,7 @@ describe("isDeepFrozen", () => {
       a.ref = b;
       Object.freeze(a);
       Object.freeze(b);
-      assertEquals(isDeepFrozen(a), true);
+      expect(isDeepFrozen(a)).toBe(true);
     });
 
     it("circular structure with unfrozen node returns false", () => {
@@ -123,25 +123,25 @@ describe("isDeepFrozen", () => {
       a.ref = b;
       Object.freeze(a);
       // b is NOT frozen
-      assertEquals(isDeepFrozen(a), false);
+      expect(isDeepFrozen(a)).toBe(false);
     });
   });
 
   describe("caching behavior", () => {
     it("repeated calls return same result (cache hit)", () => {
       const obj = deepFreeze({ a: 1, b: { c: 2 } });
-      assertEquals(isDeepFrozen(obj), true);
-      assertEquals(isDeepFrozen(obj), true); // should hit cache
-      assertEquals(isDeepFrozen(obj), true); // should hit cache again
+      expect(isDeepFrozen(obj)).toBe(true);
+      expect(isDeepFrozen(obj)).toBe(true); // should hit cache
+      expect(isDeepFrozen(obj)).toBe(true); // should hit cache again
     });
 
     it("returns true after object is frozen (no stale negative cache)", () => {
       // Regression test: isDeepFrozen must not cache `false` results, because
       // an object that is unfrozen now may be deep-frozen later.
       const obj = { a: 1, b: { c: 2 } };
-      assertEquals(isDeepFrozen(obj), false); // unfrozen
+      expect(isDeepFrozen(obj)).toBe(false); // unfrozen
       deepFreeze(obj);
-      assertEquals(isDeepFrozen(obj), true); // now frozen -- must not return stale false
+      expect(isDeepFrozen(obj)).toBe(true); // now frozen -- must not return stale false
     });
 
     it("cached object skips property traversal", () => {
@@ -160,20 +160,16 @@ describe("isDeepFrozen", () => {
       Object.freeze(proxy);
 
       // First call: traverses properties.
-      assertEquals(isDeepFrozen(proxy), true);
+      expect(isDeepFrozen(proxy)).toBe(true);
       const firstCallAccesses = accessCount;
 
       // Second call: should hit cache -- no additional property accesses.
       accessCount = 0;
-      assertEquals(isDeepFrozen(proxy), true);
-      assertEquals(
-        accessCount,
-        0,
-        "cached check should not access any properties",
-      );
+      expect(isDeepFrozen(proxy)).toBe(true);
+      expect(accessCount).toBe(0);
 
       // Sanity: first call did access properties.
-      assertEquals(firstCallAccesses > 0, true, "first call should traverse");
+      expect(firstCallAccesses).toBeGreaterThan(0);
     });
 
     it("cached array skips element traversal", () => {
@@ -187,17 +183,13 @@ describe("isDeepFrozen", () => {
       });
       Object.freeze(proxy);
 
-      assertEquals(isDeepFrozen(proxy), true);
+      expect(isDeepFrozen(proxy)).toBe(true);
       const firstCallAccesses = accessCount;
 
       accessCount = 0;
-      assertEquals(isDeepFrozen(proxy), true);
-      assertEquals(
-        accessCount,
-        0,
-        "cached check should not access any properties",
-      );
-      assertEquals(firstCallAccesses > 0, true, "first call should traverse");
+      expect(isDeepFrozen(proxy)).toBe(true);
+      expect(accessCount).toBe(0);
+      expect(firstCallAccesses).toBeGreaterThan(0);
     });
   });
 });

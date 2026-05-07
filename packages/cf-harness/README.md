@@ -27,17 +27,26 @@ The current design direction is:
 What works today:
 
 - shell-centric execution against the local `runsc-cfc` sandbox path
+- sandbox containers default to Docker `--network bridge` so local Loom/Fabric
+  helper services can be reached through Docker Desktop's `host.docker.internal`
+  host alias during early integration work; set
+  `CF_HARNESS_DOCKER_NETWORK_MODE=host` when a runtime should explicitly use
+  host networking
 - default sandbox image aligned with the public CFC kitchen-sink image published
   from the sibling `gvisor` repo:
   - `us-docker.pkg.dev/commontools-core/common-fabric/sandbox-kitchensink:latest`
+  - override per run with `--sandbox-image` or `CF_HARNESS_SANDBOX_IMAGE`
 - built-in tools:
   - `bash`
   - `bash-no-sandbox` (provisional host shell for named subagent profiles only)
   - `read_file`
+  - `view_image`
   - `read_skill_resource`
+  - `edit_file`
   - `write_file`
   - `delegate_task`
-- whole-file replace/create plus append writes
+- targeted exact-string edits plus whole-file replace/create and append writes
+- initial and in-run image attachments for model vision-capable flows
 - bounded OpenAI-compatible prompt/tool loop
 - single-child subagent delegation with fresh child prompt context, explicit
   default/browser child profiles, retained child run references, and a sanitized
@@ -57,6 +66,14 @@ What works today:
 - runtime-generated supporting-resource indexes in `skill-registry.json`
 - text-first supporting-resource reads through `read_skill_resource`, recorded
   in `skill-resource-reads.json`
+
+The sandbox `bash` tool has a provisional direct-`curl` guard while sandbox
+networking is enabled: explicit `curl` invocations may target loopback HTTP(S)
+hosts such as `localhost`, `127.0.0.1`, and Docker Desktop's
+`host.docker.internal` host alias, but obvious external `curl` targets are
+denied before sandbox execution. This is an integration unblock, not a complete
+network confinement model.
+
 - CFC mode plumbing with:
   - `disabled`
   - `observe`
@@ -140,6 +157,22 @@ deno task run -- \
   --print-transcript
 ```
 
+Initial prompt image attachments:
+
+```bash
+cd packages/cf-harness
+deno task run -- \
+  --workspace /path/to/workspace \
+  --gateway-auth-mode none \
+  --image captures/example.png \
+  --prompt "Describe the attached capture image and summarize useful next steps."
+```
+
+`--image` is repeatable and accepts `png`, `jpeg`, `gif`, and `webp` files
+inside the workspace. Relative image paths are resolved from `--workspace`. The
+transcript retains only image metadata (`hostPath`, media type, byte count,
+digest); base64 pixels are materialized only for the gateway request.
+
 Explicit skill preload:
 
 ```bash
@@ -152,6 +185,21 @@ deno task run -- \
   --skill pattern-implement \
   --prompt "Build this pattern."
 ```
+
+Sandbox image override:
+
+```bash
+deno task run -- \
+  --workspace /path/to/common-fabric-2 \
+  --cwd pattern-factory \
+  --gateway-auth-mode none \
+  --sandbox-image registry.example/cf-harness-sandbox:deno2 \
+  --prompt "Run deno task cf --help and report whether it works."
+```
+
+Use this for Deno 2 / Common Fabric CLI validation while keeping the mounted
+workspace as the source of truth for Labs, Pattern Factory, and Loom code. Run
+reports include the selected sandbox image in the capability snapshot.
 
 Loom-backed batch runs may also pass a retained manifest:
 
@@ -181,9 +229,9 @@ The provisional browser profile is the only CLI-supported path to
 subagent result. Browser/page output is treated as untrusted child-local data;
 with a `returnSchema`, parent-visible free-form strings are replaced by opaque
 links while raw observations stay in child artifacts. The browser child can read
-workspace files but does not receive `write_file`, so it should return findings
-through the structured return channel rather than by writing browser
-observations into the workspace. The host shell is policy-restricted to
+workspace files but does not receive `edit_file` or `write_file`, so it should
+return findings through the structured return channel rather than by writing
+browser observations into the workspace. The host shell is policy-restricted to
 `agent-browser`, `agent-browser` discovery (`which agent-browser`,
 `command -v agent-browser`), `pwd`, `ls`, and bounded workspace-local `find`
 commands. `agent-browser eval` is not available in this profile; browser
@@ -193,9 +241,9 @@ locator actions, and normal browser interactions.
 For browser-profile runs, prefer a host artifact root outside the workspace. Raw
 child artifacts are retained for operator analysis, but they are not meant to
 become ordinary workspace inputs for the parent model. If an artifact root is
-physically placed under the workspace, `read_file`, `write_file`, and
-browser-profile `ls`/`find` treat that artifact tree as reserved from
-model-facing file and discovery tools.
+physically placed under the workspace, `read_file`, `view_image`, `write_file`,
+and `edit_file`, plus browser-profile `ls`/`find`, treat that artifact tree as
+reserved from model-facing file and discovery tools.
 
 ```bash
 ROOT=/tmp/cf-harness-browser-demo
@@ -266,6 +314,21 @@ deno task test:integration
 The integration suite requires a working local Docker + `runsc-cfc` environment.
 By default it also uses the published kitchen-sink image above, unless you
 override `CF_HARNESS_INTEGRATION_IMAGE`.
+
+To opt into a local Labs CLI smoke inside the sandbox, use a Deno 2-compatible
+image and enable the CF CLI case:
+
+```bash
+cd packages/cf-harness
+CF_HARNESS_INTEGRATION_IMAGE=registry.example/cf-harness-sandbox:deno2 \
+CF_HARNESS_INTEGRATION_CF_CLI=1 \
+deno task test:integration
+```
+
+That case mounts the current Labs checkout as `/workspace` and runs
+`deno task cf --help` inside the `runsc-cfc` sandbox. It is skipped by default
+because the published kitchen-sink image may not have the required Deno version
+or cache state.
 
 To also exercise a real host Fabric FUSE mount bind-mounted into the sandbox at
 `/fabric`, start `cf fuse mount` separately and pass the mountpoint:

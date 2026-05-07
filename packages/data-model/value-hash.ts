@@ -21,6 +21,7 @@ import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { encodeULEB128 } from "@commonfabric/leb128";
 import { bigintToMinimalTwosComplement } from "./bigint-encoding.ts";
 import { LRUCache } from "@commonfabric/utils/cache";
+import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 
 // ---------------------------------------------------------------------------
 // Type tag bytes (Section 2 of the byte-level spec)
@@ -35,7 +36,7 @@ const TAG_ARRAY = 0x10;
 const TAG_OBJECT = 0x11;
 const TAG_INSTANCE = 0x12;
 
-// Primitive (0x2N) -- ordered by conceptual size
+// Primitive (0x2N)
 const TAG_NULL = 0x20;
 const TAG_UNDEFINED = 0x21;
 const TAG_BOOLEAN = 0x22;
@@ -46,6 +47,7 @@ const TAG_BIGINT = 0x26;
 const TAG_EPOCH_NSEC = 0x27;
 const TAG_EPOCH_DAYS = 0x28;
 const TAG_CONTENT_HASH = 0x29;
+const TAG_SYMBOL = 0x2a;
 
 // Special for hashing:
 const TAG_STRING_HASH = 0xf0;
@@ -69,6 +71,7 @@ const TAG_BIGINT_BYTES = new Uint8Array([TAG_BIGINT]);
 const TAG_EPOCH_NSEC_BYTES = new Uint8Array([TAG_EPOCH_NSEC]);
 const TAG_EPOCH_DAYS_BYTES = new Uint8Array([TAG_EPOCH_DAYS]);
 const TAG_CONTENT_HASH_BYTES = new Uint8Array([TAG_CONTENT_HASH]);
+const TAG_SYMBOL_BYTES = new Uint8Array([TAG_SYMBOL]);
 
 // ---------------------------------------------------------------------------
 // Core: recursive value feeding
@@ -97,6 +100,21 @@ const f64View = new DataView(f64Buf);
 
 /** Byte-array "view" of `f64Buf`. */
 const f64Bytes = new Uint8Array(f64Buf);
+
+/**
+ * Canonical quiet-NaN payload (big-endian `7F F8 00 00 00 00 00 00`). All NaN
+ * bit patterns hash to this single representation.
+ */
+const CANONICAL_NAN_BYTES = new Uint8Array([
+  0x7f,
+  0xf8,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+]);
 
 /** LRU cache for string representations. */
 const stringRepCache = new LRUCache<string, Uint8Array>({
@@ -144,82 +162,6 @@ function getStringRep(value: string) {
 }
 
 /**
- * Helper for `compareStrings()`: Is the given character code a surrogate?
- */
-function isSurrogateCharCode(c: number) {
-  return (c >= 0xd800) && (c <= 0xdfff);
-}
-
-/**
- * Helper for `compareStrings()`: Does the given string contain any surrogate
- * code points?
- */
-function hasSurrogateCharCode(value: string) {
-  return /[\ud800-\udfff]/.test(value);
-}
-
-/**
- * Compares strings by UTF-8 sort order.
- *
- * Note: Even though we could conceivably define the sort to be something
- * easier to calculate in JS, (a) ultimately we want this implementation to be
- * but one of several that aren't all written in JS, (b) those other languages
- * don't necessarily have the same encoding bias as JS, and (c) we want to make
- * the specification for hashing straightforward anyway (and are willing to pay
- * a performance cost because of it).
- */
-function compareStrings(a: string, b: string): number {
-  // Credit where due: Though this started out as an independent implementation
-  // of the key insight for fast sorting, this incorporates ideas from
-  // <https://github.com/rocicorp/compare-utf8>.
-
-  // Here's what's going on: JS native string sort and UTF-8 sort can differ
-  // only when at least one of the JS-form strings contains a codepoint for a
-  // surrogate-pair. As long as we don't run into one of those, we can just
-  // do a regular difference-based comparison. But if we _do_ run into one, then
-  // we have to do something extra, one way or another.
-
-  if (a === b) {
-    // Easy out!
-    return 0;
-  }
-
-  const minCharLen = Math.min(a.length, b.length);
-
-  if (
-    (minCharLen >= 20) && !(hasSurrogateCharCode(a) || hasSurrogateCharCode(b))
-  ) {
-    // Strings are long enough that it's worth a preflight check for surrogate
-    // pairs, and it turns out that neither had them.
-    return (a < b) ? -1 : ((a > b) ? 1 : 0);
-  }
-
-  // No luck for us today. Gotta do it the hard way.
-
-  for (let i = 0; i < minCharLen; i++) {
-    const aChar = a.charCodeAt(i);
-    const bChar = b.charCodeAt(i);
-    if (aChar === bChar) {
-      continue;
-    } else if (!(isSurrogateCharCode(aChar) || isSurrogateCharCode(bChar))) {
-      return aChar - bChar;
-    } else {
-      // At least one is a surrogate. Use `codePointAt()` to decode whichever of
-      // the strings have surrogate characters. That method operates reasonably
-      // whether or not the code point is in the basic or astral plane, and it
-      // also returns a reasonable value given an invalid surrogate-pair
-      // sequence. Importantly, Unicode code-point order corresponds to UTF-8
-      // byte order.
-      const aPoint = a.codePointAt(i)!;
-      const bPoint = b.codePointAt(i)!;
-      return aPoint - bPoint;
-    }
-  }
-
-  return a.length - b.length;
-}
-
-/**
  * Updates an incremental hasher with a length value, using the standard
  * in-hash encoding for same.
  */
@@ -242,15 +184,13 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
       break;
 
     case "number":
-      if (!Number.isFinite(value)) {
-        throw new Error(
-          `hashOf: non-finite number not allowed: ${value}`,
-        );
-      }
       hasher.update(TAG_NUMBER_BYTES);
-      // Normalize -0 to +0.
-      f64View.setFloat64(0, value === 0 ? 0 : value, false); // big-endian
-      hasher.update(f64Bytes);
+      if (Number.isNaN(value)) {
+        hasher.update(CANONICAL_NAN_BYTES);
+      } else {
+        f64View.setFloat64(0, value, false); // big-endian
+        hasher.update(f64Bytes);
+      }
       break;
 
     case "string": {
@@ -263,6 +203,16 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
       const bytes = bigintToMinimalTwosComplement(value);
       feedLength(hasher, bytes.length);
       hasher.update(bytes);
+      break;
+    }
+
+    case "symbol": {
+      const key = Symbol.keyFor(value);
+      if (key === undefined) {
+        throw new Error("Cannot hash unique (uninterned) symbol");
+      }
+      hasher.update(TAG_SYMBOL_BYTES);
+      hasher.update(getStringRep(key));
       break;
     }
 
@@ -415,7 +365,13 @@ function feedPlainObject(
   hasher: IncrementalHasher,
   value: Record<string, unknown>,
 ): void {
-  const keys = Object.keys(value).sort(compareStrings);
+  // Note: Even though we could conceivably define the key sort order to be
+  // something easier to calculate in JS, (a) ultimately we want this
+  // implementation to be but one of several that aren't all written in JS, (b)
+  // those other languages don't necessarily have the same encoding bias as JS,
+  // and (c) we want to make the specification for hashing straightforward
+  // anyway (and are willing to pay a performance cost because of it).
+  const keys = utf8SortedKeysOf(value);
 
   hasher.update(TAG_OBJECT_BYTES);
   for (const key of keys) {
@@ -459,14 +415,16 @@ const NULL_HASH = computeHash(null);
 const UNDEFINED_HASH = computeHash(undefined);
 const TRUE_HASH = computeHash(true);
 const FALSE_HASH = computeHash(false);
+const NEGATIVE_ZERO_HASH = computeHash(-0);
 
 /**
  * LRU cache for primitive value hashes. Primitives (strings, numbers,
- * bigints) can't be WeakMap keys, so they use a bounded cache. Sizing is based
- * on historical testing (expected ~97% hit rate in practice).
+ * bigints, registry-interned symbols) can't be WeakMap keys, so they use a
+ * bounded cache. Sizing is based on historical testing (expected ~97% hit
+ * rate in practice).
  */
 const primitiveHashCache = new LRUCache<
-  string | number | bigint,
+  string | number | bigint | symbol,
   FabricHash
 >({
   capacity: 50_000,
@@ -478,6 +436,21 @@ const primitiveHashCache = new LRUCache<
  * Mutable objects are always recomputed.
  */
 const frozenObjectHashCache = new WeakMap<object, FabricHash>();
+
+/**
+ * Looks up the given primitive in the LRU cache, computing and storing on
+ * miss. Caller must filter out values that don't behave under `Map`'s
+ * SameValueZero keying (notably `-0`, which collides with `+0`).
+ */
+function cachedPrimitiveHash(
+  value: string | number | bigint | symbol,
+): FabricHash {
+  const cached = primitiveHashCache.get(value);
+  if (cached !== undefined) return cached;
+  const result = computeHash(value);
+  primitiveHashCache.put(value, result);
+  return result;
+}
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -501,17 +474,29 @@ function hashOfInternal(
       return value ? TRUE_HASH : FALSE_HASH;
 
     case "string":
+    case "bigint":
+      return cachedPrimitiveHash(value);
+
     case "number":
-    case "bigint": {
-      const cached = primitiveHashCache.get(value);
-      if (cached !== undefined) return cached;
-      const result = computeHash(value);
-      primitiveHashCache.put(value, result);
-      return result;
-    }
+      // `Map` keys via SameValueZero, which conflates `-0` with `+0`. Use the
+      // pre-computed hash for `-0` so it doesn't collide with (or pollute)
+      // the `+0` cache entry.
+      return Object.is(value, -0)
+        ? NEGATIVE_ZERO_HASH
+        : cachedPrimitiveHash(value);
 
     case "undefined":
       return UNDEFINED_HASH;
+
+    case "symbol": {
+      // Only registry-interned symbols are hashable; unique symbols have
+      // no portable representation. The throw inside `feedValue()` covers the
+      // unique case structurally; check here so that the cache key is sound.
+      if (Symbol.keyFor(value) === undefined) {
+        throw new Error("Cannot hash unique (uninterned) symbol");
+      }
+      return cachedPrimitiveHash(value);
+    }
 
     case "object": {
       if (value === null) return NULL_HASH;
@@ -544,9 +529,17 @@ export function hashOf(value: unknown): FabricHash {
 
 /**
  * Like `hashOf()`, except always returns a plain string of the hash, encoded as
- * base64url (no `<type>:` prefix).
+ * base64url, _without_ a `<type>:` prefix.
  */
 export function hashStringOf(value: unknown): string {
   const result = hashOfInternal(value, true);
   return (typeof result === "string") ? result : result.hashString;
+}
+
+/**
+ * Like `hashOf()`, except always returns a plain string of the hash, encoded as
+ * base64url, with the `<type>:` prefix.
+ */
+export function taggedHashStringOf(value: unknown): string {
+  return hashOfInternal(value, false).toString();
 }

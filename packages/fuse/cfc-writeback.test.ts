@@ -14,10 +14,13 @@ import {
   authorizeMetadataWriteback,
   authorizeNamespaceMutationWriteback,
   authorizeSymlinkWriteback,
+  CFC_COMPAT_WRITEBACK_FINALIZE_XATTR,
+  CFC_COMPAT_WRITEBACK_PREPARE_XATTR,
   CFC_WRITEBACK_FINALIZE_XATTR,
   CFC_WRITEBACK_PREPARE_XATTR,
   CfcWritebackStore,
   metadataFieldsForSetattrFlags,
+  normalizeCfcWritebackXattrName,
   parseCfcMode,
   resolveCfcMode,
   shouldEnableCfcAnnotations,
@@ -1148,18 +1151,29 @@ Deno.test("same-parent rename can use one prepare record covering both names", (
   );
 });
 
-Deno.test("writeback xattrs accept trusted prepare/finalize names only", () => {
+Deno.test("writeback xattrs accept trusted names and compat transport names", () => {
+  assertEquals(
+    normalizeCfcWritebackXattrName(CFC_COMPAT_WRITEBACK_PREPARE_XATTR),
+    CFC_WRITEBACK_PREPARE_XATTR,
+  );
+  assertEquals(
+    normalizeCfcWritebackXattrName(CFC_COMPAT_WRITEBACK_FINALIZE_XATTR),
+    CFC_WRITEBACK_FINALIZE_XATTR,
+  );
+  assertEquals(normalizeCfcWritebackXattrName("user.example"), null);
+
   const { fileIno, ref } = makeAnnotatedTree();
   const store = new CfcWritebackStore();
 
   assertEquals(
     store.setPreparedXattr(
       fileIno,
-      "user.commonfabric.cfc.writeback.prepare",
+      CFC_COMPAT_WRITEBACK_PREPARE_XATTR,
       prepareJson("write", ref),
     ).ok,
-    false,
+    true,
   );
+  assertExists(store.getPrepared(fileIno, "write"));
   assertEquals(
     store.setPreparedXattr(fileIno, CFC_WRITEBACK_PREPARE_XATTR, "{").ok,
     false,
@@ -1176,7 +1190,7 @@ Deno.test("writeback xattrs accept trusted prepare/finalize names only", () => {
   assertEquals(
     store.setFinalizeXattr(
       fileIno,
-      CFC_WRITEBACK_FINALIZE_XATTR,
+      CFC_COMPAT_WRITEBACK_FINALIZE_XATTR,
       JSON.stringify({
         version: 1,
         operation: "write",

@@ -841,8 +841,8 @@ describe("runPattern", () => {
   });
 
   it("should create separate copies of initial values (modern, frozen)", async () => {
-    // With modernDataModel ON, getRaw() returns frozen objects. Verify
-    // independence via getRawUntyped({ frozen: false }) for mutable access.
+    // `getRaw()` returns frozen objects; verify independence via
+    // `getRawUntyped({ frozen: false })` for mutable access.
     const sm = StorageManager.emulate({ as: signer });
     const localRuntime = new Runtime({
       apiUrl: new URL(import.meta.url),

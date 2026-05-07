@@ -127,7 +127,7 @@ export const formatCfcLabelAtom = (value: unknown): string => {
   return JSON.stringify(value);
 };
 
-const formatPath = (path: string[]): string =>
+const formatPath = (path: readonly string[]): string =>
   path.length === 0 ? "/" : `/${path.join("/")}`;
 
 /**

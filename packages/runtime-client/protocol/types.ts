@@ -67,6 +67,7 @@ export enum RequestType {
   DetectNonIdempotent = "runtime:detectNonIdempotent",
   GetPatternSources = "runtime:getPatternSources",
   SetBreakpoints = "runtime:setBreakpoints",
+  UploadBlob = "runtime:uploadBlob",
 
   // Page operations (main -> worker)
   GetSpaceRootPattern = "pattern:getSpaceRoot",
@@ -346,6 +347,18 @@ export interface SetBreakpointsRequest extends BaseRequest {
   actionIds: string[];
 }
 
+export interface UploadBlobRequest extends BaseRequest {
+  type: RequestType.UploadBlob;
+  contentType: string;
+  body: number[];
+  suffix?: string;
+}
+
+export interface UploadBlobResponse {
+  id: string;
+  url: string;
+}
+
 // Logger count types for IPC (matches @commonfabric/utils/logger types)
 export interface LogCounts {
   debug: number;
@@ -581,7 +594,8 @@ export type IPCClientRequest =
   | VDomUnmountRequest
   | DetectNonIdempotentRequest
   | GetPatternSourcesRequest
-  | SetBreakpointsRequest;
+  | SetBreakpointsRequest
+  | UploadBlobRequest;
 
 export type NullResponse = null;
 
@@ -710,7 +724,8 @@ export type RemoteResponse =
   | PageResponse
   | VDomMountResponse
   | DetectNonIdempotentResponse
-  | PatternSourcesResponse;
+  | PatternSourcesResponse
+  | UploadBlobResponse;
 
 export type IPCRemoteNotification =
   | CellUpdateNotification
@@ -887,6 +902,10 @@ export type Commands = {
   [RequestType.SetBreakpoints]: {
     request: SetBreakpointsRequest;
     response: EmptyResponse;
+  };
+  [RequestType.UploadBlob]: {
+    request: UploadBlobRequest;
+    response: UploadBlobResponse;
   };
   // VDOM requests
   [RequestType.VDomEvent]: {

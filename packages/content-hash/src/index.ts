@@ -39,6 +39,6 @@ if (canUseDeno()) {
 export { sha256 };
 
 /**
- * Create a new incremental SHA-256 hasher.
+ * Creates a new incremental SHA-256 hasher.
  */
 export { createHasher };

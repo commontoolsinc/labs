@@ -22,6 +22,8 @@ export const TAGS = Object.freeze(
 
     // -- Primitive type handlers --
     BigInt: "BigInt@1",
+    SpecialNumber: "SpecialNumber@1",
+    Symbol: "Symbol@1",
     Undefined: "Undefined@1",
 
     // -- Structural / meta tags (serialization format) --

@@ -1,5 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 import app from "../../../app.ts";
+import { memoryServer } from "../memory.ts";
 import {
   decodeMemoryBoundary,
   encodeMemoryBoundary,
@@ -109,6 +110,15 @@ const serialTest = (
     try {
       await fn();
     } finally {
+      // The toolshed `memoryServer` is a module-level singleton. Its
+      // `#refreshTimer` (armed when sessions write into dirty spaces) is
+      // not cancelled by per-test `Deno.serve().shutdown()`. Drain it
+      // here so the timer doesn't survive into a later test, where
+      // Deno's leak sanitizer would flag it as either "started in this
+      // test, but never completed" (timer still pending at test end) or
+      // "started before the test, but completed during the test" (timer
+      // from a prior test fires inside this one).
+      await memoryServer.idle();
       current.resolve();
     }
   });

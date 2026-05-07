@@ -6,6 +6,7 @@ import {
   type ClientMessage,
   decodeMemoryBoundary,
   encodeMemoryBoundary,
+  type EntityDocument,
   type GraphQuery,
   type GraphQueryRequest,
   type GraphQueryResult,
@@ -204,10 +205,15 @@ class Connection {
         this.#receiveIdle = Promise.withResolvers<void>();
       }
       const idle = this.#receiveIdle.promise.then(() => true);
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
       const timeout = new Promise<boolean>((resolve) => {
-        setTimeout(() => resolve(false), remainingMs);
+        timeoutId = setTimeout(() => resolve(false), remainingMs);
       });
-      if (!await Promise.race([idle, timeout])) {
+      const drained = await Promise.race([idle, timeout]);
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
+      }
+      if (!drained) {
         return this.#pendingReceives === 0;
       }
     }
@@ -390,6 +396,9 @@ export class Server {
   #sessions: SessionRegistry;
   #connections = new Map<string, Connection>();
   #engines = new Map<string, Promise<Engine.Engine>>();
+  // Synthesized session state for direct out-of-band document writes, such as blob uploads.
+  #directSessionId = `server:${crypto.randomUUID()}`;
+  #directLocalSeq = 0;
   #dirtySpaces = new Set<string>();
   #dirtyDocsBySpace = new Map<string, Set<string>>();
   #refreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -440,6 +449,53 @@ export class Server {
     }
     this.#engines.clear();
     this.#connections.clear();
+  }
+
+  /**
+   * Drains any in-flight or scheduled subscription refresh, returning when
+   * the server has no pending work. Tests use this to drain the
+   * module-level singleton's `#refreshTimer` between cases so it doesn't
+   * leak across the Deno test boundary -- the singleton survives across
+   * tests but its pending timer must not.
+   *
+   * `flushSessions()` (called with no `spaces` argument) cancels any
+   * pending timer, runs the refresh loop to completion, and intentionally
+   * does not reschedule, so a single call is sufficient.
+   */
+  async idle(): Promise<void> {
+    if (this.#refreshTimer !== null || this.#refreshing !== null) {
+      await this.flushSessions();
+    }
+  }
+
+  async readDocument(
+    space: string,
+    id: string,
+  ): Promise<EntityDocument | null> {
+    const engine = await this.openEngine(space);
+    return Engine.read(engine, { id });
+  }
+
+  async writeDocument(
+    space: string,
+    id: string,
+    value: EntityDocument["value"],
+  ): Promise<Engine.AppliedCommit> {
+    const engine = await this.openEngine(space);
+    const commit = Engine.applyCommit(engine, {
+      sessionId: this.#directSessionId,
+      commit: {
+        localSeq: ++this.#directLocalSeq,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id,
+          value: { value },
+        }],
+      },
+    });
+    this.markSpaceDirty(space, [id]);
+    return commit;
   }
 
   async openSession(

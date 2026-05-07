@@ -23,6 +23,15 @@ Write tests for:
 - regressions that are easy to reintroduce
 - edge cases with real branching logic
 
+For Pattern Factory Build, prefer tests that cover the product contract rather
+than only the happy path:
+
+- first-run/default and sparse states
+- primary add, remove, edit, toggle, or submit flows
+- repeated actions and important state transitions
+- validation, empty, partial, or edge-case branches from the spec
+- helper or wrapper behavior that would otherwise only fail in a browser
+
 Avoid tests for:
 
 - code that is still only a sketch
@@ -34,6 +43,20 @@ Avoid tests for:
 ```bash
 deno task cf test <pattern>.test.tsx
 ```
+
+If `cf test` fails, treat that as repair work. Preserve the failing command and
+relevant output, isolate the smallest failing action/assertion when useful, fix
+either the implementation or an invalid test contract, and rerun the test. A
+failing pattern test is not a valid done state unless a concrete external,
+tooling, or environment blocker prevents further repair.
+
+For non-obvious `cf test` failures, read
+`docs/development/debugging/README.md` before changing the test shape. Match the
+exact error to the matrix and follow the linked doc. For Cell, Writable, or
+reactive-value failures, also reread:
+
+- `docs/common/concepts/reactivity.md`
+- `docs/common/patterns/new-cells.md`
 
 ## Test File Shape
 

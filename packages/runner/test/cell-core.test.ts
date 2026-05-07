@@ -308,61 +308,6 @@ describe("Cell", () => {
     expect(result?.arr).toBe("custom-array-value");
   });
 
-  it("should convert -0 to 0 during set", () => {
-    const c = runtime.getCell<unknown>(
-      space,
-      "should convert -0 to 0 during set",
-      undefined,
-      tx,
-    );
-    c.set({ value: -0 });
-
-    const result = c.get() as { value: number } | undefined;
-    expect(result?.value).toBe(0);
-    // Verify it's actually 0, not -0
-    expect(Object.is(result?.value, 0)).toBe(true);
-    expect(Object.is(result?.value, -0)).toBe(false);
-  });
-
-  it("should throw when setting NaN", () => {
-    const c = runtime.getCell<unknown>(
-      space,
-      "should throw when setting NaN",
-      undefined,
-      tx,
-    );
-    expect(() => c.set({ value: NaN })).toThrow(
-      "Cannot store non-finite number",
-    );
-  });
-
-  it("should throw when setting Infinity", () => {
-    const c = runtime.getCell<unknown>(
-      space,
-      "should throw when setting Infinity",
-      undefined,
-      tx,
-    );
-    expect(() => c.set({ value: Infinity })).toThrow(
-      "Cannot store non-finite number",
-    );
-    expect(() => c.set({ value: -Infinity })).toThrow(
-      "Cannot store non-finite number",
-    );
-  });
-
-  it("should throw when setting Symbol", () => {
-    const c = runtime.getCell<unknown>(
-      space,
-      "should throw when setting Symbol",
-      undefined,
-      tx,
-    );
-    expect(() => c.set({ value: Symbol("test") })).toThrow(
-      "Cannot store symbol",
-    );
-  });
-
   it("should throw when setting BigInt with modernDataModel OFF", async () => {
     const sm = StorageManager.emulate({ as: signer });
     const rt = new Runtime({
@@ -1242,6 +1187,230 @@ for (const unifiedJsonEncoding of [false, true]) {
           expect(Object.prototype.hasOwnProperty.call(value, "/")).toBe(true);
         },
       );
+    },
+  );
+}
+
+// Cell-storage behavior for the four "weird" numeric values: `-0`, `NaN`,
+// `+Infinity`, `-Infinity`. The two data-model paths diverge sharply here:
+//
+// * Legacy (`modernDataModel = false`): `-0` is normalized to `0` on set, and
+//   any non-finite number throws `"Cannot store non-finite number"` at the
+//   fabric-value boundary inside `cell.set()`.
+// * Modern  (`modernDataModel = true`): all four values flow through end-to-end
+//   (PRs #3492/#3493/#3495). `-0` keeps its sign; `NaN` and `±Infinity` are
+//   stored faithfully and read back as themselves.
+//
+// These tests pin both behaviors so a future flag-default change can't quietly
+// regress either path.
+for (const modernDataModel of [false, true]) {
+  describe(
+    `Cell special-number storage with \`modernDataModel = ${modernDataModel}\``,
+    () => {
+      let runtime: Runtime;
+      let storageManager: ReturnType<typeof StorageManager.emulate>;
+      let tx: IExtendedStorageTransaction;
+
+      beforeEach(() => {
+        storageManager = StorageManager.emulate({ as: signer });
+        runtime = new Runtime({
+          apiUrl: new URL(import.meta.url),
+          storageManager,
+          experimental: { modernDataModel },
+        });
+        tx = runtime.edit();
+      });
+
+      afterEach(async () => {
+        await tx.commit();
+        await runtime?.dispose();
+        await storageManager?.close();
+      });
+
+      if (modernDataModel) {
+        it("preserves the sign of -0 on set", () => {
+          const c = runtime.getCell<unknown>(
+            space,
+            "modern: preserve -0",
+            undefined,
+            tx,
+          );
+          c.set({ value: -0 });
+          const result = c.get() as { value: number } | undefined;
+          expect(Object.is(result?.value, -0)).toBe(true);
+          expect(Object.is(result?.value, 0)).toBe(false);
+        });
+
+        it("stores NaN", () => {
+          const c = runtime.getCell<unknown>(
+            space,
+            "modern: store NaN",
+            undefined,
+            tx,
+          );
+          c.set({ value: NaN });
+          const result = c.get() as { value: number } | undefined;
+          expect(Number.isNaN(result?.value)).toBe(true);
+        });
+
+        it("stores +Infinity and -Infinity", () => {
+          const c = runtime.getCell<unknown>(
+            space,
+            "modern: store infinities",
+            undefined,
+            tx,
+          );
+          c.set({ pos: Infinity, neg: -Infinity });
+          const result = c.get() as
+            | { pos: number; neg: number }
+            | undefined;
+          expect(result?.pos).toBe(Infinity);
+          expect(result?.neg).toBe(-Infinity);
+        });
+      } else {
+        it("converts -0 to 0 on set", () => {
+          const c = runtime.getCell<unknown>(
+            space,
+            "legacy: -0 to 0",
+            undefined,
+            tx,
+          );
+          c.set({ value: -0 });
+          const result = c.get() as { value: number } | undefined;
+          expect(result?.value).toBe(0);
+          expect(Object.is(result?.value, 0)).toBe(true);
+          expect(Object.is(result?.value, -0)).toBe(false);
+        });
+
+        it("throws when setting NaN", () => {
+          const c = runtime.getCell<unknown>(
+            space,
+            "legacy: throw on NaN",
+            undefined,
+            tx,
+          );
+          expect(() => c.set({ value: NaN })).toThrow(
+            "Cannot store non-finite number",
+          );
+        });
+
+        it("throws when setting +Infinity or -Infinity", () => {
+          const c = runtime.getCell<unknown>(
+            space,
+            "legacy: throw on infinities",
+            undefined,
+            tx,
+          );
+          expect(() => c.set({ value: Infinity })).toThrow(
+            "Cannot store non-finite number",
+          );
+          expect(() => c.set({ value: -Infinity })).toThrow(
+            "Cannot store non-finite number",
+          );
+        });
+      }
+    },
+  );
+}
+
+// Cell-storage behavior for symbols. The two data-model paths diverge:
+//
+// * Legacy (`modernDataModel = false`): any symbol -- registry-interned or
+//   unique -- throws `"Cannot store symbol"` at the fabric-value boundary
+//   inside `cell.set()`.
+// * Modern  (`modernDataModel = true`): registry-interned symbols
+//   (`Symbol.for(key)`) round-trip end-to-end, with `Object.is` identity
+//   preserved against any same-key `Symbol.for` in the same realm. Unique
+//   symbols (`Symbol(desc)`) throw the more specific `"Cannot store unique
+//   (uninterned) symbol"` (PRs #3503/#3510).
+for (const modernDataModel of [false, true]) {
+  describe(
+    `Cell symbol storage with \`modernDataModel = ${modernDataModel}\``,
+    () => {
+      let runtime: Runtime;
+      let storageManager: ReturnType<typeof StorageManager.emulate>;
+      let tx: IExtendedStorageTransaction;
+
+      beforeEach(() => {
+        storageManager = StorageManager.emulate({ as: signer });
+        runtime = new Runtime({
+          apiUrl: new URL(import.meta.url),
+          storageManager,
+          experimental: { modernDataModel },
+        });
+        tx = runtime.edit();
+      });
+
+      afterEach(async () => {
+        await tx.commit();
+        await runtime?.dispose();
+        await storageManager?.close();
+      });
+
+      if (modernDataModel) {
+        it("round-trips an interned symbol with stable identity", () => {
+          const c = runtime.getCell<unknown>(
+            space,
+            "modern: interned symbol round-trip",
+            undefined,
+            tx,
+          );
+          c.set({ tag: Symbol.for("status") });
+          const result = c.get() as { tag: symbol } | undefined;
+          // Same registry key in the same realm yields the same symbol
+          // instance, so the round-tripped value is `Object.is` to the
+          // constructed sentinel.
+          expect(Object.is(result?.tag, Symbol.for("status"))).toBe(true);
+        });
+
+        it("round-trips an interned symbol with an empty key", () => {
+          const c = runtime.getCell<unknown>(
+            space,
+            "modern: interned empty-key symbol",
+            undefined,
+            tx,
+          );
+          c.set({ tag: Symbol.for("") });
+          const result = c.get() as { tag: symbol } | undefined;
+          expect(Object.is(result?.tag, Symbol.for(""))).toBe(true);
+        });
+
+        it("throws on a unique (uninterned) symbol", () => {
+          const c = runtime.getCell<unknown>(
+            space,
+            "modern: throw on unique symbol",
+            undefined,
+            tx,
+          );
+          expect(() => c.set({ value: Symbol("nope") })).toThrow(
+            "Cannot store unique (uninterned) symbol",
+          );
+        });
+      } else {
+        it("throws on an interned symbol", () => {
+          const c = runtime.getCell<unknown>(
+            space,
+            "legacy: throw on interned symbol",
+            undefined,
+            tx,
+          );
+          expect(() => c.set({ tag: Symbol.for("status") })).toThrow(
+            "Cannot store symbol",
+          );
+        });
+
+        it("throws on a unique (uninterned) symbol", () => {
+          const c = runtime.getCell<unknown>(
+            space,
+            "legacy: throw on unique symbol",
+            undefined,
+            tx,
+          );
+          expect(() => c.set({ value: Symbol("nope") })).toThrow(
+            "Cannot store symbol",
+          );
+        });
+      }
     },
   );
 }

@@ -6,6 +6,7 @@ import {
   type FabricValue,
   isArrayIndexPropertyName,
 } from "@commonfabric/data-model/fabric-value";
+import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import type {
   CommitError,
   IAttestation,
@@ -146,7 +147,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   recordCfcDereferenceTrace(trace: CfcDereferenceTrace): void {
-    this.cfcState.dereferenceTraces.push(trace);
+    // Freeze on entry: from this point on the record is owned by the tx and
+    // identity-stable. Mirrors the chokepoint pattern on
+    // `recordCfcWritePolicyInput()`; together they ensure every CfcAddress
+    // that flows into the digest input lives behind a deep-frozen wrapper.
+    this.cfcState.dereferenceTraces.push(deepFreeze(trace));
     if (this.cfcState.prepare.status === "prepared") {
       this.invalidateCfc("dereference-trace-added");
     }
@@ -169,7 +174,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   recordCfcWritePolicyInput(input: WritePolicyInput): void {
-    this.cfcState.writePolicyInputs.push(input);
+    // Freeze on entry: from this point on the record is owned by the tx and
+    // identity-stable, which lets `hashStringOf()` cache its hash on the
+    // existing WeakMap. The within-sort tiebreaker in
+    // `compareWritePolicyInput` then re-hashes each element via the cache.
+    this.cfcState.writePolicyInputs.push(deepFreeze(input));
     if (this.cfcState.prepare.status === "prepared") {
       this.invalidateCfc("write-policy-input-added");
     }
@@ -186,23 +195,30 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   private buildPreparedDigestInput(): PreparedDigestInput {
+    // Each pushed record is deepFrozen so that every CfcAddress (and every
+    // path inside one) that flows into the digest input is immutable from
+    // the moment of construction. This makes the records safe to use as
+    // identity-stable cache keys (e.g. for the `hashStringOf()` WeakMap
+    // cache) and matches the chokepoint freeze applied to dereference
+    // traces and write-policy inputs.
     const consumedReads: ConsumedRead[] = [];
     for (const read of this.getReadActivities()) {
       if (isInternalVerifierRead(read.meta)) {
         continue;
       }
-      consumedReads.push({
+      consumedReads.push(deepFreeze({
         ...read,
         path: canonicalizeLogicalPath(read.path),
-      });
+      }));
     }
 
     const log = this.getReactivityLog();
     const potentialWrites: AttemptedWrite[] = (log.potentialWrites ?? []).map(
-      (address) => ({
-        ...address,
-        path: canonicalizeLogicalPath(address.path),
-      }),
+      (address) =>
+        deepFreeze({
+          ...address,
+          path: canonicalizeLogicalPath(address.path),
+        }),
     );
 
     const writes: AttemptedWrite[] = [];
@@ -211,10 +227,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     );
     for (const space of seenWriteSpaces) {
       for (const write of this.getWriteDetails(space)) {
-        writes.push({
+        writes.push(deepFreeze({
           ...write.address,
           path: canonicalizeLogicalPath(write.address.path),
-        });
+        }));
       }
     }
 

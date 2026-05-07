@@ -9,7 +9,7 @@ import {
 } from "@commonfabric/utils/base64url";
 
 /**
- * A content-addressed identifier: a hash digest paired with an algorithm tag.
+ * Content-addressed identifier: a hash digest paired with an algorithm tag.
  * Extends `FabricPrimitive` -- treated like a primitive in the fabric
  * type system (always frozen, passes through conversion unchanged).
  *
@@ -84,7 +84,7 @@ export class FabricHash extends FabricPrimitive implements ApiFabricHash {
     return this.#justHashString;
   }
 
-  /** Copy the hash bytes into `target` starting at offset 0. Returns `target`. */
+  /** Copies the hash bytes into `target` starting at offset 0. Returns `target`. */
   copyInto(target: Uint8Array): Uint8Array {
     target.set(this.#hash);
     return target;
@@ -96,7 +96,7 @@ export class FabricHash extends FabricPrimitive implements ApiFabricHash {
   }
 
   /**
-   * JSON representation: `{ '/': '<tag>:<base64urlHash>' }`.
+   * Returns the JSON representation: `{ '/': '<tag>:<base64urlHash>' }`.
    * Preserves the `{"/": string}` shape used by `Reference.View.toJSON()`.
    */
   toJSON(): { "/": string } {

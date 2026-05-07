@@ -12,11 +12,14 @@ export const DEFAULT_SUBAGENT_RETURN_CHANNEL =
 export const DEFAULT_SUBAGENT_ALLOWED_TOOL_IDS = [
   "bash",
   "read_file",
+  "view_image",
+  "edit_file",
   "write_file",
 ] as const satisfies readonly BuiltinToolId[];
 export const BROWSER_SUBAGENT_ALLOWED_TOOL_IDS = [
   "bash-no-sandbox",
   "read_file",
+  "view_image",
 ] as const satisfies readonly BuiltinToolId[];
 export const NO_HOST_TOOL_IDS = [] as const satisfies readonly BuiltinToolId[];
 export const BROWSER_SUBAGENT_HOST_TOOL_IDS = [

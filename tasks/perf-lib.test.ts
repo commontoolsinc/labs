@@ -3,6 +3,7 @@ import {
   computeBaseline,
   extractMetrics,
   fetchPRBody,
+  githubGet,
   type Job,
   type Step,
   type WorkflowRun,
@@ -122,6 +123,63 @@ Deno.test("fetchPRBody reads the live pull request body from the GitHub API", as
       requestedUrl,
       "https://api.github.com/repos/commontoolsinc/labs/pulls/3427",
     );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("githubGet retries transient GitHub responses", async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  try {
+    globalThis.fetch = ((input, _init) => {
+      calls++;
+      if (calls < 3) {
+        return Promise.resolve(
+          new Response("temporary GitHub timeout", {
+            status: 504,
+            headers: { "retry-after": "0" },
+          }),
+        );
+      }
+
+      const requestedUrl = input instanceof Request ? input.url : String(input);
+      return Promise.resolve(
+        new Response(JSON.stringify({ ok: requestedUrl }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    }) as typeof fetch;
+
+    assertEquals(
+      await githubGet<{ ok: string }>("/repos/commontoolsinc/labs/actions"),
+      { ok: "https://api.github.com/repos/commontoolsinc/labs/actions" },
+    );
+    assertEquals(calls, 3);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("githubGet does not retry non-transient GitHub responses", async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  try {
+    globalThis.fetch = ((_input, _init) => {
+      calls++;
+      return Promise.resolve(new Response("not found", { status: 404 }));
+    }) as typeof fetch;
+
+    let rejected = false;
+    try {
+      await githubGet("/repos/commontoolsinc/labs/missing");
+    } catch {
+      rejected = true;
+    }
+
+    assertEquals(rejected, true);
+    assertEquals(calls, 1);
   } finally {
     globalThis.fetch = originalFetch;
   }

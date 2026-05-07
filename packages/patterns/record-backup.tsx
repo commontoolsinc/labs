@@ -583,23 +583,28 @@ const clearImportResult = handler<
  * Handler to process uploaded file
  */
 const handleFileUpload = handler<
-  { detail: { files: Array<{ data: string; name: string }> } },
+  {
+    detail: {
+      files: Array<{
+        name: string;
+        data?: string;
+      }>;
+    };
+  },
   { importJson: Writable<string> }
 >(({ detail }, { importJson }) => {
   const files = detail?.files;
   if (!files || files.length === 0) return;
 
   const file = files[0];
-  // data is a data URL, need to extract the JSON content
-  const dataUrl = file.data;
-  const base64Match = dataUrl.match(/base64,(.+)/);
-  if (base64Match) {
-    try {
-      const jsonContent = atob(base64Match[1]);
-      importJson.set(jsonContent);
-    } catch (e) {
-      console.error("Failed to decode file:", e);
-    }
+  if (!file.data) return;
+  const commaIndex = file.data.indexOf(",");
+  const bytes = commaIndex === -1 ? file.data : file.data.slice(commaIndex + 1);
+  try {
+    const jsonContent = atob(bytes);
+    importJson.set(jsonContent);
+  } catch (e) {
+    console.error("Failed to decode file:", e);
   }
 });
 
@@ -700,6 +705,7 @@ export default pattern<Input, Output>(({ importJson }) => {
                 </p>
                 <cf-file-input
                   accept=".json,application/json"
+                  includeData
                   buttonText="📤 Upload Backup File"
                   showPreview={false}
                   oncf-change={handleFileUpload({ importJson })}

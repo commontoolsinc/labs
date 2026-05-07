@@ -146,6 +146,51 @@ round-trip correctly.
 //   - `-128n` → 0x80           → "gA"
 // This matches the hash byte format (2-hash-byte-format.md), which already
 // uses two's complement big-endian for BigInt payloads.
+
+// Special numeric values that JSON cannot represent natively.
+// Tag: "SpecialNumber@1"
+// { "/SpecialNumber@1": string }
+//
+// The state is one of exactly four literal strings:
+//   - "-0"          → the negative-zero value
+//   - "NaN"         → Number.NaN (any input NaN bit pattern serializes as
+//                     this single literal and round-trips back to NaN)
+//   - "+Infinity"   → positive infinity
+//   - "-Infinity"   → negative infinity
+//
+// String state (rather than a JSON number) is used because JSON.stringify
+// emits `null` for NaN/±Infinity and drops the sign on -0; a numeric-state
+// form would be lossy through the JSON layer. On deserialization, any state
+// other than these four literals — including a non-string state — produces
+// a `ProblematicValue` (see `1-fabric-values.md` Section 3.5) per the
+// general handler-validation rule below.
+//
+// Whether such values reach this encoder in a given run is gated by the
+// `modernDataModel` flag at the fabric-value conversion gate; see
+// `1-fabric-values.md` Section 4.9. The wire format above is the encoder's
+// contract regardless of how the values arrived.
+
+// Registry-interned symbols (`Symbol.for(key)`).
+// Tag: "Symbol@1"
+// { "/Symbol@1": string }
+//
+// The state is the registry key — the JavaScript string returned by
+// `Symbol.keyFor(s)`. On deserialization, `Symbol.for(state)` retrieves
+// (or creates) the registry symbol with the matching key, so the result
+// is `===` to any other `Symbol.for(state)` in the same realm.
+//
+// Unique symbols (`Symbol(desc)`, where `Symbol.keyFor(s)` returns
+// `undefined`) have no portable representation. The handler's
+// `canSerialize()` returns `false` for them, which routes them to the
+// registry's "unhandled value" path rather than coercing them silently
+// to a registry key. On deserialization, any state other than a string
+// yields a `ProblematicValue` (see `1-fabric-values.md` Section 3.5)
+// per the general handler-validation rule below.
+//
+// Whether a symbol value reaches this encoder in a given run is gated
+// by the `modernDataModel` flag at the fabric-value conversion gate;
+// see `1-fabric-values.md` Section 4.9. The wire format above is the
+// encoder's contract regardless of how the value arrived.
 ```
 
 > **Deserialization validation.** Deserialization cannot assume type safety from
@@ -350,3 +395,51 @@ The `/object` escape (Section 6) ensures that legitimate plain objects with
 encoder will never emit a plain-object form that violates this rule. A
 conforming decoder that encounters a violation should treat it as an encoding
 error.
+
+## 10. Plain Object Key Ordering
+
+A conforming encoder **must** emit the keys of every plain object in **UTF-8
+byte order**, using the same comparison defined for hashing in
+`2-hash-byte-format.md` Section 5:
+
+1. Compare byte-by-byte, treating each byte as an unsigned integer (0--255).
+2. At each position, the byte with the smaller unsigned value comes first.
+3. If one key is a prefix of another, the shorter key comes first.
+
+This requirement applies to every plain object that reaches the wire,
+including:
+
+- Bare plain objects (no `/`-prefixed keys).
+- Plain objects wrapped in `/object` (Section 6) — the keys of the wrapped
+  inner object must be sorted.
+- Plain objects wrapped in `/quote` (Section 6) — the keys of the quoted
+  literal must be sorted.
+
+> **Why sort.** Sorting makes the JSON wire form **canonical**: two plain
+> objects with the same keys and values produce the same JSON bytes regardless
+> of the order in which their keys were inserted. This in turn lets two
+> independently-built encoders agree on a single byte-for-byte encoding for the
+> same logical value, which simplifies content addressing, deduplication, and
+> diffing. The sort key is the same UTF-8 byte order used by hashing, so the
+> two systems share one specification of "canonical key order."
+>
+> The keys of a single-key tagged object (`/<Type>@<Version>`, `/object`,
+> `/quote`, `/hole`, etc.) are trivially "sorted" — there is only one key.
+> The requirement is meaningful only for plain objects with two or more keys,
+> and for the inner contents of `/object` and `/quote` wrappers.
+
+> **JS implementation note.** JavaScript's native string comparison (`<`, `>`,
+> `Array.prototype.sort` with no comparator) sorts by UTF-16 code units, which
+> differs from UTF-8 byte order when supplementary characters (U+10000 and
+> above) are present. An implementation must use a UTF-8-aware comparator
+> (or equivalently, sort by Unicode code point) when supplementary characters
+> may appear in keys. See `2-hash-byte-format.md` Section 5 for the detailed
+> rationale and example.
+
+> **Decoder behavior.** A decoder is **not** required to validate that incoming
+> keys are sorted. The host language's own object representation may impose its
+> own iteration order on the decoded value (for example, in JavaScript,
+> integer-index-like keys iterate in numeric order ahead of other string keys,
+> regardless of the order in which they appeared on the wire). A conforming
+> encoder re-establishes UTF-8 canonical key order on output regardless of the
+> order in which keys were received or the host language's iteration rules.

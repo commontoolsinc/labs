@@ -1,4 +1,5 @@
-import { assertEquals, assertRejects } from "@std/assert";
+import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
+import { decodeBase64 } from "@std/encoding/base64";
 import { join } from "@std/path";
 import { normalize } from "@std/path/posix";
 import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
@@ -11,9 +12,11 @@ import { createToolOutputId } from "../src/contracts/tool-result.ts";
 import { discoverHarnessSkills } from "../src/skills/registry.ts";
 import { bashTool } from "../src/tools/bash.ts";
 import { bashNoSandboxTool } from "../src/tools/bash-no-sandbox.ts";
+import { editFileTool } from "../src/tools/edit-file.ts";
 import { readFileTool } from "../src/tools/read-file.ts";
 import { RESERVED_ARTIFACT_PATH_DETAIL } from "../src/tools/reserved-artifacts.ts";
 import { readSkillResourceTool } from "../src/tools/read-skill-resource.ts";
+import { viewImageTool } from "../src/tools/view-image.ts";
 import { writeFileTool } from "../src/tools/write-file.ts";
 import type { HarnessToolContext } from "../src/tools/types.ts";
 import type {
@@ -27,6 +30,10 @@ import type {
   SandboxRuntime,
   SandboxShellRequest,
 } from "../src/sandbox/types.ts";
+
+const ONE_PIXEL_PNG = decodeBase64(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p94AAAAASUVORK5CYII=",
+);
 
 class FakeSandboxRuntime implements SandboxRuntime {
   readonly kind = "docker-runsc-cfc" as const;
@@ -115,14 +122,15 @@ const createContext = (
   artifactRootHostPath?: string,
   skillRegistry?: HarnessSkillRegistry,
   skillResourceReads: HarnessSkillResourceRead[] = [],
+  workspaceHostPath = "/tmp/cf-harness-workspace",
 ): HarnessToolContext => {
   let currentDir = initialCurrentDir;
   let sequence = 0;
   let cfcInvocationSequence = 0;
-  const workspaceHostPath = "/tmp/cf-harness-workspace";
   return {
     runId: "run-1",
     cfcEnforcementMode,
+    workspaceHostPath,
     skillRegistry,
     get currentDir() {
       return currentDir;
@@ -229,6 +237,20 @@ const observedCfcResult = (stdout: string): CfcSandboxResult => ({
   },
 });
 
+const digestText = async (text: string): Promise<string> => {
+  const bytes = new TextEncoder().encode(text);
+  const digestInput = bytes.buffer.slice(
+    bytes.byteOffset,
+    bytes.byteOffset + bytes.byteLength,
+  ) as ArrayBuffer;
+  const digest = await crypto.subtle.digest("SHA-256", digestInput);
+  return `sha256:${
+    [...new Uint8Array(digest)]
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("")
+  }`;
+};
+
 Deno.test("bash tool executes the command through the sandbox shell runtime", async () => {
   const sandbox = new FakeSandboxRuntime([{
     stdout: "ok\n",
@@ -289,6 +311,52 @@ Deno.test("bash tool preserves currentDir inside a configured Fabric mount", asy
 
   assertEquals(output.cwd, "/fabric/home");
   assertEquals(context.currentDir, "/fabric/home");
+});
+
+Deno.test("bash tool allows curl to localhost through the sandbox shell runtime", async () => {
+  const sandbox = new FakeSandboxRuntime([{
+    stdout: "pong\n",
+    stderr: "",
+    exitCode: 0,
+  }]);
+  const context = createContext(sandbox);
+  const output = await bashTool.invoke(context, {
+    command: "curl -fsS http://localhost:8000/health",
+  });
+
+  assertEquals(output.stdout, "pong\n");
+  assertEquals(stripCfcInvocationContexts(sandbox.calls), [{
+    type: "runShell",
+    request: {
+      command: [
+        '__cf_harness_cwd_marker="__CF_HARNESS_CWD__run-1:bash:1__"',
+        'trap \'__cf_harness_status=$?; trap - EXIT; printf "%s%s" "$__cf_harness_cwd_marker" "$(pwd)"; exit "$__cf_harness_status"\' EXIT',
+        "curl -fsS http://localhost:8000/health",
+      ].join("\n"),
+      cwd: "/workspace",
+      timeoutMs: undefined,
+    },
+  }]);
+});
+
+Deno.test("bash tool denies curl to non-localhost targets before sandbox execution", async () => {
+  const sandbox = new FakeSandboxRuntime();
+  const context = createContext(sandbox, "/workspace/old");
+  const output = await bashTool.invoke(context, {
+    command: "curl https://example.com",
+    cwd: "/workspace/new",
+  });
+
+  assertEquals(output, {
+    outputId: "run-1:bash:1",
+    stdout: "",
+    stderr:
+      "bash command denied: curl host example.com is not allowed from cf-harness bash; use localhost or host.docker.internal",
+    exitCode: 126,
+    cwd: "/workspace/new",
+  });
+  assertEquals(sandbox.calls, []);
+  assertEquals(context.currentDir, "/workspace/new");
 });
 
 Deno.test("bash tool updates currentDir in enforce mode from observed CFC stdout", async () => {
@@ -994,6 +1062,197 @@ Deno.test({
   },
 });
 
+Deno.test("edit_file applies exact replacements and returns a unified diff", async () => {
+  const original = "one\ntwo\nthree\n";
+  const edited = "one\nTWO\nthree\n";
+  const sandbox = new FakeSandboxRuntime([
+    { stdout: original, stderr: "", exitCode: 0 },
+    { stdout: "", stderr: "", exitCode: 0 },
+    { stdout: edited, stderr: "", exitCode: 0 },
+  ]);
+
+  const output = await editFileTool.invoke(createContext(sandbox), {
+    path: "notes/log.txt",
+    edits: [{ oldText: "two\n", newText: "TWO\n" }],
+  });
+
+  assertEquals(output, {
+    outputId: "run-1:edit_file:1",
+    path: "/workspace/notes/log.txt",
+    editsApplied: 1,
+    replacements: 1,
+    oldDigest: await digestText(original),
+    newDigest: await digestText(edited),
+    oldSizeBytes: original.length,
+    newSizeBytes: edited.length,
+    diff: [
+      "--- /workspace/notes/log.txt",
+      "+++ /workspace/notes/log.txt",
+      "@@ -1,3 +1,3 @@",
+      " one",
+      "-two",
+      "+TWO",
+      " three",
+      "",
+    ].join("\n"),
+  });
+  const calls = stripCfcInvocationContexts(sandbox.calls);
+  assertEquals(calls.map((call) => call.type), [
+    "runShell",
+    "runShell",
+    "runShell",
+  ]);
+  if (calls[1]?.type !== "runShell") {
+    throw new Error("expected edit_file write shell call");
+  }
+  assertEquals(calls[1].request.args, ["/workspace/notes/log.txt"]);
+  assertEquals(calls[1].request.cwd, "/workspace");
+  assertEquals(calls[1].request.stdinText, edited);
+  assertEquals(
+    sandbox.calls[1]?.request.cfcInvocationContext?.toolId,
+    "edit_file",
+  );
+  assertEquals(
+    sandbox.calls[1]?.request.cfcInvocationContext?.inputs.stdin?.bytes,
+    edited.length,
+  );
+});
+
+Deno.test("edit_file returns separate hunks for distant edits", async () => {
+  const original = Array.from(
+    { length: 30 },
+    (_, index) => `line ${String(index + 1).padStart(2, "0")}\n`,
+  ).join("");
+  const edited = original
+    .replace("line 02\n", "line 02 changed\n")
+    .replace("line 29\n", "line 29 changed\n");
+  const sandbox = new FakeSandboxRuntime([
+    { stdout: original, stderr: "", exitCode: 0 },
+    { stdout: "", stderr: "", exitCode: 0 },
+    { stdout: edited, stderr: "", exitCode: 0 },
+  ]);
+
+  const output = await editFileTool.invoke(createContext(sandbox), {
+    path: "notes/distant.txt",
+    edits: [
+      { oldText: "line 02\n", newText: "line 02 changed\n" },
+      { oldText: "line 29\n", newText: "line 29 changed\n" },
+    ],
+  });
+
+  if ("ok" in output) {
+    throw new Error("expected successful edit_file output");
+  }
+  assertStringIncludes(output.diff, "@@ -1,5 +1,5 @@");
+  assertStringIncludes(output.diff, "-line 02");
+  assertStringIncludes(output.diff, "+line 02 changed");
+  assertStringIncludes(output.diff, "@@ -26,5 +26,5 @@");
+  assertStringIncludes(output.diff, "-line 29");
+  assertStringIncludes(output.diff, "+line 29 changed");
+  assertEquals(output.diff.includes("line 15"), false);
+  assertEquals(output.diff.match(/^@@ /gm)?.length, 2);
+});
+
+Deno.test("edit_file caps oversized diff output", async () => {
+  const original = Array.from(
+    { length: 450 },
+    (_, index) => `old ${String(index + 1).padStart(3, "0")}\n`,
+  ).join("");
+  const edited = Array.from(
+    { length: 450 },
+    (_, index) => `new ${String(index + 1).padStart(3, "0")}\n`,
+  ).join("");
+  const sandbox = new FakeSandboxRuntime([
+    { stdout: original, stderr: "", exitCode: 0 },
+    { stdout: "", stderr: "", exitCode: 0 },
+    { stdout: edited, stderr: "", exitCode: 0 },
+  ]);
+
+  const output = await editFileTool.invoke(createContext(sandbox), {
+    path: "notes/large.txt",
+    edits: [{ oldText: original, newText: edited }],
+  });
+
+  if ("ok" in output) {
+    throw new Error("expected successful edit_file output");
+  }
+  assertStringIncludes(output.diff, "[diff truncated:");
+  assertEquals(output.diff.split("\n").length, 401);
+});
+
+Deno.test("edit_file applies replaceAll edits with expected replacement counts", async () => {
+  const original = "red blue red\n";
+  const edited = "green blue green\n";
+  const sandbox = new FakeSandboxRuntime([
+    { stdout: original, stderr: "", exitCode: 0 },
+    { stdout: "", stderr: "", exitCode: 0 },
+    { stdout: edited, stderr: "", exitCode: 0 },
+  ]);
+
+  const output = await editFileTool.invoke(createContext(sandbox), {
+    path: "notes/colors.txt",
+    edits: [{
+      oldText: "red",
+      newText: "green",
+      replaceAll: true,
+      expectedReplacements: 2,
+    }],
+    expectedDigest: await digestText(original),
+  });
+
+  if ("ok" in output) {
+    throw new Error("expected successful edit_file output");
+  }
+  assertEquals(output.path, "/workspace/notes/colors.txt");
+  assertEquals(output.replacements, 2);
+  assertEquals(output.editsApplied, 1);
+});
+
+Deno.test("edit_file rejects ambiguous single replacements without writing", async () => {
+  const sandbox = new FakeSandboxRuntime([{
+    stdout: "name: alpha\nname: beta\n",
+    stderr: "",
+    exitCode: 0,
+  }]);
+
+  const output = await editFileTool.invoke(createContext(sandbox), {
+    path: "notes/names.txt",
+    edits: [{ oldText: "name:", newText: "label:" }],
+  });
+
+  assertEquals(output.outputId, "run-1:edit_file:1");
+  assertEquals(output.path, "/workspace/notes/names.txt");
+  if (!("ok" in output) || output.ok !== false) {
+    throw new Error("expected edit_file conflict output");
+  }
+  assertEquals(output.error.code, "edit_conflict");
+  assertStringIncludes(output.error.detail ?? "", "matched 2 times");
+  assertEquals(sandbox.calls.length, 1);
+});
+
+Deno.test("edit_file rejects stale expected digests without writing", async () => {
+  const sandbox = new FakeSandboxRuntime([{
+    stdout: "hello\n",
+    stderr: "",
+    exitCode: 0,
+  }]);
+
+  const output = await editFileTool.invoke(createContext(sandbox), {
+    path: "notes/hello.txt",
+    expectedDigest: "sha256:not-current",
+    edits: [{ oldText: "hello", newText: "hi" }],
+  });
+
+  assertEquals(output.outputId, "run-1:edit_file:1");
+  assertEquals(output.path, "/workspace/notes/hello.txt");
+  if (!("ok" in output) || output.ok !== false) {
+    throw new Error("expected edit_file conflict output");
+  }
+  assertEquals(output.error.code, "edit_conflict");
+  assertStringIncludes(output.error.detail ?? "", "expected digest");
+  assertEquals(sandbox.calls.length, 1);
+});
+
 Deno.test("write_file tool supports append mode and passes content over stdin", async () => {
   const sandbox = new FakeSandboxRuntime();
   const output = await writeFileTool.invoke(createContext(sandbox), {
@@ -1196,6 +1455,73 @@ Deno.test("write_file tool denies reserved artifact paths before shelling out", 
       message:
         "permission denied: /workspace/.cf-harness-artifacts/run-1/tool-output.json",
       path: "/workspace/.cf-harness-artifacts/run-1/tool-output.json",
+      detail: RESERVED_ARTIFACT_PATH_DETAIL,
+    },
+  });
+  assertEquals(sandbox.calls, []);
+});
+
+Deno.test("view_image tool attaches a workspace image without shelling out", async () => {
+  const workspace = await Deno.realPath(await Deno.makeTempDir());
+  await Deno.writeFile(join(workspace, "capture.png"), ONE_PIXEL_PNG);
+  const sandbox = new FakeSandboxRuntime();
+
+  const output = await viewImageTool.invoke(
+    createContext(
+      sandbox,
+      "/workspace",
+      new FakeProcessRunner(),
+      "observe",
+      undefined,
+      undefined,
+      [],
+      workspace,
+    ),
+    { path: "capture.png" },
+  );
+
+  assertEquals(output.outputId, "run-1:view_image:1");
+  assertEquals(output.path, "/workspace/capture.png");
+  if (!("imageAttachment" in output)) {
+    throw new Error("expected view_image success output");
+  }
+  assertEquals(output.mediaType, "image/png");
+  assertEquals(output.bytes, ONE_PIXEL_PNG.byteLength);
+  assertEquals(output.imageAttachment.hostPath, join(workspace, "capture.png"));
+  assertEquals(sandbox.calls, []);
+});
+
+Deno.test("view_image tool denies reserved artifact paths", async () => {
+  const workspace = await Deno.realPath(await Deno.makeTempDir());
+  const artifactRoot = join(workspace, ".cf-harness-artifacts");
+  await Deno.mkdir(artifactRoot, { recursive: true });
+  await Deno.writeFile(join(artifactRoot, "capture.png"), ONE_PIXEL_PNG);
+  const sandbox = new FakeSandboxRuntime();
+
+  const output = await viewImageTool.invoke(
+    createContext(
+      sandbox,
+      "/workspace",
+      new FakeProcessRunner(),
+      "observe",
+      artifactRoot,
+      undefined,
+      [],
+      workspace,
+    ),
+    { path: ".cf-harness-artifacts/capture.png" },
+  );
+
+  assertEquals(output, {
+    outputId: "run-1:view_image:1",
+    path: "/workspace/.cf-harness-artifacts/capture.png",
+    ok: false,
+    error: {
+      type: "cf-harness.structured-file-tool-error",
+      code: "permission_denied",
+      message:
+        "permission denied: /workspace/.cf-harness-artifacts/capture.png",
+      path: "/workspace/.cf-harness-artifacts/capture.png",
       detail: RESERVED_ARTIFACT_PATH_DETAIL,
     },
   });
