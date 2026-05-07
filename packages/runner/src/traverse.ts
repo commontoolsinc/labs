@@ -33,7 +33,6 @@ import {
   DEFAULT_SELECTOR,
   internPathSelector,
   internSchemaPairAsKey,
-  REJECTING_SELECTOR,
   schemaWithProperties,
 } from "@commonfabric/data-model/schema-utils";
 import type { JSONObject, JSONSchema } from "./builder/types.ts";
@@ -481,6 +480,48 @@ export type PointerCycleTracker = CompoundCycleTracker<
   any
 >;
 
+export type TraversalContext = {
+  tracker: PointerCycleTracker;
+  cfc: ContextualFlowControl;
+  schemaTracker: MapSet<string, SchemaPathSelector>;
+  includeMeta: boolean;
+  metaDocsVisited: Set<string>;
+};
+
+export function createTraversalContext(
+  tracker: PointerCycleTracker,
+  cfc: ContextualFlowControl,
+  schemaTracker: MapSet<string, SchemaPathSelector>,
+  includeMeta: boolean = false,
+  metaDocsVisited: Set<string> = new Set<string>(),
+): TraversalContext {
+  return {
+    tracker,
+    cfc,
+    schemaTracker,
+    includeMeta,
+    metaDocsVisited,
+  };
+}
+
+export function createDefaultTraversalContext(
+  includeMeta: boolean = true,
+  schemaTracker: MapSet<string, SchemaPathSelector> =
+    new MapSetStringToPathSelectors(true),
+  metaDocsVisited: Set<string> = new Set<string>(),
+): TraversalContext {
+  return createTraversalContext(
+    new CompoundCycleTracker<
+      Immutable<FabricValue>,
+      JSONSchema | undefined
+    >(),
+    new ContextualFlowControl(),
+    schemaTracker,
+    includeMeta,
+    metaDocsVisited,
+  );
+}
+
 class ManagedStorageJournal implements ITransactionJournal {
   activity(): Iterable<Activity> {
     return [];
@@ -724,16 +765,9 @@ export abstract class BaseObjectTraverser {
   constructor(
     protected tx: IExtendedStorageTransaction,
     protected selector: SchemaPathSelector = DEFAULT_SELECTOR,
-    protected tracker: PointerCycleTracker = new CompoundCycleTracker<
-      Immutable<FabricValue>,
-      JSONSchema | undefined
-    >(),
-    protected schemaTracker: MapSetStringToPathSelectors =
-      new MapSetStringToPathSelectors(true),
-    protected cfc: ContextualFlowControl = new ContextualFlowControl(),
+    protected context: TraversalContext = createDefaultTraversalContext(),
     public objectCreator: IObjectCreator<FabricValue> =
       new StandardObjectCreator(),
-    protected traverseCells = true,
   ) {}
   protected dagMemo = new Map<string, Immutable<FabricValue>>();
   private coverageSelectorCache = new Map<string, SchemaPathSelector>();
@@ -742,6 +776,23 @@ export abstract class BaseObjectTraverser {
   abstract traverse(
     doc: IMemorySpaceValueAttestation,
   ): TraverseResult<Immutable<FabricValue>>;
+
+  protected get tracker(): PointerCycleTracker {
+    return this.context.tracker;
+  }
+
+  protected get schemaTracker(): MapSet<string, SchemaPathSelector> {
+    return this.context.schemaTracker;
+  }
+
+  protected get cfc(): ContextualFlowControl {
+    return this.context.cfc;
+  }
+
+  protected get traverseCells(): boolean {
+    return this.context.includeMeta;
+  }
+
   /**
    * Attempt to traverse the document as a directed acyclic graph.
    * This is the simplest form of traversal, where we include everything.
@@ -963,17 +1014,7 @@ export abstract class BaseObjectTraverser {
     lastNode: LastNode = "value",
   ) {
     this.getDocAtPathCalls++;
-    return getAtPath(
-      this.tx,
-      doc,
-      path,
-      this.tracker,
-      this.cfc,
-      this.schemaTracker,
-      selector,
-      this.traverseCells,
-      lastNode,
-    );
+    return getAtPath(this.tx, doc, path, this.context, selector, lastNode);
   }
 
   /**
@@ -990,17 +1031,7 @@ export abstract class BaseObjectTraverser {
   ): [IMemorySpaceValueAttestation, SchemaPathSelector | undefined] {
     if (isPrimitiveCellLink(doc.value)) {
       this.tx.read(doc.address, READ_FOR_SCHEDULING);
-      return followPointer(
-        this.tx,
-        doc,
-        [],
-        this.tracker,
-        this.cfc,
-        this.schemaTracker,
-        selector,
-        this.traverseCells,
-        "top",
-      );
+      return followPointer(this.tx, doc, [], this.context, selector, "top");
     } else {
       return [doc, selector];
     }
@@ -1085,12 +1116,9 @@ export abstract class BaseObjectTraverser {
  * @param manager - Storage manager for document access.
  * @param doc - IAttestation for the current document
  * @param path - Property/index path to follow beyond doc.address.path
- * @param tracker - Prevents pointer cycles
- * @param cfc: ContextualFlowControl with confidentiality rules
- * @param schemaTracker: Tracks schema used for loaded docs
+ * @param context - Shared traversal state, including pointer cycles, schema
+ *   tracking, metadata traversal, and metadata cycle checks.
  * @param selector: The selector being used (its path is relative to doc's root)
- * @param includeSource: if true, we will include linked source as well as
- *   pattern recursively
  * @param lastNode: defaults to "value", but if provided "writeRedirect", the
  *   return value will be the target of the last redirect pointer instead.
  *
@@ -1102,11 +1130,8 @@ export function getAtPath(
   tx: IExtendedStorageTransaction,
   doc: IMemorySpaceValueAttestation,
   path: readonly string[],
-  tracker: PointerCycleTracker,
-  cfc: ContextualFlowControl,
-  schemaTracker: MapSet<string, SchemaPathSelector>,
+  context: TraversalContext,
   selector?: SchemaPathSelector,
-  includeSource?: boolean,
   lastNode: LastNode = "value",
 ): [
   IMemorySpaceValueAttestation,
@@ -1132,11 +1157,8 @@ export function getAtPath(
         tx,
         curDoc,
         remaining,
-        tracker,
-        cfc,
-        schemaTracker,
+        context,
         selector,
-        includeSource,
         lastNode,
       );
       // followPointer/getAtPath have resolved all path elements
@@ -1251,21 +1273,18 @@ function getTrackerKey(
  * often call back into this method to resolve links (including if the target
  * of this link is also a link).
  *
- * We'll handle tracking of the docs, combining schema, and marking the linked
- * source docs as read if needed.
+ * We'll handle tracking of the docs, combining schema, and marking the
+ * metadata-linked docs as read if needed.
  *
  * I can't just use resolveLink, since I need to also track all the
- * intermediate documents if we includeSource.
+ * intermediate documents if we include metadata.
  *
  * @param tx - IStorageTransaction that can be used to read data
  * @param doc - IAttestation for the current document
  * @param path - Property/index path to follow
- * @param tracker - Prevents infinite pointer cycles
- * @param cfc: ContextualFlowControl with confidentiality rules
- * @param schemaTracker: Tracks schema to use for loaded docs
+ * @param context - Shared traversal state, including pointer cycles, schema
+ *   tracking, metadata traversal, and metadata cycle checks.
  * @param selector: SchemaPathSelector used to query the target doc
- * @param includeSource: if true, we will include linked source as well as
- *   pattern recursively
  * @param lastNode: This is just passed back into successive getAtPath calls,
  *   so @see getAtPath for details.
  *
@@ -1280,11 +1299,8 @@ function followPointer(
   tx: IExtendedStorageTransaction,
   doc: IMemorySpaceValueAttestation,
   path: readonly string[],
-  tracker: PointerCycleTracker,
-  cfc: ContextualFlowControl,
-  schemaTracker: MapSet<string, SchemaPathSelector>,
+  context: TraversalContext,
   selector?: SchemaPathSelector,
-  includeSource?: boolean,
   lastNode?: LastNode,
 ): [
   IMemorySpaceValueAttestation,
@@ -1309,12 +1325,17 @@ function followPointer(
     // Also insert the portions of target.path, so selector is relative to
     // new target doc. We do this even if the target doc is the same doc, since
     // we want the selector path to match.
-    selector = narrowSchema(doc.address.path, selector, target.path, cfc);
+    selector = narrowSchema(
+      doc.address.path,
+      selector,
+      target.path,
+      context.cfc,
+    );
     // When traversing links, we combine the schema
     selector.schema = combineOptionalSchema(selector.schema, link.schema);
   }
   // Check to see if we've already included this link with this schema context
-  using t = tracker.include(doc.value!, selector?.schema, null, doc);
+  using t = context.tracker.include(doc.value!, selector?.schema, null, doc);
   if (t === null) {
     // Cycle detected - treat this as notFound to avoid traversal
     logger.warn("traverse", () => ["Encountered cycle!", doc.value]);
@@ -1349,7 +1370,7 @@ function followPointer(
   // If we followed a link to a doc, and the doc exists, track our visit
   // We do this even if the id is the same, since the path may differ.
   if (link.id !== undefined) {
-    trackVisitedDoc(tx, target, schemaTracker, selector, includeSource);
+    trackVisitedDoc(tx, target, context, selector);
   }
 
   // If we got a NotFoundError, or an undefined because the last element
@@ -1395,11 +1416,8 @@ function followPointer(
         tx,
         partialTargetDoc,
         [...remaining, ...path],
-        tracker,
-        cfc,
-        schemaTracker,
+        context,
         selector,
-        includeSource,
         lastNode,
       );
     }
@@ -1416,33 +1434,25 @@ function followPointer(
 
   // We've loaded the linked doc, so walk the path to get to the right part of that doc (or whatever doc that path leads to),
   // then the provided path from the arguments.
-  return getAtPath(
-    tx,
-    targetDoc,
-    path,
-    tracker,
-    cfc,
-    schemaTracker,
-    selector,
-    includeSource,
-    lastNode,
-  );
+  return getAtPath(tx, targetDoc, path, context, selector, lastNode);
 }
 function trackVisitedDoc(
   tx: IExtendedStorageTransaction,
   target: IMemorySpaceAddress,
-  schemaTracker: MapSet<string, SchemaPathSelector>,
+  context: TraversalContext,
   selector: SchemaPathSelector | undefined,
-  includeSource: boolean = false,
 ) {
   // We have a reference to a different doc, so track the dependency
   // and update our targetDoc
   if (selector !== undefined) {
-    schemaTracker.add(getTrackerKey(target), internPathSelector(selector));
+    context.schemaTracker.add(
+      getTrackerKey(target),
+      internPathSelector(selector),
+    );
   }
-  // Load the sources/patterns recursively unless we're a retracted fact.
-  if (includeSource) {
-    // Loading source requires the full doc. This could be narrowed, but it
+  // Load the metadata-linked docs recursively unless we're a retracted fact.
+  if (context.includeMeta) {
+    // Loading metadata requires the full doc. This could be narrowed, but it
     // happens in a non-reactive context.
     const { ok: fullDoc } = tx.read({ ...target, path: [] });
     if (fullDoc) {
@@ -1452,8 +1462,7 @@ function trackVisitedDoc(
           address: { ...fullDoc.address, space: target.space },
           value: fullDoc.value,
         },
-        new Set<string>(),
-        schemaTracker,
+        context,
       );
     }
   }
@@ -1465,7 +1474,7 @@ export function loadMetaLinkedDoc(
   valueEntry: IMemorySpaceAttestation,
   meta: "result" | "pattern" | "argument" | "internal",
   schemaTracker: MapSet<string, SchemaPathSelector>,
-): IMemorySpaceAttestation | undefined {
+): MetaLinkedDoc | undefined {
   if (!isRecord(valueEntry.value)) {
     return undefined;
   }
@@ -1491,26 +1500,90 @@ export function loadMetaLinkedDoc(
   if (result.error) {
     return undefined;
   }
+  const selector = selectorForMetaLink(link);
   const docKey = getTrackerKey(address);
-  schemaTracker.add(docKey, REJECTING_SELECTOR);
-  return { address, value: result.ok.value };
+  schemaTracker.add(docKey, selector);
+  return { address, value: result.ok.value, selector };
+}
+
+type MetaLinkedDoc = IMemorySpaceAttestation & {
+  selector: SchemaPathSelector;
+};
+
+function selectorForMetaLink(link: NormalizedFullLink): SchemaPathSelector {
+  return internPathSelector({
+    path: ["value", ...link.path.map((part) => part.toString())],
+    schema: link.schema ?? false,
+  });
+}
+
+function traverseMetaLinkedDoc(
+  tx: IExtendedStorageTransaction,
+  doc: MetaLinkedDoc,
+  context: TraversalContext,
+) {
+  if (
+    doc.selector.schema === undefined ||
+    ContextualFlowControl.isFalseSchema(doc.selector.schema)
+  ) {
+    return;
+  }
+  if (!isRecord(doc.value) || !("value" in doc.value)) {
+    return;
+  }
+
+  const docContext = createTraversalContext(
+    new CompoundCycleTracker<
+      Immutable<FabricValue>,
+      JSONSchema | undefined
+    >(),
+    context.cfc,
+    context.schemaTracker,
+    context.includeMeta,
+    context.metaDocsVisited,
+  );
+  const traverser = new SchemaObjectTraverser(
+    tx,
+    doc.selector,
+    docContext,
+  );
+  const fullDoc = doc.value as Immutable<JSONObject>;
+  traverser.traverse({
+    address: {
+      ...doc.address,
+      path: ["value"],
+    },
+    value: fullDoc.value as Immutable<FabricValue>,
+  });
 }
 
 // Recursively load the meta linked docs from the doc
 export function loadMetaLinkedDocs(
   tx: IExtendedStorageTransaction,
   valueEntry: IMemorySpaceAttestation,
-  cycleCheck: Set<string> = new Set<string>(),
-  schemaTracker: MapSet<string, SchemaPathSelector>,
+  context: TraversalContext,
 ) {
+  const valueEntryKey = getTrackerKey(valueEntry.address);
+  if (context.metaDocsVisited.has(valueEntryKey)) {
+    return;
+  }
+  context.metaDocsVisited.add(valueEntryKey);
+
   const pendingDocs = [valueEntry];
   while (pendingDocs.length > 0) {
     const currentDoc = pendingDocs.shift()!;
     for (const meta of ["result", "pattern", "argument", "internal"] as const) {
-      const linkedDoc = loadMetaLinkedDoc(tx, currentDoc, meta, schemaTracker);
+      const linkedDoc = loadMetaLinkedDoc(
+        tx,
+        currentDoc,
+        meta,
+        context.schemaTracker,
+      );
       if (linkedDoc === undefined) continue;
-      if (cycleCheck.has(linkedDoc.address.id)) continue;
-      cycleCheck.add(linkedDoc.address.id);
+      const linkedDocKey = getTrackerKey(linkedDoc.address);
+      if (context.metaDocsVisited.has(linkedDocKey)) continue;
+      context.metaDocsVisited.add(linkedDocKey);
+      traverseMetaLinkedDoc(tx, linkedDoc, context);
       pendingDocs.push(linkedDoc);
     }
   }
@@ -1889,26 +1962,11 @@ export class SchemaObjectTraverser<V extends FabricValue>
   constructor(
     tx: IExtendedStorageTransaction,
     selector: SchemaPathSelector = DEFAULT_SELECTOR,
-    tracker: PointerCycleTracker = new CompoundCycleTracker<
-      Immutable<FabricValue>,
-      JSONSchema | undefined
-    >(),
-    schemaTracker: MapSetStringToPathSelectors =
-      new MapSetStringToPathSelectors(true),
-    cfc: ContextualFlowControl = new ContextualFlowControl(),
+    context: TraversalContext = createDefaultTraversalContext(),
     objectCreator?: IObjectCreator<V>,
-    traverseCells?: boolean,
     sharedSchemaMemo?: SchemaMemo,
   ) {
-    super(
-      tx,
-      selector,
-      tracker,
-      schemaTracker,
-      cfc,
-      objectCreator,
-      traverseCells,
-    );
+    super(tx, selector, context, objectCreator);
     this.sharedSchemaMemo = sharedSchemaMemo;
   }
 

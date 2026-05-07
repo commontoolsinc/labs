@@ -163,6 +163,12 @@ describe("pattern-binding", () => {
         y: { $alias: { cell: "argument", path: ["b", "c"] } },
         z: 3,
       };
+      const resultCell = runtime.getCell<{ a: number }>(
+        space,
+        "result cell",
+        undefined,
+        tx,
+      );
       const argumentCell = runtime.getCell<{ b: { c: number } }>(
         space,
         "argument cell",
@@ -182,6 +188,7 @@ describe("pattern-binding", () => {
         binding,
         argumentCell.getAsNormalizedFullLink(),
         internalCell.getAsNormalizedFullLink(),
+        resultCell.getAsNormalizedFullLink(),
       );
       expect(
         areLinksSame(

@@ -352,6 +352,104 @@ Deno.test("memory v2 query does not walk nested links inside inline opaque cells
   }
 });
 
+Deno.test("memory v2 query traverses metadata links using their link schema", async () => {
+  const { engine, path } = await createEngine();
+  const space = "did:key:z6Mk-memory-v2-query-meta-link-schema";
+  const rootPiece = "of:root-piece";
+  const argument = "of:argument";
+  const childPiece = "of:child-piece";
+  const childResult = "of:child-result";
+  const argumentSchema = {
+    type: "object",
+    properties: {
+      child: {
+        type: "object",
+        properties: {
+          label: { type: "string" },
+        },
+        required: ["label"],
+      },
+    },
+    required: ["child"],
+  };
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: childResult,
+          value: { value: { answer: 42 } },
+        }, {
+          op: "set",
+          id: childPiece,
+          value: {
+            value: { label: "child" },
+            argument: {
+              "/": {
+                "link@1": {
+                  id: argument,
+                  path: [],
+                  schema: argumentSchema,
+                },
+              },
+            },
+            result: { "/": { "link@1": { id: childResult, path: [] } } },
+          },
+        }, {
+          op: "set",
+          id: argument,
+          value: {
+            value: {
+              child: { "/": { "link@1": { id: childPiece, path: [] } } },
+            },
+          },
+        }, {
+          op: "set",
+          id: rootPiece,
+          value: {
+            value: { title: "root" },
+            argument: {
+              "/": {
+                "link@1": {
+                  id: argument,
+                  path: [],
+                  schema: argumentSchema,
+                },
+              },
+            },
+          },
+        }],
+      },
+    });
+
+    const result = queryGraph(space, engine, {
+      roots: [{
+        id: rootPiece,
+        selector: {
+          path: [],
+          schema: false,
+        },
+      }],
+    });
+
+    assertEquals(result.entities.map((entity) => entity.id), [
+      argument,
+      childPiece,
+      childResult,
+      rootPiece,
+    ]);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 query reuses a persistent manager cache for shared source growth", async () => {
   const { engine, path } = await createEngine();
   const space = "did:key:z6Mk-memory-v2-query-manager-growth";

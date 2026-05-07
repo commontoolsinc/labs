@@ -1,6 +1,7 @@
 import {
   CompoundCycleTracker,
   createSchemaMemo,
+  createTraversalContext,
   getAtPath,
   type IAttestation,
   type IMemorySpaceValueAttestation,
@@ -11,6 +12,7 @@ import {
   SchemaObjectTraverser,
   type SchemaPathSelector,
   schemaTrackerCoversSelector,
+  type TraversalContext,
 } from "@commonfabric/runner/traverse";
 import type { JSONSchema } from "../../runner/src/builder/types.ts";
 import { ExtendedStorageTransaction } from "../../runner/src/storage/extended-storage-transaction.ts";
@@ -278,6 +280,12 @@ export const trackGraph = (
   >();
   const schemaTracker = new MapSetStringToPathSelectors(true);
   const cfc = new ContextualFlowControl();
+  const traversalContext = createTraversalContext(
+    tracker,
+    cfc,
+    schemaTracker,
+    true,
+  );
   const sharedMemo = createSchemaMemo();
   const stats = createQueryTraversalStats();
   const readCountBefore = manager.readCount;
@@ -290,10 +298,8 @@ export const trackGraph = (
         manager,
         loaded,
         selector,
-        tracker,
-        cfc,
+        traversalContext,
         space,
-        schemaTracker,
         sharedMemo,
         stats,
       );
@@ -514,13 +520,8 @@ const loadFactsForDoc = (
   manager: EngineObjectManager,
   fact: IAttestation,
   selector: SchemaPathSelector,
-  tracker: CompoundCycleTracker<
-    Immutable<FabricValue>,
-    JSONSchema | undefined
-  >,
-  cfc: ContextualFlowControl,
+  traversalContext: TraversalContext,
   space: string,
-  schemaTracker: MapSetStringToPathSelectors,
   sharedMemo: ReturnType<typeof createSchemaMemo>,
   stats: QueryTraversalStats,
 ) => {
@@ -530,11 +531,17 @@ const loadFactsForDoc = (
 
   const docKey = toDocKey(space, fact.address.id);
   const internedSelector = internPathSelector(selector);
-  if (schemaTrackerCoversSelector(schemaTracker, docKey, internedSelector)) {
+  if (
+    schemaTrackerCoversSelector(
+      traversalContext.schemaTracker,
+      docKey,
+      internedSelector,
+    )
+  ) {
     stats.coveredSelectorSkips++;
     return;
   }
-  schemaTracker.add(docKey, internedSelector);
+  traversalContext.schemaTracker.add(docKey, internedSelector);
 
   if (!isObject(fact.value)) {
     return;
@@ -556,9 +563,7 @@ const loadFactsForDoc = (
     tx,
     factValue,
     selector.path.slice(1),
-    tracker,
-    cfc,
-    schemaTracker,
+    traversalContext,
     selector,
   );
   if (
@@ -569,10 +574,7 @@ const loadFactsForDoc = (
     const traverser = new SchemaObjectTraverser(
       tx,
       nextSelector,
-      tracker,
-      schemaTracker,
-      cfc,
-      undefined,
+      traversalContext,
       undefined,
       sharedMemo,
     );
@@ -586,8 +588,7 @@ const loadFactsForDoc = (
       address: { ...fact.address, space: space as MemorySpace },
       value: fact.value,
     },
-    new Set<string>(),
-    schemaTracker,
+    traversalContext,
   );
 };
 
@@ -613,14 +614,18 @@ const evaluateTrackedDocument = (
     JSONSchema | undefined
   >();
   const cfc = new ContextualFlowControl();
+  const traversalContext = createTraversalContext(
+    tracker,
+    cfc,
+    schemaTracker,
+    true,
+  );
   loadFactsForDoc(
     manager,
     loaded,
     selector,
-    tracker,
-    cfc,
+    traversalContext,
     space,
-    schemaTracker,
     sharedMemo,
     stats,
   );

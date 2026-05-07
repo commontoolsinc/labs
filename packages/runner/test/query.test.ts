@@ -5,11 +5,13 @@ import { JSONObject, type JSONSchema } from "../src/index.ts";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
   CompoundCycleTracker,
+  createTraversalContext,
   ManagedStorageTransaction,
   MapSet,
   MapSetStringToPathSelectors,
   SchemaObjectTraverser,
 } from "../src/traverse.ts";
+import { ContextualFlowControl } from "../src/cfc.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import type {
   MIME,
@@ -135,8 +137,12 @@ describe("Query", () => {
     const traverser = new SchemaObjectTraverser(
       emulatedStorageTx,
       { path: ["value"], schema },
-      tracker,
-      schemaTracker,
+      createTraversalContext(
+        tracker,
+        new ContextualFlowControl(),
+        schemaTracker,
+        true,
+      ),
     );
     // We've provided a schema context for this, so traverse it
     traverser.traverse({
@@ -227,8 +233,12 @@ describe("Query", () => {
     const traverser = new SchemaObjectTraverser(
       emulatedStorageTx,
       { path: ["value"], schema },
-      tracker,
-      schemaTracker,
+      createTraversalContext(
+        tracker,
+        new ContextualFlowControl(),
+        schemaTracker,
+        true,
+      ),
     );
     // We've provided a schema context for this, so traverse it
     traverser.traverse({
@@ -317,8 +327,12 @@ describe("Query", () => {
     const traverser = new SchemaObjectTraverser(
       emulatedStorageTx,
       { path: ["value"], schema },
-      tracker,
-      schemaTracker,
+      createTraversalContext(
+        tracker,
+        new ContextualFlowControl(),
+        schemaTracker,
+        true,
+      ),
     );
     // We've provided a schema context for this, so traverse it
     traverser.traverse({
@@ -438,8 +452,12 @@ describe("Query", () => {
     const traverser = new SchemaObjectTraverser(
       emulatedStorageTx,
       { path: ["value"], schema },
-      tracker,
-      schemaTracker,
+      createTraversalContext(
+        tracker,
+        new ContextualFlowControl(),
+        schemaTracker,
+        true,
+      ),
     );
 
     const result = traverser.traverse({
@@ -539,8 +557,12 @@ describe("Query", () => {
     const traverser = new SchemaObjectTraverser(
       emulatedStorageTx,
       selector,
-      tracker,
-      schemaTracker,
+      createTraversalContext(
+        tracker,
+        new ContextualFlowControl(),
+        schemaTracker,
+        true,
+      ),
     );
     // We've provided a schema context for this, so traverse it
     traverser.traverse({

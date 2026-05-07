@@ -31,6 +31,7 @@ import {
 import { toCell } from "./back-to-cell.ts";
 import {
   combineSchema,
+  createDefaultTraversalContext,
   IObjectCreator,
   mergeAnyOfMatches,
   mergeSchemaFlags,
@@ -775,11 +776,8 @@ export function validateAndTransform(
   const traverser = new SchemaObjectTraverser<any>(
     tx!,
     selector,
-    undefined,
-    undefined,
-    undefined,
+    createDefaultTraversalContext(options?.traverseCells ?? false),
     objectCreator,
-    options?.traverseCells ?? false,
   );
   const { ok: val, error: _err } = traverser.traverse(doc, link);
   // TODO(@ubik2): Now that undefined is a valid return value from traverse,
