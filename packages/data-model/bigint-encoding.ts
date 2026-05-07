@@ -124,7 +124,7 @@ export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
     // Slow path for positive numbers: This stringifies and then parses back the
     // `value`, to work around JS's very limited set of `bigint` functionality.
     // If and when the TC39 BigInt Math proposal lands, this code could be
-    // reworked to be muchb more performant. See:
+    // reworked to be much more performant. See:
     // <https://github.com/tc39/proposal-bigint-math>.
 
     const hex = hexStringFromPositiveValue(value);
