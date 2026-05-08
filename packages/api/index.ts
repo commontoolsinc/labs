@@ -1900,7 +1900,7 @@ export type FetchDataFunction = <T>(
     options?: FetchOptions;
     result?: T;
   }>,
-) => OpaqueRef<{ pending: boolean; result: T; error?: any }>;
+) => OpaqueRef<{ pending: boolean; result: T | undefined; error?: any }>;
 
 export type FetchProgramFunction = (
   params: Opaque<{ url: string }>,
@@ -1919,7 +1919,7 @@ export type StreamDataFunction = <T>(
     options?: FetchOptions;
     result?: T;
   }>,
-) => OpaqueRef<{ pending: boolean; result: T; error?: any }>;
+) => OpaqueRef<{ pending: boolean; result: T | undefined; error?: any }>;
 
 export type CompileAndRunFunction = <T = any, S = any>(
   params: Opaque<BuiltInCompileAndRunParams<T>>,
