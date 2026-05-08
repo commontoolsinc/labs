@@ -85,6 +85,27 @@ function lowerMapReceiverMemberAccess(
     break;
   }
 
+  if (ts.isCallExpression(current) && current.arguments.length === 0) {
+    const callee = unwrapExpression(current.expression);
+    if (
+      ts.isPropertyAccessExpression(callee) &&
+      callee.name.text === "get" &&
+      segments.length > 0
+    ) {
+      const receiver = unwrapExpression(callee.expression);
+      if (ts.isIdentifier(receiver)) {
+        return context.factory.createCallExpression(
+          context.factory.createPropertyAccessExpression(
+            context.factory.createIdentifier(receiver.text),
+            context.factory.createIdentifier("key"),
+          ),
+          undefined,
+          segments,
+        );
+      }
+    }
+  }
+
   if (!ts.isIdentifier(current) || segments.length === 0) {
     return expression;
   }
@@ -256,15 +277,21 @@ function createPatternCallWithParams(
     );
   }
 
-  const visitedArrayExpr = ts.visitNode(
-    methodCall.expression.expression,
-    visitor,
-    ts.isExpression,
-  ) ?? methodCall.expression.expression;
-  const loweredArrayExpr = lowerMapReceiverMemberAccess(
-    visitedArrayExpr,
+  const originalArrayExpr = methodCall.expression.expression;
+  const originalLoweredArrayExpr = lowerMapReceiverMemberAccess(
+    originalArrayExpr,
     context,
   );
+  const loweredArrayExpr = originalLoweredArrayExpr !== originalArrayExpr
+    ? originalLoweredArrayExpr
+    : lowerMapReceiverMemberAccess(
+      ts.visitNode(
+        originalArrayExpr,
+        visitor,
+        ts.isExpression,
+      ) ?? originalArrayExpr,
+      context,
+    );
 
   const originalMethodName = classifyArrayMethodCall(methodCall);
   if (!originalMethodName || originalMethodName.lowered) {

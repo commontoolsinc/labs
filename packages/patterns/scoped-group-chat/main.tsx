@@ -129,16 +129,26 @@ const metaTextStyle = {
 const sendMessage = handler<SendMessageEvent, {
   name: NameCell;
   selectedRoom: SelectedRoomCell;
+  conversation: ConversationCell;
   draft: DraftCell;
-}>(({ message }, { name, selectedRoom, draft }) => {
+}>(({ message }, { name, selectedRoom, conversation, draft }) => {
   const body = (message ?? draft.get()).trim();
   if (!body) return;
 
   const author = name.get().trim() || "Anonymous";
   const sentAt = safeDateNow();
 
-  const roomRef = selectedRoom.key("room") as RoomCell;
-  if (!roomRef.get()) return;
+  const selectedRoomRef = selectedRoom.key("room") as RoomCell;
+  const hasSelectedRoom = selectedRoomRef.get();
+  const roomRef = (hasSelectedRoom
+    ? selectedRoomRef
+    : conversation.key("rooms", 0)) as RoomCell;
+  if (!roomRef.get()) {
+    return;
+  }
+  if (!hasSelectedRoom) {
+    selectedRoom.set({ room: roomRef });
+  }
 
   (roomRef.key("messages") as Writable<ChatMessage[] | Default<[]>>).push({
     author,
@@ -249,6 +259,7 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
     const send = sendMessage({
       name,
       selectedRoom,
+      conversation,
       draft,
     });
     const roomSummaryText = computed(() =>
@@ -338,16 +349,50 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
                       )
                       : (
                         <cf-vstack gap="2">
-                          {messagesInSelectedRoom.map((message) => (
-                            <cf-chat-message
-                              role={message.author ===
-                                  (currentName || "Anonymous")
-                                ? "user"
-                                : "assistant"}
-                              content={message.body}
-                              name={message.author}
-                            />
-                          ))}
+                          {selectedRoomRef.get()?.messages.map((message) => {
+                            const isMine = message.author ===
+                              (currentName || "Anonymous");
+                            return (
+                              <div
+                                style={{
+                                  display: "flex",
+                                  justifyContent: isMine
+                                    ? "flex-end"
+                                    : "flex-start",
+                                }}
+                              >
+                                <div
+                                  style={{
+                                    maxWidth: "72%",
+                                    padding: "10px 12px",
+                                    borderRadius: "8px",
+                                    background: isMine
+                                      ? "var(--cf-theme-color-primary)"
+                                      : "var(--cf-theme-color-surface)",
+                                    color: isMine
+                                      ? "var(--cf-theme-color-primary-foreground)"
+                                      : "var(--cf-theme-color-text)",
+                                    border:
+                                      "1px solid var(--cf-theme-color-border-muted)",
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      fontSize: "12px",
+                                      fontWeight: 600,
+                                      marginBottom: "4px",
+                                      opacity: 0.8,
+                                    }}
+                                  >
+                                    {message.author}
+                                  </div>
+                                  <div style={{ whiteSpace: "pre-wrap" }}>
+                                    {message.body}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
                         </cf-vstack>
                       )}
                   </cf-vstack>

@@ -66,7 +66,7 @@ export function toJSONWithLegacyAliases(
       return {
         $alias: {
           path: pathToCell as (string | number)[],
-          ...(scope !== undefined && scope !== "space" && { scope }),
+          ...(scope !== undefined && { scope }),
           ...(schema !== undefined &&
             { schema: sanitizeSchemaForLinks(schema, { keepStreams: true }) }),
         },

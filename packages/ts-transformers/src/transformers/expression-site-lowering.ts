@@ -545,6 +545,23 @@ export function rewritePatternOwnedExpressionSites<T extends ts.Node>(
         return visitEachChildWithJsx(node, visit, context.tsContext);
       }
 
+      if (
+        isDirectArrayMethodRootExpression(node.expression) &&
+        ts.isCallExpression(node.expression)
+      ) {
+        const rewrittenArrayMethod = rewriteLateArrayMethodCallbackCall(
+          node.expression,
+          context,
+          visit,
+        );
+        if (rewrittenArrayMethod) {
+          return context.factory.createJsxExpression(
+            node.dotDotDotToken,
+            rewrittenArrayMethod,
+          );
+        }
+      }
+
       const handling = classifyExpressionSiteHandling(
         node.expression,
         "jsx-expression",

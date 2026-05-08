@@ -13,6 +13,7 @@ import {
   classifyReactiveReceiverKind,
   shouldRewriteCollectionMethod,
 } from "../../policy/mod.ts";
+import { classifyOpaquePathTerminalCall } from "../../transformers/opaque-roots.ts";
 
 function hasSharedReactiveCollectionProvenance(
   expression: ts.Expression,
@@ -34,6 +35,48 @@ function hasSharedReactiveCollectionProvenance(
         context.options.syntheticReactiveCollectionRegistry,
     },
   );
+}
+
+function isDirectCellGetPathExpression(
+  expression: ts.Expression,
+  context: TransformationContext,
+): boolean {
+  let current: ts.Expression = expression;
+
+  while (
+    ts.isPropertyAccessExpression(current) ||
+    ts.isElementAccessExpression(current)
+  ) {
+    current = current.expression;
+  }
+
+  if (
+    !ts.isCallExpression(current) ||
+    classifyOpaquePathTerminalCall(current) !== "get"
+  ) {
+    return false;
+  }
+
+  const callee = current.expression;
+  if (
+    !ts.isPropertyAccessExpression(callee) &&
+    !ts.isElementAccessExpression(callee)
+  ) {
+    return false;
+  }
+
+  const receiverType = getTypeAtLocationWithFallback(
+    callee.expression,
+    context.checker,
+    context.options.typeRegistry,
+    context.options.logger,
+  );
+  return !!receiverType &&
+    classifyReactiveReceiverKind(
+        callee.expression,
+        receiverType,
+        context.checker,
+      ) === "celllike_requires_rewrite";
 }
 
 /**
@@ -78,6 +121,13 @@ export function shouldTransformArrayMethod(
     targetType,
     context.checker,
   );
+
+  if (
+    contextInfo.kind === "pattern" &&
+    isDirectCellGetPathExpression(mapTarget, context)
+  ) {
+    return true;
+  }
 
   if (
     contextInfo.kind === "pattern" &&

@@ -2,7 +2,49 @@ import ts from "typescript";
 
 import type { EmitterContext } from "../types.ts";
 import { createReactiveWrapperForExpression } from "../rewrite-helpers.ts";
-import { isSafeEventHandlerCall } from "../../../ast/mod.ts";
+import {
+  classifyArrayMethodCall,
+  isSafeEventHandlerCall,
+} from "../../../ast/mod.ts";
+
+function isArrayMethodReceiverExpression(node: ts.Node): boolean {
+  let current: ts.Node = node;
+  let parent = current.parent;
+
+  while (
+    parent &&
+    (
+      ts.isParenthesizedExpression(parent) ||
+      ts.isAsExpression(parent) ||
+      ts.isTypeAssertionExpression(parent) ||
+      ts.isSatisfiesExpression(parent) ||
+      ts.isNonNullExpression(parent) ||
+      ts.isPartiallyEmittedExpression(parent)
+    )
+  ) {
+    if (parent.expression !== current) {
+      return false;
+    }
+    current = parent;
+    parent = parent.parent;
+  }
+
+  while (
+    parent &&
+    (
+      ts.isPropertyAccessExpression(parent) ||
+      ts.isElementAccessExpression(parent)
+    ) &&
+    parent.expression === current
+  ) {
+    current = parent;
+    parent = parent.parent;
+  }
+
+  return !!parent && ts.isCallExpression(parent) &&
+    parent.expression === current &&
+    !!classifyArrayMethodCall(parent);
+}
 
 export function emitPropertyAccess(
   params: EmitterContext,
@@ -20,6 +62,7 @@ export function emitPropertyAccess(
   if (inSafeContext) return undefined;
 
   if (dataFlows.length === 0) return undefined;
+  if (isArrayMethodReceiverExpression(expression)) return undefined;
   if (
     expression.parent &&
     ts.isCallExpression(expression.parent) &&

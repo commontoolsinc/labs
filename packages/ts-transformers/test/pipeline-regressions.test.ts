@@ -656,3 +656,56 @@ export default pattern<{ enabled: Writable<boolean> }>(({ enabled }) => ({
     assertStringIncludes(output, "({ enabled }) => enabled.get()");
   },
 );
+
+Deno.test(
+  "Pipeline regression: JSX map receiver keeps boxed cell schema through get",
+  async () => {
+    const source =
+      `import { Default, pattern, UI, Writable } from "commonfabric";
+
+interface Message {
+  body: string;
+}
+
+interface Room {
+  messages: Message[] | Default<[]>;
+}
+
+interface SelectedRoom {
+  room?: Room;
+}
+
+type RoomCell = Writable<Room>;
+
+export default pattern<{ selectedRoom: Writable<SelectedRoom> }>(
+  ({ selectedRoom }) => {
+    const selectedRoomRef = selectedRoom.key("room") as RoomCell;
+    return {
+      [UI]: (
+        <div>
+          {selectedRoomRef.get()?.messages.map((message) => (
+            <span>{message.body}</span>
+          ))}
+        </div>
+      ),
+    };
+  },
+);
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+
+    assert(
+      !output.includes(
+        "{ selectedRoomRef: selectedRoomRef }, ({ selectedRoomRef }) => selectedRoomRef.get()?.messages",
+      ),
+      "expected selectedRoomRef get() receiver to lower with a concrete cell schema, not an unknown fallback",
+    );
+    assertStringIncludes(
+      output,
+      'selectedRoomRef.key("messages").mapWithPattern',
+    );
+  },
+);

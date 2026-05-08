@@ -622,6 +622,355 @@ Deno.test("map materializes initially populated list selected by session input",
   }
 });
 
+Deno.test("ifElse selected branch materializes map over session-derived list", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+
+  try {
+    const { derive, ifElse, pattern } =
+      createTrustedBuilder(runtime).commonfabric;
+
+    const selectedRoomBase = runtime.getCell<string>(
+      space,
+      "ifElse map session selected room",
+      undefined,
+      tx,
+    );
+    const selectedRoom = createCell<string>(
+      runtime,
+      { ...selectedRoomBase.getAsNormalizedFullLink(), scope: "session" },
+      tx,
+    );
+    selectedRoom.set("lobby");
+
+    interface Message {
+      body: string;
+    }
+
+    interface Conversation {
+      rooms: Record<string, Message[]>;
+    }
+
+    const Root = pattern<{
+      conversation: Conversation;
+      selectedRoom: string;
+    }>(({ conversation, selectedRoom }) => {
+      const messages = derive(
+        { conversation, selectedRoom },
+        (
+          current: { conversation: Conversation; selectedRoom: string },
+        ) => current.conversation.rooms[current.selectedRoom] ?? [],
+      );
+      const isEmpty = derive(
+        messages,
+        (current: Message[]) => current.length === 0,
+      );
+      const rendered = ifElse(
+        isEmpty,
+        [],
+        messages.map((message) =>
+          derive(message, (current: Message) => current.body)
+        ),
+      );
+      return { rendered };
+    });
+
+    const resultCell = runtime.getCell(
+      space,
+      "ifElse selected map branch materializes",
+      undefined,
+      tx,
+    );
+
+    const result = runtime.run(tx, Root, {
+      conversation: {
+        rooms: {
+          lobby: [{ body: "visible through selected map branch" }],
+        },
+      },
+      selectedRoom,
+    }, resultCell);
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+
+    assertEquals(
+      result.key("rendered").get() as unknown,
+      ["visible through selected map branch"],
+    );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("ifElse selected VNode branch materializes map over session-derived list", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+
+  try {
+    const { derive, h, ifElse, pattern } =
+      createTrustedBuilder(runtime).commonfabric;
+
+    const selectedRoomBase = runtime.getCell<string>(
+      space,
+      "ifElse vnode map session selected room",
+      undefined,
+      tx,
+    );
+    const selectedRoom = createCell<string>(
+      runtime,
+      { ...selectedRoomBase.getAsNormalizedFullLink(), scope: "session" },
+      tx,
+    );
+    selectedRoom.set("lobby");
+
+    interface Message {
+      body: string;
+    }
+
+    interface Conversation {
+      rooms: Record<string, Message[]>;
+    }
+
+    const Root = pattern<{
+      conversation: Conversation;
+      selectedRoom: string;
+    }>(({ conversation, selectedRoom }) => {
+      const messages = derive(
+        { conversation, selectedRoom },
+        (
+          current: { conversation: Conversation; selectedRoom: string },
+        ) => current.conversation.rooms[current.selectedRoom] ?? [],
+      );
+      const isEmpty = derive(
+        messages,
+        (current: Message[]) => current.length === 0,
+      );
+      const ui = ifElse(
+        isEmpty,
+        h("span", null, "empty"),
+        h(
+          "div",
+          null,
+          messages.map((message) =>
+            h("span", null, derive(message, (current: Message) => current.body))
+          ),
+        ),
+      );
+      return { ui };
+    });
+
+    const resultCell = runtime.getCell(
+      space,
+      "ifElse selected vnode map branch materializes",
+      undefined,
+      tx,
+    );
+
+    const result = runtime.run(tx, Root, {
+      conversation: {
+        rooms: {
+          lobby: [{ body: "visible in mapped vnode branch" }],
+        },
+      },
+      selectedRoom,
+    }, resultCell);
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+
+    const uiLink = parseLink(result.key("ui").getRaw(), result.key("ui"));
+    const rendered = uiLink && runtime.getCellFromLink(uiLink).getRaw() as any;
+    const childRaw = Array.isArray(rendered?.children)
+      ? rendered.children[0]
+      : undefined;
+    const nestedLink = childRaw && parseLink(childRaw, uiLink!);
+
+    assertEquals(nestedLink?.scope, "space");
+    assertEquals(
+      JSON.stringify(runtime.getCellFromLink(nestedLink!).get()).includes(
+        "visible in mapped vnode branch",
+      ),
+      true,
+    );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("map materializes list through session boxed space-scoped reference", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+
+  try {
+    const { derive, h, ifElse, pattern } =
+      createTrustedBuilder(runtime).commonfabric;
+
+    interface Message {
+      body: string;
+    }
+
+    interface Room {
+      name: string;
+      messages: Message[];
+    }
+
+    interface SelectedRoom {
+      room?: Room;
+    }
+
+    const container = runtime.getCell<{
+      conversation: { rooms: Room[] };
+    }>(
+      space,
+      "boxed selected room target container",
+      undefined,
+      tx,
+    );
+    const scopedContainer = createCell<{
+      conversation: { rooms: Room[] };
+    }>(
+      runtime,
+      { ...container.getAsNormalizedFullLink(), scope: "space" },
+      tx,
+    );
+    scopedContainer.set({
+      conversation: {
+        rooms: [{
+          name: "Library",
+          messages: [{ body: "visible through boxed room ref" }],
+        }],
+      },
+    });
+    const room = scopedContainer.key("conversation", "rooms", 0) as Cell<Room>;
+
+    const selectedRoomBase = runtime.getCell<SelectedRoom>(
+      space,
+      "boxed selected room session state",
+      undefined,
+      tx,
+    );
+    const selectedRoom = createCell<SelectedRoom>(
+      runtime,
+      { ...selectedRoomBase.getAsNormalizedFullLink(), scope: "session" },
+      tx,
+    );
+    selectedRoom.set({});
+
+    const Root = pattern<{ selectedRoom: SelectedRoom }>(
+      ({ selectedRoom }) => {
+        const selectedRoomRef = (selectedRoom as unknown as Cell<SelectedRoom>)
+          .key("room") as Cell<Room>;
+        const selectedRoomRefInputSchema = {
+          type: "object",
+          properties: {
+            selectedRoomRef: {
+              type: "object",
+              properties: {
+                name: { type: "string" },
+                messages: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: { body: { type: "string" } },
+                    required: ["body"],
+                  },
+                },
+              },
+              required: ["name", "messages"],
+              asCell: ["cell"],
+            },
+          },
+          required: ["selectedRoomRef"],
+        } as const;
+        const messageCount = derive(
+          selectedRoomRefInputSchema,
+          { type: "number" } as const,
+          { selectedRoomRef },
+          (current: any) =>
+            current.selectedRoomRef.get()?.messages?.length ?? 0,
+        );
+        const isEmpty = derive(
+          messageCount,
+          (current: number) => current === 0,
+        );
+        const ui = ifElse(
+          isEmpty,
+          h("span", null, "empty"),
+          h(
+            "div",
+            null,
+            derive(
+              selectedRoomRefInputSchema,
+              { type: "unknown" } as const,
+              { selectedRoomRef },
+              (current: any) =>
+                current.selectedRoomRef.get()?.messages as Message[],
+            ).map((message: any) =>
+              h(
+                "span",
+                null,
+                derive(message, (current: Message) => current.body),
+              )
+            ),
+          ),
+        );
+        return { messageCount, ui };
+      },
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "map through boxed scoped room reference",
+      undefined,
+      tx,
+    );
+
+    const result = runtime.run(tx, Root, { selectedRoom }, resultCell);
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+
+    const updateTx = runtime.edit();
+    selectedRoom.withTx(updateTx).set({ room: room as unknown as Room });
+    await updateTx.commit();
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+
+    assertEquals(result.key("messageCount").get() as unknown, 1);
+    assertEquals(
+      JSON.stringify(result.key("ui").get()).includes(
+        "visible through boxed room ref",
+      ),
+      true,
+    );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
 Deno.test("filter narrows output list when scoped element controls cardinality", async () => {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({
