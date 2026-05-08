@@ -141,6 +141,52 @@ Deno.test("extractMetrics aggregates split CLI core jobs", () => {
   assertEquals(metrics.has("step: CLI integration"), false);
 });
 
+Deno.test("extractMetrics aggregates package integration matrix jobs", () => {
+  const metrics = extractMetrics(makeRun(), [
+    makeJob(
+      1,
+      "Package Integration Tests (runner)",
+      "2026-01-01T00:00:00Z",
+      "2026-01-01T00:01:20Z",
+      [
+        makeStep(
+          "🧪 Run runner integration tests",
+          "2026-01-01T00:00:10Z",
+          "2026-01-01T00:01:00Z",
+        ),
+      ],
+    ),
+    makeJob(
+      2,
+      "Package Integration Tests (shell)",
+      "2026-01-01T00:00:00Z",
+      "2026-01-01T00:01:40Z",
+      [
+        makeStep(
+          "🧪 Run shell integration tests",
+          "2026-01-01T00:00:10Z",
+          "2026-01-01T00:01:30Z",
+        ),
+      ],
+    ),
+  ]);
+
+  assertEquals(
+    metrics.get("job: Package Integration Tests (runner)")?.durationSeconds,
+    80,
+  );
+  assertEquals(
+    metrics.get("job: Package Integration Tests (shell)")?.durationSeconds,
+    100,
+  );
+  assertEquals(
+    metrics.get("job: Package Integration Tests")?.durationSeconds,
+    100,
+  );
+  assertEquals(metrics.get("step: runner integration")?.durationSeconds, 50);
+  assertEquals(metrics.get("step: shell integration")?.durationSeconds, 80);
+});
+
 Deno.test("extractMetrics aggregates pattern integration matrix shards", () => {
   const metrics = extractMetrics(makeRun(), [
     makeJob(
@@ -282,6 +328,10 @@ Deno.test("extractMetrics aggregates runner test matrix shards", () => {
 });
 
 Deno.test("timingArtifactLabel normalizes matrix shard artifacts", () => {
+  assertEquals(
+    timingArtifactLabel("test-timing-package-integration-runner"),
+    "package-integration",
+  );
   assertEquals(
     timingArtifactLabel("test-timing-pattern-integration-1"),
     "pattern-integration",

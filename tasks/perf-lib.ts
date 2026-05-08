@@ -536,6 +536,7 @@ export const JOB_TO_LABEL: Record<string, string> = {
 export function timingArtifactLabel(artifactName: string): string {
   const label = artifactName.replace(/^test-timing-/, "");
   return label
+    .replace(/^package-integration-.+$/, "package-integration")
     .replace(/^pattern-integration-\d+$/, "pattern-integration")
     .replace(/^generated-patterns-\d+$/, "generated-patterns");
 }
@@ -615,6 +616,7 @@ const JOB_METRIC_NAMES: Record<string, string> = {
 };
 
 /** Pattern for matrix jobs like "Pattern Unit Tests (1/5)". */
+export const PACKAGE_INTEGRATION_RE = /Package Integration Tests\s*\(([^)]+)\)/;
 export const PATTERN_UNIT_RE = /Pattern Unit Tests\s*\((\d+)\/(\d+)\)/;
 export const PATTERN_INTEGRATION_RE =
   /Pattern Integration Tests\s*\((\d+)\/(\d+)\)/;
@@ -734,6 +736,9 @@ export function extractMetrics(
       metrics.set(jobMetricName, makeSample(jobDuration));
     }
 
+    const packageIntegrationMatch = PACKAGE_INTEGRATION_RE.exec(
+      normalizedJobName,
+    );
     const unitMatch = PATTERN_UNIT_RE.exec(normalizedJobName);
     const patternIntegrationMatch = PATTERN_INTEGRATION_RE.exec(
       normalizedJobName,
@@ -744,7 +749,9 @@ export function extractMetrics(
     const runnerTestMatch = RUNNER_TEST_RE.exec(normalizedJobName);
     const cliCoreSplitMatch = CLI_CORE_SPLIT_RE.exec(normalizedJobName);
 
-    const matcherJobName = unitMatch
+    const matcherJobName = packageIntegrationMatch
+      ? "Package Integration Tests"
+      : unitMatch
       ? "Pattern Unit Tests"
       : patternIntegrationMatch
       ? "Pattern Integration Tests"
@@ -755,6 +762,15 @@ export function extractMetrics(
       : cliCoreSplitMatch
       ? "CLI Integration Tests (core)"
       : normalizedJobName;
+
+    if (packageIntegrationMatch) {
+      const sample = makeSample(jobDuration);
+      metrics.set(
+        `job: Package Integration Tests (${packageIntegrationMatch[1]})`,
+        sample,
+      );
+      setMaxMetric("job: Package Integration Tests", sample);
+    }
 
     if (unitMatch) {
       metrics.set(
@@ -819,8 +835,8 @@ export function extractMetrics(
         ) {
           const sample = makeSample(stepDuration);
           if (
-            patternIntegrationMatch || generatedPatternsMatch ||
-            runnerTestMatch || cliCoreSplitMatch
+            packageIntegrationMatch || patternIntegrationMatch ||
+            generatedPatternsMatch || runnerTestMatch || cliCoreSplitMatch
           ) {
             setMaxMetric(matcher.metricName, sample);
           } else {
