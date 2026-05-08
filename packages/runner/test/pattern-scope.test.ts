@@ -53,6 +53,141 @@ Deno.test("Cell.key applies concrete scope from child schema", async () => {
   }
 });
 
+Deno.test("handler bindings preserve scoped cells selected from pattern input schema", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+
+  try {
+    const { handler, pattern } = createTrustedBuilder(runtime).commonfabric;
+
+    interface Conversation {
+      rooms: { name: string }[];
+    }
+
+    const addRoom = handler<
+      { name?: string },
+      { conversation: Cell<Conversation>; newRoomName: Cell<string> }
+    >({
+      type: "object",
+      properties: {
+        name: { type: "string" },
+      },
+    }, {
+      type: "object",
+      properties: {
+        conversation: {
+          type: "object",
+          properties: {
+            rooms: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: { name: { type: "string" } },
+                required: ["name"],
+              },
+              default: [],
+            },
+          },
+          required: ["rooms"],
+          default: { rooms: [] },
+          asCell: ["cell"],
+        },
+        newRoomName: {
+          type: "string",
+          default: "",
+          asCell: ["cell"],
+        },
+      },
+      required: ["conversation", "newRoomName"],
+    }, ({ name: eventName }, { conversation, newRoomName }) => {
+      const name = eventName ?? newRoomName.get();
+      if (!name) return;
+      conversation.key("rooms").push({ name });
+      newRoomName.set("");
+    });
+
+    const Root = pattern<{
+      conversation: Conversation;
+      newRoomName: string;
+    }>(({ conversation, newRoomName }) => ({
+      conversation,
+      newRoomName,
+      addRoom: addRoom({
+        conversation: conversation as unknown as Cell<Conversation>,
+        newRoomName: newRoomName as unknown as Cell<string>,
+      }),
+    }), {
+      type: "object",
+      properties: {
+        conversation: {
+          type: "object",
+          scope: "space",
+          properties: {
+            rooms: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: { name: { type: "string" } },
+                required: ["name"],
+              },
+              default: [],
+            },
+          },
+          required: ["rooms"],
+          default: { rooms: [] },
+        },
+        newRoomName: {
+          type: "string",
+          default: "",
+          scope: "session",
+        },
+      },
+      required: ["conversation", "newRoomName"],
+    });
+
+    const resultCell = runtime.getCell(
+      space,
+      "handler scoped pattern input binding",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, Root, {
+      conversation: { rooms: [] },
+      newRoomName: "",
+    }, resultCell);
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+
+    const setTx = runtime.edit();
+    result.key("newRoomName").withTx(setTx).set("Project");
+    runtime.prepareTxForCommit(setTx);
+    await setTx.commit();
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+
+    result.key("addRoom").send({});
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+
+    assertEquals(result.key("conversation").get(), {
+      rooms: [{ name: "Project" }],
+    });
+    assertEquals(result.key("newRoomName").get() as unknown, "");
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
 Deno.test("pattern factory .asScope() sets child pattern result scope", async () => {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({
