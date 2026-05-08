@@ -34,13 +34,7 @@ export interface SelectedRoom {
   room?: Room;
 }
 
-interface ConversationSnapshot {
-  rooms: readonly Room[];
-}
-
-export interface SendMessageEvent {
-  message?: string;
-}
+export type SendMessageEvent = Record<PropertyKey, never>;
 
 export interface AddRoomEvent {
   name?: string;
@@ -53,8 +47,6 @@ export interface SelectRoomEvent {
 const DEFAULT_CONVERSATION = {
   rooms: [],
 } satisfies Conversation;
-
-const EMPTY_ROOM = { name: "", messages: [] } satisfies Room;
 
 type NameCell = Writable<string | Default<"">>;
 type EmptySelectedRoom = Record<PropertyKey, never>;
@@ -134,18 +126,18 @@ const sendMessage = handler<SendMessageEvent, {
   selectedRoom: SelectedRoomCell;
   conversation: ConversationCell;
   draft: DraftCell;
-}>(({ message }, { name, selectedRoom, conversation, draft }) => {
-  const body = (message ?? draft.get()).trim();
+}>((_, { name, selectedRoom, conversation, draft }) => {
+  const body = draft.get().trim();
   if (!body) return;
 
   const author = senderName(name.get());
   const sentAt = safeDateNow();
 
-  const selectedRoomRef = selectedRoom.key("room") as RoomCell;
+  const selectedRoomRef = selectedRoom.key("room");
   const hasSelectedRoom = selectedRoomRef.get();
-  const roomRef = (hasSelectedRoom
+  const roomRef = hasSelectedRoom
     ? selectedRoomRef
-    : conversation.key("rooms", 0)) as RoomCell;
+    : conversation.key("rooms", 0);
   if (!roomRef.get()) {
     return;
   }
@@ -153,7 +145,7 @@ const sendMessage = handler<SendMessageEvent, {
     selectedRoom.set({ room: roomRef });
   }
 
-  (roomRef.key("messages") as Writable<ChatMessage[] | Default<[]>>).push({
+  roomRef.key("messages").push({
     author,
     body,
     sentAt,
@@ -169,7 +161,7 @@ const addRoom = handler<AddRoomEvent, {
   const name = (eventName ?? newRoomName.get()).trim();
   if (!name) return;
 
-  const rooms = conversation.key("rooms") as Writable<Room[] | Default<[]>>;
+  const rooms = conversation.key("rooms");
   rooms.push({ name, messages: [] });
   selectedRoom.set({ room: rooms.key(rooms.get().length - 1) });
   newRoomName.set("");
@@ -208,19 +200,8 @@ interface ScopedGroupChatOutput {
   conversation: PerSpace<ConversationCell>;
   draft: PerUser<DraftCell>;
   newRoomName: PerSession<NewRoomNameCell>;
-  currentName: string;
-  currentRoom: { room: Room };
-  currentDraft: string;
-  conversationSnapshot: ConversationSnapshot;
-  messagesInSelectedRoom: readonly ChatMessage[];
   messageCount: number;
   roomCount: number;
-  currentRoomMessageCount: number;
-  lastRoomName: string;
-  lastRoomMessageCount: number;
-  lastCurrentRoomAuthor: string;
-  lastCurrentRoomBody: string;
-  roomSummaryText: string;
   sendMessage: Stream<SendMessageEvent>;
   addRoom: Stream<AddRoomEvent>;
   selectRoom: Stream<SelectRoomEvent>;
@@ -234,55 +215,22 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
       newRoomName,
     });
     const boundSelectRoom = selectRoom({ selectedRoom });
-    const currentName = computed(() => name.get());
-    const currentDraft = computed(() => draft.get());
-    const rooms: Room[] = computed(() =>
-      (conversation.get() as Conversation | undefined)?.rooms ?? []
-    );
-    const roomCells = conversation.key("rooms") as Writable<
-      Room[] | Default<[]>
-    >;
-    const conversationSnapshot = computed(() => ({
-      rooms,
-    }));
+    const roomCells = conversation.key("rooms");
     const selectedRoomRef = selectedRoom.key("room");
-    const currentRoom: { room: Room } = computed(() => ({
-      room: selectedRoomRef.get() ?? EMPTY_ROOM,
-    }));
-    const messagesInSelectedRoom = computed<readonly ChatMessage[]>(() =>
-      selectedRoomRef.get()?.messages ?? []
-    );
+    const messagesInSelectedRoom = selectedRoomRef.key("messages");
     const messageCount = computed(() =>
       selectedRoomRef.get()?.messages?.length ?? 0
     );
-    const currentRoomLabel = computed(() =>
+    const displayedRoomLabel = computed(() =>
       selectedRoomRef.get()?.name ?? "No room"
     );
-    const displayedRoomLabel = computed(() => currentRoomLabel || "No room");
     const send = sendMessage({
       name,
       selectedRoom,
       conversation,
       draft,
     });
-    const roomSummaryText = computed(() =>
-      rooms
-        .map((room) => `${room.name}: ${room.messages?.length ?? 0}`)
-        .join("\n")
-    );
-    const roomCount = computed(() => rooms.length);
-    const currentRoomMessageCount = messageCount;
-    const lastRoom = computed(() => rooms[rooms.length - 1] ?? EMPTY_ROOM);
-    const lastRoomName = computed(() => lastRoom.name);
-    const lastRoomMessageCount = computed(() => lastRoom.messages?.length ?? 0);
-    const lastCurrentRoomAuthor = computed(() => {
-      const messages = selectedRoomRef.get()?.messages ?? [];
-      return messages[messages.length - 1]?.author ?? "";
-    });
-    const lastCurrentRoomBody = computed(() => {
-      const messages = selectedRoomRef.get()?.messages ?? [];
-      return messages[messages.length - 1]?.body ?? "";
-    });
+    const roomCount = roomCells.key("length");
     return {
       [NAME]: "Scoped group chat",
       [UI]: (
@@ -352,7 +300,7 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
                       )
                       : (
                         <cf-vstack gap="2">
-                          {selectedRoomRef.key("messages").map((message) => {
+                          {messagesInSelectedRoom.map((message) => {
                             const author = message.author;
                             const isMine = derive({ author, name }, (
                               { author, name },
@@ -409,17 +357,16 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
             <cf-hstack slot="footer" gap="3" align="end" style={composerStyle}>
               <cf-vstack gap="1" style="flex: 1;">
                 <cf-label>Message</cf-label>
-                <cf-message-input
+                <cf-input
+                  $value={draft}
                   placeholder={`Message ${displayedRoomLabel}`}
-                  button-text="Send"
-                  oncf-send={(e: { detail?: { message?: string } }) => {
-                    const message = e.detail?.message?.trim();
-                    if (message) {
-                      send.send({ message });
-                    }
-                  }}
+                  aria-label="Message"
+                  timing-strategy="immediate"
                 />
               </cf-vstack>
+              <cf-button onClick={send}>
+                Send
+              </cf-button>
             </cf-hstack>
           </cf-screen>
         </cf-theme>
@@ -429,19 +376,8 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
       conversation,
       draft,
       newRoomName,
-      currentName,
-      currentRoom,
-      currentDraft,
-      conversationSnapshot,
-      messagesInSelectedRoom,
       messageCount,
       roomCount,
-      currentRoomMessageCount,
-      lastRoomName,
-      lastRoomMessageCount,
-      lastCurrentRoomAuthor,
-      lastCurrentRoomBody,
-      roomSummaryText,
       sendMessage: send,
       addRoom: boundAddRoom,
       selectRoom: boundSelectRoom,

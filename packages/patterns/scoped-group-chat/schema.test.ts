@@ -6,7 +6,7 @@ Deno.test("scoped group chat pattern schema generates scoped input cells", async
       "task",
       "cf",
       "check",
-      "packages/patterns/scoped-group-chat/main.tsx",
+      "packages/patterns/scoped-group-chat/main-with-writable-inputs.tsx",
       "--pattern-json",
     ],
     stdout: "piped",
