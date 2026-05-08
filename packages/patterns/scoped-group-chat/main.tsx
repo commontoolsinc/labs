@@ -129,22 +129,16 @@ const metaTextStyle = {
 const sendMessage = handler<SendMessageEvent, {
   name: NameCell;
   selectedRoom: SelectedRoomCell;
-  conversation: ConversationCell;
   draft: DraftCell;
-}>(({ message }, { name, selectedRoom, conversation, draft }) => {
+}>(({ message }, { name, selectedRoom, draft }) => {
   const body = (message ?? draft.get()).trim();
   if (!body) return;
 
   const author = name.get().trim() || "Anonymous";
   const sentAt = safeDateNow();
 
-  const selectedRoomRef = selectedRoom.key("room") as RoomCell;
-  const roomRef = (selectedRoomRef.get()
-    ? selectedRoomRef
-    : conversation.key("rooms", 0)) as RoomCell;
-  if (!roomRef.get()) {
-    return;
-  }
+  const roomRef = selectedRoom.key("room") as RoomCell;
+  if (!roomRef.get()) return;
 
   (roomRef.key("messages") as Writable<ChatMessage[] | Default<[]>>).push({
     author,
@@ -206,7 +200,6 @@ interface ScopedGroupChatOutput {
   currentDraft: string;
   conversationSnapshot: ConversationSnapshot;
   messagesInSelectedRoom: readonly ChatMessage[];
-  chatTranscript: string;
   messageCount: number;
   roomCount: number;
   currentRoomMessageCount: number;
@@ -241,28 +234,21 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
     }));
     const selectedRoomRef = selectedRoom.key("room") as RoomCell;
     const currentRoom: { room: Room } = computed(() => ({
-      room: selectedRoomRef.get() ?? rooms[0] ?? EMPTY_ROOM,
+      room: selectedRoomRef.get() ?? EMPTY_ROOM,
     }));
     const messagesInSelectedRoom = computed<readonly ChatMessage[]>(() =>
-      selectedRoomRef.get()?.messages ?? rooms[0]?.messages ?? []
+      selectedRoomRef.get()?.messages ?? []
     );
-    const chatTranscript = computed(() => {
-      const messages = selectedRoomRef.get()?.messages ?? rooms[0]?.messages ??
-        [];
-      return messages.map((message) => `${message.author}: ${message.body}`)
-        .join("\n\n");
-    });
     const messageCount = computed(() =>
-      selectedRoomRef.get()?.messages?.length ?? rooms[0]?.messages?.length ?? 0
+      selectedRoomRef.get()?.messages?.length ?? 0
     );
     const currentRoomLabel = computed(() =>
-      selectedRoomRef.get()?.name ?? rooms[0]?.name ?? "No room"
+      selectedRoomRef.get()?.name ?? "No room"
     );
     const displayedRoomLabel = computed(() => currentRoomLabel || "No room");
     const send = sendMessage({
       name,
       selectedRoom,
-      conversation,
       draft,
     });
     const roomSummaryText = computed(() =>
@@ -276,13 +262,11 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
     const lastRoomName = computed(() => lastRoom.name);
     const lastRoomMessageCount = computed(() => lastRoom.messages?.length ?? 0);
     const lastCurrentRoomAuthor = computed(() => {
-      const messages = selectedRoomRef.get()?.messages ?? rooms[0]?.messages ??
-        [];
+      const messages = selectedRoomRef.get()?.messages ?? [];
       return messages[messages.length - 1]?.author ?? "";
     });
     const lastCurrentRoomBody = computed(() => {
-      const messages = selectedRoomRef.get()?.messages ?? rooms[0]?.messages ??
-        [];
+      const messages = selectedRoomRef.get()?.messages ?? [];
       return messages[messages.length - 1]?.body ?? "";
     });
     return {
@@ -354,11 +338,16 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
                       )
                       : (
                         <cf-vstack gap="2">
-                          <cf-chat-message
-                            role="assistant"
-                            content={chatTranscript}
-                            name={displayedRoomLabel}
-                          />
+                          {messagesInSelectedRoom.map((message) => (
+                            <cf-chat-message
+                              role={message.author ===
+                                  (currentName || "Anonymous")
+                                ? "user"
+                                : "assistant"}
+                              content={message.body}
+                              name={message.author}
+                            />
+                          ))}
                         </cf-vstack>
                       )}
                   </cf-vstack>
@@ -394,7 +383,6 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
       currentDraft,
       conversationSnapshot,
       messagesInSelectedRoom,
-      chatTranscript,
       messageCount,
       roomCount,
       currentRoomMessageCount,
