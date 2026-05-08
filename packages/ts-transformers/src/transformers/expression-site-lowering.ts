@@ -30,6 +30,10 @@ import type { AnalyzeFn } from "./expression-rewrite/types.ts";
 import type { ExpressionContainerKind } from "./expression-site-types.ts";
 import { createDeriveCall } from "./builtins/derive.ts";
 import { classifyOpaquePathTerminalCall } from "./opaque-roots.ts";
+import {
+  isPatternFactoryCalleeExpression,
+  returnsOpaqueRefResult,
+} from "./structural-reactive-factory.ts";
 
 interface RewriteExpressionSiteParams {
   readonly expression: ts.Expression;
@@ -706,6 +710,17 @@ export function rewriteArrayMethodCallbackExpressionSites(
     }
 
     const current = unwrapExpression(expression);
+    if (ts.isCallExpression(current)) {
+      const callKind = detectCallKind(current, context.checker);
+      if (
+        (callKind?.kind === "builder" && callKind.builderName === "pattern") ||
+        returnsOpaqueRefResult(current, context.checker) ||
+        isPatternFactoryCalleeExpression(current.expression, context.checker)
+      ) {
+        return false;
+      }
+    }
+
     return !(
       ts.isPropertyAccessExpression(current) ||
       ts.isElementAccessExpression(current) ||
