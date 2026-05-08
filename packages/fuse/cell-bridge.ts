@@ -2435,11 +2435,7 @@ export class CellBridge {
         (typeof candidate === "object" && candidate !== null &&
           callableValues.has(candidate)) ||
         isVNode(candidate),
-      classifyEntry: (key: string, candidate: unknown) =>
-        typeof candidate === "object" && candidate !== null &&
-          callableValues.has(candidate)
-          ? callableKinds.get(key) ?? null
-          : null,
+      classifyEntry: (key: string) => callableKinds.get(key) ?? null,
     };
   }
 
@@ -2650,6 +2646,8 @@ export class CellBridge {
     annotator?: CfcProjectionAnnotator,
   ): (parentIno: bigint, name: string, value: unknown) => void {
     return (parentIno, name, value) => {
+      const classifyFsEntry = (key: string, candidate: unknown) =>
+        skipEntry(candidate) ? classifyEntry(key, candidate) : null;
       buildJsonTree(
         this.tree,
         parentIno,
@@ -2659,7 +2657,7 @@ export class CellBridge {
         resolveLink,
         0,
         skipEntry,
-        classifyEntry,
+        classifyFsEntry,
         annotator?.jsonContext([name]),
       );
     };
