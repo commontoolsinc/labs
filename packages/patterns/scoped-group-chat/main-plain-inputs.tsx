@@ -34,9 +34,7 @@ export interface SelectedRoom {
   room?: Room;
 }
 
-export interface SendMessageEvent {
-  message?: string;
-}
+export type SendMessageEvent = Record<PropertyKey, never>;
 
 export interface AddRoomEvent {
   name?: string;
@@ -130,18 +128,18 @@ const sendMessage = handler<SendMessageEvent, {
   selectedRoom: SelectedRoomCell;
   conversation: ConversationCell;
   draft: DraftCell;
-}>(({ message }, { name, selectedRoom, conversation, draft }) => {
-  const body = (message ?? draft.get()).trim();
+}>((_, { name, selectedRoom, conversation, draft }) => {
+  const body = draft.get().trim();
   if (!body) return;
 
   const author = senderName(name.get());
   const sentAt = safeDateNow();
 
-  const selectedRoomRef = selectedRoom.key("room") as RoomCell;
+  const selectedRoomRef = selectedRoom.key("room");
   const hasSelectedRoom = selectedRoomRef.get();
-  const roomRef = (hasSelectedRoom
+  const roomRef = hasSelectedRoom
     ? selectedRoomRef
-    : conversation.key("rooms", 0)) as RoomCell;
+    : conversation.key("rooms", 0);
   if (!roomRef.get()) {
     return;
   }
@@ -149,7 +147,7 @@ const sendMessage = handler<SendMessageEvent, {
     selectedRoom.set({ room: roomRef });
   }
 
-  (roomRef.key("messages") as Writable<ChatMessage[] | Default<[]>>).push({
+  roomRef.key("messages").push({
     author,
     body,
     sentAt,
@@ -165,7 +163,7 @@ const addRoom = handler<AddRoomEvent, {
   const name = (eventName ?? newRoomName.get()).trim();
   if (!name) return;
 
-  const rooms = conversation.key("rooms") as Writable<Room[] | Default<[]>>;
+  const rooms = conversation.key("rooms");
   rooms.push({ name, messages: [] });
   selectedRoom.set({ room: rooms.key(rooms.get().length - 1) });
   newRoomName.set("");
@@ -348,17 +346,16 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
             <cf-hstack slot="footer" gap="3" align="end" style={composerStyle}>
               <cf-vstack gap="1" style="flex: 1;">
                 <cf-label>Message</cf-label>
-                <cf-message-input
+                <cf-input
+                  $value={draft}
                   placeholder={`Message ${displayedRoomLabel}`}
-                  button-text="Send"
-                  oncf-send={(e: { detail?: { message?: string } }) => {
-                    const message = e.detail?.message?.trim();
-                    if (message) {
-                      send.send({ message });
-                    }
-                  }}
+                  aria-label="Message"
+                  timing-strategy="immediate"
                 />
               </cf-vstack>
+              <cf-button onClick={send}>
+                Send
+              </cf-button>
             </cf-hstack>
           </cf-screen>
         </cf-theme>
