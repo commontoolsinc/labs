@@ -320,7 +320,11 @@ jobs:
         working-directory: packages/cli
         env:
           TOOLSHED_PORT: ${{ matrix.toolshed_port }}
+          CF_CLI_INTEGRATION_TIMINGS: "1"
+          CF_CLI_INTEGRATION_TIMINGS_FILE: "../../test-results/cli-core-cf-timings.log"
         run: |
+          mkdir -p ../../test-results
+          : > "$CF_CLI_INTEGRATION_TIMINGS_FILE"
           API_URL="http://localhost:${TOOLSHED_PORT}" ./integration/${{ matrix.script }}
 
       - name: 🧪 Run CLI FUSE integration suite
@@ -342,6 +346,15 @@ jobs:
       - name: 📋 FUSE daemon log (on failure)
         if: ${{ failure() && matrix.suite_name == 'fuse' }}
         run: cat ~/.cf/fuse/fuse-daemon.log 2>/dev/null || echo "No daemon log found"
+
+      - name: 📤 Upload CLI integration timing data
+        if: ${{ always() && matrix.suite_name == 'core' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-timing-cli-core
+          path: test-results/cli-core-cf-timings.log
+          retention-days: 90
+          if-no-files-found: ignore
 
   pattern-integration-test:
     name: "Pattern Integration Tests (${{ matrix.shard }}/${{ matrix.total }})"

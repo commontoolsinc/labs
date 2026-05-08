@@ -51,7 +51,11 @@ cf() {
   local status=$?
   local end_ms=$(python3 -c 'import time; print(int(time.time() * 1000))')
   local elapsed_ms=$((end_ms - start_ms))
-  >&2 echo "[cf-timing] ${elapsed_ms}ms :: cf $*"
+  local timing_line="[cf-timing] ${elapsed_ms}ms :: cf $*"
+  >&2 echo "$timing_line"
+  if [ -n "${CF_CLI_INTEGRATION_TIMINGS_FILE:-}" ]; then
+    printf '%s\n' "$timing_line" >> "$CF_CLI_INTEGRATION_TIMINGS_FILE"
+  fi
   return $status
 }
 
