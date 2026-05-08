@@ -103,9 +103,14 @@ jobs:
             ./dist/cf
 
   generated-patterns-integration-test:
-    name: "Generated Patterns Integration Tests"
+    name: "Generated Patterns Integration Tests (${{ matrix.shard }}/${{ matrix.total }})"
     runs-on: ubuntu-latest
     environment: ci
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+        total: [4]
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
@@ -122,15 +127,23 @@ jobs:
       - name: 🧪 Run generated patterns integration tests
         working-directory: packages/generated-patterns
         run: |
+          TEST_FILES=$(deno run --allow-read ../../tasks/select-generated-pattern-files.ts ${{ matrix.shard }}/${{ matrix.total }})
+          if [ -z "$TEST_FILES" ]; then
+            echo "::error::No generated pattern files selected for shard ${{ matrix.shard }}/${{ matrix.total }}"
+            exit 1
+          fi
+          printf 'Generated patterns shard ${{ matrix.shard }}/${{ matrix.total }} files:\n'
+          printf '  %s\n' $TEST_FILES
           mkdir -p ../../test-results
-          INTEGRATION_TEST_FLAGS="--junit-path=../../test-results/generated-patterns.xml" \
-          deno task integration
+          LOG_LEVEL=warn deno test --trace-leaks -A --parallel \
+            --junit-path=../../test-results/generated-patterns-${{ matrix.shard }}.xml \
+            $TEST_FILES
 
       - name: 📤 Upload test timing data
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-timing-generated-patterns
+          name: test-timing-generated-patterns-${{ matrix.shard }}
           path: test-results/
           retention-days: 90
           if-no-files-found: ignore
