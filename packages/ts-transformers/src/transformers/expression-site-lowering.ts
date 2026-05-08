@@ -1,12 +1,17 @@
 import ts from "typescript";
 import {
   detectCallKind,
+  getExpressionText,
   isFunctionLikeExpression,
+  isMethodCall,
+  type NormalizedDataFlow,
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
 import type { TransformationContext } from "../core/mod.ts";
 import { shouldTransformArrayMethod } from "../closures/strategies/array-method-policy.ts";
 import { transformArrayMethodCallback } from "../closures/strategies/array-method-transform.ts";
+import { parseCaptureExpression } from "../utils/capture-tree.ts";
+import { unwrapExpression } from "../utils/expression.ts";
 import {
   classifyExpressionSiteHandling,
   containsLogicalBinaryOperator,
@@ -613,6 +618,101 @@ export function rewriteArrayMethodCallbackExpressionSites(
   context: TransformationContext,
 ): ts.ConciseBody {
   const analyze = context.getDataFlowAnalyzer();
+  const callback = ts.isFunctionLike(body.parent) ? body.parent : undefined;
+  const elementParam = callback?.parameters[0];
+  const elementParamName = elementParam && ts.isIdentifier(elementParam.name)
+    ? elementParam.name
+    : undefined;
+
+  const isElementParamRoot = (
+    access: ts.PropertyAccessExpression,
+  ): boolean => {
+    if (!elementParamName) return false;
+
+    const capture = parseCaptureExpression(access);
+    if (!capture || capture.path.length === 0) return false;
+    if (capture.root !== elementParamName.text) return false;
+
+    let current: ts.Expression = access;
+    while (ts.isPropertyAccessExpression(current)) {
+      current = current.expression;
+    }
+    if (!ts.isIdentifier(current)) return true;
+
+    const identifierSymbol = context.checker.getSymbolAtLocation(current);
+    const paramSymbol = context.checker.getSymbolAtLocation(elementParamName);
+    return !identifierSymbol || !paramSymbol ||
+      identifierSymbol === paramSymbol;
+  };
+
+  const collectElementParamMemberAccesses = (
+    expression: ts.Expression,
+  ): ts.Expression[] => {
+    if (!elementParamName) return [];
+
+    const accesses: ts.Expression[] = [];
+    const seen = new Set<string>();
+    const visit = (node: ts.Node): void => {
+      if (node !== expression && ts.isFunctionLike(node)) return;
+
+      if (ts.isPropertyAccessExpression(node)) {
+        if (isElementParamRoot(node) && !isMethodCall(node)) {
+          const parent = node.parent;
+          const isReceiverForLongerPropertyAccess =
+            ts.isPropertyAccessExpression(parent) &&
+            parent.expression === node &&
+            !isMethodCall(parent);
+
+          if (!isReceiverForLongerPropertyAccess) {
+            const key = getExpressionText(node);
+            if (!seen.has(key)) {
+              seen.add(key);
+              accesses.push(node);
+            }
+          }
+        }
+      }
+
+      ts.forEachChild(node, visit);
+    };
+    visit(expression);
+    return accesses;
+  };
+
+  const appendElementParamMemberDataFlows = (
+    expression: ts.Expression,
+    dataFlows: readonly NormalizedDataFlow[],
+  ): readonly NormalizedDataFlow[] => {
+    const existing = new Set(
+      dataFlows.map((dataFlow) => getExpressionText(dataFlow.expression)),
+    );
+    const additional = collectElementParamMemberAccesses(expression)
+      .filter((access) => !existing.has(getExpressionText(access)))
+      .map((access): NormalizedDataFlow => ({
+        canonicalKey: `array-element:${getExpressionText(access)}`,
+        expression: access,
+        occurrences: [],
+        scopeId: -1,
+      }));
+
+    return additional.length === 0 ? dataFlows : [...dataFlows, ...additional];
+  };
+
+  const isElementParamMemberComputation = (
+    expression: ts.Expression,
+  ): boolean => {
+    if (collectElementParamMemberAccesses(expression).length === 0) {
+      return false;
+    }
+
+    const current = unwrapExpression(expression);
+    return !(
+      ts.isPropertyAccessExpression(current) ||
+      ts.isElementAccessExpression(current) ||
+      ts.isObjectLiteralExpression(current) ||
+      ts.isArrayLiteralExpression(current)
+    );
+  };
 
   const rewriteArrayMethodOwnedReceiverMethodExpressionSite = (
     expression: ts.Expression,
@@ -651,13 +751,17 @@ export function rewriteArrayMethodCallbackExpressionSites(
     const relevantDataFlows = context.getRelevantDataFlowsFromAnalysis(
       analysis,
     );
-    if (relevantDataFlows.length === 0) {
+    const augmentedDataFlows = appendElementParamMemberDataFlows(
+      expression,
+      relevantDataFlows,
+    );
+    if (augmentedDataFlows.length === 0) {
       return undefined;
     }
 
     return createReactiveWrapperForExpression(
       expression,
-      relevantDataFlows,
+      augmentedDataFlows,
       context,
       {
         allowDirectExpressionWrap: true,
@@ -673,9 +777,13 @@ export function rewriteArrayMethodCallbackExpressionSites(
     } = {},
   ): ts.Expression | undefined => {
     const analysis = analyze(expression);
-    if (analysis.containsOpaqueRef && analysis.requiresRewrite) {
-      const relevantDataFlows = context.getRelevantDataFlowsFromAnalysis(
-        analysis,
+    if (
+      (analysis.containsOpaqueRef && analysis.requiresRewrite) ||
+      isElementParamMemberComputation(expression)
+    ) {
+      const relevantDataFlows = appendElementParamMemberDataFlows(
+        expression,
+        context.getRelevantDataFlowsFromAnalysis(analysis),
       );
       if (relevantDataFlows.length === 0) {
         return undefined;
