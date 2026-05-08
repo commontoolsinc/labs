@@ -12,6 +12,10 @@ const embeddedSchemas: Record<string, JSONSchema> = {
   "https://commonfabric.org/schemas/vnode.json": vnodeSchema,
 };
 
+const isRootDefsSchemaPointer = (pathToDef: readonly string[]): boolean =>
+  pathToDef.length === 3 && pathToDef[0] === "#" && pathToDef[1] === "$defs" &&
+  pathToDef[2].length > 0;
+
 export const isEmbeddedCfcSchemaRef = (schemaRef: string): boolean =>
   schemaRef in embeddedSchemas;
 
@@ -95,6 +99,13 @@ export const resolveCfcSchemaRef = (
       "cfc",
       () => ["Unsupported anchor $ref in schema: ", schemaRef],
     );
+    return undefined;
+  }
+  if (!isRootDefsSchemaPointer(pathToDef)) {
+    logger.warn("cfc", () => [
+      "Unsupported local $ref in schema (only #/$defs/<name> is supported): ",
+      schemaRef,
+    ]);
     return undefined;
   }
   let schemaCursor: unknown = fullSchema;
