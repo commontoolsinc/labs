@@ -58,6 +58,7 @@ export default pattern(() => {
       "Hello Library" &&
     chat.messageCount === 1 &&
     chat.lastCurrentRoomBody === "Hello Library" &&
+    chat.chatTranscript === "Anonymous: Hello Library" &&
     chat.roomSummaryText === "Garden: 0\nLibrary: 1"
   );
 
