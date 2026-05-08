@@ -9,6 +9,50 @@ import { type Cell, createCell } from "../src/cell.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
+Deno.test("Cell.key applies concrete scope from child schema", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+
+  try {
+    const cell = runtime.getCell(
+      space,
+      "schema scoped child key",
+      {
+        type: "object",
+        properties: {
+          name: { type: "string", scope: "user" },
+          selectedRoom: {
+            type: "object",
+            scope: "session",
+            properties: {
+              room: { type: "string" },
+            },
+          },
+        },
+      },
+      tx,
+    );
+
+    assertEquals(cell.getAsNormalizedFullLink().scope, "space");
+    assertEquals(cell.key("name").getAsNormalizedFullLink().scope, "user");
+    assertEquals(
+      cell.key("selectedRoom").getAsNormalizedFullLink().scope,
+      "session",
+    );
+    assertEquals(
+      cell.key("selectedRoom", "room").getAsNormalizedFullLink().scope,
+      "session",
+    );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
 Deno.test("pattern factory .asScope() sets child pattern result scope", async () => {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({

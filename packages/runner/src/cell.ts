@@ -1166,6 +1166,10 @@ export class CellImpl<T extends FabricValue>
         path: [...currentLink.path, key.toString()] as string[],
         schema: childSchema,
       };
+
+      if (isRecord(childSchema) && isCellScope(childSchema.scope)) {
+        currentLink = { ...currentLink, scope: childSchema.scope };
+      }
     }
 
     // Determine the kind based on schema flags
