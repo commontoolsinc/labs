@@ -1,6 +1,7 @@
 import {
   computed,
   Default,
+  derive,
   handler,
   NAME,
   pattern,
@@ -126,6 +127,8 @@ const metaTextStyle = {
   fontSize: "13px",
 };
 
+const senderName = (name?: string) => name?.trim() || "Anonymous";
+
 const sendMessage = handler<SendMessageEvent, {
   name: NameCell;
   selectedRoom: SelectedRoomCell;
@@ -135,7 +138,7 @@ const sendMessage = handler<SendMessageEvent, {
   const body = (message ?? draft.get()).trim();
   if (!body) return;
 
-  const author = name.get().trim() || "Anonymous";
+  const author = senderName(name.get());
   const sentAt = safeDateNow();
 
   const selectedRoomRef = selectedRoom.key("room") as RoomCell;
@@ -350,12 +353,15 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
                       : (
                         <cf-vstack gap="2">
                           {selectedRoomRef.get()?.messages.map((message) => {
-                            const isMine = message.author ===
-                              (currentName || "Anonymous");
+                            const author = message.author;
+                            const isMine = derive({ author, name }, (
+                              { author, name },
+                            ) => author === senderName(name.get()));
                             return (
                               <div
                                 style={{
                                   display: "flex",
+                                  width: "100%",
                                   justifyContent: isMine
                                     ? "flex-end"
                                     : "flex-start",
@@ -384,7 +390,7 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
                                       opacity: 0.8,
                                     }}
                                   >
-                                    {message.author}
+                                    {author}
                                   </div>
                                   <div style={{ whiteSpace: "pre-wrap" }}>
                                     {message.body}
