@@ -27,7 +27,6 @@ import {
   rewriteCallbackBody,
 } from "./array-method-utils.ts";
 import type { ComputedAliasInfo } from "./array-method-utils.ts";
-import { createDeriveCall } from "../../transformers/builtins/derive.ts";
 
 export interface ArrayMethodCallbackTransformOptions {
   readonly rewriteTransformedBody?: (
@@ -84,25 +83,6 @@ function lowerMapReceiverMemberAccess(
     }
 
     break;
-  }
-
-  if (ts.isCallExpression(current) && current.arguments.length === 0) {
-    const callee = unwrapExpression(current.expression);
-    if (
-      ts.isPropertyAccessExpression(callee) &&
-      callee.name.text === "get" &&
-      segments.length > 0
-    ) {
-      const receiver = unwrapExpression(callee.expression);
-      if (ts.isIdentifier(receiver)) {
-        return createDeriveCall(expression, [receiver], {
-          factory: context.factory,
-          tsContext: context.tsContext,
-          cfHelpers: context.cfHelpers,
-          context,
-        }) ?? expression;
-      }
-    }
   }
 
   if (!ts.isIdentifier(current) || segments.length === 0) {
@@ -276,21 +256,15 @@ function createPatternCallWithParams(
     );
   }
 
-  const originalArrayExpr = methodCall.expression.expression;
-  const originalLoweredArrayExpr = lowerMapReceiverMemberAccess(
-    originalArrayExpr,
+  const visitedArrayExpr = ts.visitNode(
+    methodCall.expression.expression,
+    visitor,
+    ts.isExpression,
+  ) ?? methodCall.expression.expression;
+  const loweredArrayExpr = lowerMapReceiverMemberAccess(
+    visitedArrayExpr,
     context,
   );
-  const loweredArrayExpr = originalLoweredArrayExpr !== originalArrayExpr
-    ? originalLoweredArrayExpr
-    : lowerMapReceiverMemberAccess(
-      ts.visitNode(
-        originalArrayExpr,
-        visitor,
-        ts.isExpression,
-      ) ?? originalArrayExpr,
-      context,
-    );
 
   const originalMethodName = classifyArrayMethodCall(methodCall);
   if (!originalMethodName || originalMethodName.lowered) {

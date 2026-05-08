@@ -1,6 +1,5 @@
 import ts from "typescript";
 import {
-  classifyArrayMethodCall,
   getDeriveInputAndCallbackArgument,
   getTypeAtLocationWithFallback,
   isWildcardTraversalCall,
@@ -59,61 +58,6 @@ function isSelfPathSegment(
 ): boolean {
   return typeof segment !== "string" &&
     isCommonFabricKeyExpression(segment, context, "SELF");
-}
-
-function isTransparentExpressionWrapper(
-  node: ts.Node,
-): node is
-  | ts.ParenthesizedExpression
-  | ts.AsExpression
-  | ts.TypeAssertion
-  | ts.SatisfiesExpression
-  | ts.NonNullExpression
-  | ts.PartiallyEmittedExpression {
-  return ts.isParenthesizedExpression(node) ||
-    ts.isAsExpression(node) ||
-    ts.isTypeAssertionExpression(node) ||
-    ts.isSatisfiesExpression(node) ||
-    ts.isNonNullExpression(node) ||
-    ts.isPartiallyEmittedExpression(node);
-}
-
-function getWrappedExpression(node: ts.Node): ts.Expression | undefined {
-  return isTransparentExpressionWrapper(node) ? node.expression : undefined;
-}
-
-function isWithinArrayMethodReceiver(expression: ts.Expression): boolean {
-  let current: ts.Node = expression;
-  let parent = current.parent;
-
-  while (parent) {
-    const wrapped = getWrappedExpression(parent);
-    if (wrapped) {
-      if (wrapped !== current) return false;
-      current = parent;
-      parent = parent.parent;
-      continue;
-    }
-
-    if (
-      (ts.isPropertyAccessExpression(parent) ||
-        ts.isElementAccessExpression(parent)) &&
-      parent.expression === current
-    ) {
-      current = parent;
-      parent = parent.parent;
-      continue;
-    }
-
-    if (ts.isCallExpression(parent)) {
-      return parent.expression === current &&
-        !!classifyArrayMethodCall(parent);
-    }
-
-    return false;
-  }
-
-  return false;
 }
 
 function registerReplacementType(
@@ -479,10 +423,6 @@ function rewriteTrackedOpaquePatternBody(
     expression: ts.CallExpression,
   ): ts.Expression | undefined => {
     if (classifyOpaquePathTerminalCall(expression) !== "get") {
-      return undefined;
-    }
-
-    if (isWithinArrayMethodReceiver(expression)) {
       return undefined;
     }
 

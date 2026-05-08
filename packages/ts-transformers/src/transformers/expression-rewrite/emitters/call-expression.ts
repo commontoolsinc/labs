@@ -2,7 +2,6 @@ import ts from "typescript";
 
 import type { Emitter } from "../types.ts";
 import {
-  classifyArrayMethodCall,
   classifyArrayMethodResultSinkCall,
   classifyArrayMethodResultSinkReceiverChainCall,
   detectCallKind,
@@ -255,45 +254,6 @@ function isCellGetTerminalCall(
   }
 }
 
-function isArrayMethodReceiverExpression(node: ts.Node): boolean {
-  let current: ts.Node = node;
-  let parent = current.parent;
-
-  while (
-    parent &&
-    (
-      ts.isParenthesizedExpression(parent) ||
-      ts.isAsExpression(parent) ||
-      ts.isTypeAssertionExpression(parent) ||
-      ts.isSatisfiesExpression(parent) ||
-      ts.isNonNullExpression(parent) ||
-      ts.isPartiallyEmittedExpression(parent)
-    )
-  ) {
-    if (parent.expression !== current) {
-      return false;
-    }
-    current = parent;
-    parent = parent.parent;
-  }
-
-  while (
-    parent &&
-    (
-      ts.isPropertyAccessExpression(parent) ||
-      ts.isElementAccessExpression(parent)
-    ) &&
-    parent.expression === current
-  ) {
-    current = parent;
-    parent = parent.parent;
-  }
-
-  return !!parent && ts.isCallExpression(parent) &&
-    parent.expression === current &&
-    !!classifyArrayMethodCall(parent);
-}
-
 export const emitCallExpression: Emitter = ({
   expression,
   dataFlows,
@@ -426,13 +386,6 @@ export const emitCallExpression: Emitter = ({
   }
 
   if (dataFlows.length === 0) return undefined;
-
-  if (
-    isCellGetTerminalCall(expression, context) &&
-    isArrayMethodReceiverExpression(expression)
-  ) {
-    return undefined;
-  }
 
   return createReactiveWrapperForExpression(
     expression,
