@@ -211,6 +211,29 @@ deno task run -- \
   --prompt "Handle this Loom wish."
 ```
 
+Batch runs can require the agent to produce a schema-validated JSON sidecar
+before the CLI exits successfully. `--result-json-path` remains the harness
+metadata output; `--structured-result-path` is the agent-authored JSON file to
+validate:
+
+```bash
+deno task run -- \
+  --workspace /path/to/workspace \
+  --gateway-auth-mode none \
+  --output-mode batch \
+  --result-json-path /tmp/cf-harness-result.json \
+  --structured-result-path capture.results.json \
+  --structured-result-schema-file /path/to/result.schema.json \
+  --prompt "Write capture.results.json with the requested structured result."
+```
+
+The structured result path must stay inside the workspace. The schema may be
+provided inline with `--structured-result-schema` or read from
+`--structured-result-schema-file`. After the run, cf-harness reads the sidecar,
+validates it with the same JSON Schema validation primitives used by subagent
+`returnSchema`, records `structured_result` in the batch metadata, and exits
+nonzero when the file is missing, invalid JSON, or schema-invalid.
+
 When constraining the parent tool surface to `delegate_task`, authorize the
 child profile separately so the delegation policy transition is explicit:
 

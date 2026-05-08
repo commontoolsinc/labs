@@ -5,7 +5,8 @@ import {
 } from "@commonfabric/data-model/fabric-value";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
-import { ContextualFlowControl } from "../cfc.ts";
+import { uniqueCfcAtoms } from "./observation.ts";
+import { resolveCfcSchemaRefs } from "./schema-refs.ts";
 
 export const INJECTION_SAFE_ATOM = {
   type: "https://commonfabric.org/cfc/atom/InjectionSafe",
@@ -34,7 +35,7 @@ const asTypeArray = (type: unknown): string[] =>
     ? [type]
     : [];
 
-const isPrimitiveJsonValue = (value: unknown): boolean =>
+export const isPrimitiveJsonValue = (value: unknown): boolean =>
   value === null ||
   typeof value === "string" ||
   typeof value === "number" ||
@@ -45,8 +46,7 @@ const cloneJson = <T>(value: T): T =>
 
 const uniqueAtoms = (
   atoms: Iterable<unknown>,
-): ImmutableJSONValue[] =>
-  ContextualFlowControl.uniqueAtoms(atoms).map((atom) => cloneJson(atom));
+): ImmutableJSONValue[] => uniqueCfcAtoms(atoms).map((atom) => cloneJson(atom));
 
 export const isPromptInjectionMaterialRiskAtom = (atom: unknown): boolean => {
   if (typeof atom === "string") {
@@ -136,7 +136,9 @@ const schemaDeclaresObjectShape = (schema: Record<string, unknown>): boolean =>
 // declared open, so authors must opt in to free-form properties before we'll
 // allow taint to escape through them. Don't "fix" this back to spec defaults
 // without revisiting the sanitizer's caller assumptions.
-const objectSchemaIsClosed = (schema: Record<string, unknown>): boolean =>
+export const cfcObjectSchemaIsClosed = (
+  schema: Record<string, unknown>,
+): boolean =>
   schemaDeclaresObjectShape(schema) &&
   schema.additionalProperties !== true &&
   typeof schema.additionalProperties !== "object";
@@ -146,7 +148,7 @@ export const resolveSchemaForValidation = (
   fullSchema: JSONSchema,
 ): JSONSchema =>
   isRecord(schema) && typeof schema.$ref === "string"
-    ? ContextualFlowControl.resolveSchemaRefs(schema, fullSchema) ?? false
+    ? resolveCfcSchemaRefs(schema, fullSchema) ?? false
     : schema;
 
 const annotateSchema = (
@@ -268,7 +270,7 @@ const annotateSchema = (
       annotatedProperties[key] = annotated.schema;
       return annotated;
     });
-    const closedObject = objectSchemaIsClosed(schema);
+    const closedObject = cfcObjectSchemaIsClosed(schema);
     const allChildrenInert = childResults.every((child) =>
       child.instructionInert
     );
@@ -446,7 +448,7 @@ export const validateAgainstSchema = (
         if (failure !== undefined) return `${key}: ${failure}`;
       }
     }
-    if (objectSchemaIsClosed(schema)) {
+    if (cfcObjectSchemaIsClosed(schema)) {
       const known = new Set(Object.keys(schema.properties ?? {}));
       const extra = Object.keys(value).find((key) => !known.has(key));
       if (extra !== undefined) return `additional property ${extra}`;
