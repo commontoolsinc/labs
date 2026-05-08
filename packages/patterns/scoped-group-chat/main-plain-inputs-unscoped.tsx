@@ -5,9 +5,6 @@ import {
   handler,
   NAME,
   pattern,
-  type PerSession,
-  type PerSpace,
-  type PerUser,
   safeDateNow,
   Stream,
   UI,
@@ -192,22 +189,22 @@ const selectRoom = handler<SelectRoomEvent, {
   },
 );
 
-interface ScopedGroupChatInput {
-  name?: PerUser<NameCell>;
-  selectedRoom?: PerSession<SelectedRoomCell>;
-  conversation?: PerSpace<ConversationCell>;
-  draft?: PerUser<DraftCell>;
-  newRoomName?: PerSession<NewRoomNameCell>;
+export interface ScopedGroupChatInput {
+  name?: string | Default<"">;
+  selectedRoom?: SelectedRoom | Default<EmptySelectedRoom>;
+  conversation?: Conversation | Default<typeof DEFAULT_CONVERSATION>;
+  draft?: string | Default<"">;
+  newRoomName?: string | Default<"">;
 }
 
-interface ScopedGroupChatOutput {
+export interface ScopedGroupChatOutput {
   [NAME]: string;
   [UI]: VNode;
-  name: PerUser<NameCell>;
-  selectedRoom: PerSession<SelectedRoomCell>;
-  conversation: PerSpace<ConversationCell>;
-  draft: PerUser<DraftCell>;
-  newRoomName: PerSession<NewRoomNameCell>;
+  name: string | Default<"">;
+  selectedRoom: SelectedRoom | Default<EmptySelectedRoom>;
+  conversation: Conversation | Default<typeof DEFAULT_CONVERSATION>;
+  draft: string | Default<"">;
+  newRoomName: string | Default<"">;
   currentName: string;
   currentRoom: { room: Room };
   currentDraft: string;
@@ -234,31 +231,17 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
       newRoomName,
     });
     const boundSelectRoom = selectRoom({ selectedRoom });
-    const currentName = computed(() => name.get());
-    const currentDraft = computed(() => draft.get());
-    const rooms: Room[] = computed(() =>
-      (conversation.get() as Conversation | undefined)?.rooms ?? []
-    );
-    const roomCells = conversation.key("rooms") as Writable<
-      Room[] | Default<[]>
-    >;
-    const conversationSnapshot = computed(() => ({
-      rooms,
-    }));
-    const selectedRoomRef = selectedRoom.key("room");
-    const currentRoom: { room: Room } = computed(() => ({
-      room: selectedRoomRef.get() ?? EMPTY_ROOM,
-    }));
-    const messagesInSelectedRoom = computed<readonly ChatMessage[]>(() =>
-      selectedRoomRef.get()?.messages ?? []
-    );
-    const messageCount = computed(() =>
-      selectedRoomRef.get()?.messages?.length ?? 0
-    );
-    const currentRoomLabel = computed(() =>
-      selectedRoomRef.get()?.name ?? "No room"
-    );
-    const displayedRoomLabel = computed(() => currentRoomLabel || "No room");
+    const currentName = name;
+    const currentDraft = draft;
+    const rooms = conversation.rooms;
+    const conversationSnapshot = { rooms };
+    const selectedRoomValue = selectedRoom.room ?? EMPTY_ROOM;
+    const currentRoom = {
+      room: selectedRoomValue,
+    };
+    const messagesInSelectedRoom = selectedRoomValue.messages;
+    const messageCount = messagesInSelectedRoom.length;
+    const displayedRoomLabel = selectedRoomValue.name || "No room";
     const send = sendMessage({
       name,
       selectedRoom,
@@ -266,23 +249,23 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
       draft,
     });
     const roomSummaryText = computed(() =>
-      rooms
-        .map((room) => `${room.name}: ${room.messages?.length ?? 0}`)
-        .join("\n")
+      (conversation.rooms ?? [])
+        ?.map((room) => `${room.name}: ${room.messages.length}`)
+        .join("\n") ?? ""
     );
-    const roomCount = computed(() => rooms.length);
+    const roomCount = rooms.length;
     const currentRoomMessageCount = messageCount;
-    const lastRoom = computed(() => rooms[rooms.length - 1] ?? EMPTY_ROOM);
-    const lastRoomName = computed(() => lastRoom.name);
-    const lastRoomMessageCount = computed(() => lastRoom.messages?.length ?? 0);
-    const lastCurrentRoomAuthor = computed(() => {
-      const messages = selectedRoomRef.get()?.messages ?? [];
-      return messages[messages.length - 1]?.author ?? "";
-    });
-    const lastCurrentRoomBody = computed(() => {
-      const messages = selectedRoomRef.get()?.messages ?? [];
-      return messages[messages.length - 1]?.body ?? "";
-    });
+    const lastRoom = rooms[rooms.length - 1] ?? EMPTY_ROOM;
+    const lastRoomName = lastRoom.name;
+    const lastRoomMessageCount = lastRoom.messages.length;
+    const lastCurrentRoomMessage =
+      messagesInSelectedRoom[messagesInSelectedRoom.length - 1] ?? {
+        author: "",
+        body: "",
+        sentAt: 0,
+      };
+    const lastCurrentRoomAuthor = lastCurrentRoomMessage.author;
+    const lastCurrentRoomBody = lastCurrentRoomMessage.body;
     return {
       [NAME]: "Scoped group chat",
       [UI]: (
@@ -309,13 +292,13 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
               <cf-vstack gap="3" padding="4">
                 <cf-hstack gap="3" align="center">
                   <cf-tab-list variant="chip">
-                    {roomCells.map((room) => (
+                    {rooms.map((room) => (
                       <cf-tab
                         value={room.name}
-                        selected={selectedRoomRef.equals(room)}
-                        onClick={selectRoomRef({ selectedRoom, room })}
+                        selected={selectedRoomValue.name === room.name}
+                        onClick={() => boundSelectRoom.send({ room })}
                       >
-                        {room.name} · {room.messages?.length ?? 0}
+                        {room.name} · {room.messages.length}
                       </cf-tab>
                     ))}
                   </cf-tab-list>
@@ -352,11 +335,11 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
                       )
                       : (
                         <cf-vstack gap="2">
-                          {selectedRoomRef.key("messages").map((message) => {
+                          {messagesInSelectedRoom.map((message) => {
                             const author = message.author;
                             const isMine = derive({ author, name }, (
                               { author, name },
-                            ) => author === senderName(name.get()));
+                            ) => author === senderName(name));
                             return (
                               <div
                                 style={{
