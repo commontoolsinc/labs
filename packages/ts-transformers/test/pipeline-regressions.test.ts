@@ -699,13 +699,17 @@ export default pattern<{ selectedRoom: Writable<SelectedRoom> }>(
 
     assert(
       !output.includes(
-        "{ selectedRoomRef: selectedRoomRef }, ({ selectedRoomRef }) => selectedRoomRef.get()?.messages",
+        "(selectedRoomRef.get()?.messages).mapWithPattern",
       ),
-      "expected selectedRoomRef get() receiver to lower with a concrete cell schema, not an unknown fallback",
+      "expected selectedRoomRef get() receiver to lower into a reactive receiver before mapWithPattern",
     );
     assertStringIncludes(
       output,
-      'selectedRoomRef.key("messages").mapWithPattern',
+      '$ref: "#/$defs/Room",\n                        asCell: ["cell"]',
+    );
+    assertStringIncludes(
+      output,
+      "}, ({ selectedRoomRef }) => selectedRoomRef.get()?.messages).mapWithPattern",
     );
   },
 );

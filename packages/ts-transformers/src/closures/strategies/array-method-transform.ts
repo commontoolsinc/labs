@@ -27,6 +27,7 @@ import {
   rewriteCallbackBody,
 } from "./array-method-utils.ts";
 import type { ComputedAliasInfo } from "./array-method-utils.ts";
+import { createDeriveCall } from "../../transformers/builtins/derive.ts";
 
 export interface ArrayMethodCallbackTransformOptions {
   readonly rewriteTransformedBody?: (
@@ -94,14 +95,12 @@ function lowerMapReceiverMemberAccess(
     ) {
       const receiver = unwrapExpression(callee.expression);
       if (ts.isIdentifier(receiver)) {
-        return context.factory.createCallExpression(
-          context.factory.createPropertyAccessExpression(
-            context.factory.createIdentifier(receiver.text),
-            context.factory.createIdentifier("key"),
-          ),
-          undefined,
-          segments,
-        );
+        return createDeriveCall(expression, [receiver], {
+          factory: context.factory,
+          tsContext: context.tsContext,
+          cfHelpers: context.cfHelpers,
+          context,
+        }) ?? expression;
       }
     }
   }
