@@ -97,7 +97,9 @@ export class PiecesController<T = unknown> {
     this.disposeCheck();
     const piecesCell = await this.#manager.getPieces();
     const pieces = await this.#manager.syncPieces(piecesCell);
-    return pieces.map((piece) => new PieceController(this.#manager, piece));
+    return pieces.map((piece) =>
+      new PieceController(this.#manager, piece.asSchema(undefined))
+    );
   }
 
   async remove(pieceId: string): Promise<boolean> {
