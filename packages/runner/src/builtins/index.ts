@@ -34,7 +34,7 @@ export function registerBuiltins(runtime: Runtime) {
   moduleRegistry.addModuleByRef("fetchData", raw(fetchData));
   moduleRegistry.addModuleByRef("fetchProgram", raw(fetchProgram));
   moduleRegistry.addModuleByRef("streamData", raw(streamData));
-  moduleRegistry.addModuleByRef("llm", raw(llm));
+  moduleRegistry.addModuleByRef("llm", raw(llm, { isEffect: true }));
   moduleRegistry.addModuleByRef("llmDialog", raw(llmDialog));
   moduleRegistry.addModuleByRef("ifElse", raw(ifElse));
   moduleRegistry.addModuleByRef("when", raw(when));
@@ -47,7 +47,7 @@ export function registerBuiltins(runtime: Runtime) {
       result: Cell<Record<string, unknown> | undefined>;
       partial: Cell<string | undefined>;
       requestHash: Cell<string | undefined>;
-    }>(generateObject),
+    }>(generateObject, { isEffect: true }),
   );
   moduleRegistry.addModuleByRef(
     "generateText",
@@ -56,7 +56,7 @@ export function registerBuiltins(runtime: Runtime) {
       result: Cell<string | undefined>;
       partial: Cell<string | undefined>;
       requestHash: Cell<string | undefined>;
-    }>(generateText),
+    }>(generateText, { isEffect: true }),
   );
   moduleRegistry.addModuleByRef(
     "navigateTo",
