@@ -825,10 +825,11 @@ Deno.test("CellBridge.hydratePieceProp renders link-backed handlers only at disc
     },
     result: {
       getCell: () => Promise.resolve(resultCell),
-      get: () => Promise.resolve({
-        recordMessage: handlerLink,
-        nested: nestedValue,
-      }),
+      get: () =>
+        Promise.resolve({
+          recordMessage: handlerLink,
+          nested: nestedValue,
+        }),
     },
   };
 
