@@ -89,6 +89,58 @@ Deno.test("extractMetrics keeps CLI core and fuse timings separate", () => {
   assertEquals(metrics.has("step: CLI integration"), false);
 });
 
+Deno.test("extractMetrics aggregates split CLI core jobs", () => {
+  const metrics = extractMetrics(makeRun(), [
+    makeJob(
+      1,
+      "CLI Integration Tests (core-piece-basics)",
+      "2026-01-01T00:00:00Z",
+      "2026-01-01T00:03:20Z",
+      [
+        makeStep(
+          "🧪 Run CLI integration suite",
+          "2026-01-01T00:01:00Z",
+          "2026-01-01T00:03:00Z",
+        ),
+      ],
+    ),
+    makeJob(
+      2,
+      "CLI Integration Tests (core-piece-call)",
+      "2026-01-01T00:00:00Z",
+      "2026-01-01T00:02:40Z",
+      [
+        makeStep(
+          "🧪 Run CLI integration suite",
+          "2026-01-01T00:01:00Z",
+          "2026-01-01T00:02:30Z",
+        ),
+      ],
+    ),
+  ]);
+
+  assertEquals(
+    metrics.get("job: CLI Integration Tests (core-piece-basics)")
+      ?.durationSeconds,
+    200,
+  );
+  assertEquals(
+    metrics.get("job: CLI Integration Tests (core-piece-call)")
+      ?.durationSeconds,
+    160,
+  );
+  assertEquals(
+    metrics.get("job: CLI Integration Tests (core)")?.durationSeconds,
+    200,
+  );
+  assertEquals(
+    metrics.get("step: CLI integration (core)")?.durationSeconds,
+    120,
+  );
+  assertEquals(metrics.has("job: CLI Integration Tests"), false);
+  assertEquals(metrics.has("step: CLI integration"), false);
+});
+
 Deno.test("extractMetrics aggregates pattern integration matrix shards", () => {
   const metrics = extractMetrics(makeRun(), [
     makeJob(

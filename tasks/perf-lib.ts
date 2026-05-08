@@ -597,6 +597,10 @@ export function normalizeName(name: string): string {
 const JOB_METRIC_NAMES: Record<string, string> = {
   "Package Integration Tests": "job: Package Integration Tests",
   "CLI Integration Tests (core)": "job: CLI Integration Tests (core)",
+  "CLI Integration Tests (core-piece-basics)":
+    "job: CLI Integration Tests (core-piece-basics)",
+  "CLI Integration Tests (core-piece-call)":
+    "job: CLI Integration Tests (core-piece-call)",
   "CLI Integration Tests (fuse)": "job: CLI Integration Tests (fuse)",
   // Legacy pre-matrix job name retained for older baselines and overrides.
   "CLI Integration Tests": "job: CLI Integration Tests",
@@ -617,6 +621,7 @@ export const PATTERN_INTEGRATION_RE =
 export const GENERATED_PATTERNS_RE =
   /Generated Patterns Integration Tests\s*\((\d+)\/(\d+)\)/;
 export const RUNNER_TEST_RE = /Runner Tests\s*\((\d+)\/(\d+)\)/;
+export const CLI_CORE_SPLIT_RE = /CLI Integration Tests\s*\((core-[^)]+)\)/;
 
 interface StepMetricMatcher {
   jobName: string;
@@ -737,6 +742,7 @@ export function extractMetrics(
       normalizedJobName,
     );
     const runnerTestMatch = RUNNER_TEST_RE.exec(normalizedJobName);
+    const cliCoreSplitMatch = CLI_CORE_SPLIT_RE.exec(normalizedJobName);
 
     const matcherJobName = unitMatch
       ? "Pattern Unit Tests"
@@ -746,6 +752,8 @@ export function extractMetrics(
       ? "Generated Patterns Integration Tests"
       : runnerTestMatch
       ? "Runner Tests"
+      : cliCoreSplitMatch
+      ? "CLI Integration Tests (core)"
       : normalizedJobName;
 
     if (unitMatch) {
@@ -786,6 +794,15 @@ export function extractMetrics(
       setMaxMetric("job: Runner Tests", sample);
     }
 
+    if (cliCoreSplitMatch) {
+      const sample = makeSample(jobDuration);
+      metrics.set(
+        `job: CLI Integration Tests (${cliCoreSplitMatch[1]})`,
+        sample,
+      );
+      setMaxMetric("job: CLI Integration Tests (core)", sample);
+    }
+
     if (normalizedJobName.includes("Test and Build")) {
       metrics.set("job: Test and Build", makeSample(jobDuration));
     }
@@ -803,7 +820,7 @@ export function extractMetrics(
           const sample = makeSample(stepDuration);
           if (
             patternIntegrationMatch || generatedPatternsMatch ||
-            runnerTestMatch
+            runnerTestMatch || cliCoreSplitMatch
           ) {
             setMaxMetric(matcher.metricName, sample);
           } else {
