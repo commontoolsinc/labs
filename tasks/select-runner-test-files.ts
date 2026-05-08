@@ -1,0 +1,78 @@
+#!/usr/bin/env -S deno run --allow-read
+
+type Shard = {
+  index: number;
+  total: number;
+};
+
+type RunnerTestFile = {
+  name: string;
+  size: number;
+};
+
+export function parseShard(raw: string): Shard {
+  const match = raw.match(/^([1-9][0-9]*)\/([1-9][0-9]*)$/);
+  if (!match) {
+    throw new Error(`Expected shard argument like 1/4, got: ${raw}`);
+  }
+
+  const index = Number(match[1]);
+  const total = Number(match[2]);
+  if (index > total) {
+    throw new Error(`Shard index ${index} exceeds total shard count ${total}`);
+  }
+
+  return { index, total };
+}
+
+export function selectRunnerTestFiles(
+  files: RunnerTestFile[],
+  shard: Shard,
+): string[] {
+  const buckets = Array.from({ length: shard.total }, () => ({
+    size: 0,
+    names: [] as string[],
+  }));
+
+  for (
+    const file of [...files].sort((a, b) =>
+      b.size - a.size || a.name.localeCompare(b.name)
+    )
+  ) {
+    const bucket = buckets.reduce((smallest, candidate) =>
+      candidate.size < smallest.size ? candidate : smallest
+    );
+    bucket.size += file.size;
+    bucket.names.push(file.name);
+  }
+
+  return buckets[shard.index - 1].names.sort();
+}
+
+async function listRunnerTests(): Promise<RunnerTestFile[]> {
+  const testDir = new URL("../packages/runner/test/", import.meta.url);
+  const files: RunnerTestFile[] = [];
+
+  for await (const entry of Deno.readDir(testDir)) {
+    if (entry.isFile && entry.name.endsWith(".test.ts")) {
+      const info = await Deno.stat(new URL(entry.name, testDir));
+      files.push({ name: entry.name, size: info.size });
+    }
+  }
+
+  files.sort((a, b) => a.name.localeCompare(b.name));
+  return files;
+}
+
+if (import.meta.main) {
+  const shard = parseShard(Deno.args[0] ?? "");
+  const files = await listRunnerTests();
+  const selected = selectRunnerTestFiles(files, shard)
+    .map((name) => `./test/${name}`);
+
+  if (selected.length === 0) {
+    throw new Error(`No runner test files selected for ${Deno.args[0]}`);
+  }
+
+  console.log(selected.join("\n"));
+}
