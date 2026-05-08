@@ -12,6 +12,10 @@ export function getPackageName(memberPath: string): string {
   return relativePath.replace(/^packages\//, "");
 }
 
+export function parseDisabledPackageList(raw: string | undefined): string[] {
+  return (raw ?? "").split(/[,\s]+/).filter((name) => name.length > 0);
+}
+
 export async function testPackage(
   memberPath: string,
   packageName: string,
@@ -109,5 +113,8 @@ export async function runTests(disabledPackages: string[]): Promise<boolean> {
 
 // Only run if this is the main module
 if (import.meta.main) {
-  await runTests(ALL_DISABLED);
+  await runTests([
+    ...ALL_DISABLED,
+    ...parseDisabledPackageList(Deno.env.get("TEST_DISABLED_PACKAGES")),
+  ]);
 }

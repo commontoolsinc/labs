@@ -72,6 +72,47 @@ jobs:
 
       - name: 🧪 Run parallel workspace tests
         run: deno task test
+        env:
+          TEST_DISABLED_PACKAGES: runner
+
+  runner-test:
+    name: "Runner Tests (${{ matrix.shard }}/${{ matrix.total }})"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+        total: [4]
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      - name: 🔍 Verify lock file & install dependencies
+        run: deno install --frozen=true
+
+      - name: 📥 Download Deno dependency binaries
+        run: deno task initialize-db
+
+      - name: 🧪 Run runner tests
+        working-directory: packages/runner
+        run: |
+          TEST_FILES=$(deno run --allow-read ../../tasks/select-runner-test-files.ts ${{ matrix.shard }}/${{ matrix.total }})
+          if [ -z "$TEST_FILES" ]; then
+            echo "::error::No runner test files selected for shard ${{ matrix.shard }}/${{ matrix.total }}"
+            exit 1
+          fi
+          printf 'Runner test shard ${{ matrix.shard }}/${{ matrix.total }} files:\n'
+          printf '  %s\n' $TEST_FILES
+          ENV=test deno test \
+            --allow-ffi \
+            --allow-env \
+            --allow-read \
+            --allow-write=/tmp,/var/folders \
+            --allow-run=git \
+            $TEST_FILES
 
   build-binaries:
     name: "Build Binaries"
@@ -411,6 +452,7 @@ jobs:
       - pattern-integration-test
       - pattern-unit-test
       - generated-patterns-integration-test
+      - runner-test
     permissions:
       contents: read
       actions: read
@@ -440,6 +482,7 @@ jobs:
       [
         "test",
         "check",
+        "runner-test",
         "pattern-integration-test",
         "pattern-unit-test",
         "package-integration-test",

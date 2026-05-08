@@ -187,6 +187,48 @@ Deno.test("extractMetrics aggregates generated patterns matrix shards", () => {
   );
 });
 
+Deno.test("extractMetrics aggregates runner test matrix shards", () => {
+  const metrics = extractMetrics(makeRun(), [
+    makeJob(
+      1,
+      "Runner Tests (1/4)",
+      "2026-01-01T00:00:00Z",
+      "2026-01-01T00:01:40Z",
+      [
+        makeStep(
+          "🧪 Run runner tests",
+          "2026-01-01T00:00:10Z",
+          "2026-01-01T00:01:30Z",
+        ),
+      ],
+    ),
+    makeJob(
+      2,
+      "Runner Tests (2/4)",
+      "2026-01-01T00:00:00Z",
+      "2026-01-01T00:01:10Z",
+      [
+        makeStep(
+          "🧪 Run runner tests",
+          "2026-01-01T00:00:10Z",
+          "2026-01-01T00:01:00Z",
+        ),
+      ],
+    ),
+  ]);
+
+  assertEquals(
+    metrics.get("job: Runner Tests (1/4)")?.durationSeconds,
+    100,
+  );
+  assertEquals(
+    metrics.get("job: Runner Tests (2/4)")?.durationSeconds,
+    70,
+  );
+  assertEquals(metrics.get("job: Runner Tests")?.durationSeconds, 100);
+  assertEquals(metrics.get("step: runner tests")?.durationSeconds, 80);
+});
+
 Deno.test("timingArtifactLabel normalizes matrix shard artifacts", () => {
   assertEquals(
     timingArtifactLabel("test-timing-pattern-integration-1"),
