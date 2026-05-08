@@ -1,5 +1,4 @@
 import {
-  computed,
   Default,
   derive,
   handler,
@@ -33,10 +32,6 @@ export interface Conversation {
 
 export interface SelectedRoom {
   room?: Room;
-}
-
-interface ConversationSnapshot {
-  rooms: readonly Room[];
 }
 
 export interface SendMessageEvent {
@@ -176,15 +171,6 @@ const addRoom = handler<AddRoomEvent, {
   newRoomName.set("");
 });
 
-const selectRoomRef = handler<void, {
-  selectedRoom: SelectedRoomCell;
-  room: RoomCell;
-}>(
-  (_, { selectedRoom, room }) => {
-    selectedRoom.set({ room });
-  },
-);
-
 const selectRoom = handler<SelectRoomEvent, {
   selectedRoom: SelectedRoomCell;
 }>(
@@ -209,19 +195,8 @@ export interface ScopedGroupChatOutput {
   conversation: PerSpace<Conversation | Default<typeof DEFAULT_CONVERSATION>>;
   draft: PerUser<string | Default<"">>;
   newRoomName: PerSession<string | Default<"">>;
-  currentName: string;
-  currentRoom: { room: Room };
-  currentDraft: string;
-  conversationSnapshot: ConversationSnapshot;
-  messagesInSelectedRoom: readonly ChatMessage[];
   messageCount: number;
   roomCount: number;
-  currentRoomMessageCount: number;
-  lastRoomName: string;
-  lastRoomMessageCount: number;
-  lastCurrentRoomAuthor: string;
-  lastCurrentRoomBody: string;
-  roomSummaryText: string;
   sendMessage: Stream<SendMessageEvent>;
   addRoom: Stream<AddRoomEvent>;
   selectRoom: Stream<SelectRoomEvent>;
@@ -235,14 +210,8 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
       newRoomName,
     });
     const boundSelectRoom = selectRoom({ selectedRoom });
-    const currentName = name;
-    const currentDraft = draft;
     const rooms = conversation.rooms;
-    const conversationSnapshot = { rooms };
     const selectedRoomValue = selectedRoom.room ?? EMPTY_ROOM;
-    const currentRoom = {
-      room: selectedRoomValue,
-    };
     const messagesInSelectedRoom = selectedRoomValue.messages;
     const messageCount = messagesInSelectedRoom.length;
     const displayedRoomLabel = selectedRoomValue.name || "No room";
@@ -252,24 +221,7 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
       conversation,
       draft,
     });
-    const roomSummaryText = computed(() =>
-      conversation.rooms
-        ?.map?.((room) => `${room.name}: ${room.messages.length}`)
-        ?.join("\n") ?? ""
-    );
     const roomCount = rooms.length;
-    const currentRoomMessageCount = messageCount;
-    const lastRoom = rooms[rooms.length - 1] ?? EMPTY_ROOM;
-    const lastRoomName = lastRoom.name;
-    const lastRoomMessageCount = lastRoom.messages.length;
-    const lastCurrentRoomMessage =
-      messagesInSelectedRoom[messagesInSelectedRoom.length - 1] ?? {
-        author: "",
-        body: "",
-        sentAt: 0,
-      };
-    const lastCurrentRoomAuthor = lastCurrentRoomMessage.author;
-    const lastCurrentRoomBody = lastCurrentRoomMessage.body;
     return {
       [NAME]: "Scoped group chat",
       [UI]: (
@@ -416,19 +368,8 @@ export default pattern<ScopedGroupChatInput, ScopedGroupChatOutput>(
       conversation,
       draft,
       newRoomName,
-      currentName,
-      currentRoom,
-      currentDraft,
-      conversationSnapshot,
-      messagesInSelectedRoom,
       messageCount,
       roomCount,
-      currentRoomMessageCount,
-      lastRoomName,
-      lastRoomMessageCount,
-      lastCurrentRoomAuthor,
-      lastCurrentRoomBody,
-      roomSummaryText,
       sendMessage: send,
       addRoom: boundAddRoom,
       selectRoom: boundSelectRoom,
