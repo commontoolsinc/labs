@@ -3,6 +3,7 @@ import { ensureDir } from "@std/fs";
 import { loadIdentity } from "./identity.ts";
 import {
   Cell,
+  getMetaLink,
   NAME,
   Runtime,
   RuntimeProgram,
@@ -35,7 +36,6 @@ import {
   renderPieceCallHelp,
 } from "./exec-schema.ts";
 import { cliCommand } from "./cli-name.ts";
-import { getMetaLink } from "../../runner/src/link-utils.ts";
 
 export interface EntryConfig {
   mainPath: string;
