@@ -600,6 +600,10 @@ const JOB_METRIC_NAMES: Record<string, string> = {
   "CLI Integration Tests (core)": "job: CLI Integration Tests (core)",
   "CLI Integration Tests (core-piece-basics)":
     "job: CLI Integration Tests (core-piece-basics)",
+  "CLI Integration Tests (core-piece-values)":
+    "job: CLI Integration Tests (core-piece-values)",
+  "CLI Integration Tests (core-piece-links)":
+    "job: CLI Integration Tests (core-piece-links)",
   "CLI Integration Tests (core-piece-call)":
     "job: CLI Integration Tests (core-piece-call)",
   "CLI Integration Tests (fuse)": "job: CLI Integration Tests (fuse)",

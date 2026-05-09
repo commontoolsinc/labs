@@ -93,7 +93,20 @@ Deno.test("extractMetrics aggregates split CLI core jobs", () => {
   const metrics = extractMetrics(makeRun(), [
     makeJob(
       1,
-      "CLI Integration Tests (core-piece-basics)",
+      "CLI Integration Tests (core-piece-values)",
+      "2026-01-01T00:00:00Z",
+      "2026-01-01T00:01:40Z",
+      [
+        makeStep(
+          "🧪 Run CLI integration suite",
+          "2026-01-01T00:00:10Z",
+          "2026-01-01T00:01:20Z",
+        ),
+      ],
+    ),
+    makeJob(
+      2,
+      "CLI Integration Tests (core-piece-links)",
       "2026-01-01T00:00:00Z",
       "2026-01-01T00:03:20Z",
       [
@@ -105,7 +118,7 @@ Deno.test("extractMetrics aggregates split CLI core jobs", () => {
       ],
     ),
     makeJob(
-      2,
+      3,
       "CLI Integration Tests (core-piece-call)",
       "2026-01-01T00:00:00Z",
       "2026-01-01T00:02:40Z",
@@ -120,7 +133,12 @@ Deno.test("extractMetrics aggregates split CLI core jobs", () => {
   ]);
 
   assertEquals(
-    metrics.get("job: CLI Integration Tests (core-piece-basics)")
+    metrics.get("job: CLI Integration Tests (core-piece-values)")
+      ?.durationSeconds,
+    100,
+  );
+  assertEquals(
+    metrics.get("job: CLI Integration Tests (core-piece-links)")
       ?.durationSeconds,
     200,
   );
