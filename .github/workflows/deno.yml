@@ -279,22 +279,28 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - suite_name: core-piece-basics
+          - suite_name: core-piece-values
             script: integration.sh
-            section: piece-basics
+            section: piece-values
             toolshed_port: 8000
+            install_fuse_deps: false
+            timeout_minutes: 10
+          - suite_name: core-piece-links
+            script: integration.sh
+            section: piece-links
+            toolshed_port: 8001
             install_fuse_deps: false
             timeout_minutes: 10
           - suite_name: core-piece-call
             script: integration.sh
             section: piece-call
-            toolshed_port: 8001
+            toolshed_port: 8002
             install_fuse_deps: false
             timeout_minutes: 10
           - suite_name: fuse
             script: fuse-exec.sh
             section: ""
-            toolshed_port: 8002
+            toolshed_port: 8003
             install_fuse_deps: true
             timeout_minutes: 15
     steps:

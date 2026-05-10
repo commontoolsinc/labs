@@ -148,7 +148,23 @@ test_get_only() {
   fi
 }
 
-run_piece_basics() {
+create_stepped_counter_piece() {
+  local value="$1"
+
+  PIECE_ID=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS $PATTERN_SRC)
+  echo "Created source piece: $PIECE_ID"
+
+  printf '{"value":%s}\n' "$value" | cf piece apply $SPACE_ARGS --piece $PIECE_ID
+  echo "$value" | cf piece set $SPACE_ARGS --piece $PIECE_ID value
+  cf piece step $SPACE_ARGS --piece $PIECE_ID
+
+  RESULT=$(cf piece get $SPACE_ARGS --piece $PIECE_ID value)
+  if [ "$RESULT" != "$value" ]; then
+    error "Source piece value should be $value before linking, got: $RESULT"
+  fi
+}
+
+run_piece_values() {
   setup_space
 
   # Create a new piece using custom default export as input
@@ -227,6 +243,14 @@ run_piece_basics() {
   if ! cf piece ls $SPACE_ARGS | grep -q "$PIECE_ID $TITLE <unnamed>"; then
     error "Piece did not appear in list of space pieces."
   fi
+
+  echo "Successfully ran CLI piece values integration tests for ${API_URL}/${SPACE}/${PIECE_ID}."
+}
+
+run_piece_links() {
+  setup_space
+
+  create_stepped_counter_piece 10
 
   echo "Testing piece link..."
 
@@ -325,7 +349,7 @@ run_piece_basics() {
     error "After calling increment on piece3, invented piece's value should be 43, got: $RESULT"
   fi
 
-  echo "Successfully ran CLI piece basics integration tests for ${API_URL}/${SPACE}/${PIECE_ID}."
+  echo "Successfully ran CLI piece link integration tests for ${API_URL}/${SPACE}/${PIECE_ID}."
 }
 
 run_piece_call() {
@@ -382,11 +406,19 @@ run_piece_call() {
 
 case "$SECTION" in
   all)
-    run_piece_basics
+    run_piece_values
+    run_piece_links
     run_piece_call
     ;;
   piece-basics)
-    run_piece_basics
+    run_piece_values
+    run_piece_links
+    ;;
+  piece-values)
+    run_piece_values
+    ;;
+  piece-links)
+    run_piece_links
     ;;
   piece-call)
     run_piece_call
