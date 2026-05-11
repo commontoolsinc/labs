@@ -186,24 +186,19 @@ export function bigintFromMinimalTwosComplement(bytes: Uint8Array): bigint {
     return dv64View.getBigInt64(0, false); // `false` means big-endian.
   }
 
-  // Slow path. For negative numbers, this uses a similar ones-complement trick
-  // as is done in the encoder function, above.
+  // Slow path.
 
-  const byteMask = negative ? 0xff : 0x00;
-  const bigMask = negative ? 0xffff_ffff_ffff_ffffn : 0n;
   const partials = bytes.length & 7;
-
-  let result = 0n;
+  let result = negative ? -1n : 0n;
 
   for (let i = 0; i < partials; i++) {
-    result = (result << 8n) | BigInt(byteMask ^ bytes[i]!);
+    result = (result << 8n) | BigInt(bytes[i]!);
   }
 
   for (let i = partials; i < bytes.length; i += 8) {
     dv64Bytes.set(bytes.subarray(i, i + 8));
-    result = (result << 64n) |
-      (bigMask ^ dv64View.getBigUint64(0, false)); // `false` means big-endian.
+    result = (result << 64n) | dv64View.getBigUint64(0, false); // `false` means big-endian.
   }
 
-  return negative ? ~result : result;
+  return result;
 }
