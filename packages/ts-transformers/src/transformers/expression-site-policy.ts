@@ -29,6 +29,7 @@ import { classifyOpaquePathTerminalCall } from "./opaque-roots.ts";
 import type { ExpressionContainerKind } from "./expression-site-types.ts";
 import {
   isPatternFactoryCalleeExpression,
+  isPatternFactoryHelperExpression,
   isStructuralReactiveFactoryExpression,
   returnsOpaqueRefResult,
 } from "./structural-reactive-factory.ts";
@@ -243,7 +244,8 @@ function classifyCallExpressionRoot(
   }
 
   if (
-    isPatternFactoryCalleeExpression(expression.expression, context.checker)
+    isPatternFactoryCalleeExpression(expression.expression, context.checker) ||
+    isPatternFactoryHelperExpression(expression.expression, context.checker)
   ) {
     return "other";
   }

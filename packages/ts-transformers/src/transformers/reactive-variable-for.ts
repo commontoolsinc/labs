@@ -598,7 +598,8 @@ function shouldAddReactiveFor(
   }
 
   if (
-    isPatternFactoryCalleeExpression(expression.expression, context.checker)
+    isPatternFactoryCalleeExpression(expression.expression, context.checker) ||
+    isPatternFactoryHelperExpression(expression.expression, context.checker)
   ) {
     return false;
   }

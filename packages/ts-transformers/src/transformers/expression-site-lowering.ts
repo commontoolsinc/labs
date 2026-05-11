@@ -30,6 +30,10 @@ import type { AnalyzeFn } from "./expression-rewrite/types.ts";
 import type { ExpressionContainerKind } from "./expression-site-types.ts";
 import { createDeriveCall } from "./builtins/derive.ts";
 import { classifyOpaquePathTerminalCall } from "./opaque-roots.ts";
+import {
+  isPatternFactoryCalleeExpression,
+  isPatternFactoryHelperExpression,
+} from "./structural-reactive-factory.ts";
 
 interface RewriteExpressionSiteParams {
   readonly expression: ts.Expression;
@@ -59,6 +63,18 @@ function getReactiveHelperWrapperKind(
   }
 
   return undefined;
+}
+
+function isPatternFactoryCallExpression(
+  expression: ts.Expression,
+  context: TransformationContext,
+): boolean {
+  const call = unwrapExpression(expression);
+  return ts.isCallExpression(call) &&
+    (
+      isPatternFactoryCalleeExpression(call.expression, context.checker) ||
+      isPatternFactoryHelperExpression(call.expression, context.checker)
+    );
 }
 
 function isDirectDeriveCall(
@@ -776,6 +792,10 @@ export function rewriteArrayMethodCallbackExpressionSites(
       allowDirectExpressionWrap?: boolean;
     } = {},
   ): ts.Expression | undefined => {
+    if (isPatternFactoryCallExpression(expression, context)) {
+      return undefined;
+    }
+
     const analysis = analyze(expression);
     if (
       (analysis.containsOpaqueRef && analysis.requiresRewrite) ||

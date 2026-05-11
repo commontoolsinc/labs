@@ -480,6 +480,41 @@ export default pattern(() => {
 );
 
 Deno.test(
+  "Pipeline regression: module-scope sub-pattern calls in maps stay structural",
+  async () => {
+    const source = `import { pattern, UI, type VNode } from "commonfabric";
+
+type Entry = { value: number };
+
+const EntryRow = pattern<Entry, { [UI]: VNode }>(({ value }) => ({
+  [UI]: <span>{value}</span>,
+}));
+
+export default pattern<{ entries: Entry[] }, { [UI]: VNode }>(({ entries }) => ({
+  [UI]: (
+    <div>
+      {entries.map((entry) => {
+        const row = EntryRow({ value: entry.value });
+        return row[UI];
+      })}
+    </div>
+  ),
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+
+    assertStringIncludes(output, "const row = EntryRow({");
+    assert(
+      !output.includes("EntryRow: EntryRow"),
+      "expected module-scope pattern factory to stay in lexical scope instead of being captured as derive data",
+    );
+  },
+);
+
+Deno.test(
   "Pipeline regression: opaque-returning factory helpers with local cells stay structural",
   async () => {
     const source = `import { pattern, Writable } from "commonfabric";
