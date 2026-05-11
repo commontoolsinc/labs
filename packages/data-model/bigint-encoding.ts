@@ -55,7 +55,35 @@ function hexStringFromPositiveValue(value: bigint): string {
 }
 
 /**
- * Shared 8-byte scratch buffer for the DataView fast path. A single
+ * Helper for `bigintToMinimalTwosComplement()`, which converts a non-zero and
+ * non-`-1` value that fits into 64 bits.
+ */
+function convertSmallValue(value: bigint) {
+  const negative = value < 0;
+  const skipByte = negative ? 0xff : 0x00;
+
+  dv64View.setBigInt64(0, value, false); // `false` means big-endian.
+
+  // Note: Loop necessarily ends before running off the end of the array
+  // because by virtue of the caller's up-front check, there's definitely a
+  // non-skipped byte).
+  for (let i = 0; true; i++) {
+    const byte = dv64Bytes[i];
+    if (byte !== skipByte) {
+      // Adjust starting index backwards if the non-skipped byte would flip
+      // the sign of the result.
+      if (negative) {
+        if (byte <= 0x7f) i--;
+      } else {
+        if (byte >= 0x80) i--;
+      }
+      return dv64Bytes.slice(i);
+    }
+  }
+};
+
+/**
+ * Shared 8-byte scratch buffer for the `DataView` fast path. A single
  * `setBigUint64()` call writes all 8 bytes at once, avoiding hex string
  * processing for values that fit in 64 bits. Same shared-buffer pattern as
  * `f64Buf`/`f64View`/`f64Bytes` in `value-hash.ts`.
@@ -87,34 +115,11 @@ const NEGATIVE_ONE_BYTES = new Uint8Array([0xFF]);
  *   when the high bit would otherwise be clear (sign extension for negative).
  */
 export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
-  // Converts a value that fits into 64 bits.
-  const convertSmallValue = (negative: boolean) => {
-    dv64View.setBigInt64(0, value, false); // `false` means big-endian.
-
-    // Note: Loop necessarily ends before running off the end of the array
-    // because by virtue of the caller's up-front check, there's definitely a
-    // non-skipped byte).
-    const skipByte = negative ? 0xff : 0x00;
-    for (let i = 0; true; i++) {
-      const byte = dv64Bytes[i];
-      if (byte !== skipByte) {
-        // Adjust starting index backwards if the non-skipped byte would flip
-        // the sign of the result.
-        if (negative) {
-          if (byte <= 0x7f) i--;
-        } else {
-          if (byte >= 0x80) i--;
-        }
-        return dv64Bytes.slice(i);
-      }
-    }
-  };
-
   if (value >= 0n) {
     if (value === 0n) {
       return ZERO_BYTES.slice();
     } else if (value <= 0x7fff_ffff_ffff_ffffn) {
-      return convertSmallValue(false);
+      return convertSmallValue(value);
     }
 
     // Slow path for positive numbers: This stringifies and then parses back the
@@ -135,7 +140,7 @@ export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
     if (value === -1n) {
       return NEGATIVE_ONE_BYTES.slice();
     } else if (value >= -0x8000_0000_0000_0000n) {
-      return convertSmallValue(true);
+      return convertSmallValue(value);
     }
 
     // Slow path for negative numbers. See above for details. The extra twist
