@@ -77,7 +77,7 @@ function convertSmallValue(value: bigint, negative: boolean) {
         : dv64Bytes.slice(i - 1);
     }
   }
-};
+}
 
 /**
  * Shared 8-byte scratch buffer for the `DataView` fast path. A single
@@ -185,8 +185,14 @@ export function bigintFromMinimalTwosComplement(bytes: Uint8Array): bigint {
     // Slow path for negative values. This uses a similar ones-complement trick
     // as is done in the encoder function, above.
     let result = 0n;
-    for (let i = 0; i < bytes.length; i++) {
+    const partials = bytes.length & 7;
+    for (let i = 0; i < partials; i++) {
       result = (result << 8n) | BigInt(0xff - bytes[i]!);
+    }
+    for (let i = partials; i < bytes.length; i += 8) {
+      dv64Bytes.set(bytes.subarray(i, i + 8));
+      result = (result << 64n) |
+        (0xffff_ffff_ffff_ffffn - dv64View.getBigUint64(0, false));
     }
     return ~result;
   } else {
