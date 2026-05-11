@@ -72,6 +72,8 @@ If you are developing runtime code, read the following documentation:
   practices
 - `docs/development/LOCAL_DEV_SERVERS.md` - **CRITICAL**: How to start local dev
   servers correctly (use `dev-local` for shell, not `dev`)
+- `docs/development/CI_PERFORMANCE.md` - When to stop or revisit CI wall-time
+  splitting/rebalancing work
 - `docs/development/UI_TESTING.md` - How to work with shadow dom in our
   integration tests
 - `docs/development/debugging/` - Runtime errors, type errors, and

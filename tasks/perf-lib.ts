@@ -153,6 +153,17 @@ export interface BaselineOverrides {
   metrics: Map<string, number>;
 }
 
+export type CiWallTimeRevisitSignalKind =
+  | "slow-job"
+  | "job-imbalance"
+  | "required-wall-time";
+
+export interface CiWallTimeRevisitSignal {
+  kind: CiWallTimeRevisitSignalKind;
+  title: string;
+  detail: string;
+}
+
 // ---------------------------------------------------------------------------
 // GitHub API helpers
 // ---------------------------------------------------------------------------
@@ -536,6 +547,7 @@ export const JOB_TO_LABEL: Record<string, string> = {
 export function timingArtifactLabel(artifactName: string): string {
   const label = artifactName.replace(/^test-timing-/, "");
   return label
+    .replace(/^package-integration-.+$/, "package-integration")
     .replace(/^pattern-integration-\d+$/, "pattern-integration")
     .replace(/^generated-patterns-\d+$/, "generated-patterns");
 }
@@ -599,6 +611,10 @@ const JOB_METRIC_NAMES: Record<string, string> = {
   "CLI Integration Tests (core)": "job: CLI Integration Tests (core)",
   "CLI Integration Tests (core-piece-basics)":
     "job: CLI Integration Tests (core-piece-basics)",
+  "CLI Integration Tests (core-piece-values)":
+    "job: CLI Integration Tests (core-piece-values)",
+  "CLI Integration Tests (core-piece-links)":
+    "job: CLI Integration Tests (core-piece-links)",
   "CLI Integration Tests (core-piece-call)":
     "job: CLI Integration Tests (core-piece-call)",
   "CLI Integration Tests (fuse)": "job: CLI Integration Tests (fuse)",
@@ -615,6 +631,7 @@ const JOB_METRIC_NAMES: Record<string, string> = {
 };
 
 /** Pattern for matrix jobs like "Pattern Unit Tests (1/5)". */
+export const PACKAGE_INTEGRATION_RE = /Package Integration Tests\s*\(([^)]+)\)/;
 export const PATTERN_UNIT_RE = /Pattern Unit Tests\s*\((\d+)\/(\d+)\)/;
 export const PATTERN_INTEGRATION_RE =
   /Pattern Integration Tests\s*\((\d+)\/(\d+)\)/;
@@ -734,6 +751,9 @@ export function extractMetrics(
       metrics.set(jobMetricName, makeSample(jobDuration));
     }
 
+    const packageIntegrationMatch = PACKAGE_INTEGRATION_RE.exec(
+      normalizedJobName,
+    );
     const unitMatch = PATTERN_UNIT_RE.exec(normalizedJobName);
     const patternIntegrationMatch = PATTERN_INTEGRATION_RE.exec(
       normalizedJobName,
@@ -744,7 +764,9 @@ export function extractMetrics(
     const runnerTestMatch = RUNNER_TEST_RE.exec(normalizedJobName);
     const cliCoreSplitMatch = CLI_CORE_SPLIT_RE.exec(normalizedJobName);
 
-    const matcherJobName = unitMatch
+    const matcherJobName = packageIntegrationMatch
+      ? "Package Integration Tests"
+      : unitMatch
       ? "Pattern Unit Tests"
       : patternIntegrationMatch
       ? "Pattern Integration Tests"
@@ -755,6 +777,15 @@ export function extractMetrics(
       : cliCoreSplitMatch
       ? "CLI Integration Tests (core)"
       : normalizedJobName;
+
+    if (packageIntegrationMatch) {
+      const sample = makeSample(jobDuration);
+      metrics.set(
+        `job: Package Integration Tests (${packageIntegrationMatch[1]})`,
+        sample,
+      );
+      setMaxMetric("job: Package Integration Tests", sample);
+    }
 
     if (unitMatch) {
       metrics.set(
@@ -819,8 +850,8 @@ export function extractMetrics(
         ) {
           const sample = makeSample(stepDuration);
           if (
-            patternIntegrationMatch || generatedPatternsMatch ||
-            runnerTestMatch || cliCoreSplitMatch
+            packageIntegrationMatch || patternIntegrationMatch ||
+            generatedPatternsMatch || runnerTestMatch || cliCoreSplitMatch
           ) {
             setMaxMetric(matcher.metricName, sample);
           } else {
@@ -862,6 +893,112 @@ export function extractTestFileMetrics(
   }
 
   return metrics;
+}
+
+// ---------------------------------------------------------------------------
+// CI wall-time revisit signals
+// ---------------------------------------------------------------------------
+
+export const CI_WALL_TIME_SLOW_JOB_SECONDS = 180;
+export const CI_WALL_TIME_REQUIRED_CHECK_SECONDS = 8 * 60;
+export const CI_WALL_TIME_IMBALANCE_RATIO = 1.5;
+export const CI_WALL_TIME_IMBALANCE_MIN_DELTA_SECONDS = 30;
+export const CI_WALL_TIME_COMPARABLE_JOB_COUNT = 5;
+
+const CI_WALL_TIME_EXCLUDED_JOB_PATTERNS = [
+  /^Deploy /,
+  /^Attest and Upload Binaries$/,
+  /^Toolshed Post-Deploy Patterns Test$/,
+];
+
+function medianNumber(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[mid - 1] + sorted[mid]) / 2
+    : sorted[mid];
+}
+
+function shouldIncludeCiWallTimeJob(name: string): boolean {
+  return !CI_WALL_TIME_EXCLUDED_JOB_PATTERNS.some((re) => re.test(name));
+}
+
+export function computeCiWallTimeRevisitSignals(
+  jobs: Job[],
+): CiWallTimeRevisitSignal[] {
+  const measuredJobs = jobs
+    .map((job) => {
+      const name = normalizeName(job.name);
+      const startMs = job.started_at ? Date.parse(job.started_at) : NaN;
+      const endMs = job.completed_at ? Date.parse(job.completed_at) : NaN;
+      return {
+        name,
+        startMs,
+        endMs,
+        durationSeconds: durationSeconds(job.started_at, job.completed_at),
+      };
+    })
+    .filter((job) =>
+      shouldIncludeCiWallTimeJob(job.name) &&
+      Number.isFinite(job.startMs) &&
+      Number.isFinite(job.endMs) &&
+      job.durationSeconds > 0
+    );
+
+  if (measuredJobs.length === 0) return [];
+
+  const signals: CiWallTimeRevisitSignal[] = [];
+  const sortedByDuration = [...measuredJobs].sort((a, b) =>
+    b.durationSeconds - a.durationSeconds
+  );
+  const slowest = sortedByDuration[0];
+
+  if (slowest.durationSeconds >= CI_WALL_TIME_SLOW_JOB_SECONDS) {
+    signals.push({
+      kind: "slow-job",
+      title: "Slowest required CI job is over 3m",
+      detail: `${slowest.name} took ${formatDuration(slowest.durationSeconds)}`,
+    });
+  }
+
+  const comparableJobs = sortedByDuration.slice(
+    0,
+    Math.min(CI_WALL_TIME_COMPARABLE_JOB_COUNT, sortedByDuration.length),
+  );
+  const comparableMedian = medianNumber(
+    comparableJobs.map((job) => job.durationSeconds),
+  );
+  if (
+    slowest.durationSeconds >=
+      comparableMedian * CI_WALL_TIME_IMBALANCE_RATIO &&
+    slowest.durationSeconds - comparableMedian >=
+      CI_WALL_TIME_IMBALANCE_MIN_DELTA_SECONDS
+  ) {
+    signals.push({
+      kind: "job-imbalance",
+      title: "One required CI job is much slower than nearby jobs",
+      detail: `${slowest.name} took ${
+        formatDuration(slowest.durationSeconds)
+      }; top-${comparableJobs.length} median is ${
+        formatDuration(comparableMedian)
+      }`,
+    });
+  }
+
+  const requiredStartMs = Math.min(...measuredJobs.map((job) => job.startMs));
+  const requiredEndMs = Math.max(...measuredJobs.map((job) => job.endMs));
+  const requiredWallTimeSeconds = (requiredEndMs - requiredStartMs) / 1000;
+  if (requiredWallTimeSeconds >= CI_WALL_TIME_REQUIRED_CHECK_SECONDS) {
+    signals.push({
+      kind: "required-wall-time",
+      title: "Required CI checks are over the wall-time budget",
+      detail: `Required non-deploy jobs took ${
+        formatDuration(requiredWallTimeSeconds)
+      } from first start to last completion`,
+    });
+  }
+
+  return signals;
 }
 
 // ---------------------------------------------------------------------------
