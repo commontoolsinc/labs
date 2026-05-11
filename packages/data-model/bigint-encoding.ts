@@ -58,8 +58,7 @@ function hexStringFromPositiveValue(value: bigint): string {
  * Helper for `bigintToMinimalTwosComplement()`, which converts a non-zero and
  * non-`-1` value that fits into 64 bits.
  */
-function convertSmallValue(value: bigint) {
-  const negative = value < 0;
+function convertSmallValue(value: bigint, negative: boolean) {
   const skipByte = negative ? 0xff : 0x00;
 
   dv64View.setBigInt64(0, value, false); // `false` means big-endian.
@@ -119,7 +118,7 @@ export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
     if (value === 0n) {
       return ZERO_BYTES.slice();
     } else if (value <= 0x7fff_ffff_ffff_ffffn) {
-      return convertSmallValue(value);
+      return convertSmallValue(value, false);
     }
 
     // Slow path for positive numbers: This stringifies and then parses back the
@@ -140,7 +139,7 @@ export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
     if (value === -1n) {
       return NEGATIVE_ONE_BYTES.slice();
     } else if (value >= -0x8000_0000_0000_0000n) {
-      return convertSmallValue(value);
+      return convertSmallValue(value, true);
     }
 
     // Slow path for negative numbers. See above for details. The extra twist
