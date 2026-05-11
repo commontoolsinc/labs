@@ -72,10 +72,9 @@ function convertSmallValue(value: bigint, negative: boolean) {
     if (byte !== skipByte) {
       // Adjust starting index backwards if the non-skipped byte would flip
       // the sign of the result.
-      if ((byte & 0x80) !== signBit) {
-        i--;
-      }
-      return dv64Bytes.slice(i);
+      return ((byte & 0x80) === signBit)
+        ? dv64Bytes.slice(i)
+        : dv64Bytes.slice(i - 1);
     }
   }
 };
