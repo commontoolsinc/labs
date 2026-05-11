@@ -4443,7 +4443,7 @@ export class Scheduler {
             }
           };
 
-          const finalize = (error?: unknown) => {
+          const finalize = async (error?: unknown) => {
             if (error) {
               try {
                 this.handleError(error as Error, action);
@@ -4456,7 +4456,13 @@ export class Scheduler {
             }
 
             this.runtime.prepareTxForCommit(tx);
-            tx.commit().then((result) => {
+            // In pull mode, settle correctness depends on the storage
+            // subscription firing (and propagating dirty + dependents) before
+            // the post-event settle phase observes the work set. Awaiting the
+            // commit here ensures that propagation has completed before
+            // `execute()` proceeds. See PR description for context.
+            try {
+              const result = await tx.commit();
               if (result.error && retriesLeft > 0) {
                 logger.warn(
                   "scheduler",
@@ -4482,13 +4488,13 @@ export class Scheduler {
                   { error: result.error, handlerId },
                 );
               }
-            }).catch((error) => {
+            } catch (commitError) {
               logger.error(
                 "schedule-error",
                 "Event handler commit promise rejected:",
-                error,
+                commitError,
               );
-            });
+            }
           };
 
           try {
@@ -4505,7 +4511,7 @@ export class Scheduler {
             try {
               this.runningPromise = Promise.resolve(
                 this.runtime.harness.invoke(() => action(tx)),
-              ).then(() => {
+              ).then(async () => {
                 const trustedEventCandidates =
                   trustedEventWriteCandidatesFromTransaction(tx, handler, [
                     queuedEvent.eventLink.space,
@@ -4524,7 +4530,7 @@ export class Scheduler {
                     `Action ${actionId} completed in ${duration.toFixed(3)}s`,
                   ];
                 });
-                finalize();
+                await finalize();
               }).catch((error) => finalize(error));
               await this.runningPromise;
             } finally {
