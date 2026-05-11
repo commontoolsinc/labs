@@ -143,12 +143,13 @@ export function shallowFabricFromNativeValueModern(
 
     // deno-lint-ignore no-fallthrough
     case NATIVE_TAGS.Primitive: {
-      // Primitives: `null`, `undefined`, boolean, string, number, bigint,
-      // symbol, function. `null` is the only value here with `typeof "object"`
-      // (actual objects are routed to other tags by `tagFromNativeValue()`).
+      // Primitives: `null`, `undefined`, `boolean`, `string`, `number`,
+      // `bigint`, `symbol`, `function`. `null` is the only value here with
+      // `typeof "object"` (actual objects are routed to other tags by
+      // `tagFromNativeValue()`).
       switch (typeof value) {
         case "object":
-          // Only null reaches here (typeof null === "object").
+          // Only `null` reaches here (`typeof null === "object"`).
           return null;
         case "undefined":
         case "boolean":
@@ -463,8 +464,8 @@ function convertErrorInternals(
 /**
  * Indicates whether the value is a fabric value, accepting `FabricInstance`
  * values, `undefined`, and arrays with `undefined` elements or sparse holes
- * -- in addition to the base fabric types (null, boolean, number, string,
- * plain objects, dense arrays).
+ * -- in addition to the base fabric types (`null`, `boolean`, `number`,
+ * `string`, plain objects, dense arrays).
  *
  * MUST be self-contained (inline base-type checks, does NOT delegate back to
  * `isFabricValue()`) to avoid circular dispatch when the `modernDataModel`
@@ -720,7 +721,7 @@ function isFabricCompatibleInternal(
   value: unknown,
   seen: Set<object>,
 ): boolean {
-  // Primitives: null, boolean, string, number, bigint, undefined.
+  // Primitives: `null`, `boolean`, `string`, `number`, `bigint`, `undefined`.
   if (value === null || value === undefined) return true;
 
   switch (typeof value) {

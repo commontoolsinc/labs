@@ -555,8 +555,8 @@ export const FabricInstanceHandler: TypeHandler = {
  * serialization: `FabricPrimitive` subclasses are checked first (direct
  * `FabricValue` members matched by `instanceof`), then `FabricInstance`
  * (generic protocol types), then `bigint` and `undefined`. Primitives
- * (null, boolean, number, string), arrays, and plain objects are handled
- * as fallthrough in the serializer after no handler matches.
+ * (`null`, `boolean`, `number`, `string`), arrays, and plain objects are
+ * handled as fallthrough in the serializer after no handler matches.
  */
 export function createDefaultRegistry(): TypeHandlerRegistry {
   const registry = new TypeHandlerRegistry();

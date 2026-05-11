@@ -348,8 +348,8 @@ function fabricFromNativeValueLegacyInternal(
     if (value === undefined && converted.size > 0) {
       return inArray ? null : OMIT;
     }
-    // At this point, `value` is a primitive (`null`, boolean, number, string) or
-    // `undefined` - all valid `FabricValue` types.
+    // At this point, `value` is a primitive (`null`, `boolean`, `number`,
+    // `string`) or `undefined` - all valid `FabricValue` types.
     return value as FabricValue;
   }
 
