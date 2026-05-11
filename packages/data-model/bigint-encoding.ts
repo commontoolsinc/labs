@@ -163,6 +163,34 @@ export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
 // ---------------------------------------------------------------------------
 
 /**
+ * Helper for `bigintFromMinimalTwosComplement()`, which decodes the given
+ * array into a _positive_ `bigint`, with all bits complemented when told that
+ * the ultimate result is negative (`negative = true`).
+ */
+function decodeLargeValue(bytes: Uint8Array, negative: boolean): bigint {
+  // For negative numbers, this uses a similar ones-complement trick
+  // as is done in the encoder function, above.
+
+  const byteMask = negative ? 0xff : 0x00;
+  const bigMask = negative ? 0xffff_ffff_ffff_ffffn : 0n;
+  const partials = bytes.length & 7;
+
+  let result = 0n;
+
+  for (let i = 0; i < partials; i++) {
+    result = (result << 8n) | BigInt(byteMask ^ bytes[i]!);
+  }
+
+  for (let i = partials; i < bytes.length; i += 8) {
+    dv64Bytes.set(bytes.subarray(i, i + 8));
+    result = (result << 64n) |
+      (bigMask ^ dv64View.getBigUint64(0, false)); // `false` means big-endian.
+  }
+
+  return negative ? ~result : result;
+}
+
+/**
  * Interprets a byte array as a two's-complement big-endian integer and returns
  * the corresponding bigint. Empty input throws.
  */
@@ -180,32 +208,9 @@ export function bigintFromMinimalTwosComplement(bytes: Uint8Array): bigint {
     // Fast path for `bytes.length <= 8`.
     dv64Bytes.fill(negative ? 0xff : 0);
     dv64Bytes.set(bytes, 8 - bytes.length);
-    return dv64View.getBigInt64(0, false);
-  } else if (negative) {
-    // Slow path for negative values. This uses a similar ones-complement trick
-    // as is done in the encoder function, above.
-    let result = 0n;
-    const partials = bytes.length & 7;
-    for (let i = 0; i < partials; i++) {
-      result = (result << 8n) | BigInt(0xff ^ bytes[i]!);
-    }
-    for (let i = partials; i < bytes.length; i += 8) {
-      dv64Bytes.set(bytes.subarray(i, i + 8));
-      result = (result << 64n) |
-        (0xffff_ffff_ffff_ffffn ^ dv64View.getBigUint64(0, false));
-    }
-    return ~result;
+    return dv64View.getBigInt64(0, false); // `false` means big-endian.
   } else {
-    // Slow path for positive values.
-    let result = 0n;
-    const partials = bytes.length & 7;
-    for (let i = 0; i < partials; i++) {
-      result = (result << 8n) | BigInt(bytes[i]!);
-    }
-    for (let i = partials; i < bytes.length; i += 8) {
-      dv64Bytes.set(bytes.subarray(i, i + 8));
-      result = (result << 64n) | dv64View.getBigUint64(0, false);
-    }
-    return result;
+    // Slow path.
+    return decodeLargeValue(bytes, negative);
   }
 }
