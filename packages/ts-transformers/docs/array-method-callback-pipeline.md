@@ -1,0 +1,175 @@
+# Array-method callback pipeline
+
+_Reference doc for the transformer pipeline as it processes reactive
+`arr.map((elem) => …)` (and `filter` / `flatMap`) callbacks._
+
+## Pipeline order
+
+The pipeline driver in `src/cf-pipeline.ts` runs transformers in a fixed
+order. The stages relevant to array-method callbacks are:
+
+```
+1.  CastValidationTransformer
+2.  EmptyArrayOfValidationTransformer
+3.  OpaqueGetValidationTransformer
+4.  PatternContextValidationTransformer
+5.  JsxExpressionSiteRouterTransformer
+6.  ComputedTransformer
+7.  ClosureTransformer                       ← lowers .map() to .mapWithPattern()
+                                                + immediately runs the per-callback
+                                                expression-site lowering
+8.  PatternOwnedExpressionSiteLoweringTransformer
+9.  HelperOwnedExpressionSiteLoweringTransformer
+10. WriteAuthorizedByValidationTransformer
+11. PatternCallbackLoweringTransformer       ← __cf_pattern_input.key(...)
+                                                destructuring (ONLY for destructured
+                                                first params)
+12. SchemaInjectionTransformer
+13. SchemaGeneratorTransformer
+14. ReactiveVariableForTransformer
+15. ModuleScopeShadowingTransformer
+16. ModuleScopeCfDataTransformer
+17. ModuleScopeFunctionHardeningTransformer
+```
+
+A common misconception worth flagging up front: stage 11
+(`PatternCallbackLowering`) runs _last_ among the lowering passes, not first.
+By the time it fires, expression-site lowering at stage 7 has already had its
+say. The `key()`-substitution prologue it generates is downstream of the
+analyzer-driven decisions about wrapping.
+
+## What stage 7 does for `.map`s
+
+`ClosureTransformer` walks the source tree and delegates each visited
+expression to a strategy. The relevant one is `ArrayMethodStrategy`
+(`src/closures/strategies/array-method-strategy.ts`). For each reactive
+`arr.map(callback)` it dispatches to `transformArrayMethodCallback`
+(`src/closures/strategies/array-method-transform.ts`).
+
+That function does, in order:
+
+1. `context.markAsArrayMethodCallback(callback)` — registers the callback
+   in `mapCallbackRegistry`. This is the signal the dataflow analyzer
+   (and other downstream consumers) uses to recognize element-param
+   identifiers as opaque even when their TS type is plain.
+2. `CaptureCollector.analyzeCurrentAndOriginal(callback)` — finds outer-
+   scope reads to capture as `params: { … }`.
+3. `analyzeElementBinding` (`array-method-utils.ts`) decides how to surface
+   the element parameter. See "Two surface forms" below.
+4. `ts.visitNode(callback.body, visitor)` — recurses into the body before
+   the per-callback expression-site lowering runs. Nested array-methods
+   in the body get transformed during this recursion (depth-first).
+5. `createPatternCallWithParams` synthesizes the new shape:
+   `array.mapWithPattern(pattern((destructured) => …), capturesObj)`.
+6. `rewriteArrayMethodCallbackExpressionSites` (called from `createPattern…`
+   via the strategy's `rewriteTransformedBody` option) runs over the
+   transformed body to decide which expressions need `derive`/`computed`
+   wrapping and which can pass through.
+
+The output of step 5 is a `pattern((destructured) => …)` call wrapping the
+original body. The destructured parameter is one of two shapes depending on
+how step 3 decided to surface the element binding.
+
+## Two surface forms, two treatments
+
+| Source form            | Stage 7 (Closure)                                                                                                                                                                                                                | Stage 11 (PatternCallback)                                                                                          |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `(elem) => …elem.foo…` | `analyzeElementBinding` reuses `elem` as the binding identifier; body unchanged. The synthesized destructured param is `({element: elem, …})`.                                                                                   | Sees identifier-form param; passes through. `elem.foo` reads survive until late lowering.                           |
+| `({piece, name}) => …` | `analyzeElementBinding` synthesizes a fresh `element` identifier plus derive aliases for each destructured field. Body is rewritten to reference those aliases. The synthesized destructured param is `({element: __elem, …})`. | Sees destructured `({element, params})`, generates `key()` prologue (mostly irrelevant — derives already cover the fields). |
+
+In our fixture suite, identifier-form outnumbers destructured-form by roughly
+10:1. The identifier-form path is therefore the dominant one and the one
+most worth understanding deeply.
+
+## How `elem.foo` becomes `elem.key("foo")`
+
+For the identifier-form path, the late stages handle most of the lowering:
+
+- During stage 7, the expression-site lowering decides whether each
+  expression in the body needs an early `derive`/`computed` wrap. The
+  decision flows from `analyze(expression)` reporting `containsOpaqueRef`
+  / `requiresRewrite` / `dataFlows`.
+- Most `elem.foo`-style passthrough reads (inside `{elem.foo}` JSX, inside
+  `[elem.foo]` array literals, etc.) are deliberately **not** wrapped at
+  stage 7. They flow through to stage 11.
+- During stage 11, `pattern-body-reactive-root-lowering` walks the body and
+  rewrites `elem.foo` to `elem.key("foo")` in place. This is the cheaper
+  form — it gives the runtime a fine-grained key path without pulling
+  `elem` into a `derive`'s inputs.
+
+The decision at stage 7 about whether to wrap is made by a gate in
+`expression-site-lowering.ts:rewriteArrayMethodCallbackExpressionSites`:
+
+- If the expression is a **passthrough container** (`PropertyAccess`,
+  `ElementAccess`, `ObjectLiteral`, `ArrayLiteral`) AND every relevant
+  dataflow is rooted at an array-method element binding (no captures of
+  outer reactive values like `labelPrefix` or `name`), the wrap is
+  **skipped**. Late stage 11 lowering handles it in-place.
+- Otherwise — computations like `BinaryExpression`, mixed dataflows that
+  include outer captures, etc. — the early wrap fires. The synthesized
+  `derive` then includes the element-rooted dataflows as **partial-key
+  entries** in its inputs object: `{ elem: { foo: elem.key("foo") } }`,
+  matching the runtime's preferred subscription shape.
+
+## Why the dataflow analyzer needs an explicit signal
+
+The analyzer (`src/ast/dataflow.ts`) decides reactivity from the TypeScript
+type at each expression. For a direct `OpaqueRef<T>` reference, the type
+itself says "this is reactive."
+
+The synthesized array-method-callback element parameter is **deliberately
+not** typed as `OpaqueRef`. `SchemaFactory.createArrayMethodCallbackSchema`
+(`src/closures/utils/schema-factory.ts`) types `element` as the plain user
+element type `T`. Downstream consumers (capability summary analysis,
+type-shrinking, schema generation) need the plain type — widening to
+`OpaqueRef<T>` would break their assumptions.
+
+So the analyzer needs an out-of-band signal that `elem` is implicitly
+opaque even when its TS type is plain. That signal is the
+`isArrayMethodElementBindingReference` hook on the dataflow analyzer:
+
+- `TransformationContext.isArrayMethodElementBindingReference(identifier)`
+  walks the identifier's declaration to its enclosing function-like and
+  checks whether that function is in `mapCallbackRegistry`. If yes, the
+  identifier is reads-as-opaque.
+- The analyzer's identifier branch returns the same opaque shape it returns
+  for a direct `OpaqueRef` when the hook says yes.
+- The analyzer's property-access branch (when the recursive analysis of the
+  target returns `containsOpaqueRef: true` and the leftmost identifier is
+  an element binding) records the full property access as a dataflow —
+  not just the root identifier — so derive builders can emit the partial-
+  key inputs shape `{ elem: { foo: elem.key("foo") } }`.
+
+## Cache invalidation contract
+
+The hook depends on `mapCallbackRegistry` being populated before any
+analyzer query that consults it. The pipeline guarantees this because
+stage 7 calls `markAsArrayMethodCallback(callback)` before recursing into
+the body. But the analyzer maintains a per-expression cache, and stages
+5-6 can analyze expressions in the body before stage 7 marks the callback.
+
+`TransformationContext.invalidateReactiveAnalysisCaches()` is called by
+each `mark*` method on the context. It drops three things:
+
+- `#reactiveContextCache`
+- `#relevantDataFlowCache`
+- `#dataFlowAnalyzer` (the analyzer instance itself, including its
+  internal per-expression cache, via `closure-state reset`)
+
+See `src/core/mod.ts` for the full registry contract.
+
+## Key code pointers
+
+| Concern                                                 | File                                                              |
+| ------------------------------------------------------- | ----------------------------------------------------------------- |
+| Pipeline order                                          | `src/cf-pipeline.ts`                                              |
+| Closure array-method strategy entry                     | `src/closures/strategies/array-method-strategy.ts`                |
+| Per-callback closure transform                          | `src/closures/strategies/array-method-transform.ts`               |
+| Element binding analysis (identifier vs destructured)   | `src/closures/strategies/array-method-utils.ts`                   |
+| Synthesized pattern callback's typed shape              | `src/closures/utils/schema-factory.ts`                            |
+| Stage 7 per-callback expression-site lowering           | `src/transformers/expression-site-lowering.ts` (`rewriteArrayMethodCallbackExpressionSites`) |
+| The defer-to-late-lowering gate                         | `src/transformers/expression-site-lowering.ts` (`shouldDeferToLateInPlaceLowering`) |
+| Dataflow analyzer identifier + property-access branches | `src/ast/dataflow.ts` (around lines 700-900)                      |
+| Element-binding hook on context                         | `src/core/context.ts` (`isArrayMethodElementBindingReference`)    |
+| Late `key()`-rewrite pass                               | `src/transformers/pattern-body-reactive-root-lowering.ts`         |
+| Cache invalidation contract                             | `src/core/mod.ts`                                                 |

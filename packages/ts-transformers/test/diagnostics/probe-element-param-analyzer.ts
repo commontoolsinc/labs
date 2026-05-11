@@ -21,8 +21,8 @@ import ts from "typescript";
 import { join } from "@std/path";
 import { walk } from "@std/fs";
 
-import { batchTypeCheckFixtures } from "./utils.ts";
-import { createDataFlowAnalyzer } from "../src/ast/dataflow.ts";
+import { batchTypeCheckFixtures } from "../utils.ts";
+import { createDataFlowAnalyzer } from "../../src/ast/dataflow.ts";
 
 interface Probe {
   fixture: string;
@@ -64,7 +64,7 @@ async function fixtureHasReactiveMapLowering(
   }
 }
 
-const FIXTURE_ROOT = join(import.meta.dirname!, "fixtures");
+const FIXTURE_ROOT = join(import.meta.dirname!, "..", "fixtures");
 
 async function loadAllFixtureSources(
   match?: string,

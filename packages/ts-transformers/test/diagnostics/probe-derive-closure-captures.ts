@@ -20,7 +20,7 @@ import ts from "typescript";
 import { join } from "@std/path";
 import { walk } from "@std/fs";
 
-const FIXTURE_ROOT = join(import.meta.dirname!, "fixtures");
+const FIXTURE_ROOT = join(import.meta.dirname!, "..", "fixtures");
 
 // Names we should not flag as closure captures even if they're not in the
 // derive's parameters: they refer to module-scope or runtime infrastructure.
