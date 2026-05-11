@@ -204,17 +204,44 @@ export function bigintFromMinimalTwosComplement(bytes: Uint8Array): bigint {
 
   // Slow path.
 
+  // Count of partial-int65 bytes.
   const partials = bytes.length & 7;
-  let result = negative ? -1n : 0n;
 
-  for (let i = 0; i < partials; i++) {
-    result = (result << 8n) | BigInt(bytes[i]!);
+  // Possibly surprising test here: Benchmarks indicate that V8 (and assumed to
+  // be similar in other JS VMs) has internal optimizations for left-shift on
+  // large positive numbers but _not_ large negative numbers. The cross-over
+  // point of this code was measured to be at 32 bytes for negative numbers.
+  if (!negative || (bytes.length <= 32)) {
+    let result = negative ? -1n : 0n;
+
+    for (let i = 0; i < partials; i++) {
+      result = (result << 8n) | BigInt(bytes[i]!);
+    }
+
+    for (let i = partials; i < bytes.length; i += 8) {
+      dv64Bytes.set(bytes.subarray(i, i + 8));
+      result = (result << 64n) | dv64View.getBigUint64(0, false); // `false` means big-endian.
+    }
+
+    return result;
+  } else {
+    // Negative and large enough to feel the pain of an unoptimized `bigint`
+    // left shift. This uses uses a similar ones-complement trick as is done in
+    // the encoder function, above, so that we operate on positive `bigint`s
+    // within the loops.
+
+    let result = 0n;
+
+    for (let i = 0; i < partials; i++) {
+      result = (result << 8n) | BigInt(0xff ^ bytes[i]!);
+    }
+
+    for (let i = partials; i < bytes.length; i += 8) {
+      dv64Bytes.set(bytes.subarray(i, i + 8));
+      result = (result << 64n) |
+        (0xffff_ffff_ffff_ffffn ^ dv64View.getBigUint64(0, false)); // `false` means big-endian.
+    }
+
+    return ~result;
   }
-
-  for (let i = partials; i < bytes.length; i += 8) {
-    dv64Bytes.set(bytes.subarray(i, i + 8));
-    result = (result << 64n) | dv64View.getBigUint64(0, false); // `false` means big-endian.
-  }
-
-  return result;
 }
