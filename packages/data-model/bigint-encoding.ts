@@ -171,6 +171,8 @@ export function bigintFromMinimalTwosComplement(bytes: Uint8Array): bigint {
     throw new Error("bigintFromMinimalTwosComplement: empty input");
   }
 
+  // Note: `false` in `getBig*(n, false)` means "big-endian."
+
   // Determine sign from the high bit of the first byte.
   const negative = (bytes[0]! & 0x80) !== 0;
 
@@ -178,7 +180,7 @@ export function bigintFromMinimalTwosComplement(bytes: Uint8Array): bigint {
     // Fast path for `bytes.length <= 8`.
     dv64Bytes.fill(negative ? 0xff : 0);
     dv64Bytes.set(bytes, 8 - bytes.length);
-    return dv64View.getBigInt64(0, false); // `false` means big-endian.
+    return dv64View.getBigInt64(0, false);
   } else if (negative) {
     // Slow path for negative values. This uses a similar ones-complement trick
     // as is done in the encoder function, above.
@@ -190,8 +192,13 @@ export function bigintFromMinimalTwosComplement(bytes: Uint8Array): bigint {
   } else {
     // Slow path for positive values.
     let result = 0n;
-    for (let i = 0; i < bytes.length; i++) {
+    const partials = bytes.length & 7;
+    for (let i = 0; i < partials; i++) {
       result = (result << 8n) | BigInt(bytes[i]!);
+    }
+    for (let i = partials; i < bytes.length; i += 8) {
+      dv64Bytes.set(bytes.subarray(i, i + 8));
+      result = (result << 64n) | dv64View.getBigUint64(0, false);
     }
     return result;
   }
