@@ -179,11 +179,27 @@ export function bigintFromMinimalTwosComplement(bytes: Uint8Array): bigint {
   // Determine sign from the high bit of the first byte.
   const negative = (bytes[0]! & 0x80) !== 0;
 
-  if (bytes.length <= 8) {
-    // Fast path for `bytes.length <= 8`.
-    dv64Bytes.fill(negative ? 0xff : 0);
-    dv64Bytes.set(bytes, 8 - bytes.length);
-    return dv64View.getBigInt64(0, false); // `false` means big-endian.
+  switch (bytes.length) {
+    case 1: {
+      if (negative) {
+        return BigInt((bytes[0] << 24) >> 24); // Sign-extend.
+      } else {
+        return BigInt(bytes[0]);
+      }
+    }
+
+    case 2:
+    case 3:
+    case 4:
+    case 5:
+    case 6:
+    case 7:
+    case 8: {
+      // Fast path for `bytes.length` in `2..8`.
+      dv64Bytes.fill(negative ? 0xff : 0);
+      dv64Bytes.set(bytes, 8 - bytes.length);
+      return dv64View.getBigInt64(0, false); // `false` means big-endian.
+    }
   }
 
   // Slow path.
