@@ -163,12 +163,25 @@ export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
 // ---------------------------------------------------------------------------
 
 /**
- * Helper for `bigintFromMinimalTwosComplement()`, which decodes the given
- * array into a _positive_ `bigint`, with all bits complemented when told that
- * the ultimate result is negative (`negative = true`).
+ * Interprets a byte array as a two's-complement big-endian integer and returns
+ * the corresponding bigint. Empty input throws.
  */
-function decodeLargeValue(bytes: Uint8Array, negative: boolean): bigint {
-  // For negative numbers, this uses a similar ones-complement trick
+export function bigintFromMinimalTwosComplement(bytes: Uint8Array): bigint {
+  if (bytes.length === 0) {
+    throw new Error("bigintFromMinimalTwosComplement: empty input");
+  }
+
+  // Determine sign from the high bit of the first byte.
+  const negative = (bytes[0]! & 0x80) !== 0;
+
+  if (bytes.length <= 8) {
+    // Fast path for `bytes.length <= 8`.
+    dv64Bytes.fill(negative ? 0xff : 0);
+    dv64Bytes.set(bytes, 8 - bytes.length);
+    return dv64View.getBigInt64(0, false); // `false` means big-endian.
+  }
+
+  // Slow path. For negative numbers, this uses a similar ones-complement trick
   // as is done in the encoder function, above.
 
   const byteMask = negative ? 0xff : 0x00;
@@ -188,29 +201,4 @@ function decodeLargeValue(bytes: Uint8Array, negative: boolean): bigint {
   }
 
   return negative ? ~result : result;
-}
-
-/**
- * Interprets a byte array as a two's-complement big-endian integer and returns
- * the corresponding bigint. Empty input throws.
- */
-export function bigintFromMinimalTwosComplement(bytes: Uint8Array): bigint {
-  if (bytes.length === 0) {
-    throw new Error("bigintFromMinimalTwosComplement: empty input");
-  }
-
-  // Note: `false` in `getBig*(n, false)` means "big-endian."
-
-  // Determine sign from the high bit of the first byte.
-  const negative = (bytes[0]! & 0x80) !== 0;
-
-  if (bytes.length <= 8) {
-    // Fast path for `bytes.length <= 8`.
-    dv64Bytes.fill(negative ? 0xff : 0);
-    dv64Bytes.set(bytes, 8 - bytes.length);
-    return dv64View.getBigInt64(0, false); // `false` means big-endian.
-  } else {
-    // Slow path.
-    return decodeLargeValue(bytes, negative);
-  }
 }
