@@ -148,6 +148,22 @@ export function createDataFlowAnalyzer(
   const isArrayMethodElementBindingReference =
     hooks.isArrayMethodElementBindingReference ?? (() => false);
 
+  /**
+   * Walk a property-access chain to its leftmost Identifier and ask the hook
+   * whether it refers to an array-method element binding. Returns false for
+   * computed access or non-identifier roots (call expressions, etc.).
+   */
+  const leftmostIdentifierIsArrayMethodElementBinding = (
+    expression: ts.Expression,
+  ): boolean => {
+    let current: ts.Expression = expression;
+    while (ts.isPropertyAccessExpression(current)) {
+      current = current.expression;
+    }
+    return ts.isIdentifier(current) &&
+      isArrayMethodElementBindingReference(current);
+  };
+
   // === Synthetic node helpers ===
   // These enable unified handling of both synthetic (transformer-created) and
   // non-synthetic (original source) nodes by gracefully handling cases where
@@ -873,6 +889,30 @@ export function createDataFlowAnalyzer(
             dataFlows: [expression],
           };
         }
+      }
+      // For array-method element bindings, the property access result type is
+      // the plain field type (e.g. `string`), not OpaqueRef. But the read is
+      // still a reactive fine-grained dependency: the runtime can subscribe to
+      // `element.key("foo")` specifically. Record the property access (not
+      // just the root identifier) as the dataflow so downstream derive-input
+      // builders can emit the partial-key shape:
+      //   { element: { foo: element.key("foo") } }
+      // instead of the broader { element: element } whole-binding capture.
+      if (
+        target.containsOpaqueRef &&
+        leftmostIdentifierIsArrayMethodElementBinding(expression)
+      ) {
+        if (originatesFromIgnored(expression.expression)) {
+          return emptyAnalysis();
+        }
+        const parentId =
+          context.expressionToNodeId.get(expression.expression) ?? null;
+        recordDataFlow(expression, scope, parentId, true);
+        return {
+          containsOpaqueRef: true,
+          requiresRewrite: target.requiresRewrite,
+          dataFlows: [expression],
+        };
       }
       const propertySymbol = getMemberSymbol(expression, checker);
       if (symbolDeclaresCommonFabricDefault(propertySymbol, checker)) {

@@ -115,11 +115,11 @@ export default pattern((__cf_pattern_input) => {
             } as const satisfies __cfHelpers.JSONSchema, {
                 type: "boolean"
             } as const satisfies __cfHelpers.JSONSchema, {
-                name: name,
                 message: {
                     author: message.key("author")
-                }
-            }, ({ name, message }) => message.author === senderName(name.get())).for("isMine", true);
+                },
+                name: name
+            }, ({ message, name }) => message.author === senderName(name.get())).for("isMine", true);
             const isKnownAuthor = __cfHelpers.derive({
                 type: "object",
                 properties: {
@@ -139,7 +139,15 @@ export default pattern((__cf_pattern_input) => {
             } as const satisfies __cfHelpers.JSONSchema, { message: {
                     author: message.key("author")
                 } }, ({ message }) => message.author === "Alice").for("isKnownAuthor", true);
-            return (<div data-author-kind={isKnownAuthor ? "known" : "other"} style={{ justifyContent: __cfHelpers.ifElse({
+            return (<div data-author-kind={__cfHelpers.ifElse({
+                type: "boolean"
+            } as const satisfies __cfHelpers.JSONSchema, {
+                type: "string"
+            } as const satisfies __cfHelpers.JSONSchema, {
+                type: "string"
+            } as const satisfies __cfHelpers.JSONSchema, {
+                "enum": ["known", "other"]
+            } as const satisfies __cfHelpers.JSONSchema, isKnownAuthor, "known", "other")} style={{ justifyContent: __cfHelpers.ifElse({
                     type: "boolean"
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"

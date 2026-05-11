@@ -135,14 +135,28 @@ export default pattern((__cf_pattern_input) => {
                     } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
                         type: "object",
                         properties: {
+                            entry: {
+                                type: "object",
+                                properties: {
+                                    name: {
+                                        type: "string"
+                                    }
+                                },
+                                required: ["name"]
+                            },
                             labelPrefix: {
                                 type: "string"
                             }
                         },
-                        required: ["labelPrefix"]
+                        required: ["entry", "labelPrefix"]
                     } as const satisfies __cfHelpers.JSONSchema, {
                         type: "boolean"
-                    } as const satisfies __cfHelpers.JSONSchema, { labelPrefix: labelPrefix }, ({ labelPrefix }) => entry.name.startsWith(labelPrefix)), [entry.key("name")], []);
+                    } as const satisfies __cfHelpers.JSONSchema, {
+                        entry: {
+                            name: entry.key("name")
+                        },
+                        labelPrefix: labelPrefix
+                    }, ({ entry, labelPrefix }) => entry.name.startsWith(labelPrefix)), [entry.key("name")], []);
                 }, {
                     type: "object",
                     properties: {
