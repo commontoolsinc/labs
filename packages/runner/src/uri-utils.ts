@@ -8,18 +8,11 @@ import type { URI } from "./sigil-types.ts";
  * Convert an entity ID to URI format with "of:" prefix
  */
 export function toURI(value: unknown): URI {
-  if (isRecord(value)) {
-    if (value instanceof FabricHash) {
-      return `of:${value.toJSON()["/"]}`;
-    }
-    if (typeof value["/"] === "string") {
-      return `of:${value["/"]}`;
-    }
-    throw new Error(
-      `Cannot convert value to URI: ${toCompactDebugString(value)}`,
-    );
-  }
-  if (typeof value === "string") {
+  if (value instanceof FabricHash) {
+    return `of:${value}`;
+  } else if (isRecord(value) && typeof value["/"] === "string") {
+    return `of:${value["/"]}`;
+  } else if (typeof value === "string") {
     // Already has prefix with colon
     if (value.includes(":")) {
       // TODO(seefeld): Remove this once we want to support any URI, ideally
