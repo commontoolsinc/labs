@@ -5,6 +5,7 @@ import {
   summarizeCfcInvocationText,
 } from "../src/contracts/cfc-invocation-context.ts";
 import { CFC_PROMPT_SLOT_BOUND_ATOM_TYPE } from "../src/contracts/prompt-slot.ts";
+import type { CfcLabelView } from "@commonfabric/runner/cfc";
 
 Deno.test("createHarnessCfcInvocationContext summarizes measured invocation inputs without raw values", async () => {
   // Spec: specs/cfc/18-runtime-implementation-profiles.md §18.2.4.1
@@ -19,6 +20,35 @@ Deno.test("createHarnessCfcInvocationContext summarizes measured invocation inpu
   const env = {
     SECRET_TOKEN: "secret env payload",
     PUBLIC_MODE: "observe",
+  };
+  const cfcInputLabels: CfcLabelView = {
+    version: 1,
+    entries: [
+      {
+        path: ["argv"],
+        label: {
+          confidentiality: [
+            { type: "test.cfc/User", subject: "did:key:argv-reader" },
+          ],
+        },
+      },
+      {
+        path: ["env", "SECRET_TOKEN"],
+        label: {
+          confidentiality: [
+            { type: "test.cfc/User", subject: "did:key:env-reader" },
+          ],
+        },
+      },
+      {
+        path: ["cwd"],
+        label: {
+          confidentiality: [
+            { type: "test.cfc/Workspace", subject: "workspace-secret" },
+          ],
+        },
+      },
+    ],
   };
 
   const context = await createHarnessCfcInvocationContext({
@@ -48,6 +78,7 @@ Deno.test("createHarnessCfcInvocationContext summarizes measured invocation inpu
     args,
     stdinText,
     env,
+    cfcInputLabels,
   });
 
   assertEquals(
@@ -67,6 +98,7 @@ Deno.test("createHarnessCfcInvocationContext summarizes measured invocation inpu
   });
   assertEquals(context.cwd, "/workspace/project");
   assertEquals(context.promptSlot?.type, CFC_PROMPT_SLOT_BOUND_ATOM_TYPE);
+  assertEquals(context.cfcInputLabels, cfcInputLabels);
 
   const serialized = JSON.stringify(context);
   for (

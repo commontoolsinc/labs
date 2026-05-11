@@ -1,4 +1,7 @@
-import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
+import type {
+  CfcEnforcementMode,
+  CfcLabelView,
+} from "@commonfabric/runner/cfc";
 import type { PromptSlotBinding } from "./prompt-slot.ts";
 import type { HarnessRunManifest } from "./run-manifest.ts";
 import type { BuiltinToolId } from "./tool-descriptor.ts";
@@ -57,6 +60,7 @@ export interface HarnessCfcInvocationContext {
   promptSlot?: PromptSlotBinding;
   runManifest: HarnessCfcInvocationRunManifestSummary;
   inputs: HarnessCfcInvocationInputSummary;
+  cfcInputLabels?: CfcLabelView;
 }
 
 export interface CreateHarnessCfcInvocationContextOptions {
@@ -75,6 +79,7 @@ export interface CreateHarnessCfcInvocationContextOptions {
   args?: readonly string[];
   stdinText?: string;
   env?: Record<string, string>;
+  cfcInputLabels?: CfcLabelView;
 }
 
 const textEncoder = new TextEncoder();
@@ -195,5 +200,8 @@ export const createHarnessCfcInvocationContext = async (
       ...(stdin !== undefined ? { stdin } : {}),
       ...(env !== undefined ? { env } : {}),
     },
+    ...(options.cfcInputLabels !== undefined
+      ? { cfcInputLabels: options.cfcInputLabels }
+      : {}),
   };
 };
