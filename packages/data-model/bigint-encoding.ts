@@ -8,6 +8,22 @@
  * except as needed for sign extension.
  */
 
+ /**
+  * Shared 8-byte scratch buffer.
+  */
+ const dv64Buf = new ArrayBuffer(8);
+
+ /**
+  * `DataView` of `dv64buf`.
+  */
+ const dv64View = new DataView(dv64Buf);
+
+ /**
+  * `Uint8Array` view of `dv64buf`.
+  */
+ const dv64Bytes = new Uint8Array(dv64Buf);
+
+
 // ---------------------------------------------------------------------------
 // `bigint` -> minimal two's-complement big-endian bytes
 // ---------------------------------------------------------------------------
@@ -78,16 +94,6 @@ function convertSmallValue(value: bigint, negative: boolean) {
     }
   }
 }
-
-/**
- * Shared 8-byte scratch buffer for the `DataView` fast path. A single
- * `setBigUint64()` call writes all 8 bytes at once, avoiding hex string
- * processing for values that fit in 64 bits. Same shared-buffer pattern as
- * `f64Buf`/`f64View`/`f64Bytes` in `value-hash.ts`.
- */
-const dv64Buf = new ArrayBuffer(8);
-const dv64View = new DataView(dv64Buf);
-const dv64Bytes = new Uint8Array(dv64Buf);
 
 /**
  * Cached result of `0n` as a `Uint8Array`.
