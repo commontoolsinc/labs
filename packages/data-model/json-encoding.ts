@@ -20,7 +20,7 @@ import {
  * Module-level flag for unified JSON encoding, set by the `Runtime`
  * constructor via `setJsonEncodingConfig()`. When enabled, the public API
  * symbols dispatch to the `JsonEncodingContext` codec instead of plain
- * JSON.stringify / JSON.parse.
+ * `JSON.stringify()` / `JSON.parse()`.
  */
 let jsonEncodingEnabled = true;
 
