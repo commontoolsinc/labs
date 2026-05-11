@@ -53,8 +53,8 @@ export {
 /**
  * Module-level flag for modern data model mode, set by the `Runtime`
  * constructor via `setDataModelConfig()`. When enabled, fabric value
- * functions use the extended type system (bigint, Map, Set, Uint8Array,
- * Date, etc.).
+ * functions use the extended type system (`bigint`, `Map`, `Set`,
+ * `Uint8Array`, `Date`, etc.).
  */
 let modernDataModelEnabled = false;
 

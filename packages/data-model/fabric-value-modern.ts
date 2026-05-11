@@ -323,7 +323,7 @@ function fabricFromNativeValueModernInternal(
     throw e;
   }
 
-  // Primitives, null, and undefined don't need recursion or freezing.
+  // Primitives, `null`, and `undefined` don't need recursion or freezing.
   if (!isRecord(value)) {
     if (isOriginalRecord) {
       converted.set(original, value);

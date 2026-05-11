@@ -114,7 +114,7 @@ export function tagFromNativeClass(
 /**
  * Maps a JS value to its native-instance tag. Returns the tag string if the
  * value is a recognized convertible native instance, or `null` otherwise.
- * Non-object types (null, undefined, primitives) return `Primitive`.
+ * Non-object types (`null`, `undefined`, primitives) return `Primitive`.
  *
  * Dispatches via the value's constructor (O(1) switch in `tagFromNativeClass`).
  * Falls back to `Error.isError()` for exotic `Error` subclasses, `Array.isArray()`
