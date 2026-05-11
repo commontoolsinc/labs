@@ -19,6 +19,7 @@ export interface HarnessToolContext {
   sandbox: SandboxRuntime;
   hostProcessRunner: ProcessRunner;
   currentDir: string;
+  workspaceHostPath?: string;
   resolvePath(path: string): string;
   resolveHostPath(path: string): string;
   hostPathToWorkspacePath(path: string): string | undefined;

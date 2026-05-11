@@ -1,37 +1,30 @@
 import { type ImmutableJSONValue, JSONSchemaObj } from "@commonfabric/api";
 import { isRecord } from "@commonfabric/utils/types";
-import { getLogger } from "@commonfabric/utils/logger";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import type { CellKind, JSONSchema } from "./builder/types.ts";
 import { CycleTracker } from "./traverse.ts";
 import { isArrayIndexPropertyName } from "@commonfabric/data-model/fabric-value";
-import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import { rendererVDOMSchema, vnodeSchema } from "@commonfabric/runner/schemas";
-import { decodeJsonPointer } from "./link-types.ts";
+import { uniqueCfcAtoms } from "./cfc/observation.ts";
+import {
+  cfcSchemaIsFalse,
+  cfcSchemaIsInternalKey,
+  cfcSchemaIsTrue,
+  cfcSchemaToObject,
+  findCfcSchemaRefs,
+  isEmbeddedCfcSchemaRef,
+  resolveCfcSchemaRef,
+  resolveCfcSchemaRefs,
+  resolveCfcSchemaRefsOrThrow,
+} from "./cfc/schema-refs.ts";
 export { CFC_ATOM_TYPE, CFC_RUNTIME_SUBJECT, cfcAtom } from "./cfc/atoms.ts";
 
-const logger = getLogger("cfc");
 type IFCAtom = ImmutableJSONValue;
-
-// Mapping from ref url to schema object
-// Any $ref links in these must be self contained or absolute
-const embeddedSchemas: Record<string, JSONSchema> = {
-  "https://commonfabric.org/schemas/vdom.json": rendererVDOMSchema,
-  "https://commonfabric.org/schemas/vnode.json": vnodeSchema,
-};
 
 // Class for handling cfc rules.
 // The spec's confidentiality model is based on structured atoms.
 export class ContextualFlowControl {
   static uniqueAtoms(atoms: Iterable<unknown>): IFCAtom[] {
-    const unique: IFCAtom[] = [];
-    for (const atom of atoms) {
-      if (!unique.some((existing) => deepEqual(existing, atom))) {
-        unique.push(atom as IFCAtom);
-      }
-    }
-    return unique;
+    return uniqueCfcAtoms(atoms);
   }
 
   static addIfcAtoms(
@@ -116,7 +109,7 @@ export class ContextualFlowControl {
         schema,
         fullSchema,
       );
-      if (schema.$ref in embeddedSchemas) {
+      if (isEmbeddedCfcSchemaRef(schema.$ref)) {
         // Absolute $ref means we should reset our fullSchema
         fullSchema = resolvedSchema;
       }
@@ -176,11 +169,7 @@ export class ContextualFlowControl {
    * @param schema optional schema to convert
    */
   static toSchemaObj(schema?: JSONSchema): JSONSchemaObj {
-    return (schema === true || schema === undefined)
-      ? {}
-      : schema === false
-      ? { not: true }
-      : schema;
+    return cfcSchemaToObject(schema);
   }
 
   /**
@@ -200,50 +189,7 @@ export class ContextualFlowControl {
     schemaObj: JSONSchemaObj,
     fullSchema: JSONSchema = schemaObj,
   ): JSONSchema | undefined {
-    // Track seen refs to avoid cycles
-    const seenRefs = new Set<string>();
-    while (true) {
-      const { $ref, ...rest } = schemaObj;
-      if ($ref === undefined) { // no more refs to resolve
-        return schemaObj;
-      } else if (seenRefs.has($ref)) {
-        // Cycle -- equivalent to non-existent ref
-        return undefined;
-      }
-      seenRefs.add($ref);
-      const resolved = ContextualFlowControl.resolveSchemaRef(
-        fullSchema,
-        $ref,
-      );
-      if (resolved === undefined) { // Non-existent ref
-        return undefined;
-      } else if ($ref in embeddedSchemas) {
-        // Absolute $ref means we should reset our fullSchema
-        fullSchema = resolved;
-      }
-      // If we have other properties, we need to keep them as we resolve refs.
-      // They will override any properties in those refs.
-      if (Object.keys(rest).length > 0) {
-        if (isRecord(resolved)) {
-          // Merge our attributes with those in the ref
-          // If we replaced the fullSchema, pull in those $defs instead
-          schemaObj = {
-            ...resolved,
-            ...rest,
-            ...(isRecord(fullSchema) && fullSchema.$defs &&
-              { $defs: fullSchema.$defs }),
-          } as JSONSchemaObj;
-        } else {
-          // Resolved to a boolean schema, so we can stop
-          const schema = ContextualFlowControl.toSchemaObj(resolved);
-          schemaObj = { ...schema, ...rest } as JSONSchemaObj;
-        }
-      } else if (typeof resolved === "boolean") {
-        return resolved;
-      } else {
-        schemaObj = resolved;
-      }
-    }
+    return resolveCfcSchemaRefs(schemaObj, fullSchema);
   }
 
   // TODO(@ubik2): We may need to collect ifc labels as we walk the tree
@@ -271,51 +217,7 @@ export class ContextualFlowControl {
     fullSchema: JSONSchema,
     schemaRef: string,
   ): JSONSchema | undefined {
-    // Allow for some absolute schema refs
-    if (schemaRef in embeddedSchemas) {
-      return embeddedSchemas[schemaRef];
-    }
-    // We only support schemaRefs that are URI fragments
-    if (!schemaRef.startsWith("#")) {
-      logger.warn("cfc", () => ["Unsupported $ref in schema: ", schemaRef]);
-      return undefined;
-    }
-    // URI fragment schemaRefs are JSONPointers, so split and unescape
-    const pathToDef = decodeJsonPointer(schemaRef);
-    // We don't support anchors yet (e.g. `"$ref": "#address"`)
-    if (pathToDef[0] !== "#") {
-      logger.warn(
-        "cfc",
-        () => ["Unsupported anchor $ref in schema: ", schemaRef],
-      );
-      return undefined;
-    }
-    let schemaCursor: unknown = fullSchema;
-    // start at 1, since the 0 element is "#"
-    for (let i = 1; i < pathToDef.length; i++) {
-      if (!isRecord(schemaCursor) || !(pathToDef[i] in schemaCursor)) {
-        logger.warn(
-          "cfc",
-          () => ["Unresolved $ref in schema: ", schemaRef, fullSchema],
-        );
-        return undefined;
-      }
-      schemaCursor = schemaCursor[pathToDef[i]];
-    }
-    // If our schema cursor is an object, carry the $defs in
-    if (typeof schemaCursor === "object") {
-      const schemaRefs = new Set<string>();
-      this.findRefs(schemaCursor as JSONSchema, schemaRefs);
-      // TODO(@ubik2): We could just carry in the $defs we need
-      if (schemaRefs.size > 0) {
-        schemaCursor = {
-          ...schemaCursor,
-          ...(isRecord(fullSchema) && fullSchema.$defs &&
-            { $defs: fullSchema.$defs }),
-        };
-      }
-    }
-    return schemaCursor as JSONSchema;
+    return resolveCfcSchemaRef(fullSchema, schemaRef);
   }
 
   /**
@@ -332,69 +234,14 @@ export class ContextualFlowControl {
     schema: JSONSchema,
     refSet: Set<string> = new Set<string>(),
   ): void {
-    if (typeof schema === "boolean") {
-      return;
-    }
-    if (schema.$ref !== undefined) {
-      refSet.add(schema.$ref);
-    }
-    if (schema.type === "array") {
-      if (schema.items !== undefined) {
-        ContextualFlowControl.findRefs(schema.items, refSet);
-      }
-      if (schema.prefixItems != undefined) {
-        for (const item of schema.prefixItems) {
-          ContextualFlowControl.findRefs(item, refSet);
-        }
-      }
-    } else if (schema.type === "object") {
-      if (schema.additionalProperties !== undefined) {
-        ContextualFlowControl.findRefs(schema.additionalProperties, refSet);
-      }
-      if (schema.properties !== undefined) {
-        for (const [_key, propSchema] of Object.entries(schema.properties)) {
-          ContextualFlowControl.findRefs(propSchema, refSet);
-        }
-      }
-    }
-    const optSchemas = [
-      ...(schema.anyOf ? schema.anyOf : []),
-      ...(schema.oneOf ? schema.oneOf : []),
-      ...(schema.allOf ? schema.allOf : []),
-    ];
-    for (const optSchema of optSchemas) {
-      ContextualFlowControl.findRefs(optSchema, refSet);
-    }
+    return findCfcSchemaRefs(schema, refSet);
   }
 
   static resolveSchemaRefsOrThrow(
     schemaObj: JSONSchemaObj,
     fullSchema: JSONSchema = schemaObj,
   ) {
-    if (!isRecord(fullSchema)) {
-      // We'd need a fullSchema to make this work
-      // We don't need to do real cycle detection, since the path is limited
-      throw new Error("Found $ref without fullSchema object");
-    }
-    const resolved = ContextualFlowControl.resolveSchemaRefs(
-      schemaObj,
-      fullSchema,
-    );
-    if (resolved === undefined) {
-      const ref = "$ref" in schemaObj
-        ? schemaObj.$ref
-        : toCompactDebugString(schemaObj);
-      throw new Error(
-        `Failed to resolve $ref: ${ref}. ` +
-          (typeof ref === "string" && ref.startsWith("http")
-            ? `External $ref URLs must be registered in embeddedSchemas (packages/runner/src/cfc.ts). ` +
-              `If you added a new native type to NATIVE_TYPE_SCHEMAS in ` +
-              `packages/schema-generator/src/formatters/native-type-formatter.ts, ` +
-              `add its schema to embeddedSchemas as well.`
-            : `Schema: ${toCompactDebugString(schemaObj)}`),
-      );
-    }
-    return resolved;
+    return resolveCfcSchemaRefsOrThrow(schemaObj, fullSchema);
   }
 
   // This is a variant of schemaAtPath that allows for an undefined schema.
@@ -620,25 +467,17 @@ export class ContextualFlowControl {
   // Check to see if the specified schema is one of the special values meaning
   // it should always validate.
   static isTrueSchema(schema: JSONSchema): boolean {
-    if (schema === true) {
-      return true;
-    }
-    return isRecord(schema) &&
-      Object.keys(schema).every((k) =>
-        this.isInternalSchemaKey(k) || k === "default" || k === "$defs"
-      );
+    return cfcSchemaIsTrue(schema);
   }
 
   // We don't need to check ID and ID_FIELD, since they won't be included
   // in Object.keys return values.
   static isInternalSchemaKey(key: string): boolean {
-    return key === "ifc" || key === "asCell" || key === "asStream";
+    return cfcSchemaIsInternalKey(key);
   }
 
   static isFalseSchema(schema: JSONSchema): boolean {
-    return schema === false ||
-      (isRecord(schema) && "not" in schema &&
-        this.isTrueSchema(schema["not"]!));
+    return cfcSchemaIsFalse(schema);
   }
 
   // Utility function to handle the legacy asCell and asStream tags, as well

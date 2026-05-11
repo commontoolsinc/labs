@@ -146,6 +146,51 @@ round-trip correctly.
 //   - `-128n` → 0x80           → "gA"
 // This matches the hash byte format (2-hash-byte-format.md), which already
 // uses two's complement big-endian for BigInt payloads.
+
+// Special numeric values that JSON cannot represent natively.
+// Tag: "SpecialNumber@1"
+// { "/SpecialNumber@1": string }
+//
+// The state is one of exactly four literal strings:
+//   - "-0"          → the negative-zero value
+//   - "NaN"         → Number.NaN (any input NaN bit pattern serializes as
+//                     this single literal and round-trips back to NaN)
+//   - "+Infinity"   → positive infinity
+//   - "-Infinity"   → negative infinity
+//
+// String state (rather than a JSON number) is used because JSON.stringify
+// emits `null` for NaN/±Infinity and drops the sign on -0; a numeric-state
+// form would be lossy through the JSON layer. On deserialization, any state
+// other than these four literals — including a non-string state — produces
+// a `ProblematicValue` (see `1-fabric-values.md` Section 3.5) per the
+// general handler-validation rule below.
+//
+// Whether such values reach this encoder in a given run is gated by the
+// `modernDataModel` flag at the fabric-value conversion gate; see
+// `1-fabric-values.md` Section 4.9. The wire format above is the encoder's
+// contract regardless of how the values arrived.
+
+// Registry-interned symbols (`Symbol.for(key)`).
+// Tag: "Symbol@1"
+// { "/Symbol@1": string }
+//
+// The state is the registry key — the JavaScript string returned by
+// `Symbol.keyFor(s)`. On deserialization, `Symbol.for(state)` retrieves
+// (or creates) the registry symbol with the matching key, so the result
+// is `===` to any other `Symbol.for(state)` in the same realm.
+//
+// Unique symbols (`Symbol(desc)`, where `Symbol.keyFor(s)` returns
+// `undefined`) have no portable representation. The handler's
+// `canSerialize()` returns `false` for them, which routes them to the
+// registry's "unhandled value" path rather than coercing them silently
+// to a registry key. On deserialization, any state other than a string
+// yields a `ProblematicValue` (see `1-fabric-values.md` Section 3.5)
+// per the general handler-validation rule below.
+//
+// Whether a symbol value reaches this encoder in a given run is gated
+// by the `modernDataModel` flag at the fabric-value conversion gate;
+// see `1-fabric-values.md` Section 4.9. The wire format above is the
+// encoder's contract regardless of how the value arrived.
 ```
 
 > **Deserialization validation.** Deserialization cannot assume type safety from

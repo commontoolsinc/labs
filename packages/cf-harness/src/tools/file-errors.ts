@@ -3,6 +3,7 @@ import type { HarnessToolContext } from "./types.ts";
 
 export const STRUCTURED_FILE_TOOL_ERROR_CODES = [
   "file_not_found",
+  "edit_conflict",
   "not_a_file",
   "permission_denied",
   "path_outside_workspace",
@@ -81,6 +82,10 @@ const messageForFileToolError = (
   switch (code) {
     case "file_not_found":
       return `file not found: ${path}`;
+    case "edit_conflict":
+      return detail !== undefined && detail !== ""
+        ? `edit conflict for ${path}: ${detail}`
+        : `edit conflict for ${path}`;
     case "not_a_file":
       return `not a file: ${path}`;
     case "permission_denied":
@@ -96,7 +101,7 @@ const messageForFileToolError = (
 
 export const createStructuredFileToolErrorOutput = (
   context: HarnessToolContext,
-  toolId: "read_file" | "write_file",
+  toolId: "read_file" | "view_image" | "write_file" | "edit_file",
   options: {
     path: string;
     code: StructuredFileToolErrorCode;

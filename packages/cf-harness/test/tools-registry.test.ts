@@ -15,20 +15,56 @@ Deno.test("builtin tool registry includes the agreed first-pass tool floor", () 
     "bash",
     "bash-no-sandbox",
     "read_file",
+    "view_image",
     "read_skill_resource",
+    "edit_file",
     "write_file",
     "delegate_task",
   ]);
-  assertEquals(BUILTIN_TOOL_REGISTRY.size, 6);
+  assertEquals(BUILTIN_TOOL_REGISTRY.size, 8);
   assertEquals(
     [...DEFAULT_PARENT_TOOL_IDS],
     [
       "bash",
       "read_file",
+      "view_image",
       "read_skill_resource",
+      "edit_file",
       "write_file",
       "delegate_task",
     ] satisfies BuiltinToolId[],
+  );
+});
+
+Deno.test("edit_file descriptor exposes exact replacement edits", () => {
+  const editFileTool = getBuiltinTool("edit_file");
+  assert(editFileTool);
+  assertEquals(editFileTool.descriptor.effectClass, "write");
+  assertEquals(
+    (editFileTool.descriptor.inputSchema as {
+      properties: {
+        edits: {
+          items: {
+            required: string[];
+            properties: { expectedReplacements: { minimum: number } };
+          };
+        };
+      };
+    }).properties.edits.items.required,
+    ["oldText", "newText"],
+  );
+  assertEquals(
+    (editFileTool.descriptor.inputSchema as {
+      properties: {
+        edits: {
+          items: {
+            required: string[];
+            properties: { expectedReplacements: { minimum: number } };
+          };
+        };
+      };
+    }).properties.edits.items.properties.expectedReplacements.minimum,
+    1,
   );
 });
 

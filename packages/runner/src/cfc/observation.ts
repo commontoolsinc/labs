@@ -1,0 +1,107 @@
+import type { ImmutableJSONValue, JSONSchema } from "@commonfabric/api";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { isRecord } from "@commonfabric/utils/types";
+import {
+  cfcLabelPathPrefixMatches,
+  type CfcLabelView,
+} from "./label-view-core.ts";
+
+export type CfcObservedConfidentiality = readonly unknown[];
+export type CfcObservationMaxConfidentiality =
+  | readonly unknown[]
+  | undefined;
+
+export interface CfcOpaqueLink {
+  "@link": string;
+}
+
+export interface CfcObservationResult<T = unknown> {
+  value: T;
+  observedConfidentiality: CfcObservedConfidentiality;
+}
+
+export const uniqueCfcAtoms = (
+  atoms: Iterable<unknown>,
+): ImmutableJSONValue[] => {
+  const unique: ImmutableJSONValue[] = [];
+  for (const atom of atoms) {
+    if (!unique.some((existing) => deepEqual(existing, atom))) {
+      unique.push(atom as ImmutableJSONValue);
+    }
+  }
+  return unique;
+};
+
+export const joinCfcObservedConfidentiality = (
+  parts: Iterable<readonly unknown[] | undefined>,
+): CfcObservedConfidentiality => {
+  const joined: unknown[] = [];
+  for (const part of parts) {
+    if (Array.isArray(part)) {
+      joined.push(...part);
+    }
+  }
+  return uniqueCfcAtoms(joined);
+};
+
+export const cfcConfidentialityForObservationNode = (
+  options: {
+    schema?: JSONSchema;
+    labelView?: CfcLabelView;
+    logicalPath?: readonly string[];
+  },
+): CfcObservedConfidentiality => {
+  const joined: unknown[] = [];
+  const logicalPath = options.logicalPath ?? [];
+
+  if (isRecord(options.schema) && isRecord(options.schema.ifc)) {
+    joined.push(...(options.schema.ifc.confidentiality ?? []));
+  }
+
+  if (options.labelView !== undefined) {
+    for (const entry of options.labelView.entries) {
+      if (cfcLabelPathPrefixMatches(entry.path, logicalPath)) {
+        joined.push(...(entry.label.confidentiality ?? []));
+      }
+    }
+  }
+
+  return uniqueCfcAtoms(joined);
+};
+
+export const cfcObservationFitsCeiling = (
+  confidentiality: readonly unknown[],
+  observationMaxConfidentiality: CfcObservationMaxConfidentiality,
+): boolean => {
+  if (
+    observationMaxConfidentiality === undefined ||
+    observationMaxConfidentiality.length === 0 ||
+    confidentiality.length === 0
+  ) {
+    return true;
+  }
+
+  return confidentiality.every((value) =>
+    observationMaxConfidentiality.some((allowed) => deepEqual(allowed, value))
+  );
+};
+
+export const cfcJsonPointerForPath = (
+  path: readonly (string | number)[],
+): string =>
+  path.length === 0
+    ? ""
+    : `/${
+      path.map((segment) =>
+        String(segment).replaceAll("~", "~0").replaceAll("/", "~1")
+      ).join("/")
+    }`;
+
+export const cfcOpaqueLinkForPath = (
+  opaqueHandleId: string,
+  path: readonly (string | number)[],
+): CfcOpaqueLink => ({
+  "@link": `opaque:${encodeURIComponent(opaqueHandleId)}${
+    path.length === 0 ? "" : `#${cfcJsonPointerForPath(path)}`
+  }`,
+});

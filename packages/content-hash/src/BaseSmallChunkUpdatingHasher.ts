@@ -21,6 +21,7 @@ export abstract class BaseSmallChunkUpdatingHasher
   #smalls = new Uint8Array(SMALLS_SIZE);
   #smallsOffset: number = 0;
 
+  /** @inheritDoc */
   override digest(): Uint8Array;
   override digest(encoding: "base64url"): string;
   override digest(encoding: string | undefined): Uint8Array | string;
@@ -29,6 +30,7 @@ export abstract class BaseSmallChunkUpdatingHasher
     return super.digest(encoding);
   }
 
+  /** @inheritDoc */
   override update(data: Uint8Array) {
     const length = data.length;
 

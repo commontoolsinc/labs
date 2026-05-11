@@ -48,7 +48,7 @@ function isEncodedInstance(v: JsonWireValue): boolean {
  * Returns true if the already-serialized wire value `v` can be embedded
  * inside a /quote wrap without inner deserialization: primitives, plain
  * objects/arrays free of non-/quote encoded instances, and /quote-wrapped
- * values (which unquote() can collapse).
+ * values (which `unquote()` can collapse).
  */
 function isQuoteSafe(v: JsonWireValue): boolean {
   if (v === null || typeof v !== "object") return true;
@@ -101,6 +101,10 @@ export class JsonEncodingContext implements SerializationContext<string> {
   /** Narrow codec view for type handlers (avoids exposing private methods). */
   private readonly codec: TypeHandlerCodec;
 
+  /**
+   * Constructs an instance, optionally configured for lenient mode (which
+   * produces `ProblematicValue` on failed reconstruction instead of throwing).
+   */
   constructor(options?: { lenient?: boolean }) {
     this.lenient = options?.lenient ?? false;
 
@@ -111,8 +115,8 @@ export class JsonEncodingContext implements SerializationContext<string> {
     };
 
     // Register native wrapper classes for deserialization. Each wrapper's
-    // static [RECONSTRUCT] method is used by the class registry fallback
-    // path in deserialize().
+    // static `[RECONSTRUCT]` method is used by the class registry fallback
+    // path in `deserialize()`.
     this.registry.set(TAGS.Error, FabricError);
     this.registry.set(TAGS.Map, FabricMap);
     this.registry.set(TAGS.Set, FabricSet);
@@ -120,11 +124,11 @@ export class JsonEncodingContext implements SerializationContext<string> {
   }
 
   // -------------------------------------------------------------------------
-  // SerializationContext<string> -- public boundary interface
+  // `SerializationContext<string>` -- public boundary interface
   // -------------------------------------------------------------------------
 
   /**
-   * Encode a fabric value to a JSON string. Serializes modern types into
+   * Encodes a fabric value to a JSON string. Serializes modern types into
    * the `/<Type>@<Version>` tagged wire format, then stringifies.
    */
   encode(value: FabricValue): string {
@@ -132,7 +136,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
   }
 
   /**
-   * Decode a JSON string back into a fabric value. Parses the string,
+   * Decodes a JSON string back into a fabric value. Parses the string,
    * then deserializes tagged forms back into modern runtime types.
    */
   decode(data: string, runtime: ReconstructionContext): FabricValue {
@@ -166,14 +170,14 @@ export class JsonEncodingContext implements SerializationContext<string> {
   // -------------------------------------------------------------------------
 
   /**
-   * Serialize a fabric value to UTF-8 JSON bytes.
+   * Serializes a fabric value to UTF-8 JSON bytes.
    */
   encodeToBytes(value: FabricValue): Uint8Array {
     return this.toBytes(this.serialize(value));
   }
 
   /**
-   * Deserialize UTF-8 JSON bytes back into a fabric value.
+   * Deserializes UTF-8 JSON bytes back into a fabric value.
    */
   decodeFromBytes(
     bytes: Uint8Array,
@@ -187,7 +191,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
   // Tag wrapping/unwrapping (private)
   // -------------------------------------------------------------------------
 
-  /** Get the wire format tag for a fabric instance's type. */
+  /** Returns the wire format tag for a fabric instance's type. */
   private getTagFor(value: FabricInstance): string {
     if (value instanceof ExplicitTagValue) {
       return value.typeTag;
@@ -201,7 +205,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
     );
   }
 
-  /** Get the class that can reconstruct instances for a given tag. */
+  /** Returns the class that can reconstruct instances for a given tag. */
   private getClassFor(
     tag: string,
   ): FabricClass<FabricInstance> | undefined {
@@ -209,7 +213,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
   }
 
   /**
-   * Wrap a tag and state into the `/<tag>` wire format. Prepends `/` to the
+   * Wraps a tag and state into the `/<tag>` wire format. Prepends `/` to the
    * tag to produce the JSON key. See Section 5.2 of the formal spec.
    */
   private wrapTag(tag: string, state: JsonWireValue): JsonWireValue {
@@ -217,7 +221,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
   }
 
   /**
-   * Unwrap a wire representation. Detects single-key objects with `/`-prefixed
+   * Unwraps a wire representation. Detects single-key objects with `/`-prefixed
    * keys. Returns `{ tag, state }` or `null` if not a tagged value.
    * See Section 5.4 of the formal spec.
    */
@@ -244,12 +248,12 @@ export class JsonEncodingContext implements SerializationContext<string> {
   // Byte conversion (private)
   // -------------------------------------------------------------------------
 
-  /** Convert a wire-format tree to UTF-8-encoded JSON bytes. */
+  /** Converts a wire-format tree to UTF-8-encoded JSON bytes. */
   private toBytes(data: JsonWireValue): Uint8Array {
     return new TextEncoder().encode(JSON.stringify(data));
   }
 
-  /** Parse UTF-8-encoded JSON bytes back into a wire-format tree. */
+  /** Parses UTF-8-encoded JSON bytes back into a wire-format tree. */
   private fromBytes(bytes: Uint8Array): JsonWireValue {
     return JSON.parse(new TextDecoder().decode(bytes)) as JsonWireValue;
   }
@@ -262,7 +266,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
   // -------------------------------------------------------------------------
 
   /**
-   * Serialize a fabric value into wire format. Recursively processes nested
+   * Serializes a fabric value into wire format. Recursively processes nested
    * values. See Section 4.5 of the formal spec.
    */
   private serialize(
@@ -374,7 +378,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
   // -------------------------------------------------------------------------
 
   /**
-   * Deserialize a wire-format value back into modern runtime types.
+   * Deserializes a wire-format value back into modern runtime types.
    * See Section 4.5 of the formal spec.
    */
   private deserialize(
@@ -388,7 +392,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
 
       // A bare `"/"` key (empty tag after stripping the leading slash) is
       // always an encoding error per spec §9 — no valid tag has an empty
-      // name. Produce a ProblematicValue rather than an UnknownValue with
+      // name. Produce a `ProblematicValue` rather than an `UnknownValue` with
       // an empty tag.
       if (tag === "") {
         return new ProblematicValue(
@@ -505,7 +509,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
     }
 
     // Plain objects: recursively deserialize values and freeze. Any
-    // /-prefixed key is reserved per spec — return ProblematicValue on
+    // `/`-prefixed key is reserved per spec — return `ProblematicValue` on
     // first occurrence rather than silently round-tripping the object.
     const result: Record<string, FabricValue> = {};
     for (const [key, val] of Object.entries(data)) {

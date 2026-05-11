@@ -27,9 +27,9 @@ export abstract class BaseCollectingHasher extends BaseIncrementalHasher {
   #currentOffset = 0;
 
   /**
-   * This is called by the base class to perform a digest operation using the
-   * underlying hash implementation. It is allowed to ignore the `encoding` and
-   * always return a `Uint8Array`.
+   * Performs a digest operation on the collected chunks using the underlying
+   * hash implementation. Called by the base class. May ignore the `encoding`
+   * and always return a `Uint8Array`.
    */
   protected abstract _digestChunks(
     encoding: string | undefined,

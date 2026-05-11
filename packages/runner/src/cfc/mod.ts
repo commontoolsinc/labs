@@ -68,6 +68,40 @@ export {
 } from "./sink-inventory.ts";
 export { markRendererTrustedEvent } from "./ui-contract.ts";
 export {
+  cfcObjectSchemaIsClosed,
+  INJECTION_SAFE_ATOM,
+  isPrimitiveJsonValue,
+  isPromptInjectionMaterialRiskAtom,
   resolveSchemaForValidation,
+  schemaWithInjectionSafeAnnotations,
   validateAgainstSchema,
 } from "./schema-sanitization.ts";
+export {
+  cfcConfidentialityForObservationNode,
+  cfcJsonPointerForPath,
+  cfcObservationFitsCeiling,
+  type CfcObservationMaxConfidentiality,
+  type CfcObservationResult,
+  type CfcObservedConfidentiality,
+  type CfcOpaqueLink,
+  cfcOpaqueLinkForPath,
+  joinCfcObservedConfidentiality,
+  uniqueCfcAtoms,
+} from "./observation.ts";
+export {
+  cfcSchemaIsFalse,
+  cfcSchemaIsInternalKey,
+  cfcSchemaIsTrue,
+  cfcSchemaToObject,
+  findCfcSchemaRefs,
+  isEmbeddedCfcSchemaRef,
+  resolveCfcSchemaRef,
+  resolveCfcSchemaRefs,
+  resolveCfcSchemaRefsOrThrow,
+} from "./schema-refs.ts";
+export {
+  type SchemaOpaqueLinkSanitizationResult,
+  validateAndSanitizeSchemaValueWithOpaqueLinks,
+  validateAndSanitizeStructuredResultValue,
+  validateStructuredResultValue,
+} from "./structured-result.ts";

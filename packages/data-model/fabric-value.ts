@@ -1,5 +1,5 @@
-// Re-export everything from interface.ts so that `fabric-value` remains the
-// canonical public surface for all type declarations and the FabricInstance
+// Re-export everything from `interface.ts` so that `fabric-value` remains the
+// canonical public surface for all type declarations and the `FabricInstance`
 // base class.
 export {
   DECONSTRUCT,
@@ -53,8 +53,8 @@ export {
 /**
  * Module-level flag for modern data model mode, set by the `Runtime`
  * constructor via `setDataModelConfig()`. When enabled, fabric value
- * functions use the extended type system (bigint, Map, Set, Uint8Array,
- * Date, etc.).
+ * functions use the extended type system (`bigint`, `Map`, `Set`,
+ * `Uint8Array`, `Date`, etc.).
  */
 let modernDataModelEnabled = false;
 
@@ -88,11 +88,11 @@ export function resetDataModelConfig(): void {
 // ---------------------------------------------------------------------------
 
 /**
- * Convert a native JS value to fabric form (deep, recursive).
+ * Converts a native JS value to fabric form (deep, recursive).
  *
- * Flag OFF (legacy): performs deep conversion via `fabricFromNativeValueLegacy`.
- * Flag ON (modern): wraps native types (Error, Date, RegExp, etc.) into
- * fabric wrappers and deep-freezes via `fabricFromNativeValueModern`.
+ * Flag OFF (legacy): performs deep conversion via `fabricFromNativeValueLegacy()`.
+ * Flag ON (modern): wraps native types (`Error`, `Date`, `RegExp`, etc.) into
+ * fabric wrappers and deep-freezes via `fabricFromNativeValueModern()`.
  *
  * @param freeze - When `true` (default), deep-freezes the result. Only
  *   applies when `modernDataModel` is ON; the legacy path does not
@@ -108,14 +108,14 @@ export function fabricFromNativeValue(
 }
 
 /**
- * Deep unwrap: recursively walk a `FabricValue` tree, unwrapping any
+ * Recursively walks a `FabricValue` tree, unwrapping any
  * `FabricNativeWrapper` values to their underlying native types via
- * `toNativeValue()`. Non-native `FabricInstance` values (Cell, Stream,
- * UnknownValue, etc.) pass through as-is.
+ * `toNativeValue()`. Non-native `FabricInstance` values (`Cell`, `Stream`,
+ * `UnknownValue`, etc.) pass through as-is.
  *
  * Flag OFF (legacy): identity passthrough (legacy values contain no
  * `FabricNativeWrapper` instances). Flag ON (modern): delegates to
- * `nativeFromFabricValueModern`.
+ * `nativeFromFabricValueModern()`.
  *
  * @param frozen - When `true` (default), deep-freezes the result. Only
  *   applies when `modernDataModel` is ON; the legacy path is a
@@ -131,15 +131,15 @@ export function nativeFromFabricValue(
 }
 
 /**
- * Clone an already-valid `FabricValue` to achieve a desired frozenness,
+ * Clones an already-valid `FabricValue` to achieve a desired frozenness,
  * with control over depth and copy semantics.
  *
- * Unlike `fabricFromNativeValue` (which converts native JS values into
+ * Unlike `fabricFromNativeValue()` (which converts native JS values into
  * fabric wrappers), this function assumes the input is already a valid
  * `FabricValue` and only adjusts frozenness by cloning where necessary.
  *
- * Flag OFF (legacy): identity passthrough (legacy values are not frozen).
- * Flag ON (modern): delegates to `cloneIfNecessaryModern`.
+ * Both flag states use modern clone semantics; the legacy dispatch target
+ * delegates to the modern implementation.
  *
  * @param value - An already-valid `FabricValue`.
  * @param options - See `CloneOptions`. Defaults: `{ frozen: true, deep: true }`.
@@ -189,15 +189,17 @@ export function cloneIfNecessary<T extends FabricValue>(
 
 /**
  * Determines if the given value is considered "fabric-compatible" by the system per se
- * (without invoking any conversions such as `.toJSON()`). This function does
+ * (without invoking any conversions such as `toJSON()`). This function does
  * not recursively validate nested values in arrays or objects.
  *
  * Flag OFF (legacy): fabric values are JSON-encodable values plus
- * `undefined`. Flag ON (modern): delegates to `isFabricValueModern` which
+ * `undefined`. Flag ON (modern): delegates to `isFabricValueModern()` which
  * accepts the extended type system.
  *
  * @param value - The value to check.
  * @returns `true` if the value is fabric-compatible per se, `false` otherwise.
+ *
+ * This function is a TypeScript type guard for `FabricValueLayer`.
  */
 export function isFabricValue(
   value: unknown,
@@ -213,11 +215,13 @@ export function isFabricValue(
  * or a deep tree thereof.
  *
  * Flag OFF (legacy): equivalent to `isFabricValue()` (non-recursive).
- * Flag ON (modern): delegates to `isFabricCompatibleModern` which recursively
+ * Flag ON (modern): delegates to `isFabricCompatibleModern()` which recursively
  * validates nested values.
  *
  * @param value - The value to check.
  * @returns `true` if the value can be stored, `false` otherwise.
+ *
+ * This function is a TypeScript type guard for `FabricValue | FabricNativeObject`.
  */
 export function isFabricCompatible(
   value: unknown,
@@ -237,7 +241,7 @@ export function isFabricCompatible(
  * converted via `toJSON()` if available.
  *
  * Flag OFF (legacy): JSON-only type system. Flag ON (modern): delegates to
- * `shallowFabricFromNativeValueModern` which handles the extended type system.
+ * `shallowFabricFromNativeValueModern()` which handles the extended type system.
  *
  * @param value - The value to convert.
  * @param freeze - When `true` (default), freezes the result if it is an
@@ -261,9 +265,9 @@ export function shallowFabricFromNativeValue(
 /**
  * Compares two fabric values for equality.
  *
- * Flag OFF (legacy): uses JSON.stringify comparison, matching the behavior of
- * the original `JSON.parse(JSON.stringify(...))` round-trip (strips undefined,
- * coerces NaN to null, etc.).
+ * Flag OFF (legacy): uses `JSON.stringify()` comparison, matching the behavior of
+ * the original `JSON.parse(JSON.stringify(...))` round-trip (strips `undefined`,
+ * coerces `NaN` to `null`, etc.).
  *
  * Flag ON (modern): uses deep structural equality that correctly handles
  * undefined, sparse arrays, and other extended types.

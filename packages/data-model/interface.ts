@@ -10,12 +10,12 @@
  */
 
 // ===========================================================================
-// FabricSpecialObject
+// `FabricSpecialObject`
 // ===========================================================================
 
 /**
  * Abstract base class for all fabric-system value types. This is the common
- * superclass of `FabricInstance` (protocol types with DECONSTRUCT/RECONSTRUCT)
+ * superclass of `FabricInstance` (protocol types with `[DECONSTRUCT]`/`[RECONSTRUCT]`)
  * and `FabricPrimitive` (immutable special primitives). It enables a single
  * `instanceof FabricSpecialObject` check wherever code needs to recognize any
  * fabric-system value without caring which branch of the hierarchy it
@@ -24,7 +24,7 @@
 export abstract class FabricSpecialObject {}
 
 // ===========================================================================
-// Fabric instance protocol (DECONSTRUCT / RECONSTRUCT / FabricInstance)
+// Fabric instance protocol (`[DECONSTRUCT]` / `[RECONSTRUCT]` / `FabricInstance`)
 // ===========================================================================
 
 /**
@@ -82,7 +82,7 @@ export abstract class FabricInstance extends FabricSpecialObject {
   shallowClone(frozen: boolean): FabricInstance {
     if (frozen && Object.isFrozen(this)) return this;
     const copy = this.shallowUnfrozenClone();
-    // Cast needed: Object.freeze() returns Readonly<T>, which TS considers
+    // Cast needed: `Object.freeze()` returns `Readonly<T>`, which TS considers
     // incompatible with abstract class types due to protected members.
     return frozen ? Object.freeze(copy) as FabricInstance : copy;
   }
@@ -123,7 +123,7 @@ export abstract class FabricPrimitive extends FabricSpecialObject {
  * The full set of values that the fabric storage layer can represent. This
  * is the strongly-typed "middle layer" of the three-layer architecture:
  *
- *   JavaScript "wild west" (unknown) <-> FabricValue <-> Serialized (Uint8Array)
+ *   JavaScript "wild west" (`unknown`) <-> `FabricValue` <-> Serialized (`Uint8Array`)
  *
  * Most native JS object types enter the fabric layer via wrapper classes
  * that implement `FabricInstance`. However, `FabricPrimitive` subclasses
@@ -134,6 +134,16 @@ export abstract class FabricPrimitive extends FabricSpecialObject {
  * `undefined` is preserved when the `modernDataModel` flag is ON. When the
  * flag is OFF, `undefined` in arrays is converted to `null` and `undefined`
  * object properties are omitted -- matching legacy behavior.
+ *
+ * `symbol` values are restricted at runtime to **registry-interned** symbols
+ * -- those for which `Symbol.keyFor(s)` returns a string. These are
+ * portable across realms and processes via their registry key. Unique
+ * symbols (`Symbol(desc)`) are not portable and are rejected at the fabric
+ * boundary. TypeScript's `symbol` type cannot distinguish the two, so the
+ * gate is a runtime one. Note also that the modern fabric-value path
+ * separately rejects all symbols at the entrance (relaxation deferred to a
+ * follow-up); the type union admits `symbol` so the lower layers (hashing,
+ * JSON encoding) can be written and tested ahead of that gate change.
  */
 export type FabricValue =
   // -- Primitives --
@@ -142,6 +152,7 @@ export type FabricValue =
   | number
   | string
   | bigint
+  | symbol
   // -- Fabric special objects --
   | FabricSpecialObject
   // -- Containers --
@@ -150,24 +161,24 @@ export type FabricValue =
   // -- undefined --
   | undefined;
 
-/** An array of fabric values. */
+/** Array of fabric values. */
 export interface FabricArray extends ArrayLike<FabricValue> {}
 
 /**
- * An object/record of fabric values.
+ * Object/record of fabric values.
  *
- * Note: `__proto__` and `constructor` properties are not currently guarded
+ * Note: `.__proto__` and `constructor()` properties are not currently guarded
  * against at the type level or at runtime in clone/conversion internals.
  * If prototype pollution becomes a concern, add boundary validation where
- * values enter the fabric system (e.g., `fabricFromNativeValue`).
+ * values enter the fabric system (e.g., `fabricFromNativeValue()`).
  */
 export interface FabricObject extends Record<string, FabricValue> {}
 
 /**
- * A single "layer" of fabric conversion -- the result of shallow conversion
+ * Single "layer" of fabric conversion -- the result of shallow conversion
  * via `shallowFabricFromNativeValue()`. Arrays and objects have the right
  * shape but their contents may still contain values requiring further
- * conversion (e.g., Error instances in a `cause` chain).
+ * conversion (e.g., `Error` instances in a `.cause` chain).
  */
 export type FabricValueLayer =
   | FabricValue
@@ -205,14 +216,14 @@ export type FabricNativeObject =
 // ===========================================================================
 
 /**
- * A class that can reconstruct fabric instances from essential state. The
- * static `[RECONSTRUCT]` method is separate from the constructor to support
- * reconstruction-specific context and instance interning.
+ * Interface for classes that can reconstruct fabric instances from essential
+ * state. The static `[RECONSTRUCT]` method is separate from the constructor
+ * to support reconstruction-specific context and instance interning.
  * See Section 2.4 of the formal spec.
  */
 export interface FabricClass<T extends FabricInstance> {
   /**
-   * Reconstruct an instance from essential state. Nested values in `state`
+   * Reconstructs an instance from essential state. Nested values in `state`
    * have already been reconstructed by the serialization system. May return
    * an existing instance (interning) rather than creating a new one.
    */
@@ -220,14 +231,14 @@ export interface FabricClass<T extends FabricInstance> {
 }
 
 /**
- * A converter that can reconstruct arbitrary values (not necessarily
+ * Converter that can reconstruct arbitrary values (not necessarily
  * `FabricInstance`s) from essential state. Used for built-in JS types like
  * `Error` that participate in the serialization protocol but don't implement
  * `FabricInstance`. See Section 1.4.1 of the formal spec.
  */
 export interface FabricValueConverter<T> {
   /**
-   * Reconstruct a value from essential state. Nested values in `state`
+   * Reconstructs a value from essential state. Nested values in `state`
    * have already been reconstructed by the serialization system.
    */
   [RECONSTRUCT](state: FabricValue, context: ReconstructionContext): T;
@@ -240,7 +251,7 @@ export interface FabricValueConverter<T> {
  * See Section 2.5 of the formal spec.
  */
 export interface ReconstructionContext {
-  /** Resolve a cell reference. Used by types that need to intern or look up
+  /** Resolves a cell reference. Used by types that need to intern or look up
    *  existing instances during reconstruction. */
   getCell(
     ref: { id: string; path: string[]; space: string },
@@ -261,10 +272,10 @@ export interface SerializationContext<SerializedForm = unknown> {
    *  throwing. @default false */
   readonly lenient: boolean;
 
-  /** Encode a fabric value into serialized form for boundary crossing. */
+  /** Encodes a fabric value into serialized form for boundary crossing. */
   encode(value: FabricValue): SerializedForm;
 
-  /** Decode a serialized form back into a fabric value. */
+  /** Decodes a serialized form back into a fabric value. */
   decode(
     data: SerializedForm,
     runtime: ReconstructionContext,

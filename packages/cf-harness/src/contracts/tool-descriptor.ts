@@ -4,14 +4,18 @@ export type BuiltinToolId =
   | "bash"
   | "bash-no-sandbox"
   | "read_file"
+  | "view_image"
   | "read_skill_resource"
+  | "edit_file"
   | "write_file"
   | "delegate_task";
 
 export const DEFAULT_PARENT_TOOL_IDS = [
   "bash",
   "read_file",
+  "view_image",
   "read_skill_resource",
+  "edit_file",
   "write_file",
   "delegate_task",
 ] as const satisfies readonly BuiltinToolId[];

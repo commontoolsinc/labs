@@ -96,9 +96,17 @@ import {
   type DelegateTaskToolOutput,
 } from "./contracts/subagent.ts";
 import {
+  type EditFileToolInput,
+  type EditFileToolOutput,
+} from "./tools/edit-file.ts";
+import {
   type ReadFileToolInput,
   type ReadFileToolOutput,
 } from "./tools/read-file.ts";
+import {
+  type ViewImageToolInput,
+  type ViewImageToolOutput,
+} from "./tools/view-image.ts";
 import {
   type ReadSkillResourceToolInput,
   type ReadSkillResourceToolOutput,
@@ -113,7 +121,9 @@ export interface BuiltinToolInputMap {
   bash: BashToolInput;
   "bash-no-sandbox": BashToolInput;
   read_file: ReadFileToolInput;
+  view_image: ViewImageToolInput;
   read_skill_resource: ReadSkillResourceToolInput;
+  edit_file: EditFileToolInput;
   write_file: WriteFileToolInput;
   delegate_task: DelegateTaskToolInput;
 }
@@ -122,7 +132,9 @@ export interface BuiltinToolOutputMap {
   bash: BashToolOutput;
   "bash-no-sandbox": BashToolOutput;
   read_file: ReadFileToolOutput;
+  view_image: ViewImageToolOutput;
   read_skill_resource: ReadSkillResourceToolOutput;
+  edit_file: EditFileToolOutput;
   write_file: WriteFileToolOutput;
   delegate_task: DelegateTaskToolOutput;
 }
@@ -998,6 +1010,7 @@ export class CfHarnessEngine {
       runId: this.#runState.runId,
       cfcEnforcementMode: this.#runState.cfcEnforcementMode,
       currentDir: this.#runState.currentDir,
+      workspaceHostPath: this.workspaceHostPath,
       skillRegistry: this.#runState.skillRegistry,
       sandbox: this.sandbox,
       hostProcessRunner: this.hostProcessRunner,

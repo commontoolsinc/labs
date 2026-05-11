@@ -40,10 +40,13 @@ What works today:
   - `bash`
   - `bash-no-sandbox` (provisional host shell for named subagent profiles only)
   - `read_file`
+  - `view_image`
   - `read_skill_resource`
+  - `edit_file`
   - `write_file`
   - `delegate_task`
-- whole-file replace/create plus append writes
+- targeted exact-string edits plus whole-file replace/create and append writes
+- initial and in-run image attachments for model vision-capable flows
 - bounded OpenAI-compatible prompt/tool loop
 - single-child subagent delegation with fresh child prompt context, explicit
   default/browser child profiles, retained child run references, and a sanitized
@@ -154,6 +157,22 @@ deno task run -- \
   --print-transcript
 ```
 
+Initial prompt image attachments:
+
+```bash
+cd packages/cf-harness
+deno task run -- \
+  --workspace /path/to/workspace \
+  --gateway-auth-mode none \
+  --image captures/example.png \
+  --prompt "Describe the attached capture image and summarize useful next steps."
+```
+
+`--image` is repeatable and accepts `png`, `jpeg`, `gif`, and `webp` files
+inside the workspace. Relative image paths are resolved from `--workspace`. The
+transcript retains only image metadata (`hostPath`, media type, byte count,
+digest); base64 pixels are materialized only for the gateway request.
+
 Explicit skill preload:
 
 ```bash
@@ -192,6 +211,29 @@ deno task run -- \
   --prompt "Handle this Loom wish."
 ```
 
+Batch runs can require the agent to produce a schema-validated JSON sidecar
+before the CLI exits successfully. `--result-json-path` remains the harness
+metadata output; `--structured-result-path` is the agent-authored JSON file to
+validate:
+
+```bash
+deno task run -- \
+  --workspace /path/to/workspace \
+  --gateway-auth-mode none \
+  --output-mode batch \
+  --result-json-path /tmp/cf-harness-result.json \
+  --structured-result-path capture.results.json \
+  --structured-result-schema-file /path/to/result.schema.json \
+  --prompt "Write capture.results.json with the requested structured result."
+```
+
+The structured result path must stay inside the workspace. The schema may be
+provided inline with `--structured-result-schema` or read from
+`--structured-result-schema-file`. After the run, cf-harness reads the sidecar,
+validates it with the same JSON Schema validation primitives used by subagent
+`returnSchema`, records `structured_result` in the batch metadata, and exits
+nonzero when the file is missing, invalid JSON, or schema-invalid.
+
 When constraining the parent tool surface to `delegate_task`, authorize the
 child profile separately so the delegation policy transition is explicit:
 
@@ -210,9 +252,9 @@ The provisional browser profile is the only CLI-supported path to
 subagent result. Browser/page output is treated as untrusted child-local data;
 with a `returnSchema`, parent-visible free-form strings are replaced by opaque
 links while raw observations stay in child artifacts. The browser child can read
-workspace files but does not receive `write_file`, so it should return findings
-through the structured return channel rather than by writing browser
-observations into the workspace. The host shell is policy-restricted to
+workspace files but does not receive `edit_file` or `write_file`, so it should
+return findings through the structured return channel rather than by writing
+browser observations into the workspace. The host shell is policy-restricted to
 `agent-browser`, `agent-browser` discovery (`which agent-browser`,
 `command -v agent-browser`), `pwd`, `ls`, and bounded workspace-local `find`
 commands. `agent-browser eval` is not available in this profile; browser
@@ -222,9 +264,9 @@ locator actions, and normal browser interactions.
 For browser-profile runs, prefer a host artifact root outside the workspace. Raw
 child artifacts are retained for operator analysis, but they are not meant to
 become ordinary workspace inputs for the parent model. If an artifact root is
-physically placed under the workspace, `read_file`, `write_file`, and
-browser-profile `ls`/`find` treat that artifact tree as reserved from
-model-facing file and discovery tools.
+physically placed under the workspace, `read_file`, `view_image`, `write_file`,
+and `edit_file`, plus browser-profile `ls`/`find`, treat that artifact tree as
+reserved from model-facing file and discovery tools.
 
 ```bash
 ROOT=/tmp/cf-harness-browser-demo

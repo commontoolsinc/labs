@@ -363,6 +363,9 @@ sudo update-ca-certificates
 > you don't need to verify the baseline against a clean tree before testing your
 > changes.
 
+- For CI wall-time optimization, follow
+  [CI Performance Policy](CI_PERFORMANCE.md). Do not keep splitting jobs once
+  the required test jobs are already in the same rough timing band.
 - Check typings with `deno task check`.
 - Run linter with `deno lint`.
 - Run all tests using `deno task test` (NOT `deno test`)

@@ -40,9 +40,9 @@ import {
  * passed to type handlers by the internal tree-walking engine.
  */
 export interface TypeHandlerCodec {
-  /** Wrap a tag and state into the wire format's tagged representation. */
+  /** Wraps a tag and state into the wire format's tagged representation. */
   wrapTag(tag: string, state: JsonWireValue): JsonWireValue;
-  /** Get the wire format tag for a fabric instance's type. */
+  /** Returns the wire format tag for a fabric instance's type. */
   getTagFor(value: FabricInstance): string;
 }
 
@@ -64,7 +64,7 @@ export interface TypeHandler {
   canSerialize(value: FabricValue): boolean;
 
   /**
-   * Serialize the value. Only called after `canSerialize` returned `true`.
+   * Serializes the value. Only called after `canSerialize()` returned `true`.
    * The handler is responsible for tag wrapping via `codec.wrapTag()` and for
    * recursively serializing nested values via the provided `recurse` callback.
    */
@@ -75,7 +75,7 @@ export interface TypeHandler {
   ): JsonWireValue;
 
   /**
-   * Deserialize a value from its wire format state. The state has already been
+   * Deserializes a value from its wire format state. The state has already been
    * unwrapped (tag stripped) but inner values have NOT been recursively
    * deserialized -- the handler must call `recurse` on nested values.
    */
@@ -97,7 +97,7 @@ export class TypeHandlerRegistry {
   /** Tag -> handler map for O(1) deserialization dispatch. */
   private readonly tagMap = new Map<string, TypeHandler>();
 
-  /** Register a handler. Handlers with non-empty tags are indexed for
+  /** Registers a handler. Handlers with non-empty tags are indexed for
    *  O(1) deserialization lookup. Handlers with empty tags (like
    *  `FabricInstanceHandler`) participate in serialization matching only. */
   register(handler: TypeHandler): void {
@@ -108,7 +108,7 @@ export class TypeHandlerRegistry {
   }
 
   /**
-   * Find a handler that can serialize the given value. Returns `undefined`
+   * Finds a handler that can serialize the given value. Returns `undefined`
    * if no handler matches (the caller should fall through to structural
    * handling for primitives, arrays, and plain objects).
    */
@@ -121,18 +121,18 @@ export class TypeHandlerRegistry {
     return undefined;
   }
 
-  /** Look up a handler by tag for deserialization. */
+  /** Looks up a handler by tag for deserialization. */
   getDeserializer(tag: string): TypeHandler | undefined {
     return this.tagMap.get(tag);
   }
 }
 
 // ---------------------------------------------------------------------------
-// Utility: ProblematicValue factory
+// Utility: `ProblematicValue` factory
 // ---------------------------------------------------------------------------
 
 /**
- * Create a `ProblematicValue` for a deserialization failure. The type tag
+ * Creates a `ProblematicValue` for a deserialization failure. The type tag
  * is preserved for round-tripping; the message provides human-readable
  * diagnostics.
  */
@@ -230,8 +230,8 @@ export const BigIntHandler: TypeHandler = {
 /**
  * Handler for `FabricEpochNsec`. Serializes to a flat base64 string encoding
  * the underlying bigint's two's-complement big-endian byte representation.
- * Wire format: `{ "/EpochNsec@1": "<base64>" }`. FabricEpochNsec is a direct
- * member of FabricValue (not a FabricInstance), so this handler uses
+ * Wire format: `{ "/EpochNsec@1": "<base64>" }`. `FabricEpochNsec` is a direct
+ * member of `FabricValue` (not a `FabricInstance`), so this handler uses
  * `instanceof` directly.
  * See Section 5.3 of the formal spec.
  */
@@ -282,8 +282,8 @@ export const EpochNsecHandler: TypeHandler = {
 /**
  * Handler for `FabricEpochDays`. Serializes to a flat base64 string encoding
  * the underlying bigint's two's-complement big-endian byte representation.
- * Wire format: `{ "/EpochDays@1": "<base64>" }`. FabricEpochDays is a direct
- * member of FabricValue (not a FabricInstance), so this handler uses
+ * Wire format: `{ "/EpochDays@1": "<base64>" }`. `FabricEpochDays` is a direct
+ * member of `FabricValue` (not a `FabricInstance`), so this handler uses
  * `instanceof` directly. Same flat encoding approach as `EpochNsecHandler`.
  * See Section 5.3 of the formal spec.
  */
@@ -407,6 +407,51 @@ export const SpecialNumberHandler: TypeHandler = {
 };
 
 /**
+ * Handler for registry-interned symbols. Serializes the registry key as a
+ * JSON string. Wire format: `{ "/Symbol@1": "<key>" }`. On deserialize,
+ * `Symbol.for(key)` retrieves (or creates) the registry symbol with the
+ * matching key, so the result is `===` to any other `Symbol.for(key)` in
+ * the same realm.
+ *
+ * Unique symbols (`Symbol(desc)`, where `Symbol.keyFor()` returns
+ * `undefined`) have no portable representation; `canSerialize()` returns
+ * `false` for them, which routes them to the registry's "unhandled value"
+ * path instead of being silently coerced to a registry symbol.
+ */
+export const SymbolHandler: TypeHandler = {
+  tag: TAGS.Symbol,
+
+  canSerialize(value: FabricValue): boolean {
+    return typeof value === "symbol" && Symbol.keyFor(value) !== undefined;
+  },
+
+  serialize(
+    value: FabricValue,
+    codec: TypeHandlerCodec,
+    _recurse: (v: FabricValue) => JsonWireValue,
+  ): JsonWireValue {
+    // `canSerialize()` already verified the symbol has a registry key.
+    const key = Symbol.keyFor(value as symbol)!;
+    return codec.wrapTag(TAGS.Symbol, key);
+  },
+
+  deserialize(
+    state: JsonWireValue,
+    _runtime: ReconstructionContext,
+    _recurse: (v: JsonWireValue) => FabricValue,
+  ): FabricValue {
+    if (typeof state !== "string") {
+      return makeProblematic(
+        TAGS.Symbol,
+        state,
+        `Symbol: expected string state, got ${typeof state}`,
+      );
+    }
+    return Symbol.for(state);
+  },
+};
+
+/**
  * Handler for `FabricBytes`. Serializes to a flat base64url string
  * encoding the raw bytes. Wire format: `{ "/Bytes@1": "<base64>" }`.
  * `FabricBytes` is a direct member of `FabricValue` (via
@@ -464,7 +509,7 @@ export const BytesHandler: TypeHandler = {
  * registry for those tags.
  */
 export const FabricInstanceHandler: TypeHandler = {
-  // This tag is not used for deserialization dispatch -- FabricInstance
+  // This tag is not used for deserialization dispatch -- `FabricInstance`
   // types are looked up by their individual tags. The handler is registered
   // for serialization matching only.
   tag: "",
@@ -480,14 +525,14 @@ export const FabricInstanceHandler: TypeHandler = {
   ): JsonWireValue {
     const inst = value as FabricInstance;
 
-    // ExplicitTagValue (UnknownValue, ProblematicValue): use
-    // preserved typeTag and re-serialize their stored state.
+    // `ExplicitTagValue` (`UnknownValue`, `ProblematicValue`): use
+    // preserved `.typeTag` and re-serialize their stored state.
     if (inst instanceof ExplicitTagValue) {
       const serializedState = recurse(inst.state);
       return codec.wrapTag(inst.typeTag, serializedState);
     }
 
-    // General FabricInstance: use DECONSTRUCT and codec for tag.
+    // General `FabricInstance`: use `[DECONSTRUCT]` and codec for tag.
     const state = inst[DECONSTRUCT]();
     const tag = codec.getTagFor(inst);
     const serializedState = recurse(state);
@@ -499,33 +544,34 @@ export const FabricInstanceHandler: TypeHandler = {
     _runtime: ReconstructionContext,
     _recurse: (v: JsonWireValue) => FabricValue,
   ): FabricValue {
-    // Not reached via tag dispatch -- FabricInstance deserialization is
-    // handled by the class registry fallback in deserialize().
+    // Not reached via tag dispatch -- `FabricInstance` deserialization is
+    // handled by the class registry fallback in `deserialize()`.
     throw new Error("FabricInstanceHandler.deserialize should not be called");
   },
 };
 
 /**
- * Create a registry with the built-in type handlers. The order matters for
+ * Creates a registry with the built-in type handlers. The order matters for
  * serialization: `FabricPrimitive` subclasses are checked first (direct
  * `FabricValue` members matched by `instanceof`), then `FabricInstance`
  * (generic protocol types), then `bigint` and `undefined`. Primitives
- * (null, boolean, number, string), arrays, and plain objects are handled
- * as fallthrough in the serializer after no handler matches.
+ * (`null`, `boolean`, `number`, `string`), arrays, and plain objects are
+ * handled as fallthrough in the serializer after no handler matches.
  */
 export function createDefaultRegistry(): TypeHandlerRegistry {
   const registry = new TypeHandlerRegistry();
-  // FabricPrimitive subclasses first -- they are direct FabricValue members
-  // matched by instanceof, and must be checked before the generic
-  // FabricInstanceHandler.
+  // `FabricPrimitive` subclasses first -- they are direct `FabricValue` members
+  // matched by `instanceof`, and must be checked before the generic
+  // `FabricInstanceHandler`.
   registry.register(EpochNsecHandler);
   registry.register(EpochDaysHandler);
   registry.register(BytesHandler);
-  // FabricInstance (generic -- checked via instanceof).
+  // `FabricInstance` (generic -- checked via `instanceof`).
   registry.register(FabricInstanceHandler);
   // Primitives that need tagged encoding (can't be expressed in JSON natively).
   registry.register(BigIntHandler);
   registry.register(SpecialNumberHandler);
+  registry.register(SymbolHandler);
   registry.register(UndefinedHandler);
   return registry;
 }

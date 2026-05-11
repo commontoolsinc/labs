@@ -44,7 +44,7 @@ class DenoHasher extends BaseIncrementalHasher {
         return this.#hasher.digest(encoding);
       }
       case undefined: {
-        // node:crypto digest() returns Buffer; normalize to plain Uint8Array.
+        // `node:crypto`'s `digest()` returns `Buffer`; normalize to plain `Uint8Array`.
         const buf = this.#hasher.digest();
         return new Uint8Array(
           buf.buffer,
@@ -60,7 +60,7 @@ class DenoHasher extends BaseIncrementalHasher {
 }
 
 /**
- * Is this module usable?
+ * Indicates whether this module is usable.
  */
 export function canUseDeno() {
   return crypto !== null;

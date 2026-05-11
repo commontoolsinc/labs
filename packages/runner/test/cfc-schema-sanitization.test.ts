@@ -6,7 +6,8 @@ import {
   isPromptInjectionMaterialRiskAtom,
   schemaWithInjectionSafeAnnotations,
   validateAgainstSchema,
-} from "../src/cfc/schema-sanitization.ts";
+  validateAndSanitizeSchemaValueWithOpaqueLinks,
+} from "../src/cfc/mod.ts";
 
 const promptRisk = {
   type: "https://commonfabric.org/cfc/atom/Caveat",
@@ -226,5 +227,76 @@ describe("schema-based prompt injection sanitization", () => {
         payload: { value: "not a number" },
       }),
     ).toBeDefined();
+  });
+
+  it("sanitizes free strings to opaque links while preserving schema-inert values", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["approve", "reject"] },
+        confidence: { type: "number" },
+        evidence: { type: "string" },
+      },
+      required: ["action", "confidence", "evidence"],
+      additionalProperties: false,
+    } as const satisfies JSONSchema;
+
+    const sanitized = validateAndSanitizeSchemaValueWithOpaqueLinks({
+      schema,
+      value: {
+        action: "approve",
+        confidence: 0.9,
+        evidence: "untrusted page text",
+      },
+      opaqueHandleId: "child-run-1",
+    });
+
+    expect(sanitized).toEqual({
+      value: {
+        action: "approve",
+        confidence: 0.9,
+        evidence: { "@link": "opaque:child-run-1#/evidence" },
+      },
+      linkedStringCount: 1,
+    });
+  });
+
+  it("preserves caller-provided opaque links when the matching schema branch allows them", () => {
+    const opaqueLinkSchema = {
+      type: "object",
+      properties: {
+        "@link": { type: "string" },
+      },
+      required: ["@link"],
+      additionalProperties: false,
+    } as const satisfies JSONSchema;
+    const schema = {
+      type: "object",
+      properties: {
+        evidence: {
+          anyOf: [
+            opaqueLinkSchema,
+            { type: "string" },
+          ],
+        },
+      },
+      required: ["evidence"],
+      additionalProperties: false,
+    } as const satisfies JSONSchema;
+
+    const sanitized = validateAndSanitizeSchemaValueWithOpaqueLinks({
+      schema,
+      value: {
+        evidence: { "@link": "opaque:child-run-1#/raw" },
+      },
+      opaqueHandleId: "child-run-1",
+    });
+
+    expect(sanitized).toEqual({
+      value: {
+        evidence: { "@link": "opaque:child-run-1#/raw" },
+      },
+      linkedStringCount: 0,
+    });
   });
 });

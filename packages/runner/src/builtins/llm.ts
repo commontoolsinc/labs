@@ -23,8 +23,8 @@ import {
   schemaWithInjectionSafeAnnotations,
   validateAgainstSchema,
 } from "../cfc/schema-sanitization.ts";
+import { uniqueCfcAtoms } from "../cfc/observation.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
-import { ContextualFlowControl } from "../cfc.ts";
 import { type Cell, isCell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
@@ -90,7 +90,7 @@ function collectCellConfidentiality(cell: Cell<any>): readonly unknown[] {
     return [];
   }
 
-  return ContextualFlowControl.uniqueAtoms(
+  return uniqueCfcAtoms(
     labelView.entries.flatMap((entry) => entry.label.confidentiality ?? []),
   );
 }
@@ -98,7 +98,7 @@ function collectCellConfidentiality(cell: Cell<any>): readonly unknown[] {
 function collectGenerateObjectPromptConfidentiality(
   inputs: Cell<any>,
 ): readonly unknown[] {
-  return ContextualFlowControl.uniqueAtoms([
+  return uniqueCfcAtoms([
     ...collectCellConfidentiality(inputs.key("prompt")),
     ...collectCellConfidentiality(inputs.key("messages")),
     ...collectCellConfidentiality(inputs.key("system")),
@@ -257,7 +257,7 @@ async function executeWithToolsLoop(params: {
         ...toolResultMessages,
       ];
 
-      const nextObservedConfidentiality = ContextualFlowControl.uniqueAtoms([
+      const nextObservedConfidentiality = uniqueCfcAtoms([
         ...observedConfidentiality,
         ...toolResults.flatMap((result) =>
           result.observedConfidentiality ?? []
@@ -1183,11 +1183,10 @@ export function generateObject<T extends Record<string, unknown>>(
                 "You are a helpful assistant.";
               const livePromptObservedConfidentiality =
                 collectGenerateObjectPromptConfidentiality(inputs);
-              const liveInitialObservedConfidentiality = ContextualFlowControl
-                .uniqueAtoms([
-                  ...livePromptObservedConfidentiality,
-                  ...liveContextDocs.observedConfidentiality,
-                ]);
+              const liveInitialObservedConfidentiality = uniqueCfcAtoms([
+                ...livePromptObservedConfidentiality,
+                ...liveContextDocs.observedConfidentiality,
+              ]);
 
               // Execute with tools - capture presentResult when called
               let finalResult: T | undefined;
@@ -1263,13 +1262,12 @@ export function generateObject<T extends Record<string, unknown>>(
                   ];
                   finalMessages = updatedMessages;
 
-                  const nextObservedConfidentiality = ContextualFlowControl
-                    .uniqueAtoms([
-                      ...observedConfidentiality,
-                      ...toolResults.flatMap((result) =>
-                        result.observedConfidentiality ?? []
-                      ),
-                    ]);
+                  const nextObservedConfidentiality = uniqueCfcAtoms([
+                    ...observedConfidentiality,
+                    ...toolResults.flatMap((result) =>
+                      result.observedConfidentiality ?? []
+                    ),
+                  ]);
                   if (presentResultPart) {
                     finalObservedConfidentiality = nextObservedConfidentiality;
                   }
@@ -1494,7 +1492,7 @@ export function generateObject<T extends Record<string, unknown>>(
               };
             logGenerateObject("client-generateObject-start", {
               ...directRequestSummary,
-              observedConfidentialityCount: ContextualFlowControl.uniqueAtoms([
+              observedConfidentialityCount: uniqueCfcAtoms([
                 ...collectGenerateObjectPromptConfidentiality(inputs),
                 ...liveContextDocs.observedConfidentiality,
               ]).length,
@@ -1516,7 +1514,7 @@ export function generateObject<T extends Record<string, unknown>>(
             return {
               ...response,
               resultSchema: resultSchemaForObserved(
-                ContextualFlowControl.uniqueAtoms([
+                uniqueCfcAtoms([
                   ...livePromptObservedConfidentiality,
                   ...liveContextDocs.observedConfidentiality,
                 ]),

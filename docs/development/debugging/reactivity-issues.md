@@ -58,6 +58,31 @@ const activeItems = computed(() => items.filter(item => !item.done));
 
 **The Pattern:** Compute transformations (filter, sort, group) outside JSX using `computed()`, then map over the computed result inside JSX. Mapping over `computed()` results is the canonical pattern.
 
+## Mapped List Churns or Times Out
+
+**Issue:** Rendering a list triggers `non-idempotent raw:map`,
+`Too many iterations: ... raw:map`, link-resolution churn, or a test action
+timeout.
+
+**Check:** Look for render-time writes inside the `.map()` body. Event props
+must receive a handler to run later, not the result of calling a stream or
+mutation immediately.
+
+```tsx
+// Wrong - send runs while the row renders
+{items.map((item, index) => (
+  <cf-button onClick={selectItem.send(index)}>Select</cf-button>
+))}
+
+// Correct - send runs when clicked
+{items.map((item, index) => (
+  <cf-button onClick={() => selectItem.send(index)}>Select</cf-button>
+))}
+```
+
+See [Immediate Event Invocation](gotchas/immediate-event-invocation.md) for the
+full diagnosis checklist.
+
 ## Conditional Rendering Not Working
 
 **Issue:** Ternary operator doesn't work for conditional rendering

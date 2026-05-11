@@ -15,6 +15,11 @@ Common causes:
 - Appending to an array on each execution instead of replacing it
 - Two actions forming a cycle: A writes cell X which triggers B, B writes
   cell Y which triggers A
+- A mapped render body that invokes a stream or writes to state immediately,
+  such as `onClick={stream.send(index)}` inside `.map(...)`, instead of passing
+  a handler to run when the event fires. This often appears as
+  `non-idempotent raw:map` or `Too many iterations: ... raw:map`; see
+  [Immediate Event Invocation](gotchas/immediate-event-invocation.md).
 
 ## Quick Start (Browser Console)
 

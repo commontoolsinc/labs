@@ -21,6 +21,7 @@ import {
   applyBaselineOverrides,
   type BaselineOverrides,
   computeBaseline,
+  computeCiWallTimeRevisitSignals,
   downloadAndParseJUnit,
   extractMetrics,
   extractTestFileMetrics,
@@ -41,6 +42,7 @@ import {
   readAndParseEvent,
   REPO,
   STDDEV_FACTOR,
+  timingArtifactLabel,
   type TimingSample,
   TOKEN,
   WORKFLOW_FILE,
@@ -126,7 +128,7 @@ async function main() {
       const suites = await downloadAndParseJUnit(artifact.id);
       const testMetrics = extractTestFileMetrics(
         currentRunInfo,
-        artifact.name.replace("test-timing-", ""),
+        timingArtifactLabel(artifact.name),
         suites,
       );
       for (const [name, sample] of testMetrics) {
@@ -143,6 +145,7 @@ async function main() {
   }
 
   console.log(`Extracted ${currentMetrics.size} metrics from current run.`);
+  const wallTimeSignals = computeCiWallTimeRevisitSignals(currentJobs);
 
   // 3. Fetch recent main-branch push runs for baseline
   console.log("Fetching recent main-branch runs for baseline...");
@@ -191,7 +194,7 @@ async function main() {
         if (suites.length > 0) {
           const testMetrics = extractTestFileMetrics(
             run,
-            artifact.name.replace("test-timing-", ""),
+            timingArtifactLabel(artifact.name),
             suites,
           );
           for (const [name, sample] of testMetrics) {
@@ -458,7 +461,21 @@ async function main() {
     }
   }
 
-  // 6c. Pass/fail outcome + override copy-paste block pinned at the bottom.
+  // 6c. Informational CI wall-time policy signals. These are intentionally
+  // non-blocking; they tell us when to consider CI split/rebalance work again.
+  if (wallTimeSignals.length > 0) {
+    console.log("\n## CI Wall-Time Revisit Signals");
+    console.log(
+      "Informational only. See docs/development/CI_PERFORMANCE.md before starting CI-splitting work.",
+    );
+    console.log("| signal | detail |");
+    console.log("|:--|:--|");
+    for (const signal of wallTimeSignals) {
+      console.log(`| ${signal.title} | ${signal.detail} |`);
+    }
+  }
+
+  // 6d. Pass/fail outcome + override copy-paste block pinned at the bottom.
   if (informationalOnly) {
     console.log("\nInformational Only:");
   }

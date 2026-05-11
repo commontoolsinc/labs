@@ -9,7 +9,9 @@ Quick error reference and debugging workflows. For detailed explanations, see li
 | "Property 'set' does not exist" | Missing `Writable<>` in signature | Add `Writable<T>` for write access ([@writeable](../../common/concepts/types-and-schemas/writable.md)) |
 | "X.get is not a function" | Calling `.get()` on computed/lift result | Access directly without `.get()` - only `Writable<>` has `.get()` ([gotchas/get-is-not-a-function](gotchas/get-is-not-a-function.md)) |
 | "X.filter is not a function" | Value isn't an array (yet) | Check `Default<>`, don't assume `.get()` is the fix ([gotchas/filter-map-find-not-a-function](gotchas/filter-map-find-not-a-function.md)) |
+| "Cell.of() only accepts static data" | Passing an input prop, mapped field, or computed/reactive value into `Writable.of()` / `Cell.of()` | Use the input writable cell directly, or initialize pattern-owned local cells from static values only ([new-cells](../../common/patterns/new-cells.md), [@reactivity](../../common/concepts/reactivity.md)) |
 | "Tried to access a reactive reference outside a reactive context" | Accessing reactive value at init time (in `[NAME]`, `Writable.of()`, or object indexing) | Wrap in `computed()`, use `lift()`, or set in event handler ([gotchas/reactive-reference-outside-context](gotchas/reactive-reference-outside-context.md)) |
+| ".trim is not a function" / ".replace is not a function" / ".includes is not a function" | Calling plain string helpers on reactive fields, often from JSX or `.map()` render contexts | Render reactive values directly when possible, or derive labels/branches in `computed()` ([reactivity-issues](reactivity-issues.md), [@reactivity](../../common/concepts/reactivity.md)) |
 | "Type 'string' is not assignable to type 'CSSProperties'" | String style on HTML element | Use object syntax `style={{ ... }}` ([style-errors](style-errors.md)) |
 | Type mismatch binding item to `$checked` | Binding whole item, not property | Bind `item.done`, not `item` ([type-errors](type-errors.md)) |
 | "ReadOnlyAddressError" | onClick inside computed() | Move button outside, use disabled ([gotchas/onclick-inside-computed](gotchas/onclick-inside-computed.md)) |
@@ -24,6 +26,7 @@ Quick error reference and debugging workflows. For detailed explanations, see li
 | CLI `get` returns stale computed values | `piece set` doesn't trigger recompute | Run `piece step` after `set` to trigger re-evaluation ([cli-debugging](cli-debugging.md#stale-computed-values-after-piece-set)) |
 | "handler() should be defined at module scope" | handler() inside pattern body | Move handler() outside pattern ([gotchas/handler-inside-pattern](gotchas/handler-inside-pattern.md)) |
 | UI churning, high CPU, never settles | Non-idempotent computed or action cycle | Run `await commonfabric.detectNonIdempotent()` ([non-idempotent-detection](non-idempotent-detection.md)) |
+| `non-idempotent raw:map` or `Too many iterations: ... raw:map` | Mapped render body is doing work during render, often an event prop invoking `.send()` immediately | Inspect `.map()` JSX for `onClick={stream.send(...)}` or other render-time writes ([gotchas/immediate-event-invocation](gotchas/immediate-event-invocation.md)) |
 | "Function creation is not allowed in pattern context" | Helper function inside pattern | Move function to module scope ([gotchas/handler-inside-pattern](gotchas/handler-inside-pattern.md)) |
 | "lift() should not be immediately invoked inside a pattern" | `lift(...)(args)` inside pattern | Use `computed()` instead, or define lift() at module scope ([gotchas/handler-inside-pattern](gotchas/handler-inside-pattern.md)) |
 | Click handler does nothing, ID lookup fails silently | Using custom `id` property for lookups | Use `equals()` for identity, not custom IDs ([gotchas/custom-id-property-pitfall](gotchas/custom-id-property-pitfall.md)) |
@@ -40,10 +43,13 @@ These issues compile without errors but fail at runtime.
 - [.get() is Not a Function](gotchas/get-is-not-a-function.md) - Only `Writable<>` has `.get()`
 - [filter/map/find is Not a Function](gotchas/filter-map-find-not-a-function.md) - Value isn't an array yet
 - [Reactive Reference Outside Context](gotchas/reactive-reference-outside-context.md) - Use `lift()` for object indexing
+- [Local Cells](../../common/patterns/new-cells.md) - `Writable.of()` is for
+  new pattern-owned cells initialized from static values
 - [onClick Inside computed()](gotchas/onclick-inside-computed.md) - ReadOnlyAddressError
 - [ifElse with Composed Pattern Cells](gotchas/ifelse-composed-pattern-cells.md) - Piece hangs
 - [lift() Returns Stale/Empty Data](gotchas/lift-returns-stale-data.md) - Closure limitations
 - [Handler Binding Error](gotchas/handler-binding-error.md) - Two-step binding pattern
+- [Immediate Event Invocation](gotchas/immediate-event-invocation.md) - Event props invoking streams or writes during render
 - [Stream.of() / .subscribe() Don't Exist](gotchas/stream-subscribe-dont-exist.md) - Bound handlers ARE streams
 - [handler() or Function Inside Pattern](gotchas/handler-inside-pattern.md) - Module scope requirement
 - [Custom `id` Property Pitfall](gotchas/custom-id-property-pitfall.md) - Use `equals()` for identity

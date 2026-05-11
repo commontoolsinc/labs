@@ -703,6 +703,8 @@ export const classifyBuiltinToolFailure = (
         toolId,
       );
     case "read_file":
+    case "view_image":
+    case "edit_file":
     case "write_file":
       return classifyStructuredFileToolFailure(toolId, output, at);
     case "read_skill_resource":
@@ -760,6 +762,8 @@ const fileFailureKindForCode = (
   switch (code) {
     case "file_not_found":
       return "file_not_found";
+    case "edit_conflict":
+      return "harness_error";
     case "not_a_file":
       return "not_a_file";
     case "permission_denied":
@@ -772,7 +776,7 @@ const fileFailureKindForCode = (
 };
 
 const classifyStructuredFileToolFailure = (
-  toolId: "read_file" | "write_file",
+  toolId: "read_file" | "view_image" | "write_file" | "edit_file",
   output: unknown,
   at: string,
 ): HarnessFailureRecord | undefined => {

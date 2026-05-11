@@ -1,10 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
-import {
-  assert,
-  assertNotStrictEquals,
-  assertStrictEquals,
-  assertThrows,
-} from "@std/assert";
+import { assert } from "@std/assert";
+import { expect } from "@std/expect";
 import { FabricHash } from "../fabric-hash.ts";
 import { SchemaAndHash } from "../schema-and-hash.ts";
 import { toDeepFrozenSchema } from "../schema-utils.ts";
@@ -21,9 +17,7 @@ const HASH_B = new FabricHash(
 
 describe("constructor", () => {
   it("throws if schema is not deep-frozen", () => {
-    assertThrows(
-      () => new SchemaAndHash({ type: "number" }, HASH_A),
-      Error,
+    expect(() => new SchemaAndHash({ type: "number" }, HASH_A)).toThrow(
       "schema must be deep-frozen",
     );
   });
@@ -31,31 +25,31 @@ describe("constructor", () => {
   it("accepts a deep-frozen schema", () => {
     const schema = toDeepFrozenSchema({ type: "number" });
     const sah = new SchemaAndHash(schema, HASH_A);
-    assertStrictEquals(sah.schema, schema);
-    assertStrictEquals(sah.hash, HASH_A);
+    expect(sah.schema).toBe(schema);
+    expect(sah.hash).toBe(HASH_A);
   });
 
   it("accepts boolean schema (primitives are inherently frozen)", () => {
     const sah = new SchemaAndHash(true, HASH_A);
-    assertStrictEquals(sah.schema, true);
+    expect(sah.schema).toBe(true);
   });
 });
 
 describe("hashString getter", () => {
   it("returns a string", () => {
     const sah = new SchemaAndHash(true, HASH_A);
-    assertStrictEquals(typeof sah.hashString, "string");
+    expect(typeof sah.hashString).toBe("string");
   });
 
   it("matches hash.toString()", () => {
     const sah = new SchemaAndHash(true, HASH_A);
-    assertStrictEquals(sah.hashString, sah.hash.toString());
+    expect(sah.hashString).toBe(sah.hash.toString());
   });
 
   it("different hashes produce different hashStrings", () => {
     const sahA = new SchemaAndHash(true, HASH_A);
     const sahB = new SchemaAndHash(true, HASH_B);
-    assertNotStrictEquals(sahA.hashString, sahB.hashString);
+    expect(sahA.hashString).not.toBe(sahB.hashString);
   });
 });
 

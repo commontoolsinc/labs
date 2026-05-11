@@ -23,6 +23,7 @@ const HASHER_POOL_SIZE = 5;
  * used synchronously).
  */
 class HasherPool extends InstancePool<IHasher> {
+  /** @inheritDoc */
   protected override _initInstance(instance: IHasher) {
     instance.init();
   }
@@ -32,8 +33,8 @@ class HasherPool extends InstancePool<IHasher> {
 const hasherPool = new HasherPool();
 
 /**
- * A hasher instance which _isn't_ allowed to be acquired for concurrent use.
- * This is the one used to serve one-shot hash requests.
+ * The one-shot hasher instance, _not_ allowed to be acquired for concurrent
+ * use. Used to serve one-shot hash requests.
  */
 const theOneShotHasher: IHasher[] = [];
 
@@ -44,7 +45,7 @@ const theOneShotHasher: IHasher[] = [];
 let initResult: Promise<boolean> | null = null;
 
 /**
- * Is this module actually usable?
+ * Whether this module is actually usable.
  */
 let moduleIsUsable: boolean = false;
 
@@ -52,7 +53,7 @@ let moduleIsUsable: boolean = false;
  * Gets and initializes the unique one-shot hasher instance.
  */
 function getOneShotHasher(): IHasher {
-  const result = theOneShotHasher[0];
+  const result = theOneShotHasher[0]!;
   result.init();
   return result;
 }

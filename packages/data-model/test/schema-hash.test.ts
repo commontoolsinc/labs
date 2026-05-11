@@ -1,11 +1,5 @@
 import { describe, it } from "@std/testing/bdd";
-import {
-  assert,
-  assertEquals,
-  assertNotEquals,
-  assertNotStrictEquals,
-  assertStrictEquals,
-} from "@std/assert";
+import { assert } from "@std/assert";
 import { expect } from "@std/expect";
 import {
   findInternedSchema,
@@ -25,7 +19,7 @@ describe("schema-hash dispatch", () => {
   describe("hashSchema()", () => {
     it("returns a string", () => {
       const result = hashSchema({ type: "number" });
-      assertStrictEquals(typeof result, "string");
+      expect(typeof result).toBe("string");
     });
 
     it("agrees with general `hashStringOf()`", () => {
@@ -41,19 +35,19 @@ describe("schema-hash dispatch", () => {
       };
       const a = hashSchema(schema);
       const b = hashSchema(schema);
-      assertStrictEquals(a, b);
+      expect(a).toBe(b);
     });
 
     it("produces different results for different schemas", () => {
       const a = hashSchema({ type: "number" });
       const b = hashSchema({ type: "string" });
-      assertNotEquals(a, b);
+      expect(a).not.toEqual(b);
     });
 
     it("is key-order independent", () => {
       const a = hashSchema({ type: "object", title: "A" } as JSONSchema);
       const b = hashSchema({ title: "A", type: "object" } as JSONSchema);
-      assertStrictEquals(a, b);
+      expect(a).toBe(b);
     });
   });
 
@@ -79,7 +73,7 @@ describe("schema-hash dispatch", () => {
       describe(`with \`wantSchemaAndHash = ${wantSah}\``, () => {
         it("creates a valid result with schema equal to the given one", () => {
           const result = callIntern({ type: "number" });
-          assertEquals(result, { type: "number" });
+          expect(result).toEqual({ type: "number" });
         });
 
         it("returns a deep-frozen schema result", () => {
@@ -109,7 +103,7 @@ describe("schema-hash dispatch", () => {
           }) as JSONSchemaObj;
           assert(isDeepFrozen(schema));
           const result = callIntern(schema);
-          assertStrictEquals(result, schema);
+          expect(result).toBe(schema);
         });
 
         it("uses a never-before-encountered mutable schema by reference", () => {
@@ -120,28 +114,28 @@ describe("schema-hash dispatch", () => {
             title: `schemaHashTestAt${Date.now()}-${Math.random()}`,
           };
           const result = callIntern(schema);
-          assertStrictEquals(result, schema);
+          expect(result).toBe(schema);
         });
 
         it("handles boolean schema true", () => {
           const result = callIntern(true);
-          assertEquals(result, true);
+          expect(result).toBe(true);
         });
 
         it("handles boolean schema false", () => {
           const result = callIntern(false);
-          assertEquals(result, false);
+          expect(result).toBe(false);
         });
 
         it("handles empty object schema", () => {
           const result = callIntern({});
-          assertEquals(result, {});
+          expect(result).toEqual({});
         });
 
         it("returns same instance for repeated boolean schema", () => {
           const result1 = callIntern(true, true);
           const result2 = callIntern(true, true);
-          assertStrictEquals(result1, result2);
+          expect(result1).toBe(result2);
         });
 
         it("returns same instance for same frozen object schema", () => {
@@ -150,19 +144,19 @@ describe("schema-hash dispatch", () => {
           }) as JSONSchemaObj;
           const result1 = callIntern(schema, true);
           const result2 = callIntern(schema, true);
-          assertStrictEquals(result1, result2);
+          expect(result1).toBe(result2);
         });
 
         it("returns same instance for repeated unfrozen schema", () => {
           const result1 = callIntern({ type: "number" }, true);
           const result2 = callIntern({ type: "number" }, true);
-          assertStrictEquals(result1, result2);
+          expect(result1).toBe(result2);
         });
 
         it("different schemas produce different instances", () => {
           const result1 = callIntern({ type: "number" }, true);
           const result2 = callIntern({ type: "string" }, true);
-          assertNotStrictEquals(result1, result2);
+          expect(result1).not.toBe(result2);
         });
 
         it("property order does not affect interning", () => {
@@ -174,7 +168,7 @@ describe("schema-hash dispatch", () => {
             { title: "foo", type: "object" },
             true,
           );
-          assertStrictEquals(result1, result2);
+          expect(result1).toBe(result2);
         });
 
         it("structurally-equal but identity-different schemas return same instance", () => {
@@ -186,10 +180,10 @@ describe("schema-hash dispatch", () => {
             type: "object",
             properties: { x: { type: "number" } },
           };
-          assertNotStrictEquals(a, b); // different objects
+          expect(a).not.toBe(b); // different objects
           const resultA = callIntern(a, true);
           const resultB = callIntern(b, true);
-          assertStrictEquals(resultA, resultB);
+          expect(resultA).toBe(resultB);
         });
       });
     }
@@ -197,27 +191,27 @@ describe("schema-hash dispatch", () => {
 
   describe("isInternedSchema()", () => {
     it("returns true for boolean true", () => {
-      assertStrictEquals(isInternedSchema(true), true);
+      expect(isInternedSchema(true)).toBe(true);
     });
 
     it("returns true for boolean false", () => {
-      assertStrictEquals(isInternedSchema(false), true);
+      expect(isInternedSchema(false)).toBe(true);
     });
 
     it("returns true for a freshly interned schema", () => {
       const schema = internSchema({ type: "string" });
-      assertStrictEquals(isInternedSchema(schema), true);
+      expect(isInternedSchema(schema)).toBe(true);
     });
 
     it("returns false for a non-interned schema", () => {
       const schema: JSONSchemaObj = { type: "string" };
-      assertStrictEquals(isInternedSchema(schema), false);
+      expect(isInternedSchema(schema)).toBe(false);
     });
 
     it("returns false for an equivalent-but-different object", () => {
       internSchema({ type: "number" });
       const equivalent: JSONSchemaObj = { type: "number" };
-      assertStrictEquals(isInternedSchema(equivalent), false);
+      expect(isInternedSchema(equivalent)).toBe(false);
     });
   });
 
@@ -247,9 +241,9 @@ describe("schema-hash dispatch", () => {
         expectedSah: SchemaAndHash,
       ) => {
         if (wantSah) {
-          assertStrictEquals(got, expectedSah);
+          expect(got).toBe(expectedSah);
         } else {
-          assertStrictEquals(got, expectedSah.schema);
+          expect(got).toBe(expectedSah.schema);
         }
       };
 
@@ -278,7 +272,7 @@ describe("schema-hash dispatch", () => {
         it("returns undefined for unknown hash", () => {
           const unknown = new FabricHash(new Uint8Array(32), "fid1");
           const found = callFind(unknown);
-          assertStrictEquals(found, undefined);
+          expect(found).toBe(undefined);
         });
 
         it("finds interned boolean schemas", () => {
@@ -297,17 +291,17 @@ describe("schema-hash dispatch", () => {
     it("returns the interned schema's hashString for an object", () => {
       const schema: JSONSchema = { type: "number" };
       const sah = internSchema(schema, true);
-      assertStrictEquals(internSchemaAsHashString(schema), sah.hashString);
+      expect(internSchemaAsHashString(schema)).toBe(sah.hashString);
     });
 
     it("returns the boolean schema's prefab hashString for `true`", () => {
       const expected = internSchema(true, true).hashString;
-      assertStrictEquals(internSchemaAsHashString(true), expected);
+      expect(internSchemaAsHashString(true)).toBe(expected);
     });
 
     it("returns the boolean schema's prefab hashString for `false`", () => {
       const expected = internSchema(false, true).hashString;
-      assertStrictEquals(internSchemaAsHashString(false), expected);
+      expect(internSchemaAsHashString(false)).toBe(expected);
     });
 
     it("produces matching strings for structurally-equal objects", () => {
@@ -319,19 +313,14 @@ describe("schema-hash dispatch", () => {
         type: "object",
         properties: { x: { type: "string" } },
       };
-      assertStrictEquals(
-        internSchemaAsHashString(a),
-        internSchemaAsHashString(b),
-      );
+      expect(internSchemaAsHashString(a)).toBe(internSchemaAsHashString(b));
     });
 
     it("produces different strings for different schemas", () => {
-      assertNotEquals(
-        internSchemaAsHashString({ type: "number" }),
+      expect(internSchemaAsHashString({ type: "number" })).not.toEqual(
         internSchemaAsHashString({ type: "string" }),
       );
-      assertNotEquals(
-        internSchemaAsHashString(true),
+      expect(internSchemaAsHashString(true)).not.toEqual(
         internSchemaAsHashString(false),
       );
     });
@@ -343,9 +332,9 @@ describe("schema-hash dispatch", () => {
         type: "number",
         title: `schemaHashTestAt${Date.now()}-${Math.random()}`,
       };
-      assertStrictEquals(isInternedSchema(schema), false);
+      expect(isInternedSchema(schema)).toBe(false);
       internSchemaAsHashString(schema);
-      assertStrictEquals(isInternedSchema(schema), true);
+      expect(isInternedSchema(schema)).toBe(true);
       assert(isDeepFrozen(schema));
     });
 
@@ -353,15 +342,12 @@ describe("schema-hash dispatch", () => {
       const schema: JSONSchema = { type: "number" };
       const first = internSchemaAsHashString(schema);
       const second = internSchemaAsHashString(schema);
-      assertStrictEquals(first, second);
+      expect(first).toBe(second);
     });
   });
 
   it("hashSchema returns base64url strings (no algorithm prefix)", () => {
     const result = hashSchema({ type: "number" });
-    assert(
-      /^[A-Za-z0-9_-]+$/.test(result),
-      `Expected plain base64url, got: ${result}`,
-    );
+    expect(result).toMatch(/^[A-Za-z0-9_-]+$/);
   });
 });

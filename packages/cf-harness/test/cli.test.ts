@@ -1,4 +1,5 @@
 import { assertEquals, assertRejects } from "@std/assert";
+import { decodeBase64 } from "@std/encoding/base64";
 import { join } from "@std/path";
 import {
   buildCfHarnessBaseSystemPrompt,
@@ -22,6 +23,10 @@ import type {
   RunHarnessPromptOptions,
   RunHarnessTranscriptOptions,
 } from "../src/prompt-loop.ts";
+
+const ONE_PIXEL_PNG = decodeBase64(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p94AAAAASUVORK5CYII=",
+);
 
 const createIoBuffers = (): {
   io: CfHarnessCliIO;
@@ -66,6 +71,124 @@ Deno.test("parseCfHarnessCliArgs resolves defaults from cwd and positional promp
   assertEquals(parsed.maxModelTurns, 8);
   assertEquals(parsed.printTranscript, false);
   assertEquals(parsed.sandboxImage, undefined);
+  assertEquals(parsed.imageAttachments, []);
+});
+
+Deno.test("parseCfHarnessCliArgs resolves image attachments within the workspace", async () => {
+  const workspace = await Deno.makeTempDir();
+  const launcherCwd = await Deno.makeTempDir();
+  await Deno.writeFile(join(workspace, "capture.png"), ONE_PIXEL_PNG);
+
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--workspace",
+      workspace,
+      "--image",
+      "capture.png",
+      "--prompt",
+      "Describe the image",
+    ],
+    {
+      cwd: launcherCwd,
+      env: {},
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.imageAttachments.length, 1);
+  assertEquals(
+    parsed.imageAttachments[0].hostPath,
+    await Deno.realPath(join(workspace, "capture.png")),
+  );
+  assertEquals(parsed.imageAttachments[0].mediaType, "image/png");
+  assertEquals(parsed.imageAttachments[0].bytes, ONE_PIXEL_PNG.byteLength);
+  assertEquals(
+    parsed.imageAttachments[0].digest.startsWith("sha256:"),
+    true,
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects image attachments outside the workspace", async () => {
+  const workspace = await Deno.makeTempDir();
+  const outside = await Deno.makeTempDir();
+  const outsideImage = join(outside, "capture.png");
+  await Deno.writeFile(outsideImage, ONE_PIXEL_PNG);
+
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--workspace",
+          workspace,
+          "--image",
+          outsideImage,
+          "--prompt",
+          "Describe the image",
+        ],
+        {
+          cwd: workspace,
+          env: {},
+        },
+      ),
+    Error,
+    "--image paths must stay within the workspace",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects image symlinks that resolve outside the workspace", async () => {
+  const workspace = await Deno.makeTempDir();
+  const outside = await Deno.makeTempDir();
+  const outsideImage = join(outside, "capture.png");
+  const linkedImage = join(workspace, "linked.png");
+  await Deno.writeFile(outsideImage, ONE_PIXEL_PNG);
+  await Deno.symlink(outsideImage, linkedImage);
+
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--workspace",
+          workspace,
+          "--image",
+          linkedImage,
+          "--prompt",
+          "Describe the image",
+        ],
+        {
+          cwd: workspace,
+          env: {},
+        },
+      ),
+    Error,
+    "--image paths must stay within the workspace",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs rejects image attachments while resuming", async () => {
+  const workspace = await Deno.makeTempDir();
+  await Deno.writeFile(join(workspace, "capture.png"), ONE_PIXEL_PNG);
+
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--workspace",
+          workspace,
+          "--resume-run",
+          "run-state.json",
+          "--image",
+          "capture.png",
+        ],
+        {
+          cwd: workspace,
+          env: {},
+        },
+      ),
+    Error,
+    "--image is not supported with --resume-run",
+  );
 });
 
 Deno.test("parseCfHarnessCliArgs supports prompt files and mode overrides", async () => {
@@ -348,6 +471,8 @@ Deno.test("parseCfHarnessCliArgs supports allowed tools and result json path", a
       "--allow-tool",
       "read_file",
       "--allow-tool",
+      "view_image",
+      "--allow-tool",
       "read_skill_resource",
       "--allow-tool",
       "bash",
@@ -365,11 +490,139 @@ Deno.test("parseCfHarnessCliArgs supports allowed tools and result json path", a
   }
   assertEquals(parsed.allowedToolIds, [
     "read_file",
+    "view_image",
     "read_skill_resource",
     "bash",
   ]);
   assertEquals(parsed.allowedSubagentProfiles, []);
   assertEquals(parsed.resultJsonPath, "/tmp/project/results/output.json");
+});
+
+Deno.test("parseCfHarnessCliArgs supports structured result validation flags", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--structured-result-path",
+      "results/capture.results.json",
+      "--structured-result-schema-file",
+      "schemas/capture.schema.json",
+    ],
+    {
+      cwd: "/tmp/project",
+      env: {},
+      readTextFile: (path) => {
+        assertEquals(path, "/tmp/project/schemas/capture.schema.json");
+        return Promise.resolve(
+          JSON.stringify({
+            type: "object",
+            properties: {
+              ok: { type: "boolean" },
+            },
+            required: ["ok"],
+            additionalProperties: false,
+          }),
+        );
+      },
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(
+    parsed.structuredResult?.path,
+    "/tmp/project/results/capture.results.json",
+  );
+  assertEquals(
+    parsed.structuredResult?.sandboxPath,
+    "/workspace/results/capture.results.json",
+  );
+  assertEquals(parsed.structuredResult?.schema, {
+    type: "object",
+    properties: {
+      ok: { type: "boolean" },
+    },
+    required: ["ok"],
+    additionalProperties: false,
+  });
+});
+
+Deno.test("parseCfHarnessCliArgs rejects malformed structured result validation flags", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--structured-result-path",
+          "../capture.results.json",
+          "--structured-result-schema",
+          '{"type":"object"}',
+        ],
+        {
+          cwd: "/tmp/project",
+          env: {},
+        },
+      ),
+    Error,
+    "--structured-result-path must stay within the workspace",
+  );
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--structured-result-path",
+          "capture.results.json",
+        ],
+        {
+          cwd: "/tmp/project",
+          env: {},
+        },
+      ),
+    Error,
+    "--structured-result-path requires --structured-result-schema or --structured-result-schema-file",
+  );
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--structured-result-schema",
+          '{"type":"object"}',
+        ],
+        {
+          cwd: "/tmp/project",
+          env: {},
+        },
+      ),
+    Error,
+    "--structured-result-schema requires --structured-result-path",
+  );
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--structured-result-path",
+          "capture.results.json",
+          "--structured-result-schema",
+          '{"type":"object"}',
+          "--structured-result-schema-file",
+          "schema.json",
+        ],
+        {
+          cwd: "/tmp/project",
+          env: {},
+        },
+      ),
+    Error,
+    "provide only one of --structured-result-schema or --structured-result-schema-file",
+  );
 });
 
 Deno.test("parseCfHarnessCliArgs supports explicit subagent profile authorization", async () => {
@@ -549,7 +802,7 @@ Deno.test("parseCfHarnessCliArgs rejects bash-no-sandbox as a parent allow-tool"
         },
       ),
     Error,
-    "allowed tools must be one or more of bash, read_file, read_skill_resource, write_file, delegate_task",
+    "allowed tools must be one or more of bash, read_file, view_image, read_skill_resource, edit_file, write_file, delegate_task",
   );
 });
 
@@ -571,7 +824,7 @@ Deno.test("parseCfHarnessCliArgs rejects unknown allowed tools before resolving 
         },
       ),
     Error,
-    "allowed tools must be one or more of bash, read_file, read_skill_resource, write_file, delegate_task",
+    "allowed tools must be one or more of bash, read_file, view_image, read_skill_resource, edit_file, write_file, delegate_task",
   );
 });
 
@@ -954,6 +1207,68 @@ Deno.test("runCfHarnessCli executes the prompt loop and prints result metadata",
     ],
   );
   assertEquals(stderr, []);
+});
+
+Deno.test("runCfHarnessCli passes image attachments to the prompt loop", async () => {
+  const workspace = await Deno.makeTempDir();
+  await Deno.writeFile(join(workspace, "capture.png"), ONE_PIXEL_PNG);
+  const { io, stderr } = createIoBuffers();
+  let runPromptOptions: RunHarnessPromptOptions | undefined;
+  const exitCode = await runCfHarnessCli(
+    [
+      "--workspace",
+      workspace,
+      "--image",
+      "capture.png",
+      "--prompt",
+      "Describe the image",
+    ],
+    {
+      io,
+      cwd: workspace,
+      env: { CF_HARNESS_API_KEY: "test-key" },
+      createPromptLoop: () => ({
+        runPrompt: (options) => {
+          runPromptOptions = options;
+          return Promise.resolve(
+            ({
+              model: "gpt-5.4",
+              finalAssistantText: "Image described.",
+              transcript: [
+                {
+                  role: "user",
+                  content: "Describe the image",
+                  imageAttachments: options.imageAttachments,
+                },
+                { role: "assistant", content: "Image described." },
+              ],
+              modelTurns: 1,
+              runState: {
+                runId: "run-cli-image",
+                status: "completed",
+                createdAt: "2026-05-05T22:00:00.000Z",
+                updatedAt: "2026-05-05T22:00:01.000Z",
+                cfcEnforcementMode: "disabled",
+                currentDir: "/workspace",
+                policyEvents: [],
+                toolOutputs: [],
+              },
+            }) satisfies HarnessPromptLoopResult,
+          );
+        },
+        runTranscript: () =>
+          Promise.reject(new Error("unexpected resume path")),
+      }),
+    },
+  );
+
+  assertEquals(exitCode, 0);
+  assertEquals(stderr, []);
+  assertEquals(runPromptOptions?.imageAttachments?.length, 1);
+  assertEquals(
+    runPromptOptions?.imageAttachments?.[0].hostPath,
+    await Deno.realPath(join(workspace, "capture.png")),
+  );
 });
 
 Deno.test("runCfHarnessCli passes tool and subagent profile allowlists", async () => {
@@ -1463,6 +1778,191 @@ Deno.test("runCfHarnessCli writes a structured batch result sidecar when request
         toolOutputs: [],
       },
     }, JSON.parse(writes[0].text).duration_ms),
+  );
+});
+
+Deno.test("runCfHarnessCli validates a top-level structured result sidecar", async () => {
+  const { io, stdout, stderr } = createIoBuffers();
+  const writes: Array<{ path: string; text: string }> = [];
+  let runPromptOptions: RunHarnessPromptOptions | undefined;
+  const exitCode = await runCfHarnessCli(
+    [
+      "--workspace",
+      "/tmp/project",
+      "--prompt",
+      "Execute the batch task",
+      "--output-mode",
+      "batch",
+      "--gateway-auth-mode",
+      "none",
+      "--result-json-path",
+      "/tmp/project/out/result.json",
+      "--structured-result-path",
+      "capture.results.json",
+      "--structured-result-schema",
+      JSON.stringify({
+        type: "object",
+        properties: {
+          ok: { type: "boolean" },
+          status: { type: "string", enum: ["done", "blocked"] },
+        },
+        required: ["ok", "status"],
+        additionalProperties: false,
+      }),
+    ],
+    {
+      io,
+      env: {},
+      readTextFile: (path) => {
+        assertEquals(path, "/tmp/project/capture.results.json");
+        return Promise.resolve(JSON.stringify({ ok: true, status: "done" }));
+      },
+      writeTextFile: (path, text) => {
+        writes.push({ path, text });
+        return Promise.resolve();
+      },
+      createPromptLoop: () => ({
+        runPrompt: (options) => {
+          runPromptOptions = options;
+          return Promise.resolve(
+            ({
+              model: "gpt-5.4",
+              finalAssistantText: "Batch result.",
+              transcript: [
+                { role: "user", content: "Execute the batch task" },
+                { role: "assistant", content: "Batch result." },
+              ],
+              modelTurns: 2,
+              runState: {
+                runId: "run-cli-structured-result",
+                status: "completed",
+                createdAt: "2026-04-16T23:10:00.000Z",
+                updatedAt: "2026-04-16T23:10:02.000Z",
+                cfcEnforcementMode: "observe",
+                currentDir: "/workspace",
+                artifactRoot:
+                  "/tmp/project/.cf-harness-artifacts/run-cli-structured-result",
+                transcriptPath:
+                  "/tmp/project/.cf-harness-artifacts/run-cli-structured-result/transcript.json",
+                runReportPath:
+                  "/tmp/project/.cf-harness-artifacts/run-cli-structured-result/run-report.json",
+                policyEvents: [],
+                toolOutputs: [],
+              },
+            }) satisfies HarnessPromptLoopResult,
+          );
+        },
+        runTranscript: () =>
+          Promise.reject(new Error("unexpected resume path")),
+      }),
+    },
+  );
+
+  assertEquals(exitCode, 0);
+  assertEquals(stdout, ["Batch result.\n"]);
+  assertEquals(stderr, []);
+  assertEquals(
+    runPromptOptions?.systemPrompt?.includes(
+      "write a JSON file at /workspace/capture.results.json",
+    ),
+    true,
+  );
+  assertEquals(writes.length, 1);
+  assertEquals(writes[0].path, "/tmp/project/out/result.json");
+  const batchResult = JSON.parse(writes[0].text);
+  assertEquals(batchResult.structured_result.status, "valid");
+  assertEquals(
+    batchResult.structured_result.result_path,
+    "/tmp/project/capture.results.json",
+  );
+  assertEquals(
+    batchResult.structured_result.schema_digest.startsWith("sha256:"),
+    true,
+  );
+});
+
+Deno.test("runCfHarnessCli exits nonzero when top-level structured result is invalid", async () => {
+  const { io, stdout, stderr } = createIoBuffers();
+  const writes: Array<{ path: string; text: string }> = [];
+  const exitCode = await runCfHarnessCli(
+    [
+      "--workspace",
+      "/tmp/project",
+      "--prompt",
+      "Execute the batch task",
+      "--output-mode",
+      "batch",
+      "--gateway-auth-mode",
+      "none",
+      "--result-json-path",
+      "/tmp/project/out/result.json",
+      "--structured-result-path",
+      "capture.results.json",
+      "--structured-result-schema",
+      JSON.stringify({
+        type: "object",
+        properties: {
+          ok: { type: "boolean" },
+        },
+        required: ["ok"],
+        additionalProperties: false,
+      }),
+    ],
+    {
+      io,
+      env: {},
+      readTextFile: () =>
+        Promise.resolve(JSON.stringify({ ok: true, extra: "not allowed" })),
+      writeTextFile: (path, text) => {
+        writes.push({ path, text });
+        return Promise.resolve();
+      },
+      createPromptLoop: () => ({
+        runPrompt: () =>
+          Promise.resolve(
+            ({
+              model: "gpt-5.4",
+              finalAssistantText: "Batch result.",
+              transcript: [
+                { role: "user", content: "Execute the batch task" },
+                { role: "assistant", content: "Batch result." },
+              ],
+              modelTurns: 2,
+              runState: {
+                runId: "run-cli-structured-result-invalid",
+                status: "completed",
+                createdAt: "2026-04-16T23:10:00.000Z",
+                updatedAt: "2026-04-16T23:10:02.000Z",
+                cfcEnforcementMode: "observe",
+                currentDir: "/workspace",
+                policyEvents: [],
+                toolOutputs: [],
+              },
+            }) satisfies HarnessPromptLoopResult,
+          ),
+        runTranscript: () =>
+          Promise.reject(new Error("unexpected resume path")),
+      }),
+    },
+  );
+
+  assertEquals(exitCode, 1);
+  assertEquals(stdout, ["Batch result.\n"]);
+  assertEquals(stderr, [
+    "structured result validation failed: structured result did not match the schema\n",
+  ]);
+  assertEquals(writes.length, 1);
+  const batchResult = JSON.parse(writes[0].text);
+  assertEquals(batchResult.structured_result, {
+    type: "cf-harness.structured-result-validation",
+    status: "invalid",
+    schema_digest: batchResult.structured_result.schema_digest,
+    result_path: "/tmp/project/capture.results.json",
+    validation_error: "structured result did not match the schema",
+  });
+  assertEquals(
+    batchResult.structured_result.schema_digest.startsWith("sha256:"),
+    true,
   );
 });
 
