@@ -219,8 +219,51 @@ export class TransformationContext {
     this.invalidateReactiveAnalysisCaches();
   }
 
+  /**
+   * Returns true if the given identifier resolves to the per-element binding
+   * of an array-method pattern callback (one whose declaring function-like is
+   * registered in `mapCallbackRegistry`).
+   *
+   * Uses node-walking rather than symbol identity because symbols can be
+   * re-instantiated across pipeline stages while node parent links remain
+   * stable.
+   */
+  isArrayMethodElementBindingReference(identifier: ts.Identifier): boolean {
+    const symbol = this.checker.getSymbolAtLocation(identifier);
+    const declaration = symbol?.valueDeclaration ??
+      symbol?.declarations?.[0];
+    if (!declaration) return false;
+    if (
+      !ts.isParameter(declaration) &&
+      !ts.isBindingElement(declaration)
+    ) {
+      return false;
+    }
+
+    // Walk up to the enclosing function-like.
+    let cursor: ts.Node | undefined = declaration.parent;
+    while (cursor && !ts.isFunctionLike(cursor)) {
+      cursor = cursor.parent;
+    }
+    if (!cursor) return false;
+
+    // Only the FIRST parameter of an array-method callback counts as the
+    // element binding. Index/array params and non-first decls are not.
+    const fn = cursor as ts.SignatureDeclarationBase;
+    const firstParam = fn.parameters?.[0];
+    if (!firstParam) return false;
+    if (!declarationBelongsToFirstParam(declaration, firstParam)) {
+      return false;
+    }
+
+    return this.isArrayMethodCallback(cursor);
+  }
+
   getDataFlowAnalyzer(): ReturnType<typeof createDataFlowAnalyzer> {
-    this.#dataFlowAnalyzer ??= createDataFlowAnalyzer(this.checker);
+    this.#dataFlowAnalyzer ??= createDataFlowAnalyzer(this.checker, {
+      isArrayMethodElementBindingReference: (id) =>
+        this.isArrayMethodElementBindingReference(id),
+    });
     return this.#dataFlowAnalyzer;
   }
 
@@ -272,5 +315,30 @@ export class TransformationContext {
       DataFlowAnalysis,
       readonly NormalizedDataFlow[]
     >();
+    // The dataflow analyzer holds its own per-expression cache. Drop the
+    // analyzer instance so the next consumer recreates it with a fresh cache.
+    // Critical when downstream registries (array-method element bindings,
+    // synthetic reactive collections, etc.) gain new entries between queries
+    // — a cached "not opaque" result from before registration would otherwise
+    // win.
+    this.#dataFlowAnalyzer = undefined;
   }
+}
+
+function declarationBelongsToFirstParam(
+  decl: ts.Declaration,
+  firstParam: ts.ParameterDeclaration,
+): boolean {
+  // Identifier-form: the declaration itself is the parameter.
+  if (decl === firstParam) return true;
+  // Destructured: the declaration is a binding element nested under the
+  // parameter's binding pattern. Walk parents until we hit firstParam (or
+  // exit the function-like).
+  let cursor: ts.Node | undefined = decl.parent;
+  while (cursor) {
+    if (cursor === firstParam) return true;
+    if (ts.isFunctionLike(cursor)) return false;
+    cursor = cursor.parent;
+  }
+  return false;
 }

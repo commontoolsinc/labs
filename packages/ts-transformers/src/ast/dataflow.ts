@@ -122,11 +122,31 @@ function isStructuralOpaqueKeyDataFlow(
     classifyOpaquePathTerminalCall(target) === "key";
 }
 
+export interface DataFlowAnalyzerHooks {
+  /**
+   * Returns true if the given identifier is a reference to the per-element
+   * parameter of an array-method pattern callback synthesized by
+   * ClosureTransformer. Such bindings are typed as the plain user element
+   * type for downstream consumers, so the analyzer needs an out-of-band
+   * signal to recognize reads through them as reactive.
+   *
+   * The hook is given the identifier node (not its symbol) because symbol
+   * identity can drift between pipeline stages when transformers create
+   * new ASTs; node identity (with parent links) is durable.
+   */
+  readonly isArrayMethodElementBindingReference?: (
+    identifier: ts.Identifier,
+  ) => boolean;
+}
+
 export function createDataFlowAnalyzer(
   checker: ts.TypeChecker,
+  hooks: DataFlowAnalyzerHooks = {},
 ): (expression: ts.Expression) => DataFlowAnalysis {
   const analysisCache = new WeakMap<ts.Expression, DataFlowAnalysis>();
   const resolvingConstAliases = new Set<ts.Symbol>();
+  const isArrayMethodElementBindingReference =
+    hooks.isArrayMethodElementBindingReference ?? (() => false);
 
   // === Synthetic node helpers ===
   // These enable unified handling of both synthetic (transformer-created) and
@@ -726,6 +746,19 @@ export function createDataFlowAnalyzer(
         isReactiveValueExpression(expression, checker)
       ) {
         recordDataFlow(expression, scope, null, true); // Explicit: direct OpaqueRef
+        return {
+          containsOpaqueRef: true,
+          requiresRewrite: false,
+          dataFlows: [expression],
+        };
+      }
+      if (isArrayMethodElementBindingReference(expression)) {
+        // The synthesized `element` binding of an array-method pattern
+        // callback is implicitly opaque, even though its TS type is the plain
+        // user element type. Treat it the same as a direct OpaqueRef so
+        // `element.foo`-style reads are recorded as reactive dependencies and
+        // can drive fine-grained subscriptions in downstream lowering.
+        recordDataFlow(expression, scope, null, true);
         return {
           containsOpaqueRef: true,
           requiresRewrite: false,
