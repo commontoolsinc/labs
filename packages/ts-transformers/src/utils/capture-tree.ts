@@ -167,49 +167,58 @@ export function createCaptureAccessExpression(
   template?: ts.Expression,
 ): ts.Expression {
   if (template) {
+    // Unwrap non-semantic wrappers up front so wrapped templates take the
+    // same paths as bare ones. Without this, `(entry.key("piece"))` would
+    // miss the key-call fast path (the call sits behind parens) and
+    // `(entry).piece` would fall out of the rebuild walk because parens
+    // aren't a recognized rebuild node. Both should land on the same
+    // structural output as their bare-form equivalents.
+    const unwrapped = unwrapExpression(template);
+
     if (
-      ts.isCallExpression(template) &&
-      ts.isPropertyAccessExpression(template.expression) &&
-      template.expression.name.text === "key"
+      ts.isCallExpression(unwrapped) &&
+      ts.isPropertyAccessExpression(unwrapped.expression) &&
+      unwrapped.expression.name.text === "key"
     ) {
-      return template;
+      return unwrapped;
     }
 
     const rebuild = (expr: ts.Expression): ts.Expression | undefined => {
-      if (ts.isIdentifier(expr)) {
+      const target = unwrapExpression(expr);
+      if (ts.isIdentifier(target)) {
         return factory.createIdentifier(rootName);
       }
-      if (ts.isPropertyAccessExpression(expr)) {
-        const target = rebuild(expr.expression);
-        if (!target) return undefined;
-        if (ts.isPropertyAccessChain(expr)) {
+      if (ts.isPropertyAccessExpression(target)) {
+        const inner = rebuild(target.expression);
+        if (!inner) return undefined;
+        if (ts.isPropertyAccessChain(target)) {
           return factory.createPropertyAccessChain(
-            target,
+            inner,
             factory.createToken(ts.SyntaxKind.QuestionDotToken),
-            expr.name,
+            target.name,
           );
         }
-        return factory.createPropertyAccessExpression(target, expr.name);
+        return factory.createPropertyAccessExpression(inner, target.name);
       }
-      if (ts.isElementAccessExpression(expr)) {
-        const target = rebuild(expr.expression);
-        if (!target) return undefined;
-        if (ts.isElementAccessChain(expr)) {
+      if (ts.isElementAccessExpression(target)) {
+        const inner = rebuild(target.expression);
+        if (!inner) return undefined;
+        if (ts.isElementAccessChain(target)) {
           return factory.createElementAccessChain(
-            target,
+            inner,
             factory.createToken(ts.SyntaxKind.QuestionDotToken),
-            expr.argumentExpression,
+            target.argumentExpression,
           );
         }
         return factory.createElementAccessExpression(
-          target,
-          expr.argumentExpression,
+          inner,
+          target.argumentExpression,
         );
       }
       return undefined;
     };
 
-    const rebuilt = rebuild(template);
+    const rebuilt = rebuild(unwrapped);
     if (rebuilt) {
       return rebuilt;
     }
