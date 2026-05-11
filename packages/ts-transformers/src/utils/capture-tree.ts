@@ -1,5 +1,6 @@
 import ts from "typescript";
 
+import { unwrapExpression } from "./expression.ts";
 import { isSafeIdentifierText } from "./identifiers.ts";
 
 export interface CapturePathInfo {
@@ -17,12 +18,19 @@ export interface CaptureTreeNode {
 export function parseCaptureExpression(
   expr: ts.Expression,
 ): CapturePathInfo | undefined {
-  if (ts.isIdentifier(expr)) {
-    return { root: expr.text, path: [], expression: expr };
+  // Unwrap non-semantic wrappers (parens, `as`, type assertions, `satisfies`,
+  // `!`, partially-emitted) so wrapped reads like `(entry).name` and
+  // `entry!.name` parse the same way as the bare form. Without this, the
+  // capture would fall into the unstructured "fallback" bucket downstream
+  // and lose its partial-key dataflow shape.
+  const unwrapped = unwrapExpression(expr);
+
+  if (ts.isIdentifier(unwrapped)) {
+    return { root: unwrapped.text, path: [], expression: expr };
   }
 
-  if (ts.isCallExpression(expr)) {
-    const callee = expr.expression;
+  if (ts.isCallExpression(unwrapped)) {
+    const callee = unwrapped.expression;
     if (
       ts.isPropertyAccessExpression(callee) &&
       callee.name.text === "key"
@@ -33,7 +41,7 @@ export function parseCaptureExpression(
       }
 
       const keySegments: string[] = [];
-      for (const arg of expr.arguments) {
+      for (const arg of unwrapped.arguments) {
         if (
           ts.isStringLiteralLike(arg) ||
           ts.isNumericLiteral(arg) ||
@@ -53,9 +61,9 @@ export function parseCaptureExpression(
     }
   }
 
-  if (ts.isPropertyAccessExpression(expr)) {
+  if (ts.isPropertyAccessExpression(unwrapped)) {
     const segments: string[] = [];
-    let current: ts.Expression = expr;
+    let current: ts.Expression = unwrapped;
 
     while (ts.isPropertyAccessExpression(current)) {
       // If we encounter optional chaining (e.g., foo?.bar), stop here and
@@ -64,7 +72,7 @@ export function parseCaptureExpression(
       // null/undefined, so we shouldn't descend into its properties.
       if (ts.isPropertyAccessChain(current)) {
         // The expression before the ?. is our capture target
-        const beforeChain = current.expression;
+        const beforeChain = unwrapExpression(current.expression);
         if (ts.isIdentifier(beforeChain)) {
           return { root: beforeChain.text, path: [], expression: beforeChain };
         }
@@ -77,7 +85,9 @@ export function parseCaptureExpression(
         return undefined;
       }
       segments.unshift(current.name.text);
-      current = current.expression;
+      // Unwrap at every descent step so wrappers anywhere in the chain
+      // (e.g. `((entry).name).x`) don't break the walk.
+      current = unwrapExpression(current.expression);
     }
 
     if (ts.isIdentifier(current)) {

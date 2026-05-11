@@ -153,15 +153,18 @@ export function createDataFlowAnalyzer(
 
   /**
    * Walk a property-access chain to its leftmost Identifier and ask the hook
-   * whether it refers to an array-method element binding. Returns false for
-   * computed access or non-identifier roots (call expressions, etc.).
+   * whether it refers to an array-method element binding. Unwraps non-semantic
+   * wrappers (parens, `as`, type assertions, `satisfies`, `!`, partially-
+   * emitted) at every step so wrapped reads like `(elem).foo` or `elem!.foo`
+   * are still recognized. Returns false for computed access or non-identifier
+   * roots (call expressions, etc.).
    */
   const leftmostIdentifierIsArrayMethodElementBinding = (
     expression: ts.Expression,
   ): boolean => {
-    let current: ts.Expression = expression;
+    let current: ts.Expression = unwrapStructuralDataFlowExpression(expression);
     while (ts.isPropertyAccessExpression(current)) {
-      current = current.expression;
+      current = unwrapStructuralDataFlowExpression(current.expression);
     }
     return ts.isIdentifier(current) &&
       isArrayMethodElementBindingReference(current);
