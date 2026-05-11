@@ -36,6 +36,19 @@ const FABRIC_MOUNT = Deno.env.get("CF_HARNESS_INTEGRATION_FABRIC_MOUNT");
 const FABRIC_INTEGRATION = INTEGRATION &&
   FABRIC_MOUNT !== undefined &&
   FABRIC_MOUNT.trim() !== "";
+const FABRIC_CFC_FLOW_INTEGRATION = FABRIC_INTEGRATION &&
+  Deno.env.get("CF_HARNESS_INTEGRATION_FABRIC_CFC_FLOW") === "1";
+const FABRIC_CFC_DURABLE_HOST_LABEL_INTEGRATION = FABRIC_CFC_FLOW_INTEGRATION &&
+  Deno.env.get("CF_HARNESS_INTEGRATION_FABRIC_CFC_DURABLE_HOST_LABEL") === "1";
+const FABRIC_CFC_READ_PATH = Deno.env.get(
+  "CF_HARNESS_INTEGRATION_FABRIC_CFC_READ_PATH",
+);
+const FABRIC_CFC_WRITE_PATH = Deno.env.get(
+  "CF_HARNESS_INTEGRATION_FABRIC_CFC_WRITE_PATH",
+);
+const FABRIC_CFC_LABEL_SUBJECT =
+  Deno.env.get("CF_HARNESS_INTEGRATION_FABRIC_CFC_LABEL_SUBJECT")?.trim() ||
+  "did:key:fabric";
 const CF_CLI_INTEGRATION = INTEGRATION &&
   Deno.env.get("CF_HARNESS_INTEGRATION_CF_CLI") === "1";
 const LABS_ROOT_URL = new URL("../../..", import.meta.url);
@@ -129,6 +142,32 @@ const assertLabelIncludesSubject = (label: IFCLabel, subject: string) => {
   assertConfidentialityTaint(label);
   assertStringIncludes(JSON.stringify(label.confidentiality), subject);
 };
+
+const requireSandboxFabricPath = (
+  path: string | undefined,
+  envName: string,
+): string => {
+  const trimmed = path?.trim() ?? "";
+  if (trimmed === "") {
+    throw new Error(`${envName} is required for Fabric CFC flow tests`);
+  }
+  const segments = trimmed.slice(1).split("/");
+  if (
+    !trimmed.startsWith("/fabric/") ||
+    segments.some((segment) =>
+      segment === "" || segment === "." ||
+      segment === ".."
+    )
+  ) {
+    throw new Error(
+      `${envName} must be a concrete absolute sandbox path under /fabric without . or .. segments`,
+    );
+  }
+  return trimmed;
+};
+
+const singleQuoteShell = (value: string): string =>
+  `'${value.replaceAll("'", `'"'"'`)}'`;
 
 const invocationInputLabels = (): CfcLabelView => ({
   version: 1,
@@ -636,5 +675,213 @@ Deno.test({
       assertStringIncludes(statusResult.output.content, '"startedAt"');
       assertStringIncludes(statusResult.output.content, '"spaces"');
     });
+  },
+});
+
+Deno.test({
+  name: "cf-harness integration: Fabric FUSE read labels immediate return",
+  ignore: !FABRIC_CFC_FLOW_INTEGRATION || !CFC_RESULT_DIR_CONFIGURED,
+  permissions: { env: true, read: true, run: true, write: true },
+  async fn() {
+    const fabricReadPath = requireSandboxFabricPath(
+      FABRIC_CFC_READ_PATH,
+      "CF_HARNESS_INTEGRATION_FABRIC_CFC_READ_PATH",
+    );
+    await withFabricHarness(
+      "integration-fabric-read-host-bind",
+      async (engine, hostPath) => {
+        const hostPayload = "fuse read tainted host output\n";
+        const result = await engine.invokeBuiltinTool("bash", {
+          command: [
+            "set -eu",
+            `cat ${singleQuoteShell(fabricReadPath)} >/dev/null`,
+            `printf ${
+              singleQuoteShell(hostPayload)
+            } > /workspace/fuse-read-host.txt`,
+            "printf 'fuse read tainted return\\n'",
+          ].join("\n"),
+        });
+
+        assertEquals(result.output.exitCode, 0);
+        assertEquals(
+          await Deno.readTextFile(`${hostPath}/fuse-read-host.txt`),
+          hostPayload,
+        );
+        assert(result.output.cfcResult !== undefined);
+        assertEquals(result.output.cfcResult.stdout.policy, "opaque");
+        assertLabelIncludesSubject(
+          result.output.cfcResult.stdout.label,
+          FABRIC_CFC_LABEL_SUBJECT,
+        );
+      },
+    );
+  },
+});
+
+Deno.test({
+  name: "cf-harness integration: Fabric FUSE read labels host bind readback",
+  ignore: !FABRIC_CFC_DURABLE_HOST_LABEL_INTEGRATION ||
+    !CFC_RESULT_DIR_CONFIGURED,
+  permissions: { env: true, read: true, run: true, write: true },
+  async fn() {
+    const fabricReadPath = requireSandboxFabricPath(
+      FABRIC_CFC_READ_PATH,
+      "CF_HARNESS_INTEGRATION_FABRIC_CFC_READ_PATH",
+    );
+    await withFabricHarness(
+      "integration-fabric-read-host-bind-readback",
+      async (engine, hostPath) => {
+        const hostPayload = "fuse read durable host output\n";
+        const result = await engine.invokeBuiltinTool("bash", {
+          command: [
+            "set -eu",
+            `cat ${singleQuoteShell(fabricReadPath)} >/dev/null`,
+            `printf ${
+              singleQuoteShell(hostPayload)
+            } > /workspace/fuse-read-host.txt`,
+            "printf 'fuse read durable return\\n'",
+          ].join("\n"),
+        });
+
+        assertEquals(result.output.exitCode, 0);
+        assertEquals(
+          await Deno.readTextFile(`${hostPath}/fuse-read-host.txt`),
+          hostPayload,
+        );
+        assert(result.output.cfcResult !== undefined);
+        assertEquals(result.output.cfcResult.stdout.policy, "opaque");
+        assertLabelIncludesSubject(
+          result.output.cfcResult.stdout.label,
+          FABRIC_CFC_LABEL_SUBJECT,
+        );
+
+        const hostReadBack = await engine.invokeBuiltinTool("bash", {
+          command: "cat /workspace/fuse-read-host.txt",
+        });
+        assertEquals(hostReadBack.output.exitCode, 0);
+        assertStringIncludes(hostReadBack.output.stdout, hostPayload);
+        assert(hostReadBack.output.cfcResult !== undefined);
+        assertEquals(hostReadBack.output.cfcResult.stdout.policy, "opaque");
+        assertLabelIncludesSubject(
+          hostReadBack.output.cfcResult.stdout.label,
+          FABRIC_CFC_LABEL_SUBJECT,
+        );
+      },
+    );
+  },
+});
+
+Deno.test({
+  name:
+    "cf-harness integration: invocation labels taint Fabric FUSE write and return",
+  ignore: !FABRIC_CFC_FLOW_INTEGRATION || !CFC_RESULT_DIR_CONFIGURED ||
+    !CFC_INVOCATION_CONTEXT_DIR_CONFIGURED,
+  permissions: { env: true, read: true, run: true, write: true },
+  async fn() {
+    const fabricWritePath = requireSandboxFabricPath(
+      FABRIC_CFC_WRITE_PATH,
+      "CF_HARNESS_INTEGRATION_FABRIC_CFC_WRITE_PATH",
+    );
+    await withFabricHarness(
+      "integration-input-label-fabric-write",
+      async (engine) => {
+        const fabricPayload =
+          "from invocation label through FUSE: integration-input-label-fabric-write\n";
+        const writeResult = await engine.invokeBuiltinTool("bash", {
+          command: [
+            "set -eu",
+            `printf ${singleQuoteShell(fabricPayload)} > ${
+              singleQuoteShell(fabricWritePath)
+            }`,
+            "printf 'wrote fabric value\\n'",
+          ].join("\n"),
+          cfcInputLabels: invocationInputLabels(),
+        });
+
+        assertEquals(writeResult.output.exitCode, 0);
+        assert(writeResult.output.cfcResult !== undefined);
+        assertEquals(writeResult.output.cfcResult.stdout.policy, "opaque");
+        assertLabelIncludesSubject(
+          writeResult.output.cfcResult.stdout.label,
+          INVOCATION_TAINT_SUBJECT,
+        );
+
+        const readBack = await engine.invokeBuiltinTool("bash", {
+          command: `cat ${singleQuoteShell(fabricWritePath)}`,
+        });
+        assertEquals(readBack.output.exitCode, 0);
+        assertStringIncludes(readBack.output.stdout, fabricPayload);
+        assert(readBack.output.cfcResult !== undefined);
+        assertEquals(readBack.output.cfcResult.stdout.policy, "opaque");
+        assertLabelIncludesSubject(
+          readBack.output.cfcResult.stdout.label,
+          INVOCATION_TAINT_SUBJECT,
+        );
+      },
+    );
+  },
+});
+
+Deno.test({
+  name:
+    "cf-harness integration: invocation and Fabric labels join before Fabric write",
+  ignore: !FABRIC_CFC_FLOW_INTEGRATION || !CFC_RESULT_DIR_CONFIGURED ||
+    !CFC_INVOCATION_CONTEXT_DIR_CONFIGURED,
+  permissions: { env: true, read: true, run: true, write: true },
+  async fn() {
+    const fabricReadPath = requireSandboxFabricPath(
+      FABRIC_CFC_READ_PATH,
+      "CF_HARNESS_INTEGRATION_FABRIC_CFC_READ_PATH",
+    );
+    const fabricWritePath = requireSandboxFabricPath(
+      FABRIC_CFC_WRITE_PATH,
+      "CF_HARNESS_INTEGRATION_FABRIC_CFC_WRITE_PATH",
+    );
+    await withFabricHarness(
+      "integration-input-label-fabric-join-write",
+      async (engine) => {
+        const joinedPayload =
+          "joined invocation and fabric labels: integration-input-label-fabric-join-write\n";
+        const joinedWrite = await engine.invokeBuiltinTool("bash", {
+          command: [
+            "set -eu",
+            `cat ${singleQuoteShell(fabricReadPath)} >/dev/null`,
+            `printf ${singleQuoteShell(joinedPayload)} > ${
+              singleQuoteShell(fabricWritePath)
+            }`,
+            "printf 'joined fabric result\\n'",
+          ].join("\n"),
+          cfcInputLabels: invocationInputLabels(),
+        });
+
+        assertEquals(joinedWrite.output.exitCode, 0);
+        assert(joinedWrite.output.cfcResult !== undefined);
+        assertEquals(joinedWrite.output.cfcResult.stdout.policy, "opaque");
+        assertLabelIncludesSubject(
+          joinedWrite.output.cfcResult.stdout.label,
+          INVOCATION_TAINT_SUBJECT,
+        );
+        assertLabelIncludesSubject(
+          joinedWrite.output.cfcResult.stdout.label,
+          FABRIC_CFC_LABEL_SUBJECT,
+        );
+
+        const readBack = await engine.invokeBuiltinTool("bash", {
+          command: `cat ${singleQuoteShell(fabricWritePath)}`,
+        });
+        assertEquals(readBack.output.exitCode, 0);
+        assertStringIncludes(readBack.output.stdout, joinedPayload);
+        assert(readBack.output.cfcResult !== undefined);
+        assertEquals(readBack.output.cfcResult.stdout.policy, "opaque");
+        assertLabelIncludesSubject(
+          readBack.output.cfcResult.stdout.label,
+          INVOCATION_TAINT_SUBJECT,
+        );
+        assertLabelIncludesSubject(
+          readBack.output.cfcResult.stdout.label,
+          FABRIC_CFC_LABEL_SUBJECT,
+        );
+      },
+    );
   },
 });
