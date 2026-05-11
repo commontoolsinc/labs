@@ -897,7 +897,9 @@ class QuerySubscriptionInvocation<
     // This is a bit strange, but the revisions in here aren't proper
     // They've lost their Reference methods, so recreate them
     commit.revisions.forEach((item) => {
-      item.cause = FabricHash.fromJson(JSON.parse(JSON.stringify(item.cause)));
+      item.cause = FabricHash.fromJson(
+        item.cause as unknown as { "/": string },
+      );
     });
 
     return { ok: {} };

@@ -119,8 +119,6 @@ export function getEntityId(value: any): { "/": string } | undefined {
   const entityId = { "/": fromURI(link.id) };
 
   if (link.path && link.path.length > 0) {
-    return JSON.parse(
-      JSON.stringify(createRef({ path: link.path }, entityId)),
-    );
+    return createRef({ path: link.path }, entityId).toJSON!();
   } else return entityId;
 }

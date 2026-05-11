@@ -5377,9 +5377,7 @@ function getPieceMetadataFromFrame(frame?: Frame): {
   result.spellId = spellCell?.getAsNormalizedFullLink().id;
   const resultCell = source.get()?.resultRef;
   result.space = source.space;
-  result.pieceId = JSON.parse(
-    JSON.stringify(resultCell?.entityId ?? {}),
-  )["/"];
+  result.pieceId = resultCell?.entityId?.["/"];
   return result;
 }
 
