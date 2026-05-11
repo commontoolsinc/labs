@@ -1,3 +1,4 @@
+import { FabricHash } from "@commonfabric/data-model/fabric-hash";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { isRecord } from "@commonfabric/utils/types";
@@ -7,18 +8,18 @@ import type { URI } from "./sigil-types.ts";
  * Convert an entity ID to URI format with "of:" prefix
  */
 export function toURI(value: unknown): URI {
+  if (value instanceof FabricHash) {
+    return `of:${value.toJSON()["/"]}`;
+  }
   if (isRecord(value)) {
-    // Normalize: prefer `toJSON()` result if present (e.g., `FabricHash`),
-    // else use `value` directly. Inputs whose `/` is not a string fall
-    // through to the error path.
-    const normalized = (typeof value.toJSON === "function")
-      ? value.toJSON()
-      : value;
-
-    if (isRecord(normalized) && typeof normalized["/"] === "string") {
-      return `of:${normalized["/"]}`;
+    if (typeof value["/"] === "string") {
+      return `of:${value["/"]}`;
     }
-  } else if (typeof value === "string") {
+    throw new Error(
+      `Cannot convert value to URI: ${toCompactDebugString(value)}`,
+    );
+  }
+  if (typeof value === "string") {
     // Already has prefix with colon
     if (value.includes(":")) {
       // TODO(seefeld): Remove this once we want to support any URI, ideally

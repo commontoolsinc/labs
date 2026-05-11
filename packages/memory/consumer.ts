@@ -894,12 +894,11 @@ class QuerySubscriptionInvocation<
       }
     }
     this.integrate(commit);
-    // This is a bit strange, but the revisions in here aren't proper
-    // They've lost their Reference methods, so recreate them
+    // The revisions in here aren't proper: they've lost their identity as
+    // `FabricHash`, so recreate them from the string form.
     commit.revisions.forEach((item) => {
-      item.cause = FabricHash.fromJson(
-        item.cause as unknown as { "/": string },
-      );
+      const stringValue = (item.cause as unknown as { "/": string })["/"];
+      item.cause = FabricHash.fromString(stringValue);
     });
 
     return { ok: {} };
