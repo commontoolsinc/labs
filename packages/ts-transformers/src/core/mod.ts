@@ -43,6 +43,24 @@
  *   classification) computed by PatternCallbackLoweringTransformer.
  *   Writers: pattern-callback lowering (registerCapabilitySummary)
  *   Readers: schema-injection (findCapabilitySummaryForParameter)
+ *
+ * --- Cache invalidation contract ---
+ *
+ * Each of the four mark* methods on TransformationContext mutates one of the
+ * registries above and then calls invalidateReactiveAnalysisCaches(). That
+ * helper drops three things: the wrapper-level caches (#reactiveContextCache,
+ * #relevantDataFlowCache) and the dataflow analyzer instance itself
+ * (#dataFlowAnalyzer). Dropping the analyzer instance is critical: the
+ * analyzer's internal per-expression cache (createDataFlowAnalyzer's
+ * `analysisCache`) lives inside its closure and would otherwise return stale
+ * pre-mutation verdicts after a registry write.
+ *
+ * If you add a new context-level cache or registry, mutate it through a
+ * mark* method that calls invalidateReactiveAnalysisCaches() (or extend the
+ * helper to also drop your new cache). If you add a new analyzer-side cache
+ * inside createDataFlowAnalyzer, no extra wiring is needed — the whole
+ * analyzer instance is dropped together, so any state captured in its
+ * closure is GC'd.
  */
 export { TransformationContext } from "./context.ts";
 export type {

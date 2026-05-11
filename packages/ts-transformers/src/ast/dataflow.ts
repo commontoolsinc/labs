@@ -143,6 +143,9 @@ export function createDataFlowAnalyzer(
   checker: ts.TypeChecker,
   hooks: DataFlowAnalyzerHooks = {},
 ): (expression: ts.Expression) => DataFlowAnalysis {
+  // Per-expression memoization for `analyze()`. Lives inside this closure;
+  // invalidated as a unit when `TransformationContext.invalidateReactiveAnalysisCaches`
+  // drops the analyzer instance (see core/mod.ts cache-invalidation contract).
   const analysisCache = new WeakMap<ts.Expression, DataFlowAnalysis>();
   const resolvingConstAliases = new Set<ts.Symbol>();
   const isArrayMethodElementBindingReference =
