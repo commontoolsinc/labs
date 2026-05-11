@@ -300,6 +300,19 @@ Deno.test("DockerRunscSandboxRuntime writes invocation context sidecars before s
       },
       runManifest: { present: false },
       command: "echo hello",
+      cfcInputLabels: {
+        version: 1,
+        entries: [
+          {
+            path: ["argv"],
+            label: {
+              confidentiality: [
+                { type: "test.cfc/User", subject: "did:key:argv-reader" },
+              ],
+            },
+          },
+        ],
+      },
     });
     const runner = new FakeProcessRunner(dockerLifecycleResults());
     const runtime = new DockerRunscSandboxRuntime(
