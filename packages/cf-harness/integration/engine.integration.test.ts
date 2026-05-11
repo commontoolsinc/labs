@@ -1,9 +1,14 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { fromFileUrl } from "@std/path";
-import type { CfcEnforcementMode, IFCLabel } from "@commonfabric/runner/cfc";
+import type {
+  CfcEnforcementMode,
+  CfcLabelView,
+  IFCLabel,
+} from "@commonfabric/runner/cfc";
 import { CfHarnessEngine } from "../src/engine.ts";
 import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
 import {
+  CFC_INVOCATION_CONTEXT_DIR_ENV,
   CFC_RESULT_DIR_ENV,
   DEFAULT_DOCKER_RUNSC_IMAGE,
   resolveDockerRunscSandboxConfig,
@@ -23,7 +28,10 @@ const CFC_TAINT_IMAGE = Deno.env.get("CF_HARNESS_INTEGRATION_TAINT_IMAGE") ??
   "alpine:3.20";
 const CFC_RESULT_DIR_CONFIGURED =
   (Deno.env.get(CFC_RESULT_DIR_ENV) ?? "").length > 0;
+const CFC_INVOCATION_CONTEXT_DIR_CONFIGURED =
+  (Deno.env.get(CFC_INVOCATION_CONTEXT_DIR_ENV) ?? "").length > 0;
 const TAINTED_SECRET = '{"secret":"tainted from policy"}\n';
+const INVOCATION_TAINT_SUBJECT = "did:key:argv-reader";
 const FABRIC_MOUNT = Deno.env.get("CF_HARNESS_INTEGRATION_FABRIC_MOUNT");
 const FABRIC_INTEGRATION = INTEGRATION &&
   FABRIC_MOUNT !== undefined &&
@@ -116,6 +124,24 @@ const assertConfidentialityTaint = (label: IFCLabel) => {
     `expected a non-empty confidentiality label, got ${JSON.stringify(label)}`,
   );
 };
+
+const assertLabelIncludesSubject = (label: IFCLabel, subject: string) => {
+  assertConfidentialityTaint(label);
+  assertStringIncludes(JSON.stringify(label.confidentiality), subject);
+};
+
+const invocationInputLabels = (): CfcLabelView => ({
+  version: 1,
+  entries: [{
+    path: ["argv"],
+    label: {
+      confidentiality: [{
+        type: "test.cfc/User",
+        subject: INVOCATION_TAINT_SUBJECT,
+      }],
+    },
+  }],
+});
 
 const writePolicyLabeledSecret = async (secretsHostPath: string) => {
   await Deno.mkdir(secretsHostPath, { recursive: true });
@@ -279,6 +305,119 @@ Deno.test({
           );
         },
         {
+          configureSandbox: () => ({
+            image: CFC_TAINT_IMAGE,
+            extraDockerArgs: [
+              "--mount",
+              `type=bind,src=${secretsHostPath},dst=/secrets,readonly`,
+            ],
+          }),
+        },
+      );
+    } finally {
+      await Deno.remove(secretsHostPath, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name:
+    "cf-harness integration: invocation input labels taint host bind output",
+  ignore: !INTEGRATION || !CFC_RESULT_DIR_CONFIGURED ||
+    !CFC_INVOCATION_CONTEXT_DIR_CONFIGURED,
+  permissions: { env: true, read: true, run: true, write: true },
+  async fn() {
+    await withHarness(
+      "integration-input-label-host-bind",
+      async (engine, hostPath) => {
+        const writeResult = await engine.invokeBuiltinTool("bash", {
+          command:
+            "printf 'from invocation label\n' > /workspace/input-labeled.txt; printf 'wrote input-labeled file\n'",
+          cfcInputLabels: invocationInputLabels(),
+        });
+
+        assertEquals(
+          await Deno.readTextFile(`${hostPath}/input-labeled.txt`),
+          "from invocation label\n",
+        );
+        assert(writeResult.output.cfcResult !== undefined);
+        assertEquals(writeResult.output.cfcResult.stdout.policy, "opaque");
+        assertLabelIncludesSubject(
+          writeResult.output.cfcResult.stdout.label,
+          INVOCATION_TAINT_SUBJECT,
+        );
+
+        const readBack = await engine.invokeBuiltinTool("bash", {
+          command: "cat /workspace/input-labeled.txt",
+        });
+        assert(readBack.output.cfcResult !== undefined);
+        assertEquals(readBack.output.cfcResult.stdout.policy, "opaque");
+        assertLabelIncludesSubject(
+          readBack.output.cfcResult.stdout.label,
+          INVOCATION_TAINT_SUBJECT,
+        );
+      },
+      { cfcEnforcementMode: "enforce-strict" },
+    );
+  },
+});
+
+Deno.test({
+  name:
+    "cf-harness integration: invocation labels join policy reads before writes",
+  ignore: !INTEGRATION || !CFC_RESULT_DIR_CONFIGURED ||
+    !CFC_INVOCATION_CONTEXT_DIR_CONFIGURED,
+  permissions: { env: true, read: true, run: true, write: true },
+  async fn() {
+    await assertCfcPolicyLabelsAvailable();
+    const secretsHostPath = await makeIntegrationTempDir(
+      "cf-harness-secrets-",
+    );
+    try {
+      await writePolicyLabeledSecret(secretsHostPath);
+      await withHarness(
+        "integration-input-label-join-host-read",
+        async (engine, hostPath) => {
+          const joinedWrite = await engine.invokeBuiltinTool("bash", {
+            command: [
+              "cat /secrets/space.json >/dev/null",
+              "printf 'joined taint\n' > /workspace/joined.txt",
+              "printf 'joined result\n'",
+            ].join("; "),
+            cfcInputLabels: invocationInputLabels(),
+          });
+
+          assertEquals(
+            await Deno.readTextFile(`${hostPath}/joined.txt`),
+            "joined taint\n",
+          );
+          assert(joinedWrite.output.cfcResult !== undefined);
+          assertEquals(joinedWrite.output.cfcResult.stdout.policy, "opaque");
+          assertLabelIncludesSubject(
+            joinedWrite.output.cfcResult.stdout.label,
+            INVOCATION_TAINT_SUBJECT,
+          );
+          assertLabelIncludesSubject(
+            joinedWrite.output.cfcResult.stdout.label,
+            "did:key:alice",
+          );
+
+          const readBack = await engine.invokeBuiltinTool("bash", {
+            command: "cat /workspace/joined.txt",
+          });
+          assert(readBack.output.cfcResult !== undefined);
+          assertEquals(readBack.output.cfcResult.stdout.policy, "opaque");
+          assertLabelIncludesSubject(
+            readBack.output.cfcResult.stdout.label,
+            INVOCATION_TAINT_SUBJECT,
+          );
+          assertLabelIncludesSubject(
+            readBack.output.cfcResult.stdout.label,
+            "did:key:alice",
+          );
+        },
+        {
+          cfcEnforcementMode: "enforce-strict",
           configureSandbox: () => ({
             image: CFC_TAINT_IMAGE,
             extraDockerArgs: [
