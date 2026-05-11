@@ -334,7 +334,7 @@ function fabricFromNativeValueModernInternal(
   // Ideally the recursive internals conversion would be handled generically
   // rather than requiring a type-specific branch here.
   //
-  // `FabricError` wraps a raw `Error` whose internals (cause, custom
+  // `FabricError` wraps a raw `Error` whose internals (`.cause`, custom
   // properties) may contain raw native types that aren't `FabricValue`.
   // We must recursively convert those internals NOW so that when
   // `[DECONSTRUCT]` runs at serialization time, all nested values are
@@ -409,13 +409,13 @@ function fabricFromNativeValueModernInternal(
 }
 
 /**
- * Creates a new Error with the same class and properties as the original,
- * but with `cause` and custom enumerable properties recursively converted
+ * Creates a new `Error` with the same class and properties as the original,
+ * but with `.cause` and custom enumerable properties recursively converted
  * to `FabricValue`. This ensures that when `FabricError[DECONSTRUCT]`
  * runs at serialization time, all nested values are already `FabricValue`.
  *
- * We create a new Error rather than mutating the original because the
- * caller's Error should not be modified as a side effect of storing it.
+ * We create a new `Error` rather than mutating the original because the
+ * caller's `Error` should not be modified as a side effect of storing it.
  */
 function convertErrorInternals(
   error: Error,
@@ -435,7 +435,7 @@ function convertErrorInternals(
     result.stack = error.stack;
   }
 
-  // Recursively convert `cause` -- it could be a raw `Error`, `Map`, etc.
+  // Recursively convert `.cause` -- it could be a raw `Error`, `Map`, etc.
   if (error.cause !== undefined) {
     result.cause = fabricFromNativeValueModernInternal(
       error.cause,
@@ -819,7 +819,7 @@ function isFabricCompatibleInternal(
  *
  * The freeze-state contract: the output's freeze state ALWAYS matches `frozen`.
  * Arrays and objects are copied and frozen/unfrozen accordingly. For
- * `FabricError`, the inner `Error`'s `cause` and custom properties are also
+ * `FabricError`, the inner `Error`'s `.cause` and custom properties are also
  * recursively unwrapped (since they may contain `FabricInstance` wrappers).
  */
 export function nativeFromFabricValueModern(

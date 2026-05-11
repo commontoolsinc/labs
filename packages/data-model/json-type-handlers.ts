@@ -526,7 +526,7 @@ export const FabricInstanceHandler: TypeHandler = {
     const inst = value as FabricInstance;
 
     // `ExplicitTagValue` (`UnknownValue`, `ProblematicValue`): use
-    // preserved `typeTag` and re-serialize their stored state.
+    // preserved `.typeTag` and re-serialize their stored state.
     if (inst instanceof ExplicitTagValue) {
       const serializedState = recurse(inst.state);
       return codec.wrapTag(inst.typeTag, serializedState);

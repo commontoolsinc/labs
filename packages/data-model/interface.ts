@@ -167,7 +167,7 @@ export interface FabricArray extends ArrayLike<FabricValue> {}
 /**
  * Object/record of fabric values.
  *
- * Note: `__proto__` and `constructor()` properties are not currently guarded
+ * Note: `.__proto__` and `constructor()` properties are not currently guarded
  * against at the type level or at runtime in clone/conversion internals.
  * If prototype pollution becomes a concern, add boundary validation where
  * values enter the fabric system (e.g., `fabricFromNativeValue()`).
@@ -178,7 +178,7 @@ export interface FabricObject extends Record<string, FabricValue> {}
  * Single "layer" of fabric conversion -- the result of shallow conversion
  * via `shallowFabricFromNativeValue()`. Arrays and objects have the right
  * shape but their contents may still contain values requiring further
- * conversion (e.g., `Error` instances in a `cause` chain).
+ * conversion (e.g., `Error` instances in a `.cause` chain).
  */
 export type FabricValueLayer =
   | FabricValue
