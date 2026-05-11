@@ -150,8 +150,8 @@ export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
     const bytes = new Uint8Array(hex.length >> 1);
 
     for (let i = 0; i < bytes.length; i++) {
-      // `0xff - value` to undo the ones-complement in `~value` above.
-      bytes[i] = 0xff - byteValueAt(hex, i * 2);
+      // `0xff ^ value` to undo the ones-complement in `~value` above.
+      bytes[i] = 0xff ^ byteValueAt(hex, i * 2);
     }
 
     return bytes;
@@ -187,12 +187,12 @@ export function bigintFromMinimalTwosComplement(bytes: Uint8Array): bigint {
     let result = 0n;
     const partials = bytes.length & 7;
     for (let i = 0; i < partials; i++) {
-      result = (result << 8n) | BigInt(0xff - bytes[i]!);
+      result = (result << 8n) | BigInt(0xff ^ bytes[i]!);
     }
     for (let i = partials; i < bytes.length; i += 8) {
       dv64Bytes.set(bytes.subarray(i, i + 8));
       result = (result << 64n) |
-        (0xffff_ffff_ffff_ffffn - dv64View.getBigUint64(0, false));
+        (0xffff_ffff_ffff_ffffn ^ dv64View.getBigUint64(0, false));
     }
     return ~result;
   } else {
