@@ -60,6 +60,7 @@ function hexStringFromPositiveValue(value: bigint): string {
  */
 function convertSmallValue(value: bigint, negative: boolean) {
   const skipByte = negative ? 0xff : 0x00;
+  const signBit = skipByte & 0x80;
 
   dv64View.setBigInt64(0, value, false); // `false` means big-endian.
 
@@ -71,10 +72,8 @@ function convertSmallValue(value: bigint, negative: boolean) {
     if (byte !== skipByte) {
       // Adjust starting index backwards if the non-skipped byte would flip
       // the sign of the result.
-      if (negative) {
-        if (byte <= 0x7f) i--;
-      } else {
-        if (byte >= 0x80) i--;
+      if ((byte & 0x80) !== signBit) {
+        i--;
       }
       return dv64Bytes.slice(i);
     }
