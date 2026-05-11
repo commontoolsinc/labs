@@ -9,7 +9,7 @@
  */
 
 // ---------------------------------------------------------------------------
-// BigInt -> minimal two's-complement big-endian bytes
+// `bigint` -> minimal two's-complement big-endian bytes
 // ---------------------------------------------------------------------------
 
 /**
@@ -157,7 +157,7 @@ export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
 }
 
 // ---------------------------------------------------------------------------
-// Two's-complement big-endian bytes -> BigInt
+// Two's-complement big-endian bytes -> `bigint`
 // ---------------------------------------------------------------------------
 
 /**

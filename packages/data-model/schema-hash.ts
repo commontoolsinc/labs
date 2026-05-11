@@ -46,7 +46,7 @@ export function hashSchema(schema: JSONSchema): string {
  * only reachable while the schema object itself is alive.
  *
  * - `booleanInterns`: prefab `SchemaAndHash` for `true` and `false` (boolean
- *   schemas are primitives and can't be WeakMap/WeakRef targets).
+ *   schemas are primitives and can't be `WeakMap`/`WeakRef` targets).
  */
 const schemaToSah = new WeakMap<JSONSchemaObj, SchemaAndHash>();
 const hashToRef = new Map<string, WeakRef<JSONSchemaObj> | boolean>();

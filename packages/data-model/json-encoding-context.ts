@@ -48,7 +48,7 @@ function isEncodedInstance(v: JsonWireValue): boolean {
  * Returns true if the already-serialized wire value `v` can be embedded
  * inside a /quote wrap without inner deserialization: primitives, plain
  * objects/arrays free of non-/quote encoded instances, and /quote-wrapped
- * values (which unquote() can collapse).
+ * values (which `unquote()` can collapse).
  */
 function isQuoteSafe(v: JsonWireValue): boolean {
   if (v === null || typeof v !== "object") return true;
@@ -115,8 +115,8 @@ export class JsonEncodingContext implements SerializationContext<string> {
     };
 
     // Register native wrapper classes for deserialization. Each wrapper's
-    // static [RECONSTRUCT] method is used by the class registry fallback
-    // path in deserialize().
+    // static `[RECONSTRUCT]` method is used by the class registry fallback
+    // path in `deserialize()`.
     this.registry.set(TAGS.Error, FabricError);
     this.registry.set(TAGS.Map, FabricMap);
     this.registry.set(TAGS.Set, FabricSet);
@@ -124,7 +124,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
   }
 
   // -------------------------------------------------------------------------
-  // SerializationContext<string> -- public boundary interface
+  // `SerializationContext<string>` -- public boundary interface
   // -------------------------------------------------------------------------
 
   /**
@@ -392,7 +392,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
 
       // A bare `"/"` key (empty tag after stripping the leading slash) is
       // always an encoding error per spec §9 — no valid tag has an empty
-      // name. Produce a ProblematicValue rather than an UnknownValue with
+      // name. Produce a `ProblematicValue` rather than an `UnknownValue` with
       // an empty tag.
       if (tag === "") {
         return new ProblematicValue(
@@ -509,7 +509,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
     }
 
     // Plain objects: recursively deserialize values and freeze. Any
-    // /-prefixed key is reserved per spec — return ProblematicValue on
+    // `/`-prefixed key is reserved per spec — return `ProblematicValue` on
     // first occurrence rather than silently round-tripping the object.
     const result: Record<string, FabricValue> = {};
     for (const [key, val] of Object.entries(data)) {
