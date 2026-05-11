@@ -8,21 +8,20 @@
  * except as needed for sign extension.
  */
 
- /**
-  * Shared 8-byte scratch buffer.
-  */
- const dv64Buf = new ArrayBuffer(8);
+/**
+ * Shared 8-byte scratch buffer.
+ */
+const dv64Buf = new ArrayBuffer(8);
 
- /**
-  * `DataView` of `dv64buf`.
-  */
- const dv64View = new DataView(dv64Buf);
+/**
+ * `DataView` of `dv64buf`.
+ */
+const dv64View = new DataView(dv64Buf);
 
- /**
-  * `Uint8Array` view of `dv64buf`.
-  */
- const dv64Bytes = new Uint8Array(dv64Buf);
-
+/**
+ * `Uint8Array` view of `dv64buf`.
+ */
+const dv64Bytes = new Uint8Array(dv64Buf);
 
 // ---------------------------------------------------------------------------
 // `bigint` -> minimal two's-complement big-endian bytes
