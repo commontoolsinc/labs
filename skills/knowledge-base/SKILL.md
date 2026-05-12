@@ -9,7 +9,8 @@ description: Shared foundation for Oracle & Corrector agents. Establishes the so
 
 Read these docs to orient yourself:
 
-1. **`docs/common/concepts/glossary.md`** - Terminology (Cell, Piece, Space, Spell, etc.)
+1. **`docs/common/concepts/glossary.md`** - Terminology (Cell, Piece, Space,
+   Spell, etc.)
 2. **`docs/specs/pattern-construction/overview.md`** - Authoritative system
    design
 3. **`AGENTS.md`** - Documentation reading list and codebase guidelines
