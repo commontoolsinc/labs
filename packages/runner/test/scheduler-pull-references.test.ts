@@ -3,40 +3,36 @@
 import {
   afterEach,
   beforeEach,
+  createSchedulerTestRuntime,
   describe,
+  disposeSchedulerTestRuntime,
   expect,
   it,
   Runtime,
-  signer,
   space,
-  StorageManager,
   toMemorySpaceAddress,
-} from "./scheduler-pull-test-utils.ts";
+} from "./scheduler-test-utils.ts";
 import type {
   Action,
   IExtendedStorageTransaction,
   JSONSchema,
-} from "./scheduler-pull-test-utils.ts";
+  SchedulerTestStorageManager,
+} from "./scheduler-test-utils.ts";
 
 describe("pull mode with references", () => {
-  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let storageManager: SchedulerTestStorageManager;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
 
   beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: signer });
-    runtime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager,
-    });
-    runtime.scheduler.enablePullMode();
-    tx = runtime.edit();
+    ({ storageManager, runtime, tx } = createSchedulerTestRuntime(
+      import.meta.url,
+      { pullMode: "enabled" },
+    ));
   });
 
   afterEach(async () => {
-    await tx.commit();
-    await runtime?.dispose();
-    await storageManager?.close();
+    await disposeSchedulerTestRuntime({ storageManager, runtime, tx });
   });
 
   it("should propagate dirtiness through references (nested lift scenario)", async () => {

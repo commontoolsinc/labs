@@ -1,0 +1,191 @@
+import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { isRecord } from "@commonfabric/utils/types";
+import type {
+  IExtendedStorageTransaction,
+  IMemorySpaceAddress,
+} from "../storage/interface.ts";
+import { getTransactionWriteDetails } from "../storage/transaction-inspection.ts";
+import { ignoreReadForScheduling } from "../storage/reactivity-log.ts";
+import type { CycleReport } from "../telemetry.ts";
+import { mapsEqual } from "./topology.ts";
+
+export type DiagnosisRecord = {
+  readValues: Map<string, unknown>;
+  writeValues: Map<string, unknown>;
+  timestamp: number;
+};
+
+export function makeAddressKey(addr: IMemorySpaceAddress): string {
+  return `${addr.space}/${addr.id}/${addr.path.join("/")}`;
+}
+
+function unwrapTransactionDetailValue(value: unknown): unknown {
+  return isRecord(value) && "value" in value ? value.value : value;
+}
+
+export function captureTransactionWrites(
+  tx: IExtendedStorageTransaction,
+  writes: readonly IMemorySpaceAddress[],
+  options: { errorValue?: unknown } = {},
+): Map<string, unknown> {
+  const writeValues = new Map<string, unknown>();
+  const writeDetailsBySpace = new Map<string, Map<string, unknown>>();
+
+  for (const write of writes) {
+    const key = makeAddressKey(write);
+    try {
+      let details = writeDetailsBySpace.get(write.space);
+      if (!details) {
+        details = new Map<string, unknown>();
+        for (const detail of getTransactionWriteDetails(tx, write.space)) {
+          details.set(
+            makeAddressKey(detail.address),
+            unwrapTransactionDetailValue(detail.value),
+          );
+        }
+        writeDetailsBySpace.set(write.space, details);
+      }
+      writeValues.set(key, details.has(key) ? details.get(key) : undefined);
+    } catch (error) {
+      if (!("errorValue" in options)) throw error;
+      writeValues.set(key, options.errorValue);
+    }
+  }
+
+  return writeValues;
+}
+
+export function captureCommittedReads(
+  reads: readonly IMemorySpaceAddress[],
+  createReadTx: () => IExtendedStorageTransaction,
+): Map<string, unknown> {
+  const readValues = new Map<string, unknown>();
+
+  for (const read of reads) {
+    const key = makeAddressKey(read);
+    let readerTx: IExtendedStorageTransaction | undefined;
+    try {
+      readerTx = createReadTx();
+      const result = readerTx.tx.read(
+        {
+          space: read.space,
+          id: read.id,
+          path: [...read.path],
+        },
+        { meta: ignoreReadForScheduling },
+      );
+      readValues.set(key, result.ok?.value);
+    } catch {
+      readValues.set(key, "[read-error]");
+    } finally {
+      readerTx?.abort();
+    }
+  }
+
+  return readValues;
+}
+
+export function findDifferingWriteKeys(
+  previousWrites: Map<string, unknown>,
+  latestWrites: Map<string, unknown>,
+  options: { keySet?: "union" | "latest" } = {},
+): string[] {
+  const keys = options.keySet === "latest"
+    ? latestWrites.keys()
+    : new Set([...latestWrites.keys(), ...previousWrites.keys()]).keys();
+  const differingKeys: string[] = [];
+
+  for (const key of keys) {
+    if (!previousWrites.has(key)) {
+      differingKeys.push(key);
+      continue;
+    }
+    if (!deepEqual(previousWrites.get(key), latestWrites.get(key))) {
+      differingKeys.push(key);
+    }
+  }
+
+  return differingKeys;
+}
+
+export function findNonIdempotentPair(
+  history: DiagnosisRecord[],
+): {
+  previous: DiagnosisRecord;
+  latest: DiagnosisRecord;
+  differingWriteKeys: string[];
+} | undefined {
+  if (history.length < 2) return undefined;
+
+  const latest = history[history.length - 1];
+  for (const previous of history.slice(0, -1)) {
+    // Same reads with different writes is the diagnosis signal.
+    if (!mapsEqual(latest.readValues, previous.readValues)) continue;
+
+    const differingWriteKeys = findDifferingWriteKeys(
+      previous.writeValues,
+      latest.writeValues,
+    );
+    if (differingWriteKeys.length > 0) {
+      return { previous, latest, differingWriteKeys };
+    }
+  }
+
+  return undefined;
+}
+
+export function detectCausalCycles(
+  causalEdges: readonly { writer: string; triggered: string; cell: string }[],
+): CycleReport[] {
+  // Build adjacency list: writer -> [{ triggered, cell }]
+  const adj = new Map<string, { triggered: string; cell: string }[]>();
+  for (const edge of causalEdges) {
+    let neighbors = adj.get(edge.writer);
+    if (!neighbors) {
+      neighbors = [];
+      adj.set(edge.writer, neighbors);
+    }
+    neighbors.push({ triggered: edge.triggered, cell: edge.cell });
+  }
+
+  const cycles: CycleReport[] = [];
+  const visited = new Set<string>();
+  const inStack = new Set<string>();
+  const stack: { actionId: string; writesCell: string }[] = [];
+
+  const dfs = (node: string) => {
+    if (inStack.has(node)) {
+      // Found a cycle - extract it from the stack
+      const cycleStart = stack.findIndex((s) => s.actionId === node);
+      if (cycleStart !== -1) {
+        const cycle = stack.slice(cycleStart);
+        cycles.push({
+          cycle: [...cycle],
+          timestamp: performance.now(),
+        });
+      }
+      return;
+    }
+    if (visited.has(node)) return;
+
+    visited.add(node);
+    inStack.add(node);
+
+    const neighbors = adj.get(node) ?? [];
+    for (const { triggered, cell } of neighbors) {
+      stack.push({ actionId: node, writesCell: cell });
+      dfs(triggered);
+      stack.pop();
+    }
+
+    inStack.delete(node);
+  };
+
+  for (const node of adj.keys()) {
+    if (!visited.has(node)) {
+      dfs(node);
+    }
+  }
+
+  return cycles;
+}

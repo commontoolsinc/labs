@@ -5,46 +5,39 @@ import {
   assertSpyCall,
   assertSpyCalls,
   beforeEach,
+  createSchedulerTestRuntime,
   describe,
+  disposeSchedulerTestRuntime,
   expect,
   ignoreReadForScheduling,
   it,
   Runtime,
-  signer,
   space,
   spy,
-  StorageManager,
   storedCfcMetadataAppliesToPath,
   toMemorySpaceAddress,
   txToReactivityLog,
-} from "./scheduler-core-test-utils.ts";
+} from "./scheduler-test-utils.ts";
 import type {
   Action,
   IExtendedStorageTransaction,
-} from "./scheduler-core-test-utils.ts";
+  SchedulerTestStorageManager,
+} from "./scheduler-test-utils.ts";
 
 describe("scheduler", () => {
-  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let storageManager: SchedulerTestStorageManager;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
 
   beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: signer });
-    // Create runtime with the shared storage provider
-    // We need to bypass the URL-based configuration for this test
-    runtime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager,
-    });
-    // Use push mode for basic scheduler tests (tests push-mode behavior)
-    runtime.scheduler.disablePullMode();
-    tx = runtime.edit();
+    ({ storageManager, runtime, tx } = createSchedulerTestRuntime(
+      import.meta.url,
+      { pullMode: "disabled" },
+    ));
   });
 
   afterEach(async () => {
-    await tx.commit();
-    await runtime?.dispose();
-    await storageManager?.close();
+    await disposeSchedulerTestRuntime({ storageManager, runtime, tx });
   });
 
   it("should run actions when cells change", async () => {

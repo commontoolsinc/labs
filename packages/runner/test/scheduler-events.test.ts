@@ -3,42 +3,35 @@
 import {
   afterEach,
   beforeEach,
+  createSchedulerTestRuntime,
   describe,
+  disposeSchedulerTestRuntime,
   expect,
   it,
   Runtime,
-  signer,
   space,
-  StorageManager,
-} from "./scheduler-core-test-utils.ts";
+} from "./scheduler-test-utils.ts";
 import type {
   Entity,
   EventHandler,
   IExtendedStorageTransaction,
-} from "./scheduler-core-test-utils.ts";
+  SchedulerTestStorageManager,
+} from "./scheduler-test-utils.ts";
 
 describe("event handling", () => {
-  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let storageManager: SchedulerTestStorageManager;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
 
   beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: signer });
-    // Create runtime with the shared storage provider
-    // We need to bypass the URL-based configuration for this test
-    runtime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager,
-    });
-    // Use push mode for event handling tests
-    runtime.scheduler.disablePullMode();
-    tx = runtime.edit();
+    ({ storageManager, runtime, tx } = createSchedulerTestRuntime(
+      import.meta.url,
+      { pullMode: "disabled" },
+    ));
   });
 
   afterEach(async () => {
-    await tx.commit();
-    await runtime?.dispose();
-    await storageManager?.close();
+    await disposeSchedulerTestRuntime({ storageManager, runtime, tx });
   });
 
   it("should queue and process events", async () => {

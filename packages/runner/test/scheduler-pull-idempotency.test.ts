@@ -3,38 +3,33 @@
 import {
   afterEach,
   beforeEach,
+  createSchedulerTestRuntime,
   describe,
+  disposeSchedulerTestRuntime,
   expect,
   it,
   Runtime,
-  signer,
   space,
-  StorageManager,
-} from "./scheduler-pull-test-utils.ts";
+} from "./scheduler-test-utils.ts";
 import type {
   Action,
   IExtendedStorageTransaction,
-} from "./scheduler-pull-test-utils.ts";
+  SchedulerTestStorageManager,
+} from "./scheduler-test-utils.ts";
 
 describe("inline idempotency check mode", () => {
-  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let storageManager: SchedulerTestStorageManager;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
 
   beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: signer });
-    runtime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager,
-    });
-    // Inline idempotency mode should work regardless of the scheduler default.
-    tx = runtime.edit();
+    ({ storageManager, runtime, tx } = createSchedulerTestRuntime(
+      import.meta.url,
+    ));
   });
 
   afterEach(async () => {
-    await tx.commit();
-    await runtime?.dispose();
-    await storageManager?.close();
+    await disposeSchedulerTestRuntime({ storageManager, runtime, tx });
   });
 
   it("detects non-idempotent via inline mode", async () => {

@@ -43,7 +43,6 @@ import { recordTrustedEventPolicyInputs } from "./cfc/ui-contract.ts";
 import { ensurePieceRunning } from "./ensure-piece-running.ts";
 import type {
   ActionStats,
-  CycleReport,
   NonIdempotentReport,
   SchedulerActionInfo,
   SchedulerDiagnosisResult,
@@ -76,13 +75,21 @@ import {
   toActionRunTraceAddress,
 } from "./scheduler/diagnostics.ts";
 import {
+  captureCommittedReads,
+  captureTransactionWrites,
+  detectCausalCycles,
+  type DiagnosisRecord,
+  findDifferingWriteKeys,
+  findNonIdempotentPair,
+} from "./scheduler/diagnosis.ts";
+import {
   filterIgnoredAddresses,
   hasAnnotatedWrites,
   trustedEventWriteCandidatesFromTransaction,
   txToReactivityLog,
 } from "./scheduler/reactivity.ts";
 import { entityKey } from "./scheduler/keys.ts";
-import { mapsEqual, topologicalSort } from "./scheduler/topology.ts";
+import { topologicalSort } from "./scheduler/topology.ts";
 import type {
   Action,
   ActionRunTraceEntry,
@@ -210,11 +217,7 @@ export class Scheduler {
   private diagnosisResolve:
     | ((result: SchedulerDiagnosisResult) => void)
     | null = null;
-  private diagnosisHistory = new Map<string, {
-    readValues: Map<string, unknown>;
-    writeValues: Map<string, unknown>;
-    timestamp: number;
-  }[]>();
+  private diagnosisHistory = new Map<string, DiagnosisRecord[]>();
   private diagnosisNonIdempotent: NonIdempotentReport[] = [];
 
   // Inline idempotency check mode: when enabled, every computation re-run
@@ -449,39 +452,12 @@ export class Scheduler {
     return [...this.idempotencyViolations];
   }
 
-  private makeAddressKey(addr: IMemorySpaceAddress): string {
-    return `${addr.space}/${addr.id}/${addr.path.join("/")}`;
-  }
-
-  private captureWrites(
-    tx: IExtendedStorageTransaction,
-    log: ReactivityLog,
-  ): Map<string, unknown> {
-    const writes = new Map<string, unknown>();
-    const writeDetailsBySpace = new Map<string, Map<string, unknown>>();
-    for (const write of log.writes) {
-      const key = this.makeAddressKey(write);
-      let details = writeDetailsBySpace.get(write.space);
-      if (!details) {
-        details = new Map<string, unknown>();
-        for (const detail of getTransactionWriteDetails(tx, write.space)) {
-          const raw = detail.value;
-          const value = isRecord(raw) && "value" in raw ? raw.value : raw;
-          details.set(this.makeAddressKey(detail.address), value);
-        }
-        writeDetailsBySpace.set(write.space, details);
-      }
-      writes.set(key, details.has(key) ? details.get(key) : undefined);
-    }
-    return writes;
-  }
-
   private runIdempotencyRecheck(
     action: Action,
     tx: IExtendedStorageTransaction,
     log: ReactivityLog,
   ): void {
-    const writes1 = this.captureWrites(tx, log);
+    const writes1 = captureTransactionWrites(tx, log.writes);
 
     const tx2 = this.runtime.edit();
     let isAsync = false;
@@ -497,21 +473,17 @@ export class Scheduler {
       }
     } catch { /* ignore errors */ }
     const log2 = txToReactivityLog(tx2);
-    const writes2 = isAsync ? new Map() : this.captureWrites(tx2, log2);
+    const writes2 = isAsync
+      ? new Map()
+      : captureTransactionWrites(tx2, log2.writes);
     tx2.abort();
 
     // Skip comparison for async actions — writes are incomplete/unreliable
     if (isAsync) return;
 
-    const differingKeys: string[] = [];
-    for (const key of writes2.keys()) {
-      const v2 = writes2.get(key);
-      if (!writes1.has(key)) {
-        differingKeys.push(key);
-      } else if (!deepEqual(writes1.get(key), v2)) {
-        differingKeys.push(key);
-      }
-    }
+    const differingKeys = findDifferingWriteKeys(writes1, writes2, {
+      keySet: "latest",
+    });
 
     if (differingKeys.length > 0) {
       const actionId = this.getActionId(action);
@@ -3620,7 +3592,7 @@ export class Scheduler {
     const duration = performance.now() - this.diagnosisStartTime;
 
     // Detect cycles from causal edges
-    const cycles = this.detectCycles();
+    const cycles = detectCausalCycles(this.causalEdges);
 
     const result: SchedulerDiagnosisResult = {
       nonIdempotent: this.diagnosisNonIdempotent,
@@ -3693,58 +3665,12 @@ export class Scheduler {
     tx: IExtendedStorageTransaction,
     log: ReactivityLog,
   ): void {
-    // Build address key helper
-    const makeKey = (addr: IMemorySpaceAddress): string =>
-      `${addr.space}/${addr.id}/${addr.path.join("/")}`;
-
-    // Capture read values from committed storage (what the next run would see)
-    const readValues = new Map<string, unknown>();
-    for (const read of log.reads) {
-      const key = makeKey(read);
-      let readerTx: IExtendedStorageTransaction | undefined;
-      try {
-        readerTx = this.runtime.edit();
-        const result = readerTx.tx.read(
-          {
-            space: read.space,
-            id: read.id,
-            path: [...read.path],
-          },
-          { meta: ignoreReadForScheduling },
-        );
-        readValues.set(key, result.ok?.value);
-      } catch {
-        readValues.set(key, "[read-error]");
-      } finally {
-        readerTx?.abort();
-      }
-    }
-
-    // Capture write values from the action's transaction journal
-    const writeValues = new Map<string, unknown>();
-    const writeDetailsBySpace = new Map<string, Map<string, unknown>>();
-    for (const write of log.writes) {
-      const key = makeKey(write);
-      try {
-        let details = writeDetailsBySpace.get(write.space);
-        if (!details) {
-          details = new Map<string, unknown>();
-          for (const detail of getTransactionWriteDetails(tx, write.space)) {
-            const raw = detail.value;
-            const value = isRecord(raw) && "value" in raw ? raw.value : raw;
-            details.set(makeKey(detail.address), value);
-          }
-          writeDetailsBySpace.set(write.space, details);
-        }
-        writeValues.set(key, details.has(key) ? details.get(key) : undefined);
-      } catch {
-        writeValues.set(key, "[write-error]");
-      }
-    }
-
     const record = {
-      readValues,
-      writeValues,
+      // Committed reads model what a later run with the same inputs would see.
+      readValues: captureCommittedReads(log.reads, () => this.runtime.edit()),
+      writeValues: captureTransactionWrites(tx, log.writes, {
+        errorValue: "[write-error]",
+      }),
       timestamp: performance.now(),
     };
 
@@ -3759,130 +3685,32 @@ export class Scheduler {
       history.shift();
     }
 
-    // Compare with previous records: same reads, different writes => non-idempotent
-    this.checkIdempotency(actionId, action, history);
-  }
+    const nonIdempotent = findNonIdempotentPair(history);
+    if (!nonIdempotent) return;
 
-  /**
-   * Checks if any two records in the history have the same reads but different writes.
-   */
-  private checkIdempotency(
-    actionId: string,
-    action: Action,
-    history: {
-      readValues: Map<string, unknown>;
-      writeValues: Map<string, unknown>;
-      timestamp: number;
-    }[],
-  ): void {
-    if (history.length < 2) return;
+    // Non-idempotent detected! Only report once per action.
+    const existing = this.diagnosisNonIdempotent.find(
+      (r) => r.actionId === actionId,
+    );
+    if (existing) return;
 
-    const latest = history[history.length - 1];
-
-    for (let i = 0; i < history.length - 1; i++) {
-      const prev = history[i];
-
-      // Check if reads are the same
-      if (!mapsEqual(latest.readValues, prev.readValues)) continue;
-
-      // Reads are the same - check if writes differ
-      const differingKeys: string[] = [];
-      const allWriteKeys = new Set([
-        ...latest.writeValues.keys(),
-        ...prev.writeValues.keys(),
-      ]);
-
-      for (const key of allWriteKeys) {
-        const latestVal = latest.writeValues.get(key);
-        const prevVal = prev.writeValues.get(key);
-        if (!deepEqual(latestVal, prevVal)) {
-          differingKeys.push(key);
-        }
-      }
-
-      if (differingKeys.length > 0) {
-        // Non-idempotent detected! Only report once per action.
-        const existing = this.diagnosisNonIdempotent.find(
-          (r) => r.actionId === actionId,
-        );
-        if (!existing) {
-          this.diagnosisNonIdempotent.push({
-            actionId,
-            actionInfo: this.getActionTelemetryInfo(action),
-            runs: [
-              {
-                timestamp: prev.timestamp,
-                reads: Object.fromEntries(prev.readValues),
-                writes: Object.fromEntries(prev.writeValues),
-              },
-              {
-                timestamp: latest.timestamp,
-                reads: Object.fromEntries(latest.readValues),
-                writes: Object.fromEntries(latest.writeValues),
-              },
-            ],
-            differingWriteKeys: differingKeys,
-          });
-        }
-      }
-    }
-  }
-
-  /**
-   * Detects cycles in the causal edge graph using DFS.
-   */
-  private detectCycles(): CycleReport[] {
-    // Build adjacency list: writer -> [{ triggered, cell }]
-    const adj = new Map<string, { triggered: string; cell: string }[]>();
-    for (const edge of this.causalEdges) {
-      let neighbors = adj.get(edge.writer);
-      if (!neighbors) {
-        neighbors = [];
-        adj.set(edge.writer, neighbors);
-      }
-      neighbors.push({ triggered: edge.triggered, cell: edge.cell });
-    }
-
-    const cycles: CycleReport[] = [];
-    const visited = new Set<string>();
-    const inStack = new Set<string>();
-    const stack: { actionId: string; writesCell: string }[] = [];
-
-    const dfs = (node: string) => {
-      if (inStack.has(node)) {
-        // Found a cycle - extract it from the stack
-        const cycleStart = stack.findIndex((s) => s.actionId === node);
-        if (cycleStart !== -1) {
-          const cycle = stack.slice(cycleStart);
-          cycles.push({
-            cycle: [...cycle],
-            timestamp: performance.now(),
-          });
-        }
-        return;
-      }
-      if (visited.has(node)) return;
-
-      visited.add(node);
-      inStack.add(node);
-
-      const neighbors = adj.get(node) ?? [];
-      for (const { triggered, cell } of neighbors) {
-        stack.push({ actionId: node, writesCell: cell });
-        dfs(triggered);
-        stack.pop();
-      }
-
-      inStack.delete(node);
-    };
-
-    for (const node of adj.keys()) {
-      if (!visited.has(node)) {
-        dfs(node);
-      }
-    }
-
-    return cycles;
+    this.diagnosisNonIdempotent.push({
+      actionId,
+      actionInfo: this.getActionTelemetryInfo(action),
+      runs: [
+        {
+          timestamp: nonIdempotent.previous.timestamp,
+          reads: Object.fromEntries(nonIdempotent.previous.readValues),
+          writes: Object.fromEntries(nonIdempotent.previous.writeValues),
+        },
+        {
+          timestamp: nonIdempotent.latest.timestamp,
+          reads: Object.fromEntries(nonIdempotent.latest.readValues),
+          writes: Object.fromEntries(nonIdempotent.latest.writeValues),
+        },
+      ],
+      differingWriteKeys: nonIdempotent.differingWriteKeys,
+    });
   }
 
   private handleError(error: Error, action: any) {
