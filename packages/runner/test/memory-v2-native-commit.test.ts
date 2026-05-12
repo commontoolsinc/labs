@@ -113,6 +113,36 @@ Deno.test("memory v2 native commits require explicit full-document roots", async
   }
 });
 
+Deno.test("memory v2 extended root writes into new documents emit set drafts", async () => {
+  const { storage, drafts } = captureNativeDrafts();
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager: storage,
+  });
+
+  try {
+    const tx = runtime.edit();
+    tx.writeValueOrThrow(
+      { space, id: "of:memory-v2-native-root-create", path: [] },
+      { count: 1 },
+    );
+
+    const commitResult = await tx.commit();
+    assert(commitResult.ok);
+    assertEquals(drafts, [{
+      operations: [{
+        op: "set",
+        id: "of:memory-v2-native-root-create",
+        type,
+        value: { value: { count: 1 } },
+      }],
+    }]);
+  } finally {
+    await runtime.dispose();
+    await storage.close();
+  }
+});
+
 Deno.test("memory v2 transactions emit patch drafts for safe object-path writes", async () => {
   const { storage, drafts } = captureNativeDrafts();
 
@@ -159,7 +189,7 @@ Deno.test("memory v2 transactions emit patch drafts for safe object-path writes"
   }
 });
 
-Deno.test("memory v2 transactions emit set drafts for leaf writes into new documents", async () => {
+Deno.test("memory v2 transactions emit patch drafts for leaf writes into new documents", async () => {
   const { storage, drafts } = captureNativeDrafts();
 
   try {
@@ -181,13 +211,86 @@ Deno.test("memory v2 transactions emit set drafts for leaf writes into new docum
     assert(commitResult.ok);
     assertEquals(drafts, [{
       operations: [{
-        op: "set",
+        op: "patch",
         id: "of:memory-v2-native-create-via-patch",
         type,
+        patches: [{
+          op: "add",
+          path: "/value/profile/name",
+          value: "Ada",
+        }],
         value: { value: { profile: { name: "Ada" } } },
       }],
     }]);
   } finally {
+    await storage.close();
+  }
+});
+
+Deno.test("memory v2 concurrent leaf writes into new documents merge as path patches", async () => {
+  const { storage, drafts } = captureNativeDrafts();
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager: storage,
+  });
+
+  try {
+    const id = "of:memory-v2-native-concurrent-leaf-writes";
+    const sumTx = runtime.edit();
+    const resultTx = runtime.edit();
+
+    sumTx.writeValueOrThrow({ space, id, path: ["sum"] }, 15);
+    resultTx.writeValueOrThrow(
+      { space, id, path: ["result"] },
+      "Numbers: 15",
+    );
+
+    const sumCommit = sumTx.commit();
+    const resultCommit = resultTx.commit();
+
+    assertEquals(runtime.readTx().readValueOrThrow({ space, id, path: [] }), {
+      sum: 15,
+      result: "Numbers: 15",
+    });
+
+    assert((await sumCommit).ok);
+    assert((await resultCommit).ok);
+    await storage.synced();
+
+    assertEquals(drafts, [
+      {
+        operations: [{
+          op: "patch",
+          id,
+          type,
+          patches: [{
+            op: "add",
+            path: "/value/sum",
+            value: 15,
+          }],
+          value: { value: { sum: 15 } },
+        }],
+      },
+      {
+        operations: [{
+          op: "patch",
+          id,
+          type,
+          patches: [{
+            op: "add",
+            path: "/value/result",
+            value: "Numbers: 15",
+          }],
+          value: { value: { result: "Numbers: 15" } },
+        }],
+      },
+    ]);
+    assertEquals(runtime.readTx().readValueOrThrow({ space, id, path: [] }), {
+      sum: 15,
+      result: "Numbers: 15",
+    });
+  } finally {
+    await runtime.dispose();
     await storage.close();
   }
 });

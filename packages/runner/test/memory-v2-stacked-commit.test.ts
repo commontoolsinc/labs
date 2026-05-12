@@ -88,18 +88,20 @@ type RejectedRecord = {
   commit: ClientCommit;
   error: { name: string; message: string };
 };
+type ScriptedResponseOptions = {
+  remoteInterleave?: RemoteCommit;
+  responseDelayMs?: number;
+};
 type ScriptedOutcome =
-  | { kind: "accept"; remoteInterleave?: RemoteCommit }
-  | {
+  | ScriptedResponseOptions & { kind: "accept" }
+  | ScriptedResponseOptions & {
     kind: "rejectConflict";
     message?: string;
-    remoteInterleave?: RemoteCommit;
   }
-  | { kind: "dropThenReplayAccept"; remoteInterleave?: RemoteCommit }
-  | {
+  | ScriptedResponseOptions & { kind: "dropThenReplayAccept" }
+  | ScriptedResponseOptions & {
     kind: "dropThenReplayReject";
     message?: string;
-    remoteInterleave?: RemoteCommit;
   };
 type RemoteCommit = {
   label: string;
@@ -134,6 +136,7 @@ class ScriptedServerModel {
   readonly applied = new Map<number, AppliedRecord>();
   readonly rejected = new Map<number, RejectedRecord>();
   readonly scripted = new Map<number, ScriptedOutcome>();
+  readonly responseDelays = new Map<number, number>();
   readonly dropped = new Set<number>();
   serverSeq = 0;
   sessionId = "session:stacked";
@@ -146,6 +149,13 @@ class ScriptedServerModel {
 
   setOutcome(localSeq: number, outcome: ScriptedOutcome): void {
     this.scripted.set(localSeq, outcome);
+    if (outcome.responseDelayMs !== undefined) {
+      this.responseDelays.set(localSeq, outcome.responseDelayMs);
+    }
+  }
+
+  responseDelayMs(localSeq: number): number {
+    return this.responseDelays.get(localSeq) ?? 0;
   }
 
   seed(id: URI, value: RootValue): DocState {
@@ -387,9 +397,9 @@ class ScriptedModelTransport implements MemoryV2Client.Transport {
         });
         break;
       case "transact": {
+        const commit = message.commit!;
+        const response = this.model.transact(commit);
         setTimeout(() => {
-          const commit = message.commit!;
-          const response = this.model.transact(commit);
           if (response.type === "drop") {
             this.#closeReceiver(new Error("disconnect"));
             return;
@@ -401,7 +411,7 @@ class ScriptedModelTransport implements MemoryV2Client.Transport {
               ? { ok: response.applied }
               : { error: response.error }),
           });
-        }, 0);
+        }, this.model.responseDelayMs(commit.localSeq));
         break;
       }
       default:
@@ -970,6 +980,131 @@ Deno.test("memory v2 stacked commits: C1,C2,C3 all succeed on one doc", async ()
       changedIdsFor(harness.notifications.notifications, "revert"),
       [],
     );
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: out-of-order confirmations preserve earlier pending patches", async () => {
+  const harness = await createHarness();
+  try {
+    await seedAccepted(harness, DOCS.A, {});
+
+    harness.model.setOutcome(2, {
+      kind: "accept",
+      responseDelayMs: 25,
+    });
+    harness.model.setOutcome(3, { kind: "accept" });
+
+    const sum = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "add",
+        path: "/value/sum",
+        value: 15,
+      }],
+      { sum: 15 },
+    );
+
+    const result = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "add",
+        path: "/value/result",
+        value: "Numbers: 15",
+      }],
+      {
+        sum: 15,
+        result: "Numbers: 15",
+      },
+      sourceFromReads([{ id: DOCS.A }]),
+    );
+
+    await assertResultOk(result);
+    expectVisible(harness, {
+      A: {
+        sum: 15,
+        result: "Numbers: 15",
+      },
+    });
+
+    await assertResultOk(sum);
+    expectVisible(harness, {
+      A: {
+        sum: 15,
+        result: "Numbers: 15",
+      },
+    });
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: out-of-order setup and derived patch confirmations preserve siblings", async () => {
+  const harness = await createHarness();
+  try {
+    const setup = beginSet(harness, DOCS.A, {});
+    harness.model.setOutcome(setup.localSeq, {
+      kind: "accept",
+      responseDelayMs: 20,
+    });
+
+    const sum = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "add",
+        path: "/value/sum",
+        value: 15,
+      }],
+      { sum: 15 },
+    );
+    harness.model.setOutcome(2, {
+      kind: "accept",
+      responseDelayMs: 40,
+    });
+
+    const result = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "add",
+        path: "/value/result",
+        value: "Numbers: 15",
+      }],
+      {
+        sum: 15,
+        result: "Numbers: 15",
+      },
+      sourceFromReads([{ id: DOCS.A }]),
+    );
+    harness.model.setOutcome(3, { kind: "accept" });
+
+    await assertResultOk(result);
+    expectVisible(harness, {
+      A: {
+        sum: 15,
+        result: "Numbers: 15",
+      },
+    });
+
+    await assertResultOk(setup.promise);
+    expectVisible(harness, {
+      A: {
+        sum: 15,
+        result: "Numbers: 15",
+      },
+    });
+
+    await assertResultOk(sum);
+    expectVisible(harness, {
+      A: {
+        sum: 15,
+        result: "Numbers: 15",
+      },
+    });
   } finally {
     await harness.close();
   }

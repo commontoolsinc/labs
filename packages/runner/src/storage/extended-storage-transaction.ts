@@ -391,6 +391,16 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       writeResult.error &&
       (writeResult.error.name === "NotFoundError")
     ) {
+      if (this.tx.writeBatch) {
+        const batchRetry = this.tx.writeBatch([{ address, value }]);
+        if (!batchRetry.error) {
+          return;
+        }
+        if (batchRetry.error.name !== "NotFoundError") {
+          throw toThrowable(batchRetry.error);
+        }
+      }
+
       // Create parent entries if needed.
       // errorPath includes the missing key (consistent with read errors).
       // lastExistingPath is one level up - the actual last existing parent.

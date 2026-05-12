@@ -1883,12 +1883,18 @@ export class V2StorageTransaction implements IStorageTransaction {
     type: MediaType,
     doc: WritableDocumentEntry,
   ): NativeStorageCommitOperation | null {
-    if (doc.initial.value === undefined || doc.current.value === undefined) {
+    if (doc.current.value === undefined) {
       return null;
     }
 
     const details = [...doc.patchDetails.values()];
     if (details.some((detail) => detail.address.path.length === 0)) {
+      return null;
+    }
+    if (
+      doc.initial.value === undefined &&
+      details.some((detail) => detail.address.path.length <= 1)
+    ) {
       return null;
     }
 

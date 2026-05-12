@@ -120,20 +120,22 @@ type MaterializedVersion = {
   transactionValue: CachedTransactionValue;
 };
 
+type PendingMetadata = {
+  localSeq: number;
+  appliedSeq?: number;
+};
+
 type PendingVersion =
-  | {
-    localSeq: number;
+  | PendingMetadata & {
     op: "set";
     value: EntityDocument;
   }
-  | {
-    localSeq: number;
+  | PendingMetadata & {
     op: "patch";
     patches: PatchOp[];
     value: EntityDocument;
   }
-  | {
-    localSeq: number;
+  | PendingMetadata & {
     op: "delete";
   };
 
@@ -329,6 +331,47 @@ const materializedVersionThroughPending = (
     });
   }
   return cache.prefixes[pendingCount - 1]!;
+};
+
+const promoteAppliedPendingPrefix = (record: DocumentRecord): void => {
+  const firstUnappliedIndex = record.pending.findIndex((entry) =>
+    entry.appliedSeq === undefined
+  );
+  const appliedCount = firstUnappliedIndex === -1
+    ? record.pending.length
+    : firstUnappliedIndex;
+  if (appliedCount === 0) {
+    return;
+  }
+
+  const appliedSeq = Math.max(
+    ...record.pending
+      .slice(0, appliedCount)
+      .map((entry) => entry.appliedSeq ?? record.confirmed.seq),
+  );
+  const previousConfirmed = record.confirmed;
+  const cache = ensurePendingMaterializationCache(record);
+  const prefix = materializedVersionThroughPending(record, appliedCount);
+
+  if (record.confirmed.seq < appliedSeq) {
+    const promoted = confirmedVersion(appliedSeq, prefix.value);
+    promoted.transactionValue = prefix.transactionValue;
+    record.confirmed = promoted;
+    record.pending = record.pending.slice(appliedCount);
+    record.materialized = cache.confirmed === previousConfirmed
+      ? {
+        confirmed: promoted,
+        prefixes: cache.prefixes.slice(appliedCount),
+      }
+      : undefined;
+    if (record.materialized?.prefixes.length === 0) {
+      record.materialized = undefined;
+    }
+    return;
+  }
+
+  record.pending = record.pending.slice(appliedCount);
+  dropMaterializedSuffix(record, 0);
 };
 
 const dropMaterializedSuffix = (
@@ -1405,6 +1448,11 @@ class SpaceReplica implements ISpaceReplica {
 
     for (const upsert of sync.upserts) {
       const record = this.record(upsert.id as URI);
+      // Watch refreshes can arrive after local confirmations. Never move the
+      // confirmed base backwards; pending replay depends on monotonic bases.
+      if (upsert.seq < record.confirmed.seq) {
+        continue;
+      }
       record.confirmed = confirmedVersion(
         upsert.seq,
         upsert.deleted === true ? undefined : upsert.doc,
@@ -1482,52 +1530,11 @@ class SpaceReplica implements ISpaceReplica {
         );
         continue;
       }
-      const firstPendingIndex = pendingIndexes[0]!;
-      const lastPendingIndex = pendingIndexes[pendingIndexes.length - 1]!;
-      const pending = record.pending[lastPendingIndex]!;
-      const previousConfirmed = record.confirmed;
-      let promoted: ConfirmedVersion | undefined;
-      let reusedSuffix: PendingMaterializedPrefix[] | undefined;
-
-      if (record.confirmed.seq < applied.seq) {
-        if (firstPendingIndex === 0) {
-          const prefix = materializedVersionThroughPending(
-            record,
-            lastPendingIndex + 1,
-          );
-          const cache = ensurePendingMaterializationCache(record);
-          promoted = confirmedVersion(
-            applied.seq,
-            prefix.value,
-          );
-          promoted.transactionValue = prefix.transactionValue;
-          if (cache.confirmed === previousConfirmed) {
-            reusedSuffix = cache.prefixes.slice(lastPendingIndex + 1);
-          }
-        } else {
-          promoted = confirmedVersion(
-            applied.seq,
-            applyPendingVersion(record.confirmed.value, pending),
-          );
-        }
+      for (const pendingIndex of pendingIndexes) {
+        record.pending[pendingIndex]!.appliedSeq = applied.seq;
       }
 
-      record.pending = record.pending.filter((entry) =>
-        entry.localSeq !== localSeq
-      );
-
-      if (promoted) {
-        record.confirmed = promoted;
-        record.materialized = reusedSuffix && reusedSuffix.length > 0
-          ? {
-            confirmed: promoted,
-            prefixes: reusedSuffix,
-          }
-          : undefined;
-        continue;
-      }
-
-      dropMaterializedSuffix(record, firstPendingIndex);
+      promoteAppliedPendingPrefix(record);
     }
   }
 
@@ -1543,6 +1550,7 @@ class SpaceReplica implements ISpaceReplica {
         entry.localSeq !== localSeq
       );
       dropMaterializedSuffix(record, firstPendingIndex);
+      promoteAppliedPendingPrefix(record);
     }
   }
 
