@@ -1,5 +1,6 @@
 import ts from "typescript";
 
+import { unwrapExpression } from "./expression.ts";
 import { isSafeIdentifierText } from "./identifiers.ts";
 
 export interface CapturePathInfo {
@@ -17,12 +18,19 @@ export interface CaptureTreeNode {
 export function parseCaptureExpression(
   expr: ts.Expression,
 ): CapturePathInfo | undefined {
-  if (ts.isIdentifier(expr)) {
-    return { root: expr.text, path: [], expression: expr };
+  // Unwrap non-semantic wrappers (parens, `as`, type assertions, `satisfies`,
+  // `!`, partially-emitted) so wrapped reads like `(entry).name` and
+  // `entry!.name` parse the same way as the bare form. Without this, the
+  // capture would fall into the unstructured "fallback" bucket downstream
+  // and lose its partial-key dataflow shape.
+  const unwrapped = unwrapExpression(expr);
+
+  if (ts.isIdentifier(unwrapped)) {
+    return { root: unwrapped.text, path: [], expression: expr };
   }
 
-  if (ts.isCallExpression(expr)) {
-    const callee = expr.expression;
+  if (ts.isCallExpression(unwrapped)) {
+    const callee = unwrapped.expression;
     if (
       ts.isPropertyAccessExpression(callee) &&
       callee.name.text === "key"
@@ -33,7 +41,7 @@ export function parseCaptureExpression(
       }
 
       const keySegments: string[] = [];
-      for (const arg of expr.arguments) {
+      for (const arg of unwrapped.arguments) {
         if (
           ts.isStringLiteralLike(arg) ||
           ts.isNumericLiteral(arg) ||
@@ -53,9 +61,9 @@ export function parseCaptureExpression(
     }
   }
 
-  if (ts.isPropertyAccessExpression(expr)) {
+  if (ts.isPropertyAccessExpression(unwrapped)) {
     const segments: string[] = [];
-    let current: ts.Expression = expr;
+    let current: ts.Expression = unwrapped;
 
     while (ts.isPropertyAccessExpression(current)) {
       // If we encounter optional chaining (e.g., foo?.bar), stop here and
@@ -64,7 +72,7 @@ export function parseCaptureExpression(
       // null/undefined, so we shouldn't descend into its properties.
       if (ts.isPropertyAccessChain(current)) {
         // The expression before the ?. is our capture target
-        const beforeChain = current.expression;
+        const beforeChain = unwrapExpression(current.expression);
         if (ts.isIdentifier(beforeChain)) {
           return { root: beforeChain.text, path: [], expression: beforeChain };
         }
@@ -77,7 +85,9 @@ export function parseCaptureExpression(
         return undefined;
       }
       segments.unshift(current.name.text);
-      current = current.expression;
+      // Unwrap at every descent step so wrappers anywhere in the chain
+      // (e.g. `((entry).name).x`) don't break the walk.
+      current = unwrapExpression(current.expression);
     }
 
     if (ts.isIdentifier(current)) {
@@ -157,49 +167,58 @@ export function createCaptureAccessExpression(
   template?: ts.Expression,
 ): ts.Expression {
   if (template) {
+    // Unwrap non-semantic wrappers up front so wrapped templates take the
+    // same paths as bare ones. Without this, `(entry.key("piece"))` would
+    // miss the key-call fast path (the call sits behind parens) and
+    // `(entry).piece` would fall out of the rebuild walk because parens
+    // aren't a recognized rebuild node. Both should land on the same
+    // structural output as their bare-form equivalents.
+    const unwrapped = unwrapExpression(template);
+
     if (
-      ts.isCallExpression(template) &&
-      ts.isPropertyAccessExpression(template.expression) &&
-      template.expression.name.text === "key"
+      ts.isCallExpression(unwrapped) &&
+      ts.isPropertyAccessExpression(unwrapped.expression) &&
+      unwrapped.expression.name.text === "key"
     ) {
-      return template;
+      return unwrapped;
     }
 
     const rebuild = (expr: ts.Expression): ts.Expression | undefined => {
-      if (ts.isIdentifier(expr)) {
+      const target = unwrapExpression(expr);
+      if (ts.isIdentifier(target)) {
         return factory.createIdentifier(rootName);
       }
-      if (ts.isPropertyAccessExpression(expr)) {
-        const target = rebuild(expr.expression);
-        if (!target) return undefined;
-        if (ts.isPropertyAccessChain(expr)) {
+      if (ts.isPropertyAccessExpression(target)) {
+        const inner = rebuild(target.expression);
+        if (!inner) return undefined;
+        if (ts.isPropertyAccessChain(target)) {
           return factory.createPropertyAccessChain(
-            target,
+            inner,
             factory.createToken(ts.SyntaxKind.QuestionDotToken),
-            expr.name,
+            target.name,
           );
         }
-        return factory.createPropertyAccessExpression(target, expr.name);
+        return factory.createPropertyAccessExpression(inner, target.name);
       }
-      if (ts.isElementAccessExpression(expr)) {
-        const target = rebuild(expr.expression);
-        if (!target) return undefined;
-        if (ts.isElementAccessChain(expr)) {
+      if (ts.isElementAccessExpression(target)) {
+        const inner = rebuild(target.expression);
+        if (!inner) return undefined;
+        if (ts.isElementAccessChain(target)) {
           return factory.createElementAccessChain(
-            target,
+            inner,
             factory.createToken(ts.SyntaxKind.QuestionDotToken),
-            expr.argumentExpression,
+            target.argumentExpression,
           );
         }
         return factory.createElementAccessExpression(
-          target,
-          expr.argumentExpression,
+          inner,
+          target.argumentExpression,
         );
       }
       return undefined;
     };
 
-    const rebuilt = rebuild(template);
+    const rebuilt = rebuild(unwrapped);
     if (rebuilt) {
       return rebuilt;
     }

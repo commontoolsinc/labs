@@ -390,8 +390,16 @@ export function transformDeriveCall(
   builder.setCaptureTree(captureTree);
   builder.setCaptureRenames(captureNameMap);
 
-  // Register used names (original input param name)
-  builder.registerUsedNames([originalInputParamName]);
+  // Reserve the original input parameter name in the builder's used-names so
+  // captures that collide with it get renamed by reserveIdentifier. Skip
+  // reserving when the callback had zero parameters — there's no original
+  // input binding to collide with, and reserving anyway would cause a capture
+  // that happens to share the fallback name ("input") to be renamed to
+  // input_1, leaving the body's references pointing at the outer-scoped
+  // identifier via lexical closure instead of the destructured binding.
+  if (!hadZeroParameters) {
+    builder.registerUsedNames([originalInputParamName]);
+  }
 
   // Infer result type from callback
   const signature = checker.getSignatureFromDeclaration(callback);
