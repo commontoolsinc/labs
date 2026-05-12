@@ -28,6 +28,7 @@ import {
   classifyOpaquePathTerminalCall,
   collectLocalOpaqueRootSymbols,
   getOpaqueAccessInfo,
+  isOpaqueOriginCall,
   isOpaqueRootInfo,
   isOpaqueSourceExpression,
   isTopmostMemberAccess,
@@ -125,7 +126,11 @@ function rewriteTrackedOpaquePatternBody(
   opaqueRootSymbols: Set<ts.Symbol>,
   context: TransformationContext,
 ): ts.ConciseBody {
-  if (opaqueRoots.size === 0 && opaqueRootSymbols.size === 0) {
+  if (
+    opaqueRoots.size === 0 &&
+    opaqueRootSymbols.size === 0 &&
+    !hasLocalOpaqueOriginBinding(body, context)
+  ) {
     return body;
   }
 
@@ -993,6 +998,34 @@ function rewriteDeriveCallbackComputedKeyAccesses(
     ) as ts.Block;
   }
   return visit(body) as ts.Expression;
+}
+
+function hasLocalOpaqueOriginBinding(
+  body: ts.ConciseBody,
+  context: TransformationContext,
+): boolean {
+  let found = false;
+
+  const scan = (node: ts.Node): void => {
+    if (found) return;
+    if (ts.isFunctionLike(node) && node !== body) return;
+
+    if (ts.isVariableDeclaration(node) && node.initializer) {
+      const initializer = unwrapExpression(node.initializer);
+      if (
+        ts.isCallExpression(initializer) &&
+        isOpaqueOriginCall(initializer, context)
+      ) {
+        found = true;
+        return;
+      }
+    }
+
+    ts.forEachChild(node, scan);
+  };
+
+  scan(body);
+  return found;
 }
 
 function collectBindingNames(
