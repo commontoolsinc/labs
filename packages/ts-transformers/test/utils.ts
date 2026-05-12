@@ -22,8 +22,6 @@ export interface TransformOptions {
   precomputedDiagnostics?: ts.Diagnostic[];
   /** If provided, pipeline diagnostics will be pushed into this array after transformation. */
   pipelineDiagnostics?: TransformationDiagnostic[];
-  /** Forwarded to TransformationOptions.debug; enables debug-only diagnostics. */
-  debug?: boolean;
 }
 
 export interface BatchTypeCheckResult {
@@ -538,7 +536,6 @@ export async function transformFiles(
   const pipeline = new CommonFabricTransformerPipeline({
     mode,
     logger,
-    debug: options.debug,
   });
 
   const out: Record<string, string> = {};
