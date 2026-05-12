@@ -266,8 +266,8 @@ export function bigintFromMinimalTwosComplement(bytes: Uint8Array): bigint {
   // Possibly surprising test here: Benchmarks indicate that V8 (and assumed to
   // be similar in other JS VMs) has internal optimizations for left-shift on
   // large positive numbers but _not_ large negative numbers. The cross-over
-  // point of this code was measured to be at 32 bytes for negative numbers.
-  if (!negative || (bytes.length <= 32)) {
+  // point of this code was measured to be at 128 bytes for negative numbers.
+  if (!negative || (bytes.length <= 128)) {
     // Note: Over ~1024 bytes, benchmarks indicate there is a win to be had by
     // using a `DataView` to extract `uint64`s from `bytes`.
     for (let i = partials; i < bytes.length; i += 8) {
