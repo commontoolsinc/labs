@@ -1,20 +1,9 @@
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isRecord } from "@commonfabric/utils/types";
-import type { MemorySpace, URI } from "@commonfabric/memory/interface";
-import { getTopFrame } from "./builder/pattern.ts";
-import {
-  type CellScope,
-  type Frame,
-  type Module,
-  type Pattern,
-  TYPE,
-} from "./builder/types.ts";
+import type { MemorySpace } from "@commonfabric/memory/interface";
+import { type Frame } from "./builder/types.ts";
 import type { Cancel } from "./cancel.ts";
-import {
-  getCellOrThrow,
-  isCellResultForDereferencing,
-} from "./query-result-proxy.ts";
 import { ConsoleEvent } from "./harness/console.ts";
 import type {
   ConsoleHandler,
@@ -34,7 +23,6 @@ import type {
   IMemorySpaceAddress,
   IStorageSubscription,
   IStorageTransaction,
-  MediaType,
   MemoryAddressPathComponent,
 } from "./storage/interface.ts";
 import {
@@ -45,15 +33,11 @@ import {
   sortAndCompactPaths,
   type SortedAndCompactPaths,
 } from "./reactive-dependencies.ts";
-import {
-  getDirectTransactionReactivityLog,
-  getTransactionWriteDetails,
-} from "./storage/transaction-inspection.ts";
+import { getTransactionWriteDetails } from "./storage/transaction-inspection.ts";
 import {
   allowMutableTransactionRead,
   ignoreReadForScheduling,
   markReadAsPotentialWrite,
-  reactivityLogFromActivities,
 } from "./storage/reactivity-log.ts";
 import { recordTrustedEventPolicyInputs } from "./cfc/ui-contract.ts";
 import { ensurePieceRunning } from "./ensure-piece-running.ts";
@@ -69,6 +53,54 @@ import type {
   SchedulerGraphNode,
   SchedulerGraphSnapshot,
 } from "./telemetry.ts";
+import {
+  AUTO_DEBOUNCE_DELAY_MS,
+  AUTO_DEBOUNCE_MIN_RUNS,
+  AUTO_DEBOUNCE_THRESHOLD_MS,
+  CYCLE_DEBOUNCE_MIN_RUNS,
+  CYCLE_DEBOUNCE_MULTIPLIER,
+  CYCLE_DEBOUNCE_THRESHOLD_MS,
+  DEFAULT_RETRIES_FOR_EVENTS,
+  MAX_ACTION_RUN_TRACE_HISTORY,
+  MAX_ITERATIONS_PER_RUN,
+  MAX_RETRIES_FOR_REACTIVE,
+  MAX_SETTLE_STATS_HISTORY,
+  MAX_TRIGGER_TRACE_HISTORY,
+} from "./scheduler/constants.ts";
+import {
+  createDirtyDependencyTraceContext,
+  getPieceMetadataFromFrame,
+  materializeHostVisibleStack,
+  queueTask,
+  summarizeTriggerTraceValue,
+  toActionRunTraceAddress,
+} from "./scheduler/diagnostics.ts";
+import {
+  filterIgnoredAddresses,
+  hasAnnotatedWrites,
+  trustedEventWriteCandidatesFromTransaction,
+  txToReactivityLog,
+} from "./scheduler/reactivity.ts";
+import { entityKey } from "./scheduler/keys.ts";
+import { mapsEqual, topologicalSort } from "./scheduler/topology.ts";
+import type {
+  Action,
+  ActionRunTraceEntry,
+  DirtyDependencyTraceContext,
+  EventHandler,
+  PopulateDependencies,
+  PopulateDependenciesEntry,
+  QueuedEvent,
+  ReactivityLog,
+  SettleIterationStats,
+  SettleStats,
+  SettleStatsHistoryEntry,
+  SpaceScopeAndURI,
+  TelemetryAnnotations,
+  TriggerTraceActionRecord,
+  TriggerTraceEntry,
+  TriggerTraceScheduledEffect,
+} from "./scheduler/types.ts";
 import { ensureNotRenderThread } from "@commonfabric/utils/env";
 ensureNotRenderThread();
 
@@ -79,338 +111,33 @@ const logger = getLogger("scheduler", {
 
 // Re-export types that tests expect from scheduler
 export type { ErrorWithContext };
+export type {
+  Action,
+  ActionRunTraceAddress,
+  ActionRunTraceEntry,
+  AnnotatedAction,
+  AnnotatedEventHandler,
+  EventHandler,
+  PopulateDependencies,
+  ReactivityLog,
+  SettleIterationStats,
+  SettleStats,
+  SettleStatsHistoryEntry,
+  SpaceScopeAndURI,
+  SpaceScopeURIAndType,
+  TelemetryAnnotations,
+  TriggerTraceActionRecord,
+  TriggerTraceEntry,
+  TriggerTraceScheduledEffect,
+  TriggerTraceValueKind,
+  TriggerTraceValueSummary,
+} from "./scheduler/types.ts";
+export { txToReactivityLog } from "./scheduler/reactivity.ts";
 
-export interface TelemetryAnnotations {
-  pattern: Pattern;
-  module: Module;
-  reads: NormalizedFullLink[];
-  writes: NormalizedFullLink[];
-  ignoredSchedulingWrites?: NormalizedFullLink[];
-}
-
-export type Action = (tx: IExtendedStorageTransaction) => any;
-export type AnnotatedAction = Action & TelemetryAnnotations;
-export type EventHandler =
-  & ((tx: IExtendedStorageTransaction, event: any) => any)
-  & {
-    /**
-     * Optional callback to populate a transaction with the handler's read dependencies.
-     * Called by the scheduler to discover what cells the handler will read.
-     * The callback should read all cells (using .get({ traverseCells: true })) that
-     * the handler will access, so the transaction captures all dependencies.
-     * The event is passed so dependencies can be resolved from links in the event.
-     */
-    populateDependencies?: (
-      tx: IExtendedStorageTransaction,
-      event: any,
-    ) => void;
-  };
-export type AnnotatedEventHandler = EventHandler & TelemetryAnnotations;
-
-function hasAnnotatedWrites(
-  handler: EventHandler,
-): handler is AnnotatedEventHandler {
-  return "writes" in handler && Array.isArray(handler.writes);
-}
-
-function trustedEventWriteCandidatesFromTransaction(
-  tx: IExtendedStorageTransaction,
-  handler: EventHandler,
-  fallbackSpaces: Iterable<MemorySpace> = [],
-): NormalizedFullLink[] {
-  const candidates: NormalizedFullLink[] = [];
-  const seen = new Map<string, number>();
-  const detailSpaces = new Set<MemorySpace>(fallbackSpaces);
-
-  const addCandidate = (write: NormalizedFullLink | IMemorySpaceAddress) => {
-    const path = write.path[0] === "value" ? write.path.slice(1) : write.path;
-    const candidate: NormalizedFullLink = {
-      space: write.space,
-      id: write.id,
-      // Transaction memory addresses may omit scope for legacy/default-space writes.
-      scope: write.scope ?? "space",
-      path: [...path],
-      ...("schema" in write && write.schema !== undefined
-        ? { schema: write.schema }
-        : {}),
-    };
-    const key = `${candidate.space}/${candidate.id}/${
-      candidate.path.join("/")
-    }`;
-    const existingIndex = seen.get(key);
-    if (existingIndex !== undefined) {
-      if (
-        candidates[existingIndex].schema === undefined &&
-        candidate.schema !== undefined
-      ) {
-        candidates[existingIndex] = {
-          ...candidates[existingIndex],
-          schema: candidate.schema,
-        };
-      }
-      return;
-    }
-    seen.set(key, candidates.length);
-    candidates.push(candidate);
-  };
-
-  if (hasAnnotatedWrites(handler)) {
-    for (const write of handler.writes) {
-      addCandidate(write);
-      detailSpaces.add(write.space);
-    }
-  }
-
-  const log = txToReactivityLog(tx);
-  for (const write of [...log.writes, ...(log.potentialWrites ?? [])]) {
-    addCandidate(write);
-    detailSpaces.add(write.space);
-  }
-
-  for (const input of tx.getCfcState().writePolicyInputs) {
-    if (input.kind === "schema") {
-      addCandidate({
-        space: input.target.space,
-        id: input.target.id as URI,
-        path: input.target.path,
-        ...(input.schema !== undefined ? { schema: input.schema } : {}),
-      });
-      detailSpaces.add(input.target.space);
-    }
-  }
-
-  for (const space of detailSpaces) {
-    for (const detail of getTransactionWriteDetails(tx, space)) {
-      addCandidate(detail.address);
-    }
-  }
-
-  return candidates;
-}
-
-/**
- * Callback to populate a transaction with an action's read dependencies.
- * Called by the scheduler to discover what cells the action will read.
- * The callback should read all cells (using .get({ traverseCells: true })) that
- * the action will access, so the transaction captures all dependencies.
- * The transaction will be aborted after this callback returns, so it's safe
- * to simulate writes.
- */
-export type PopulateDependencies = (tx: IExtendedStorageTransaction) => void;
-type PopulateDependenciesEntry = PopulateDependencies | ReactivityLog;
-
-/**
- * Reactivity log.
- *
- * Used to log reads and writes to docs. Used by scheduler to keep track of
- * dependencies and to topologically sort pending actions before executing them.
- */
-export type ReactivityLog = {
-  reads: IMemorySpaceAddress[];
-  /** Reads that should not invalidate on child writes unless they add a new key */
-  shallowReads: IMemorySpaceAddress[];
-  writes: IMemorySpaceAddress[];
-  /** Reads marked as potential writes (e.g., for diffAndUpdate which reads then conditionally writes) */
-  potentialWrites?: IMemorySpaceAddress[];
-};
-
-type DirtyDependencyTraceContext = SchedulerEventPreflightStats & {
-  depth: number;
-  actionSummaries: Map<Action, SchedulerEventPreflightActionSummary>;
-  rootDirectWriterActions: Set<Action>;
-};
-
-function createDirtyDependencyTraceContext(): DirtyDependencyTraceContext {
-  return {
-    visitCount: 0,
-    memoHitCount: 0,
-    cycleHitCount: 0,
-    dirtyInputCount: 0,
-    resultTrueCount: 0,
-    workSetAddCount: 0,
-    reverseDependencyActionCount: 0,
-    reverseDependencyEdgeCount: 0,
-    logFallbackCount: 0,
-    logReadCount: 0,
-    logShallowReadCount: 0,
-    writerCandidateCount: 0,
-    writerOverlapCount: 0,
-    directWriterCount: 0,
-    maxDepth: 0,
-    depth: 0,
-    actionSummaries: new Map(),
-    rootDirectWriterActions: new Set(),
-  };
-}
-
-function addressMatchesLinkPrefix(
-  address: IMemorySpaceAddress,
-  link: NormalizedFullLink,
-): boolean {
-  const documentAddress = toMemorySpaceAddress(link);
-  return address.space === link.space &&
-    address.id === link.id &&
-    normalizeCellScope(address.scope) === link.scope &&
-    arraysOverlap(documentAddress.path, address.path);
-}
-
-function filterIgnoredAddresses(
-  addresses: readonly IMemorySpaceAddress[] | undefined,
-  ignoredWrites: readonly NormalizedFullLink[],
-): IMemorySpaceAddress[] {
-  if (!addresses?.length || ignoredWrites.length === 0) {
-    return addresses ? [...addresses] : [];
-  }
-
-  return addresses.filter((address) =>
-    !ignoredWrites.some((link) => addressMatchesLinkPrefix(address, link))
-  );
-}
 export {
   allowMutableTransactionRead,
   ignoreReadForScheduling,
   markReadAsPotentialWrite,
-};
-
-export type SpaceScopeAndURI = `${MemorySpace}/${CellScope}/${URI}`;
-export type SpaceScopeURIAndType =
-  `${MemorySpace}/${CellScope}/${URI}/${MediaType}`;
-
-function entityKey(
-  address: Pick<IMemorySpaceAddress, "space" | "id" | "scope">,
-): SpaceScopeAndURI {
-  return `${address.space}/${normalizeCellScope(address.scope)}/${address.id}`;
-}
-
-/** Per-iteration stats captured during the settle loop. */
-export interface SettleIterationStats {
-  workSetSize: number;
-  orderSize: number;
-  actionsRun: number;
-  /** Action IDs in the work set (truncated to top entries) */
-  actions: { id: string; type: "effect" | "computation" }[];
-  durationMs: number;
-}
-
-/** Stats for the entire settle loop of one execute() call. */
-export interface SettleStats {
-  iterations: SettleIterationStats[];
-  totalDurationMs: number;
-  settledEarly: boolean;
-  initialSeedCount: number;
-}
-
-/** One recorded settle stats entry from execute() history. */
-export interface SettleStatsHistoryEntry {
-  recordedAt: number;
-  stats: SettleStats;
-}
-
-export interface ActionRunTraceEntry {
-  recordedAt: number;
-  actionId: string;
-  actionType: "effect" | "computation";
-  parentActionId?: string;
-  durationMs: number;
-  declaredWrites: ActionRunTraceAddress[];
-  actualWrites: ActionRunTraceAddress[];
-}
-
-export interface ActionRunTraceAddress {
-  space: MemorySpace;
-  entityId: URI;
-  path: string[];
-}
-
-export type TriggerTraceValueKind =
-  | "undefined"
-  | "null"
-  | "boolean"
-  | "number"
-  | "string"
-  | "array"
-  | "object"
-  | "other";
-
-export interface TriggerTraceValueSummary {
-  kind: TriggerTraceValueKind;
-  size?: number;
-  preview?: string | number | boolean | null;
-}
-
-export interface TriggerTraceScheduledEffect {
-  actionId: string;
-  pendingBefore: boolean;
-  dirtyBefore: boolean;
-  debounceMs?: number;
-}
-
-export interface TriggerTraceActionRecord {
-  actionId: string;
-  actionType: "effect" | "computation";
-  mode: "pull" | "push";
-  decision:
-    | "schedule-push"
-    | "schedule-effect"
-    | "mark-dirty"
-    | "already-dirty"
-    | "skip-own-commit-source"
-    | "skip-same-change-group";
-  pendingBefore: boolean;
-  pendingAfter: boolean;
-  dirtyBefore: boolean;
-  dirtyAfter: boolean;
-  scheduledEffects: TriggerTraceScheduledEffect[];
-}
-
-export interface TriggerTraceEntry {
-  recordedAt: number;
-  notificationType: string;
-  changeIndex: number;
-  matchedActionCount: number;
-  mode: "pull" | "push";
-  writerActionId?: string;
-  space: MemorySpace;
-  entityId: URI;
-  path: string[];
-  before: TriggerTraceValueSummary;
-  after: TriggerTraceValueSummary;
-  triggered: TriggerTraceActionRecord[];
-}
-
-const MAX_ITERATIONS_PER_RUN = 100;
-const MAX_SETTLE_STATS_HISTORY = 20;
-const MAX_TRIGGER_TRACE_HISTORY = 400;
-const MAX_ACTION_RUN_TRACE_HISTORY = 2000;
-const DEFAULT_RETRIES_FOR_EVENTS = 5;
-const MAX_RETRIES_FOR_REACTIVE = 10;
-const AUTO_DEBOUNCE_THRESHOLD_MS = 50;
-const AUTO_DEBOUNCE_MIN_RUNS = 3;
-const AUTO_DEBOUNCE_DELAY_MS = 100;
-
-// Cycle-aware debounce: applies adaptive debounce to actions cycling within one execute()
-const CYCLE_DEBOUNCE_THRESHOLD_MS = 100; // Min iteration time to trigger cycle debounce
-const CYCLE_DEBOUNCE_MIN_RUNS = 3; // Action must run this many times to be considered cycling
-const CYCLE_DEBOUNCE_MULTIPLIER = 2; // Debounce delay = multiplier × iteration time
-
-function toActionRunTraceAddress(
-  address: IMemorySpaceAddress,
-): ActionRunTraceAddress {
-  return {
-    space: address.space,
-    entityId: address.id,
-    path: address.path.map((part) => String(part)),
-  };
-}
-
-type QueuedEvent = {
-  eventLink: NormalizedFullLink;
-  action: Action;
-  handler: EventHandler;
-  event: any;
-  retriesLeft: number;
-  onCommit?: (tx: IExtendedStorageTransaction) => void;
-  notBefore?: number;
 };
 
 export class Scheduler {
@@ -5218,240 +4945,4 @@ export class Scheduler {
     }
     this.diagnosisEnabled = false;
   }
-}
-
-function mapsEqual(
-  a: Map<string, unknown>,
-  b: Map<string, unknown>,
-): boolean {
-  if (a.size !== b.size) return false;
-  for (const [key, val] of a) {
-    if (!b.has(key)) return false;
-    if (!deepEqual(val, b.get(key))) return false;
-  }
-  return true;
-}
-
-function topologicalSort(
-  actions: Set<Action>,
-  dependencies: WeakMap<Action, ReactivityLog>,
-  mightWrite: WeakMap<Action, IMemorySpaceAddress[]>,
-  actionParent?: WeakMap<Action, Action>,
-  dependents?: WeakMap<Action, Set<Action>>,
-): Action[] {
-  const graph = new Map<Action, Set<Action>>();
-  const inDegree = new Map<Action, number>();
-
-  // Initialize graph and inDegree for relevant actions
-  for (const action of actions) {
-    graph.set(action, new Set());
-    inDegree.set(action, 0);
-  }
-
-  // Build the graph based on read/write dependencies.
-  // In pull mode we maintain this incrementally in `dependents`, so we can
-  // avoid rebuilding the graph from scratch on every settle iteration.
-  if (dependents) {
-    for (const actionA of actions) {
-      const graphA = graph.get(actionA)!;
-      const actionDependents = dependents.get(actionA);
-      if (!actionDependents) continue;
-      for (const actionB of actionDependents) {
-        if (!actions.has(actionB) || graphA.has(actionB)) continue;
-        graphA.add(actionB);
-        inDegree.set(actionB, (inDegree.get(actionB) || 0) + 1);
-      }
-    }
-  } else {
-    for (const actionA of actions) {
-      const log = dependencies.get(actionA);
-      if (!log) continue;
-      const writes = mightWrite.get(actionA) ?? [];
-      const graphA = graph.get(actionA)!;
-      for (const write of writes) {
-        for (const actionB of actions) {
-          if (actionA !== actionB && !graphA.has(actionB)) {
-            const logB = dependencies.get(actionB);
-            if (!logB) continue;
-            if (
-              logB.reads.some(
-                (addr) =>
-                  addr.space === write.space &&
-                  addr.id === write.id &&
-                  arraysOverlap(write.path, addr.path),
-              ) ||
-              logB.shallowReads.some(
-                (addr) =>
-                  addr.space === write.space &&
-                  addr.id === write.id &&
-                  nonRecursiveReadMayOverlapWrite(addr.path, write.path),
-              )
-            ) {
-              graphA.add(actionB);
-              inDegree.set(actionB, (inDegree.get(actionB) || 0) + 1);
-            }
-          }
-        }
-      }
-    }
-  }
-
-  // Add parent-child edges only when no opposing data dependency exists.
-  // Structural creation order is a fallback; semantic read/write dependencies
-  // should win once a parent actually reads a child's result.
-  if (actionParent) {
-    for (const child of actions) {
-      const parent = actionParent.get(child);
-      if (parent && actions.has(parent)) {
-        const graphParent = graph.get(parent)!;
-        const graphChild = graph.get(child)!;
-        if (!graphParent.has(child) && !graphChild.has(parent)) {
-          graphParent.add(child);
-          inDegree.set(child, (inDegree.get(child) || 0) + 1);
-        }
-      }
-    }
-  }
-
-  // Perform topological sort with cycle handling
-  const queue: Action[] = [];
-  const result: Action[] = [];
-  const visited = new Set<Action>();
-
-  // Add all actions with no dependencies (in-degree 0) to the queue
-  for (const [action, degree] of inDegree.entries()) {
-    if (degree === 0) {
-      queue.push(action);
-    }
-  }
-
-  while (queue.length > 0 || visited.size < actions.size) {
-    if (queue.length === 0) {
-      // Handle cycle: prefer parents over children, then lowest in-degree
-      // This ensures parent runs before child even when they form a read/write cycle
-      const unvisited = Array.from(actions).filter(
-        (action) => !visited.has(action),
-      );
-
-      // Sort by: prefer no unvisited parent, then by in-degree
-      unvisited.sort((a, b) => {
-        const aParent = actionParent?.get(a);
-        const bParent = actionParent?.get(b);
-        const aHasUnvisitedParent = aParent && !visited.has(aParent) &&
-          actions.has(aParent);
-        const bHasUnvisitedParent = bParent && !visited.has(bParent) &&
-          actions.has(bParent);
-
-        // Prefer nodes whose parent is already visited (or have no parent)
-        if (aHasUnvisitedParent && !bHasUnvisitedParent) return 1; // b first
-        if (!aHasUnvisitedParent && bHasUnvisitedParent) return -1; // a first
-
-        // Fall back to in-degree
-        return (inDegree.get(a) || 0) - (inDegree.get(b) || 0);
-      });
-
-      queue.push(unvisited[0]);
-    }
-
-    const current = queue.shift()!;
-    if (visited.has(current)) continue;
-
-    result.push(current);
-    visited.add(current);
-
-    for (const neighbor of graph.get(current) || []) {
-      inDegree.set(neighbor, inDegree.get(neighbor)! - 1);
-      if (inDegree.get(neighbor) === 0) {
-        queue.push(neighbor);
-      }
-    }
-  }
-
-  return result;
-}
-
-export function txToReactivityLog(
-  tx: IExtendedStorageTransaction,
-): ReactivityLog {
-  const direct = getDirectTransactionReactivityLog(tx);
-  if (direct) {
-    return direct;
-  }
-  return reactivityLogFromActivities(tx.journal.activity());
-}
-
-function summarizeTriggerTraceValue(value: unknown): TriggerTraceValueSummary {
-  if (value === undefined) return { kind: "undefined" };
-  if (value === null) return { kind: "null", preview: null };
-  if (typeof value === "boolean") return { kind: "boolean", preview: value };
-  if (typeof value === "number") return { kind: "number", preview: value };
-  if (typeof value === "string") {
-    return {
-      kind: "string",
-      size: value.length,
-      preview: value.length > 80 ? `${value.slice(0, 77)}...` : value,
-    };
-  }
-  if (Array.isArray(value)) {
-    return { kind: "array", size: value.length };
-  }
-  if (isRecord(value)) {
-    return { kind: "object", size: Object.keys(value).length };
-  }
-  return { kind: "other", preview: Object.prototype.toString.call(value) };
-}
-
-function getPieceMetadataFromFrame(frame?: Frame): {
-  spellId?: string;
-  patternId?: string;
-  space?: string;
-  pieceId?: string;
-} {
-  // TODO(seefeld): This is a rather hacky way to get the context, based on the
-  // unsafe_binding pattern. Once we replace that mechanism, let's add nicer
-  // abstractions for context here as well.
-  frame ??= getTopFrame();
-
-  const sourceAsProxy = frame?.unsafe_binding?.materialize([]);
-
-  if (!isCellResultForDereferencing(sourceAsProxy)) {
-    return {};
-  }
-  const result: ReturnType<typeof getPieceMetadataFromFrame> = {};
-  const source = getCellOrThrow(sourceAsProxy).asSchema({
-    type: "object",
-    properties: {
-      [TYPE]: { type: "string" },
-      spell: { type: "object", asCell: ["cell"] },
-      resultRef: { type: "object", asCell: ["cell"] },
-    },
-  });
-  result.patternId = source.get()?.[TYPE];
-  const spellCell = source.get()?.spell;
-  result.spellId = spellCell?.getAsNormalizedFullLink().id;
-  const resultCell = source.get()?.resultRef;
-  result.space = source.space;
-  result.pieceId = resultCell?.entityId?.["/"];
-  return result;
-}
-
-function materializeHostVisibleStack(error: Error): void {
-  if (typeof error.stack === "string" && error.stack.length > 0) {
-    return;
-  }
-  const getStackString = (globalThis as {
-    getStackString?: (error: Error) => string;
-  }).getStackString;
-  if (typeof getStackString !== "function") {
-    return;
-  }
-  const frames = getStackString(error);
-  if (!frames) {
-    return;
-  }
-  error.stack = `${error}${frames.startsWith("\n") ? frames : `\n${frames}`}`;
-}
-
-function queueTask(fn: () => void): ReturnType<typeof setTimeout> {
-  return setTimeout(fn, 0);
 }
