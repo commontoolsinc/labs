@@ -70,41 +70,10 @@ function hexStringFromPositiveValue(value: bigint): string {
 }
 
 /**
- * Helper for `bigintToMinimalTwosComplement()`, which converts a non-zero and
- * non-`-1` value that fits into 64 bits.
+ * Helper for `bigintToMinimalTwosComplement()`, which converts a value that
+ * fits into 64 bits and requires `length >= 5`.
  */
-function convertSmallValue(value: bigint, negative: boolean): Uint8Array {
-  if (!negative && (value <= 0x7fff_ffffn)) {
-    const num = Number(value);
-    if (num <= 0x7fff) {
-      if (num <= 0x7f) {
-        const result = new Uint8Array(1);
-        result[0] = num;
-        return result;
-      } else {
-        const result = new Uint8Array(2);
-        result[0] = num >> 8;
-        result[1] = num;
-        return result;
-      }
-    } else {
-      if (num <= 0x7f_ffff) {
-        const result = new Uint8Array(3);
-        result[0] = num >> 16;
-        result[1] = num >> 8;
-        result[2] = num;
-        return result;
-      } else {
-        const result = new Uint8Array(4);
-        result[0] = num >> 24;
-        result[1] = num >> 16;
-        result[2] = num >> 8;
-        result[3] = num;
-        return result;
-      }
-    }
-  }
-
+function encode5To8Bytes(value: bigint, negative: boolean): Uint8Array {
   const skipByte = negative ? 0xff : 0x00;
   const signBit = skipByte & 0x80;
 
@@ -140,7 +109,37 @@ function convertSmallValue(value: bigint, negative: boolean): Uint8Array {
 export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
   if (value >= 0n) {
     if (value <= 0x7fff_ffff_ffff_ffffn) {
-      return convertSmallValue(value, false);
+      if (value <= 0x7fff_ffffn) {
+        const num = Number(value);
+        if (num <= 0x7fff) {
+          if (num <= 0x7f) {
+            const result = new Uint8Array(1);
+            result[0] = num;
+            return result;
+          } else {
+            const result = new Uint8Array(2);
+            result[0] = num >> 8;
+            result[1] = num;
+            return result;
+          }
+        } else {
+          if (num <= 0x7f_ffff) {
+            const result = new Uint8Array(3);
+            result[0] = num >> 16;
+            result[1] = num >> 8;
+            result[2] = num;
+            return result;
+          } else {
+            const result = new Uint8Array(4);
+            result[0] = num >> 24;
+            result[1] = num >> 16;
+            result[2] = num >> 8;
+            result[3] = num;
+            return result;
+          }
+        }
+      }
+      return encode5To8Bytes(value, false);
     }
 
     // Slow path for positive numbers: This stringifies and then parses back the
@@ -158,12 +157,38 @@ export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
 
     return bytes;
   } else {
-    if (value >= -128n) {
-      const result = new Uint8Array(1);
-      result[0] = Number(value);
-      return result;
-    } else if (value >= -0x8000_0000_0000_0000n) {
-      return convertSmallValue(value, true);
+    if (value >= -0x8000_0000_0000_0000n) {
+      if (value >= -0x8000_0000n) {
+        const num = Number(value);
+        if (num >= -0x8000) {
+          if (num >= -0x80) {
+            const result = new Uint8Array(1);
+            result[0] = num;
+            return result;
+          } else {
+            const result = new Uint8Array(2);
+            result[0] = num >> 8;
+            result[1] = num;
+            return result;
+          }
+        } else {
+          if (num >= -0x80_0000) {
+            const result = new Uint8Array(3);
+            result[0] = num >> 16;
+            result[1] = num >> 8;
+            result[2] = num;
+            return result;
+          } else {
+            const result = new Uint8Array(4);
+            result[0] = num >> 24;
+            result[1] = num >> 16;
+            result[2] = num >> 8;
+            result[3] = num;
+            return result;
+          }
+        }
+      }
+      return encode5To8Bytes(value, true);
     }
 
     // Slow path for negative numbers. See above for details. The extra twist
