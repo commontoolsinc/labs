@@ -57,8 +57,38 @@ import {
   classifyUnsupportedExpressionSiteCallRoot,
   findLowerableExpressionSite,
 } from "./expression-site-policy.ts";
+import {
+  isDeclaredWithinFunction,
+  isModuleScopedDeclaration,
+} from "../ast/scope-analysis.ts";
+import type {
+  CallbackBoundarySemantics,
+  SupportedCallbackBoundaryKind,
+} from "../policy/callback-boundary.ts";
 
 const EMPTY_OPAQUE_ROOTS = new Set<string>();
+const SES_SELF_CONTAINED_CALLBACK_BOUNDARIES = new Set<
+  SupportedCallbackBoundaryKind
+>([
+  "event-handler",
+  "reactive-array-method",
+  "pattern-builder",
+  "render-builder",
+  "derive",
+  "computed-builder",
+  "action-builder",
+  "lift-builder",
+  "handler-builder",
+]);
+
+const STANDALONE_FUNCTION_BUILDER_NAMES = new Set([
+  "action",
+  "computed",
+  "handler",
+  "lift",
+  "pattern",
+  "render",
+]);
 
 export class PatternContextValidationTransformer
   extends HelpersOnlyTransformer {
@@ -94,6 +124,13 @@ export class PatternContextValidationTransformer
           if (boundarySemantics.establishesLocalReactiveAliasScope) {
             this.validateLocalReactiveAliasUsage(node, context);
           }
+
+          this.validateCallbackSelfContainment(
+            node,
+            boundarySemantics,
+            context,
+            checker,
+          );
 
           this.validateSupportedPatternStatements(node, context, checker);
         }
@@ -628,6 +665,69 @@ export class PatternContextValidationTransformer
     }
   }
 
+  private validateCallbackSelfContainment(
+    func: ts.ArrowFunction | ts.FunctionExpression,
+    boundarySemantics: CallbackBoundarySemantics,
+    context: TransformationContext,
+    checker: ts.TypeChecker,
+  ): void {
+    const decision = boundarySemantics.decision;
+    if (
+      decision.kind !== "supported" ||
+      !SES_SELF_CONTAINED_CALLBACK_BOUNDARIES.has(decision.boundaryKind)
+    ) {
+      return;
+    }
+
+    const diagnosticsSeen = new Set<string>();
+
+    const report = (node: ts.Identifier): void => {
+      if (diagnosticsSeen.has(node.text)) return;
+      diagnosticsSeen.add(node.text);
+      context.reportDiagnostic({
+        severity: "error",
+        type: "ses-callback:callable-capture",
+        message:
+          `Callback passed to ${decision.boundaryKind} captures callable ` +
+          `'${node.text}' from an enclosing function scope. SES callback ` +
+          `implementations must be self-contained; move callable helpers to ` +
+          `module scope, or pass serializable data through explicit inputs/state.`,
+        node,
+      });
+    };
+
+    const visit = (node: ts.Node): void => {
+      if (node !== func && ts.isFunctionLike(node)) {
+        return;
+      }
+
+      if (ts.isIdentifier(node) && !this.shouldIgnoreReferenceSite(node)) {
+        const symbol = this.getReferenceSymbol(node, checker);
+        const declarations = (symbol?.getDeclarations() ?? []).filter((decl) =>
+          !ts.isShorthandPropertyAssignment(decl)
+        );
+        if (
+          declarations.length > 0 &&
+          declarations.some((decl) =>
+            this.isEnclosingFunctionScopedDeclaration(decl, func)
+          ) &&
+          this.isCallableReference(node, declarations, checker)
+        ) {
+          report(node);
+        }
+      }
+
+      ts.forEachChild(node, visit);
+    };
+
+    for (const parameter of func.parameters) {
+      if (parameter.initializer) {
+        visit(parameter.initializer);
+      }
+    }
+    visit(func.body);
+  }
+
   /**
    * Validates that standalone functions don't use reactive operations like
    * computed(), derive(), or .map() on CellLike types.
@@ -685,18 +785,17 @@ export class PatternContextValidationTransformer
         const arrayMethodCallSite = classifyArrayMethodCallSite(node, checker);
 
         if (callKind) {
-          // Check for computed() calls
           if (
             callKind.kind === "builder" &&
-            callKind.builderName === "computed"
+            STANDALONE_FUNCTION_BUILDER_NAMES.has(callKind.builderName)
           ) {
             context.reportDiagnostic({
               severity: "error",
               type: "standalone-function:reactive-operation",
               message:
-                `computed() is not allowed inside standalone functions. ` +
+                `${callKind.builderName}() is not allowed inside standalone functions. ` +
                 `Standalone functions cannot capture reactive closures. ` +
-                `Move the computed() call to the pattern body, or use patternTool() to enable automatic closure capture.`,
+                `Move the ${callKind.builderName}() call to an allowed authoring context, or use patternTool() to enable automatic closure capture.`,
               node,
             });
             return;
@@ -737,5 +836,210 @@ export class PatternContextValidationTransformer
     if (func.body) {
       visitBody(func.body);
     }
+  }
+
+  private shouldIgnoreReferenceSite(node: ts.Identifier): boolean {
+    if (!node.parent || this.isInsideTypeNode(node)) {
+      return true;
+    }
+
+    if (
+      ts.isPropertyAccessExpression(node.parent) &&
+      node.parent.name === node
+    ) {
+      return true;
+    }
+
+    if (ts.isPropertyAssignment(node.parent) && node.parent.name === node) {
+      return true;
+    }
+
+    if (ts.isBindingElement(node.parent)) {
+      return true;
+    }
+
+    if (ts.isVariableDeclaration(node.parent) && node.parent.name === node) {
+      return true;
+    }
+
+    if (ts.isParameter(node.parent) && node.parent.name === node) {
+      return true;
+    }
+
+    if (
+      ts.isFunctionDeclaration(node.parent) &&
+      node.parent.name === node
+    ) {
+      return true;
+    }
+
+    if (
+      ts.isFunctionExpression(node.parent) &&
+      node.parent.name === node
+    ) {
+      return true;
+    }
+
+    if (
+      ts.isJsxOpeningElement(node.parent) ||
+      ts.isJsxClosingElement(node.parent) ||
+      ts.isJsxSelfClosingElement(node.parent)
+    ) {
+      return true;
+    }
+
+    return false;
+  }
+
+  private isInsideTypeNode(node: ts.Node): boolean {
+    let current: ts.Node | undefined = node.parent;
+    while (current) {
+      if (this.isTypeNode(current)) {
+        return true;
+      }
+      if (ts.isExpression(current)) {
+        return false;
+      }
+      current = current.parent;
+    }
+    return false;
+  }
+
+  private isTypeNode(node: ts.Node): boolean {
+    return node.kind >= ts.SyntaxKind.FirstTypeNode &&
+      node.kind <= ts.SyntaxKind.LastTypeNode;
+  }
+
+  private getReferenceSymbol(
+    node: ts.Identifier,
+    checker: ts.TypeChecker,
+  ): ts.Symbol | undefined {
+    if (ts.isShorthandPropertyAssignment(node.parent)) {
+      return checker.getShorthandAssignmentValueSymbol(node.parent) ??
+        checker.getShorthandAssignmentValueSymbol(
+          ts.getOriginalNode(node.parent),
+        );
+    }
+    return checker.getSymbolAtLocation(node) ??
+      checker.getSymbolAtLocation(ts.getOriginalNode(node));
+  }
+
+  private isEnclosingFunctionScopedDeclaration(
+    declaration: ts.Declaration,
+    func: ts.FunctionLikeDeclaration,
+  ): boolean {
+    if (isDeclaredWithinFunction(declaration, func)) {
+      return false;
+    }
+
+    if (
+      ts.isImportClause(declaration) ||
+      ts.isImportSpecifier(declaration) ||
+      ts.isNamespaceImport(declaration) ||
+      isModuleScopedDeclaration(declaration)
+    ) {
+      return false;
+    }
+
+    let current: ts.Node | undefined = declaration.parent;
+    while (current) {
+      if (ts.isFunctionLike(current)) {
+        return true;
+      }
+      if (ts.isSourceFile(current)) {
+        return false;
+      }
+      current = current.parent;
+    }
+
+    return false;
+  }
+
+  private isCallableReference(
+    node: ts.Identifier,
+    declarations: readonly ts.Declaration[],
+    checker: ts.TypeChecker,
+  ): boolean {
+    if (
+      declarations.some((declaration) => this.isSyntacticCallable(declaration))
+    ) {
+      return true;
+    }
+
+    if (!this.isCallableUseSite(node)) {
+      return false;
+    }
+
+    // Keep checker queries narrow; broad validation-time type queries can
+    // perturb later schema inference ordering for unrelated expression sites.
+    const type = checker.getTypeAtLocation(node);
+    return type.getCallSignatures().length > 0 ||
+      type.getConstructSignatures().length > 0;
+  }
+
+  private isSyntacticCallable(declaration: ts.Declaration): boolean {
+    if (
+      ts.isFunctionDeclaration(declaration) ||
+      ts.isFunctionExpression(declaration) ||
+      ts.isMethodDeclaration(declaration) ||
+      ts.isClassDeclaration(declaration)
+    ) {
+      return true;
+    }
+
+    if (ts.isVariableDeclaration(declaration)) {
+      if (declaration.initializer) {
+        const initializer = declaration.initializer;
+        if (
+          ts.isArrowFunction(initializer) ||
+          ts.isFunctionExpression(initializer) ||
+          ts.isClassExpression(initializer)
+        ) {
+          return true;
+        }
+      }
+      return !!declaration.type &&
+        this.isCallableTypeNode(declaration.type);
+    }
+
+    if (ts.isParameter(declaration)) {
+      return !!declaration.type && this.isCallableTypeNode(declaration.type);
+    }
+
+    return false;
+  }
+
+  private isCallableTypeNode(type: ts.TypeNode): boolean {
+    if (ts.isFunctionTypeNode(type) || ts.isConstructorTypeNode(type)) {
+      return true;
+    }
+
+    if (ts.isParenthesizedTypeNode(type)) {
+      return this.isCallableTypeNode(type.type);
+    }
+
+    if (ts.isUnionTypeNode(type) || ts.isIntersectionTypeNode(type)) {
+      return type.types.some((member) => this.isCallableTypeNode(member));
+    }
+
+    if (
+      ts.isTypeReferenceNode(type) &&
+      ts.isIdentifier(type.typeName) &&
+      type.typeName.text === "Function"
+    ) {
+      return true;
+    }
+
+    return false;
+  }
+
+  private isCallableUseSite(node: ts.Identifier): boolean {
+    const parent = node.parent;
+    return !!parent &&
+      (
+        (ts.isCallExpression(parent) && parent.expression === node) ||
+        (ts.isNewExpression(parent) && parent.expression === node) ||
+        (ts.isTaggedTemplateExpression(parent) && parent.tag === node)
+      );
   }
 }
