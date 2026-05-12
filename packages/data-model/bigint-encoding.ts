@@ -176,36 +176,53 @@ export function bigintFromMinimalTwosComplement(bytes: Uint8Array): bigint {
     throw new Error("bigintFromMinimalTwosComplement: empty input");
   }
 
-  // Note: `false` second argument to the `DataView.get*()` methods means
-  // "big-endian."
-
-  // Determine sign from the high bit of the first byte.
-  const negative = (bytes[0]! & 0x80) !== 0;
-
   switch (bytes.length) {
     case 1: {
-      if (negative) {
-        return BigInt((bytes[0] << 24) >> 24); // Sign-extend.
-      } else {
-        return BigInt(bytes[0]);
-      }
+      // `(x << 24) >> 24` to sign extend. Similar below.
+      return BigInt((bytes[0] << 24) >> 24);
     }
 
-    case 2:
-    case 3:
-    case 4:
-    case 5:
-    case 6:
-    case 7:
+    case 2: {
+      return BigInt(((bytes[0] << 24) | (bytes[1] << 16)) >> 16);
+    }
+
+    case 3: {
+      return BigInt(((bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8)) >> 8);
+    }
+
+    case 4: {
+      return BigInt((bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3]);
+    }
+
+    case 5: {
+      const subResult1 = BigInt((bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3]);
+      const subResult2 = BigInt(bytes[4]);
+      return (subResult1 << 8n) | subResult2;
+    }
+
+    case 6: {
+      const subResult1 = BigInt((bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3]);
+      const subResult2 = BigInt((bytes[4] << 8) | bytes[5]);
+      return (subResult1 << 16n) | subResult2;
+    }
+
+    case 7: {
+      const subResult1 = BigInt((bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3]);
+      const subResult2 = BigInt((bytes[4] << 16) | (bytes[5] << 8) | bytes[6]);
+      return (subResult1 << 24n) | subResult2;
+    }
+
     case 8: {
-      // Fast path for `bytes.length` in `2..8`.
-      dv64Bytes.fill(negative ? 0xff : 0);
-      dv64Bytes.set(bytes, 8 - bytes.length);
-      return dv64View.getBigInt64(0, false);
+      const subResult1 = BigInt((bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3]);
+      const subResult2 = BigInt((bytes[4] << 24) | (bytes[5] << 16) | (bytes[6] << 8) | bytes[7]) & 0xffff_ffffn;
+      return (subResult1 << 32n) | subResult2;
     }
   }
 
   // Slow path.
+
+  // Determine sign from the high bit of the first byte.
+  const negative = (bytes[0]! & 0x80) !== 0;
 
   // Count of partial-`int64` bytes.
   const partials = bytes.length & 7;
