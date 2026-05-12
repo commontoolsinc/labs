@@ -34,13 +34,11 @@ describe("ExperimentalOptions", () => {
         storageManager: sm,
         experimental: {
           modernDataModel: false,
-          unifiedJsonEncoding: false,
         },
       });
       expect(runtime.experimental).toEqual({
         modernDataModel: false,
         richStorableValues: undefined,
-        unifiedJsonEncoding: false,
         schedulerHistoricalMightWrite: undefined,
       });
       await runtime.dispose();
@@ -54,13 +52,11 @@ describe("ExperimentalOptions", () => {
         storageManager: sm,
         experimental: {
           modernDataModel: true,
-          unifiedJsonEncoding: true,
         },
       });
       expect(runtime.experimental).toEqual({
         modernDataModel: true,
         richStorableValues: undefined,
-        unifiedJsonEncoding: true,
         schedulerHistoricalMightWrite: undefined,
       });
       await runtime.dispose();
@@ -79,7 +75,6 @@ describe("ExperimentalOptions", () => {
       expect(runtime.experimental).toEqual({
         modernDataModel: true,
         richStorableValues: undefined,
-        unifiedJsonEncoding: undefined,
         schedulerHistoricalMightWrite: undefined,
       });
       await runtime.dispose();
