@@ -1,19 +1,21 @@
-// CT-1562 regression: `const rooms = conversation.rooms` followed by
-// `rooms.map(...).join("\n")` in a non-JSX value-site expression once
-// crashed at runtime with `TypeError: rooms.map is not a function` when
-// the schema for `rooms` included the `Default<[]>` `anyOf` split
-// (`{ type: "array", items: false }` vs `{ items: { $ref } }`).
+// Pattern-level invariant: a field typed as `T[] | Default<[]>` must
+// materialize as an array (not an object with numeric keys) when consumed
+// by a value-site expression like `rooms.map(...).join("\n")`.
 //
-// Root cause was in `packages/runner/src/traverse.ts`:
+// `Default<[]>` emits a schema with an anyOf split — `{type:"array",
+// items:false}` (the empty-array branch) alongside `{type:"array",
+// items:{$ref:T}}` (the populated branch). Both branches can match a
+// populated array. Before the fix in `packages/runner/src/traverse.ts`,
 // `mergeAnyOfMatches` ran `Object.assign({}, …branches)` for multi-match
 // anyOf results because arrays satisfy `isRecord`; two array branches
-// collapsed to `{ "0": …, "1": … }`, dropping `.map`. Fix preserves
-// array-ness when all matches are arrays.
+// collapsed to `{ "0": …, "1": … }`, dropping `.map` and crashing the
+// derive callback with `TypeError: rooms.map is not a function`. Fix
+// preserves array-ness when all matches are arrays.
 //
-// This is the end-to-end regression test exercising the full
-// PatternManager.compilePattern + runtime.run path. The unit-level
-// regression tests for both fixes live in
-// `packages/runner/test/traverse.test.ts`.
+// This is the end-to-end test exercising the full
+// PatternManager.compilePattern + runtime.run path. Unit-level
+// regression tests for `mergeAnyOfMatches` and `canBranchMatch` live
+// in `packages/runner/test/traverse.test.ts`. Tracks CT-1562.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -27,7 +29,7 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-describe("Pattern Runner - CT-1562 Default<[]> anyOf merge drops array-ness", () => {
+describe("Pattern Runner - Default<[]> array field materializes as array", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
