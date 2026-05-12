@@ -10,7 +10,6 @@ affecting users who haven't opted in.
 | Flag | Env Var | Description |
 |------|---------|-------------|
 | `modernDataModel` | `EXPERIMENTAL_MODERN_DATA_MODEL` | Enables the new fabric value type system (`bigint`, `Map`, `Set`, `Uint8Array`, `Date`, `FabricInstance`). |
-| `unifiedJsonEncoding` | `EXPERIMENTAL_UNIFIED_JSON_ENCODING` | Enables a unified JSON encoding scheme for all fabric values. |
 
 All flags default to `undefined` which means they take on the default value
 defined for the flag. The default is generally `false` unless the flag is in the
@@ -26,11 +25,11 @@ and when **running the server** (for server-side flags):
 
 ```bash
 # Enable a single flag (build + run)
-EXPERIMENTAL_MODERN_DATA_MODEL=true deno task dev
+EXPERIMENTAL_SOME_FLAG=true deno task dev
 
 # Enable multiple flags
-EXPERIMENTAL_MODERN_DATA_MODEL=true \
-EXPERIMENTAL_UNIFIED_JSON_ENCODING=true \
+EXPERIMENTAL_SOME_FLAG=true \
+EXPERIMENTAL_SOME_OTHER_FLAG=true \
 deno task dev
 ```
 
@@ -97,9 +96,6 @@ Browser Web Worker
               +-- setDataModelConfig(true)
               |    +-- modernDataModelEnabled = true
               |         +-- fabricFromNativeValue() checks modernDataModelEnabled
-              +-- setUnifiedJsonEncoding(...)
-                   +-- unifiedJsonEncoding = true
-                        +-- jsonFromValue() (etc.) dispatches to modern path
 ```
 
 Key points:
@@ -138,7 +134,7 @@ When any experimental flags are enabled, the `Runtime` constructor logs them on
 startup. Look for a line like:
 
 ```
-Experimental flags enabled: modernDataModel, unifiedJsonEncoding
+Experimental flags enabled: someFlag, someOtherFlag
 ```
 
 - **Server-side (toolshed):** Check `packages/toolshed/local-dev-toolshed.log`.
@@ -170,9 +166,7 @@ with defaults (all `false`) and stores the resolved result as
 
 The memory layer uses module-level ambient config variables:
 `modernDataModelEnabled` in `packages/data-model/fabric-value.ts` (set by
-`setDataModelConfig()`), and
-`unifiedJsonEncoding` in `packages/data-model/json-encoding.ts` (set by
-`setJsonEncodingConfig()`). This means:
+`setDataModelConfig()`). This means:
 
 - Only one set of experimental flags is active per JavaScript context at a time.
 - In the browser, the Web Worker is a separate JS context, so its flags are
