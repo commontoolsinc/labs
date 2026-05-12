@@ -1,9 +1,7 @@
 # Experimental Options
 
 `ExperimentalOptions` are feature flags that gate incremental rollout of
-space-model data-layer changes. Each flag independently enables a piece of the
-new fabric-value pipeline so features can be activated one at a time without
-affecting users who haven't opted in.
+various major features.
 
 ## Available Flags
 
@@ -16,6 +14,14 @@ defined for the flag. The default is generally `false` unless the flag is in the
 process of being "graduated." Setting any flag to `true` activates the
 corresponding experimental behavior, and setting it to `false` suppresses the
 experimental behavior (if it happened to be on by default).
+
+## Defining a new flag
+
+Unfortunately, there is no single unified "source of truth" for the set of
+flags. As a stop-gap there is a "dummy" flag called `pancakeTelephony` /
+`EXPERIMENTAL_PANCAKE_TELEPHONY`. If you search the codebase for these, then
+you'll find everywhere where code needs to change in order to accommodate a
+new flag.
 
 ## Enabling Flags Locally
 
