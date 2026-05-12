@@ -3,10 +3,12 @@
  *
  * Measures `bigintToMinimalTwosComplement()` and
  * `bigintFromMinimalTwosComplement()` across the full byte-length spectrum,
- * with separate positive/negative tracks. Sizes 1-32 sweep in single-byte
- * steps so the discontinuity at the 8-byte boundary is visible (both
- * directions switch from a `DataView.{set,get}BigUint64()` fast path to a
- * per-byte fallback there). Sizes 64..1024 sample the deep-fallback regime.
+ * with separate positive/negative tracks. Sizes 1-127 sweep in single-byte
+ * steps so several discontinuities are visible: the 8-byte fast-path boundary
+ * (both directions switch from a `DataView.{set,get}BigUint64()` fast path to
+ * a per-byte fallback) and the 32-byte large-negative-decoder crossover.
+ * Sizes 128, 256, 512 sample the deep-fallback regime; 1008..1039 brackets
+ * 1024 to expose `partials` cost (`bytes.length & 7`) at very large sizes.
  *
  * Each iteration of a benchmark function processes a fixed BATCH of values
  * pre-generated with a deterministic xorshift RNG, so JIT specialization on
@@ -34,45 +36,15 @@ import {
 
 const BATCH = 64;
 
-const BYTE_SIZES: readonly number[] = [
-  1,
-  2,
-  3,
-  4,
-  5,
-  6,
-  7,
-  8,
-  9,
-  10,
-  11,
-  12,
-  13,
-  14,
-  15,
-  16,
-  17,
-  18,
-  19,
-  20,
-  21,
-  22,
-  23,
-  24,
-  25,
-  26,
-  27,
-  28,
-  29,
-  30,
-  31,
-  32,
-  64,
-  128,
-  256,
-  512,
-  1024,
-];
+const BYTE_SIZES: readonly number[] = (() => {
+  const set = new Set<number>();
+  for (let i = 1; i <= 127; i++) set.add(i);
+  set.add(128);
+  set.add(256);
+  set.add(512);
+  for (let i = 1008; i <= 1039; i++) set.add(i);
+  return [...set].sort((a, b) => a - b);
+})();
 
 function makeRng(seed: number): () => number {
   let s = seed >>> 0;
