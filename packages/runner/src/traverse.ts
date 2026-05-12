@@ -642,8 +642,8 @@ export function mergeAnyOfMatches<T>(
   // schema, but the address is ignored, and a second option where
   // address is set, and name is ignored, we want to include both.
   if (matches.length > 1) {
-    // If all our matches are objects, merge the properties.
-    if (matches.every((v) => isRecord(v))) {
+    // If all our matches are non-array objects, merge the properties.
+    if (matches.every((v) => isObject(v))) {
       const unified: Record<string, T> = {};
       for (const match of matches) {
         Object.assign(unified, match);
