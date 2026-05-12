@@ -108,37 +108,36 @@ function encode5To8Bytes(value: bigint, negative: boolean): Uint8Array {
  */
 export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
   if (value >= 0n) {
-    if (value <= 0x7fff_ffff_ffff_ffffn) {
-      if (value <= 0x7fff_ffffn) {
-        const num = Number(value);
-        if (num <= 0x7fff) {
-          if (num <= 0x7f) {
-            const result = new Uint8Array(1);
-            result[0] = num;
-            return result;
-          } else {
-            const result = new Uint8Array(2);
-            result[0] = num >> 8;
-            result[1] = num;
-            return result;
-          }
+    if (value <= 0x7fff_ffffn) {
+      const num = Number(value);
+      if (num <= 0x7fff) {
+        if (num <= 0x7f) {
+          const result = new Uint8Array(1);
+          result[0] = num;
+          return result;
         } else {
-          if (num <= 0x7f_ffff) {
-            const result = new Uint8Array(3);
-            result[0] = num >> 16;
-            result[1] = num >> 8;
-            result[2] = num;
-            return result;
-          } else {
-            const result = new Uint8Array(4);
-            result[0] = num >> 24;
-            result[1] = num >> 16;
-            result[2] = num >> 8;
-            result[3] = num;
-            return result;
-          }
+          const result = new Uint8Array(2);
+          result[0] = num >> 8;
+          result[1] = num;
+          return result;
+        }
+      } else {
+        if (num <= 0x7f_ffff) {
+          const result = new Uint8Array(3);
+          result[0] = num >> 16;
+          result[1] = num >> 8;
+          result[2] = num;
+          return result;
+        } else {
+          const result = new Uint8Array(4);
+          result[0] = num >> 24;
+          result[1] = num >> 16;
+          result[2] = num >> 8;
+          result[3] = num;
+          return result;
         }
       }
+    } else if (value <= 0x7fff_ffff_ffff_ffffn) {
       return encode5To8Bytes(value, false);
     }
 
@@ -157,37 +156,36 @@ export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
 
     return bytes;
   } else {
-    if (value >= -0x8000_0000_0000_0000n) {
-      if (value >= -0x8000_0000n) {
-        const num = Number(value);
-        if (num >= -0x8000) {
-          if (num >= -0x80) {
-            const result = new Uint8Array(1);
-            result[0] = num;
-            return result;
-          } else {
-            const result = new Uint8Array(2);
-            result[0] = num >> 8;
-            result[1] = num;
-            return result;
-          }
+    if (value >= -0x8000_0000n) {
+      const num = Number(value);
+      if (num >= -0x8000) {
+        if (num >= -0x80) {
+          const result = new Uint8Array(1);
+          result[0] = num;
+          return result;
         } else {
-          if (num >= -0x80_0000) {
-            const result = new Uint8Array(3);
-            result[0] = num >> 16;
-            result[1] = num >> 8;
-            result[2] = num;
-            return result;
-          } else {
-            const result = new Uint8Array(4);
-            result[0] = num >> 24;
-            result[1] = num >> 16;
-            result[2] = num >> 8;
-            result[3] = num;
-            return result;
-          }
+          const result = new Uint8Array(2);
+          result[0] = num >> 8;
+          result[1] = num;
+          return result;
+        }
+      } else {
+        if (num >= -0x80_0000) {
+          const result = new Uint8Array(3);
+          result[0] = num >> 16;
+          result[1] = num >> 8;
+          result[2] = num;
+          return result;
+        } else {
+          const result = new Uint8Array(4);
+          result[0] = num >> 24;
+          result[1] = num >> 16;
+          result[2] = num >> 8;
+          result[3] = num;
+          return result;
         }
       }
+    } else if (value >= -0x8000_0000_0000_0000n) {
       return encode5To8Bytes(value, true);
     }
 
