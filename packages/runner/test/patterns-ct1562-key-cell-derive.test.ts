@@ -80,15 +80,7 @@ describe("Pattern Runner - CT-1562 Default<[]> anyOf merge drops array-ness", ()
             "  const roomSummaryText = rooms",
             "    .map((room) => `${room.name}: ${room.messages.length}`)",
             "    .join('\\n');",
-            "  return {",
-            "    [UI]: (",
-            "      <div>",
-            "        {rooms.map((room) => <span>{room.name}</span>)}",
-            "        <p>{roomSummaryText}</p>",
-            "      </div>",
-            "    ),",
-            "    roomSummaryText,",
-            "  };",
+            "  return { roomSummaryText };",
             "});",
           ].join("\n"),
         },
@@ -137,9 +129,12 @@ describe("Pattern Runner - CT-1562 Default<[]> anyOf merge drops array-ness", ()
       console.log("CT-1562 scheduler errors:", errors);
     }
 
-    const queryResult = result.getAsQueryResult() as
-      | { roomSummaryText?: string }
-      | undefined;
-    expect(queryResult?.roomSummaryText).toBe("alpha: 2\nbeta: 0");
+    const queryResult = result.getAsQueryResult();
+    console.log("CT-1562 queryResult:", queryResult);
+    const direct = result.key("roomSummaryText").get();
+    console.log("CT-1562 direct read of roomSummaryText:", direct);
+
+    expect((queryResult as { roomSummaryText?: string })?.roomSummaryText)
+      .toBe("alpha: 2\nbeta: 0");
   });
 });

@@ -19,6 +19,7 @@ import {
   MapSet,
   MapSetStringToPathSelectors,
   mergeAnyOfBranchSchemas,
+  mergeAnyOfMatches,
   PointerCycleTracker,
   SchemaObjectTraverser,
 } from "../src/traverse.ts";
@@ -519,6 +520,84 @@ describe("SchemaObjectTraverser array traversal", () => {
     });
 
     expect(error).toBeDefined();
+  });
+
+  // CT-1562 / B3: companion to the test above. Same `items: false` constraint
+  // but without `prefixItems` — i.e., "this array allows no items at all,
+  // only `[]` matches." The traverser currently accepts populated arrays
+  // through this schema, returning them unchanged. RED until B3 is fixed.
+  it("rejects populated array when items is false and no prefixItems (B3)", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-items-false-no-prefix" as URI;
+    const docEntity = docUri as Entity;
+
+    const docValue = ["alpha", "beta"];
+
+    const docRevision: Revision<State> = {
+      the: type,
+      of: docEntity,
+      is: { value: docValue },
+      cause: hashOf({ the: type, of: docEntity }),
+      since: 1,
+    };
+    store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+
+    const schema = {
+      type: "array",
+      items: false,
+    } as const satisfies JSONSchema;
+
+    const traverser = getTraverser(store, { path: ["value"], schema });
+
+    const { error } = traverser.traverse({
+      address: {
+        space: "did:null:null",
+        id: docUri,
+        type,
+        path: ["value"],
+      },
+      value: docValue,
+    });
+
+    expect(error).toBeDefined();
+  });
+
+  it("accepts empty array when items is false (B3 baseline)", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-items-false-empty" as URI;
+    const docEntity = docUri as Entity;
+
+    const docValue: never[] = [];
+
+    const docRevision: Revision<State> = {
+      the: type,
+      of: docEntity,
+      is: { value: docValue },
+      cause: hashOf({ the: type, of: docEntity }),
+      since: 1,
+    };
+    store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+
+    const schema = {
+      type: "array",
+      items: false,
+    } as const satisfies JSONSchema;
+
+    const traverser = getTraverser(store, { path: ["value"], schema });
+
+    const { ok: result } = traverser.traverse({
+      address: {
+        space: "did:null:null",
+        id: docUri,
+        type,
+        path: ["value"],
+      },
+      value: docValue,
+    });
+
+    expect(result).toEqual([]);
   });
 
   describe("SchemaObjectTraverser getAtPath", () => {
@@ -1835,6 +1914,78 @@ describe("canBranchMatch", () => {
         linkValue,
       ),
     ).toBe(true);
+  });
+
+  // CT-1562 / B1: `items: false` on an array schema means "no items allowed"
+  // (only the empty array `[]` matches). canBranchMatch currently checks
+  // `type === "array"` but ignores `items: false`, so populated arrays falsely
+  // pass the fast-reject check. These tests RED until B1 is fixed.
+  it("accepts empty array against items: false (only empty arrays match)", () => {
+    expect(canBranchMatch({ type: "array", items: false }, [])).toBe(true);
+  });
+
+  it("rejects populated array against items: false (B1, currently fails)", () => {
+    expect(canBranchMatch({ type: "array", items: false }, [1, 2, 3])).toBe(
+      false,
+    );
+    expect(canBranchMatch({ type: "array", items: false }, ["a"])).toBe(
+      false,
+    );
+  });
+});
+
+describe("mergeAnyOfMatches", () => {
+  // CT-1562 / B2: when an anyOf produces multiple successful matches and all
+  // of them are arrays, the current `Object.assign({}, ...arrays)` merge
+  // strips array-ness, returning `{ "0": …, "1": … }` instead of `[…, …]`.
+  // Arrays satisfy `isRecord` (typeof [] === "object" && [] !== null), so
+  // the object-merge branch fires erroneously.
+  //
+  // The existing object-merge semantic is intentional for object branches
+  // (different anyOf branches contributing disjoint property sets); it
+  // doesn't apply to arrays.
+  //
+  // These tests are RED until B2 is fixed.
+
+  it("returns undefined when matches is empty", () => {
+    expect(mergeAnyOfMatches([])).toBe(undefined);
+  });
+
+  it("returns the sole match when matches has length 1", () => {
+    expect(mergeAnyOfMatches([42])).toBe(42);
+    expect(mergeAnyOfMatches([{ name: "Alice" }])).toEqual({ name: "Alice" });
+    expect(mergeAnyOfMatches([[1, 2, 3]])).toEqual([1, 2, 3]);
+  });
+
+  it("merges multiple object matches by property union (existing behavior)", () => {
+    const a = { name: "Alice" };
+    const b = { age: 30 };
+    expect(mergeAnyOfMatches([a, b])).toEqual({ name: "Alice", age: 30 });
+  });
+
+  it("preserves array-ness when all matches are arrays (B2, currently fails)", () => {
+    // Both branches of an anyOf produce arrays. The merge must return an
+    // array, not an Object.assign'd plain object.
+    const result = mergeAnyOfMatches([[1, 2], [3, 4]]);
+    expect(Array.isArray(result)).toBe(true);
+  });
+
+  it("preserves array-ness when one branch is empty and one is populated (B2 CT-1562 shape, currently fails)", () => {
+    // This is the precise shape CT-1562 hits: one branch returns [] (the
+    // `{items: false}` branch in the Default<[]> anyOf) and the other
+    // returns the populated array. Both are arrays; merging them as objects
+    // produces `{"0": …, "1": …}` which has no `.map`.
+    const result = mergeAnyOfMatches([[], [{ name: "alpha" }, {
+      name: "beta",
+    }]]);
+    expect(Array.isArray(result)).toBe(true);
+  });
+
+  it("returns matches[0] for mixed-type matches (existing behavior)", () => {
+    // When matches aren't all the same shape (e.g. one is null, one is an
+    // object), the merge can't combine them and falls through to matches[0].
+    const obj = { name: "Alice" };
+    expect(mergeAnyOfMatches([obj, null])).toEqual(obj);
   });
 });
 

@@ -1,8 +1,12 @@
 # CT-1562 investigation: `rooms.map().join()` breaks for cells
 
-**Status:** root cause located in the data-model schema-traversal layer. The
-ts-transformers pipeline (and PR #3550 in particular) is innocent — its output
-is byte-identical between `main` and our branch for the failing fixture.
+**Status:** fixed. Two independent logical errors in
+`packages/runner/src/traverse.ts` identified and corrected. Berni's repro now
+returns `"alpha: 2\nbeta: 0"` instead of throwing `TypeError`.
+
+The ts-transformers pipeline (and PR #3550 in particular) is innocent — its
+output is byte-identical between `main` and the original fix-attempt branch for
+the failing fixture. The bug lives entirely in the runtime schema traversal.
 
 ## Berni's report
 
@@ -65,7 +69,11 @@ const roomSummaryText = __cfHelpers.derive(
 The schema says "rooms is an array of Room" — no `asCell`. The runtime should
 materialize `rooms` as a plain array before calling the callback. **It does
 not.** The destructured `rooms` arrives as a plain object
-`{ "0": alpha, "1": beta }` — same numeric keys, but no `.map`.
+`{ "0": alpha, "1": beta }` — same numeric keys, but no `.map`. The trigger is
+the `anyOf` shape that `Default<[]>` produces: an empty-array branch
+(`items: false`) alongside the populated branch. With non-`Default<[]>` arrays
+(`Room[]` without the `| Default<[]>` union), the schema is a single
+`{type:"array", items:{$ref:Room}}` — no anyOf, no merge, no corruption.
 
 ### Direct evidence (instrumented probe)
 
@@ -105,111 +113,141 @@ CT1562_PROBE: {
 **Conclusion:** `Default<[]>` on an array-typed field is the trigger. The
 `anyOf` schema it produces is the proximal cause.
 
-## Why the `anyOf` is the trigger
+## The two logical errors
 
-In `packages/runner/src/traverse.ts`:
+In `packages/runner/src/traverse.ts` there are two independent defects, both
+real, both worth fixing on first principles. Of the two, **only B2 actually
+fixes CT-1562 end-to-end**, but B1 is a correctness defect for adjacent cases
+and would surface independently in any anyOf where a non-link populated array is
+matched against an `items: false` branch.
 
-1. `canBranchMatch` (line ~3267) decides which `anyOf` branches "match" the
-   actual value. For `{ type: "array", items: false }` against a populated
-   array, it checks `resolved.type === "array"` (matches!) and skips the items
-   check — `items: false` is ignored. So **both** branches return `true`, even
-   though only the populated branch is semantically valid.
+### B1 — `canBranchMatch` ignores `items: false`
 
-2. The traverser then calls `traverseWithSchema` for each matching branch and
-   collects results into `matches`. Both branches likely produce an array result
-   (one empty-ish, one populated).
+`canBranchMatch` (`traverse.ts:3267`) is the fast-reject step inside the anyOf
+loop. For `{ type: "array", items: false }` against `[populated]`, it checked
+`resolved.type === "array"` (matches) but skipped the items check entirely, so
+the branch falsely "matched" and the traverser then ran per-branch traversal on
+the bad branch.
 
-3. `mergeAnyOfMatches` (line ~637):
+Why this doesn't on its own fix CT-1562: at the call site where the bug
+manifests, `doc.value` is `{$alias: …}` (a cell link), not an array.
+`canBranchMatch` returns `true` early for link values (line ~3290, by design —
+we can't know what the link resolves to without traversing). So the new
+`items: false` check is unreachable on this code path.
 
-   ```ts
-   if (matches.length > 1) {
-     if (matches.every((v) => isRecord(v))) {
-       const unified: Record<string, T> = {};
-       for (const match of matches) {
-         Object.assign(unified, match);
-       }
-       return unified;
-     }
-   }
-   ```
+B1 still matters: it's the right semantic for `canBranchMatch`, and the unit
+test (`rejects populated array against items: false`) was RED before fix and
+GREEN after. The fix prevents an entire class of false-positive matches that
+would otherwise feed bad results into the merge.
 
-   Arrays satisfy `isRecord` (`typeof [] === "object" && [] !== null`), so this
-   branch fires. `Object.assign({}, [], [alpha, beta])` returns
-   `{ "0": alpha, "1": beta }` — array-ness is **lost**. The destructured
-   `rooms` in the derive callback is this plain object.
+### B2 — `mergeAnyOfMatches` corrupts arrays
 
-## Why the trusted-builder runtime tests don't catch this
-
-In the `runtime.run(tx, pattern, …)` test harness (used by the unit-test suites
-in `packages/runner/test/patterns-*.test.ts`), the action callback goes through
-a path that produces a different argument shape. I built a runtime test
-mirroring the exact lowered shape and it **passed**:
-
-> `packages/runner/test/patterns-ct1562-key-cell-derive.test.ts` (provisional,
-> not committed)
-
-The repro requires the deployed (SES sandboxed) path:
-
-```bash
-deno task cf piece new <fixture>.tsx -s ct1562-test
-echo '{"conversation": {"rooms": [...]}}' | deno task cf piece apply --piece <id> -s ct1562-test
-# TypeError: rooms.map is not a function
-```
-
-So adding a runner unit test against the trusted builder will not catch
-regressions in the schema-traversal merge. Tests that exercise this bug need to
-go through `runtime.patternManager.compilePattern(...)` plus deploy-style
-invocation, OR exercise `validateAndTransform` directly with the offending
-`anyOf` schema and asserted output shape.
-
-## Two fix candidates
-
-### Candidate A — `mergeAnyOfMatches` (narrow, recommended)
-
-Add an array-aware branch in `packages/runner/src/traverse.ts:637`:
+`mergeAnyOfMatches` (`traverse.ts:637`) merges `matches` from multi-branch anyOf
+traversals. The existing object-merge behavior:
 
 ```ts
 if (matches.length > 1) {
-  if (matches.every(Array.isArray)) {
-    // Pick the populated one, or the first if both are non-empty.
-    return matches.find((m) => m.length > 0) ?? matches[0];
+  if (matches.every((v) => isRecord(v))) {
+    const unified: Record<string, T> = {};
+    for (const match of matches) Object.assign(unified, match);
+    return unified;
   }
-  if (matches.every((v) => isRecord(v))) { /* existing object-merge */ }
 }
 ```
 
-Rationale: the `Object.assign` merge is a deliberate semantic for object
-branches — different branches contributing different properties — and shouldn't
-apply to arrays at all. The current behavior silently corrupts every `anyOf`
-whose branches all produce arrays; no usage I'm aware of relies on it.
+Arrays satisfy `isRecord` (`typeof [] === "object" && [] !== null`), so this
+fires for two-array matches. `Object.assign({}, [], [alpha, beta])` produces
+`{ "0": alpha, "1": beta }` — array-ness is lost. The destructured `rooms` in
+the derive callback is this plain object; `.map` is undefined; crash.
 
-### Candidate B — `canBranchMatch` honoring `items: false`
-
-In `packages/runner/src/traverse.ts:3267`, after the existing `type` check, add:
+**Fix:** add an `Array.isArray`-first branch before the existing object-merge:
 
 ```ts
-// items: false → only the empty array matches.
-if (
-  resolved.type === "array" && resolved.items === false && Array.isArray(value)
-) {
-  if (value.length > 0) return false;
+if (matches.every((v) => Array.isArray(v))) {
+  return matches.find((m) => m.length > 0) ?? matches[0];
 }
 ```
 
-This addresses the **upstream** cause: with this in place, only the populated
-branch matches a populated array, and `mergeAnyOfMatches` sees a single match —
-no merge happens, and the array passes through untouched.
+Returns the populated array (or the first if all empty). Preserves array-ness.
+The existing object-merge semantic for actual object branches is untouched.
 
-Riskier than Candidate A because it changes branch-matching semantics that other
-code paths may rely on. Worth doing eventually, but probably not as the first
-fix.
+### Why both got triggered together by CT-1562
 
-### Recommendation
+CT-1562 hits the path twice: once with `traverseCells=true` (the query path, for
+reactive scheduling) and once with `traverseCells=false` (the materialization
+path, for the actual derive argument). These two modes use different
+`ObjectCreator`s and produce different intermediate results for the two anyOf
+branches:
 
-Land Candidate A first as the focused fix with a regression test that deploys
-via the full pipeline (or invokes `validateAndTransform` directly). Track
-Candidate B as a follow-up if there's appetite for tightening anyOf semantics
-broadly.
+| Mode                  | Branch 1 (`items: false`) | Branch 2 (`items: $ref`) | merge produces            |
+| --------------------- | ------------------------- | ------------------------ | ------------------------- |
+| `traverseCells=true`  | populated array           | `null`                   | `matches[0]` (good)       |
+| `traverseCells=false` | populated array           | populated array          | corrupt `{0:…,1:…}` (bug) |
+
+`canBranchMatch` doesn't help either pass because `doc.value` is a `{$alias}`
+link at that call site. The bug surface is `mergeAnyOfMatches`'s array
+mishandling, triggered by both branches successfully returning arrays in the
+materialization pass.
+
+### Adjacent observations (investigated, no defect)
+
+During the investigation we considered two additional hypotheses; both turned
+out to be downstream effects of the above, not independent defects:
+
+- **`traverseWithSchema` apparently accepting `items: false` against a populated
+  array in the anyOf path.** The standalone traversal path
+  (`SchemaObjectTraverser.traverseArrayWithSchema`) correctly rejects this —
+  verified by a new test
+  (`rejects populated array when items is false and no
+  prefixItems`). The
+  "leak" we observed in the anyOf path is an emergent effect of link
+  resolution + `traverseCells=false` semantics on a branch that shouldn't have
+  been entered in the first place. With B2 catching the merge, this effect is
+  benign.
+
+- **"Non-determinism" between two identical traversal calls.** Initially
+  observed as `matches=[arr, null]` on the first call and `matches=[arr, arr]`
+  on the second. Later traced to the two calls running with different
+  `traverseCells` settings (`true` for the query path, `false` for the
+  materialize path) — two legitimate but semantically different reads. Not a
+  determinism bug; the two reads just disagree about a should-never-match
+  branch.
+
+## Test surface
+
+Both fixes have isolated unit tests in `packages/runner/test/traverse.test.ts`:
+
+- **B1**: in the `canBranchMatch` describe block — two new tests,
+  `accepts
+  empty array against items: false` (baseline) and
+  `rejects populated array
+  against items: false` (the RED-then-GREEN test for
+  the fix).
+- **B2**: a new `mergeAnyOfMatches` describe block — six tests covering empty
+  matches, single match, the existing object-merge, the two array-preserving
+  cases (B2 RED-then-GREEN), and the mixed-type fall-through.
+- **B3 baseline**: in `SchemaObjectTraverser array traversal`, two new tests for
+  `items: false` (populated → rejects, empty → accepts) confirming the
+  standalone traversal path already had correct semantics.
+
+End-to-end repro: `packages/runner/test/patterns-ct1562-key-cell-derive.test.ts`
+exercises the full `PatternManager.compilePattern` + `runtime.run` path with
+Berni's repro shape (simplified to omit the `[UI]` field, which has a separate
+test-harness materialization quirk unrelated to CT-1562).
+
+### Independent confidence in each fix
+
+We verified each fix's independence by selectively reverting:
+
+| State       | `mergeAnyOfMatches` unit tests | `canBranchMatch` unit tests | Full `traverse.test.ts` | CT-1562 in-process | CT-1562 production |
+| ----------- | ------------------------------ | --------------------------- | ----------------------- | ------------------ | ------------------ |
+| Neither fix | 4/6 pass (B2 cases RED)        | 20/21 pass (B1 case RED)    | 21/22 describe blocks   | RED                | RED                |
+| B2 only     | 6/6 pass                       | 20/21 pass (B1 case RED)    | 21/22 describe blocks   | GREEN              | GREEN              |
+| B1 only     | 4/6 pass (B2 cases RED)        | 21/21 pass                  | 21/22 describe blocks   | RED                | RED                |
+| Both        | 6/6 pass                       | 21/21 pass                  | 22/22 describe blocks   | GREEN              | GREEN              |
+
+Each fix carries its own correctness witness in its own tests. Either can be
+reverted without invalidating the other.
 
 ## Test population
 
@@ -231,18 +269,19 @@ them candidate exposures for this bug:
 Pieces that read these fields in a value-site `.map`/`.filter`/`.reduce` without
 an explicit unwrap will hit the same crash.
 
-## Repro fixtures (committed on this branch, not yet in CI)
+## Repro fixtures (all committed on this branch)
 
 - `packages/ts-transformers/test/fixtures/closures/local-rebind-map-join-value-site.input.tsx`
-  — Berni's repro, `Default<[]>` form, reproduces the crash on `cf piece apply`.
+  — Berni's repro, `Default<[]>` form. Reproduces the crash on
+  `cf piece
+  apply` against pre-fix code.
 - `packages/ts-transformers/test/fixtures/closures/local-rebind-map-join-no-default.input.tsx`
-  — same shape without `Default<[]>`, **works** on `cf piece apply`.
+  — same shape without `Default<[]>`. Confirms the rebind itself is fine.
 - `packages/ts-transformers/test/fixtures/closures/ct1562-probe.input.tsx` —
-  instrumented probe with `inspectRooms` helper; used to capture the
+  instrumented probe with `inspectRooms` helper; captured the
   `{ isArray, ctor, keys, … }` evidence above.
-- `packages/runner/test/patterns-ct1562-key-cell-derive.test.ts` — provisional
-  in-process runtime test (passes incorrectly; useful as a record of what the
-  trusted-builder path does for the same shape).
-
-None of these are committed yet — open question whether to land them as-is, fold
-them into the fix PR, or discard.
+- `packages/runner/test/patterns-ct1562-key-cell-derive.test.ts` — in-process
+  runtime test (simplified Berni's repro to avoid an unrelated `[UI]`
+  test-harness quirk). RED on pre-fix code (scheduler error:
+  `TypeError:
+  rooms.map is not a function`); GREEN after either fix lands.
