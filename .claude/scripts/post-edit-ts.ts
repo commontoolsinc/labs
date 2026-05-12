@@ -4,8 +4,13 @@
  *
  * Claude Code Post-Tool hook for Write|Edit.
  * - Runs `deno check <file>` on TypeScript files after editing.
- * - Runs `deno fmt <file>` to auto-format.
  * - Reports type errors via exit code 2.
+ *
+ * Formatting (`deno fmt`) is deliberately NOT run here — it ran on every
+ * Edit/Write and produced noisy "file was modified by a formatter"
+ * notifications that interrupt iteration. Formatting now lives in the
+ * git pre-commit hook (`.githooks/pre-commit`); install via
+ * `scripts/install-git-hooks.sh`.
  */
 
 const rawInput = await new Response(Deno.stdin.readable).text();
@@ -47,13 +52,5 @@ if (!checkResult.success) {
   // Exit 0 to allow incremental changes - errors are shown but don't block
   Deno.exit(0);
 }
-
-// Auto-format the file (non-blocking - we don't fail on format issues)
-const fmt = new Deno.Command("deno", {
-  args: ["fmt", filePath],
-  stdout: "piped",
-  stderr: "piped",
-});
-await fmt.output();
 
 Deno.exit(0);
