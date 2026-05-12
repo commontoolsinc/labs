@@ -221,9 +221,18 @@ export function bigintFromMinimalTwosComplement(bytes: Uint8Array): bigint {
       result = (result << 8n) | BigInt(bytes[i]!);
     }
 
+    // Note: Over ~1024 bytes, benchmarks indicate there is a win to be had by
+    // using a `DataView` to extract `uint64`s from `bytes`.
     for (let i = partials; i < bytes.length; i += 8) {
-      dv64Bytes.set(bytes.subarray(i, i + 8));
-      result = (result << 64n) | dv64View.getBigUint64(0, false);
+      const subResult1 = BigInt(
+        (bytes[i] << 24) | (bytes[i + 1] << 16) | (bytes[i + 2] << 8) |
+          bytes[i + 3],
+      ) & 0xffff_ffffn;
+      const subResult2 = BigInt(
+        (bytes[i + 4] << 24) | (bytes[i + 5] << 16) | (bytes[i + 6] << 8) |
+          bytes[i + 7],
+      ) & 0xffff_ffffn;
+      result = (result << 64n) | (subResult1 << 32n) | subResult2;
     }
 
     return result;
@@ -240,9 +249,15 @@ export function bigintFromMinimalTwosComplement(bytes: Uint8Array): bigint {
     }
 
     for (let i = partials; i < bytes.length; i += 8) {
-      dv64Bytes.set(bytes.subarray(i, i + 8));
-      result = (result << 64n) |
-        (0xffff_ffff_ffff_ffffn ^ dv64View.getBigUint64(0, false));
+      const subResult1 = BigInt(
+        ~((bytes[i] << 24) | (bytes[i + 1] << 16) | (bytes[i + 2] << 8) |
+          bytes[i + 3]),
+      ) & 0xffff_ffffn;
+      const subResult2 = BigInt(
+        ~((bytes[i + 4] << 24) | (bytes[i + 5] << 16) | (bytes[i + 6] << 8) |
+          bytes[i + 7]),
+      ) & 0xffff_ffffn;
+      result = (result << 64n) | (subResult1 << 32n) | subResult2;
     }
 
     return ~result;
