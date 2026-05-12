@@ -95,16 +95,6 @@ function convertSmallValue(value: bigint, negative: boolean) {
 }
 
 /**
- * Cached result of `0n` as a `Uint8Array`.
- */
-const ZERO_BYTES = new Uint8Array([0x00]);
-
-/**
- * Cached result of `-1n` as a `Uint8Array`.
- */
-const NEGATIVE_ONE_BYTES = new Uint8Array([0xFF]);
-
-/**
  * Converts a bigint to its minimal two's-complement big-endian byte
  * representation. The encoding is the same one used by the hash
  * byte-level spec (Section 3.7).
@@ -118,8 +108,10 @@ const NEGATIVE_ONE_BYTES = new Uint8Array([0xFF]);
  */
 export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
   if (value >= 0n) {
-    if (value === 0n) {
-      return ZERO_BYTES.slice();
+    if (value <= 127n) {
+      const result = new Uint8Array(1);
+      result[0] = Number(value);
+      return result;
     } else if (value <= 0x7fff_ffff_ffff_ffffn) {
       return convertSmallValue(value, false);
     }
@@ -139,8 +131,10 @@ export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
 
     return bytes;
   } else {
-    if (value === -1n) {
-      return NEGATIVE_ONE_BYTES.slice();
+    if (value >= -128n) {
+      const result = new Uint8Array(1);
+      result[0] = Number(value);
+      return result;
     } else if (value >= -0x8000_0000_0000_0000n) {
       return convertSmallValue(value, true);
     }
