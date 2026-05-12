@@ -576,93 +576,83 @@ describe("default-app flow test", () => {
     }
   });
 
-  it({
-    // Disabled while the push scheduler is still in use — this test
-    // exercises a race that's flaky under push semantics. Berni is
-    // investigating the underlying scheduler bug; the push scheduler is
-    // being removed in favor of pull soon, after which this can be
-    // re-enabled (and the body already calls setSchedulerPullMode(true)
-    // for that future state). Tracked alongside the move-to-pull work.
-    name: "should render every rapidly created notebook note",
-    ignore: true,
-    fn: async () => {
-      identity = await Identity.generate({ implementation: "noble" });
-      const notebookSpaceName = globalThis.crypto.randomUUID();
+  it("should render every rapidly created notebook note", async () => {
+    identity = await Identity.generate({ implementation: "noble" });
+    const notebookSpaceName = globalThis.crypto.randomUUID();
 
-      const page = shell.page();
-      await shell.goto({
-        frontendUrl: FRONTEND_URL,
-        view: { spaceName: notebookSpaceName },
-        identity,
-      });
+    const page = shell.page();
+    await shell.goto({
+      frontendUrl: FRONTEND_URL,
+      view: { spaceName: notebookSpaceName },
+      identity,
+    });
 
-      console.log("Set scheduler mode: pull for notebook regression...");
-      await waitFor(async () => {
-        return await setSchedulerPullMode(page, true);
-      });
+    console.log("Set scheduler mode: pull for notebook regression...");
+    await waitFor(async () => {
+      return await setSchedulerPullMode(page, true);
+    });
 
+    await waitFor(async () => {
+      return !!(await clickButtonWithText(page, "Notes"));
+    });
+    await waitFor(async () => {
+      return !!(await clickButtonWithText(page, "New Notebook"));
+    });
+    try {
       await waitFor(async () => {
-        return !!(await clickButtonWithText(page, "Notes"));
+        const state = await collectNotebookRenderState(page);
+        return state.isNotebook;
       });
-      await waitFor(async () => {
-        return !!(await clickButtonWithText(page, "New Notebook"));
-      });
-      try {
-        await waitFor(async () => {
-          const state = await collectNotebookRenderState(page);
-          return state.isNotebook;
-        });
-      } catch (error) {
-        console.log(
-          "Notebook navigation diagnostics:",
-          JSON.stringify(await collectNavigationDiagnostics(page), null, 2),
-        );
-        throw error;
-      }
-
-      await waitFor(async () => {
-        return !!(await clickButtonWithTitle(page, "New Note"));
-      });
-      await waitFor(async () => {
-        return !!(await findButtonWithText(page, "Create Another"));
-      });
-
-      const noteCreates = 7;
-      for (let i = 0; i < noteCreates - 1; i++) {
-        assert(
-          await clickButtonWithText(page, "Create Another"),
-          `Expected Create Another click ${i + 1} to succeed`,
-        );
-      }
-      assert(
-        await clickButtonWithExactText(page, "Create"),
-        "Expected final Create click to succeed",
+    } catch (error) {
+      console.log(
+        "Notebook navigation diagnostics:",
+        JSON.stringify(await collectNavigationDiagnostics(page), null, 2),
       );
+      throw error;
+    }
 
-      try {
-        await waitFor(async () => {
-          const state = await collectNotebookRenderState(page);
-          return state.noteCount === noteCreates &&
-            state.renderedNoteChips === noteCreates;
-        });
-      } catch (_) {
-        // Keep the final assertions below so failures include diagnostics.
-      }
+    await waitFor(async () => {
+      return !!(await clickButtonWithTitle(page, "New Note"));
+    });
+    await waitFor(async () => {
+      return !!(await findButtonWithText(page, "Create Another"));
+    });
 
-      const summary = await collectNotebookRenderState(page);
-      if (
-        summary.noteCount !== noteCreates ||
-        summary.renderedNoteChips !== noteCreates
-      ) {
-        console.log(
-          "Notebook rapid create diagnostics:",
-          JSON.stringify(await collectNotebookDiagnostics(page), null, 2),
-        );
-      }
+    const noteCreates = 7;
+    for (let i = 0; i < noteCreates - 1; i++) {
+      assert(
+        await clickButtonWithText(page, "Create Another"),
+        `Expected Create Another click ${i + 1} to succeed`,
+      );
+    }
+    assert(
+      await clickButtonWithExactText(page, "Create"),
+      "Expected final Create click to succeed",
+    );
 
-      assertEquals(summary.noteCount, noteCreates);
-      assertEquals(summary.renderedNoteChips, noteCreates);
-    },
+    try {
+      await waitFor(async () => {
+        const state = await collectNotebookRenderState(page);
+        return state.noteCount === noteCreates &&
+          state.renderedNoteChips === noteCreates;
+      });
+    } catch (_) {
+      // Keep the final assertions below so failures include diagnostics.
+    }
+
+    const summary = await collectNotebookRenderState(page);
+    if (
+      summary.noteCount !== noteCreates ||
+      summary.renderedNoteChips !== noteCreates
+    ) {
+      console.log(
+        "Notebook rapid create diagnostics:",
+        JSON.stringify(await collectNotebookDiagnostics(page), null, 2),
+      );
+    }
+
+    assertEquals(summary.noteCount, noteCreates);
+    assertEquals(summary.renderedNoteChips, noteCreates);
   });
 });
 
