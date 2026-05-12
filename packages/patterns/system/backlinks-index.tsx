@@ -5,7 +5,6 @@ import {
   NAME,
   pattern,
   UI,
-  type VNode,
   Writable,
 } from "commonfabric";
 
@@ -126,29 +125,26 @@ type Entry = {
   backlinks: any[];
 };
 
-/** Sub-pattern to render a single entry row with its backlinks. */
-const EntryRow = pattern<Entry, { [UI]: VNode }>(({ piece, backlinks }) => {
-  return {
-    [UI]: (
-      <cf-card>
-        <cf-vstack gap="1">
-          <cf-cell-link $cell={piece} />
-          <cf-hstack gap="2" style={{ paddingLeft: "8px", flexWrap: "wrap" }}>
-            {backlinks.map((link) => (
-              <cf-cell-link
-                $cell={link}
-                style={{
-                  fontSize: "12px",
-                  color: "var(--cf-color-text-secondary)",
-                }}
-              />
-            ))}
-          </cf-hstack>
-        </cf-vstack>
-      </cf-card>
-    ),
-  };
-});
+function renderEntryRow({ piece, backlinks }: Entry) {
+  return (
+    <cf-card>
+      <cf-vstack gap="1">
+        <cf-cell-link $cell={piece} />
+        <cf-hstack gap="2" style={{ paddingLeft: "8px", flexWrap: "wrap" }}>
+          {backlinks.map((link) => (
+            <cf-cell-link
+              $cell={link}
+              style={{
+                fontSize: "12px",
+                color: "var(--cf-color-text-secondary)",
+              }}
+            />
+          ))}
+        </cf-hstack>
+      </cf-vstack>
+    </cf-card>
+  );
+}
 
 const BacklinksIndex = pattern<Input, Output>(({ allPieces }) => {
   computeIndex({ allPieces } as { allPieces: WritableBacklinks[] });
@@ -200,14 +196,7 @@ const BacklinksIndex = pattern<Input, Output>(({ allPieces }) => {
             {filteredCount} of {totalCount} pieces
           </span>
 
-          {filtered.map((entry) => {
-            const row = EntryRow({
-              piece: entry.piece,
-              name: entry.name,
-              backlinks: entry.backlinks,
-            });
-            return row[UI];
-          })}
+          {filtered.map((entry) => renderEntryRow(entry))}
         </cf-vstack>
       </cf-screen>
     ),
