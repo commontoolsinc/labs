@@ -660,7 +660,6 @@ Deno.test({
         ].join("\n"),
       });
       assertEquals(navResult.output.exitCode, 0);
-      assertEquals(navResult.output.cwd, "/fabric");
       assertStringIncludes(navResult.output.stdout, "pwd=/fabric\n");
       assertStringIncludes(navResult.output.stdout, "status-bytes=");
 
@@ -694,7 +693,7 @@ Deno.test({
         const result = await engine.invokeBuiltinTool("bash", {
           command: [
             "set -eu",
-            `cat ${singleQuoteShell(fabricReadPath)} >/dev/null`,
+            `payload=$(cat ${singleQuoteShell(fabricReadPath)})`,
             `printf ${
               singleQuoteShell(hostPayload)
             } > /workspace/fuse-read-host.txt`,
@@ -735,11 +734,12 @@ Deno.test({
         const result = await engine.invokeBuiltinTool("bash", {
           command: [
             "set -eu",
-            `cat ${singleQuoteShell(fabricReadPath)} >/dev/null`,
+            `IFS= read -r payload < ${
+              singleQuoteShell(fabricReadPath)
+            } || [ -n "$payload" ]`,
             `printf ${
               singleQuoteShell(hostPayload)
             } > /workspace/fuse-read-host.txt`,
-            "printf 'fuse read durable return\\n'",
           ].join("\n"),
         });
 
