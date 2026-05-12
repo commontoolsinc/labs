@@ -73,7 +73,38 @@ function hexStringFromPositiveValue(value: bigint): string {
  * Helper for `bigintToMinimalTwosComplement()`, which converts a non-zero and
  * non-`-1` value that fits into 64 bits.
  */
-function convertSmallValue(value: bigint, negative: boolean) {
+function convertSmallValue(value: bigint, negative: boolean): Uint8Array {
+  if (!negative && (value <= 0x7fff_ffffn)) {
+    const num = Number(value);
+    if (num <= 0x7fff) {
+      if (num <= 0x7f) {
+        const result = new Uint8Array(1);
+        result[0] = num;
+        return result;
+      } else {
+        const result = new Uint8Array(2);
+        result[0] = num >> 8;
+        result[1] = num;
+        return result;
+      }
+    } else {
+      if (num <= 0x7f_ffff) {
+        const result = new Uint8Array(3);
+        result[0] = num >> 16;
+        result[1] = num >> 8;
+        result[2] = num;
+        return result;
+      } else {
+        const result = new Uint8Array(4);
+        result[0] = num >> 24;
+        result[1] = num >> 16;
+        result[2] = num >> 8;
+        result[3] = num;
+        return result;
+      }
+    }
+  }
+
   const skipByte = negative ? 0xff : 0x00;
   const signBit = skipByte & 0x80;
 
@@ -108,11 +139,7 @@ function convertSmallValue(value: bigint, negative: boolean) {
  */
 export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
   if (value >= 0n) {
-    if (value <= 127n) {
-      const result = new Uint8Array(1);
-      result[0] = Number(value);
-      return result;
-    } else if (value <= 0x7fff_ffff_ffff_ffffn) {
+    if (value <= 0x7fff_ffff_ffff_ffffn) {
       return convertSmallValue(value, false);
     }
 
