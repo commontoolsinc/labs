@@ -5,6 +5,7 @@ import {
   type NormalizedDataFlow,
   setParentPointers,
 } from "../../ast/mod.ts";
+import { isModuleScopedDeclaration } from "../../ast/scope-analysis.ts";
 import { TransformationContext } from "../../core/mod.ts";
 import { createDeriveCall } from "../builtins/derive.ts";
 
@@ -109,7 +110,11 @@ export function createReactiveWrapperForExpression(
   }
 
   if (options.preferDeriveWrapper) {
-    const refs = wrapperDataFlows.map((dataFlow) => dataFlow.expression);
+    const refs = unionWithEnclosingScopeFreeIdentifiers(
+      wrapperDataFlows.map((dataFlow) => dataFlow.expression),
+      expression,
+      context.checker,
+    );
     return createDeriveCall(expression, refs, {
       factory: context.factory,
       tsContext: context.tsContext,
@@ -168,4 +173,149 @@ export function createReactiveWrapperForExpression(
   setParentPointers(computedCall, expression.parent);
 
   return computedCall;
+}
+
+/**
+ * Union the reactive dataflow refs with any free identifiers in `expression`
+ * whose declarations live in an enclosing (non-module, non-expression-local)
+ * function scope. This is what makes plain-JS captures (e.g. `const suffix =
+ * "!"` declared in the enclosing pattern/map callback) become explicit
+ * derive inputs instead of flowing through lexical closure.
+ *
+ * The dataflow analyzer only surfaces reactive captures (Cell/OpaqueRef).
+ * Plain-JS values declared in enclosing scope are invisible to it, so they
+ * default to lexical closure when `createDeriveCall` emits the callback.
+ * That breaks the self-contained-callback contract that SES sandboxing and
+ * module-scope hoisting rely on. Including them here gives them schema
+ * coverage and explicit transport.
+ *
+ * Identifiers that resolve to module scope (imports, top-level consts) are
+ * NOT added — module bindings are stable and hoistable. Identifiers
+ * declared *inside* a nested function within `expression` itself (e.g. the
+ * parameter of a `.filter((x) => ...)` callback nested in the expression)
+ * are NOT added — they're local, not enclosing.
+ */
+function unionWithEnclosingScopeFreeIdentifiers(
+  refs: readonly ts.Expression[],
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+): ts.Expression[] {
+  // Build a set of identifier names already represented by the dataflow refs
+  // so we don't add them again. We key by name rather than by symbol because
+  // dataflow refs are sometimes synthesized expressions whose root identifier
+  // doesn't carry a resolvable symbol on the post-transform AST. Within a
+  // single expression, TypeScript scoping makes name → binding unambiguous,
+  // so name-based dedup is safe here.
+  const alreadyCoveredNames = new Set<string>();
+  for (const ref of refs) {
+    const root = getRootIdentifier(ref);
+    if (root) alreadyCoveredNames.add(root.text);
+  }
+
+  const added: ts.Expression[] = [];
+  const addedNames = new Set<string>();
+
+  const visit = (node: ts.Node): void => {
+    // Don't descend into nested functions — their parameters and locals
+    // are not enclosing-scope captures of the expression.
+    if (node !== expression && ts.isFunctionLike(node)) {
+      return;
+    }
+
+    if (ts.isIdentifier(node) && isReferenceSite(node)) {
+      if (
+        !alreadyCoveredNames.has(node.text) && !addedNames.has(node.text)
+      ) {
+        const symbol = checker.getSymbolAtLocation(node);
+        if (symbol && isEnclosingScopeDeclaration(symbol)) {
+          addedNames.add(node.text);
+          added.push(node);
+        }
+      }
+    }
+
+    ts.forEachChild(node, visit);
+  };
+
+  visit(expression);
+
+  return [...refs, ...added];
+}
+
+function getRootIdentifier(expr: ts.Expression): ts.Identifier | undefined {
+  let current: ts.Expression = expr;
+  while (
+    ts.isPropertyAccessExpression(current) ||
+    ts.isElementAccessExpression(current) ||
+    ts.isCallExpression(current) ||
+    ts.isParenthesizedExpression(current) ||
+    ts.isAsExpression(current) ||
+    ts.isNonNullExpression(current)
+  ) {
+    if (ts.isCallExpression(current)) {
+      current = current.expression;
+    } else if (ts.isPropertyAccessExpression(current)) {
+      current = current.expression;
+    } else if (ts.isElementAccessExpression(current)) {
+      current = current.expression;
+    } else {
+      current = (current as
+        | ts.ParenthesizedExpression
+        | ts.AsExpression
+        | ts.NonNullExpression).expression;
+    }
+  }
+  return ts.isIdentifier(current) ? current : undefined;
+}
+
+function isReferenceSite(node: ts.Identifier): boolean {
+  const parent = node.parent;
+  if (!parent) return false;
+  // Property name in a property access — not a free reference.
+  if (ts.isPropertyAccessExpression(parent) && parent.name === node) {
+    return false;
+  }
+  // Property key in an object literal — not a free reference.
+  if (ts.isPropertyAssignment(parent) && parent.name === node) return false;
+  // Property name in a binding pattern (e.g. `{ propertyName: bindingName }`)
+  // — not a free reference.
+  if (ts.isBindingElement(parent) && parent.propertyName === node) return false;
+  // JSX tag names look like identifiers but resolve to components/elements.
+  if (
+    ts.isJsxOpeningElement(parent) ||
+    ts.isJsxClosingElement(parent) ||
+    ts.isJsxSelfClosingElement(parent)
+  ) return false;
+  return true;
+}
+
+function isEnclosingScopeDeclaration(symbol: ts.Symbol): boolean {
+  const declarations = symbol.getDeclarations();
+  if (!declarations || declarations.length === 0) return false;
+  // Reject if ANY declaration is module-scoped or an import — those don't
+  // need to be passed as derive inputs. They're stable and hoistable.
+  for (const decl of declarations) {
+    if (
+      ts.isImportSpecifier(decl) ||
+      ts.isImportClause(decl) ||
+      ts.isNamespaceImport(decl) ||
+      isModuleScopedDeclaration(decl)
+    ) {
+      return false;
+    }
+    if (ts.isTypeParameterDeclaration(decl)) {
+      return false;
+    }
+  }
+  // Accept only if SOME declaration is inside a function-like ancestor
+  // (i.e., truly enclosing-scope, not floating somewhere weird).
+  return declarations.some((decl) => {
+    let current: ts.Node | undefined = decl.parent;
+    while (current) {
+      if (ts.isFunctionLike(current)) return true;
+      if (ts.isSourceFile(current)) return false;
+      current = current.parent;
+    }
+    return false;
+  });
 }

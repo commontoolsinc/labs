@@ -1,10 +1,13 @@
 # Plain-JS captures in derive callbacks — investigation
 
-**Status:** investigation complete; fix in progress. The hoist-time diagnostic
-introduced in PR #3550 does NOT detect any of the four known plain-JS-capture
-bugs because it runs at the wrong pipeline stage — before the expression-site
-lowering transformers synthesize the inner `__cfHelpers.derive(...)` calls that
-are the actual locus of the bug.
+**Status:** fixed. The hoist-time diagnostic introduced in PR #3550 does NOT
+detect any of the four known plain-JS-capture bugs because it runs at the wrong
+pipeline stage. The fix lives in `createReactiveWrapperForExpression` (the wrap
+path used by `expression-site-lowering.ts`): we now union the expression's
+enclosing-scope free identifiers with the analyzer's reactive dataflows before
+passing refs to `createDeriveCall`. All four known captures (`multiplier`,
+`suffix`, `prefix`, `n`) are now explicit derive inputs and the probe reports 0
+hits across 342 fixtures.
 
 ## The bug class
 
@@ -85,33 +88,46 @@ in framing. The framing was "the hoist diagnostic catches this, just needs the
 false positives cleaned up and to be promoted to warning." Reality is "the hoist
 diagnostic never sees this, and a different pass would have to catch it."
 
-Two possible directions:
+### Fix (landed): synthesis-time wrap-path change
 
-### Direction A — Fix at synthesis time (recommended)
+`createReactiveWrapperForExpression` in
+`packages/ts-transformers/src/transformers/expression-rewrite/rewrite-helpers.ts`
+now unions the analyzer's reactive dataflows with any free identifiers in the
+expression whose declarations live in an enclosing (non-module,
+non-expression-local) function scope. The unioned set becomes the explicit refs
+passed to `createDeriveCall`, which uses its existing
+`captureTree`/`fallbackEntries` machinery to fold them into the derive's inputs
+and schema.
 
-The expression-site lowering transformers
-(`PatternOwnedExpressionSiteLoweringTransformer`,
-`HelperOwnedExpressionSiteLoweringTransformer`) call something like
-`createReactiveWrapperForExpression` (or a sibling) when they synthesize an
-inner `__cfHelpers.derive(...)` call. That helper is responsible for choosing
-which identifiers to wire into the derive's `inputs` argument. Today it only
-wires the _reactive_ free variables (identified by the dataflow analyzer); it
-silently leaves plain-JS free variables to flow through lexical closure.
+The walker (`unionWithEnclosingScopeFreeIdentifiers`):
 
-Fix: at this synthesis site, union the plain-JS free variables of the expression
-with the reactive dataflows so they become explicit refs in the synthesized
-`createDeriveCall(...)`. Same wrap-path fix PR #3550 sketched.
+- Skips identifiers already covered by reactive dataflows (name-based dedup;
+  symbol-based dedup is unreliable because dataflow refs are sometimes
+  synthesized expressions whose root identifier doesn't carry a resolvable
+  symbol on the post-transform AST).
+- Skips identifiers whose declarations are at module scope (imports, top-level
+  consts) — those are stable across hoist boundaries.
+- Skips type parameters.
+- Skips identifiers declared inside nested functions within the expression
+  itself (e.g. a `.filter((x) => ...)` parameter nested in the expression body)
+  — those are local, not enclosing.
+- Does not descend into nested function-like nodes within the expression when
+  walking — same rationale.
+- Skips property names in property accesses, property keys in object literals,
+  propertyName in binding patterns, and JSX tag names — these are not free
+  references to bindings.
 
-### Direction B — Add a post-synthesis hoist-style check
+This was a one-function change with no broader pipeline restructuring. The probe
+(`probe-derive-callback-captures.ts`) now reports 0 hits across 342 fixtures,
+down from 4 hits across 3 fixtures.
 
-Run a second pass after lowering that walks every synthesized
-`__cfHelpers.derive(...)` and checks the same `canHoist` invariant on its
-callback. This is what `test/diagnostics/probe-derive-callback-captures.ts` does
-today (offline, on the printed output). It could be promoted into the pipeline
-as a default-warning transformer.
+### Defense-in-depth (future work)
 
-A is the actual fix; B is the defense-in-depth detector. They aren't mutually
-exclusive; B is useful regardless of A's implementation.
+A post-synthesis pass that walks every synthesized `__cfHelpers.derive(...)` and
+checks the self-contained-callback invariant — equivalent to running the
+existing probe inside the pipeline as a default-warning. Not required for
+correctness now that the synthesis-time fix is in, but useful as a regression
+detector. Tracked separately.
 
 ## Pipeline cleanup observation
 
