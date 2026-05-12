@@ -241,30 +241,33 @@ export function bigintFromMinimalTwosComplement(bytes: Uint8Array): bigint {
   // Count of partial-`int64` bytes.
   const partials = bytes.length & 7;
 
+  let result;
+
+  // This calculates the high-order "partial" `int64`, if any. We waste a little
+  // bit of work in cases where the partial count isn't a multiple of `4`, but
+  // it's worth it for the simplicity (and is at worst negligible in time cost).
+  if (partials === 0) {
+    result = negative ? -1n : 0n;
+  } else if (partials <= 4) {
+    const partial = BigInt(
+      (bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3],
+    );
+    result = partial >> BigInt(32 - (partials * 8));
+  } else {
+    const partial1 = BigInt(
+      (bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3],
+    );
+    const partial2 = BigInt(
+      (bytes[4] << 24) | (bytes[5] << 16) | (bytes[6] << 8) | bytes[7],
+    ) & 0xffff_ffffn;
+    result = ((partial1 << 32n) | partial2) >> BigInt(64 - (partials * 8));
+  }
+
   // Possibly surprising test here: Benchmarks indicate that V8 (and assumed to
   // be similar in other JS VMs) has internal optimizations for left-shift on
   // large positive numbers but _not_ large negative numbers. The cross-over
   // point of this code was measured to be at 32 bytes for negative numbers.
   if (!negative || (bytes.length <= 32)) {
-    let result;
-
-    if (partials === 0) {
-      result = negative ? -1n : 0n;
-    } else if (partials <= 4) {
-      const partial = BigInt(
-        (bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3],
-      );
-      result = partial >> BigInt(32 - (partials * 8));
-    } else {
-      const partial1 = BigInt(
-        (bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3],
-      );
-      const partial2 = BigInt(
-        (bytes[4] << 24) | (bytes[5] << 16) | (bytes[6] << 8) | bytes[7],
-      ) & 0xffff_ffffn;
-      result = ((partial1 << 32n) | partial2) >> BigInt(64 - (partials * 8));
-    }
-
     // Note: Over ~1024 bytes, benchmarks indicate there is a win to be had by
     // using a `DataView` to extract `uint64`s from `bytes`.
     for (let i = partials; i < bytes.length; i += 8) {
@@ -284,13 +287,9 @@ export function bigintFromMinimalTwosComplement(bytes: Uint8Array): bigint {
     // Negative and large enough to feel the pain of an unoptimized `bigint`
     // left shift. This uses uses a similar ones-complement trick as is done in
     // the encoder function, above, so that we operate on positive `bigint`s
-    // within the loops.
+    // within the loop.
 
-    let result = 0n;
-
-    for (let i = 0; i < partials; i++) {
-      result = (result << 8n) | BigInt(0xff ^ bytes[i]!);
-    }
+    result = ~result; // Because the `partials` calc made it negative.
 
     for (let i = partials; i < bytes.length; i += 8) {
       const subResult1 = BigInt(
