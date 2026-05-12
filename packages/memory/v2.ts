@@ -3,7 +3,6 @@ import {
   getDataModelConfig,
 } from "@commonfabric/data-model/fabric-value";
 import {
-  getJsonEncodingConfig,
   jsonFromValue,
   valueFromJson,
 } from "@commonfabric/data-model/json-encoding";
@@ -141,7 +140,6 @@ export interface SessionOpenResult {
 
 export interface MemoryProtocolFlags {
   richStorableValues: boolean;
-  unifiedJsonEncoding: boolean;
 }
 
 export interface HelloMessage {
@@ -345,15 +343,12 @@ const memoryReconstructionContext: ReconstructionContext = {
 
 export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   richStorableValues: getDataModelConfig(),
-  unifiedJsonEncoding: getJsonEncodingConfig(),
 });
 
 export const sameMemoryProtocolFlags = (
   left: MemoryProtocolFlags,
   right: MemoryProtocolFlags,
-): boolean =>
-  left.richStorableValues === right.richStorableValues &&
-  left.unifiedJsonEncoding === right.unifiedJsonEncoding;
+): boolean => left.richStorableValues === right.richStorableValues;
 
 export const isMemoryProtocolFlags = (
   value: unknown,
@@ -362,8 +357,7 @@ export const isMemoryProtocolFlags = (
     return false;
   }
 
-  return typeof value.richStorableValues === "boolean" &&
-    typeof value.unifiedJsonEncoding === "boolean";
+  return typeof value.richStorableValues === "boolean";
 };
 
 export const encodeMemoryBoundary = (value: unknown): string =>
@@ -377,10 +371,9 @@ export const decodeMemoryBoundary = <Value = FabricValue>(
     memoryReconstructionContext,
   ) as FabricValue;
 
-  if (!getJsonEncodingConfig()) {
-    return decoded as Value;
-  }
-
+  // TODO(danfuzz): It shouldn't be necessary to thaw values coming out of the
+  // JSON decoder. See what happens when this gets replaced with just
+  // `return value`.
   return cloneIfNecessary(
     decoded,
     { frozen: false, deep: true, force: true },

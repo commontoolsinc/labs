@@ -1,3 +1,4 @@
+import { FabricHash } from "@commonfabric/data-model/fabric-hash";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { isRecord } from "@commonfabric/utils/types";
@@ -7,12 +8,10 @@ import type { URI } from "./sigil-types.ts";
  * Convert an entity ID to URI format with "of:" prefix
  */
 export function toURI(value: unknown): URI {
-  if (isRecord(value)) {
-    // Converts EntityId to JSON
-    const parsed = JSON.parse(JSON.stringify(value)) as { "/": string };
-
-    // Handle EntityId object
-    if (typeof parsed["/"] === "string") return `of:${parsed["/"]}`;
+  if (value instanceof FabricHash) {
+    return `of:${value}`;
+  } else if (isRecord(value) && typeof value["/"] === "string") {
+    return `of:${value["/"]}`;
   } else if (typeof value === "string") {
     // Already has prefix with colon
     if (value.includes(":")) {

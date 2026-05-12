@@ -480,6 +480,90 @@ export default pattern(() => {
 );
 
 Deno.test(
+  "Pipeline regression: mapped pattern factory calls with element fields stay structural",
+  async () => {
+    const source = `import { UI, pattern, type VNode } from "commonfabric";
+
+type Entry = {
+  piece: any;
+  name: string;
+  backlinks: any[];
+};
+
+const EntryRow = pattern<Entry, { [UI]: VNode }>(({ piece, backlinks }) => ({
+  [UI]: <div>{piece}{backlinks.length}</div>,
+}));
+
+export default pattern<{ entries: Entry[] }, { [UI]: VNode }>(({ entries }) => ({
+  [UI]: (
+    <div>
+      {entries.map((entry) => {
+        const row = EntryRow({
+          piece: entry.piece,
+          name: entry.name,
+          backlinks: entry.backlinks,
+        });
+        return row[UI];
+      })}
+    </div>
+  ),
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+
+    assertStringIncludes(output, "const row = EntryRow({");
+    assertStringIncludes(output, 'piece: entry.key("piece")');
+    assertStringIncludes(output, 'name: entry.key("name")');
+    assertStringIncludes(output, 'backlinks: entry.key("backlinks")');
+    assert(
+      !/__cfHelpers\.derive\([\s\S]{0,500}EntryRow: EntryRow[\s\S]{0,500}EntryRow\(\{/
+        .test(
+          output,
+        ),
+      "expected mapped pattern factory invocation to stay structural instead of being wrapped in derive",
+    );
+  },
+);
+
+Deno.test(
+  "Pipeline regression: module-scope sub-pattern calls in maps stay structural",
+  async () => {
+    const source = `import { pattern, UI, type VNode } from "commonfabric";
+
+type Entry = { value: number };
+
+const EntryRow = pattern<Entry, { [UI]: VNode }>(({ value }) => ({
+  [UI]: <span>{value}</span>,
+}));
+
+export default pattern<{ entries: Entry[] }, { [UI]: VNode }>(({ entries }) => ({
+  [UI]: (
+    <div>
+      {entries.map((entry) => {
+        const row = EntryRow({ value: entry.value });
+        return row[UI];
+      })}
+    </div>
+  ),
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+
+    assertStringIncludes(output, "const row = EntryRow({");
+    assert(
+      !output.includes("EntryRow: EntryRow"),
+      "expected module-scope pattern factory to stay in lexical scope instead of being captured as derive data",
+    );
+  },
+);
+
+Deno.test(
   "Pipeline regression: opaque-returning factory helpers with local cells stay structural",
   async () => {
     const source = `import { pattern, Writable } from "commonfabric";

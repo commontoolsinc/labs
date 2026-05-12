@@ -2688,11 +2688,29 @@ async function collectNotebookDiagnostics(
       id: string;
       preview?: string;
       isPending: boolean;
+      isDemanded?: boolean;
+      isDebouncedWaiting?: boolean;
+      isConditionallyScheduled?: boolean;
+      hasActiveDebounceTimer?: boolean;
+      nextDebounceRunInMs?: number;
+      nextEligibleRunInMs?: number;
       reads: string[];
       writes: string[];
       outgoing: Array<{ to: string; cells?: string[]; edgeType?: string }>;
     }>;
-    pendingEffects?: Array<{ id: string; preview?: string }>;
+    effectState?: Array<{
+      id: string;
+      preview?: string;
+      isPending: boolean;
+      isDirty: boolean;
+      isPullDemandRoot?: boolean;
+      isConditionallyScheduled?: boolean;
+      hasActiveDebounceTimer?: boolean;
+      debounceMs?: number;
+      nextEligibleRunInMs?: number;
+      reads: string[];
+      writes: string[];
+    }>;
     actionTraceTail?: Array<{ id: string; type: string; writes: string[] }>;
   }
 > {
@@ -2714,6 +2732,12 @@ async function collectNotebookDiagnostics(
         id: node.id,
         preview: node.preview,
         isPending: node.isPending,
+        isDemanded: node.isDemanded,
+        isDebouncedWaiting: node.isDebouncedWaiting,
+        isConditionallyScheduled: node.isConditionallyScheduled,
+        hasActiveDebounceTimer: node.hasActiveDebounceTimer,
+        nextDebounceRunInMs: node.nextDebounceRunInMs,
+        nextEligibleRunInMs: node.nextEligibleRunInMs,
         reads: (node.reads ?? []).slice(0, 12),
         writes: (node.writes ?? []).slice(0, 8),
         outgoing: (edgesByFrom.get(node.id) ?? [])
@@ -2724,10 +2748,29 @@ async function collectNotebookDiagnostics(
             edgeType: edge.edgeType,
           })),
       }));
-    const pendingEffects = (graph?.nodes ?? [])
-      .filter((node: any) => node.type === "effect" && node.isPending)
+    const effectState = (graph?.nodes ?? [])
+      .filter((node: any) =>
+        node.type === "effect" &&
+        (node.isPending ||
+          node.isDirty ||
+          node.isConditionallyScheduled ||
+          node.hasActiveDebounceTimer ||
+          node.debounceMs !== undefined)
+      )
       .slice(0, 20)
-      .map((node: any) => ({ id: node.id, preview: node.preview }));
+      .map((node: any) => ({
+        id: node.id,
+        preview: node.preview,
+        isPending: node.isPending,
+        isDirty: node.isDirty,
+        isPullDemandRoot: node.isPullDemandRoot,
+        isConditionallyScheduled: node.isConditionallyScheduled,
+        hasActiveDebounceTimer: node.hasActiveDebounceTimer,
+        debounceMs: node.debounceMs,
+        nextEligibleRunInMs: node.nextEligibleRunInMs,
+        reads: (node.reads ?? []).slice(0, 8),
+        writes: (node.writes ?? []).slice(0, 6),
+      }));
     const actionTraceTail = (actionTrace ?? []).slice(-20).map((
       entry: any,
     ) => ({
@@ -2740,7 +2783,7 @@ async function collectNotebookDiagnostics(
 
     return {
       dirtyComputations,
-      pendingEffects,
+      effectState,
       actionTraceTail,
     };
   });

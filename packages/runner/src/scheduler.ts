@@ -2383,8 +2383,11 @@ export class Scheduler {
       );
 
       // Get timing controls
+      const now = performance.now();
       const debounceMs = this.actionDebounce.get(action);
       const throttleMs = this.actionThrottle.get(action);
+      const nextDebounceRunAt = this.getNextDebounceRunTime(action);
+      const nextEligibleRunAt = this.getNextEligibleRunTime(action);
 
       // Get pattern association
       const annotated = action as Partial<TelemetryAnnotations>;
@@ -2398,6 +2401,21 @@ export class Scheduler {
         stats: this.actionStats.get(id),
         isDirty: this.dirty.has(action),
         isPending: this.pending.has(action),
+        isDemanded: this.isDemandedPullComputation(action),
+        isLiveEffect: this.isLiveEffect(action),
+        isPullDemandRoot: this.isPullDemandRootEffect(action),
+        isConditionallyScheduled: this.conditionallyScheduledEffects.has(
+          action,
+        ),
+        isDebouncedWaiting: nextDebounceRunAt !== undefined &&
+          nextDebounceRunAt > now,
+        hasActiveDebounceTimer: this.debounceTimers.has(action),
+        nextDebounceRunInMs: nextDebounceRunAt !== undefined
+          ? Math.max(0, Math.round(nextDebounceRunAt - now))
+          : undefined,
+        nextEligibleRunInMs: nextEligibleRunAt !== undefined
+          ? Math.max(0, Math.round(nextEligibleRunAt - now))
+          : undefined,
         parentId,
         childCount: childCount && childCount > 0 ? childCount : undefined,
         preview: (action as Action & {
@@ -3047,6 +3065,18 @@ export class Scheduler {
       this.dependencies.has(action);
   }
 
+  private isPullDemandRootEffect(action: Action): boolean {
+    return this.pullMode &&
+      this.effects.has(action) &&
+      (this.getSchedulingWrites(action)?.length ?? 0) === 0;
+  }
+
+  private canAutomaticallyDebounce(action: Action): boolean {
+    if (this.noDebounce.get(action)) return false;
+    if (!this.effects.has(action)) return false;
+    return !this.isPullDemandRootEffect(action);
+  }
+
   private shouldRunFirstPullComputationInDemandContext(
     action: Action,
   ): boolean {
@@ -3570,12 +3600,10 @@ export class Scheduler {
    * Auto-debounce is enabled by default; use noDebounce to opt out.
    */
   private maybeAutoDebounce(action: Action): void {
-    // Check if action has opted out of auto-debounce
-    if (this.noDebounce.get(action)) return;
-
     // Auto-debouncing computations in push mode makes observable derived state
-    // lag behind writes. Keep auto-debounce for effects only.
-    if (!this.effects.has(action)) return;
+    // lag behind writes. Pull-mode demand roots are effects, but delaying them
+    // can leave a live renderer observing stale materialized data.
+    if (!this.canAutomaticallyDebounce(action)) return;
 
     // Check if already has a manual debounce set
     if (this.actionDebounce.has(action)) return;
@@ -4841,8 +4869,7 @@ export class Scheduler {
         } else {
           const activePullDemand = this.pullMode &&
             (this.computations.has(fn) ||
-              (this.effects.has(fn) &&
-                (this.getSchedulingWrites(fn)?.length ?? 0) === 0));
+              this.isPullDemandRootEffect(fn));
           if (activePullDemand) {
             this.activePullDemandActions.add(fn);
           }
@@ -4950,9 +4977,8 @@ export class Scheduler {
     if (this.pullMode && executeElapsed >= CYCLE_DEBOUNCE_THRESHOLD_MS) {
       for (const [action, runs] of this.runsThisExecute) {
         if (
-          this.effects.has(action) &&
-          runs >= CYCLE_DEBOUNCE_MIN_RUNS &&
-          !this.noDebounce.get(action)
+          this.canAutomaticallyDebounce(action) &&
+          runs >= CYCLE_DEBOUNCE_MIN_RUNS
         ) {
           // This action is cycling - apply adaptive debounce
           const adaptiveDelay = Math.round(
@@ -5377,9 +5403,7 @@ function getPieceMetadataFromFrame(frame?: Frame): {
   result.spellId = spellCell?.getAsNormalizedFullLink().id;
   const resultCell = source.get()?.resultRef;
   result.space = source.space;
-  result.pieceId = JSON.parse(
-    JSON.stringify(resultCell?.entityId ?? {}),
-  )["/"];
+  result.pieceId = resultCell?.entityId?.["/"];
   return result;
 }
 

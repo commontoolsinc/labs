@@ -593,6 +593,10 @@ export interface IStorageTransaction {
    * Calling commit on a transaction that has already completed (committed or
    * failed) returns the prior error or a {@link IStorageTransactionComplete}
    * error. Commit is NOT idempotent — it does not replay the original result.
+   *
+   * When this method returns, the changes will have been committed locally,
+   * but may not be visible to another runtime. When the returned promise
+   * resolves, the data is fully committed and available to other processes.
    */
   commit(): Promise<Result<Unit, CommitError>>;
 

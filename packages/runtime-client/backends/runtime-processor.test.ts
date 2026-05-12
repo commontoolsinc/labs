@@ -14,26 +14,19 @@ import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
 import { FabricBytes } from "@commonfabric/data-model/fabric-bytes";
 import { cellRefToSigilLink } from "./utils.ts";
 import {
-  getJsonEncodingConfig,
-  setJsonEncodingConfig,
-} from "@commonfabric/data-model/json-encoding";
-import {
   getDataModelConfig,
   setDataModelConfig,
 } from "@commonfabric/data-model/fabric-value";
 
-const withUnifiedJsonEncoding = async <T>(
+const withModernDataModel = async <T>(
   fn: () => Promise<T> | T,
 ): Promise<T> => {
-  const previousJson = getJsonEncodingConfig();
   const previousDataModel = getDataModelConfig();
   setDataModelConfig(true);
-  setJsonEncodingConfig(true);
   try {
     return await fn();
   } finally {
     setDataModelConfig(previousDataModel);
-    setJsonEncodingConfig(previousJson);
   }
 };
 
@@ -439,7 +432,7 @@ describe("RuntimeProcessor blob upload IPC", () => {
     } as unknown as RuntimeProcessor;
 
     try {
-      await withUnifiedJsonEncoding(async () => {
+      await withModernDataModel(async () => {
         await expect(
           RuntimeProcessor.prototype.handleUploadBlob.call(processor, {
             type: RequestType.UploadBlob,

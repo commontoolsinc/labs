@@ -8,6 +8,21 @@
  * except as needed for sign extension.
  */
 
+/**
+ * Shared 8-byte scratch buffer.
+ */
+const dv64Buf = new ArrayBuffer(8);
+
+/**
+ * `DataView` of `dv64buf`.
+ */
+const dv64View = new DataView(dv64Buf);
+
+/**
+ * `Uint8Array` view of `dv64buf`.
+ */
+const dv64Bytes = new Uint8Array(dv64Buf);
+
 // ---------------------------------------------------------------------------
 // `bigint` -> minimal two's-complement big-endian bytes
 // ---------------------------------------------------------------------------
@@ -55,24 +70,29 @@ function hexStringFromPositiveValue(value: bigint): string {
 }
 
 /**
- * Shared 8-byte scratch buffer for the DataView fast path. A single
- * `setBigUint64()` call writes all 8 bytes at once, avoiding hex string
- * processing for values that fit in 64 bits. Same shared-buffer pattern as
- * `f64Buf`/`f64View`/`f64Bytes` in `value-hash.ts`.
+ * Helper for `bigintToMinimalTwosComplement()`, which converts a non-zero and
+ * non-`-1` value that fits into 64 bits.
  */
-const dv64Buf = new ArrayBuffer(8);
-const dv64View = new DataView(dv64Buf);
-const dv64Bytes = new Uint8Array(dv64Buf);
+function convertSmallValue(value: bigint, negative: boolean) {
+  const skipByte = negative ? 0xff : 0x00;
+  const signBit = skipByte & 0x80;
 
-/**
- * Cached result of `0n` as a `Uint8Array`.
- */
-const ZERO_BYTES = new Uint8Array([0x00]);
+  dv64View.setBigInt64(0, value, false); // `false` means big-endian.
 
-/**
- * Cached result of `-1n` as a `Uint8Array`.
- */
-const NEGATIVE_ONE_BYTES = new Uint8Array([0xFF]);
+  // Note: Loop necessarily ends before running off the end of the array
+  // because by virtue of the caller's up-front check, there's definitely a
+  // non-skipped byte).
+  for (let i = 0; true; i++) {
+    const byte = dv64Bytes[i];
+    if (byte !== skipByte) {
+      // Adjust starting index backwards if the non-skipped byte would flip
+      // the sign of the result.
+      return ((byte & 0x80) === signBit)
+        ? dv64Bytes.slice(i)
+        : dv64Bytes.slice(i - 1);
+    }
+  }
+}
 
 /**
  * Converts a bigint to its minimal two's-complement big-endian byte
@@ -87,34 +107,13 @@ const NEGATIVE_ONE_BYTES = new Uint8Array([0xFF]);
  *   when the high bit would otherwise be clear (sign extension for negative).
  */
 export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
-  // Converts a value that fits into 64 bits.
-  const convertSmallValue = (negative: boolean) => {
-    dv64View.setBigInt64(0, value, false); // `false` means big-endian.
-
-    // Note: Loop necessarily ends before running off the end of the array
-    // because by virtue of the caller's up-front check, there's definitely a
-    // non-skipped byte).
-    const skipByte = negative ? 0xff : 0x00;
-    for (let i = 0; true; i++) {
-      const byte = dv64Bytes[i];
-      if (byte !== skipByte) {
-        // Adjust starting index backwards if the non-skipped byte would flip
-        // the sign of the result.
-        if (negative) {
-          if (byte <= 0x7f) i--;
-        } else {
-          if (byte >= 0x80) i--;
-        }
-        return dv64Bytes.slice(i);
-      }
-    }
-  };
-
   if (value >= 0n) {
-    if (value === 0n) {
-      return ZERO_BYTES.slice();
+    if (value <= 127n) {
+      const result = new Uint8Array(1);
+      result[0] = Number(value);
+      return result;
     } else if (value <= 0x7fff_ffff_ffff_ffffn) {
-      return convertSmallValue(false);
+      return convertSmallValue(value, false);
     }
 
     // Slow path for positive numbers: This stringifies and then parses back the
@@ -132,10 +131,12 @@ export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
 
     return bytes;
   } else {
-    if (value === -1n) {
-      return NEGATIVE_ONE_BYTES.slice();
+    if (value >= -128n) {
+      const result = new Uint8Array(1);
+      result[0] = Number(value);
+      return result;
     } else if (value >= -0x8000_0000_0000_0000n) {
-      return convertSmallValue(true);
+      return convertSmallValue(value, true);
     }
 
     // Slow path for negative numbers. See above for details. The extra twist
@@ -148,8 +149,8 @@ export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
     const bytes = new Uint8Array(hex.length >> 1);
 
     for (let i = 0; i < bytes.length; i++) {
-      // `0xff - value` to undo the ones-complement in `~value` above.
-      bytes[i] = 0xff - byteValueAt(hex, i * 2);
+      // `0xff ^ value` to undo the ones-complement in `~value` above.
+      bytes[i] = 0xff ^ byteValueAt(hex, i * 2);
     }
 
     return bytes;
@@ -165,32 +166,137 @@ export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
  * the corresponding bigint. Empty input throws.
  */
 export function bigintFromMinimalTwosComplement(bytes: Uint8Array): bigint {
-  if (bytes.length === 0) {
-    throw new Error("bigintFromMinimalTwosComplement: empty input");
+  switch (bytes.length) {
+    case 0: {
+      throw new Error("bigintFromMinimalTwosComplement: empty input");
+    }
+
+    case 1: {
+      // `(x << 24) >> 24` to sign extend. Similar below.
+      return BigInt((bytes[0] << 24) >> 24);
+    }
+
+    case 2: {
+      return BigInt(((bytes[0] << 24) | (bytes[1] << 16)) >> 16);
+    }
+
+    case 3: {
+      return BigInt(
+        ((bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8)) >> 8,
+      );
+    }
+
+    case 4: {
+      return BigInt(
+        (bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3],
+      );
+    }
+
+    case 5: {
+      const subResult1 = BigInt(
+        (bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3],
+      );
+      const subResult2 = BigInt(bytes[4]);
+      return (subResult1 << 8n) | subResult2;
+    }
+
+    case 6: {
+      const subResult1 = BigInt(
+        (bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3],
+      );
+      const subResult2 = BigInt((bytes[4] << 8) | bytes[5]);
+      return (subResult1 << 16n) | subResult2;
+    }
+
+    case 7: {
+      const subResult1 = BigInt(
+        (bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3],
+      );
+      const subResult2 = BigInt((bytes[4] << 16) | (bytes[5] << 8) | bytes[6]);
+      return (subResult1 << 24n) | subResult2;
+    }
+
+    case 8: {
+      const subResult1 = BigInt(
+        (bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3],
+      );
+      const subResult2 = BigInt(
+        (bytes[4] << 24) | (bytes[5] << 16) | (bytes[6] << 8) | bytes[7],
+      ) & 0xffff_ffffn;
+      return (subResult1 << 32n) | subResult2;
+    }
   }
+
+  // Slow path.
 
   // Determine sign from the high bit of the first byte.
   const negative = (bytes[0]! & 0x80) !== 0;
 
-  if (bytes.length <= 8) {
-    // Fast path for `bytes.length <= 8`.
-    dv64Bytes.fill(negative ? 0xff : 0);
-    dv64Bytes.set(bytes, 8 - bytes.length);
-    return dv64View.getBigInt64(0, false); // `false` means big-endian.
-  } else if (negative) {
-    // Slow path for negative values. This uses a similar ones-complement trick
-    // as is done in the encoder function, above.
-    let result = 0n;
-    for (let i = 0; i < bytes.length; i++) {
-      result = (result << 8n) | BigInt(0xff - bytes[i]!);
-    }
-    return ~result;
+  // Count of partial-`int64` bytes.
+  const partials = bytes.length & 7;
+
+  let result;
+
+  // This calculates the high-order "partial" `int64`, if any. We waste a little
+  // bit of work in cases where the partial count isn't a multiple of `4`, but
+  // it's worth it for the simplicity (and is at worst negligible in time cost).
+  if (partials === 0) {
+    result = negative ? -1n : 0n;
+  } else if (partials <= 4) {
+    const partial = BigInt(
+      (bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3],
+    );
+    result = partial >> BigInt(32 - (partials * 8));
   } else {
-    // Slow path for positive values.
-    let result = 0n;
-    for (let i = 0; i < bytes.length; i++) {
-      result = (result << 8n) | BigInt(bytes[i]!);
+    const partial1 = BigInt(
+      (bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3],
+    );
+    const partial2 = BigInt(
+      (bytes[4] << 24) | (bytes[5] << 16) | (bytes[6] << 8) | bytes[7],
+    ) & 0xffff_ffffn;
+    result = ((partial1 << 32n) | partial2) >> BigInt(64 - (partials * 8));
+  }
+
+  // Possibly surprising test here: Benchmarks indicate that V8 (and assumed to
+  // be similar in other JS VMs) has internal optimizations for left-shift on
+  // large positive numbers but _not_ large negative numbers. The cross-over
+  // point of this code was measured to be at 128 bytes for negative numbers.
+  if (!negative || (bytes.length <= 128)) {
+    // Note: Over ~1024 bytes, benchmarks indicate there is a win to be had by
+    // using a `DataView` to extract `uint64`s from `bytes`.
+    for (let i = partials; i < bytes.length; i += 8) {
+      const subResult1 = BigInt(
+        (bytes[i] << 24) | (bytes[i + 1] << 16) | (bytes[i + 2] << 8) |
+          bytes[i + 3],
+      ) & 0xffff_ffffn;
+      const subResult2 = BigInt(
+        (bytes[i + 4] << 24) | (bytes[i + 5] << 16) | (bytes[i + 6] << 8) |
+          bytes[i + 7],
+      ) & 0xffff_ffffn;
+      result = (result << 64n) | (subResult1 << 32n) | subResult2;
     }
+
     return result;
+  } else {
+    // Negative and large enough to feel the pain of an unoptimized `bigint`
+    // left shift. This uses uses a similar ones-complement trick as is done in
+    // the encoder function, above, so that we operate on positive `bigint`s
+    // within the loop.
+
+    result = ~result; // Because the `partials` calc made it negative.
+
+    for (let i = partials; i < bytes.length; i += 8) {
+      const subResult1 = BigInt(
+        ~((bytes[i] << 24) | (bytes[i + 1] << 16) | (bytes[i + 2] << 8) |
+          bytes[i + 3]),
+      ) & 0xffff_ffffn;
+      const subResult2 = BigInt(
+        ~((bytes[i + 4] << 24) | (bytes[i + 5] << 16) | (bytes[i + 6] << 8) |
+          bytes[i + 7]),
+      ) & 0xffff_ffffn;
+      result = (result << 64n) | (subResult1 << 32n) | subResult2;
+    }
+
+    return ~result;
   }
 }
