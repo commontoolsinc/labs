@@ -6,11 +6,6 @@ import {
   resetDataModelConfig,
   setDataModelConfig,
 } from "@commonfabric/data-model/fabric-value";
-import {
-  getJsonEncodingConfig,
-  resetJsonEncodingConfig,
-  setJsonEncodingConfig,
-} from "@commonfabric/data-model/json-encoding";
 import { parseClientMessage, Server, SessionRegistry } from "../v2/server.ts";
 import {
   encodeMemoryBoundary,
@@ -40,13 +35,11 @@ const tick = async () => {
   await new Promise((resolve) => setTimeout(resolve, 0));
 };
 
-const withUnifiedJsonEncoding = async <T>(
+const withModernDataModel = async <T>(
   fn: () => Promise<T> | T,
 ): Promise<T> => {
-  const previousJson = getJsonEncodingConfig();
   const previousDataModel = getDataModelConfig();
   setDataModelConfig(true);
-  setJsonEncodingConfig(true);
   try {
     return await fn();
   } finally {
@@ -54,11 +47,6 @@ const withUnifiedJsonEncoding = async <T>(
       setDataModelConfig(true);
     } else {
       resetDataModelConfig();
-    }
-    if (previousJson) {
-      setJsonEncodingConfig(true);
-    } else {
-      resetJsonEncodingConfig();
     }
   }
 };
@@ -245,7 +233,7 @@ Deno.test("memory v2 server direct document helpers round-trip values", async ()
   };
 
   try {
-    await withUnifiedJsonEncoding(async () => {
+    await withModernDataModel(async () => {
       await server.writeDocument(space, id, contents);
 
       assertEquals(await server.readDocument(space, id), {
