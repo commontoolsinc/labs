@@ -246,10 +246,23 @@ export function bigintFromMinimalTwosComplement(bytes: Uint8Array): bigint {
   // large positive numbers but _not_ large negative numbers. The cross-over
   // point of this code was measured to be at 32 bytes for negative numbers.
   if (!negative || (bytes.length <= 32)) {
-    let result = negative ? -1n : 0n;
+    let result;
 
-    for (let i = 0; i < partials; i++) {
-      result = (result << 8n) | BigInt(bytes[i]!);
+    if (partials === 0) {
+      result = negative ? -1n : 0n;
+    } else if (partials <= 4) {
+      const partial = BigInt(
+        (bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3],
+      );
+      result = partial >> BigInt(32 - (partials * 8));
+    } else {
+      const partial1 = BigInt(
+        (bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3],
+      );
+      const partial2 = BigInt(
+        (bytes[4] << 24) | (bytes[5] << 16) | (bytes[6] << 8) | bytes[7],
+      ) & 0xffff_ffffn;
+      result = ((partial1 << 32n) | partial2) >> BigInt(64 - (partials * 8));
     }
 
     // Note: Over ~1024 bytes, benchmarks indicate there is a win to be had by
