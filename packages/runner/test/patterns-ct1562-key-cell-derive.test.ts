@@ -1,24 +1,19 @@
-// CT-1562: `const rooms = conversation.rooms` followed by
-// `rooms.map(...).join("\n")` in a non-JSX value-site expression crashes
-// at runtime with `TypeError: rooms.map is not a function` when the
-// schema generated for `rooms` includes the `Default<[]>` `anyOf` split
+// CT-1562 regression: `const rooms = conversation.rooms` followed by
+// `rooms.map(...).join("\n")` in a non-JSX value-site expression once
+// crashed at runtime with `TypeError: rooms.map is not a function` when
+// the schema for `rooms` included the `Default<[]>` `anyOf` split
 // (`{ type: "array", items: false }` vs `{ items: { $ref } }`).
 //
-// Root cause: in the schema traversal, BOTH `anyOf` branches "match" a
-// populated array because `canBranchMatch` doesn't honor `items: false`;
-// then `mergeAnyOfMatches` runs `Object.assign({}, …branches)` because
-// arrays satisfy `isRecord`. The result is `{ "0": room1, "1": room2 }`
-// — a plain object that drops array-ness, and `.map` is undefined.
+// Root cause was in `packages/runner/src/traverse.ts`:
+// `mergeAnyOfMatches` ran `Object.assign({}, …branches)` for multi-match
+// anyOf results because arrays satisfy `isRecord`; two array branches
+// collapsed to `{ "0": …, "1": … }`, dropping `.map`. Fix preserves
+// array-ness when all matches are arrays.
 //
-// See packages/ts-transformers/docs/ct1562-investigation.md for the
-// full evidence (including a probe deployed via `cf piece` that observed
-// `{ isArray: false, ctor: "Object", keys: ["0","1"], hasMap: false }`
-// inside the derive callback).
-//
-// This test is RED on purpose. It reproduces the bug at the
-// in-process / full-pipeline layer (PatternManager.compilePattern →
-// runtime.run) so we get red-green TDD on a fix. When the underlying
-// merge/traversal is fixed, this test should pass without changes here.
+// This is the end-to-end regression test exercising the full
+// PatternManager.compilePattern + runtime.run path. The unit-level
+// regression tests for both fixes live in
+// `packages/runner/test/traverse.test.ts`.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -122,18 +117,11 @@ describe("Pattern Runner - CT-1562 Default<[]> anyOf merge drops array-ness", ()
     tx = runtime.edit();
     await result.pull();
 
-    // Surface scheduler errors (the SES path emits `TypeError: rooms.map is
-    // not a function`; the in-process trusted-builder path may instead
-    // silently produce a non-array `rooms` and crash at `.map`).
-    if (errors.length > 0) {
-      console.log("CT-1562 scheduler errors:", errors);
-    }
-
+    // Pre-fix, this test failed with a scheduler error matching Berni's
+    // ticket (`TypeError: rooms.map is not a function`). The assertion
+    // below is the user-visible expectation.
+    expect(errors).toEqual([]);
     const queryResult = result.getAsQueryResult();
-    console.log("CT-1562 queryResult:", queryResult);
-    const direct = result.key("roomSummaryText").get();
-    console.log("CT-1562 direct read of roomSummaryText:", direct);
-
     expect((queryResult as { roomSummaryText?: string })?.roomSummaryText)
       .toBe("alpha: 2\nbeta: 0");
   });
