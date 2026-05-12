@@ -36,8 +36,6 @@ Deno.test({
       $EXPERIMENTAL_MODERN_DATA_MODEL: "true",
       $EXPERIMENTAL_UNIFIED_JSON_ENCODING: "false",
       $EXPERIMENTAL_RICH_STORABLE_VALUES: undefined,
-      $EXPERIMENTAL_STORABLE_PROTOCOL: undefined,
-      $EXPERIMENTAL_CANONICAL_HASHING: undefined,
     }, importFreshEnvModule);
 
     expect(mod.EXPERIMENTAL).toEqual({
@@ -56,8 +54,6 @@ Deno.test({
       $EXPERIMENTAL_MODERN_DATA_MODEL: undefined,
       $EXPERIMENTAL_UNIFIED_JSON_ENCODING: undefined,
       $EXPERIMENTAL_RICH_STORABLE_VALUES: "true",
-      $EXPERIMENTAL_STORABLE_PROTOCOL: "true",
-      $EXPERIMENTAL_CANONICAL_HASHING: "true",
     }, importFreshEnvModule);
 
     expect(mod.EXPERIMENTAL).toEqual({
