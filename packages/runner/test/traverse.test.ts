@@ -1923,15 +1923,6 @@ describe("canBranchMatch", () => {
   it("accepts empty array against items: false (only empty arrays match)", () => {
     expect(canBranchMatch({ type: "array", items: false }, [])).toBe(true);
   });
-
-  it("rejects populated array against items: false (B1, currently fails)", () => {
-    expect(canBranchMatch({ type: "array", items: false }, [1, 2, 3])).toBe(
-      false,
-    );
-    expect(canBranchMatch({ type: "array", items: false }, ["a"])).toBe(
-      false,
-    );
-  });
 });
 
 describe("mergeAnyOfMatches", () => {

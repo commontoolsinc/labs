@@ -642,18 +642,8 @@ export function mergeAnyOfMatches<T>(
   // schema, but the address is ignored, and a second option where
   // address is set, and name is ignored, we want to include both.
   if (matches.length > 1) {
-    // Arrays satisfy isRecord (typeof [] === "object" && [] !== null),
-    // but the object-merge semantic below (Object.assign on properties)
-    // doesn't apply to arrays — it produces { "0": …, "1": … } and drops
-    // array-ness. When all matches are arrays, return whichever has
-    // content; if all are empty, return the first. This is what CT-1562
-    // hits via the Default<[]> schema's anyOf split, where one branch
-    // produces [] and the other produces the populated array.
-    if (matches.every((v) => Array.isArray(v))) {
-      return matches.find((m) => (m as unknown[]).length > 0) ?? matches[0];
-    }
-    // If all our matches are objects, merge the properties.
-    if (matches.every((v) => isRecord(v))) {
+    // If all our matches are non-array objects, merge the properties.
+    if (matches.every((v) => isObject(v))) {
       const unified: Record<string, T> = {};
       for (const match of matches) {
         Object.assign(unified, match);
@@ -3306,26 +3296,6 @@ export function canBranchMatch(
         : [resolved.type];
       if (!schemaTypes.includes(actualType)) return false;
     }
-  }
-
-  // `items: false` on an array schema means "no additional items allowed
-  // beyond prefixItems". With no prefixItems, only `[]` matches. The
-  // schema-generator emits this shape for `Default<[]>` (never[] element
-  // type → items: false), and that branch should fast-reject any
-  // populated array.
-  if (
-    Array.isArray(value) &&
-    (resolved.type === "array" ||
-      (Array.isArray(resolved.type) && resolved.type.includes("array"))) &&
-    (resolved as JSONSchemaObj & { items?: unknown }).items === false
-  ) {
-    const prefixCount = Array.isArray(
-        (resolved as JSONSchemaObj & { prefixItems?: unknown[] }).prefixItems,
-      )
-      ? (resolved as JSONSchemaObj & { prefixItems: unknown[] }).prefixItems
-        .length
-      : 0;
-    if (value.length > prefixCount) return false;
   }
 
   // For plain object values, check missing required properties.
