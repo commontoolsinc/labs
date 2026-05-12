@@ -28,7 +28,7 @@ export function plainObjectFromJson<T extends object = object>(
   const result = valueFromJson(json, runtime);
 
   if ((result === null) || (typeof result !== "object")) {
-    throw new Error("plainObjectFromJson: Decoded to non-object");
+    throw new Error("plainObjectFromJson: Decoded to primitive (not a plain object)");
   } else if (Array.isArray(result)) {
     throw new Error(
       "plainObjectFromJson: Decoded to array (not a plain object)",

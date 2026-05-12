@@ -268,5 +268,17 @@ describe("json-encoding", () => {
       const json = jsonFromValue(err as FabricValue);
       expect(() => plainObjectFromJson(json)).toThrow(/instance/);
     });
+
+    it("throws on an array", () => {
+      const json = jsonFromValue(["whoops"]);
+      expect(() => plainObjectFromJson(json)).toThrow(/array/);
+    });
+
+    for (const prim of [null, 123, "florp", true]) {
+      it(`throws on primitive \`${prim}\``, () => {
+        const json = jsonFromValue(prim);
+        expect(() => plainObjectFromJson(json)).toThrow(/primitive/);
+      });
+    }
   });
 });
