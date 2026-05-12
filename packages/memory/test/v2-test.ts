@@ -118,7 +118,6 @@ describe("memory v2 flags", () => {
 
     assertEquals(getMemoryProtocolFlags(), {
       richStorableValues: false,
-      unifiedJsonEncoding: false,
     });
 
     setDataModelConfig(true);
@@ -126,7 +125,6 @@ describe("memory v2 flags", () => {
 
     assertEquals(getMemoryProtocolFlags(), {
       richStorableValues: true,
-      unifiedJsonEncoding: true,
     });
 
     resetDataModelConfig();

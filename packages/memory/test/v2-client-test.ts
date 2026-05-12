@@ -1621,7 +1621,6 @@ Deno.test("memory v2 client rejects hello.ok when flags disagree", async () => {
           protocol: MEMORY_PROTOCOL,
           flags: {
             richStorableValues: !getMemoryProtocolFlags().richStorableValues,
-            unifiedJsonEncoding: getMemoryProtocolFlags().unifiedJsonEncoding,
           },
         }));
       }

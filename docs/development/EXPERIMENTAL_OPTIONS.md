@@ -18,10 +18,8 @@ experimental behavior (if it happened to be on by default).
 ## Defining a new flag
 
 Unfortunately, there is no single unified "source of truth" for the set of
-flags. As a stop-gap there is a "dummy" flag called `pancakeTelephony` /
-`EXPERIMENTAL_PANCAKE_TELEPHONY`. If you search the codebase for these, then
-you'll find everywhere where code needs to change in order to accommodate a
-new flag.
+flags. You pretty much need to search the codebase for an existing flag, and
+tweak all the spots that turn up.
 
 ## Enabling Flags Locally
 

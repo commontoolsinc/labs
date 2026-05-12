@@ -141,7 +141,6 @@ export interface SessionOpenResult {
 
 export interface MemoryProtocolFlags {
   richStorableValues: boolean;
-  unifiedJsonEncoding: boolean;
 }
 
 export interface HelloMessage {
@@ -345,15 +344,12 @@ const memoryReconstructionContext: ReconstructionContext = {
 
 export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   richStorableValues: getDataModelConfig(),
-  unifiedJsonEncoding: getJsonEncodingConfig(),
 });
 
 export const sameMemoryProtocolFlags = (
   left: MemoryProtocolFlags,
   right: MemoryProtocolFlags,
-): boolean =>
-  left.richStorableValues === right.richStorableValues &&
-  left.unifiedJsonEncoding === right.unifiedJsonEncoding;
+): boolean => left.richStorableValues === right.richStorableValues;
 
 export const isMemoryProtocolFlags = (
   value: unknown,
@@ -362,8 +358,7 @@ export const isMemoryProtocolFlags = (
     return false;
   }
 
-  return typeof value.richStorableValues === "boolean" &&
-    typeof value.unifiedJsonEncoding === "boolean";
+  return typeof value.richStorableValues === "boolean";
 };
 
 export const encodeMemoryBoundary = (value: unknown): string =>
