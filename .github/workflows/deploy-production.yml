@@ -1,5 +1,7 @@
 name: Manual Production Deployment
 
+run-name: Deploy ${{ inputs.ref }} to Estuary
+
 on:
   workflow_dispatch:
     inputs:
