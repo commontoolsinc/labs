@@ -37,10 +37,12 @@ There are a few more specific terms for cells within the piece:
 ```mermaid
 flowchart TD
     A["Result Cell"]
-    A --source--> B["Process Cell"]
-    B --value.resultRef--> A
-    B --value.pattern--> C["Pattern Cell"]
-    D@{ shape: procs, label: "Data Cells"} --source--> B
+    A --argument--> B["Argument Cell"]
+    A --internal--> C["Internal Cell"]
+    A --pattern--> D["Pattern Cell"]
+    B --result--> A
+    C --result--> A
+    D@{ shape: procs, label: "Data Cells"} --result--> A
 ```
 
 ## CRDT (Conflict-free Replicated Data Type)
