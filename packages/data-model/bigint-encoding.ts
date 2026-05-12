@@ -172,11 +172,11 @@ export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
  * the corresponding bigint. Empty input throws.
  */
 export function bigintFromMinimalTwosComplement(bytes: Uint8Array): bigint {
-  if (bytes.length === 0) {
-    throw new Error("bigintFromMinimalTwosComplement: empty input");
-  }
-
   switch (bytes.length) {
+    case 0: {
+      throw new Error("bigintFromMinimalTwosComplement: empty input");
+    }
+
     case 1: {
       // `(x << 24) >> 24` to sign extend. Similar below.
       return BigInt((bytes[0] << 24) >> 24);
@@ -187,34 +187,48 @@ export function bigintFromMinimalTwosComplement(bytes: Uint8Array): bigint {
     }
 
     case 3: {
-      return BigInt(((bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8)) >> 8);
+      return BigInt(
+        ((bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8)) >> 8,
+      );
     }
 
     case 4: {
-      return BigInt((bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3]);
+      return BigInt(
+        (bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3],
+      );
     }
 
     case 5: {
-      const subResult1 = BigInt((bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3]);
+      const subResult1 = BigInt(
+        (bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3],
+      );
       const subResult2 = BigInt(bytes[4]);
       return (subResult1 << 8n) | subResult2;
     }
 
     case 6: {
-      const subResult1 = BigInt((bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3]);
+      const subResult1 = BigInt(
+        (bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3],
+      );
       const subResult2 = BigInt((bytes[4] << 8) | bytes[5]);
       return (subResult1 << 16n) | subResult2;
     }
 
     case 7: {
-      const subResult1 = BigInt((bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3]);
+      const subResult1 = BigInt(
+        (bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3],
+      );
       const subResult2 = BigInt((bytes[4] << 16) | (bytes[5] << 8) | bytes[6]);
       return (subResult1 << 24n) | subResult2;
     }
 
     case 8: {
-      const subResult1 = BigInt((bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3]);
-      const subResult2 = BigInt((bytes[4] << 24) | (bytes[5] << 16) | (bytes[6] << 8) | bytes[7]) & 0xffff_ffffn;
+      const subResult1 = BigInt(
+        (bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3],
+      );
+      const subResult2 = BigInt(
+        (bytes[4] << 24) | (bytes[5] << 16) | (bytes[6] << 8) | bytes[7],
+      ) & 0xffff_ffffn;
       return (subResult1 << 32n) | subResult2;
     }
   }
