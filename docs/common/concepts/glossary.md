@@ -31,7 +31,8 @@ program inputs and outputs.
 There are a few more specific terms for cells within the piece:
 
 - Result Cell -- This is the main piece cell. The UI will be built here.
-- Process Cell -- This holds much of the working state of the piece.
+- Argument Cell -- This holds some of the inputs of the piece.
+- Internal Cell -- This is a temporary cell, but it holds the working state of the piece.
 - Pattern Cell -- Contains the pattern source code.
 
 ```mermaid
@@ -42,7 +43,7 @@ flowchart TD
     A --pattern--> D["Pattern Cell"]
     B --result--> A
     C --result--> A
-    D@{ shape: procs, label: "Data Cells"} --result--> A
+    E@{ shape: procs, label: "Data Cells"} --result--> A
 ```
 
 ## CRDT (Conflict-free Replicated Data Type)
