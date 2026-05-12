@@ -227,7 +227,16 @@ function unionWithEnclosingScopeFreeIdentifiers(
         !alreadyCoveredNames.has(node.text) && !addedNames.has(node.text)
       ) {
         const symbol = checker.getSymbolAtLocation(node);
-        if (symbol && isEnclosingScopeDeclaration(symbol)) {
+        // Only capture value-space symbols. Type-only identifiers (type
+        // aliases, interfaces — type parameters are also filtered by
+        // `isEnclosingScopeDeclaration` below) can appear at reference
+        // sites in `as`/`satisfies` casts and generic type arguments;
+        // emitting them as runtime inputs would be a type error.
+        if (
+          symbol &&
+          (symbol.flags & ts.SymbolFlags.Value) !== 0 &&
+          isEnclosingScopeDeclaration(symbol)
+        ) {
           addedNames.add(node.text);
           added.push(node);
         }
