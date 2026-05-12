@@ -4,7 +4,6 @@ import {
   resetDataModelConfig,
   setDataModelConfig,
 } from "@commonfabric/data-model/fabric-value";
-import { setJsonEncodingConfig } from "@commonfabric/data-model/json-encoding";
 import {
   applyCommit,
   close,
@@ -1125,7 +1124,6 @@ Deno.test("memory v2 engine rejects branch reads before createdSeq", async () =>
 
 Deno.test("memory v2 engine persists rich patch values at the storage boundary", async () => {
   setDataModelConfig(true);
-  setJsonEncodingConfig(true);
   try {
     const { engine, path } = await createEngine();
 
@@ -1185,6 +1183,5 @@ Deno.test("memory v2 engine persists rich patch values at the storage boundary",
     }
   } finally {
     resetDataModelConfig();
-    setJsonEncodingConfig(false);
   }
 });

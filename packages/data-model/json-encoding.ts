@@ -1,74 +1,25 @@
 import { isInstance } from "@commonfabric/utils/types";
 import type { FabricValue } from "./fabric-value.ts";
 import type { ReconstructionContext } from "./fabric-value.ts";
-import {
-  jsonFromValueLegacy,
-  seemsLikeJsonEncodedFabricValueLegacy,
-  valueFromJsonLegacy,
-} from "./json-encoding-legacy.ts";
-import {
-  jsonFromValueModern,
-  seemsLikeJsonEncodedFabricValueModern,
-  valueFromJsonModern,
-} from "./json-encoding-modern.ts";
+import { EMPTY_RECONSTRUCTION_CONTEXT } from "./empty-reconstruction-context.ts";
+import { JsonEncodingContext } from "./json-encoding-context.ts";
 
-// ---------------------------------------------------------------------------
-// Unified JSON encoding flag and dispatch configuration
-// ---------------------------------------------------------------------------
+/** Shared JSON encoding context. */
+const jsonEncodingContext = new JsonEncodingContext();
 
 /**
- * Module-level flag for unified JSON encoding, set by the `Runtime`
- * constructor via `setJsonEncodingConfig()`. When enabled, the public API
- * symbols dispatch to the `JsonEncodingContext` codec instead of plain
- * `JSON.stringify()` / `JSON.parse()`.
- */
-let jsonEncodingEnabled = true;
-
-/**
- * Activates or deactivates unified JSON encoding mode. Called by the
- * `Runtime` constructor to propagate
- * `ExperimentalOptions.unifiedJsonEncoding` into the memory layer.
- */
-export function setJsonEncodingConfig(enabled?: boolean): void {
-  if (enabled !== undefined) {
-    jsonEncodingEnabled = enabled;
-  }
-}
-
-/** Returns whether unified JSON encoding mode is currently enabled. */
-export function getJsonEncodingConfig(): boolean {
-  return jsonEncodingEnabled;
-}
-
-/**
- * Restores unified JSON encoding mode to its default (enabled). Called by
- * `Runtime.dispose()` to avoid leaking flags between runtime instances or
- * test runs.
- */
-export function resetJsonEncodingConfig(): void {
-  jsonEncodingEnabled = true;
-}
-
-// ---------------------------------------------------------------------------
-// Flag-dispatched public API
-// ---------------------------------------------------------------------------
-
-/**
- * Encodes a fabric value to a JSON string. When unified JSON encoding is ON,
- * uses the modern JSON-based format. When OFF, equivalent to
- * `JSON.stringify(value)`.
+ * Encodes a fabric value to a JSON string in the standard `FabricValue`
+ * JSON-embedded encoding, prefixed with the format-identifying tag `fvj1:`.
  */
 export function jsonFromValue(value: FabricValue): string {
-  if (jsonEncodingEnabled) {
-    return jsonFromValueModern(value);
-  } else {
-    return jsonFromValueLegacy(value);
-  }
+  return jsonEncodingContext.encode(value);
 }
 
 /**
- * Decodes a JSON string back into a fabric value which is expected to be a
- * plain object. Throws if it turns out to be something else.
+ * Decodes a string in the `FabricValue` JSON-embedded encoding format, which is
+ * expected to be a plain object. Throws if it turns out to be something else.
+ * If `runtime` is omitted, the shared `EMPTY_RECONSTRUCTION_CONTEXT` is
+ * substituted, which throws if any reconstruction is needed.
  */
 export function plainObjectFromJson<T extends object = object>(
   json: string,
@@ -77,7 +28,9 @@ export function plainObjectFromJson<T extends object = object>(
   const result = valueFromJson(json, runtime);
 
   if ((result === null) || (typeof result !== "object")) {
-    throw new Error("plainObjectFromJson: Decoded to non-object");
+    throw new Error(
+      "plainObjectFromJson: Decoded to primitive (not a plain object)",
+    );
   } else if (Array.isArray(result)) {
     throw new Error(
       "plainObjectFromJson: Decoded to array (not a plain object)",
@@ -96,27 +49,20 @@ export function plainObjectFromJson<T extends object = object>(
  * JSON as defined by this module.
  */
 export function seemsLikeJsonEncodedFabricValue(value: string): boolean {
-  if (jsonEncodingEnabled) {
-    return seemsLikeJsonEncodedFabricValueModern(value);
-  } else {
-    return seemsLikeJsonEncodedFabricValueLegacy(value);
-  }
+  return JsonEncodingContext.seemsLikeEncoded(value);
 }
 
 /**
- * Decodes a JSON string back into a fabric value. When unified JSON encoding is
- * ON, uses the modern JSON-based format. When OFF, equivalent to
- * `JSON.parse(json)`. The `runtime` argument is only consulted when the flag
- * is ON; if omitted, the shared `EMPTY_RECONSTRUCTION_CONTEXT` is substituted,
- * which throws if any cell reconstruction is needed.
+ * Decodes a string in the `FabricValue` JSON-embedded encoding format. If
+ * `runtime` is omitted, the shared `EMPTY_RECONSTRUCTION_CONTEXT` is
+ * substituted, which throws if any reconstruction is needed.
  */
 export function valueFromJson(
   json: string,
   runtime?: ReconstructionContext | undefined,
 ): FabricValue {
-  if (jsonEncodingEnabled) {
-    return valueFromJsonModern(json, runtime);
-  } else {
-    return valueFromJsonLegacy(json);
-  }
+  return jsonEncodingContext.decode(
+    json,
+    runtime ?? EMPTY_RECONSTRUCTION_CONTEXT,
+  );
 }

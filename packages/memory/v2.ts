@@ -3,7 +3,6 @@ import {
   getDataModelConfig,
 } from "@commonfabric/data-model/fabric-value";
 import {
-  getJsonEncodingConfig,
   jsonFromValue,
   valueFromJson,
 } from "@commonfabric/data-model/json-encoding";
@@ -372,10 +371,9 @@ export const decodeMemoryBoundary = <Value = FabricValue>(
     memoryReconstructionContext,
   ) as FabricValue;
 
-  if (!getJsonEncodingConfig()) {
-    return decoded as Value;
-  }
-
+  // TODO(danfuzz): It shouldn't be necessary to thaw values coming out of the
+  // JSON decoder. See what happens when this gets replaced with just
+  // `return value`.
   return cloneIfNecessary(
     decoded,
     { frozen: false, deep: true, force: true },

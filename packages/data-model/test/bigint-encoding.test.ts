@@ -9,9 +9,9 @@ import {
   toUnpaddedBase64url,
 } from "@commonfabric/utils/base64url";
 
-// ============================================================================
+//
 // Reference encoder
-// ============================================================================
+//
 
 /**
  * Deliberately-naive minimal two's-complement encoder, used as the test
@@ -139,9 +139,9 @@ const fixtures: readonly Fixture[] = rawFixtures.map((value) => {
   return { value, encoded, label: fixtureLabel(value, encoded) };
 });
 
-// ============================================================================
+//
 // Reference encoder anchor
-// ============================================================================
+//
 
 // A small set of explicit byte-level assertions that pin `referenceEncode`
 // against the spec. The rest of the suite trusts it as an oracle, so it
@@ -191,25 +191,63 @@ describe("referenceEncode (test oracle)", () => {
   });
 });
 
-// ============================================================================
+//
 // Per-function fixture loops
-// ============================================================================
+//
 
-describe("bigintToMinimalTwosComplement", () => {
-  for (const { value, encoded, label } of fixtures) {
-    it(`encodes ${label}`, () => {
-      expect(bigintToMinimalTwosComplement(value)).toEqual(encoded);
+const FIXTURE_SLICE_SIZE = 1000;
+for (let at = 0; at < fixtures.length; at += FIXTURE_SLICE_SIZE) {
+  const slice = fixtures.slice(at, at + FIXTURE_SLICE_SIZE);
+  const sliceLabel = `fixtures ${at}..${at + slice.length - 1}`;
+
+  describe("bigintToMinimalTwosComplement()", () => {
+    it(`correctly encodes ${sliceLabel}`, () => {
+      for (let i = 0; i < slice.length; i++) {
+        const { value, encoded, label } = slice[i];
+        try {
+          expect(bigintToMinimalTwosComplement(value)).toEqual(encoded);
+        } catch {
+          throw new Error(`Failed on ${label}.`);
+        }
+      }
     });
-  }
-});
+  });
 
-describe("bigintFromMinimalTwosComplement", () => {
-  for (const { value, encoded, label } of fixtures) {
-    it(`decodes ${label}`, () => {
-      expect(bigintFromMinimalTwosComplement(encoded)).toBe(value);
+  describe("bigintFromMinimalTwosComplement()", () => {
+    it(`correctly decodes ${sliceLabel}`, () => {
+      for (let i = 0; i < slice.length; i++) {
+        const { value, encoded, label } = slice[i];
+        try {
+          expect(bigintFromMinimalTwosComplement(encoded)).toBe(value);
+        } catch {
+          throw new Error(`Failed on ${label}.`);
+        }
+      }
     });
-  }
+  });
 
+  describe("round trip through base64url", () => {
+    it(`correctly round-trips ${sliceLabel}`, () => {
+      for (let i = 0; i < slice.length; i++) {
+        const { value, label } = slice[i];
+        const bytes = bigintToMinimalTwosComplement(value);
+        const b64 = toUnpaddedBase64url(bytes);
+        const decodedBytes = fromBase64url(b64);
+        try {
+          expect(bigintFromMinimalTwosComplement(decodedBytes)).toBe(value);
+        } catch {
+          throw new Error(`Failed on ${label}.`);
+        }
+      }
+    });
+  });
+}
+
+//
+// Edge cases and specific regression tests
+//
+
+describe("bigintFromMinimalTwosComplement()", () => {
   it("throws on empty input", () => {
     expect(() => bigintFromMinimalTwosComplement(new Uint8Array([]))).toThrow(
       "empty input",
@@ -217,53 +255,31 @@ describe("bigintFromMinimalTwosComplement", () => {
   });
 });
 
-describe("bigint encoding round-trip", () => {
-  for (const { value, label } of fixtures) {
-    it(`round-trips ${label}`, () => {
-      const bytes = bigintToMinimalTwosComplement(value);
-      expect(bigintFromMinimalTwosComplement(bytes)).toBe(value);
-    });
-  }
-});
-
-describe("bigint -> base64url -> bigint round-trip", () => {
-  for (const { value, label } of fixtures) {
-    it(`round-trips ${label} through base64url`, () => {
-      const bytes = bigintToMinimalTwosComplement(value);
-      const b64 = toUnpaddedBase64url(bytes);
-      const decodedBytes = fromBase64url(b64);
-      expect(bigintFromMinimalTwosComplement(decodedBytes)).toBe(value);
-    });
-  }
-});
-
-// ============================================================================
-// Byte-length boundary regressions
-// ============================================================================
-
 // Both `bigintToMinimalTwosComplement` paths used to confuse "leading char
 // of `value.toString(16)`" with "high nibble of byte 0 of the encoded form".
 // They differ when the hex string would need leading-zero padding to fill
 // `byteLen * 2` characters: the hex's leading char is non-zero, but the
 // padded byte representation has byte 0 starting with a zero nibble.
-describe("bigintToMinimalTwosComplement byte-length corner cases", () => {
-  // Positive: an odd-length hex with leading nibble in 8..F. The fast path
-  // historically inserted an unnecessary sign-extension byte.
-  it("does not over-pad 217129053n (= 0xCF1205D)", () => {
-    expect(bigintToMinimalTwosComplement(217129053n)).toEqual(
-      new Uint8Array([0x0c, 0xf1, 0x20, 0x5d]),
-    );
-  });
-
-  // Negatives with abs in [241, 248]. Production historically encoded these
-  // as a single byte with the high bit *clear*, breaking the round-trip
-  // (e.g., -241n decoded back as 15n).
-  for (let i = 241; i <= 248; i++) {
-    const v = BigInt(-i);
-    it(`round-trips ${v}n with sign bit set`, () => {
-      const bytes = bigintToMinimalTwosComplement(v);
-      expect(bytes[0] & 0x80).not.toBe(0);
-      expect(bigintFromMinimalTwosComplement(bytes)).toBe(v);
+describe("bigintToMinimalTwosComplement()", () => {
+  describe("byte-length corner cases", () => {
+    // Positive: an odd-length hex with leading nibble in 8..F. The fast path
+    // historically inserted an unnecessary sign-extension byte.
+    it("does not over-pad 217129053n (= 0xCF1205D)", () => {
+      expect(bigintToMinimalTwosComplement(217129053n)).toEqual(
+        new Uint8Array([0x0c, 0xf1, 0x20, 0x5d]),
+      );
     });
-  }
+
+    // Negatives with abs in [241, 248]. Production historically encoded these
+    // as a single byte with the high bit *clear*, breaking the round-trip
+    // (e.g., -241n decoded back as 15n).
+    for (let i = 241; i <= 248; i++) {
+      const v = BigInt(-i);
+      it(`round-trips ${v}n with sign bit set`, () => {
+        const bytes = bigintToMinimalTwosComplement(v);
+        expect(bytes[0] & 0x80).not.toBe(0);
+        expect(bigintFromMinimalTwosComplement(bytes)).toBe(v);
+      });
+    }
+  });
 });
