@@ -348,7 +348,39 @@ describe("debounce and throttling", () => {
     expect(runtime.scheduler.getDebounce(computation)).toBeUndefined();
   });
 
-  it("should auto-debounce slow effects after threshold runs", () => {
+  it("should auto-debounce slow writeful effects after threshold runs", () => {
+    const output = runtime.getCell<number>(
+      space,
+      "auto-debounce-writeful-effect-output",
+      undefined,
+      tx,
+    );
+    const effect: Action = (actionTx) => {
+      output.withTx(actionTx).send(1);
+    };
+    runtime.scheduler.subscribe(effect, {
+      reads: [],
+      shallowReads: [],
+      writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
+    }, { isEffect: true });
+
+    const scheduler = runtime.scheduler as any;
+    scheduler.actionStats.set(scheduler.getActionId(effect), {
+      runCount: 3,
+      totalTime: 180,
+      averageTime: 60,
+      lastRunTime: 60,
+      lastRunTimestamp: performance.now(),
+    });
+
+    scheduler.maybeAutoDebounce(effect);
+
+    expect(runtime.scheduler.getDebounce(effect)).toBe(100);
+  });
+
+  it("should not auto-debounce write-less pull demand root effects", () => {
+    runtime.scheduler.enablePullMode();
+
     const effect: Action = () => {};
     runtime.scheduler.subscribe(effect, {
       reads: [],
@@ -367,7 +399,7 @@ describe("debounce and throttling", () => {
 
     scheduler.maybeAutoDebounce(effect);
 
-    expect(runtime.scheduler.getDebounce(effect)).toBe(100);
+    expect(runtime.scheduler.getDebounce(effect)).toBeUndefined();
   });
 
   it("should not auto-debounce fast actions", async () => {
