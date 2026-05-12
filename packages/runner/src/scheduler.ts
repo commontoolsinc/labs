@@ -431,7 +431,7 @@ export class Scheduler {
   private stale = new Set<Action>();
   private upstreamStaleWriters = new WeakMap<Action, Set<Action>>();
   private upstreamStaleCount = new WeakMap<Action, number>();
-  private pullMode = true;
+  private pullMode = false;
 
   // Debugger breakpoints: action IDs that should trigger `debugger` before execution
   private breakpoints = new Set<string>();

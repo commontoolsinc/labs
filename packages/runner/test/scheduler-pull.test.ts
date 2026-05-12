@@ -80,8 +80,8 @@ describe("pull-based scheduling", () => {
     await storageManager?.close();
   });
 
-  it("should default to pull mode", () => {
-    expect(runtime.scheduler.isPullModeEnabled()).toBe(true);
+  it("should default to push mode", () => {
+    expect(runtime.scheduler.isPullModeEnabled()).toBe(false);
   });
 
   it("should dispatch schema-marked streams without a materialized stream marker", async () => {
