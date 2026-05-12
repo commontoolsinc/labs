@@ -13,11 +13,6 @@ import { encodeMemoryBoundary } from "@commonfabric/memory/v2";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
-  getJsonEncodingConfig,
-  resetJsonEncodingConfig,
-  setJsonEncodingConfig,
-} from "@commonfabric/data-model/json-encoding";
-import {
   type FabricValue,
   getDataModelConfig,
   resetDataModelConfig,
@@ -32,13 +27,11 @@ const app = createApp()
   .route("/", memory)
   .route("/", router);
 
-const withUnifiedJsonEncoding = async <T>(
+const withDataModelConfig = async <T>(
   fn: () => Promise<T> | T,
 ): Promise<T> => {
-  const previousJson = getJsonEncodingConfig();
   const previousDataModel = getDataModelConfig();
   setDataModelConfig(true);
-  setJsonEncodingConfig(true);
   try {
     return await fn();
   } finally {
@@ -46,11 +39,6 @@ const withUnifiedJsonEncoding = async <T>(
       setDataModelConfig(true);
     } else {
       resetDataModelConfig();
-    }
-    if (previousJson) {
-      setJsonEncodingConfig(true);
-    } else {
-      resetJsonEncodingConfig();
     }
   }
 };
@@ -75,7 +63,7 @@ describe("Blob Routes", () => {
     const id = hashOf(contents).toString();
     const hash = id.slice("fid1:".length);
 
-    await withUnifiedJsonEncoding(async () => {
+    await withDataModelConfig(async () => {
       const post = await app.request(`/${identity.did()}/blobs/image.gif`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -94,7 +82,7 @@ describe("Blob Routes", () => {
     });
   });
 
-  it("accepts blob upload encoding without ambient unified JSON flags", async () => {
+  it("accepts blob upload encoding without ambient data model flags", async () => {
     const identity = await Identity.fromPassphrase(
       "toolshed-blob-route-explicit-codec",
     );
@@ -107,7 +95,6 @@ describe("Blob Routes", () => {
     const hash = id.slice("fid1:".length);
 
     setDataModelConfig(false);
-    setJsonEncodingConfig(false);
     try {
       const post = await app.request(`/${identity.did()}/blobs/image.gif`, {
         method: "POST",
@@ -125,7 +112,6 @@ describe("Blob Routes", () => {
       expect(new Uint8Array(await get.arrayBuffer())).toEqual(bytes);
     } finally {
       resetDataModelConfig();
-      resetJsonEncodingConfig();
     }
   });
 
@@ -140,7 +126,7 @@ describe("Blob Routes", () => {
     const cid = `cid:${id}` as const;
     const hash = id.slice("fid1:".length);
 
-    await withUnifiedJsonEncoding(async () => {
+    await withDataModelConfig(async () => {
       const post = await app.request(`/${identity.did()}/blobs/image.png`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -225,7 +211,7 @@ describe("Blob Routes", () => {
     const id = hashOf(contents).toString();
     const hash = id.slice("fid1:".length);
 
-    const post = await withUnifiedJsonEncoding(() =>
+    const post = await withDataModelConfig(() =>
       app.request(`/${identity.did()}/blobs/image.toolonggg`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -269,7 +255,7 @@ describe("Blob Routes", () => {
     const id = hashOf(contents).toString();
     const hash = id.slice("fid1:".length);
 
-    await withUnifiedJsonEncoding(async () => {
+    await withDataModelConfig(async () => {
       const post = await app.request(`/${identity.did()}/blobs/page.html`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
