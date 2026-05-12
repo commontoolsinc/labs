@@ -1,13 +1,9 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { afterEach, describe, it } from "@std/testing/bdd";
 import { assert, assertEquals, assertFalse } from "@std/assert";
 import {
   resetDataModelConfig,
   setDataModelConfig,
 } from "@commonfabric/data-model/fabric-value";
-import {
-  resetJsonEncodingConfig,
-  setJsonEncodingConfig,
-} from "@commonfabric/data-model/json-encoding";
 import {
   decodeMemoryBoundary,
   DEFAULT_BRANCH,
@@ -111,26 +107,19 @@ describe("memory v2 source links", () => {
 describe("memory v2 flags", () => {
   it("reflects the active runtime storage flags", () => {
     resetDataModelConfig();
-    resetJsonEncodingConfig();
-
     setDataModelConfig(false);
-    setJsonEncodingConfig(false);
 
     assertEquals(getMemoryProtocolFlags(), {
       richStorableValues: false,
-      unifiedJsonEncoding: false,
     });
 
     setDataModelConfig(true);
-    setJsonEncodingConfig(true);
 
     assertEquals(getMemoryProtocolFlags(), {
       richStorableValues: true,
-      unifiedJsonEncoding: true,
     });
 
     resetDataModelConfig();
-    resetJsonEncodingConfig();
   });
 });
 
@@ -138,80 +127,40 @@ describe("memory v2 flags", () => {
 // Boundary encode/decode dispatch test (explicitly tests OFF and ON paths)
 // ---------------------------------------------------------------------------
 
-describe("memory v2 boundary encoding dispatch", () => {
-  it("follows unified JSON dispatch", () => {
-    const document = {
-      value: {
-        present: 1,
-        missing: undefined,
-      },
-    };
-
-    setJsonEncodingConfig(false);
-    const legacyEncoded = encodeMemoryBoundary(document);
-    assertEquals(legacyEncoded, JSON.stringify({ value: { present: 1 } }));
-    assertEquals(decodeMemoryBoundary(legacyEncoded), {
-      value: { present: 1 },
-    });
-
-    setJsonEncodingConfig(true);
-    const unifiedEncoded = encodeMemoryBoundary(document);
-    assertEquals(
-      decodeMemoryBoundary(unifiedEncoded),
-      document,
-    );
-
-    resetJsonEncodingConfig();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Per-flag-state tests — run for both flag=false and flag=true
-// ---------------------------------------------------------------------------
-
 describe("memory v2 boundary decode", () => {
   afterEach(() => {
     resetDataModelConfig();
-    resetJsonEncodingConfig();
   });
 
-  for (const unifiedJsonEncoding of [false, true]) {
-    describe(`with \`unifiedJsonEncoding = ${unifiedJsonEncoding}\``, () => {
-      beforeEach(() => {
-        setJsonEncodingConfig(unifiedJsonEncoding);
-      });
-
-      it("returns mutable plain JSON trees", () => {
-        const decoded = decodeMemoryBoundary<{
-          value: {
-            nested: {
-              count: number;
-            };
-          };
-        }>(
-          encodeMemoryBoundary({
-            value: {
-              nested: {
-                count: 1,
-              },
-            },
-          }),
-        );
-
-        assertEquals(decoded, {
-          value: {
-            nested: {
-              count: 1,
-            },
+  it("returns mutable plain JSON trees", () => {
+    const decoded = decodeMemoryBoundary<{
+      value: {
+        nested: {
+          count: number;
+        };
+      };
+    }>(
+      encodeMemoryBoundary({
+        value: {
+          nested: {
+            count: 1,
           },
-        });
-        assertFalse(Object.isFrozen(decoded));
-        assertFalse(Object.isFrozen(decoded.value));
-        assertFalse(Object.isFrozen(decoded.value.nested));
+        },
+      }),
+    );
 
-        decoded.value.nested.count = 2;
-        assertEquals(decoded.value.nested.count, 2);
-      });
+    assertEquals(decoded, {
+      value: {
+        nested: {
+          count: 1,
+        },
+      },
     });
-  }
+    assertFalse(Object.isFrozen(decoded));
+    assertFalse(Object.isFrozen(decoded.value));
+    assertFalse(Object.isFrozen(decoded.value.nested));
+
+    decoded.value.nested.count = 2;
+    assertEquals(decoded.value.nested.count, 2);
+  });
 });

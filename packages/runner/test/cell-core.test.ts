@@ -1042,12 +1042,11 @@ describe("Cell raw methods: frozen-or-not (richStorableValues ON)", () => {
   });
 });
 
-// Source-cell round-trip across commit + fresh-tx reload, parameterized over
-// `unifiedJsonEncoding` flag state. These tests assert end-to-end correctness
-// of the standard `setSourceCell` → commit → `getSourceCell` round-trip:
-// the round-trip preserves the source-link object, and a raw `tx.read` of
-// `path: ["source"]` returns it as an object link record (with own-property
-// `"/"`), never as a string.
+// Source-cell round-trip across commit + fresh-tx reload. These tests assert
+// end-to-end correctness of the standard `setSourceCell` → commit →
+// `getSourceCell` round-trip: the round-trip preserves the source-link object,
+// and a raw `tx.read` of `path: ["source"]` returns it as an object link record
+// (with own-property `"/"`), never as a string.
 //
 // Historical context: these tests were authored alongside the deletion of
 // two defensive `JSON.parse` blocks that previously existed in
@@ -1066,122 +1065,114 @@ describe("Cell raw methods: frozen-or-not (richStorableValues ON)", () => {
 // deletion.
 //
 // The tests below pin the round-trip behavior that, post-deletion, is the
-// observable contract — and that, pre-deletion, was being maintained
-// gratuitously by the now-removed parses. They serve as a passive
-// regression net for any future change that might re-introduce a
-// non-object value at `path: ["source"]`.
+// observable contract. They serve as a passive regression net for any future
+// change that might re-introduce a non-object value at `path: ["source"]`.
 //
 // See `coordination/docs/2026-04-30-fvj1-parse-site-kickoff.md` (project
 // kickoff doc, session 2026-067) for the full liveness analysis.
-for (const unifiedJsonEncoding of [false, true]) {
-  describe(
-    `Cell source-cell round-trip with \`unifiedJsonEncoding = ${unifiedJsonEncoding}\``,
-    () => {
-      let runtime: Runtime;
-      let storageManager: ReturnType<typeof StorageManager.emulate>;
-      let tx: IExtendedStorageTransaction;
+describe(`Cell source-cell round-trip`, () => {
+  let runtime: Runtime;
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let tx: IExtendedStorageTransaction;
 
-      beforeEach(() => {
-        storageManager = StorageManager.emulate({ as: signer });
-        runtime = new Runtime({
-          apiUrl: new URL(import.meta.url),
-          storageManager,
-          experimental: { unifiedJsonEncoding },
-        });
-        tx = runtime.edit();
-      });
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    tx = runtime.edit();
+  });
 
-      afterEach(async () => {
-        await runtime?.dispose();
-        await storageManager?.close();
-      });
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
 
-      it(
-        "setSourceCell + commit + getSourceCell round-trips correctly across a fresh tx",
-        async () => {
-          // Set up a source/target pair via the standard API.
-          const sourceCell = runtime.getCell<{ foo: number }>(
-            space,
-            "fvj1 source-cell round-trip: source",
-            undefined,
-            tx,
-          );
-          sourceCell.set({ foo: 123 });
-
-          const targetCell = runtime.getCell<{ bar: string }>(
-            space,
-            "fvj1 source-cell round-trip: target",
-            undefined,
-            tx,
-          );
-          targetCell.set({ bar: "baz" });
-          targetCell.setSourceCell(sourceCell);
-
-          // Commit, then start a fresh tx. This forces the `path: ["source"]`
-          // read to go through the storage layer (rather than the in-tx
-          // novelty cache, which short-circuits serialization), so
-          // `valueFromJson` runs as the actual decode step.
-          await tx.commit();
-          tx = runtime.edit();
-
-          // Fresh-tx getSourceCell: reads `path: ["source"]` through the
-          // storage layer, where `valueFromJson` decodes the row to an
-          // object before it surfaces here. `getSourceCell` then takes its
-          // `isRecord` branch and converts the link record to a URI string.
-          const retrievedSource = targetCell.withTx(tx).getSourceCell();
-          expect(isCell(retrievedSource)).toBe(true);
-          expect(retrievedSource?.withTx(tx).get()).toEqual({ foo: 123 });
-        },
+  it(
+    "setSourceCell + commit + getSourceCell round-trips correctly across a fresh tx",
+    async () => {
+      // Set up a source/target pair via the standard API.
+      const sourceCell = runtime.getCell<{ foo: number }>(
+        space,
+        "fvj1 source-cell round-trip: source",
+        undefined,
+        tx,
       );
+      sourceCell.set({ foo: 123 });
 
-      it(
-        "raw read of path: ['source'] returns an object link record",
-        async () => {
-          // Set up a source/target pair and commit.
-          const sourceCell = runtime.getCell<{ foo: number }>(
-            space,
-            "fvj1 source-cell raw read: source",
-            undefined,
-            tx,
-          );
-          sourceCell.set({ foo: 123 });
-
-          const targetCell = runtime.getCell<{ bar: string }>(
-            space,
-            "fvj1 source-cell raw read: target",
-            undefined,
-            tx,
-          );
-          targetCell.set({ bar: "baz" });
-          targetCell.setSourceCell(sourceCell);
-
-          await tx.commit();
-          tx = runtime.edit();
-
-          // Raw read of `path: ["source"]` exercises the same storage-layer
-          // code path as `getSourceCell`'s underlying `readOrThrow`. The
-          // value the storage layer surfaces should be an object link
-          // record (with own-property `"/"`), never a JSON-stringified
-          // form, under both flag states.
-          const targetLink = targetCell.getAsNormalizedFullLink();
-          const sourceAddress = {
-            space,
-            id: targetLink.id,
-            path: ["source"],
-          } as IMemorySpaceAddress;
-          const readResult = tx.read(sourceAddress);
-          expect(readResult.ok).toBeDefined();
-
-          const value = readResult.ok!.value;
-          expect(typeof value).not.toBe("string");
-          expect(typeof value).toBe("object");
-          expect(value).not.toBeNull();
-          expect(Object.prototype.hasOwnProperty.call(value, "/")).toBe(true);
-        },
+      const targetCell = runtime.getCell<{ bar: string }>(
+        space,
+        "fvj1 source-cell round-trip: target",
+        undefined,
+        tx,
       );
+      targetCell.set({ bar: "baz" });
+      targetCell.setSourceCell(sourceCell);
+
+      // Commit, then start a fresh tx. This forces the `path: ["source"]`
+      // read to go through the storage layer (rather than the in-tx
+      // novelty cache, which short-circuits serialization), so
+      // `valueFromJson` runs as the actual decode step.
+      await tx.commit();
+      tx = runtime.edit();
+
+      // Fresh-tx getSourceCell: reads `path: ["source"]` through the
+      // storage layer, where `valueFromJson` decodes the row to an
+      // object before it surfaces here. `getSourceCell` then takes its
+      // `isRecord` branch and converts the link record to a URI string.
+      const retrievedSource = targetCell.withTx(tx).getSourceCell();
+      expect(isCell(retrievedSource)).toBe(true);
+      expect(retrievedSource?.withTx(tx).get()).toEqual({ foo: 123 });
     },
   );
-}
+
+  it(
+    "raw read of path: ['source'] returns an object link record",
+    async () => {
+      // Set up a source/target pair and commit.
+      const sourceCell = runtime.getCell<{ foo: number }>(
+        space,
+        "fvj1 source-cell raw read: source",
+        undefined,
+        tx,
+      );
+      sourceCell.set({ foo: 123 });
+
+      const targetCell = runtime.getCell<{ bar: string }>(
+        space,
+        "fvj1 source-cell raw read: target",
+        undefined,
+        tx,
+      );
+      targetCell.set({ bar: "baz" });
+      targetCell.setSourceCell(sourceCell);
+
+      await tx.commit();
+      tx = runtime.edit();
+
+      // Raw read of `path: ["source"]` exercises the same storage-layer
+      // code path as `getSourceCell`'s underlying `readOrThrow`. The
+      // value the storage layer surfaces should be an object link
+      // record (with own-property `"/"`), never a JSON-stringified
+      // form, under both flag states.
+      const targetLink = targetCell.getAsNormalizedFullLink();
+      const sourceAddress = {
+        space,
+        id: targetLink.id,
+        path: ["source"],
+      } as IMemorySpaceAddress;
+      const readResult = tx.read(sourceAddress);
+      expect(readResult.ok).toBeDefined();
+
+      const value = readResult.ok!.value;
+      expect(typeof value).not.toBe("string");
+      expect(typeof value).toBe("object");
+      expect(value).not.toBeNull();
+      expect(Object.prototype.hasOwnProperty.call(value, "/")).toBe(true);
+    },
+  );
+});
 
 // Cell-storage behavior for the four "weird" numeric values: `-0`, `NaN`,
 // `+Infinity`, `-Infinity`. The two data-model paths diverge sharply here:

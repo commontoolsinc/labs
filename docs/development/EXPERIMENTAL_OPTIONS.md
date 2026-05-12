@@ -1,22 +1,25 @@
 # Experimental Options
 
 `ExperimentalOptions` are feature flags that gate incremental rollout of
-space-model data-layer changes. Each flag independently enables a piece of the
-new fabric-value pipeline so features can be activated one at a time without
-affecting users who haven't opted in.
+various major features.
 
 ## Available Flags
 
 | Flag | Env Var | Description |
 |------|---------|-------------|
 | `modernDataModel` | `EXPERIMENTAL_MODERN_DATA_MODEL` | Enables the new fabric value type system (`bigint`, `Map`, `Set`, `Uint8Array`, `Date`, `FabricInstance`). |
-| `unifiedJsonEncoding` | `EXPERIMENTAL_UNIFIED_JSON_ENCODING` | Enables a unified JSON encoding scheme for all fabric values. |
 
 All flags default to `undefined` which means they take on the default value
 defined for the flag. The default is generally `false` unless the flag is in the
 process of being "graduated." Setting any flag to `true` activates the
 corresponding experimental behavior, and setting it to `false` suppresses the
 experimental behavior (if it happened to be on by default).
+
+## Defining a new flag
+
+Unfortunately, there is no single unified "source of truth" for the set of
+flags. You pretty much need to search the codebase for an existing flag, and
+tweak all the spots that turn up.
 
 ## Enabling Flags Locally
 
@@ -26,11 +29,11 @@ and when **running the server** (for server-side flags):
 
 ```bash
 # Enable a single flag (build + run)
-EXPERIMENTAL_MODERN_DATA_MODEL=true deno task dev
+EXPERIMENTAL_SOME_FLAG=true deno task dev
 
 # Enable multiple flags
-EXPERIMENTAL_MODERN_DATA_MODEL=true \
-EXPERIMENTAL_UNIFIED_JSON_ENCODING=true \
+EXPERIMENTAL_SOME_FLAG=true \
+EXPERIMENTAL_SOME_OTHER_FLAG=true \
 deno task dev
 ```
 
@@ -97,9 +100,6 @@ Browser Web Worker
               +-- setDataModelConfig(true)
               |    +-- modernDataModelEnabled = true
               |         +-- fabricFromNativeValue() checks modernDataModelEnabled
-              +-- setUnifiedJsonEncoding(...)
-                   +-- unifiedJsonEncoding = true
-                        +-- jsonFromValue() (etc.) dispatches to modern path
 ```
 
 Key points:
@@ -138,7 +138,7 @@ When any experimental flags are enabled, the `Runtime` constructor logs them on
 startup. Look for a line like:
 
 ```
-Experimental flags enabled: modernDataModel, unifiedJsonEncoding
+Experimental flags enabled: someFlag, someOtherFlag
 ```
 
 - **Server-side (toolshed):** Check `packages/toolshed/local-dev-toolshed.log`.
@@ -170,9 +170,7 @@ with defaults (all `false`) and stores the resolved result as
 
 The memory layer uses module-level ambient config variables:
 `modernDataModelEnabled` in `packages/data-model/fabric-value.ts` (set by
-`setDataModelConfig()`), and
-`unifiedJsonEncoding` in `packages/data-model/json-encoding.ts` (set by
-`setJsonEncodingConfig()`). This means:
+`setDataModelConfig()`). This means:
 
 - Only one set of experimental flags is active per JavaScript context at a time.
 - In the browser, the Web Worker is a separate JS context, so its flags are

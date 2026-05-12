@@ -18,10 +18,6 @@ import {
   resetDataModelConfig,
   setDataModelConfig,
 } from "@commonfabric/data-model/fabric-value";
-import {
-  resetJsonEncodingConfig,
-  setJsonEncodingConfig,
-} from "@commonfabric/data-model/json-encoding";
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
 import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
 import type {
@@ -150,8 +146,6 @@ export interface ExperimentalOptions {
   modernDataModel?: boolean | undefined;
   /** Backward-compat alias for `modernDataModel`. */
   richStorableValues?: boolean | undefined;
-  /** Enable `/<Type>@<Version>` JSON encoding, replacing legacy sigil/`@`-prefix/`$`-prefix conventions. */
-  unifiedJsonEncoding?: boolean | undefined;
   /** Preserve cumulative scheduler write history instead of using current-known writes. */
   schedulerHistoricalMightWrite?: boolean | undefined;
 }
@@ -291,7 +285,6 @@ export class Runtime {
     this.experimental = {
       modernDataModel: undefined,
       richStorableValues: undefined,
-      unifiedJsonEncoding: undefined,
       schedulerHistoricalMightWrite: undefined,
       ...options.experimental,
     };
@@ -314,9 +307,9 @@ export class Runtime {
       );
     }
 
-    // Propagate experimental flags to the memory layer's ambient config.
+    // Propagate experimental flags to their ambient control points.
     setDataModelConfig(this.experimental.modernDataModel);
-    setJsonEncodingConfig(this.experimental.unifiedJsonEncoding);
+
     this.id = options.storageManager.id;
     this.apiUrl = new URL(options.apiUrl);
     this.staticCache = isDeno()
@@ -486,9 +479,8 @@ export class Runtime {
     // Dispose the Engine (clears compiler/runtime state and the console hook)
     this.harness.dispose();
 
-    // Reset experimental fabric config to defaults
+    // Reset experimental config to defaults.
     resetDataModelConfig();
-    resetJsonEncodingConfig();
 
     // Clear the current runtime reference
     // Removed setCurrentRuntime call - no longer using singleton pattern

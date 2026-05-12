@@ -166,7 +166,6 @@ describe("Blob Routes", () => {
         }),
         experimental: {
           modernDataModel: true,
-          unifiedJsonEncoding: true,
         },
       });
 

@@ -130,7 +130,6 @@ export interface InitializationData {
   // Experimental space-model feature flags.
   experimental?: {
     modernDataModel?: boolean;
-    unifiedJsonEncoding?: boolean;
   };
   // Commit-boundary CFC mode for the worker runtime.
   cfcEnforcementMode?:

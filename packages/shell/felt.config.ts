@@ -44,9 +44,6 @@ const config: Config = {
       "$EXPERIMENTAL_MODERN_DATA_MODEL": Deno.env.get(
         "EXPERIMENTAL_MODERN_DATA_MODEL",
       ),
-      "$EXPERIMENTAL_UNIFIED_JSON_ENCODING": Deno.env.get(
-        "EXPERIMENTAL_UNIFIED_JSON_ENCODING",
-      ),
       "$COMPILATION_CACHE_CLIENT": Deno.env.get(
         "COMPILATION_CACHE_CLIENT",
       ) ?? "true",

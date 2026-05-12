@@ -26,7 +26,6 @@ export function experimentalOptionsFromEnv(): ExperimentalOptions {
   };
   const opts: ExperimentalOptions = {
     modernDataModel: read("EXPERIMENTAL_MODERN_DATA_MODEL"),
-    unifiedJsonEncoding: read("EXPERIMENTAL_UNIFIED_JSON_ENCODING"),
   };
 
   // Log any overridden experimental flags.
