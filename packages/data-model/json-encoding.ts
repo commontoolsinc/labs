@@ -1,27 +1,25 @@
 import { isInstance } from "@commonfabric/utils/types";
 import type { FabricValue } from "./fabric-value.ts";
 import type { ReconstructionContext } from "./fabric-value.ts";
-import {
-  jsonFromValueModern,
-  seemsLikeJsonEncodedFabricValueModern,
-  valueFromJsonModern,
-} from "./json-encoding-modern.ts";
+import { EMPTY_RECONSTRUCTION_CONTEXT } from "./empty-reconstruction-context.ts";
+import { JsonEncodingContext } from "./json-encoding-context.ts";
 
-// ---------------------------------------------------------------------------
-// Flag-dispatched public API
-// ---------------------------------------------------------------------------
+/** Shared JSON encoding context. */
+const jsonEncodingContext = new JsonEncodingContext();
 
 /**
  * Encodes a fabric value to a JSON string in the standard `FabricValue`
  * JSON-embedded encoding, prefixed with the format-identifying tag `fvj1:`.
  */
 export function jsonFromValue(value: FabricValue): string {
-  return jsonFromValueModern(value);
+  return jsonEncodingContext.encode(value);
 }
 
 /**
  * Decodes a string in the `FabricValue` JSON-embedded encoding format, which is
  * expected to be a plain object. Throws if it turns out to be something else.
+ * If `runtime` is omitted, the shared `EMPTY_RECONSTRUCTION_CONTEXT` is
+ * substituted, which throws if any reconstruction is needed.
  */
 export function plainObjectFromJson<T extends object = object>(
   json: string,
@@ -49,7 +47,7 @@ export function plainObjectFromJson<T extends object = object>(
  * JSON as defined by this module.
  */
 export function seemsLikeJsonEncodedFabricValue(value: string): boolean {
-  return seemsLikeJsonEncodedFabricValueModern(value);
+  return JsonEncodingContext.seemsLikeEncoded(value);
 }
 
 /**
@@ -61,5 +59,8 @@ export function valueFromJson(
   json: string,
   runtime?: ReconstructionContext | undefined,
 ): FabricValue {
-  return valueFromJsonModern(json, runtime);
+  return jsonEncodingContext.decode(
+    json,
+    runtime ?? EMPTY_RECONSTRUCTION_CONTEXT,
+  );
 }
