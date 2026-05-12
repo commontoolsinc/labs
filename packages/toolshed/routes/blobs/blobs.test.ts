@@ -27,7 +27,7 @@ const app = createApp()
   .route("/", memory)
   .route("/", router);
 
-const withDataModelConfig = async <T>(
+const withModernDataModel = async <T>(
   fn: () => Promise<T> | T,
 ): Promise<T> => {
   const previousDataModel = getDataModelConfig();
@@ -63,7 +63,7 @@ describe("Blob Routes", () => {
     const id = hashOf(contents).toString();
     const hash = id.slice("fid1:".length);
 
-    await withDataModelConfig(async () => {
+    await withModernDataModel(async () => {
       const post = await app.request(`/${identity.did()}/blobs/image.gif`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -126,7 +126,7 @@ describe("Blob Routes", () => {
     const cid = `cid:${id}` as const;
     const hash = id.slice("fid1:".length);
 
-    await withDataModelConfig(async () => {
+    await withModernDataModel(async () => {
       const post = await app.request(`/${identity.did()}/blobs/image.png`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -211,7 +211,7 @@ describe("Blob Routes", () => {
     const id = hashOf(contents).toString();
     const hash = id.slice("fid1:".length);
 
-    const post = await withDataModelConfig(() =>
+    const post = await withModernDataModel(() =>
       app.request(`/${identity.did()}/blobs/image.toolonggg`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -255,7 +255,7 @@ describe("Blob Routes", () => {
     const id = hashOf(contents).toString();
     const hash = id.slice("fid1:".length);
 
-    await withDataModelConfig(async () => {
+    await withModernDataModel(async () => {
       const post = await app.request(`/${identity.did()}/blobs/page.html`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

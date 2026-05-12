@@ -10,8 +10,6 @@ import {
 } from "@commonfabric/data-model/fabric-value";
 import {
   jsonFromValue,
-  resetJsonEncodingConfig,
-  setJsonEncodingConfig,
   valueFromJson,
 } from "@commonfabric/data-model/json-encoding";
 import { FabricEpochNsec } from "@commonfabric/data-model/fabric-epoch";
@@ -1895,7 +1893,6 @@ Deno.test("memory v2 stacked commits: dropping an earlier pending write invalida
 
 Deno.test("memory v2 stacked commits: pending visibility preserves rich fabric values", async () => {
   setDataModelConfig(true);
-  setJsonEncodingConfig(true);
   const harness = await createHarness();
   let commitPromise: Promise<any> | undefined;
   try {
@@ -1916,7 +1913,6 @@ Deno.test("memory v2 stacked commits: pending visibility preserves rich fabric v
     await commitPromise?.catch(() => {});
     await harness.close();
     resetDataModelConfig();
-    resetJsonEncodingConfig();
   }
 });
 
