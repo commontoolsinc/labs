@@ -111,7 +111,7 @@ export default pattern<DeviceInput, DeviceOutput>(({ name }) => {
     name,
     startEditing,
     saveDraft,
-    [UI]: <cf-input $value={name} />,
+    [UI]: <cf-input $value={draftName} />,
   };
 });
 ```
