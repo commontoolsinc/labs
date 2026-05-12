@@ -1,5 +1,6 @@
 import { parseArgs } from "@std/cli/parse-args";
-import { dirname, join, relative, resolve } from "@std/path";
+import { dirname, isAbsolute, join, relative, resolve } from "@std/path";
+import type { JSONSchema } from "@commonfabric/api";
 import { type CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import {
   DEFAULT_GATEWAY_BASE_URL,
@@ -9,6 +10,7 @@ import {
 } from "./config.ts";
 import {
   createHarnessImageAttachment,
+  isRelativePathWithinWorkspace,
   parseImageAttachmentPaths,
 } from "./image-attachments.ts";
 import type { HarnessImageAttachment } from "./contracts/image.ts";
@@ -52,6 +54,12 @@ import {
   isHarnessSkillRootWithinWorkspace,
   loadHarnessSkillContext,
 } from "./skills/registry.ts";
+import {
+  digestJsonValue,
+  parseStructuredResultJson,
+  parseStructuredResultSchema,
+  validateStructuredResultValue,
+} from "./structured-result.ts";
 
 const DEFAULT_MODEL = "gpt-5.4";
 const DEFAULT_MAX_MODEL_TURNS = 8;
@@ -82,6 +90,7 @@ export interface CfHarnessCliConfig {
   gatewayAuthMode: HarnessGatewayAuthMode;
   artifactRoot: string;
   resultJsonPath?: string;
+  structuredResult?: CfHarnessStructuredResultConfig;
   runManifestPath?: string;
   cfcEnforcementModeOverride?: CfcEnforcementMode;
   maxModelTurns: number;
@@ -90,6 +99,12 @@ export interface CfHarnessCliConfig {
   apiKeySource?: "CF_HARNESS_API_KEY" | "OPENAI_API_KEY";
   sandboxImage?: string;
   fabricMount?: string;
+}
+
+export interface CfHarnessStructuredResultConfig {
+  path: string;
+  sandboxPath: string;
+  schema: JSONSchema;
 }
 
 export interface CfHarnessCliIO {
@@ -208,7 +223,10 @@ Options:
   --gateway-base-url <url>      OpenAI-compatible gateway URL
   --gateway-auth-mode <mode>    bearer | none (default: bearer)
   --artifact-root <path>        Host-side artifact directory
-  --result-json-path <path>     Optional structured result sidecar path
+  --result-json-path <path>     Optional batch metadata JSON output path
+  --structured-result-path <p>  JSON file the run must write and validate
+  --structured-result-schema <j> JSON Schema for --structured-result-path
+  --structured-result-schema-file <p> JSON Schema file for --structured-result-path
   --run-manifest <path>         Optional Loom run manifest JSON path
   --cfc-enforcement-mode <mode> disabled | observe | enforce-explicit | enforce-strict
   --sandbox-image <image>       Docker image for the runsc-cfc sandbox (default: ${DEFAULT_DOCKER_RUNSC_IMAGE})
@@ -416,6 +434,86 @@ const resolvePrompt = async (
   return positionalPrompt!;
 };
 
+const resolvePathWithinWorkspace = (
+  workspace: string,
+  input: string,
+  flagName: string,
+): string => {
+  const hostPath = isAbsolute(input)
+    ? resolve(input)
+    : resolve(workspace, input);
+  if (!isRelativePathWithinWorkspace(relative(workspace, hostPath))) {
+    throw new Error(`${flagName} must stay within the workspace`);
+  }
+  return hostPath;
+};
+
+const parseStructuredResultConfig = async (
+  args: ReturnType<typeof parseArgs>,
+  options: {
+    cwd: string;
+    workspace: string;
+    readTextFile: (path: string) => Promise<string>;
+  },
+): Promise<CfHarnessStructuredResultConfig | undefined> => {
+  const structuredResultPath =
+    typeof args["structured-result-path"] === "string"
+      ? resolvePathWithinWorkspace(
+        options.workspace,
+        args["structured-result-path"],
+        "--structured-result-path",
+      )
+      : undefined;
+  const inlineSchema = typeof args["structured-result-schema"] === "string"
+    ? args["structured-result-schema"]
+    : undefined;
+  const schemaFile = typeof args["structured-result-schema-file"] === "string"
+    ? resolve(options.cwd, args["structured-result-schema-file"])
+    : undefined;
+  if (structuredResultPath === undefined) {
+    if (inlineSchema !== undefined || schemaFile !== undefined) {
+      throw new Error(
+        "--structured-result-schema requires --structured-result-path",
+      );
+    }
+    return undefined;
+  }
+  if (inlineSchema !== undefined && schemaFile !== undefined) {
+    throw new Error(
+      "provide only one of --structured-result-schema or --structured-result-schema-file",
+    );
+  }
+  const rawSchema = inlineSchema ??
+    (schemaFile !== undefined
+      ? await options.readTextFile(schemaFile)
+      : undefined);
+  if (rawSchema === undefined) {
+    throw new Error(
+      "--structured-result-path requires --structured-result-schema or --structured-result-schema-file",
+    );
+  }
+  const parsed = parseStructuredResultSchema(rawSchema, {
+    label: "--structured-result-schema",
+  });
+  if (parsed === undefined) {
+    throw new Error(
+      "--structured-result-path requires --structured-result-schema or --structured-result-schema-file",
+    );
+  }
+  return {
+    path: structuredResultPath,
+    sandboxPath: toWorkspaceSandboxPath(
+      options.workspace,
+      structuredResultPath,
+      {
+        strict: true,
+        errorPrefix: "--structured-result-path",
+      },
+    ),
+    schema: parsed.schema,
+  };
+};
+
 export const parseCfHarnessCliArgs = async (
   argv: readonly string[],
   deps: Pick<RunCfHarnessCliDependencies, "cwd" | "env" | "readTextFile"> = {},
@@ -442,6 +540,9 @@ export const parseCfHarnessCliArgs = async (
       "gateway-auth-mode",
       "artifact-root",
       "result-json-path",
+      "structured-result-path",
+      "structured-result-schema",
+      "structured-result-schema-file",
       "run-manifest",
       "cfc-enforcement-mode",
       "sandbox-image",
@@ -579,6 +680,11 @@ export const parseCfHarnessCliArgs = async (
   }
   const gatewayAuthMode = parsedGatewayAuthMode ?? "bearer";
   const readTextFile = deps.readTextFile ?? Deno.readTextFile;
+  const structuredResult = await parseStructuredResultConfig(args, {
+    cwd,
+    workspace,
+    readTextFile,
+  });
   const prompt = await resolvePrompt(args, cwd, readTextFile);
   const imageAttachments = await Promise.all(
     imagePaths.map((path) =>
@@ -666,6 +772,7 @@ export const parseCfHarnessCliArgs = async (
     gatewayAuthMode,
     artifactRoot,
     ...(resultJsonPath !== undefined ? { resultJsonPath } : {}),
+    ...(structuredResult !== undefined ? { structuredResult } : {}),
     ...(runManifestPath !== undefined ? { runManifestPath } : {}),
     ...(cfcEnforcementModeOverride !== undefined
       ? { cfcEnforcementModeOverride }
@@ -738,9 +845,28 @@ const appendAdditionalInstructions = (
   }
 };
 
+const appendStructuredResultInstructions = (
+  lines: string[],
+  structuredResult: CfHarnessStructuredResultConfig | undefined,
+): void => {
+  if (structuredResult === undefined) {
+    return;
+  }
+  lines.push(
+    "",
+    "Structured result contract:",
+    `- Before finishing, write a JSON file at ${structuredResult.sandboxPath}.`,
+    "- The harness validates that file against the configured structured-result schema after the run.",
+    "- If the file is missing, invalid JSON, or schema-invalid, the CLI exits nonzero and records the validation failure in the batch result sidecar when configured.",
+  );
+};
+
 export const buildCfHarnessOperatorSystemPrompt = (
   config:
-    & Pick<CfHarnessCliConfig, "workspace" | "focusRoot" | "systemPrompt">
+    & Pick<
+      CfHarnessCliConfig,
+      "workspace" | "focusRoot" | "systemPrompt" | "structuredResult"
+    >
     & {
       fabricMountPath?: string;
     },
@@ -761,13 +887,14 @@ export const buildCfHarnessOperatorSystemPrompt = (
       `- A Common Fabric space is mounted at ${config.fabricMountPath}. You may browse its contents for context.`,
     );
   }
+  appendStructuredResultInstructions(lines, config.structuredResult);
   appendAdditionalInstructions(lines, config.systemPrompt);
   return lines.join("\n");
 };
 
 export const buildCfHarnessBatchSystemPrompt = (
   config:
-    & Pick<CfHarnessCliConfig, "systemPrompt">
+    & Pick<CfHarnessCliConfig, "systemPrompt" | "structuredResult">
     & {
       fabricMountPath?: string;
     },
@@ -779,6 +906,7 @@ export const buildCfHarnessBatchSystemPrompt = (
       `A Common Fabric space is mounted at ${config.fabricMountPath}. You may browse its contents for context.`,
     );
   }
+  appendStructuredResultInstructions(lines, config.structuredResult);
   appendAdditionalInstructions(lines, config.systemPrompt);
   return lines.join("\n");
 };
@@ -787,7 +915,11 @@ export const resolveCfHarnessCliSystemPrompt = (
   config:
     & Pick<
       CfHarnessCliConfig,
-      "workspace" | "focusRoot" | "systemPrompt" | "outputMode"
+      | "workspace"
+      | "focusRoot"
+      | "systemPrompt"
+      | "outputMode"
+      | "structuredResult"
     >
     & {
       fabricMountPath?: string;
@@ -830,11 +962,79 @@ export interface CfHarnessBatchResult {
   artifact_root?: string;
   transcript_path?: string;
   run_report_path?: string;
+  structured_result?: CfHarnessStructuredResultValidation;
 }
+
+export interface CfHarnessStructuredResultValidation {
+  type: "cf-harness.structured-result-validation";
+  status: "valid" | "invalid";
+  schema_digest: string;
+  result_path: string;
+  validation_error?: string;
+}
+
+export const validateCfHarnessStructuredResult = async (
+  options: {
+    config: CfHarnessStructuredResultConfig;
+    readTextFile: (path: string) => Promise<string>;
+  },
+): Promise<CfHarnessStructuredResultValidation> => {
+  const schemaDigest = await digestJsonValue(options.config.schema);
+  let text: string;
+  try {
+    text = await options.readTextFile(options.config.path);
+  } catch {
+    return {
+      type: "cf-harness.structured-result-validation",
+      status: "invalid",
+      schema_digest: schemaDigest,
+      result_path: options.config.path,
+      validation_error: "structured result file could not be read",
+    };
+  }
+  let value: unknown;
+  try {
+    value = parseStructuredResultJson(text, {
+      emptyMessage: "structured result file was empty",
+      invalidMessage: "structured result file was not valid JSON",
+    });
+  } catch (error) {
+    return {
+      type: "cf-harness.structured-result-validation",
+      status: "invalid",
+      schema_digest: schemaDigest,
+      result_path: options.config.path,
+      validation_error: error instanceof Error
+        ? error.message
+        : "structured result file was not valid JSON",
+    };
+  }
+  try {
+    validateStructuredResultValue({
+      schema: options.config.schema,
+      value,
+    });
+  } catch {
+    return {
+      type: "cf-harness.structured-result-validation",
+      status: "invalid",
+      schema_digest: schemaDigest,
+      result_path: options.config.path,
+      validation_error: "structured result did not match the schema",
+    };
+  }
+  return {
+    type: "cf-harness.structured-result-validation",
+    status: "valid",
+    schema_digest: schemaDigest,
+    result_path: options.config.path,
+  };
+};
 
 export const createCfHarnessBatchResult = (
   result: HarnessPromptLoopResult,
   durationMs: number,
+  structuredResult?: CfHarnessStructuredResultValidation,
 ): CfHarnessBatchResult => ({
   response: result.finalAssistantText,
   duration_ms: durationMs,
@@ -853,6 +1053,9 @@ export const createCfHarnessBatchResult = (
     : {}),
   ...(result.runState.runReportPath !== undefined
     ? { run_report_path: result.runState.runReportPath }
+    : {}),
+  ...(structuredResult !== undefined
+    ? { structured_result: structuredResult }
     : {}),
 });
 
@@ -1232,12 +1435,22 @@ export const runCfHarnessCli = async (
       });
     }
     const durationMs = Date.now() - startedAt;
+    const structuredResultValidation = parsed.structuredResult === undefined
+      ? undefined
+      : await validateCfHarnessStructuredResult({
+        config: parsed.structuredResult,
+        readTextFile,
+      });
     if (parsed.resultJsonPath !== undefined) {
       await writeTextFile(
         parsed.resultJsonPath,
         `${
           JSON.stringify(
-            createCfHarnessBatchResult(result, durationMs),
+            createCfHarnessBatchResult(
+              result,
+              durationMs,
+              structuredResultValidation,
+            ),
             null,
             2,
           )
@@ -1247,6 +1460,12 @@ export const runCfHarnessCli = async (
     io.stdout(formatCfHarnessCliResult(result, parsed.outputMode));
     if (parsed.printTranscript) {
       io.stdout(`${JSON.stringify(result.transcript, null, 2)}\n`);
+    }
+    if (structuredResultValidation?.status === "invalid") {
+      io.stderr(
+        `structured result validation failed: ${structuredResultValidation.validation_error}\n`,
+      );
+      return 1;
     }
     return 0;
   } catch (error) {

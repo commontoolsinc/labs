@@ -25,7 +25,7 @@ function specialInstanceToFabricValue(
     // Return a single-key object using the `@` prefix convention established
     // elsewhere in the system. The spread captures any custom enumerable
     // properties, followed by explicit assignment of the standard (but
-    // non-enumerable) Error properties.
+    // non-enumerable) `Error` properties.
     return {
       "@Error": {
         ...error,
@@ -64,7 +64,7 @@ function hasToJSONMethod(
 /**
  * Legacy implementation of `isFabricValue()` for the JSON-only type system.
  * Determines if the given value is considered "fabric-compatible" per se (without
- * invoking any conversions such as `.toJSON()`).
+ * invoking any conversions such as `toJSON()`).
  *
  * @param value - The value to check.
  * @returns `true` if the value is fabric-compatible per se, `false` otherwise.
@@ -212,7 +212,7 @@ export function shallowFabricFromNativeValueLegacy(
         );
       } else if (Array.isArray(value)) {
         // Note that if the original `value` had a `toJSON()` method, that would
-        // have triggered the `toJSON` clause above and so we won't end up here.
+        // have triggered the `toJSON()` clause above and so we won't end up here.
         if (!isArrayWithOnlyIndexProperties(value)) {
           throw new Error(
             "Cannot store array with enumerable named properties.",
@@ -267,9 +267,9 @@ const PROCESSING = Symbol("PROCESSING");
  * @throws Error if the value (or any nested value) can't be converted.
  */
 export function fabricFromNativeValueLegacy(value: unknown): FabricValue {
-  // The internal helper can return OMIT for nested values that should be
-  // omitted, but at the top level this never happens (OMIT is only returned
-  // when converted.size > 0, i.e., in nested calls).
+  // The internal helper can return `OMIT` for nested values that should be
+  // omitted, but at the top level this never happens (`OMIT` is only returned
+  // when `converted.size > 0`, i.e., in nested calls).
   return fabricFromNativeValueLegacyInternal(
     value,
     new Map(),
@@ -342,14 +342,14 @@ function fabricFromNativeValueLegacyInternal(
       // Cache the primitive result for the original object (e.g., from toJSON).
       converted.set(original, value);
     }
-    // `undefined` at non-top-level should be omitted (matches JSON.stringify).
-    // In arrays, return `null` instead of OMIT to match JSON.stringify semantics
-    // (which coerces undefined to null in array positions).
+    // `undefined` at non-top-level should be omitted (matches `JSON.stringify()`).
+    // In arrays, return `null` instead of `OMIT` to match `JSON.stringify()` semantics
+    // (which coerces `undefined` to `null` in array positions).
     if (value === undefined && converted.size > 0) {
       return inArray ? null : OMIT;
     }
-    // At this point, value is a primitive (null, boolean, number, string) or
-    // undefined - all valid FabricValue types.
+    // At this point, `value` is a primitive (`null`, `boolean`, `number`,
+    // `string`) or `undefined` - all valid `FabricValue` types.
     return value as FabricValue;
   }
 

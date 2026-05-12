@@ -356,6 +356,21 @@ export function rewriteOwnedPreClosureJsxExpressionSite(
     return undefined;
   }
 
+  // Defer to late in-place lowering when this JSX expression is just an
+  // element-member read (or passthrough container thereof). The late
+  // `pattern-body-reactive-root-lowering` pass will rewrite `elem.foo` to
+  // `elem.key("foo")` in place, producing `{elem.key("foo")}` directly in
+  // the JSX rather than `{derive({...}, ({elem}) => elem.foo)}`. The
+  // in-place form encodes the same reactive dependency more cheaply and
+  // doesn't pull the whole element binding into a derive's inputs.
+  const relevantDataFlows = context.getRelevantDataFlowsFromAnalysis(analysis);
+  if (
+    !hasLogicalOps &&
+    shouldDeferToLateInPlaceLowering(context, expression, relevantDataFlows)
+  ) {
+    return undefined;
+  }
+
   if (context.options.mode === "error") {
     context.reportDiagnostic({
       type: "opaque-ref:jsx-expression",
@@ -608,6 +623,102 @@ export function rewritePatternOwnedExpressionSites<T extends ts.Node>(
   return ts.visitNode(root, visit) as T;
 }
 
+/**
+ * Find the leftmost identifier in a dataflow expression — the "root" of a
+ * `foo`, `foo.bar`, `foo.bar.baz`, or `foo.key("bar")` chain.
+ */
+function getDataFlowRootIdentifier(
+  expression: ts.Expression,
+): ts.Identifier | undefined {
+  let current: ts.Expression = expression;
+  while (true) {
+    if (ts.isPropertyAccessExpression(current)) {
+      current = current.expression;
+      continue;
+    }
+    if (
+      ts.isCallExpression(current) &&
+      ts.isPropertyAccessExpression(current.expression) &&
+      current.expression.name.text === "key"
+    ) {
+      current = current.expression.expression;
+      continue;
+    }
+    break;
+  }
+  return ts.isIdentifier(current) ? current : undefined;
+}
+
+/**
+ * True when every relevant dataflow is rooted at an array-method element
+ * binding (no captures of outer reactive values like `labelPrefix`).
+ */
+function allDataFlowsAreElementBindingRoots(
+  context: TransformationContext,
+  dataFlows: readonly { readonly expression: ts.Expression }[],
+): boolean {
+  if (dataFlows.length === 0) return false;
+  for (const dataFlow of dataFlows) {
+    const root = getDataFlowRootIdentifier(dataFlow.expression);
+    if (!root) return false;
+    if (!context.isArrayMethodElementBindingReference(root)) return false;
+  }
+  return true;
+}
+
+/**
+ * True when the expression is a "pass-through container" — it holds other
+ * expressions without computing a value of its own. Late
+ * `pattern-body-reactive-root-lowering` will descend into it and rewrite
+ * `elem.foo` reads to `elem.key("foo")` in-place. For these shapes the
+ * early derive-wrap is unnecessary and produces broader output.
+ *
+ * In contrast, computations (BinaryExpression, ConditionalExpression,
+ * CallExpression, etc.) produce a new value and *must* be wrapped in
+ * `derive`/`computed` at the early stage; otherwise the resulting value
+ * would be a one-shot snapshot rather than a reactive cell.
+ */
+function isPassthroughContainerExpression(
+  expression: ts.Expression,
+): boolean {
+  let current = expression;
+  while (
+    ts.isParenthesizedExpression(current) ||
+    ts.isAsExpression(current) ||
+    ts.isTypeAssertionExpression(current) ||
+    ts.isSatisfiesExpression(current) ||
+    ts.isNonNullExpression(current)
+  ) {
+    current = current.expression;
+  }
+  return ts.isPropertyAccessExpression(current) ||
+    ts.isElementAccessExpression(current) ||
+    ts.isObjectLiteralExpression(current) ||
+    ts.isArrayLiteralExpression(current);
+}
+
+/**
+ * Combined gate: the early derive-wrap should defer to late in-place
+ * lowering for an expression whose only reactive content is element-member
+ * access AND whose shape doesn't produce a new value of its own. Both
+ * conditions are required:
+ *
+ *   - All-element-binding-rooted alone isn't enough: a computation like
+ *     `elem.type === "folder"` still needs an early wrap to be reactive,
+ *     even though its only reactive read is `elem.type`.
+ *
+ *   - Passthrough-shape alone isn't enough: an array literal `[outerCell]`
+ *     needs an early wrap if it captures a non-element reactive value.
+ */
+function shouldDeferToLateInPlaceLowering(
+  context: TransformationContext,
+  expression: ts.Expression,
+  dataFlows: readonly { readonly expression: ts.Expression }[],
+): boolean {
+  return allDataFlowsAreElementBindingRoots(context, dataFlows) &&
+    isPassthroughContainerExpression(expression);
+}
+
 export function rewriteArrayMethodCallbackExpressionSites(
   body: ts.ConciseBody,
   context: TransformationContext,
@@ -654,6 +765,11 @@ export function rewriteArrayMethodCallbackExpressionSites(
     if (relevantDataFlows.length === 0) {
       return undefined;
     }
+    if (
+      shouldDeferToLateInPlaceLowering(context, expression, relevantDataFlows)
+    ) {
+      return undefined;
+    }
 
     return createReactiveWrapperForExpression(
       expression,
@@ -678,6 +794,11 @@ export function rewriteArrayMethodCallbackExpressionSites(
         analysis,
       );
       if (relevantDataFlows.length === 0) {
+        return undefined;
+      }
+      if (
+        shouldDeferToLateInPlaceLowering(context, expression, relevantDataFlows)
+      ) {
         return undefined;
       }
 

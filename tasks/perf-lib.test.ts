@@ -1,11 +1,13 @@
 import { assertAlmostEquals, assertEquals } from "@std/assert";
 import {
   computeBaseline,
+  computeCiWallTimeRevisitSignals,
   extractMetrics,
   fetchPRBody,
   githubGet,
   type Job,
   type Step,
+  timingArtifactLabel,
   type WorkflowRun,
 } from "./perf-lib.ts";
 
@@ -86,6 +88,407 @@ Deno.test("extractMetrics keeps CLI core and fuse timings separate", () => {
   );
   assertEquals(metrics.has("job: CLI Integration Tests"), false);
   assertEquals(metrics.has("step: CLI integration"), false);
+});
+
+Deno.test("extractMetrics aggregates split CLI core jobs", () => {
+  const metrics = extractMetrics(makeRun(), [
+    makeJob(
+      1,
+      "CLI Integration Tests (core-piece-values)",
+      "2026-01-01T00:00:00Z",
+      "2026-01-01T00:01:40Z",
+      [
+        makeStep(
+          "🧪 Run CLI integration suite",
+          "2026-01-01T00:00:10Z",
+          "2026-01-01T00:01:20Z",
+        ),
+      ],
+    ),
+    makeJob(
+      2,
+      "CLI Integration Tests (core-piece-links)",
+      "2026-01-01T00:00:00Z",
+      "2026-01-01T00:03:20Z",
+      [
+        makeStep(
+          "🧪 Run CLI integration suite",
+          "2026-01-01T00:01:00Z",
+          "2026-01-01T00:03:00Z",
+        ),
+      ],
+    ),
+    makeJob(
+      3,
+      "CLI Integration Tests (core-piece-call)",
+      "2026-01-01T00:00:00Z",
+      "2026-01-01T00:02:40Z",
+      [
+        makeStep(
+          "🧪 Run CLI integration suite",
+          "2026-01-01T00:01:00Z",
+          "2026-01-01T00:02:30Z",
+        ),
+      ],
+    ),
+  ]);
+
+  assertEquals(
+    metrics.get("job: CLI Integration Tests (core-piece-values)")
+      ?.durationSeconds,
+    100,
+  );
+  assertEquals(
+    metrics.get("job: CLI Integration Tests (core-piece-links)")
+      ?.durationSeconds,
+    200,
+  );
+  assertEquals(
+    metrics.get("job: CLI Integration Tests (core-piece-call)")
+      ?.durationSeconds,
+    160,
+  );
+  assertEquals(
+    metrics.get("job: CLI Integration Tests (core)")?.durationSeconds,
+    200,
+  );
+  assertEquals(
+    metrics.get("step: CLI integration (core)")?.durationSeconds,
+    120,
+  );
+  assertEquals(metrics.has("job: CLI Integration Tests"), false);
+  assertEquals(metrics.has("step: CLI integration"), false);
+});
+
+Deno.test("extractMetrics aggregates package integration matrix jobs", () => {
+  const metrics = extractMetrics(makeRun(), [
+    makeJob(
+      1,
+      "Package Integration Tests (runner)",
+      "2026-01-01T00:00:00Z",
+      "2026-01-01T00:01:20Z",
+      [
+        makeStep(
+          "🧪 Run runner integration tests",
+          "2026-01-01T00:00:10Z",
+          "2026-01-01T00:01:00Z",
+        ),
+      ],
+    ),
+    makeJob(
+      2,
+      "Package Integration Tests (shell)",
+      "2026-01-01T00:00:00Z",
+      "2026-01-01T00:01:40Z",
+      [
+        makeStep(
+          "🧪 Run shell integration tests",
+          "2026-01-01T00:00:10Z",
+          "2026-01-01T00:01:30Z",
+        ),
+      ],
+    ),
+  ]);
+
+  assertEquals(
+    metrics.get("job: Package Integration Tests (runner)")?.durationSeconds,
+    80,
+  );
+  assertEquals(
+    metrics.get("job: Package Integration Tests (shell)")?.durationSeconds,
+    100,
+  );
+  assertEquals(
+    metrics.get("job: Package Integration Tests")?.durationSeconds,
+    100,
+  );
+  assertEquals(metrics.get("step: runner integration")?.durationSeconds, 50);
+  assertEquals(metrics.get("step: shell integration")?.durationSeconds, 80);
+});
+
+Deno.test("extractMetrics aggregates pattern integration matrix shards", () => {
+  const metrics = extractMetrics(makeRun(), [
+    makeJob(
+      1,
+      "Pattern Integration Tests (1/4)",
+      "2026-01-01T00:00:00Z",
+      "2026-01-01T00:01:40Z",
+      [
+        makeStep(
+          "🧩 Run end-to-end patterns integration tests",
+          "2026-01-01T00:00:10Z",
+          "2026-01-01T00:01:30Z",
+        ),
+      ],
+    ),
+    makeJob(
+      2,
+      "Pattern Integration Tests (2/4)",
+      "2026-01-01T00:00:00Z",
+      "2026-01-01T00:01:10Z",
+      [
+        makeStep(
+          "🧩 Run end-to-end patterns integration tests",
+          "2026-01-01T00:00:10Z",
+          "2026-01-01T00:01:00Z",
+        ),
+      ],
+    ),
+  ]);
+
+  assertEquals(
+    metrics.get("job: Pattern Integration Tests (1/4)")?.durationSeconds,
+    100,
+  );
+  assertEquals(
+    metrics.get("job: Pattern Integration Tests (2/4)")?.durationSeconds,
+    70,
+  );
+  assertEquals(
+    metrics.get("job: Pattern Integration Tests")?.durationSeconds,
+    100,
+  );
+  assertEquals(
+    metrics.get("step: patterns integration")?.durationSeconds,
+    80,
+  );
+});
+
+Deno.test("extractMetrics aggregates generated patterns matrix shards", () => {
+  const metrics = extractMetrics(makeRun(), [
+    makeJob(
+      1,
+      "Generated Patterns Integration Tests (1/4)",
+      "2026-01-01T00:00:00Z",
+      "2026-01-01T00:01:40Z",
+      [
+        makeStep(
+          "🧪 Run generated patterns integration tests",
+          "2026-01-01T00:00:10Z",
+          "2026-01-01T00:01:30Z",
+        ),
+      ],
+    ),
+    makeJob(
+      2,
+      "Generated Patterns Integration Tests (2/4)",
+      "2026-01-01T00:00:00Z",
+      "2026-01-01T00:01:10Z",
+      [
+        makeStep(
+          "🧪 Run generated patterns integration tests",
+          "2026-01-01T00:00:10Z",
+          "2026-01-01T00:01:00Z",
+        ),
+      ],
+    ),
+  ]);
+
+  assertEquals(
+    metrics.get("job: Generated Patterns Integration Tests (1/4)")
+      ?.durationSeconds,
+    100,
+  );
+  assertEquals(
+    metrics.get("job: Generated Patterns Integration Tests (2/4)")
+      ?.durationSeconds,
+    70,
+  );
+  assertEquals(
+    metrics.get("job: Generated Patterns Integration Tests")?.durationSeconds,
+    100,
+  );
+  assertEquals(
+    metrics.get("step: generated patterns integration")?.durationSeconds,
+    80,
+  );
+});
+
+Deno.test("extractMetrics aggregates runner test matrix shards", () => {
+  const metrics = extractMetrics(makeRun(), [
+    makeJob(
+      1,
+      "Runner Tests (1/4)",
+      "2026-01-01T00:00:00Z",
+      "2026-01-01T00:01:40Z",
+      [
+        makeStep(
+          "🧪 Run runner tests",
+          "2026-01-01T00:00:10Z",
+          "2026-01-01T00:01:30Z",
+        ),
+      ],
+    ),
+    makeJob(
+      2,
+      "Runner Tests (2/4)",
+      "2026-01-01T00:00:00Z",
+      "2026-01-01T00:01:10Z",
+      [
+        makeStep(
+          "🧪 Run runner tests",
+          "2026-01-01T00:00:10Z",
+          "2026-01-01T00:01:00Z",
+        ),
+      ],
+    ),
+  ]);
+
+  assertEquals(
+    metrics.get("job: Runner Tests (1/4)")?.durationSeconds,
+    100,
+  );
+  assertEquals(
+    metrics.get("job: Runner Tests (2/4)")?.durationSeconds,
+    70,
+  );
+  assertEquals(metrics.get("job: Runner Tests")?.durationSeconds, 100);
+  assertEquals(metrics.get("step: runner tests")?.durationSeconds, 80);
+});
+
+Deno.test("timingArtifactLabel normalizes matrix shard artifacts", () => {
+  assertEquals(
+    timingArtifactLabel("test-timing-package-integration-runner"),
+    "package-integration",
+  );
+  assertEquals(
+    timingArtifactLabel("test-timing-pattern-integration-1"),
+    "pattern-integration",
+  );
+  assertEquals(
+    timingArtifactLabel("test-timing-generated-patterns-1"),
+    "generated-patterns",
+  );
+  assertEquals(
+    timingArtifactLabel("test-timing-package-integration"),
+    "package-integration",
+  );
+});
+
+Deno.test("computeCiWallTimeRevisitSignals stays quiet for balanced CI", () => {
+  const signals = computeCiWallTimeRevisitSignals([
+    makeJob(
+      1,
+      "Pattern Integration Tests (1/4)",
+      "2026-01-01T00:00:00Z",
+      "2026-01-01T00:02:00Z",
+      [],
+    ),
+    makeJob(
+      2,
+      "CLI Integration Tests (core-piece-call)",
+      "2026-01-01T00:00:00Z",
+      "2026-01-01T00:01:50Z",
+      [],
+    ),
+    makeJob(
+      3,
+      "Package Integration Tests (shell)",
+      "2026-01-01T00:00:00Z",
+      "2026-01-01T00:01:45Z",
+      [],
+    ),
+    makeJob(
+      4,
+      "Generated Patterns Integration Tests (1/4)",
+      "2026-01-01T00:00:00Z",
+      "2026-01-01T00:01:40Z",
+      [],
+    ),
+    makeJob(
+      5,
+      "Runner Tests (1/4)",
+      "2026-01-01T00:00:00Z",
+      "2026-01-01T00:01:35Z",
+      [],
+    ),
+  ]);
+
+  assertEquals(signals, []);
+});
+
+Deno.test("computeCiWallTimeRevisitSignals flags slow and imbalanced jobs", () => {
+  const signals = computeCiWallTimeRevisitSignals([
+    makeJob(
+      1,
+      "Pattern Integration Tests (2/4)",
+      "2026-01-01T00:00:00Z",
+      "2026-01-01T00:04:00Z",
+      [],
+    ),
+    makeJob(
+      2,
+      "CLI Integration Tests (core-piece-call)",
+      "2026-01-01T00:00:00Z",
+      "2026-01-01T00:01:40Z",
+      [],
+    ),
+    makeJob(
+      3,
+      "Package Integration Tests (shell)",
+      "2026-01-01T00:00:00Z",
+      "2026-01-01T00:01:35Z",
+      [],
+    ),
+    makeJob(
+      4,
+      "Generated Patterns Integration Tests (1/4)",
+      "2026-01-01T00:00:00Z",
+      "2026-01-01T00:01:30Z",
+      [],
+    ),
+    makeJob(
+      5,
+      "Runner Tests (1/4)",
+      "2026-01-01T00:00:00Z",
+      "2026-01-01T00:01:25Z",
+      [],
+    ),
+  ]);
+
+  assertEquals(
+    signals.map((signal) => signal.kind),
+    ["slow-job", "job-imbalance"],
+  );
+  assertEquals(
+    signals[0].detail,
+    "Pattern Integration Tests (2/4) took 4m 0s",
+  );
+});
+
+Deno.test("computeCiWallTimeRevisitSignals flags long required wall time", () => {
+  const signals = computeCiWallTimeRevisitSignals([
+    makeJob(
+      1,
+      "Check",
+      "2026-01-01T00:00:00Z",
+      "2026-01-01T00:01:00Z",
+      [],
+    ),
+    makeJob(
+      2,
+      "Pattern Integration Tests (1/4)",
+      "2026-01-01T00:07:30Z",
+      "2026-01-01T00:08:30Z",
+      [],
+    ),
+    makeJob(
+      3,
+      "Deploy to Toolshed (Staging)",
+      "2026-01-01T00:20:00Z",
+      "2026-01-01T00:25:00Z",
+      [],
+    ),
+  ]);
+
+  assertEquals(
+    signals.map((signal) => signal.kind),
+    ["required-wall-time"],
+  );
+  assertEquals(
+    signals[0].detail,
+    "Required non-deploy jobs took 8m 30s from first start to last completion",
+  );
 });
 
 Deno.test("computeBaseline enforces the 15 percent floor for low-variance samples", () => {

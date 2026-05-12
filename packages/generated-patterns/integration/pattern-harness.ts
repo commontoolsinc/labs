@@ -110,6 +110,7 @@ export async function runPatternScenario(scenario: PatternIntegrationScenario) {
           (cell, segment) => cell.key(segment),
           result,
         );
+        await targetCell.pull();
         await runtime.editWithRetry((tx) =>
           targetCell.withTx(tx).send(event.payload)
         );

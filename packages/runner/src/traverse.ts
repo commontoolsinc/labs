@@ -2668,6 +2668,12 @@ export class SchemaObjectTraverser<V extends FabricValue>
     const docArray = doc.value as Immutable<FabricValue>[];
     const arrayObj = new Array<Immutable<FabricValue>>(docArray.length);
 
+    // Rendering or otherwise consuming a schema-backed array depends on its
+    // direct structure, not just the indices that exist right now. Record a
+    // shallow read of the array itself so appends/removes can demand lazy
+    // upstream computations in pull mode.
+    this.tx.read(doc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
+
     // We use `every` here so if our input is a sparse array, so is our output.
     const valid = docArray.every((item, index) => {
       const itemSchema = this.cfc.schemaAtPath(schema, [index.toString()]);

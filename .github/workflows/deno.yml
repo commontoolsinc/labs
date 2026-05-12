@@ -8,6 +8,10 @@ on:
     branches:
       - main
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 # Define the list of binaries we're building
 # This makes it easy to add more binaries in the future
 env:
@@ -68,6 +72,47 @@ jobs:
 
       - name: 🧪 Run parallel workspace tests
         run: deno task test
+        env:
+          TEST_DISABLED_PACKAGES: runner
+
+  runner-test:
+    name: "Runner Tests (${{ matrix.shard }}/${{ matrix.total }})"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+        total: [4]
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      - name: 🔍 Verify lock file & install dependencies
+        run: deno install --frozen=true
+
+      - name: 📥 Download Deno dependency binaries
+        run: deno task initialize-db
+
+      - name: 🧪 Run runner tests
+        working-directory: packages/runner
+        run: |
+          TEST_FILES=$(deno run --allow-read ../../tasks/select-runner-test-files.ts ${{ matrix.shard }}/${{ matrix.total }})
+          if [ -z "$TEST_FILES" ]; then
+            echo "::error::No runner test files selected for shard ${{ matrix.shard }}/${{ matrix.total }}"
+            exit 1
+          fi
+          printf 'Runner test shard ${{ matrix.shard }}/${{ matrix.total }} files:\n'
+          printf '  %s\n' $TEST_FILES
+          ENV=test deno test \
+            --allow-ffi \
+            --allow-env \
+            --allow-read \
+            --allow-write=/tmp,/var/folders \
+            --allow-run=git \
+            $TEST_FILES
 
   build-binaries:
     name: "Build Binaries"
@@ -99,9 +144,14 @@ jobs:
             ./dist/cf
 
   generated-patterns-integration-test:
-    name: "Generated Patterns Integration Tests"
+    name: "Generated Patterns Integration Tests (${{ matrix.shard }}/${{ matrix.total }})"
     runs-on: ubuntu-latest
     environment: ci
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+        total: [4]
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
@@ -118,15 +168,23 @@ jobs:
       - name: 🧪 Run generated patterns integration tests
         working-directory: packages/generated-patterns
         run: |
+          TEST_FILES=$(deno run --allow-read ../../tasks/select-generated-pattern-files.ts ${{ matrix.shard }}/${{ matrix.total }})
+          if [ -z "$TEST_FILES" ]; then
+            echo "::error::No generated pattern files selected for shard ${{ matrix.shard }}/${{ matrix.total }}"
+            exit 1
+          fi
+          printf 'Generated patterns shard ${{ matrix.shard }}/${{ matrix.total }} files:\n'
+          printf '  %s\n' $TEST_FILES
           mkdir -p ../../test-results
-          INTEGRATION_TEST_FLAGS="--junit-path=../../test-results/generated-patterns.xml" \
-          deno task integration
+          LOG_LEVEL=warn deno test --trace-leaks -A --parallel \
+            --junit-path=../../test-results/generated-patterns-${{ matrix.shard }}.xml \
+            $TEST_FILES
 
       - name: 📤 Upload test timing data
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-timing-generated-patterns
+          name: test-timing-generated-patterns-${{ matrix.shard }}
           path: test-results/
           retention-days: 90
           if-no-files-found: ignore
@@ -136,10 +194,34 @@ jobs:
   # ---------------------------------------------------------------------------
 
   package-integration-test:
-    name: "Package Integration Tests"
+    name: "Package Integration Tests (${{ matrix.suite_name }})"
     runs-on: ubuntu-latest
     needs: ["build-binaries"]
     environment: ci
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite_name: runner
+            package_dir: packages/runner
+            junit_name: runner
+            step_name: runner integration tests
+            headless: false
+          - suite_name: runtime-client
+            package_dir: packages/runtime-client
+            junit_name: runtime-client
+            step_name: runtime-client integration tests
+            headless: false
+          - suite_name: shell
+            package_dir: packages/shell
+            junit_name: shell
+            step_name: shell integration tests
+            headless: true
+          - suite_name: background-charm-service
+            package_dir: packages/background-charm-service
+            junit_name: background-charm-service
+            step_name: background worker integration tests
+            headless: true
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
@@ -151,56 +233,39 @@ jobs:
         uses: actions/download-artifact@v4
 
       - name: 🚀 Start Toolshed server for testing
+        env:
+          TOOLSHED_PORT: 8000
         run: |
           chmod +x ./common-binaries/toolshed
           CTTS_AI_LLM_ANTHROPIC_API_KEY=fake \
-          ./common-binaries/toolshed &
+          ./common-binaries/toolshed --port="$TOOLSHED_PORT" &
 
       # For Astral
       # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled
       - name: 🛡️ Disable AppArmor for browser tests
         run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
 
-      - name: 🧪 Run end-to-end runner integration tests
-        working-directory: packages/runner
+      - name: 🧪 Run ${{ matrix.step_name }}
+        working-directory: ${{ matrix.package_dir }}
+        env:
+          HEADLESS_ENABLED: ${{ matrix.headless }}
+          JUNIT_NAME: ${{ matrix.junit_name }}
+          TOOLSHED_PORT: 8000
         run: |
           mkdir -p ../../test-results
-          API_URL=http://localhost:8000/ \
-          INTEGRATION_TEST_FLAGS="--junit-path=../../test-results/runner.xml" \
-          deno task integration
-
-      - name: 🧪 Run end-to-end runtime-client integration tests
-        working-directory: packages/runtime-client
-        run: |
-          mkdir -p ../../test-results
-          API_URL=http://localhost:8000/ \
-          INTEGRATION_TEST_FLAGS="--junit-path=../../test-results/runtime-client.xml" \
-          deno task integration
-
-      - name: 🧪 Run end-to-end shell integration tests
-        working-directory: packages/shell
-        run: |
-          mkdir -p ../../test-results
-          HEADLESS=1 \
-          API_URL=http://localhost:8000/ \
-          INTEGRATION_TEST_FLAGS="--junit-path=../../test-results/shell.xml" \
-          deno task integration
-
-      - name: 🧪 Run background worker integration tests
-        working-directory: packages/background-charm-service
-        run: |
-          mkdir -p ../../test-results
-          HEADLESS=1 \
-          API_URL=http://localhost:8000/ \
-          INTEGRATION_TEST_FLAGS="--junit-path=../../test-results/background-charm-service.xml" \
+          if [ "$HEADLESS_ENABLED" = "true" ]; then
+            export HEADLESS=1
+          fi
+          API_URL="http://localhost:${TOOLSHED_PORT}/" \
+          INTEGRATION_TEST_FLAGS="--junit-path=../../test-results/${JUNIT_NAME}.xml" \
           deno task integration
 
       - name: 📤 Upload test timing data
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-timing-package-integration
-          path: test-results/
+          name: test-timing-package-integration-${{ matrix.suite_name }}
+          path: test-results/${{ matrix.junit_name }}.xml
           retention-days: 90
           if-no-files-found: ignore
 
@@ -214,14 +279,28 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - suite_name: core
+          - suite_name: core-piece-values
             script: integration.sh
+            section: piece-values
             toolshed_port: 8000
+            install_fuse_deps: false
+            timeout_minutes: 10
+          - suite_name: core-piece-links
+            script: integration.sh
+            section: piece-links
+            toolshed_port: 8001
+            install_fuse_deps: false
+            timeout_minutes: 10
+          - suite_name: core-piece-call
+            script: integration.sh
+            section: piece-call
+            toolshed_port: 8002
             install_fuse_deps: false
             timeout_minutes: 10
           - suite_name: fuse
             script: fuse-exec.sh
-            toolshed_port: 8001
+            section: ""
+            toolshed_port: 8003
             install_fuse_deps: true
             timeout_minutes: 15
     steps:
@@ -258,11 +337,16 @@ jobs:
           fi
 
       - name: 🧪 Run CLI integration suite
-        if: ${{ matrix.suite_name == 'core' }}
+        if: ${{ startsWith(matrix.suite_name, 'core-') }}
         working-directory: packages/cli
         env:
           TOOLSHED_PORT: ${{ matrix.toolshed_port }}
+          CF_CLI_INTEGRATION_SECTION: ${{ matrix.section }}
+          CF_CLI_INTEGRATION_TIMINGS: "1"
+          CF_CLI_INTEGRATION_TIMINGS_FILE: "../../test-results/cli-${{ matrix.suite_name }}-cf-timings.log"
         run: |
+          mkdir -p ../../test-results
+          : > "$CF_CLI_INTEGRATION_TIMINGS_FILE"
           API_URL="http://localhost:${TOOLSHED_PORT}" ./integration/${{ matrix.script }}
 
       - name: 🧪 Run CLI FUSE integration suite
@@ -285,11 +369,25 @@ jobs:
         if: ${{ failure() && matrix.suite_name == 'fuse' }}
         run: cat ~/.cf/fuse/fuse-daemon.log 2>/dev/null || echo "No daemon log found"
 
+      - name: 📤 Upload CLI integration timing data
+        if: ${{ always() && startsWith(matrix.suite_name, 'core-') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-timing-cli-${{ matrix.suite_name }}
+          path: test-results/cli-${{ matrix.suite_name }}-cf-timings.log
+          retention-days: 90
+          if-no-files-found: ignore
+
   pattern-integration-test:
-    name: "Pattern Integration Tests"
+    name: "Pattern Integration Tests (${{ matrix.shard }}/${{ matrix.total }})"
     runs-on: ubuntu-latest
     needs: ["build-binaries"]
     environment: ci
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+        total: [4]
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
@@ -314,17 +412,21 @@ jobs:
       - name: 🧩 Run end-to-end patterns integration tests
         working-directory: packages/patterns
         run: |
+          mapfile -t TEST_FILES < <(deno run --allow-read ../../tasks/select-pattern-integration-files.ts ${{ matrix.shard }}/${{ matrix.total }})
+          printf 'Pattern integration shard ${{ matrix.shard }}/${{ matrix.total }} files:\n'
+          printf '  %s\n' "${TEST_FILES[@]}"
           mkdir -p ../../test-results
           HEADLESS=1 \
           API_URL=http://localhost:8000/ \
-          INTEGRATION_TEST_FLAGS="--junit-path=../../test-results/patterns.xml" \
-          deno task integration
+          deno test --v8-flags=--max-old-space-size=4096 --trace-leaks -A \
+            --junit-path=../../test-results/patterns-${{ matrix.shard }}.xml \
+            "${TEST_FILES[@]}"
 
       - name: 📤 Upload test timing data
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-timing-pattern-integration
+          name: test-timing-pattern-integration-${{ matrix.shard }}
           path: test-results/
           retention-days: 90
           if-no-files-found: ignore
@@ -385,6 +487,7 @@ jobs:
       - pattern-integration-test
       - pattern-unit-test
       - generated-patterns-integration-test
+      - runner-test
     permissions:
       contents: read
       actions: read
@@ -414,6 +517,7 @@ jobs:
       [
         "test",
         "check",
+        "runner-test",
         "pattern-integration-test",
         "pattern-unit-test",
         "package-integration-test",

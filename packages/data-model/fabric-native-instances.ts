@@ -68,9 +68,10 @@ function copyOwnSafeProperties(
 }
 
 /**
- * Creates a shallow copy of an Error, preserving constructor, name, message,
- * stack, cause, and custom enumerable properties. Used by `toNativeValue()`
- * when the freeze state of the wrapped Error doesn't match the requested state.
+ * Creates a shallow copy of an `Error`, preserving `constructor()`, `.name`,
+ * `.message`, `.stack`, `.cause`, and custom enumerable properties. Used by
+ * `toNativeValue()` when the freeze state of the wrapped `Error` doesn't match
+ * the requested state.
  */
 function copyError(error: Error): Error {
   const copy = new (error.constructor as ErrorConstructor)(error.message);
@@ -86,7 +87,7 @@ function copyError(error: Error): Error {
 }
 
 // ---------------------------------------------------------------------------
-// Utility: Error class lookup
+// Utility: `Error` class lookup
 // ---------------------------------------------------------------------------
 
 /** Map from Error subclass name to its constructor. */
@@ -142,7 +143,7 @@ export abstract class FabricNativeWrapper<T extends object>
 }
 
 // ---------------------------------------------------------------------------
-// FabricError
+// `FabricError`
 // ---------------------------------------------------------------------------
 
 /**
@@ -164,9 +165,9 @@ export class FabricError extends FabricNativeWrapper<Error> {
   }
 
   /**
-   * Deconstructs into essential state for serialization. Returns type, name,
-   * message, stack, cause, and custom enumerable properties. Does NOT recurse
-   * into nested values -- the serialization system handles that.
+   * Deconstructs into essential state for serialization. Returns `.type`,
+   * `.name`, `.message`, `.stack`, `.cause`, and custom enumerable properties.
+   * Does NOT recurse into nested values -- the serialization system handles that.
    *
    * `type` is the constructor name (e.g. "TypeError") used for reconstruction.
    * `name` is the `.name` property -- emitted as `null` when it equals `type`
@@ -175,7 +176,7 @@ export class FabricError extends FabricNativeWrapper<Error> {
    * **Invariant**: By the time this method runs, `this.error.cause` and any
    * custom enumerable properties are already `FabricValue`. The conversion
    * layer (`convertErrorInternals()` in `fabric-value-modern.ts`) ensures
-   * this by recursively converting Error internals before wrapping in
+   * this by recursively converting `Error` internals before wrapping in
    * `FabricError`. The `as FabricValue` casts below are therefore safe.
    */
   [DECONSTRUCT](): FabricValue {
@@ -265,13 +266,13 @@ export class FabricError extends FabricNativeWrapper<Error> {
 }
 
 // ---------------------------------------------------------------------------
-// Stub native wrappers: Map, Set, Date, Uint8Array
+// Stub native wrappers: `Map`, `Set`, `Date`, `Uint8Array`
 // ---------------------------------------------------------------------------
 
 /**
  * Wrapper for `Map` instances. Stub -- `[DECONSTRUCT]` and `[RECONSTRUCT]`
- * throw until Map support is fully implemented. Extra properties beyond the
- * wrapped collection are not supported on non-Error wrappers.
+ * throw until `Map` support is fully implemented. Extra properties beyond the
+ * wrapped collection are not supported on non-`Error` wrappers.
  */
 export class FabricMap
   extends FabricNativeWrapper<Map<FabricValue, FabricValue>> {
@@ -315,8 +316,8 @@ export class FabricMap
 
 /**
  * Wrapper for `Set` instances. Stub -- `[DECONSTRUCT]` and `[RECONSTRUCT]`
- * throw until Set support is fully implemented. Extra properties beyond the
- * wrapped collection are not supported on non-Error wrappers.
+ * throw until `Set` support is fully implemented. Extra properties beyond the
+ * wrapped collection are not supported on non-`Error` wrappers.
  */
 export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
   /** @inheritDoc */
@@ -380,7 +381,7 @@ export class FabricRegExp extends FabricNativeWrapper<RegExp> {
   /**
    * Deconstructs into essential state for serialization. Returns
    * `{ source, flags, flavor }` -- the values needed to reconstruct the
-   * RegExp. Extra enumerable properties on the RegExp cause rejection.
+   * `RegExp`. Extra enumerable properties on the `RegExp` cause rejection.
    */
   [DECONSTRUCT](): FabricValue {
     rejectExtraRegExpProperties(this.regex);
@@ -402,8 +403,8 @@ export class FabricRegExp extends FabricNativeWrapper<RegExp> {
   }
 
   /**
-   * Returns a frozen copy of the RegExp. A frozen RegExp has an immutable
-   * `lastIndex`, so stateful methods (`exec()`, `test()`) won't work
+   * Returns a frozen copy of the `RegExp`. A frozen `RegExp` has an immutable
+   * `.lastIndex`, so stateful methods (`exec()`, `test()`) won't work
    * correctly -- but that matches the "death before confusion" principle.
    */
   protected toNativeFrozen(): RegExp {
@@ -432,8 +433,8 @@ export class FabricRegExp extends FabricNativeWrapper<RegExp> {
 }
 
 /**
- * Helper for `FabricRegExp.[DECONSTRUCT]()`, which rejects RegExp instances
- * with extra enumerable properties. The built-in `lastIndex` property is not
+ * Helper for `FabricRegExp.[DECONSTRUCT]()`, which rejects `RegExp` instances
+ * with extra enumerable properties. The built-in `.lastIndex` property is not
  * enumerable, so `Object.keys()` won't see it. Any enumerable own property
  * is therefore user-added and causes rejection.
  */

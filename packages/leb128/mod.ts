@@ -74,7 +74,7 @@ export function decodeULEB128(
     if (index >= buffer.length) {
       throw new Error("decodeULEB128: unexpected end of buffer");
     }
-    byte = buffer[index];
+    byte = buffer[index]!;
     // At shift 28, only 4 bits remain in a 32-bit value; reject if
     // the payload bits would overflow.
     if (shift >= 28 && (byte & 0x7f) > 0x0f) {
@@ -152,7 +152,7 @@ export function decodeSLEB128(
     if (index >= buffer.length) {
       throw new Error("decodeSLEB128: unexpected end of buffer");
     }
-    byte = buffer[index];
+    byte = buffer[index]!;
     if (shift >= 35) {
       throw new Error("decodeSLEB128: value exceeds signed 32-bit range");
     }

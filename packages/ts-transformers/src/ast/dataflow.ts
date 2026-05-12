@@ -122,11 +122,53 @@ function isStructuralOpaqueKeyDataFlow(
     classifyOpaquePathTerminalCall(target) === "key";
 }
 
+export interface DataFlowAnalyzerHooks {
+  /**
+   * Returns true if the given identifier is a reference to the per-element
+   * parameter of an array-method pattern callback synthesized by
+   * ClosureTransformer. Such bindings are typed as the plain user element
+   * type for downstream consumers, so the analyzer needs an out-of-band
+   * signal to recognize reads through them as reactive.
+   *
+   * The hook is given the identifier node (not its symbol) because symbol
+   * identity can drift between pipeline stages when transformers create
+   * new ASTs; node identity (with parent links) is durable.
+   */
+  readonly isArrayMethodElementBindingReference?: (
+    identifier: ts.Identifier,
+  ) => boolean;
+}
+
 export function createDataFlowAnalyzer(
   checker: ts.TypeChecker,
+  hooks: DataFlowAnalyzerHooks = {},
 ): (expression: ts.Expression) => DataFlowAnalysis {
+  // Per-expression memoization for `analyze()`. Lives inside this closure;
+  // invalidated as a unit when `TransformationContext.invalidateReactiveAnalysisCaches`
+  // drops the analyzer instance (see core/mod.ts cache-invalidation contract).
   const analysisCache = new WeakMap<ts.Expression, DataFlowAnalysis>();
   const resolvingConstAliases = new Set<ts.Symbol>();
+  const isArrayMethodElementBindingReference =
+    hooks.isArrayMethodElementBindingReference ?? (() => false);
+
+  /**
+   * Walk a property-access chain to its leftmost Identifier and ask the hook
+   * whether it refers to an array-method element binding. Unwraps non-semantic
+   * wrappers (parens, `as`, type assertions, `satisfies`, `!`, partially-
+   * emitted) at every step so wrapped reads like `(elem).foo` or `elem!.foo`
+   * are still recognized. Returns false for computed access or non-identifier
+   * roots (call expressions, etc.).
+   */
+  const leftmostIdentifierIsArrayMethodElementBinding = (
+    expression: ts.Expression,
+  ): boolean => {
+    let current: ts.Expression = unwrapStructuralDataFlowExpression(expression);
+    while (ts.isPropertyAccessExpression(current)) {
+      current = unwrapStructuralDataFlowExpression(current.expression);
+    }
+    return ts.isIdentifier(current) &&
+      isArrayMethodElementBindingReference(current);
+  };
 
   // === Synthetic node helpers ===
   // These enable unified handling of both synthetic (transformer-created) and
@@ -732,6 +774,19 @@ export function createDataFlowAnalyzer(
           dataFlows: [expression],
         };
       }
+      if (isArrayMethodElementBindingReference(expression)) {
+        // The synthesized `element` binding of an array-method pattern
+        // callback is implicitly opaque, even though its TS type is the plain
+        // user element type. Treat it the same as a direct OpaqueRef so
+        // `element.foo`-style reads are recorded as reactive dependencies and
+        // can drive fine-grained subscriptions in downstream lowering.
+        recordDataFlow(expression, scope, null, true);
+        return {
+          containsOpaqueRef: true,
+          requiresRewrite: false,
+          dataFlows: [expression],
+        };
+      }
       if (symbolDeclaresCommonFabricDefault(symbol, checker)) {
         recordDataFlow(expression, scope, null, true); // Explicit: Common Fabric default
         return {
@@ -840,6 +895,30 @@ export function createDataFlowAnalyzer(
             dataFlows: [expression],
           };
         }
+      }
+      // For array-method element bindings, the property access result type is
+      // the plain field type (e.g. `string`), not OpaqueRef. But the read is
+      // still a reactive fine-grained dependency: the runtime can subscribe to
+      // `element.key("foo")` specifically. Record the property access (not
+      // just the root identifier) as the dataflow so downstream derive-input
+      // builders can emit the partial-key shape:
+      //   { element: { foo: element.key("foo") } }
+      // instead of the broader { element: element } whole-binding capture.
+      if (
+        target.containsOpaqueRef &&
+        leftmostIdentifierIsArrayMethodElementBinding(expression)
+      ) {
+        if (originatesFromIgnored(expression.expression)) {
+          return emptyAnalysis();
+        }
+        const parentId =
+          context.expressionToNodeId.get(expression.expression) ?? null;
+        recordDataFlow(expression, scope, parentId, true);
+        return {
+          containsOpaqueRef: true,
+          requiresRewrite: target.requiresRewrite,
+          dataFlows: [expression],
+        };
       }
       const propertySymbol = getMemberSymbol(expression, checker);
       if (symbolDeclaresCommonFabricDefault(propertySymbol, checker)) {

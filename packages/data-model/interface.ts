@@ -10,12 +10,12 @@
  */
 
 // ===========================================================================
-// FabricSpecialObject
+// `FabricSpecialObject`
 // ===========================================================================
 
 /**
  * Abstract base class for all fabric-system value types. This is the common
- * superclass of `FabricInstance` (protocol types with DECONSTRUCT/RECONSTRUCT)
+ * superclass of `FabricInstance` (protocol types with `[DECONSTRUCT]`/`[RECONSTRUCT]`)
  * and `FabricPrimitive` (immutable special primitives). It enables a single
  * `instanceof FabricSpecialObject` check wherever code needs to recognize any
  * fabric-system value without caring which branch of the hierarchy it
@@ -24,7 +24,7 @@
 export abstract class FabricSpecialObject {}
 
 // ===========================================================================
-// Fabric instance protocol (DECONSTRUCT / RECONSTRUCT / FabricInstance)
+// Fabric instance protocol (`[DECONSTRUCT]` / `[RECONSTRUCT]` / `FabricInstance`)
 // ===========================================================================
 
 /**
@@ -82,7 +82,7 @@ export abstract class FabricInstance extends FabricSpecialObject {
   shallowClone(frozen: boolean): FabricInstance {
     if (frozen && Object.isFrozen(this)) return this;
     const copy = this.shallowUnfrozenClone();
-    // Cast needed: Object.freeze() returns Readonly<T>, which TS considers
+    // Cast needed: `Object.freeze()` returns `Readonly<T>`, which TS considers
     // incompatible with abstract class types due to protected members.
     return frozen ? Object.freeze(copy) as FabricInstance : copy;
   }
@@ -123,7 +123,7 @@ export abstract class FabricPrimitive extends FabricSpecialObject {
  * The full set of values that the fabric storage layer can represent. This
  * is the strongly-typed "middle layer" of the three-layer architecture:
  *
- *   JavaScript "wild west" (unknown) <-> FabricValue <-> Serialized (Uint8Array)
+ *   JavaScript "wild west" (`unknown`) <-> `FabricValue` <-> Serialized (`Uint8Array`)
  *
  * Most native JS object types enter the fabric layer via wrapper classes
  * that implement `FabricInstance`. However, `FabricPrimitive` subclasses
@@ -167,10 +167,10 @@ export interface FabricArray extends ArrayLike<FabricValue> {}
 /**
  * Object/record of fabric values.
  *
- * Note: `__proto__` and `constructor` properties are not currently guarded
+ * Note: `.__proto__` and `constructor()` properties are not currently guarded
  * against at the type level or at runtime in clone/conversion internals.
  * If prototype pollution becomes a concern, add boundary validation where
- * values enter the fabric system (e.g., `fabricFromNativeValue`).
+ * values enter the fabric system (e.g., `fabricFromNativeValue()`).
  */
 export interface FabricObject extends Record<string, FabricValue> {}
 
@@ -178,7 +178,7 @@ export interface FabricObject extends Record<string, FabricValue> {}
  * Single "layer" of fabric conversion -- the result of shallow conversion
  * via `shallowFabricFromNativeValue()`. Arrays and objects have the right
  * shape but their contents may still contain values requiring further
- * conversion (e.g., Error instances in a `cause` chain).
+ * conversion (e.g., `Error` instances in a `.cause` chain).
  */
 export type FabricValueLayer =
   | FabricValue

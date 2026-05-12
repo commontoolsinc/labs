@@ -206,4 +206,29 @@ describe("ContextualFlowControl.resolveSchemaRefsOrThrow", () => {
     expect(() => ContextualFlowControl.resolveSchemaRefsOrThrow(schema))
       .toThrow(/Failed to resolve \$ref/);
   });
+
+  it("rejects local $refs outside root $defs", () => {
+    const schema: JSONSchemaObj = {
+      properties: {
+        name: { type: "string" },
+      },
+      $ref: "#/properties/name",
+    };
+    expect(() => ContextualFlowControl.resolveSchemaRefsOrThrow(schema))
+      .toThrow(/Failed to resolve \$ref/);
+  });
+
+  it("rejects local $refs into nested paths under root $defs", () => {
+    const schema: JSONSchemaObj = {
+      $defs: {
+        Foo: {
+          type: "object",
+          properties: { name: { type: "string" } },
+        },
+      },
+      $ref: "#/$defs/Foo/properties/name",
+    };
+    expect(() => ContextualFlowControl.resolveSchemaRefsOrThrow(schema))
+      .toThrow(/Failed to resolve \$ref/);
+  });
 });

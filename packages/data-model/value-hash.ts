@@ -167,7 +167,7 @@ function getStringRep(value: string) {
  */
 function feedLength(hasher: IncrementalHasher, value: number): void {
   const valueBuf = (value <= MAX_CACHED_SMALL_LENGTH)
-    ? smallLengthCache[value]
+    ? smallLengthCache[value]!
     : encodeULEB128(value);
 
   hasher.update(valueBuf);
@@ -236,7 +236,7 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
 }
 
 /**
- * Feed an object-typed value (special primitives, FabricInstance, Array,
+ * Feed an object-typed value (special primitives, `FabricInstance`, `Array`,
  * or plain object) into the hasher. Dispatches via `tagFromNativeValue()` /
  * `NATIVE_TAGS` for recognized types. The `null` case is handled by the
  * caller (`feedValue()`).
@@ -297,7 +297,7 @@ function feedObjectValue(
     }
 
     case NATIVE_TAGS.FabricInstance: {
-      // Generic FabricInstance (protocol path via DECONSTRUCT).
+      // Generic `FabricInstance` (protocol path via `[DECONSTRUCT]`).
       hasher.update(TAG_INSTANCE_BYTES);
       const typeTag = (value as { typeTag?: unknown }).typeTag;
       if (typeof typeTag !== "string") {
@@ -314,7 +314,7 @@ function feedObjectValue(
     case NATIVE_TAGS.Date:
     case NATIVE_TAGS.RegExp:
     case NATIVE_TAGS.Uint8Array: {
-      // Native instances that have a well-defined FabricValue conversion.
+      // Native instances that have a well-defined `FabricValue` conversion.
       // Convert on-the-fly and hash the converted value.
       const converted = shallowFabricFromNativeValueModern(value, false);
       feedValue(hasher, converted);
@@ -334,7 +334,7 @@ function feedObjectValue(
 }
 
 /**
- * Feed an array value with sparse hole handling, terminated by TAG_END.
+ * Feed an array value with sparse hole handling, terminated by `TAG_END`.
  */
 function feedArray(hasher: IncrementalHasher, value: unknown[]): void {
   hasher.update(TAG_ARRAY_BYTES);
@@ -359,7 +359,7 @@ function feedArray(hasher: IncrementalHasher, value: unknown[]): void {
 
 /**
  * Feed a plain object value, keys sorted by UTF-8 byte order, terminated
- * by TAG_END.
+ * by `TAG_END`.
  */
 function feedPlainObject(
   hasher: IncrementalHasher,

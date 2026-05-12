@@ -40,7 +40,7 @@ function throwFinalizedBuilderMutation(typeName: string): never {
 /**
  * Helper for the `FrozenMap` methods, which fetches the backing `Map` for the
  * given wrapper instance. Throws if `value` is not a recognized `FrozenMap`
- * receiver (e.g. when an intrinsic mutator was called via `.call(...)`).
+ * receiver (e.g. when an intrinsic mutator was called via `call(...)`).
  */
 function getMapBacking<K, V>(value: object): MapBacking<K, V> {
   const backing = MAP_BACKING.get(value);
@@ -83,7 +83,7 @@ function forEachSetLikeValue<T>(
 
 /**
  * Effectively-immutable `Map` wrapper. Read methods delegate to a
- * module-private backing `Map`; mutator methods (`set`, `delete`, `clear`,
+ * module-private backing `Map`; mutator methods (`set()`, `delete()`, `clear()`,
  * etc.) throw. Instances are frozen at construction time (or at builder
  * `finish()` time, see `createBuilder()`).
  */
@@ -213,8 +213,8 @@ Object.setPrototypeOf(FrozenMap, Map);
 
 /**
  * Effectively-immutable `Set` wrapper. Read methods and set-algebra methods
- * delegate to a module-private backing `Set`; mutator methods (`add`,
- * `delete`, `clear`) throw. Instances are frozen at construction time (or at
+ * delegate to a module-private backing `Set`; mutator methods (`add()`,
+ * `delete()`, `clear()`) throw. Instances are frozen at construction time (or at
  * builder `finish()` time, see `createBuilder()`).
  */
 export class FrozenSet<T> implements Set<T> {

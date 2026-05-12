@@ -48,10 +48,16 @@ import {
 } from "../query-result-proxy.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { type CfcLabelView, cfcLabelViewForCell } from "../cfc/label-view.ts";
-import { cfcLabelPathPrefixMatches } from "../cfc/label-view-core.ts";
+import {
+  cfcConfidentialityForObservationNode,
+  cfcObservationFitsCeiling,
+  type CfcObservationResult,
+  joinCfcObservedConfidentiality,
+  uniqueCfcAtoms,
+} from "../cfc/observation.ts";
+import { cfcSchemaToObject, resolveCfcSchemaRefs } from "../cfc/schema-refs.ts";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { resolveLink } from "../link-resolution.ts";
 import { internalVerifierRead } from "../storage/reactivity-log.ts";
 import type { RawBuiltinResult } from "../module.ts";
@@ -99,10 +105,7 @@ function stripInjectedResult(
 // --------------------
 
 type ToolKind = "handler" | "cell" | "pattern";
-type LLMObservationSerializationResult = {
-  value: unknown;
-  observedConfidentiality: readonly unknown[];
-};
+type LLMObservationSerializationResult = CfcObservationResult;
 
 type SerializeForLLMObservationParams = {
   value: unknown;
@@ -152,7 +155,7 @@ function resolveRefsForLLM(
   const toObj = (s: unknown) =>
     s === false
       ? ({ type: "object", properties: {} } as Record<string, unknown>)
-      : ContextualFlowControl.toSchemaObj(
+      : cfcSchemaToObject(
         typeof s === "boolean" ? s : (s as JSONSchema) ?? undefined,
       );
 
@@ -172,7 +175,7 @@ function resolveRefsForLLM(
         // Circular or too deep — truncate
         return { type: "object", additionalProperties: true };
       }
-      const resolved = ContextualFlowControl.resolveSchemaRefs(
+      const resolved = resolveCfcSchemaRefs(
         nodeObj,
         schema,
       );
@@ -404,59 +407,6 @@ function simplifySchemaForContext(
   return simplified as JSONSchema;
 }
 
-function joinObservedConfidentiality(
-  parts: Iterable<readonly unknown[] | undefined>,
-): readonly unknown[] {
-  const joined: unknown[] = [];
-  for (const part of parts) {
-    if (!Array.isArray(part)) {
-      continue;
-    }
-    joined.push(...part);
-  }
-  return ContextualFlowControl.uniqueAtoms(joined);
-}
-
-function confidentialityForCurrentNode(
-  schema: JSONSchema | undefined,
-  labelView: CfcLabelView | undefined,
-  logicalPath: readonly string[],
-): readonly unknown[] {
-  const joined: unknown[] = [];
-
-  if (isRecord(schema) && isRecord(schema.ifc)) {
-    joined.push(...(schema.ifc.confidentiality ?? []));
-  }
-
-  if (labelView !== undefined) {
-    for (const entry of labelView.entries) {
-      if (!cfcLabelPathPrefixMatches(entry.path, logicalPath)) {
-        continue;
-      }
-      joined.push(...(entry.label.confidentiality ?? []));
-    }
-  }
-
-  return ContextualFlowControl.uniqueAtoms(joined);
-}
-
-function fitsObservationCeiling(
-  confidentiality: readonly unknown[],
-  observationMaxConfidentiality: readonly unknown[] | undefined,
-): boolean {
-  if (
-    observationMaxConfidentiality === undefined ||
-    observationMaxConfidentiality.length === 0 ||
-    confidentiality.length === 0
-  ) {
-    return true;
-  }
-
-  return confidentiality.every((value) =>
-    observationMaxConfidentiality.some((allowed) => deepEqual(allowed, value))
-  );
-}
-
 function observationLinkForValue(
   value: unknown,
   logicalPath: readonly string[],
@@ -512,13 +462,13 @@ function serializeForLLMObservation(
     };
   }
 
-  const nodeConfidentiality = confidentialityForCurrentNode(
+  const nodeConfidentiality = cfcConfidentialityForObservationNode({
     schema,
     labelView,
     logicalPath,
-  );
+  });
   if (
-    !fitsObservationCeiling(
+    !cfcObservationFitsCeiling(
       nodeConfidentiality,
       observationMaxConfidentiality,
     )
@@ -635,7 +585,7 @@ function serializeForLLMObservation(
 
     return {
       value: serialized,
-      observedConfidentiality: joinObservedConfidentiality(observedParts),
+      observedConfidentiality: joinCfcObservedConfidentiality(observedParts),
     };
   }
 
@@ -666,7 +616,7 @@ function serializeForLLMObservation(
 
   return {
     value: serialized,
-    observedConfidentiality: joinObservedConfidentiality(observedParts),
+    observedConfidentiality: joinCfcObservedConfidentiality(observedParts),
   };
 }
 
@@ -1557,7 +1507,7 @@ function buildAvailableCellsDocumentationWithObservation(
   const entries = [...seenPaths.values()].map((v) => v.entry);
   return {
     docs: "\n\n# Available Cells\n\n" + entries.join("\n\n"),
-    observedConfidentiality: joinObservedConfidentiality(
+    observedConfidentiality: joinCfcObservedConfidentiality(
       [...seenPaths.values()].map((value) => value.observedConfidentiality),
     ),
   };
@@ -1588,17 +1538,16 @@ function getObservedDialogMessages(
   observedConfidentiality: readonly unknown[];
 } {
   const labelView = cfcLabelViewForCell(messagesCell);
-  const observedConfidentiality = joinObservedConfidentiality(
+  const observedConfidentiality = joinCfcObservedConfidentiality(
     messages.map((_message, index) => {
       const stored = messageObservations[index.toString()];
       if (Array.isArray(stored)) {
         return stored;
       }
-      return confidentialityForCurrentNode(
-        undefined,
+      return cfcConfidentialityForObservationNode({
         labelView,
-        [index.toString()],
-      );
+        logicalPath: [index.toString()],
+      });
     }),
   );
 
@@ -1616,7 +1565,7 @@ function mergeDialogMessageObservations(
   };
   for (const update of updates) {
     const key = update.index.toString();
-    merged[key] = ContextualFlowControl.uniqueAtoms([
+    merged[key] = uniqueCfcAtoms([
       ...(merged[key] ?? []),
       ...(update.observedConfidentiality ?? []),
     ]) as unknown[];
@@ -1916,9 +1865,7 @@ function toolAllowsObservedConfidentiality(
     return true;
   }
 
-  return observedConfidentiality.every((value) =>
-    maxConfidentiality.some((allowed) => deepEqual(allowed, value))
-  );
+  return cfcObservationFitsCeiling(observedConfidentiality, maxConfidentiality);
 }
 
 async function executeToolCalls(
@@ -2995,7 +2942,7 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
       .get() as DialogMessageObservationMap) ??
       {},
   );
-  const requestObservedConfidentiality = joinObservedConfidentiality([
+  const requestObservedConfidentiality = joinCfcObservedConfidentiality([
     visibleMessages.observedConfidentiality,
     cellsDocs.observedConfidentiality,
   ]);

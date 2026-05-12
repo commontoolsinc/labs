@@ -631,6 +631,91 @@ describe("debounce and throttling", () => {
     expect(runtime.scheduler.getDebounce(slowCycling)).toBeUndefined();
   });
 
+  it("should not cycle-debounce pull computations with live effect demand", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const counter = runtime.getCell<number>(
+      space,
+      "no-cycle-debounce-computation-counter",
+      undefined,
+      tx,
+    );
+    const output = runtime.getCell<number>(
+      space,
+      "no-cycle-debounce-computation-output",
+      undefined,
+      tx,
+    );
+    const sink = runtime.getCell<number>(
+      space,
+      "no-cycle-debounce-computation-sink",
+      undefined,
+      tx,
+    );
+    counter.set(0);
+    output.set(0);
+    sink.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let producerRuns = 0;
+    let feedbackRuns = 0;
+
+    const producer: Action = async (actionTx) => {
+      producerRuns++;
+      await new Promise((resolve) => setTimeout(resolve, 35));
+      output.withTx(actionTx).send(counter.withTx(actionTx).get() ?? 0);
+    };
+
+    const feedback: Action = async (actionTx) => {
+      feedbackRuns++;
+      await new Promise((resolve) => setTimeout(resolve, 35));
+      const value = output.withTx(actionTx).get() ?? 0;
+      if (value < 3) {
+        counter.withTx(actionTx).send(value + 1);
+      }
+    };
+
+    const effect: Action = (actionTx) => {
+      sink.withTx(actionTx).send(output.withTx(actionTx).get() ?? 0);
+    };
+
+    runtime.scheduler.subscribe(
+      producer,
+      {
+        reads: [toMemorySpaceAddress(counter.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
+      },
+      {},
+    );
+    runtime.scheduler.subscribe(
+      feedback,
+      {
+        reads: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(counter.getAsNormalizedFullLink())],
+      },
+      {},
+    );
+    runtime.scheduler.subscribe(
+      effect,
+      {
+        reads: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(sink.getAsNormalizedFullLink())],
+      },
+      { isEffect: true },
+    );
+
+    await runtime.scheduler.idle();
+
+    expect(producerRuns).toBeGreaterThanOrEqual(3);
+    expect(feedbackRuns).toBeGreaterThanOrEqual(3);
+    expect(runtime.scheduler.getDebounce(producer)).toBeUndefined();
+    expect(runtime.scheduler.getDebounce(feedback)).toBeUndefined();
+  });
+
   it("should only increase debounce if cycle debounce is larger than existing", async () => {
     // If an action already has a higher debounce set (manually or from previous
     // cycle debounce), the cycle-aware mechanism should not reduce it.

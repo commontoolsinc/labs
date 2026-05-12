@@ -61,7 +61,16 @@ Deno.test("createDeriveCall keeps fallback refs synced when names collide", () =
     } as any;
 
     const rootIdentifier = factory.createIdentifier("_v1");
-    const fallbackExpr = factory.createParenthesizedExpression(rootIdentifier);
+    // Use a non-parseable expression for the fallback ref. (We previously used
+    // `(_v1)` here, but parseCaptureExpression now unwraps non-semantic wrappers
+    // including parens, so a parenthesized identifier parses to the same root
+    // as the bare identifier and no rename happens. A call expression with a
+    // non-`key` callee is reliably non-parseable.)
+    const fallbackExpr = factory.createCallExpression(
+      factory.createIdentifier("_v1"),
+      undefined,
+      [],
+    );
 
     const derive = createDeriveCall(fallbackExpr, [
       rootIdentifier,

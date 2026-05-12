@@ -2054,6 +2054,7 @@ export class Runner {
           this.stop(resultCell);
         }
       });
+      this.pullCellOnceAfterSuccessfulCommit(tx, resultCell);
     }
 
     previousResultCellRef.current ??= resultCell;

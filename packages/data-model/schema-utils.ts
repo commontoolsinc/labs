@@ -306,8 +306,8 @@ export function emptySchemaObject() {
  * Returns the given `SchemaPathSelector` with its `schema` (if any) interned
  * and with both its `path` array and the selector object itself deep-frozen
  * in place. The input reference is returned — this function does not clone.
- * Idempotent on repeat calls: `internPathSelector(internPathSelector(x)) ===
- * internPathSelector(x)`.
+ * Idempotent on repeat calls:
+ * `internPathSelector(internPathSelector(x)) === internPathSelector(x)`.
  *
  * Exists so that callers who feed selectors into `MapSetStringToPathSelectors`
  * (or any other cache keyed on `hashStringOf()` of a selector) can hand in an
@@ -330,7 +330,7 @@ export function internPathSelector(
  * ... }` input) without actually traversing into it.
  *
  * Frozen at module load, but its `schema: false` member is NOT routed
- * through `internSchema` here (because doing so during `schema-utils.ts`'s
+ * through `internSchema()` here (because doing so during `schema-utils.ts`'s
  * module-load would reach into a not-yet-initialized `schema-hash.ts`
  * due to the pre-existing circular import between the two modules). The
  * boolean-schema intern path uses prefab singletons anyway, so
@@ -348,7 +348,7 @@ export const REJECTING_SELECTOR: SchemaPathSelector = Object.freeze({
  * path needs to have `"value"` in it.
  *
  * Frozen at module load; like `REJECTING_SELECTOR`, the boolean
- * `schema: true` member is not routed through `internSchema` here
+ * `schema: true` member is not routed through `internSchema()` here
  * (same circular-import reason — see `REJECTING_SELECTOR` doc comment).
  */
 export const DEFAULT_SELECTOR: SchemaPathSelector = Object.freeze({
@@ -358,13 +358,13 @@ export const DEFAULT_SELECTOR: SchemaPathSelector = Object.freeze({
 
 /**
  * Returns a cache-key string for an ordered pair of schemas, each interned
- * (and thus deep-frozen) via `internSchema`. The `|` delimiter is outside
+ * (and thus deep-frozen) via `internSchema()`. The `|` delimiter is outside
  * the base64url alphabet used by hash strings, so the two halves cannot
  * merge ambiguously.
  *
  * Used at the `traverse.ts` sites that key an intern cache on a merge
  * operation's two input schemas. Interning the inputs stabilizes their
- * identities in `internSchema`'s WeakMap, so subsequent calls with the
+ * identities in `internSchema()`'s `WeakMap`, so subsequent calls with the
  * same object references hit the hash-cache fast path in O(1) rather
  * than re-hashing. See
  * `coordination/docs/2026-04-16-modern-schema-hash-cache-audit.md` §1

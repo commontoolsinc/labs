@@ -22,8 +22,32 @@ const space = signer.did();
 
 type StaleSchedulerInternals = {
   isStale: (action: Action) => boolean;
+  isDemandedPullComputation: (action: Action) => boolean;
   getUpstreamStaleCount: (action: Action) => number;
   clearDirectDirty: (action: Action) => boolean;
+  isEffectAction: WeakMap<Action, boolean>;
+  setDependencies: (
+    action: Action,
+    log: {
+      reads: ReturnType<typeof toMemorySpaceAddress>[];
+      shallowReads: ReturnType<typeof toMemorySpaceAddress>[];
+      writes: ReturnType<typeof toMemorySpaceAddress>[];
+    },
+  ) => {
+    log: {
+      reads: ReturnType<typeof toMemorySpaceAddress>[];
+      shallowReads: ReturnType<typeof toMemorySpaceAddress>[];
+      writes: ReturnType<typeof toMemorySpaceAddress>[];
+    };
+  };
+  updateDependents: (
+    action: Action,
+    log: {
+      reads: ReturnType<typeof toMemorySpaceAddress>[];
+      shallowReads: ReturnType<typeof toMemorySpaceAddress>[];
+      writes: ReturnType<typeof toMemorySpaceAddress>[];
+    },
+  ) => void;
   collectDirtyDependencies: (
     action: Action,
     workSet: Set<Action>,
@@ -54,6 +78,51 @@ describe("pull-based scheduling", () => {
     await tx.commit();
     await runtime?.dispose();
     await storageManager?.close();
+  });
+
+  it("should default to push mode", () => {
+    expect(runtime.scheduler.isPullModeEnabled()).toBe(false);
+  });
+
+  it("should dispatch schema-marked streams without a materialized stream marker", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const stream = runtime.getCell<{ amount: number }>(
+      space,
+      "schema-marked-stream-without-marker",
+      {
+        asCell: ["stream"],
+        type: "object",
+        properties: {
+          amount: { type: "number" },
+        },
+      } as JSONSchema,
+      tx,
+    );
+    const result = runtime.getCell<number>(
+      space,
+      "schema-marked-stream-result",
+      undefined,
+      tx,
+    );
+    result.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let handlerRuns = 0;
+    runtime.scheduler.addEventHandler(
+      (eventTx, event: { amount: number }) => {
+        handlerRuns++;
+        result.withTx(eventTx).send(event.amount);
+      },
+      stream.getAsNormalizedFullLink(),
+    );
+
+    stream.send({ amount: 7 });
+    await runtime.scheduler.idle();
+
+    expect(handlerRuns).toBe(1);
+    expect(await result.pull()).toBe(7);
   });
 
   it("should have unchanged behavior with pullMode = false", async () => {
@@ -560,6 +629,318 @@ describe("pull-based scheduling", () => {
 
     // Effect should have run (triggered via scheduleAffectedEffects)
     expect(effectRuns).toBeGreaterThan(initialEffectRuns);
+  });
+
+  it("should run dirty computations with live downstream effect demand", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const source = runtime.getCell<number>(
+      space,
+      "pull-demanded-dirty-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    const derived = runtime.getCell<number>(
+      space,
+      "pull-demanded-dirty-derived",
+      undefined,
+      tx,
+    );
+    derived.set(0);
+    const effectResult = runtime.getCell<number>(
+      space,
+      "pull-demanded-dirty-effect",
+      undefined,
+      tx,
+    );
+    effectResult.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let computationRuns = 0;
+    let effectRuns = 0;
+
+    const computation: Action = (actionTx) => {
+      computationRuns++;
+      derived.withTx(actionTx).send(
+        (source.withTx(actionTx).get() ?? 0) * 10,
+      );
+    };
+
+    const effect: Action = (actionTx) => {
+      effectRuns++;
+      effectResult.withTx(actionTx).send(
+        (derived.withTx(actionTx).get() ?? 0) + 5,
+      );
+    };
+
+    runtime.scheduler.subscribe(
+      computation,
+      {
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(derived.getAsNormalizedFullLink())],
+      },
+      {},
+    );
+    runtime.scheduler.subscribe(
+      effect,
+      {
+        reads: [toMemorySpaceAddress(derived.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(effectResult.getAsNormalizedFullLink())],
+      },
+      { isEffect: true },
+    );
+
+    await runtime.scheduler.idle();
+
+    expect(computationRuns).toBe(1);
+    expect(effectRuns).toBe(1);
+    expect(effectResult.get()).toBe(15);
+
+    source.withTx(tx).send(2);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const schedulerInternal = runtime.scheduler as unknown as {
+      pending: Set<Action>;
+      dirty: Set<Action>;
+      markDirty: (action: Action) => void;
+    };
+    schedulerInternal.pending.delete(effect);
+    schedulerInternal.dirty.delete(effect);
+    schedulerInternal.markDirty(computation);
+    runtime.scheduler.queueExecution();
+
+    await runtime.scheduler.idle();
+
+    expect(computationRuns).toBe(2);
+    expect(effectRuns).toBe(2);
+    expect(effectResult.get()).toBe(25);
+  });
+
+  it("should demand dirty computations from dependency-bearing live effects", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const source = runtime.getCell<number>(
+      space,
+      "pull-demand-live-effect-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    const derived = runtime.getCell<number>(
+      space,
+      "pull-demand-live-effect-derived",
+      undefined,
+      tx,
+    );
+    derived.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let computationRuns = 0;
+    const computation: Action = (actionTx) => {
+      computationRuns++;
+      derived.withTx(actionTx).send(source.withTx(actionTx).get() ?? 0);
+    };
+
+    runtime.scheduler.subscribe(
+      computation,
+      {
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(derived.getAsNormalizedFullLink())],
+      },
+      {},
+    );
+
+    const effect: Action = (actionTx) => {
+      derived.withTx(actionTx).get();
+    };
+    const schedulerInternal = runtime
+      .scheduler as unknown as StaleSchedulerInternals;
+    schedulerInternal.isEffectAction.set(effect, true);
+    const { log } = schedulerInternal.setDependencies(effect, {
+      reads: [toMemorySpaceAddress(derived.getAsNormalizedFullLink())],
+      shallowReads: [],
+      writes: [],
+    });
+    schedulerInternal.updateDependents(effect, log);
+
+    expect(schedulerInternal.isDemandedPullComputation(computation)).toBe(
+      true,
+    );
+
+    await runtime.scheduler.idle();
+
+    expect(computationRuns).toBe(1);
+    expect(derived.get()).toBe(1);
+  });
+
+  it("should discover writes for new child computations in demanded subgraphs", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const source = runtime.getCell<number>(
+      space,
+      "pull-demanded-child-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    const parentResult = runtime.getCell<number>(
+      space,
+      "pull-demanded-child-parent-result",
+      undefined,
+      tx,
+    );
+    parentResult.set(0);
+    const childResult = runtime.getCell<number>(
+      space,
+      "pull-demanded-child-result",
+      undefined,
+      tx,
+    );
+    childResult.set(0);
+    const effectResult = runtime.getCell<number>(
+      space,
+      "pull-demanded-child-effect",
+      undefined,
+      tx,
+    );
+    effectResult.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let childSubscribed = false;
+    let parentRuns = 0;
+    let childRuns = 0;
+    let effectRuns = 0;
+
+    const child: Action = (actionTx) => {
+      childRuns++;
+      childResult.withTx(actionTx).send(
+        (source.withTx(actionTx).get() ?? 0) * 10,
+      );
+    };
+
+    const parent: Action = (actionTx) => {
+      parentRuns++;
+      parentResult.withTx(actionTx).send(source.withTx(actionTx).get() ?? 0);
+      if (!childSubscribed) {
+        childSubscribed = true;
+        runtime.scheduler.subscribe(
+          child,
+          {
+            reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+            shallowReads: [],
+            writes: [],
+          },
+          {},
+        );
+      }
+    };
+
+    const effect: Action = (actionTx) => {
+      effectRuns++;
+      effectResult.withTx(actionTx).send(
+        (parentResult.withTx(actionTx).get() ?? 0) +
+          (childResult.withTx(actionTx).get() ?? 0),
+      );
+    };
+
+    runtime.scheduler.subscribe(
+      parent,
+      {
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(parentResult.getAsNormalizedFullLink())],
+      },
+      {},
+    );
+    runtime.scheduler.subscribe(
+      effect,
+      {
+        reads: [
+          toMemorySpaceAddress(parentResult.getAsNormalizedFullLink()),
+          toMemorySpaceAddress(childResult.getAsNormalizedFullLink()),
+        ],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(effectResult.getAsNormalizedFullLink())],
+      },
+      { isEffect: true },
+    );
+
+    await runtime.scheduler.idle();
+
+    expect(parentRuns).toBe(1);
+    expect(childRuns).toBe(1);
+    expect(effectRuns).toBeGreaterThanOrEqual(2);
+    expect(effectResult.get()).toBe(11);
+  });
+
+  it("should first-run child computations created by demand-root effects", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const source = runtime.getCell<number>(
+      space,
+      "pull-demanded-effect-child-source",
+      undefined,
+      tx,
+    );
+    source.set(3);
+    const childResult = runtime.getCell<number>(
+      space,
+      "pull-demanded-effect-child-result",
+      undefined,
+      tx,
+    );
+    childResult.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let effectRuns = 0;
+    let childRuns = 0;
+    let childSubscribed = false;
+
+    const child: Action = (actionTx) => {
+      childRuns++;
+      childResult.withTx(actionTx).send(
+        (source.withTx(actionTx).get() ?? 0) * 10,
+      );
+    };
+
+    const effect: Action = () => {
+      effectRuns++;
+      if (!childSubscribed) {
+        childSubscribed = true;
+        runtime.scheduler.subscribe(
+          child,
+          {
+            reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+            shallowReads: [],
+            writes: [
+              toMemorySpaceAddress(childResult.getAsNormalizedFullLink()),
+            ],
+          },
+          {},
+        );
+      }
+    };
+
+    runtime.scheduler.subscribe(
+      effect,
+      { reads: [], shallowReads: [], writes: [] },
+      { isEffect: true },
+    );
+
+    await runtime.scheduler.idle();
+
+    expect(effectRuns).toBe(1);
+    expect(childRuns).toBe(1);
+    expect(childResult.get()).toBe(30);
   });
 
   it("should collect shared dirty dependencies consistently across effect seeds", async () => {
@@ -3250,6 +3631,38 @@ describe("pull mode array reactivity", () => {
     // Verify sink was called with updated array
     expect(sinkValues.length).toBe(2);
     expect(sinkValues[1]).toEqual(["a", "b", "c"]);
+
+    cancel();
+  });
+
+  it("should record schema array sinks as shallow structural reads", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const arrayCell = runtime.getCell<string[]>(
+      space,
+      "schema-array-structural-sink",
+      { type: "array", items: { type: "string" } },
+      tx,
+    );
+    arrayCell.set(["a", "b"]);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const cancel = arrayCell.withTx(tx).sink(() => {});
+    await runtime.scheduler.idle();
+
+    const link = arrayCell.getAsNormalizedFullLink();
+    const expectedAddress = toMemorySpaceAddress(link);
+    const expectedRead = `${expectedAddress.space}/${expectedAddress.id}/${
+      expectedAddress.path.join("/")
+    }`;
+    const graph = runtime.scheduler.getGraphSnapshot();
+    const sinkNode = graph.nodes.find((node) =>
+      node.type === "effect" &&
+      node.id.startsWith(`sink:${link.space}/${link.id}/`)
+    );
+
+    expect(sinkNode?.shallowReads ?? []).toContain(expectedRead);
 
     cancel();
   });

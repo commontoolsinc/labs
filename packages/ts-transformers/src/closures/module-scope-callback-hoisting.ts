@@ -38,9 +38,46 @@ export function hoistModuleScopedBuilderCallbacks(
       }
       if (
         !isFunctionLikeExpression(argument) ||
-        !isNestedWithinFunction(argument) ||
-        !callbackCanBeHoisted(argument, context.checker)
+        !isNestedWithinFunction(argument)
       ) {
+        return argument;
+      }
+
+      const analysis = analyzeCallbackForHoisting(argument, context.checker);
+      if (!analysis.canHoist) {
+        // Debug-only diagnostic: builder callbacks (derive/handler/lift/
+        // pattern/patternTool) ought to be hoistable to module scope so
+        // they become self-contained, sandbox-safe units. When they
+        // capture values from enclosing function scope (even plain JS
+        // values), hoisting fails silently and the callback runs inline
+        // against the live closure. That works in-process today but
+        // breaks the self-contained-callback contract — captured values
+        // should be passed in as explicit inputs instead.
+        //
+        // Gated behind `options.debug` because TS symbol resolution on
+        // post-ClosureTransformer ASTs produces phantom enclosing-scope
+        // hits for synthesized destructured bindings. The diagnostic is
+        // useful for targeted investigation of specific files but too
+        // noisy to enable in normal builds. The intended population-scale
+        // enumeration uses the post-pipeline probe at
+        // `test/diagnostics/probe-derive-callback-captures.ts` instead.
+        if (
+          context.options.debug &&
+          analysis.capturedEnclosingNames.size > 0
+        ) {
+          const names = Array.from(analysis.capturedEnclosingNames).sort()
+            .join(", ");
+          context.reportDiagnostic({
+            severity: "warning",
+            type: "pattern-context:non-hoistable-callback",
+            message:
+              `Builder callback captures enclosing-scope binding(s) [${names}] ` +
+              `and cannot be hoisted to module scope. Captured values should ` +
+              `be passed in via the inputs argument so the callback stays ` +
+              `self-contained.`,
+            node: argument,
+          });
+        }
         return argument;
       }
 
@@ -138,19 +175,26 @@ function hasSelfDescribingFunctionTypes(
   return callback.parameters.every((parameter) => parameter.type !== undefined);
 }
 
-function callbackCanBeHoisted(
+interface CallbackHoistAnalysis {
+  /** True if the callback can be hoisted to module scope. */
+  readonly canHoist: boolean;
+  /** Distinct names from enclosing-function scope that the callback captures. */
+  readonly capturedEnclosingNames: ReadonlySet<string>;
+}
+
+function analyzeCallbackForHoisting(
   callback: ts.ArrowFunction | ts.FunctionExpression,
   checker: ts.TypeChecker,
-): boolean {
+): CallbackHoistAnalysis {
   let usesModuleScopedReferences = false;
-  let capturesEnclosingBindings = false;
+  const capturedEnclosingNames = new Set<string>();
 
-  const visit = (node: ts.Node): boolean => {
+  const visit = (node: ts.Node): void => {
     if (
       node !== callback &&
       isFunctionLikeDeclaration(node)
     ) {
-      return false;
+      return;
     }
 
     if (ts.isIdentifier(node)) {
@@ -158,17 +202,16 @@ function callbackCanBeHoisted(
       if (scope === "module") {
         usesModuleScopedReferences = true;
       } else if (scope === "enclosing") {
-        capturesEnclosingBindings = true;
-        return true;
+        capturedEnclosingNames.add(node.text);
       }
     }
 
-    return ts.forEachChild(node, (child) => visit(child)) ?? false;
+    ts.forEachChild(node, visit);
   };
 
   for (const parameter of callback.parameters) {
-    if (parameter.initializer && visit(parameter.initializer)) {
-      return false;
+    if (parameter.initializer) {
+      visit(parameter.initializer);
     }
   }
 
@@ -176,7 +219,10 @@ function callbackCanBeHoisted(
     visit(callback.body);
   }
 
-  return usesModuleScopedReferences && !capturesEnclosingBindings;
+  return {
+    canHoist: usesModuleScopedReferences && capturedEnclosingNames.size === 0,
+    capturedEnclosingNames,
+  };
 }
 
 type ReferenceScope = "local" | "module" | "enclosing" | "other";
