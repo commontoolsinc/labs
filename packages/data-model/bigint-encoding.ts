@@ -176,6 +176,9 @@ export function bigintFromMinimalTwosComplement(bytes: Uint8Array): bigint {
     throw new Error("bigintFromMinimalTwosComplement: empty input");
   }
 
+  // Note: `false` second argument to the `DataView.get*()` methods means
+  // "big-endian."
+
   // Determine sign from the high bit of the first byte.
   const negative = (bytes[0]! & 0x80) !== 0;
 
@@ -198,13 +201,13 @@ export function bigintFromMinimalTwosComplement(bytes: Uint8Array): bigint {
       // Fast path for `bytes.length` in `2..8`.
       dv64Bytes.fill(negative ? 0xff : 0);
       dv64Bytes.set(bytes, 8 - bytes.length);
-      return dv64View.getBigInt64(0, false); // `false` means big-endian.
+      return dv64View.getBigInt64(0, false);
     }
   }
 
   // Slow path.
 
-  // Count of partial-int65 bytes.
+  // Count of partial-`int64` bytes.
   const partials = bytes.length & 7;
 
   // Possibly surprising test here: Benchmarks indicate that V8 (and assumed to
@@ -220,7 +223,7 @@ export function bigintFromMinimalTwosComplement(bytes: Uint8Array): bigint {
 
     for (let i = partials; i < bytes.length; i += 8) {
       dv64Bytes.set(bytes.subarray(i, i + 8));
-      result = (result << 64n) | dv64View.getBigUint64(0, false); // `false` means big-endian.
+      result = (result << 64n) | dv64View.getBigUint64(0, false);
     }
 
     return result;
@@ -239,7 +242,7 @@ export function bigintFromMinimalTwosComplement(bytes: Uint8Array): bigint {
     for (let i = partials; i < bytes.length; i += 8) {
       dv64Bytes.set(bytes.subarray(i, i + 8));
       result = (result << 64n) |
-        (0xffff_ffff_ffff_ffffn ^ dv64View.getBigUint64(0, false)); // `false` means big-endian.
+        (0xffff_ffff_ffff_ffffn ^ dv64View.getBigUint64(0, false));
     }
 
     return ~result;
