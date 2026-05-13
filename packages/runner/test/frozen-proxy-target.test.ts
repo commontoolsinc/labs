@@ -521,7 +521,7 @@ describe("frozen proxy target: v2 committed reads with richStorableValues ON", (
   });
 });
 
-describe("frozen proxy target: committed reads with richStorableValues OFF", () => {
+describe("frozen proxy target: committed reads with richStorableValues OFF (legacy)", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -530,10 +530,12 @@ describe("frozen proxy target: committed reads with richStorableValues OFF", () 
     storageManager = StorageManager.emulate({
       as: signer,
     });
-    // No experimental flags -- richStorableValues defaults to false.
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      experimental: {
+        modernDataModel: false,
+      },
     });
     tx = runtime.edit();
   });
@@ -544,7 +546,7 @@ describe("frozen proxy target: committed reads with richStorableValues OFF", () 
     await storageManager?.close();
   });
 
-  it("returns unfrozen committed objects when richStorableValues is OFF", async () => {
+  it("returns unfrozen committed objects when richStorableValues is OFF (legacy)", async () => {
     const link = writeCell(runtime, tx, "legacy-frozen-raw", {
       a: 1,
       b: 2,
@@ -553,6 +555,54 @@ describe("frozen proxy target: committed reads with richStorableValues OFF", () 
     tx = await commitAndReopen(runtime, tx);
     const rawValue = tx.readValueOrThrow(link);
     expect(Object.isFrozen(rawValue)).toBe(false);
+
+    const result = createQueryResultProxy<{ a: number; b: number }>(
+      runtime,
+      tx,
+      link,
+      0,
+      false,
+    );
+
+    expect(Number(result.a)).toBe(1);
+    expect(Number(result.b)).toBe(2);
+  });
+});
+
+describe("frozen proxy target: committed reads under modernDataModel", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({
+      as: signer,
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      experimental: {
+        modernDataModel: true,
+      },
+    });
+    tx = runtime.edit();
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("returns frozen committed objects under modernDataModel", async () => {
+    const link = writeCell(runtime, tx, "modern-frozen-raw", {
+      a: 1,
+      b: 2,
+    });
+
+    tx = await commitAndReopen(runtime, tx);
+    const rawValue = tx.readValueOrThrow(link);
+    expect(Object.isFrozen(rawValue)).toBe(true);
 
     const result = createQueryResultProxy<{ a: number; b: number }>(
       runtime,
