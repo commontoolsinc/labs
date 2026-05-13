@@ -4980,8 +4980,11 @@ export class Scheduler {
 
       // Run all remaining dirty effects - these shouldn't be lost
       // But skip throttled effects - they should stay dirty for later
-      for (const effect of this.effects) {
-        if (this.dirty.has(effect) && !this.isThrottled(effect)) {
+      const dirtyEffects = [...this.effects].filter((effect) =>
+        this.dirty.has(effect) && !this.isThrottled(effect)
+      );
+      for (const effect of dirtyEffects) {
+        if (this.effects.has(effect) && this.dirty.has(effect)) {
           logger.debug("schedule-cycle", () => [
             `[CYCLE-BREAK] Running dirty effect: ${this.getActionId(effect)}`,
           ]);

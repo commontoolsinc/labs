@@ -947,14 +947,33 @@ function explicitWishSchemaScope(schema: unknown): CellScope | undefined {
 function wishOutputScope(
   schema: unknown,
   inputScope: CellScope,
-  usedHomeSpace: boolean,
+  usesHomeSpace: boolean,
 ): CellScope {
   const explicitScope = explicitWishSchemaScope(schema);
   if (explicitScope) return explicitScope;
-  if (usedHomeSpace) {
+  if (usesHomeSpace) {
     return narrowestScope([inputScope, "user"]);
   }
   return inputScope;
+}
+
+export function wishTargetMayUseHomeSpace(
+  query: unknown,
+  scope?: ("~" | "." | string)[],
+): boolean {
+  if (typeof query !== "string") return scope?.includes("~") === true;
+
+  let parsed: ParsedWishTarget;
+  try {
+    parsed = parseWishTarget(query);
+  } catch {
+    return false;
+  }
+
+  const kind = getResolutionKind(parsed);
+  if (kind === "home-target") return true;
+  if (scope?.includes("~")) return true;
+  return kind === "hashtag-search" && scope === undefined;
 }
 
 function sharedWishCellValue(
@@ -1140,6 +1159,7 @@ export function wish(
         const queryKey = sanitizeQueryKey(String(query ?? ""));
         actionQueryKey = queryKey;
         const inputScope = tx.getNarrowestReadScope();
+        const targetMayUseHomeSpace = wishTargetMayUseHomeSpace(query, scope);
 
         if (query === undefined || query === null || query === "") {
           const errorMsg = `Wish target "${
@@ -1148,7 +1168,7 @@ export function wish(
           const outputScope = wishOutputScope(
             schema,
             inputScope,
-            false,
+            targetMayUseHomeSpace,
           );
           measureWishPhase(
             "send-error",
@@ -1212,7 +1232,7 @@ export function wish(
             const outputScope = wishOutputScope(
               schema,
               inputScope,
-              ctx.usedHomeSpace === true,
+              targetMayUseHomeSpace || ctx.usedHomeSpace === true,
             );
             // Persist #now cell across re-runs to avoid non-idempotent loops
             if (ctx.nowCell) nowCell = ctx.nowCell;
@@ -1394,7 +1414,7 @@ export function wish(
                   wishOutputScope(
                     schema,
                     inputScope,
-                    ctx.usedHomeSpace === true,
+                    targetMayUseHomeSpace || ctx.usedHomeSpace === true,
                   ),
                   schema,
                 ),
