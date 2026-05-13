@@ -69,6 +69,7 @@ import {
 } from "./link-types.ts";
 import type { LastNode } from "./link-resolution.ts";
 import type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
+import { SigilLink } from "./sigil-types.ts";
 
 const logger = getLogger("traverse", { enabled: true, level: "warn" });
 
@@ -1431,20 +1432,20 @@ function trackVisitedDoc(
 export function loadMetaLinkedDoc(
   tx: IExtendedStorageTransaction,
   valueEntry: IMemorySpaceAttestation,
-  meta: "result" | "pattern" | "argument" | "internal",
+  meta: "cfc" | "result" | "pattern" | "argument" | "internal",
   schemaTracker: MapSet<string, SchemaPathSelector>,
 ): MetaLinkedDoc | undefined {
   if (!isRecord(valueEntry.value)) {
     return undefined;
   }
   const targetObj = valueEntry.value as Immutable<JSONObject>;
-  const linkObj = (isRecord(targetObj) && meta in targetObj &&
-      isPrimitiveCellLink(targetObj[meta]))
+  if (!isRecord(targetObj) || !(meta in targetObj)) return undefined;
+  const linkObj = isPrimitiveCellLink(targetObj[meta])
     ? targetObj[meta]
+    : (meta === "cfc") // cfc links are different
+    ? cfcMetaToSigilLink(targetObj["cfc"])
     : undefined;
-  if (linkObj === undefined) {
-    return undefined;
-  }
+  if (linkObj === undefined) return undefined;
   const link = parseLink(linkObj, valueEntry.address)!;
   const address = {
     space: link.space,
@@ -1463,6 +1464,16 @@ export function loadMetaLinkedDoc(
   const docKey = getTrackerKey(address);
   schemaTracker.add(docKey, selector);
   return { address, value: result.ok.value, selector };
+}
+
+function cfcMetaToSigilLink(obj: unknown): SigilLink | undefined {
+  if (isRecord(obj) && "schemaHash" in obj) {
+    const schemaHash = obj["schemaHash"];
+    if (typeof schemaHash === "string" && schemaHash.length > 0) {
+      return { "/": { "link@1": { id: `cid:${obj["schemaHash"]}` } } };
+    }
+  }
+  return undefined;
 }
 
 type MetaLinkedDoc = IMemorySpaceAttestation & {
@@ -1531,14 +1542,25 @@ export function loadMetaLinkedDocs(
   const pendingDocs = [valueEntry];
   while (pendingDocs.length > 0) {
     const currentDoc = pendingDocs.shift()!;
-    for (const meta of ["result", "pattern", "argument", "internal"] as const) {
+    for (
+      const meta of [
+        "cfc",
+        "result",
+        "pattern",
+        "argument",
+        "internal",
+      ] as const
+    ) {
       const linkedDoc = loadMetaLinkedDoc(
         tx,
         currentDoc,
         meta,
         context.schemaTracker,
       );
-      if (linkedDoc === undefined) continue;
+      // Don't recurse into invalid docs or cid docs
+      if (linkedDoc === undefined || linkedDoc.address.id.startsWith("cid:")) {
+        continue;
+      }
       const linkedDocKey = getTrackerKey(linkedDoc.address);
       if (context.metaDocsVisited.has(linkedDocKey)) continue;
       context.metaDocsVisited.add(linkedDocKey);
