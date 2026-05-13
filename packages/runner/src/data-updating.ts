@@ -1,5 +1,6 @@
 import { isRecord } from "@commonfabric/utils/types";
 import {
+  FabricInstance,
   type FabricObject,
   type FabricValue,
   isArrayIndexPropertyName,
@@ -345,6 +346,23 @@ export function normalizeAndDiff(
         `[SEEN_CHECK] Already seen object at path=${pathStr}, converting to cell`,
     );
     newValue = new CellImpl(runtime, tx, seen.get(newValue)!);
+  }
+
+  // `FabricInstance` values (`FabricError`, `FabricEpochNsec`, etc.) are
+  // atomic from this layer's perspective: their own-enumerable properties
+  // are implementation details, not user-visible structure, and iterating
+  // them would re-wrap embedded native values (e.g., `FabricError.error`
+  // is a native `Error`) on each pass, recursing forever. Emit a single
+  // change at this link with the wrapper as the value — the storage
+  // layer's JSON encoding handles serialization via
+  // `[DECONSTRUCT]`/`[RECONSTRUCT]`.
+  if (newValue instanceof FabricInstance) {
+    diffLogger.debug(
+      "diff",
+      () => `[BRANCH_FABRIC_INSTANCE] Atomic FabricInstance at path=${pathStr}`,
+    );
+    changes.push({ location: link, value: newValue as FabricValue });
+    return changes;
   }
 
   // ID_FIELD redirects to an existing field and we do something like DOM
