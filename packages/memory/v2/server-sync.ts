@@ -8,7 +8,7 @@ import {
   type WatchSpec,
 } from "../v2.ts";
 
-export type SessionCacheEntry = SessionSyncUpsert;
+export type SessionCacheEntry = SessionSyncUpsert & { scope: CellScope };
 
 const DEFAULT_SCOPE: CellScope = "space";
 
@@ -27,7 +27,7 @@ export const sameSnapshot = (
   }
   return left.branch === right.branch &&
     left.id === right.id &&
-    (left.scope ?? DEFAULT_SCOPE) === (right.scope ?? DEFAULT_SCOPE) &&
+    left.scope === right.scope &&
     left.seq === right.seq &&
     left.deleted === right.deleted;
 };
@@ -42,9 +42,7 @@ export const toCacheEntry = (
     return {
       branch: entity.branch,
       id: entity.id,
-      ...(entity.scope !== undefined && entity.scope !== DEFAULT_SCOPE
-        ? { scope: entity.scope }
-        : {}),
+      scope: entity.scope ?? DEFAULT_SCOPE,
       seq: entity.seq,
       deleted: true,
     };
@@ -52,9 +50,7 @@ export const toCacheEntry = (
   return {
     branch: entity.branch,
     id: entity.id,
-    ...(entity.scope !== undefined && entity.scope !== DEFAULT_SCOPE
-      ? { scope: entity.scope }
-      : {}),
+    scope: entity.scope ?? DEFAULT_SCOPE,
     seq: entity.seq,
     doc: entity.document,
   };
@@ -65,10 +61,18 @@ export const trackedIdsFromEntries = (
 ): Set<string> => {
   const ids = new Set<string>();
   for (const entry of entries) {
-    ids.add(`${entry.scope ?? DEFAULT_SCOPE}\0${entry.id}`);
+    ids.add(`${entry.scope}\0${entry.id}`);
   }
   return ids;
 };
+
+const compareSyncAddress = (
+  left: { branch: string; id: string; scope?: CellScope },
+  right: { branch: string; id: string; scope?: CellScope },
+): number =>
+  left.branch.localeCompare(right.branch) ||
+  (left.scope ?? DEFAULT_SCOPE).localeCompare(right.scope ?? DEFAULT_SCOPE) ||
+  left.id.localeCompare(right.id);
 
 export const groupedQueries = (
   watches: readonly WatchSpec[],
@@ -135,22 +139,16 @@ export const buildFullSync = (
   const removes = [...previous.values()]
     .filter((entry) =>
       !next.has(
-        cacheKeyForEntity(entry.branch, entry.id, entry.scope ?? DEFAULT_SCOPE),
+        cacheKeyForEntity(entry.branch, entry.id, entry.scope),
       )
     )
     .map((entry) => ({
       branch: entry.branch,
       id: entry.id,
-      ...(entry.scope !== undefined && entry.scope !== DEFAULT_SCOPE
-        ? { scope: entry.scope }
-        : {}),
+      scope: entry.scope,
     }))
-    .sort((left, right) =>
-      left.branch.localeCompare(right.branch) || left.id.localeCompare(right.id)
-    );
-  const upserts = [...next.values()].sort((left, right) =>
-    left.branch.localeCompare(right.branch) || left.id.localeCompare(right.id)
-  );
+    .sort(compareSyncAddress);
+  const upserts = [...next.values()].sort(compareSyncAddress);
   return {
     type: "sync",
     fromSeq,
@@ -177,20 +175,14 @@ export const buildDiffSync = (
     .map(([, entry]) => ({
       branch: entry.branch,
       id: entry.id,
-      ...(entry.scope !== undefined && entry.scope !== DEFAULT_SCOPE
-        ? { scope: entry.scope }
-        : {}),
+      scope: entry.scope,
     }))
-    .sort((left, right) =>
-      left.branch.localeCompare(right.branch) || left.id.localeCompare(right.id)
-    );
+    .sort(compareSyncAddress);
   return {
     type: "sync",
     fromSeq,
     toSeq,
-    upserts: upserts.toSorted((left, right) =>
-      left.branch.localeCompare(right.branch) || left.id.localeCompare(right.id)
-    ),
+    upserts: upserts.toSorted(compareSyncAddress),
     removes,
   };
 };
