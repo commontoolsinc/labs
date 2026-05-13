@@ -2212,13 +2212,15 @@ export function recursivelyAddIDIfNeeded<T>(
   // they remain unused.
   if (value instanceof FabricInstance) {
     seen.set(value, value);
+    let state: FabricValue | undefined;
     try {
-      const state = value[DECONSTRUCT]();
-      if (isRecord(state) || Array.isArray(state)) {
-        recursivelyAddIDIfNeeded(state, frame, seen);
-      }
+      state = value[DECONSTRUCT]();
     } catch {
-      // `[DECONSTRUCT]` not yet implemented for this subclass.
+      // `[DECONSTRUCT]` not yet implemented for this subclass
+      // (`FabricMap`, `FabricSet`); skip the side-effect traversal.
+    }
+    if (state !== undefined && (isRecord(state) || Array.isArray(state))) {
+      recursivelyAddIDIfNeeded(state, frame, seen);
     }
     return value;
   }
