@@ -89,6 +89,17 @@ export function schemaToTypeString(
   schema: JSONSchema,
   options: SchemaFormatOptions = {},
 ): string {
+  const rendered = schemaToTypeStringInner(schema, options);
+  return applyScopeWrapper(
+    (schema as Record<string, unknown>)?.scope,
+    rendered,
+  );
+}
+
+function schemaToTypeStringInner(
+  schema: JSONSchema,
+  options: SchemaFormatOptions = {},
+): string {
   const { defs = {}, depth = 0, maxDepth = 4, indent = 0 } = options;
   const nextOpts = { defs, depth: depth + 1, maxDepth, indent };
 
@@ -138,7 +149,7 @@ export function schemaToTypeString(
 
   // Normalize asCell/asStream into a single asCellValue array for easier handling
   if (asCellValues.length > 0) {
-    const { asCell: _c, asStream: _s, ...restSchema } = schema;
+    const { asCell: _c, asStream: _s, scope: _scope, ...restSchema } = schema;
     // Wrapper arrays are ordered outermost-first, so apply them from the end.
     let innerType = schemaToTypeString(restSchema, nextOpts);
     for (let i = asCellValues.length - 1; i >= 0; i--) {
@@ -238,20 +249,37 @@ function getWrappedTypeString(
   innerType: string,
 ): string {
   const kind = typeof wrapper === "string" ? wrapper : wrapper.kind;
+  const scoped = (type: string) =>
+    typeof wrapper === "string" ? type : applyScopeWrapper(wrapper.scope, type);
   switch (kind) {
     case "cell":
-      return `Cell<${innerType}>`;
+      return scoped(`Cell<${innerType}>`);
     case "readonly":
-      return `ReadonlyCell<${innerType}>`;
+      return scoped(`ReadonlyCell<${innerType}>`);
     case "writeonly":
-      return `WriteonlyCell<${innerType}>`;
+      return scoped(`WriteonlyCell<${innerType}>`);
     case "comparable":
-      return `ComparableCell<${innerType}>`;
+      return scoped(`ComparableCell<${innerType}>`);
     case "stream":
-      return `(${innerType}) => void`;
+      return scoped(`(${innerType}) => void`);
     case "opaque":
-      return "Opaque";
+      return scoped("Opaque");
     default:
       return "UnknownWrapper";
+  }
+}
+
+function applyScopeWrapper(scope: unknown, innerType: string): string {
+  switch (scope) {
+    case "space":
+      return `PerSpace<${innerType}>`;
+    case "user":
+      return `PerUser<${innerType}>`;
+    case "session":
+      return `PerSession<${innerType}>`;
+    case "any":
+      return `PerAny<${innerType}>`;
+    default:
+      return innerType;
   }
 }

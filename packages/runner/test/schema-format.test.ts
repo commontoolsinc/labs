@@ -84,6 +84,30 @@ Deno.test('schemaToTypeString formats asCell: ["stream", "cell"] as Stream<Cell<
   assertEquals(result, "(Cell<number>) => void");
 });
 
+Deno.test("schemaToTypeString restores scope wrappers", () => {
+  assertEquals(
+    schemaToTypeString({
+      type: "string",
+      scope: "user",
+    } as any),
+    "PerUser<string>",
+  );
+  assertEquals(
+    schemaToTypeString({
+      type: "string",
+      scope: "any",
+    } as any),
+    "PerAny<string>",
+  );
+  assertEquals(
+    schemaToTypeString({
+      type: "string",
+      asCell: [{ kind: "cell", scope: "session" }],
+    } as any),
+    "PerSession<Cell<string>>",
+  );
+});
+
 Deno.test("schemaToTypeString handles enums as union literals", () => {
   const schema: any = {
     enum: ["open", "closed", "pending"],

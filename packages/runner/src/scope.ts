@@ -52,6 +52,12 @@ export function narrowestScope(
   return narrowest;
 }
 
+/**
+ * A scoped schema may follow links at the same or broader scope only. For
+ * example, a user-scoped schema can read space/user links but not session links.
+ * Omitted schema scope and `scope: "any"` are permissive and can follow every
+ * concrete link scope.
+ */
 export function canFollowScopedLink(
   schemaScope: SchemaScope | undefined,
   linkScope: CellScope,
