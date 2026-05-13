@@ -27,6 +27,7 @@ import {
   computeBaseline,
   type DenoBenchResult,
   downloadAndParseJUnit,
+  downloadAndParsePerfMetrics,
   escapeTableCell,
   extractBenchMetrics,
   extractMetrics,
@@ -53,6 +54,7 @@ import {
   normalizeName,
   parseBaselineOverrides,
   parseDenoTestLog,
+  PERF_METRICS_ARTIFACT_NAME,
   type PRInfo,
   RECENT_THRESHOLD,
   RECENT_WINDOW,
@@ -442,6 +444,7 @@ async function main() {
   // TODO(perf): Remove log-parsing fallback after 2026-03-19.
   console.log("Fetching test timing artifacts...");
   let artifactRunsProcessed = 0;
+  let perfMetricRunsProcessed = 0;
   let logParseRunsProcessed = 0;
   await mapConcurrent(
     [...jobsByRun],
@@ -449,6 +452,24 @@ async function main() {
     async ({ run, jobs }) => {
       try {
         const artifacts = await fetchArtifactsForRun(run.id);
+        const perfMetricsArtifact = artifacts.find(
+          (a) => a.name === PERF_METRICS_ARTIFACT_NAME && !a.expired,
+        );
+        if (perfMetricsArtifact) {
+          const metrics = await downloadAndParsePerfMetrics(
+            perfMetricsArtifact.id,
+          );
+          if (metrics) {
+            for (const [name, sample] of metrics) {
+              if (name.startsWith("test:") || name.startsWith("subtest:")) {
+                addSample(timelines, name, sample);
+              }
+            }
+            perfMetricRunsProcessed++;
+            return;
+          }
+        }
+
         const timingArtifacts = artifacts.filter(
           (a) => a.name.startsWith("test-timing-") && !a.expired,
         );
@@ -504,7 +525,7 @@ async function main() {
   );
 
   console.log(
-    `Processed ${timelines.size} metrics across ${runs.length} runs (${artifactRunsProcessed} with JUnit artifacts, ${logParseRunsProcessed} via log parsing).`,
+    `Processed ${timelines.size} metrics across ${runs.length} runs (${perfMetricRunsProcessed} with perf metrics, ${artifactRunsProcessed} with JUnit artifacts, ${logParseRunsProcessed} via log parsing).`,
   );
 
   // Fetch benchmark results from the Benchmarks workflow

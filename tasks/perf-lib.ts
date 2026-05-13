@@ -13,6 +13,10 @@
 export const REPO = Deno.env.get("GITHUB_REPOSITORY") ?? "commontoolsinc/labs";
 export const TOKEN = Deno.env.get("GITHUB_TOKEN");
 export const WORKFLOW_FILE = "deno.yml";
+export const PERF_METRICS_ARTIFACT_NAME = "perf-metrics";
+export const PERF_METRICS_FILE = "perf-metrics.json";
+export const PERF_METRICS_BACKFILL_ARTIFACT_NAME = "perf-metrics-backfill";
+export const PERF_METRICS_BACKFILL_FILE = "perf-metrics-backfill.json";
 
 /** Minimum number of historical samples before we compute a baseline. */
 export const MIN_SAMPLES = 5;
@@ -87,6 +91,27 @@ export interface TimingSample {
   sha: string;
   createdAt: string;
   durationSeconds: number;
+}
+
+export interface PerfMetricRecord extends TimingSample {
+  name: string;
+}
+
+export interface PerfMetricsFile {
+  version: 1;
+  generatedAt: string;
+  metrics: PerfMetricRecord[];
+}
+
+export interface PerfMetricsBackfillRun {
+  runId: number;
+  metrics: PerfMetricRecord[];
+}
+
+export interface PerfMetricsBackfillFile {
+  version: 1;
+  generatedAt: string;
+  runs: PerfMetricsBackfillRun[];
 }
 
 export interface MetricTimeline {
@@ -361,6 +386,191 @@ export async function downloadAndParseJUnit(
       }
     }
     return suites;
+  } finally {
+    try {
+      await Deno.remove(tmpDir, { recursive: true });
+    } catch { /* ignore cleanup errors */ }
+  }
+}
+
+export function serializePerfMetrics(
+  metrics: Map<string, TimingSample>,
+): PerfMetricsFile {
+  return {
+    version: 1,
+    generatedAt: new Date().toISOString(),
+    metrics: metricsToRecords(metrics),
+  };
+}
+
+function metricsToRecords(
+  metrics: Map<string, TimingSample>,
+): PerfMetricRecord[] {
+  return [...metrics.entries()]
+    .map(([name, sample]) => ({ name, ...sample }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export function parsePerfMetricsFile(
+  content: string,
+): Map<string, TimingSample> {
+  const parsed = JSON.parse(content) as Partial<PerfMetricsFile>;
+  if (parsed.version !== 1 || !Array.isArray(parsed.metrics)) {
+    throw new Error("Unsupported perf metrics file format.");
+  }
+
+  const metrics = new Map<string, TimingSample>();
+  for (const metric of parsed.metrics) {
+    if (
+      typeof metric.name !== "string" ||
+      typeof metric.runId !== "number" ||
+      typeof metric.runUrl !== "string" ||
+      typeof metric.sha !== "string" ||
+      typeof metric.createdAt !== "string" ||
+      typeof metric.durationSeconds !== "number"
+    ) {
+      throw new Error("Invalid perf metric record.");
+    }
+
+    metrics.set(metric.name, {
+      runId: metric.runId,
+      runUrl: metric.runUrl,
+      sha: metric.sha,
+      createdAt: metric.createdAt,
+      durationSeconds: metric.durationSeconds,
+    });
+  }
+  return metrics;
+}
+
+export function serializePerfMetricsBackfill(
+  metricsByRunId: Map<number, Map<string, TimingSample>>,
+): PerfMetricsBackfillFile {
+  return {
+    version: 1,
+    generatedAt: new Date().toISOString(),
+    runs: [...metricsByRunId.entries()]
+      .map(([runId, metrics]) => ({
+        runId,
+        metrics: metricsToRecords(metrics),
+      }))
+      .sort((a, b) => a.runId - b.runId),
+  };
+}
+
+export function parsePerfMetricsBackfillFile(
+  content: string,
+): Map<number, Map<string, TimingSample>> {
+  const parsed = JSON.parse(content) as Partial<PerfMetricsBackfillFile>;
+  if (parsed.version !== 1 || !Array.isArray(parsed.runs)) {
+    throw new Error("Unsupported perf metrics backfill file format.");
+  }
+
+  const metricsByRunId = new Map<number, Map<string, TimingSample>>();
+  for (const run of parsed.runs) {
+    if (typeof run.runId !== "number" || !Array.isArray(run.metrics)) {
+      throw new Error("Invalid perf metrics backfill run.");
+    }
+
+    metricsByRunId.set(
+      run.runId,
+      parsePerfMetricsFile(JSON.stringify({
+        version: 1,
+        generatedAt: parsed.generatedAt ?? "",
+        metrics: run.metrics,
+      })),
+    );
+  }
+  return metricsByRunId;
+}
+
+export async function writePerfMetricsFile(
+  path: string,
+  metrics: Map<string, TimingSample>,
+): Promise<void> {
+  await Deno.writeTextFile(
+    path,
+    `${JSON.stringify(serializePerfMetrics(metrics), null, 2)}\n`,
+  );
+}
+
+export async function writePerfMetricsBackfillFile(
+  path: string,
+  metricsByRunId: Map<number, Map<string, TimingSample>>,
+): Promise<void> {
+  await Deno.writeTextFile(
+    path,
+    `${
+      JSON.stringify(serializePerfMetricsBackfill(metricsByRunId), null, 2)
+    }\n`,
+  );
+}
+
+export async function downloadAndParsePerfMetrics(
+  artifactId: number,
+): Promise<Map<string, TimingSample> | null> {
+  const resp = await fetch(
+    `https://api.github.com/repos/${REPO}/actions/artifacts/${artifactId}/zip`,
+    { headers: apiHeaders() },
+  );
+  if (!resp.ok) return null;
+
+  const tmpDir = await Deno.makeTempDir({ prefix: "perf-metrics-" });
+  const zipPath = `${tmpDir}/artifact.zip`;
+
+  try {
+    const data = new Uint8Array(await resp.arrayBuffer());
+    await Deno.writeFile(zipPath, data);
+
+    const unzip = new Deno.Command("unzip", {
+      args: ["-o", zipPath, "-d", tmpDir],
+      stdout: "null",
+      stderr: "null",
+    });
+    const result = await unzip.output();
+    if (!result.success) return null;
+
+    const jsonPath = `${tmpDir}/${PERF_METRICS_FILE}`;
+    const content = await Deno.readTextFile(jsonPath);
+    return parsePerfMetricsFile(content);
+  } catch {
+    return null;
+  } finally {
+    try {
+      await Deno.remove(tmpDir, { recursive: true });
+    } catch { /* ignore cleanup errors */ }
+  }
+}
+
+export async function downloadAndParsePerfMetricsBackfill(
+  artifactId: number,
+): Promise<Map<number, Map<string, TimingSample>> | null> {
+  const resp = await fetch(
+    `https://api.github.com/repos/${REPO}/actions/artifacts/${artifactId}/zip`,
+    { headers: apiHeaders() },
+  );
+  if (!resp.ok) return null;
+
+  const tmpDir = await Deno.makeTempDir({ prefix: "perf-metrics-backfill-" });
+  const zipPath = `${tmpDir}/artifact.zip`;
+
+  try {
+    const data = new Uint8Array(await resp.arrayBuffer());
+    await Deno.writeFile(zipPath, data);
+
+    const unzip = new Deno.Command("unzip", {
+      args: ["-o", zipPath, "-d", tmpDir],
+      stdout: "null",
+      stderr: "null",
+    });
+    const result = await unzip.output();
+    if (!result.success) return null;
+
+    const jsonPath = `${tmpDir}/${PERF_METRICS_BACKFILL_FILE}`;
+    const content = await Deno.readTextFile(jsonPath);
+    return parsePerfMetricsBackfillFile(content);
+  } catch {
+    return null;
   } finally {
     try {
       await Deno.remove(tmpDir, { recursive: true });

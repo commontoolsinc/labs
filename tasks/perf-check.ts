@@ -19,10 +19,13 @@ import {
   addSample,
   API_CONCURRENCY,
   applyBaselineOverrides,
+  type Artifact,
   type BaselineOverrides,
   computeBaseline,
   computeCiWallTimeRevisitSignals,
   downloadAndParseJUnit,
+  downloadAndParsePerfMetrics,
+  downloadAndParsePerfMetricsBackfill,
   extractMetrics,
   extractTestFileMetrics,
   fetchArtifactsForRun,
@@ -38,6 +41,10 @@ import {
   MIN_REGRESSION_PCT,
   MIN_SAMPLES,
   parseBaselineOverrides,
+  PERF_METRICS_ARTIFACT_NAME,
+  PERF_METRICS_BACKFILL_ARTIFACT_NAME,
+  PERF_METRICS_BACKFILL_FILE,
+  PERF_METRICS_FILE,
   type PRInfo,
   readAndParseEvent,
   REPO,
@@ -47,10 +54,15 @@ import {
   TOKEN,
   WORKFLOW_FILE,
   type WorkflowRun,
+  writePerfMetricsBackfillFile,
+  writePerfMetricsFile,
 } from "./perf-lib.ts";
 
 /** How many recent main-branch runs to use for baseline. */
 const BASELINE_RUNS = 20;
+
+/** Recent completed workflow runs to scan for fallback backfill artifacts. */
+const BACKFILL_SOURCE_RUNS = 20;
 
 /**
  * Metrics to exclude from regression checks because their aggregate values
@@ -139,6 +151,11 @@ async function main() {
     console.warn(`  Warning: could not fetch artifacts for current run: ${e}`);
   }
 
+  await writePerfMetricsFile(PERF_METRICS_FILE, currentMetrics);
+  console.log(
+    `Wrote ${PERF_METRICS_FILE} with ${currentMetrics.size} metrics.`,
+  );
+
   if (currentMetrics.size === 0) {
     console.log("No metrics extracted from current run. Nothing to check.");
     Deno.exit(0);
@@ -167,53 +184,151 @@ async function main() {
   const timelines = new Map<string, MetricTimeline>();
   const overridesBySha = new Map<string, BaselineOverrides>();
   const prInfoBySha = new Map<string, PRInfo>();
+  const newBackfills = new Map<number, Map<string, TimingSample>>();
 
-  await mapConcurrent(baselineRuns, API_CONCURRENCY, async (run) => {
-    const [jobs, pr] = await Promise.all([
-      fetchJobsForRun(run.id),
-      fetchPRForCommit(run.head_sha),
-    ]);
+  interface BaselineRunContext {
+    run: WorkflowRun;
+    artifacts: Artifact[];
+    pr: PRInfo | null;
+  }
+
+  const baselineContexts = await mapConcurrent(
+    baselineRuns,
+    API_CONCURRENCY,
+    async (run): Promise<BaselineRunContext> => {
+      const [artifacts, pr] = await Promise.all([
+        fetchArtifactsForRun(run.id),
+        fetchPRForCommit(run.head_sha),
+      ]);
+      return { run, artifacts, pr };
+    },
+  );
+
+  console.log("Fetching recent perf metric backfills...");
+  const backfillSourceData = await githubGet<{ workflow_runs: WorkflowRun[] }>(
+    `/repos/${REPO}/actions/workflows/${WORKFLOW_FILE}/runs?status=completed&per_page=${BACKFILL_SOURCE_RUNS}`,
+  );
+  const baselineRunIds = new Set(baselineRuns.map((run) => run.id));
+  const backfillSourceRuns = backfillSourceData.workflow_runs.filter((run) =>
+    !baselineRunIds.has(run.id) && run.id !== runIdNum
+  );
+  const extraBackfillContexts = await mapConcurrent(
+    backfillSourceRuns,
+    API_CONCURRENCY,
+    async (run): Promise<BaselineRunContext> => ({
+      run,
+      artifacts: await fetchArtifactsForRun(run.id),
+      pr: null,
+    }),
+  );
+
+  const backfilledMetricsByRunId = new Map<number, Map<string, TimingSample>>();
+  await mapConcurrent(
+    [...baselineContexts, ...extraBackfillContexts],
+    API_CONCURRENCY,
+    async ({ artifacts }) => {
+      const artifact = artifacts.find(
+        (a) => a.name === PERF_METRICS_BACKFILL_ARTIFACT_NAME && !a.expired,
+      );
+      if (!artifact) return;
+
+      const backfills = await downloadAndParsePerfMetricsBackfill(artifact.id);
+      if (!backfills) return;
+
+      for (const [backfilledRunId, metrics] of backfills) {
+        if (!backfilledMetricsByRunId.has(backfilledRunId)) {
+          backfilledMetricsByRunId.set(backfilledRunId, metrics);
+        }
+      }
+    },
+  );
+  if (backfilledMetricsByRunId.size > 0) {
+    console.log(
+      `Loaded perf metric backfills for ${backfilledMetricsByRunId.size} run(s).`,
+    );
+  }
+
+  await mapConcurrent(baselineContexts, API_CONCURRENCY, async (context) => {
+    const { run, artifacts, pr } = context;
 
     if (pr) {
       prInfoBySha.set(run.head_sha, pr);
+      const overrides = parseBaselineOverrides(pr.body ?? "");
+      if (overrides.metrics.size > 0) {
+        overridesBySha.set(run.head_sha, overrides);
+      }
     }
 
-    const metrics = extractMetrics(run, jobs);
+    const perfMetricsArtifact = artifacts.find(
+      (a) => a.name === PERF_METRICS_ARTIFACT_NAME && !a.expired,
+    );
+    if (perfMetricsArtifact) {
+      const metrics = await downloadAndParsePerfMetrics(
+        perfMetricsArtifact.id,
+      );
+      if (metrics) {
+        for (const [name, sample] of metrics) {
+          addSample(timelines, name, sample);
+        }
+        return;
+      }
+    }
+
+    const backfilledMetrics = backfilledMetricsByRunId.get(run.id);
+    if (backfilledMetrics) {
+      for (const [name, sample] of backfilledMetrics) {
+        addSample(timelines, name, sample);
+      }
+      return;
+    }
+
+    const jobs = await fetchJobsForRun(run.id);
+    const metrics = new Map(extractMetrics(run, jobs));
     for (const [name, sample] of metrics) {
       addSample(timelines, name, sample);
     }
 
     // Fetch per-test timing artifacts
+    let canBackfill = true;
     try {
-      const artifacts = await fetchArtifactsForRun(run.id);
       const timingArtifacts = artifacts.filter(
         (a) => a.name.startsWith("test-timing-") && !a.expired,
       );
       for (const artifact of timingArtifacts) {
         const suites = await downloadAndParseJUnit(artifact.id);
-        if (suites.length > 0) {
-          const testMetrics = extractTestFileMetrics(
-            run,
-            timingArtifactLabel(artifact.name),
-            suites,
-          );
-          for (const [name, sample] of testMetrics) {
-            addSample(timelines, name, sample);
-          }
+        if (suites.length === 0) {
+          canBackfill = false;
+          continue;
+        }
+        const testMetrics = extractTestFileMetrics(
+          run,
+          timingArtifactLabel(artifact.name),
+          suites,
+        );
+        for (const [name, sample] of testMetrics) {
+          metrics.set(name, sample);
+          addSample(timelines, name, sample);
         }
       }
     } catch {
       // Artifacts may not exist for older runs
+      canBackfill = false;
     }
 
-    // Check for baseline overrides in merged PRs
-    if (pr?.body) {
-      const overrides = parseBaselineOverrides(pr.body);
-      if (overrides.metrics.size > 0) {
-        overridesBySha.set(run.head_sha, overrides);
-      }
+    if (metrics.size > 0 && canBackfill) {
+      newBackfills.set(run.id, metrics);
     }
   });
+
+  if (newBackfills.size > 0) {
+    await writePerfMetricsBackfillFile(
+      PERF_METRICS_BACKFILL_FILE,
+      newBackfills,
+    );
+    console.log(
+      `Wrote ${PERF_METRICS_BACKFILL_FILE} for ${newBackfills.size} fallback run(s).`,
+    );
+  }
 
   // Sort timelines chronologically
   for (const timeline of timelines.values()) {
