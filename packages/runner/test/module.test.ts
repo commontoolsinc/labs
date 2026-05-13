@@ -187,6 +187,7 @@ describe("module", () => {
           $alias: {
             path: ["internal", "stream:click"],
             schema: true,
+            scope: "space",
           },
         },
       });
@@ -202,6 +203,7 @@ describe("module", () => {
         $alias: {
           path: ["internal", "stream:click"],
           schema: true,
+          scope: "space",
         },
       });
     });
@@ -224,6 +226,7 @@ describe("module", () => {
         value: {
           $alias: {
             path: ["internal", '["a","b"]'],
+            scope: "space",
           },
         },
       });
