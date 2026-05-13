@@ -461,7 +461,7 @@ async function main() {
       );
     }
 
-    console.log("\n::group:Baseline sample breakdown:\n");
+    console.log("\n::group::Baseline sample breakdown:\n");
     for (const f of failures) {
       const timeline = timelines.get(f.metric);
       if (!timeline) continue;
