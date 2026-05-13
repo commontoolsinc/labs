@@ -448,7 +448,7 @@ async function main() {
 
     console.log(
       "\n## Performance regression details:\n" +
-      "\n| Metric | Current | Baseline (median) | Threshold | Change |",
+        "\n| Metric | Current | Baseline (median) | Threshold | Change |",
     );
     console.log(
       "|--------|---------|-------------------|-----------|--------|",
