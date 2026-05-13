@@ -169,6 +169,24 @@ const requireSandboxFabricPath = (
 const singleQuoteShell = (value: string): string =>
   `'${value.replaceAll("'", `'"'"'`)}'`;
 
+const fabricParentDirectories = (path: string): string[] => {
+  const parts = path.slice(1).split("/");
+  const dirs: string[] = [];
+  for (let index = 0; index < parts.length - 1; index++) {
+    dirs.push(`/${parts.slice(0, index + 1).join("/")}`);
+  }
+  return dirs;
+};
+
+const warmFabricParentDirectories = (path: string): string[] =>
+  fabricParentDirectories(path).flatMap((dir) => {
+    const quoted = singleQuoteShell(dir);
+    return [
+      `for _ in 1 2 3 4 5; do ls -ld ${quoted} >/dev/null 2>&1 && break; sleep 0.1; done`,
+      `ls -ld ${quoted} >/dev/null`,
+    ];
+  });
+
 const invocationInputLabels = (): CfcLabelView => ({
   version: 1,
   entries: [{
@@ -693,6 +711,7 @@ Deno.test({
         const result = await engine.invokeBuiltinTool("bash", {
           command: [
             "set -eu",
+            ...warmFabricParentDirectories(fabricReadPath),
             `payload=$(cat ${singleQuoteShell(fabricReadPath)})`,
             `printf ${
               singleQuoteShell(hostPayload)
@@ -734,6 +753,7 @@ Deno.test({
         const result = await engine.invokeBuiltinTool("bash", {
           command: [
             "set -eu",
+            ...warmFabricParentDirectories(fabricReadPath),
             `IFS= read -r payload < ${
               singleQuoteShell(fabricReadPath)
             } || [ -n "$payload" ]`,
@@ -790,6 +810,7 @@ Deno.test({
         const writeResult = await engine.invokeBuiltinTool("bash", {
           command: [
             "set -eu",
+            ...warmFabricParentDirectories(fabricWritePath),
             `printf ${singleQuoteShell(fabricPayload)} > ${
               singleQuoteShell(fabricWritePath)
             }`,
@@ -807,7 +828,11 @@ Deno.test({
         );
 
         const readBack = await engine.invokeBuiltinTool("bash", {
-          command: `cat ${singleQuoteShell(fabricWritePath)}`,
+          command: [
+            "set -eu",
+            ...warmFabricParentDirectories(fabricWritePath),
+            `cat ${singleQuoteShell(fabricWritePath)}`,
+          ].join("\n"),
         });
         assertEquals(readBack.output.exitCode, 0);
         assertStringIncludes(readBack.output.stdout, fabricPayload);
@@ -845,7 +870,9 @@ Deno.test({
         const joinedWrite = await engine.invokeBuiltinTool("bash", {
           command: [
             "set -eu",
+            ...warmFabricParentDirectories(fabricReadPath),
             `cat ${singleQuoteShell(fabricReadPath)} >/dev/null`,
+            ...warmFabricParentDirectories(fabricWritePath),
             `printf ${singleQuoteShell(joinedPayload)} > ${
               singleQuoteShell(fabricWritePath)
             }`,
@@ -867,7 +894,11 @@ Deno.test({
         );
 
         const readBack = await engine.invokeBuiltinTool("bash", {
-          command: `cat ${singleQuoteShell(fabricWritePath)}`,
+          command: [
+            "set -eu",
+            ...warmFabricParentDirectories(fabricWritePath),
+            `cat ${singleQuoteShell(fabricWritePath)}`,
+          ].join("\n"),
         });
         assertEquals(readBack.output.exitCode, 0);
         assertStringIncludes(readBack.output.stdout, joinedPayload);
