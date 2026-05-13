@@ -460,13 +460,17 @@ async function main() {
             perfMetricsArtifact.id,
           );
           if (metrics) {
+            let hasTestMetrics = false;
             for (const [name, sample] of metrics) {
               if (name.startsWith("test:") || name.startsWith("subtest:")) {
+                hasTestMetrics = true;
                 addSample(timelines, name, sample);
               }
             }
-            perfMetricRunsProcessed++;
-            return;
+            if (hasTestMetrics) {
+              perfMetricRunsProcessed++;
+              return;
+            }
           }
         }
 

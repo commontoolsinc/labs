@@ -192,12 +192,25 @@ async function main() {
     pr: PRInfo | null;
   }
 
+  async function fetchArtifactsForRunBestEffort(
+    run: WorkflowRun,
+  ): Promise<Artifact[]> {
+    try {
+      return await fetchArtifactsForRun(run.id);
+    } catch (error) {
+      console.warn(
+        `  Warning: could not fetch artifacts for run ${run.id}: ${error}`,
+      );
+      return [];
+    }
+  }
+
   const baselineContexts = await mapConcurrent(
     baselineRuns,
     API_CONCURRENCY,
     async (run): Promise<BaselineRunContext> => {
       const [artifacts, pr] = await Promise.all([
-        fetchArtifactsForRun(run.id),
+        fetchArtifactsForRunBestEffort(run),
         fetchPRForCommit(run.head_sha),
       ]);
       return { run, artifacts, pr };
@@ -206,7 +219,7 @@ async function main() {
 
   console.log("Fetching recent perf metric backfills...");
   const backfillSourceData = await githubGet<{ workflow_runs: WorkflowRun[] }>(
-    `/repos/${REPO}/actions/workflows/${WORKFLOW_FILE}/runs?status=completed&per_page=${BACKFILL_SOURCE_RUNS}`,
+    `/repos/${REPO}/actions/workflows/${WORKFLOW_FILE}/runs?branch=main&event=push&status=success&per_page=${BACKFILL_SOURCE_RUNS}`,
   );
   const baselineRunIds = new Set(baselineRuns.map((run) => run.id));
   const backfillSourceRuns = backfillSourceData.workflow_runs.filter((run) =>
@@ -217,31 +230,40 @@ async function main() {
     API_CONCURRENCY,
     async (run): Promise<BaselineRunContext> => ({
       run,
-      artifacts: await fetchArtifactsForRun(run.id),
+      artifacts: await fetchArtifactsForRunBestEffort(run),
       pr: null,
     }),
   );
 
   const backfilledMetricsByRunId = new Map<number, Map<string, TimingSample>>();
-  await mapConcurrent(
-    [...baselineContexts, ...extraBackfillContexts],
+  const backfillSourceContexts = [
+    ...baselineContexts,
+    ...extraBackfillContexts,
+  ].sort((a, b) =>
+    b.run.created_at.localeCompare(a.run.created_at) || b.run.id - a.run.id
+  );
+  const parsedBackfillSources = await mapConcurrent(
+    backfillSourceContexts,
     API_CONCURRENCY,
     async ({ artifacts }) => {
       const artifact = artifacts.find(
         (a) => a.name === PERF_METRICS_BACKFILL_ARTIFACT_NAME && !a.expired,
       );
-      if (!artifact) return;
+      if (!artifact) return null;
 
-      const backfills = await downloadAndParsePerfMetricsBackfill(artifact.id);
-      if (!backfills) return;
-
-      for (const [backfilledRunId, metrics] of backfills) {
-        if (!backfilledMetricsByRunId.has(backfilledRunId)) {
-          backfilledMetricsByRunId.set(backfilledRunId, metrics);
-        }
-      }
+      return await downloadAndParsePerfMetricsBackfill(artifact.id);
     },
   );
+
+  for (const backfills of parsedBackfillSources) {
+    if (!backfills) continue;
+
+    for (const [backfilledRunId, metrics] of backfills) {
+      if (!backfilledMetricsByRunId.has(backfilledRunId)) {
+        backfilledMetricsByRunId.set(backfilledRunId, metrics);
+      }
+    }
+  }
   if (backfilledMetricsByRunId.size > 0) {
     console.log(
       `Loaded perf metric backfills for ${backfilledMetricsByRunId.size} run(s).`,
