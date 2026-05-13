@@ -163,13 +163,13 @@ export function inferTypeFromModules(moduleTypes: string[]): InferredType {
  * and logs a warning rather than crashing the entire template application.
  *
  * @param templateId - ID of the template to create modules for
- * @param createNotesPiece - Factory function to create Notes piece with correct linkPattern.
- *                           Required because Notes needs the Record pattern JSON for wiki-links,
- *                           which avoids global state.
+ * @param notesPiece - Optional pre-created Notes piece with the correct linkPattern.
+ *                     Notes needs the Record pattern JSON for wiki-links, which
+ *                     avoids global state.
  */
 export function createTemplateModules(
   templateId: string,
-  createNotesPiece?: () => unknown,
+  notesPiece?: unknown,
 ): SubPieceEntry[] {
   const template = TEMPLATE_REGISTRY[templateId];
   if (!template) return [];
@@ -182,13 +182,8 @@ export function createTemplateModules(
       // Notes needs linkPattern which requires Record's pattern JSON
       let piece: unknown;
       if (moduleType === "notes") {
-        if (!createNotesPiece) {
-          console.warn(
-            `Template "${templateId}" includes notes but no createNotesPiece factory provided`,
-          );
-          continue;
-        }
-        piece = createNotesPiece();
+        if (!notesPiece) continue;
+        piece = notesPiece;
       } else {
         piece = createSubPiece(moduleType);
       }

@@ -20,8 +20,8 @@
  * ```
  */
 
-import { __cf_data, type Opaque } from "commonfabric";
-import { createAuthManager } from "../../../auth/create-auth-manager.tsx";
+import { __cf_data, action, navigateTo, pattern, Writable } from "commonfabric";
+import { AuthManagerBase } from "../../../auth/create-auth-manager.tsx";
 import type { AuthManagerDescriptor } from "../../../auth/auth-manager-descriptor.ts";
 import AirtableAuth from "../airtable-auth.tsx";
 
@@ -82,15 +82,59 @@ const AirtableAuthManagerDescriptor: AuthManagerDescriptor = __cf_data({
   hasAvatarSupport: false,
 });
 
-export function AirtableAuthManager(
-  input: Opaque<
-    import("../../../auth/create-auth-manager.tsx").AuthManagerInput
-  >,
-) {
-  return createAuthManager(
-    AirtableAuthManagerDescriptor,
-    AirtableAuth,
-  )(input);
-}
+export const AirtableAuthManager = pattern<
+  import("../../../auth/create-auth-manager.tsx").AuthManagerInput,
+  import("../../../auth/create-auth-manager.tsx").AuthManagerOutput
+>(({ requiredScopes, accountType, debugMode }) => {
+  const createAuth = action(() => {
+    const required = Array.isArray(requiredScopes) ? requiredScopes : [];
+    const emptyAuth: Record<string, unknown> = {
+      tokenType: "",
+      scope: [],
+      expiresIn: 0,
+      expiresAt: 0,
+      refreshToken: "",
+      user: { email: "", name: "", picture: "" },
+      accessToken: "",
+    };
+
+    return navigateTo(
+      AirtableAuth(
+        {
+          selectedScopes: {
+            "data.records:read": Writable.of(
+              required.includes("data.records:read"),
+            ),
+            "data.records:write": Writable.of(
+              required.includes("data.records:write"),
+            ),
+            "data.recordComments:read": Writable.of(
+              required.includes("data.recordComments:read"),
+            ),
+            "data.recordComments:write": Writable.of(
+              required.includes("data.recordComments:write"),
+            ),
+            "schema.bases:read": Writable.of(
+              required.includes("schema.bases:read"),
+            ),
+            "schema.bases:write": Writable.of(
+              required.includes("schema.bases:write"),
+            ),
+            "webhook:manage": Writable.of(required.includes("webhook:manage")),
+          },
+          auth: emptyAuth,
+        } as Parameters<typeof AirtableAuth>[0],
+      ),
+    );
+  });
+
+  return AuthManagerBase({
+    requiredScopes,
+    accountType,
+    debugMode,
+    descriptor: AirtableAuthManagerDescriptor,
+    createAuth,
+  });
+});
 
 export default AirtableAuthManager;

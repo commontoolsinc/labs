@@ -25,8 +25,8 @@
  * For fallback, a "Refresh Session" button is shown in the expired UI.
  */
 
-import { __cf_data, type Opaque } from "commonfabric";
-import { createAuthManager } from "../../../auth/create-auth-manager.tsx";
+import { __cf_data, action, navigateTo, pattern, Writable } from "commonfabric";
+import { AuthManagerBase } from "../../../auth/create-auth-manager.tsx";
 import type { AuthManagerDescriptor } from "../../../auth/auth-manager-descriptor.ts";
 import GoogleAuth from "../google-auth.tsx";
 
@@ -103,14 +103,51 @@ const GoogleAuthManagerDescriptor: AuthManagerDescriptor = __cf_data({
   hasAvatarSupport: true,
 });
 
-export function GoogleAuthManager(
-  input: Opaque<GoogleAuthManagerInput>,
-): GoogleAuthManagerOutput {
-  return createAuthManager(
-    GoogleAuthManagerDescriptor,
-    GoogleAuth,
-  )(input);
-}
+export const GoogleAuthManager = pattern<
+  GoogleAuthManagerInput,
+  GoogleAuthManagerOutput
+>(({ requiredScopes, accountType, debugMode }) => {
+  const createAuth = action(() => {
+    const required = Array.isArray(requiredScopes) ? requiredScopes : [];
+    const emptyAuth: Record<string, unknown> = {
+      tokenType: "",
+      scope: [],
+      expiresIn: 0,
+      expiresAt: 0,
+      refreshToken: "",
+      user: { email: "", name: "", picture: "" },
+      token: "",
+    };
+
+    return navigateTo(
+      GoogleAuth(
+        {
+          selectedScopes: {
+            gmail: Writable.of(required.includes("gmail")),
+            gmailSend: Writable.of(required.includes("gmailSend")),
+            gmailModify: Writable.of(required.includes("gmailModify")),
+            calendar: Writable.of(required.includes("calendar")),
+            calendarWrite: Writable.of(required.includes("calendarWrite")),
+            drive: Writable.of(required.includes("drive")),
+            docs: Writable.of(required.includes("docs")),
+            contacts: Writable.of(required.includes("contacts")),
+          },
+          auth: emptyAuth,
+        } as Parameters<typeof GoogleAuth>[0],
+      ),
+    );
+  });
+
+  return AuthManagerBase({
+    requiredScopes,
+    accountType,
+    debugMode,
+    descriptor: GoogleAuthManagerDescriptor,
+    createAuth,
+  });
+});
 
 // Backward-compatible export for existing code that uses createGoogleAuth()
 export const createGoogleAuth = GoogleAuthManager;
+
+export default GoogleAuthManager;
