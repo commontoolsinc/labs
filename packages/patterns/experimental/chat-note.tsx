@@ -347,11 +347,12 @@ const ChatNote = pattern<Input, Output>(
     model,
     [SELF]: self,
   }) => {
-    const { allPieces } =
-      wish<{ allPieces: MinimalPiece[] | Default<[]> }>({ query: "/" }).result;
-    const { result: mentionable } = wish<MentionablePiece[] | Default<[]>>({
+    const { allPieces } = wish<{ allPieces: MinimalPiece[] | Default<[]> }>({
+      query: "/",
+    }).result!;
+    const mentionable = wish<MentionablePiece[] | Default<[]>>({
       query: "#mentionable",
-    });
+    }).result!;
     const mentioned = Writable.of<MentionablePiece[]>([]);
     const backlinks = Writable.of<MentionablePiece[]>([]);
 
