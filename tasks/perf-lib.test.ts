@@ -6,6 +6,10 @@ import {
   fetchPRBody,
   githubGet,
   type Job,
+  parsePerfMetricsBackfillFile,
+  parsePerfMetricsFile,
+  serializePerfMetrics,
+  serializePerfMetricsBackfill,
   type Step,
   timingArtifactLabel,
   type WorkflowRun,
@@ -362,6 +366,71 @@ Deno.test("timingArtifactLabel normalizes matrix shard artifacts", () => {
   assertEquals(
     timingArtifactLabel("test-timing-package-integration"),
     "package-integration",
+  );
+});
+
+Deno.test("perf metrics files round-trip stable metric samples", () => {
+  const metrics = new Map([
+    [
+      "step: Type check",
+      {
+        runId: 123,
+        runUrl: "https://example.test/run/123",
+        sha: "abc123",
+        createdAt: "2026-01-01T00:00:00Z",
+        durationSeconds: 42.5,
+      },
+    ],
+    [
+      "job: Check",
+      {
+        runId: 123,
+        runUrl: "https://example.test/run/123",
+        sha: "abc123",
+        createdAt: "2026-01-01T00:00:00Z",
+        durationSeconds: 60,
+      },
+    ],
+  ]);
+
+  const serialized = serializePerfMetrics(metrics);
+  assertEquals(
+    serialized.metrics.map((metric) => metric.name),
+    ["job: Check", "step: Type check"],
+  );
+
+  assertEquals(
+    parsePerfMetricsFile(JSON.stringify(serialized)),
+    metrics,
+  );
+});
+
+Deno.test("perf metrics backfill files round-trip run-keyed samples", () => {
+  const runMetrics = new Map([
+    [
+      123,
+      new Map([
+        [
+          "job: Check",
+          {
+            runId: 123,
+            runUrl: "https://example.test/run/123",
+            sha: "abc123",
+            createdAt: "2026-01-01T00:00:00Z",
+            durationSeconds: 60,
+          },
+        ],
+      ]),
+    ],
+  ]);
+
+  const serialized = serializePerfMetricsBackfill(runMetrics);
+  assertEquals(serialized.runs.map((run) => run.runId), [123]);
+  assertEquals(serialized.runs[0].metrics[0].name, "job: Check");
+
+  assertEquals(
+    parsePerfMetricsBackfillFile(JSON.stringify(serialized)),
+    runMetrics,
   );
 });
 
