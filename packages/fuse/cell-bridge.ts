@@ -297,6 +297,7 @@ export class CellBridge {
   private hydratedPieceProps = new Map<bigint, Set<"input" | "result">>();
   /** In-flight hydration promises keyed by `${pieceIno}-${propName}`. */
   private pendingHydrations = new Map<string, Promise<boolean>>();
+  private pendingFinalizations = new Map<string, Promise<void>>();
   private retainedSubtrees = new Map<bigint, number>();
   /** Monotonic invalidation epoch per hydration key. */
   private hydrationEpochs = new Map<string, number>();
@@ -1551,18 +1552,30 @@ export class CellBridge {
       this.invalidateWritePath(writePath);
       return;
     }
-    const cell = await writePath.piece[writePath.cell].getCell();
-    const newValue = await writePath.piece[writePath.cell].get();
-    await this.rebuildPieceProp({
-      cell,
-      newValue,
-      pieceId: writePath.piece.id,
-      pieceIno,
-      pieceName: writePath.pieceName,
-      propName: writePath.cell,
-      resolveLink: this.makeLinkResolver(writePath.spaceName),
-      spaceName: writePath.spaceName,
+    const key = this.propRebuildKey(pieceIno, writePath.cell);
+    const previous = this.pendingFinalizations.get(key) ?? Promise.resolve();
+    const current = previous.catch(() => {}).then(async () => {
+      const cell = await writePath.piece[writePath.cell].getCell();
+      const newValue = await writePath.piece[writePath.cell].get();
+      await this.rebuildPieceProp({
+        cell,
+        newValue,
+        pieceId: writePath.piece.id,
+        pieceIno,
+        pieceName: writePath.pieceName,
+        propName: writePath.cell,
+        resolveLink: this.makeLinkResolver(writePath.spaceName),
+        spaceName: writePath.spaceName,
+      });
     });
+    this.pendingFinalizations.set(key, current);
+    try {
+      await current;
+    } finally {
+      if (this.pendingFinalizations.get(key) === current) {
+        this.pendingFinalizations.delete(key);
+      }
+    }
   }
 
   async finalizeSourceWritePath(writePath: SourceWritePath): Promise<void> {
