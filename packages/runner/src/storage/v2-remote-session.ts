@@ -20,6 +20,15 @@ export const toWebSocketAddress = (address: URL): URL => {
   return next;
 };
 
+export const toSpaceWebSocketAddress = (
+  address: URL,
+  space: MemorySpace,
+): URL => {
+  const next = toWebSocketAddress(address);
+  next.searchParams.set("space", space);
+  return next;
+};
+
 class WebSocketTransport implements MemoryClient.Transport {
   #receiver: (payload: string) => void = () => {};
   #closeReceiver: (error?: Error) => void = () => {};
@@ -128,7 +137,9 @@ export class RemoteSessionFactory implements SessionFactory {
 
   async create(space: MemorySpace, signer = this.defaultSigner) {
     const client = await MemoryClient.connect({
-      transport: new WebSocketTransport(this.address),
+      transport: new WebSocketTransport(
+        toSpaceWebSocketAddress(this.address, space),
+      ),
     });
     const session = await client.mount(
       space,
