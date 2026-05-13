@@ -148,6 +148,11 @@ export function bigintToMinimalTwosComplement(value: bigint): Uint8Array {
     // <https://github.com/tc39/proposal-bigint-math>.
 
     const hex = hexStringFromPositiveValue(value);
+
+    // Note: When it is widely-enough available, we will be able to say `return
+    // Uint8Array.fromHex(hex)` here and probably see a major performance
+    // improvement.
+
     const bytes = new Uint8Array(hex.length >> 1);
 
     for (let i = 0; i < bytes.length; i++) {
