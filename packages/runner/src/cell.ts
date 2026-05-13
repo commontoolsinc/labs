@@ -2208,9 +2208,8 @@ export function recursivelyAddIDIfNeeded<T>(
   // `seen` and populating `frame.generatedIdCounter` for any
   // objects-in-arrays nested inside — then return the original instance
   // unchanged. Subclasses that haven't implemented `[DECONSTRUCT]` yet
-  // (`FabricMap`, `FabricSet`) will throw from this path; that's
-  // intentional — those classes aren't yet in use, and a thrown error is
-  // the right signal the moment they start seeing traffic.
+  // will throw from this path; that's the right signal the moment they
+  // start seeing traffic.
   if (value instanceof FabricInstance) {
     seen.set(value, value);
     const state = value[DECONSTRUCT]();
