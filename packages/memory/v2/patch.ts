@@ -1,4 +1,5 @@
 import type { FabricValue } from "../interface.ts";
+import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import { isInstance, isObject } from "@commonfabric/utils/types";
 import type { PatchOp } from "../v2.ts";
 import { encodePointer, parsePointer } from "./path.ts";
@@ -7,6 +8,27 @@ type PatchObject = Record<string, FabricValue>;
 type PatchContainer = PatchObject | FabricValue[];
 const MAX_ARRAY_INDEX = 2 ** 32 - 2;
 
+/**
+ * Applies a sequence of RFC 6902 JSON Patch operations (`replace`, `add`,
+ * `remove`, `move`, `splice`) to a document tree, returning a new document
+ * tree with the patches applied in order. JSON Pointer paths in the ops are
+ * parsed via `parsePointer()` from `./path.ts`.
+ *
+ * Used during document materialization: `engine.ts` walks the stored patch
+ * sequence for a branch and rebuilds the current document by replaying each
+ * patch on top of the previous state (`applyPatchDocument` → `applyPatch`).
+ * The function is therefore on the hot path for any read that reconstructs
+ * a document from its stored patch list.
+ *
+ * Mutation discipline: each `applyOp` call uses `shallowCloneContainer` to
+ * produce a new top-level copy of the container being modified, then
+ * recurses into the path; containers off the modified path remain
+ * frozen-by-reference. The returned tree is then fully deep-frozen at the
+ * function boundary, completing the shallow-clone / mutate / deep-freeze
+ * pattern: shallow clones at the immediate containers on the modified
+ * path, deep-freeze of the assembled result before it leaves the function.
+ * Callers can rely on the return value being deeply frozen.
+ */
 export const applyPatch = (
   state: FabricValue,
   ops: PatchOp[],
@@ -15,7 +37,7 @@ export const applyPatch = (
   for (const op of ops) {
     current = applyOp(current, op);
   }
-  return current;
+  return deepFreeze(current);
 };
 
 const applyOp = (state: FabricValue, op: PatchOp): FabricValue => {
