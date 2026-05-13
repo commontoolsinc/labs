@@ -308,7 +308,16 @@ async function main() {
 
   // 6. Report results
 
-  // 6a. Full metric table — always emitted, grouped by metric kind.
+  // 6a. Prominent failure callout up top, so it's unmissable.
+  if (failures.length > 0) {
+    console.log(
+      "\n!!!" +
+        `\n!!! PERFORMANCE REGRESSION DETECTED in ${failures.length} metric(s) !!!` +
+        "\n!!!\n",
+    );
+  }
+
+  // 6b. Full metric table — always emitted, grouped by metric kind.
   console.log(
     "\n::group::All collected metrics:" +
       `\nThresholds: median + ${STDDEV_FACTOR}σ or +${
@@ -419,7 +428,7 @@ async function main() {
 
   console.log("::endgroup::");
 
-  // 6b. Informational CI wall-time policy signals. These are intentionally
+  // 6c. Informational CI wall-time policy signals. These are intentionally
   // non-blocking; they tell us when to consider CI split/rebalance work again.
   if (wallTimeSignals.length > 0) {
     console.log("\n## CI Wall-Time Revisit Signals");
@@ -433,16 +442,12 @@ async function main() {
     }
   }
 
-  // 6c. Prominent failure callout up top, so it's unmissable.
+  // 6d. Failure metric details.
   if (failures.length > 0) {
     failures.sort((a, b) => (b.pctIncrease ?? 0) - (a.pctIncrease ?? 0));
 
     console.log(
-      `\n!!! PERFORMANCE REGRESSION DETECTED in ${failures.length} metric(s) !!!\n`,
-    );
-    console.log(
-      "::group::Baseline samples:" +
-        "\n| Metric | Current | Baseline (median) | Threshold | Change |",
+      "\n| Metric | Current | Baseline (median) | Threshold | Change |",
     );
     console.log(
       "|--------|---------|-------------------|-----------|--------|",
@@ -456,7 +461,7 @@ async function main() {
       );
     }
 
-    console.log("\nBaseline sample breakdown:\n");
+    console.log("\n::group:Baseline sample breakdown:\n");
     for (const f of failures) {
       const timeline = timelines.get(f.metric);
       if (!timeline) continue;
@@ -477,11 +482,11 @@ async function main() {
         );
       }
     }
+
+    console.log("::endgroup::");
   }
 
-  console.log("::endgroup::");
-
-  // 6d. Pass/fail outcome + override copy-paste block pinned at the bottom.
+  // 6e. Pass/fail outcome + override copy-paste block pinned at the bottom.
   if (informationalOnly) {
     console.log("\nInformational Only:");
   }
