@@ -1,17 +1,13 @@
-import { action, computed, pattern, Writable } from "commonfabric";
-import ScopedGroupChat from "./main.tsx";
+import { action, computed, pattern } from "commonfabric";
+import ScopedGroupChat from "./main-plain-inputs.tsx";
 
 export default pattern(() => {
-  const selectedRoom = Writable.of({});
-  const conversation = Writable.of({
-    rooms: [],
-  });
   const chat = ScopedGroupChat({
-    name: Writable.of(""),
-    selectedRoom,
-    conversation,
-    draft: Writable.of(""),
-    newRoomName: Writable.of(""),
+    name: "",
+    selectedRoom: {},
+    conversation: { rooms: [] },
+    draft: "Hello Library",
+    newRoomName: "",
   });
 
   const action_add_new_room = action(() => {
@@ -23,51 +19,46 @@ export default pattern(() => {
   });
 
   const action_send_message = action(() => {
-    chat.sendMessage.send({
-      message: "Hello Library",
-    });
+    chat.sendMessage.send({});
   });
 
   const action_select_first_room = action(() => {
     chat.selectRoom.send({
-      room: conversation.key("rooms", 0),
+      room: chat.conversation.rooms[0],
     });
   });
 
-  const assert_initial_scoped_fields = computed(() =>
-    chat.roomCount === 0 &&
-    chat.lastRoomName === ""
-  );
+  const assert_initial_scoped_fields = computed(() => chat.roomCount === 0);
 
   const assert_added_room_is_selected = computed(() =>
     chat.roomCount === 1 &&
-    chat.lastRoomName === "Garden" &&
-    chat.lastRoomMessageCount === 0
+    chat.selectedRoom.room?.name === "Garden" &&
+    chat.messageCount === 0
   );
 
   const assert_second_room_is_selected = computed(() =>
     chat.roomCount === 2 &&
-    chat.lastRoomName === "Library" &&
-    chat.lastRoomMessageCount === 0
+    chat.selectedRoom.room?.name === "Library" &&
+    chat.messageCount === 0
   );
 
   const assert_message_was_sent = computed(() =>
-    chat.conversationSnapshot.rooms[0]?.messages?.length === 0 &&
-    chat.conversationSnapshot.rooms[1]?.messages?.length === 1 &&
-    chat.conversationSnapshot.rooms[1]?.messages?.[0]?.body ===
+    chat.conversation.rooms[0]?.messages?.length === 0 &&
+    chat.conversation.rooms[1]?.messages?.length === 1 &&
+    chat.conversation.rooms[1]?.messages?.[0]?.body ===
       "Hello Library" &&
     chat.messageCount === 1 &&
-    chat.lastCurrentRoomBody === "Hello Library" &&
-    chat.roomSummaryText === "Garden: 0\nLibrary: 1"
+    chat.selectedRoom.room?.messages?.[0]?.body === "Hello Library"
   );
 
   const assert_room_counts_do_not_follow_selection = computed(() =>
     chat.messageCount === 0 &&
-    chat.roomSummaryText === "Garden: 0\nLibrary: 1"
+    chat.conversation.rooms[0]?.messages?.length === 0 &&
+    chat.conversation.rooms[1]?.messages?.length === 1
   );
 
   const assert_selected_room_reference_changed = computed(() =>
-    chat.currentRoom.room.name === "Garden"
+    chat.selectedRoom.room?.name === "Garden"
   );
 
   return {

@@ -8,7 +8,6 @@ import {
   type PerSpace,
   type PerUser,
   safeDateNow,
-  type SCOPE_BRAND,
   Stream,
   UI,
   type VNode,
