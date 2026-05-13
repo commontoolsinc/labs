@@ -64,6 +64,16 @@ const BASELINE_RUNS = 20;
 /** Recent completed workflow runs to scan for fallback backfill artifacts. */
 const BACKFILL_SOURCE_RUNS = 20;
 
+function pullRequestBodyFromEvent(
+  event: object | undefined,
+): string | undefined {
+  const pullRequest =
+    (event as { pull_request?: { body?: unknown } } | undefined)
+      ?.pull_request;
+  if (!pullRequest || !("body" in pullRequest)) return undefined;
+  return typeof pullRequest.body === "string" ? pullRequest.body : "";
+}
+
 /**
  * Metrics to exclude from regression checks because their aggregate values
  * naturally grow as new tests are added.  Per-test timings from JUnit
@@ -93,16 +103,24 @@ async function main() {
     Deno.exit(1);
   }
 
-  console.log(
-    "::group::Triggered by event:\n%o\n::endgroup::",
-    await readAndParseEvent(),
-  );
+  const event = await readAndParseEvent();
+  console.log("::group::Triggered by event:\n%o\n::endgroup::", event);
 
   // 1. Check PR description for overrides, if there's a PR to check.
   let prOverrides;
   if (prNumber) {
-    console.log(`Fetching PR #${prNumber} description...`);
-    const prBody = await fetchPRBody(parseInt(prNumber));
+    let prBody = pullRequestBodyFromEvent(event);
+    if (prBody === undefined) {
+      console.log(`Fetching PR #${prNumber} description...`);
+      try {
+        prBody = await fetchPRBody(parseInt(prNumber));
+      } catch (error) {
+        console.warn(`  Warning: could not fetch PR body: ${error}`);
+        prBody = "";
+      }
+    } else {
+      console.log("Using PR description from pull_request event payload.");
+    }
     prOverrides = parseBaselineOverrides(prBody);
   } else {
     prOverrides = { metrics: new Map() };
