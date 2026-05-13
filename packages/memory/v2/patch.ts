@@ -1,4 +1,5 @@
 import type { FabricValue } from "../interface.ts";
+import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import { isInstance, isObject } from "@commonfabric/utils/types";
 import type { PatchOp } from "../v2.ts";
 import { encodePointer, parsePointer } from "./path.ts";
@@ -15,7 +16,7 @@ export const applyPatch = (
   for (const op of ops) {
     current = applyOp(current, op);
   }
-  return current;
+  return deepFreeze(current);
 };
 
 const applyOp = (state: FabricValue, op: PatchOp): FabricValue => {
