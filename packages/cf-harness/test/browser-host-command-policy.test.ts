@@ -11,9 +11,23 @@ const assertDenied = (command: string) => {
 
 Deno.test("validateBrowserHostCommand allows agent-browser invocations", () => {
   assertAllowed("agent-browser --help");
-  assertAllowed('agent-browser open "https://example.com/?a=1&b=2"');
-  assertAllowed('agent-browser find role button click "Submit"');
-  assertAllowed(`agent-browser click 'button[aria-label="Close"]'`);
+  assertAllowed("agent-browser help");
+  assertAllowed(
+    'agent-browser --cdp http://host.docker.internal:9362 open "https://example.com/?a=1&b=2"',
+  );
+  assertAllowed(
+    'agent-browser --cdp http://127.0.0.1:9362 find role button click "Submit"',
+  );
+  assertAllowed(
+    `agent-browser --cdp=http://localhost:9362 click 'button[aria-label="Close"]'`,
+  );
+  assertAllowed(
+    "agent-browser --cdp http://host.docker.internal:9362 wait 5000",
+  );
+  assertAllowed(
+    "agent-browser --cdp=http://host.docker.internal:9362 snapshot -i",
+  );
+  assertAllowed("agent-browser --cdp http://127.0.0.1:9362 get title");
 });
 
 Deno.test("validateBrowserHostCommand allows agent-browser discovery", () => {
@@ -62,8 +76,12 @@ Deno.test("validateBrowserHostCommand rejects unquoted shell expansion syntax", 
   assertDenied("ls [.][.]");
   assertDenied("find {.,..} -maxdepth 1 -type d -print");
   assertDenied("find . -maxdepth 2 -type f -name *.ts -print");
-  assertDenied("agent-browser open https://example.com/?a=1");
-  assertDenied("agent-browser click button[aria-label=Close]");
+  assertDenied(
+    "agent-browser --cdp http://host.docker.internal:9362 open https://example.com/?a=1",
+  );
+  assertDenied(
+    "agent-browser --cdp http://host.docker.internal:9362 click button[aria-label=Close]",
+  );
 });
 
 Deno.test("validateBrowserHostCommand keeps ls and find within the workspace", () => {
@@ -95,4 +113,25 @@ Deno.test("validateBrowserHostCommand rejects high-risk agent-browser host surfa
   assertDenied("agent-browser -p ios snapshot");
   assertDenied("agent-browser -p=ios snapshot");
   assertDenied("agent-browser -pbrowserbase snapshot");
+});
+
+Deno.test("validateBrowserHostCommand requires local CDP for page commands", () => {
+  assertDenied('agent-browser open "https://example.com"');
+  assertDenied("agent-browser snapshot -i");
+  assertDenied('agent-browser find role button click "Submit"');
+  assertDenied("agent-browser click '@e1'");
+  assertDenied("agent-browser get title");
+  assertDenied("agent-browser --cdp 9222 snapshot");
+  assertDenied("agent-browser --cdp snapshot");
+  assertDenied(
+    "agent-browser --cdp https://host.docker.internal:9362 snapshot",
+  );
+  assertDenied("agent-browser --cdp http://example.com:9362 snapshot");
+  assertDenied("agent-browser --cdp http://host.docker.internal snapshot");
+  assertDenied(
+    "agent-browser --cdp http://host.docker.internal:9362/json snapshot",
+  );
+  assertDenied(
+    "agent-browser --cdp http://host.docker.internal:9362 --cdp http://localhost:9362 snapshot",
+  );
 });
