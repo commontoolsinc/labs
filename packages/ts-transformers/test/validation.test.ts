@@ -3427,3 +3427,49 @@ Deno.test("Inline reactive-root chain rewrite", async (t) => {
     },
   );
 });
+
+Deno.test("Module-extracted reactive callback bodies (CT-1587)", async (t) => {
+  // ClosureTransformer hoists reactive callback bodies (computed/derive/etc.)
+  // into top-level `const __cfModuleCallback_N = ...` declarations. Those
+  // bodies must still receive the reactive-root lowering pass so chains like
+  // `cell.result` get lowered to `cell.key("result")` — otherwise the access
+  // stays as plain JS and unwraps the cell at runtime.
+  await t.step(
+    "lowers property access on opaque roots inside computed() bodies",
+    async () => {
+      const source = `
+        import { computed, Default, pattern, wish } from "commonfabric";
+
+        export default pattern<Record<string, never>>(() => {
+          const result = computed(() => {
+            const fooWish = wish<Default<string[], []>>({ query: "#items" });
+            const foo = fooWish.result!;
+            return foo[0];
+          });
+          return { result };
+        });
+      `;
+      const { diagnostics, output } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        `Should produce clean output (got: ${
+          errors.map((e) => e.message).join("; ")
+        })`,
+      );
+      assertStringIncludes(
+        output,
+        'fooWish.key("result")',
+        'fooWish.result! inside computed() should lower to fooWish.key("result")',
+      );
+      assertStringIncludes(
+        output,
+        'foo.key("0")',
+        'foo[0] inside computed() should lower to foo.key("0")',
+      );
+    },
+  );
+});
