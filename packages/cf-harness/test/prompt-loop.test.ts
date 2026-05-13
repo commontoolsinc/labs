@@ -1768,7 +1768,8 @@ Deno.test("CfHarnessPromptLoop keeps browser subagent observations behind struct
                   function: {
                     name: "bash-no-sandbox",
                     arguments: JSON.stringify({
-                      command: "agent-browser get text body",
+                      command:
+                        "agent-browser --cdp http://host.docker.internal:9362 get text body",
                     }),
                   },
                 }],
@@ -1834,7 +1835,13 @@ Deno.test("CfHarnessPromptLoop keeps browser subagent observations behind struct
     );
     assertEquals(hostRunner.requests, [{
       command: "agent-browser",
-      args: ["get", "text", "body"],
+      args: [
+        "--cdp",
+        "http://host.docker.internal:9362",
+        "get",
+        "text",
+        "body",
+      ],
       cwd: workspaceHostPath,
       timeoutMs: 30000,
     }]);
