@@ -120,6 +120,20 @@ const arrayMethods: { [key: string]: ArrayMethodType } = {
   toLocaleString: ArrayMethodType.ReadOnly,
 };
 
+/**
+ * Builds a JS proxy view over a stored cell. Read traps resolve links
+ * and wrap nested values; write-side array mutators (`push`, `splice`,
+ * `unshift`, etc.) route through the same write-boundary normalization
+ * as `Cell.set()` / `Cell.push()`.
+ *
+ * **Frozenness contract (modern data model only):** Values handed to
+ * the write-side array mutators flow through `recursivelyAddIDIfNeeded`
+ * and so inherit its modern-mode contract: plain unfrozen Object/Array
+ * inputs get shallowly frozen at each visited level; already-deep-
+ * frozen valid `FabricValue` inputs are accepted identity-preservingly.
+ * Under `modernDataModel: false` (legacy), no freezing happens at the
+ * write boundary.
+ */
 export function createQueryResultProxy<T>(
   runtime: Runtime,
   tx: IExtendedStorageTransaction | undefined,

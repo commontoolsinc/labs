@@ -2173,6 +2173,18 @@ function validateStaticData(value: unknown): void {
  * This ensures that mutable arrays only consist of links to documents, at least
  * when written to only via .set, .update and .push above.
  *
+ * **Frozenness contract (modern data model only):** This function sits at
+ * the write boundary into runner/memory storage. Under
+ * `modernDataModel: true`, the shallow fabric conversion that happens
+ * here additionally produces frozen shallow clones for any plain
+ * unfrozen Object/Array level it visits — so the returned tree's
+ * already-processed sub-trees are deep-frozen `FabricValue`s. If the
+ * input is already a deep-frozen valid `FabricValue`, the shallow
+ * conversion returns it as-is and reference identity is preserved
+ * end-to-end. Under `modernDataModel: false` (legacy), no freezing
+ * happens here at all and the legacy "preserve identity when there's
+ * nothing to do" optimization applies regardless of input frozenness.
+ *
  * TODO(seefeld): When an array has default entries and is rewritten as [...old,
  * new], this will still break, because the previous entries will point back to
  * the array itself instead of being new entries.

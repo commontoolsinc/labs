@@ -236,13 +236,36 @@ export interface IReadable<T> {
 
 /**
  * Writable cells can update their value.
+ *
+ * **Frozenness contract (modern data model only):** Values passed into
+ * `set()`, `update()`, and `push()` flow through a write-boundary
+ * normalization step that — under `modernDataModel: true` — shallowly
+ * freezes any plain unfrozen Object/Array levels it visits. Inputs that
+ * are already deep-frozen valid `FabricValue` trees are accepted
+ * identity-preservingly with no further cloning. Under
+ * `modernDataModel: false` (legacy), no freezing happens at the write
+ * boundary; storage handles its own frozenness invariants on commit.
  */
 export interface IWritable<T, C extends AnyBrandedCell<any>> {
+  /**
+   * Set the cell's value. See the {@link IWritable} interface docs for
+   * the modern-mode frozenness contract on the input.
+   */
   set(value: T | AnyCellWrapping<T>): C;
+  /**
+   * Merge a partial object value into the cell. Implemented as a
+   * per-key `set()`, so the same frozenness contract applies. See
+   * {@link IWritable}.
+   */
   update<V extends (Partial<T> | AnyCellWrapping<Partial<T>>)>(
     this: IsThisObject,
     values: V extends object ? AnyCellWrapping<V> : never,
   ): C;
+  /**
+   * Append one or more values to an array cell. See the
+   * {@link IWritable} interface docs for the modern-mode frozenness
+   * contract on the inputs.
+   */
   push(
     this: IsThisArray,
     ...value: T extends (infer U)[] ? (U | AnyCellWrapping<U>)[] : never
