@@ -15,6 +15,7 @@ import type {
 } from "./builder/types.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import {
+  getDataModelConfig,
   resetDataModelConfig,
   setDataModelConfig,
 } from "@commonfabric/data-model/fabric-value";
@@ -307,8 +308,14 @@ export class Runtime {
       );
     }
 
-    // Propagate experimental flags to their ambient control points.
+    // Propagate experimental flags to their ambient control points, then
+    // read back the effective state so `experimental.modernDataModel` reflects
+    // what is actually in effect (matters when the caller didn't pass an
+    // explicit value — without this, consumers like `createQueryResultProxy`
+    // see `undefined` and treat the runtime as legacy even when the global
+    // default is modern).
     setDataModelConfig(this.experimental.modernDataModel);
+    this.experimental.modernDataModel = getDataModelConfig();
 
     this.id = options.storageManager.id;
     this.apiUrl = new URL(options.apiUrl);

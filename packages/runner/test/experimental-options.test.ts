@@ -157,12 +157,12 @@ describe("ExperimentalOptions", () => {
       expect((result as unknown[])[1]).toBe(undefined);
     });
 
-    it("returns to flag-OFF behavior after reset", () => {
-      setDataModelConfig(true);
+    it("reset restores the default behavior", () => {
+      const initial = getDataModelConfig();
+      // Toggle to the opposite of the default, then reset.
+      setDataModelConfig(!initial);
       resetDataModelConfig();
-      const err = new Error("test");
-      const result = shallowFabricFromNativeValue(err);
-      expect(result).toHaveProperty("@Error");
+      expect(getDataModelConfig()).toBe(initial);
     });
   });
 
@@ -232,11 +232,11 @@ describe("ExperimentalOptions", () => {
       expect(2 in result).toBe(true);
     });
 
-    it("returns to flag-OFF behavior after reset", () => {
-      setDataModelConfig(true);
+    it("reset restores the default behavior", () => {
+      const initial = getDataModelConfig();
+      setDataModelConfig(!initial);
       resetDataModelConfig();
-      const result = fabricFromNativeValue({ a: 1, b: undefined });
-      expect(result).toEqual({ a: 1 });
+      expect(getDataModelConfig()).toBe(initial);
     });
 
     it("caches correctly when toJSON() returns undefined (no false cache miss)", () => {
@@ -297,11 +297,11 @@ describe("ExperimentalOptions", () => {
       expect(isFabricValue(sparse)).toBe(true);
     });
 
-    it("returns to flag-OFF behavior after reset", () => {
-      setDataModelConfig(true);
+    it("reset restores the default behavior", () => {
+      const initial = getDataModelConfig();
+      setDataModelConfig(!initial);
       resetDataModelConfig();
-      expect(isFabricValue(new Error("test"))).toBe(false);
-      expect(isFabricValue([undefined])).toBe(false);
+      expect(getDataModelConfig()).toBe(initial);
     });
   });
 
@@ -350,22 +350,23 @@ describe("ExperimentalOptions", () => {
       await sm.close();
     });
 
-    it("disposing Runtime resets global config", async () => {
+    it("disposing Runtime resets global config to the default", async () => {
+      const initial = getDataModelConfig();
       const sm = StorageManager.emulate({ as: signer });
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager: sm,
         experimental: {
-          modernDataModel: true,
+          modernDataModel: !initial,
         },
       });
 
-      expect(getDataModelConfig()).toBe(true);
+      expect(getDataModelConfig()).toBe(!initial);
 
       await runtime.dispose();
       await sm.close();
 
-      expect(getDataModelConfig()).toBe(false);
+      expect(getDataModelConfig()).toBe(initial);
     });
   });
 });
