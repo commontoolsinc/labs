@@ -23,7 +23,7 @@ export default pattern(() => {
     const __cf_destructure_1 = fetchData({
         url: "/api/data",
         mode: "text",
-    }), pending = __cf_destructure_1.key("pending"), result = __cf_destructure_1.key("result");
+    }), pending = __cf_destructure_1.key("pending").for("pending", true), result = __cf_destructure_1.key("result").for("result", true);
     // Pattern 1: undefined as ifTrue (waiting state returns nothing)
     const output1 = ifElse({
         type: "boolean"

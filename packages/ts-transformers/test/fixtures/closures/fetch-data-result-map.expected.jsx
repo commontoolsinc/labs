@@ -18,7 +18,7 @@ export default pattern(() => {
     const __cf_destructure_1 = fetchData<Item[]>({
         url: "https://example.com",
         result: [],
-    }), items = __cf_destructure_1.key("result");
+    }), items = __cf_destructure_1.key("result").for("items", true);
     return {
         [UI]: <div>{items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
             const item = __cf_pattern_input.key("element");

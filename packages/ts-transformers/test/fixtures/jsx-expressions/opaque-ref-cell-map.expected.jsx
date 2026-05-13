@@ -158,7 +158,7 @@ export default pattern(() => {
         storedCellRef: cell(),
     }) as {
         cellRef: any[];
-    }, cellRef = __cf_destructure_1.key("cellRef");
+    }, cellRef = __cf_destructure_1.key("cellRef").for("cellRef", true);
     return {
         [NAME]: "Charms Launcher",
         [UI]: (<div>

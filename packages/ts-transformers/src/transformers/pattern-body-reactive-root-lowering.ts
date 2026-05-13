@@ -105,6 +105,30 @@ function reportReceiverMethodError(
   });
 }
 
+// Wraps a destructured leaf's initializer with `.for("<causeName>", true)`
+// so the shared causeContainer (root + all `.key()` siblings) gets identity
+// from the user-facing binding name rather than falling back to a
+// counter-based `__#N` internal path. `allowIfSet: true` makes this a no-op
+// once any sibling has set the cause — so in a multi-binding destructure
+// (`const { a, b } = wish(...)`), the first leaf in source order wins.
+function attachForCauseToOpaqueInitializer(
+  initializer: ts.Expression,
+  causeName: string,
+  context: TransformationContext,
+): ts.Expression {
+  const { factory } = context;
+  const call = factory.createCallExpression(
+    factory.createPropertyAccessExpression(initializer, "for"),
+    undefined,
+    [factory.createStringLiteral(causeName), factory.createTrue()],
+  );
+  return context.cfHelpers.preserveNodeSourceMap(
+    call,
+    initializer,
+    initializer,
+  );
+}
+
 export function rewritePatternCallbackBody(
   body: ts.ConciseBody,
   opaqueRoots: Set<string>,
@@ -536,10 +560,19 @@ function rewriteTrackedOpaquePatternBody(
 
       const initializer = unwrapExpression(declaration.initializer);
       let rootIdentifier: ts.Identifier;
+      // True only when the destructure root is a fresh reactive-origin call
+      // (`wish(...)`, `fetchData(...)`, etc.). In that case the synthesized
+      // root cell starts without a cause, so we attach a stable `.for(...)`
+      // to each named leaf below to pin its shared causeContainer to a
+      // user-facing identifier — otherwise the cell falls back to a
+      // counter-based `__#N` internal path that drifts across edits.
+      let rootIsFreshOpaqueOrigin = false;
       if (ts.isIdentifier(initializer)) {
         rootIdentifier = context.factory.createIdentifier(initializer.text);
       } else {
         rootIdentifier = context.factory.createUniqueName("__cf_destructure");
+        rootIsFreshOpaqueOrigin = ts.isCallExpression(initializer) &&
+          isOpaqueOriginCall(initializer, context);
         rewrittenDeclarations.push(
           context.factory.createVariableDeclaration(
             rootIdentifier,
@@ -564,6 +597,14 @@ function rewriteTrackedOpaquePatternBody(
             rootIdentifier,
             binding.path,
             context.factory,
+          );
+        }
+
+        if (rootIsFreshOpaqueOrigin && binding.path.length > 0) {
+          loweredInitializer = attachForCauseToOpaqueInitializer(
+            loweredInitializer,
+            binding.localName,
+            context,
           );
         }
 

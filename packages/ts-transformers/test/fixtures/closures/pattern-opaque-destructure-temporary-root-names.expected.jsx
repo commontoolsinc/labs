@@ -39,7 +39,7 @@ export default pattern((__cf_pattern_input) => {
             },
             required: ["title"],
         },
-    }), result = __cf_destructure_1.key("result");
+    }), result = __cf_destructure_1.key("result").for("result", true);
     return <div>{__cfHelpers.derive({
         type: "object",
         properties: {
