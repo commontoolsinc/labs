@@ -42,11 +42,20 @@ Before touching JSX, decide all of the following:
 - **Tone**: Pick a concrete direction such as editorial, playful, luxurious,
   brutalist, retro-futurist, soft, or utilitarian.
 - **Hook**: What is the one visual idea someone will remember?
+- **State lifetime**: Which UI state is shared, user-specific, or session-only?
 - **Constraint strategy**: How will you get that look with `cf-*` components,
   local fonts, and public CSS custom properties?
 
 Do not drift into an undifferentiated default. Commit to a direction and execute
 it cleanly.
+
+Treat transient UI state as part of the design brief, not as incidental
+implementation detail. Active tab, selected item, selected room, open modal,
+local filter text, and focused item should usually be `PerSession<>`. A useful
+test: if the user opens the same instance in a new tab, should this state carry
+over? If not, it is probably `PerSession<>`. User preferences, display names,
+and personal drafts are usually `PerUser<>`. Shared records and canonical
+content are usually `PerSpace<>`.
 
 ## Theme-First Workflow
 
@@ -111,6 +120,20 @@ defaults, or layouts that read like a raw form dump.
 If a control is already bound to a cell, usually via `$value` or `$checked`, do
 not add a change handler that simply writes the same value back into that same
 cell. Use handlers only for dependent state updates or other side effects.
+
+**Scoped UI state:**
+
+```ts
+interface MultiUserUiState {
+  sharedBoard: PerSpace<Board>;
+  displayName: PerUser<string | Default<"">>;
+  selectedCard: PerSession<CardSelection | Default<{}>>;
+}
+```
+
+Use ordinary data-shaped inputs when the public API should stay simple. Use
+`Writable` cell aliases inside the scope wrapper when handlers need stable cell
+handles for `.key(...)`, `.equals(...)`, or per-item bindings.
 
 **Layout structure:**
 
@@ -178,3 +201,5 @@ domain flow, not as the first place to copy styling from.
 - the result has a clear visual idea rather than a generic default shell
 - full-height layouts use `cf-screen` (auto-scrolls); `cf-vscroll` only for
   chat/fade-edges
+- transient UI state has explicit scope; tab-local state is `PerSession<>`
+  unless cross-session persistence is intentional
