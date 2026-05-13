@@ -111,6 +111,7 @@ export function rewritePatternCallbackBody(
   opaqueRootSymbols: Set<ts.Symbol>,
   context: TransformationContext,
 ): ts.ConciseBody {
+  reportInlineReactiveRootAccesses(body, context);
   const rewrittenBody = rewriteTrackedOpaquePatternBody(
     body,
     opaqueRoots,
@@ -1026,6 +1027,98 @@ function hasLocalOpaqueOriginBinding(
 
   scan(body);
   return found;
+}
+
+/**
+ * Emit a diagnostic for the one-line `const x = wish(...).result` shape, which
+ * the body-walker cannot lower because the call result has no name binding to
+ * register as a local opaque root. The two-step form (`const w = wish(...);
+ * const x = w.result;`) is supported; the one-line form silently produces
+ * code where `.result` is plain JS access, and downstream consumers crash
+ * with `TypeError: <x>.get is not a function` (or similar) at runtime.
+ *
+ * This is a build-time guard so the constraint is discoverable at the
+ * authoring site rather than from a runtime stack trace in a different file.
+ */
+function reportInlineReactiveRootAccesses(
+  body: ts.ConciseBody,
+  context: TransformationContext,
+): void {
+  const reported = new Set<ts.Node>();
+
+  const scan = (node: ts.Node): void => {
+    if (ts.isFunctionLike(node) && node !== body) return;
+
+    if (
+      (ts.isPropertyAccessExpression(node) ||
+        ts.isElementAccessExpression(node)) &&
+      // Only flag source-level access sites — synthesized nodes (pos < 0)
+      // come from earlier transformer passes that may have lowered
+      // `(items ?? []).map(...)` or similar into a synthesized
+      // `.method-on-call` shape that LOOKS like the bug but isn't
+      // user-authored. This is a build-time guard for user-authored shapes.
+      node.pos >= 0
+    ) {
+      // Only flag the topmost access in a chain (e.g. `wish(...).result` —
+      // not `.result` deep inside a longer chain). The topmost site is
+      // where the user wrote the access; reporting on inner sites would
+      // duplicate the error.
+      if (isTopmostMemberAccess(node)) {
+        const receiver = findInlineOpaqueOriginCallReceiver(node, context);
+        if (receiver && !reported.has(node)) {
+          reported.add(node);
+          context.reportDiagnostic({
+            severity: "error",
+            type: "pattern-context:inline-reactive-root-access",
+            message: "Cannot read a property directly off the result of a " +
+              "reactive-origin call (e.g. wish/computed) in a pattern body. " +
+              "Bind the call result to a `const` first, then read the " +
+              "property from the binding. For example, instead of " +
+              "`const x = wish(...).result;` write " +
+              "`const w = wish(...); const x = w.result;`.",
+            node,
+          });
+        }
+      }
+    }
+
+    ts.forEachChild(node, scan);
+  };
+
+  scan(body);
+}
+
+/**
+ * If `access` is a property/element access chain that bottoms out on a
+ * directly-invoked opaque-origin call (without an intermediate Identifier),
+ * return that call expression. Otherwise return undefined.
+ */
+function findInlineOpaqueOriginCallReceiver(
+  access: ts.PropertyAccessExpression | ts.ElementAccessExpression,
+  context: TransformationContext,
+): ts.CallExpression | undefined {
+  let current: ts.Expression = access.expression;
+  // Walk through any non-semantic wrappers (parens, casts) and chained
+  // property/element accesses to find the receiver of the chain.
+  while (true) {
+    const unwrapped = unwrapExpression(current);
+    if (
+      ts.isPropertyAccessExpression(unwrapped) ||
+      ts.isElementAccessExpression(unwrapped)
+    ) {
+      current = unwrapped.expression;
+      continue;
+    }
+    current = unwrapped;
+    break;
+  }
+  if (
+    ts.isCallExpression(current) &&
+    isOpaqueOriginCall(current, context)
+  ) {
+    return current;
+  }
+  return undefined;
 }
 
 function collectBindingNames(

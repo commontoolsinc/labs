@@ -28,7 +28,8 @@ export default pattern<{ items: string[] }>((state) => {
   });
 
   const fromWish = computed(() => {
-    const foo = wish<Default<string[], []>>({ query: "#items" }).result!;
+    const fooWish = wish<Default<string[], []>>({ query: "#items" });
+    const foo = fooWish.result!;
     return foo.map((item) => item + "!");
   });
 

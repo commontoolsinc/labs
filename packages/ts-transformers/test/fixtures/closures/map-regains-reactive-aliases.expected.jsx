@@ -12,14 +12,15 @@ const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 const __cfModuleCallback_1 = __cfHardenFn(() => {
-    const foo = wish<Default<string[], [
+    const fooWish = wish<Default<string[], [
     ]>>({ query: "#items" }, {
         type: "array",
         items: {
             type: "string"
         },
         "default": []
-    } as const satisfies __cfHelpers.JSONSchema).result!;
+    } as const satisfies __cfHelpers.JSONSchema).for("fooWish", true);
+    const foo = fooWish.result!;
     return foo.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
         const item = __cf_pattern_input.key("element");
         return item + "!";

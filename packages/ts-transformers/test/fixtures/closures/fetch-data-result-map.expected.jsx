@@ -15,10 +15,10 @@ interface Item {
     name: string;
 }
 export default pattern(() => {
-    const { result: items } = fetchData<Item[]>({
+    const __cf_destructure_1 = fetchData<Item[]>({
         url: "https://example.com",
         result: [],
-    });
+    }), items = __cf_destructure_1.key("result");
     return {
         [UI]: <div>{items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
             const item = __cf_pattern_input.key("element");

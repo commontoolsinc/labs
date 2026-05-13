@@ -32,7 +32,7 @@ interface Charm {
 // Context: Regression test ensuring array .length produces the correct schema
 //   shape rather than an object schema with a length property.
 export default pattern(() => {
-    const { allCharms } = wish<{
+    const charmsWish = wish<{
         allCharms: Charm[];
     }>({ query: "/" }, {
         type: "object",
@@ -59,7 +59,8 @@ export default pattern(() => {
                 required: ["id", "name"]
             }
         }
-    } as const satisfies __cfHelpers.JSONSchema).result!;
+    } as const satisfies __cfHelpers.JSONSchema).for("charmsWish", true);
+    const __cf_destructure_1 = charmsWish.key("result")!, allCharms = __cf_destructure_1.key("allCharms");
     return {
         [NAME]: __cfHelpers.derive({
             type: "object",
@@ -78,7 +79,7 @@ export default pattern(() => {
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, { allCharms: {
-                length: allCharms.length
+                length: allCharms.key("length")
             } }, ({ allCharms }) => `Charms (${allCharms.length})`),
         [UI]: (<div>
         <span>Count: {__cfHelpers.derive({
@@ -98,7 +99,7 @@ export default pattern(() => {
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __cfHelpers.JSONSchema, { allCharms: {
-                length: allCharms.length
+                length: allCharms.key("length")
             } }, ({ allCharms }) => allCharms.length)}</span>
         <ul>
           {allCharms.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {

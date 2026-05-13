@@ -151,14 +151,14 @@ const goToCharm = handler({
 // create the named cell inside the pattern body, so we do it just once
 export default pattern(() => {
     // cell to store array of charms we created
-    const { cellRef } = createCellRef({
+    const __cf_destructure_1 = createCellRef({
         isInitialized: cell(false, {
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema),
         storedCellRef: cell(),
     }) as {
         cellRef: any[];
-    };
+    }, cellRef = __cf_destructure_1.key("cellRef");
     return {
         [NAME]: "Charms Launcher",
         [UI]: (<div>
