@@ -187,6 +187,18 @@ const warmFabricParentDirectories = (path: string): string[] =>
     ];
   });
 
+const warmFabricParents = async (
+  engine: CfHarnessEngine,
+  path: string,
+): Promise<void> => {
+  const commands = warmFabricParentDirectories(path);
+  if (commands.length === 0) return;
+  const result = await engine.invokeBuiltinTool("bash", {
+    command: ["set -eu", ...commands].join("\n"),
+  });
+  assertEquals(result.output.exitCode, 0);
+};
+
 const invocationInputLabels = (): CfcLabelView => ({
   version: 1,
   entries: [{
@@ -708,10 +720,10 @@ Deno.test({
       "integration-fabric-read-host-bind",
       async (engine, hostPath) => {
         const hostPayload = "fuse read tainted host output\n";
+        await warmFabricParents(engine, fabricReadPath);
         const result = await engine.invokeBuiltinTool("bash", {
           command: [
             "set -eu",
-            ...warmFabricParentDirectories(fabricReadPath),
             `payload=$(cat ${singleQuoteShell(fabricReadPath)})`,
             `printf ${
               singleQuoteShell(hostPayload)
@@ -750,10 +762,10 @@ Deno.test({
       "integration-fabric-read-host-bind-readback",
       async (engine, hostPath) => {
         const hostPayload = "fuse read durable host output\n";
+        await warmFabricParents(engine, fabricReadPath);
         const result = await engine.invokeBuiltinTool("bash", {
           command: [
             "set -eu",
-            ...warmFabricParentDirectories(fabricReadPath),
             `IFS= read -r payload < ${
               singleQuoteShell(fabricReadPath)
             } || [ -n "$payload" ]`,
@@ -807,10 +819,10 @@ Deno.test({
       async (engine) => {
         const fabricPayload =
           "from invocation label through FUSE: integration-input-label-fabric-write\n";
+        await warmFabricParents(engine, fabricWritePath);
         const writeResult = await engine.invokeBuiltinTool("bash", {
           command: [
             "set -eu",
-            ...warmFabricParentDirectories(fabricWritePath),
             `printf ${singleQuoteShell(fabricPayload)} > ${
               singleQuoteShell(fabricWritePath)
             }`,
@@ -827,10 +839,10 @@ Deno.test({
           INVOCATION_TAINT_SUBJECT,
         );
 
+        await warmFabricParents(engine, fabricWritePath);
         const readBack = await engine.invokeBuiltinTool("bash", {
           command: [
             "set -eu",
-            ...warmFabricParentDirectories(fabricWritePath),
             `cat ${singleQuoteShell(fabricWritePath)}`,
           ].join("\n"),
         });
@@ -867,12 +879,12 @@ Deno.test({
       async (engine) => {
         const joinedPayload =
           "joined invocation and fabric labels: integration-input-label-fabric-join-write\n";
+        await warmFabricParents(engine, fabricReadPath);
+        await warmFabricParents(engine, fabricWritePath);
         const joinedWrite = await engine.invokeBuiltinTool("bash", {
           command: [
             "set -eu",
-            ...warmFabricParentDirectories(fabricReadPath),
             `cat ${singleQuoteShell(fabricReadPath)} >/dev/null`,
-            ...warmFabricParentDirectories(fabricWritePath),
             `printf ${singleQuoteShell(joinedPayload)} > ${
               singleQuoteShell(fabricWritePath)
             }`,
@@ -893,10 +905,10 @@ Deno.test({
           FABRIC_CFC_LABEL_SUBJECT,
         );
 
+        await warmFabricParents(engine, fabricWritePath);
         const readBack = await engine.invokeBuiltinTool("bash", {
           command: [
             "set -eu",
-            ...warmFabricParentDirectories(fabricWritePath),
             `cat ${singleQuoteShell(fabricWritePath)}`,
           ].join("\n"),
         });
