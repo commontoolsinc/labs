@@ -76,11 +76,11 @@ export const AuthoredIfElse = pattern((__cf_pattern_input) => {
     return ifElse({
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema, {
-        "enum": ["B", "C", "A"]
+        "enum": ["A", "B", "C"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
     } as const satisfies __cfHelpers.JSONSchema, {
-        "enum": ["B", "C", "A", "D"]
+        "enum": ["A", "B", "C", "D"]
     } as const satisfies __cfHelpers.JSONSchema, show, __cfHelpers.derive({
         type: "object",
         properties: {
@@ -93,7 +93,7 @@ export const AuthoredIfElse = pattern((__cf_pattern_input) => {
         },
         required: ["foo", "bar"]
     } as const satisfies __cfHelpers.JSONSchema, {
-        "enum": ["B", "C", "A"]
+        "enum": ["A", "B", "C"]
     } as const satisfies __cfHelpers.JSONSchema, {
         foo: foo,
         bar: bar
@@ -113,7 +113,7 @@ export const AuthoredIfElse = pattern((__cf_pattern_input) => {
     },
     required: ["show", "foo", "bar"]
 } as const satisfies __cfHelpers.JSONSchema, {
-    "enum": ["B", "C", "A", "D"]
+    "enum": ["A", "B", "C", "D"]
 } as const satisfies __cfHelpers.JSONSchema);
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
