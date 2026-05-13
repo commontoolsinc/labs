@@ -372,14 +372,17 @@ describe("Cell", () => {
 
   // `recursivelyAddIDIfNeeded()` has a legacy "preserve reference identity
   // when there's nothing to do" optimization. Under the modern data model
-  // (`modernDataModel: true`), every conversion step produces a frozen
-  // shallow clone, so reference identity inherently isn't preserved — the
-  // result is structurally equal but a fresh deep-frozen tree. These two
-  // pairs of tests pin the legacy invariant explicitly and assert the
-  // modern shape separately. (Direct unit tests of
-  // `recursivelyAddIDIfNeeded` don't go through a `Runtime`, so flag
-  // control happens via `setDataModelConfig()` rather than runtime
-  // construction.)
+  // (`modernDataModel: true`), the shallow fabric conversion eagerly
+  // freezes plain unfrozen Object/Array inputs by producing a frozen
+  // shallow clone — so reference identity isn't preserved for unfrozen
+  // inputs even when no IDs need to be generated. However, when the
+  // input is *already* deep-frozen (a valid `FabricValue`), the shallow
+  // conversion returns it as-is, so identity *is* preserved. The pairs
+  // below pin the legacy invariant explicitly and assert the modern
+  // shape (both sides: unfrozen vs. already-frozen) separately. (Direct
+  // unit tests of `recursivelyAddIDIfNeeded` don't go through a
+  // `Runtime`, so flag control happens via `setDataModelConfig()`
+  // rather than runtime construction.)
 
   it("preserves identity when recursivelyAddIDIfNeeded has nothing to do (legacy)", () => {
     const savedFlag = getDataModelConfig();
@@ -407,7 +410,7 @@ describe("Cell", () => {
     }
   });
 
-  it("returns a structural copy when recursivelyAddIDIfNeeded has nothing to do (modern)", () => {
+  it("returns a structural copy when recursivelyAddIDIfNeeded has nothing to do (modern, unfrozen input)", () => {
     const savedFlag = getDataModelConfig();
     setDataModelConfig(true);
     try {
@@ -425,12 +428,44 @@ describe("Cell", () => {
 
       const result = recursivelyAddIDIfNeeded(value, frame);
 
-      // Modern: shallow fabric conversion at each level produces fresh
-      // (frozen) sub-trees, so the legacy "preserve identity when nothing
-      // to do" optimization no longer applies. The function still returns
-      // a structurally equivalent value.
+      // Modern: shallow fabric conversion eagerly freezes unfrozen plain
+      // Object/Array inputs (producing a fresh frozen clone at the level
+      // it visits), so the legacy "preserve identity when nothing to do"
+      // optimization doesn't apply for unfrozen inputs. The function
+      // still returns a structurally equivalent value.
       expect(result).not.toBe(value);
       expect(result).toEqual(value);
+    } finally {
+      setDataModelConfig(savedFlag);
+    }
+  });
+
+  it("preserves identity when input is already deep-frozen (modern)", () => {
+    const savedFlag = getDataModelConfig();
+    setDataModelConfig(true);
+    try {
+      const frame: Frame = {
+        generatedIdCounter: 0,
+        opaqueRefs: new Set(),
+      };
+      // Deep-freeze before passing in. Under modern, an already-frozen
+      // plain Object/Array is a valid `FabricValue` and shallow fabric
+      // conversion returns it as-is, so reference identity survives all
+      // the way out.
+      const interests = Object.freeze(["coding", "reading"]);
+      const stable = Object.freeze({ nested: true });
+      const value = Object.freeze({
+        firstName: "Ada",
+        lastName: "Lovelace",
+        interests,
+        stable,
+      });
+
+      const result = recursivelyAddIDIfNeeded(value, frame);
+
+      expect(result).toBe(value);
+      expect(result.interests).toBe(interests);
+      expect(result.stable).toBe(stable);
     } finally {
       setDataModelConfig(savedFlag);
     }
