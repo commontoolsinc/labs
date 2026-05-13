@@ -3,6 +3,7 @@ import {
   assertEquals,
   assertExists,
   assertStrictEquals,
+  assertThrows,
 } from "@std/assert";
 import { toFileUrl } from "@std/path";
 import {
@@ -14,9 +15,12 @@ import {
 } from "../v2/engine.ts";
 import {
   extendTrackedGraph,
+  fromDirtyKey,
+  fromDocKey,
   isGraphQueryCoveredByState,
   queryGraph,
   refreshTrackedGraph,
+  toDirtyKey,
   trackGraph,
 } from "../v2/query.ts";
 import { createGraphFixture } from "./v2-graph.fixture.ts";
@@ -42,6 +46,33 @@ const authorization = {
   signature: "sig:alice",
   access: { "proof:1": {} },
 };
+
+Deno.test("memory v2 query keys require explicit scope", () => {
+  assertEquals(
+    fromDocKey("did:key:space/user/of:doc/application/json"),
+    {
+      space: "did:key:space",
+      scope: "user",
+      id: "of:doc",
+      type: "application/json",
+    },
+  );
+  assertEquals(fromDirtyKey("session\0of:doc"), {
+    scope: "session",
+    id: "of:doc",
+  });
+
+  assertThrows(
+    () => fromDocKey("did:key:space/of:doc/application/json" as never),
+    Error,
+    "invalid memory v2 query doc key",
+  );
+  assertThrows(
+    () => fromDirtyKey("of:doc"),
+    Error,
+    "invalid memory v2 dirty key",
+  );
+});
 
 Deno.test("memory v2 queryGraph reads the declared scoped root instance", async () => {
   const { engine, path } = await createEngine();
@@ -538,7 +569,7 @@ Deno.test("memory v2 query refresh skips already-covered stable linked docs", as
       space,
       engine,
       tracked.state,
-      new Set([fixture.rootId]),
+      new Set([toDirtyKey(fixture.rootId)]),
     );
     assertExists(refreshed);
     assertEquals(
@@ -742,7 +773,7 @@ Deno.test("memory v2 query uses a fresh memo for write-triggered refreshes", asy
       space,
       engine,
       tracked.state,
-      new Set([fixture.rootId]),
+      new Set([toDirtyKey(fixture.rootId)]),
     );
     assertExists(refreshed);
     assertStrictEquals(tracked.state.memo, growthMemo);
@@ -843,7 +874,7 @@ Deno.test("memory v2 query refresh updates the growth manager cache for later wa
       space,
       engine,
       tracked.state,
-      new Set([process]),
+      new Set([toDirtyKey(process)]),
     );
     assertExists(refreshed);
 

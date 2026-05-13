@@ -264,21 +264,7 @@ const entitiesFromTracker = (
   branch: string,
 ): Map<QueryDocKey, EntitySnapshot> => {
   const entities = new Map<QueryDocKey, EntitySnapshot>();
-  const explicitEntityKeys = new Set<string>();
   for (const [key] of tracker) {
-    const parsed = fromDocKey(key as QueryDocKey);
-    if (parsed.legacy !== true) {
-      explicitEntityKeys.add(`${parsed.space}\0${parsed.id}\0${parsed.type}`);
-    }
-  }
-  for (const [key] of tracker) {
-    const parsed = fromDocKey(key as QueryDocKey);
-    if (
-      parsed.legacy === true &&
-      explicitEntityKeys.has(`${parsed.space}\0${parsed.id}\0${parsed.type}`)
-    ) {
-      continue;
-    }
     const snapshot = snapshotForDocKey(
       space,
       manager,
@@ -513,14 +499,8 @@ export const refreshTrackedGraph = (
       invalidations.set(scope, scopedIds);
     }
     scopedIds.add(id);
-    let key = toDocKey(space, id, "application/json", scope);
-    let selectors = state.tracker.get(key);
-    if (
-      selectors === undefined && scope === DEFAULT_SCOPE
-    ) {
-      key = `${space}/${id}/application/json` as QueryDocKey;
-      selectors = state.tracker.get(key);
-    }
+    const key = toDocKey(space, id, "application/json", scope);
+    const selectors = state.tracker.get(key);
     if (selectors !== undefined && selectors.size > 0) {
       affectedDocs.set(key, new Set(selectors));
     }
@@ -560,21 +540,12 @@ export const refreshTrackedGraph = (
 
   const touched = new Set<QueryDocKey>(affectedDocs.keys());
   for (const address of manager.loadedAddresses()) {
-    let key = toDocKey(
+    const key = toDocKey(
       space,
       address.id,
       "application/json",
       address.scope,
     );
-    if (
-      !state.tracker.has(key) && address.scope === DEFAULT_SCOPE
-    ) {
-      const legacyKey =
-        `${space}/${address.id}/application/json` as QueryDocKey;
-      if (state.tracker.has(legacyKey)) {
-        key = legacyKey;
-      }
-    }
     const previous = state.entities.get(key);
     const detail = manager.detail({ id: address.id, scope: address.scope });
     if (previous !== undefined && detail?.seq === previous.seq) {
@@ -763,7 +734,7 @@ export const fromDirtyKey = (
       return { scope, id: key.slice(separator + 1) };
     }
   }
-  return { scope: DEFAULT_SCOPE, id: key };
+  throw new Error(`invalid memory v2 dirty key: ${key}`);
 };
 
 export const fromDocKey = (
@@ -773,7 +744,6 @@ export const fromDocKey = (
   id: string;
   type: string;
   scope: CellScope;
-  legacy?: true;
 } => {
   const match = /^([^/]+)\/(space|user|session)\/(.+)\/application\/json$/
     .exec(key);
@@ -790,17 +760,5 @@ export const fromDocKey = (
     const id = rest.slice(0, -2).join("/");
     return { space, scope: maybeScope as CellScope, id, type };
   }
-  const oldShapeMatch = /^([^/]+)\/(.+)\/application\/json$/.exec(key);
-  if (oldShapeMatch !== null) {
-    const [, oldSpace, id] = oldShapeMatch;
-    return {
-      space: oldSpace,
-      scope: DEFAULT_SCOPE,
-      id,
-      type: "application/json",
-      legacy: true,
-    };
-  }
-  const [oldSpace, id, type] = key.split("/", 3);
-  return { space: oldSpace, scope: DEFAULT_SCOPE, id, type, legacy: true };
+  throw new Error(`invalid memory v2 query doc key: ${key}`);
 };
