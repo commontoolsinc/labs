@@ -58,7 +58,7 @@ const removeItem = handler({
 //   removeItem({ items, item })                    -> captures both the reactive array and the current element
 // Context: The array comes from wish().result rather than a pattern param or a local cell
 export default pattern((_) => {
-    const itemsWish = wish<Default<Item[], [
+    const __cf_destructure_1 = wish<Default<Item[], [
     ]>>({ query: "#items" }, {
         type: "array",
         items: {
@@ -79,8 +79,7 @@ export default pattern((_) => {
                 required: ["name", "value"]
             }
         }
-    } as const satisfies __cfHelpers.JSONSchema).for("itemsWish", true);
-    const items = itemsWish.key("result")!;
+    } as const satisfies __cfHelpers.JSONSchema), items = __cf_destructure_1.key("result").for("items", true);
     return {
         [NAME]: "Test",
         [UI]: (<ul>

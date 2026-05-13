@@ -177,7 +177,14 @@ export function isOpaqueSourceExpression(
 
     if (ts.isPropertyAccessExpression(current.expression)) {
       const methodName = current.expression.name.text;
-      if (methodName === "key" || methodName === "get") {
+      // `.key()` returns a navigated sibling; `.get()` returns a value
+      // proxy; `.for()` returns the same cell (identity-preserving cause
+      // annotation, no-op semantically). All preserve opaque-source
+      // provenance, so a chain ending in one of these stays opaque iff
+      // its underlying receiver is opaque.
+      if (
+        methodName === "key" || methodName === "get" || methodName === "for"
+      ) {
         return isOpaqueSourceExpression(
           current.expression.expression,
           opaqueRoots,
@@ -185,6 +192,36 @@ export function isOpaqueSourceExpression(
           context,
         );
       }
+    }
+  }
+
+  // Property/element access chains that bottom out on an opaque-origin
+  // call (`wish(...).result`, `fetchData(...).result.items`, etc.) are
+  // also opaque sources — the chain navigates through reactive cells
+  // before being read. The body-lowering pre-pass rewrites these into
+  // destructure form, but consumers that examine the source AST before
+  // that rewrite (e.g. `buildPatternScope` in pattern-callback-lowering)
+  // still need to recognize the binding as opaque so closure captures
+  // are wired up correctly.
+  if (
+    ts.isPropertyAccessExpression(current) ||
+    ts.isElementAccessExpression(current)
+  ) {
+    let inner: ts.Expression = current.expression;
+    while (true) {
+      const unwrapped = unwrapExpression(inner);
+      if (
+        ts.isPropertyAccessExpression(unwrapped) ||
+        ts.isElementAccessExpression(unwrapped)
+      ) {
+        inner = unwrapped.expression;
+        continue;
+      }
+      inner = unwrapped;
+      break;
+    }
+    if (ts.isCallExpression(inner) && isOpaqueOriginCall(inner, context)) {
+      return true;
     }
   }
 

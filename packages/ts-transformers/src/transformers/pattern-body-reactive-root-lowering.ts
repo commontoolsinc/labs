@@ -41,6 +41,7 @@ import {
   classifyUnsupportedExpressionSiteCallRoot,
 } from "./expression-site-policy.ts";
 import { getCellKind } from "./opaque-ref/opaque-ref.ts";
+import { createPropertyName } from "../utils/identifiers.ts";
 
 const KNOWN_PATH_TERMINAL_METHODS = new Set([
   "set",
@@ -135,9 +136,10 @@ export function rewritePatternCallbackBody(
   opaqueRootSymbols: Set<ts.Symbol>,
   context: TransformationContext,
 ): ts.ConciseBody {
-  reportInlineReactiveRootAccesses(body, context);
+  const preRewrittenBody = rewriteInlineReactiveOriginChains(body, context);
+  reportInlineReactiveRootAccesses(preRewrittenBody, context);
   const rewrittenBody = rewriteTrackedOpaquePatternBody(
-    body,
+    preRewrittenBody,
     opaqueRoots,
     opaqueRootSymbols,
     context,
@@ -1071,6 +1073,195 @@ function hasLocalOpaqueOriginBinding(
 }
 
 /**
+ * Pre-pass that rewrites one-line reactive-origin chains in variable
+ * declarations into equivalent destructure forms, so the existing destructure
+ * lowering machinery (in `lowerOpaqueDestructuredVariableStatement`) handles
+ * them without further work.
+ *
+ * Source shapes handled:
+ *   const x = wish(...).result
+ *     => const { result: x } = wish(...)
+ *   const x = wish(...).result.allCharms
+ *     => const { result: { allCharms: x } } = wish(...)
+ *   const { x } = wish(...).result
+ *     => const { result: { x } } = wish(...)
+ *   const { x } = wish(...).result.allCharms
+ *     => const { result: { allCharms: { x } } } = wish(...)
+ *
+ * Non-null assertions inside the chain are dropped (they have no runtime
+ * effect). Casts and parens at the root of the chain are preserved.
+ *
+ * The rewrite only fires when the chain bottoms out on an opaque-origin
+ * call (per `isOpaqueOriginCall`) with NO intermediate named binding —
+ * exactly the source shape that the existing walker can't lower in place.
+ */
+function rewriteInlineReactiveOriginChains(
+  body: ts.ConciseBody,
+  context: TransformationContext,
+): ts.ConciseBody {
+  const { factory } = context;
+
+  const tryRewriteDeclaration = (
+    declaration: ts.VariableDeclaration,
+  ): ts.VariableDeclaration | undefined => {
+    if (!declaration.initializer) return undefined;
+    // Already-fine forms: declaration.initializer is a plain Identifier
+    // (two-step form, already-handled) or a CallExpression directly (no
+    // intermediate chain to rewrite).
+    const unwrappedInitializer = unwrapExpression(declaration.initializer);
+    if (ts.isIdentifier(unwrappedInitializer)) return undefined;
+    if (ts.isCallExpression(unwrappedInitializer)) return undefined;
+    // The initializer must be a property-access chain bottoming on an
+    // opaque-origin call. Element-access (computed key) terminals don't
+    // fit cleanly into a destructure pattern; skip them.
+    if (
+      !ts.isPropertyAccessExpression(unwrappedInitializer) &&
+      !ts.isElementAccessExpression(unwrappedInitializer)
+    ) {
+      return undefined;
+    }
+    const chain = collectInlineOpaqueChain(unwrappedInitializer, context);
+    if (!chain) return undefined;
+    const wrappedBinding = wrapBindingPatternInDestructureChain(
+      declaration.name,
+      chain.segments,
+      factory,
+    );
+    if (!wrappedBinding) return undefined;
+    // Preserve cast/paren wrappers at the root of the chain so type
+    // information that downstream passes rely on (schema injection)
+    // stays intact. Non-null assertions on the call itself or inside the
+    // chain are dropped — they're type-only and have no runtime effect.
+    return factory.updateVariableDeclaration(
+      declaration,
+      wrappedBinding,
+      declaration.exclamationToken,
+      undefined, // strip the explicit type annotation — destructure pattern shape no longer matches
+      chain.rootInitializer,
+    );
+  };
+
+  const visit: ts.Visitor = (node) => {
+    // Don't descend into nested function-like nodes; their own pattern
+    // bodies get their own pass via the surrounding pipeline.
+    if (ts.isFunctionLike(node) && node !== body) return node;
+    if (ts.isVariableStatement(node)) {
+      let changed = false;
+      const newDeclarations = node.declarationList.declarations.map((decl) => {
+        const rewritten = tryRewriteDeclaration(decl);
+        if (rewritten) {
+          changed = true;
+          return rewritten;
+        }
+        return decl;
+      });
+      if (changed) {
+        const newList = factory.updateVariableDeclarationList(
+          node.declarationList,
+          newDeclarations,
+        );
+        return factory.updateVariableStatement(
+          node,
+          node.modifiers,
+          newList,
+        );
+      }
+    }
+    return ts.visitEachChild(node, visit, context.tsContext);
+  };
+
+  return ts.visitNode(body, visit) as ts.ConciseBody;
+}
+
+/**
+ * Walk a property-access chain inward to its call receiver. If the receiver
+ * is an opaque-origin call, return the static chain segments (innermost
+ * first — i.e. the access nearest the call comes first) and the root call
+ * initializer with cast/paren wrappers preserved. Otherwise return undefined.
+ */
+function collectInlineOpaqueChain(
+  access: ts.PropertyAccessExpression | ts.ElementAccessExpression,
+  context: TransformationContext,
+): { segments: string[]; rootInitializer: ts.Expression } | undefined {
+  const segments: string[] = [];
+  let current: ts.Expression = access;
+  while (true) {
+    if (
+      ts.isPropertyAccessExpression(current) ||
+      ts.isElementAccessExpression(current)
+    ) {
+      const segment = getStaticAccessKey(current);
+      if (segment === undefined) return undefined;
+      segments.unshift(segment);
+      current = current.expression;
+      continue;
+    }
+    const unwrapped = unwrapExpression(current);
+    if (unwrapped !== current) {
+      current = unwrapped;
+      continue;
+    }
+    break;
+  }
+  if (segments.length === 0) return undefined;
+  if (!ts.isCallExpression(current)) return undefined;
+  if (!isOpaqueOriginCall(current, context)) return undefined;
+  // Innermost segment first: walking outward, the segment closest to the
+  // call (the FIRST access applied) is the OUTER destructure key.
+  return { segments, rootInitializer: current };
+}
+
+function getStaticAccessKey(
+  access: ts.PropertyAccessExpression | ts.ElementAccessExpression,
+): string | undefined {
+  if (ts.isPropertyAccessExpression(access)) {
+    return access.name.text;
+  }
+  const arg = access.argumentExpression;
+  if (ts.isStringLiteralLike(arg) || ts.isNoSubstitutionTemplateLiteral(arg)) {
+    return arg.text;
+  }
+  if (ts.isNumericLiteral(arg)) {
+    return arg.text;
+  }
+  return undefined;
+}
+
+/**
+ * Given a binding pattern (or identifier) `inner` and a chain of property
+ * keys [seg0, seg1, ..., segN] running from outer to inner (segment closest
+ * to the call is seg0), produce the wrapped destructure pattern:
+ *   { seg0: { seg1: { ... { segN: <inner> } } } }
+ *
+ * Returns undefined if the inner binding is incompatible (e.g. has a default
+ * initializer that we can't safely preserve in this transformation).
+ */
+function wrapBindingPatternInDestructureChain(
+  inner: ts.BindingName,
+  segments: readonly string[],
+  factory: ts.NodeFactory,
+): ts.BindingName | undefined {
+  let current: ts.BindingName = inner;
+  for (let i = segments.length - 1; i >= 0; i--) {
+    const key = segments[i];
+    // When the inner binding is an Identifier and key matches the
+    // identifier text, we could use the `{ key }` shorthand. But we
+    // always emit an explicit property name to keep the rewrite legible
+    // and to be safe when the binding is a nested pattern (where the
+    // shorthand form is syntactically invalid).
+    const propertyName = createPropertyName(key, factory);
+    const element = factory.createBindingElement(
+      undefined,
+      propertyName,
+      current,
+      undefined,
+    );
+    current = factory.createObjectBindingPattern([element]);
+  }
+  return current;
+}
+
+/**
  * Emit a diagnostic for the one-line `const x = wish(...).result` shape, which
  * the body-walker cannot lower because the call result has no name binding to
  * register as a local opaque root. The two-step form (`const w = wish(...);
@@ -1098,7 +1289,13 @@ function reportInlineReactiveRootAccesses(
       // `(items ?? []).map(...)` or similar into a synthesized
       // `.method-on-call` shape that LOOKS like the bug but isn't
       // user-authored. This is a build-time guard for user-authored shapes.
-      node.pos >= 0
+      node.pos >= 0 &&
+      // Skip when this access is the callee of a method call
+      // (`<call>.for(...)`, `<call>.key(...)`, etc.). Those are legitimate
+      // identity-preserving / navigating method invocations on the cell,
+      // not value-property reads that defeat reactivity.
+      !(node.parent && ts.isCallExpression(node.parent) &&
+        node.parent.expression === node)
     ) {
       // Only flag the topmost access in a chain (e.g. `wish(...).result` —
       // not `.result` deep inside a longer chain). The topmost site is

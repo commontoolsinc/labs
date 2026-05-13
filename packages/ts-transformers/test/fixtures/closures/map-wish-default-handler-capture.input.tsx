@@ -23,8 +23,7 @@ const removeItem = handler<
 //   removeItem({ items, item })                    -> captures both the reactive array and the current element
 // Context: The array comes from wish().result rather than a pattern param or a local cell
 export default pattern<Record<string, never>>((_) => {
-  const itemsWish = wish<Default<Item[], []>>({ query: "#items" });
-  const items = itemsWish.result!;
+  const items = wish<Default<Item[], []>>({ query: "#items" }).result!;
 
   return {
     [NAME]: "Test",

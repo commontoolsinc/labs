@@ -22,8 +22,7 @@ interface Charm {
 // Context: Regression test ensuring array .length produces the correct schema
 //   shape rather than an object schema with a length property.
 export default pattern(() => {
-  const charmsWish = wish<{ allCharms: Charm[] }>({ query: "/" });
-  const { allCharms } = charmsWish.result!;
+  const { allCharms } = wish<{ allCharms: Charm[] }>({ query: "/" }).result!;
 
   return {
     [NAME]: computed(() => `Charms (${allCharms.length})`),
