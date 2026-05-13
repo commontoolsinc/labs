@@ -49,37 +49,6 @@ interface LobbyOutput {
   reset: Stream<void>;
 }
 
-function createGameAndNavigate(
-  gameName: string,
-  player1: Writable<PlayerData | null>,
-  player2: Writable<PlayerData | null>,
-  shots: Writable<ShotsState>,
-  gameState: Writable<GameState>,
-  myName: string,
-  myPlayerNumber: 1 | 2,
-) {
-  console.log("[createGameAndNavigate] Starting...");
-  console.log(
-    "[createGameAndNavigate] myName:",
-    myName,
-    "myPlayerNumber:",
-    myPlayerNumber,
-  );
-
-  const gameInstance = BattleshipRoom({
-    gameName,
-    player1,
-    player2,
-    shots,
-    gameState,
-    myName,
-    myPlayerNumber,
-  });
-
-  console.log("[createGameAndNavigate] Game instance created");
-  return navigateTo(gameInstance);
-}
-
 // Handler for joining as a specific player slot
 const joinAsPlayer = handler<
   unknown,
@@ -153,15 +122,16 @@ const joinAsPlayer = handler<
 
     // Navigate to game room
     console.log("[joinAsPlayer] Navigating to game room...");
-    return createGameAndNavigate(
+    const gameInstance = BattleshipRoom({
       gameName,
       player1,
       player2,
       shots,
       gameState,
-      name,
-      playerSlot,
-    );
+      myName: name,
+      myPlayerNumber: playerSlot,
+    });
+    return navigateTo(gameInstance);
   },
 );
 
@@ -192,15 +162,16 @@ const rejoinGame = handler<
     if (!playerData) return;
 
     console.log("[rejoinGame] Rejoining as:", playerData.name);
-    return createGameAndNavigate(
+    const gameInstance = BattleshipRoom({
       gameName,
       player1,
       player2,
       shots,
       gameState,
-      playerData.name,
-      playerSlot,
-    );
+      myName: playerData.name,
+      myPlayerNumber: playerSlot,
+    });
+    return navigateTo(gameInstance);
   },
 );
 

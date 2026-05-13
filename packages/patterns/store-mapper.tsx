@@ -1624,23 +1624,22 @@ export default pattern<Input, Output>(
                                     );
                                   }
 
-                                  // Helper function to check if aisle exists
-                                  // Uses .some() directly on currentAisles (works with reactive proxies)
-                                  const aisleExists = (name: string) => {
-                                    try {
-                                      return currentAisles.some(
-                                        (existing: Aisle) =>
-                                          existing?.name?.toLowerCase?.() ===
-                                            name.toLowerCase(),
-                                      );
-                                    } catch {
-                                      return false;
-                                    }
-                                  };
+                                  const sourceAisles: Aisle[] = Array.isArray(
+                                      currentAisles,
+                                    )
+                                    ? currentAisles
+                                    : [];
+                                  const existingAisleNames = sourceAisles.map(
+                                    (existing: Aisle) =>
+                                      existing?.name?.toLowerCase?.() ?? "",
+                                  );
 
                                   // Count new aisles
                                   const newCount = extracted.aisles.filter(
-                                    (e) => !aisleExists(e.name),
+                                    (e) =>
+                                      !existingAisleNames.includes(
+                                        e.name.toLowerCase(),
+                                      ),
                                   ).length;
 
                                   return (
@@ -1665,9 +1664,11 @@ export default pattern<Input, Output>(
                                       {/* Individual aisle results */}
                                       {extracted.aisles.map(
                                         (extractedAisle: ExtractedAisle) => {
-                                          const exists = aisleExists(
-                                            extractedAisle.name,
-                                          );
+                                          const exists = existingAisleNames
+                                            .includes(
+                                              extractedAisle.name
+                                                .toLowerCase(),
+                                            );
                                           return (
                                             <cf-hstack
                                               gap="2"

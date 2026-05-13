@@ -1,16 +1,15 @@
 /**
- * Factory for creating OAuth auth manager patterns.
+ * Shared OAuth auth manager base pattern.
  *
- * Each auth manager is ~95% identical across providers. This factory
+ * Each auth manager is ~95% identical across providers. This base pattern
  * extracts the shared logic (wish setup, state machine, refresh handling,
  * UI components) and parameterizes it via an AuthManagerDescriptor.
  *
  * Usage:
  * ```typescript
- * import { createAuthManager } from "../../auth/create-auth-manager.tsx";
- * import MyAuth from "../my-auth.tsx";
- *
- * export default createAuthManager(myDescriptor, MyAuth);
+ * Provider-specific modules should wrap AuthManagerBase in a module-scope
+ * pattern and pass a serializable descriptor plus provider-specific createAuth
+ * action.
  * ```
  */
 import {
@@ -22,11 +21,11 @@ import {
   navigateTo,
   pattern,
   safeDateNow,
+  type Stream,
   UI,
   wish,
   Writable,
 } from "commonfabric";
-import type { NodeFactory, Opaque } from "commonfabric";
 
 import type { AuthInfo, AuthState, TokenExpiryWarning } from "./auth-types.ts";
 import type { AuthManagerDescriptor } from "./auth-manager-descriptor.ts";
@@ -48,6 +47,11 @@ export interface AuthManagerInput {
   requiredScopes?: string[] | Default<[]>;
   accountType?: "default" | "personal" | "work" | Default<"default">;
   debugMode?: boolean | Default<false>;
+}
+
+export interface AuthManagerBaseInput extends AuthManagerInput {
+  descriptor: AuthManagerDescriptor;
+  createAuth: Stream<void>;
 }
 
 export interface AuthManagerOutput {
@@ -136,711 +140,678 @@ const attemptRefresh = handler<
 });
 
 // =============================================================================
-// FACTORY
+// MODULE-SCOPE DERIVATIONS
 // =============================================================================
 
-/**
- * Create an auth manager pattern for the given provider.
- *
- * @param descriptor - Provider-specific configuration
- * @param AuthPattern - The provider's auth pattern function (for creating new instances)
- */
-export function createAuthManager<T, R>(
-  descriptor: AuthManagerDescriptor,
-  AuthPattern: NodeFactory<T, R>,
-) {
-  function debugLog(enabled: boolean, ...args: unknown[]) {
-    if (enabled) console.log(`[${descriptor.displayName}Auth]`, ...args);
+const deriveAuthState = lift<{
+  descriptor: AuthManagerDescriptor;
+  piece?: AuthPiece | null;
+  requiredScopes?: string[];
+  now: number;
+  debugMode?: boolean;
+}, DerivedAuthState>(({
+  descriptor,
+  piece,
+  requiredScopes,
+  now,
+  debugMode,
+}) => {
+  const auth = piece?.auth ?? null;
+  const currentEmail = auth?.user?.email ?? "";
+  const requestedScopes = Array.isArray(requiredScopes) ? requiredScopes : [];
+  const grantedScopes = Array.isArray(auth?.scope) ? auth.scope : [];
+  const hasToken = !!auth?.[descriptor.tokenField];
+  const hasEmail = currentEmail !== "";
+  const tokenExpiresAt = typeof auth?.expiresAt === "number"
+    ? auth.expiresAt
+    : null;
+  const tokenTimeRemaining = tokenExpiresAt === null
+    ? null
+    : tokenExpiresAt - now;
+
+  let tokenExpiryWarning: TokenExpiryWarning = "ok";
+  if (tokenTimeRemaining !== null) {
+    if (tokenTimeRemaining < 0) {
+      tokenExpiryWarning = "expired";
+    } else if (tokenTimeRemaining < TOKEN_EXPIRY_THRESHOLD_MS) {
+      tokenExpiryWarning = "warning";
+    }
   }
 
-  const deriveAuthState = lift<{
-    piece?: AuthPiece | null;
-    requiredScopes?: string[];
-    now: number;
-    debugMode?: boolean;
-  }, DerivedAuthState>(({
-    piece,
-    requiredScopes,
-    now,
-    debugMode,
-  }) => {
-    const auth = piece?.auth ?? null;
-    const currentEmail = auth?.user?.email ?? "";
-    const requestedScopes = Array.isArray(requiredScopes) ? requiredScopes : [];
-    const grantedScopes = Array.isArray(auth?.scope) ? auth.scope : [];
-    const hasToken = !!auth?.[descriptor.tokenField];
-    const hasEmail = currentEmail !== "";
-    const tokenExpiresAt = typeof auth?.expiresAt === "number"
-      ? auth.expiresAt
-      : null;
-    const tokenTimeRemaining = tokenExpiresAt === null
-      ? null
-      : tokenExpiresAt - now;
+  const missingScopes = requestedScopes.filter((key) =>
+    !grantedScopes.includes(descriptor.scopes[key]?.scopeString ?? key)
+  );
+  const hasRequiredScopes = missingScopes.length === 0;
+  const isTokenExpired = tokenExpiresAt !== null && tokenExpiresAt < now;
 
-    let tokenExpiryWarning: TokenExpiryWarning = "ok";
-    if (tokenTimeRemaining !== null) {
-      if (tokenTimeRemaining < 0) {
-        tokenExpiryWarning = "expired";
-      } else if (tokenTimeRemaining < TOKEN_EXPIRY_THRESHOLD_MS) {
-        tokenExpiryWarning = "warning";
-      }
-    }
+  let currentState: AuthState;
+  if (!auth) {
+    currentState = "loading";
+  } else if (!hasToken || !hasEmail) {
+    currentState = "needs-login";
+  } else if (!hasRequiredScopes) {
+    currentState = "missing-scopes";
+  } else if (isTokenExpired) {
+    currentState = "token-expired";
+  } else {
+    currentState = "ready";
+  }
 
-    const missingScopes = requestedScopes.filter((key) =>
-      !grantedScopes.includes(descriptor.scopes[key]?.scopeString ?? key)
-    );
-    const hasRequiredScopes = missingScopes.length === 0;
-    const isTokenExpired = tokenExpiresAt !== null && tokenExpiresAt < now;
+  const isReady = hasToken && hasEmail && !isTokenExpired &&
+    hasRequiredScopes;
+  const tokenExpiryDisplay = formatTimeRemaining(tokenTimeRemaining);
+  const statusDotColor = STATUS_COLORS[currentState] ?? STATUS_COLORS.loading;
 
-    let currentState: AuthState;
-    if (!auth) {
-      currentState = "loading";
-    } else if (!hasToken || !hasEmail) {
-      currentState = "needs-login";
-    } else if (!hasRequiredScopes) {
-      currentState = "missing-scopes";
-    } else if (isTokenExpired) {
-      currentState = "token-expired";
-    } else {
-      currentState = "ready";
-    }
-
-    const isReady = hasToken && hasEmail && !isTokenExpired &&
-      hasRequiredScopes;
-    const tokenExpiryDisplay = formatTimeRemaining(tokenTimeRemaining);
-    const statusDotColor = STATUS_COLORS[currentState] ?? STATUS_COLORS.loading;
-
-    let statusText = STATUS_MESSAGES[currentState];
-    if (currentState === "ready") {
-      statusText = `Signed in as ${currentEmail}`;
-    } else if (currentState === "missing-scopes") {
-      const names = missingScopes
-        .map((key) => descriptor.scopes[key]?.description ?? key)
-        .join(", ");
-      statusText = `Missing: ${names}`;
-    } else if (currentState === "needs-login") {
-      statusText = `Please sign in to your ${descriptor.displayName}`;
-    }
-
-    const scopesList = requestedScopes
+  let statusText = STATUS_MESSAGES[currentState];
+  if (currentState === "ready") {
+    statusText = `Signed in as ${currentEmail}`;
+  } else if (currentState === "missing-scopes") {
+    const names = missingScopes
       .map((key) => descriptor.scopes[key]?.description ?? key)
       .join(", ");
-    const missingScopesList = missingScopes
-      .map((key) => descriptor.scopes[key]?.description ?? key)
-      .join(", ");
-    const showAvatar = descriptor.hasAvatarSupport &&
-      currentState === "ready" &&
-      !!auth?.user?.picture;
-    const avatarUrl = (auth?.user?.picture ?? "") as string;
-    const showExpiryInStatus = currentState === "ready" &&
-      tokenExpiryDisplay !== "";
-    const expiryHintColor = tokenExpiryWarning === "warning"
-      ? "#b45309"
-      : "#666";
-    const expiryHintWeight = tokenExpiryWarning === "warning"
-      ? "500"
-      : "normal";
-    const statusBgColor = currentState !== "ready" ||
-        tokenExpiryWarning === "warning"
-      ? "#fef3c7"
-      : "#d1fae5";
-    const isNeedsLogin = currentState === "needs-login";
-    const isTokenExpiredState = currentState === "token-expired";
-    const isReadyState = currentState === "ready";
+    statusText = `Missing: ${names}`;
+  } else if (currentState === "needs-login") {
+    statusText = `Please sign in to your ${descriptor.displayName}`;
+  }
 
-    debugLog(debugMode === true, "state:", currentState);
-    debugLog(debugMode === true, "isReady:", isReady);
-    debugLog(debugMode === true, "missingScopes:", missingScopes);
-    debugLog(debugMode === true, "isTokenExpired:", isTokenExpired);
+  const scopesList = requestedScopes
+    .map((key) => descriptor.scopes[key]?.description ?? key)
+    .join(", ");
+  const missingScopesList = missingScopes
+    .map((key) => descriptor.scopes[key]?.description ?? key)
+    .join(", ");
+  const showAvatar = descriptor.hasAvatarSupport &&
+    currentState === "ready" &&
+    !!auth?.user?.picture;
+  const avatarUrl = (auth?.user?.picture ?? "") as string;
+  const showExpiryInStatus = currentState === "ready" &&
+    tokenExpiryDisplay !== "";
+  const expiryHintColor = tokenExpiryWarning === "warning" ? "#b45309" : "#666";
+  const expiryHintWeight = tokenExpiryWarning === "warning" ? "500" : "normal";
+  const statusBgColor = currentState !== "ready" ||
+      tokenExpiryWarning === "warning"
+    ? "#fef3c7"
+    : "#d1fae5";
+  const isNeedsLogin = currentState === "needs-login";
+  const isTokenExpiredState = currentState === "token-expired";
+  const isReadyState = currentState === "ready";
 
-    return {
-      auth,
-      authInfo: {
-        state: currentState,
-        auth,
-        authCell: auth,
-        email: currentEmail,
-        hasRequiredScopes,
-        grantedScopes,
-        missingScopes,
-        tokenExpiresAt,
-        isTokenExpired,
-        tokenTimeRemaining,
-        tokenExpiryWarning,
-        tokenExpiryDisplay,
-        statusDotColor,
-        statusText,
-        piece: piece ?? null,
-        userChip: piece?.userChip ?? null,
-      },
-      currentEmail,
-      currentState,
-      hasRequiredScopes,
-      isNeedsLogin,
-      isReady,
-      isReadyState,
-      isTokenExpired,
-      isTokenExpiredState,
+  if (debugMode === true) {
+    console.log(`[${descriptor.displayName}Auth]`, "state:", currentState);
+    console.log(`[${descriptor.displayName}Auth]`, "isReady:", isReady);
+    console.log(
+      `[${descriptor.displayName}Auth]`,
+      "missingScopes:",
       missingScopes,
-      missingScopesList,
-      piece: piece ?? null,
-      refreshStream: piece?.refreshToken ?? null,
-      scopesList,
-      showAvatar,
-      avatarUrl,
-      showExpiryInStatus,
-      statusBgColor,
+    );
+    console.log(
+      `[${descriptor.displayName}Auth]`,
+      "isTokenExpired:",
+      isTokenExpired,
+    );
+  }
+
+  return {
+    auth,
+    authInfo: {
+      state: currentState,
+      auth,
+      authCell: auth,
+      email: currentEmail,
+      hasRequiredScopes,
+      grantedScopes,
+      missingScopes,
+      tokenExpiresAt,
+      isTokenExpired,
+      tokenTimeRemaining,
+      tokenExpiryWarning,
+      tokenExpiryDisplay,
       statusDotColor,
       statusText,
-      tokenExpiresAt,
-      tokenExpiryDisplay,
-      tokenExpiryWarning,
-      tokenTimeRemaining,
-      expiryHintColor,
-      expiryHintWeight,
+      piece: piece ?? null,
       userChip: piece?.userChip ?? null,
+    },
+    currentEmail,
+    currentState,
+    hasRequiredScopes,
+    isNeedsLogin,
+    isReady,
+    isReadyState,
+    isTokenExpired,
+    isTokenExpiredState,
+    missingScopes,
+    missingScopesList,
+    piece: piece ?? null,
+    refreshStream: piece?.refreshToken ?? null,
+    scopesList,
+    showAvatar,
+    avatarUrl,
+    showExpiryInStatus,
+    statusBgColor,
+    statusDotColor,
+    statusText,
+    tokenExpiresAt,
+    tokenExpiryDisplay,
+    tokenExpiryWarning,
+    tokenTimeRemaining,
+    expiryHintColor,
+    expiryHintWeight,
+    userChip: piece?.userChip ?? null,
+  };
+});
+
+// =============================================================================
+// BASE PATTERN
+// =============================================================================
+
+export const AuthManagerBase = pattern<AuthManagerBaseInput, AuthManagerOutput>(
+  ({ requiredScopes, accountType, debugMode, descriptor, createAuth }) => {
+    // ======================================================================
+    // WISH SETUP
+    // ======================================================================
+    const wishTag = computed(() => {
+      const type = accountType;
+      if (descriptor.variantWishTags && type !== "default") {
+        return descriptor.variantWishTags[type as string] ??
+          descriptor.wishTag;
+      }
+      return descriptor.wishTag;
+    });
+
+    const wishResult = wish<AuthPiece>({
+      query: wishTag,
+      scope: [".", "~"],
+    });
+
+    const now = Writable.of(safeDateNow());
+    startReactiveClock(now);
+
+    // Normalize the wish-provided UI into a local render-node contract so
+    // consumers see a stable UI field even when the underlying wish result
+    // has not materialized content yet.
+    const pickerUI = <>{wishResult[UI]}</>;
+    const authState = deriveAuthState({
+      descriptor,
+      piece: wishResult.result,
+      requiredScopes,
+      now,
+      debugMode,
+    });
+    const auth = authState.auth;
+    const authInfo = authState.authInfo;
+    const currentEmail = authState.currentEmail;
+    const currentState = authState.currentState;
+    const isReady = authState.isReady;
+    const tokenExpiryWarning = authState.tokenExpiryWarning;
+    const tokenExpiryDisplay = authState.tokenExpiryDisplay;
+
+    // Refresh state
+    const refreshing = Writable.of(false);
+    const refreshStream = authState.refreshStream;
+    const isRefreshing = computed(() => refreshing.get());
+    const refreshFailed = Writable.of(false);
+    const refreshStartedAt = Writable.of(0);
+
+    // Reactive watcher: detect when a refresh succeeds
+    computed(() => {
+      if (!refreshing.get()) return;
+      const expiresAt = authState.tokenExpiresAt ?? 0;
+      if (expiresAt > now.get()) {
+        refreshing.set(false);
+        refreshFailed.set(false);
+        refreshStartedAt.set(0);
+      }
+    });
+
+    // Mark the refresh attempt as failed if no new token arrives in time.
+    computed(() => {
+      if (!refreshing.get()) return;
+      const startedAt = refreshStartedAt.get();
+      if (!startedAt) return;
+      if (now.get() - startedAt >= REFRESH_FAILURE_TIMEOUT_MS) {
+        refreshing.set(false);
+        refreshFailed.set(true);
+        refreshStartedAt.set(0);
+      }
+    });
+
+    const reauthenticate = action(() => navigateTo(wishResult.result));
+
+    // ====================================================================
+    // UI COMPONENTS
+    // ====================================================================
+    // Status UI
+    const statusUI = (
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
+          padding: "8px 12px",
+          borderRadius: "6px",
+          backgroundColor: authState.statusBgColor,
+          fontSize: "14px",
+        }}
+      >
+        {authState.showAvatar
+          ? (
+            <img
+              src={authState.avatarUrl}
+              alt=""
+              style={{ width: "20px", height: "20px", borderRadius: "50%" }}
+            />
+          )
+          : (
+            <span
+              style={{
+                width: "10px",
+                height: "10px",
+                borderRadius: "50%",
+                backgroundColor: currentState === "ready"
+                  ? descriptor.brandColor
+                  : authState.statusDotColor,
+              }}
+            />
+          )}
+        <span>{authState.statusText}</span>
+        {authState.showExpiryInStatus
+          ? (
+            <span
+              style={{
+                marginLeft: "4px",
+                fontSize: "12px",
+                color: authState.expiryHintColor,
+                fontWeight: authState.expiryHintWeight,
+              }}
+            >
+              • {tokenExpiryDisplay}
+            </span>
+          )
+          : null}
+      </div>
+    );
+
+    // State boolean computeds for fullUI
+    const isMissingScopes = computed(() => currentState === "missing-scopes");
+
+    const manageButtonStyle = {
+      padding: "6px 12px",
+      backgroundColor: "transparent",
+      color: "#4b5563",
+      border: "1px solid #d1d5db",
+      borderRadius: "4px",
+      cursor: "pointer",
+      fontSize: "13px",
     };
-  });
+    const altButtonStyle = {
+      padding: "6px 12px",
+      backgroundColor: "transparent",
+      color: descriptor.brandColor,
+      border: `1px solid ${descriptor.brandColor}`,
+      borderRadius: "4px",
+      cursor: "pointer",
+      fontSize: "13px",
+    };
+    const actionRowStyle = {
+      padding: "12px 16px",
+      backgroundColor: "#f9fafb",
+      display: "flex",
+      gap: "12px",
+      alignItems: "center",
+    };
 
-  return pattern<AuthManagerInput, AuthManagerOutput>(
-    ({ requiredScopes, accountType, debugMode }) => {
-      // ======================================================================
-      // WISH SETUP
-      // ======================================================================
-      const wishTag = computed(() => {
-        const type = accountType;
-        if (descriptor.variantWishTags && type !== "default") {
-          return descriptor.variantWishTags[type as string] ??
-            descriptor.wishTag;
-        }
-        return descriptor.wishTag;
-      });
-
-      const wishResult = wish<AuthPiece>({
-        query: wishTag,
-        scope: [".", "~"],
-      });
-
-      const now = Writable.of(safeDateNow());
-      startReactiveClock(now);
-
-      // Normalize the wish-provided UI into a local render-node contract so
-      // consumers see a stable UI field even when the underlying wish result
-      // has not materialized content yet.
-      const pickerUI = <>{wishResult[UI]}</>;
-      const authState = deriveAuthState({
-        piece: wishResult.result,
-        requiredScopes,
-        now,
-        debugMode,
-      });
-      const auth = authState.auth;
-      const authInfo = authState.authInfo;
-      const currentEmail = authState.currentEmail;
-      const currentState = authState.currentState;
-      const isReady = authState.isReady;
-      const tokenExpiryWarning = authState.tokenExpiryWarning;
-      const tokenExpiryDisplay = authState.tokenExpiryDisplay;
-
-      // Refresh state
-      const refreshing = Writable.of(false);
-      const refreshStream = authState.refreshStream;
-      const isRefreshing = computed(() => refreshing.get());
-      const refreshFailed = Writable.of(false);
-      const refreshStartedAt = Writable.of(0);
-
-      // Reactive watcher: detect when a refresh succeeds
-      computed(() => {
-        if (!refreshing.get()) return;
-        const expiresAt = authState.tokenExpiresAt ?? 0;
-        if (expiresAt > now.get()) {
-          refreshing.set(false);
-          refreshFailed.set(false);
-          refreshStartedAt.set(0);
-        }
-      });
-
-      // Mark the refresh attempt as failed if no new token arrives in time.
-      computed(() => {
-        if (!refreshing.get()) return;
-        const startedAt = refreshStartedAt.get();
-        if (!startedAt) return;
-        if (now.get() - startedAt >= REFRESH_FAILURE_TIMEOUT_MS) {
-          refreshing.set(false);
-          refreshFailed.set(true);
-          refreshStartedAt.set(0);
-        }
-      });
-
-      // ====================================================================
-      // ACTIONS
-      // ====================================================================
-      const createAuth = action(() => {
-        const selected: Record<string, boolean> = {};
-        for (const key of Object.keys(descriptor.scopes)) {
-          selected[key] = false;
-        }
-        for (const scope of requiredScopes as string[]) {
-          if (scope in selected) selected[scope] = true;
-        }
-
-        // Build empty auth with correct token field
-        const emptyAuth: Record<string, unknown> = {
-          tokenType: "",
-          scope: [],
-          expiresIn: 0,
-          expiresAt: 0,
-          refreshToken: "",
-          user: { email: "", name: "", picture: "" },
-        };
-        emptyAuth[descriptor.tokenField] = "";
-
-        return navigateTo(
-          AuthPattern({
-            selectedScopes: selected,
-            auth: emptyAuth,
-          } as Opaque<T>),
-        );
-      });
-
-      const reauthenticate = action(() => navigateTo(wishResult.result));
-
-      // ====================================================================
-      // UI COMPONENTS
-      // ====================================================================
-      // Status UI
-      const statusUI = (
-        <div
+    // Loading UI
+    const loadingUI = (
+      <div
+        style={{
+          padding: "16px",
+          backgroundColor: "#f3f4f6",
+          borderRadius: "8px",
+          border: "1px solid #d1d5db",
+        }}
+      >
+        <h4 style={{ margin: "0 0 8px 0", color: "#374151" }}>
+          Connect Your {descriptor.displayName} Account
+        </h4>
+        <p
           style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            padding: "8px 12px",
+            margin: "0 0 12px 0",
+            fontSize: "14px",
+            color: "#4b5563",
+          }}
+        >
+          To use this feature, connect a {descriptor.displayName}{" "}
+          account with these permissions: {authState.scopesList}
+        </p>
+        {pickerUI}
+        <button
+          type="button"
+          onClick={createAuth}
+          style={{
+            padding: "10px 20px",
+            backgroundColor: descriptor.brandColor,
+            color: "white",
+            border: "none",
             borderRadius: "6px",
-            backgroundColor: authState.statusBgColor,
+            cursor: "pointer",
+            fontWeight: "500",
             fontSize: "14px",
           }}
         >
-          {authState.showAvatar
-            ? (
-              <img
-                src={authState.avatarUrl}
-                alt=""
-                style={{ width: "20px", height: "20px", borderRadius: "50%" }}
-              />
-            )
-            : (
-              <span
-                style={{
-                  width: "10px",
-                  height: "10px",
-                  borderRadius: "50%",
-                  backgroundColor: currentState === "ready"
-                    ? descriptor.brandColor
-                    : authState.statusDotColor,
-                }}
-              />
-            )}
-          <span>{authState.statusText}</span>
-          {authState.showExpiryInStatus
-            ? (
-              <span
-                style={{
-                  marginLeft: "4px",
-                  fontSize: "12px",
-                  color: authState.expiryHintColor,
-                  fontWeight: authState.expiryHintWeight,
-                }}
-              >
-                • {tokenExpiryDisplay}
-              </span>
-            )
-            : null}
-        </div>
-      );
+          Connect {descriptor.displayName} Account
+        </button>
+      </div>
+    );
 
-      // State boolean computeds for fullUI
-      const isMissingScopes = computed(() => currentState === "missing-scopes");
-
-      const manageButtonStyle = {
-        padding: "6px 12px",
-        backgroundColor: "transparent",
-        color: "#4b5563",
-        border: "1px solid #d1d5db",
-        borderRadius: "4px",
-        cursor: "pointer",
-        fontSize: "13px",
-      };
-      const altButtonStyle = {
-        padding: "6px 12px",
-        backgroundColor: "transparent",
-        color: descriptor.brandColor,
-        border: `1px solid ${descriptor.brandColor}`,
-        borderRadius: "4px",
-        cursor: "pointer",
-        fontSize: "13px",
-      };
-      const actionRowStyle = {
-        padding: "12px 16px",
-        backgroundColor: "#f9fafb",
-        display: "flex",
-        gap: "12px",
-        alignItems: "center",
-      };
-
-      // Loading UI
-      const loadingUI = (
-        <div
-          style={{
-            padding: "16px",
-            backgroundColor: "#f3f4f6",
-            borderRadius: "8px",
-            border: "1px solid #d1d5db",
-          }}
-        >
-          <h4 style={{ margin: "0 0 8px 0", color: "#374151" }}>
-            Connect Your {descriptor.displayName} Account
-          </h4>
-          <p
-            style={{
-              margin: "0 0 12px 0",
-              fontSize: "14px",
-              color: "#4b5563",
-            }}
-          >
-            To use this feature, connect a {descriptor.displayName}{" "}
-            account with these permissions: {authState.scopesList}
-          </p>
-          {pickerUI}
-          <button
-            type="button"
-            onClick={createAuth}
-            style={{
-              padding: "10px 20px",
-              backgroundColor: descriptor.brandColor,
-              color: "white",
-              border: "none",
-              borderRadius: "6px",
-              cursor: "pointer",
-              fontWeight: "500",
-              fontSize: "14px",
-            }}
-          >
-            Connect {descriptor.displayName} Account
-          </button>
-        </div>
-      );
-
-      // Needs login UI
-      const needsLoginUI = (
-        <div
-          style={{
-            borderRadius: "8px",
-            border: "1px solid #ef4444",
-            overflow: "hidden",
-          }}
-        >
-          <div
-            style={{
-              padding: "12px 16px",
-              backgroundColor: "#fee2e2",
-              borderBottom: "1px solid #ef4444",
-            }}
-          >
-            <h4
-              style={{
-                margin: "0 0 4px 0",
-                color: "#dc2626",
-                fontSize: "14px",
-              }}
-            >
-              Sign In Required
-            </h4>
-            <div style={{ margin: "0", fontSize: "13px", color: "#4b5563" }}>
-              Please sign in with your {descriptor.displayName}{" "}
-              account to continue.
-            </div>
-          </div>
-          {pickerUI}
-          <div style={actionRowStyle}>
-            <button
-              type="button"
-              onClick={reauthenticate}
-              style={manageButtonStyle}
-            >
-              Manage this account
-            </button>
-            <button type="button" onClick={createAuth} style={altButtonStyle}>
-              + Use different account
-            </button>
-          </div>
-        </div>
-      );
-
-      // Missing scopes UI
-      const missingScopesUI = (
-        <div
-          style={{
-            borderRadius: "8px",
-            border: "1px solid #f97316",
-            overflow: "hidden",
-          }}
-        >
-          <div
-            style={{
-              padding: "12px 16px",
-              backgroundColor: "#ffedd5",
-              borderBottom: "1px solid #f97316",
-            }}
-          >
-            <h4
-              style={{
-                margin: "0 0 4px 0",
-                color: "#c2410c",
-                fontSize: "14px",
-              }}
-            >
-              Additional Permissions Needed
-            </h4>
-            <div style={{ margin: "0", fontSize: "13px", color: "#4b5563" }}>
-              Connected as <strong>{currentEmail}</strong>, but missing:{" "}
-              {authState.missingScopesList}
-            </div>
-          </div>
-          {pickerUI}
-          <div style={actionRowStyle}>
-            <button
-              type="button"
-              onClick={reauthenticate}
-              style={manageButtonStyle}
-            >
-              Manage this account
-            </button>
-            <button type="button" onClick={createAuth} style={altButtonStyle}>
-              + Use different account
-            </button>
-          </div>
-        </div>
-      );
-
-      // Token expired UI
-      const tokenExpiredUI = (
-        <div
-          style={{
-            borderRadius: "8px",
-            border: "1px solid #ef4444",
-            overflow: "hidden",
-          }}
-        >
-          <div
-            style={{
-              padding: "12px 16px",
-              backgroundColor: "#fee2e2",
-              borderBottom: "1px solid #ef4444",
-            }}
-          >
-            <h4
-              style={{
-                margin: "0 0 4px 0",
-                color: "#dc2626",
-                fontSize: "14px",
-              }}
-            >
-              Session Expired
-            </h4>
-            <div style={{ margin: "0", fontSize: "13px", color: "#4b5563" }}>
-              Your {descriptor.displayName} session has expired.
-            </div>
-            <div
-              style={{
-                marginTop: "12px",
-                display: "flex",
-                gap: "8px",
-                alignItems: "center",
-              }}
-            >
-              <button
-                type="button"
-                onClick={attemptRefresh({
-                  refreshStream,
-                  refreshing,
-                  refreshFailed,
-                  refreshStartedAt,
-                })}
-                disabled={refreshing}
-                style={{
-                  padding: "8px 16px",
-                  backgroundColor: "#3b82f6",
-                  color: "white",
-                  border: "none",
-                  borderRadius: "6px",
-                  cursor: "pointer",
-                  fontWeight: "500",
-                  fontSize: "14px",
-                }}
-              >
-                {isRefreshing ? "Refreshing..." : "Refresh Session"}
-              </button>
-              {refreshFailed
-                ? (
-                  <span style={{ fontSize: "13px", color: "#dc2626" }}>
-                    Refresh failed — try signing in again below.
-                  </span>
-                )
-                : null}
-            </div>
-          </div>
-          {pickerUI}
-          <div style={actionRowStyle}>
-            <button
-              type="button"
-              onClick={reauthenticate}
-              style={manageButtonStyle}
-            >
-              Manage this account
-            </button>
-            <button type="button" onClick={createAuth} style={altButtonStyle}>
-              + Use different account
-            </button>
-          </div>
-        </div>
-      );
-
-      // Ready UI
-      const showTokenWarning = computed(() => tokenExpiryWarning === "warning");
-      const readyBorderRadius = computed(() =>
-        tokenExpiryWarning === "warning" ? "8px 8px 0 0" : "8px"
-      );
-      const readyBorderBottom = computed(() =>
-        tokenExpiryWarning === "warning" ? "none" : "1px solid #10b981"
-      );
-      const showExpiryInReady = computed(() => !!tokenExpiryDisplay);
-
-      const readyUI = (
-        <div>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-              padding: "12px 16px",
-              backgroundColor: "#d1fae5",
-              borderRadius: readyBorderRadius,
-              border: "1px solid #10b981",
-              borderBottom: readyBorderBottom,
-            }}
-          >
-            {authState.userChip as any}
-            <div
-              style={{
-                marginLeft: "auto",
-                display: "flex",
-                alignItems: "center",
-                gap: "12px",
-              }}
-            >
-              {showExpiryInReady
-                ? (
-                  <span style={{ fontSize: "12px", color: "#059669" }}>
-                    {tokenExpiryDisplay}
-                  </span>
-                )
-                : null}
-              <button
-                type="button"
-                onClick={reauthenticate}
-                style={{
-                  background: "none",
-                  border: "none",
-                  color: "#047857",
-                  cursor: "pointer",
-                  fontSize: "12px",
-                  padding: "2px 6px",
-                  borderRadius: "4px",
-                }}
-              >
-                Switch
-              </button>
-              <button
-                type="button"
-                onClick={createAuth}
-                style={{
-                  background: "none",
-                  border: "none",
-                  color: "#047857",
-                  cursor: "pointer",
-                  fontSize: "12px",
-                  padding: "2px 6px",
-                  borderRadius: "4px",
-                }}
-              >
-                + Add
-              </button>
-            </div>
-          </div>
-          {showTokenWarning
-            ? (
-              <div
-                style={{
-                  padding: "8px 16px",
-                  backgroundColor: "#fef3c7",
-                  borderRadius: "0 0 8px 8px",
-                  border: "1px solid #f59e0b",
-                  borderTop: "none",
-                  fontSize: "13px",
-                  color: "#b45309",
-                }}
-              >
-                Token expires soon. You may need to re-authenticate shortly.
-              </div>
-            )
-            : null}
-        </div>
-      );
-
-      // Refreshing UI
-      const refreshingUI = (
+    // Needs login UI
+    const needsLoginUI = (
+      <div
+        style={{
+          borderRadius: "8px",
+          border: "1px solid #ef4444",
+          overflow: "hidden",
+        }}
+      >
         <div
           style={{
             padding: "12px 16px",
-            backgroundColor: "#fef3c7",
-            borderRadius: "8px",
-            border: "1px solid #f59e0b",
+            backgroundColor: "#fee2e2",
+            borderBottom: "1px solid #ef4444",
+          }}
+        >
+          <h4
+            style={{
+              margin: "0 0 4px 0",
+              color: "#dc2626",
+              fontSize: "14px",
+            }}
+          >
+            Sign In Required
+          </h4>
+          <div style={{ margin: "0", fontSize: "13px", color: "#4b5563" }}>
+            Please sign in with your {descriptor.displayName}{" "}
+            account to continue.
+          </div>
+        </div>
+        {pickerUI}
+        <div style={actionRowStyle}>
+          <button
+            type="button"
+            onClick={reauthenticate}
+            style={manageButtonStyle}
+          >
+            Manage this account
+          </button>
+          <button type="button" onClick={createAuth} style={altButtonStyle}>
+            + Use different account
+          </button>
+        </div>
+      </div>
+    );
+
+    // Missing scopes UI
+    const missingScopesUI = (
+      <div
+        style={{
+          borderRadius: "8px",
+          border: "1px solid #f97316",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            padding: "12px 16px",
+            backgroundColor: "#ffedd5",
+            borderBottom: "1px solid #f97316",
+          }}
+        >
+          <h4
+            style={{
+              margin: "0 0 4px 0",
+              color: "#c2410c",
+              fontSize: "14px",
+            }}
+          >
+            Additional Permissions Needed
+          </h4>
+          <div style={{ margin: "0", fontSize: "13px", color: "#4b5563" }}>
+            Connected as <strong>{currentEmail}</strong>, but missing:{" "}
+            {authState.missingScopesList}
+          </div>
+        </div>
+        {pickerUI}
+        <div style={actionRowStyle}>
+          <button
+            type="button"
+            onClick={reauthenticate}
+            style={manageButtonStyle}
+          >
+            Manage this account
+          </button>
+          <button type="button" onClick={createAuth} style={altButtonStyle}>
+            + Use different account
+          </button>
+        </div>
+      </div>
+    );
+
+    // Token expired UI
+    const tokenExpiredUI = (
+      <div
+        style={{
+          borderRadius: "8px",
+          border: "1px solid #ef4444",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            padding: "12px 16px",
+            backgroundColor: "#fee2e2",
+            borderBottom: "1px solid #ef4444",
+          }}
+        >
+          <h4
+            style={{
+              margin: "0 0 4px 0",
+              color: "#dc2626",
+              fontSize: "14px",
+            }}
+          >
+            Session Expired
+          </h4>
+          <div style={{ margin: "0", fontSize: "13px", color: "#4b5563" }}>
+            Your {descriptor.displayName} session has expired.
+          </div>
+          <div
+            style={{
+              marginTop: "12px",
+              display: "flex",
+              gap: "8px",
+              alignItems: "center",
+            }}
+          >
+            <button
+              type="button"
+              onClick={attemptRefresh({
+                refreshStream,
+                refreshing,
+                refreshFailed,
+                refreshStartedAt,
+              })}
+              disabled={refreshing}
+              style={{
+                padding: "8px 16px",
+                backgroundColor: "#3b82f6",
+                color: "white",
+                border: "none",
+                borderRadius: "6px",
+                cursor: "pointer",
+                fontWeight: "500",
+                fontSize: "14px",
+              }}
+            >
+              {isRefreshing ? "Refreshing..." : "Refresh Session"}
+            </button>
+            {refreshFailed
+              ? (
+                <span style={{ fontSize: "13px", color: "#dc2626" }}>
+                  Refresh failed — try signing in again below.
+                </span>
+              )
+              : null}
+          </div>
+        </div>
+        {pickerUI}
+        <div style={actionRowStyle}>
+          <button
+            type="button"
+            onClick={reauthenticate}
+            style={manageButtonStyle}
+          >
+            Manage this account
+          </button>
+          <button type="button" onClick={createAuth} style={altButtonStyle}>
+            + Use different account
+          </button>
+        </div>
+      </div>
+    );
+
+    // Ready UI
+    const showTokenWarning = computed(() => tokenExpiryWarning === "warning");
+    const readyBorderRadius = computed(() =>
+      tokenExpiryWarning === "warning" ? "8px 8px 0 0" : "8px"
+    );
+    const readyBorderBottom = computed(() =>
+      tokenExpiryWarning === "warning" ? "none" : "1px solid #10b981"
+    );
+    const showExpiryInReady = computed(() => !!tokenExpiryDisplay);
+
+    const readyUI = (
+      <div>
+        <div
+          style={{
             display: "flex",
             alignItems: "center",
             gap: "8px",
-            fontSize: "14px",
-            color: "#b45309",
+            padding: "12px 16px",
+            backgroundColor: "#d1fae5",
+            borderRadius: readyBorderRadius,
+            border: "1px solid #10b981",
+            borderBottom: readyBorderBottom,
           }}
         >
-          <span style={{ fontSize: "16px" }}>⟳</span>
-          Refreshing session...
+          {authState.userChip as any}
+          <div
+            style={{
+              marginLeft: "auto",
+              display: "flex",
+              alignItems: "center",
+              gap: "12px",
+            }}
+          >
+            {showExpiryInReady
+              ? (
+                <span style={{ fontSize: "12px", color: "#059669" }}>
+                  {tokenExpiryDisplay}
+                </span>
+              )
+              : null}
+            <button
+              type="button"
+              onClick={reauthenticate}
+              style={{
+                background: "none",
+                border: "none",
+                color: "#047857",
+                cursor: "pointer",
+                fontSize: "12px",
+                padding: "2px 6px",
+                borderRadius: "4px",
+              }}
+            >
+              Switch
+            </button>
+            <button
+              type="button"
+              onClick={createAuth}
+              style={{
+                background: "none",
+                border: "none",
+                color: "#047857",
+                cursor: "pointer",
+                fontSize: "12px",
+                padding: "2px 6px",
+                borderRadius: "4px",
+              }}
+            >
+              + Add
+            </button>
+          </div>
         </div>
-      );
+        {showTokenWarning
+          ? (
+            <div
+              style={{
+                padding: "8px 16px",
+                backgroundColor: "#fef3c7",
+                borderRadius: "0 0 8px 8px",
+                border: "1px solid #f59e0b",
+                borderTop: "none",
+                fontSize: "13px",
+                color: "#b45309",
+              }}
+            >
+              Token expires soon. You may need to re-authenticate shortly.
+            </div>
+          )
+          : null}
+      </div>
+    );
 
-      // Compose fullUI via nested ternaries
-      const loginOrLoad = authState.isNeedsLogin ? needsLoginUI : loadingUI;
-      const scopesOrPrev = isMissingScopes ? missingScopesUI : loginOrLoad;
-      const expiredOrPrev = authState.isTokenExpiredState
-        ? tokenExpiredUI
-        : scopesOrPrev;
-      const refreshOrPrev = isRefreshing ? refreshingUI : expiredOrPrev;
-      const fullUI = authState.isReadyState ? readyUI : refreshOrPrev;
+    // Refreshing UI
+    const refreshingUI = (
+      <div
+        style={{
+          padding: "12px 16px",
+          backgroundColor: "#fef3c7",
+          borderRadius: "8px",
+          border: "1px solid #f59e0b",
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
+          fontSize: "14px",
+          color: "#b45309",
+        }}
+      >
+        <span style={{ fontSize: "16px" }}>⟳</span>
+        Refreshing session...
+      </div>
+    );
 
-      // ====================================================================
-      // RETURN
-      // ====================================================================
-      return {
-        auth,
-        authInfo,
-        isReady,
-        currentEmail,
-        currentState,
-        pickerUI,
-        statusUI,
-        fullUI,
-        [UI]: fullUI,
-      };
-    },
-  );
-}
+    // Compose fullUI via nested ternaries
+    const loginOrLoad = authState.isNeedsLogin ? needsLoginUI : loadingUI;
+    const scopesOrPrev = isMissingScopes ? missingScopesUI : loginOrLoad;
+    const expiredOrPrev = authState.isTokenExpiredState
+      ? tokenExpiredUI
+      : scopesOrPrev;
+    const refreshOrPrev = isRefreshing ? refreshingUI : expiredOrPrev;
+    const fullUI = authState.isReadyState ? readyUI : refreshOrPrev;
+
+    // ====================================================================
+    // RETURN
+    // ====================================================================
+    return {
+      auth,
+      authInfo,
+      isReady,
+      currentEmail,
+      currentState,
+      pickerUI,
+      statusUI,
+      fullUI,
+      [UI]: fullUI,
+    };
+  },
+);
