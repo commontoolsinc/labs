@@ -2215,9 +2215,15 @@ export function recursivelyAddIDIfNeeded<T>(
     let state: FabricValue | undefined;
     try {
       state = value[DECONSTRUCT]();
-    } catch {
-      // `[DECONSTRUCT]` not yet implemented for this subclass
-      // (`FabricMap`, `FabricSet`); skip the side-effect traversal.
+    } catch (e) {
+      // `[DECONSTRUCT]` not yet implemented for this subclass (e.g.,
+      // `FabricMap`, `FabricSet`); skip the side-effect traversal. Log
+      // so the gap surfaces if/when these classes start to see traffic.
+      logger.warn(
+        "fabric-instance-deconstruct-skip",
+        `recursivelyAddIDIfNeeded: skipping ${value.constructor.name} (no [DECONSTRUCT])`,
+        e,
+      );
     }
     if (state !== undefined && (isRecord(state) || Array.isArray(state))) {
       recursivelyAddIDIfNeeded(state, frame, seen);
