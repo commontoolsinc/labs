@@ -962,15 +962,34 @@ export class PatternContextValidationTransformer
       return true;
     }
 
-    if (!this.isCallableUseSite(node)) {
+    if (
+      !this.isCallableUseSite(node) &&
+      !declarations.some((declaration) =>
+        this.shouldCheckInferredCallabilityForCapture(declaration)
+      )
+    ) {
       return false;
     }
 
     // Keep checker queries narrow; broad validation-time type queries can
     // perturb later schema inference ordering for unrelated expression sites.
+    // In addition to direct calls, check inferred callability for captured
+    // aliases and contextual bindings so forwarded helpers cannot cross SES
+    // callback boundaries unnoticed.
     const type = checker.getTypeAtLocation(node);
     return type.getCallSignatures().length > 0 ||
       type.getConstructSignatures().length > 0;
+  }
+
+  private shouldCheckInferredCallabilityForCapture(
+    declaration: ts.Declaration,
+  ): boolean {
+    return (
+      ts.isBindingElement(declaration) ||
+      ts.isParameter(declaration) ||
+      (ts.isVariableDeclaration(declaration) &&
+        declaration.initializer !== undefined)
+    );
   }
 
   private isSyntacticCallable(declaration: ts.Declaration): boolean {

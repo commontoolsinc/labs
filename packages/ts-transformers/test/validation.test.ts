@@ -3120,6 +3120,52 @@ Deno.test("SES Callback Self-Containment Validation", async (t) => {
   );
 
   await t.step(
+    "errors when derive callback captures forwarded enclosing helper function",
+    async () => {
+      const source =
+        `      import { computed, derive, pattern } from "commonfabric";
+
+      export default pattern(() => {
+        const label = computed(() => {
+          const helper = (value: string) => value.toUpperCase();
+          const forwarded = helper;
+          return derive("x", () => ({ helper: forwarded }));
+        });
+        return { label };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertHasErrorType(errors, "ses-callback:callable-capture");
+    },
+  );
+
+  await t.step(
+    "errors when derive callback captures forwarded function-typed pattern input",
+    async () => {
+      const source =
+        `      import { computed, derive, pattern } from "commonfabric";
+
+      export default pattern<{
+        helper: (value: string) => string;
+      }>(({ helper }) => {
+        const label = computed(() => {
+          return derive("x", () => ({ helper }));
+        });
+        return { label };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertHasErrorType(errors, "ses-callback:callable-capture");
+    },
+  );
+
+  await t.step(
     "errors when action callback captures enclosing helper function",
     async () => {
       const source =
@@ -3201,6 +3247,35 @@ Deno.test("SES Callback Self-Containment Validation", async (t) => {
       });
       const errors = getErrors(diagnostics);
       assertHasErrorType(errors, "ses-callback:callable-capture");
+    },
+  );
+
+  await t.step(
+    "allows derive callback to capture forwarded non-callable data",
+    async () => {
+      const source =
+        `      import { computed, derive, pattern } from "commonfabric";
+
+      export default pattern(() => {
+        const label = computed(() => {
+          const value = "x";
+          const forwarded = value;
+          return derive("x", () => forwarded);
+        });
+        return { label };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics).filter((error) =>
+        error.type === "ses-callback:callable-capture"
+      );
+      assertEquals(
+        errors.length,
+        0,
+        "Forwarded non-callable data should remain valid callback state",
+      );
     },
   );
 
