@@ -53,7 +53,7 @@ export {
  * functions use the extended type system (`bigint`, `Map`, `Set`,
  * `Uint8Array`, `Date`, etc.).
  */
-let modernDataModelEnabled = false;
+let modernDataModelEnabled = true;
 
 /**
  * Activates or deactivates modern data model mode. Called by the `Runtime`
@@ -72,12 +72,12 @@ export function getDataModelConfig(): boolean {
 }
 
 /**
- * Restores modern data model mode to its default (disabled). Called by
+ * Restores modern data model mode to its default (enabled). Called by
  * `Runtime.dispose()` to avoid leaking flags between runtime instances or
  * test runs.
  */
 export function resetDataModelConfig(): void {
-  modernDataModelEnabled = false;
+  modernDataModelEnabled = true;
 }
 
 //
