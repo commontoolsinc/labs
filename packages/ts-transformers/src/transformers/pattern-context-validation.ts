@@ -36,6 +36,7 @@
  *   callback: ERROR (use a nested computed()/derive())
  */
 import ts from "typescript";
+import { COMMONFABRIC_REACTIVE_ORIGIN_BUILDER_NAMES } from "../core/commonfabric-runtime-registry.ts";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
 import {
   classifyArrayMethodCallSite,
@@ -72,6 +73,7 @@ const SES_SELF_CONTAINED_CALLBACK_BOUNDARIES = new Set<
 >([
   "event-handler",
   "reactive-array-method",
+  "pattern-tool",
   "pattern-builder",
   "render-builder",
   "derive",
@@ -79,15 +81,6 @@ const SES_SELF_CONTAINED_CALLBACK_BOUNDARIES = new Set<
   "action-builder",
   "lift-builder",
   "handler-builder",
-]);
-
-const STANDALONE_FUNCTION_BUILDER_NAMES = new Set([
-  "action",
-  "computed",
-  "handler",
-  "lift",
-  "pattern",
-  "render",
 ]);
 
 export class PatternContextValidationTransformer
@@ -787,7 +780,9 @@ export class PatternContextValidationTransformer
         if (callKind) {
           if (
             callKind.kind === "builder" &&
-            STANDALONE_FUNCTION_BUILDER_NAMES.has(callKind.builderName)
+            COMMONFABRIC_REACTIVE_ORIGIN_BUILDER_NAMES.has(
+              callKind.builderName,
+            )
           ) {
             context.reportDiagnostic({
               severity: "error",

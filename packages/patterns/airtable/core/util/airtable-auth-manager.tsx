@@ -20,7 +20,7 @@
  * ```
  */
 
-import { __cf_data, action, navigateTo, pattern, Writable } from "commonfabric";
+import { action, navigateTo, pattern, Writable } from "commonfabric";
 import { AuthManagerBase } from "../../../auth/create-auth-manager.tsx";
 import type { AuthManagerDescriptor } from "../../../auth/auth-manager-descriptor.ts";
 import AirtableAuth from "../airtable-auth.tsx";
@@ -48,31 +48,27 @@ export type ScopeKey =
   | "webhook:manage";
 
 /** Human-readable scope descriptions */
-const AIRTABLE_SCOPE_DESCRIPTIONS = __cf_data(
-  {
-    "data.records:read": "Read records",
-    "data.records:write": "Write records",
-    "data.recordComments:read": "Read record comments",
-    "data.recordComments:write": "Write record comments",
-    "schema.bases:read": "Read base schemas",
-    "schema.bases:write": "Write base schemas",
-    "webhook:manage": "Manage webhooks",
-  } as const,
-);
+const AIRTABLE_SCOPE_DESCRIPTIONS = {
+  "data.records:read": "Read records",
+  "data.records:write": "Write records",
+  "data.recordComments:read": "Read record comments",
+  "data.recordComments:write": "Write record comments",
+  "schema.bases:read": "Read base schemas",
+  "schema.bases:write": "Write base schemas",
+  "webhook:manage": "Manage webhooks",
+} as const;
 export const SCOPE_DESCRIPTIONS: Record<ScopeKey, string> =
   AIRTABLE_SCOPE_DESCRIPTIONS;
 
-/** Unified scope registry for the auth manager factory */
-const SCOPES: AuthManagerDescriptor["scopes"] = __cf_data(
-  Object.fromEntries(
-    Object.entries(SCOPE_DESCRIPTIONS).map(([key, desc]) => [
-      key,
-      { description: desc, scopeString: key },
-    ]),
-  ),
+/** Unified scope registry for the auth manager base */
+const SCOPES: AuthManagerDescriptor["scopes"] = Object.fromEntries(
+  Object.entries(SCOPE_DESCRIPTIONS).map(([key, desc]) => [
+    key,
+    { description: desc, scopeString: key },
+  ]),
 );
 
-const AirtableAuthManagerDescriptor: AuthManagerDescriptor = __cf_data({
+const AirtableAuthManagerDescriptor: AuthManagerDescriptor = {
   name: "airtable",
   displayName: "Airtable",
   brandColor: "#18BFFF",
@@ -80,7 +76,7 @@ const AirtableAuthManagerDescriptor: AuthManagerDescriptor = __cf_data({
   tokenField: "accessToken",
   scopes: SCOPES,
   hasAvatarSupport: false,
-});
+};
 
 export const AirtableAuthManager = pattern<
   import("../../../auth/create-auth-manager.tsx").AuthManagerInput,

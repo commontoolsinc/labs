@@ -954,7 +954,7 @@ const AIRTABLE_AUTH_MANAGER_SOURCE = `/**
  * \`\`\`
  */
 
-import { __cf_data, action, navigateTo, pattern, Writable } from "commonfabric";
+import { action, navigateTo, pattern, Writable } from "commonfabric";
 import { AuthManagerBase } from "../../../auth/create-auth-manager.tsx";
 import type { AuthManagerDescriptor } from "../../../auth/auth-manager-descriptor.ts";
 import AirtableAuth from "../airtable-auth.tsx";
@@ -982,31 +982,27 @@ export type ScopeKey =
   | "webhook:manage";
 
 /** Human-readable scope descriptions */
-const AIRTABLE_SCOPE_DESCRIPTIONS = __cf_data(
-  {
-    "data.records:read": "Read records",
-    "data.records:write": "Write records",
-    "data.recordComments:read": "Read record comments",
-    "data.recordComments:write": "Write record comments",
-    "schema.bases:read": "Read base schemas",
-    "schema.bases:write": "Write base schemas",
-    "webhook:manage": "Manage webhooks",
-  } as const,
-);
+const AIRTABLE_SCOPE_DESCRIPTIONS = {
+  "data.records:read": "Read records",
+  "data.records:write": "Write records",
+  "data.recordComments:read": "Read record comments",
+  "data.recordComments:write": "Write record comments",
+  "schema.bases:read": "Read base schemas",
+  "schema.bases:write": "Write base schemas",
+  "webhook:manage": "Manage webhooks",
+} as const;
 export const SCOPE_DESCRIPTIONS: Record<ScopeKey, string> =
   AIRTABLE_SCOPE_DESCRIPTIONS;
 
 /** Unified scope registry for the auth manager base */
-const SCOPES: AuthManagerDescriptor["scopes"] = __cf_data(
-  Object.fromEntries(
-    Object.entries(SCOPE_DESCRIPTIONS).map(([key, desc]) => [
-      key,
-      { description: desc, scopeString: key },
-    ]),
-  ),
+const SCOPES: AuthManagerDescriptor["scopes"] = Object.fromEntries(
+  Object.entries(SCOPE_DESCRIPTIONS).map(([key, desc]) => [
+    key,
+    { description: desc, scopeString: key },
+  ]),
 );
 
-const AirtableAuthManagerDescriptor: AuthManagerDescriptor = __cf_data({
+const AirtableAuthManagerDescriptor: AuthManagerDescriptor = {
   name: "airtable",
   displayName: "Airtable",
   brandColor: "#18BFFF",
@@ -1014,7 +1010,7 @@ const AirtableAuthManagerDescriptor: AuthManagerDescriptor = __cf_data({
   tokenField: "accessToken",
   scopes: SCOPES,
   hasAvatarSupport: false,
-});
+};
 
 export const AirtableAuthManager = pattern<
   import("../../../auth/create-auth-manager.tsx").AuthManagerInput,
@@ -2365,13 +2361,13 @@ ${
 Auth manager utility pattern. Wraps the shared \`AuthManagerBase\` pattern — follow the Airtable auth manager reference exactly:
 
 - CTS transforms are enabled by default; do not add \`/// <cf-disable-transform />\`
-- Import \`__cf_data\`, \`action\`, \`navigateTo\`, \`pattern\`, and \`Writable\` from \`"commonfabric"\`
+- Import \`action\`, \`navigateTo\`, \`pattern\`, and \`Writable\` from \`"commonfabric"\`
 - Import \`AuthManagerBase\` from \`"../../../auth/create-auth-manager.tsx"\`
 - Import \`AuthManagerDescriptor\` type from \`"../../../auth/auth-manager-descriptor.ts"\`
 - Import the auth pattern: \`import ${pascalName}Auth from "../${providerName}-auth.tsx";\`
 - Re-export shared types: \`AuthInfo\`, \`AuthState\`, \`TokenExpiryWarning\`, \`AuthManagerInput\`, \`AuthManagerOutput\`
 - Re-export the auth type from the auth pattern
-- Define a \`__cf_data()\` descriptor object with: name, displayName, brandColor (\`${brandColor}\`), wishTag (\`"${hashTag}"\`), tokenField, scopes, hasAvatarSupport
+- Define a descriptor object with: name, displayName, brandColor (\`${brandColor}\`), wishTag (\`"${hashTag}"\`), tokenField, scopes, hasAvatarSupport
 - Define \`${pascalName}AuthManager\` as a module-scope \`pattern(...)\`
 - Inside that pattern, define \`createAuth = action(() => navigateTo(${pascalName}Auth(...)))\`; do not put pattern construction inside a standalone factory function
 - Build \`selectedScopes\` explicitly with one \`Writable.of(required.includes("<scope>"))\` property per provider scope

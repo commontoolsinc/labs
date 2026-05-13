@@ -3163,6 +3163,28 @@ Deno.test("SES Callback Self-Containment Validation", async (t) => {
   );
 
   await t.step(
+    "errors when patternTool callback captures enclosing helper function",
+    async () => {
+      const source =
+        `      import { computed, pattern, patternTool } from "commonfabric";
+
+      export default pattern(() => {
+        const tool = computed(() => {
+          const helper = (value: string) => value.toUpperCase();
+          return patternTool(({ query }: { query: string }) => helper(query));
+        });
+        return { tool };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertHasErrorType(errors, "ses-callback:callable-capture");
+    },
+  );
+
+  await t.step(
     "errors when reactive map callback captures function-typed pattern input",
     async () => {
       const source = `      import { h, pattern } from "commonfabric";
