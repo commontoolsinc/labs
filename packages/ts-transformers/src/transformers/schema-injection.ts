@@ -517,6 +517,32 @@ function collectFunctionSchemaTypeNodes(
     }
   }
 
+  if (
+    context &&
+    unwrappedReturnExpr &&
+    ts.isObjectLiteralExpression(unwrappedReturnExpr) &&
+    objectLiteralHasExplicitScopeValueTypeNodes(unwrappedReturnExpr, checker)
+  ) {
+    const scopedResult = buildObjectLiteralReturnTypeNode(
+      unwrappedReturnExpr,
+      checker,
+      sourceFile,
+      factory,
+      typeRegistry,
+      capabilityRegistry,
+      context,
+    );
+    if (scopedResult) {
+      preserveUiContractHint(
+        resultNode,
+        scopedResult,
+        context.options.schemaHints,
+      );
+      resultNode = scopedResult;
+      resultType = undefined;
+    }
+  }
+
   const needsResultRecovery = !resultNode ||
     containsAnyOrUnknownTypeNode(resultNode) ||
     shouldDropFallbackTypeForSchema(
@@ -1605,7 +1631,8 @@ function buildObjectLiteralReturnTypeNode(
       return undefined;
     }
 
-    const valueTypeNode = typeToSchemaTypeNode(valueType, checker, sourceFile);
+    const valueTypeNode = getExplicitValueTypeNode(valueExpr, checker) ??
+      typeToSchemaTypeNode(valueType, checker, sourceFile);
     if (!valueTypeNode) {
       return undefined;
     }
@@ -1640,6 +1667,77 @@ function buildObjectLiteralReturnTypeNode(
     members,
     { factory, checker, typeRegistry },
   );
+}
+
+function getExplicitValueTypeNode(
+  valueExpr: ts.Expression,
+  checker: ts.TypeChecker,
+): ts.TypeNode | undefined {
+  if (!ts.isIdentifier(valueExpr)) {
+    return undefined;
+  }
+  const symbol = checker.getSymbolAtLocation(valueExpr);
+  let declaration = symbol?.valueDeclaration ?? symbol?.declarations?.[0];
+  if (declaration && ts.isShorthandPropertyAssignment(declaration)) {
+    const shorthandValueSymbol = checker.getShorthandAssignmentValueSymbol(
+      declaration,
+    );
+    declaration = shorthandValueSymbol?.valueDeclaration ??
+      shorthandValueSymbol?.declarations?.[0];
+  }
+  if (declaration && ts.isVariableDeclaration(declaration)) {
+    return declaration.type;
+  }
+  return undefined;
+}
+
+function objectLiteralHasExplicitScopeValueTypeNodes(
+  expr: ts.ObjectLiteralExpression,
+  checker: ts.TypeChecker,
+): boolean {
+  for (const property of expr.properties) {
+    if (
+      !ts.isPropertyAssignment(property) &&
+      !ts.isShorthandPropertyAssignment(property)
+    ) {
+      continue;
+    }
+
+    const valueExpr = ts.isPropertyAssignment(property)
+      ? unwrapExpression(property.initializer)
+      : property.name;
+    const valueTypeNode = getExplicitValueTypeNode(valueExpr, checker);
+    if (valueTypeNode && typeNodeContainsScopeWrapper(valueTypeNode)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function typeNodeContainsScopeWrapper(typeNode: ts.TypeNode): boolean {
+  const unwrapped = unwrapParenthesizedSchemaTypeNode(typeNode);
+  if (ts.isTypeReferenceNode(unwrapped)) {
+    const name = ts.isIdentifier(unwrapped.typeName)
+      ? unwrapped.typeName.text
+      : unwrapped.typeName.right.text;
+    return SCOPE_ALIAS_TO_CELL_SCOPE.has(name) ||
+      (unwrapped.typeArguments?.some(typeNodeContainsScopeWrapper) ?? false);
+  }
+  if (ts.isUnionTypeNode(unwrapped) || ts.isIntersectionTypeNode(unwrapped)) {
+    return unwrapped.types.some(typeNodeContainsScopeWrapper);
+  }
+  if (ts.isArrayTypeNode(unwrapped)) {
+    return typeNodeContainsScopeWrapper(unwrapped.elementType);
+  }
+  if (ts.isTypeLiteralNode(unwrapped)) {
+    return unwrapped.members.some((member) =>
+      ts.isPropertySignature(member) &&
+      !!member.type &&
+      typeNodeContainsScopeWrapper(member.type)
+    );
+  }
+  return false;
 }
 
 function propagateUiContractHintsFromObjectLiteral(

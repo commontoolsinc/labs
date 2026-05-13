@@ -59,9 +59,11 @@ export default pattern((__cf_pattern_input) => {
     type: "object",
     properties: {
         userChild: {
+            $ref: "#/$defs/ChildOutput",
             scope: "user"
         },
         sessionChild: {
+            $ref: "#/$defs/ChildOutput",
             scope: "session"
         },
         plainChild: {
