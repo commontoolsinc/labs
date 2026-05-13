@@ -13,6 +13,7 @@ import {
 } from "../src/storage/extended-storage-transaction.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { createFrozenRequestSnapshot } from "../src/cfc/request-snapshot.ts";
+import { createCell } from "../src/cell.ts";
 
 const signer = await Identity.fromPassphrase("test stream-data outbox");
 const space = signer.did();
@@ -230,5 +231,75 @@ describe("stream-data outbox mechanism", () => {
 
     expect(fetchCalls.length).toBe(1);
     expect(fetchCalls[0].url).toContain("/stream-retry");
+  });
+
+  it("restarts streamData when identical inputs move to a narrower scope", async () => {
+    const setupTx = runtime.edit();
+    const parentCell = runtime.getCell(
+      space,
+      "stream-scope-change-parent",
+      undefined,
+      setupTx,
+    );
+    const inputsCell = runtime.getCell<{
+      url: string;
+      options?: {
+        body?: any;
+        method?: string;
+        headers?: Record<string, string>;
+      };
+      result?: any;
+    }>(
+      space,
+      "stream-scope-change-inputs",
+      undefined,
+      setupTx,
+    );
+    inputsCell.set({
+      url: "http://mock-test-server.local/stream-scope-change",
+    });
+    const setupResult = await setupTx.commit();
+    expect(setupResult.ok).toBeDefined();
+
+    const action = rawStreamData(
+      inputsCell,
+      () => {},
+      () => {},
+      [],
+      parentCell,
+      runtime,
+    );
+
+    const firstTx = runtime.edit();
+    action(firstTx);
+    const firstResult = await firstTx.commit();
+    expect(firstResult.ok).toBeDefined();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(fetchCalls.length).toBe(1);
+
+    const linkTx = runtime.edit();
+    const userUrlBase = runtime.getCell<string>(
+      space,
+      "stream-scope-change-user-url",
+      undefined,
+      linkTx,
+    );
+    const userUrl = createCell<string>(
+      runtime,
+      { ...userUrlBase.getAsNormalizedFullLink(), scope: "user" },
+      linkTx,
+    );
+    userUrl.set("http://mock-test-server.local/stream-scope-change");
+    inputsCell.withTx(linkTx).key("url").set(userUrl);
+    const linkResult = await linkTx.commit();
+    expect(linkResult.ok).toBeDefined();
+
+    const secondTx = runtime.edit();
+    action(secondTx);
+    const secondResult = await secondTx.commit();
+    expect(secondResult.ok).toBeDefined();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(fetchCalls.length).toBe(2);
   });
 });

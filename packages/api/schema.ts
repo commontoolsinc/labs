@@ -234,14 +234,15 @@ type ReapplyWrappers<
 > = Wrappers extends readonly [] ? StripWrappers<T>
   : StripWrappers<T> & { asCell: Wrappers };
 
-type ApplyWrapper<W extends AsCellType, T> = WrapperKind<W> extends "cell"
-  ? Cell<T>
+type ApplyWrapper<W extends AsCellType, T> = W extends AsCellType
+  ? WrapperKind<W> extends "cell" ? Cell<T>
   : WrapperKind<W> extends "stream" ? Stream<T>
   : WrapperKind<W> extends "opaque" ? OpaqueCell<T>
   : WrapperKind<W> extends "readonly" ? ReadonlyCell<T>
   : WrapperKind<W> extends "writeonly" ? WriteonlyCell<T>
   : WrapperKind<W> extends "comparable" ? ComparableCell<T>
-  : T;
+  : T
+  : never;
 
 type SchemaInner<
   T extends JSONSchema,

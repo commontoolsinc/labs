@@ -11,6 +11,7 @@ import {
   type OpaqueRef,
   Schema,
 } from "../src/builder/types.ts";
+import type { AsCellType, ReadonlyCell } from "@commonfabric/api";
 import { pattern } from "../src/builder/pattern.ts";
 import { type Cell, Runtime, type Stream } from "@commonfabric/runner";
 import { Identity } from "@commonfabric/identity";
@@ -604,6 +605,16 @@ describe("Schema-to-TS Type Conversion", () => {
 
       expectType<Expected, ComplexNested>();
     });
+  });
+
+  it("should distribute widened asCell wrapper kinds", () => {
+    type WidenedWrapper = Extract<AsCellType, "cell" | "readonly">;
+    type Wrapped = Schema<{
+      type: "string";
+      asCell: readonly [WidenedWrapper];
+    }>;
+
+    expectType<Cell<string> | ReadonlyCell<string>, Wrapped>();
   });
 
   it("should handle additionalProperties", () => {

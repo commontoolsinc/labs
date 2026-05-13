@@ -19,6 +19,9 @@ interface Memory {
 const stateScope = (state: State) =>
   normalizeCellScope((state as State & Pick<IMemoryAddress, "scope">).scope);
 
+const unclaimedWithScope = (state: State): State =>
+  ({ ...unclaimed(state), scope: stateScope(state) }) as State;
+
 const toKey = (state: State) =>
   `/${stateScope(state)}/${state.the}/${state.of}`;
 const toAddress = (
@@ -222,7 +225,7 @@ export const checkout = (memory: Memory, facts: Iterable<State>) => {
     if (existing) {
       checkout.add(existing);
     } else {
-      checkout.add(unclaimed(member));
+      checkout.add(unclaimedWithScope(member));
     }
   }
   return checkout;

@@ -666,6 +666,98 @@ describe("CFC trusted UI event enforcement", () => {
     ).toBe(true);
   });
 
+  it("records trusted event policy inputs separately by scope", () => {
+    const documentId = "of:cfc-ui-contract-scoped-trusted-event-document";
+    const writePolicyInputs: Array<
+      ReturnType<
+        IExtendedStorageTransaction["getCfcState"]
+      >["writePolicyInputs"][number]
+    > = [{
+      kind: "schema",
+      target: {
+        space,
+        scope: "user",
+        id: documentId,
+        path: [],
+      },
+      schema: {
+        type: "object",
+        properties: {
+          argument: {
+            type: "object",
+            properties: {
+              savedTitle: { $ref: "#/$defs/TrustedAction" },
+            },
+          },
+        },
+        $defs: {
+          TrustedAction: trustedPatternUiActionSchema,
+        },
+      },
+    }, {
+      kind: "trusted-event",
+      target: {
+        space,
+        scope: "space",
+        id: documentId,
+        path: ["argument", "savedTitle"],
+      },
+      eventId: `trusted-event:click:${documentId}:argument/savedTitle`,
+      provenance: {
+        origin: "dom",
+        trusted: true,
+        ui: {
+          pattern: "TrustedDirectCommandSurface",
+          eventIntegrity: ["TrustedDirectCommandSurface"],
+          uiContractDataset: {
+            uiAction: "SubmitDirectCommand",
+          },
+        },
+      },
+    }];
+    const tx = {
+      getCfcState: () => ({ writePolicyInputs }),
+      recordCfcWritePolicyInput: (
+        input: typeof writePolicyInputs[number],
+      ) => {
+        writePolicyInputs.push(input);
+      },
+    };
+
+    recordTrustedEventPolicyInputs(
+      tx as unknown as IExtendedStorageTransaction,
+      [{
+        space,
+        scope: "user",
+        id: documentId,
+        path: ["argument", "savedTitle"],
+      }],
+      rendererEvent({
+        type: "click",
+        provenance: {
+          origin: "dom",
+          trusted: true,
+          ui: {
+            pattern: "TrustedDirectCommandSurface",
+            eventIntegrity: ["TrustedDirectCommandSurface"],
+            uiContractDataset: {
+              uiAction: "SubmitDirectCommand",
+            },
+          },
+        },
+      }),
+    );
+
+    const trustedScopes = writePolicyInputs.flatMap((input) =>
+      input.kind === "trusted-event" &&
+        input.target.id === documentId &&
+        input.target.path.join("/") === "argument/savedTitle"
+        ? [input.target.scope]
+        : []
+    );
+    expect(trustedScopes.sort()).toEqual(["space", "user"]);
+  });
+
   it("commits trusted event writes when the handler write annotation is untyped", async () => {
     storageManager = StorageManager.emulate({
       as: signer,

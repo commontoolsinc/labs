@@ -475,6 +475,9 @@ export function llm(
     const outputScope = tx.getNarrowestReadScope();
 
     if (!cellsInitialized || cellScope !== outputScope) {
+      if (cellsInitialized && cellScope !== outputScope) {
+        previousCallHash = undefined;
+      }
       const baseResultCell = runtime.getCell(
         parentCell.space,
         { llm: { result: cause } },
@@ -697,6 +700,9 @@ export function generateText(
     const outputScope = tx.getNarrowestReadScope();
 
     if (!cellsInitialized || cellScope !== outputScope) {
+      if (cellsInitialized && cellScope !== outputScope) {
+        previousCallHash = undefined;
+      }
       const baseResultCell = runtime.getCell(
         parentCell.space,
         { generateText: { result: cause } },
@@ -946,6 +952,9 @@ export function generateObject<T extends Record<string, unknown>>(
     const outputScope = tx.getNarrowestReadScope();
 
     if (!cellsInitialized || cellScope !== outputScope) {
+      if (cellsInitialized && cellScope !== outputScope) {
+        previousCallHash = undefined;
+      }
       const baseResultCell = runtime.getCell(
         parentCell.space,
         { generateObject: { result: cause } },

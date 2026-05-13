@@ -358,7 +358,8 @@ The schema generator lowers these wrappers into `scope` fields. Existing cell
 wrappers continue to lower into `asCell`.
 
 The `asCell` array preserves wrapper order from outermost to innermost. Existing
-string entries remain valid and mean `{ kind: <string>, scope: "inherit" }`.
+string entries remain valid and mean `{ kind: <string> }`; scope is inherited by
+omission.
 Object entries add scope at the corresponding cell-wrapper level:
 
 ```json

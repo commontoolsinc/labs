@@ -51,6 +51,9 @@ export function streamData(
     const outputScope = tx.getNarrowestReadScope();
 
     if (!cellsInitialized || cellScope !== outputScope) {
+      if (cellsInitialized && cellScope !== outputScope) {
+        previousCall = "";
+      }
       const basePending = runtime.getCell<boolean>(
         parentCell.space,
         { streamData: { pending: cause } },

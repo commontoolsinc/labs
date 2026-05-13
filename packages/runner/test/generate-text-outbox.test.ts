@@ -24,6 +24,7 @@ import {
   generateText as rawGenerateText,
   llm as rawLlm,
 } from "../src/builtins/llm.ts";
+import { createCell } from "../src/cell.ts";
 
 const signer = await Identity.fromPassphrase("test generate-text outbox");
 const space = signer.did();
@@ -270,6 +271,105 @@ describe("generateText outbox mechanism", () => {
       await runtime.idle();
 
       expect(sendRequestCalls.length).toBe(1);
+    } finally {
+      LLMClient.prototype.sendRequest = originalSendRequest;
+    }
+  });
+
+  it("starts generateText again when identical inputs move to a narrower scope", async () => {
+    const prompt = "generate text same prompt narrower scope";
+    addMockResponse(
+      (req) =>
+        req.messages.some((m) =>
+          typeof m.content === "string" && m.content.includes(prompt)
+        ),
+      {
+        role: "assistant",
+        content: "scoped response",
+        id: "mock-generate-text-scope-change",
+      },
+    );
+    addMockResponse(
+      (req) =>
+        req.messages.some((m) =>
+          typeof m.content === "string" && m.content.includes(prompt)
+        ),
+      {
+        role: "assistant",
+        content: "scoped response again",
+        id: "mock-generate-text-scope-change-again",
+      },
+    );
+
+    const setupTx = runtime.edit();
+    const parentCell = runtime.getCell(
+      space,
+      "generateText-scope-change-parent",
+      undefined,
+      setupTx,
+    );
+    const inputsCell = runtime.getCell<BuiltInGenerateTextParams>(
+      space,
+      "generateText-scope-change-inputs",
+      undefined,
+      setupTx,
+    );
+    inputsCell.set({ prompt });
+    const setupResult = await setupTx.commit();
+    expect(setupResult.ok).toBeDefined();
+
+    let resultCell: any;
+    const action = rawGenerateText(
+      inputsCell,
+      (_resultTx, result) => {
+        resultCell = result;
+      },
+      () => {},
+      [],
+      parentCell,
+      runtime,
+    );
+
+    const originalSendRequest = LLMClient.prototype.sendRequest;
+    const sendRequestCalls: number[] = [];
+    LLMClient.prototype.sendRequest = async function (...args: unknown[]) {
+      sendRequestCalls.push(Date.now());
+      return await originalSendRequest.apply(this, args as never);
+    };
+
+    try {
+      const firstTx = runtime.edit();
+      action(firstTx);
+      const firstResult = await firstTx.commit();
+      expect(firstResult.ok).toBeDefined();
+      await waitForCallCount(sendRequestCalls, 1);
+      await waitForPendingToBecomeFalse(resultCell);
+
+      const linkTx = runtime.edit();
+      const userPromptBase = runtime.getCell<string>(
+        space,
+        "generateText-scope-change-user-prompt",
+        undefined,
+        linkTx,
+      );
+      const userPrompt = createCell<string>(
+        runtime,
+        { ...userPromptBase.getAsNormalizedFullLink(), scope: "user" },
+        linkTx,
+      );
+      userPrompt.set(prompt);
+      inputsCell.withTx(linkTx).key("prompt").set(userPrompt);
+      const linkResult = await linkTx.commit();
+      expect(linkResult.ok).toBeDefined();
+
+      const secondTx = runtime.edit();
+      action(secondTx);
+      const secondResult = await secondTx.commit();
+      expect(secondResult.ok).toBeDefined();
+      await waitForCallCount(sendRequestCalls, 2);
+      await waitForPendingToBecomeFalse(resultCell);
+
+      expect(sendRequestCalls.length).toBe(2);
     } finally {
       LLMClient.prototype.sendRequest = originalSendRequest;
     }

@@ -93,6 +93,9 @@ export function compileAndRun(
     ]);
 
     if (!cellsInitialized || cellScope !== outputScope) {
+      if (cellsInitialized && cellScope !== outputScope) {
+        previousCallHash = undefined;
+      }
       const basePending = runtime.getCell<boolean>(
         parentCell.space,
         { compile: { pending: cause } },
