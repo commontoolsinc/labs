@@ -148,6 +148,8 @@ export function filter(
           resultCell,
           { doNotUpdateOnPatternChange: true },
         );
+        // Link these individual cells to the top cell
+        setResultCell(resultCell, parentCell);
         // Link the new result cells to the pattern cell too
         setPatternCell(resultCell, parentCell.key("pattern"));
 
