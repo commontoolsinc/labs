@@ -348,14 +348,14 @@ export function normalizeAndDiff(
     newValue = new CellImpl(runtime, tx, seen.get(newValue)!);
   }
 
-  // `FabricInstance` values (`FabricError`, `FabricEpochNsec`, etc.) are
-  // atomic from this layer's perspective: their own-enumerable properties
-  // are implementation details, not user-visible structure, and iterating
-  // them would re-wrap embedded native values (e.g., `FabricError.error`
-  // is a native `Error`) on each pass, recursing forever. Emit a single
-  // change at this link with the wrapper as the value — the storage
-  // layer's JSON encoding handles serialization via
-  // `[DECONSTRUCT]`/`[RECONSTRUCT]`.
+  // `FabricInstance` values (`FabricError`, `FabricMap`, `FabricSet`,
+  // `FabricRegExp`) are atomic from this layer's perspective: their
+  // own-enumerable properties are implementation details, not
+  // user-visible structure, and iterating them would re-wrap embedded
+  // native values (e.g., `FabricError.error` is a native `Error`) on
+  // each pass, recursing forever. Emit a single change at this link with
+  // the wrapper as the value — the storage layer's JSON encoding handles
+  // serialization via `[DECONSTRUCT]`/`[RECONSTRUCT]`.
   if (newValue instanceof FabricInstance) {
     diffLogger.debug(
       "diff",

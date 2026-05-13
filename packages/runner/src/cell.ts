@@ -2197,18 +2197,19 @@ export function recursivelyAddIDIfNeeded<T>(
     return value;
   }
 
-  // `FabricInstance` values (`FabricError`, `FabricEpochNsec`, etc.) are
-  // immutable wrappers with class-defined identity. Their own-enumerable
-  // properties are implementation details (e.g., `FabricError.error` is the
-  // wrapped native `Error`), not user-visible structure; iterating them
-  // would re-wrap the embedded native value on each pass and recurse
-  // forever. Instead, walk the observable internal structure via
-  // `[DECONSTRUCT]()` (the same mechanism the serialization system uses)
-  // for side effects only — tracking shared references in `seen` and
-  // populating `frame.generatedIdCounter` for any objects-in-arrays nested
-  // inside — then return the original instance unchanged. Subclasses
-  // without `[DECONSTRUCT]` yet (`FabricMap`, `FabricSet`) skip the
-  // side-effect traversal; that's acceptable while they remain unused.
+  // `FabricInstance` values (`FabricError`, `FabricMap`, `FabricSet`,
+  // `FabricRegExp`) are immutable wrappers with class-defined identity.
+  // Their own-enumerable properties are implementation details (e.g.,
+  // `FabricError.error` is the wrapped native `Error`), not user-visible
+  // structure; iterating them would re-wrap the embedded native value on
+  // each pass and recurse forever. Instead, walk the observable internal
+  // structure via `[DECONSTRUCT]()` (the same mechanism the serialization
+  // system uses) for side effects only — tracking shared references in
+  // `seen` and populating `frame.generatedIdCounter` for any
+  // objects-in-arrays nested inside — then return the original instance
+  // unchanged. Subclasses without `[DECONSTRUCT]` yet (`FabricMap`,
+  // `FabricSet`) skip the side-effect traversal; that's acceptable while
+  // they remain unused.
   if (value instanceof FabricInstance) {
     seen.set(value, value);
     try {
