@@ -441,7 +441,8 @@ async function main() {
       `\n!!! PERFORMANCE REGRESSION DETECTED in ${failures.length} metric(s) !!!\n`,
     );
     console.log(
-      "| Metric | Current | Baseline (median) | Threshold | Change |",
+      "::group::Baseline samples:" +
+        "\n| Metric | Current | Baseline (median) | Threshold | Change |",
     );
     console.log(
       "|--------|---------|-------------------|-----------|--------|",
@@ -477,6 +478,8 @@ async function main() {
       }
     }
   }
+
+  console.log("::endgroup::");
 
   // 6d. Pass/fail outcome + override copy-paste block pinned at the bottom.
   if (informationalOnly) {
