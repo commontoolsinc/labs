@@ -2207,25 +2207,14 @@ export function recursivelyAddIDIfNeeded<T>(
   // system uses) for side effects only — tracking shared references in
   // `seen` and populating `frame.generatedIdCounter` for any
   // objects-in-arrays nested inside — then return the original instance
-  // unchanged. Subclasses without `[DECONSTRUCT]` yet (`FabricMap`,
-  // `FabricSet`) skip the side-effect traversal; that's acceptable while
-  // they remain unused.
+  // unchanged. Subclasses that haven't implemented `[DECONSTRUCT]` yet
+  // (`FabricMap`, `FabricSet`) will throw from this path; that's
+  // intentional — those classes aren't yet in use, and a thrown error is
+  // the right signal the moment they start seeing traffic.
   if (value instanceof FabricInstance) {
     seen.set(value, value);
-    let state: FabricValue | undefined;
-    try {
-      state = value[DECONSTRUCT]();
-    } catch (e) {
-      // `[DECONSTRUCT]` not yet implemented for this subclass (e.g.,
-      // `FabricMap`, `FabricSet`); skip the side-effect traversal. Log
-      // so the gap surfaces if/when these classes start to see traffic.
-      logger.warn(
-        "fabric-instance-deconstruct-skip",
-        `recursivelyAddIDIfNeeded: skipping ${value.constructor.name} (no [DECONSTRUCT])`,
-        e,
-      );
-    }
-    if (state !== undefined && (isRecord(state) || Array.isArray(state))) {
+    const state = value[DECONSTRUCT]();
+    if (isRecord(state) || Array.isArray(state)) {
       recursivelyAddIDIfNeeded(state, frame, seen);
     }
     return value;
