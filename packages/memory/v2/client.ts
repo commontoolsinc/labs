@@ -72,13 +72,19 @@ const reconnectDelayMs = (attempt: number): number => {
   );
 };
 
-const watchKey = (branch: string, id: string): string => `${branch}\0${id}`;
+const watchKey = (
+  branch: string,
+  id: string,
+  scope: string | undefined,
+): string => `${branch}\0${scope ?? "space"}\0${id}`;
 
 const compareEntitySnapshot = (
   left: EntitySnapshot,
   right: EntitySnapshot,
 ): number =>
-  left.branch.localeCompare(right.branch) || left.id.localeCompare(right.id);
+  left.branch.localeCompare(right.branch) ||
+  (left.scope ?? "space").localeCompare(right.scope ?? "space") ||
+  left.id.localeCompare(right.id);
 
 export class Client {
   #pending = new Map<string, PromiseWithResolvers<unknown>>();
@@ -911,9 +917,10 @@ export class WatchView {
   applySync(sync: SessionSync, emit: boolean): void {
     const upserts = new Map<string, EntitySnapshot>();
     for (const upsert of sync.upserts) {
-      upserts.set(watchKey(upsert.branch, upsert.id), {
+      upserts.set(watchKey(upsert.branch, upsert.id, upsert.scope), {
         branch: upsert.branch,
         id: upsert.id,
+        ...(upsert.scope !== undefined ? { scope: upsert.scope } : {}),
         seq: upsert.seq,
         document: upsert.doc ?? null,
       });
@@ -921,7 +928,7 @@ export class WatchView {
 
     const removeKeys = new Set<string>();
     for (const remove of sync.removes) {
-      const key = watchKey(remove.branch, remove.id);
+      const key = watchKey(remove.branch, remove.id, remove.scope);
       removeKeys.add(key);
     }
 

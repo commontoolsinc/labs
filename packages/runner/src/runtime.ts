@@ -55,6 +55,7 @@ import { ModuleRegistry } from "./module.ts";
 import { Runner } from "./runner.ts";
 import { registerBuiltins } from "./builtins/index.ts";
 import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
+import { isCellScope, normalizeCellScope } from "./scope.ts";
 import { toURI } from "./uri-utils.ts";
 import { isDeno } from "@commonfabric/utils/env";
 import { popFrame, pushFrame } from "./builder/pattern.ts";
@@ -74,6 +75,26 @@ import {
   type UnsafeHostTrust,
   type UnsafeHostTrustOptions,
 } from "./unsafe-host-trust.ts";
+
+const isFullNormalizedLinkShape = (
+  value: unknown,
+): value is NormalizedLink & {
+  id: string;
+  space: MemorySpace;
+  path: string[];
+} => {
+  if (typeof value !== "object" || value === null) return false;
+  const link = value as NormalizedLink;
+  if (link.scope === "inherit") {
+    throw new Error(
+      "NormalizedFullLink.scope cannot be 'inherit'; resolve scope before creating a full link",
+    );
+  }
+  return typeof link.id === "string" &&
+    typeof link.space === "string" &&
+    Array.isArray(link.path) &&
+    (link.scope === undefined || isCellScope(link.scope));
+};
 
 interface WriteDebugContextStore<T> {
   getStore(): T | undefined;
@@ -702,6 +723,7 @@ export class Runtime {
         id: toURI(createRef({}, cause)),
         path: [],
         space,
+        scope: "space",
       },
       schema,
       tx,
@@ -763,6 +785,7 @@ export class Runtime {
         id: toURI(entityId),
         path: path?.map(String) ?? [],
         space,
+        scope: "space",
       },
       schema,
       tx,
@@ -799,6 +822,13 @@ export class Runtime {
       ? parseLink(cellLink)
       : isNormalizedFullLink(cellLink)
       ? cellLink
+      : isFullNormalizedLinkShape(cellLink)
+      ? {
+        ...cellLink,
+        scope: isCellScope(cellLink.scope)
+          ? cellLink.scope
+          : normalizeCellScope(undefined),
+      }
       : undefined;
     if (!link) throw new Error("Invalid cell link");
     if ("cfcLabelView" in link) {

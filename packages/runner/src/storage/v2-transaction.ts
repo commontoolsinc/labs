@@ -71,6 +71,8 @@ import {
   readValueAtPath,
 } from "./v2-path.ts";
 import { recordWriteStackTrace } from "./write-stack-trace.ts";
+import { normalizeCellScope } from "../scope.ts";
+import type { CellScope } from "../builder/types.ts";
 
 type RootAttestation = IAttestation;
 
@@ -905,6 +907,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     branch: SpaceBranch;
     id: URI;
     type: MediaType;
+    scope: CellScope;
     doc: DocumentEntry;
   };
 
@@ -970,8 +973,8 @@ export class V2StorageTransaction implements IStorageTransaction {
         continue;
       }
 
-      const { id, type } = this.parseDocKey(key);
-      const patch = this.buildPatchOperation(id, type, doc);
+      const { id, type, scope } = this.parseDocKey(key);
+      const patch = this.buildPatchOperation(id, type, scope, doc);
       if (patch) {
         operations.push(patch);
         continue;
@@ -979,8 +982,8 @@ export class V2StorageTransaction implements IStorageTransaction {
 
       operations.push(
         doc.current.value === undefined
-          ? { op: "delete", id, type }
-          : { op: "set", id, type, value: doc.current.value },
+          ? { op: "delete", id, type, scope }
+          : { op: "set", id, type, scope, value: doc.current.value },
       );
     }
 
@@ -1048,6 +1051,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     if (!address.id.startsWith("data:")) {
       const readActivity = {
         space: address.space,
+        scope: normalizeCellScope(address.scope),
         id: address.id,
         path: address.path,
         meta: readMeta,
@@ -1544,6 +1548,7 @@ export class V2StorageTransaction implements IStorageTransaction {
   ): void {
     const writeActivity = {
       space,
+      scope: normalizeCellScope(address.scope),
       id: address.id,
       path: address.path,
     };
@@ -1673,6 +1678,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
       const address = {
         space: read.space,
+        scope: read.scope,
         id: read.id,
         path: read.path,
       };
@@ -1696,7 +1702,7 @@ export class V2StorageTransaction implements IStorageTransaction {
           continue;
         }
 
-        const { id } = this.parseDocKey(key);
+        const { id, scope } = this.parseDocKey(key);
         const reactivityPaths = new Map<string, readonly string[]>();
         for (const detail of doc.patchDetails.values()) {
           for (
@@ -1715,6 +1721,7 @@ export class V2StorageTransaction implements IStorageTransaction {
         ) {
           writes.push({
             space,
+            scope,
             id,
             path,
           });
@@ -1773,12 +1780,14 @@ export class V2StorageTransaction implements IStorageTransaction {
 
   private document(
     branch: SpaceBranch,
-    address: Pick<IMemoryAddress, "id" | "type">,
+    address: Pick<IMemoryAddress, "id" | "type" | "scope">,
   ): { doc: DocumentEntry; meta: { seq?: number } } {
+    const scope = normalizeCellScope(address.scope);
     if (
       this.#lastDocument?.branch === branch &&
       this.#lastDocument.id === address.id &&
-      this.#lastDocument.type === (address.type ?? DOCUMENT_MIME)
+      this.#lastDocument.type === (address.type ?? DOCUMENT_MIME) &&
+      this.#lastDocument.scope === scope
     ) {
       return {
         doc: this.#lastDocument.doc,
@@ -1806,6 +1815,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       branch,
       id: address.id,
       type: address.type ?? DOCUMENT_MIME,
+      scope,
       doc,
     };
     return {
@@ -1816,7 +1826,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
   private loadRoot(
     branch: SpaceBranch,
-    address: Pick<IMemoryAddress, "id" | "type">,
+    address: Pick<IMemoryAddress, "id" | "type" | "scope">,
   ): RootAttestation {
     const type = address.type ?? DOCUMENT_MIME;
     if (address.id.startsWith("data:")) {
@@ -1830,20 +1840,26 @@ export class V2StorageTransaction implements IStorageTransaction {
     const state = branch.replica.get({
       id: address.id,
       type,
+      scope: address.scope,
     }) ?? unclaimed({
       of: address.id,
       the: type,
     });
 
     return {
-      address: { id: address.id, type, path: [] },
+      address: {
+        id: address.id,
+        type,
+        path: [],
+        scope: normalizeCellScope(address.scope),
+      },
       value: state.is,
     };
   }
 
   private readSeq(
     branch: SpaceBranch,
-    address: Pick<IMemoryAddress, "id" | "type">,
+    address: Pick<IMemoryAddress, "id" | "type" | "scope">,
   ): number | undefined {
     if (address.id.startsWith("data:")) {
       return undefined;
@@ -1851,6 +1867,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     const state = branch.replica.get({
       id: address.id,
       type: address.type ?? DOCUMENT_MIME,
+      scope: address.scope,
     }) as { since?: number } | undefined;
     return typeof state?.since === "number" ? state.since : undefined;
   }
@@ -1870,17 +1887,30 @@ export class V2StorageTransaction implements IStorageTransaction {
     return { ok: {} };
   }
 
-  private docKey(address: Pick<IMemoryAddress, "id" | "type">): string {
-    return address.id;
+  private docKey(
+    address: Pick<IMemoryAddress, "id" | "type" | "scope">,
+  ): string {
+    return `${normalizeCellScope(address.scope)}\0${address.id}`;
   }
 
-  private parseDocKey(key: string): { id: URI; type: MediaType } {
-    return { id: key as URI, type: DOCUMENT_MIME };
+  private parseDocKey(
+    key: string,
+  ): { id: URI; type: MediaType; scope: CellScope } {
+    const separator = key.indexOf("\0");
+    if (separator === -1) {
+      return { id: key as URI, type: DOCUMENT_MIME, scope: "space" };
+    }
+    return {
+      scope: normalizeCellScope(key.slice(0, separator) as CellScope),
+      id: key.slice(separator + 1) as URI,
+      type: DOCUMENT_MIME,
+    };
   }
 
   private buildPatchOperation(
     id: URI,
     type: MediaType,
+    scope: CellScope,
     doc: WritableDocumentEntry,
   ): NativeStorageCommitOperation | null {
     if (doc.initial.value === undefined || doc.current.value === undefined) {
@@ -2007,6 +2037,6 @@ export class V2StorageTransaction implements IStorageTransaction {
       ...retainedNonCoverCandidates.map((candidate) => candidate.patch),
     ];
 
-    return { op: "patch", id, type, patches, value: doc.current.value };
+    return { op: "patch", id, type, scope, patches, value: doc.current.value };
   }
 }

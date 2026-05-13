@@ -41,6 +41,7 @@ describe("write stack trace", () => {
         tx.writeValueOrThrow(
           {
             space,
+            scope: "space",
             id: "doc:root",
             path: [],
           },
@@ -82,6 +83,7 @@ describe("write stack trace", () => {
         tx.writeValueOrThrow(
           {
             space,
+            scope: "space",
             id: "doc:async",
             path: [],
           },
@@ -140,6 +142,7 @@ describe("write stack trace", () => {
         tx.writeValueOrThrow(
           {
             space,
+            scope: "space",
             id: "doc:first",
             path: [],
           },
@@ -159,6 +162,7 @@ describe("write stack trace", () => {
           tx.writeValueOrThrow(
             {
               space,
+              scope: "space",
               id: "doc:second",
               path: [],
             },
@@ -231,6 +235,7 @@ describe("write stack trace", () => {
         firstTx.writeValueOrThrow(
           {
             space,
+            scope: "space",
             id: "doc:primary",
             path: [],
           },
@@ -245,6 +250,7 @@ describe("write stack trace", () => {
         secondTx.writeValueOrThrow(
           {
             space,
+            scope: "space",
             id: "doc:secondary",
             path: [],
           },

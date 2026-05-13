@@ -37,6 +37,7 @@ Deno.bench(
       const tx = runtime.edit();
       tx.writeValueOrThrow({
         space,
+        scope: "space",
         id: "of:reactivity-log-bench",
         path: [],
       }, {
@@ -48,26 +49,31 @@ Deno.bench(
       for (let index = 0; index < 50; index += 1) {
         tx.readValueOrThrow({
           space,
+          scope: "space",
           id: "of:reactivity-log-bench",
           path: ["count"],
         });
         tx.read({
           space,
+          scope: "space",
           id: "of:reactivity-log-bench",
           path: ["nested", "value"],
         }, { nonRecursive: true });
         tx.read({
           space,
+          scope: "space",
           id: "of:reactivity-log-bench",
           path: ["nested"],
         }, { meta: ignoreReadForScheduling });
         tx.read({
           space,
+          scope: "space",
           id: "of:reactivity-log-bench",
           path: ["list"],
         }, { meta: markReadAsPotentialWrite });
         tx.writeValueOrThrow({
           space,
+          scope: "space",
           id: "of:reactivity-log-bench",
           path: ["count"],
         }, index);
@@ -89,6 +95,7 @@ Deno.bench(
       const tx = runtime.edit();
       tx.writeValueOrThrow({
         space,
+        scope: "space",
         id: "of:reactivity-log-repeat",
         path: [],
       }, {
@@ -99,11 +106,13 @@ Deno.bench(
       for (let index = 0; index < 50; index += 1) {
         tx.readValueOrThrow({
           space,
+          scope: "space",
           id: "of:reactivity-log-repeat",
           path: ["nested", "value"],
         });
         tx.writeValueOrThrow({
           space,
+          scope: "space",
           id: "of:reactivity-log-repeat",
           path: ["count"],
         }, index);

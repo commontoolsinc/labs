@@ -3,6 +3,7 @@ import {
   assertEquals,
   assertExists,
   assertStrictEquals,
+  assertThrows,
 } from "@std/assert";
 import { toFileUrl } from "@std/path";
 import {
@@ -14,9 +15,12 @@ import {
 } from "../v2/engine.ts";
 import {
   extendTrackedGraph,
+  fromDirtyKey,
+  fromDocKey,
   isGraphQueryCoveredByState,
   queryGraph,
   refreshTrackedGraph,
+  toDirtyKey,
   trackGraph,
 } from "../v2/query.ts";
 import { createGraphFixture } from "./v2-graph.fixture.ts";
@@ -42,6 +46,91 @@ const authorization = {
   signature: "sig:alice",
   access: { "proof:1": {} },
 };
+
+Deno.test("memory v2 query keys require explicit scope", () => {
+  assertEquals(
+    fromDocKey("did:key:space/user/of:doc/application/json"),
+    {
+      space: "did:key:space",
+      scope: "user",
+      id: "of:doc",
+      type: "application/json",
+    },
+  );
+  assertEquals(fromDirtyKey("session\0of:doc"), {
+    scope: "session",
+    id: "of:doc",
+  });
+
+  assertThrows(
+    () => fromDocKey("did:key:space/of:doc/application/json" as never),
+    Error,
+    "invalid memory v2 query doc key",
+  );
+  assertThrows(
+    () => fromDirtyKey("of:doc"),
+    Error,
+    "invalid memory v2 dirty key",
+  );
+});
+
+Deno.test("memory v2 queryGraph reads the declared scoped root instance", async () => {
+  const { engine, path } = await createEngine();
+  const space = "did:key:z6Mk-memory-v2-query-scopes";
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:alice",
+      principal: "did:key:alice",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:scoped-query-root",
+          value: { value: { name: "space" } },
+        }, {
+          op: "set",
+          id: "of:scoped-query-root",
+          scope: "user",
+          value: { value: { name: "alice" } },
+        }],
+      },
+    });
+
+    const result = queryGraph(
+      space,
+      engine,
+      {
+        roots: [{
+          id: "of:scoped-query-root",
+          scope: "user",
+          selector: {
+            path: [],
+            schema: {
+              type: "object",
+              properties: { name: { type: "string" } },
+              required: ["name"],
+            },
+          },
+        }],
+      },
+      undefined,
+      { principal: "did:key:alice", sessionId: "session:alice" },
+    );
+
+    assertEquals(result.entities, [{
+      branch: "",
+      id: "of:scoped-query-root",
+      scope: "user",
+      seq: 1,
+      document: { value: { name: "alice" } },
+    }]);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
 
 Deno.test("memory v2 query retains a persistent memo for incremental watch growth", async () => {
   const { engine, path } = await createEngine();
@@ -480,7 +569,7 @@ Deno.test("memory v2 query refresh skips already-covered stable linked docs", as
       space,
       engine,
       tracked.state,
-      new Set([fixture.rootId]),
+      new Set([toDirtyKey(fixture.rootId)]),
     );
     assertExists(refreshed);
     assertEquals(
@@ -527,7 +616,7 @@ Deno.test("memory v2 query treats schema true as covering narrower selectors", a
         },
       }],
     });
-    const rootKey = `${space}/${rootId}/application/json`;
+    const rootKey = `${space}/space/${rootId}/application/json`;
     assertEquals(tracked.state.tracker.get(rootKey)?.size, 1);
 
     extendTrackedGraph(space, engine, tracked.state, {
@@ -684,7 +773,7 @@ Deno.test("memory v2 query uses a fresh memo for write-triggered refreshes", asy
       space,
       engine,
       tracked.state,
-      new Set([fixture.rootId]),
+      new Set([toDirtyKey(fixture.rootId)]),
     );
     assertExists(refreshed);
     assertStrictEquals(tracked.state.memo, growthMemo);
@@ -785,7 +874,7 @@ Deno.test("memory v2 query refresh updates the growth manager cache for later wa
       space,
       engine,
       tracked.state,
-      new Set([process]),
+      new Set([toDirtyKey(process)]),
     );
     assertExists(refreshed);
 

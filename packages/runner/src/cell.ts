@@ -22,6 +22,7 @@ import {
   type Apply,
   type Cell,
   type CellKind,
+  type CellScope,
   type CellTypeConstructor,
   type Frame,
   type HKT,
@@ -90,9 +91,11 @@ import {
   isCellLink,
   type NormalizedFullLink,
   type NormalizedLink,
+  parseLink,
   type SanitizeSchemaForLinksOptions,
   toMemorySpaceAddress,
 } from "./link-utils.ts";
+import { isCellScope, normalizeCellScope } from "./scope.ts";
 import type {
   ChangeGroup,
   IExtendedStorageTransaction,
@@ -149,6 +152,7 @@ const recordSchemaWritePolicyInput = (
     target: {
       space: link.space,
       id: link.id,
+      scope: link.scope,
       path: [...link.path],
     },
     schemaHash: schemaAndHash.hashString,
@@ -328,6 +332,7 @@ declare module "@commonfabric/api" {
       cell: OpaqueCell<any>;
       path: readonly PropertyKey[];
       schema?: JSONSchema;
+      scope?: CellScope;
       nodes: Set<NodeRef>;
       frame: Frame;
       value?: Opaque<T> | T;
@@ -494,7 +499,12 @@ export class CellImpl<T extends FabricValue>
     this._frame = getTopFrame();
 
     // Store this cell's own link
-    this._link = link ?? { path: [] };
+    this._link = {
+      ...(link ?? { path: [] }),
+      scope: isCellScope(link?.scope) ? link.scope : normalizeCellScope(
+        undefined,
+      ),
+    };
 
     // Use provided container or create one
     // If link has an id, extract it to the container
@@ -1156,6 +1166,10 @@ export class CellImpl<T extends FabricValue>
         path: [...currentLink.path, key.toString()] as string[],
         schema: childSchema,
       };
+
+      if (isRecord(childSchema) && isCellScope(childSchema.scope)) {
+        currentLink = { ...currentLink, scope: childSchema.scope };
+      }
     }
 
     // Determine the kind based on schema flags
@@ -1164,7 +1178,15 @@ export class CellImpl<T extends FabricValue>
       const asCellValues = ContextualFlowControl.getAsCellValues(childSchema);
       // we can override the kind of cell we use for a key
       if (asCellValues.length > 0) {
-        kind = asCellValues[0];
+        const asCellEntry = asCellValues[0];
+        const asCellKind = ContextualFlowControl.getAsCellKind(asCellEntry);
+        if (asCellKind !== undefined) {
+          kind = asCellKind;
+        }
+        const asCellScope = ContextualFlowControl.getAsCellScope(asCellEntry);
+        if (isCellScope(asCellScope)) {
+          currentLink = { ...currentLink, scope: asCellScope };
+        }
       }
     }
 
@@ -1464,12 +1486,20 @@ export class CellImpl<T extends FabricValue>
         `Source cell ID expected to be a record link, got: ${typeof sourceCellId}`,
       );
     }
+    const sourceLink = parseLink(sourceCellId, this.link);
+    if (sourceLink) {
+      return createCell(this.runtime, {
+        ...sourceLink,
+        schema,
+      }, this.tx) as Cell<any>;
+    }
     const sourceCellIdString = toURI(sourceCellId);
 
     return createCell(this.runtime, {
       space: this.link.space,
       path: [],
       id: sourceCellIdString,
+      scope: this.link.scope,
       schema: schema,
     }, this.tx) as Cell<any>;
   }
@@ -1488,8 +1518,7 @@ export class CellImpl<T extends FabricValue>
     // System-owned provenance metadata, not user-surface value data.
     this.tx.writeOrThrow(
       { ...toMemorySpaceAddress(this.link), path: ["source"] },
-      // TODO(@ubik2): Transition source links to sigil links?
-      { "/": fromURI(sourceLink.id) },
+      createSigilLinkFromParsedLink(sourceLink, { base: this.link }),
     );
   }
 
@@ -1557,6 +1586,7 @@ export class CellImpl<T extends FabricValue>
     cell: OpaqueCell<unknown>;
     path: readonly PropertyKey[];
     schema?: JSONSchema;
+    scope?: CellScope;
     nodes: Set<NodeRef>;
     frame: Frame;
     value?: Opaque<T> | T;
@@ -1570,6 +1600,7 @@ export class CellImpl<T extends FabricValue>
       cell: this._causeContainer.cell,
       path: this.path,
       schema: this.schema,
+      scope: isCellScope(this._link.scope) ? this._link.scope : undefined,
       nodes: cellNodes.get(this._causeContainer.cell) ?? new Set(),
       frame: this._frame,
       // Cast needed: stream sentinel marker isn't actually of type T
@@ -1673,13 +1704,14 @@ export class CellImpl<T extends FabricValue>
         implementation: "map",
       });
     }
+    const op = pattern(
+      ({ element, index, array }: Opaque<any>) => fn(element, index, array),
+    );
     const result = mapFactory({
       list: this as unknown as OpaqueRef<T>,
-      op: pattern(
-        ({ element, index, array }: Opaque<any>) => fn(element, index, array),
-      ),
+      op,
     });
-    const schema = flowPrecisionSchemaForBuiltin("map");
+    const schema = flowPrecisionSchemaForBuiltin("map", op.resultSchema);
     if (schema !== undefined) {
       result.setSchema(schema);
     }
@@ -1708,7 +1740,7 @@ export class CellImpl<T extends FabricValue>
       op: op,
       params: params,
     });
-    const schema = flowPrecisionSchemaForBuiltin("map");
+    const schema = flowPrecisionSchemaForBuiltin("map", op.resultSchema);
     if (schema !== undefined) {
       result.setSchema(schema);
     }

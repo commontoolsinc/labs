@@ -4,6 +4,7 @@ import { isRecord } from "@commonfabric/utils/types";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import { getTopFrame } from "./builder/pattern.ts";
 import {
+  type CellScope,
   type Frame,
   type Module,
   type Pattern,
@@ -26,6 +27,7 @@ import {
   type NormalizedFullLink,
   toMemorySpaceAddress,
 } from "./link-utils.ts";
+import { normalizeCellScope } from "./scope.ts";
 import type {
   ChangeGroup,
   IExtendedStorageTransaction,
@@ -125,6 +127,8 @@ function trustedEventWriteCandidatesFromTransaction(
     const candidate: NormalizedFullLink = {
       space: write.space,
       id: write.id,
+      // Transaction memory addresses may omit scope for legacy/default-space writes.
+      scope: write.scope ?? "space",
       path: [...path],
       ...("schema" in write && write.schema !== undefined
         ? { schema: write.schema }
@@ -246,6 +250,7 @@ function addressMatchesLinkPrefix(
   const documentAddress = toMemorySpaceAddress(link);
   return address.space === link.space &&
     address.id === link.id &&
+    normalizeCellScope(address.scope) === link.scope &&
     arraysOverlap(documentAddress.path, address.path);
 }
 
@@ -267,8 +272,15 @@ export {
   markReadAsPotentialWrite,
 };
 
-export type SpaceAndURI = `${MemorySpace}/${URI}`;
-export type SpaceURIAndType = `${MemorySpace}/${URI}/${MediaType}`;
+export type SpaceScopeAndURI = `${MemorySpace}/${CellScope}/${URI}`;
+export type SpaceScopeURIAndType =
+  `${MemorySpace}/${CellScope}/${URI}/${MediaType}`;
+
+function entityKey(
+  address: Pick<IMemorySpaceAddress, "space" | "id" | "scope">,
+): SpaceScopeAndURI {
+  return `${address.space}/${normalizeCellScope(address.scope)}/${address.id}`;
+}
 
 /** Per-iteration stats captured during the settle loop. */
 export interface SettleIterationStats {
@@ -408,9 +420,12 @@ export class Scheduler {
   private pending = new Set<Action>();
   private dependencies = new WeakMap<Action, ReactivityLog>();
   private cancels = new WeakMap<Action, Cancel>();
-  private triggers = new Map<SpaceAndURI, Map<Action, SortedAndCompactPaths>>();
+  private triggers = new Map<
+    SpaceScopeAndURI,
+    Map<Action, SortedAndCompactPaths>
+  >();
   private nonRecursiveTriggers = new Map<
-    SpaceAndURI,
+    SpaceScopeAndURI,
     Map<Action, SortedAndCompactPaths>
   >();
   private actionChangeGroups = new WeakMap<Action, ChangeGroup>();
@@ -519,9 +534,9 @@ export class Scheduler {
   private historicalMightWrite = new WeakMap<Action, IMemorySpaceAddress[]>();
   // Index: entity -> actions that write to it (for fast dependency lookup).
   // Updated from the active scheduling write set.
-  private writersByEntity = new Map<SpaceAndURI, Set<Action>>();
+  private writersByEntity = new Map<SpaceScopeAndURI, Set<Action>>();
   // Reverse index: action -> entities it writes to (for cleanup)
-  private actionWriteEntities = new WeakMap<Action, Set<SpaceAndURI>>();
+  private actionWriteEntities = new WeakMap<Action, Set<SpaceScopeAndURI>>();
   // Track actions scheduled for first time (bypass filter)
   private scheduledFirstTime = new Set<Action>();
   // Filter stats for diagnostics
@@ -1105,12 +1120,12 @@ export class Scheduler {
 
       // Use writersByEntity index for efficient lookup
       if (!shouldMarkDirty) {
-        const entities = new Set<SpaceAndURI>();
+        const entities = new Set<SpaceScopeAndURI>();
         for (const read of effectReads) {
-          entities.add(`${read.space}/${read.id}` as SpaceAndURI);
+          entities.add(entityKey(read));
         }
         for (const read of effectShallowReads) {
-          entities.add(`${read.space}/${read.id}` as SpaceAndURI);
+          entities.add(entityKey(read));
         }
 
         for (const entity of entities) {
@@ -1564,7 +1579,7 @@ export class Scheduler {
               continue;
             }
 
-            const spaceAndURI = `${space}/${change.address.id}` as SpaceAndURI;
+            const spaceAndURI = entityKey({ ...change.address, space });
             const paths = this.triggers.get(spaceAndURI);
             const nonRecursivePaths = this.nonRecursiveTriggers.get(
               spaceAndURI,
@@ -1847,6 +1862,8 @@ export class Scheduler {
       !previousSchedulingWrites.some((existing) =>
         existing.space === write.space &&
         existing.id === write.id &&
+        normalizeCellScope(existing.scope) ===
+          normalizeCellScope(write.scope) &&
         existing.path.length <= write.path.length &&
         arraysOverlap(existing.path, write.path)
       )
@@ -1855,6 +1872,8 @@ export class Scheduler {
       !nextSchedulingWrites.some((existing) =>
         existing.space === write.space &&
         existing.id === write.id &&
+        normalizeCellScope(existing.scope) ===
+          normalizeCellScope(write.scope) &&
         existing.path.length <= write.path.length &&
         arraysOverlap(existing.path, write.path)
       )
@@ -1863,11 +1882,11 @@ export class Scheduler {
     // Update writersByEntity index for fast dependency lookup
     // Collect new entities from writes
     const existingEntities = this.actionWriteEntities.get(action) ?? new Set();
-    const nextEntities = new Set<SpaceAndURI>();
-    const addedEntities = new Set<SpaceAndURI>();
-    const removedEntities = new Set<SpaceAndURI>();
+    const nextEntities = new Set<SpaceScopeAndURI>();
+    const addedEntities = new Set<SpaceScopeAndURI>();
+    const removedEntities = new Set<SpaceScopeAndURI>();
     for (const write of nextSchedulingWrites) {
-      const entity: SpaceAndURI = `${write.space}/${write.id}`;
+      const entity = entityKey(write);
       nextEntities.add(entity);
       if (!existingEntities.has(entity)) {
         addedEntities.add(entity);
@@ -1968,17 +1987,17 @@ export class Scheduler {
     reads: IMemorySpaceAddress[],
     shallowReads: IMemorySpaceAddress[],
   ): {
-    entities: Set<SpaceAndURI>;
-    triggerPathsByEntity: Map<SpaceAndURI, SortedAndCompactPaths>;
+    entities: Set<SpaceScopeAndURI>;
+    triggerPathsByEntity: Map<SpaceScopeAndURI, SortedAndCompactPaths>;
   } {
     this.clearActionTriggers(action);
     const pathsByEntity = addressesToPathByEntity(reads);
     const nonRecursivePathsByEntity = addressesToPathByEntity(
       shallowReads,
     );
-    const entities = new Set<SpaceAndURI>();
+    const entities = new Set<SpaceScopeAndURI>();
     const triggerPathsByEntity = new Map<
-      SpaceAndURI,
+      SpaceScopeAndURI,
       SortedAndCompactPaths
     >();
 
@@ -2011,7 +2030,7 @@ export class Scheduler {
 
   private setCancelForEntities(
     action: Action,
-    entities: Set<SpaceAndURI>,
+    entities: Set<SpaceScopeAndURI>,
   ): void {
     const actionId = this.getActionId(action);
     this.cancels.set(action, () => {
@@ -2035,7 +2054,7 @@ export class Scheduler {
       updateDependents?: boolean;
       useRawReadsForTriggers?: boolean;
     },
-  ): { log: ReactivityLog; entities: Set<SpaceAndURI> } {
+  ): { log: ReactivityLog; entities: Set<SpaceScopeAndURI> } {
     let log: ReactivityLog;
     if (typeof populateDependencies === "function") {
       const depTx = this.runtime.edit();
@@ -2096,9 +2115,9 @@ export class Scheduler {
     const newDependencies = new Set<Action>();
 
     // Group reads by entity for efficient lookup
-    const readsByEntity = new Map<SpaceAndURI, IMemorySpaceAddress[]>();
+    const readsByEntity = new Map<SpaceScopeAndURI, IMemorySpaceAddress[]>();
     for (const read of log.reads) {
-      const entity: SpaceAndURI = `${read.space}/${read.id}`;
+      const entity = entityKey(read);
       let entityReads = readsByEntity.get(entity);
       if (!entityReads) {
         entityReads = [];
@@ -2106,9 +2125,12 @@ export class Scheduler {
       }
       entityReads.push(read);
     }
-    const nonRecursiveByEntity = new Map<SpaceAndURI, IMemorySpaceAddress[]>();
+    const nonRecursiveByEntity = new Map<
+      SpaceScopeAndURI,
+      IMemorySpaceAddress[]
+    >();
     for (const read of log.shallowReads) {
-      const entity: SpaceAndURI = `${read.space}/${read.id}`;
+      const entity = entityKey(read);
       let entityReads = nonRecursiveByEntity.get(entity);
       if (!entityReads) {
         entityReads = [];
@@ -2216,7 +2238,7 @@ export class Scheduler {
   }
 
   private collectReadersForWrite(write: IMemorySpaceAddress): Set<Action> {
-    const entity = `${write.space}/${write.id}` as SpaceAndURI;
+    const entity = entityKey(write);
     const readers = new Set<Action>();
 
     const recursiveReaders = this.triggers.get(entity);
@@ -2292,6 +2314,7 @@ export class Scheduler {
         if (
           read.space === write.space &&
           read.id === write.id &&
+          normalizeCellScope(read.scope) === normalizeCellScope(write.scope) &&
           arraysOverlap(write.path, read.path)
         ) {
           return true;
@@ -2305,6 +2328,7 @@ export class Scheduler {
         if (
           read.space === write.space &&
           read.id === write.id &&
+          normalizeCellScope(read.scope) === normalizeCellScope(write.scope) &&
           nonRecursiveReadMayOverlapWrite(read.path, write.path)
         ) {
           return true;
@@ -2373,13 +2397,13 @@ export class Scheduler {
       // Get reads and writes for diagnostics
       const deps = this.dependencies.get(action);
       const reads = deps?.reads.map((r) =>
-        `${r.space}/${r.id}/${r.path.join("/")}`
+        `${r.space}/${r.id}/${normalizeCellScope(r.scope)}/${r.path.join("/")}`
       );
       const shallowReads = deps?.shallowReads.map((r) =>
-        `${r.space}/${r.id}/${r.path.join("/")}`
+        `${r.space}/${r.id}/${normalizeCellScope(r.scope)}/${r.path.join("/")}`
       );
       const writes = this.getSchedulingWrites(action)?.map((w) =>
-        `${w.space}/${w.id}/${w.path.join("/")}`
+        `${w.space}/${w.id}/${normalizeCellScope(w.scope)}/${w.path.join("/")}`
       );
 
       // Get timing controls
@@ -2458,7 +2482,7 @@ export class Scheduler {
       const deps = this.dependencies.get(action);
       if (deps) {
         for (const read of deps.reads) {
-          const entity = `${read.space}/${read.id}`;
+          const entity = entityKey(read);
           if (!entityReaders.has(entity)) {
             entityReaders.set(entity, new Set());
           }
@@ -2469,7 +2493,7 @@ export class Scheduler {
       const writes = this.getSchedulingWrites(action);
       if (writes) {
         for (const write of writes) {
-          writtenEntities.add(`${write.space}/${write.id}`);
+          writtenEntities.add(entityKey(write));
         }
       }
     }
@@ -2550,9 +2574,10 @@ export class Scheduler {
         if (
           write.space === read.space &&
           write.id === read.id &&
+          normalizeCellScope(write.scope) === normalizeCellScope(read.scope) &&
           arraysOverlap(write.path, read.path)
         ) {
-          overlapping.push(`${write.space}/${write.id}`);
+          overlapping.push(entityKey(write));
         }
       }
     }
@@ -3179,7 +3204,7 @@ export class Scheduler {
     }
     try {
       for (const read of log.reads) {
-        const entity = `${read.space}/${read.id}` as SpaceAndURI;
+        const entity = entityKey(read);
         const writers = this.writersByEntity.get(entity);
         if (!writers) continue;
 
@@ -3197,7 +3222,7 @@ export class Scheduler {
       }
 
       for (const read of log.shallowReads) {
-        const entity = `${read.space}/${read.id}` as SpaceAndURI;
+        const entity = entityKey(read);
         const writers = this.writersByEntity.get(entity);
         if (!writers) continue;
 
@@ -4955,8 +4980,11 @@ export class Scheduler {
 
       // Run all remaining dirty effects - these shouldn't be lost
       // But skip throttled effects - they should stay dirty for later
-      for (const effect of this.effects) {
-        if (this.dirty.has(effect) && !this.isThrottled(effect)) {
+      const dirtyEffects = [...this.effects].filter((effect) =>
+        this.dirty.has(effect) && !this.isThrottled(effect)
+      );
+      for (const effect of dirtyEffects) {
+        if (this.effects.has(effect) && this.dirty.has(effect)) {
           logger.debug("schedule-cycle", () => [
             `[CYCLE-BREAK] Running dirty effect: ${this.getActionId(effect)}`,
           ]);

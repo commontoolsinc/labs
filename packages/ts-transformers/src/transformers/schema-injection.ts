@@ -39,8 +39,18 @@ import {
   isCellLikeTypeNode,
   printTypeNode,
 } from "./type-shrinking.ts";
+import { isPatternFactoryCalleeExpression } from "./structural-reactive-factory.ts";
 
 type UiContractHint = NonNullable<SchemaHint["cfcUiContract"]>;
+type CellScope = "space" | "user" | "session";
+
+const SCOPE_ALIAS_TO_CELL_SCOPE: ReadonlyMap<string, CellScope | "any"> =
+  new Map([
+    ["PerSpace", "space"],
+    ["PerUser", "user"],
+    ["PerSession", "session"],
+    ["PerAny", "any"],
+  ]);
 
 /**
  * Schema Injection Transformer - TypeRegistry Integration
@@ -507,6 +517,32 @@ function collectFunctionSchemaTypeNodes(
     }
   }
 
+  if (
+    context &&
+    unwrappedReturnExpr &&
+    ts.isObjectLiteralExpression(unwrappedReturnExpr) &&
+    objectLiteralHasExplicitScopeValueTypeNodes(unwrappedReturnExpr, checker)
+  ) {
+    const scopedResult = buildObjectLiteralReturnTypeNode(
+      unwrappedReturnExpr,
+      checker,
+      sourceFile,
+      factory,
+      typeRegistry,
+      capabilityRegistry,
+      context,
+    );
+    if (scopedResult) {
+      preserveUiContractHint(
+        resultNode,
+        scopedResult,
+        context.options.schemaHints,
+      );
+      resultNode = scopedResult;
+      resultType = undefined;
+    }
+  }
+
   const needsResultRecovery = !resultNode ||
     containsAnyOrUnknownTypeNode(resultNode) ||
     shouldDropFallbackTypeForSchema(
@@ -681,6 +717,102 @@ function inferSchemaContextualType(
   checker: ts.TypeChecker,
 ): ts.Type | undefined {
   return checker.getContextualType(node) ?? inferContextualType(node, checker);
+}
+
+function scopedFactoryContextualScope(
+  node: ts.Expression,
+  checker: ts.TypeChecker,
+): CellScope | undefined {
+  const contextualType = checker.getContextualType(node) ??
+    inferContextualType(node, checker);
+  if (!contextualType) return undefined;
+  return cellScopeFromType(contextualType, checker, node);
+}
+
+function cellScopeFromType(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+  location: ts.Node,
+): CellScope | undefined {
+  const aliasScope = type.aliasSymbol
+    ? SCOPE_ALIAS_TO_CELL_SCOPE.get(type.aliasSymbol.name)
+    : undefined;
+  if (aliasScope && aliasScope !== "any") {
+    return aliasScope;
+  }
+
+  for (const prop of type.getProperties()) {
+    if (!isScopeBrandProperty(prop)) continue;
+    const scope = cellScopeFromScopeBrandType(
+      checker.getTypeOfSymbolAtLocation(prop, location),
+    );
+    if (scope) return scope;
+  }
+
+  return undefined;
+}
+
+function isScopeBrandProperty(prop: ts.Symbol): boolean {
+  if (prop.getName().includes("SCOPE_BRAND")) return true;
+  return (prop.declarations ?? []).some((declaration) => {
+    const name = "name" in declaration
+      ? (declaration as { name?: ts.Node }).name
+      : undefined;
+    return !!name && name.getText().includes("SCOPE_BRAND");
+  });
+}
+
+function cellScopeFromScopeBrandType(type: ts.Type): CellScope | undefined {
+  if (type.isStringLiteral()) {
+    return isCellScopeValue(type.value) ? type.value : undefined;
+  }
+  if (type.isUnion()) {
+    for (const member of type.types) {
+      const scope = cellScopeFromScopeBrandType(member);
+      if (scope) return scope;
+    }
+  }
+  return undefined;
+}
+
+function isCellScopeValue(value: string): value is CellScope {
+  return value === "space" || value === "user" || value === "session";
+}
+
+function isAlreadyScopedFactoryCall(node: ts.CallExpression): boolean {
+  const callee = unwrapExpression(node.expression);
+  return ts.isCallExpression(callee) &&
+    ts.isPropertyAccessExpression(callee.expression) &&
+    callee.expression.name.text === "asScope";
+}
+
+function maybeApplyFactoryContextualScope(
+  node: ts.CallExpression,
+  context: TransformationContext,
+): ts.CallExpression | undefined {
+  const { checker, factory } = context;
+  if (isAlreadyScopedFactoryCall(node)) return undefined;
+  if (!isPatternFactoryCalleeExpression(node.expression, checker)) {
+    return undefined;
+  }
+
+  const scope = scopedFactoryContextualScope(node, checker);
+  if (!scope) return undefined;
+
+  const scopedFactory = factory.createCallExpression(
+    factory.createPropertyAccessExpression(
+      node.expression,
+      factory.createIdentifier("asScope"),
+    ),
+    undefined,
+    [factory.createStringLiteral(scope)],
+  );
+  return factory.updateCallExpression(
+    node,
+    scopedFactory,
+    node.typeArguments,
+    node.arguments,
+  );
 }
 
 interface ResolvedInjectableSchemaType {
@@ -1499,7 +1631,8 @@ function buildObjectLiteralReturnTypeNode(
       return undefined;
     }
 
-    const valueTypeNode = typeToSchemaTypeNode(valueType, checker, sourceFile);
+    const valueTypeNode = getExplicitValueTypeNode(valueExpr, checker) ??
+      typeToSchemaTypeNode(valueType, checker, sourceFile);
     if (!valueTypeNode) {
       return undefined;
     }
@@ -1534,6 +1667,77 @@ function buildObjectLiteralReturnTypeNode(
     members,
     { factory, checker, typeRegistry },
   );
+}
+
+function getExplicitValueTypeNode(
+  valueExpr: ts.Expression,
+  checker: ts.TypeChecker,
+): ts.TypeNode | undefined {
+  if (!ts.isIdentifier(valueExpr)) {
+    return undefined;
+  }
+  const symbol = checker.getSymbolAtLocation(valueExpr);
+  let declaration = symbol?.valueDeclaration ?? symbol?.declarations?.[0];
+  if (declaration && ts.isShorthandPropertyAssignment(declaration)) {
+    const shorthandValueSymbol = checker.getShorthandAssignmentValueSymbol(
+      declaration,
+    );
+    declaration = shorthandValueSymbol?.valueDeclaration ??
+      shorthandValueSymbol?.declarations?.[0];
+  }
+  if (declaration && ts.isVariableDeclaration(declaration)) {
+    return declaration.type;
+  }
+  return undefined;
+}
+
+function objectLiteralHasExplicitScopeValueTypeNodes(
+  expr: ts.ObjectLiteralExpression,
+  checker: ts.TypeChecker,
+): boolean {
+  for (const property of expr.properties) {
+    if (
+      !ts.isPropertyAssignment(property) &&
+      !ts.isShorthandPropertyAssignment(property)
+    ) {
+      continue;
+    }
+
+    const valueExpr = ts.isPropertyAssignment(property)
+      ? unwrapExpression(property.initializer)
+      : property.name;
+    const valueTypeNode = getExplicitValueTypeNode(valueExpr, checker);
+    if (valueTypeNode && typeNodeContainsScopeWrapper(valueTypeNode)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function typeNodeContainsScopeWrapper(typeNode: ts.TypeNode): boolean {
+  const unwrapped = unwrapParenthesizedSchemaTypeNode(typeNode);
+  if (ts.isTypeReferenceNode(unwrapped)) {
+    const name = ts.isIdentifier(unwrapped.typeName)
+      ? unwrapped.typeName.text
+      : unwrapped.typeName.right.text;
+    return SCOPE_ALIAS_TO_CELL_SCOPE.has(name) ||
+      (unwrapped.typeArguments?.some(typeNodeContainsScopeWrapper) ?? false);
+  }
+  if (ts.isUnionTypeNode(unwrapped) || ts.isIntersectionTypeNode(unwrapped)) {
+    return unwrapped.types.some(typeNodeContainsScopeWrapper);
+  }
+  if (ts.isArrayTypeNode(unwrapped)) {
+    return typeNodeContainsScopeWrapper(unwrapped.elementType);
+  }
+  if (ts.isTypeLiteralNode(unwrapped)) {
+    return unwrapped.members.some((member) =>
+      ts.isPropertySignature(member) &&
+      !!member.type &&
+      typeNodeContainsScopeWrapper(member.type)
+    );
+  }
+  return false;
 }
 
 function propagateUiContractHintsFromObjectLiteral(
@@ -2487,6 +2691,10 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
       }
 
       const callKind = detectCallKind(node, checker);
+      const scopedFactoryCall = maybeApplyFactoryContextualScope(node, context);
+      if (scopedFactoryCall) {
+        return ts.visitEachChild(scopedFactoryCall, visit, transformation);
+      }
 
       if (callKind?.kind === "builder" && callKind.builderName === "pattern") {
         const result = handlePatternSchemaInjection(

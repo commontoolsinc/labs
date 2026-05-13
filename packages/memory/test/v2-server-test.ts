@@ -1714,6 +1714,7 @@ Deno.test("memory v2 server watch set replacement emits removes for entities tha
     assertEquals(second.ok?.sync.removes, [{
       branch: "",
       id: "of:doc:1",
+      scope: "space",
     }]);
   } finally {
     await server.close();
@@ -1764,6 +1765,7 @@ Deno.test("memory v2 server flushes session sync before returning conflicts", as
       {
         branch: "",
         id: "of:doc:1",
+        scope: "space",
         seq: 0,
         deleted: true,
       },
@@ -1832,6 +1834,7 @@ Deno.test("memory v2 server flushes session sync before returning conflicts", as
     assertEquals(effect.effect.upserts, [{
       branch: "",
       id: "of:doc:1",
+      scope: "space",
       seq: 2,
       doc: {
         value: { version: 3 },
@@ -1975,6 +1978,7 @@ Deno.test("memory v2 server processes back-to-back websocket messages in receive
     assertEquals(effect.effect.upserts, [{
       branch: "",
       id: "of:doc:1",
+      scope: "space",
       seq: 2,
       doc: {
         value: { version: 3 },
@@ -2144,6 +2148,7 @@ Deno.test("memory v2 server waits for queued receives before rerunning scheduled
     assertEquals(firstEffect.effect.upserts, [{
       branch: "",
       id: "of:doc:1",
+      scope: "space",
       seq: 1,
       doc: {
         value: { version: 1 },
@@ -2161,6 +2166,7 @@ Deno.test("memory v2 server waits for queued receives before rerunning scheduled
     assertEquals(secondEffect.effect.upserts, [{
       branch: "",
       id: "of:doc:1",
+      scope: "space",
       seq: 3,
       doc: {
         value: { version: 3 },
@@ -2168,6 +2174,7 @@ Deno.test("memory v2 server waits for queued receives before rerunning scheduled
     }, {
       branch: "",
       id: "of:doc:2",
+      scope: "space",
       seq: 2,
       doc: {
         value: { version: 2 },
@@ -2331,6 +2338,7 @@ Deno.test("memory v2 server reruns scheduled watch refresh after max deferral", 
     assertEquals(firstEffect.effect.upserts, [{
       branch: "",
       id: "of:doc:1",
+      scope: "space",
       seq: 1,
       doc: {
         value: { version: 1 },
@@ -2349,6 +2357,7 @@ Deno.test("memory v2 server reruns scheduled watch refresh after max deferral", 
     assertEquals(secondEffect.effect.upserts, [{
       branch: "",
       id: "of:doc:2",
+      scope: "space",
       seq: 2,
       doc: {
         value: { version: 2 },

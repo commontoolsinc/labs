@@ -4,6 +4,7 @@ import { applyPatch } from "./patch.ts";
 import { parentPath, parsePointer, pathsOverlap } from "./path.ts";
 import {
   type BranchName,
+  type CellScope,
   type ClientCommit,
   decodeMemoryBoundary,
   DEFAULT_BRANCH,
@@ -16,6 +17,66 @@ import {
   type Reference,
   type SessionId,
 } from "../v2.ts";
+
+const DEFAULT_SCOPE: CellScope = "space";
+const DEFAULT_SCOPE_KEY = "space" as const;
+
+const normalizeScope = (scope: CellScope | undefined): CellScope =>
+  scope ?? DEFAULT_SCOPE;
+
+const encodeScopeKeyPart = (value: string): string => encodeURIComponent(value);
+
+const resolvePrincipalSessionKey = (
+  principal: string,
+  sessionId: SessionId,
+): string =>
+  `session:${encodeScopeKeyPart(principal)}:${encodeScopeKeyPart(sessionId)}`;
+
+const resolveCommitSessionKey = (
+  sessionId: SessionId,
+  principal?: string,
+): string =>
+  principal ? resolvePrincipalSessionKey(principal, sessionId) : sessionId;
+
+const resolveScopeKey = (
+  scope: CellScope | undefined,
+  options: { principal?: string; sessionId?: SessionId },
+): string => {
+  const declared = normalizeScope(scope);
+  switch (declared) {
+    case "space":
+      return DEFAULT_SCOPE_KEY;
+    case "user":
+      if (!options.principal) {
+        throw new ProtocolError(
+          "user scoped memory operations require a principal",
+        );
+      }
+      return `user:${encodeScopeKeyPart(options.principal)}`;
+    case "session":
+      if (!options.principal) {
+        throw new ProtocolError(
+          "session scoped memory operations require a principal",
+        );
+      }
+      if (!options.sessionId) {
+        throw new ProtocolError(
+          "session scoped memory operations require a session id",
+        );
+      }
+      return resolvePrincipalSessionKey(options.principal, options.sessionId);
+  }
+};
+
+const declaredScopeFromScopeKey = (scopeKey: string): CellScope => {
+  if (scopeKey.startsWith("session:")) {
+    return "session";
+  }
+  if (scopeKey.startsWith("user:")) {
+    return "user";
+  }
+  return "space";
+};
 
 const PRAGMAS = `
   PRAGMA journal_mode = WAL;
@@ -75,16 +136,17 @@ CREATE INDEX IF NOT EXISTS idx_commit_invocation_ref
 CREATE TABLE IF NOT EXISTS revision (
   branch      TEXT    NOT NULL DEFAULT '',
   id          TEXT    NOT NULL,
+  scope_key   TEXT    NOT NULL DEFAULT 'space',
   seq         INTEGER NOT NULL,
   op_index    INTEGER NOT NULL,
   op          TEXT    NOT NULL,
   data        JSON,
   commit_seq  INTEGER NOT NULL,
-  PRIMARY KEY (branch, id, seq, op_index),
+  PRIMARY KEY (branch, id, scope_key, seq, op_index),
   FOREIGN KEY (commit_seq) REFERENCES "commit"(seq)
 );
 CREATE INDEX IF NOT EXISTS idx_revision_branch_id_seq
-  ON revision (branch, id, seq, op_index);
+  ON revision (branch, id, scope_key, seq, op_index);
 CREATE INDEX IF NOT EXISTS idx_revision_commit
   ON revision (commit_seq);
 CREATE INDEX IF NOT EXISTS idx_revision_branch
@@ -93,20 +155,22 @@ CREATE INDEX IF NOT EXISTS idx_revision_branch
 CREATE TABLE IF NOT EXISTS head (
   branch    TEXT    NOT NULL,
   id        TEXT    NOT NULL,
+  scope_key TEXT    NOT NULL DEFAULT 'space',
   seq       INTEGER NOT NULL,
   op_index  INTEGER NOT NULL,
-  PRIMARY KEY (branch, id)
+  PRIMARY KEY (branch, id, scope_key)
 );
 CREATE INDEX IF NOT EXISTS idx_head_branch ON head (branch);
 
 CREATE TABLE IF NOT EXISTS snapshot (
   branch  TEXT    NOT NULL DEFAULT '',
   id      TEXT    NOT NULL,
+  scope_key TEXT  NOT NULL DEFAULT 'space',
   seq     INTEGER NOT NULL,
   value   JSON    NOT NULL,
-  PRIMARY KEY (branch, id, seq)
+  PRIMARY KEY (branch, id, scope_key, seq)
 );
-CREATE INDEX IF NOT EXISTS idx_snapshot_lookup ON snapshot (branch, id, seq);
+CREATE INDEX IF NOT EXISTS idx_snapshot_lookup ON snapshot (branch, id, scope_key, seq);
 
 CREATE TABLE IF NOT EXISTS branch (
   name           TEXT    NOT NULL PRIMARY KEY,
@@ -169,6 +233,7 @@ const INSERT_REVISION = `
 INSERT INTO revision (
   branch,
   id,
+  scope_key,
   seq,
   op_index,
   op,
@@ -178,6 +243,7 @@ INSERT INTO revision (
 VALUES (
   :branch,
   :id,
+  :scope_key,
   :seq,
   :op_index,
   :op,
@@ -187,26 +253,28 @@ VALUES (
 `;
 
 const UPSERT_HEAD = `
-INSERT INTO head (branch, id, seq, op_index)
-VALUES (:branch, :id, :seq, :op_index)
-ON CONFLICT (branch, id) DO UPDATE
+INSERT INTO head (branch, id, scope_key, seq, op_index)
+VALUES (:branch, :id, :scope_key, :seq, :op_index)
+ON CONFLICT (branch, id, scope_key) DO UPDATE
 SET seq = :seq, op_index = :op_index
 `;
 
 const INSERT_SNAPSHOT = `
-INSERT OR REPLACE INTO snapshot (branch, id, seq, value)
-VALUES (:branch, :id, :seq, :value)
+INSERT OR REPLACE INTO snapshot (branch, id, scope_key, seq, value)
+VALUES (:branch, :id, :scope_key, :seq, :value)
 `;
 
 const DELETE_OLD_SNAPSHOTS = `
 DELETE FROM snapshot
 WHERE branch = :branch
   AND id = :id
+  AND scope_key = :scope_key
   AND seq NOT IN (
     SELECT seq
     FROM snapshot
     WHERE branch = :branch
       AND id = :id
+      AND scope_key = :scope_key
     ORDER BY seq DESC
     LIMIT :retention
   )
@@ -224,18 +292,19 @@ WHERE name = :branch
 const SELECT_HEAD = `
 SELECT seq, op_index
 FROM head
-WHERE branch = :branch AND id = :id
+WHERE branch = :branch AND id = :id AND scope_key = :scope_key
 `;
 
 const SELECT_CURRENT_LOCAL = `
 SELECT r.seq, r.op_index, r.op, r.data
 FROM head h
 JOIN revision r
-  ON r.branch = h.branch
+ ON r.branch = h.branch
  AND r.id = h.id
+ AND r.scope_key = h.scope_key
  AND r.seq = h.seq
  AND r.op_index = h.op_index
-WHERE h.branch = :branch AND h.id = :id
+WHERE h.branch = :branch AND h.id = :id AND h.scope_key = :scope_key
 `;
 
 const SELECT_AT_SEQ_LOCAL = `
@@ -243,6 +312,7 @@ SELECT seq, op_index, op, data
 FROM revision
 WHERE branch = :branch
   AND id = :id
+  AND scope_key = :scope_key
   AND seq <= :seq
 ORDER BY seq DESC, op_index DESC
 LIMIT 1
@@ -253,6 +323,7 @@ SELECT seq, op_index, op, data
 FROM revision
 WHERE branch = :branch
   AND id = :id
+  AND scope_key = :scope_key
   AND op IN ('set', 'delete')
   AND (
     seq < :seq OR
@@ -267,6 +338,7 @@ SELECT seq, value
 FROM snapshot
 WHERE branch = :branch
   AND id = :id
+  AND scope_key = :scope_key
   AND seq <= :seq
 ORDER BY seq DESC
 LIMIT 1
@@ -277,6 +349,7 @@ SELECT seq, op_index, data
 FROM revision
 WHERE branch = :branch
   AND id = :id
+  AND scope_key = :scope_key
   AND op = 'patch'
   AND (
     seq > :base_seq OR
@@ -294,6 +367,7 @@ SELECT COUNT(*) AS count
 FROM revision
 WHERE branch = :branch
   AND id = :id
+  AND scope_key = :scope_key
   AND op = 'patch'
   AND seq > :after_seq
   AND seq <= :seq
@@ -321,6 +395,7 @@ SELECT seq
 FROM revision
 WHERE branch = :branch
   AND id = :id
+  AND scope_key = :scope_key
   AND seq > :after_seq
   AND op IN ('set', 'delete')
 ORDER BY seq DESC, op_index DESC
@@ -332,6 +407,7 @@ SELECT seq, op_index, data
 FROM revision
 WHERE branch = :branch
   AND id = :id
+  AND scope_key = :scope_key
   AND seq > :after_seq
   AND op = 'patch'
 ORDER BY seq DESC, op_index DESC
@@ -345,7 +421,7 @@ WHERE session_id = :session_id
 `;
 
 const SELECT_COMMIT_REVISIONS = `
-SELECT branch, id, seq, op_index, op, data, commit_seq
+SELECT branch, id, scope_key, seq, op_index, op, data, commit_seq
 FROM revision
 WHERE commit_seq = :commit_seq
 ORDER BY op_index ASC
@@ -490,6 +566,7 @@ export type AuthorizationRecord = FabricValue;
 
 export interface ApplyCommitOptions {
   sessionId: SessionId;
+  principal?: string;
   invocation?: InvocationRecord;
   invocationPayload?: FabricValue;
   authorization?: AuthorizationRecord;
@@ -498,6 +575,8 @@ export interface ApplyCommitOptions {
 
 export interface AppliedRevision {
   id: EntityId;
+  scope?: CellScope;
+  scopeKey?: string;
   branch: BranchName;
   seq: number;
   opIndex: number;
@@ -515,12 +594,17 @@ export interface AppliedCommit {
 
 export interface ReadOptions {
   id: EntityId;
+  scope?: CellScope;
+  principal?: string;
+  sessionId?: SessionId;
   branch?: BranchName;
   seq?: number;
 }
 
 export interface EntityState {
   id: EntityId;
+  scope: CellScope;
+  scopeKey: string;
   branch: BranchName;
   seq: number;
   opIndex: number;
@@ -557,6 +641,7 @@ type CommitRow = {
 type RevisionRow = {
   branch: string;
   id: string;
+  scope_key: string;
   seq: number;
   op_index: number;
   op: Operation["op"];
@@ -627,6 +712,95 @@ const prepareStatements = (database: Database): PreparedStatements => ({
   deleteOldSnapshots: database.prepare(DELETE_OLD_SNAPSHOTS),
 });
 
+const hasColumn = (
+  database: Database,
+  table: string,
+  column: string,
+): boolean => {
+  const rows = database.prepare(`PRAGMA table_info("${table}")`).all() as Array<
+    { name: string }
+  >;
+  return rows.some((row) => row.name === column);
+};
+
+const migrateScopedEntityTables = (database: Database): void => {
+  if (hasColumn(database, "revision", "scope_key")) {
+    return;
+  }
+
+  database.exec(`
+BEGIN TRANSACTION;
+
+DROP INDEX IF EXISTS idx_revision_branch_id_seq;
+DROP INDEX IF EXISTS idx_revision_commit;
+DROP INDEX IF EXISTS idx_revision_branch;
+DROP INDEX IF EXISTS idx_head_branch;
+DROP INDEX IF EXISTS idx_snapshot_lookup;
+
+ALTER TABLE revision RENAME TO revision_unscoped_migration;
+ALTER TABLE head RENAME TO head_unscoped_migration;
+ALTER TABLE snapshot RENAME TO snapshot_unscoped_migration;
+
+CREATE TABLE revision (
+  branch      TEXT    NOT NULL DEFAULT '',
+  id          TEXT    NOT NULL,
+  scope_key   TEXT    NOT NULL DEFAULT 'space',
+  seq         INTEGER NOT NULL,
+  op_index    INTEGER NOT NULL,
+  op          TEXT    NOT NULL,
+  data        JSON,
+  commit_seq  INTEGER NOT NULL,
+  PRIMARY KEY (branch, id, scope_key, seq, op_index),
+  FOREIGN KEY (commit_seq) REFERENCES "commit"(seq)
+);
+CREATE INDEX idx_revision_branch_id_seq
+  ON revision (branch, id, scope_key, seq, op_index);
+CREATE INDEX idx_revision_commit
+  ON revision (commit_seq);
+CREATE INDEX idx_revision_branch
+  ON revision (branch, seq);
+
+CREATE TABLE head (
+  branch    TEXT    NOT NULL,
+  id        TEXT    NOT NULL,
+  scope_key TEXT    NOT NULL DEFAULT 'space',
+  seq       INTEGER NOT NULL,
+  op_index  INTEGER NOT NULL,
+  PRIMARY KEY (branch, id, scope_key)
+);
+CREATE INDEX idx_head_branch ON head (branch);
+
+CREATE TABLE snapshot (
+  branch    TEXT    NOT NULL DEFAULT '',
+  id        TEXT    NOT NULL,
+  scope_key TEXT    NOT NULL DEFAULT 'space',
+  seq       INTEGER NOT NULL,
+  value     JSON    NOT NULL,
+  PRIMARY KEY (branch, id, scope_key, seq)
+);
+CREATE INDEX idx_snapshot_lookup
+  ON snapshot (branch, id, scope_key, seq);
+
+INSERT INTO revision (branch, id, scope_key, seq, op_index, op, data, commit_seq)
+SELECT branch, id, 'space', seq, op_index, op, data, commit_seq
+FROM revision_unscoped_migration;
+
+INSERT INTO head (branch, id, scope_key, seq, op_index)
+SELECT branch, id, 'space', seq, op_index
+FROM head_unscoped_migration;
+
+INSERT INTO snapshot (branch, id, scope_key, seq, value)
+SELECT branch, id, 'space', seq, value
+FROM snapshot_unscoped_migration;
+
+DROP TABLE revision_unscoped_migration;
+DROP TABLE head_unscoped_migration;
+DROP TABLE snapshot_unscoped_migration;
+
+COMMIT;
+`);
+};
+
 export const open = async (
   {
     url,
@@ -638,6 +812,7 @@ export const open = async (
   database.exec(NEW_DB_PRAGMAS);
   database.exec(PRAGMAS);
   database.exec(INIT);
+  migrateScopedEntityTables(database);
   return {
     url,
     database,
@@ -697,17 +872,53 @@ export const listBranches = (engine: Engine): BranchState[] => {
 
 export const read = (
   engine: Engine,
-  { id, branch = DEFAULT_BRANCH, seq }: ReadOptions,
+  { id, branch = DEFAULT_BRANCH, seq, scope, principal, sessionId }:
+    ReadOptions,
 ): EntityDocument | null => {
-  return readState(engine, { id, branch, seq })?.document ?? null;
+  return readState(engine, { id, branch, seq, scope, principal, sessionId })
+    ?.document ?? null;
 };
 
 export const readState = (
   engine: Engine,
-  { id, branch = DEFAULT_BRANCH, seq }: ReadOptions,
+  { id, branch = DEFAULT_BRANCH, seq, scope, principal, sessionId }:
+    ReadOptions,
 ): EntityState | null => {
+  const declaredScope = normalizeScope(scope);
+  const scopeKey = resolveScopeKey(scope, { principal, sessionId });
+  return readStateForScopeKey(engine, {
+    id,
+    branch,
+    seq,
+    scope: declaredScope,
+    scopeKey,
+  });
+};
+
+const readStateForScopeKey = (
+  engine: Engine,
+  {
+    id,
+    scopeKey,
+    branch = DEFAULT_BRANCH,
+    seq,
+    scope,
+  }: {
+    id: EntityId;
+    scope?: CellScope;
+    scopeKey: string;
+    branch?: BranchName;
+    seq?: number;
+  },
+): EntityState | null => {
+  const declaredScope = scope ?? declaredScopeFromScopeKey(scopeKey);
   const targetSeq = seq ?? headSeq(engine, branch);
-  const resolved = readRowForBranch(engine, { id, branch, seq: targetSeq });
+  const resolved = readRowForBranch(engine, {
+    id,
+    scopeKey,
+    branch,
+    seq: targetSeq,
+  });
   if (resolved === null) {
     return null;
   }
@@ -724,6 +935,7 @@ export const readState = (
     case "patch":
       document = reconstructPatchedDocument(engine, {
         id,
+        scopeKey,
         branch: resolvedBranch,
         seq: row.seq,
         opIndex: row.op_index,
@@ -733,6 +945,8 @@ export const readState = (
 
   return {
     id,
+    scope: declaredScope,
+    scopeKey,
     branch: resolvedBranch,
     seq: row.seq,
     opIndex: row.op_index,
@@ -769,9 +983,11 @@ const applyCommitTransaction = (
   engine: Engine,
   {
     sessionId,
+    principal,
     commit,
   }: ApplyCommitOptions,
 ): AppliedCommit => {
+  const sessionKey = resolveCommitSessionKey(sessionId, principal);
   if (commit.operations.length === 0) {
     throw new Error("memory v2 commit requires at least one operation");
   }
@@ -780,7 +996,7 @@ const applyCommitTransaction = (
   ensureActiveBranch(engine, branch);
 
   const existing = engine.statements.selectExistingCommit.get({
-    session_id: sessionId,
+    session_id: sessionKey,
     local_seq: commit.localSeq,
   }) as CommitRow | undefined;
   if (existing) {
@@ -796,10 +1012,12 @@ const applyCommitTransaction = (
     };
   }
 
-  validateConfirmedReads(engine, branch, commit);
+  validateConfirmedReads(engine, branch, commit, { principal, sessionId });
   const resolvedPendingReads = resolvePendingReads(
     engine,
+    sessionKey,
     sessionId,
+    principal,
     branch,
     commit,
   );
@@ -833,7 +1051,7 @@ const applyCommitTransaction = (
   engine.statements.insertCommit.run({
     seq,
     branch,
-    session_id: sessionId,
+    session_id: sessionKey,
     local_seq: commit.localSeq,
     invocation_ref: invocationRef,
     authorization_ref: authorizationRef,
@@ -848,6 +1066,8 @@ const applyCommitTransaction = (
       seq,
       opIndex,
       operation,
+      principal,
+      sessionId,
     });
     revisions.push(revision);
   }
@@ -865,9 +1085,16 @@ const writeOperation = (
     seq: number;
     opIndex: number;
     operation: Operation;
+    principal?: string;
+    sessionId: SessionId;
   },
 ): AppliedRevision => {
-  const { branch, seq, opIndex, operation } = options;
+  const { branch, seq, opIndex, operation, principal, sessionId } = options;
+  const scope = normalizeScope(operation.scope);
+  const scopeKey = resolveScopeKey(operation.scope, { principal, sessionId });
+  const revisionScopeFields = scope === DEFAULT_SCOPE
+    ? {}
+    : { scope, scopeKey };
   switch (operation.op) {
     case "set": {
       if (!isEntityDocument(operation.value)) {
@@ -878,6 +1105,7 @@ const writeOperation = (
       engine.statements.insertRevision.run({
         branch,
         id: operation.id,
+        scope_key: scopeKey,
         seq,
         op_index: opIndex,
         op: "set",
@@ -887,11 +1115,13 @@ const writeOperation = (
       engine.statements.upsertHead.run({
         branch,
         id: operation.id,
+        scope_key: scopeKey,
         seq,
         op_index: opIndex,
       });
       return {
         id: operation.id,
+        ...revisionScopeFields,
         branch,
         seq,
         opIndex,
@@ -904,6 +1134,7 @@ const writeOperation = (
       engine.statements.insertRevision.run({
         branch,
         id: operation.id,
+        scope_key: scopeKey,
         seq,
         op_index: opIndex,
         op: "patch",
@@ -913,11 +1144,13 @@ const writeOperation = (
       engine.statements.upsertHead.run({
         branch,
         id: operation.id,
+        scope_key: scopeKey,
         seq,
         op_index: opIndex,
       });
       return {
         id: operation.id,
+        ...revisionScopeFields,
         branch,
         seq,
         opIndex,
@@ -930,6 +1163,7 @@ const writeOperation = (
       engine.statements.insertRevision.run({
         branch,
         id: operation.id,
+        scope_key: scopeKey,
         seq,
         op_index: opIndex,
         op: "delete",
@@ -939,11 +1173,13 @@ const writeOperation = (
       engine.statements.upsertHead.run({
         branch,
         id: operation.id,
+        scope_key: scopeKey,
         seq,
         op_index: opIndex,
       });
       return {
         id: operation.id,
+        ...revisionScopeFields,
         branch,
         seq,
         opIndex,
@@ -958,14 +1194,21 @@ const validateConfirmedReads = (
   engine: Engine,
   branch: BranchName,
   commit: ClientCommit,
+  scopeContext: { principal?: string; sessionId: SessionId },
 ): void => {
+  // A commit is evaluated under one connection principal/session context.
+  // Every confirmed read in the commit resolves declared user/session scope
+  // against that writer identity, even when the read points at another branch.
+  // Cross-branch reads inherit this same principal context.
   for (const read of commit.reads.confirmed) {
     const readBranch = read.branch ?? branch;
     ensureReadableBranch(engine, readBranch);
+    const scopeKey = resolveScopeKey(read.scope, scopeContext);
     const conflictSeq = findConflictSeq(
       engine,
       readBranch,
       read.id,
+      scopeKey,
       read.seq,
       read.path,
     );
@@ -979,7 +1222,9 @@ const validateConfirmedReads = (
 
 const resolvePendingReads = (
   engine: Engine,
+  sessionKey: string,
   sessionId: SessionId,
+  principal: string | undefined,
   branch: BranchName,
   commit: ClientCommit,
 ): Array<{ localSeq: number; seq: number }> => {
@@ -989,7 +1234,7 @@ const resolvePendingReads = (
     let resolution = resolutions.get(read.localSeq);
     if (!resolution) {
       const row = engine.statements.selectPendingResolution.get({
-        session_id: sessionId,
+        session_id: sessionKey,
         local_seq: read.localSeq,
       }) as { seq: number } | undefined;
       if (!row) {
@@ -1008,6 +1253,7 @@ const resolvePendingReads = (
       engine,
       branch,
       read.id,
+      resolveScopeKey(read.scope, { principal, sessionId }),
       resolution.seq,
       read.path,
     );
@@ -1025,12 +1271,14 @@ const findConflictSeq = (
   engine: Engine,
   branch: BranchName,
   id: EntityId,
+  scopeKey: string,
   afterSeq: number,
   readPath: readonly string[],
 ): number | null => {
   const setOrDeleteConflict = engine.statements.selectSetDeleteConflict.get({
     branch,
     id,
+    scope_key: scopeKey,
     after_seq: afterSeq,
   }) as { seq: number } | undefined;
   if (setOrDeleteConflict !== undefined) {
@@ -1041,6 +1289,7 @@ const findConflictSeq = (
     const conflict of engine.statements.selectPatchConflicts.iter({
       branch,
       id,
+      scope_key: scopeKey,
       after_seq: afterSeq,
     }) as Iterable<{
       seq: number;
@@ -1098,6 +1347,8 @@ const selectCommitRevisions = (
   return rows.map((row) => {
     const base = {
       id: row.id,
+      scope: declaredScopeFromScopeKey(row.scope_key),
+      scopeKey: row.scope_key,
       branch: row.branch,
       seq: row.seq,
       opIndex: row.op_index,
@@ -1131,12 +1382,13 @@ const materializeSnapshots = (
 
   const seen = new Set<string>();
   for (const revision of revisions) {
-    const key = revisionKey(branch, revision.id);
+    const revisionScopeKey = revision.scopeKey ?? DEFAULT_SCOPE_KEY;
+    const key = revisionKey(branch, revision.id, revisionScopeKey);
     if (seen.has(key)) {
       continue;
     }
     seen.add(key);
-    maybeMaterializeSnapshot(engine, branch, revision.id);
+    maybeMaterializeSnapshot(engine, branch, revision.id, revisionScopeKey);
   }
 };
 
@@ -1144,17 +1396,25 @@ const maybeMaterializeSnapshot = (
   engine: Engine,
   branch: BranchName,
   id: EntityId,
+  scopeKey: string,
 ): void => {
-  const current = readState(engine, { id, branch });
+  const current = readStateForScopeKey(engine, { id, scopeKey, branch });
   if (current === null || current.document === null || current.op !== "patch") {
     return;
   }
 
-  const baseSeq = latestMaterializationSeq(engine, branch, id, current.seq);
+  const baseSeq = latestMaterializationSeq(
+    engine,
+    branch,
+    id,
+    scopeKey,
+    current.seq,
+  );
   const patchCount = (
     engine.statements.selectPatchCount.get({
       branch,
       id,
+      scope_key: scopeKey,
       after_seq: baseSeq,
       seq: current.seq,
     }) as { count: number }
@@ -1166,16 +1426,18 @@ const maybeMaterializeSnapshot = (
   engine.statements.insertSnapshot.run({
     branch,
     id,
+    scope_key: scopeKey,
     seq: current.seq,
     value: encodeMemoryBoundary(current.document),
   });
-  compactSnapshots(engine, branch, id);
+  compactSnapshots(engine, branch, id, scopeKey);
 };
 
 const compactSnapshots = (
   engine: Engine,
   branch: BranchName,
   id: EntityId,
+  scopeKey: string,
 ): void => {
   if (engine.snapshotRetention <= 0) {
     return;
@@ -1183,6 +1445,7 @@ const compactSnapshots = (
   engine.statements.deleteOldSnapshots.run({
     branch,
     id,
+    scope_key: scopeKey,
     retention: engine.snapshotRetention,
   });
 };
@@ -1191,17 +1454,20 @@ const latestMaterializationSeq = (
   engine: Engine,
   branch: BranchName,
   id: EntityId,
+  scopeKey: string,
   seq: number,
 ): number => {
   const baseRow = engine.statements.selectLatestBase.get({
     branch,
     id,
+    scope_key: scopeKey,
     seq,
     op_index: Number.MAX_SAFE_INTEGER,
   }) as ReadRow | undefined;
   const snapshotRow = engine.statements.selectLatestSnapshot.get({
     branch,
     id,
+    scope_key: scopeKey,
     seq,
   }) as SnapshotRow | undefined;
   return Math.max(baseRow?.seq ?? 0, snapshotRow?.seq ?? 0);
@@ -1211,21 +1477,24 @@ const reconstructPatchedDocument = (
   engine: Engine,
   options: {
     id: EntityId;
+    scopeKey: string;
     branch: BranchName;
     seq: number;
     opIndex: number;
   },
 ): EntityDocument => {
-  const { id, branch, seq, opIndex } = options;
+  const { id, scopeKey, branch, seq, opIndex } = options;
   const baseRow = engine.statements.selectLatestBase.get({
     branch,
     id,
+    scope_key: scopeKey,
     seq,
     op_index: opIndex,
   }) as ReadRow | undefined;
   const snapshotRow = engine.statements.selectLatestSnapshot.get({
     branch,
     id,
+    scope_key: scopeKey,
     seq,
   }) as SnapshotRow | undefined;
 
@@ -1247,6 +1516,7 @@ const reconstructPatchedDocument = (
   const patches = engine.statements.selectPatches.all({
     branch,
     id,
+    scope_key: scopeKey,
     base_seq: baseSeq,
     base_op_index: baseOpIndex,
     seq,
@@ -1267,6 +1537,7 @@ const readRowForBranch = (
   engine: Engine,
   options: {
     id: EntityId;
+    scopeKey: string;
     branch: BranchName;
     seq: number;
   },
@@ -1279,10 +1550,12 @@ const readRowForBranch = (
       ? engine.statements.selectCurrentLocal.get({
         branch: options.branch,
         id: options.id,
+        scope_key: options.scopeKey,
       })
       : engine.statements.selectAtSeqLocal.get({
         branch: options.branch,
         id: options.id,
+        scope_key: options.scopeKey,
         seq: options.seq,
       })) as ReadRow | undefined;
   if (currentRow !== undefined) {
@@ -1296,6 +1569,7 @@ const readRowForBranch = (
   const inheritedSeq = Math.min(options.seq, branch.forkSeq ?? 0);
   return readRowForBranch(engine, {
     id: options.id,
+    scopeKey: options.scopeKey,
     branch: branch.parentBranch,
     seq: inheritedSeq,
   });
@@ -1384,8 +1658,11 @@ const sameStoredOriginal = (
   return stored === encodeMemoryBoundary(incoming);
 };
 
-const revisionKey = (branch: BranchName, id: EntityId): string =>
-  `${branch}\0${id}`;
+const revisionKey = (
+  branch: BranchName,
+  id: EntityId,
+  scopeKey: string,
+): string => `${branch}\0${scopeKey}\0${id}`;
 
 const LEGACY_EMPTY_INVOCATION_REF =
   "memory-v2:legacy-empty-invocation" as Reference;

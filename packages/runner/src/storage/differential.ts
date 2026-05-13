@@ -8,6 +8,7 @@ import type {
   State,
 } from "./interface.ts";
 import * as Address from "./transaction/address.ts";
+import { normalizeCellScope } from "../scope.ts";
 
 export const create = () => new Changes();
 
@@ -15,13 +16,21 @@ interface Memory {
   get(entry: IMemoryAddress): State | undefined;
 }
 
-const toKey = (state: State) => `/${state.the}/${state.of}`;
+const stateScope = (state: State) =>
+  normalizeCellScope((state as State & Pick<IMemoryAddress, "scope">).scope);
+
+const unclaimedWithScope = (state: State): State =>
+  ({ ...unclaimed(state), scope: stateScope(state) }) as State;
+
+const toKey = (state: State) =>
+  `/${stateScope(state)}/${state.the}/${state.of}`;
 const toAddress = (
   state: State,
   path: readonly string[] = [],
 ): IMemoryAddress => ({
   id: state.of,
   type: state.the,
+  scope: stateScope(state),
   path: [...path],
 });
 
@@ -216,7 +225,7 @@ export const checkout = (memory: Memory, facts: Iterable<State>) => {
     if (existing) {
       checkout.add(existing);
     } else {
-      checkout.add(unclaimed(member));
+      checkout.add(unclaimedWithScope(member));
     }
   }
   return checkout;

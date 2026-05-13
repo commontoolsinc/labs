@@ -1,5 +1,5 @@
 import { isRecord } from "@commonfabric/utils/types";
-import type { JSONSchema } from "../builder/types.ts";
+import type { CellScope, JSONSchema } from "../builder/types.ts";
 import {
   findAndInlineDataURILinks,
   type NormalizedFullLink,
@@ -61,6 +61,7 @@ type TrustedEventPolicyTx = Pick<
 type AddressLike = {
   space: string;
   id: string;
+  scope: CellScope;
   path: readonly unknown[];
 };
 
@@ -454,6 +455,7 @@ const targetMatchesWrite = (
 ): boolean =>
   target.space === write.space &&
   target.id === write.id &&
+  target.scope === write.scope &&
   pathsEqual(target.path, write.path);
 
 const sameDocument = (
@@ -461,7 +463,8 @@ const sameDocument = (
   write: AddressLike,
 ): boolean =>
   target.space === write.space &&
-  target.id === write.id;
+  target.id === write.id &&
+  target.scope === write.scope;
 
 const contractCandidatesForWrite = (
   tx: TrustedEventPolicyTx,
@@ -615,6 +618,7 @@ export const recordTrustedEventPolicyInputs = (
       const target = {
         space: write.space,
         id: write.id,
+        scope: write.scope,
         path: [...write.path],
       };
       const eventId = trustedEventId(matchingEvent, write);

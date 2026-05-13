@@ -140,17 +140,19 @@ Deno.test("memory v2 server replaces watch sets and emits session sync effects",
         upserts: Array<{
           branch: string;
           id: string;
+          scope: string;
           seq: number;
           doc?: unknown;
           deleted?: true;
         }>;
-        removes: Array<{ branch: string; id: string }>;
+        removes: Array<{ branch: string; id: string; scope: string }>;
       };
     }>(shiftMessage(watcherMessages));
     assertEquals(watchResponse.ok?.serverSeq, 1);
     assertEquals(watchResponse.ok?.sync.upserts, [{
       branch: "",
       id: "of:doc:1",
+      scope: "space",
       seq: 1,
       doc: {
         value: {
@@ -192,6 +194,7 @@ Deno.test("memory v2 server replaces watch sets and emits session sync effects",
     assertEquals(effect.effect.upserts, [{
       branch: "",
       id: "of:doc:1",
+      scope: "space",
       seq: 2,
       doc: {
         value: {

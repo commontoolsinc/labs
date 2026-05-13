@@ -172,6 +172,11 @@ Deno.test("navigateTo is idempotent for one result process cell", async () => {
       resultTx: IExtendedStorageTransaction,
       result: unknown,
     ) => {
+      assertEquals(
+        (result as { getAsNormalizedFullLink(): { scope: string } })
+          .getAsNormalizedFullLink().scope,
+        "session",
+      );
       processCell.withTx(resultTx).key("result").set(result);
     };
 

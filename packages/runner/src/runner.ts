@@ -10,6 +10,7 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { isRecord } from "@commonfabric/utils/types";
 import { rendererVDOMSchema } from "./schemas.ts";
 import {
+  type CellScope,
   type Frame,
   isModule,
   isPattern,
@@ -29,7 +30,7 @@ import {
   popFrame,
   pushFrameFromCause,
 } from "./builder/pattern.ts";
-import { type Cell, isCell } from "./cell.ts";
+import { type Cell, createCell, isCell } from "./cell.ts";
 import { type Action } from "./scheduler.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import {
@@ -67,6 +68,7 @@ import { FunctionCache } from "./function-cache.ts";
 import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import "./builtins/index.ts";
 import { isCellResult } from "./query-result-proxy.ts";
+import { isCellScope, narrowestScope } from "./scope.ts";
 import {
   cellAwareDeepCopy,
   describePatternOrModule,
@@ -137,6 +139,18 @@ const processCellSetupSchema = (pattern: Pattern): JSONSchema => ({
   required: [TYPE] as const,
 });
 
+function schemaCellScope(
+  schema: JSONSchema | undefined,
+): CellScope | undefined {
+  return isRecord(schema) && isCellScope(schema.scope)
+    ? schema.scope
+    : undefined;
+}
+
+function patternDefaultScope(pattern: Pattern): CellScope | undefined {
+  return schemaCellScope(pattern.resultSchema) ?? pattern.defaultScope;
+}
+
 const recordOutputSchemaPolicyInputs = (
   tx: IExtendedStorageTransaction,
   runtime: Runtime,
@@ -169,6 +183,7 @@ const recordOutputSchemaPolicyInputs = (
         target: {
           space: targetLink.space,
           id: targetLink.id,
+          scope: targetLink.scope,
           path: [...targetLink.path],
         },
         schema,
@@ -218,6 +233,7 @@ const recordSchemaPolicyInputForLink = (
     target: {
       space: link.space,
       id: link.id,
+      scope: link.scope,
       path: [...link.path],
     },
     schema,
@@ -347,12 +363,14 @@ const recordSetupProjectionPolicyInputs = (
       target: {
         space: target.space,
         id: target.id,
+        scope: target.scope,
         path: [...target.path, ...schemaPath],
       },
       claim: CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
       sources: [{
         space: source.space,
         id: source.id,
+        scope: source.scope,
         path: [...source.path],
       }],
     });
@@ -420,6 +438,10 @@ type JavaScriptNodeContext = BoundNodeIO & {
   verifiedLoadId: string | undefined;
 };
 
+type JavaScriptActionResultCells = {
+  byScope: Map<CellScope, Cell<any>>;
+};
+
 export class Runner {
   readonly cancels = new Map<`${MemorySpace}/${URI}`, Cancel>();
   private allCancels = new Set<Cancel>();
@@ -427,7 +449,10 @@ export class Runner {
   private locallyPreparedResults = new Set<`${MemorySpace}/${URI}`>();
   // Map whose key is the result cell's full key, and whose values are the
   // patterns as strings
-  private resultPatternCache = new Map<`${MemorySpace}/${URI}`, string>();
+  private resultPatternCache = new Map<
+    `${MemorySpace}/${CellScope}/${URI}`,
+    string
+  >();
 
   constructor(readonly runtime: Runtime) {
     this.runtime.storageManager.subscribe(this.createStorageSubscription());
@@ -448,7 +473,11 @@ export class Runner {
         const space = notification.space;
         if ("changes" in notification) {
           for (const change of notification.changes) {
-            this.resultPatternCache.delete(`${space}/${change.address.id}`);
+            this.resultPatternCache.delete(
+              `${space}/${
+                change.address.scope ?? "space"
+              }/${change.address.id}`,
+            );
           }
         } else if (notification.type === "reset") {
           // copy keys, since we'll mutate the collection while iterating
@@ -530,12 +559,21 @@ export class Runner {
       return sourceCell as Cell<ProcessCellData<T>>;
     }
 
-    const processCell = this.runtime.getCell<ProcessCellData<T>>(
+    const baseProcessCell = this.runtime.getCell<ProcessCellData<T>>(
       resultCell.space,
       resultCell,
       undefined,
       tx,
     );
+    const resultScope = resultCell.getAsNormalizedFullLink().scope;
+    const processCell = resultScope === "space" ? baseProcessCell : createCell(
+      this.runtime,
+      {
+        ...baseProcessCell.getAsNormalizedFullLink(),
+        scope: resultScope,
+      },
+      tx,
+    ) as Cell<ProcessCellData<T>>;
     resultCell.withTx(tx).setSourceCell(processCell);
     return processCell;
   }
@@ -1084,13 +1122,48 @@ export class Runner {
       }
     }
 
-    // Step 5: Check whether the pattern is available, otherwise load it
-    const patternId = processCell.key(TYPE).getRaw() as string | undefined;
+    // Step 5: Check whether the pattern is available, otherwise load it. In a
+    // fresh runtime the result cell may have synced only the source link; sync
+    // the process cell before deciding its persisted $TYPE is absent.
+    const getPatternId = () =>
+      processCell.key(TYPE).getRaw() as string | undefined;
+    const patternId = getPatternId();
     if (!patternId) {
-      return Promise.reject(
-        new Error(`Cannot start: no pattern ID ($TYPE)`),
-      );
+      return Promise.resolve(processCell.sync()).then(() => {
+        const syncedPatternId = getPatternId();
+        if (!syncedPatternId) {
+          return Promise.reject(
+            new Error(`Cannot start: no pattern ID ($TYPE)`),
+          );
+        }
+        return this.startAvailablePattern(
+          rootCell,
+          processCell,
+          syncedPatternId,
+          wasSyncedAtEntry,
+          wasPreparedLocally,
+          seenCells,
+        );
+      });
     }
+    return this.startAvailablePattern(
+      rootCell,
+      processCell,
+      patternId,
+      wasSyncedAtEntry,
+      wasPreparedLocally,
+      seenCells,
+    );
+  }
+
+  private startAvailablePattern<T = any>(
+    rootCell: Cell<T>,
+    processCell: Cell<any>,
+    patternId: string,
+    wasSyncedAtEntry: boolean,
+    wasPreparedLocally: boolean,
+    seenCells: Set<Cell>,
+  ): Promise<boolean> {
     const pattern = this.runtime.patternManager.patternById(patternId);
     if (!pattern) {
       return this.runtime.patternManager.loadPattern(
@@ -1395,9 +1468,9 @@ export class Runner {
       : resultCell;
   }
 
-  private getDocKey(cell: Cell<any>): `${MemorySpace}/${URI}` {
-    const { space, id } = cell.getAsNormalizedFullLink();
-    return `${space}/${id}`;
+  private getDocKey(cell: Cell<any>): `${MemorySpace}/${CellScope}/${URI}` {
+    const { space, id, scope } = cell.getAsNormalizedFullLink();
+    return `${space}/${scope}/${id}`;
   }
 
   private async syncCellsForRunningPattern(
@@ -2084,8 +2157,9 @@ export class Runner {
     outputs: FabricValue,
     addCancel: AddCancel,
     resultFor: { inputs: FabricValue; outputs: FabricValue; fn: string },
-    previousResultCellRef: { current?: Cell<any> },
+    previousResultCellRef: JavaScriptActionResultCells,
     recordIgnoredSchedulingWrite?: (link: NormalizedFullLink) => void,
+    narrowestReadScope?: CellScope,
   ): any {
     if (
       !validateAndCheckOpaqueRefs(result, name) &&
@@ -2098,21 +2172,41 @@ export class Runner {
         outputs,
         resultSchema,
       );
-      sendValueToBinding(tx, processCell, outputs, result);
+      sendValueToBinding(tx, processCell, outputs, result, {
+        narrowestReadScope,
+      });
       return result;
     }
 
     const resultPattern = patternFromFrame(() => result);
-    const resultCell = previousResultCellRef.current ??
-      this.runtime.getCell(
+    const effectiveOutputScope = narrowestScope([
+      schemaCellScope(resultSchema),
+      schemaCellScope(resultPattern.resultSchema),
+      narrowestReadScope,
+    ]);
+    let resultCell = previousResultCellRef.byScope.get(effectiveOutputScope);
+    if (resultCell === undefined) {
+      const baseResultCell = this.runtime.getCell(
         processCell.space,
         { resultFor },
         undefined,
         tx,
       );
+      resultCell = effectiveOutputScope === "space"
+        ? baseResultCell
+        : createCell(
+          this.runtime,
+          {
+            ...baseResultCell.getAsNormalizedFullLink(),
+            scope: effectiveOutputScope,
+          },
+          tx,
+        );
+      previousResultCellRef.byScope.set(effectiveOutputScope, resultCell);
+    }
 
     const resultPatternAsString = JSON.stringify(resultPattern);
-    const cacheKey = `${resultCell.space}/${resultCell.sourceURI}` as const;
+    const cacheKey = this.getDocKey(resultCell);
     const previousResultPatternAsString = this.resultPatternCache.get(cacheKey);
     const patternUnchanged =
       previousResultPatternAsString === resultPatternAsString;
@@ -2145,7 +2239,6 @@ export class Runner {
       this.pullCellOnceAfterSuccessfulCommit(tx, resultCell);
     }
 
-    previousResultCellRef.current ??= resultCell;
     const effectiveResultSchema = resultSchema ?? resultPattern.resultSchema ??
       resultCell.schema;
     recordOutputSchemaPolicyInputs(
@@ -2160,6 +2253,7 @@ export class Runner {
       processCell,
       outputs,
       resultCell.getAsLink({ base: processCell }),
+      { narrowestReadScope: effectiveOutputScope },
     );
     return result;
   }
@@ -2378,7 +2472,9 @@ export class Runner {
       undefined,
       tx,
     );
-    const previousResultCellRef: { current?: Cell<any> } = {};
+    const previousResultCellRef: JavaScriptActionResultCells = {
+      byScope: new Map(),
+    };
     let previouslyInvalidArgument = false;
     const fnSource = fn.toString();
 
@@ -2430,6 +2526,7 @@ export class Runner {
 
       try {
         logger.timeStart("action", "readInputs");
+        tx.resetNarrowestReadScope();
         const { argument, isValidArgument } = (() => {
           try {
             return this.readJavaScriptArgument(
@@ -2510,6 +2607,7 @@ export class Runner {
               resultFor,
               previousResultCellRef,
               (link) => action.ignoredSchedulingWrites?.push(link),
+              tx.getNarrowestReadScope(),
             );
           } finally {
             logger.timeEnd("action", "postRun");
@@ -2931,7 +3029,9 @@ export class Runner {
       );
       sendToBindings = false;
     } else {
-      resultCell = this.runtime.getCell(
+      const resultScope = patternDefaultScope(patternImpl) ??
+        module.defaultScope;
+      const baseResultCell = this.runtime.getCell(
         processCell.space,
         {
           pattern: module.implementation,
@@ -2942,6 +3042,16 @@ export class Runner {
         patternImpl.resultSchema,
         tx,
       );
+      resultCell = resultScope === undefined || resultScope === "space"
+        ? baseResultCell
+        : createCell(
+          this.runtime,
+          {
+            ...baseResultCell.getAsNormalizedFullLink(),
+            scope: resultScope,
+          },
+          tx,
+        );
       sendToBindings = true;
     }
 

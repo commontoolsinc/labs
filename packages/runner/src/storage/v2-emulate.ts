@@ -1,4 +1,4 @@
-import type { MemorySpace } from "@commonfabric/memory/interface";
+import type { MemorySpace, Signer } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { type Options, type SessionFactory, StorageManager } from "./v2.ts";
@@ -6,11 +6,16 @@ import { type Options, type SessionFactory, StorageManager } from "./v2.ts";
 class EmulatedSessionFactory implements SessionFactory {
   constructor(private readonly getServer: () => MemoryV2Server.Server) {}
 
-  async create(space: MemorySpace) {
+  async create(space: MemorySpace, signer?: Signer) {
     const client = await MemoryV2Client.connect({
       transport: MemoryV2Client.loopback(this.getServer()),
     });
-    const session = await client.mount(space);
+    const session = await client.mount(space, {}, () => ({
+      invocation: {},
+      authorization: {
+        principal: signer?.did(),
+      },
+    }));
     return { client, session };
   }
 }
@@ -27,7 +32,14 @@ export class EmulatedStorageManager extends StorageManager {
         ...options,
         address: new URL("memory://"),
       },
-      () => new MemoryV2Server.Server(),
+      () =>
+        new MemoryV2Server.Server({
+          authorizeSessionOpen(message) {
+            const principal = (message.authorization as { principal?: unknown })
+              ?.principal;
+            return typeof principal === "string" ? principal : undefined;
+          },
+        }),
     );
   }
 

@@ -46,7 +46,7 @@ export function toJSONWithLegacyAliases(
   if (isCellResultForDereferencing(value)) value = getCellOrThrow(value);
 
   if (isCell(value)) {
-    const { external, frame, schema } = value.export();
+    const { external, frame, schema, scope } = value.export();
 
     // If this is an external reference, just copy the reference as is.
     if (external) return external as JSONValue;
@@ -66,6 +66,7 @@ export function toJSONWithLegacyAliases(
       return {
         $alias: {
           path: pathToCell as (string | number)[],
+          ...(scope !== undefined && { scope }),
           ...(schema !== undefined &&
             { schema: sanitizeSchemaForLinks(schema, { keepStreams: true }) }),
         },

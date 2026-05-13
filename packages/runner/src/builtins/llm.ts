@@ -29,7 +29,9 @@ import { type Cell, isCell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import type { CellScope } from "../builder/types.ts";
 import { llmToolExecutionHelpers } from "./llm-dialog.ts";
+import { scopedCell } from "./scope-policy.ts";
 import {
   GenerateObjectParamsSchema,
   GenerateObjectResultSchema,
@@ -456,27 +458,10 @@ export function llm(
   let previousCallHash: string | undefined = undefined;
   let cellsInitialized = false;
   let resultCell: Cell<Schema<typeof LLMResultSchema>>;
+  let cellScope: CellScope | undefined;
 
   return (tx: IExtendedStorageTransaction) => {
-    if (!cellsInitialized) {
-      resultCell = runtime.getCell(
-        parentCell.space,
-        { llm: { result: cause } },
-        LLMResultSchema,
-        tx,
-      );
-      resultCell.sync();
-      sendResult(tx, resultCell);
-      cellsInitialized = true;
-    }
-
-    const thisRun = ++currentRun;
-    const pendingWithLog = resultCell.key("pending").withTx(tx);
-    const resultWithLog = resultCell.key("result").withTx(tx);
-    const errorWithLog = resultCell.key("error").withTx(tx);
-    const partialWithLog = resultCell.key("partial").withTx(tx);
-    const requestHashWithLog = resultCell.key("requestHash").withTx(tx);
-
+    tx.resetNarrowestReadScope();
     const { system, messages, stop, maxTokens, model } = inputs.withTx(tx)
       .get();
 
@@ -487,6 +472,31 @@ export function llm(
       parentCell.space,
       tx,
     );
+    const outputScope = tx.getNarrowestReadScope();
+
+    if (!cellsInitialized || cellScope !== outputScope) {
+      if (cellsInitialized && cellScope !== outputScope) {
+        previousCallHash = undefined;
+      }
+      const baseResultCell = runtime.getCell(
+        parentCell.space,
+        { llm: { result: cause } },
+        LLMResultSchema,
+        tx,
+      );
+      resultCell = scopedCell(runtime, tx, baseResultCell, outputScope);
+      resultCell.sync();
+      sendResult(tx, resultCell);
+      cellsInitialized = true;
+      cellScope = outputScope;
+    }
+
+    const thisRun = ++currentRun;
+    const pendingWithLog = resultCell.key("pending").withTx(tx);
+    const resultWithLog = resultCell.key("result").withTx(tx);
+    const errorWithLog = resultCell.key("error").withTx(tx);
+    const partialWithLog = resultCell.key("partial").withTx(tx);
+    const requestHashWithLog = resultCell.key("requestHash").withTx(tx);
 
     const llmParams: LLMRequest = {
       system: ((system ?? "") + contextDocs.docs).trim() ||
@@ -673,27 +683,43 @@ export function generateText(
   let previousCallHash: string | undefined = undefined;
   let cellsInitialized = false;
   let resultCell: Cell<Schema<typeof GenerateTextResultSchema>>;
+  let cellScope: CellScope | undefined;
 
   return (tx: IExtendedStorageTransaction) => {
-    if (!cellsInitialized) {
-      resultCell = runtime.getCell(
+    tx.resetNarrowestReadScope();
+    const { system, prompt, messages, model, maxTokens } = inputs.withTx(tx)
+      .get();
+
+    // Build context documentation from context cells and append to system prompt
+    const contextDocs = buildContextDocumentation(
+      inputs,
+      runtime,
+      parentCell.space,
+      tx,
+    );
+    const outputScope = tx.getNarrowestReadScope();
+
+    if (!cellsInitialized || cellScope !== outputScope) {
+      if (cellsInitialized && cellScope !== outputScope) {
+        previousCallHash = undefined;
+      }
+      const baseResultCell = runtime.getCell(
         parentCell.space,
         { generateText: { result: cause } },
         GenerateTextResultSchema,
         tx,
       );
+      resultCell = scopedCell(runtime, tx, baseResultCell, outputScope);
       resultCell.sync();
       sendResult(tx, resultCell);
       cellsInitialized = true;
+      cellScope = outputScope;
     }
     const pendingWithLog = resultCell.key("pending").withTx(tx);
     const resultWithLog = resultCell.key("result").withTx(tx);
     const errorWithLog = resultCell.key("error").withTx(tx);
     const partialWithLog = resultCell.key("partial").withTx(tx);
     const requestHashWithLog = resultCell.key("requestHash").withTx(tx);
-
-    const { system, prompt, messages, model, maxTokens } = inputs.withTx(tx)
-      .get();
 
     // If neither prompt nor messages is provided, don't make a request
     const hasPrompt = Array.isArray(prompt) ? prompt.length > 0 : !!prompt;
@@ -709,14 +735,6 @@ export function generateText(
     const requestMessages: readonly BuiltInLLMMessage[] =
       (messages as unknown as readonly BuiltInLLMMessage[]) ||
       [{ role: "user", content: prompt! }];
-
-    // Build context documentation from context cells and append to system prompt
-    const contextDocs = buildContextDocumentation(
-      inputs,
-      runtime,
-      parentCell.space,
-      tx,
-    );
 
     const llmParams: LLMRequest = {
       system: ((system ?? "") + contextDocs.docs).trim() ||
@@ -907,26 +925,10 @@ export function generateObject<T extends Record<string, unknown>>(
   let previousCallHash: string | undefined = undefined;
   let cellsInitialized = false;
   let resultCell: Cell<Schema<typeof GenerateObjectResultSchema>>;
+  let cellScope: CellScope | undefined;
 
   return (tx: IExtendedStorageTransaction) => {
-    if (!cellsInitialized) {
-      resultCell = runtime.getCell(
-        parentCell.space,
-        { generateObject: { result: cause } },
-        GenerateObjectResultSchema,
-        tx,
-      );
-      resultCell.sync();
-      sendResult(tx, resultCell);
-      cellsInitialized = true;
-    }
-    const pendingWithLog = resultCell.key("pending").withTx(tx);
-    const resultWithLog = resultCell.key("result").withTx(tx);
-    const messagesWithLog = resultCell.key("messages").withTx(tx);
-    const errorWithLog = resultCell.key("error").withTx(tx);
-    const partialWithLog = resultCell.key("partial").withTx(tx);
-    const requestHashWithLog = resultCell.key("requestHash").withTx(tx);
-
+    tx.resetNarrowestReadScope();
     const {
       prompt,
       messages,
@@ -947,6 +949,30 @@ export function generateObject<T extends Record<string, unknown>>(
     ).withTx(tx).get() as
       | readonly unknown[]
       | undefined;
+    const outputScope = tx.getNarrowestReadScope();
+
+    if (!cellsInitialized || cellScope !== outputScope) {
+      if (cellsInitialized && cellScope !== outputScope) {
+        previousCallHash = undefined;
+      }
+      const baseResultCell = runtime.getCell(
+        parentCell.space,
+        { generateObject: { result: cause } },
+        GenerateObjectResultSchema,
+        tx,
+      );
+      resultCell = scopedCell(runtime, tx, baseResultCell, outputScope);
+      resultCell.sync();
+      sendResult(tx, resultCell);
+      cellsInitialized = true;
+      cellScope = outputScope;
+    }
+    const pendingWithLog = resultCell.key("pending").withTx(tx);
+    const resultWithLog = resultCell.key("result").withTx(tx);
+    const messagesWithLog = resultCell.key("messages").withTx(tx);
+    const errorWithLog = resultCell.key("error").withTx(tx);
+    const partialWithLog = resultCell.key("partial").withTx(tx);
+    const requestHashWithLog = resultCell.key("requestHash").withTx(tx);
 
     const hasPrompt = Array.isArray(prompt) ? prompt.length > 0 : !!prompt;
     if (

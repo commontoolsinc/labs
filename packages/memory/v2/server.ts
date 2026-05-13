@@ -2,6 +2,7 @@ import * as FS from "@std/fs";
 import * as Path from "@std/path";
 import { resolveSpaceStoreUrl } from "./storage-path.ts";
 import {
+  type CellScope,
   type ClientCommit,
   type ClientMessage,
   decodeMemoryBoundary,
@@ -36,6 +37,7 @@ import {
   queryGraph,
   type QueryGraphReuseContext,
   refreshTrackedGraph,
+  toDirtyKey,
   type TrackedGraphState,
   trackGraph,
 } from "./query.ts";
@@ -61,6 +63,11 @@ const SUBSCRIPTION_REFRESH_DELAY_MS = 5;
 const MIN_REFRESH_QUEUE_DRAIN_WAIT_MS = 500;
 const SLOW_QUERY_THRESHOLD_MS = 100;
 const SLOW_QUERY_BUFFER_SIZE = 100;
+
+// Memory v2 wire values may omit scope for default-space entries; storage and
+// watch keys need an explicit declared scope.
+const declaredScope = (scope: CellScope | undefined): CellScope =>
+  scope ?? "space";
 
 export interface SlowQuery {
   timestamp: number;
@@ -494,7 +501,7 @@ export class Server {
         }],
       },
     });
-    this.markSpaceDirty(space, [id]);
+    this.markSpaceDirty(space, [toDirtyKey(id)]);
     return commit;
   }
 
@@ -588,7 +595,8 @@ export class Server {
   async transact(
     message: TransactRequest,
   ): Promise<ResponseMessage<Engine.AppliedCommit>> {
-    if (this.#sessions.get(message.space, message.sessionId) === null) {
+    const session = this.#sessions.get(message.space, message.sessionId);
+    if (session === null) {
       return respondTypedError<Engine.AppliedCommit>(
         message.requestId,
         toError("SessionError", "Unknown session for space"),
@@ -599,11 +607,14 @@ export class Server {
       const engine = await this.openEngine(message.space);
       const commit = Engine.applyCommit(engine, {
         sessionId: message.sessionId,
+        principal: session.principal,
         commit: message.commit,
       });
       this.markSpaceDirty(
         message.space,
-        message.commit.operations.map((operation) => operation.id),
+        message.commit.operations.map((operation) =>
+          toDirtyKey(operation.id, declaredScope(operation.scope))
+        ),
       );
       return {
         type: "response",
@@ -632,7 +643,8 @@ export class Server {
   async graphQuery(
     message: GraphQueryRequest,
   ): Promise<ResponseMessage<GraphQueryResult>> {
-    if (this.#sessions.get(message.space, message.sessionId) === null) {
+    const session = this.#sessions.get(message.space, message.sessionId);
+    if (session === null) {
       return respondTypedError<GraphQueryResult>(
         message.requestId,
         toError("SessionError", "Unknown session for space"),
@@ -652,7 +664,16 @@ export class Server {
       return {
         type: "response",
         requestId: message.requestId,
-        ok: await this.evaluateGraphQuery(message.space, message.query),
+        ok: await this.evaluateGraphQuery(
+          message.space,
+          message.query,
+          undefined,
+          undefined,
+          {
+            principal: session.principal,
+            sessionId: message.sessionId,
+          },
+        ),
       };
     } catch (error) {
       return respondTypedError<GraphQueryResult>(
@@ -680,6 +701,11 @@ export class Server {
       const { serverSeq, graphs, entities } = await this.evaluateWatchSet(
         message.space,
         message.watches,
+        undefined,
+        {
+          principal: session.principal,
+          sessionId: message.sessionId,
+        },
       );
       const sync = buildFullSync(
         session.entities,
@@ -774,11 +800,23 @@ export class Server {
             message.space,
             engine,
             query,
+            undefined,
+            {
+              principal: session.principal,
+              sessionId: message.sessionId,
+            },
           );
           graphs.set(branch, tracked.state);
           for (const entity of tracked.state.entities.values()) {
             const entry = toCacheEntry(entity);
-            updates.set(cacheKeyForEntity(entry.branch, entry.id), entry);
+            updates.set(
+              cacheKeyForEntity(
+                entry.branch,
+                entry.id,
+                declaredScope(entry.scope),
+              ),
+              entry,
+            );
           }
           continue;
         }
@@ -797,7 +835,14 @@ export class Server {
         );
         for (const entity of extended.updates.values()) {
           const entry = toCacheEntry(entity);
-          updates.set(cacheKeyForEntity(entry.branch, entry.id), entry);
+          updates.set(
+            cacheKeyForEntity(
+              entry.branch,
+              entry.id,
+              declaredScope(entry.scope),
+            ),
+            entry,
+          );
         }
       }
 
@@ -805,7 +850,9 @@ export class Server {
       for (const [key, entry] of updates) {
         const previous = session.entities.get(key);
         session.entities.set(key, entry);
-        session.trackedIds.add(entry.id);
+        session.trackedIds.add(
+          toDirtyKey(entry.id, declaredScope(entry.scope)),
+        );
         if (!sameSnapshot(previous, entry)) {
           upserts.push(entry);
         }
@@ -855,6 +902,7 @@ export class Server {
     query: GraphQuery,
     engine?: Engine.Engine,
     reuse?: QueryGraphReuseContext,
+    scopeContext: { principal?: string; sessionId?: string } = {},
   ): Promise<GraphQueryResult> {
     const startedAt = performance.now();
     const result = queryGraph(
@@ -862,6 +910,7 @@ export class Server {
       engine ?? await this.openEngine(space),
       query,
       reuse,
+      scopeContext,
     );
     recordSlowQueryDuration("graph.query", space, startedAt, {
       roots: query.roots.length,
@@ -873,6 +922,7 @@ export class Server {
     space: string,
     watches: readonly WatchSpec[],
     engine?: Engine.Engine,
+    scopeContext: { principal?: string; sessionId?: string } = {},
   ): Promise<{
     serverSeq: number;
     graphs: Map<string, TrackedGraphState>;
@@ -893,12 +943,17 @@ export class Server {
         resolvedEngine,
         query,
         reuse,
+        scopeContext,
       );
       serverSeq = result.serverSeq;
       graphs.set(branch, result.state);
       for (const entity of result.state.entities.values()) {
         const entry = toCacheEntry(entity);
-        const key = cacheKeyForEntity(entry.branch, entry.id);
+        const key = cacheKeyForEntity(
+          entry.branch,
+          entry.id,
+          declaredScope(entry.scope),
+        );
         const existing = entities.get(key);
         if (
           existing === undefined ||
@@ -958,7 +1013,14 @@ export class Server {
         }
         for (const entity of refreshed.updates.values()) {
           const entry = toCacheEntry(entity);
-          updates.set(cacheKeyForEntity(entry.branch, entry.id), entry);
+          updates.set(
+            cacheKeyForEntity(
+              entry.branch,
+              entry.id,
+              declaredScope(entry.scope),
+            ),
+            entry,
+          );
         }
       }
 
@@ -970,7 +1032,9 @@ export class Server {
       for (const [key, entry] of updates) {
         const previous = session.entities.get(key);
         session.entities.set(key, entry);
-        session.trackedIds.add(entry.id);
+        session.trackedIds.add(
+          toDirtyKey(entry.id, declaredScope(entry.scope)),
+        );
         if (!sameSnapshot(previous, entry)) {
           upserts.push(entry);
         }
@@ -1003,6 +1067,11 @@ export class Server {
     const { serverSeq, graphs, entities } = await this.evaluateWatchSet(
       space,
       session.watches,
+      undefined,
+      {
+        principal: session.principal,
+        sessionId,
+      },
     );
     const sync = buildDiffSync(
       session.entities,
@@ -1046,13 +1115,13 @@ export class Server {
   ): void {
     const ids = new Set<string>();
     for (const operation of commit.operations) {
-      ids.add(operation.id);
+      ids.add(toDirtyKey(operation.id, declaredScope(operation.scope)));
     }
     for (const read of commit.reads.confirmed) {
-      ids.add(read.id);
+      ids.add(toDirtyKey(read.id, declaredScope(read.scope)));
     }
     for (const read of commit.reads.pending) {
-      ids.add(read.id);
+      ids.add(toDirtyKey(read.id, declaredScope(read.scope)));
     }
     this.markSpaceDirty(space, ids);
   }

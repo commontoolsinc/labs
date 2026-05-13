@@ -1,4 +1,4 @@
-import type { JSONSchema } from "@commonfabric/api";
+import type { JSONSchema, LinkScope } from "@commonfabric/api";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { URI } from "@commonfabric/memory/interface";
 
@@ -22,6 +22,7 @@ export type LinkV1Inner = {
   id?: URI;
   path?: readonly string[];
   space?: MemorySpace;
+  scope?: LinkScope;
   schema?: JSONSchema;
   overwrite?: "redirect" | "this"; // default is "this"
 };
@@ -59,6 +60,7 @@ export type LegacyAlias = {
   $alias: {
     cell?: number | { "/": string };
     path: readonly PropertyKey[];
+    scope?: LinkScope;
     schema?: JSONSchema;
   };
 };

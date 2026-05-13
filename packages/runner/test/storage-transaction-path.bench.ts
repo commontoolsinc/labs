@@ -30,6 +30,7 @@ Deno.bench("Storage tx path - root read x100", async () => {
   try {
     tx.writeValueOrThrow({
       space,
+      scope: "space",
       id: "of:storage-tx-read",
       path: [],
     }, { count: 0, label: "bench", nested: { value: 1 } });
@@ -37,6 +38,7 @@ Deno.bench("Storage tx path - root read x100", async () => {
     for (let index = 0; index < 100; index += 1) {
       tx.readValueOrThrow({
         space,
+        scope: "space",
         id: "of:storage-tx-read",
         path: [],
       });
@@ -52,6 +54,7 @@ Deno.bench("Storage tx path - single sibling write x100", async () => {
   try {
     tx.writeValueOrThrow({
       space,
+      scope: "space",
       id: "of:storage-tx-write",
       path: [],
     }, { count: 0, label: "bench", nested: { value: 1 } });
@@ -59,6 +62,7 @@ Deno.bench("Storage tx path - single sibling write x100", async () => {
     for (let index = 0; index < 100; index += 1) {
       tx.writeValueOrThrow({
         space,
+        scope: "space",
         id: "of:storage-tx-write",
         path: ["count"],
       }, index);
@@ -74,6 +78,7 @@ Deno.bench("Storage tx path - five sibling writes x100", async () => {
   try {
     tx.writeValueOrThrow({
       space,
+      scope: "space",
       id: "of:storage-tx-five",
       path: [],
     }, {
@@ -89,6 +94,7 @@ Deno.bench("Storage tx path - five sibling writes x100", async () => {
         {
           address: {
             space,
+            scope: "space",
             id: "of:storage-tx-five",
             path: ["a"],
           },
@@ -97,6 +103,7 @@ Deno.bench("Storage tx path - five sibling writes x100", async () => {
         {
           address: {
             space,
+            scope: "space",
             id: "of:storage-tx-five",
             path: ["b"],
           },
@@ -105,6 +112,7 @@ Deno.bench("Storage tx path - five sibling writes x100", async () => {
         {
           address: {
             space,
+            scope: "space",
             id: "of:storage-tx-five",
             path: ["c"],
           },
@@ -113,6 +121,7 @@ Deno.bench("Storage tx path - five sibling writes x100", async () => {
         {
           address: {
             space,
+            scope: "space",
             id: "of:storage-tx-five",
             path: ["d", "nested"],
           },
@@ -121,6 +130,7 @@ Deno.bench("Storage tx path - five sibling writes x100", async () => {
         {
           address: {
             space,
+            scope: "space",
             id: "of:storage-tx-five",
             path: ["e"],
           },
