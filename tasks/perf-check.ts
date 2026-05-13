@@ -74,6 +74,62 @@ function pullRequestBodyFromEvent(
   return typeof pullRequest.body === "string" ? pullRequest.body : "";
 }
 
+function currentWorkflowRunFromEvent(
+  event: object | undefined,
+  runId: number,
+): WorkflowRun {
+  const payload = event as {
+    after?: unknown;
+    pull_request?: {
+      head?: { sha?: unknown };
+    };
+  } | undefined;
+
+  const headSha = typeof payload?.pull_request?.head?.sha === "string"
+    ? payload.pull_request.head.sha
+    : typeof payload?.after === "string"
+    ? payload.after
+    : Deno.env.get("GITHUB_SHA") ?? "";
+
+  return {
+    id: runId,
+    html_url: `https://github.com/${REPO}/actions/runs/${runId}`,
+    head_sha: headSha,
+    created_at: new Date().toISOString(),
+    conclusion: "",
+    event: Deno.env.get("GITHUB_EVENT_NAME") ?? "",
+  };
+}
+
+function isGitHubRateLimitError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /\b(rate limit|rate-limited|ratelimit)\b/i.test(message);
+}
+
+async function githubApiOrSkip<T>(
+  description: string,
+  operation: () => Promise<T>,
+  metricsForArtifact: Map<string, TimingSample>,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (!isGitHubRateLimitError(error)) throw error;
+
+    console.warn(
+      `  Warning: GitHub API rate limit while ${description}: ${error}`,
+    );
+    await writePerfMetricsFile(PERF_METRICS_FILE, metricsForArtifact);
+    console.log(
+      `Wrote ${PERF_METRICS_FILE} with ${metricsForArtifact.size} metrics.`,
+    );
+    console.log(
+      "Skipping performance regression check because GitHub API rate limits prevent collecting required CI timing data.",
+    );
+    Deno.exit(0);
+  }
+}
+
 /**
  * Metrics to exclude from regression checks because their aggregate values
  * naturally grow as new tests are added.  Per-test timings from JUnit
@@ -135,13 +191,16 @@ async function main() {
   // 2. Get current run's job/step metrics and per-test timing artifacts
   console.log(`Fetching jobs for current run ${runId}...`);
   const runIdNum = parseInt(runId);
-  const currentJobs = await fetchJobsForRun(runIdNum);
-
-  // Build a minimal WorkflowRun for the current run to extract metrics
-  const currentRunInfo = await githubGet<WorkflowRun>(
-    `/repos/${REPO}/actions/runs/${runId}`,
-  );
   const currentMetrics = new Map<string, TimingSample>();
+  const currentJobs = await githubApiOrSkip(
+    `fetching jobs for current run ${runId}`,
+    () => fetchJobsForRun(runIdNum),
+    currentMetrics,
+  );
+
+  // The event payload has the metadata needed for samples, so avoid spending
+  // another API request on the current workflow run.
+  const currentRunInfo = currentWorkflowRunFromEvent(event, runIdNum);
 
   // Extract job/step metrics
   for (const [name, sample] of extractMetrics(currentRunInfo, currentJobs)) {
@@ -184,8 +243,13 @@ async function main() {
 
   // 3. Fetch recent main-branch push runs for baseline
   console.log("Fetching recent main-branch runs for baseline...");
-  const baselineData = await githubGet<{ workflow_runs: WorkflowRun[] }>(
-    `/repos/${REPO}/actions/workflows/${WORKFLOW_FILE}/runs?branch=main&status=success&event=push&per_page=${BASELINE_RUNS}`,
+  const baselineData = await githubApiOrSkip(
+    "fetching recent main-branch runs for baseline",
+    () =>
+      githubGet<{ workflow_runs: WorkflowRun[] }>(
+        `/repos/${REPO}/actions/workflows/${WORKFLOW_FILE}/runs?branch=main&status=success&event=push&per_page=${BASELINE_RUNS}`,
+      ),
+    currentMetrics,
   );
   const baselineRuns = baselineData.workflow_runs;
 
@@ -223,34 +287,49 @@ async function main() {
     }
   }
 
-  const baselineContexts = await mapConcurrent(
-    baselineRuns,
-    API_CONCURRENCY,
-    async (run): Promise<BaselineRunContext> => {
-      const [artifacts, pr] = await Promise.all([
-        fetchArtifactsForRunBestEffort(run),
-        fetchPRForCommit(run.head_sha),
-      ]);
-      return { run, artifacts, pr };
-    },
+  const baselineContexts = await githubApiOrSkip(
+    "fetching baseline run context",
+    () =>
+      mapConcurrent(
+        baselineRuns,
+        API_CONCURRENCY,
+        async (run): Promise<BaselineRunContext> => {
+          const [artifacts, pr] = await Promise.all([
+            fetchArtifactsForRunBestEffort(run),
+            fetchPRForCommit(run.head_sha),
+          ]);
+          return { run, artifacts, pr };
+        },
+      ),
+    currentMetrics,
   );
 
   console.log("Fetching recent perf metric backfills...");
-  const backfillSourceData = await githubGet<{ workflow_runs: WorkflowRun[] }>(
-    `/repos/${REPO}/actions/workflows/${WORKFLOW_FILE}/runs?branch=main&event=push&status=success&per_page=${BACKFILL_SOURCE_RUNS}`,
+  const backfillSourceData = await githubApiOrSkip(
+    "fetching recent perf metric backfill sources",
+    () =>
+      githubGet<{ workflow_runs: WorkflowRun[] }>(
+        `/repos/${REPO}/actions/workflows/${WORKFLOW_FILE}/runs?branch=main&event=push&status=success&per_page=${BACKFILL_SOURCE_RUNS}`,
+      ),
+    currentMetrics,
   );
   const baselineRunIds = new Set(baselineRuns.map((run) => run.id));
   const backfillSourceRuns = backfillSourceData.workflow_runs.filter((run) =>
     !baselineRunIds.has(run.id) && run.id !== runIdNum
   );
-  const extraBackfillContexts = await mapConcurrent(
-    backfillSourceRuns,
-    API_CONCURRENCY,
-    async (run): Promise<BaselineRunContext> => ({
-      run,
-      artifacts: await fetchArtifactsForRunBestEffort(run),
-      pr: null,
-    }),
+  const extraBackfillContexts = await githubApiOrSkip(
+    "fetching extra perf metric backfill context",
+    () =>
+      mapConcurrent(
+        backfillSourceRuns,
+        API_CONCURRENCY,
+        async (run): Promise<BaselineRunContext> => ({
+          run,
+          artifacts: await fetchArtifactsForRunBestEffort(run),
+          pr: null,
+        }),
+      ),
+    currentMetrics,
   );
 
   const backfilledMetricsByRunId = new Map<number, Map<string, TimingSample>>();
@@ -260,17 +339,22 @@ async function main() {
   ].sort((a, b) =>
     b.run.created_at.localeCompare(a.run.created_at) || b.run.id - a.run.id
   );
-  const parsedBackfillSources = await mapConcurrent(
-    backfillSourceContexts,
-    API_CONCURRENCY,
-    async ({ artifacts }) => {
-      const artifact = artifacts.find(
-        (a) => a.name === PERF_METRICS_BACKFILL_ARTIFACT_NAME && !a.expired,
-      );
-      if (!artifact) return null;
+  const parsedBackfillSources = await githubApiOrSkip(
+    "downloading perf metric backfills",
+    () =>
+      mapConcurrent(
+        backfillSourceContexts,
+        API_CONCURRENCY,
+        async ({ artifacts }) => {
+          const artifact = artifacts.find(
+            (a) => a.name === PERF_METRICS_BACKFILL_ARTIFACT_NAME && !a.expired,
+          );
+          if (!artifact) return null;
 
-      return await downloadAndParsePerfMetricsBackfill(artifact.id);
-    },
+          return await downloadAndParsePerfMetricsBackfill(artifact.id);
+        },
+      ),
+    currentMetrics,
   );
 
   for (const backfills of parsedBackfillSources) {
@@ -288,77 +372,82 @@ async function main() {
     );
   }
 
-  await mapConcurrent(baselineContexts, API_CONCURRENCY, async (context) => {
-    const { run, artifacts, pr } = context;
+  await githubApiOrSkip(
+    "building baseline timelines",
+    () =>
+      mapConcurrent(baselineContexts, API_CONCURRENCY, async (context) => {
+        const { run, artifacts, pr } = context;
 
-    if (pr) {
-      prInfoBySha.set(run.head_sha, pr);
-      const overrides = parseBaselineOverrides(pr.body ?? "");
-      if (overrides.metrics.size > 0) {
-        overridesBySha.set(run.head_sha, overrides);
-      }
-    }
+        if (pr) {
+          prInfoBySha.set(run.head_sha, pr);
+          const overrides = parseBaselineOverrides(pr.body ?? "");
+          if (overrides.metrics.size > 0) {
+            overridesBySha.set(run.head_sha, overrides);
+          }
+        }
 
-    const perfMetricsArtifact = artifacts.find(
-      (a) => a.name === PERF_METRICS_ARTIFACT_NAME && !a.expired,
-    );
-    if (perfMetricsArtifact) {
-      const metrics = await downloadAndParsePerfMetrics(
-        perfMetricsArtifact.id,
-      );
-      if (metrics) {
+        const perfMetricsArtifact = artifacts.find(
+          (a) => a.name === PERF_METRICS_ARTIFACT_NAME && !a.expired,
+        );
+        if (perfMetricsArtifact) {
+          const metrics = await downloadAndParsePerfMetrics(
+            perfMetricsArtifact.id,
+          );
+          if (metrics) {
+            for (const [name, sample] of metrics) {
+              addSample(timelines, name, sample);
+            }
+            return;
+          }
+        }
+
+        const backfilledMetrics = backfilledMetricsByRunId.get(run.id);
+        if (backfilledMetrics) {
+          for (const [name, sample] of backfilledMetrics) {
+            addSample(timelines, name, sample);
+          }
+          return;
+        }
+
+        const jobs = await fetchJobsForRun(run.id);
+        const metrics = new Map(extractMetrics(run, jobs));
         for (const [name, sample] of metrics) {
           addSample(timelines, name, sample);
         }
-        return;
-      }
-    }
 
-    const backfilledMetrics = backfilledMetricsByRunId.get(run.id);
-    if (backfilledMetrics) {
-      for (const [name, sample] of backfilledMetrics) {
-        addSample(timelines, name, sample);
-      }
-      return;
-    }
-
-    const jobs = await fetchJobsForRun(run.id);
-    const metrics = new Map(extractMetrics(run, jobs));
-    for (const [name, sample] of metrics) {
-      addSample(timelines, name, sample);
-    }
-
-    // Fetch per-test timing artifacts
-    let canBackfill = true;
-    try {
-      const timingArtifacts = artifacts.filter(
-        (a) => a.name.startsWith("test-timing-") && !a.expired,
-      );
-      for (const artifact of timingArtifacts) {
-        const suites = await downloadAndParseJUnit(artifact.id);
-        if (suites.length === 0) {
+        // Fetch per-test timing artifacts
+        let canBackfill = true;
+        try {
+          const timingArtifacts = artifacts.filter(
+            (a) => a.name.startsWith("test-timing-") && !a.expired,
+          );
+          for (const artifact of timingArtifacts) {
+            const suites = await downloadAndParseJUnit(artifact.id);
+            if (suites.length === 0) {
+              canBackfill = false;
+              continue;
+            }
+            const testMetrics = extractTestFileMetrics(
+              run,
+              timingArtifactLabel(artifact.name),
+              suites,
+            );
+            for (const [name, sample] of testMetrics) {
+              metrics.set(name, sample);
+              addSample(timelines, name, sample);
+            }
+          }
+        } catch {
+          // Artifacts may not exist for older runs
           canBackfill = false;
-          continue;
         }
-        const testMetrics = extractTestFileMetrics(
-          run,
-          timingArtifactLabel(artifact.name),
-          suites,
-        );
-        for (const [name, sample] of testMetrics) {
-          metrics.set(name, sample);
-          addSample(timelines, name, sample);
-        }
-      }
-    } catch {
-      // Artifacts may not exist for older runs
-      canBackfill = false;
-    }
 
-    if (metrics.size > 0 && canBackfill) {
-      newBackfills.set(run.id, metrics);
-    }
-  });
+        if (metrics.size > 0 && canBackfill) {
+          newBackfills.set(run.id, metrics);
+        }
+      }),
+    currentMetrics,
+  );
 
   if (newBackfills.size > 0) {
     await writePerfMetricsBackfillFile(
