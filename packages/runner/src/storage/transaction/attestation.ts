@@ -339,15 +339,9 @@ export const claim = (
   const source = attest(state);
   const actual = type === "application/json" &&
       address.path.length === 0 &&
-      "getDocument" in replica &&
       typeof replica.getDocument === "function"
     ? toTransactionDocumentValue(
-      (replica as {
-        getDocument: (
-          id: typeof address.id,
-          scope?: typeof address.scope,
-        ) => Parameters<typeof toTransactionDocumentValue>[0];
-      }).getDocument(address.id as any, address.scope),
+      replica.getDocument(address.id, address.scope),
     )
     : read(source, address)?.ok?.value;
 

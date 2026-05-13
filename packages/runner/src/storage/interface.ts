@@ -1,6 +1,6 @@
 import type { Immutable } from "@commonfabric/utils/types";
 import type { CellScope, ImmutableJSONValue } from "@commonfabric/api";
-import type { PatchOp } from "@commonfabric/memory/v2";
+import type { EntityDocument, PatchOp } from "@commonfabric/memory/v2";
 import type { EntityId } from "../create-ref.ts";
 import {
   type Assertion,
@@ -1023,6 +1023,8 @@ export interface ISpaceReplica extends ISpace {
    * does not have it.
    */
   get(entry: BaseMemoryAddress): State | undefined;
+
+  getDocument(id: URI, scope?: CellScope): EntityDocument | undefined;
 
   commit?(
     transaction: ITransaction,
