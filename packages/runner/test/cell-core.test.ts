@@ -207,6 +207,57 @@ describe("Cell", () => {
     await sm.close();
   });
 
+  it("Error set through a nested write-redirect lands on the target (modern)", async () => {
+    const sm = StorageManager.emulate({ as: signer });
+    const rt = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: sm,
+      experimental: { modernDataModel: true },
+    });
+    const localTx = rt.edit();
+
+    const target = rt.getCell<unknown>(
+      space,
+      "nested redirect target (modern Error)",
+      undefined,
+      localTx,
+    );
+    target.set("initial");
+
+    // `parent.slot` holds a write-redirect that aliases writes to `target`.
+    // `Cell.set` pre-resolves its top-level link, so to exercise
+    // `normalizeAndDiff`'s redirect-resolution branch we need the redirect
+    // at a nested key — that's the path it actually fires on, during the
+    // per-key recursion in the `isRecord(newValue)` branch.
+    const parent = rt.getCell<{ slot: unknown }>(
+      space,
+      "nested redirect parent (modern Error)",
+      undefined,
+      localTx,
+    );
+    parent.setRawUntyped({
+      slot: target.getAsWriteRedirectLink(),
+    } as unknown as FabricValue);
+
+    // Writing a `FabricInstance` (here, a native `Error` that gets wrapped
+    // into `FabricError`) through the redirect must land at the target,
+    // not clobber the redirect link at `parent.slot`. Target started as
+    // `"initial"`; under the bug, target stays as `"initial"` because the
+    // FabricError clobbered the redirect at `parent.slot`.
+    parent.set({ slot: new TypeError("through nested redirect") });
+
+    const targetResult = target.get() as {
+      error: { message: string };
+      typeTag: string;
+    };
+    expect(targetResult.typeTag).toBe("Error@1");
+    expect(targetResult.error.message).toBe("through nested redirect");
+
+    await localTx.commit();
+    await rt.dispose();
+    await sm.close();
+  });
+
   it("should call toJSON() on plain objects during set", () => {
     const c = runtime.getCell<unknown>(
       space,

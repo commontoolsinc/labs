@@ -348,23 +348,6 @@ export function normalizeAndDiff(
     newValue = new CellImpl(runtime, tx, seen.get(newValue)!);
   }
 
-  // `FabricInstance` values (`FabricError`, `FabricMap`, `FabricSet`,
-  // `FabricRegExp`) are atomic from this layer's perspective: their
-  // own-enumerable properties are implementation details, not
-  // user-visible structure, and iterating them would re-wrap embedded
-  // native values (e.g., `FabricError.error` is a native `Error`) on
-  // each pass, recursing forever. Emit a single change at this link with
-  // the wrapper as the value — the storage layer's JSON encoding handles
-  // serialization via `[DECONSTRUCT]`/`[RECONSTRUCT]`.
-  if (newValue instanceof FabricInstance) {
-    diffLogger.debug(
-      "diff",
-      () => `[BRANCH_FABRIC_INSTANCE] Atomic FabricInstance at path=${pathStr}`,
-    );
-    changes.push({ location: link, value: newValue as FabricValue });
-    return changes;
-  }
-
   // ID_FIELD redirects to an existing field and we do something like DOM
   // diffing with it: We look at sibling entries and their value for that field,
   // and if we find a match, we reuse that document. Otherwise we create a new
@@ -779,6 +762,26 @@ export function normalizeAndDiff(
       });
     }
 
+    return changes;
+  }
+
+  // `FabricInstance` values (`FabricError`, `FabricMap`, `FabricSet`,
+  // `FabricRegExp`) are atomic from this layer's perspective: their
+  // own-enumerable properties are implementation details, not
+  // user-visible structure, and iterating them via the generic
+  // `isRecord` branch below would re-wrap embedded native values (e.g.,
+  // `FabricError.error` is a native `Error`) on each pass, recursing
+  // forever. Emit a single change at this link with the wrapper as the
+  // value — the storage layer's JSON encoding handles serialization via
+  // `[DECONSTRUCT]`/`[RECONSTRUCT]`. Placed after the write-redirect
+  // resolution above so writes through a redirect land on the target,
+  // not on the redirect itself.
+  if (newValue instanceof FabricInstance) {
+    diffLogger.debug(
+      "diff",
+      () => `[BRANCH_FABRIC_INSTANCE] Atomic FabricInstance at path=${pathStr}`,
+    );
+    changes.push({ location: link, value: newValue as FabricValue });
     return changes;
   }
 
