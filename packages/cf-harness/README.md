@@ -255,11 +255,15 @@ links while raw observations stay in child artifacts. The browser child can read
 workspace files but does not receive `edit_file` or `write_file`, so it should
 return findings through the structured return channel rather than by writing
 browser observations into the workspace. The host shell is policy-restricted to
-`agent-browser`, `agent-browser` discovery (`which agent-browser`,
-`command -v agent-browser`), `pwd`, `ls`, and bounded workspace-local `find`
-commands. `agent-browser eval` is not available in this profile; browser
-subagents should inspect pages with commands such as `snapshot`, `get`, `find`,
-locator actions, and normal browser interactions.
+`agent-browser` attached through an approved local CDP endpoint, `agent-browser`
+discovery (`which agent-browser`, `command -v agent-browser`), `pwd`, `ls`, and
+bounded workspace-local `find` commands. Page commands should use the Loom
+Browser Access endpoint supplied by the task, for example
+`agent-browser --cdp http://host.docker.internal:9362 snapshot -i`. Bare
+`agent-browser open` / `snapshot` launches are denied so the child cannot race
+the host's live browser profile. `agent-browser eval` is not available in this
+profile; browser subagents should inspect pages with commands such as
+`snapshot`, `get`, `find`, locator actions, and normal browser interactions.
 
 For browser-profile runs, prefer a host artifact root outside the workspace. Raw
 child artifacts are retained for operator analysis, but they are not meant to

@@ -6,6 +6,8 @@ import {
 } from "@commonfabric/utils/types";
 import {
   cloneIfNecessary,
+  DECONSTRUCT,
+  FabricInstance,
   type FabricValue,
   isArrayIndexPropertyName,
   shallowFabricFromNativeValue,
@@ -2192,6 +2194,28 @@ export function recursivelyAddIDIfNeeded<T>(
 
   // Cell links pass through unchanged.
   if (isCellLink(value)) {
+    return value;
+  }
+
+  // `FabricInstance` values (`FabricError`, `FabricMap`, `FabricSet`,
+  // `FabricRegExp`) are immutable wrappers with class-defined identity.
+  // Their own-enumerable properties are implementation details (e.g.,
+  // `FabricError.error` is the wrapped native `Error`), not user-visible
+  // structure; iterating them would re-wrap the embedded native value on
+  // each pass and recurse forever. Instead, walk the observable internal
+  // structure via `[DECONSTRUCT]()` (the same mechanism the serialization
+  // system uses) for side effects only — tracking shared references in
+  // `seen` and populating `frame.generatedIdCounter` for any
+  // objects-in-arrays nested inside — then return the original instance
+  // unchanged. Subclasses that haven't implemented `[DECONSTRUCT]` yet
+  // will throw from this path; that's the right signal the moment they
+  // start seeing traffic.
+  if (value instanceof FabricInstance) {
+    seen.set(value, value);
+    const state = value[DECONSTRUCT]();
+    if (isRecord(state) || Array.isArray(state)) {
+      recursivelyAddIDIfNeeded(state, frame, seen);
+    }
     return value;
   }
 

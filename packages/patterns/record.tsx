@@ -165,7 +165,6 @@ const initializeRecord = lift<{
     const typePickerPiece = TypePickerModule({
       entries: subPieces,
       trashedEntries: trashedSubPieces,
-      linkPatternJson: recordPatternJson,
     } as any);
 
     // Capture schema for dynamic discovery

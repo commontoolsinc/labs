@@ -75,36 +75,89 @@ describe("Cell", () => {
     expect(c.get()).toBe(20);
   });
 
-  it("should convert Error instances to @Error wrapper on set", () => {
-    const c = runtime.getCell<unknown>(
+  it("should convert Error instances to @Error wrapper on set (legacy)", async () => {
+    const sm = StorageManager.emulate({ as: signer });
+    const rt = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: sm,
+      experimental: { modernDataModel: false },
+    });
+    const localTx = rt.edit();
+    const c = rt.getCell<unknown>(
       space,
-      "should convert Error instances to @Error wrapper on set",
+      "should convert Error instances to @Error wrapper on set (legacy)",
       undefined,
-      tx,
+      localTx,
     );
     const error = new TypeError("something went wrong");
     c.set(error);
 
-    // Error should be converted to @Error wrapper during set
+    // Legacy path: error should be converted to the `@Error` wrapper.
     const result = c.get() as { "@Error": Record<string, unknown> } | undefined;
     expect(result).toHaveProperty("@Error");
     expect(result!["@Error"].name).toBe("TypeError");
     expect(result!["@Error"].message).toBe("something went wrong");
     expect(typeof result!["@Error"].stack).toBe("string");
+    await localTx.commit();
+    await rt.dispose();
+    await sm.close();
   });
 
-  it("should preserve Error cause property on set", () => {
-    const c = runtime.getCell<unknown>(
+  it("should wrap Error instances in FabricError on set (modern)", async () => {
+    const sm = StorageManager.emulate({ as: signer });
+    const rt = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: sm,
+      experimental: { modernDataModel: true },
+    });
+    const localTx = rt.edit();
+    const c = rt.getCell<unknown>(
       space,
-      "should preserve Error cause property on set",
+      "should wrap Error instances in FabricError on set (modern)",
       undefined,
-      tx,
+      localTx,
+    );
+    const error = new TypeError("something went wrong");
+    c.set(error);
+
+    // Modern path: error is stored as a `FabricError`-shaped value rather
+    // than the legacy `@Error` wrapper. `c.get()` returns a proxy view of
+    // the stored wrapper — its `error` slot exposes the wrapped Error's
+    // observable fields (`message`, `stack`), and its `typeTag` is
+    // `"Error"` (`FabricError`'s tag).
+    const result = c.get() as {
+      error: { message: string; stack: string };
+      typeTag: string;
+      "@Error"?: unknown;
+    };
+    expect(result["@Error"]).toBeUndefined();
+    expect(result.typeTag).toBe("Error@1");
+    expect(result.error.message).toBe("something went wrong");
+    expect(typeof result.error.stack).toBe("string");
+    await localTx.commit();
+    await rt.dispose();
+    await sm.close();
+  });
+
+  it("should preserve Error cause property on set (legacy)", async () => {
+    const sm = StorageManager.emulate({ as: signer });
+    const rt = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: sm,
+      experimental: { modernDataModel: false },
+    });
+    const localTx = rt.edit();
+    const c = rt.getCell<unknown>(
+      space,
+      "should preserve Error cause property on set (legacy)",
+      undefined,
+      localTx,
     );
     const cause = new Error("root cause");
     const error = new Error("wrapper error", { cause });
     c.set(error);
 
-    // Error cause should be recursively converted to @Error wrapper
+    // Legacy path: error cause is recursively converted to `@Error` wrapper.
     const result = c.get() as { "@Error": Record<string, unknown> } | undefined;
     expect(result).toHaveProperty("@Error");
     expect(result!["@Error"].message).toBe("wrapper error");
@@ -113,6 +166,96 @@ describe("Cell", () => {
     };
     expect(causeWrapper).toHaveProperty("@Error");
     expect(causeWrapper["@Error"].message).toBe("root cause");
+    await localTx.commit();
+    await rt.dispose();
+    await sm.close();
+  });
+
+  it("should preserve Error cause property on set (modern)", async () => {
+    const sm = StorageManager.emulate({ as: signer });
+    const rt = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: sm,
+      experimental: { modernDataModel: true },
+    });
+    const localTx = rt.edit();
+    const c = rt.getCell<unknown>(
+      space,
+      "should preserve Error cause property on set (modern)",
+      undefined,
+      localTx,
+    );
+    const cause = new Error("root cause");
+    const error = new Error("wrapper error", { cause });
+    c.set(error);
+
+    // Modern path: outer error is a `FabricError`-shaped value; its cause
+    // is also `FabricError`-shaped (recursively wrapped at conversion
+    // time), not a legacy `@Error` wrapper.
+    const result = c.get() as {
+      error: { message: string; cause: { message: string; stack: string } };
+      typeTag: string;
+      "@Error"?: unknown;
+    };
+    expect(result["@Error"]).toBeUndefined();
+    expect(result.typeTag).toBe("Error@1");
+    expect(result.error.message).toBe("wrapper error");
+    expect(result.error.cause.message).toBe("root cause");
+    expect(typeof result.error.cause.stack).toBe("string");
+    await localTx.commit();
+    await rt.dispose();
+    await sm.close();
+  });
+
+  it("Error set through a nested write-redirect lands on the target (modern)", async () => {
+    const sm = StorageManager.emulate({ as: signer });
+    const rt = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: sm,
+      experimental: { modernDataModel: true },
+    });
+    const localTx = rt.edit();
+
+    const target = rt.getCell<unknown>(
+      space,
+      "nested redirect target (modern Error)",
+      undefined,
+      localTx,
+    );
+    target.set("initial");
+
+    // `parent.slot` holds a write-redirect that aliases writes to `target`.
+    // `Cell.set` pre-resolves its top-level link, so to exercise
+    // `normalizeAndDiff`'s redirect-resolution branch we need the redirect
+    // at a nested key — that's the path it actually fires on, during the
+    // per-key recursion in the `isRecord(newValue)` branch.
+    const parent = rt.getCell<{ slot: unknown }>(
+      space,
+      "nested redirect parent (modern Error)",
+      undefined,
+      localTx,
+    );
+    parent.setRawUntyped({
+      slot: target.getAsWriteRedirectLink(),
+    } as unknown as FabricValue);
+
+    // Writing a `FabricInstance` (here, a native `Error` that gets wrapped
+    // into `FabricError`) through the redirect must land at the target,
+    // not clobber the redirect link at `parent.slot`. Target started as
+    // `"initial"`; under the bug, target stays as `"initial"` because the
+    // FabricError clobbered the redirect at `parent.slot`.
+    parent.set({ slot: new TypeError("through nested redirect") });
+
+    const targetResult = target.get() as {
+      error: { message: string };
+      typeTag: string;
+    };
+    expect(targetResult.typeTag).toBe("Error@1");
+    expect(targetResult.error.message).toBe("through nested redirect");
+
+    await localTx.commit();
+    await rt.dispose();
+    await sm.close();
   });
 
   it("should call toJSON() on plain objects during set", () => {
