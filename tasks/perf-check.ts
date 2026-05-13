@@ -310,54 +310,33 @@ async function main() {
 
   // 6a. Prominent failure callout up top, so it's unmissable.
   if (failures.length > 0) {
-    failures.sort((a, b) => (b.pctIncrease ?? 0) - (a.pctIncrease ?? 0));
-
     console.log(
-      `\n!!! PERFORMANCE REGRESSION DETECTED in ${failures.length} metric(s) !!!\n`,
+      "\n!!!" +
+        `\n!!! PERFORMANCE REGRESSION DETECTED in ${failures.length} metric(s) !!!` +
+        "\n!!!",
     );
-    console.log(
-      "| Metric | Current | Baseline (median) | Threshold | Change |",
-    );
-    console.log(
-      "|--------|---------|-------------------|-----------|--------|",
-    );
-    for (const f of failures) {
-      const fmt = (v: number) => formatMetricValue(f.metric, v);
-      console.log(
-        `| ${f.metric} | ${fmt(f.current)} | ${fmt(f.median!)} | ${
-          fmt(f.threshold!)
-        } | +${f.pctIncrease!.toFixed(0)}% |`,
-      );
-    }
+  }
 
-    console.log("\nBaseline sample breakdown:\n");
-    for (const f of failures) {
-      const timeline = timelines.get(f.metric);
-      if (!timeline) continue;
-
-      const fmt = (v: number) => formatMetricValue(f.metric, v);
-      console.log(
-        `  ${f.metric} (n=${timeline.samples.length}, median=${
-          fmt(f.median!)
-        }, variance=${fmt(f.variance!)}, stddev=${fmt(f.stddev!)}):`,
-      );
-      for (const s of timeline.samples) {
-        const pr = prInfoBySha.get(s.sha);
-        const prStr = pr ? `PR #${pr.number}` : s.sha.slice(0, 8);
-        console.log(
-          `    ${fmt(s.durationSeconds)} — ${prStr} (${
-            s.createdAt.slice(0, 10)
-          })`,
-        );
-      }
+  // 6b. Informational CI wall-time policy signals. These are intentionally
+  // non-blocking; they tell us when to consider CI split/rebalance work again.
+  if (wallTimeSignals.length > 0) {
+    console.log("\n## CI Wall-Time Revisit Signals");
+    console.log(
+      "Informational only. See docs/development/CI_PERFORMANCE.md before starting CI-splitting work.",
+    );
+    console.log("| signal | detail |");
+    console.log("|:--|:--|");
+    for (const signal of wallTimeSignals) {
+      console.log(`| ${signal.title} | ${signal.detail} |`);
     }
   }
 
-  // 6b. Full metric table — always emitted, grouped by metric kind.
+  // 6c. Full metric table — always emitted, grouped by metric kind.
   console.log(
-    `\nThresholds: median + ${STDDEV_FACTOR}σ or +${
-      MIN_REGRESSION_PCT * 100
-    }% (whichever is higher); non-bench metrics also require at least +${MIN_ABSOLUTE_DELTA}s.`,
+    "\n::group::All collected metrics:" +
+      `\nThresholds: median + ${STDDEV_FACTOR}σ or +${
+        MIN_REGRESSION_PCT * 100
+      }% (whichever is higher); non-bench metrics also require at least +${MIN_ABSOLUTE_DELTA}s.`,
   );
   console.log(
     "Status key: OVER = over threshold (fails); CLOSE = ≥50% of margin consumed;",
@@ -461,21 +440,54 @@ async function main() {
     }
   }
 
-  // 6c. Informational CI wall-time policy signals. These are intentionally
-  // non-blocking; they tell us when to consider CI split/rebalance work again.
-  if (wallTimeSignals.length > 0) {
-    console.log("\n## CI Wall-Time Revisit Signals");
+  console.log("::endgroup::");
+
+  // 6d. Failure metric details.
+  if (failures.length > 0) {
+    failures.sort((a, b) => (b.pctIncrease ?? 0) - (a.pctIncrease ?? 0));
+
     console.log(
-      "Informational only. See docs/development/CI_PERFORMANCE.md before starting CI-splitting work.",
+      "\n## Performance regression details:\n" +
+        "\n| Metric | Current | Baseline (median) | Threshold | Change |",
     );
-    console.log("| signal | detail |");
-    console.log("|:--|:--|");
-    for (const signal of wallTimeSignals) {
-      console.log(`| ${signal.title} | ${signal.detail} |`);
+    console.log(
+      "|--------|---------|-------------------|-----------|--------|",
+    );
+    for (const f of failures) {
+      const fmt = (v: number) => formatMetricValue(f.metric, v);
+      console.log(
+        `| ${f.metric} | ${fmt(f.current)} | ${fmt(f.median!)} | ${
+          fmt(f.threshold!)
+        } | +${f.pctIncrease!.toFixed(0)}% |`,
+      );
     }
+
+    console.log("\n::group::Baseline sample breakdown:\n");
+    for (const f of failures) {
+      const timeline = timelines.get(f.metric);
+      if (!timeline) continue;
+
+      const fmt = (v: number) => formatMetricValue(f.metric, v);
+      console.log(
+        `  ${f.metric} (n=${timeline.samples.length}, median=${
+          fmt(f.median!)
+        }, variance=${fmt(f.variance!)}, stddev=${fmt(f.stddev!)}):`,
+      );
+      for (const s of timeline.samples) {
+        const pr = prInfoBySha.get(s.sha);
+        const prStr = pr ? `PR #${pr.number}` : s.sha.slice(0, 8);
+        console.log(
+          `    ${fmt(s.durationSeconds)} — ${prStr} (${
+            s.createdAt.slice(0, 10)
+          })`,
+        );
+      }
+    }
+
+    console.log("::endgroup::");
   }
 
-  // 6d. Pass/fail outcome + override copy-paste block pinned at the bottom.
+  // 6e. Pass/fail outcome + override copy-paste block pinned at the bottom.
   if (informationalOnly) {
     console.log("\nInformational Only:");
   }
