@@ -794,8 +794,9 @@ export class PatternContextValidationTransformer
               type: "standalone-function:reactive-operation",
               message:
                 `${callKind.builderName}() is not allowed inside standalone functions. ` +
-                `Standalone functions cannot capture reactive closures. ` +
-                `Move the ${callKind.builderName}() call to an allowed authoring context, or use patternTool() to enable automatic closure capture.`,
+                `Common Fabric builders must be authored in an allowed context ` +
+                `so their callbacks can be self-contained for SES sandboxing. ` +
+                `Move the ${callKind.builderName}() call to module scope, a pattern-owned context, or use patternTool() when closure capture is required.`,
               node,
             });
             return;
