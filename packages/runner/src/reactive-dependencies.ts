@@ -4,7 +4,7 @@ import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { isPrimitiveCellLink } from "./link-utils.ts";
 import { normalizeCellScope } from "./scope.ts";
 import { arrayEqual } from "./path-utils.ts";
-import type { Action, SpaceAndURI } from "./scheduler.ts";
+import type { Action, SpaceScopeAndURI } from "./scheduler.ts";
 import type {
   IMemorySpaceAddress,
   MemoryAddressPathComponent,
@@ -76,12 +76,12 @@ export function sortAndCompactPaths(
  */
 export function addressesToPathByEntity(
   addresses: IMemorySpaceAddress[],
-): Map<SpaceAndURI, SortedAndCompactPaths> {
-  const map = new Map<SpaceAndURI, SortedAndCompactPaths>();
+): Map<SpaceScopeAndURI, SortedAndCompactPaths> {
+  const map = new Map<SpaceScopeAndURI, SortedAndCompactPaths>();
   for (const address of addresses) {
-    const key: SpaceAndURI = `${address.space}/${address.id}/${
+    const key: SpaceScopeAndURI = `${address.space}/${
       normalizeCellScope(address.scope)
-    }`;
+    }/${address.id}`;
     if (!map.has(key)) map.set(key, []);
     map.get(key)!.push(address.path);
   }

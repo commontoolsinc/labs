@@ -7,7 +7,7 @@ import {
   sortAndCompactPaths,
   type SortedAndCompactPaths,
 } from "../src/reactive-dependencies.ts";
-import type { Action, SpaceAndURI } from "../src/scheduler.ts";
+import type { Action, SpaceScopeAndURI } from "../src/scheduler.ts";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type {
   IMemorySpaceAddress,
@@ -385,35 +385,35 @@ describe("addresssesToPathByEntity", () => {
     expect(result.size).toBe(3);
     expect(
       result.has(
-        "did:test:space1/https://example.com/entity1/space" as SpaceAndURI,
+        "did:test:space1/space/https://example.com/entity1" as SpaceScopeAndURI,
       ),
     ).toBe(true);
     expect(
       result.has(
-        "did:test:space1/https://example.com/entity2/space" as SpaceAndURI,
+        "did:test:space1/space/https://example.com/entity2" as SpaceScopeAndURI,
       ),
     ).toBe(true);
     expect(
       result.has(
-        "did:test:space2/https://example.com/entity1/space" as SpaceAndURI,
+        "did:test:space2/space/https://example.com/entity1" as SpaceScopeAndURI,
       ),
     ).toBe(true);
 
     const space1Entity1 = result.get(
-      "did:test:space1/https://example.com/entity1/space" as SpaceAndURI,
+      "did:test:space1/space/https://example.com/entity1" as SpaceScopeAndURI,
     )!;
     expect(space1Entity1).toHaveLength(2);
     expect(space1Entity1[0]).toEqual(["a"]);
     expect(space1Entity1[1]).toEqual(["b"]);
 
     const space1Entity2 = result.get(
-      "did:test:space1/https://example.com/entity2/space" as SpaceAndURI,
+      "did:test:space1/space/https://example.com/entity2" as SpaceScopeAndURI,
     )!;
     expect(space1Entity2).toHaveLength(1);
     expect(space1Entity2[0]).toEqual(["c"]);
 
     const space2Entity1 = result.get(
-      "did:test:space2/https://example.com/entity1/space" as SpaceAndURI,
+      "did:test:space2/space/https://example.com/entity1" as SpaceScopeAndURI,
     )!;
     expect(space2Entity1).toHaveLength(1);
     expect(space2Entity1[0]).toEqual(["d"]);
@@ -452,7 +452,7 @@ describe("addresssesToPathByEntity", () => {
     expect(result.size).toBe(2);
 
     const space1Entity1 = result.get(
-      "did:test:space1/https://example.com/entity1/space" as SpaceAndURI,
+      "did:test:space1/space/https://example.com/entity1" as SpaceScopeAndURI,
     )!;
     expect(space1Entity1).toHaveLength(3);
     expect(space1Entity1[0]).toEqual(["a"]);
@@ -460,7 +460,7 @@ describe("addresssesToPathByEntity", () => {
     expect(space1Entity1[2]).toEqual(["c"]);
 
     const space1Entity2 = result.get(
-      "did:test:space1/https://example.com/entity2/space" as SpaceAndURI,
+      "did:test:space1/space/https://example.com/entity2" as SpaceScopeAndURI,
     )!;
     expect(space1Entity2).toHaveLength(1);
     expect(space1Entity2[0]).toEqual(["d"]);
@@ -491,7 +491,7 @@ describe("addresssesToPathByEntity", () => {
     const result = addressesToPathByEntity(addresses);
 
     const paths = result.get(
-      "did:test:space1/https://example.com/entity1/space" as SpaceAndURI,
+      "did:test:space1/space/https://example.com/entity1" as SpaceScopeAndURI,
     )!;
     expect(paths).toHaveLength(3);
     expect(paths[0]).toEqual(["z"]);
@@ -558,7 +558,7 @@ describe("addresssesToPathByEntity", () => {
 
     // Check Space 1, Entity 1
     const s1e1 = result.get(
-      "did:test:space1/https://api.example.com/data/space" as SpaceAndURI,
+      "did:test:space1/space/https://api.example.com/data" as SpaceScopeAndURI,
     )!;
     expect(s1e1).toHaveLength(3);
     expect(s1e1).toEqual([
@@ -569,7 +569,7 @@ describe("addresssesToPathByEntity", () => {
 
     // Check Space 1, Entity 2
     const s1e2 = result.get(
-      "did:test:space1/https://api.example.com/settings/space" as SpaceAndURI,
+      "did:test:space1/space/https://api.example.com/settings" as SpaceScopeAndURI,
     )!;
     expect(s1e2).toHaveLength(2);
     expect(s1e2[0]).toEqual(["config"]);
@@ -577,14 +577,14 @@ describe("addresssesToPathByEntity", () => {
 
     // Check Space 2, Entity 1
     const s2e1 = result.get(
-      "did:test:space2/https://api.example.com/data/space" as SpaceAndURI,
+      "did:test:space2/space/https://api.example.com/data" as SpaceScopeAndURI,
     )!;
     expect(s2e1).toHaveLength(1);
     expect(s2e1[0]).toEqual(["users", "789"]);
 
     // Check Space 2, Entity 3
     const s2e3 = result.get(
-      "did:test:space2/https://api.example.com/metrics/space" as SpaceAndURI,
+      "did:test:space2/space/https://api.example.com/metrics" as SpaceScopeAndURI,
     )!;
     expect(s2e3).toHaveLength(1);
     expect(s2e3[0]).toEqual(["analytics"]);

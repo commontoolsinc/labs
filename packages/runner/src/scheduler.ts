@@ -4,6 +4,7 @@ import { isRecord } from "@commonfabric/utils/types";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import { getTopFrame } from "./builder/pattern.ts";
 import {
+  type CellScope,
   type Frame,
   type Module,
   type Pattern,
@@ -271,13 +272,14 @@ export {
   markReadAsPotentialWrite,
 };
 
-export type SpaceAndURI = `${MemorySpace}/${URI}/${string}`;
-export type SpaceURIAndType = `${MemorySpace}/${URI}/${MediaType}`;
+export type SpaceScopeAndURI = `${MemorySpace}/${CellScope}/${URI}`;
+export type SpaceScopeURIAndType =
+  `${MemorySpace}/${CellScope}/${URI}/${MediaType}`;
 
 function entityKey(
   address: Pick<IMemorySpaceAddress, "space" | "id" | "scope">,
-): SpaceAndURI {
-  return `${address.space}/${address.id}/${normalizeCellScope(address.scope)}`;
+): SpaceScopeAndURI {
+  return `${address.space}/${normalizeCellScope(address.scope)}/${address.id}`;
 }
 
 /** Per-iteration stats captured during the settle loop. */
@@ -418,9 +420,12 @@ export class Scheduler {
   private pending = new Set<Action>();
   private dependencies = new WeakMap<Action, ReactivityLog>();
   private cancels = new WeakMap<Action, Cancel>();
-  private triggers = new Map<SpaceAndURI, Map<Action, SortedAndCompactPaths>>();
+  private triggers = new Map<
+    SpaceScopeAndURI,
+    Map<Action, SortedAndCompactPaths>
+  >();
   private nonRecursiveTriggers = new Map<
-    SpaceAndURI,
+    SpaceScopeAndURI,
     Map<Action, SortedAndCompactPaths>
   >();
   private actionChangeGroups = new WeakMap<Action, ChangeGroup>();
@@ -529,9 +534,9 @@ export class Scheduler {
   private historicalMightWrite = new WeakMap<Action, IMemorySpaceAddress[]>();
   // Index: entity -> actions that write to it (for fast dependency lookup).
   // Updated from the active scheduling write set.
-  private writersByEntity = new Map<SpaceAndURI, Set<Action>>();
+  private writersByEntity = new Map<SpaceScopeAndURI, Set<Action>>();
   // Reverse index: action -> entities it writes to (for cleanup)
-  private actionWriteEntities = new WeakMap<Action, Set<SpaceAndURI>>();
+  private actionWriteEntities = new WeakMap<Action, Set<SpaceScopeAndURI>>();
   // Track actions scheduled for first time (bypass filter)
   private scheduledFirstTime = new Set<Action>();
   // Filter stats for diagnostics
@@ -1115,7 +1120,7 @@ export class Scheduler {
 
       // Use writersByEntity index for efficient lookup
       if (!shouldMarkDirty) {
-        const entities = new Set<SpaceAndURI>();
+        const entities = new Set<SpaceScopeAndURI>();
         for (const read of effectReads) {
           entities.add(entityKey(read));
         }
@@ -1525,11 +1530,10 @@ export class Scheduler {
     if (populateDependencies) {
       handler.populateDependencies = populateDependencies;
     }
-    const normalizedRef = { ...ref, scope: normalizeCellScope(ref.scope) };
-    this.eventHandlers.push([normalizedRef, handler]);
+    this.eventHandlers.push([ref, handler]);
     return () => {
       const index = this.eventHandlers.findIndex(([r, h]) =>
-        r === normalizedRef && h === handler
+        r === ref && h === handler
       );
       if (index !== -1) this.eventHandlers.splice(index, 1);
     };
@@ -1878,9 +1882,9 @@ export class Scheduler {
     // Update writersByEntity index for fast dependency lookup
     // Collect new entities from writes
     const existingEntities = this.actionWriteEntities.get(action) ?? new Set();
-    const nextEntities = new Set<SpaceAndURI>();
-    const addedEntities = new Set<SpaceAndURI>();
-    const removedEntities = new Set<SpaceAndURI>();
+    const nextEntities = new Set<SpaceScopeAndURI>();
+    const addedEntities = new Set<SpaceScopeAndURI>();
+    const removedEntities = new Set<SpaceScopeAndURI>();
     for (const write of nextSchedulingWrites) {
       const entity = entityKey(write);
       nextEntities.add(entity);
@@ -1983,17 +1987,17 @@ export class Scheduler {
     reads: IMemorySpaceAddress[],
     shallowReads: IMemorySpaceAddress[],
   ): {
-    entities: Set<SpaceAndURI>;
-    triggerPathsByEntity: Map<SpaceAndURI, SortedAndCompactPaths>;
+    entities: Set<SpaceScopeAndURI>;
+    triggerPathsByEntity: Map<SpaceScopeAndURI, SortedAndCompactPaths>;
   } {
     this.clearActionTriggers(action);
     const pathsByEntity = addressesToPathByEntity(reads);
     const nonRecursivePathsByEntity = addressesToPathByEntity(
       shallowReads,
     );
-    const entities = new Set<SpaceAndURI>();
+    const entities = new Set<SpaceScopeAndURI>();
     const triggerPathsByEntity = new Map<
-      SpaceAndURI,
+      SpaceScopeAndURI,
       SortedAndCompactPaths
     >();
 
@@ -2026,7 +2030,7 @@ export class Scheduler {
 
   private setCancelForEntities(
     action: Action,
-    entities: Set<SpaceAndURI>,
+    entities: Set<SpaceScopeAndURI>,
   ): void {
     const actionId = this.getActionId(action);
     this.cancels.set(action, () => {
@@ -2050,7 +2054,7 @@ export class Scheduler {
       updateDependents?: boolean;
       useRawReadsForTriggers?: boolean;
     },
-  ): { log: ReactivityLog; entities: Set<SpaceAndURI> } {
+  ): { log: ReactivityLog; entities: Set<SpaceScopeAndURI> } {
     let log: ReactivityLog;
     if (typeof populateDependencies === "function") {
       const depTx = this.runtime.edit();
@@ -2111,7 +2115,7 @@ export class Scheduler {
     const newDependencies = new Set<Action>();
 
     // Group reads by entity for efficient lookup
-    const readsByEntity = new Map<SpaceAndURI, IMemorySpaceAddress[]>();
+    const readsByEntity = new Map<SpaceScopeAndURI, IMemorySpaceAddress[]>();
     for (const read of log.reads) {
       const entity = entityKey(read);
       let entityReads = readsByEntity.get(entity);
@@ -2121,7 +2125,10 @@ export class Scheduler {
       }
       entityReads.push(read);
     }
-    const nonRecursiveByEntity = new Map<SpaceAndURI, IMemorySpaceAddress[]>();
+    const nonRecursiveByEntity = new Map<
+      SpaceScopeAndURI,
+      IMemorySpaceAddress[]
+    >();
     for (const read of log.shallowReads) {
       const entity = entityKey(read);
       let entityReads = nonRecursiveByEntity.get(entity);
