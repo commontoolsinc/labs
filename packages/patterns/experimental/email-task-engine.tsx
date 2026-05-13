@@ -25,6 +25,7 @@ import {
   handler,
   ifElse,
   NAME,
+  type Opaque,
   pattern,
   Stream,
   UI,
@@ -74,7 +75,7 @@ interface SuggestionResult {
 
 interface TaskAnalysis {
   email: TaskEmail;
-  result: SuggestionResult | null;
+  result: SuggestionResult | undefined;
   pending: boolean;
   error?: unknown;
 }
@@ -457,8 +458,8 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
   const sortNewestFirst = Writable.of(true).for("sortNewestFirst");
 
   // Get all pieces for note discovery
-  const { allPieces } =
-    wish<{ allPieces: NotePiece[] }>({ query: "#default" }).result;
+  const { allPieces } = wish<{ allPieces: NotePiece[] }>({ query: "#default" })
+    .result!;
 
   // Use createGoogleAuth for scopes that include gmailModify
   const {
@@ -554,7 +555,9 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
       const notes = availableNotes || [];
       const notesContext = notes.length === 0
         ? "No existing notes found."
-        : notes.map((n) => `- "${n.title}": ${n.contentPreview}`).join("\n");
+        : notes.map((n: { title: string; contentPreview: string }) =>
+          `- "${n.title}": ${n.contentPreview}`
+        ).join("\n");
 
       return `You are analyzing an email to suggest an action. The email has been labeled "task-current" indicating the user wants to take action on it.
 
@@ -584,7 +587,7 @@ Respond with the most appropriate action.`;
     });
 
     const llmAnalysis = generateObject<SuggestionResult>({
-      prompt,
+      prompt: prompt as Opaque<string>,
       schema: SUGGESTION_SCHEMA,
       model: "anthropic:claude-sonnet-4-5",
     });
@@ -605,7 +608,7 @@ Respond with the most appropriate action.`;
   );
   const completedCount = computed(
     () =>
-      analyses?.filter((a) => !a?.pending && a?.result !== null)?.length ||
+      analyses?.filter((a) => !a?.pending && a?.result !== undefined)?.length ||
       0,
   );
 
