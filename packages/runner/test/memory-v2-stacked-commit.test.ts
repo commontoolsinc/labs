@@ -19,6 +19,7 @@ import {
   type EntityDocument,
   getMemoryProtocolFlags,
   type PatchOp,
+  type SessionSync,
 } from "@commonfabric/memory/v2";
 import type { ReconstructionContext } from "@commonfabric/data-model/interface";
 import type {
@@ -507,6 +508,29 @@ const createHarness = () => {
 
 const clone = <T>(value: T): T => structuredClone(value);
 
+const staleSyncFor = (
+  id: URI,
+  seq: number,
+  value: RootValue,
+): SessionSync => ({
+  type: "sync",
+  fromSeq: 0,
+  toSeq: seq,
+  upserts: [{
+    branch: "",
+    id,
+    seq,
+    doc: value === undefined ? undefined : { value },
+  }],
+  removes: [],
+});
+
+const integrateSessionSync = (harness: Harness, sync: SessionSync): void => {
+  (harness.replica as unknown as {
+    applySessionSync(sync: SessionSync, type: "pull" | "integrate"): void;
+  }).applySessionSync(sync, "integrate");
+};
+
 const valueFor = (
   label: string,
   extra: Record<string, FabricValue> = {},
@@ -968,6 +992,110 @@ Deno.test("memory v2 stacked commits: C1,C2,C3 all succeed on one doc", async ()
       changedIdsFor(harness.notifications.notifications, "revert"),
       [],
     );
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: stale session sync does not overwrite ordered confirmations", async () => {
+  const harness = await createHarness();
+  try {
+    const setup = beginSet(harness, DOCS.A, {});
+    await assertResultOk(setup.promise);
+
+    const sum = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "add",
+        path: "/value/sum",
+        value: 15,
+      }],
+      { sum: 15 },
+    );
+    await assertResultOk(sum);
+
+    const result = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "add",
+        path: "/value/result",
+        value: "Numbers: 15",
+      }],
+      {
+        sum: 15,
+        result: "Numbers: 15",
+      },
+      sourceFromReads([{ id: DOCS.A }]),
+    );
+    await assertResultOk(result);
+
+    // Transact responses above are ordered. The stale sync models a background
+    // watch refresh computed before those commits and integrated later.
+    integrateSessionSync(harness, staleSyncFor(DOCS.A, 1, {}));
+
+    expectVisible(harness, {
+      A: {
+        sum: 15,
+        result: "Numbers: 15",
+      },
+    });
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: stale session sync does not erase an earlier sibling while a later patch is pending", async () => {
+  const harness = await createHarness();
+  try {
+    const setup = beginSet(harness, DOCS.A, {});
+    await assertResultOk(setup.promise);
+
+    const sum = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "add",
+        path: "/value/sum",
+        value: 15,
+      }],
+      { sum: 15 },
+    );
+    await assertResultOk(sum);
+
+    const result = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "add",
+        path: "/value/result",
+        value: "Numbers: 15",
+      }],
+      {
+        sum: 15,
+        result: "Numbers: 15",
+      },
+      sourceFromReads([{ id: DOCS.A }]),
+    );
+
+    // Keep the later patch pending while integrating the older watch snapshot.
+    integrateSessionSync(harness, staleSyncFor(DOCS.A, 1, {}));
+
+    expectVisible(harness, {
+      A: {
+        sum: 15,
+        result: "Numbers: 15",
+      },
+    });
+
+    await assertResultOk(result);
+    expectVisible(harness, {
+      A: {
+        sum: 15,
+        result: "Numbers: 15",
+      },
+    });
   } finally {
     await harness.close();
   }
