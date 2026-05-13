@@ -1,5 +1,5 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
-import { assert, assertEquals, assertFalse } from "@std/assert";
+import { assert, assertEquals, assertFalse, assertThrows } from "@std/assert";
 import {
   resetDataModelConfig,
   setDataModelConfig,
@@ -132,7 +132,7 @@ describe("memory v2 boundary decode", () => {
     resetDataModelConfig();
   });
 
-  it("returns mutable plain JSON trees", () => {
+  it("returns deeply-frozen plain JSON trees", () => {
     const decoded = decodeMemoryBoundary<{
       value: {
         nested: {
@@ -156,11 +156,13 @@ describe("memory v2 boundary decode", () => {
         },
       },
     });
-    assertFalse(Object.isFrozen(decoded));
-    assertFalse(Object.isFrozen(decoded.value));
-    assertFalse(Object.isFrozen(decoded.value.nested));
+    assert(Object.isFrozen(decoded));
+    assert(Object.isFrozen(decoded.value));
+    assert(Object.isFrozen(decoded.value.nested));
 
-    decoded.value.nested.count = 2;
-    assertEquals(decoded.value.nested.count, 2);
+    assertThrows(() => {
+      decoded.value.nested.count = 2;
+    }, TypeError);
+    assertEquals(decoded.value.nested.count, 1);
   });
 });

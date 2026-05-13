@@ -1,7 +1,4 @@
-import {
-  cloneIfNecessary,
-  getDataModelConfig,
-} from "@commonfabric/data-model/fabric-value";
+import { getDataModelConfig } from "@commonfabric/data-model/fabric-value";
 import {
   jsonFromValue,
   valueFromJson,
@@ -371,13 +368,7 @@ export const decodeMemoryBoundary = <Value = FabricValue>(
     memoryReconstructionContext,
   ) as FabricValue;
 
-  // TODO(danfuzz): It shouldn't be necessary to thaw values coming out of the
-  // JSON decoder. See what happens when this gets replaced with just
-  // `return value`.
-  return cloneIfNecessary(
-    decoded,
-    { frozen: false, deep: true, force: true },
-  ) as Value;
+  return decoded as Value;
 };
 
 export const toDocumentPath = (path: readonly string[]): DocumentPath =>
