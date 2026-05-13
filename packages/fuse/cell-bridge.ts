@@ -297,7 +297,7 @@ export class CellBridge {
   private hydratedPieceProps = new Map<bigint, Set<"input" | "result">>();
   /** In-flight hydration promises keyed by `${pieceIno}-${propName}`. */
   private pendingHydrations = new Map<string, Promise<boolean>>();
-  private pendingFinalizations = new Map<string, Promise<void>>();
+  private pendingPropRebuildQueues = new Map<string, Promise<void>>();
   private retainedSubtrees = new Map<bigint, number>();
   /** Monotonic invalidation epoch per hydration key. */
   private hydrationEpochs = new Map<string, number>();
@@ -1127,7 +1127,7 @@ export class CellBridge {
         this.pendingPropRebuilds.delete(key);
         this.activePropRebuilds.add(key);
         this.updateStatus();
-        void this.rebuildPieceProp({
+        void this.enqueuePiecePropRebuild({
           cell: entry.cell,
           newValue: entry.latestValue,
           pieceId: entry.pieceId,
@@ -1382,6 +1382,23 @@ export class CellBridge {
     this.debugLog(`[${spaceName}] Updated ${pieceName}/${propName}`);
   }
 
+  private async enqueuePiecePropRebuild(args: PropRebuildJob): Promise<void> {
+    const key = this.propRebuildKey(args.pieceIno, args.propName);
+    const previous = this.pendingPropRebuildQueues.get(key) ??
+      Promise.resolve();
+    const current = previous.catch(() => {}).then(() =>
+      this.rebuildPieceProp(args)
+    );
+    this.pendingPropRebuildQueues.set(key, current);
+    try {
+      await current;
+    } finally {
+      if (this.pendingPropRebuildQueues.get(key) === current) {
+        this.pendingPropRebuildQueues.delete(key);
+      }
+    }
+  }
+
   private static readonly MAX_HYDRATION_RETRIES = 3;
 
   private hydratePieceProp(
@@ -1410,7 +1427,7 @@ export class CellBridge {
         try {
           const cell = await info.piece[propName].getCell();
           const newValue = await info.piece[propName].get();
-          await this.rebuildPieceProp({
+          await this.enqueuePiecePropRebuild({
             cell,
             newValue,
             pieceId: info.piece.id,
@@ -1552,30 +1569,18 @@ export class CellBridge {
       this.invalidateWritePath(writePath);
       return;
     }
-    const key = this.propRebuildKey(pieceIno, writePath.cell);
-    const previous = this.pendingFinalizations.get(key) ?? Promise.resolve();
-    const current = previous.catch(() => {}).then(async () => {
-      const cell = await writePath.piece[writePath.cell].getCell();
-      const newValue = await writePath.piece[writePath.cell].get();
-      await this.rebuildPieceProp({
-        cell,
-        newValue,
-        pieceId: writePath.piece.id,
-        pieceIno,
-        pieceName: writePath.pieceName,
-        propName: writePath.cell,
-        resolveLink: this.makeLinkResolver(writePath.spaceName),
-        spaceName: writePath.spaceName,
-      });
+    const cell = await writePath.piece[writePath.cell].getCell();
+    const newValue = await writePath.piece[writePath.cell].get();
+    await this.enqueuePiecePropRebuild({
+      cell,
+      newValue,
+      pieceId: writePath.piece.id,
+      pieceIno,
+      pieceName: writePath.pieceName,
+      propName: writePath.cell,
+      resolveLink: this.makeLinkResolver(writePath.spaceName),
+      spaceName: writePath.spaceName,
     });
-    this.pendingFinalizations.set(key, current);
-    try {
-      await current;
-    } finally {
-      if (this.pendingFinalizations.get(key) === current) {
-        this.pendingFinalizations.delete(key);
-      }
-    }
   }
 
   async finalizeSourceWritePath(writePath: SourceWritePath): Promise<void> {
@@ -2785,7 +2790,7 @@ export class CellBridge {
               // undefined, keep the current mounted tree intact until a
               // concrete replacement arrives.
               this.invalidateRootPropCache(pieceIno, propName);
-              await this.rebuildPieceProp({
+              await this.enqueuePiecePropRebuild({
                 cell,
                 newValue: rebuildValue,
                 pieceId: piece.id,
