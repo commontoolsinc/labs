@@ -1176,8 +1176,14 @@ function rewriteInlineReactiveOriginChains(
 /**
  * Walk a property-access chain inward to its call receiver. If the receiver
  * is an opaque-origin call, return the static chain segments (innermost
- * first — i.e. the access nearest the call comes first) and the root call
- * initializer with cast/paren wrappers preserved. Otherwise return undefined.
+ * first — i.e. the access nearest the call comes first) and the root
+ * initializer with any cast/paren wrappers AROUND the call preserved (so
+ * load-bearing type information like `(wish(...) as T).result` survives the
+ * rewrite). Non-semantic wrappers BETWEEN accesses (e.g. `wish().result!.x`)
+ * are stripped — they're type-only and have no runtime effect once the chain
+ * is restructured into a destructure pattern. Returns undefined if the
+ * receiver isn't an opaque-origin call or the chain contains a computed/
+ * non-static access key.
  */
 function collectInlineOpaqueChain(
   access: ts.PropertyAccessExpression | ts.ElementAccessExpression,
@@ -1185,30 +1191,51 @@ function collectInlineOpaqueChain(
 ): { segments: string[]; rootInitializer: ts.Expression } | undefined {
   const segments: string[] = [];
   let current: ts.Expression = access;
+  // First phase: peel access segments. Between accesses we strip parens and
+  // non-null assertions (purely syntactic — no type info, no runtime effect)
+  // but NOT casts/satisfies — those carry load-bearing type information that
+  // downstream passes (schema injection, type-aware lowering) rely on.
+  while (
+    ts.isPropertyAccessExpression(current) ||
+    ts.isElementAccessExpression(current)
+  ) {
+    const segment = getStaticAccessKey(current);
+    if (segment === undefined) return undefined;
+    segments.unshift(segment);
+    current = stripSyntacticWrappers(current.expression);
+  }
+  if (segments.length === 0) return undefined;
+  // `current` is now the call (possibly still wrapped in casts/satisfies).
+  // Inspect the unwrapped form to verify it's an opaque-origin call, but
+  // return `current` unchanged so any preserved wrappers stay attached.
+  const unwrappedRoot = unwrapExpression(current);
+  if (!ts.isCallExpression(unwrappedRoot)) return undefined;
+  if (!isOpaqueOriginCall(unwrappedRoot, context)) return undefined;
+  return { segments, rootInitializer: current };
+}
+
+/**
+ * Strip purely syntactic wrappers (parens, non-null assertions) but preserve
+ * casts and satisfies expressions, which carry type information that
+ * downstream transformer passes rely on.
+ */
+function stripSyntacticWrappers(expression: ts.Expression): ts.Expression {
+  let current = expression;
   while (true) {
-    if (
-      ts.isPropertyAccessExpression(current) ||
-      ts.isElementAccessExpression(current)
-    ) {
-      const segment = getStaticAccessKey(current);
-      if (segment === undefined) return undefined;
-      segments.unshift(segment);
+    if (ts.isParenthesizedExpression(current)) {
       current = current.expression;
       continue;
     }
-    const unwrapped = unwrapExpression(current);
-    if (unwrapped !== current) {
-      current = unwrapped;
+    if (ts.isNonNullExpression(current)) {
+      current = current.expression;
       continue;
     }
-    break;
+    if (ts.isPartiallyEmittedExpression(current)) {
+      current = current.expression;
+      continue;
+    }
+    return current;
   }
-  if (segments.length === 0) return undefined;
-  if (!ts.isCallExpression(current)) return undefined;
-  if (!isOpaqueOriginCall(current, context)) return undefined;
-  // Innermost segment first: walking outward, the segment closest to the
-  // call (the FIRST access applied) is the OUTER destructure key.
-  return { segments, rootInitializer: current };
 }
 
 function getStaticAccessKey(
@@ -1290,12 +1317,18 @@ function reportInlineReactiveRootAccesses(
       // `.method-on-call` shape that LOOKS like the bug but isn't
       // user-authored. This is a build-time guard for user-authored shapes.
       node.pos >= 0 &&
-      // Skip when this access is the callee of a method call
-      // (`<call>.for(...)`, `<call>.key(...)`, etc.). Those are legitimate
-      // identity-preserving / navigating method invocations on the cell,
-      // not value-property reads that defeat reactivity.
+      // Skip when this access is the callee of a method call AND its
+      // immediate receiver is a reactive-origin call itself
+      // (`Writable.of(...).for(...)`, `wish(...).key(...)`, etc.). Those
+      // are legitimate identity-preserving / navigating method invocations
+      // on the cell — not value-property reads that defeat reactivity. We
+      // intentionally don't skip when the receiver is a *chain* like
+      // `wish(...).result.get()`: there the `.result` defeats reactivity
+      // and the trailing `.get()` is reading a value off plain JS, exactly
+      // the broken shape this diagnostic exists to catch.
       !(node.parent && ts.isCallExpression(node.parent) &&
-        node.parent.expression === node)
+        node.parent.expression === node &&
+        isDirectReactiveOriginCallReceiver(node, context))
     ) {
       // Only flag the topmost access in a chain (e.g. `wish(...).result` —
       // not `.result` deep inside a longer chain). The topmost site is
@@ -1357,6 +1390,21 @@ function findInlineOpaqueOriginCallReceiver(
     return current;
   }
   return undefined;
+}
+
+/**
+ * True when `access`'s immediate receiver (after stripping non-semantic
+ * wrappers) is itself a reactive-origin call. Used to distinguish
+ * `Writable.of(...).for(...)` / `wish(...).key(...)` (legitimate cell methods
+ * on the call result) from chains like `wish(...).result.get()` where the
+ * receiver of `.get` is a *property access* on the call, not the call itself.
+ */
+function isDirectReactiveOriginCallReceiver(
+  access: ts.PropertyAccessExpression | ts.ElementAccessExpression,
+  context: TransformationContext,
+): boolean {
+  const receiver = unwrapExpression(access.expression);
+  return ts.isCallExpression(receiver) && isOpaqueOriginCall(receiver, context);
 }
 
 function collectBindingNames(

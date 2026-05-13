@@ -177,11 +177,12 @@ export function isOpaqueSourceExpression(
 
     if (ts.isPropertyAccessExpression(current.expression)) {
       const methodName = current.expression.name.text;
-      // `.key()` returns a navigated sibling; `.get()` returns a value
-      // proxy; `.for()` returns the same cell (identity-preserving cause
-      // annotation, no-op semantically). All preserve opaque-source
-      // provenance, so a chain ending in one of these stays opaque iff
-      // its underlying receiver is opaque.
+      // `.key()` returns a navigated sibling; `.get()` returns the underlying
+      // value (a proxy only in the rare `schema: true` case); `.for()`
+      // returns the same cell (identity-preserving cause annotation, no-op
+      // semantically). All preserve opaque-source provenance, so a chain
+      // ending in one of these stays opaque iff its underlying receiver is
+      // opaque.
       if (
         methodName === "key" || methodName === "get" || methodName === "for"
       ) {

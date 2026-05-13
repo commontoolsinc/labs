@@ -3329,3 +3329,101 @@ Deno.test("SES Callback Self-Containment Validation", async (t) => {
     },
   );
 });
+
+Deno.test("Inline reactive-root access diagnostic", async (t) => {
+  await t.step(
+    "does not flag identity-preserving methods on reactive-origin calls",
+    async () => {
+      // `Writable.of(...).for(...)` is the standard cell-naming idiom — the
+      // `.for(...)` call returns the same cell (identity-preserving), so this
+      // shape is not the broken-reactivity pattern the diagnostic guards.
+      const source = `
+        import { pattern, Writable } from "commonfabric";
+
+        export default pattern<Record<string, never>>(() => {
+          const flag = Writable.of(false).for("flag");
+          return { flag };
+        });
+      `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const inlineErrors = getErrors(diagnostics).filter((d) =>
+        d.type === "pattern-context:inline-reactive-root-access"
+      );
+      assertEquals(
+        inlineErrors.length,
+        0,
+        "Writable.of(...).for(...) should not trigger the inline-reactive-root diagnostic",
+      );
+    },
+  );
+
+  await t.step(
+    "flags chains like wish(...).result.get() that read off the unwrapped value",
+    async () => {
+      // `wish(...).result.get()` is the broken shape: `.result` is plain JS
+      // access that defeats reactivity, and `.get()` then tries to call a
+      // method on the unwrapped value. The fact that `.get()` is a call
+      // does not make this access site safe.
+      const source = `
+        import { pattern, wish } from "commonfabric";
+
+        export default pattern<Record<string, never>>(() => {
+          const broken = wish<{ result: number }>({ query: "/" }).result.get();
+          return { broken };
+        });
+      `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const inlineErrors = getErrors(diagnostics).filter((d) =>
+        d.type === "pattern-context:inline-reactive-root-access"
+      );
+      assertGreater(
+        inlineErrors.length,
+        0,
+        "wish(...).result.get() should still trigger the inline-reactive-root diagnostic",
+      );
+    },
+  );
+});
+
+Deno.test("Inline reactive-root chain rewrite", async (t) => {
+  await t.step(
+    "preserves cast wrappers around the call when rewriting one-line chains",
+    async () => {
+      // `(wish(...) as T).result` carries load-bearing type information in
+      // the `as T` cast — downstream schema-injection / type-aware passes
+      // rely on it. The rewrite must keep the cast attached to the call so
+      // the destructure form sees the same type.
+      const source = `
+        import { pattern, wish } from "commonfabric";
+
+        type ResultShape = { allCharms: { id: string }[] };
+
+        export default pattern<Record<string, never>>(() => {
+          const { allCharms } =
+            (wish({ query: "/" }) as { result: ResultShape }).result;
+          return { count: allCharms.length };
+        });
+      `;
+      const { diagnostics, output } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        `Rewrite should produce clean output (got: ${
+          errors.map((e) => e.message).join("; ")
+        })`,
+      );
+      assertStringIncludes(
+        output,
+        "result: ResultShape",
+        "The `as { result: ResultShape }` cast should survive the chain rewrite",
+      );
+    },
+  );
+});
