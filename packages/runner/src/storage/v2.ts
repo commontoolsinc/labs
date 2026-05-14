@@ -1,5 +1,4 @@
 import { cloneIfNecessary } from "@commonfabric/data-model/fabric-value";
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import {
   type ConflictError as IConflictError,
   type ConnectionError as IConnectionError,
