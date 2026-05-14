@@ -116,7 +116,9 @@ export default pattern((__cf_pattern_input) => {
                     properties: {
                         tree: {
                             type: "array",
-                            items: true,
+                            items: {
+                                $ref: "#/$defs/Entry"
+                            },
                             asCell: ["readonly"]
                         },
                         p: {
@@ -126,7 +128,30 @@ export default pattern((__cf_pattern_input) => {
                             }
                         }
                     },
-                    required: ["tree", "p"]
+                    required: ["tree", "p"],
+                    $defs: {
+                        Entry: {
+                            type: "object",
+                            properties: {
+                                id: {
+                                    type: "string"
+                                },
+                                name: {
+                                    type: "string"
+                                },
+                                type: {
+                                    "enum": ["file", "folder"]
+                                },
+                                children: {
+                                    type: "array",
+                                    items: {
+                                        $ref: "#/$defs/Entry"
+                                    }
+                                }
+                            },
+                            required: ["id", "name", "type"]
+                        }
+                    }
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "array",
                     items: {

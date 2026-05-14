@@ -30,6 +30,8 @@ const timedHandler = handler({
     type: "object",
     properties: {
         lastUpdate: {
+            type: "string",
+            format: "date-time",
             asCell: ["writeonly"]
         }
     },

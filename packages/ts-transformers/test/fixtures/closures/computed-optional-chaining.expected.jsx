@@ -41,6 +41,16 @@ export default pattern(() => {
                 asCell: ["readonly"]
             },
             config: {
+                anyOf: [{
+                        type: "object",
+                        properties: {
+                            multiplier: {
+                                type: "number"
+                            }
+                        }
+                    }, {
+                        type: "null"
+                    }],
                 asCell: ["readonly"]
             }
         },

@@ -363,19 +363,11 @@ export default pattern((state) => {
                                     type: "object",
                                     properties: {
                                         selectedTaskId: {
-                                            anyOf: [{
-                                                    type: "string"
-                                                }, {
-                                                    type: "undefined"
-                                                }],
+                                            type: ["string", "undefined"],
                                             asCell: ["readonly"]
                                         },
                                         hoveredSectionId: {
-                                            anyOf: [{
-                                                    type: "string"
-                                                }, {
-                                                    type: "undefined"
-                                                }],
+                                            type: ["string", "undefined"],
                                             asCell: ["readonly"]
                                         },
                                         section: {
@@ -546,19 +538,11 @@ export default pattern((state) => {
                                 required: ["globalAccent", "showCompleted"]
                             },
                             selectedTaskId: {
-                                anyOf: [{
-                                        type: "string"
-                                    }, {
-                                        type: "undefined"
-                                    }],
+                                type: ["string", "undefined"],
                                 asCell: ["readonly"]
                             },
                             hoveredSectionId: {
-                                anyOf: [{
-                                        type: "string"
-                                    }, {
-                                        type: "undefined"
-                                    }],
+                                type: ["string", "undefined"],
                                 asCell: ["readonly"]
                             }
                         },

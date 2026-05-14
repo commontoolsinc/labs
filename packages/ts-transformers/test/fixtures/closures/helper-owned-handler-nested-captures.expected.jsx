@@ -65,6 +65,11 @@ export default pattern((__cf_pattern_input) => {
         type: "object",
         properties: {
             timer: {
+                anyOf: [{
+                        type: "number"
+                    }, {
+                        type: "null"
+                    }],
                 asCell: ["cell"]
             },
             fileId: {

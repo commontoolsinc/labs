@@ -156,6 +156,12 @@ function shouldPreferNodeDrivenShrink(
   retainedPaths: readonly (readonly string[])[],
   checker: ts.TypeChecker,
 ): boolean {
+  if (
+    containsDefaultTypeNode(nodeDriven) && !containsDefaultTypeNode(typeDriven)
+  ) {
+    return true;
+  }
+
   const requestedHeads = getTopLevelRequestedHeads(retainedPaths);
   const typeDrivenCoverage = countRepresentedRequestedHeads(
     typeDriven,
@@ -184,6 +190,12 @@ function shouldPreferTypeDrivenShrink(
   checker: ts.TypeChecker,
   hasDirectAccess: boolean,
 ): boolean {
+  if (
+    containsDefaultTypeNode(nodeDriven) && !containsDefaultTypeNode(typeDriven)
+  ) {
+    return false;
+  }
+
   const requestedHeads = getTopLevelRequestedHeads(retainedPaths);
   const typeDrivenCoverage = countRepresentedRequestedHeads(
     typeDriven,
@@ -206,6 +218,27 @@ function shouldPreferTypeDrivenShrink(
       containsAnyOrUnknownTypeNode(nodeDriven) &&
       !containsAnyOrUnknownTypeNode(typeDriven)
     );
+}
+
+function containsDefaultTypeNode(node: ts.TypeNode): boolean {
+  let found = false;
+  const visit = (current: ts.Node) => {
+    if (found) return;
+    if (ts.isTypeReferenceNode(current)) {
+      const name = ts.isIdentifier(current.typeName)
+        ? current.typeName.text
+        : ts.isQualifiedName(current.typeName)
+        ? current.typeName.right.text
+        : undefined;
+      if (name === "Default") {
+        found = true;
+        return;
+      }
+    }
+    ts.forEachChild(current, visit);
+  };
+  visit(node);
+  return found;
 }
 
 function choosePreferredShrinkCandidate(
@@ -1643,22 +1676,38 @@ function extractCellLikeInnerTypeNode(
   sourceFile: ts.SourceFile,
   typeRegistry?: WeakMap<ts.Node, ts.Type>,
 ): ts.TypeNode | undefined {
-  if (
-    ts.isTypeReferenceNode(node) &&
-    isCellLikeTypeNode(node) &&
-    node.typeArguments?.[0]
-  ) {
-    return node.typeArguments[0];
-  }
   const semanticType = getTypeFromTypeNodeWithFallback(
     node,
     checker,
     typeRegistry,
   );
-  const innerType = semanticType && isCellLikeType(semanticType, checker)
+  const semanticInner = semanticType && isCellLikeType(semanticType, checker)
     ? unwrapCellLikeType(semanticType, checker)
     : undefined;
-  return typeToSchemaTypeNode(innerType, checker, sourceFile);
+  if (
+    ts.isTypeReferenceNode(node) &&
+    isCellLikeTypeNode(node) &&
+    node.typeArguments?.[0]
+  ) {
+    const inner = node.typeArguments[0];
+    const innerType = getTypeFromTypeNodeWithFallback(
+      inner,
+      checker,
+      typeRegistry,
+    );
+    const typeToRegister = semanticInner && !isAnyOrUnknownType(semanticInner)
+      ? semanticInner
+      : innerType;
+    if (typeToRegister) {
+      typeRegistry?.set(inner, typeToRegister);
+    }
+    return inner;
+  }
+  const innerNode = typeToSchemaTypeNode(semanticInner, checker, sourceFile);
+  if (innerNode && semanticInner) {
+    typeRegistry?.set(innerNode, semanticInner);
+  }
+  return innerNode;
 }
 
 function selectCellPathCapability(
@@ -1805,6 +1854,11 @@ function applyCellCapabilityPathsToTypeNode(
     }
 
     let updated = member.type;
+    const memberSemanticType = getTypeFromTypeNodeWithFallback(
+      updated,
+      checker,
+      typeRegistry,
+    );
     const inner = extractCellLikeInnerTypeNode(
       updated,
       checker,
@@ -1815,6 +1869,9 @@ function applyCellCapabilityPathsToTypeNode(
       const capability = selectCellPathCapability(childPaths);
       if (capability) {
         updated = wrapTypeNodeWithCapability(inner, capability, factory);
+        if (typeRegistry && isCellLikeType(memberSemanticType, checker)) {
+          typeRegistry.set(updated, memberSemanticType);
+        }
       }
     } else {
       const nested = childPaths.filter((entry) => entry.path.length > 0);
@@ -2813,14 +2870,6 @@ export function applyShrinkAndWrap(
     );
     shrunk = next;
   }
-  next = applyCellCapabilityPathsToTypeNode(
-    next,
-    cellCapabilityPaths,
-    factory,
-    checker,
-    sourceFile,
-    context?.options.typeRegistry,
-  );
   if (context && fnNode) {
     validateShrinkCoverage(
       paramSummary,
@@ -2843,6 +2892,14 @@ export function applyShrinkAndWrap(
     checker,
     sourceFile,
     factory,
+  );
+  next = applyCellCapabilityPathsToTypeNode(
+    next,
+    cellCapabilityPaths,
+    factory,
+    checker,
+    sourceFile,
+    context?.options.typeRegistry,
   );
 
   if (!shouldWrap) {

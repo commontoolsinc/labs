@@ -28,7 +28,7 @@ const removeItem = handler({
                 $ref: "#/$defs/Item"
             },
             "default": [],
-            asCell: ["readonly"]
+            asCell: ["writeonly"]
         },
         item: {
             $ref: "#/$defs/Item"

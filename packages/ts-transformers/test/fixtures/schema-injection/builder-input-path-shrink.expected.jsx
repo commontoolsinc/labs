@@ -18,7 +18,7 @@ const liftOptional = lift({
     type: "object",
     properties: {
         foo: {
-            type: ["string", "undefined"]
+            type: "string"
         }
     },
     asCell: ["readonly"]

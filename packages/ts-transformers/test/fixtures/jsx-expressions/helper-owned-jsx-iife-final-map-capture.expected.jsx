@@ -84,7 +84,9 @@ export default pattern((__cf_pattern_input) => {
                     properties: {
                         entries: {
                             type: "array",
-                            items: true,
+                            items: {
+                                $ref: "#/$defs/Entry"
+                            },
                             asCell: ["readonly"]
                         },
                         p: {
@@ -94,7 +96,18 @@ export default pattern((__cf_pattern_input) => {
                             }
                         }
                     },
-                    required: ["entries", "p"]
+                    required: ["entries", "p"],
+                    $defs: {
+                        Entry: {
+                            type: "object",
+                            properties: {
+                                name: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["name"]
+                        }
+                    }
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "array",
                     items: {

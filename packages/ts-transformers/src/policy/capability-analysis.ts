@@ -107,7 +107,12 @@ function extendSourceRef(
 const PARAMETER_SUMMARY_PREFIX = "__param";
 
 const WRITER_METHODS = new Set(["set", "update"]);
-const ARRAY_IDENTITY_WRITER_METHODS = new Set(["push", "unshift", "splice"]);
+const ARRAY_IDENTITY_WRITER_METHODS = new Set([
+  "push",
+  "unshift",
+  "splice",
+  "remove",
+]);
 const ARRAY_IDENTITY_PRESERVING_CHAIN_METHODS = new Set(["slice"]);
 const READER_METHODS = new Set(["get"]);
 const OPAQUE_DERIVATION_METHODS = new Set([
@@ -2506,9 +2511,11 @@ export function analyzeFunctionCapabilities(
               )
             ) {
               // These methods are available on opaque cells and return opaque
-              // results. Root receivers need no extra capability, but nested
-              // receivers must still be retained in object-shaped inputs.
-              if (receiver.path.length > 0) {
+              // results. Dynamic receivers can hide which branch is used, so
+              // they must disable shrinking for the root.
+              if (receiver.dynamic) {
+                markWildcard(receiver.root);
+              } else if (receiver.path.length > 0) {
                 recordOpaquePath(receiver.root, receiver.path);
               } else {
                 markOpaqueUse(receiver.root, receiver.path);

@@ -261,6 +261,19 @@ export class CommonFabricFormatter implements TypeFormatter {
     }
 
     const wrapperInfo = getCellWrapperInfo(type, context.typeChecker);
+    if (
+      resolvedWrapper &&
+      resolvedWrapper.kind !== "Default" &&
+      wrapperInfo &&
+      wrapperInfo.kind !== resolvedWrapper.kind
+    ) {
+      return this.formatWrapperTypeFromNode(
+        resolvedWrapper.node,
+        context,
+        resolvedWrapper.kind,
+      );
+    }
+
     if (wrapperInfo && !(type.flags & ts.TypeFlags.Union)) {
       const nodeToPass = this.selectWrapperTypeNode(
         n,
@@ -338,9 +351,16 @@ export class CommonFabricFormatter implements TypeFormatter {
       throw new Error(`${wrapperKind}<T> requires type argument`);
     }
 
+    const registeredWrapperType = context.typeRegistry?.get(typeRefNode);
+    const registeredWrapperInfo = registeredWrapperType
+      ? getCellWrapperInfo(registeredWrapperType, context.typeChecker)
+      : undefined;
+
     let innerType: ts.Type;
     try {
-      innerType = context.typeChecker.getTypeFromTypeNode(innerTypeNode);
+      innerType = context.typeRegistry?.get(innerTypeNode) ??
+        registeredWrapperInfo?.typeRef.typeArguments?.[0] ??
+        context.typeChecker.getTypeFromTypeNode(innerTypeNode);
     } catch {
       innerType = context.typeChecker.getAnyType();
     }
@@ -405,7 +425,8 @@ export class CommonFabricFormatter implements TypeFormatter {
 
     let innerType: ts.Type;
     try {
-      innerType = context.typeChecker.getTypeFromTypeNode(innerTypeNode);
+      innerType = context.typeRegistry?.get(innerTypeNode) ??
+        context.typeChecker.getTypeFromTypeNode(innerTypeNode);
     } catch {
       innerType = context.typeChecker.getAnyType();
     }
@@ -487,7 +508,8 @@ export class CommonFabricFormatter implements TypeFormatter {
       innerTypeNode
     ) {
       try {
-        const fromNode = context.typeChecker.getTypeFromTypeNode(innerTypeNode);
+        const fromNode = context.typeRegistry?.get(innerTypeNode) ??
+          context.typeChecker.getTypeFromTypeNode(innerTypeNode);
         if (fromNode && !this.isUnusableInnerType(fromNode)) {
           innerType = fromNode;
         }
@@ -818,7 +840,8 @@ export class CommonFabricFormatter implements TypeFormatter {
       throw new Error("Default<T,V> type arguments cannot be undefined");
     }
     // Get the value type from the type nodes
-    const valueType = context.typeChecker.getTypeFromTypeNode(valueTypeNode);
+    const valueType = context.typeRegistry?.get(valueTypeNode) ??
+      context.typeChecker.getTypeFromTypeNode(valueTypeNode);
     if (typeArgs.length === 1 && this.isUndefinedType(valueType)) {
       throw new Error(
         "Default<undefined> is unsupported; use an optional field or a JSON value default.",
@@ -1573,7 +1596,8 @@ export class CommonFabricFormatter implements TypeFormatter {
       const lastTypeArg =
         typeNode.typeArguments[typeNode.typeArguments.length - 1];
       if (lastTypeArg) {
-        const lastType = context.typeChecker.getTypeFromTypeNode(lastTypeArg);
+        const lastType = context.typeRegistry?.get(lastTypeArg) ??
+          context.typeChecker.getTypeFromTypeNode(lastTypeArg);
         // If the value type is never, this represents an empty object
         if (lastType.flags & ts.TypeFlags.Never) {
           return {};
@@ -1624,7 +1648,8 @@ export class CommonFabricFormatter implements TypeFormatter {
     if (typeNode.kind === ts.SyntaxKind.UndefinedKeyword) return undefined;
 
     // Fallback: try to get the type and extract from it
-    const type = context.typeChecker.getTypeFromTypeNode(typeNode);
+    const type = context.typeRegistry?.get(typeNode) ??
+      context.typeChecker.getTypeFromTypeNode(typeNode);
     return this.extractDefaultValue(type, context);
   }
 

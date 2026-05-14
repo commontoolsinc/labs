@@ -639,13 +639,14 @@ function createToSchemaCall(
     "cfHelpers" | "factory"
   >,
   typeNode: ts.TypeNode,
-  options?: { widenLiterals?: boolean },
+  options?: SchemaCallOptions,
 ): ts.CallExpression {
   const expr = cfHelpers.getHelperExpr("toSchema");
 
-  // Build arguments array if options are provided
   const args: ts.Expression[] = [];
-  if (options?.widenLiterals) {
+  if (isSchemaCallOptionExpressions(options)) {
+    args.push(...options);
+  } else if (options?.widenLiterals) {
     args.push(
       factory.createObjectLiteralExpression([
         factory.createPropertyAssignment(
@@ -661,6 +662,14 @@ function createToSchemaCall(
     [typeNode],
     args,
   );
+}
+
+type SchemaCallOptions = { widenLiterals?: boolean } | readonly ts.Expression[];
+
+function isSchemaCallOptionExpressions(
+  options: SchemaCallOptions | undefined,
+): options is readonly ts.Expression[] {
+  return Array.isArray(options);
 }
 
 function isToSchemaCall(node: ts.Expression): node is ts.CallExpression {
@@ -897,7 +906,7 @@ function createSchemaCallWithRegistryTransfer(
   typeNode: ts.TypeNode,
   checker: ts.TypeChecker,
   typeRegistry?: TypeRegistry,
-  options?: { widenLiterals?: boolean },
+  options?: SchemaCallOptions,
   schemaHints?: TransformationContext["options"]["schemaHints"],
 ): ts.CallExpression {
   const emittedTypeNode = normalizeSchemaInjectionTypeNode(
@@ -3104,6 +3113,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
               narrowedArgumentType,
               checker,
               typeRegistry,
+              firstArgument.arguments,
             );
             if (narrowedArgumentTypeValue && typeRegistry) {
               typeRegistry.set(inputSchema, narrowedArgumentTypeValue);

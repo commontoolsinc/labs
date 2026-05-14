@@ -537,6 +537,23 @@ Deno.test(
 );
 
 Deno.test(
+  "Capability analysis treats dynamic opaque derivation receivers as wildcard",
+  () => {
+    const fn = parseFirstCallback(
+      `const fn = (input, key) => {
+        return input.collections[key].map((item) => item.name);
+      };`,
+    );
+    const summary = analyzeFunctionCapabilities(fn);
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.capability, "opaque");
+    assertEquals(input.wildcard, true);
+    assertEquals(input.opaquePaths.length, 0);
+  },
+);
+
+Deno.test(
   "Capability analysis keeps root derivation plus equality usage opaque",
   () => {
     const fn = parseFirstCallback(
