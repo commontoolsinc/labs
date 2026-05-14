@@ -1,4 +1,4 @@
-import { hashOf } from "@commonfabric/data-model/value-hash";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { stripUndefinedProps } from "@commonfabric/utils/strip-undefined-props";
 import { type Cell } from "../cell.ts";
 import type { Runtime } from "../runtime.ts";
@@ -42,8 +42,8 @@ export const internalSchema = internSchema(
  *     function must do the normalization itself to stay
  *     data-model-flag-agnostic.
  *
- * `hashOf()` itself is happy to hash `undefined` values; no normalization
- * for hashability per se is needed.
+ * `hashStringOf()` itself is happy to hash `undefined` values; no
+ * normalization for hashability per se is needed.
  */
 export function computeInputHashFromValue<T extends Record<string, any>>(
   inputs: T | undefined,
@@ -52,7 +52,7 @@ export function computeInputHashFromValue<T extends Record<string, any>>(
     string,
     unknown
   >;
-  return hashOf(stripUndefinedProps(inputsOnly)).toString();
+  return hashStringOf(stripUndefinedProps(inputsOnly));
 }
 
 export function computeInputHash<T extends Record<string, any>>(
