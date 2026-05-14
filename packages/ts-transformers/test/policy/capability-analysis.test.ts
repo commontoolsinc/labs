@@ -141,6 +141,7 @@ function getPaths(
   identityOnly: boolean;
   identityPaths: string[];
   identityCellPaths: string[];
+  opaquePaths: string[];
 } {
   const param = summary.params.find((entry) => entry.name === name);
   if (!param) {
@@ -158,6 +159,7 @@ function getPaths(
     identityCellPaths: (param.identityCellPaths ?? []).map((path) =>
       path.join(".")
     ),
+    opaquePaths: (param.opaquePaths ?? []).map((path) => path.join(".")),
   };
 }
 
@@ -514,6 +516,25 @@ Deno.test("Capability analysis keeps opaque derivation methods opaque", () => {
   assertEquals(input.writePaths.length, 0);
   assertEquals(input.wildcard, false);
 });
+
+Deno.test(
+  "Capability analysis records nested opaque derivation methods without reads",
+  () => {
+    const fn = parseFirstCallback(
+      `const fn = (input) => {
+        return input.items.map((item) => item.name);
+      };`,
+    );
+    const summary = analyzeFunctionCapabilities(fn);
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.capability, "opaque");
+    assertEquals(input.readPaths.length, 0);
+    assertEquals(input.writePaths.length, 0);
+    assert(input.opaquePaths.includes("items"));
+    assertEquals(input.wildcard, false);
+  },
+);
 
 Deno.test(
   "Capability analysis keeps root derivation plus equality usage opaque",

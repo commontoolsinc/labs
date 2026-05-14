@@ -29,7 +29,7 @@ const logCharmsList = lift({
             items: {
                 $ref: "#/$defs/CharmEntry"
             },
-            asCell: ["cell"]
+            asCell: ["readonly"]
         }
     },
     required: ["charmsList"],

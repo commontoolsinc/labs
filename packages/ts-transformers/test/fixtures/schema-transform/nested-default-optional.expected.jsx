@@ -29,40 +29,26 @@ const increment = handler(false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
         state: {
-            $ref: "#/$defs/NestedOptionalState",
-            asCell: ["cell"]
-        }
-    },
-    required: ["state"],
-    $defs: {
-        NestedOptionalState: {
             type: "object",
             properties: {
                 nested: {
-                    $ref: "#/$defs/OptionalNested"
+                    type: "object",
+                    properties: {
+                        branch: {
+                            type: "object",
+                            properties: {
+                                counter: {
+                                    type: "number"
+                                }
+                            }
+                        }
+                    }
                 }
-            }
-        },
-        OptionalNested: {
-            type: "object",
-            properties: {
-                branch: {
-                    $ref: "#/$defs/OptionalBranch"
-                }
-            }
-        },
-        OptionalBranch: {
-            type: "object",
-            properties: {
-                counter: {
-                    type: "number"
-                },
-                label: {
-                    type: "string"
-                }
-            }
+            },
+            asCell: ["cell"]
         }
-    }
+    },
+    required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, (_, context: {
     state: Cell<NestedOptionalState>;
 }) => {

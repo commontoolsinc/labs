@@ -46,7 +46,7 @@ export default pattern((__cf_pattern_input) => {
                             items: {
                                 $ref: "#/$defs/HabitLog"
                             },
-                            asCell: ["cell"]
+                            asCell: ["readonly"]
                         },
                         habit: {
                             type: "object",
@@ -113,10 +113,8 @@ export default pattern((__cf_pattern_input) => {
                         properties: {
                             logs: {
                                 type: "array",
-                                items: {
-                                    $ref: "#/$defs/HabitLog"
-                                },
-                                asCell: ["cell"]
+                                items: true,
+                                asCell: ["readonly"]
                             },
                             todayDate: {
                                 type: "string"
@@ -127,21 +125,6 @@ export default pattern((__cf_pattern_input) => {
                 },
                 required: ["element", "params"],
                 $defs: {
-                    HabitLog: {
-                        type: "object",
-                        properties: {
-                            habitName: {
-                                type: "string"
-                            },
-                            date: {
-                                type: "string"
-                            },
-                            completed: {
-                                type: "boolean"
-                            }
-                        },
-                        required: ["habitName", "date", "completed"]
-                    },
                     Habit: {
                         type: "object",
                         properties: {

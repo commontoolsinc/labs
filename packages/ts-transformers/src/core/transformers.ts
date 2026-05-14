@@ -40,6 +40,7 @@ export interface CapabilityParamSummary {
   readonly readPaths: readonly (readonly string[])[];
   readonly fullShapePaths?: readonly (readonly string[])[];
   readonly writePaths: readonly (readonly string[])[];
+  readonly opaquePaths?: readonly (readonly string[])[];
   readonly passthrough: boolean;
   readonly wildcard: boolean;
   readonly identityOnly?: boolean;

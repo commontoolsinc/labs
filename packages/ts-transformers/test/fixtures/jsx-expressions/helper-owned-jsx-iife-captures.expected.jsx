@@ -59,7 +59,7 @@ export default pattern((__cf_pattern_input) => {
                 items: {
                     type: "string"
                 },
-                asCell: ["cell"]
+                asCell: ["writeonly"]
             }
         },
         required: ["path"]
@@ -92,7 +92,7 @@ export default pattern((__cf_pattern_input) => {
                             items: {
                                 type: "string"
                             },
-                            asCell: ["cell"]
+                            asCell: ["readonly"]
                         }
                     },
                     required: ["path"]
@@ -128,7 +128,7 @@ export default pattern((__cf_pattern_input) => {
                             items: {
                                 type: "string"
                             },
-                            asCell: ["cell"]
+                            asCell: ["readonly"]
                         }
                     },
                     required: ["path"]
@@ -143,10 +143,8 @@ export default pattern((__cf_pattern_input) => {
                     properties: {
                         entries: {
                             type: "array",
-                            items: {
-                                $ref: "#/$defs/Entry"
-                            },
-                            asCell: ["cell"]
+                            items: true,
+                            asCell: ["readonly"]
                         },
                         p: {
                             type: "array",
@@ -155,18 +153,7 @@ export default pattern((__cf_pattern_input) => {
                             }
                         }
                     },
-                    required: ["entries", "p"],
-                    $defs: {
-                        Entry: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["name"]
-                        }
-                    }
+                    required: ["entries", "p"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "array",
                     items: {
@@ -201,7 +188,7 @@ export default pattern((__cf_pattern_input) => {
                                     }
                                 },
                                 required: ["name"],
-                                asCell: ["stream"]
+                                asCell: ["readonly"]
                             },
                             entry: {
                                 type: "object",
@@ -239,7 +226,7 @@ export default pattern((__cf_pattern_input) => {
                                         }
                                     },
                                     required: ["name"],
-                                    asCell: ["stream"]
+                                    asCell: ["readonly"]
                                 }
                             },
                             required: ["pushPath"]

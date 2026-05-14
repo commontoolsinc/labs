@@ -65,7 +65,7 @@ export default pattern((__cf_pattern_input) => {
                             items: {
                                 type: "string"
                             },
-                            asCell: ["cell"]
+                            asCell: ["readonly"]
                         }
                     },
                     required: ["path"]
@@ -80,10 +80,8 @@ export default pattern((__cf_pattern_input) => {
                     properties: {
                         entries: {
                             type: "array",
-                            items: {
-                                $ref: "#/$defs/Entry"
-                            },
-                            asCell: ["cell"]
+                            items: true,
+                            asCell: ["readonly"]
                         },
                         p: {
                             type: "array",
@@ -92,18 +90,7 @@ export default pattern((__cf_pattern_input) => {
                             }
                         }
                     },
-                    required: ["entries", "p"],
-                    $defs: {
-                        Entry: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["name"]
-                        }
-                    }
+                    required: ["entries", "p"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "array",
                     items: {
@@ -141,7 +128,7 @@ export default pattern((__cf_pattern_input) => {
                             },
                             labelPrefix: {
                                 type: "string",
-                                asCell: ["cell"]
+                                asCell: ["readonly"]
                             }
                         },
                         required: ["entry", "labelPrefix"]
@@ -164,7 +151,7 @@ export default pattern((__cf_pattern_input) => {
                             properties: {
                                 labelPrefix: {
                                     type: "string",
-                                    asCell: ["cell"]
+                                    asCell: ["readonly"]
                                 }
                             },
                             required: ["labelPrefix"]

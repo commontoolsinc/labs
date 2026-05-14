@@ -1141,12 +1141,28 @@ function resolveDualSchemaBuilderTypes(
     isCellLikeType(options.fallbackArgumentType, checker) &&
     parameterUsesCellLikeMethods(callback, 0)
   ) {
-    argumentTypeValue = options.fallbackArgumentType;
-    argumentTypeNode = typeToSchemaTypeNode(
+    const fallbackArgumentNode = typeToSchemaTypeNode(
       options.fallbackArgumentType,
       checker,
       sourceFile,
-    ) ?? argumentTypeNode;
+    );
+    if (fallbackArgumentNode) {
+      ({
+        argumentTypeNode,
+        argumentTypeValue,
+      } = applyCallbackBuilderArgumentCapabilitySummary(
+        callback,
+        fallbackArgumentNode,
+        options.fallbackArgumentType,
+        checker,
+        sourceFile,
+        factory,
+        capabilityRegistry,
+        context,
+      ));
+    } else {
+      argumentTypeValue = options.fallbackArgumentType;
+    }
   }
 
   if (

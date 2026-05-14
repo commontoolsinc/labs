@@ -38,7 +38,7 @@ export default pattern((__cf_pattern_input) => {
             properties: {
                 value: {
                     type: "string",
-                    asCell: ["cell"]
+                    asCell: ["writeonly"]
                 }
             },
             required: ["value"]

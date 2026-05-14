@@ -67,7 +67,7 @@ export default pattern((_state: any) => {
                         },
                         required: ["id", "name"]
                     },
-                    asCell: ["cell"]
+                    asCell: ["readonly"]
                 }
             },
             required: ["people"]

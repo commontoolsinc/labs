@@ -29,8 +29,12 @@ export default pattern((__cf_pattern_input) => {
             type: "object",
             properties: {
                 a: {
-                    type: "string",
-                    asCell: ["cell"]
+                    anyOf: [{
+                            type: "string"
+                        }, {
+                            type: "undefined"
+                        }],
+                    asCell: ["readonly"]
                 }
             }
         } as const satisfies __cfHelpers.JSONSchema, (_, { a }) => console.log(a))({
@@ -40,8 +44,12 @@ export default pattern((__cf_pattern_input) => {
             type: "object",
             properties: {
                 b: {
-                    type: "number",
-                    asCell: ["cell"]
+                    anyOf: [{
+                            type: "number"
+                        }, {
+                            type: "undefined"
+                        }],
+                    asCell: ["readonly"]
                 }
             }
         } as const satisfies __cfHelpers.JSONSchema, (_, { b }) => console.log(b))({

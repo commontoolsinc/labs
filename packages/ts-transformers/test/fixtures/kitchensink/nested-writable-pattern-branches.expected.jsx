@@ -85,7 +85,7 @@ export default pattern((state) => {
                         items: {
                             type: "unknown"
                         },
-                        asCell: ["cell"]
+                        asCell: ["readonly"]
                     }
                 },
                 required: ["sections"]
@@ -363,12 +363,20 @@ export default pattern((state) => {
                                     type: "object",
                                     properties: {
                                         selectedTaskId: {
-                                            type: ["string", "undefined"],
-                                            asCell: ["cell"]
+                                            anyOf: [{
+                                                    type: "string"
+                                                }, {
+                                                    type: "undefined"
+                                                }],
+                                            asCell: ["readonly"]
                                         },
                                         hoveredSectionId: {
-                                            type: ["string", "undefined"],
-                                            asCell: ["cell"]
+                                            anyOf: [{
+                                                    type: "string"
+                                                }, {
+                                                    type: "undefined"
+                                                }],
+                                            asCell: ["readonly"]
                                         },
                                         section: {
                                             type: "object",
@@ -538,12 +546,20 @@ export default pattern((state) => {
                                 required: ["globalAccent", "showCompleted"]
                             },
                             selectedTaskId: {
-                                type: ["string", "undefined"],
-                                asCell: ["cell"]
+                                anyOf: [{
+                                        type: "string"
+                                    }, {
+                                        type: "undefined"
+                                    }],
+                                asCell: ["readonly"]
                             },
                             hoveredSectionId: {
-                                type: ["string", "undefined"],
-                                asCell: ["cell"]
+                                anyOf: [{
+                                        type: "string"
+                                    }, {
+                                        type: "undefined"
+                                    }],
+                                asCell: ["readonly"]
                             }
                         },
                         required: ["state", "selectedTaskId", "hoveredSectionId"]

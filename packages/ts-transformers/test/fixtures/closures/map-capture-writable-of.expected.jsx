@@ -50,12 +50,7 @@ export default pattern((state) => {
                         type: "object",
                         properties: {
                             selected: {
-                                anyOf: [{
-                                        type: "string"
-                                    }, {
-                                        type: "null"
-                                    }],
-                                asCell: ["cell"]
+                                asCell: ["readonly"]
                             }
                         },
                         required: ["selected"]

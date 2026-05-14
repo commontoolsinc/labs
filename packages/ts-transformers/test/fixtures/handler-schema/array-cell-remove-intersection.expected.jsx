@@ -24,27 +24,14 @@ const removeItem = handler({
     properties: {
         items: {
             type: "array",
-            items: {
-                $ref: "#/$defs/Item"
-            },
+            items: true,
             asCell: ["cell"]
         },
         index: {
             type: "number"
         }
     },
-    required: ["items", "index"],
-    $defs: {
-        Item: {
-            type: "object",
-            properties: {
-                text: {
-                    type: "string"
-                }
-            },
-            required: ["text"]
-        }
-    }
+    required: ["items", "index"]
 } as const satisfies __cfHelpers.JSONSchema, (_, { items, index }) => {
     const next = items.get().slice();
     if (index >= 0 && index < next.length)
@@ -62,27 +49,14 @@ const removeItemAlias = handler({
     properties: {
         items: {
             type: "array",
-            items: {
-                $ref: "#/$defs/Item"
-            },
+            items: true,
             asCell: ["cell"]
         },
         index: {
             type: "number"
         }
     },
-    required: ["items", "index"],
-    $defs: {
-        Item: {
-            type: "object",
-            properties: {
-                text: {
-                    type: "string"
-                }
-            },
-            required: ["text"]
-        }
-    }
+    required: ["items", "index"]
 } as const satisfies __cfHelpers.JSONSchema, (_, { items, index }) => {
     const next = items.get().slice();
     if (index >= 0 && index < next.length)

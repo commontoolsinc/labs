@@ -120,6 +120,7 @@ function deriveCapabilityShrinkPlan(
   const paths = uniquePaths([
     ...paramSummary.readPaths,
     ...paramSummary.writePaths,
+    ...(paramSummary.opaquePaths ?? []),
   ]);
   const fullShapePaths = uniquePaths(paramSummary.fullShapePaths ?? []);
   const identityPaths = uniquePaths(paramSummary.identityPaths ?? []);
@@ -1631,6 +1632,220 @@ export function wrapTypeNodeWithCapability(
   );
 }
 
+interface CellCapabilityPath {
+  readonly path: readonly string[];
+  readonly capability: ReactiveCapability;
+}
+
+function extractCellLikeInnerTypeNode(
+  node: ts.TypeNode,
+  checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
+): ts.TypeNode | undefined {
+  if (
+    ts.isTypeReferenceNode(node) &&
+    isCellLikeTypeNode(node) &&
+    node.typeArguments?.[0]
+  ) {
+    return node.typeArguments[0];
+  }
+  const semanticType = getTypeFromTypeNodeWithFallback(
+    node,
+    checker,
+    typeRegistry,
+  );
+  const innerType = semanticType && isCellLikeType(semanticType, checker)
+    ? unwrapCellLikeType(semanticType, checker)
+    : undefined;
+  return typeToSchemaTypeNode(innerType, checker, sourceFile);
+}
+
+function selectCellPathCapability(
+  entries: readonly CellCapabilityPath[],
+): ReactiveCapability | undefined {
+  let hasRead = false;
+  let hasWrite = false;
+  let hasOpaque = false;
+
+  for (const entry of entries) {
+    if (entry.capability === "writable") {
+      hasRead = true;
+      hasWrite = true;
+    } else if (entry.capability === "readonly") {
+      hasRead = true;
+    } else if (entry.capability === "writeonly") {
+      hasWrite = true;
+    } else if (entry.capability === "opaque") {
+      hasOpaque = true;
+    }
+  }
+
+  if (hasRead && hasWrite) return "writable";
+  if (hasRead) return "readonly";
+  if (hasWrite) return "writeonly";
+  if (hasOpaque) return "opaque";
+  return undefined;
+}
+
+function buildCellCapabilityPaths(
+  paramSummary: CapabilityParamSummary,
+): readonly CellCapabilityPath[] {
+  const byPath = new Map<
+    string,
+    {
+      path: readonly string[];
+      read: boolean;
+      write: boolean;
+      opaque: boolean;
+    }
+  >();
+  const ensure = (path: readonly string[]) => {
+    const key = JSON.stringify(path);
+    let entry = byPath.get(key);
+    if (!entry) {
+      entry = {
+        path,
+        read: false,
+        write: false,
+        opaque: false,
+      };
+      byPath.set(key, entry);
+    }
+    return entry;
+  };
+
+  for (const path of paramSummary.opaquePaths ?? []) {
+    if (path.length === 0) continue;
+    ensure(path).opaque = true;
+  }
+  for (const path of paramSummary.readPaths) {
+    if (path.length === 0) continue;
+    ensure(path).read = true;
+  }
+  for (const path of paramSummary.writePaths) {
+    if (path.length === 0) continue;
+    ensure(path).write = true;
+  }
+
+  return Array.from(byPath.values()).map((entry) => {
+    const capability = entry.read && entry.write
+      ? "writable"
+      : entry.read
+      ? "readonly"
+      : entry.write
+      ? "writeonly"
+      : "opaque";
+    return { path: entry.path, capability };
+  });
+}
+
+function groupCellCapabilityPathsByHead(
+  entries: readonly CellCapabilityPath[],
+): Map<string, CellCapabilityPath[]> {
+  const grouped = new Map<string, CellCapabilityPath[]>();
+  for (const entry of entries) {
+    if (entry.path.length === 0) continue;
+    const [head, ...tail] = entry.path;
+    if (!head) continue;
+    const existing = grouped.get(head);
+    const childEntry = { path: tail, capability: entry.capability };
+    if (existing) {
+      existing.push(childEntry);
+    } else {
+      grouped.set(head, [childEntry]);
+    }
+  }
+  return grouped;
+}
+
+function applyCellCapabilityPathsToTypeNode(
+  node: ts.TypeNode,
+  paths: readonly CellCapabilityPath[],
+  factory: ts.NodeFactory,
+  checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
+): ts.TypeNode {
+  if (paths.length === 0) {
+    return node;
+  }
+
+  if (ts.isParenthesizedTypeNode(node)) {
+    const updated = applyCellCapabilityPathsToTypeNode(
+      node.type,
+      paths,
+      factory,
+      checker,
+      sourceFile,
+      typeRegistry,
+    );
+    return updated === node.type
+      ? node
+      : factory.updateParenthesizedType(node, updated);
+  }
+
+  if (!ts.isTypeLiteralNode(node)) {
+    return node;
+  }
+
+  const grouped = groupCellCapabilityPathsByHead(paths);
+  let changed = false;
+  const members = node.members.map((member) => {
+    if (!ts.isPropertySignature(member) || !member.type || !member.name) {
+      return member;
+    }
+    const propertyName = getRequestedPropertyNameText(member.name, checker);
+    if (!propertyName) {
+      return member;
+    }
+    const childPaths = grouped.get(propertyName);
+    if (!childPaths) {
+      return member;
+    }
+
+    let updated = member.type;
+    const inner = extractCellLikeInnerTypeNode(
+      updated,
+      checker,
+      sourceFile,
+      typeRegistry,
+    );
+    if (inner) {
+      const capability = selectCellPathCapability(childPaths);
+      if (capability) {
+        updated = wrapTypeNodeWithCapability(inner, capability, factory);
+      }
+    } else {
+      const nested = childPaths.filter((entry) => entry.path.length > 0);
+      if (nested.length > 0) {
+        updated = applyCellCapabilityPathsToTypeNode(
+          updated,
+          nested,
+          factory,
+          checker,
+          sourceFile,
+          typeRegistry,
+        );
+      }
+    }
+
+    if (updated === member.type) {
+      return member;
+    }
+    changed = true;
+    return factory.updatePropertySignature(
+      member,
+      member.modifiers,
+      member.name,
+      member.questionToken,
+      updated,
+    );
+  });
+
+  return changed ? factory.createTypeLiteralNode(members) : node;
+}
+
 function createIdentityOnlyReplacementTypeNode(
   node: ts.TypeNode,
   semanticType: ts.Type | undefined,
@@ -2423,6 +2638,7 @@ export function applyShrinkAndWrap(
     identityOnlyRoot,
     effectiveIdentityPaths,
   } = shrinkPlan;
+  const cellCapabilityPaths = buildCellCapabilityPaths(paramSummary);
   const appliedIdentityCellPaths = shouldWrap
     ? identityCellPaths.filter((path) => path.length > 0)
     : identityCellPaths;
@@ -2597,6 +2813,14 @@ export function applyShrinkAndWrap(
     );
     shrunk = next;
   }
+  next = applyCellCapabilityPathsToTypeNode(
+    next,
+    cellCapabilityPaths,
+    factory,
+    checker,
+    sourceFile,
+    context?.options.typeRegistry,
+  );
   if (context && fnNode) {
     validateShrinkCoverage(
       paramSummary,

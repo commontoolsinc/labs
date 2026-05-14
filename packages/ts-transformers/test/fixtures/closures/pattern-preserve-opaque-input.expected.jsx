@@ -28,7 +28,7 @@ export default pattern((input: Writable<State>) => {
             properties: {
                 input: {
                     $ref: "#/$defs/State",
-                    asCell: ["cell"]
+                    asCell: ["readonly"]
                 }
             },
             required: ["input"],

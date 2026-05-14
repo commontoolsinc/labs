@@ -36,6 +36,7 @@ interface MutableCapabilityState {
   readonly rawIdentityCellPaths: Set<string>;
   readonly rawComparablePaths: Set<string>;
   readonly rawComparableCellPaths: Set<string>;
+  readonly rawOpaquePaths: Set<string>;
   passthrough: boolean;
   wildcard: boolean;
   hasIdentityUse: boolean;
@@ -47,6 +48,7 @@ interface ObservedCapabilityUsage {
   readonly readPaths: readonly (readonly string[])[];
   readonly fullShapePaths: readonly (readonly string[])[];
   readonly writePaths: readonly (readonly string[])[];
+  readonly opaquePaths: readonly (readonly string[])[];
   readonly passthrough: boolean;
   readonly wildcard: boolean;
   readonly identityOnly: boolean;
@@ -985,6 +987,18 @@ function normalizeObservedCapabilityUsage(
   const readPaths = Array.from(state.reads).map(decodePath);
   const fullShapePaths = Array.from(state.fullShapeReads).map(decodePath);
   const writePaths = Array.from(state.writes).map(decodePath);
+  const opaquePaths = Array.from(state.rawOpaquePaths)
+    .map(decodePath)
+    .filter((opaquePath) =>
+      ![
+        ...readPaths,
+        ...fullShapePaths,
+        ...writePaths,
+      ].some((path) =>
+        path.length >= opaquePath.length &&
+        opaquePath.every((segment, index) => path[index] === segment)
+      )
+    );
   const identityPaths = Array.from(state.rawIdentityPaths)
     .map(decodePath)
     .filter((identityPath) => {
@@ -998,6 +1012,7 @@ function normalizeObservedCapabilityUsage(
         ...readPaths,
         ...fullShapePaths,
         ...writePaths,
+        ...opaquePaths,
       ].some((path) =>
         path.length >= identityPath.length &&
         identityPath.every((segment, index) => path[index] === segment)
@@ -1020,6 +1035,7 @@ function normalizeObservedCapabilityUsage(
     readPaths,
     fullShapePaths,
     writePaths,
+    opaquePaths,
     passthrough: state.passthrough,
     wildcard: state.wildcard,
     identityOnly: identityPaths.some((path) => path.length === 0) &&
@@ -1094,6 +1110,7 @@ export function analyzeFunctionCapabilities(
           rawIdentityCellPaths: new Set<string>(),
           rawComparablePaths: new Set<string>(),
           rawComparableCellPaths: new Set<string>(),
+          rawOpaquePaths: new Set<string>(),
           passthrough: false,
           wildcard: false,
           hasIdentityUse: false,
@@ -1156,6 +1173,18 @@ export function analyzeFunctionCapabilities(
 
     const markOpaqueUse = (name: string, path: readonly string[]): void => {
       const state = ensureState(name);
+      state.hasNonIdentityUse = true;
+      if (path.length === 0) {
+        state.hasNonIdentityRootUse = true;
+      }
+    };
+
+    const recordOpaquePath = (
+      name: string,
+      path: readonly string[],
+    ): void => {
+      const state = ensureState(name);
+      state.rawOpaquePaths.add(encodePath(path));
       state.hasNonIdentityUse = true;
       if (path.length === 0) {
         state.hasNonIdentityRootUse = true;
@@ -2334,6 +2363,12 @@ export function analyzeFunctionCapabilities(
             for (const writePath of paramSummary.writePaths) {
               trackWrite(source.root, [...source.path, ...writePath]);
             }
+            for (const opaquePath of paramSummary.opaquePaths ?? []) {
+              recordOpaquePath(source.root, [
+                ...source.path,
+                ...opaquePath,
+              ]);
+            }
 
             for (const identityPath of paramSummary.identityPaths ?? []) {
               if (source.dynamic) {
@@ -2474,7 +2509,7 @@ export function analyzeFunctionCapabilities(
               // results. Root receivers need no extra capability, but nested
               // receivers must still be retained in object-shaped inputs.
               if (receiver.path.length > 0) {
-                trackReadRef(receiver);
+                recordOpaquePath(receiver.root, receiver.path);
               } else {
                 markOpaqueUse(receiver.root, receiver.path);
               }

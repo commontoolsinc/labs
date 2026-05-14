@@ -1771,7 +1771,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
   );
 
   await t.step(
-    "derive preserves cell wrappers when callback uses .get() on inferred input",
+    "derive narrows cell wrappers when callback only uses .get() on inferred input",
     async () => {
       const source = [
         "/// <cts-enable />",
@@ -1793,13 +1793,13 @@ Deno.test("Schema Shrink Validation", async (t) => {
         }`,
       );
       const inputSchema = extractSchemas(result.output)[0] ?? "";
-      assertStringIncludes(inputSchema, 'asCell: ["cell"]');
+      assertStringIncludes(inputSchema, 'asCell: ["readonly"]');
       assertEquals(inputSchema.includes("asOpaque: true"), false);
     },
   );
 
   await t.step(
-    "derive preserves cell wrappers when expression-bodied callback is a direct .get() call",
+    "derive narrows cell wrappers when expression-bodied callback is a direct .get() call",
     async () => {
       const source = [
         "/// <cts-enable />",
@@ -1821,7 +1821,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
         }`,
       );
       const inputSchema = extractSchemas(result.output)[0] ?? "";
-      assertStringIncludes(inputSchema, 'asCell: ["cell"]');
+      assertStringIncludes(inputSchema, 'asCell: ["readonly"]');
       assertEquals(inputSchema.includes("asOpaque: true"), false);
     },
   );

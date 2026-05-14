@@ -54,7 +54,7 @@ export default pattern((__cf_pattern_input) => {
                         }
                     },
                     required: ["messages"],
-                    asCell: ["cell"]
+                    asCell: ["readonly"]
                 }
             },
             required: ["selectedRoom"],
@@ -108,7 +108,7 @@ export default pattern((__cf_pattern_input) => {
                     },
                     name: {
                         type: "string",
-                        asCell: ["cell"]
+                        asCell: ["readonly"]
                     }
                 },
                 required: ["message", "name"]
@@ -170,7 +170,7 @@ export default pattern((__cf_pattern_input) => {
                     properties: {
                         name: {
                             type: "string",
-                            asCell: ["cell"]
+                            asCell: ["readonly"]
                         }
                     },
                     required: ["name"]

@@ -48,7 +48,7 @@ export default pattern((state) => {
                         },
                         selectedValue: {
                             type: "string",
-                            asCell: ["cell"]
+                            asCell: ["writeonly"]
                         }
                     },
                     required: ["changeCount", "selectedValue"]

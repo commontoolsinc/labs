@@ -167,7 +167,7 @@ const actionPattern = pattern((input: Writable<{
                     }
                 },
                 required: ["foo"],
-                asCell: ["cell"]
+                asCell: ["readonly"]
             }
         },
         required: ["input"]

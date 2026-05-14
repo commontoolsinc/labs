@@ -40,7 +40,7 @@ export default pattern((__cf_pattern_input) => {
         properties: {
             isEditing: {
                 type: "boolean",
-                asCell: ["cell"]
+                asCell: ["writeonly"]
             }
         },
         required: ["isEditing"]
@@ -86,7 +86,7 @@ export default pattern((__cf_pattern_input) => {
                         required: ["description"]
                     },
                     startEditing: {
-                        asCell: ["stream", "opaque"]
+                        asCell: ["readonly", "opaque"]
                     }
                 },
                 required: ["card", "startEditing"]
