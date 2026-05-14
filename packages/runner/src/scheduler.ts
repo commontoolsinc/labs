@@ -134,6 +134,7 @@ import {
   setStaleFromInputs,
   type StalenessState,
 } from "./scheduler/staleness.ts";
+import { unsubscribeSchedulerAction } from "./scheduler/subscriptions.ts";
 import {
   type ActionTimingState,
   getActionStats as getActionStatsFromState,
@@ -950,66 +951,33 @@ export class Scheduler {
     action: Action,
     options: { preserveChangeGroup?: boolean } = {},
   ): void {
-    const { preserveChangeGroup = false } = options;
-    this.cancels.get(action)?.();
-    this.cancels.delete(action);
-    this.dependencies.delete(action);
-    if (!preserveChangeGroup) {
-      const changeGroup = this.actionChangeGroups.get(action);
-      const actionId = this.getActionId(action);
-      if (
-        changeGroup !== undefined &&
-        this.changeGroupToActionId.get(changeGroup) === actionId
-      ) {
-        this.changeGroupToActionId.delete(changeGroup);
-      }
-      this.actionChangeGroups.delete(action);
-    }
-    this.pending.delete(action);
-    this.conditionallyScheduledEffects.delete(action);
-    // Clear direct/stale state before removing outgoing edges so downstream
-    // stale counts are decremented through normal propagation.
-    this.clearDirectDirty(action);
-    this.forceClearStale(action);
-    const dependencies = this.reverseDependencies.get(action);
-    if (dependencies) {
-      for (const dependency of dependencies) {
-        const dependents = this.dependents.get(dependency);
-        dependents?.delete(action);
-        if (dependents && dependents.size === 0) {
-          this.dependents.delete(dependency);
-        }
-      }
-      this.reverseDependencies.delete(action);
-    }
-    this.dependents.delete(action);
-    // Clean up effect/computation tracking
-    this.effects.delete(action);
-    this.computations.delete(action);
-    this.pullDemandedFirstRunComputations.delete(action);
-    // Clean up writersByEntity index
-    const writeEntities = this.actionWriteEntities.get(action);
-    if (writeEntities) {
-      for (const entity of writeEntities) {
-        const writers = this.writersByEntity.get(entity);
-        writers?.delete(action);
-        if (writers && writers.size === 0) {
-          this.writersByEntity.delete(entity);
-        }
-      }
-      // Clear actionWriteEntities so resubscribe will re-register the action
-      this.actionWriteEntities.delete(action);
-    }
-    // NOTE: We intentionally keep parent-child relationships intact.
-    // They're needed for cycle detection (identifying obsolete children
-    // when parent is re-running). They'll be cleaned up when parent is
-    // garbage collected (WeakMap).
-    // Cancel any pending debounce timer
-    this.cancelDebounceTimer(action);
-    this.clearComputationDebounceState(action, { cancelTimer: false });
-    // Clean up dependency collection tracking
-    this.populateDependenciesCallbacks.delete(action);
-    this.pendingDependencyCollection.delete(action);
+    unsubscribeSchedulerAction(
+      {
+        cancels: this.cancels,
+        dependencies: this.dependencies,
+        actionChangeGroups: this.actionChangeGroups,
+        changeGroupToActionId: this.changeGroupToActionId,
+        pending: this.pending,
+        conditionallyScheduledEffects: this.conditionallyScheduledEffects,
+        reverseDependencies: this.reverseDependencies,
+        dependents: this.dependents,
+        effects: this.effects,
+        computations: this.computations,
+        pullDemandedFirstRunComputations: this.pullDemandedFirstRunComputations,
+        actionWriteEntities: this.actionWriteEntities,
+        writersByEntity: this.writersByEntity,
+        populateDependenciesCallbacks: this.populateDependenciesCallbacks,
+        pendingDependencyCollection: this.pendingDependencyCollection,
+        getActionId: (target) => this.getActionId(target),
+        clearDirectDirty: (target) => this.clearDirectDirty(target),
+        forceClearStale: (target) => this.forceClearStale(target),
+        cancelDebounceTimer: (target) => this.cancelDebounceTimer(target),
+        clearComputationDebounceState: (target, targetOptions) =>
+          this.clearComputationDebounceState(target, targetOptions),
+      },
+      action,
+      options,
+    );
   }
 
   async run(action: Action): Promise<any> {
