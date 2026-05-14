@@ -401,7 +401,10 @@ Deno.test("CfHarnessEngine derives prompt-slot labels for model-authored sandbox
   });
 
   engine.setPromptSlotBinding(promptSlotBinding);
-  await engine.invokeBuiltinTool("bash", { command: "printf hello" });
+  await engine.invokeBuiltinTool("bash", {
+    command: "printf hello",
+    cwd: "task-dir",
+  });
   await engine.invokeBuiltinTool("write_file", {
     path: "notes.md",
     content: "hello from prompt",
@@ -425,10 +428,16 @@ Deno.test("CfHarnessEngine derives prompt-slot labels for model-authored sandbox
         toolId: "bash",
         labels: {
           version: 1,
-          entries: [{
-            path: ["command"],
-            label: { confidentiality: [expectedAtom] },
-          }],
+          entries: [
+            {
+              path: ["command"],
+              label: { confidentiality: [expectedAtom] },
+            },
+            {
+              path: ["cwd"],
+              label: { confidentiality: [expectedAtom] },
+            },
+          ],
         },
       },
       {
