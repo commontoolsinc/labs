@@ -70,6 +70,8 @@ export default pattern(() => {
     winner: null,
     lastMessage: "Alice's turn - fire at the enemy fleet!",
   });
+  const myNameCell = Writable.of("Alice");
+  const myPlayerNumberCell = Writable.of<1 | 2 | null>(1);
 
   // Create room as Player 1 (Alice)
   const room = BattleshipRoom({
@@ -78,8 +80,8 @@ export default pattern(() => {
     player2: player2Cell,
     shots: shotsCell,
     gameState: gameStateCell,
-    myName: "Alice",
-    myPlayerNumber: 1,
+    myName: myNameCell,
+    myPlayerNumber: myPlayerNumberCell,
   });
 
   // ==========================================================================
