@@ -9,6 +9,7 @@ import {
 } from "./artifacts.ts";
 import {
   appendHarnessCfcInvocationContext,
+  appendHarnessCfcModelContextObservations,
   appendHarnessFailureRecord,
   appendHarnessPolicyDecision,
   appendHarnessPolicyEvent,
@@ -30,6 +31,7 @@ import {
   setHarnessSkillResourceReads,
   setHarnessTranscriptPath,
 } from "./run-state.ts";
+import type { HarnessCfcModelContextObservationInput } from "./contracts/cfc-model-context.ts";
 import {
   classifyBuiltinToolFailure,
   classifyHarnessPolicyEventFailure,
@@ -420,6 +422,18 @@ export class CfHarnessEngine {
       this.#runState,
       policyDecision,
       now,
+    );
+    await this.persistRunState();
+    return this.getRunState();
+  }
+
+  async recordCfcModelContextObservations(
+    observations: readonly HarnessCfcModelContextObservationInput[],
+  ): Promise<HarnessRunState> {
+    this.#runState = appendHarnessCfcModelContextObservations(
+      this.#runState,
+      observations,
+      this.#now(),
     );
     await this.persistRunState();
     return this.getRunState();
@@ -1004,6 +1018,9 @@ export class CfHarnessEngine {
         : {}),
       ...(options.cfcInputLabelPaths !== undefined
         ? { cfcInputLabelPaths: options.cfcInputLabelPaths }
+        : {}),
+      ...(this.#runState.cfcModelContext !== undefined
+        ? { cfcModelContext: this.#runState.cfcModelContext }
         : {}),
     });
     this.#runState = appendHarnessCfcInvocationContext(

@@ -10,6 +10,7 @@ export * from "./gateway/openai-client.ts";
 export * from "./contracts/image.ts";
 export * from "./contracts/prompt-slot.ts";
 export * from "./contracts/cfc-invocation-context.ts";
+export * from "./contracts/cfc-model-context.ts";
 export * from "./contracts/cfc-policy-snapshot.ts";
 export * from "./contracts/run-manifest.ts";
 export * from "./contracts/observation.ts";
