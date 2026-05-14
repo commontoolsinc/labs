@@ -4134,6 +4134,387 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("resolves represents-principal(current user) from the trust snapshot", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      tx.setCfcTrustSnapshot({
+        id: "trust-snapshot-current-profile",
+        actingPrincipal: signer.did(),
+      });
+      tx.setCfcImplementationIdentity({
+        kind: "verified",
+        bundleId: "bundle-hash-1",
+        sourceFile: "/trusted.tsx",
+        bindingPath: ["commitTrustedProfileSave"],
+      });
+
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-current-principal-profile",
+        {
+          type: "object",
+          properties: {
+            profile: {
+              type: "object",
+              properties: { name: { type: "string" } },
+              required: ["name"],
+              ifc: {
+                addIntegrity: [{
+                  kind: "represents-principal",
+                  subject: { __ctCurrentPrincipal: true },
+                }],
+                writeAuthorizedBy: {
+                  __ctWriterIdentityOf: {
+                    file: "/trusted.tsx",
+                    path: ["commitTrustedProfileSave"],
+                  },
+                },
+                uiContract: {
+                  helper: "UiAction",
+                  action: "SaveProfile",
+                  trustedPattern: "ProfileSurface",
+                  requiredEventIntegrity: ["ProfileSurface"],
+                },
+              },
+            },
+          },
+          required: ["profile"],
+        },
+        tx,
+      );
+      cell.set({ profile: { name: "Ada" } });
+      const target = cell.getAsNormalizedFullLink();
+      tx.recordCfcWritePolicyInput({
+        kind: "trusted-event",
+        target: {
+          space: target.space,
+          scope: target.scope,
+          id: target.id,
+          path: ["profile"],
+        },
+        eventId: "trusted-save-profile",
+        provenance: {
+          origin: "dom",
+          trusted: true,
+          ui: {
+            pattern: "ProfileSurface",
+            eventIntegrity: ["ProfileSurface"],
+            uiContractDataset: { uiAction: "SaveProfile" },
+          },
+        },
+      });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.ok).toBeDefined();
+
+      const verify = runtime.edit();
+      const stored = verify.readOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: target.id,
+        path: [],
+      }) as { cfc?: { labelMap?: { entries?: unknown[] } } };
+      expect(stored.cfc?.labelMap?.entries).toContainEqual({
+        path: ["profile"],
+        label: {
+          integrity: [{
+            kind: "represents-principal",
+            subject: signer.did(),
+          }],
+        },
+      });
+      verify.abort();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("resolves authored-by(current user) from the trust snapshot", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      tx.setCfcTrustSnapshot({
+        id: "trust-snapshot-current-message",
+        actingPrincipal: signer.did(),
+      });
+      tx.setCfcImplementationIdentity({
+        kind: "verified",
+        bundleId: "bundle-hash-1",
+        sourceFile: "/trusted.tsx",
+        bindingPath: ["commitTrustedMessageSend"],
+      });
+
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-current-principal-message",
+        {
+          type: "object",
+          properties: {
+            message: {
+              type: "object",
+              properties: { body: { type: "string" } },
+              required: ["body"],
+              ifc: {
+                addIntegrity: [{
+                  kind: "authored-by",
+                  subject: { __ctCurrentPrincipal: true },
+                }],
+                writeAuthorizedBy: {
+                  __ctWriterIdentityOf: {
+                    file: "/trusted.tsx",
+                    path: ["commitTrustedMessageSend"],
+                  },
+                },
+                uiContract: {
+                  helper: "UiAction",
+                  action: "SendMessage",
+                  trustedPattern: "SendSurface",
+                  requiredEventIntegrity: ["SendSurface"],
+                },
+              },
+            },
+          },
+          required: ["message"],
+        },
+        tx,
+      );
+      cell.set({ message: { body: "hello" } });
+      const target = cell.getAsNormalizedFullLink();
+      tx.recordCfcWritePolicyInput({
+        kind: "trusted-event",
+        target: {
+          space: target.space,
+          scope: target.scope,
+          id: target.id,
+          path: ["message"],
+        },
+        eventId: "trusted-send-message",
+        provenance: {
+          origin: "dom",
+          trusted: true,
+          ui: {
+            pattern: "SendSurface",
+            eventIntegrity: ["SendSurface"],
+            uiContractDataset: { uiAction: "SendMessage" },
+          },
+        },
+      });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.ok).toBeDefined();
+
+      const verify = runtime.edit();
+      const stored = verify.readOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: target.id,
+        path: [],
+      }) as { cfc?: { labelMap?: { entries?: unknown[] } } };
+      expect(stored.cfc?.labelMap?.entries).toContainEqual({
+        path: ["message"],
+        label: {
+          integrity: [{
+            kind: "authored-by",
+            subject: signer.did(),
+          }],
+        },
+      });
+      verify.abort();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("rejects current-principal integrity without trusted write provenance", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      tx.setCfcTrustSnapshot({
+        id: "trust-snapshot-current-missing-write",
+        actingPrincipal: signer.did(),
+      });
+
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-current-principal-missing-write",
+        {
+          type: "object",
+          properties: {
+            value: {
+              type: "string",
+              ifc: {
+                addIntegrity: [{
+                  kind: "authored-by",
+                  subject: { __ctCurrentPrincipal: true },
+                }],
+                uiContract: {
+                  helper: "UiAction",
+                  action: "SendMessage",
+                },
+              },
+            },
+          },
+          required: ["value"],
+        },
+        tx,
+      );
+      cell.set({ value: "hello" });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain(
+        "current-principal integrity requires writeAuthorizedBy",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("rejects current-principal integrity without trusted UI provenance", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      tx.setCfcTrustSnapshot({
+        id: "trust-snapshot-current-missing-ui",
+        actingPrincipal: signer.did(),
+      });
+      tx.setCfcImplementationIdentity({
+        kind: "verified",
+        bundleId: "bundle-hash-1",
+        sourceFile: "/trusted.tsx",
+        bindingPath: ["commitTrustedMessageSend"],
+      });
+
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-current-principal-missing-ui",
+        {
+          type: "object",
+          properties: {
+            value: {
+              type: "string",
+              ifc: {
+                addIntegrity: [{
+                  kind: "authored-by",
+                  subject: { __ctCurrentPrincipal: true },
+                }],
+                writeAuthorizedBy: {
+                  __ctWriterIdentityOf: {
+                    file: "/trusted.tsx",
+                    path: ["commitTrustedMessageSend"],
+                  },
+                },
+              },
+            },
+          },
+          required: ["value"],
+        },
+        tx,
+      );
+      cell.set({ value: "hello" });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain(
+        "current-principal integrity requires uiContract",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("rejects pattern-authored literal DID subjects for current-user claims", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      tx.setCfcTrustSnapshot({
+        id: "trust-snapshot-current-literal-did",
+        actingPrincipal: signer.did(),
+      });
+      tx.setCfcImplementationIdentity({
+        kind: "verified",
+        bundleId: "bundle-hash-1",
+        sourceFile: "/trusted.tsx",
+        bindingPath: ["commitTrustedMessageSend"],
+      });
+
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-current-principal-literal-did",
+        {
+          type: "object",
+          properties: {
+            value: {
+              type: "string",
+              ifc: {
+                addIntegrity: [{
+                  kind: "authored-by",
+                  subject: "did:example:mallory",
+                }],
+                writeAuthorizedBy: {
+                  __ctWriterIdentityOf: {
+                    file: "/trusted.tsx",
+                    path: ["commitTrustedMessageSend"],
+                  },
+                },
+                uiContract: {
+                  helper: "UiAction",
+                  action: "SendMessage",
+                  trustedPattern: "SendSurface",
+                  requiredEventIntegrity: ["SendSurface"],
+                },
+              },
+            },
+          },
+          required: ["value"],
+        },
+        tx,
+      );
+      cell.set({ value: "hello" });
+      const target = cell.getAsNormalizedFullLink();
+      tx.recordCfcWritePolicyInput({
+        kind: "trusted-event",
+        target: {
+          space: target.space,
+          scope: target.scope,
+          id: target.id,
+          path: ["value"],
+        },
+        eventId: "trusted-send-literal-did",
+        provenance: {
+          origin: "dom",
+          trusted: true,
+          ui: {
+            pattern: "SendSurface",
+            eventIntegrity: ["SendSurface"],
+            uiContractDataset: { uiAction: "SendMessage" },
+          },
+        },
+      });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain(
+        "current-principal integrity subject must be runtime resolved",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("rejects writeAuthorizedBy when the verified bundle identity differs", async () => {
     const { runtime, storageManager } = createRuntime();
     try {

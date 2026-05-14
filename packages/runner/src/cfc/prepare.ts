@@ -97,6 +97,97 @@ const hasLabelValues = (label: IFCLabel): boolean =>
   (label.confidentiality?.length ?? 0) > 0 ||
   (label.integrity?.length ?? 0) > 0;
 
+const CURRENT_PRINCIPAL_PLACEHOLDER_KEY = "__ctCurrentPrincipal";
+const CURRENT_PRINCIPAL_CLAIM_KINDS = new Set([
+  "authored-by",
+  "represents-principal",
+]);
+
+const isCurrentPrincipalPlaceholder = (value: unknown): boolean =>
+  isRecord(value) && value[CURRENT_PRINCIPAL_PLACEHOLDER_KEY] === true;
+
+const hasCurrentPrincipalPlaceholder = (value: unknown): boolean => {
+  if (isCurrentPrincipalPlaceholder(value)) {
+    return true;
+  }
+  if (Array.isArray(value)) {
+    return value.some(hasCurrentPrincipalPlaceholder);
+  }
+  if (isRecord(value)) {
+    return Object.values(value).some(hasCurrentPrincipalPlaceholder);
+  }
+  return false;
+};
+
+const resolveCurrentPrincipalPlaceholders = (
+  value: unknown,
+  actingPrincipal: string,
+): unknown => {
+  if (isCurrentPrincipalPlaceholder(value)) {
+    return actingPrincipal;
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) =>
+      resolveCurrentPrincipalPlaceholders(entry, actingPrincipal)
+    );
+  }
+  if (!isRecord(value)) {
+    return value;
+  }
+
+  let changed = false;
+  const next: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    const resolved = resolveCurrentPrincipalPlaceholders(
+      entry,
+      actingPrincipal,
+    );
+    changed ||= resolved !== entry;
+    next[key] = resolved;
+  }
+  return changed ? next : value;
+};
+
+const resolveCurrentPrincipalLabelValues = (
+  values: readonly unknown[] | undefined,
+  actingPrincipal: string | undefined,
+): readonly unknown[] | undefined => {
+  if (!values) {
+    return undefined;
+  }
+  const resolved = values.flatMap((value) => {
+    if (!hasCurrentPrincipalPlaceholder(value)) {
+      return [value];
+    }
+    return actingPrincipal
+      ? [resolveCurrentPrincipalPlaceholders(value, actingPrincipal)]
+      : [];
+  });
+  return resolved.length > 0 ? resolved : undefined;
+};
+
+const isCurrentPrincipalClaimAtom = (value: unknown): value is {
+  readonly kind: string;
+  readonly subject?: unknown;
+} =>
+  isRecord(value) &&
+  typeof value.kind === "string" &&
+  CURRENT_PRINCIPAL_CLAIM_KINDS.has(value.kind);
+
+const hasLiteralDidCurrentPrincipalClaim = (value: unknown): boolean => {
+  if (Array.isArray(value)) {
+    return value.some(hasLiteralDidCurrentPrincipalClaim);
+  }
+  if (isCurrentPrincipalClaimAtom(value)) {
+    return typeof value.subject === "string" &&
+      value.subject.startsWith("did:");
+  }
+  if (isRecord(value)) {
+    return Object.values(value).some(hasLiteralDidCurrentPrincipalClaim);
+  }
+  return false;
+};
+
 const metadataAppliesToPath = (
   metadata: CfcMetadata,
   path: readonly string[],
@@ -712,6 +803,50 @@ const exactCopySourcePath = (
   return claimPathToLogicalPath(schema.ifc.exactCopyOf);
 };
 
+const currentPrincipalIntegrityReason = (
+  tx: IExtendedStorageTransaction,
+  schema: JSONSchema,
+  path: readonly string[],
+): string | undefined => {
+  if (!isRecord(schema) || !isRecord(schema.ifc)) {
+    return undefined;
+  }
+
+  const ifc = schema.ifc;
+  const integrity = Array.isArray(ifc.integrity) ? ifc.integrity : [];
+  const addIntegrity = Array.isArray(ifc.addIntegrity) ? ifc.addIntegrity : [];
+  const currentPrincipalValues = [...integrity, ...addIntegrity];
+  if (currentPrincipalValues.length === 0) {
+    return undefined;
+  }
+  if (hasLiteralDidCurrentPrincipalClaim(currentPrincipalValues)) {
+    return `current-principal integrity subject must be runtime resolved at /${
+      path.join("/")
+    }`;
+  }
+  if (!currentPrincipalValues.some(hasCurrentPrincipalPlaceholder)) {
+    return undefined;
+  }
+
+  const trustSnapshot = tx.getCfcState().trustSnapshot;
+  if (!trustSnapshot?.id || !trustSnapshot?.actingPrincipal) {
+    return `current-principal integrity requires a trust snapshot at /${
+      path.join("/")
+    }`;
+  }
+  if (ifc.writeAuthorizedBy === undefined) {
+    return `current-principal integrity requires writeAuthorizedBy at /${
+      path.join("/")
+    }`;
+  }
+  if (ifc.uiContract === undefined) {
+    return `current-principal integrity requires uiContract at /${
+      path.join("/")
+    }`;
+  }
+  return undefined;
+};
+
 const writeValueForTarget = (
   tx: IExtendedStorageTransaction,
   target: {
@@ -855,6 +990,14 @@ const verifyInputRequirements = (
     if (unsupportedTrustSensitive !== undefined) {
       return unsupportedTrustSensitive;
     }
+    const currentPrincipalFailure = currentPrincipalIntegrityReason(
+      tx,
+      entry.schema,
+      entry.path,
+    );
+    if (currentPrincipalFailure !== undefined) {
+      return currentPrincipalFailure;
+    }
     const writeAuthorizedByFailure = writeAuthorizedByReason(
       tx,
       entry.schema,
@@ -964,11 +1107,13 @@ const verifyExactCopyRequirements = (
 };
 
 const derivePersistedLabel = (
+  tx: IExtendedStorageTransaction,
   schema: JSONSchema,
   schemaLabel: IFCLabel,
   sourceEntryLabels?: Map<string, IFCLabel>,
 ): IFCLabel => {
   const ifc = isRecord(schema) ? schema.ifc : undefined;
+  const actingPrincipal = tx.getCfcState().trustSnapshot?.actingPrincipal;
   const copiedInputLabel = sourceEntryLabels && exactCopySourcePath(schema)
     ? sourceEntryLabels.get(pathKey(exactCopySourcePath(schema)!))
     : undefined;
@@ -978,14 +1123,21 @@ const derivePersistedLabel = (
       copiedInputLabel?.confidentiality,
     ),
     integrity: mergeLabelValues(
-      schemaLabel.integrity,
+      resolveCurrentPrincipalLabelValues(
+        schemaLabel.integrity,
+        actingPrincipal,
+      ),
       copiedInputLabel?.integrity,
-      Array.isArray(ifc?.addIntegrity) ? ifc.addIntegrity : undefined,
+      resolveCurrentPrincipalLabelValues(
+        Array.isArray(ifc?.addIntegrity) ? ifc.addIntegrity : undefined,
+        actingPrincipal,
+      ),
     ),
   };
 };
 
 const persistedLabelFromSchemaAtPath = (
+  tx: IExtendedStorageTransaction,
   schema: JSONSchema,
   path: readonly string[],
 ): IFCLabel | undefined => {
@@ -1008,7 +1160,7 @@ const persistedLabelFromSchemaAtPath = (
   const entryLabels = new Map<string, IFCLabel>(
     entries.map((entry) => [pathKey(entry.path), entry.label]),
   );
-  return derivePersistedLabel(match.schema, match.label, entryLabels);
+  return derivePersistedLabel(tx, match.schema, match.label, entryLabels);
 };
 
 const mergeLabels = (
@@ -1036,12 +1188,17 @@ const linkReferenceIntegrity = (input: LinkWritePolicyInput): unknown => ({
   },
 });
 
-const rootLabelFromSchema = (schema: JSONSchema | undefined): IFCLabel => {
+const rootLabelFromSchema = (
+  tx: IExtendedStorageTransaction,
+  schema: JSONSchema | undefined,
+): IFCLabel => {
   if (schema === undefined) {
     return {};
   }
   const root = walkIfcSchema(schema).find((entry) => entry.path.length === 0);
-  return root?.label ?? {};
+  return root === undefined
+    ? {}
+    : derivePersistedLabel(tx, root.schema, root.label);
 };
 
 const derivePersistedLinkLabel = (
@@ -1059,11 +1216,12 @@ const derivePersistedLinkLabel = (
   const pendingSourceLabel = candidateSchemas.get(targetKey(input.source)) !==
       undefined
     ? persistedLabelFromSchemaAtPath(
+      tx,
       candidateSchemas.get(targetKey(input.source))!,
       input.source.path,
     )
     : undefined;
-  const linkSchemaLabel = rootLabelFromSchema(input.linkSchema);
+  const linkSchemaLabel = rootLabelFromSchema(tx, input.linkSchema);
   const hasCarriedLabel =
     input.cfcLabelView?.entries.some((entry) => hasLabelValues(entry.label)) ??
       false;
@@ -1320,6 +1478,7 @@ export const prepareBoundaryCommit = (
         return [];
       }
       const label = derivePersistedLabel(
+        tx,
         entry.schema,
         entry.label,
         mergedSchemaEntryLabels,

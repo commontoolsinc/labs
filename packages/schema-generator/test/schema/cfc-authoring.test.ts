@@ -116,6 +116,8 @@ describe("Schema: CFC authoring aliases", () => {
       type Confidential<T, X extends readonly unknown[]> = Cfc<T, { confidentiality: X }>;
       type Integrity<T, X extends readonly unknown[]> = Cfc<T, { integrity: X }>;
       type AddIntegrity<T, X extends readonly unknown[]> = Cfc<T, { addIntegrity: X }>;
+      type RepresentsCurrentUser<T> = Cfc<T, { addIntegrity: readonly [{ kind: "represents-principal"; subject: { __ctCurrentPrincipal: true } }] }>;
+      type AuthoredByCurrentUser<T> = Cfc<T, { addIntegrity: readonly [{ kind: "authored-by"; subject: { __ctCurrentPrincipal: true } }] }>;
       type RequiresIntegrity<T, X extends readonly unknown[]> = Cfc<T, { requiredIntegrity: X }>;
       type MaxConfidentiality<T, X extends readonly unknown[]> = Cfc<T, { maxConfidentiality: X }>;
       type ExactCopy<T, P extends string> = Cfc<T, { exactCopyOf: P }>;
@@ -129,6 +131,8 @@ describe("Schema: CFC authoring aliases", () => {
         confidential: Confidential<string, readonly ["confidential"]>;
         integrity: Integrity<string, readonly ["integrity"]>;
         addIntegrity: AddIntegrity<string, readonly ["add-integrity"]>;
+        representsCurrentUser: RepresentsCurrentUser<{ name: string }>;
+        authoredByCurrentUser: AuthoredByCurrentUser<{ body: string }>;
         requiresIntegrity: RequiresIntegrity<string, readonly ["required-integrity"]>;
         maxConfidentiality: MaxConfidentiality<string, readonly ["max-confidentiality"]>;
         exactCopy: ExactCopy<string, "/source">;
@@ -155,6 +159,16 @@ describe("Schema: CFC authoring aliases", () => {
     ]);
     expect((schema.properties?.addIntegrity as any).ifc?.addIntegrity)
       .toEqual(["add-integrity"]);
+    expect((schema.properties?.representsCurrentUser as any).ifc?.addIntegrity)
+      .toEqual([{
+        kind: "represents-principal",
+        subject: { __ctCurrentPrincipal: true },
+      }]);
+    expect((schema.properties?.authoredByCurrentUser as any).ifc?.addIntegrity)
+      .toEqual([{
+        kind: "authored-by",
+        subject: { __ctCurrentPrincipal: true },
+      }]);
     expect((schema.properties?.requiresIntegrity as any).ifc?.requiredIntegrity)
       .toEqual(["required-integrity"]);
     expect(

@@ -1236,6 +1236,20 @@ export class CommonFabricFormatter implements TypeFormatter {
         return { integrity: readValue(1) };
       case "AddIntegrity":
         return { addIntegrity: readValue(1) };
+      case "RepresentsCurrentUser":
+        return {
+          addIntegrity: [{
+            kind: "represents-principal",
+            subject: { __ctCurrentPrincipal: true },
+          }],
+        };
+      case "AuthoredByCurrentUser":
+        return {
+          addIntegrity: [{
+            kind: "authored-by",
+            subject: { __ctCurrentPrincipal: true },
+          }],
+        };
       case "RequiresIntegrity":
         return { requiredIntegrity: readValue(1) };
       case "MaxConfidentiality":

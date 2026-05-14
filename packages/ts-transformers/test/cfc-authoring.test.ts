@@ -182,6 +182,8 @@ Deno.test("ts-transformers re-exports the canonical CFC alias set", () => {
     "Confidential",
     "Integrity",
     "AddIntegrity",
+    "RepresentsCurrentUser",
+    "AuthoredByCurrentUser",
     "RequiresIntegrity",
     "MaxConfidentiality",
     "OpaqueInput",
