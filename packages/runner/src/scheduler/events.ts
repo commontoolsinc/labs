@@ -1,16 +1,217 @@
 import { getLogger } from "@commonfabric/utils/logger";
 import { recordTrustedEventPolicyInputs } from "../cfc/ui-contract.ts";
 import type { Runtime } from "../runtime.ts";
+import { createDirtyDependencyTraceContext } from "./diagnostics.ts";
+import { planEventDirtyDependencyScheduling } from "./execution.ts";
 import {
   hasAnnotatedWrites,
   trustedEventWriteCandidatesFromTransaction,
+  txToReactivityLog,
 } from "./reactivity.ts";
-import type { Action, EventHandler, QueuedEvent } from "./types.ts";
+import type {
+  Action,
+  DirtyDependencyTraceContext,
+  EventHandler,
+  QueuedEvent,
+  ReactivityLog,
+} from "./types.ts";
 
 const logger = getLogger("scheduler", {
   enabled: true,
   level: "warn",
 });
+
+export interface EventDependencyPreflightResult {
+  shouldSkipEvent: boolean;
+  deps: ReactivityLog;
+  dirtyDeps: Set<Action>;
+  hasDirtyDependencies: boolean;
+  dirtySizeBefore: number;
+  pendingSizeBefore: number;
+  populateMs: number;
+  txToLogMs: number;
+  depCommitMs: number;
+  collectMs: number;
+  scheduleMs: number;
+  preflightStats: DirtyDependencyTraceContext;
+}
+
+export function preflightQueuedEventDependencies(state: {
+  readonly runtime: Runtime;
+  readonly eventQueue: QueuedEvent[];
+  readonly dirty: ReadonlySet<Action>;
+  readonly pending: ReadonlySet<Action>;
+  readonly pendingActions: Set<Action>;
+  readonly eventBlockingDeps: Set<Action>;
+  readonly handleError: (error: Error, handler: EventHandler) => void;
+  readonly setDirtyDependencyTraceContext: (
+    trace: DirtyDependencyTraceContext | undefined,
+  ) => void;
+  readonly collectDirtyDependenciesForLog: (
+    deps: ReactivityLog,
+    dirtyDeps: Set<Action>,
+    memo: Map<Action, boolean>,
+  ) => boolean;
+  readonly isDebouncedComputationWaiting: (action: Action) => boolean;
+  readonly getNextDebounceRunTime: (action: Action) => number | undefined;
+  readonly getNextEligibleRunTime: (action: Action) => number | undefined;
+  readonly scheduleEventQueueWake: (notBefore: number) => void;
+}, queuedEvent: QueuedEvent): EventDependencyPreflightResult {
+  const { handler, event: eventValue } = queuedEvent;
+  const preflightStats = createDirtyDependencyTraceContext();
+  const dirtySizeBefore = state.dirty.size;
+  const pendingSizeBefore = state.pending.size;
+  let populateMs = 0;
+  let txToLogMs = 0;
+  let depCommitMs = 0;
+  let collectMs = 0;
+  let scheduleMs = 0;
+  let shouldSkipEvent = false;
+
+  // Get the handler's dependencies (read-only, just capturing what will be read)
+  const depTx = state.runtime.edit();
+  depTx.setReadOnly?.("scheduler.populateDependencies()");
+  let stepStart = performance.now();
+  logger.timeStart(
+    "scheduler",
+    "execute",
+    "event",
+    "pullPopulateDependencies",
+  );
+  try {
+    handler.populateDependencies?.(depTx, eventValue);
+  } catch (error) {
+    state.eventQueue.shift();
+    state.handleError(error as Error, handler);
+    shouldSkipEvent = true;
+  } finally {
+    logger.timeEnd(
+      "scheduler",
+      "execute",
+      "event",
+      "pullPopulateDependencies",
+    );
+  }
+  populateMs = performance.now() - stepStart;
+
+  stepStart = performance.now();
+  logger.timeStart(
+    "scheduler",
+    "execute",
+    "event",
+    "pullTxToReactivityLog",
+  );
+  const deps: ReactivityLog = shouldSkipEvent
+    ? { reads: [], shallowReads: [], writes: [] }
+    : txToReactivityLog(depTx);
+  logger.timeEnd(
+    "scheduler",
+    "execute",
+    "event",
+    "pullTxToReactivityLog",
+  );
+  txToLogMs = performance.now() - stepStart;
+
+  // Commit the read-only inspection tx as a no-op so dependency discovery
+  // does not participate in CFC prepare or commit gating. Do this even
+  // after populateDependencies errors so the transaction is closed.
+  stepStart = performance.now();
+  logger.timeStart(
+    "scheduler",
+    "execute",
+    "event",
+    "pullDepCommitStart",
+  );
+  depTx.commit();
+  logger.timeEnd(
+    "scheduler",
+    "execute",
+    "event",
+    "pullDepCommitStart",
+  );
+  depCommitMs = performance.now() - stepStart;
+
+  const dirtyDeps = new Set<Action>();
+  const dirtyDepMemo = new Map<Action, boolean>();
+  stepStart = performance.now();
+  logger.timeStart(
+    "scheduler",
+    "execute",
+    "event",
+    "pullCollectDirtyDependencies",
+  );
+  let hasDirtyDependencies = false;
+  state.setDirtyDependencyTraceContext(preflightStats);
+  try {
+    hasDirtyDependencies = state.collectDirtyDependenciesForLog(
+      deps,
+      dirtyDeps,
+      dirtyDepMemo,
+    );
+  } finally {
+    state.setDirtyDependencyTraceContext(undefined);
+    logger.timeEnd(
+      "scheduler",
+      "execute",
+      "event",
+      "pullCollectDirtyDependencies",
+    );
+  }
+  collectMs = performance.now() - stepStart;
+
+  if (!shouldSkipEvent && hasDirtyDependencies) {
+    stepStart = performance.now();
+    logger.timeStart(
+      "scheduler",
+      "execute",
+      "event",
+      "pullScheduleDirtyDependencies",
+    );
+    try {
+      const eventDirtyPlan = planEventDirtyDependencyScheduling({
+        dirtyDeps,
+        isDebouncedComputationWaiting: (dep) =>
+          state.isDebouncedComputationWaiting(dep),
+        getNextDebounceRunTime: (dep) => state.getNextDebounceRunTime(dep),
+        getNextEligibleRunTime: (dep) => state.getNextEligibleRunTime(dep),
+      });
+      for (const dep of eventDirtyPlan.runnableDeps) {
+        state.pendingActions.add(dep);
+        state.eventBlockingDeps.add(dep);
+      }
+      if (eventDirtyPlan.runnableDeps.length > 0) {
+        shouldSkipEvent = true;
+      } else if (eventDirtyPlan.nextEligibleAt !== undefined) {
+        queuedEvent.notBefore = eventDirtyPlan.nextEligibleAt;
+        state.scheduleEventQueueWake(eventDirtyPlan.nextEligibleAt);
+        shouldSkipEvent = true;
+      }
+    } finally {
+      logger.timeEnd(
+        "scheduler",
+        "execute",
+        "event",
+        "pullScheduleDirtyDependencies",
+      );
+    }
+    scheduleMs = performance.now() - stepStart;
+  }
+
+  return {
+    shouldSkipEvent,
+    deps,
+    dirtyDeps,
+    hasDirtyDependencies,
+    dirtySizeBefore,
+    pendingSizeBefore,
+    populateMs,
+    txToLogMs,
+    depCommitMs,
+    collectMs,
+    scheduleMs,
+    preflightStats,
+  };
+}
 
 export async function dispatchQueuedEvent(state: {
   readonly runtime: Runtime;

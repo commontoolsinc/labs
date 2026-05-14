@@ -52,7 +52,6 @@ import {
   MAX_TRIGGER_TRACE_HISTORY,
 } from "./scheduler/constants.ts";
 import {
-  createDirtyDependencyTraceContext,
   getPieceMetadataFromFrame,
   materializeHostVisibleStack,
   queueTask,
@@ -90,7 +89,6 @@ import {
   markExecuteStart,
   planAdaptiveCycleDebounce,
   planCycleBreak,
-  planEventDirtyDependencyScheduling,
   planExecuteContinuation,
   pushBoundedHistory,
   recordEarlyIterationComputations,
@@ -149,7 +147,10 @@ import {
   filterIgnoredAddresses,
   txToReactivityLog,
 } from "./scheduler/reactivity.ts";
-import { dispatchQueuedEvent } from "./scheduler/events.ts";
+import {
+  dispatchQueuedEvent,
+  preflightQueuedEventDependencies,
+} from "./scheduler/events.ts";
 import { buildSchedulerGraphSnapshot } from "./scheduler/graph-snapshot.ts";
 import { entityKey } from "./scheduler/keys.ts";
 import {
@@ -3268,168 +3269,58 @@ export class Scheduler {
       } else {
         delete queuedEvent.notBefore;
 
-        const { handler, event: eventValue } = queuedEvent;
+        const { handler } = queuedEvent;
         const handlerId = this.getActionId(handler);
 
         // In pull mode, ensure handler dependencies are computed before running.
         let shouldSkipEvent = false;
         if (this.pullMode && handler.populateDependencies) {
-          const preflightStats = createDirtyDependencyTraceContext();
-          const dirtySizeBefore = this.dirty.size;
-          const pendingSizeBefore = this.pending.size;
-          let populateMs = 0;
-          let txToLogMs = 0;
-          let depCommitMs = 0;
-          let collectMs = 0;
-          let scheduleMs = 0;
-          // Get the handler's dependencies (read-only, just capturing what will be read)
-          const depTx = this.runtime.edit();
-          depTx.setReadOnly?.("scheduler.populateDependencies()");
-          let stepStart = performance.now();
-          logger.timeStart(
-            "scheduler",
-            "execute",
-            "event",
-            "pullPopulateDependencies",
-          );
-          try {
-            handler.populateDependencies(depTx, eventValue);
-          } catch (error) {
-            this.eventQueue.shift();
-            this.handleError(error as Error, handler);
-            shouldSkipEvent = true;
-          } finally {
-            logger.timeEnd(
-              "scheduler",
-              "execute",
-              "event",
-              "pullPopulateDependencies",
-            );
-          }
-          populateMs = performance.now() - stepStart;
-          stepStart = performance.now();
-          logger.timeStart(
-            "scheduler",
-            "execute",
-            "event",
-            "pullTxToReactivityLog",
-          );
-          const deps: ReactivityLog = shouldSkipEvent
-            ? { reads: [], shallowReads: [], writes: [] }
-            : txToReactivityLog(depTx);
-          logger.timeEnd(
-            "scheduler",
-            "execute",
-            "event",
-            "pullTxToReactivityLog",
-          );
-          txToLogMs = performance.now() - stepStart;
-          // Commit even though we only read - the tx has no writes so this is safe
-          stepStart = performance.now();
-          logger.timeStart(
-            "scheduler",
-            "execute",
-            "event",
-            "pullDepCommitStart",
-          );
-          // Commit the read-only inspection tx as a no-op so dependency discovery
-          // does not participate in CFC prepare or commit gating. Do this even
-          // after populateDependencies errors so the transaction is closed.
-          depTx.commit();
-          logger.timeEnd(
-            "scheduler",
-            "execute",
-            "event",
-            "pullDepCommitStart",
-          );
-          depCommitMs = performance.now() - stepStart;
-
-          const dirtyDeps = new Set<Action>();
-          const dirtyDepMemo = new Map<Action, boolean>();
-          stepStart = performance.now();
-          logger.timeStart(
-            "scheduler",
-            "execute",
-            "event",
-            "pullCollectDirtyDependencies",
-          );
-          let hasDirtyDependencies = false;
-          this.dirtyDependencyTraceContext = preflightStats;
-          try {
-            hasDirtyDependencies = this.collectDirtyDependenciesForLog(
-              deps,
-              dirtyDeps,
-              dirtyDepMemo,
-            );
-          } finally {
-            this.dirtyDependencyTraceContext = undefined;
-            logger.timeEnd(
-              "scheduler",
-              "execute",
-              "event",
-              "pullCollectDirtyDependencies",
-            );
-          }
-          collectMs = performance.now() - stepStart;
-
-          if (!shouldSkipEvent && hasDirtyDependencies) {
-            stepStart = performance.now();
-            logger.timeStart(
-              "scheduler",
-              "execute",
-              "event",
-              "pullScheduleDirtyDependencies",
-            );
-            try {
-              const eventDirtyPlan = planEventDirtyDependencyScheduling({
+          const preflight = preflightQueuedEventDependencies({
+            runtime: this.runtime,
+            eventQueue: this.eventQueue,
+            dirty: this.dirty,
+            pending: this.pending,
+            pendingActions: this.pending,
+            eventBlockingDeps,
+            handleError: (error, target) => this.handleError(error, target),
+            setDirtyDependencyTraceContext: (trace) => {
+              this.dirtyDependencyTraceContext = trace;
+            },
+            collectDirtyDependenciesForLog: (deps, dirtyDeps, dirtyDepMemo) =>
+              this.collectDirtyDependenciesForLog(
+                deps,
                 dirtyDeps,
-                isDebouncedComputationWaiting: (dep) =>
-                  this.isDebouncedComputationWaiting(dep),
-                getNextDebounceRunTime: (dep) =>
-                  this.getNextDebounceRunTime(dep),
-                getNextEligibleRunTime: (dep) =>
-                  this.getNextEligibleRunTime(dep),
-              });
-              for (const dep of eventDirtyPlan.runnableDeps) {
-                this.pending.add(dep);
-                eventBlockingDeps.add(dep);
-              }
-              if (eventDirtyPlan.runnableDeps.length > 0) {
-                shouldSkipEvent = true;
-              } else if (eventDirtyPlan.nextEligibleAt !== undefined) {
-                queuedEvent.notBefore = eventDirtyPlan.nextEligibleAt;
-                this.scheduleEventQueueWake(eventDirtyPlan.nextEligibleAt);
-                shouldSkipEvent = true;
-              }
-            } finally {
-              logger.timeEnd(
-                "scheduler",
-                "execute",
-                "event",
-                "pullScheduleDirtyDependencies",
-              );
-            }
-            scheduleMs = performance.now() - stepStart;
-          }
+                dirtyDepMemo,
+              ),
+            isDebouncedComputationWaiting: (dep) =>
+              this.isDebouncedComputationWaiting(dep),
+            getNextDebounceRunTime: (dep) => this.getNextDebounceRunTime(dep),
+            getNextEligibleRunTime: (dep) => this.getNextEligibleRunTime(dep),
+            scheduleEventQueueWake: (notBefore) =>
+              this.scheduleEventQueueWake(notBefore),
+          }, queuedEvent);
+          shouldSkipEvent = preflight.shouldSkipEvent;
 
           if (this.eventPreflightTelemetryEnabled) {
             this.runtime.telemetry.submit({
               type: "scheduler.event.preflight",
               handlerId,
               handlerInfo: this.getActionTelemetryInfo(handler),
-              readCount: deps.reads.length,
-              shallowReadCount: deps.shallowReads.length,
-              dirtySizeBefore,
-              pendingSizeBefore,
-              dirtyDependencyCount: dirtyDeps.size,
-              hasDirtyDependencies,
+              readCount: preflight.deps.reads.length,
+              shallowReadCount: preflight.deps.shallowReads.length,
+              dirtySizeBefore: preflight.dirtySizeBefore,
+              pendingSizeBefore: preflight.pendingSizeBefore,
+              dirtyDependencyCount: preflight.dirtyDeps.size,
+              hasDirtyDependencies: preflight.hasDirtyDependencies,
               skipped: shouldSkipEvent,
-              populateMs,
-              txToLogMs,
-              depCommitMs,
-              collectMs,
-              scheduleMs,
-              stats: this.snapshotDirtyDependencyTraceContext(preflightStats),
+              populateMs: preflight.populateMs,
+              txToLogMs: preflight.txToLogMs,
+              depCommitMs: preflight.depCommitMs,
+              collectMs: preflight.collectMs,
+              scheduleMs: preflight.scheduleMs,
+              stats: this.snapshotDirtyDependencyTraceContext(
+                preflight.preflightStats,
+              ),
             });
           }
         }
