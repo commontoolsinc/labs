@@ -12,7 +12,7 @@ import {
   type GraphQueryRequest,
   type GraphQueryResult,
   type HelloMessage,
-  isMemoryProtocolFlags,
+  parseMemoryProtocolFlags,
   type ResponseMessage,
   type ServerMessage,
   type SessionAckRequest,
@@ -28,6 +28,7 @@ import {
   type WatchSetRequest,
   type WatchSetResult,
   type WatchSpec,
+  type WireMemoryProtocolFlags,
 } from "../v2.ts";
 import * as Engine from "./engine.ts";
 import {
@@ -1305,13 +1306,15 @@ export const parseClientMessage = (
 
   if (
     parsed.type === "hello" &&
-    typeof parsed.protocol === "string" &&
-    isMemoryProtocolFlags(parsed.flags)
+    typeof parsed.protocol === "string"
   ) {
+    if (parseMemoryProtocolFlags(parsed.flags) === null) {
+      return null;
+    }
     return {
       type: "hello",
       protocol: parsed.protocol as HelloMessage["protocol"],
-      flags: parsed.flags,
+      flags: parsed.flags as WireMemoryProtocolFlags,
     };
   }
 

@@ -6,11 +6,11 @@ import {
   getMemoryProtocolFlags,
   type GraphQuery,
   type GraphQueryResult,
-  isMemoryProtocolFlags,
   MEMORY_PROTOCOL,
+  type MemoryProtocolFlags,
+  parseMemoryProtocolFlags,
   type ResponseMessage,
   sameMemoryProtocolFlags,
-  type ServerMessage,
   type SessionEffectMessage,
   type SessionOpenResult,
   type SessionRevokedMessage,
@@ -210,13 +210,14 @@ export class Client {
     }
 
     if (this.#helloPending !== null) {
-      if (isHelloOk(message)) {
+      const helloOk = parseHelloOk(message);
+      if (helloOk !== null) {
         const expectedFlags = getMemoryProtocolFlags();
-        if (!sameMemoryProtocolFlags(message.flags, expectedFlags)) {
+        if (!sameMemoryProtocolFlags(helloOk.flags, expectedFlags)) {
           const error = new Error(
             `memory flag mismatch: client=${
               toCompactDebugString(expectedFlags)
-            } server=${toCompactDebugString(message.flags)}`,
+            } server=${toCompactDebugString(helloOk.flags)}`,
           );
           error.name = "ProtocolError";
           this.#helloPending.reject(error);
@@ -1086,13 +1087,25 @@ const isConnectionError = (error: unknown): boolean =>
     error.message.includes("transport closed") ||
     error.message.includes("disconnect"));
 
-const isHelloOk = (
+const parseHelloOk = (
   message: unknown,
-): message is Extract<ServerMessage, { type: "hello.ok" }> => {
-  return typeof message === "object" && message !== null &&
-    (message as { type?: string }).type === "hello.ok" &&
-    (message as { protocol?: string }).protocol === MEMORY_PROTOCOL &&
-    isMemoryProtocolFlags((message as { flags?: unknown }).flags);
+): { flags: MemoryProtocolFlags } | null => {
+  if (typeof message !== "object" || message === null) {
+    return null;
+  }
+  const obj = message as {
+    type?: unknown;
+    protocol?: unknown;
+    flags?: unknown;
+  };
+  if (obj.type !== "hello.ok" || obj.protocol !== MEMORY_PROTOCOL) {
+    return null;
+  }
+  const parsed = parseMemoryProtocolFlags(obj.flags);
+  if (parsed === null) {
+    return null;
+  }
+  return { flags: parsed.flags };
 };
 
 const isSessionEffect = (

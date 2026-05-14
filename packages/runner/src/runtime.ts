@@ -166,8 +166,6 @@ export type PieceCreatedCallback = (piece: Cell<any>) => void;
 export interface ExperimentalOptions {
   /** Enable the new fabric value type system (bigint, Map, Set, Uint8Array, Date, FabricInstance). */
   modernDataModel?: boolean | undefined;
-  /** Backward-compat alias for `modernDataModel`. */
-  richStorableValues?: boolean | undefined;
   /** Preserve cumulative scheduler write history instead of using current-known writes. */
   schedulerHistoricalMightWrite?: boolean | undefined;
 }
@@ -306,18 +304,9 @@ export class Runtime {
   constructor(options: RuntimeOptions) {
     this.experimental = {
       modernDataModel: undefined,
-      richStorableValues: undefined,
       schedulerHistoricalMightWrite: undefined,
       ...options.experimental,
     };
-
-    if (
-      options.experimental?.modernDataModel === undefined &&
-      options.experimental?.richStorableValues !== undefined
-    ) {
-      this.experimental.modernDataModel =
-        options.experimental.richStorableValues;
-    }
 
     // Log any overridden experimental flags.
     const overrideFlags = Object.entries(this.experimental)

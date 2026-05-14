@@ -38,7 +38,6 @@ describe("ExperimentalOptions", () => {
       });
       expect(runtime.experimental).toEqual({
         modernDataModel: false,
-        richStorableValues: undefined,
         schedulerHistoricalMightWrite: undefined,
       });
       await runtime.dispose();
@@ -56,7 +55,6 @@ describe("ExperimentalOptions", () => {
       });
       expect(runtime.experimental).toEqual({
         modernDataModel: true,
-        richStorableValues: undefined,
         schedulerHistoricalMightWrite: undefined,
       });
       await runtime.dispose();
@@ -74,24 +72,8 @@ describe("ExperimentalOptions", () => {
       });
       expect(runtime.experimental).toEqual({
         modernDataModel: true,
-        richStorableValues: undefined,
         schedulerHistoricalMightWrite: undefined,
       });
-      await runtime.dispose();
-      await sm.close();
-    });
-
-    it("maps richStorableValues onto modernDataModel when the primary flag is unset", async () => {
-      const sm = StorageManager.emulate({ as: signer });
-      const runtime = new Runtime({
-        apiUrl: new URL(import.meta.url),
-        storageManager: sm,
-        experimental: {
-          richStorableValues: true,
-        },
-      });
-      expect(runtime.experimental.modernDataModel).toBe(true);
-      expect(runtime.experimental.richStorableValues).toBe(true);
       await runtime.dispose();
       await sm.close();
     });
