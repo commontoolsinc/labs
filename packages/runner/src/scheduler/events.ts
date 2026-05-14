@@ -31,6 +31,57 @@ const logger = getLogger("scheduler", {
   level: "warn",
 });
 
+export interface EventQueueWakeState {
+  timer: ReturnType<typeof setTimeout> | null;
+  wakeAt: number | null;
+  readonly eventQueue: readonly QueuedEvent[];
+  readonly isDisposed: () => boolean;
+  readonly queueExecution: () => void;
+}
+
+export function scheduleEventQueueWake(
+  state: EventQueueWakeState,
+  notBefore: number,
+): void {
+  if (state.isDisposed()) return;
+  if (
+    state.wakeAt !== null && state.wakeAt <= notBefore &&
+    state.timer !== null
+  ) {
+    return;
+  }
+
+  cancelEventQueueWake(state);
+
+  const delay = Math.max(0, notBefore - performance.now());
+  state.wakeAt = notBefore;
+  state.timer = setTimeout(() => {
+    state.timer = null;
+    state.wakeAt = null;
+    state.queueExecution();
+  }, delay);
+}
+
+export function cancelEventQueueWake(state: EventQueueWakeState): void {
+  if (state.timer !== null) {
+    clearTimeout(state.timer);
+    state.timer = null;
+  }
+  state.wakeAt = null;
+}
+
+export function hasEventQueueWakeTimer(state: EventQueueWakeState): boolean {
+  return state.timer !== null;
+}
+
+export function isHeadEventParked(
+  state: Pick<EventQueueWakeState, "eventQueue">,
+  now: number = performance.now(),
+): boolean {
+  const headEvent = state.eventQueue[0];
+  return headEvent?.notBefore !== undefined && headEvent.notBefore > now;
+}
+
 export interface EventDependencyPreflightResult {
   shouldSkipEvent: boolean;
   deps: ReactivityLog;

@@ -141,8 +141,13 @@ import {
 import { txToReactivityLog } from "./scheduler/reactivity.ts";
 import {
   addSchedulerEventHandler,
+  cancelEventQueueWake as cancelEventQueueWakeState,
+  type EventQueueWakeState,
+  hasEventQueueWakeTimer,
+  isHeadEventParked as isHeadEventParkedState,
   processQueuedEventDuringExecute,
   queueSchedulerEvent,
+  scheduleEventQueueWake as scheduleEventQueueWakeState,
 } from "./scheduler/events.ts";
 import { buildSchedulerGraphSnapshot } from "./scheduler/graph-snapshot.ts";
 import { entityKey } from "./scheduler/keys.ts";
@@ -308,8 +313,13 @@ export class Scheduler {
   // Track all active debounce timers for cleanup during dispose
   private activeDebounceTimers = new Set<ReturnType<typeof setTimeout>>();
   private pendingQueueTaskTimer: ReturnType<typeof setTimeout> | null = null;
-  private eventQueueWakeTimer: ReturnType<typeof setTimeout> | null = null;
-  private eventQueueWakeAt: number | null = null;
+  private eventQueueWakeState: EventQueueWakeState = {
+    timer: null,
+    wakeAt: null,
+    eventQueue: this.eventQueue,
+    isDisposed: () => this.disposed,
+    queueExecution: () => this.queueExecution(),
+  };
   private actionDebounce = new WeakMap<Action, number>();
   private actionHasRun = new WeakSet<Action>();
   private computationDebounceReady = new WeakSet<Action>();
@@ -1070,7 +1080,7 @@ export class Scheduler {
           this.idle().then(resolve)
         );
       } else if (
-        this.eventQueueWakeTimer !== null &&
+        hasEventQueueWakeTimer(this.eventQueueWakeState) &&
         ((this.eventQueue.length > 0 && this.isHeadEventParked()) ||
           this.hasDeferredDirtyEffectWork())
       ) {
@@ -2348,36 +2358,15 @@ export class Scheduler {
   }
 
   private scheduleEventQueueWake(notBefore: number): void {
-    if (this.disposed) return;
-    if (
-      this.eventQueueWakeAt !== null && this.eventQueueWakeAt <= notBefore &&
-      this.eventQueueWakeTimer !== null
-    ) {
-      return;
-    }
-
-    this.cancelEventQueueWake();
-
-    const delay = Math.max(0, notBefore - performance.now());
-    this.eventQueueWakeAt = notBefore;
-    this.eventQueueWakeTimer = setTimeout(() => {
-      this.eventQueueWakeTimer = null;
-      this.eventQueueWakeAt = null;
-      this.queueExecution();
-    }, delay);
+    scheduleEventQueueWakeState(this.eventQueueWakeState, notBefore);
   }
 
   private cancelEventQueueWake(): void {
-    if (this.eventQueueWakeTimer !== null) {
-      clearTimeout(this.eventQueueWakeTimer);
-      this.eventQueueWakeTimer = null;
-    }
-    this.eventQueueWakeAt = null;
+    cancelEventQueueWakeState(this.eventQueueWakeState);
   }
 
   private isHeadEventParked(now: number = performance.now()): boolean {
-    const headEvent = this.eventQueue[0];
-    return headEvent?.notBefore !== undefined && headEvent.notBefore > now;
+    return isHeadEventParkedState(this.eventQueueWakeState, now);
   }
 
   // ============================================================
@@ -3151,7 +3140,7 @@ export class Scheduler {
         }
         this.loopCounter = new WeakMap();
         this.scheduled = false;
-      } else if (this.eventQueueWakeTimer !== null) {
+      } else if (hasEventQueueWakeTimer(this.eventQueueWakeState)) {
         this.loopCounter = new WeakMap();
         this.scheduled = false;
 
