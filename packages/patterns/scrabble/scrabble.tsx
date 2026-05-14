@@ -319,6 +319,7 @@ export interface GameInput {
   rack?: PerUser<RackCell>;
   placed?: PerUser<PlacedCell>;
   myName?: PerUser<NameCell>;
+  joinName?: PerSession<NameCell>;
   message?: PerSession<MessageCell>;
 }
 
@@ -609,6 +610,7 @@ function returnedLetters(tiles: readonly PlacedTile[]): Letter[] {
 
 function joinPlayerByName(
   nameInput: string | undefined,
+  myName: NameCell,
   rack: RackCell,
   placed: PlacedCell,
   board: BoardCell,
@@ -617,16 +619,21 @@ function joinPlayerByName(
   players: PlayersCell,
   gameEvents: EventsCell,
   message: MessageCell,
-) {
+): boolean {
   const name = trimmedName(nameInput);
   if (!name) {
     message.set("Enter your name to join.");
-    return;
+    return false;
   }
 
+  const currentName = trimmedName(myName.get());
   const existingPlayers = players.get();
   const existingPlayer = existingPlayers.find((player) => player.name === name);
   if (existingPlayer) {
+    if (currentName !== name) {
+      message.set(`Name ${name} is already taken.`);
+      return false;
+    }
     if (rack.get().length === 0) {
       const currentBag = bag.get().length ? [...bag.get()] : createTileBag();
       if (bag.get().length === 0) bag.set(currentBag);
@@ -636,7 +643,12 @@ function joinPlayerByName(
       bagIndex.set(currentIndex + drawn.length);
     }
     message.set(`Welcome back, ${name}.`);
-    return;
+    return true;
+  }
+
+  if (currentName && currentName !== name) {
+    message.set(`You already joined as ${currentName}.`);
+    return false;
   }
 
   const currentBag = bag.get().length ? [...bag.get()] : createTileBag();
@@ -655,6 +667,7 @@ function joinPlayerByName(
     joinedAt: safeDateNow(),
   };
   players.set([...existingPlayers, player]);
+  myName.set(name);
   rack.set(drawn);
   placed.set([]);
   bagIndex.set(currentIndex + drawn.length);
@@ -666,11 +679,13 @@ function joinPlayerByName(
     timestamp: safeDateNow(),
   }]);
   message.set(`Joined as ${name}.`);
+  return true;
 }
 
 const joinGameHandler = handler<
   void,
   {
+    joinName: NameCell;
     myName: NameCell;
     rack: RackCell;
     placed: PlacedCell;
@@ -683,10 +698,22 @@ const joinGameHandler = handler<
   }
 >((
   _event,
-  { myName, rack, placed, board, bag, bagIndex, players, gameEvents, message },
+  {
+    joinName,
+    myName,
+    rack,
+    placed,
+    board,
+    bag,
+    bagIndex,
+    players,
+    gameEvents,
+    message,
+  },
 ) => {
-  joinPlayerByName(
-    myName.get(),
+  const joined = joinPlayerByName(
+    joinName.get(),
+    myName,
     rack,
     placed,
     board,
@@ -696,6 +723,7 @@ const joinGameHandler = handler<
     gameEvents,
     message,
   );
+  if (joined) joinName.set("");
 });
 
 const joinWithNameHandler = handler<
@@ -715,9 +743,9 @@ const joinWithNameHandler = handler<
   name,
   { myName, rack, placed, board, bag, bagIndex, players, gameEvents, message },
 ) => {
-  myName.set(name);
   joinPlayerByName(
     name,
+    myName,
     rack,
     placed,
     board,
@@ -1076,6 +1104,7 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
       rack,
       placed,
       myName,
+      joinName,
       message,
     },
   ) => {
@@ -1091,6 +1120,7 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
       rack.get().map((letter, index) => ({ ...letter, index }))
     );
     const joinGame = joinGameHandler({
+      joinName,
       myName,
       rack,
       placed,
@@ -1184,7 +1214,7 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
                     }}
                   >
                     <cf-input
-                      $value={myName}
+                      $value={joinName}
                       placeholder="Your name"
                       timing-strategy="immediate"
                       style="flex: 1;"

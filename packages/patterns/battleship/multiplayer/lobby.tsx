@@ -205,9 +205,12 @@ const BattleshipLobby = pattern<LobbyState, LobbyOutput>(
 
     const player1Data = computed(() => player1.get());
     const player2Data = computed(() => player2.get());
-    const joined = computed(() =>
-      normalizePlayerNumber(myPlayerNumber.get()) !== null
-    );
+    const joined = computed(() => {
+      const slot = normalizePlayerNumber(myPlayerNumber.get());
+      if (slot === null) return false;
+      const player = slot === 1 ? player1.get() : player2.get();
+      return !!player && player.name === trimmedName(myName.get());
+    });
     const isFull = computed(() => !!player1.get() && !!player2.get());
     const waitingLabel = computed(() => {
       const p1 = player1.get();

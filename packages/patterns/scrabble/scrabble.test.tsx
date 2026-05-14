@@ -34,6 +34,10 @@ export default pattern(() => {
     scrabble.joinWithName.send("Alice");
   });
 
+  const action_try_rename_after_join = action(() => {
+    scrabble.joinWithName.send("Bob");
+  });
+
   const action_submit_off_center_word = action(() => {
     const a = rackLetter(scrabble.rack, "A");
     const t = rackLetter(scrabble.rack, "T");
@@ -70,6 +74,14 @@ export default pattern(() => {
     scrabble.rack.length === 7 &&
     scrabble.bagIndex === 7 &&
     scrabble.message === "The first word must cover the center star."
+  );
+
+  const assert_joined_name_is_immutable = computed(() =>
+    scrabble.players.length === 1 &&
+    scrabble.players[0]?.name === "Alice" &&
+    scrabble.myName === "Alice" &&
+    scrabble.rack.length === 7 &&
+    scrabble.message === "You already joined as Alice."
   );
 
   const assert_center_word_submitted = computed(() => {
@@ -111,6 +123,8 @@ export default pattern(() => {
   return {
     tests: [
       { action: action_join_alice },
+      { action: action_try_rename_after_join },
+      { assertion: assert_joined_name_is_immutable },
       { action: action_submit_off_center_word },
       { assertion: assert_off_center_word_rejected },
       { action: action_submit_center_word },
