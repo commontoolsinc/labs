@@ -559,6 +559,7 @@ export const editFileTool: HarnessToolDefinition<
         cwd: context.currentDir,
         command: READ_FILE_COMMAND,
         args: readArgs,
+        cfcInputLabelPaths: [["args"]],
       }),
     });
     if (readResult.exitCode !== 0) {
@@ -608,6 +609,7 @@ export const editFileTool: HarnessToolDefinition<
         command: WRITE_FILE_COMMAND,
         args: writeArgs,
         stdinText: edited.content,
+        cfcInputLabelPaths: [["args"], ["stdin"]],
       }),
     });
     if (writeResult.exitCode !== 0) {
@@ -629,6 +631,7 @@ export const editFileTool: HarnessToolDefinition<
         cwd: context.currentDir,
         command: READ_FILE_COMMAND,
         args: readArgs,
+        cfcInputLabelPaths: [["args"]],
       }),
     });
     if (verifyResult.exitCode !== 0) {

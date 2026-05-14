@@ -1,6 +1,7 @@
 import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { normalize } from "@std/path/posix";
 import type { HarnessArtifactStore } from "../src/artifacts.ts";
+import { CF_HARNESS_PROMPT_SLOT_INFLUENCE_ATOM_TYPE } from "../src/contracts/cfc-invocation-context.ts";
 import { createHarnessCfcPolicySnapshot } from "../src/contracts/cfc-policy-snapshot.ts";
 import { createHarnessPolicyEvent } from "../src/contracts/policy.ts";
 import { CFC_PROMPT_SLOT_BOUND_ATOM_TYPE } from "../src/contracts/prompt-slot.ts";
@@ -368,6 +369,86 @@ Deno.test("CfHarnessEngine records prompt slot binding into run state", () => {
 
   assertEquals(engine.getRunState().promptSlotBinding, promptSlotBinding);
   assertEquals(engine.getRunState().updatedAt, "2026-04-17T19:00:01.000Z");
+});
+
+Deno.test("CfHarnessEngine derives prompt-slot labels for model-authored sandbox invocation inputs", async () => {
+  const promptSlotBinding = {
+    type: CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
+    source: { type: "test.prompt-slot", subject: "engine-label-test" },
+    role: "direct-command",
+    kernelName: "cf-harness",
+    surface: "test",
+    eventId: "event-engine-label",
+  } as const;
+  const sandbox = new FakeSandboxRuntime([
+    { stdout: "", stderr: "", exitCode: 0 },
+    { stdout: "", stderr: "", exitCode: 0 },
+  ]);
+  const engine = new CfHarnessEngine({
+    sandboxRuntime: sandbox,
+    runId: "run-prompt-slot-labels",
+    cfcEnforcementMode: "observe",
+    now: (() => {
+      const timestamps = [
+        "2026-04-17T19:05:00.000Z",
+        "2026-04-17T19:05:01.000Z",
+        "2026-04-17T19:05:02.000Z",
+        "2026-04-17T19:05:03.000Z",
+        "2026-04-17T19:05:04.000Z",
+      ];
+      return () => timestamps.shift() ?? "2026-04-17T19:05:05.000Z";
+    })(),
+  });
+
+  engine.setPromptSlotBinding(promptSlotBinding);
+  await engine.invokeBuiltinTool("bash", { command: "printf hello" });
+  await engine.invokeBuiltinTool("write_file", {
+    path: "notes.md",
+    content: "hello from prompt",
+  });
+
+  const expectedAtom = {
+    type: CF_HARNESS_PROMPT_SLOT_INFLUENCE_ATOM_TYPE,
+    version: 1,
+    role: "direct-command",
+    kernelName: "cf-harness",
+    surface: "test",
+    eventId: "event-engine-label",
+  };
+  assertEquals(
+    engine.getRunState().cfcInvocationContexts?.map((context) => ({
+      toolId: context.toolId,
+      labels: context.cfcInputLabels,
+    })),
+    [
+      {
+        toolId: "bash",
+        labels: {
+          version: 1,
+          entries: [{
+            path: ["command"],
+            label: { confidentiality: [expectedAtom] },
+          }],
+        },
+      },
+      {
+        toolId: "write_file",
+        labels: {
+          version: 1,
+          entries: [
+            {
+              path: ["args"],
+              label: { confidentiality: [expectedAtom] },
+            },
+            {
+              path: ["stdin"],
+              label: { confidentiality: [expectedAtom] },
+            },
+          ],
+        },
+      },
+    ],
+  );
 });
 
 Deno.test("CfHarnessEngine stamps policy snapshot state changes with mutation time", async () => {

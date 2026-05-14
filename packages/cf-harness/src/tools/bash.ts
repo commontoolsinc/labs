@@ -110,6 +110,7 @@ export const bashTool: HarnessToolDefinition<BashToolInput, BashToolOutput> = {
         ...(input.cfcInputLabels !== undefined
           ? { cfcInputLabels: input.cfcInputLabels }
           : {}),
+        cfcInputLabelPaths: [["command"]],
       }),
     });
     const mayTrustCwdMarker = context.cfcEnforcementMode === "disabled" ||
