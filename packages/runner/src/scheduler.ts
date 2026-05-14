@@ -139,8 +139,7 @@ import {
 } from "./scheduler/reactivity.ts";
 import {
   addSchedulerEventHandler,
-  dispatchQueuedEvent,
-  preflightQueuedEventDependencies,
+  processQueuedEventDuringExecute,
   queueSchedulerEvent,
 } from "./scheduler/events.ts";
 import { buildSchedulerGraphSnapshot } from "./scheduler/graph-snapshot.ts";
@@ -3042,89 +3041,39 @@ export class Scheduler {
     const eventBlockingDeps = new Set<Action>();
 
     logger.timeStart("scheduler", "execute", "event");
-    // Process next event from the event queue.
-    const queuedEvent = this.eventQueue[0];
-    if (queuedEvent) {
-      if (
-        queuedEvent.notBefore !== undefined &&
-        queuedEvent.notBefore > performance.now()
-      ) {
-        this.scheduleEventQueueWake(queuedEvent.notBefore);
-      } else {
-        delete queuedEvent.notBefore;
-
-        const { handler } = queuedEvent;
-        const handlerId = this.getActionId(handler);
-
-        // In pull mode, ensure handler dependencies are computed before running.
-        let shouldSkipEvent = false;
-        if (this.pullMode && handler.populateDependencies) {
-          const preflight = preflightQueuedEventDependencies({
-            runtime: this.runtime,
-            eventQueue: this.eventQueue,
-            dirty: this.dirty,
-            pending: this.pending,
-            pendingActions: this.pending,
-            eventBlockingDeps,
-            handleError: (error, target) => this.handleError(error, target),
-            setDirtyDependencyTraceContext: (trace) => {
-              this.dirtyDependencyTraceContext = trace;
-            },
-            collectDirtyDependenciesForLog: (deps, dirtyDeps, dirtyDepMemo) =>
-              this.collectDirtyDependenciesForLog(
-                deps,
-                dirtyDeps,
-                dirtyDepMemo,
-              ),
-            isDebouncedComputationWaiting: (dep) =>
-              this.isDebouncedComputationWaiting(dep),
-            getNextDebounceRunTime: (dep) => this.getNextDebounceRunTime(dep),
-            getNextEligibleRunTime: (dep) => this.getNextEligibleRunTime(dep),
-            scheduleEventQueueWake: (notBefore) =>
-              this.scheduleEventQueueWake(notBefore),
-          }, queuedEvent);
-          shouldSkipEvent = preflight.shouldSkipEvent;
-
-          if (this.eventPreflightTelemetryEnabled) {
-            this.runtime.telemetry.submit({
-              type: "scheduler.event.preflight",
-              handlerId,
-              handlerInfo: this.getActionTelemetryInfo(handler),
-              readCount: preflight.deps.reads.length,
-              shallowReadCount: preflight.deps.shallowReads.length,
-              dirtySizeBefore: preflight.dirtySizeBefore,
-              pendingSizeBefore: preflight.pendingSizeBefore,
-              dirtyDependencyCount: preflight.dirtyDeps.size,
-              hasDirtyDependencies: preflight.hasDirtyDependencies,
-              skipped: shouldSkipEvent,
-              populateMs: preflight.populateMs,
-              txToLogMs: preflight.txToLogMs,
-              depCommitMs: preflight.depCommitMs,
-              collectMs: preflight.collectMs,
-              scheduleMs: preflight.scheduleMs,
-              stats: this.snapshotDirtyDependencyTraceContext(
-                preflight.preflightStats,
-              ),
-            });
-          }
-        }
-
-        if (!shouldSkipEvent) {
-          await dispatchQueuedEvent({
-            runtime: this.runtime,
-            eventQueue: this.eventQueue,
-            setRunningPromise: (promise) => {
-              this.runningPromise = promise;
-            },
-            getActionId: (target) => this.getActionId(target),
-            getActionTelemetryInfo: (target) =>
-              this.getActionTelemetryInfo(target),
-            handleError: (error, target) => this.handleError(error, target),
-            queueExecution: () => this.queueExecution(),
-          }, queuedEvent);
-        }
-      }
-    }
+    await processQueuedEventDuringExecute({
+      runtime: this.runtime,
+      eventQueue: this.eventQueue,
+      pullMode: this.pullMode,
+      dirty: this.dirty,
+      pending: this.pending,
+      eventBlockingDeps,
+      eventPreflightTelemetryEnabled: this.eventPreflightTelemetryEnabled,
+      setRunningPromise: (promise) => {
+        this.runningPromise = promise;
+      },
+      getActionId: (target) => this.getActionId(target),
+      getActionTelemetryInfo: (target) => this.getActionTelemetryInfo(target),
+      handleError: (error, target) => this.handleError(error, target),
+      queueExecution: () => this.queueExecution(),
+      setDirtyDependencyTraceContext: (trace) => {
+        this.dirtyDependencyTraceContext = trace;
+      },
+      collectDirtyDependenciesForLog: (deps, dirtyDeps, dirtyDepMemo) =>
+        this.collectDirtyDependenciesForLog(
+          deps,
+          dirtyDeps,
+          dirtyDepMemo,
+        ),
+      isDebouncedComputationWaiting: (dep) =>
+        this.isDebouncedComputationWaiting(dep),
+      getNextDebounceRunTime: (dep) => this.getNextDebounceRunTime(dep),
+      getNextEligibleRunTime: (dep) => this.getNextEligibleRunTime(dep),
+      scheduleEventQueueWake: (notBefore) =>
+        this.scheduleEventQueueWake(notBefore),
+      snapshotDirtyDependencyTraceContext: (trace) =>
+        this.snapshotDirtyDependencyTraceContext(trace),
+    });
     logger.timeEnd("scheduler", "execute", "event");
 
     // Process any newly subscribed actions that were added during event handling.

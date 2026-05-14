@@ -7,6 +7,10 @@ import {
   type NormalizedFullLink,
 } from "../link-utils.ts";
 import type { Runtime } from "../runtime.ts";
+import type {
+  SchedulerActionInfo,
+  SchedulerEventPreflightStats,
+} from "../telemetry.ts";
 import { createDirtyDependencyTraceContext } from "./diagnostics.ts";
 import { planEventDirtyDependencyScheduling } from "./execution.ts";
 import {
@@ -123,6 +127,125 @@ export function addSchedulerEventHandler(state: {
     );
     if (index !== -1) state.eventHandlers.splice(index, 1);
   };
+}
+
+export async function processQueuedEventDuringExecute(state: {
+  readonly runtime: Runtime;
+  readonly eventQueue: QueuedEvent[];
+  readonly pullMode: boolean;
+  readonly dirty: ReadonlySet<Action>;
+  readonly pending: Set<Action>;
+  readonly eventBlockingDeps: Set<Action>;
+  readonly eventPreflightTelemetryEnabled: boolean;
+  readonly setRunningPromise: (promise: Promise<unknown>) => void;
+  readonly getActionId: (action: Action | EventHandler) => string;
+  readonly getActionTelemetryInfo: (
+    handler: EventHandler,
+  ) => SchedulerActionInfo | undefined;
+  readonly handleError: (
+    error: Error,
+    action: Action | EventHandler,
+  ) => void;
+  readonly queueExecution: () => void;
+  readonly setDirtyDependencyTraceContext: (
+    trace: DirtyDependencyTraceContext | undefined,
+  ) => void;
+  readonly collectDirtyDependenciesForLog: (
+    deps: ReactivityLog,
+    dirtyDeps: Set<Action>,
+    memo: Map<Action, boolean>,
+  ) => boolean;
+  readonly isDebouncedComputationWaiting: (action: Action) => boolean;
+  readonly getNextDebounceRunTime: (action: Action) => number | undefined;
+  readonly getNextEligibleRunTime: (action: Action) => number | undefined;
+  readonly scheduleEventQueueWake: (notBefore: number) => void;
+  readonly snapshotDirtyDependencyTraceContext: (
+    trace: DirtyDependencyTraceContext,
+  ) => SchedulerEventPreflightStats;
+}): Promise<void> {
+  // Process next event from the event queue.
+  const queuedEvent = state.eventQueue[0];
+  if (!queuedEvent) return;
+
+  if (
+    queuedEvent.notBefore !== undefined &&
+    queuedEvent.notBefore > performance.now()
+  ) {
+    state.scheduleEventQueueWake(queuedEvent.notBefore);
+    return;
+  }
+
+  delete queuedEvent.notBefore;
+
+  const { handler } = queuedEvent;
+  const handlerId = state.getActionId(handler);
+
+  // In pull mode, ensure handler dependencies are computed before running.
+  let shouldSkipEvent = false;
+  if (state.pullMode && handler.populateDependencies) {
+    const preflight = preflightQueuedEventDependencies({
+      runtime: state.runtime,
+      eventQueue: state.eventQueue,
+      dirty: state.dirty,
+      pending: state.pending,
+      pendingActions: state.pending,
+      eventBlockingDeps: state.eventBlockingDeps,
+      handleError: (error, target) => state.handleError(error, target),
+      setDirtyDependencyTraceContext: (trace) => {
+        state.setDirtyDependencyTraceContext(trace);
+      },
+      collectDirtyDependenciesForLog: (deps, dirtyDeps, dirtyDepMemo) =>
+        state.collectDirtyDependenciesForLog(
+          deps,
+          dirtyDeps,
+          dirtyDepMemo,
+        ),
+      isDebouncedComputationWaiting: (dep) =>
+        state.isDebouncedComputationWaiting(dep),
+      getNextDebounceRunTime: (dep) => state.getNextDebounceRunTime(dep),
+      getNextEligibleRunTime: (dep) => state.getNextEligibleRunTime(dep),
+      scheduleEventQueueWake: (notBefore) =>
+        state.scheduleEventQueueWake(notBefore),
+    }, queuedEvent);
+    shouldSkipEvent = preflight.shouldSkipEvent;
+
+    if (state.eventPreflightTelemetryEnabled) {
+      state.runtime.telemetry.submit({
+        type: "scheduler.event.preflight",
+        handlerId,
+        handlerInfo: state.getActionTelemetryInfo(handler),
+        readCount: preflight.deps.reads.length,
+        shallowReadCount: preflight.deps.shallowReads.length,
+        dirtySizeBefore: preflight.dirtySizeBefore,
+        pendingSizeBefore: preflight.pendingSizeBefore,
+        dirtyDependencyCount: preflight.dirtyDeps.size,
+        hasDirtyDependencies: preflight.hasDirtyDependencies,
+        skipped: shouldSkipEvent,
+        populateMs: preflight.populateMs,
+        txToLogMs: preflight.txToLogMs,
+        depCommitMs: preflight.depCommitMs,
+        collectMs: preflight.collectMs,
+        scheduleMs: preflight.scheduleMs,
+        stats: state.snapshotDirtyDependencyTraceContext(
+          preflight.preflightStats,
+        ),
+      });
+    }
+  }
+
+  if (shouldSkipEvent) return;
+
+  await dispatchQueuedEvent({
+    runtime: state.runtime,
+    eventQueue: state.eventQueue,
+    setRunningPromise: (promise) => {
+      state.setRunningPromise(promise);
+    },
+    getActionId: (target) => state.getActionId(target),
+    getActionTelemetryInfo: (target) => state.getActionTelemetryInfo(target),
+    handleError: (error, target) => state.handleError(error, target),
+    queueExecution: () => state.queueExecution(),
+  }, queuedEvent);
 }
 
 export function preflightQueuedEventDependencies(state: {
@@ -307,14 +430,9 @@ export async function dispatchQueuedEvent(state: {
   readonly eventQueue: QueuedEvent[];
   readonly setRunningPromise: (promise: Promise<unknown>) => void;
   readonly getActionId: (action: Action | EventHandler) => string;
-  readonly getActionTelemetryInfo: (handler: EventHandler) =>
-    | {
-      patternName?: string;
-      moduleName?: string;
-      reads?: string[];
-      writes?: string[];
-    }
-    | undefined;
+  readonly getActionTelemetryInfo: (
+    handler: EventHandler,
+  ) => SchedulerActionInfo | undefined;
   readonly handleError: (error: Error, action: Action) => void;
   readonly queueExecution: () => void;
 }, queuedEvent: QueuedEvent): Promise<void> {
