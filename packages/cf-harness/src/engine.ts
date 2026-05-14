@@ -46,6 +46,7 @@ import {
 import {
   createHarnessCfcInvocationContext,
   type HarnessCfcInvocationContext,
+  type HarnessCfcInvocationInputLabelPath,
   type HarnessCfcInvocationOperation,
   summarizeCfcInvocationRunManifest,
 } from "./contracts/cfc-invocation-context.ts";
@@ -970,6 +971,7 @@ export class CfHarnessEngine {
     stdinText?: string;
     env?: Record<string, string>;
     cfcInputLabels?: CfcLabelView;
+    cfcInputLabelPaths?: readonly HarnessCfcInvocationInputLabelPath[];
   }): Promise<HarnessCfcInvocationContext> {
     const now = this.#now();
     const invocation = await createHarnessCfcInvocationContext({
@@ -999,6 +1001,9 @@ export class CfHarnessEngine {
       ...(options.env !== undefined ? { env: options.env } : {}),
       ...(options.cfcInputLabels !== undefined
         ? { cfcInputLabels: options.cfcInputLabels }
+        : {}),
+      ...(options.cfcInputLabelPaths !== undefined
+        ? { cfcInputLabelPaths: options.cfcInputLabelPaths }
         : {}),
     });
     this.#runState = appendHarnessCfcInvocationContext(
@@ -1065,6 +1070,7 @@ export class CfHarnessEngine {
         stdinText?: string;
         env?: Record<string, string>;
         cfcInputLabels?: CfcLabelView;
+        cfcInputLabelPaths?: readonly HarnessCfcInvocationInputLabelPath[];
       }) => this.#createCfcInvocationContext(options),
     };
   }
