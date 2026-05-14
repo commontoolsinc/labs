@@ -1,10 +1,6 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
-import {
-  resetDataModelConfig,
-  setDataModelConfig,
-} from "@commonfabric/data-model/fabric-value";
 import type { FabricValue } from "@commonfabric/memory/interface";
 import type { EntityDocument } from "@commonfabric/memory/v2";
 import {
@@ -138,15 +134,7 @@ describe("memory v2 path helpers", () => {
 
 });
 
-describe("memory v2 path helpers — modern data model refreeze", () => {
-  beforeEach(() => {
-    setDataModelConfig(true);
-  });
-
-  afterEach(() => {
-    resetDataModelConfig();
-  });
-
+describe("memory v2 path helpers — deep-freeze contract", () => {
   it("cloneWithValueAtPath returns a deep-frozen result for path writes", () => {
     const root: EntityDocument = {
       value: {
@@ -183,49 +171,5 @@ describe("memory v2 path helpers — modern data model refreeze", () => {
     const result = cloneWithoutPath(root, ["value", "right", "remove"])!;
 
     expect(isDeepFrozen(result)).toBe(true);
-  });
-});
-
-describe("memory v2 path helpers — legacy data model passthrough", () => {
-  // Counterpart to the modern-data-model refreeze block: under the legacy
-  // flag the helpers must NOT refreeze their output, preserving the
-  // mutable-pending contract that legacy read paths rely on (see PR #3577
-  // and `v2-transaction.ts:1069`).
-  beforeEach(() => {
-    setDataModelConfig(false);
-  });
-
-  afterEach(() => {
-    resetDataModelConfig();
-  });
-
-  it("cloneWithValueAtPath does not freeze its output under legacy", () => {
-    const root: EntityDocument = {
-      value: {
-        left: { nested: { stable: true } },
-        right: { count: 1 },
-      },
-    };
-
-    const result = cloneWithValueAtPath(
-      root,
-      ["value", "right", "count"],
-      2,
-    )!;
-
-    expect(Object.isFrozen(result)).toBe(false);
-  });
-
-  it("cloneWithoutPath does not freeze its output under legacy", () => {
-    const root: EntityDocument = {
-      value: {
-        left: { nested: { stable: true } },
-        right: { keep: 1, remove: 2 },
-      },
-    };
-
-    const result = cloneWithoutPath(root, ["value", "right", "remove"])!;
-
-    expect(Object.isFrozen(result)).toBe(false);
   });
 });

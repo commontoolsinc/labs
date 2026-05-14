@@ -1,8 +1,5 @@
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
-import {
-  cloneIfNecessary,
-  getDataModelConfig,
-} from "@commonfabric/data-model/fabric-value";
+import { cloneIfNecessary } from "@commonfabric/data-model/fabric-value";
 import {
   type ConflictError as IConflictError,
   type ConnectionError as IConnectionError,
@@ -274,20 +271,10 @@ const applyPendingVersion = (
   switch (pending.op) {
     case "delete":
       return undefined;
-    case "set": {
-      // Converges the legacy storage-internal pending chain toward the
-      // modern frozen-data-through-the-system discipline. Under modern,
-      // refreeze fires so set-op materialized values are deep-frozen at
-      // boundary; under legacy the refreeze is skipped, leaving PR #3577's
-      // mutable-read contract intact until the modern flag becomes the
-      // default (#3569). See audit
-      // `coordination/docs/2026-05-14-deep-freeze-discipline-audit.md` §4.
-      const next = cloneIfNecessary(pending.value as FabricValue, {
-        frozen: false,
-      });
-      return (getDataModelConfig() ? deepFreeze(next) : next) as
-        EntityDocument;
-    }
+    case "set":
+      return deepFreeze(
+        cloneIfNecessary(pending.value as FabricValue, { frozen: false }),
+      ) as EntityDocument;
     case "patch": {
       let next = base;
       for (
