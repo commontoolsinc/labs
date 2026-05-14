@@ -973,7 +973,9 @@ function toCapability(state: MutableCapabilityState): ReactiveCapability {
   if (hasReads && hasWrites) return "writable";
   if (hasReads) return "readonly";
   if (hasWrites) return "writeonly";
-  if (state.rawComparablePaths.size > 0) return "comparable";
+  if (state.rawComparablePaths.size > 0 && !state.hasNonIdentityUse) {
+    return "comparable";
+  }
   return "opaque";
 }
 
@@ -1148,6 +1150,14 @@ export function analyzeFunctionCapabilities(
         state.hasIdentityUse = true;
       } else {
         state.hasNonIdentityUse = true;
+        state.hasNonIdentityRootUse = true;
+      }
+    };
+
+    const markOpaqueUse = (name: string, path: readonly string[]): void => {
+      const state = ensureState(name);
+      state.hasNonIdentityUse = true;
+      if (path.length === 0) {
         state.hasNonIdentityRootUse = true;
       }
     };
@@ -2465,6 +2475,8 @@ export function analyzeFunctionCapabilities(
               // receivers must still be retained in object-shaped inputs.
               if (receiver.path.length > 0) {
                 trackReadRef(receiver);
+              } else {
+                markOpaqueUse(receiver.root, receiver.path);
               }
             } else {
               // Unknown method call over a tracked source reads at least the receiver path.

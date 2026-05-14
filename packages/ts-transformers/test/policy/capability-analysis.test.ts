@@ -515,6 +515,25 @@ Deno.test("Capability analysis keeps opaque derivation methods opaque", () => {
   assertEquals(input.wildcard, false);
 });
 
+Deno.test(
+  "Capability analysis keeps root derivation plus equality usage opaque",
+  () => {
+    const fn = parseFirstCallback(
+      `const fn = (input, mapper, other) => {
+        input.map(mapper);
+        return input.equals(other);
+      };`,
+    );
+    const summary = analyzeFunctionCapabilities(fn);
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.capability, "opaque");
+    assertEquals(input.readPaths.length, 0);
+    assertEquals(input.writePaths.length, 0);
+    assertEquals(input.wildcard, false);
+  },
+);
+
 Deno.test("Capability analysis classifies pure passthrough as opaque", () => {
   const fn = parseFirstCallback(
     `const fn = (input) => {

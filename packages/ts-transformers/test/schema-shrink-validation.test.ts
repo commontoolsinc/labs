@@ -2063,6 +2063,37 @@ Deno.test("Schema Shrink Validation", async (t) => {
   );
 
   await t.step(
+    "derive keeps root cell opaque when derivation and equality are both used",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { derive, type Writable } from "commonfabric";',
+        "const input = {} as Writable<number[]>;",
+        "const summary = derive(input, (input) => {",
+        "  input.map((value) => value);",
+        "  return input.equals(input);",
+        "});",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      const inputSchema = extractSchemas(result.output)[0] ?? "";
+      assertStringIncludes(inputSchema, 'asCell: ["opaque"]');
+      assertEquals(inputSchema.includes('asCell: ["comparable"]'), false);
+    },
+  );
+
+  await t.step(
     "derive keeps both array and index cells for dynamic element access",
     async () => {
       const source = [
