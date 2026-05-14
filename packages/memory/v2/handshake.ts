@@ -2,8 +2,10 @@ import {
   getMemoryProtocolFlags,
   type HelloMessage,
   MEMORY_PROTOCOL,
+  parseMemoryProtocolFlags,
   sameMemoryProtocolFlags,
   type ServerMessage,
+  wireMemoryProtocolFlags,
 } from "../v2.ts";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 
@@ -29,7 +31,10 @@ export const respondToHello = (message: HelloMessage): ServerMessage => {
       ),
     };
   }
-  if (!sameMemoryProtocolFlags(message.flags, expectedFlags)) {
+  const parsed = parseMemoryProtocolFlags(message.flags);
+  if (
+    parsed === null || !sameMemoryProtocolFlags(parsed.flags, expectedFlags)
+  ) {
     return {
       type: "response",
       requestId: "handshake",
@@ -41,9 +46,11 @@ export const respondToHello = (message: HelloMessage): ServerMessage => {
       ),
     };
   }
+  // Echo the wire-key the peer used, so older peers that only know the
+  // legacy `richStorableValues` name still parse the reply.
   return {
     type: "hello.ok",
     protocol: MEMORY_PROTOCOL,
-    flags: expectedFlags,
+    flags: wireMemoryProtocolFlags(expectedFlags, parsed.wireKey),
   };
 };

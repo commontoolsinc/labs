@@ -546,7 +546,7 @@ Deno.test("memory v2 server rejects handshakes when flags disagree", async () =>
       type: "hello",
       protocol: MEMORY_PROTOCOL,
       flags: {
-        richStorableValues: !HELLO_FLAGS.richStorableValues,
+        modernDataModel: !HELLO_FLAGS.modernDataModel,
       },
     }));
 
@@ -557,10 +557,37 @@ Deno.test("memory v2 server rejects handshakes when flags disagree", async () =>
         name: "ProtocolError",
         message: `memory flag mismatch: client=${
           JSON.stringify({
-            richStorableValues: !HELLO_FLAGS.richStorableValues,
+            modernDataModel: !HELLO_FLAGS.modernDataModel,
           })
         } server=${JSON.stringify(HELLO_FLAGS)}`,
       },
+    });
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("memory v2 server accepts legacy richStorableValues flag name and echoes it", async () => {
+  const server = createServer("memory://memory-v2-server-handshake-legacy");
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+
+  try {
+    await connection.receive(encodeMemoryBoundary({
+      type: "hello",
+      protocol: MEMORY_PROTOCOL,
+      flags: {
+        // Client used the legacy field name with the matching value.
+        richStorableValues: HELLO_FLAGS.modernDataModel,
+      },
+    }));
+
+    // The server normalizes on input but echoes the same wire-key the
+    // peer used, so older clients still recognize the reply.
+    assertEquals(shiftMessage(messages), {
+      type: "hello.ok",
+      protocol: MEMORY_PROTOCOL,
+      flags: { richStorableValues: HELLO_FLAGS.modernDataModel },
     });
   } finally {
     await server.close();

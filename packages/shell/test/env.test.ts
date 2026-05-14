@@ -34,27 +34,10 @@ Deno.test({
     const mod = await withPatchedGlobals({
       $API_URL: "http://shell.test/",
       $EXPERIMENTAL_MODERN_DATA_MODEL: "true",
-      $EXPERIMENTAL_RICH_STORABLE_VALUES: undefined,
     }, importFreshEnvModule);
 
     expect(mod.EXPERIMENTAL).toEqual({
       modernDataModel: true,
-    });
-  },
-});
-
-Deno.test({
-  name: "shell env ignores defunct legacy experimental globals",
-  permissions: { read: true },
-  async fn() {
-    const mod = await withPatchedGlobals({
-      $API_URL: "http://shell.test/",
-      $EXPERIMENTAL_MODERN_DATA_MODEL: undefined,
-      $EXPERIMENTAL_RICH_STORABLE_VALUES: "true",
-    }, importFreshEnvModule);
-
-    expect(mod.EXPERIMENTAL).toEqual({
-      modernDataModel: undefined,
     });
   },
 });

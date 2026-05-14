@@ -1,7 +1,7 @@
 /**
  * Tests for the frozen proxy target fix in `query-result-proxy.ts`.
  *
- * When `richStorableValues` is enabled, stored objects are deep-frozen at
+ * When `modernDataModel` is enabled, stored objects are deep-frozen at
  * commit time. After commit, reads in a new transaction return direct
  * references to these frozen objects. The proxy creation function must still
  * wrap them (using an unfrozen stub as the proxy target) so that link
@@ -63,7 +63,7 @@ describe("frozen proxy target: link resolution through frozen objects", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
       experimental: {
-        richStorableValues: true,
+        modernDataModel: true,
       },
     });
     tx = runtime.edit();
@@ -86,7 +86,7 @@ describe("frozen proxy target: link resolution through frozen objects", () => {
     targetCell.set({ answer: 42 });
 
     // Set up a cell whose value contains a sigil link to the target.
-    // Write it deep-frozen to simulate post-commit state with richStorableValues.
+    // Write it deep-frozen to simulate post-commit state with modernDataModel.
     const sourceLink = writeCell(
       runtime,
       tx,
@@ -133,7 +133,7 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
       experimental: {
-        richStorableValues: true,
+        modernDataModel: true,
       },
     });
     tx = runtime.edit();
@@ -446,7 +446,7 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
   });
 });
 
-describe("frozen proxy target: v2 committed reads with richStorableValues ON", () => {
+describe("frozen proxy target: v2 committed reads with modernDataModel ON", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -459,7 +459,7 @@ describe("frozen proxy target: v2 committed reads with richStorableValues ON", (
       apiUrl: new URL(import.meta.url),
       storageManager,
       experimental: {
-        richStorableValues: true,
+        modernDataModel: true,
       },
     });
     tx = runtime.edit();
@@ -521,7 +521,7 @@ describe("frozen proxy target: v2 committed reads with richStorableValues ON", (
   });
 });
 
-describe("frozen proxy target: committed reads with richStorableValues OFF (legacy)", () => {
+describe("frozen proxy target: committed reads with modernDataModel OFF (legacy)", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -546,7 +546,7 @@ describe("frozen proxy target: committed reads with richStorableValues OFF (lega
     await storageManager?.close();
   });
 
-  it("returns unfrozen committed objects when richStorableValues is OFF (legacy)", async () => {
+  it("returns unfrozen committed objects when modernDataModel is OFF (legacy)", async () => {
     const link = writeCell(runtime, tx, "legacy-frozen-raw", {
       a: 1,
       b: 2,
