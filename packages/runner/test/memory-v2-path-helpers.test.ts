@@ -131,7 +131,6 @@ describe("memory v2 path helpers", () => {
     expect(cloneWithoutPath(root, ["value", "right"])).toBe(root);
     expect(cloneWithoutPath(root, ["value", "left", "missing"])).toBe(root);
   });
-
 });
 
 describe("memory v2 path helpers — deep-freeze contract", () => {
