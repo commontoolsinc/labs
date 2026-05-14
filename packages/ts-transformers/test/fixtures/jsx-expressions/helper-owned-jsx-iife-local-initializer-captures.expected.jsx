@@ -261,7 +261,7 @@ export default pattern((__cf_pattern_input) => {
                                     }
                                 },
                                 required: ["name"],
-                                asCell: ["readonly"]
+                                asCell: ["stream"]
                             },
                             item: {
                                 type: "object",
@@ -299,7 +299,7 @@ export default pattern((__cf_pattern_input) => {
                                         }
                                     },
                                     required: ["name"],
-                                    asCell: ["readonly"]
+                                    asCell: ["stream"]
                                 }
                             },
                             required: ["pushPath"]

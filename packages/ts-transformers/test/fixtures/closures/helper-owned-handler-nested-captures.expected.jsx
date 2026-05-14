@@ -95,7 +95,7 @@ export default pattern((__cf_pattern_input) => {
                     }
                 },
                 required: ["fileId", "content"],
-                asCell: ["readonly"]
+                asCell: ["stream"]
             }
         },
         required: ["timer", "fileId", "content", "savedContent", "onSaveFile"]

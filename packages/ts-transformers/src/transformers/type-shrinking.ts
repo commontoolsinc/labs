@@ -17,6 +17,7 @@ import {
   typeToSchemaTypeNode,
   unwrapCellLikeType,
 } from "../ast/mod.ts";
+import { getCellKind } from "./opaque-ref/opaque-ref.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -498,11 +499,7 @@ function findPropertySymbol(
 
 export function isCellLikeTypeNode(node: ts.TypeNode): boolean {
   if (!ts.isTypeReferenceNode(node)) return false;
-  const name = ts.isIdentifier(node.typeName)
-    ? node.typeName.text
-    : ts.isQualifiedName(node.typeName)
-    ? node.typeName.right.text
-    : undefined;
+  const name = getTypeReferenceNodeName(node);
   if (!name) return false;
   return name === "Cell" ||
     name === "Writable" ||
@@ -512,6 +509,28 @@ export function isCellLikeTypeNode(node: ts.TypeNode): boolean {
     name === "ReadonlyCell" ||
     name === "WriteonlyCell" ||
     name === "Stream";
+}
+
+function getTypeReferenceNodeName(
+  node: ts.TypeReferenceNode,
+): string | undefined {
+  return ts.isIdentifier(node.typeName)
+    ? node.typeName.text
+    : ts.isQualifiedName(node.typeName)
+    ? node.typeName.right.text
+    : undefined;
+}
+
+export function isStreamTypeNode(node: ts.TypeNode): boolean {
+  return ts.isTypeReferenceNode(node) &&
+    getTypeReferenceNodeName(node) === "Stream";
+}
+
+function isStreamCellType(
+  type: ts.Type | undefined,
+  checker: ts.TypeChecker,
+): boolean {
+  return !!type && getCellKind(type, checker) === "stream";
 }
 
 export function printTypeNode(
@@ -1656,6 +1675,25 @@ export function wrapTypeNodeWithCapability(
     ? "Writable"
     : "OpaqueCell";
 
+  return createHelperWrapperTypeNode(node, wrapperName, factory);
+}
+
+function wrapTypeNodeWithCapabilityOrStream(
+  node: ts.TypeNode,
+  capability: ReactiveCapability,
+  factory: ts.NodeFactory,
+  preserveStream: boolean,
+): ts.TypeNode {
+  return preserveStream
+    ? createHelperWrapperTypeNode(node, "Stream", factory)
+    : wrapTypeNodeWithCapability(node, capability, factory);
+}
+
+function createHelperWrapperTypeNode(
+  node: ts.TypeNode,
+  wrapperName: string,
+  factory: ts.NodeFactory,
+): ts.TypeNode {
   return factory.createTypeReferenceNode(
     factory.createQualifiedName(
       factory.createIdentifier("__cfHelpers"),
@@ -1868,7 +1906,13 @@ function applyCellCapabilityPathsToTypeNode(
     if (inner) {
       const capability = selectCellPathCapability(childPaths);
       if (capability) {
-        updated = wrapTypeNodeWithCapability(inner, capability, factory);
+        updated = wrapTypeNodeWithCapabilityOrStream(
+          inner,
+          capability,
+          factory,
+          isStreamTypeNode(updated) ||
+            isStreamCellType(memberSemanticType, checker),
+        );
         if (typeRegistry && isCellLikeType(memberSemanticType, checker)) {
           typeRegistry.set(updated, memberSemanticType);
         }
@@ -1926,10 +1970,11 @@ function createIdentityOnlyReplacementTypeNode(
     isCellLikeTypeNode(node) ||
     isCellLikeType(resolvedType, checker)
   ) {
-    const wrappedNode = wrapTypeNodeWithCapability(
+    const wrappedNode = wrapTypeNodeWithCapabilityOrStream(
       unknownNode,
       forceComparable ? "comparable" : "opaque",
       factory,
+      isStreamTypeNode(node) || isStreamCellType(resolvedType, checker),
     );
     const wrappedType = resolveIdentitySemanticType(
       wrappedNode,
@@ -2684,6 +2729,7 @@ export function applyShrinkAndWrap(
   wrapCapability: ReactiveCapability = paramSummary.capability,
   context?: TransformationContext,
   fnNode?: ts.Node,
+  preserveStreamWrapper = false,
 ): ts.TypeNode {
   const shrinkPlan = deriveCapabilityShrinkPlan(paramSummary);
   const {
@@ -2747,7 +2793,12 @@ export function applyShrinkAndWrap(
     if (!shouldWrap) {
       return next;
     }
-    return wrapTypeNodeWithCapability(next, wrapCapability, factory);
+    return wrapTypeNodeWithCapabilityOrStream(
+      next,
+      wrapCapability,
+      factory,
+      preserveStreamWrapper,
+    );
   }
 
   let next = identityOnlyRoot
@@ -2905,5 +2956,10 @@ export function applyShrinkAndWrap(
   if (!shouldWrap) {
     return next;
   }
-  return wrapTypeNodeWithCapability(next, wrapCapability, factory);
+  return wrapTypeNodeWithCapabilityOrStream(
+    next,
+    wrapCapability,
+    factory,
+    preserveStreamWrapper,
+  );
 }
