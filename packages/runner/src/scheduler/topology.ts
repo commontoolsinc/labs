@@ -6,6 +6,32 @@ import {
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
 import type { Action, ReactivityLog } from "./types.ts";
 
+export function collectTransitiveEffects(state: {
+  readonly dependents: WeakMap<Action, Set<Action>>;
+  readonly effects: ReadonlySet<Action>;
+}, action: Action): Action[] {
+  const visited = new Set<Action>();
+  const effects: Action[] = [];
+
+  const visit = (current: Action) => {
+    if (visited.has(current)) return;
+    visited.add(current);
+
+    if (state.effects.has(current)) {
+      effects.push(current);
+    }
+
+    const dependents = state.dependents.get(current);
+    if (!dependents) return;
+    for (const dependent of dependents) {
+      visit(dependent);
+    }
+  };
+
+  visit(action);
+  return effects;
+}
+
 export function mapsEqual(
   a: Map<string, unknown>,
   b: Map<string, unknown>,

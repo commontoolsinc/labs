@@ -124,7 +124,10 @@ import {
   txToReactivityLog,
 } from "./scheduler/reactivity.ts";
 import { entityKey } from "./scheduler/keys.ts";
-import { topologicalSort } from "./scheduler/topology.ts";
+import {
+  collectTransitiveEffects,
+  topologicalSort,
+} from "./scheduler/topology.ts";
 import type {
   Action,
   ActionRunTraceEntry,
@@ -2809,28 +2812,12 @@ export class Scheduler {
     const scheduledEffects: TriggerTraceScheduledEffect[] = [];
 
     try {
-      const visited = new Set<Action>();
-      const toSchedule: Action[] = [];
-
-      const findEffects = (action: Action) => {
-        if (visited.has(action)) return;
-        visited.add(action);
-
-        if (this.effects.has(action)) {
-          toSchedule.push(action);
-        }
-
-        const deps = this.dependents.get(action);
-        if (deps) {
-          for (const dependent of deps) {
-            findEffects(dependent);
-          }
-        }
-      };
-
-      findEffects(computation);
-
-      for (const effect of toSchedule) {
+      for (
+        const effect of collectTransitiveEffects(
+          { dependents: this.dependents, effects: this.effects },
+          computation,
+        )
+      ) {
         const pendingBefore = this.pending.has(effect);
         const dirtyBefore = this.dirty.has(effect);
         const debounceMs = this.actionDebounce.get(effect);
