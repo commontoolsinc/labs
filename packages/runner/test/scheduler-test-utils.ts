@@ -113,7 +113,6 @@ function getStaleSchedulerInternals(
 ): StaleSchedulerInternals {
   const internal = scheduler as unknown as {
     pending: Set<Action>;
-    dirty: Set<Action>;
     stalenessState:
       & Parameters<typeof isActionStale>[0]
       & Parameters<typeof markDirectDirtyState>[0];
@@ -130,7 +129,7 @@ function getStaleSchedulerInternals(
 
   return {
     pending: internal.pending,
-    dirty: internal.dirty,
+    dirty: internal.stalenessState.dirty,
     isStale: (action) => isActionStale(internal.stalenessState, action),
     isDemandedPullComputation: (action) =>
       internal.isDemandedPullComputation(action),
