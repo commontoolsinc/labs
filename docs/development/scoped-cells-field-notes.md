@@ -75,31 +75,40 @@ These are the things that bit during the build. Each is also captured in
 
 ### Runtime bugs
 
-#### B1. `onClick={() => stream.send({...})}` is sometimes lowered as a `derive(...)` wrapper instead of a handler — FILED
+#### B1. `onClick={() => stream.send({...})}` is sometimes lowered as a `derive(...)` wrapper instead of a handler — FIXED (CT-1589 / PR #3595)
 
-**Status:** Issue body drafted at `DRAFT-ISSUE-onClick-derive-wrap.md`
-(repo root, untracked). Reproducer at
-`packages/patterns/scope-bug-lambda-in-map/main.tsx`.
+**Status:** Fixed in `bbf4642cc [codex] fix ts-transformers inline handler
+sends (#3595)`, merged 2026-05-14. Filed as
+[CT-1589](https://linear.app/common-tools/issue/CT-1589/transformer-wraps-some-onclick-lambdas-in-derive-instead-of-leaving)
+and verified resolved end-to-end after rebasing the branch onto main.
 
-**Root cause (verified via `--show-transformed`):** For some patterns the
-ts-transformer hoists the JSX `onClick` lambda into a top-level
-`const __cfModuleCallback_N = __cfHardenFn(...)` and wraps its body in
-`__cfHelpers.derive(inputSchema, { asCell: ["opaque"] }, captures, body)` —
-treating the click handler as a reactive expression that should compute an
-opaque value, rather than as an event handler. The stream `.send` never
-fires.
+**Root cause:** For some patterns the ts-transformer hoisted the JSX `onClick`
+lambda into a top-level `const __cfModuleCallback_N = __cfHardenFn(...)` and
+wrapped its body in `__cfHelpers.derive(inputSchema, { asCell: ["opaque"] },
+captures, body)` — treating the click handler as a reactive expression that
+should compute an opaque value, rather than as an event handler. The stream
+`.send` never fired.
 
-The fix in PR #3582 (`fix(ts-transformers): lower property access in
-module-extracted callbacks`) is unrelated — it covers a different layer of
-the same general problem (property access lowering inside extracted
-callbacks). Cherry-picked and verified locally that it does **not** fix this.
+PR #3582 (`fix(ts-transformers): lower property access in module-extracted
+callbacks`) was unrelated — it covered a different layer of the same general
+problem. Cherry-picking it locally did not fix this.
 
-`packages/patterns/cozy-poll-scoped/main.tsx` triggers the bug (4
-`__cfModuleCallback_*` declarations, all `derive`-wrapped). Five reduced
-variants in `scope-bug-lambda-in-map/main.tsx` do **not** trigger it — the
-exact context that causes the closure transformer to extract the lambda
-remains to be bisected. Cozy-poll-scoped is the smallest known in-tree
-trigger as of this writing.
+**Verification after PR #3595:**
+
+```bash
+deno task cf check packages/patterns/cozy-poll-scoped/main.tsx --show-transformed \
+  | grep -c __cfModuleCallback
+# → 0 (was 4 pre-fix, 8 with PR #3582 cherry-picked)
+```
+
+The vote onClick now lowers to a bare
+`(__cf_handler_event, { boundCastVote, oid }) => boundCastVote.send({...})`
+at the call site. End-to-end browser test: clicking 🟢 Love it landed
+`votes: [Array(1)]` and rendered the voter chip with selected state.
+
+The minimal repro at `packages/patterns/scope-bug-lambda-in-map/main.tsx` is
+kept for now as a regression reference; it can be removed once the runtime
+team has a permanent fixture (PR #3595 likely added one).
 
 #### B2. ~~`array.length` on a top-level scoped array doesn't lift reactively~~ — NOT A BUG
 
