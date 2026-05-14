@@ -26,7 +26,6 @@ import type {
 } from "./storage/interface.ts";
 import {
   arraysOverlap,
-  determineTriggeredActions,
   sortAndCompactPaths,
   type SortedAndCompactPaths,
 } from "./reactive-dependencies.ts";
@@ -65,7 +64,6 @@ import {
   getPieceMetadataFromFrame,
   materializeHostVisibleStack,
   queueTask,
-  summarizeTriggerTraceValue,
   toActionRunTraceAddress,
 } from "./scheduler/diagnostics.ts";
 import {
@@ -101,6 +99,14 @@ import {
   summarizeSettleRun,
 } from "./scheduler/execution.ts";
 import {
+  collectTriggeredActionsForChange,
+  createTriggerTraceActionRecord,
+  createTriggerTraceEntry,
+  hasRegisteredTriggers,
+  planTriggeredAction,
+  shouldRecordTriggerTraceEntry,
+} from "./scheduler/notifications.ts";
+import {
   filterIgnoredAddresses,
   hasAnnotatedWrites,
   trustedEventWriteCandidatesFromTransaction,
@@ -122,7 +128,6 @@ import type {
   SettleStatsHistoryEntry,
   SpaceScopeAndURI,
   TelemetryAnnotations,
-  TriggerTraceActionRecord,
   TriggerTraceEntry,
   TriggerTraceScheduledEffect,
 } from "./scheduler/types.ts";
@@ -1284,66 +1289,43 @@ export class Scheduler {
             });
 
             if (
-              this.triggers.size === 0 &&
-              this.nonRecursiveTriggers.size === 0
+              !hasRegisteredTriggers({
+                triggers: this.triggers,
+                nonRecursiveTriggers: this.nonRecursiveTriggers,
+              })
             ) {
               continue;
             }
 
-            const spaceAndURI = entityKey({ ...change.address, space });
-            const paths = this.triggers.get(spaceAndURI);
-            const nonRecursivePaths = this.nonRecursiveTriggers.get(
-              spaceAndURI,
+            const {
+              entity: spaceAndURI,
+              hasMatchingTriggerPaths,
+              triggeredActions,
+            } = collectTriggeredActionsForChange(
+              {
+                triggers: this.triggers,
+                nonRecursiveTriggers: this.nonRecursiveTriggers,
+              },
+              space,
+              change,
             );
 
-            if (paths || nonRecursivePaths) {
-              const triggeredActionSet = new Set<Action>();
-              if (paths) {
-                for (
-                  const action of determineTriggeredActions(
-                    paths,
-                    change.before,
-                    change.after,
-                    change.address.path,
-                  )
-                ) {
-                  triggeredActionSet.add(action);
-                }
-              }
-              if (nonRecursivePaths) {
-                for (
-                  const action of determineTriggeredActions(
-                    nonRecursivePaths,
-                    change.before,
-                    change.after,
-                    change.address.path,
-                    { nonRecursive: true },
-                  )
-                ) {
-                  triggeredActionSet.add(action);
-                }
-              }
-              const triggeredActions = [...triggeredActionSet];
+            if (hasMatchingTriggerPaths) {
               const writerActionId = hasSourceChangeGroup &&
                   sourceChangeGroup !== undefined
                 ? this.changeGroupToActionId.get(sourceChangeGroup)
                 : undefined;
               const triggerTraceEntry: TriggerTraceEntry | null =
                 this.collectTriggerTrace
-                  ? {
-                    recordedAt: performance.now(),
+                  ? createTriggerTraceEntry({
                     notificationType: notification.type,
                     changeIndex,
                     matchedActionCount: triggeredActions.length,
-                    mode: this.pullMode ? "pull" : "push",
+                    pullMode: this.pullMode,
                     writerActionId,
                     space,
-                    entityId: change.address.id,
-                    path: [...change.address.path],
-                    before: summarizeTriggerTraceValue(change.before),
-                    after: summarizeTriggerTraceValue(change.after),
-                    triggered: [] as TriggerTraceActionRecord[],
-                  } satisfies TriggerTraceEntry
+                    change,
+                  })
                   : null;
 
               for (const action of triggeredActions) {
@@ -1367,84 +1349,53 @@ export class Scheduler {
 
                 const actionChangeGroup = this.actionChangeGroups.get(action);
                 const actionId = this.getActionId(action);
-                const actionType = this.effects.has(action)
-                  ? "effect"
-                  : "computation";
+                const actionIsEffect = this.effects.has(action);
+                const actionType = actionIsEffect ? "effect" : "computation";
                 const pendingBefore = this.pending.has(action);
                 const dirtyBefore = this.dirty.has(action);
                 const isOwnCommitSource = notification.type === "commit" &&
                   notification.source !== undefined &&
-                  this.inFlightSources.get(action)?.has(notification.source);
-                if (isOwnCommitSource) {
-                  triggerTraceEntry?.triggered.push({
-                    actionId,
-                    actionType,
-                    mode: this.pullMode ? "pull" : "push",
-                    decision: "skip-own-commit-source",
-                    pendingBefore,
-                    pendingAfter: this.pending.has(action),
-                    dirtyBefore,
-                    dirtyAfter: this.dirty.has(action),
-                    scheduledEffects: [],
-                  });
-                  continue;
-                }
-                if (
-                  hasSourceChangeGroup &&
-                  actionChangeGroup !== undefined &&
-                  Object.is(actionChangeGroup, sourceChangeGroup)
-                ) {
-                  triggerTraceEntry?.triggered.push({
-                    actionId,
-                    actionType,
-                    mode: this.pullMode ? "pull" : "push",
-                    decision: "skip-same-change-group",
-                    pendingBefore,
-                    pendingAfter: this.pending.has(action),
-                    dirtyBefore,
-                    dirtyAfter: this.dirty.has(action),
-                    scheduledEffects: [],
-                  });
-                  continue;
-                }
-
-                let decision: TriggerTraceActionRecord["decision"];
-                let scheduledEffects: TriggerTraceScheduledEffect[] = [];
-                if (this.pullMode) {
-                  // Pull mode: only schedule effects, mark computations as dirty
-                  if (this.effects.has(action)) {
-                    this.conditionallyScheduledEffects.delete(action);
-                    this.scheduleWithDebounce(action);
-                    decision = "schedule-effect";
-                  } else {
-                    // Mark computation as dirty and schedule affected effects
-                    this.markDirty(action);
-                    scheduledEffects = this.scheduleAffectedEffects(action);
-                    decision = dirtyBefore ? "already-dirty" : "mark-dirty";
-                  }
-                } else {
-                  // Push mode: existing behavior - schedule all triggered actions
-                  this.scheduleWithDebounce(action);
-                  decision = "schedule-push";
-                }
-
-                triggerTraceEntry?.triggered.push({
-                  actionId,
-                  actionType,
-                  mode: this.pullMode ? "pull" : "push",
-                  decision,
-                  pendingBefore,
-                  pendingAfter: this.pending.has(action),
+                  this.inFlightSources.get(action)?.has(notification.source) ===
+                    true;
+                const plan = planTriggeredAction({
+                  pullMode: this.pullMode,
+                  isEffect: actionIsEffect,
                   dirtyBefore,
-                  dirtyAfter: this.dirty.has(action),
-                  scheduledEffects,
+                  isOwnCommitSource,
+                  hasSourceChangeGroup,
+                  actionChangeGroup,
+                  sourceChangeGroup,
                 });
+                let scheduledEffects: TriggerTraceScheduledEffect[] = [];
+
+                if (plan.operation === "schedule") {
+                  if (this.pullMode && actionIsEffect) {
+                    this.conditionallyScheduledEffects.delete(action);
+                  }
+                  this.scheduleWithDebounce(action);
+                } else if (plan.operation === "mark-dirty") {
+                  this.markDirty(action);
+                  scheduledEffects = this.scheduleAffectedEffects(action);
+                }
+
+                triggerTraceEntry?.triggered.push(
+                  createTriggerTraceActionRecord({
+                    actionId,
+                    actionType,
+                    pullMode: this.pullMode,
+                    decision: plan.decision,
+                    pendingBefore,
+                    pendingAfter: this.pending.has(action),
+                    dirtyBefore,
+                    dirtyAfter: this.dirty.has(action),
+                    scheduledEffects,
+                  }),
+                );
               }
 
               if (
                 triggerTraceEntry &&
-                (triggerTraceEntry.triggered.length > 0 ||
-                  triggerTraceEntry.matchedActionCount > 0)
+                shouldRecordTriggerTraceEntry(triggerTraceEntry)
               ) {
                 this.recordTriggerTrace(triggerTraceEntry);
               }
