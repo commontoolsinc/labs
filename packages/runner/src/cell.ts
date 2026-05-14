@@ -9,6 +9,7 @@ import {
   DECONSTRUCT,
   FabricInstance,
   type FabricValue,
+  getDataModelConfig,
   isArrayIndexPropertyName,
   shallowFabricFromNativeValue,
 } from "@commonfabric/data-model/fabric-value";
@@ -2175,15 +2176,15 @@ function validateStaticData(value: unknown): void {
  *
  * **Frozenness contract (modern data model only):** This function sits at
  * the write boundary into runner/memory storage. Under
- * `modernDataModel: true`, the shallow fabric conversion that happens
- * here additionally produces frozen shallow clones for any plain
- * unfrozen Object/Array level it visits — so the returned tree's
- * already-processed sub-trees are deep-frozen `FabricValue`s. If the
- * input is already a deep-frozen valid `FabricValue`, the shallow
- * conversion returns it as-is and reference identity is preserved
- * end-to-end. Under `modernDataModel: false` (legacy), no freezing
- * happens here at all and the legacy "preserve identity when there's
- * nothing to do" optimization applies regardless of input frozenness.
+ * `modernDataModel: true`, the returned tree is always a valid
+ * deep-frozen `FabricValue`: the shallow fabric conversion freezes the
+ * sub-trees it visits, and the function freezes the freshly-built
+ * top-level container before returning. If the input is already a
+ * deep-frozen valid `FabricValue`, the shallow conversion returns it
+ * as-is and reference identity is preserved end-to-end. Under
+ * `modernDataModel: false` (legacy), no freezing happens here at all
+ * and the legacy "preserve identity when there's nothing to do"
+ * optimization applies regardless of input frozenness.
  *
  * TODO(seefeld): When an array has default entries and is rewritten as [...old,
  * new], this will still break, because the previous entries will point back to
@@ -2268,7 +2269,11 @@ export function recursivelyAddIDIfNeeded<T>(
         isObject(v) && !isCellLink(v) && !(ID in v)
       ) {
         changed = true;
-        result[i] = { [ID]: frame.generatedIdCounter++, ...v };
+        const withId = { [ID]: frame.generatedIdCounter++, ...v };
+        // Under modern, the ID-wrapped object is a freshly-built
+        // container that must also be deep-frozen.
+        if (getDataModelConfig()) Object.freeze(withId);
+        result[i] = withId;
       } else {
         if (!Object.is(v, el)) {
           changed = true;
@@ -2282,6 +2287,11 @@ export function recursivelyAddIDIfNeeded<T>(
       return value;
     }
 
+    // Under the modern data model, the value enters a write-boundary that
+    // expects deep-frozen `FabricValue` trees. Children are already frozen
+    // by `shallowFabricFromNativeValue()` above; freeze the freshly-built
+    // top-level container so the returned tree is deep-frozen as a whole.
+    if (getDataModelConfig()) Object.freeze(result);
     return result as T;
   } else {
     // At this point we know `value` is a non-array record (we returned early
@@ -2314,6 +2324,8 @@ export function recursivelyAddIDIfNeeded<T>(
       return value;
     }
 
+    // See array-branch comment above re: modern freeze.
+    if (getDataModelConfig()) Object.freeze(result);
     return result as T;
   }
 }
