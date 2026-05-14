@@ -107,6 +107,17 @@ import {
   shouldRecordTriggerTraceEntry,
 } from "./scheduler/notifications.ts";
 import {
+  addStaleUpstream,
+  clearDirectDirty as clearDirectDirtyState,
+  forceClearStale as forceClearStaleState,
+  getUpstreamStaleCount as getUpstreamStaleCountFromState,
+  isActionStale,
+  markDirectDirty as markDirectDirtyState,
+  removeStaleUpstream,
+  setStaleFromInputs,
+  type StalenessState,
+} from "./scheduler/staleness.ts";
+import {
   filterIgnoredAddresses,
   hasAnnotatedWrites,
   trustedEventWriteCandidatesFromTransaction,
@@ -203,6 +214,13 @@ export class Scheduler {
   private stale = new Set<Action>();
   private upstreamStaleWriters = new WeakMap<Action, Set<Action>>();
   private upstreamStaleCount = new WeakMap<Action, number>();
+  private stalenessState: StalenessState = {
+    dirty: this.dirty,
+    stale: this.stale,
+    dependents: this.dependents,
+    upstreamStaleWriters: this.upstreamStaleWriters,
+    upstreamStaleCount: this.upstreamStaleCount,
+  };
   private pullMode = true;
 
   // Debugger breakpoints: action IDs that should trigger `debugger` before execution
@@ -1750,7 +1768,7 @@ export class Scheduler {
     reverse.add(writer);
 
     if (!alreadyDependent && this.isStale(writer)) {
-      this.addStaleUpstream(writer, dependent);
+      addStaleUpstream(this.stalenessState, writer, dependent);
       if (this.isDemandedPullComputation(writer)) {
         this.queueExecution();
       }
@@ -1771,7 +1789,7 @@ export class Scheduler {
     }
 
     if (hadDependent) {
-      this.removeStaleUpstream(writer, dependent);
+      removeStaleUpstream(this.stalenessState, writer, dependent);
     }
   }
 
@@ -2088,6 +2106,16 @@ export class Scheduler {
     return this.dependents.get(action) ?? new Set();
   }
 
+  private resetUpstreamStaleState(): void {
+    this.upstreamStaleWriters = new WeakMap();
+    this.upstreamStaleCount = new WeakMap();
+    this.stalenessState = {
+      ...this.stalenessState,
+      upstreamStaleWriters: this.upstreamStaleWriters,
+      upstreamStaleCount: this.upstreamStaleCount,
+    };
+  }
+
   // ============================================================
   // Pull-based scheduling methods
   // ============================================================
@@ -2100,8 +2128,7 @@ export class Scheduler {
   enablePullMode(): void {
     this.pullMode = true;
     this.stale.clear();
-    this.upstreamStaleWriters = new WeakMap();
-    this.upstreamStaleCount = new WeakMap();
+    this.resetUpstreamStaleState();
 
     // Rebuild reverse dependency graph (dependents map) from current dependencies.
     // In push mode, processRun() doesn't update dependents, so the map may be stale.
@@ -2113,7 +2140,7 @@ export class Scheduler {
       }
     }
     for (const action of this.dirty) {
-      this.setStaleFromInputs(action);
+      setStaleFromInputs(this.stalenessState, action);
     }
 
     this.runtime.telemetry.submit({
@@ -2131,8 +2158,7 @@ export class Scheduler {
     // Clear dirty set when switching back to push mode
     this.dirty.clear();
     this.stale.clear();
-    this.upstreamStaleWriters = new WeakMap();
-    this.upstreamStaleCount = new WeakMap();
+    this.resetUpstreamStaleState();
     this.runtime.telemetry.submit({
       type: "scheduler.mode.change",
       pullMode: false,
@@ -2171,84 +2197,19 @@ export class Scheduler {
   }
 
   private markDirectDirty(action: Action): boolean {
-    if (this.dirty.has(action)) return false;
-
-    this.dirty.add(action);
-    this.setStaleFromInputs(action);
-    return true;
+    return markDirectDirtyState(this.stalenessState, action);
   }
 
   private clearDirectDirty(action: Action): boolean {
-    if (!this.dirty.delete(action)) return false;
+    if (!this.dirty.has(action)) return false;
     if (this.computations.has(action)) {
       this.clearComputationDebounceState(action);
     }
-    this.setStaleFromInputs(action);
-    return true;
-  }
-
-  private setStaleFromInputs(action: Action): void {
-    const shouldBeStale = this.dirty.has(action) ||
-      this.getUpstreamStaleCount(action) > 0;
-    const isCurrentlyStale = this.stale.has(action);
-    if (shouldBeStale === isCurrentlyStale) return;
-
-    if (shouldBeStale) {
-      this.stale.add(action);
-    } else {
-      this.stale.delete(action);
-    }
-    this.propagateStaleTransition(action, shouldBeStale);
-  }
-
-  private propagateStaleTransition(
-    action: Action,
-    becameStale: boolean,
-  ): void {
-    const dependents = this.dependents.get(action);
-    if (!dependents) return;
-
-    const delta = becameStale ? 1 : -1;
-    for (const dependent of dependents) {
-      if (delta > 0) {
-        this.addStaleUpstream(action, dependent);
-      } else {
-        this.removeStaleUpstream(action, dependent);
-      }
-    }
-  }
-
-  private addStaleUpstream(writer: Action, dependent: Action): void {
-    let writers = this.upstreamStaleWriters.get(dependent);
-    if (!writers) {
-      writers = new Set();
-      this.upstreamStaleWriters.set(dependent, writers);
-    }
-    if (writers.has(writer)) return;
-
-    writers.add(writer);
-    this.upstreamStaleCount.set(dependent, writers.size);
-    this.setStaleFromInputs(dependent);
-  }
-
-  private removeStaleUpstream(writer: Action, dependent: Action): void {
-    const writers = this.upstreamStaleWriters.get(dependent);
-    if (!writers?.delete(writer)) return;
-
-    if (writers.size === 0) {
-      this.upstreamStaleWriters.delete(dependent);
-      this.upstreamStaleCount.delete(dependent);
-    } else {
-      this.upstreamStaleCount.set(dependent, writers.size);
-    }
-    this.setStaleFromInputs(dependent);
+    return clearDirectDirtyState(this.stalenessState, action);
   }
 
   private forceClearStale(action: Action): void {
-    this.upstreamStaleWriters.delete(action);
-    this.upstreamStaleCount.delete(action);
-    if (!this.stale.delete(action)) return;
-    this.propagateStaleTransition(action, false);
+    forceClearStaleState(this.stalenessState, action);
   }
 
   private getTraceActionSummary(
@@ -2329,11 +2290,11 @@ export class Scheduler {
   }
 
   private isStale(action: Action): boolean {
-    return this.stale.has(action);
+    return isActionStale(this.stalenessState, action);
   }
 
   private getUpstreamStaleCount(action: Action): number {
-    return this.upstreamStaleCount.get(action) ?? 0;
+    return getUpstreamStaleCountFromState(this.stalenessState, action);
   }
 
   /**
