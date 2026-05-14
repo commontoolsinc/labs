@@ -984,6 +984,55 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     );
 
     await t.step(
+      "strict text integrity derives authorship from a bound represented profile",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+        const root: WorkerVNode = {
+          type: "vnode",
+          name: "cf-cfc-authorship",
+          props: {
+            verifyTextIntegrity: true,
+            $author: representedProfileCell as never,
+            authorName: "Alice",
+          },
+          children: [authoredByProfileTextCell as never],
+        };
+
+        const cancel = reconciler.mount(root);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(renderedText.includes("Profile-authored note"), true);
+          assertEquals(
+            renderedText.includes("Content hidden by integrity policy"),
+            false,
+          );
+          assertEquals(
+            collector.getOpsOfType("set-binding").some((op) =>
+              op.propName === "author"
+            ),
+            false,
+          );
+          assertEquals(
+            collector.getOpsOfType("set-prop").some((op) =>
+              op.key === "author" &&
+              JSON.stringify(op.value) ===
+                JSON.stringify({ subject: signer.did(), name: "Alice" })
+            ),
+            true,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
       "strict text integrity blocks unsigned child text",
       async () => {
         const collector = createOpsCollector();

@@ -227,20 +227,35 @@ describe("CFCFCAuthorship", () => {
         },
       }],
     };
+    let profile = { name: "Alice Nguyen" };
+    let notify: (() => void) | undefined;
     const element = new CFCFCAuthorship();
     element.value = {
       getCfcLabel: () => Promise.resolve(messageLabel),
     };
     element.author = {
-      get: () => ({ name: "Alice Nguyen" }),
+      get: () => profile,
       getCfcLabel: () => Promise.resolve(profileLabel),
-      subscribe: () => () => {},
+      subscribe: (callback: () => void) => {
+        notify = callback;
+        return () => {};
+      },
     };
 
     await element.refreshLabel();
     await element.refreshAuthorClaim();
 
     expect(element.authorshipState).toBe("verified");
+
+    profile = { name: "Alice Updated" };
+    notify?.();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(element.authorshipState).toBe("verified");
+    expect(element.authorClaim).toEqual({
+      subject: "did:example:alice",
+      name: "Alice Updated",
+    });
   });
 
   it("fails closed when a bound author claim cell changes away from the integrity subject", async () => {

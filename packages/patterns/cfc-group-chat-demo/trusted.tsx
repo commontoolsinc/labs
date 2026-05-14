@@ -56,18 +56,20 @@ export type TrustedProfile = RepresentsCurrentUser<
   >
 >;
 
+export type ProfileCell = Writable<ChatProfile>;
 export type TrustedProfileCell = Writable<TrustedProfile>;
 
 export interface MyProfileValue {
-  readonly profile?: TrustedProfileCell;
+  readonly profile?: ProfileCell;
 }
 
 export type MyProfileCell = Writable<MyProfileValue | Default<{}>>;
 const MY_PROFILE_VALUE_SCHEMA = toSchema<MyProfileValue>();
+const TRUSTED_PROFILE_SCHEMA = toSchema<TrustedProfile>();
 
 export type TrustedSentChatMessage = AuthoredByCurrentUser<
   TrustedActionWrite<
-    SentChatMessage<TrustedProfileCell>,
+    SentChatMessage<ProfileCell>,
     typeof commitTrustedMessageSend,
     typeof TRUSTED_GROUP_CHAT_SEND_ACTION,
     typeof TRUSTED_GROUP_CHAT_SEND_SURFACE
@@ -75,7 +77,7 @@ export type TrustedSentChatMessage = AuthoredByCurrentUser<
 >;
 
 export type ImportedClaimedChatMessage = PlainImportedClaimedChatMessage<
-  TrustedProfileCell
+  ProfileCell
 >;
 
 export type SharedChatMessage =
@@ -102,7 +104,12 @@ export const myProfileValue = (
 
 export const currentProfileCell = (
   myProfile: MyProfileCell,
-): TrustedProfileCell | undefined => myProfileValue(myProfile).profile;
+): TrustedProfileCell | undefined =>
+  myProfileValue(myProfile).profile
+    ? (myProfileValue(myProfile).profile as any).asSchema(
+      TRUSTED_PROFILE_SCHEMA,
+    ) as TrustedProfileCell
+    : undefined;
 
 export const currentProfileSnapshot = (
   myProfile: MyProfileCell,
@@ -126,13 +133,13 @@ const cellKey = (cell: unknown): string | undefined => {
 export const participantClaimsValue = (
   myProfile: MyProfileCell,
   messages: SharedMessagesCell,
-): ParticipantClaim<TrustedProfileCell>[] => {
+): ParticipantClaim<ProfileCell>[] => {
   const seen = new Set<string>();
-  const participants: ParticipantClaim<TrustedProfileCell>[] = [];
+  const participants: ParticipantClaim<ProfileCell>[] = [];
   const addParticipant = (
     name: string | undefined,
     accentColor: string | undefined,
-    profile: TrustedProfileCell | undefined,
+    profile: ProfileCell | undefined,
   ) => {
     if (!name) {
       return;
@@ -157,7 +164,7 @@ export const participantClaimsValue = (
   );
 
   messagesValue(messages).forEach((message) => {
-    const profile = message.authorProfile as TrustedProfileCell | undefined;
+    const profile = message.authorProfile as ProfileCell | undefined;
     const profileValue = profile?.get();
     addParticipant(
       profileValue?.name ?? message.authorName,
@@ -472,7 +479,7 @@ export const VerifiedChatBubble = pattern<
     <cf-cfc-authorship
       data-authorship-surface={message.id}
       $value={message}
-      author={message.authorProfile}
+      $author={message.authorProfile}
       authorName={message.authorName}
       verifyTextIntegrity
       allowLiteralText={false}
@@ -487,5 +494,5 @@ export const VerifiedChatBubble = pattern<
   ),
 }));
 
-export type ParticipantClaimValue = ParticipantClaim<TrustedProfileCell>;
-export type AnyPlainChatMessage = PlainChatMessage<TrustedProfileCell>;
+export type ParticipantClaimValue = ParticipantClaim<ProfileCell>;
+export type AnyPlainChatMessage = PlainChatMessage<ProfileCell>;

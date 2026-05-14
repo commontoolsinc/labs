@@ -592,6 +592,10 @@ export class CFCFCAuthorship extends BaseElement {
     }
 
     this._unsubscribeAuthor = author.subscribe((claim) => {
+      if (hasLabelQuery(author) || hasLabelResolution(author)) {
+        void this.refreshAuthorClaim();
+        return;
+      }
       const previous = this._authorClaim;
       this._authorClaim = claim;
       this.requestUpdate("author", previous);

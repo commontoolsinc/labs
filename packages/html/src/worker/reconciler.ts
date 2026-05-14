@@ -26,6 +26,7 @@ import {
   UI,
   useCancelGroup,
 } from "@commonfabric/runner";
+import type { JSONValue } from "@commonfabric/runtime-client";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
 import type {
@@ -527,7 +528,8 @@ export class WorkerReconciler {
   private requiredAuthorshipIntegrityFromAuthor(
     node: WorkerVNode,
   ): readonly unknown[] | undefined {
-    const author = this.nodePropForRenderPolicy(node, "author");
+    const author = this.nodePropForRenderPolicy(node, "author") ??
+      this.nodePropForRenderPolicy(node, "$author");
     if (!isCell(author)) {
       return undefined;
     }
@@ -537,6 +539,62 @@ export class WorkerReconciler {
     return subject === undefined
       ? undefined
       : [{ kind: "authored-by", subject }];
+  }
+
+  private authorshipAuthorClaimFromAuthorCell(
+    state: NodeState,
+    authorCell: Cell<unknown>,
+  ): JSONValue | undefined {
+    if (state.tagName !== CFC_AUTHORSHIP_TAG) {
+      return undefined;
+    }
+
+    const subject = this.representsPrincipalSubjectForCell(authorCell);
+    if (subject === undefined) {
+      return undefined;
+    }
+
+    const sourceNode = {
+      name: state.tagName,
+      props: state.sourceProps,
+      children: state.sourceChildren ?? [],
+    } as WorkerVNode;
+    const authorName = this.nodePropForRenderPolicy(sourceNode, "authorName");
+    const resolvedAuthorName = isCell(authorName)
+      ? this.readCellPolicyValue(authorName as Cell<unknown>)
+      : authorName;
+
+    const claim: Record<string, JSONValue> = { subject };
+    if (typeof resolvedAuthorName === "string") {
+      claim.name = resolvedAuthorName;
+    }
+    return claim as JSONValue;
+  }
+
+  private bindingOpsForCell(
+    state: NodeState,
+    propName: string,
+    cell: Cell<unknown>,
+  ): VDomOp[] {
+    if (propName === "author") {
+      const authorClaim = this.authorshipAuthorClaimFromAuthorCell(state, cell);
+      if (authorClaim !== undefined) {
+        return [{
+          op: "set-prop",
+          nodeId: state.nodeId,
+          key: "author",
+          value: authorClaim,
+        }];
+      }
+    }
+
+    const cellRef = cell.getAsNormalizedFullLink();
+    return [{
+      op: "set-binding",
+      nodeId: state.nodeId,
+      propName,
+      cellRef,
+    }];
   }
 
   private representsPrincipalSubjectForCell(
@@ -837,6 +895,8 @@ export class WorkerReconciler {
     return key === "requiredTextIntegrity" ||
       key === "requiredIntegrity" ||
       key === "data-cfc-required-text-integrity" ||
+      key === "author" ||
+      key === "$author" ||
       key === "verifyTextIntegrity" ||
       key === "verify-text-integrity" ||
       key === "data-cfc-verify-text-integrity" ||
@@ -1522,13 +1582,9 @@ export class WorkerReconciler {
       if (existingState) {
         existingState.cancel();
       }
-      const cellRef = (value as Cell<unknown>).getAsNormalizedFullLink();
-      this.queueOps([{
-        op: "set-binding",
-        nodeId: state.nodeId,
-        propName,
-        cellRef,
-      }]);
+      this.queueOps(
+        this.bindingOpsForCell(state, propName, value as Cell<unknown>),
+      );
       state.propSubscriptions.set(key, {
         cell: value as Cell<unknown>,
         cancel: () => {},
@@ -1684,13 +1740,9 @@ export class WorkerReconciler {
           if (existingState) existingState.cancel();
 
           const propName = getBindingPropName(key);
-          const cellRef = resolvedTarget.getAsNormalizedFullLink();
-          this.queueOps([{
-            op: "set-binding",
-            nodeId: state.nodeId,
-            propName,
-            cellRef,
-          }]);
+          this.queueOps(
+            this.bindingOpsForCell(state, propName, resolvedTarget),
+          );
           state.propSubscriptions.set(key, {
             cell: resolvedTarget,
             cancel: () => {},
@@ -2480,13 +2532,9 @@ export class WorkerReconciler {
         // Bidirectional binding ($prop)
         const propName = getBindingPropName(key);
         if (isCell(value)) {
-          const cellRef = value.getAsNormalizedFullLink();
-          this.queueOps([{
-            op: "set-binding",
-            nodeId: state.nodeId,
-            propName,
-            cellRef,
-          }]);
+          this.queueOps(
+            this.bindingOpsForCell(state, propName, value as Cell<unknown>),
+          );
           state.propSubscriptions.set(key, {
             cell: value as Cell<unknown>,
             cancel: () => {},
