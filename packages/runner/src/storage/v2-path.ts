@@ -132,11 +132,9 @@ export const cloneWithValueAtPath = (
   value: FabricValue | undefined,
 ): EntityDocument | undefined => {
   if (path.length === 0) {
-    return value === undefined
-      ? undefined
-      : deepFreeze(
-        cloneIfNecessary(value as FabricValue, { frozen: false }),
-      ) as EntityDocument;
+    return value === undefined ? undefined : deepFreeze(
+      cloneIfNecessary(value as FabricValue, { frozen: false }),
+    ) as EntityDocument;
   }
 
   const baseRoot = (root ?? {}) as Record<string, unknown>;
