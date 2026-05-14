@@ -592,15 +592,15 @@ export class RuntimeProcessor {
 
     // Fast path: pattern already exists
     // (Value is a Cell itself, and pattern metadata means it's instantiated)
-    // FIXME(@ubik2): Need to handle this some other way. We don't generally link patterns
-    // to a result.
-    // if (getMetaLink(defaultPatternCell, "pattern")) {
-    //   await this.runtime.start(defaultPatternCell);
-    //   await this.runtime.idle();
-    //   return {
-    //     cell: createCellRef(defaultPatternCell),
-    //   };
-    // }
+    // We've followed all the links from "defaultPattern", so our cell should
+    // be the result cell for the default pattern.
+    if (getMetaLink(defaultPatternCell, "pattern")) {
+      await this.runtime.start(defaultPatternCell);
+      await this.runtime.idle();
+      return {
+        cell: createCellRef(defaultPatternCell),
+      };
+    }
 
     // Pattern doesn't exist - create it via home space PieceController
     const homeSession: Session = {

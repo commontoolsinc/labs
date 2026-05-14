@@ -118,7 +118,7 @@ describe("ensurePieceRunning", () => {
         properties: { doubled: { type: "number" } },
       },
       result: {
-        doubled: { $alias: { cell: "result", path: ["doubled"] } }, // will be bound to resultCell.value.doubled
+        doubled: { $alias: { cell: "internal", path: ["doubled"] } }, // bound to resultCell.internal.doubled
       },
       nodes: [
         {
