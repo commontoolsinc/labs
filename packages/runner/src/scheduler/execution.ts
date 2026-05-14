@@ -136,6 +136,32 @@ export function recordEarlyIterationComputations(state: {
   }
 }
 
+export function isPendingPullActionRunnable(state: {
+  readonly effects: ReadonlySet<Action>;
+  readonly isDemandedPullComputation: (action: Action) => boolean;
+  readonly shouldRunFirstPullComputationInDemandContext: (
+    action: Action,
+  ) => boolean;
+}, action: Action): boolean {
+  return state.effects.has(action) ||
+    state.isDemandedPullComputation(action) ||
+    state.shouldRunFirstPullComputationInDemandContext(action);
+}
+
+export function isDirtyPullActionRunnable(state: {
+  readonly effects: ReadonlySet<Action>;
+  readonly isDemandedPullComputation: (action: Action) => boolean;
+  readonly isThrottled: (action: Action) => boolean;
+  readonly isDebouncedComputationWaiting?: (action: Action) => boolean;
+}, action: Action): boolean {
+  return (
+    state.effects.has(action) ||
+    state.isDemandedPullComputation(action)
+  ) &&
+    !state.isThrottled(action) &&
+    state.isDebouncedComputationWaiting?.(action) !== true;
+}
+
 export function summarizeSettleIteration(state: {
   readonly workSetSize: number;
   readonly order: readonly Action[];

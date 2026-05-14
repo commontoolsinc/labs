@@ -88,6 +88,8 @@ import {
 import {
   buildPullInitialSeeds,
   createSettlingTracker,
+  isDirtyPullActionRunnable,
+  isPendingPullActionRunnable,
   markExecuteStart,
   planAdaptiveCycleDebounce,
   planCycleBreak,
@@ -2732,49 +2734,65 @@ export class Scheduler {
    */
   private collectPullIterationSeeds(workSet: Set<Action>): void {
     for (const action of this.pending) {
-      if (
-        this.effects.has(action) ||
-        this.isDemandedPullComputation(action) ||
-        this.shouldRunFirstPullComputationInDemandContext(action)
-      ) {
+      if (this.isPendingPullActionRunnable(action)) {
         workSet.add(action);
       }
     }
 
     for (const action of this.dirty) {
-      if (
-        this.effects.has(action) ||
-        this.isDemandedPullComputation(action)
-      ) {
-        if (!this.isThrottled(action)) {
-          this.pending.add(action);
-          workSet.add(action);
-        }
+      if (this.isDirtyPullActionRunnable(action)) {
+        this.pending.add(action);
+        workSet.add(action);
       }
     }
   }
 
   private hasRunnablePullWork(): boolean {
     for (const action of this.pending) {
-      if (this.effects.has(action) || this.isDemandedPullComputation(action)) {
-        return true;
-      }
-      if (this.shouldRunFirstPullComputationInDemandContext(action)) {
+      if (this.isPendingPullActionRunnable(action)) {
         return true;
       }
     }
 
     for (const action of this.dirty) {
       if (
-        (this.effects.has(action) || this.isDemandedPullComputation(action)) &&
-        !this.isThrottled(action) &&
-        !this.isDebouncedComputationWaiting(action)
+        this.isDirtyPullActionRunnable(action, {
+          considerDebounce: true,
+        })
       ) {
         return true;
       }
     }
 
     return false;
+  }
+
+  private isPendingPullActionRunnable(action: Action): boolean {
+    return isPendingPullActionRunnable({
+      effects: this.effects,
+      isDemandedPullComputation: (candidate) =>
+        this.isDemandedPullComputation(candidate),
+      shouldRunFirstPullComputationInDemandContext: (candidate) =>
+        this.shouldRunFirstPullComputationInDemandContext(candidate),
+    }, action);
+  }
+
+  private isDirtyPullActionRunnable(
+    action: Action,
+    options: { considerDebounce?: boolean } = {},
+  ): boolean {
+    return isDirtyPullActionRunnable({
+      effects: this.effects,
+      isDemandedPullComputation: (candidate) =>
+        this.isDemandedPullComputation(candidate),
+      isThrottled: (candidate) => this.isThrottled(candidate),
+      ...(options.considerDebounce
+        ? {
+          isDebouncedComputationWaiting: (candidate: Action) =>
+            this.isDebouncedComputationWaiting(candidate),
+        }
+        : {}),
+    }, action);
   }
 
   private hasDeferredDirtyEffectWork(): boolean {
