@@ -1,5 +1,11 @@
 import { getLogger } from "@commonfabric/utils/logger";
 import { recordTrustedEventPolicyInputs } from "../cfc/ui-contract.ts";
+import type { Cancel } from "../cancel.ts";
+import { ensurePieceRunning } from "../ensure-piece-running.ts";
+import {
+  areNormalizedLinksSame,
+  type NormalizedFullLink,
+} from "../link-utils.ts";
 import type { Runtime } from "../runtime.ts";
 import { createDirtyDependencyTraceContext } from "./diagnostics.ts";
 import { planEventDirtyDependencyScheduling } from "./execution.ts";
@@ -34,6 +40,89 @@ export interface EventDependencyPreflightResult {
   collectMs: number;
   scheduleMs: number;
   preflightStats: DirtyDependencyTraceContext;
+}
+
+export function queueSchedulerEvent(state: {
+  readonly runtime: Runtime;
+  readonly eventHandlers: readonly [NormalizedFullLink, EventHandler][];
+  readonly eventQueue: QueuedEvent[];
+  readonly backgroundTasks: Set<Promise<unknown>>;
+  readonly queueExecution: () => void;
+  readonly queueEvent: (
+    eventLink: NormalizedFullLink,
+    event: unknown,
+    retries: number,
+    onCommit: QueuedEvent["onCommit"] | undefined,
+    doNotLoadPieceIfNotRunning: boolean,
+  ) => void;
+}, args: {
+  readonly eventLink: NormalizedFullLink;
+  readonly event: unknown;
+  readonly retries: number;
+  readonly onCommit?: QueuedEvent["onCommit"];
+  readonly doNotLoadPieceIfNotRunning: boolean;
+}): void {
+  let handlerFound = false;
+
+  for (const [link, handler] of state.eventHandlers) {
+    if (areNormalizedLinksSame(link, args.eventLink)) {
+      handlerFound = true;
+      state.queueExecution();
+      state.eventQueue.push({
+        eventLink: args.eventLink,
+        action: (tx) => handler(tx, args.event),
+        handler,
+        event: args.event,
+        retriesLeft: args.retries,
+        onCommit: args.onCommit,
+      });
+    }
+  }
+
+  // If no handler was found, try to start the piece that should handle this event.
+  if (!handlerFound && !args.doNotLoadPieceIfNotRunning) {
+    const startTask = (async () => {
+      const started = await ensurePieceRunning(state.runtime, args.eventLink);
+      if (started) {
+        // Piece was started, re-queue the event. Don't trigger loading again
+        // if this didn't result in registering a handler, as trying again
+        // won't change this.
+        state.queueEvent(
+          args.eventLink,
+          args.event,
+          args.retries,
+          args.onCommit,
+          true,
+        );
+      }
+    })();
+    state.backgroundTasks.add(startTask);
+    startTask.finally(() => {
+      state.backgroundTasks.delete(startTask);
+    });
+  }
+}
+
+export function addSchedulerEventHandler(state: {
+  readonly eventHandlers: [NormalizedFullLink, EventHandler][];
+}, args: {
+  readonly handler: EventHandler;
+  readonly ref: NormalizedFullLink;
+  readonly populateDependencies?: (
+    tx: Parameters<EventHandler>[0],
+    event: Parameters<EventHandler>[1],
+  ) => void;
+}): Cancel {
+  if (args.populateDependencies) {
+    args.handler.populateDependencies = args.populateDependencies;
+  }
+  state.eventHandlers.push([args.ref, args.handler]);
+  return () => {
+    const index = state.eventHandlers.findIndex(([r, h]) =>
+      r === args.ref && h === args.handler
+    );
+    if (index !== -1) state.eventHandlers.splice(index, 1);
+  };
 }
 
 export function preflightQueuedEventDependencies(state: {

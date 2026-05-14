@@ -10,11 +10,7 @@ import type {
   ErrorWithContext,
   Runtime,
 } from "./runtime.ts";
-import {
-  areNormalizedLinksSame,
-  type NormalizedFullLink,
-  toMemorySpaceAddress,
-} from "./link-utils.ts";
+import { type NormalizedFullLink, toMemorySpaceAddress } from "./link-utils.ts";
 import type {
   ChangeGroup,
   IExtendedStorageTransaction,
@@ -32,7 +28,6 @@ import {
   ignoreReadForScheduling,
   markReadAsPotentialWrite,
 } from "./storage/reactivity-log.ts";
-import { ensurePieceRunning } from "./ensure-piece-running.ts";
 import type {
   ActionStats,
   NonIdempotentReport,
@@ -149,8 +144,10 @@ import {
   txToReactivityLog,
 } from "./scheduler/reactivity.ts";
 import {
+  addSchedulerEventHandler,
   dispatchQueuedEvent,
   preflightQueuedEventDependencies,
+  queueSchedulerEvent,
 } from "./scheduler/events.ts";
 import { buildSchedulerGraphSnapshot } from "./scheduler/graph-snapshot.ts";
 import { entityKey } from "./scheduler/keys.ts";
@@ -1236,39 +1233,33 @@ export class Scheduler {
     onCommit?: (tx: IExtendedStorageTransaction) => void,
     doNotLoadPieceIfNotRunning: boolean = false,
   ): void {
-    let handlerFound = false;
-
-    for (const [link, handler] of this.eventHandlers) {
-      if (areNormalizedLinksSame(link, eventLink)) {
-        handlerFound = true;
-        this.queueExecution();
-        this.eventQueue.push({
-          eventLink,
-          action: (tx: IExtendedStorageTransaction) => handler(tx, event),
-          handler,
-          event,
-          retriesLeft: retries,
-          onCommit,
-        });
-      }
-    }
-
-    // If no handler was found, try to start the piece that should handle this event
-    if (!handlerFound && !doNotLoadPieceIfNotRunning) {
-      const startTask = (async () => {
-        const started = await ensurePieceRunning(this.runtime, eventLink);
-        if (started) {
-          // Piece was started, re-queue the event. Don't trigger loading again
-          // if this didn't result in registering a handler, as trying again
-          // won't change this.
-          this.queueEvent(eventLink, event, retries, onCommit, true);
-        }
-      })();
-      this.backgroundTasks.add(startTask);
-      startTask.finally(() => {
-        this.backgroundTasks.delete(startTask);
-      });
-    }
+    queueSchedulerEvent({
+      runtime: this.runtime,
+      eventHandlers: this.eventHandlers,
+      eventQueue: this.eventQueue,
+      backgroundTasks: this.backgroundTasks,
+      queueExecution: () => this.queueExecution(),
+      queueEvent: (
+        targetEventLink,
+        targetEvent,
+        targetRetries,
+        targetOnCommit,
+        targetDoNotLoad,
+      ) =>
+        this.queueEvent(
+          targetEventLink,
+          targetEvent,
+          targetRetries,
+          targetOnCommit,
+          targetDoNotLoad,
+        ),
+    }, {
+      eventLink,
+      event,
+      retries,
+      onCommit,
+      doNotLoadPieceIfNotRunning,
+    });
   }
 
   addEventHandler(
@@ -1279,16 +1270,13 @@ export class Scheduler {
       event: any,
     ) => void,
   ): Cancel {
-    if (populateDependencies) {
-      handler.populateDependencies = populateDependencies;
-    }
-    this.eventHandlers.push([ref, handler]);
-    return () => {
-      const index = this.eventHandlers.findIndex(([r, h]) =>
-        r === ref && h === handler
-      );
-      if (index !== -1) this.eventHandlers.splice(index, 1);
-    };
+    return addSchedulerEventHandler({
+      eventHandlers: this.eventHandlers,
+    }, {
+      handler,
+      ref,
+      populateDependencies,
+    });
   }
 
   onConsole(fn: ConsoleHandler): void {
