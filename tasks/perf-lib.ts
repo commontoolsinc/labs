@@ -173,6 +173,12 @@ export interface PRInfo {
   merged_at: string | null;
 }
 
+export interface CurrentPRBody {
+  body: string;
+  source: "live" | "event-fallback" | "empty-fallback";
+  errorMessage?: string;
+}
+
 export interface BaselineOverrides {
   /** Metric name -> value in the metric's native unit (seconds or nanoseconds). */
   metrics: Map<string, number>;
@@ -1319,6 +1325,32 @@ export async function fetchPRBody(prNumber: number): Promise<string> {
     `/repos/${REPO}/pulls/${prNumber}`,
   );
   return pr.body ?? "";
+}
+
+export function pullRequestBodyFromEvent(
+  event: object | undefined,
+): string | undefined {
+  const pullRequest =
+    (event as { pull_request?: { body?: unknown } } | undefined)
+      ?.pull_request;
+  if (!pullRequest || !("body" in pullRequest)) return undefined;
+  return typeof pullRequest.body === "string" ? pullRequest.body : "";
+}
+
+export async function fetchCurrentPRBody(
+  prNumber: number,
+  event: object | undefined,
+): Promise<CurrentPRBody> {
+  try {
+    return { body: await fetchPRBody(prNumber), source: "live" };
+  } catch (error) {
+    const eventBody = pullRequestBodyFromEvent(event);
+    return {
+      body: eventBody ?? "",
+      source: eventBody === undefined ? "empty-fallback" : "event-fallback",
+      errorMessage: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------

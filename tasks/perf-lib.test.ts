@@ -3,6 +3,7 @@ import {
   computeBaseline,
   computeCiWallTimeRevisitSignals,
   extractMetrics,
+  fetchCurrentPRBody,
   fetchPRBody,
   githubGet,
   type Job,
@@ -594,6 +595,50 @@ Deno.test("fetchPRBody reads the live pull request body from the GitHub API", as
     assertEquals(
       requestedUrl,
       "https://api.github.com/repos/commontoolsinc/labs/pulls/3427",
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("fetchCurrentPRBody prefers the live pull request body over stale event payloads", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = ((_input, _init) =>
+      Promise.resolve(
+        new Response(JSON.stringify({ body: "LIVE PR BODY" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )) as typeof fetch;
+
+    const result = await fetchCurrentPRBody(3427, {
+      pull_request: { body: "STALE EVENT BODY" },
+    });
+
+    assertEquals(result, { body: "LIVE PR BODY", source: "live" });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("fetchCurrentPRBody falls back to the event body if the live request fails", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = ((_input, _init) =>
+      Promise.resolve(
+        new Response("rate limited", { status: 429 }),
+      )) as typeof fetch;
+
+    const result = await fetchCurrentPRBody(3427, {
+      pull_request: { body: "EVENT BODY" },
+    });
+
+    assertEquals(result.body, "EVENT BODY");
+    assertEquals(result.source, "event-fallback");
+    assertEquals(
+      result.errorMessage?.includes("GitHub API 429:"),
+      true,
     );
   } finally {
     globalThis.fetch = originalFetch;
