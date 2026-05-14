@@ -1,7 +1,6 @@
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isRecord } from "@commonfabric/utils/types";
-import type { MemorySpace } from "@commonfabric/memory/interface";
 import { type Frame } from "./builder/types.ts";
 import type { Cancel } from "./cancel.ts";
 import { ConsoleEvent } from "./harness/console.ts";
@@ -51,7 +50,7 @@ import {
 } from "./scheduler/constants.ts";
 import {
   getPieceMetadataFromFrame,
-  materializeHostVisibleStack,
+  handleSchedulerError,
   queueTask,
 } from "./scheduler/diagnostics.ts";
 import {
@@ -3138,42 +3137,13 @@ export class Scheduler {
   }
 
   private handleError(error: Error, action: any) {
-    const { pieceId, spellId, patternId, space } = getPieceMetadataFromFrame(
-      (error as Error & { frame?: Frame }).frame,
-    );
-
-    // Transform stack trace to show original source locations
-    materializeHostVisibleStack(error);
-    if (error.stack) {
-      error.stack = this.runtime.harness.parseStack(error.stack);
-    }
-
-    const errorWithContext = error as ErrorWithContext;
-    errorWithContext.action = action;
-    if (pieceId) errorWithContext.pieceId = pieceId;
-    if (spellId) errorWithContext.spellId = spellId;
-    if (patternId) errorWithContext.patternId = patternId;
-    if (space) errorWithContext.space = space as MemorySpace;
-
-    for (const handler of this.errorHandlers) {
-      try {
-        handler(errorWithContext);
-      } catch (handlerError) {
-        console.error("Error in error handler:", handlerError);
-      }
-    }
-
-    const prefix = this.errorHandlers.size === 0
-      ? "Uncaught error in action:"
-      : "Error in action:";
-
-    console.error(
-      prefix,
-      String(error),
-      ...(pieceId ? [`\n  pieceId: ${pieceId}`] : []),
-      ...(space ? [`\n  space: ${space}`] : []),
-      ...(patternId ? [`\n  patternId: ${patternId}`] : []),
-      ...(error.stack ? [`\n${error.stack}`] : []),
+    handleSchedulerError(
+      {
+        errorHandlers: this.errorHandlers,
+        parseStack: (stack) => this.runtime.harness.parseStack(stack),
+      },
+      error,
+      action,
     );
   }
 

@@ -1,3 +1,4 @@
+import type { MemorySpace } from "@commonfabric/memory/interface";
 import { isRecord } from "@commonfabric/utils/types";
 import { getTopFrame } from "../builder/pattern.ts";
 import { type Frame, TYPE } from "../builder/types.ts";
@@ -5,6 +6,7 @@ import {
   getCellOrThrow,
   isCellResultForDereferencing,
 } from "../query-result-proxy.ts";
+import type { ErrorHandler, ErrorWithContext } from "../runtime.ts";
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
 import type {
   ActionRunTraceAddress,
@@ -117,6 +119,53 @@ export function materializeHostVisibleStack(error: Error): void {
     return;
   }
   error.stack = `${error}${frames.startsWith("\n") ? frames : `\n${frames}`}`;
+}
+
+export function handleSchedulerError(
+  state: {
+    readonly errorHandlers: ReadonlySet<ErrorHandler>;
+    readonly parseStack: (stack: string) => string;
+  },
+  error: Error,
+  action: unknown,
+): void {
+  const { pieceId, spellId, patternId, space } = getPieceMetadataFromFrame(
+    (error as Error & { frame?: Frame }).frame,
+  );
+
+  // Transform stack trace to show original source locations.
+  materializeHostVisibleStack(error);
+  if (error.stack) {
+    error.stack = state.parseStack(error.stack);
+  }
+
+  const errorWithContext = error as ErrorWithContext;
+  errorWithContext.action = action as ErrorWithContext["action"];
+  if (pieceId) errorWithContext.pieceId = pieceId;
+  if (spellId) errorWithContext.spellId = spellId;
+  if (patternId) errorWithContext.patternId = patternId;
+  if (space) errorWithContext.space = space as MemorySpace;
+
+  for (const handler of state.errorHandlers) {
+    try {
+      handler(errorWithContext);
+    } catch (handlerError) {
+      console.error("Error in error handler:", handlerError);
+    }
+  }
+
+  const prefix = state.errorHandlers.size === 0
+    ? "Uncaught error in action:"
+    : "Error in action:";
+
+  console.error(
+    prefix,
+    String(error),
+    ...(pieceId ? [`\n  pieceId: ${pieceId}`] : []),
+    ...(space ? [`\n  space: ${space}`] : []),
+    ...(patternId ? [`\n  patternId: ${patternId}`] : []),
+    ...(error.stack ? [`\n${error.stack}`] : []),
+  );
 }
 
 export function queueTask(fn: () => void): ReturnType<typeof setTimeout> {
