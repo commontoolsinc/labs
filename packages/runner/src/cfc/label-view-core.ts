@@ -1,4 +1,5 @@
 import { encodePointer } from "../../../memory/v2/path.ts";
+import { uniqueCfcAtoms } from "./observation.ts";
 
 export type IFCLabel = {
   confidentiality?: unknown[];
@@ -74,7 +75,15 @@ const mergeLabel = (
       ...(Array.isArray(left?.[key]) ? left[key] : []),
       ...(Array.isArray(right[key]) ? right[key] : []),
     ];
-    const unique = [...new Set(values)];
+    // Dedup structurally via `uniqueCfcAtoms()` rather than by reference
+    // (`new Set()`). Atoms can be fabric-converted clones (each call to
+    // `cloneIfNecessary()` produces a fresh frozen object), so two
+    // logically-identical caveats may not share a JS reference. The
+    // reference-keyed approach would leave duplicates that callers
+    // observe as both `confidentiality` bloat and -- since downstream
+    // entry-merging compares labels structurally -- as label entries
+    // failing to coalesce at the right path.
+    const unique = uniqueCfcAtoms(values);
     if (unique.length > 0) {
       merged[key] = unique;
     }
