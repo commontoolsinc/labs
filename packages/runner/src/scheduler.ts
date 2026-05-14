@@ -118,6 +118,11 @@ import {
   type StalenessState,
 } from "./scheduler/staleness.ts";
 import {
+  type ActionTimingState,
+  getActionStats as getActionStatsFromState,
+  recordActionTime as recordActionTimeState,
+} from "./scheduler/timing.ts";
+import {
   filterIgnoredAddresses,
   hasAnnotatedWrites,
   trustedEventWriteCandidatesFromTransaction,
@@ -232,6 +237,10 @@ export class Scheduler {
   // Compute time tracking for cycle-aware scheduling
   // Keyed by action ID (source location) to persist stats across action recreation
   private actionStats = new Map<string, ActionStats>();
+  private actionTimingState: ActionTimingState = {
+    actionStats: this.actionStats,
+    getActionId: (action) => this.getActionId(action),
+  };
   private anonymousActionIds = new WeakMap<Action | EventHandler, string>();
   private anonymousActionCounter = 0;
   // Cycle detection during dependency collection
@@ -2851,25 +2860,7 @@ export class Scheduler {
    * Stats are keyed by action ID (source location) to persist across action recreation.
    */
   private recordActionTime(action: Action, elapsed: number): void {
-    const now = performance.now();
-    const actionId = this.getActionId(action);
-    const existing = this.actionStats.get(actionId);
-    if (existing) {
-      existing.runCount++;
-      existing.totalTime += elapsed;
-      existing.averageTime = existing.totalTime / existing.runCount;
-      existing.lastRunTime = elapsed;
-      existing.lastRunTimestamp = now;
-    } else {
-      this.actionStats.set(actionId, {
-        runCount: 1,
-        totalTime: elapsed,
-        averageTime: elapsed,
-        lastRunTime: elapsed,
-        lastRunTimestamp: now,
-      });
-    }
-
+    recordActionTimeState(this.actionTimingState, action, elapsed);
     // Check if action should be auto-debounced based on performance
     this.maybeAutoDebounce(action);
   }
@@ -2880,10 +2871,7 @@ export class Scheduler {
    * Accepts either an Action or an action ID string.
    */
   getActionStats(action: Action | string): ActionStats | undefined {
-    const actionId = typeof action === "string"
-      ? action
-      : this.getActionId(action);
-    return this.actionStats.get(actionId);
+    return getActionStatsFromState(this.actionTimingState, action);
   }
 
   // ============================================================
