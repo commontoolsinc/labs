@@ -497,6 +497,20 @@ Deno.test("Capability analysis classifies push-only usage as writeonly", () => {
   assertEquals(input.readPaths.length, 0);
 });
 
+Deno.test("Capability analysis classifies removeAll-only usage as writeonly", () => {
+  const fn = parseFirstCallback(
+    `const fn = (input, item) => {
+      input.key("items").removeAll(item);
+    };`,
+  );
+  const summary = analyzeFunctionCapabilities(fn);
+  const input = getPaths(summary, "input");
+
+  assertEquals(input.capability, "writeonly");
+  assert(input.writePaths.includes("items"));
+  assertEquals(input.readPaths.length, 0);
+});
+
 Deno.test("Capability analysis keeps opaque derivation methods opaque", () => {
   const fn = parseFirstCallback(
     `const fn = (input, mapper) => {

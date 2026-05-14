@@ -112,6 +112,7 @@ const ARRAY_IDENTITY_WRITER_METHODS = new Set([
   "unshift",
   "splice",
   "remove",
+  "removeAll",
 ]);
 const ARRAY_IDENTITY_PRESERVING_CHAIN_METHODS = new Set(["slice"]);
 const READER_METHODS = new Set(["get"]);
