@@ -1299,17 +1299,6 @@ const ensureSchemaDocument = (
   schema: JSONSchema,
 ): void => {
   const id = `cid:${schemaHash}`;
-  const existing = tx.readOrThrow({
-    space,
-    id: id as URI,
-    type: "application/json",
-    path: [],
-  }, {
-    meta: INTERNAL_VERIFIER_META,
-  });
-  if (existing !== undefined) {
-    return;
-  }
   tx.writeOrThrow({
     space,
     id: id as URI,

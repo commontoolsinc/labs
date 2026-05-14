@@ -1639,6 +1639,70 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("does not conflict when another transaction already wrote the same schema document", async () => {
+    const server = new MemoryV2Server.Server();
+    const storageManagerA = new SharedV2StorageManager({
+      as: signer,
+      address: new URL("memory://"),
+    }, server);
+    const storageManagerB = new SharedV2StorageManager({
+      as: signer,
+      address: new URL("memory://"),
+    }, server);
+    const runtimeA = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager: storageManagerA,
+    });
+    const runtimeB = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager: storageManagerB,
+    });
+    const schema = {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          ifc: { integrity: ["trusted-profile"] },
+        },
+      },
+      required: ["name"],
+    } as const satisfies JSONSchema;
+
+    try {
+      const txA = runtimeA.edit();
+      txA.setCfcEnforcementMode("enforce-explicit");
+      const cellA = runtimeA.getCell(
+        signer.did(),
+        "cfc-schema-doc-race-a",
+        schema,
+        txA,
+      );
+      cellA.set({ name: "Alice" });
+      txA.prepareCfc();
+
+      const txB = runtimeB.edit();
+      txB.setCfcEnforcementMode("enforce-explicit");
+      const cellB = runtimeB.getCell(
+        signer.did(),
+        "cfc-schema-doc-race-b",
+        schema,
+        txB,
+      );
+      cellB.set({ name: "Bob" });
+      txB.prepareCfc();
+      expect((await txB.commit()).ok).toBeDefined();
+
+      const resultA = await txA.commit();
+      expect(resultA.ok).toBeDefined();
+    } finally {
+      await runtimeA.dispose();
+      await runtimeB.dispose();
+      await storageManagerA.close();
+      await storageManagerB.close();
+      await server.close();
+    }
+  });
+
   it("persists CFC metadata on the scoped document instance", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
