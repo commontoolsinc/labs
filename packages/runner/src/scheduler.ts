@@ -49,11 +49,9 @@ import {
   queueTask,
 } from "./scheduler/diagnostics.ts";
 import {
-  captureCommittedReads,
-  captureTransactionWrites,
+  captureDiagnosisRecord as captureDiagnosisRecordState,
   detectCausalCycles,
   type DiagnosisRecord,
-  findNonIdempotentPair,
   runIdempotencyRecheck as runIdempotencyRecheckState,
 } from "./scheduler/diagnosis.ts";
 import {
@@ -2888,51 +2886,16 @@ export class Scheduler {
     tx: IExtendedStorageTransaction,
     log: ReactivityLog,
   ): void {
-    const record = {
-      // Committed reads model what a later run with the same inputs would see.
-      readValues: captureCommittedReads(log.reads, () => this.runtime.edit()),
-      writeValues: captureTransactionWrites(tx, log.writes, {
-        errorValue: "[write-error]",
-      }),
-      timestamp: performance.now(),
-    };
-
-    // Store in ring buffer (max 10 per action)
-    let history = this.diagnosisHistory.get(actionId);
-    if (!history) {
-      history = [];
-      this.diagnosisHistory.set(actionId, history);
-    }
-    history.push(record);
-    if (history.length > 10) {
-      history.shift();
-    }
-
-    const nonIdempotent = findNonIdempotentPair(history);
-    if (!nonIdempotent) return;
-
-    // Non-idempotent detected! Only report once per action.
-    const existing = this.diagnosisNonIdempotent.find(
-      (r) => r.actionId === actionId,
-    );
-    if (existing) return;
-
-    this.diagnosisNonIdempotent.push({
+    captureDiagnosisRecordState({
+      diagnosisHistory: this.diagnosisHistory,
+      diagnosisNonIdempotent: this.diagnosisNonIdempotent,
+      createReadTx: () => this.runtime.edit(),
+      getActionTelemetryInfo: (target) => this.getActionTelemetryInfo(target),
+    }, {
       actionId,
-      actionInfo: this.getActionTelemetryInfo(action),
-      runs: [
-        {
-          timestamp: nonIdempotent.previous.timestamp,
-          reads: Object.fromEntries(nonIdempotent.previous.readValues),
-          writes: Object.fromEntries(nonIdempotent.previous.writeValues),
-        },
-        {
-          timestamp: nonIdempotent.latest.timestamp,
-          reads: Object.fromEntries(nonIdempotent.latest.readValues),
-          writes: Object.fromEntries(nonIdempotent.latest.writeValues),
-        },
-      ],
-      differingWriteKeys: nonIdempotent.differingWriteKeys,
+      action,
+      tx,
+      log,
     });
   }
 

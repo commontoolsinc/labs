@@ -209,6 +209,67 @@ export function runIdempotencyRecheck(
   });
 }
 
+export function captureDiagnosisRecord(state: {
+  readonly diagnosisHistory: Map<string, DiagnosisRecord[]>;
+  readonly diagnosisNonIdempotent: NonIdempotentReport[];
+  readonly createReadTx: () => IExtendedStorageTransaction;
+  readonly getActionTelemetryInfo: (
+    action: Action,
+  ) => SchedulerActionInfo | undefined;
+}, args: {
+  readonly actionId: string;
+  readonly action: Action;
+  readonly tx: IExtendedStorageTransaction;
+  readonly log: ReactivityLog;
+}): void {
+  const record = {
+    // Committed reads model what a later run with the same inputs would see.
+    readValues: captureCommittedReads(args.log.reads, state.createReadTx),
+    writeValues: captureTransactionWrites(args.tx, args.log.writes, {
+      errorValue: "[write-error]",
+    }),
+    timestamp: performance.now(),
+  };
+
+  // Store in ring buffer (max 10 per action).
+  let history = state.diagnosisHistory.get(args.actionId);
+  if (!history) {
+    history = [];
+    state.diagnosisHistory.set(args.actionId, history);
+  }
+  history.push(record);
+  if (history.length > 10) {
+    history.shift();
+  }
+
+  const nonIdempotent = findNonIdempotentPair(history);
+  if (!nonIdempotent) return;
+
+  // Non-idempotent detected. Only report once per action.
+  const existing = state.diagnosisNonIdempotent.find(
+    (r) => r.actionId === args.actionId,
+  );
+  if (existing) return;
+
+  state.diagnosisNonIdempotent.push({
+    actionId: args.actionId,
+    actionInfo: state.getActionTelemetryInfo(args.action),
+    runs: [
+      {
+        timestamp: nonIdempotent.previous.timestamp,
+        reads: Object.fromEntries(nonIdempotent.previous.readValues),
+        writes: Object.fromEntries(nonIdempotent.previous.writeValues),
+      },
+      {
+        timestamp: nonIdempotent.latest.timestamp,
+        reads: Object.fromEntries(nonIdempotent.latest.readValues),
+        writes: Object.fromEntries(nonIdempotent.latest.writeValues),
+      },
+    ],
+    differingWriteKeys: nonIdempotent.differingWriteKeys,
+  });
+}
+
 export function detectCausalCycles(
   causalEdges: readonly { writer: string; triggered: string; cell: string }[],
 ): CycleReport[] {
