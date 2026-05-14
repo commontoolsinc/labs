@@ -1,69 +1,35 @@
 import {
-  type Cfc,
+  AuthoredByCurrentUser,
+  Cfc,
   computed,
   Default,
   handler,
   NAME,
   pattern,
+  RepresentsCurrentUser,
   Stream,
+  toSchema,
   UI,
   Writable,
   WriteAuthorizedBy,
 } from "commonfabric";
 import {
-  findParticipantBySlot,
-  type ImportedClaimedChatMessage,
-  makeParticipantSnapshot,
-  metaForSlot,
-  type Participant,
-  type ParticipantProfile,
-  type PlainSentChatMessage,
-  prepareSentMessageSnapshot,
-  type SentChatMessageOne,
-  type SentChatMessageThree,
-  type SentChatMessageTwo,
-  SLOT_IDS,
-  type SlotId,
-  sortParticipants,
+  type ChatProfile,
+  createSentMessageSnapshot,
+  type ImportedClaimedChatMessage as PlainImportedClaimedChatMessage,
+  makeProfileSnapshot,
+  type ParticipantClaim,
+  type PlainChatMessage,
+  type SentChatMessage,
 } from "./logic.ts";
-
-export type TrustedActionWriteWithIntegrity<
-  T,
-  Binding,
-  Action extends string,
-  Pattern extends string,
-  Integrity extends readonly [string, ...string[]],
-> = Cfc<
-  WriteAuthorizedBy<T, Binding>,
-  {
-    uiContract: {
-      helper: "UiAction";
-      action: Action;
-      trustedPattern: Pattern;
-      requiredEventIntegrity: Integrity;
-    };
-  }
->;
 
 export type TrustedActionWrite<
   T,
   Binding,
   Action extends string,
   Pattern extends string,
-> = TrustedActionWriteWithIntegrity<
-  T,
-  Binding,
-  Action,
-  Pattern,
-  [Pattern]
->;
-
-export type TrustedActionUiContract<
-  T,
-  Action extends string,
-  Pattern extends string,
 > = Cfc<
-  T,
+  WriteAuthorizedBy<T, Binding>,
   {
     uiContract: {
       helper: "UiAction";
@@ -81,177 +47,173 @@ export const TRUSTED_GROUP_CHAT_SAVE_PROFILE_ACTION =
   "TrustedGroupChatSaveProfile";
 export const TRUSTED_GROUP_CHAT_SEND_ACTION = "TrustedGroupChatSendMessage";
 
-export type AuthorshipIntegrity<Author extends string> = {
-  readonly kind: "authored-by";
-  readonly subject: Author;
-};
-
-export type SlotSelectionValue = SlotId | Default<"participant-1">;
-export type SlotSelectionCell = Writable<SlotSelectionValue>;
-
-const normalizeSlotId = (value: SlotSelectionValue | undefined): SlotId => {
-  switch (value) {
-    case "participant-1":
-    case "participant-2":
-    case "participant-3":
-      return value;
-    default:
-      return "participant-1";
-  }
-};
-
-export const activeSlotValue = (slotId: SlotSelectionCell): SlotId =>
-  normalizeSlotId(slotId.get() as SlotSelectionValue | undefined);
-
-type TrustedParticipantOne = Cfc<
-  ParticipantProfile<"participant-1">,
-  { integrity: readonly [AuthorshipIntegrity<"participant-1">] }
+export type TrustedProfile = RepresentsCurrentUser<
+  TrustedActionWrite<
+    ChatProfile,
+    typeof commitTrustedProfileSave,
+    typeof TRUSTED_GROUP_CHAT_SAVE_PROFILE_ACTION,
+    typeof TRUSTED_GROUP_CHAT_PROFILE_SURFACE
+  >
 >;
 
-type TrustedParticipantTwo = Cfc<
-  ParticipantProfile<"participant-2">,
-  { integrity: readonly [AuthorshipIntegrity<"participant-2">] }
->;
+export type TrustedProfileCell = Writable<TrustedProfile>;
 
-type TrustedParticipantThree = Cfc<
-  ParticipantProfile<"participant-3">,
-  { integrity: readonly [AuthorshipIntegrity<"participant-3">] }
->;
+export interface MyProfileValue {
+  readonly profile?: TrustedProfileCell;
+}
 
-export type TrustedParticipant =
-  | TrustedParticipantOne
-  | TrustedParticipantTwo
-  | TrustedParticipantThree;
+export type MyProfileCell = Writable<MyProfileValue | Default<{}>>;
+const MY_PROFILE_VALUE_SCHEMA = toSchema<MyProfileValue>();
 
-export type TrustedSentMessageOne = Cfc<
-  TrustedActionWriteWithIntegrity<
-    SentChatMessageOne,
+export type TrustedSentChatMessage = AuthoredByCurrentUser<
+  TrustedActionWrite<
+    SentChatMessage<TrustedProfileCell>,
     typeof commitTrustedMessageSend,
     typeof TRUSTED_GROUP_CHAT_SEND_ACTION,
-    typeof TRUSTED_GROUP_CHAT_SEND_SURFACE,
-    [typeof TRUSTED_GROUP_CHAT_SEND_SURFACE]
-  >,
-  { integrity: readonly [AuthorshipIntegrity<"participant-1">] }
+    typeof TRUSTED_GROUP_CHAT_SEND_SURFACE
+  >
 >;
 
-export type TrustedSentMessageTwo = Cfc<
-  TrustedActionWriteWithIntegrity<
-    SentChatMessageTwo,
-    typeof commitTrustedMessageSend,
-    typeof TRUSTED_GROUP_CHAT_SEND_ACTION,
-    typeof TRUSTED_GROUP_CHAT_SEND_SURFACE,
-    [typeof TRUSTED_GROUP_CHAT_SEND_SURFACE]
-  >,
-  { integrity: readonly [AuthorshipIntegrity<"participant-2">] }
+export type ImportedClaimedChatMessage = PlainImportedClaimedChatMessage<
+  TrustedProfileCell
 >;
-
-export type TrustedSentMessageThree = Cfc<
-  TrustedActionWriteWithIntegrity<
-    SentChatMessageThree,
-    typeof commitTrustedMessageSend,
-    typeof TRUSTED_GROUP_CHAT_SEND_ACTION,
-    typeof TRUSTED_GROUP_CHAT_SEND_SURFACE,
-    [typeof TRUSTED_GROUP_CHAT_SEND_SURFACE]
-  >,
-  { integrity: readonly [AuthorshipIntegrity<"participant-3">] }
->;
-
-export type TrustedSentChatMessage =
-  | TrustedSentMessageOne
-  | TrustedSentMessageTwo
-  | TrustedSentMessageThree;
 
 export type SharedChatMessage =
   | TrustedSentChatMessage
   | ImportedClaimedChatMessage;
 
-type SharedParticipantsWritable = Writable<
-  TrustedParticipant[] | Default<[]>
->;
-type SharedMessagesWritable = Writable<SharedChatMessage[] | Default<[]>>;
-
-export const participantsValue = (
-  participants: SharedParticipantsWritable,
-): TrustedParticipant[] =>
-  Array.from((participants.get() as TrustedParticipant[] | undefined) ?? []);
-
-export const messagesValue = (
-  messages: SharedMessagesWritable,
-): SharedChatMessage[] =>
-  Array.from((messages.get() as SharedChatMessage[] | undefined) ?? []);
+export type SharedMessagesValue = SharedChatMessage[] | Default<[]>;
+export type SharedMessagesCell = Writable<SharedMessagesValue>;
 
 const draftText = (draft: Writable<string | Default<"">>): string =>
   (draft.get() as string | undefined) ?? "";
 
-const makeTrustedParticipant = (
-  slotId: SlotId,
-  name: string,
-): TrustedParticipant => {
-  const participant = makeParticipantSnapshot(slotId, name);
-  switch (slotId) {
-    case "participant-1":
-      return participant as TrustedParticipantOne;
-    case "participant-2":
-      return participant as TrustedParticipantTwo;
-    case "participant-3":
-      return participant as TrustedParticipantThree;
+export const messagesValue = (
+  messages: SharedMessagesCell,
+): SharedChatMessage[] =>
+  Array.from((messages.get() as SharedChatMessage[] | undefined) ?? []);
+
+export const myProfileValue = (
+  myProfile: MyProfileCell,
+): MyProfileValue =>
+  ((myProfile as any).asSchema(MY_PROFILE_VALUE_SCHEMA).get() as
+    | MyProfileValue
+    | undefined) ?? {};
+
+export const currentProfileCell = (
+  myProfile: MyProfileCell,
+): TrustedProfileCell | undefined => myProfileValue(myProfile).profile;
+
+export const currentProfileSnapshot = (
+  myProfile: MyProfileCell,
+): TrustedProfile | undefined => currentProfileCell(myProfile)?.get();
+
+const cellKey = (cell: unknown): string | undefined => {
+  try {
+    const link = (cell as {
+      getAsNormalizedFullLink?: () => { id?: string; scope?: string };
+      getAsLink?: () => string;
+    }).getAsNormalizedFullLink?.();
+    if (link?.id) {
+      return `${link.scope ?? "space"}:${link.id}`;
+    }
+    return (cell as { getAsLink?: () => string }).getAsLink?.();
+  } catch {
+    return undefined;
   }
 };
 
-const makeTrustedSentMessage = (
-  slotId: SlotId,
-  message: PlainSentChatMessage,
-): TrustedSentChatMessage => {
-  switch (slotId) {
-    case "participant-1":
-      return message as TrustedSentMessageOne;
-    case "participant-2":
-      return message as TrustedSentMessageTwo;
-    case "participant-3":
-      return message as TrustedSentMessageThree;
-  }
+export const participantClaimsValue = (
+  myProfile: MyProfileCell,
+  messages: SharedMessagesCell,
+): ParticipantClaim<TrustedProfileCell>[] => {
+  const seen = new Set<string>();
+  const participants: ParticipantClaim<TrustedProfileCell>[] = [];
+  const addParticipant = (
+    name: string | undefined,
+    accentColor: string | undefined,
+    profile: TrustedProfileCell | undefined,
+  ) => {
+    if (!name) {
+      return;
+    }
+    const key = cellKey(profile) ?? name;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    participants.push({
+      name,
+      accentColor: accentColor ?? "#64748b",
+      ...(profile !== undefined ? { profile } : {}),
+    });
+  };
+
+  const mineValue = currentProfileSnapshot(myProfile);
+  addParticipant(
+    mineValue?.name,
+    mineValue?.accentColor,
+    currentProfileCell(myProfile),
+  );
+
+  messagesValue(messages).forEach((message) => {
+    const profile = message.authorProfile as TrustedProfileCell | undefined;
+    const profileValue = profile?.get();
+    addParticipant(
+      profileValue?.name ?? message.authorName,
+      profileValue?.accentColor,
+      profile,
+    );
+  });
+
+  return participants;
+};
+
+export const participantSummary = (
+  myProfile: MyProfileCell,
+  messages: SharedMessagesCell,
+): string => {
+  const participants = participantClaimsValue(myProfile, messages);
+  return participants.length === 0
+    ? "No participants yet"
+    : participants.map((participant) => participant.name).join(" · ");
 };
 
 export const applyTrustedProfileSave = (
-  participants: readonly TrustedParticipant[],
-  slotId: SlotId,
+  myProfile: MyProfileCell,
   rawName: string,
-): {
-  trimmedName: string | null;
-  nextParticipants: TrustedParticipant[];
-} => {
-  const participantList = Array.from(participants);
+): { trimmedName: string | null; profile?: TrustedProfileCell } => {
   const trimmedName = rawName.trim();
   if (!trimmedName) {
-    return {
-      trimmedName: null,
-      nextParticipants: participantList,
-    };
+    return { trimmedName: null };
   }
 
-  return {
-    trimmedName,
-    nextParticipants: sortParticipants([
-      ...participantList.filter((participant) => participant.id !== slotId),
-      makeTrustedParticipant(slotId, trimmedName),
-    ]),
-  };
+  if (currentProfileCell(myProfile)?.get()) {
+    currentProfileCell(myProfile)?.set(
+      makeProfileSnapshot(
+        trimmedName,
+        currentProfileCell(myProfile)?.get(),
+      ) as TrustedProfile,
+    );
+    return { trimmedName, profile: currentProfileCell(myProfile) };
+  }
+
+  const profile = Writable.for<TrustedProfile>("profile") as TrustedProfileCell;
+  profile.set(makeProfileSnapshot(trimmedName) as TrustedProfile);
+  myProfile.set({ profile });
+  return { trimmedName, profile };
 };
 
 export const prepareTrustedMessageSend = (
-  participants: readonly TrustedParticipant[],
-  slotId: SlotId,
+  myProfile: MyProfileCell,
   rawBody: string,
 ): {
   trimmedBody: string | null;
   message: TrustedSentChatMessage | null;
 } => {
-  const { trimmedBody, message } = prepareSentMessageSnapshot(
-    participants as readonly Participant[],
-    slotId,
-    rawBody,
-  );
-  if (!trimmedBody || !message) {
+  const profileValue = currentProfileCell(myProfile)?.get();
+  const trimmedBody = rawBody.trim();
+  if (!currentProfileCell(myProfile) || !profileValue || !trimmedBody) {
     return {
       trimmedBody: null,
       message: null,
@@ -260,14 +222,17 @@ export const prepareTrustedMessageSend = (
 
   return {
     trimmedBody,
-    message: makeTrustedSentMessage(slotId, message),
+    message: createSentMessageSnapshot(
+      currentProfileCell(myProfile) as TrustedProfileCell,
+      profileValue,
+      trimmedBody,
+    ) as TrustedSentChatMessage,
   };
 };
 
 export const applyTrustedMessageSend = (
   messages: readonly SharedChatMessage[],
-  participants: readonly TrustedParticipant[],
-  slotId: SlotId,
+  myProfile: MyProfileCell,
   rawBody: string,
 ): {
   trimmedBody: string | null;
@@ -275,8 +240,7 @@ export const applyTrustedMessageSend = (
 } => {
   const messageList = Array.from(messages);
   const { trimmedBody, message } = prepareTrustedMessageSend(
-    participants,
-    slotId,
+    myProfile,
     rawBody,
   );
   if (!trimmedBody || !message) {
@@ -298,41 +262,29 @@ export const applyTrustedMessageSend = (
 export const commitTrustedProfileSave = handler<
   void,
   {
-    slotId: SlotSelectionCell;
+    myProfile: MyProfileCell;
     nameDraft: Writable<string | Default<"">>;
-    participants: SharedParticipantsWritable;
   }
->((_, { slotId, nameDraft, participants }) => {
-  const participantList = participantsValue(participants);
-  const trimmedName = draftText(nameDraft).trim();
-  if (!trimmedName) {
-    return;
-  }
-
-  const activeSlot = activeSlotValue(slotId);
-  const participant = makeTrustedParticipant(activeSlot, trimmedName);
-  const existingIndex = participantList.findIndex((saved) =>
-    saved.id === activeSlot
+>((_, { myProfile, nameDraft }) => {
+  const { trimmedName } = applyTrustedProfileSave(
+    myProfile,
+    draftText(nameDraft),
   );
-  if (existingIndex >= 0) {
-    participants.key(existingIndex).set(participant);
-    return;
+  if (trimmedName) {
+    nameDraft.set(trimmedName);
   }
-  participants.push(participant);
 });
 
 export const commitTrustedMessageSend = handler<
   void,
   {
-    slotId: SlotSelectionCell;
+    myProfile: MyProfileCell;
     messageDraft: Writable<string | Default<"">>;
-    participants: SharedParticipantsWritable;
-    messages: SharedMessagesWritable;
+    messages: SharedMessagesCell;
   }
->((_, { slotId, messageDraft, participants, messages }) => {
+>((_, { myProfile, messageDraft, messages }) => {
   const { trimmedBody, message } = prepareTrustedMessageSend(
-    participantsValue(participants),
-    activeSlotValue(slotId),
+    myProfile,
     draftText(messageDraft),
   );
   if (!trimmedBody || !message) {
@@ -343,23 +295,9 @@ export const commitTrustedMessageSend = handler<
   messageDraft.set("");
 });
 
-export type SharedParticipantsValue = TrustedParticipant[] | Default<[]>;
-
-export type SharedMessagesValue = SharedChatMessage[] | Default<[]>;
-
-export type SharedParticipantsCell = Writable<SharedParticipantsValue>;
-export type SharedMessagesCell = SharedMessagesWritable;
-
-export interface SharedChatStateValue {
-  participants: SharedParticipantsValue;
-  messages: SharedMessagesValue;
-}
-
-export type SharedChatStateCell = Writable<SharedChatStateValue>;
-
 interface TrustedParticipantsPanelInput {
-  participants: SharedParticipantsCell;
-  viewerSlotId: SlotSelectionCell;
+  myProfile: MyProfileCell;
+  messages: SharedMessagesCell;
   id: string;
 }
 
@@ -367,51 +305,29 @@ const TrustedParticipantsPanel = pattern<
   TrustedParticipantsPanelInput,
   { [NAME]: string; [UI]: any }
 >((
-  { participants, viewerSlotId, id }: TrustedParticipantsPanelInput,
+  { myProfile, messages, id }: TrustedParticipantsPanelInput,
 ): { [NAME]: string; [UI]: any } => ({
   [NAME]: computed(() => `${id} participants panel`),
   [UI]: (
     <cf-hstack id={id} gap="2" wrap>
-      {SLOT_IDS.map((slotId) => (
-        <div
-          id={`${id}-${slotId}-name`}
-          data-participant-slot={slotId}
-        >
-          <cf-chip
-            label={computed(() => {
-              const saved = findParticipantBySlot(
-                participantsValue(participants),
-                slotId,
-              );
-              return saved ? saved.name : metaForSlot(slotId).label;
-            })}
-            variant={computed(() => {
-              const saved = findParticipantBySlot(
-                participantsValue(participants),
-                slotId,
-              );
-              if (slotId === activeSlotValue(viewerSlotId)) {
-                return "primary";
-              }
-              return saved ? "accent" : "default";
-            })}
-          />
-        </div>
-      ))}
+      <cf-chip
+        label={computed(() => participantSummary(myProfile, messages))}
+        variant="accent"
+      />
     </cf-hstack>
   ),
 }));
 
 export interface TrustedProfileSaveSurfaceInput {
-  slotId: SlotSelectionCell;
+  myProfile: MyProfileCell;
   nameDraft: Writable<string | Default<"">>;
-  participants: SharedParticipantsCell;
 }
 
 export interface TrustedProfileSaveSurfaceOutput {
   [NAME]: string;
   [UI]: any;
-  participants: SharedParticipantsCell;
+  myProfile: MyProfileCell;
+  currentProfileName: string;
   saveProfile: Stream<void>;
 }
 
@@ -419,29 +335,19 @@ export const TrustedProfileSaveSurface = pattern<
   TrustedProfileSaveSurfaceInput,
   TrustedProfileSaveSurfaceOutput
 >((
-  { slotId, nameDraft, participants }: TrustedProfileSaveSurfaceInput,
+  { myProfile, nameDraft }: TrustedProfileSaveSurfaceInput,
 ): TrustedProfileSaveSurfaceOutput => {
   const saveProfile = commitTrustedProfileSave({
-    slotId,
+    myProfile,
     nameDraft,
-    participants,
   });
-  const activeSlotLabel = computed(() =>
-    metaForSlot(activeSlotValue(slotId)).label
+  const currentSavedName = computed(() =>
+    currentProfileSnapshot(myProfile)?.name ?? "Name not set"
   );
-  const currentSavedName = computed(() => {
-    const saved = findParticipantBySlot(
-      participantsValue(participants),
-      activeSlotValue(slotId),
-    );
-    return saved ? saved.name : "Name not set";
-  });
   const saveDisabled = computed(() => draftText(nameDraft).trim().length === 0);
 
   return {
-    [NAME]: computed(() =>
-      `${metaForSlot(activeSlotValue(slotId)).label} profile save`
-    ),
+    [NAME]: "profile save",
     [UI]: (
       <cf-card
         id="trusted-profile-surface"
@@ -449,7 +355,6 @@ export const TrustedProfileSaveSurface = pattern<
         data-ui-event-integrity={TRUSTED_GROUP_CHAT_PROFILE_SURFACE}
       >
         <cf-hstack slot="content" gap="2" align="center" wrap>
-          <cf-chip label={activeSlotLabel} variant="primary" />
           <cf-vgroup gap="sm" style={{ minWidth: "12rem", flex: "1 1 12rem" }}>
             <cf-input
               id="trusted-profile-name"
@@ -473,15 +378,15 @@ export const TrustedProfileSaveSurface = pattern<
         </cf-hstack>
       </cf-card>
     ),
-    participants,
+    myProfile,
+    currentProfileName: currentSavedName,
     saveProfile,
   };
 });
 
 export interface TrustedChatSendSurfaceInput {
-  slotId: SlotSelectionCell;
+  myProfile: MyProfileCell;
   messageDraft: Writable<string | Default<"">>;
-  participants: SharedParticipantsCell;
   messages: SharedMessagesCell;
 }
 
@@ -496,26 +401,20 @@ export const TrustedChatSendSurface = pattern<
   TrustedChatSendSurfaceInput,
   TrustedChatSendSurfaceOutput
 >((
-  { slotId, messageDraft, participants, messages }: TrustedChatSendSurfaceInput,
+  { myProfile, messageDraft, messages }: TrustedChatSendSurfaceInput,
 ): TrustedChatSendSurfaceOutput => {
   const sendDisabled = computed(() =>
-    findParticipantBySlot(
-        participantsValue(participants),
-        activeSlotValue(slotId),
-      ) === undefined ||
+    currentProfileSnapshot(myProfile) === undefined ||
     draftText(messageDraft).trim().length === 0
   );
   const sendMessage = commitTrustedMessageSend({
-    slotId,
+    myProfile,
     messageDraft,
-    participants,
-    messages,
+    messages: messages as any,
   });
 
   return {
-    [NAME]: computed(() =>
-      `${metaForSlot(activeSlotValue(slotId)).label} send surface`
-    ),
+    [NAME]: "send surface",
     [UI]: (
       <cf-card
         id="trusted-send-surface"
@@ -524,8 +423,8 @@ export const TrustedChatSendSurface = pattern<
       >
         <cf-vstack slot="content" gap="2">
           {TrustedParticipantsPanel({
-            participants,
-            viewerSlotId: slotId,
+            myProfile,
+            messages: messages as any,
             id: "trusted-participants-panel",
           })}
           <cf-hstack align="center" wrap gap="2">
@@ -567,30 +466,26 @@ export const VerifiedChatBubble = pattern<
   { [NAME]: string; [UI]: any }
 >((
   { message }: VerifiedChatBubbleInput,
-): { [NAME]: string; [UI]: any } => {
-  const requiredTextIntegrity = computed(() => ({
-    kind: "authored-by",
-    subject: `${message.author.id}`,
-  } satisfies AuthorshipIntegrity<string>));
-  return {
-    [NAME]: "verified message bubble",
-    [UI]: (
-      <cf-cfc-authorship
-        data-authorship-surface={message.id}
-        $value={message}
-        author={message.author.id}
-        authorName={message.author.name}
-        verifyTextIntegrity
-        allowLiteralText={false}
-        requiredTextIntegrity={requiredTextIntegrity}
-      >
-        <cf-chat-message
-          compact
-          role="assistant"
-          name={message.author.name}
-          content={message.body}
-        />
-      </cf-cfc-authorship>
-    ),
-  };
-});
+): { [NAME]: string; [UI]: any } => ({
+  [NAME]: "verified message bubble",
+  [UI]: (
+    <cf-cfc-authorship
+      data-authorship-surface={message.id}
+      $value={message}
+      author={message.authorProfile}
+      authorName={message.authorName}
+      verifyTextIntegrity
+      allowLiteralText={false}
+    >
+      <cf-chat-message
+        compact
+        role="assistant"
+        name={message.authorName}
+        content={message.body}
+      />
+    </cf-cfc-authorship>
+  ),
+}));
+
+export type ParticipantClaimValue = ParticipantClaim<TrustedProfileCell>;
+export type AnyPlainChatMessage = PlainChatMessage<TrustedProfileCell>;

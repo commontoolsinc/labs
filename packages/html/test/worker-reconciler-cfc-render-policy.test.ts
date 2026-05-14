@@ -53,6 +53,14 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     kind: "signed-release",
     subject: "other-release",
   };
+  const representedProfileAtom = {
+    kind: "represents-principal",
+    subject: signer.did(),
+  };
+  const authoredByProfileAtom = {
+    kind: "authored-by",
+    subject: signer.did(),
+  };
 
   try {
     const tx = runtime.edit();
@@ -143,6 +151,63 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       tx,
     );
     unsignedText.set("Unsigned release note");
+    const representedProfile = runtime.getCell<{ name: string }>(
+      signer.did(),
+      "cfc-render-policy-represented-profile",
+      undefined,
+      tx,
+    );
+    const representedProfileLink = representedProfile.getAsNormalizedFullLink();
+    tx.writeOrThrow({
+      space: signer.did(),
+      id: representedProfileLink.id!,
+      type: "application/json",
+      path: [],
+    }, {
+      value: { name: "Alice" },
+      cfc: {
+        version: 1,
+        schemaHash: "test-represented-profile-schema",
+        labelMap: {
+          version: 1,
+          entries: [{
+            path: [],
+            label: {
+              integrity: [representedProfileAtom],
+            },
+          }],
+        },
+      },
+    });
+    const authoredByProfileText = runtime.getCell<string>(
+      signer.did(),
+      "cfc-render-policy-authored-by-profile-text",
+      undefined,
+      tx,
+    );
+    const authoredByProfileTextLink = authoredByProfileText
+      .getAsNormalizedFullLink();
+    tx.writeOrThrow({
+      space: signer.did(),
+      id: authoredByProfileTextLink.id!,
+      type: "application/json",
+      path: [],
+    }, {
+      value: "Profile-authored note",
+      cfc: {
+        version: 1,
+        schemaHash: "test-authored-by-profile-text-schema",
+        labelMap: {
+          version: 1,
+          entries: [{
+            path: [],
+            label: {
+              integrity: [authoredByProfileAtom],
+            },
+          }],
+        },
+      },
+    });
     const commitResult = await tx.commit();
     assertEquals(commitResult.ok !== undefined, true);
 
@@ -161,6 +226,14 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     const unsignedReleaseText = runtime.getCell<string>(
       signer.did(),
       "cfc-render-policy-unsigned-text",
+    );
+    const representedProfileCell = runtime.getCell<{ name: string }>(
+      signer.did(),
+      "cfc-render-policy-represented-profile",
+    );
+    const authoredByProfileTextCell = runtime.getCell<string>(
+      signer.did(),
+      "cfc-render-policy-authored-by-profile-text",
     );
     const dummyTx = runtime.edit();
     const dummyCell = runtime.getCell(
@@ -869,6 +942,40 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
               op.key === "textIntegrityState" && op.value === "blocked"
             ),
             true,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "strict text integrity derives authorship from a represented profile",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+        const root: WorkerVNode = {
+          type: "vnode",
+          name: "cf-cfc-authorship",
+          props: {
+            verifyTextIntegrity: true,
+            author: representedProfileCell as never,
+          },
+          children: [authoredByProfileTextCell as never],
+        };
+
+        const cancel = reconciler.mount(root);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(renderedText.includes("Profile-authored note"), true);
+          assertEquals(
+            renderedText.includes("Content hidden by integrity policy"),
+            false,
           );
         } finally {
           cancel();

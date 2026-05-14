@@ -202,6 +202,47 @@ describe("CFCFCAuthorship", () => {
     expect(element.authorshipState).toBe("verified");
   });
 
+  it("verifies a message against a represented-principal profile cell", async () => {
+    const messageLabel = {
+      version: 1 as const,
+      entries: [{
+        path: [],
+        label: {
+          integrity: [{
+            kind: "authored-by",
+            subject: "did:example:alice",
+          }],
+        },
+      }],
+    };
+    const profileLabel = {
+      version: 1 as const,
+      entries: [{
+        path: [],
+        label: {
+          integrity: [{
+            kind: "represents-principal",
+            subject: "did:example:alice",
+          }],
+        },
+      }],
+    };
+    const element = new CFCFCAuthorship();
+    element.value = {
+      getCfcLabel: () => Promise.resolve(messageLabel),
+    };
+    element.author = {
+      get: () => ({ name: "Alice Nguyen" }),
+      getCfcLabel: () => Promise.resolve(profileLabel),
+      subscribe: () => () => {},
+    };
+
+    await element.refreshLabel();
+    await element.refreshAuthorClaim();
+
+    expect(element.authorshipState).toBe("verified");
+  });
+
   it("fails closed when a bound author claim cell changes away from the integrity subject", async () => {
     const cfcLabel = {
       version: 1 as const,

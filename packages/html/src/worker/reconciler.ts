@@ -398,11 +398,14 @@ export class WorkerReconciler {
       "allow-literal-text",
       "data-cfc-allow-literal-text",
     ]) ?? false;
-    const requiredIntegrity = this.nodePropAsAtomList(node, [
+    const explicitRequiredIntegrity = this.nodePropAsAtomList(node, [
       "requiredTextIntegrity",
       "requiredIntegrity",
       "data-cfc-required-text-integrity",
-    ]) ?? [];
+    ]);
+    const requiredIntegrity = explicitRequiredIntegrity ??
+      this.requiredAuthorshipIntegrityFromAuthor(node) ??
+      [];
 
     return {
       ...policy,
@@ -517,6 +520,51 @@ export class WorkerReconciler {
         continue;
       }
       return Array.isArray(resolved) ? resolved : [resolved];
+    }
+    return undefined;
+  }
+
+  private requiredAuthorshipIntegrityFromAuthor(
+    node: WorkerVNode,
+  ): readonly unknown[] | undefined {
+    const author = this.nodePropForRenderPolicy(node, "author");
+    if (!isCell(author)) {
+      return undefined;
+    }
+    const subject = this.representsPrincipalSubjectForCell(
+      author as Cell<unknown>,
+    );
+    return subject === undefined
+      ? undefined
+      : [{ kind: "authored-by", subject }];
+  }
+
+  private representsPrincipalSubjectForCell(
+    cell: Cell<unknown>,
+  ): string | undefined {
+    let labelView: CfcLabelView | undefined;
+    try {
+      labelView = cfcLabelViewForCell(cell);
+      if (labelView === undefined) {
+        labelView = cfcLabelViewForCell(cell.resolveAsCell());
+      }
+    } catch {
+      return undefined;
+    }
+    if (labelView === undefined) {
+      return undefined;
+    }
+    for (const atom of this.integrityLabels(labelView)) {
+      if (typeof atom !== "object" || atom === null || Array.isArray(atom)) {
+        continue;
+      }
+      const record = atom as Record<string, unknown>;
+      if (record.kind !== "represents-principal") {
+        continue;
+      }
+      if (typeof record.subject === "string") {
+        return record.subject;
+      }
     }
     return undefined;
   }

@@ -1,75 +1,48 @@
 import { nonPrivateRandom, safeDateNow } from "commonfabric";
 
-export const SLOT_IDS = [
-  "participant-1",
-  "participant-2",
-  "participant-3",
-] as const;
-
-export type SlotId = typeof SLOT_IDS[number];
-
 export type MessageOrigin = "sent" | "imported";
 
-type SlotMeta = {
-  readonly id: SlotId;
-  readonly label: string;
-  readonly accentColor: string;
-};
-
-const SLOT_META: readonly SlotMeta[] = [
-  {
-    id: "participant-1",
-    label: "Participant 1",
-    accentColor: "#2563eb",
-  },
-  {
-    id: "participant-2",
-    label: "Participant 2",
-    accentColor: "#059669",
-  },
-  {
-    id: "participant-3",
-    label: "Participant 3",
-    accentColor: "#dc2626",
-  },
-] as const;
-
-export type ParticipantProfile<Slot extends SlotId> = {
-  readonly id: Slot;
-  readonly slotLabel: string;
+export interface ChatProfile {
   readonly name: string;
   readonly accentColor: string;
-};
+}
 
-export type ParticipantOne = ParticipantProfile<"participant-1">;
-export type ParticipantTwo = ParticipantProfile<"participant-2">;
-export type ParticipantThree = ParticipantProfile<"participant-3">;
-export type Participant = ParticipantOne | ParticipantTwo | ParticipantThree;
+export interface ParticipantClaim<ProfileRef = unknown> {
+  readonly name: string;
+  readonly accentColor: string;
+  readonly profile?: ProfileRef;
+}
 
-export type ChatMessage<Slot extends SlotId, Origin extends MessageOrigin> = {
-  readonly origin: Origin;
+export interface SentChatMessage<ProfileRef = unknown> {
+  readonly origin: "sent";
   readonly id: string;
-  readonly author: ParticipantProfile<Slot>;
+  readonly authorName: string;
+  readonly authorProfile: ProfileRef;
   readonly body: string;
   readonly timestamp: number;
-};
+}
 
-export type SentChatMessageOne = ChatMessage<"participant-1", "sent">;
-export type SentChatMessageTwo = ChatMessage<"participant-2", "sent">;
-export type SentChatMessageThree = ChatMessage<"participant-3", "sent">;
-export type PlainSentChatMessage =
-  | SentChatMessageOne
-  | SentChatMessageTwo
-  | SentChatMessageThree;
+export interface ImportedClaimedChatMessage<ProfileRef = unknown> {
+  readonly origin: "imported";
+  readonly id: string;
+  readonly authorName: string;
+  readonly authorProfile?: ProfileRef;
+  readonly body: string;
+  readonly timestamp: number;
+}
 
-export type ImportedClaimedChatMessage =
-  | ChatMessage<"participant-1", "imported">
-  | ChatMessage<"participant-2", "imported">
-  | ChatMessage<"participant-3", "imported">;
+export type PlainChatMessage<ProfileRef = unknown> =
+  | SentChatMessage<ProfileRef>
+  | ImportedClaimedChatMessage<ProfileRef>;
 
-export type PlainChatMessage =
-  | PlainSentChatMessage
-  | ImportedClaimedChatMessage;
+const PROFILE_COLORS = [
+  "#2563eb",
+  "#059669",
+  "#dc2626",
+  "#7c3aed",
+  "#c2410c",
+  "#0f766e",
+] as const;
 
 const RANDOM_IMPORTED_BODIES = [
   "Jumping in late here.",
@@ -79,181 +52,51 @@ const RANDOM_IMPORTED_BODIES = [
   "I might be missing context, but this seems fine.",
 ] as const;
 
-export const metaForSlot = (slotId: SlotId): SlotMeta =>
-  SLOT_META.find((slot) => slot.id === slotId) ?? SLOT_META[0];
+const hashText = (text: string): number =>
+  Array.from(text).reduce(
+    (hash, char) => (hash * 31 + char.charCodeAt(0)) >>> 0,
+    0,
+  );
 
-export const makeParticipantSnapshot = (
-  slotId: SlotId,
+export const accentColorForName = (name: string): string =>
+  PROFILE_COLORS[hashText(name) % PROFILE_COLORS.length] ?? PROFILE_COLORS[0];
+
+export const makeProfileSnapshot = (
   name: string,
-): Participant => {
-  const meta = metaForSlot(slotId);
-  switch (slotId) {
-    case "participant-1":
-      return {
-        id: "participant-1",
-        slotLabel: meta.label,
-        name,
-        accentColor: meta.accentColor,
-      };
-    case "participant-2":
-      return {
-        id: "participant-2",
-        slotLabel: meta.label,
-        name,
-        accentColor: meta.accentColor,
-      };
-    case "participant-3":
-      return {
-        id: "participant-3",
-        slotLabel: meta.label,
-        name,
-        accentColor: meta.accentColor,
-      };
-  }
-};
+  previous?: ChatProfile,
+): ChatProfile => ({
+  name,
+  accentColor: previous?.accentColor ?? accentColorForName(name),
+});
 
-export const findParticipantBySlot = <ParticipantValue extends Participant>(
-  participants: readonly ParticipantValue[],
-  slotId: SlotId,
-): ParticipantValue | undefined =>
-  participants.find((participant) => participant.id === slotId);
+const createId = (prefix: string): string =>
+  `${prefix}-${safeDateNow()}-${nonPrivateRandom().toString(36).slice(2, 8)}`;
 
-export const sortParticipants = <ParticipantValue extends Participant>(
-  participants: readonly ParticipantValue[],
-): ParticipantValue[] =>
-  SLOT_IDS.flatMap((slotId) => {
-    const match = participants.find((participant) => participant.id === slotId);
-    return match ? [match] : [];
-  });
-
-const createId = (prefix: string, slotId: SlotId): string =>
-  `${prefix}-${slotId}-${safeDateNow()}-${
-    nonPrivateRandom().toString(36).slice(2, 8)
-  }`;
-
-export const createSentMessageSnapshot = (
-  slotId: SlotId,
-  author: Participant,
+export const createSentMessageSnapshot = <ProfileRef>(
+  authorProfile: ProfileRef,
+  author: ChatProfile,
   body: string,
-): PlainSentChatMessage => {
-  const timestamp = safeDateNow();
-  const id = createId("msg", slotId);
-  switch (slotId) {
-    case "participant-1":
-      return {
-        origin: "sent",
-        id,
-        author: {
-          id: "participant-1",
-          slotLabel: author.slotLabel,
-          name: author.name,
-          accentColor: author.accentColor,
-        },
-        body,
-        timestamp,
-      };
-    case "participant-2":
-      return {
-        origin: "sent",
-        id,
-        author: {
-          id: "participant-2",
-          slotLabel: author.slotLabel,
-          name: author.name,
-          accentColor: author.accentColor,
-        },
-        body,
-        timestamp,
-      };
-    case "participant-3":
-      return {
-        origin: "sent",
-        id,
-        author: {
-          id: "participant-3",
-          slotLabel: author.slotLabel,
-          name: author.name,
-          accentColor: author.accentColor,
-        },
-        body,
-        timestamp,
-      };
-  }
-};
+): SentChatMessage<ProfileRef> => ({
+  origin: "sent",
+  id: createId("msg"),
+  authorName: author.name,
+  authorProfile,
+  body,
+  timestamp: safeDateNow(),
+});
 
-export const prepareSentMessageSnapshot = (
-  participants: readonly Participant[],
-  slotId: SlotId,
-  rawBody: string,
-): {
-  trimmedBody: string | null;
-  message: PlainSentChatMessage | null;
-} => {
-  const participantList = Array.from(participants);
-  const trimmedBody = rawBody.trim();
-  const sender = findParticipantBySlot(participantList, slotId);
-
-  if (!trimmedBody || !sender) {
-    return {
-      trimmedBody: null,
-      message: null,
-    };
-  }
-
-  return {
-    trimmedBody,
-    message: createSentMessageSnapshot(slotId, sender, trimmedBody),
-  };
-};
-
-const createImportedClaimedMessage = (
-  author: Participant,
+const createImportedClaimedMessage = <ProfileRef>(
+  author: ParticipantClaim<ProfileRef>,
   body: string,
   timestamp: number,
-): ImportedClaimedChatMessage => {
-  const id = createId("imported", author.id);
-  switch (author.id) {
-    case "participant-1":
-      return {
-        origin: "imported",
-        id,
-        author: {
-          id: "participant-1",
-          slotLabel: author.slotLabel,
-          name: author.name,
-          accentColor: author.accentColor,
-        },
-        body,
-        timestamp,
-      };
-    case "participant-2":
-      return {
-        origin: "imported",
-        id,
-        author: {
-          id: "participant-2",
-          slotLabel: author.slotLabel,
-          name: author.name,
-          accentColor: author.accentColor,
-        },
-        body,
-        timestamp,
-      };
-    case "participant-3":
-      return {
-        origin: "imported",
-        id,
-        author: {
-          id: "participant-3",
-          slotLabel: author.slotLabel,
-          name: author.name,
-          accentColor: author.accentColor,
-        },
-        body,
-        timestamp,
-      };
-  }
-};
+): ImportedClaimedChatMessage<ProfileRef> => ({
+  origin: "imported",
+  id: createId("imported"),
+  authorName: author.name,
+  ...(author.profile !== undefined ? { authorProfile: author.profile } : {}),
+  body,
+  timestamp,
+});
 
 const compareMessagesByThreadOrder = (
   left: Pick<PlainChatMessage, "id" | "timestamp">,
@@ -304,10 +147,10 @@ const randomInsertTimestamp = (
     : leftTimestamp + nonPrivateRandom() * 0.001;
 };
 
-export const createRandomImportedClaimedMessages = (
-  existingMessages: readonly PlainChatMessage[],
-  participants: readonly Participant[],
-): ImportedClaimedChatMessage[] => {
+export const createRandomImportedClaimedMessages = <ProfileRef>(
+  existingMessages: readonly PlainChatMessage<ProfileRef>[],
+  participants: readonly ParticipantClaim<ProfileRef>[],
+): ImportedClaimedChatMessage<ProfileRef>[] => {
   const authorPool = Array.from(participants);
   const workingMessages = sortDisplayMessages(existingMessages);
   const insertCount = Math.min(3, workingMessages.length);
@@ -319,16 +162,13 @@ export const createRandomImportedClaimedMessages = (
     const author = chooseRandom(authorPool);
     const body = chooseRandom(RANDOM_IMPORTED_BODIES);
     if (!author || !body) {
-      return null;
+      return undefined;
     }
-
-    const message = createImportedClaimedMessage(
-      author,
-      body,
-      randomInsertTimestamp(workingMessages),
-    );
+    const timestamp = randomInsertTimestamp(workingMessages);
+    const message = createImportedClaimedMessage(author, body, timestamp);
     workingMessages.push(message);
-    workingMessages.sort(compareMessagesByThreadOrder);
     return message;
-  }).flatMap((message) => message ? [message] : []);
+  }).filter((message): message is ImportedClaimedChatMessage<ProfileRef> =>
+    message !== undefined
+  );
 };

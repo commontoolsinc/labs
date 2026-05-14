@@ -125,6 +125,24 @@ const readClaimValue = async (
   return undefined;
 };
 
+const readLabelView = async (
+  value: unknown,
+): Promise<CfcLabelView | undefined> => {
+  if (hasLabelQuery(value)) {
+    const direct = await value.getCfcLabel();
+    if (direct !== undefined) {
+      return direct;
+    }
+  }
+  if (hasLabelResolution(value)) {
+    const resolved = await value.resolveAsCell();
+    if (hasLabelQuery(resolved)) {
+      return await resolved.getCfcLabel();
+    }
+  }
+  return undefined;
+};
+
 const primitiveToString = (value: unknown): string | undefined => {
   if (typeof value === "string") {
     return value;
@@ -172,6 +190,43 @@ const primaryAuthorId = (author: unknown): string | undefined =>
 
 const authorDisplayName = (author: unknown): string | undefined =>
   objectStringFields(author, AUTHOR_DISPLAY_FIELDS)[0];
+
+const representsPrincipalSubjectForLabel = (
+  view: CfcLabelView | undefined,
+): string | undefined => {
+  if (!view) {
+    return undefined;
+  }
+  for (const entry of rootEntries(view)) {
+    for (const atom of entry.label.integrity ?? []) {
+      if (typeof atom !== "object" || atom === null || Array.isArray(atom)) {
+        continue;
+      }
+      const atomRecord = atom as Record<string, unknown>;
+      if (objectField(atomRecord, "kind") !== "represents-principal") {
+        continue;
+      }
+      const subject = objectField(atomRecord, "subject");
+      if (subject !== undefined) {
+        return subject;
+      }
+    }
+  }
+  return undefined;
+};
+
+const principalAuthorClaim = (
+  subject: string | undefined,
+  displayName: string | undefined,
+): unknown | undefined => {
+  if (subject === undefined) {
+    return undefined;
+  }
+  return {
+    subject,
+    ...(displayName !== undefined ? { name: displayName } : {}),
+  };
+};
 
 export const integrityAtomMatchesAuthor = (
   atom: unknown,
@@ -582,7 +637,13 @@ export class CFCFCAuthorship extends BaseElement {
 
     let authorClaim: unknown;
     try {
-      authorClaim = await readClaimValue(this.author);
+      const valueClaim = await readClaimValue(this.author);
+      const profileLabel = await readLabelView(this.author);
+      const profileSubject = representsPrincipalSubjectForLabel(profileLabel);
+      authorClaim = principalAuthorClaim(
+        profileSubject,
+        authorDisplayName(valueClaim) ?? primitiveToString(this.authorName),
+      ) ?? valueClaim;
     } catch {
       authorClaim = undefined;
     }

@@ -14,24 +14,16 @@ import {
 } from "commonfabric";
 import {
   createRandomImportedClaimedMessages,
-  findParticipantBySlot,
-  metaForSlot,
-  SLOT_IDS,
-  type SlotId,
   sortDisplayMessages,
 } from "./logic.ts";
 import {
-  activeSlotValue,
   commitTrustedMessageSend,
   messagesValue,
-  participantsValue,
+  type MyProfileCell,
+  participantClaimsValue,
   type SharedChatMessage,
   type SharedMessagesCell,
   type SharedMessagesValue,
-  type SharedParticipantsCell,
-  type SharedParticipantsValue,
-  type SlotSelectionCell,
-  type SlotSelectionValue,
   TrustedChatSendSurface,
   TrustedProfileSaveSurface,
   VerifiedChatBubble,
@@ -51,57 +43,6 @@ const writeDraftText = handler<string, { value: DraftCell }>(
   },
 );
 
-const writeActiveSlot = handler<SlotId, { activeSlot: SlotSelectionCell }>(
-  (nextSlot, { activeSlot }) => {
-    activeSlot.set(nextSlot);
-  },
-);
-
-const selectSlot = handler<
-  void,
-  {
-    activeSlot: SlotSelectionCell;
-    slotId: SlotId;
-  }
->((_, { activeSlot, slotId }) => {
-  activeSlot.set(slotId);
-});
-
-interface SlotPickerInput {
-  activeSlot: SlotSelectionCell;
-  participants: SharedParticipantsCell;
-}
-
-const SlotPicker = pattern<SlotPickerInput, { [NAME]: string; [UI]: any }>((
-  { activeSlot, participants }: SlotPickerInput,
-): { [NAME]: string; [UI]: any } => ({
-  [NAME]: "demo participant picker",
-  [UI]: (
-    <cf-hstack id="active-slot-picker" gap="2" wrap>
-      {SLOT_IDS.map((slotId) => {
-        const label = computed(() => {
-          const saved = findParticipantBySlot(
-            participantsValue(participants),
-            slotId,
-          );
-          return saved ? saved.name : metaForSlot(slotId).label;
-        });
-        return (
-          <cf-button
-            id={`select-slot-${slotId}`}
-            variant={computed(() =>
-              activeSlotValue(activeSlot) === slotId ? "primary" : "secondary"
-            )}
-            onClick={selectSlot({ activeSlot, slotId })}
-          >
-            {label}
-          </cf-button>
-        );
-      })}
-    </cf-hstack>
-  ),
-}));
-
 interface SharedTranscriptInput {
   messages: SharedMessagesCell;
   id: string;
@@ -113,9 +54,9 @@ const SharedTranscript = pattern<
 >((
   { messages, id }: SharedTranscriptInput,
 ): { [NAME]: string; [UI]: any } => {
-  const messageCountLabel = computed(() => {
-    return messageCountText(messagesValue(messages).length);
-  });
+  const messageCountLabel = computed(() =>
+    messageCountText(messagesValue(messages).length)
+  );
   const transcriptRows = messages.map((messageCell) => (
     <div style={{ width: "min(34rem, 100%)" }}>
       {VerifiedChatBubble({
@@ -148,9 +89,8 @@ const SharedTranscript = pattern<
 });
 
 export interface GroupChatDemoInput {
-  participants?: PerSpace<SharedParticipantsCell>;
+  myProfile?: PerUser<MyProfileCell>;
   messages?: PerSpace<SharedMessagesCell>;
-  activeSlot?: PerUser<SlotSelectionCell>;
   profileDraft?: PerUser<DraftCell>;
   messageDraft?: PerUser<DraftCell>;
   hostMessageDraft?: PerSession<DraftCell>;
@@ -159,78 +99,67 @@ export interface GroupChatDemoInput {
 export interface GroupChatDemoOutput {
   [NAME]: string;
   [UI]: any;
-  participants: PerSpace<SharedParticipantsCell>;
+  myProfile: PerUser<MyProfileCell>;
   messages: PerSpace<SharedMessagesCell>;
-  activeSlot: PerUser<SlotSelectionCell>;
   profileDraft: PerUser<DraftCell>;
   messageDraft: PerUser<DraftCell>;
   hostMessageDraft: PerSession<DraftCell>;
-  setActiveSlot: Stream<SlotId>;
   setProfileDraft: Stream<string>;
   setMessageDraft: Stream<string>;
   setHostMessageDraft: Stream<string>;
+  currentProfileName: string;
   saveProfile: Stream<void>;
   sendTrustedMessage: Stream<void>;
+  hostLookalikeSend: Stream<void>;
+  addRandomMessages: Stream<void>;
 }
 
 export const GroupChatDemo = pattern<GroupChatDemoInput, GroupChatDemoOutput>((
   {
-    participants,
+    myProfile,
     messages,
-    activeSlot,
     profileDraft,
     messageDraft,
     hostMessageDraft,
   }: GroupChatDemoInput,
 ): GroupChatDemoOutput => {
-  const participantsCell = participants as SharedParticipantsCell;
+  const myProfileCell = myProfile as MyProfileCell;
   const messagesCell = messages as SharedMessagesCell;
-  const activeSlotCell = activeSlot as SlotSelectionCell;
   const profileDraftCell = profileDraft as DraftCell;
   const messageDraftCell = messageDraft as DraftCell;
   const hostMessageDraftCell = hostMessageDraft as DraftCell;
   const trustedProfileSave = TrustedProfileSaveSurface({
-    slotId: activeSlotCell,
+    myProfile: myProfileCell,
     nameDraft: profileDraftCell,
-    participants: participantsCell,
   });
   const trustedSend = TrustedChatSendSurface({
-    slotId: activeSlotCell,
+    myProfile: myProfileCell,
     messageDraft: messageDraftCell,
-    participants: participantsCell,
-    messages: messagesCell,
+    messages: messagesCell as any,
   });
   const hostLookalikeSend = commitTrustedMessageSend({
-    slotId: activeSlotCell,
+    myProfile: myProfileCell,
     messageDraft: hostMessageDraftCell,
-    participants: participantsCell,
-    messages: messagesCell,
+    messages: messagesCell as any,
   });
-  const setActiveSlot = writeActiveSlot({ activeSlot: activeSlotCell });
   const setProfileDraft = writeDraftText({ value: profileDraftCell });
   const setMessageDraft = writeDraftText({ value: messageDraftCell });
   const setHostMessageDraft = writeDraftText({ value: hostMessageDraftCell });
-  const activeSlotLabel = computed(() =>
-    metaForSlot(activeSlotValue(activeSlotCell)).label
-  );
-  const currentProfileLabel = computed(() => {
-    const saved = findParticipantBySlot(
-      participantsValue(participantsCell),
-      activeSlotValue(activeSlotCell),
-    );
-    return saved ? saved.name : "Name not set";
+  const participantCountLabel = computed(() => {
+    const count = participantClaimsValue(myProfileCell, messagesCell).length;
+    return `${count} participant${count === 1 ? "" : "s"}`;
   });
   const hostSendDisabled = computed(() =>
     draftText(hostMessageDraftCell).trim().length === 0
   );
   const addRandomMessagesDisabled = computed(() =>
-    participantsValue(participantsCell).length === 0 ||
+    participantClaimsValue(myProfileCell, messagesCell).length === 0 ||
     messagesValue(messagesCell).length === 0
   );
   const addRandomMessages = action(() => {
     const nextMessages = createRandomImportedClaimedMessages(
       sortDisplayMessages(messagesValue(messagesCell)),
-      participantsValue(participantsCell),
+      participantClaimsValue(myProfileCell, messagesCell),
     );
     nextMessages.forEach((message) =>
       messagesCell.push(message as SharedChatMessage)
@@ -256,20 +185,12 @@ export const GroupChatDemo = pattern<GroupChatDemoInput, GroupChatDemoOutput>((
                 <cf-vstack gap="1">
                   <cf-heading level={2}>Group chat</cf-heading>
                   <cf-label>
-                    The chat shell is ordinary pattern code. Small reviewed
-                    components save profiles, send messages, and render verified
-                    author bubbles.
+                    Ordinary chat layout built from small reviewed CFC surfaces.
                   </cf-label>
                 </cf-vstack>
                 <cf-hstack gap="2" wrap>
                   <cf-chip
-                    label={computed(() =>
-                      `${participantsValue(participantsCell).length} profile${
-                        participantsValue(participantsCell).length === 1
-                          ? ""
-                          : "s"
-                      }`
-                    )}
+                    label={participantCountLabel}
                   />
                   <cf-chip
                     label={computed(() =>
@@ -278,16 +199,6 @@ export const GroupChatDemo = pattern<GroupChatDemoInput, GroupChatDemoOutput>((
                   />
                 </cf-hstack>
               </cf-hstack>
-              <cf-vstack gap="2">
-                <cf-label>Demo participant for this user</cf-label>
-                {SlotPicker({
-                  activeSlot: activeSlotCell,
-                  participants: participantsCell,
-                })}
-                <cf-label id="current-profile-label">
-                  Acting as {activeSlotLabel}: {currentProfileLabel}
-                </cf-label>
-              </cf-vstack>
             </cf-vstack>
           </cf-card>
 
@@ -296,7 +207,7 @@ export const GroupChatDemo = pattern<GroupChatDemoInput, GroupChatDemoOutput>((
           <cf-card id="chat-panel">
             <cf-vstack slot="content" gap="3" style={{ minHeight: 0 }}>
               {SharedTranscript({
-                messages: messagesCell,
+                messages: messagesCell as any,
                 id: "trusted-conversation-preview",
               })}
               {trustedSend}
@@ -338,25 +249,22 @@ export const GroupChatDemo = pattern<GroupChatDemoInput, GroupChatDemoOutput>((
         </cf-vstack>
       </cf-screen>
     ),
-    participants: participantsCell as PerSpace<SharedParticipantsCell>,
+    myProfile: myProfileCell as PerUser<MyProfileCell>,
     messages: messagesCell as PerSpace<SharedMessagesCell>,
-    activeSlot: activeSlotCell as PerUser<SlotSelectionCell>,
     profileDraft: profileDraftCell as PerUser<DraftCell>,
     messageDraft: messageDraftCell as PerUser<DraftCell>,
     hostMessageDraft: hostMessageDraftCell as PerSession<DraftCell>,
-    setActiveSlot,
     setProfileDraft,
     setMessageDraft,
     setHostMessageDraft,
+    currentProfileName: trustedProfileSave.currentProfileName,
     saveProfile: trustedProfileSave.saveProfile,
     sendTrustedMessage: trustedSend.sendMessage,
+    hostLookalikeSend,
+    addRandomMessages,
   };
 });
 
 export default GroupChatDemo;
 
-export type {
-  SharedMessagesValue,
-  SharedParticipantsValue,
-  SlotSelectionValue,
-};
+export type { SharedMessagesValue };
