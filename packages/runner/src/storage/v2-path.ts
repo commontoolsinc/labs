@@ -1,3 +1,4 @@
+import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import {
   cloneIfNecessary,
   isArrayIndexPropertyName,
@@ -131,11 +132,9 @@ export const cloneWithValueAtPath = (
   value: FabricValue | undefined,
 ): EntityDocument | undefined => {
   if (path.length === 0) {
-    return value === undefined
-      ? undefined
-      : cloneIfNecessary(value as FabricValue, {
-        frozen: false,
-      }) as EntityDocument;
+    return deepFreeze(
+      cloneIfNecessary(value as FabricValue, { frozen: false }),
+    ) as EntityDocument;
   }
 
   const baseRoot = (root ?? {}) as Record<string, unknown>;
@@ -160,11 +159,9 @@ export const cloneWithValueAtPath = (
   }
 
   const last = path[path.length - 1]!;
-  const nextValue = value === undefined
-    ? undefined
-    : cloneIfNecessary(value as FabricValue, { frozen: false });
+  const nextValue = cloneIfNecessary(value as FabricValue, { frozen: false });
   setPathSegmentValue(currentClone, last, nextValue);
-  return nextRoot as EntityDocument;
+  return deepFreeze(nextRoot) as EntityDocument;
 };
 
 export const cloneWithoutPath = (
@@ -215,7 +212,7 @@ export const cloneWithoutPath = (
     delete currentClone[last];
   }
 
-  return nextRoot as EntityDocument;
+  return deepFreeze(nextRoot) as EntityDocument;
 };
 
 export const ensureParentContainers = (

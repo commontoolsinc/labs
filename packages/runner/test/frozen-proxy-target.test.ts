@@ -546,7 +546,7 @@ describe("frozen proxy target: committed reads with modernDataModel OFF (legacy)
     await storageManager?.close();
   });
 
-  it("returns unfrozen committed objects when modernDataModel is OFF (legacy)", async () => {
+  it("returns frozen committed objects when modernDataModel is OFF (legacy)", async () => {
     const link = writeCell(runtime, tx, "legacy-frozen-raw", {
       a: 1,
       b: 2,
@@ -554,7 +554,7 @@ describe("frozen proxy target: committed reads with modernDataModel OFF (legacy)
 
     tx = await commitAndReopen(runtime, tx);
     const rawValue = tx.readValueOrThrow(link);
-    expect(Object.isFrozen(rawValue)).toBe(false);
+    expect(Object.isFrozen(rawValue)).toBe(true);
 
     const result = createQueryResultProxy<{ a: number; b: number }>(
       runtime,
