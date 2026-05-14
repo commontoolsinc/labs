@@ -1,0 +1,140 @@
+/**
+ * Test: Cozy Lunch Poll - Scoped
+ *
+ * Exercises the scope idioms (per-space directory, per-user identity,
+ * derived admin) and the core voting flows.
+ */
+
+import { action, computed, pattern } from "commonfabric";
+import CozyPoll from "./main.tsx";
+
+export default pattern(() => {
+  const poll = CozyPoll({});
+
+  // === Actions ===
+
+  const action_join_as_alex = action(() => {
+    poll.joinAs.send({ name: "Alex" });
+  });
+
+  const action_try_rejoin_as_alex_two = action(() => {
+    poll.joinAs.send({ name: "Alex Two" });
+  });
+
+  const action_add_chipotle = action(() => {
+    poll.addOption.send({ title: "Chipotle" });
+  });
+
+  const action_add_thai = action(() => {
+    poll.addOption.send({ title: "Thai Kitchen" });
+  });
+
+  const action_vote_green_first = action(() => {
+    const first = poll.options[0];
+    if (first) poll.castVote.send({ optionId: first.id, voteType: "green" });
+  });
+
+  const action_vote_red_first = action(() => {
+    const first = poll.options[0];
+    if (first) poll.castVote.send({ optionId: first.id, voteType: "red" });
+  });
+
+  const action_vote_green_first_again = action(() => {
+    const first = poll.options[0];
+    if (first) poll.castVote.send({ optionId: first.id, voteType: "green" });
+  });
+
+  const action_reset_votes = action(() => {
+    poll.resetVotes.send({});
+  });
+
+  const action_remove_first_option = action(() => {
+    const first = poll.options[0];
+    if (first) poll.removeOption.send({ optionId: first.id });
+  });
+
+  // === Assertions ===
+
+  const assert_joined_as_alex = computed(() =>
+    poll.users.length === 1 &&
+    poll.users[0]?.name === "Alex" &&
+    poll.myName === "Alex" &&
+    poll.adminName === "Alex" &&
+    poll.isJoined === true &&
+    poll.isAdmin === true
+  );
+
+  const assert_immutable_after_join = computed(() =>
+    poll.users.length === 1 &&
+    poll.myName === "Alex"
+  );
+
+  const assert_chipotle_added = computed(() =>
+    poll.options.length === 1 &&
+    poll.options[0]?.title === "Chipotle" &&
+    poll.options[0]?.addedByName === "Alex"
+  );
+
+  const assert_two_options = computed(() => poll.options.length === 2);
+
+  const assert_green_vote_recorded = computed(() => {
+    const v = poll.votes[0];
+    return poll.votes.length === 1 &&
+      v?.voteType === "green" &&
+      v?.voterName === "Alex";
+  });
+
+  const assert_changed_to_red = computed(() => {
+    const v = poll.votes[0];
+    return poll.votes.length === 1 &&
+      v?.voteType === "red";
+  });
+
+  const assert_revote_green_cleared = computed(() => poll.votes.length === 0);
+
+  const assert_votes_reset = computed(() => poll.votes.length === 0);
+
+  const assert_option_removed = computed(() => poll.options.length === 1);
+
+  return {
+    tests: [
+      // First join → claims admin
+      { action: action_join_as_alex },
+      { assertion: assert_joined_as_alex },
+
+      // Second join attempt → no-op (name immutable after join)
+      { action: action_try_rejoin_as_alex_two },
+      { assertion: assert_immutable_after_join },
+
+      // Admin adds options
+      { action: action_add_chipotle },
+      { assertion: assert_chipotle_added },
+      { action: action_add_thai },
+      { assertion: assert_two_options },
+
+      // Vote green, change to red
+      { action: action_vote_green_first },
+      { assertion: assert_green_vote_recorded },
+      { action: action_vote_red_first },
+      { assertion: assert_changed_to_red },
+
+      // Voting green again (was red) → switches to green
+      { action: action_vote_green_first_again },
+      { assertion: assert_green_vote_recorded },
+
+      // Voting same color again → toggles off
+      { action: action_vote_green_first_again },
+      { assertion: assert_revote_green_cleared },
+
+      // Admin reset clears votes
+      { action: action_vote_green_first },
+      { action: action_reset_votes },
+      { assertion: assert_votes_reset },
+
+      // Admin removes option (Chipotle), Thai remains
+      { action: action_remove_first_option },
+      { assertion: assert_option_removed },
+    ],
+    poll,
+  };
+});
