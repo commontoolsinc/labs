@@ -45,6 +45,7 @@ interface LobbyOutput {
   gameState: GameState;
   myName: string;
   myPlayerNumber: 1 | 2 | null;
+  joinWithName: Stream<string>;
   joinPlayer1: Stream<{ name: string }>;
   joinPlayer2: Stream<{ name: string }>;
   reset: Stream<void>;
@@ -93,8 +94,36 @@ const joinSlot = (
   return playerData;
 };
 
+const joinAvailableSlot = (
+  name: string,
+  myName: PlayerNameCell,
+  myPlayerNumber: PlayerNumberCell,
+  player1: PlayerCell,
+  player2: PlayerCell,
+  shots: ShotsCell,
+  gameState: GameStateCell,
+) => {
+  const existingSlot = normalizePlayerNumber(myPlayerNumber.get());
+  if (existingSlot !== null) {
+    const slotPlayer = existingSlot === 1 ? player1.get() : player2.get();
+    if (slotPlayer && slotPlayer.name === trimmedName(myName.get())) {
+      return false;
+    }
+    myName.set("");
+    myPlayerNumber.set(null);
+  }
+
+  const slot = !player1.get() ? 1 : !player2.get() ? 2 : null;
+  if (slot === null) return false;
+
+  joinSlot(slot, name, player1, player2, shots, gameState);
+  myName.set(name);
+  myPlayerNumber.set(slot);
+  return true;
+};
+
 const joinGame = handler<
-  unknown,
+  void,
   {
     joinName: PlayerNameCell;
     myName: PlayerNameCell;
@@ -108,18 +137,49 @@ const joinGame = handler<
   _event,
   { joinName, myName, myPlayerNumber, player1, player2, shots, gameState },
 ) => {
-  if (normalizePlayerNumber(myPlayerNumber.get()) !== null) return;
-
   const name = trimmedName(joinName.get());
   if (!name) return;
 
-  const slot = !player1.get() ? 1 : !player2.get() ? 2 : null;
-  if (slot === null) return;
+  if (
+    joinAvailableSlot(
+      name,
+      myName,
+      myPlayerNumber,
+      player1,
+      player2,
+      shots,
+      gameState,
+    )
+  ) {
+    joinName.set("");
+  }
+});
 
-  joinSlot(slot, name, player1, player2, shots, gameState);
-  myName.set(name);
-  myPlayerNumber.set(slot);
-  joinName.set("");
+const joinWithName = handler<
+  string,
+  {
+    myName: PlayerNameCell;
+    myPlayerNumber: PlayerNumberCell;
+    player1: PlayerCell;
+    player2: PlayerCell;
+    shots: ShotsCell;
+    gameState: GameStateCell;
+  }
+>((
+  name,
+  { myName, myPlayerNumber, player1, player2, shots, gameState },
+) => {
+  const trimmed = trimmedName(name);
+  if (!trimmed) return;
+  joinAvailableSlot(
+    trimmed,
+    myName,
+    myPlayerNumber,
+    player1,
+    player2,
+    shots,
+    gameState,
+  );
 });
 
 const joinPlayer = handler<
@@ -177,6 +237,11 @@ const BattleshipLobby = pattern<LobbyState, LobbyOutput>(
     const sharedCells = { player1, player2, shots, gameState };
     const join = joinGame({
       joinName,
+      myName,
+      myPlayerNumber,
+      ...sharedCells,
+    } as any);
+    const joinWithNameStream = joinWithName({
       myName,
       myPlayerNumber,
       ...sharedCells,
@@ -317,6 +382,7 @@ const BattleshipLobby = pattern<LobbyState, LobbyOutput>(
       myPlayerNumber: computed(() =>
         normalizePlayerNumber(myPlayerNumber.get())
       ),
+      joinWithName: joinWithNameStream,
       joinPlayer1,
       joinPlayer2,
       reset,
