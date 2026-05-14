@@ -436,6 +436,12 @@ records the observed output labels in run state and merges those confidentiality
 labels into later model-authored invocation inputs. Opaque and denied outputs
 are not added to this model-context accumulator.
 
+The persisted model-context accumulator is sensitive retained run metadata. It
+does not store raw stdout/stderr bytes, but its labels and observation refs can
+still disclose which confidential sources influenced model-visible context.
+Handle it under the same access and retention boundary as transcripts, tool
+outputs, run state, and CFC policy traces.
+
 On Docker Desktop for macOS, use the host path for `cf-harness` and the
 `/host_mnt/...` projection for Docker's runtime args. The gVisor
 `docker-desktop-cfc-setup` helper defaults to:

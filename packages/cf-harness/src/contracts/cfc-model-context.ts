@@ -29,6 +29,11 @@ export interface HarnessCfcModelContextObservationInput {
   truncated?: boolean;
 }
 
+/**
+ * Sensitive retained run metadata. Even without raw stdout/stderr bytes, these
+ * labels and observation refs can reveal which confidential sources influenced
+ * model-visible context, so treat this at least like transcript metadata.
+ */
 export interface HarnessCfcModelContext {
   type: "cf-harness.cfc-model-context";
   version: 1;
