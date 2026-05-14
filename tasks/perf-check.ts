@@ -29,8 +29,8 @@ import {
   extractMetrics,
   extractTestFileMetrics,
   fetchArtifactsForRun,
+  fetchCurrentPRBody,
   fetchJobsForRun,
-  fetchPRBody,
   fetchPRForCommit,
   formatMetricValue,
   formatOverrideSuggestion,
@@ -63,16 +63,6 @@ const BASELINE_RUNS = 20;
 
 /** Recent completed workflow runs to scan for fallback backfill artifacts. */
 const BACKFILL_SOURCE_RUNS = 20;
-
-function pullRequestBodyFromEvent(
-  event: object | undefined,
-): string | undefined {
-  const pullRequest =
-    (event as { pull_request?: { body?: unknown } } | undefined)
-      ?.pull_request;
-  if (!pullRequest || !("body" in pullRequest)) return undefined;
-  return typeof pullRequest.body === "string" ? pullRequest.body : "";
-}
 
 function currentWorkflowRunFromEvent(
   event: object | undefined,
@@ -165,19 +155,20 @@ async function main() {
   // 1. Check PR description for overrides, if there's a PR to check.
   let prOverrides;
   if (prNumber) {
-    let prBody = pullRequestBodyFromEvent(event);
-    if (prBody === undefined) {
-      console.log(`Fetching PR #${prNumber} description...`);
-      try {
-        prBody = await fetchPRBody(parseInt(prNumber));
-      } catch (error) {
-        console.warn(`  Warning: could not fetch PR body: ${error}`);
-        prBody = "";
-      }
+    console.log(`Fetching live PR #${prNumber} description...`);
+    const prBody = await fetchCurrentPRBody(parseInt(prNumber), event);
+    if (prBody.source === "live") {
+      console.log("Using live PR description from GitHub API.");
+    } else if (prBody.source === "event-fallback") {
+      console.warn(
+        `  Warning: could not fetch live PR body; using pull_request event payload: ${prBody.errorMessage}`,
+      );
     } else {
-      console.log("Using PR description from pull_request event payload.");
+      console.warn(
+        `  Warning: could not fetch live PR body and no pull_request event body was available: ${prBody.errorMessage}`,
+      );
     }
-    prOverrides = parseBaselineOverrides(prBody);
+    prOverrides = parseBaselineOverrides(prBody.body);
   } else {
     prOverrides = { metrics: new Map() };
   }
