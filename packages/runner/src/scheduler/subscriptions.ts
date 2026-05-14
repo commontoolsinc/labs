@@ -7,6 +7,110 @@ import type {
   SpaceScopeAndURI,
 } from "./types.ts";
 
+type SchedulerActionTypeState = {
+  readonly isEffectAction: WeakMap<Action, boolean>;
+  readonly effects: Set<Action>;
+  readonly computations: Set<Action>;
+  readonly getPullMode: () => boolean;
+  readonly getIdempotencyCheckMode: () => boolean;
+  readonly queueExecution: () => void;
+};
+
+type SchedulerActionChangeGroupState = {
+  readonly actionChangeGroups: WeakMap<Action, ChangeGroup>;
+  readonly changeGroupToActionId: Map<ChangeGroup, string>;
+  readonly getActionId: (action: Action) => string;
+};
+
+type SchedulerParentChildState = {
+  readonly getExecutingAction: () => Action | null;
+  readonly actionParent: WeakMap<Action, Action>;
+  readonly actionChildren: WeakMap<Action, Set<Action>>;
+};
+
+export type SchedulerSubscriptionState =
+  & SchedulerActionTypeState
+  & SchedulerActionChangeGroupState
+  & SchedulerParentChildState;
+
+export function updateSchedulerActionType(
+  state: SchedulerActionTypeState,
+  action: Action,
+  isEffect: boolean | undefined,
+  options: { queueExecution?: boolean } = {},
+): boolean {
+  if (isEffect) {
+    state.isEffectAction.set(action, true);
+  }
+
+  const actionIsEffect = state.isEffectAction.get(action) ?? false;
+
+  if (actionIsEffect) {
+    state.effects.add(action);
+    state.computations.delete(action);
+    if (options.queueExecution) {
+      state.queueExecution();
+    }
+  } else {
+    state.computations.add(action);
+    state.effects.delete(action);
+    if (
+      options.queueExecution &&
+      (!state.getPullMode() || state.getIdempotencyCheckMode())
+    ) {
+      state.queueExecution();
+    }
+  }
+
+  return actionIsEffect;
+}
+
+export function updateSchedulerActionChangeGroup(
+  state: SchedulerActionChangeGroupState,
+  action: Action,
+  options: { changeGroup?: ChangeGroup },
+): void {
+  if (
+    !Object.prototype.hasOwnProperty.call(options, "changeGroup")
+  ) {
+    return;
+  }
+  const previousChangeGroup = state.actionChangeGroups.get(action);
+  const actionId = state.getActionId(action);
+  if (
+    previousChangeGroup !== undefined &&
+    state.changeGroupToActionId.get(previousChangeGroup) === actionId
+  ) {
+    state.changeGroupToActionId.delete(previousChangeGroup);
+  }
+  if (options.changeGroup === undefined) {
+    state.actionChangeGroups.delete(action);
+  } else {
+    state.actionChangeGroups.set(action, options.changeGroup);
+    state.changeGroupToActionId.set(options.changeGroup, actionId);
+  }
+}
+
+export function registerParentChildAction(
+  state: SchedulerParentChildState,
+  action: Action,
+  options: { allowExisting?: boolean } = {},
+): void {
+  const { allowExisting = true } = options;
+  const parent = state.getExecutingAction();
+  if (!parent || parent === action) return;
+  if (!allowExisting && state.actionParent.has(action)) return;
+
+  state.actionParent.set(action, parent);
+
+  let children = state.actionChildren.get(parent);
+  if (!children) {
+    children = new Set();
+    state.actionChildren.set(parent, children);
+  }
+  children.add(action);
+}
+
 export function unsubscribeSchedulerAction(
   state: {
     readonly cancels: WeakMap<Action, Cancel>;

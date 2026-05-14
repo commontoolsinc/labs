@@ -126,7 +126,13 @@ import {
   setStaleFromInputs,
   type StalenessState,
 } from "./scheduler/staleness.ts";
-import { unsubscribeSchedulerAction } from "./scheduler/subscriptions.ts";
+import {
+  registerParentChildAction,
+  type SchedulerSubscriptionState,
+  unsubscribeSchedulerAction,
+  updateSchedulerActionChangeGroup,
+  updateSchedulerActionType,
+} from "./scheduler/subscriptions.ts";
 import {
   type ActionTimingState,
   getActionStats as getActionStatsFromState,
@@ -364,6 +370,20 @@ export class Scheduler {
   currentActionId?: string;
   private actionParent = new WeakMap<Action, Action>();
   private actionChildren = new WeakMap<Action, Set<Action>>();
+  private subscriptionState: SchedulerSubscriptionState = {
+    actionChangeGroups: this.actionChangeGroups,
+    changeGroupToActionId: this.changeGroupToActionId,
+    isEffectAction: this.isEffectAction,
+    effects: this.effects,
+    computations: this.computations,
+    getPullMode: () => this.pullMode,
+    getIdempotencyCheckMode: () => this.idempotencyCheckMode,
+    queueExecution: () => this.queueExecution(),
+    getActionId: (target) => this.getActionId(target),
+    getExecutingAction: () => this.executingAction,
+    actionParent: this.actionParent,
+    actionChildren: this.actionChildren,
+  };
 
   /**
    * Temporarily set the executing action so that any child actions created
@@ -545,81 +565,6 @@ export class Scheduler {
     );
   }
 
-  private updateActionType(
-    action: Action,
-    isEffect: boolean | undefined,
-    options: { queueExecution?: boolean } = {},
-  ): boolean {
-    if (isEffect) {
-      this.isEffectAction.set(action, true);
-    }
-
-    const actionIsEffect = this.isEffectAction.get(action) ?? false;
-
-    if (actionIsEffect) {
-      this.effects.add(action);
-      this.computations.delete(action);
-      if (options.queueExecution) {
-        this.queueExecution();
-      }
-    } else {
-      this.computations.add(action);
-      this.effects.delete(action);
-      if (
-        options.queueExecution &&
-        (!this.pullMode || this.idempotencyCheckMode)
-      ) {
-        this.queueExecution();
-      }
-    }
-
-    return actionIsEffect;
-  }
-
-  private updateChangeGroup(
-    action: Action,
-    options: { changeGroup?: ChangeGroup },
-  ): void {
-    if (
-      !Object.prototype.hasOwnProperty.call(options, "changeGroup")
-    ) {
-      return;
-    }
-    const previousChangeGroup = this.actionChangeGroups.get(action);
-    const actionId = this.getActionId(action);
-    if (
-      previousChangeGroup !== undefined &&
-      this.changeGroupToActionId.get(previousChangeGroup) === actionId
-    ) {
-      this.changeGroupToActionId.delete(previousChangeGroup);
-    }
-    if (options.changeGroup === undefined) {
-      this.actionChangeGroups.delete(action);
-    } else {
-      this.actionChangeGroups.set(action, options.changeGroup);
-      this.changeGroupToActionId.set(options.changeGroup, actionId);
-    }
-  }
-
-  private registerParentChild(
-    action: Action,
-    options: { allowExisting?: boolean } = {},
-  ): void {
-    const { allowExisting = true } = options;
-    if (!this.executingAction || this.executingAction === action) return;
-    if (!allowExisting && this.actionParent.has(action)) return;
-
-    const parent = this.executingAction;
-    this.actionParent.set(action, parent);
-
-    let children = this.actionChildren.get(parent);
-    if (!children) {
-      children = new Set();
-      this.actionChildren.set(parent, children);
-    }
-    children.add(action);
-  }
-
   /**
    * Subscribes an action to run when its dependencies change.
    *
@@ -663,7 +608,7 @@ export class Scheduler {
       throttle,
     } = options;
 
-    this.updateChangeGroup(action, options);
+    updateSchedulerActionChangeGroup(this.subscriptionState, action, options);
 
     // Apply debounce settings if provided
     if (debounce !== undefined) {
@@ -677,12 +622,17 @@ export class Scheduler {
       this.setThrottle(action, throttle);
     }
 
-    const actionIsEffect = this.updateActionType(action, isEffect, {
-      queueExecution: true,
-    });
+    const actionIsEffect = updateSchedulerActionType(
+      this.subscriptionState,
+      action,
+      isEffect,
+      {
+        queueExecution: true,
+      },
+    );
 
     // Track parent-child relationship if action is created during another action's execution
-    this.registerParentChild(action);
+    registerParentChildAction(this.subscriptionState, action);
     const parent = this.actionParent.get(action);
     if (
       this.pullMode &&
@@ -794,7 +744,7 @@ export class Scheduler {
   ): void {
     const { isEffect } = options;
 
-    this.updateChangeGroup(action, options);
+    updateSchedulerActionChangeGroup(this.subscriptionState, action, options);
 
     const { reads, shallowReads, log: schedulingLog } = this.setDependencies(
       action,
@@ -803,7 +753,11 @@ export class Scheduler {
 
     // Track action type for pull-based scheduling
     // Once an action is marked as an effect, it stays an effect
-    const actionIsEffect = this.updateActionType(action, isEffect);
+    const actionIsEffect = updateSchedulerActionType(
+      this.subscriptionState,
+      action,
+      isEffect,
+    );
     const actionId = this.getActionId(action);
 
     // Update reverse dependency graph after the action type is restored. In
@@ -813,7 +767,9 @@ export class Scheduler {
 
     // Track parent-child relationship if action is created during another action's execution
     // Only set if not already set (resubscribe can be called multiple times)
-    this.registerParentChild(action, { allowExisting: false });
+    registerParentChildAction(this.subscriptionState, action, {
+      allowExisting: false,
+    });
 
     const { entities, triggerPathsByEntity } = this.addTriggerPaths(
       action,
