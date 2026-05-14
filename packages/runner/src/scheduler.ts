@@ -57,7 +57,6 @@ import {
   runIdempotencyRecheck as runIdempotencyRecheckState,
 } from "./scheduler/diagnosis.ts";
 import {
-  addTriggerPathsToIndex,
   collectDirectWritersForLog,
   collectReadersForWrite,
   type DependencyGraphState,
@@ -65,8 +64,10 @@ import {
   pendingDependencyCollectionMightAffect
     as pendingDependencyCollectionMightAffectState,
   readsOverlapWrites,
-  removeActionFromTriggerIndex,
+  replaceActionTriggerPaths,
+  setCancelForTriggerEntities,
   setSchedulerDependencies,
+  type TriggerSubscriptionState,
   updateDependentEdgesForLog,
 } from "./scheduler/dependency-index.ts";
 import {
@@ -392,6 +393,18 @@ export class Scheduler {
     useHistoricalMightWrite: () => this.useHistoricalMightWrite(),
     isPullMode: () => this.pullMode,
   };
+  private triggerSubscriptionState: TriggerSubscriptionState = {
+    triggers: this.triggers,
+    nonRecursiveTriggers: this.nonRecursiveTriggers,
+    cancels: this.cancels,
+    getActionId: (action) => this.getActionId(action),
+    onTriggerUnsubscribe: (actionId, entityCount) => {
+      logger.debug("schedule-unsubscribe", () => [
+        `Action: ${actionId}`,
+        `Entities: ${entityCount}`,
+      ]);
+    },
+  };
   private subscriptionState: SchedulerSubscriptionState = {
     actionChangeGroups: this.actionChangeGroups,
     changeGroupToActionId: this.changeGroupToActionId,
@@ -660,14 +673,19 @@ export class Scheduler {
         immediateLog,
       );
       this.updateDependents(action, schedulingLog);
-      const { entities } = this.addTriggerPaths(
+      const { entities } = replaceActionTriggerPaths(
+        this.triggerSubscriptionState,
         action,
         reads,
         shallowReads,
       );
 
       // Register the cancel function for the latest trigger set.
-      this.setCancelForEntities(action, entities);
+      setCancelForTriggerEntities(
+        this.triggerSubscriptionState,
+        action,
+        entities,
+      );
     } else {
       // Mark action for dependency collection before first run
       this.pendingDependencyCollection.add(action);
@@ -748,7 +766,8 @@ export class Scheduler {
       allowExisting: false,
     });
 
-    const { entities, triggerPathsByEntity } = this.addTriggerPaths(
+    const { entities, triggerPathsByEntity } = replaceActionTriggerPaths(
+      this.triggerSubscriptionState,
       action,
       reads,
       shallowReads,
@@ -760,7 +779,11 @@ export class Scheduler {
       `Reads: ${reads.length}`,
     ]);
 
-    this.setCancelForEntities(action, entities);
+    setCancelForTriggerEntities(
+      this.triggerSubscriptionState,
+      action,
+      entities,
+    );
 
     // In pull mode: When an effect resubscribes, check if any non-throttled dirty
     // computations write to what it reads. If so, mark the effect dirty so it can
@@ -1222,55 +1245,6 @@ export class Scheduler {
     );
   }
 
-  private addTriggerPaths(
-    action: Action,
-    reads: IMemorySpaceAddress[],
-    shallowReads: IMemorySpaceAddress[],
-  ): {
-    entities: Set<SpaceScopeAndURI>;
-    triggerPathsByEntity: Map<SpaceScopeAndURI, SortedAndCompactPaths>;
-  } {
-    this.clearActionTriggers(action);
-    return addTriggerPathsToIndex(
-      {
-        triggers: this.triggers,
-        nonRecursiveTriggers: this.nonRecursiveTriggers,
-      },
-      action,
-      reads,
-      shallowReads,
-    );
-  }
-
-  private clearActionTriggers(action: Action): void {
-    const cancel = this.cancels.get(action);
-    if (!cancel) return;
-
-    cancel();
-    this.cancels.delete(action);
-  }
-
-  private setCancelForEntities(
-    action: Action,
-    entities: Set<SpaceScopeAndURI>,
-  ): void {
-    const actionId = this.getActionId(action);
-    this.cancels.set(action, () => {
-      logger.debug("schedule-unsubscribe", () => [
-        `Action: ${actionId}`,
-        `Entities: ${entities.size}`,
-      ]);
-      removeActionFromTriggerIndex(
-        {
-          triggers: this.triggers,
-          nonRecursiveTriggers: this.nonRecursiveTriggers,
-        },
-        action,
-        entities,
-      );
-    });
-  }
-
   private collectDependenciesForAction(
     action: Action,
     populateDependencies: PopulateDependenciesEntry,
@@ -1314,12 +1288,17 @@ export class Scheduler {
     const shallowReadsForTriggers = options.useRawReadsForTriggers
       ? log.shallowReads
       : shallowReads;
-    const { entities } = this.addTriggerPaths(
+    const { entities } = replaceActionTriggerPaths(
+      this.triggerSubscriptionState,
       action,
       readsForTriggers,
       shallowReadsForTriggers,
     );
-    this.setCancelForEntities(action, entities);
+    setCancelForTriggerEntities(
+      this.triggerSubscriptionState,
+      action,
+      entities,
+    );
 
     return { log, entities };
   }

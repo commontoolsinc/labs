@@ -7,6 +7,7 @@ import {
 } from "../reactive-dependencies.ts";
 import { toMemorySpaceAddress } from "../link-utils.ts";
 import { normalizeCellScope } from "../scope.ts";
+import type { Cancel } from "../cancel.ts";
 import type {
   IMemorySpaceAddress,
   MemoryAddressPathComponent,
@@ -40,6 +41,15 @@ export interface TriggerIndexState {
 export interface WriterIndexState {
   readonly writersByEntity: Map<SpaceScopeAndURI, Set<Action>>;
   readonly actionWriteEntities: WeakMap<Action, Set<SpaceScopeAndURI>>;
+}
+
+export interface TriggerSubscriptionState extends TriggerIndexState {
+  readonly cancels: WeakMap<Action, Cancel>;
+  readonly getActionId: (action: Action) => string;
+  readonly onTriggerUnsubscribe?: (
+    actionId: string,
+    entityCount: number,
+  ) => void;
 }
 
 export interface DependencyGraphState extends TriggerIndexState {
@@ -199,6 +209,42 @@ export function addTriggerPathsToIndex(
   }
 
   return { entities, triggerPathsByEntity };
+}
+
+export function replaceActionTriggerPaths(
+  state: TriggerSubscriptionState,
+  action: Action,
+  reads: IMemorySpaceAddress[],
+  shallowReads: IMemorySpaceAddress[],
+): {
+  entities: Set<SpaceScopeAndURI>;
+  triggerPathsByEntity: Map<SpaceScopeAndURI, SortedAndCompactPaths>;
+} {
+  clearActionTriggers(state, action);
+  return addTriggerPathsToIndex(state, action, reads, shallowReads);
+}
+
+export function clearActionTriggers(
+  state: TriggerSubscriptionState,
+  action: Action,
+): void {
+  const cancel = state.cancels.get(action);
+  if (!cancel) return;
+
+  cancel();
+  state.cancels.delete(action);
+}
+
+export function setCancelForTriggerEntities(
+  state: TriggerSubscriptionState,
+  action: Action,
+  entities: Set<SpaceScopeAndURI>,
+): void {
+  const actionId = state.getActionId(action);
+  state.cancels.set(action, () => {
+    state.onTriggerUnsubscribe?.(actionId, entities.size);
+    removeActionFromTriggerIndex(state, action, entities);
+  });
 }
 
 export function removeActionFromTriggerIndex(
