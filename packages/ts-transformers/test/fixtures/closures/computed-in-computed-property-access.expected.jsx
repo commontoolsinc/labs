@@ -24,7 +24,7 @@ const __cfModuleCallback_1 = __cfHardenFn(() => {
         },
         required: ["bar"]
     } as const satisfies __cfHelpers.JSONSchema, {}, () => ({ bar: 1 })).for("foo", true);
-    return foo.bar;
+    return foo.key("bar");
 });
 // FIXTURE: computed-in-computed-property-access
 // Verifies: property access on a computed() result declared INSIDE another computed()
