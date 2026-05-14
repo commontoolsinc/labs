@@ -547,4 +547,29 @@ describe("buildDenoArgs", () => {
     expect(args).not.toContain("--identity");
     expect(args).not.toContain("--exec-cli");
   });
+
+  it("passes CFC mount options through to the daemon", () => {
+    const args = buildDenoArgs({
+      modPath: "/mod.ts",
+      mountpoint: "/mnt",
+      apiUrl: "",
+      identity: "",
+      execCli: "",
+      allowOther: true,
+      cfcMode: "enforce-explicit",
+      cfcAnnotations: true,
+      cfcXattrNamespace: "both",
+      cfcWritebackXattrs: true,
+      cfcWritebackState: "/tmp/cf-writeback.json",
+    });
+    expect(args).toContain("--allow-other");
+    expect(args).toContain("--cfc-mode");
+    expect(args).toContain("enforce-explicit");
+    expect(args).toContain("--cfc-annotations");
+    expect(args).toContain("--cfc-xattr-namespace");
+    expect(args).toContain("both");
+    expect(args).toContain("--cfc-writeback-xattrs");
+    expect(args).toContain("--cfc-writeback-state");
+    expect(args).toContain("/tmp/cf-writeback.json");
+  });
 });

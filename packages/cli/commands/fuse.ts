@@ -122,6 +122,26 @@ export const fuse = new Command()
     "Linux only: export the mount to other users such as Docker daemon. Requires user_allow_other in /etc/fuse.conf.",
   )
   .option(
+    "--cfc-mode <mode:string>",
+    "Enable FUSE-side CFC mode: disabled, observe, enforce-explicit, or enforce-strict.",
+  )
+  .option(
+    "--cfc-annotations",
+    "Publish CFC annotation xattrs even when CFC mode is disabled.",
+  )
+  .option(
+    "--cfc-xattr-namespace <namespace:string>",
+    "CFC xattr namespace to expose: trusted, compat, or both.",
+  )
+  .option(
+    "--cfc-writeback-xattrs",
+    "Enable temporary CFC writeback prepare/finalize xattrs for integration testing.",
+  )
+  .option(
+    "--cfc-writeback-state <path:string>",
+    "Path for persisted CFC writeback recovery state.",
+  )
+  .option(
     "-s, --space <name:string>",
     "Space(s) to connect (repeatable, default: home).",
     { collect: true },
@@ -185,6 +205,17 @@ export const fuse = new Command()
       if (apiUrl) spawnArgs.push("--api-url", apiUrl);
       if (identity) spawnArgs.push("--identity", identity);
       if (options.allowOther) spawnArgs.push("--allow-other");
+      if (options.cfcMode) spawnArgs.push("--cfc-mode", options.cfcMode);
+      if (options.cfcAnnotations) spawnArgs.push("--cfc-annotations");
+      if (options.cfcXattrNamespace) {
+        spawnArgs.push("--cfc-xattr-namespace", options.cfcXattrNamespace);
+      }
+      if (options.cfcWritebackXattrs) {
+        spawnArgs.push("--cfc-writeback-xattrs");
+      }
+      if (options.cfcWritebackState) {
+        spawnArgs.push("--cfc-writeback-state", options.cfcWritebackState);
+      }
       if (execCli) spawnArgs.push("--exec-cli", execCli);
       for (const s of options.space ?? []) spawnArgs.push("--space", s);
     } else {
@@ -197,6 +228,11 @@ export const fuse = new Command()
         identity,
         execCli,
         allowOther: options.allowOther,
+        cfcMode: options.cfcMode,
+        cfcAnnotations: options.cfcAnnotations,
+        cfcXattrNamespace: options.cfcXattrNamespace,
+        cfcWritebackXattrs: options.cfcWritebackXattrs,
+        cfcWritebackState: options.cfcWritebackState,
       });
       for (const s of options.space ?? []) spawnArgs.push("--space", s);
     }

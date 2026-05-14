@@ -149,9 +149,9 @@ Deno.test({
           inputs: {
             command: {
               type: "cf-harness.redacted-text-summary",
-              bytes: 205,
+              bytes: 218,
               digest:
-                "sha256:6bb6cd56e7da813533d74d7817e27d52c502178533187fe96132f5804f2a7d15",
+                "sha256:639e51198d6d74a7eaf2333cf7cb33819448ba30b4c8aa668809cda975728cfd",
             },
           },
         }],
