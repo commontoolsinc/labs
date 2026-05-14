@@ -11,7 +11,12 @@ import type {
   MemoryAddressPathComponent,
 } from "../storage/interface.ts";
 import { entityKey } from "./keys.ts";
-import type { Action, SpaceScopeAndURI } from "./types.ts";
+import type {
+  Action,
+  DirtyDependencyTraceContext,
+  ReactivityLog,
+  SpaceScopeAndURI,
+} from "./types.ts";
 
 export interface TriggerIndexState {
   readonly triggers: Map<
@@ -236,6 +241,59 @@ export function collectReadersForWrite(
   }
 
   return readers;
+}
+
+export function collectDirectWritersForLog(state: {
+  readonly writersByEntity: Map<SpaceScopeAndURI, Set<Action>>;
+  readonly effects: ReadonlySet<Action>;
+  readonly getSchedulingWrites: (
+    action: Action,
+  ) => readonly IMemorySpaceAddress[] | undefined;
+  readonly trace?: DirtyDependencyTraceContext;
+}, log: ReactivityLog): Set<Action> {
+  const directWriters = new Set<Action>();
+  if (state.trace) {
+    state.trace.logReadCount += log.reads.length;
+    state.trace.logShallowReadCount += log.shallowReads.length;
+  }
+
+  for (const read of log.reads) {
+    const entity = entityKey(read);
+    const writers = state.writersByEntity.get(entity);
+    if (!writers) continue;
+
+    for (const writer of writers) {
+      if (state.effects.has(writer)) continue;
+      if (state.trace) state.trace.writerCandidateCount++;
+      const writes = state.getSchedulingWrites(writer) ?? [];
+      if (readsOverlapWrites([read], [], writes)) {
+        if (state.trace && !directWriters.has(writer)) {
+          state.trace.writerOverlapCount++;
+        }
+        directWriters.add(writer);
+      }
+    }
+  }
+
+  for (const read of log.shallowReads) {
+    const entity = entityKey(read);
+    const writers = state.writersByEntity.get(entity);
+    if (!writers) continue;
+
+    for (const writer of writers) {
+      if (state.effects.has(writer)) continue;
+      if (state.trace) state.trace.writerCandidateCount++;
+      const writes = state.getSchedulingWrites(writer) ?? [];
+      if (readsOverlapWrites([], [read], writes)) {
+        if (state.trace && !directWriters.has(writer)) {
+          state.trace.writerOverlapCount++;
+        }
+        directWriters.add(writer);
+      }
+    }
+  }
+
+  return directWriters;
 }
 
 export function readsOverlapWrites(

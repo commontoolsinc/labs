@@ -74,6 +74,7 @@ import {
 import {
   addTriggerPathsToIndex,
   buildKnownSchedulingWrites,
+  collectDirectWritersForLog,
   collectReadersForWrite,
   diffSchedulingWrites,
   groupReadsByEntity,
@@ -2670,48 +2671,15 @@ export class Scheduler {
     memo = new Map<Action, boolean>(),
   ): boolean {
     const lookupStart = performance.now();
-    const directWriters = new Set<Action>();
     const trace = this.dirtyDependencyTraceContext;
-    if (trace) {
-      trace.logReadCount += log.reads.length;
-      trace.logShallowReadCount += log.shallowReads.length;
-    }
+    let directWriters: Set<Action>;
     try {
-      for (const read of log.reads) {
-        const entity = entityKey(read);
-        const writers = this.writersByEntity.get(entity);
-        if (!writers) continue;
-
-        for (const writer of writers) {
-          if (this.effects.has(writer)) continue;
-          if (trace) trace.writerCandidateCount++;
-          const writes = this.getSchedulingWrites(writer) ?? [];
-          if (readsOverlapWrites([read], [], writes)) {
-            if (trace && !directWriters.has(writer)) {
-              trace.writerOverlapCount++;
-            }
-            directWriters.add(writer);
-          }
-        }
-      }
-
-      for (const read of log.shallowReads) {
-        const entity = entityKey(read);
-        const writers = this.writersByEntity.get(entity);
-        if (!writers) continue;
-
-        for (const writer of writers) {
-          if (this.effects.has(writer)) continue;
-          if (trace) trace.writerCandidateCount++;
-          const writes = this.getSchedulingWrites(writer) ?? [];
-          if (readsOverlapWrites([], [read], writes)) {
-            if (trace && !directWriters.has(writer)) {
-              trace.writerOverlapCount++;
-            }
-            directWriters.add(writer);
-          }
-        }
-      }
+      directWriters = collectDirectWritersForLog({
+        writersByEntity: this.writersByEntity,
+        effects: this.effects,
+        getSchedulingWrites: (writer) => this.getSchedulingWrites(writer),
+        trace,
+      }, log);
     } finally {
       logger.time(
         lookupStart,
