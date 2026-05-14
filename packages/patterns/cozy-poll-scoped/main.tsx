@@ -413,8 +413,10 @@ export default pattern<CozyPollInput, CozyPollOutput>(
 
                 <cf-vstack gap="2">
                   {ranked.map((tally) => {
+                    const oid = tally.option.id;
+                    const optionTitle = tally.option.title;
                     const myVote = derive(
-                      { votes, myName, optionId: tally.option.id },
+                      { votes, myName, optionId: oid },
                       ({ votes, myName, optionId }) =>
                         myVoteFor(votes, trimmedName(myName), optionId),
                     );
@@ -423,7 +425,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                         <cf-vstack slot="content" gap="2">
                           <cf-hstack justify="between" align="center">
                             <cf-heading level={4}>
-                              {tally.option.title}
+                              {optionTitle}
                             </cf-heading>
                             <div
                               style={{
@@ -460,7 +462,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                                 <cf-button
                                   onClick={() =>
                                     boundCastVote.send({
-                                      optionId: tally.option.id,
+                                      optionId: oid,
                                       voteType: "green",
                                     })}
                                 >
@@ -469,7 +471,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                                 <cf-button
                                   onClick={() =>
                                     boundCastVote.send({
-                                      optionId: tally.option.id,
+                                      optionId: oid,
                                       voteType: "yellow",
                                     })}
                                 >
@@ -478,7 +480,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                                 <cf-button
                                   onClick={() =>
                                     boundCastVote.send({
-                                      optionId: tally.option.id,
+                                      optionId: oid,
                                       voteType: "red",
                                     })}
                                 >
@@ -489,7 +491,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                                     <cf-button
                                       onClick={() =>
                                         boundRemoveOption.send({
-                                          optionId: tally.option.id,
+                                          optionId: oid,
                                         })}
                                     >
                                       Remove
