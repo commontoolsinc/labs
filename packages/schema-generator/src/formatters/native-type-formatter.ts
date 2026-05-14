@@ -150,7 +150,8 @@ export class NativeTypeFormatter implements TypeFormatter {
       return fileName === "lib.d.ts" ||
         fileName.endsWith("/lib.d.ts") ||
         /(^|\/)lib\.[^/]+\.d\.ts$/i.test(fileName) ||
-        /(^|\/)(es\d+(?:\.[^/]+)?|dom|jsx)\.d\.ts$/i.test(fileName);
+        /(^|\/)(es\d+(?:\.[^/]+)?|dom|jsx)\.d\.ts$/i.test(fileName) ||
+        /(^|[\\/])node_modules[\\/]@types[\\/]node[\\/]/.test(fileName);
     }) ?? false;
   }
 

@@ -428,6 +428,82 @@ interface HasUrl {
       });
     });
 
+    it("formats URL from @types/node as string with uri format", () => {
+      const generator = new SchemaGenerator();
+      const sourceFiles = new Map([
+        [
+          "/test.ts",
+          ts.createSourceFile(
+            "/test.ts",
+            `
+interface HasNodeUrl {
+  homepage: URL;
+}`,
+            ts.ScriptTarget.ES2023,
+            true,
+          ),
+        ],
+        [
+          "/node_modules/@types/node/url.d.ts",
+          ts.createSourceFile(
+            "/node_modules/@types/node/url.d.ts",
+            `
+declare interface URL {
+  href: string;
+}`,
+            ts.ScriptTarget.ES2023,
+            true,
+          ),
+        ],
+      ]);
+      const compilerHost: ts.CompilerHost = {
+        getSourceFile: (fileName) => sourceFiles.get(fileName),
+        writeFile: () => {},
+        getCurrentDirectory: () => "/",
+        getDirectories: () => [],
+        fileExists: (fileName) => sourceFiles.has(fileName),
+        readFile: (fileName) => sourceFiles.get(fileName)?.text,
+        getCanonicalFileName: (fileName) => fileName,
+        useCaseSensitiveFileNames: () => true,
+        getNewLine: () => "\n",
+        getDefaultLibFileName: () => "lib.d.ts",
+      };
+      const program = ts.createProgram(
+        [...sourceFiles.keys()],
+        {
+          target: ts.ScriptTarget.ES2023,
+          module: ts.ModuleKind.ESNext,
+          noLib: true,
+          strict: true,
+        },
+        compilerHost,
+      );
+      const checker = program.getTypeChecker();
+      const sourceFile = program.getSourceFile("/test.ts");
+      if (!sourceFile) throw new Error("Expected test source file");
+      let foundType: ts.Type | undefined;
+      ts.forEachChild(sourceFile, (node) => {
+        if (
+          ts.isInterfaceDeclaration(node) && node.name.text === "HasNodeUrl"
+        ) {
+          const symbol = checker.getSymbolAtLocation(node.name);
+          if (symbol) foundType = checker.getDeclaredTypeOfSymbol(symbol);
+        }
+      });
+      if (!foundType) throw new Error("Expected HasNodeUrl type");
+
+      const schema = generator.generateSchema(foundType, checker);
+      const objectSchema = schema as Record<string, unknown>;
+      const props = objectSchema.properties as
+        | Record<string, Record<string, unknown>>
+        | undefined;
+
+      expect(props?.homepage).toEqual({
+        type: "string",
+        format: "uri",
+      });
+    });
+
     it("formats Uint8Array as permissive true schema", async () => {
       const generator = new SchemaGenerator();
       const code = `
