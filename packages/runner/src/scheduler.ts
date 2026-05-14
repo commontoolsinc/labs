@@ -95,27 +95,7 @@ import {
   summarizeSettleIteration,
   summarizeSettleRun,
 } from "./scheduler/execution.ts";
-import {
-  canAutomaticallyDebounce as canAutomaticallyDebounceState,
-  cancelDebounceTimer as cancelDebounceTimerState,
-  clearActiveDebounceTimers,
-  clearComputationDebounceState as clearComputationDebounceStateFromDelay,
-  clearDebounce as clearDebounceState,
-  clearThrottle as clearThrottleState,
-  getDebounce as getDebounceState,
-  getNextDebounceRunTime as getNextDebounceRunTimeState,
-  getNextEligibleRunTime as getNextEligibleRunTimeState,
-  getThrottle as getThrottleState,
-  isDebouncedComputationWaiting as isDebouncedComputationWaitingState,
-  isThrottled as isThrottledState,
-  maybeAutoDebounce as maybeAutoDebounceState,
-  scheduleComputationDebounce,
-  type SchedulerDelayState,
-  scheduleWithDebounce as scheduleWithDebounceState,
-  setDebounce as setDebounceState,
-  setNoDebounce as setNoDebounceState,
-  setThrottle as setThrottleState,
-} from "./scheduler/delays.ts";
+import { SchedulerDelays } from "./scheduler/delays.ts";
 import { processStorageNotification } from "./scheduler/notifications.ts";
 import {
   clearSchedulerDirectDirty,
@@ -319,20 +299,10 @@ export class Scheduler {
     isDisposed: () => this.disposed,
     queueExecution: () => this.queueExecution(),
   };
-  private delayState: SchedulerDelayState = {
-    actionDebounce: new WeakMap<Action, number>(),
-    actionThrottle: new WeakMap<Action, number>(),
+  private delays = new SchedulerDelays({
     actionStats: this.actionStats,
-    actionHasRun: new WeakSet<Action>(),
-    computationDebounceReady: new WeakSet<Action>(),
-    computationDebounceReadyAt: new WeakMap<Action, number>(),
-    computationDebounceFlushSeeds: new Set<Action>(),
-    // Actions that opt out of auto-debounce (inverted: true means NO auto-debounce)
-    noDebounce: new WeakMap<Action, boolean>(),
-    debounceTimers: new WeakMap<Action, ReturnType<typeof setTimeout>>(),
-    activeDebounceTimers: new Set<ReturnType<typeof setTimeout>>(),
     getActionId: (action) => this.getActionId(action),
-  };
+  });
   private inFlightSourceState: InFlightSourceState = {
     inFlightSources: new WeakMap<Action, Set<IStorageTransaction>>(),
   };
@@ -420,7 +390,7 @@ export class Scheduler {
     scheduleComputationDebounce: (action) =>
       this.scheduleComputationDebounce(action),
     clearComputationDebounceState: (action) =>
-      clearComputationDebounceStateFromDelay(this.delayState, action),
+      this.delays.clearComputationDebounceState(action),
     isDemandedPullComputation: (action) =>
       this.isDemandedPullComputation(action),
     queueExecution: () => this.queueExecution(),
@@ -436,7 +406,7 @@ export class Scheduler {
     effects: this.effects,
     isDemandedPullComputation: (action: Action) =>
       this.isDemandedPullComputation(action),
-    isThrottled: (action: Action) => isThrottledState(this.delayState, action),
+    isThrottled: (action: Action) => this.delays.isThrottled(action),
   };
   private dirtyPullRunnableStateWithDebounce = {
     ...this.dirtyPullRunnableState,
@@ -499,7 +469,7 @@ export class Scheduler {
   private pendingDependencyCollectionState = {
     pendingDependencyCollection: this.pendingDependencyCollection,
     effects: this.effects,
-    isThrottled: (action: Action) => isThrottledState(this.delayState, action),
+    isThrottled: (action: Action) => this.delays.isThrottled(action),
     getSchedulingWrites: (action: Action) =>
       getSchedulingWritesFromState(this.schedulingWriteState, action),
     hasDependentPath: (from: Action, to: Action) =>
@@ -864,7 +834,7 @@ export class Scheduler {
             if (writer === action) continue;
             if (!isActionStale(this.stalenessState, writer)) continue;
             if (this.effects.has(writer)) continue; // Only check computations
-            if (isThrottledState(this.delayState, writer)) continue; // Skip throttled - they trigger via storage
+            if (this.delays.isThrottled(writer)) continue; // Skip throttled - they trigger via storage
 
             // Check path overlap
             const writerWrites =
@@ -922,13 +892,9 @@ export class Scheduler {
         forceClearStale: (target) =>
           forceClearStaleState(this.stalenessState, target),
         cancelDebounceTimer: (target) =>
-          cancelDebounceTimerState(this.delayState, target),
+          this.delays.cancelDebounceTimer(target),
         clearComputationDebounceState: (target, targetOptions) =>
-          clearComputationDebounceStateFromDelay(
-            this.delayState,
-            target,
-            targetOptions,
-          ),
+          this.delays.clearComputationDebounceState(target, targetOptions),
       },
       action,
       options,
@@ -965,7 +931,7 @@ export class Scheduler {
         const elapsed = performance.now() - actionStartTime;
         recordActionTimeState(this.actionTimingState, action, elapsed);
         this.maybeAutoDebounce(action);
-        this.delayState.actionHasRun.add(action);
+        this.delays.markActionHasRun(action);
         this.pullDemandedFirstRunComputations.delete(action);
 
         try {
@@ -1425,15 +1391,16 @@ export class Scheduler {
       actionParent: this.actionParent,
       actionChildren: this.actionChildren,
       actionStats: this.actionStats,
-      actionDebounce: this.delayState.actionDebounce,
-      actionThrottle: this.delayState.actionThrottle,
-      debounceTimers: this.delayState.debounceTimers,
+      getDebounce: (action) => this.delays.getDebounce(action),
+      getThrottle: (action) => this.delays.getThrottle(action),
+      hasActiveDebounceTimer: (action) =>
+        this.delays.hasActiveDebounceTimer(action),
       getActionId: (action) => this.getActionId(action),
       getSchedulingWrites: (action) =>
         getSchedulingWritesFromState(this.schedulingWriteState, action),
       getNextDebounceRunTime: (action) => this.getNextDebounceRunTime(action),
       getNextEligibleRunTime: (action) =>
-        getNextEligibleRunTimeState(this.delayState, action),
+        this.delays.getNextEligibleRunTime(action),
       isDemandedPullComputation: (action) =>
         this.isDemandedPullComputation(action),
       isLiveEffect: (action) => this.isLiveEffect(action),
@@ -1840,12 +1807,11 @@ export class Scheduler {
   }
 
   private canAutomaticallyDebounce(action: Action): boolean {
-    return canAutomaticallyDebounceState({
-      noDebounce: this.delayState.noDebounce,
+    return this.delays.canAutomaticallyDebounce(action, {
       effects: this.effects,
       isPullDemandRootEffect: (candidate) =>
         this.isPullDemandRootEffect(candidate),
-    }, action);
+    });
   }
 
   private shouldRunFirstPullComputationInDemandContext(
@@ -1855,7 +1821,7 @@ export class Scheduler {
       !this.pullMode ||
       !this.computations.has(action) ||
       this.effects.has(action) ||
-      this.delayState.actionHasRun.has(action)
+      this.delays.hasActionRun(action)
     ) {
       return false;
     }
@@ -2018,7 +1984,7 @@ export class Scheduler {
       ) {
         const pendingBefore = this.pending.has(effect);
         const dirtyBefore = this.stalenessState.dirty.has(effect);
-        const debounceMs = this.delayState.actionDebounce.get(effect);
+        const debounceMs = this.delays.getDebounce(effect);
         if (
           !pendingBefore && !dirtyBefore &&
           !this.conditionallyScheduledEffects.has(effect)
@@ -2062,21 +2028,21 @@ export class Scheduler {
    * If triggered again during the delay, the timer resets.
    */
   setDebounce(action: Action, ms: number): void {
-    setDebounceState(this.delayState, action, ms);
+    this.delays.setDebounce(action, ms);
   }
 
   /**
    * Gets the current debounce delay for an action, if set.
    */
   getDebounce(action: Action): number | undefined {
-    return getDebounceState(this.delayState, action);
+    return this.delays.getDebounce(action);
   }
 
   /**
    * Clears the debounce setting for an action.
    */
   clearDebounce(action: Action): void {
-    clearDebounceState(this.delayState, action);
+    this.delays.clearDebounce(action);
   }
 
   /**
@@ -2085,12 +2051,11 @@ export class Scheduler {
    * By default, slow actions (> 50ms avg after 3 runs) will automatically get debounced.
    */
   setNoDebounce(action: Action, optOut: boolean): void {
-    setNoDebounceState(this.delayState, action, optOut);
+    this.delays.setNoDebounce(action, optOut);
   }
 
   private getNextDebounceRunTime(action: Action): number | undefined {
-    return getNextDebounceRunTimeState(
-      this.delayState,
+    return this.delays.getNextDebounceRunTime(
       action,
       {
         pullMode: this.pullMode,
@@ -2102,8 +2067,7 @@ export class Scheduler {
   }
 
   private isDebouncedComputationWaiting(action: Action): boolean {
-    return isDebouncedComputationWaitingState(
-      this.delayState,
+    return this.delays.isDebouncedComputationWaiting(
       action,
       {
         pullMode: this.pullMode,
@@ -2119,8 +2083,7 @@ export class Scheduler {
   }
 
   private scheduleComputationDebounce(action: Action): void {
-    scheduleComputationDebounce(
-      this.delayState,
+    this.delays.scheduleComputationDebounce(
       action,
       {
         pullMode: this.pullMode,
@@ -2141,8 +2104,7 @@ export class Scheduler {
    * Otherwise, it's added immediately.
    */
   private scheduleWithDebounce(action: Action): void {
-    scheduleWithDebounceState(
-      this.delayState,
+    this.delays.scheduleWithDebounce(
       action,
       {
         pending: this.pending,
@@ -2159,7 +2121,7 @@ export class Scheduler {
    * Auto-debounce is enabled by default; use noDebounce to opt out.
    */
   private maybeAutoDebounce(action: Action): void {
-    const update = maybeAutoDebounceState(this.delayState, action, {
+    const update = this.delays.maybeAutoDebounce(action, {
       canAutomaticallyDebounce: (candidate) =>
         this.canAutomaticallyDebounce(candidate),
     });
@@ -2185,21 +2147,21 @@ export class Scheduler {
    * dependencies are throttled are parked until the earliest eligible wake time.
    */
   setThrottle(action: Action, ms: number): void {
-    setThrottleState(this.delayState, action, ms);
+    this.delays.setThrottle(action, ms);
   }
 
   /**
    * Gets the current throttle period for an action, if set.
    */
   getThrottle(action: Action): number | undefined {
-    return getThrottleState(this.delayState, action);
+    return this.delays.getThrottle(action);
   }
 
   /**
    * Clears the throttle setting for an action.
    */
   clearThrottle(action: Action): void {
-    clearThrottleState(this.delayState, action);
+    this.delays.clearThrottle(action);
   }
 
   // ============================================================
@@ -2512,8 +2474,7 @@ export class Scheduler {
       isDebouncedComputationWaiting: (dep) =>
         this.isDebouncedComputationWaiting(dep),
       getNextDebounceRunTime: (dep) => this.getNextDebounceRunTime(dep),
-      getNextEligibleRunTime: (dep) =>
-        getNextEligibleRunTimeState(this.delayState, dep),
+      getNextEligibleRunTime: (dep) => this.delays.getNextEligibleRunTime(dep),
       scheduleEventQueueWake: (notBefore) =>
         scheduleEventQueueWakeState(this.eventQueueWakeState, notBefore),
       snapshotDirtyDependencyTraceContext: (trace) =>
@@ -2554,8 +2515,7 @@ export class Scheduler {
       effects: this.effects,
       newActionsWithoutDependencies,
       eventBlockingDeps,
-      computationDebounceFlushSeeds:
-        this.delayState.computationDebounceFlushSeeds,
+      computationDebounceFlushSeeds: this.delays.computationDebounceFlushSeeds,
     });
 
     // Settle loop: runs until no more dirty work is found.
@@ -2723,7 +2683,7 @@ export class Scheduler {
 
         // Check throttle: skip recently-run actions but keep them dirty
         // They'll be pulled next time an effect needs them (if throttle expired)
-        if (isThrottledState(this.delayState, fn)) {
+        if (this.delays.isThrottled(fn)) {
           logger.debug("schedule-throttle", () => [
             `[THROTTLE] Skipping throttled action: ${this.getActionId(fn)}`,
           ]);
@@ -2755,7 +2715,7 @@ export class Scheduler {
         this.pending.delete(fn);
         this.conditionallyScheduledEffects.delete(fn);
         if (this.computations.has(fn)) {
-          clearComputationDebounceStateFromDelay(this.delayState, fn);
+          this.delays.clearComputationDebounceState(fn);
         }
         if (this.pullMode && this.effects.has(fn)) {
           clearSchedulerDirty(this.dirtySchedulingState, fn);
@@ -2838,7 +2798,7 @@ export class Scheduler {
       dirty: this.stalenessState.dirty,
       effects: this.effects,
       runsThisExecute: this.runsThisExecute,
-      isThrottled: (action) => isThrottledState(this.delayState, action),
+      isThrottled: (action) => this.delays.isThrottled(action),
     });
     if (cycleBreakPlan.shouldBreak) {
       logger.debug("schedule-cycle", () => [
@@ -2887,13 +2847,12 @@ export class Scheduler {
         this.canAutomaticallyDebounce(
           action,
         ),
-      getCurrentDebounce: (action) =>
-        this.delayState.actionDebounce.get(action),
+      getCurrentDebounce: (action) => this.delays.getDebounce(action),
     });
     for (
       const { action, runs, delayMs } of cycleDebouncePlan.updates
     ) {
-      this.delayState.actionDebounce.set(action, delayMs);
+      this.delays.setDebounce(action, delayMs);
       logger.debug("schedule-cycle-debounce", () => [
         `[CYCLE-DEBOUNCE] Action ${this.getActionId(action)} ` +
         `ran ${runs}x in ${cycleDebouncePlan.elapsedMs.toFixed(1)}ms, ` +
@@ -2942,7 +2901,7 @@ export class Scheduler {
         this.isDebouncedComputationWaiting(action),
       getNextDebounceRunTime: (action) => this.getNextDebounceRunTime(action),
       getNextEligibleRunTime: (action) =>
-        getNextEligibleRunTimeState(this.delayState, action),
+        this.delays.getNextEligibleRunTime(action),
     });
 
     if (!continuation.shouldQueueAnotherTick) {
@@ -3000,7 +2959,7 @@ export class Scheduler {
   dispose(): void {
     this.disposed = true;
     // Clear all active debounce timers
-    clearActiveDebounceTimers(this.delayState);
+    this.delays.clearActiveDebounceTimers();
     if (this.pendingQueueTaskTimer !== null) {
       clearTimeout(this.pendingQueueTaskTimer);
       this.pendingQueueTaskTimer = null;

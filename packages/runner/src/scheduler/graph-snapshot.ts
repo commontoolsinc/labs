@@ -22,9 +22,9 @@ export interface SchedulerGraphSnapshotState {
   readonly actionParent: WeakMap<Action, Action>;
   readonly actionChildren: WeakMap<Action, Set<Action>>;
   readonly actionStats: ReadonlyMap<string, ActionStats>;
-  readonly actionDebounce: WeakMap<Action, number>;
-  readonly actionThrottle: WeakMap<Action, number>;
-  readonly debounceTimers: WeakMap<Action, ReturnType<typeof setTimeout>>;
+  readonly getDebounce: (action: Action) => number | undefined;
+  readonly getThrottle: (action: Action) => number | undefined;
+  readonly hasActiveDebounceTimer: (action: Action) => boolean;
   readonly getActionId: (action: Action) => string;
   readonly getSchedulingWrites: (
     action: Action,
@@ -64,8 +64,8 @@ export function buildSchedulerGraphSnapshot(
     const writes = state.getSchedulingWrites(action)?.map(formatAddress);
 
     // Get timing controls
-    const debounceMs = state.actionDebounce.get(action);
-    const throttleMs = state.actionThrottle.get(action);
+    const debounceMs = state.getDebounce(action);
+    const throttleMs = state.getThrottle(action);
     const nextDebounceRunAt = state.getNextDebounceRunTime(action);
     const nextEligibleRunAt = state.getNextEligibleRunTime(action);
 
@@ -83,7 +83,7 @@ export function buildSchedulerGraphSnapshot(
       ),
       isDebouncedWaiting: nextDebounceRunAt !== undefined &&
         nextDebounceRunAt > now,
-      hasActiveDebounceTimer: state.debounceTimers.has(action),
+      hasActiveDebounceTimer: state.hasActiveDebounceTimer(action),
       nextDebounceRunInMs: nextDebounceRunAt !== undefined
         ? Math.max(0, Math.round(nextDebounceRunAt - now))
         : undefined,
