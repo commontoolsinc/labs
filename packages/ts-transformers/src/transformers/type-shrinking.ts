@@ -29,6 +29,7 @@ interface CapabilityShrinkPlan {
   readonly fullShapePaths: readonly (readonly string[])[];
   readonly identityPaths: readonly (readonly string[])[];
   readonly identityCellPaths: readonly (readonly string[])[];
+  readonly comparableCellPaths: readonly (readonly string[])[];
   readonly identityOnlyRoot: boolean;
   readonly effectiveIdentityPaths: readonly (readonly string[])[];
 }
@@ -123,6 +124,10 @@ function deriveCapabilityShrinkPlan(
   const fullShapePaths = uniquePaths(paramSummary.fullShapePaths ?? []);
   const identityPaths = uniquePaths(paramSummary.identityPaths ?? []);
   const identityCellPaths = uniquePaths(paramSummary.identityCellPaths ?? []);
+  const comparableCellPaths = uniquePaths([
+    ...(paramSummary.comparableCellPaths ?? []),
+    ...(paramSummary.capability === "comparable" ? identityCellPaths : []),
+  ]);
   const retainedPaths = uniquePaths([...paths, ...identityPaths]);
   const identityOnlyRoot = !!paramSummary.identityOnly &&
     !paramSummary.wildcard &&
@@ -137,6 +142,7 @@ function deriveCapabilityShrinkPlan(
     fullShapePaths,
     identityPaths,
     identityCellPaths,
+    comparableCellPaths,
     identityOnlyRoot,
     effectiveIdentityPaths,
   };
@@ -1607,6 +1613,8 @@ export function wrapTypeNodeWithCapability(
 ): ts.TypeNode {
   const wrapperName = capability === "readonly"
     ? "ReadonlyCell"
+    : capability === "comparable"
+    ? "ComparableCell"
     : capability === "writeonly"
     ? "WriteonlyCell"
     : capability === "writable"
@@ -1626,6 +1634,7 @@ function createIdentityOnlyReplacementTypeNode(
   node: ts.TypeNode,
   semanticType: ts.Type | undefined,
   forceOpaque: boolean,
+  forceComparable: boolean,
   checker: ts.TypeChecker,
   factory: ts.NodeFactory,
   typeRegistry?: WeakMap<ts.Node, ts.Type>,
@@ -1646,7 +1655,7 @@ function createIdentityOnlyReplacementTypeNode(
   ) {
     const wrappedNode = wrapTypeNodeWithCapability(
       unknownNode,
-      "opaque",
+      forceComparable ? "comparable" : "opaque",
       factory,
     );
     const wrappedType = resolveIdentitySemanticType(
@@ -1688,6 +1697,7 @@ function createIdentityOnlyRootTypeNode(
   node: ts.TypeNode,
   semanticType: ts.Type | undefined,
   forceOpaque: boolean,
+  forceComparable: boolean,
   checker: ts.TypeChecker,
   factory: ts.NodeFactory,
   typeRegistry?: WeakMap<ts.Node, ts.Type>,
@@ -1700,6 +1710,7 @@ function createIdentityOnlyRootTypeNode(
       node,
       resolvedType,
       forceOpaque,
+      forceComparable,
       checker,
       factory,
       typeRegistry,
@@ -1735,6 +1746,7 @@ function createIdentityOnlyRootTypeNode(
           ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
           memberType,
           forceOpaque,
+          forceComparable,
           checker,
           factory,
           typeRegistry,
@@ -1754,6 +1766,7 @@ function createIdentityOnlyRootTypeNode(
     node,
     resolvedType,
     forceOpaque,
+    forceComparable,
     checker,
     factory,
     typeRegistry,
@@ -1801,6 +1814,7 @@ function applyIdentityOnlyPathsToTypeNode(
   node: ts.TypeNode,
   paths: readonly (readonly string[])[],
   cellLikePaths: readonly (readonly string[])[],
+  comparableCellLikePaths: readonly (readonly string[])[],
   factory: ts.NodeFactory,
   checker: ts.TypeChecker,
   semanticType?: ts.Type,
@@ -1808,6 +1822,9 @@ function applyIdentityOnlyPathsToTypeNode(
 ): ts.TypeNode {
   const normalized = uniquePaths(paths);
   const normalizedCellLikePaths = uniquePaths(cellLikePaths);
+  const normalizedComparableCellLikePaths = uniquePaths(
+    comparableCellLikePaths,
+  );
   if (normalized.length === 0) {
     return node;
   }
@@ -1821,6 +1838,7 @@ function applyIdentityOnlyPathsToTypeNode(
       node,
       resolvedSemanticType,
       normalizedCellLikePaths.some((path) => path.length === 0),
+      normalizedComparableCellLikePaths.some((path) => path.length === 0),
       checker,
       factory,
       typeRegistry,
@@ -1832,6 +1850,7 @@ function applyIdentityOnlyPathsToTypeNode(
       node.type,
       normalized,
       normalizedCellLikePaths,
+      normalizedComparableCellLikePaths,
       factory,
       checker,
       resolvedSemanticType,
@@ -1844,6 +1863,9 @@ function applyIdentityOnlyPathsToTypeNode(
 
   const itemPaths = getArrayItemPaths(normalized);
   const itemCellLikePaths = getArrayItemPaths(normalizedCellLikePaths);
+  const itemComparableCellLikePaths = getArrayItemPaths(
+    normalizedComparableCellLikePaths,
+  );
   if (itemPaths.length > 0) {
     const itemSemanticType = resolvedSemanticType
       ? getArrayElementType(
@@ -1856,6 +1878,7 @@ function applyIdentityOnlyPathsToTypeNode(
         node.elementType,
         itemPaths,
         itemCellLikePaths,
+        itemComparableCellLikePaths,
         factory,
         checker,
         itemSemanticType,
@@ -1877,6 +1900,7 @@ function applyIdentityOnlyPathsToTypeNode(
         node.type.elementType,
         itemPaths,
         itemCellLikePaths,
+        itemComparableCellLikePaths,
         factory,
         checker,
         itemSemanticType,
@@ -1904,6 +1928,7 @@ function applyIdentityOnlyPathsToTypeNode(
         inner,
         itemPaths,
         itemCellLikePaths,
+        itemComparableCellLikePaths,
         factory,
         checker,
         itemSemanticType,
@@ -1924,6 +1949,9 @@ function applyIdentityOnlyPathsToTypeNode(
   if (ts.isTypeLiteralNode(node)) {
     const grouped = groupPathsByHead(normalized);
     const cellLikeGrouped = groupPathsByHead(normalizedCellLikePaths);
+    const comparableCellLikeGrouped = groupPathsByHead(
+      normalizedComparableCellLikePaths,
+    );
     let changed = false;
     const members = node.members.map((member) => {
       if (!ts.isPropertySignature(member) || !member.type || !member.name) {
@@ -1941,6 +1969,7 @@ function applyIdentityOnlyPathsToTypeNode(
         member.type,
         childPaths,
         cellLikeGrouped.get(propertyName) ?? [],
+        comparableCellLikeGrouped.get(propertyName) ?? [],
         factory,
         checker,
         getIdentityChildSemanticType(
@@ -1983,6 +2012,7 @@ function applyIdentityOnlyPathsToTypeNode(
       inner,
       normalized,
       normalizedCellLikePaths,
+      normalizedComparableCellLikePaths,
       factory,
       checker,
       unwrapCellLikeType(resolvedSemanticType, checker) ?? resolvedSemanticType,
@@ -2004,6 +2034,9 @@ function applyIdentityOnlyPathsToTypeNode(
     if (members) {
       const grouped = groupPathsByHead(normalized);
       const cellLikeGrouped = groupPathsByHead(normalizedCellLikePaths);
+      const comparableCellLikeGrouped = groupPathsByHead(
+        normalizedComparableCellLikePaths,
+      );
       let changed = false;
       const updatedMembers = members.map((member) => {
         if (!ts.isPropertySignature(member) || !member.type || !member.name) {
@@ -2021,6 +2054,7 @@ function applyIdentityOnlyPathsToTypeNode(
           member.type,
           childPaths,
           cellLikeGrouped.get(propertyName) ?? [],
+          comparableCellLikeGrouped.get(propertyName) ?? [],
           factory,
           checker,
           getIdentityChildSemanticType(
@@ -2061,6 +2095,7 @@ function applyIdentityOnlyPathsToTypeNode(
         member,
         normalized,
         normalizedCellLikePaths,
+        normalizedComparableCellLikePaths,
         factory,
         checker,
         resolvedSemanticType,
@@ -2383,6 +2418,7 @@ export function applyShrinkAndWrap(
     fullShapePaths,
     identityPaths,
     identityCellPaths,
+    comparableCellPaths,
     identityOnlyRoot,
     effectiveIdentityPaths,
   } = shrinkPlan;
@@ -2406,6 +2442,7 @@ export function applyShrinkAndWrap(
         baseTypeNode,
         effectiveIdentityPaths,
         identityCellPaths,
+        comparableCellPaths,
         factory,
         checker,
         baseType,
@@ -2438,6 +2475,7 @@ export function applyShrinkAndWrap(
       baseTypeNode,
       effectiveIdentityPaths,
       identityCellPaths,
+      comparableCellPaths,
       factory,
       checker,
       baseType,
@@ -2448,6 +2486,7 @@ export function applyShrinkAndWrap(
       baseTypeNode,
       identityPaths,
       identityCellPaths,
+      comparableCellPaths,
       factory,
       checker,
       baseType,
@@ -2543,6 +2582,7 @@ export function applyShrinkAndWrap(
       next,
       identityPaths,
       identityCellPaths,
+      comparableCellPaths,
       factory,
       checker,
       baseType,

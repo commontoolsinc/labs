@@ -24,6 +24,7 @@ export interface SchemaHint {
 
 export type ReactiveCapability =
   | "opaque"
+  | "comparable"
   | "readonly"
   | "writeonly"
   | "writable";
@@ -44,6 +45,8 @@ export interface CapabilityParamSummary {
   readonly identityOnly?: boolean;
   readonly identityPaths?: readonly (readonly string[])[];
   readonly identityCellPaths?: readonly (readonly string[])[];
+  readonly comparablePaths?: readonly (readonly string[])[];
+  readonly comparableCellPaths?: readonly (readonly string[])[];
   readonly defaults?: readonly CapabilityParamDefault[];
 }
 

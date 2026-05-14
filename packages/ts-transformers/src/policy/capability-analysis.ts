@@ -34,6 +34,8 @@ interface MutableCapabilityState {
   readonly writes: Set<string>;
   readonly rawIdentityPaths: Set<string>;
   readonly rawIdentityCellPaths: Set<string>;
+  readonly rawComparablePaths: Set<string>;
+  readonly rawComparableCellPaths: Set<string>;
   passthrough: boolean;
   wildcard: boolean;
   hasIdentityUse: boolean;
@@ -50,6 +52,8 @@ interface ObservedCapabilityUsage {
   readonly identityOnly: boolean;
   readonly identityPaths: readonly (readonly string[])[];
   readonly identityCellPaths: readonly (readonly string[])[];
+  readonly comparablePaths: readonly (readonly string[])[];
+  readonly comparableCellPaths: readonly (readonly string[])[];
 }
 
 interface AccessPathInfo {
@@ -104,6 +108,14 @@ const WRITER_METHODS = new Set(["set", "update"]);
 const ARRAY_IDENTITY_WRITER_METHODS = new Set(["push", "unshift", "splice"]);
 const ARRAY_IDENTITY_PRESERVING_CHAIN_METHODS = new Set(["slice"]);
 const READER_METHODS = new Set(["get"]);
+const OPAQUE_DERIVATION_METHODS = new Set([
+  "map",
+  "mapWithPattern",
+  "flatMap",
+  "flatMapWithPattern",
+  "filter",
+  "filterWithPattern",
+]);
 const FALLBACK_OPERATORS = new Set<ts.SyntaxKind>([
   ts.SyntaxKind.QuestionQuestionToken,
   ts.SyntaxKind.BarBarToken,
@@ -761,15 +773,18 @@ function isKnownIdentityEqualsCallee(
   const current = unwrapExpression(expr);
 
   if (ts.isIdentifier(current)) {
+    if (current.text !== "equals" && current.text !== "equalLinks") {
+      return false;
+    }
     if (!checker) {
-      return current.text === "equals";
+      return true;
     }
     const symbol = checker.getSymbolAtLocation(current);
-    return resolvesToCommonFabricSymbol(symbol, checker, "equals");
+    return resolvesToCommonFabricSymbol(symbol, checker, current.text);
   }
 
   if (ts.isPropertyAccessExpression(current)) {
-    if (current.name.text !== "equals") {
+    if (current.name.text !== "equals" && current.name.text !== "equalLinks") {
       return false;
     }
     return !checker ||
@@ -781,7 +796,8 @@ function isKnownIdentityEqualsCallee(
     current.argumentExpression &&
     isLiteralElement(current.argumentExpression)
   ) {
-    if (getLiteralElementText(current.argumentExpression) !== "equals") {
+    const methodName = getLiteralElementText(current.argumentExpression);
+    if (methodName !== "equals" && methodName !== "equalLinks") {
       return false;
     }
     return !checker ||
@@ -957,6 +973,7 @@ function toCapability(state: MutableCapabilityState): ReactiveCapability {
   if (hasReads && hasWrites) return "writable";
   if (hasReads) return "readonly";
   if (hasWrites) return "writeonly";
+  if (state.rawComparablePaths.size > 0) return "comparable";
   return "opaque";
 }
 
@@ -989,6 +1006,13 @@ function normalizeObservedCapabilityUsage(
   const identityCellPaths = Array.from(state.rawIdentityCellPaths)
     .filter((path) => keptIdentityPaths.has(path))
     .map(decodePath);
+  const comparablePaths = Array.from(state.rawComparablePaths)
+    .filter((path) => keptIdentityPaths.has(path))
+    .map(decodePath);
+  const keptComparablePaths = new Set(comparablePaths.map(encodePath));
+  const comparableCellPaths = Array.from(state.rawComparableCellPaths)
+    .filter((path) => keptComparablePaths.has(path))
+    .map(decodePath);
 
   return {
     readPaths,
@@ -1003,6 +1027,8 @@ function normalizeObservedCapabilityUsage(
       !state.wildcard,
     identityPaths,
     identityCellPaths,
+    comparablePaths,
+    comparableCellPaths,
   };
 }
 
@@ -1064,6 +1090,8 @@ export function analyzeFunctionCapabilities(
           writes: new Set<string>(),
           rawIdentityPaths: new Set<string>(),
           rawIdentityCellPaths: new Set<string>(),
+          rawComparablePaths: new Set<string>(),
+          rawComparableCellPaths: new Set<string>(),
           passthrough: false,
           wildcard: false,
           hasIdentityUse: false,
@@ -1136,6 +1164,20 @@ export function analyzeFunctionCapabilities(
         state.rawIdentityCellPaths.add(encoded);
       }
       state.hasIdentityUse = true;
+    };
+
+    const recordComparablePath = (
+      name: string,
+      path: readonly string[],
+      options?: { cellLike?: boolean },
+    ): void => {
+      recordIdentityPath(name, path, options);
+      const state = ensureState(name);
+      const encoded = encodePath(path);
+      state.rawComparablePaths.add(encoded);
+      if (options?.cellLike) {
+        state.rawComparableCellPaths.add(encoded);
+      }
     };
 
     const hasRecordedIdentityPath = (
@@ -1797,17 +1839,21 @@ export function analyzeFunctionCapabilities(
     const markIdentityUseRef = (
       ref: SourceRef,
       expr?: ts.Expression,
+      options?: { comparable?: boolean },
     ): void => {
       const cellLike = expr
         ? isCellLikeExpression(expr) || !isPrimitiveLikeExpression(expr)
         : false;
+      const record = options?.comparable
+        ? recordComparablePath
+        : recordIdentityPath;
       if (ref.dynamic) {
         markWildcard(ref.root);
       } else if (ref.path.length === 0) {
-        recordIdentityPath(ref.root, [], { cellLike });
+        record(ref.root, [], { cellLike });
         markPassthrough(ref.root, { identityOnly: true });
       } else {
-        recordIdentityPath(ref.root, ref.path, { cellLike });
+        record(ref.root, ref.path, { cellLike });
       }
     };
 
@@ -2283,7 +2329,17 @@ export function analyzeFunctionCapabilities(
               if (source.dynamic) {
                 markWildcard(source.root);
               } else {
-                recordIdentityPath(
+                const isComparablePath = (paramSummary.comparablePaths ?? [])
+                  .some((path) =>
+                    path.length === identityPath.length &&
+                    path.every((segment, index) =>
+                      segment === identityPath[index]
+                    )
+                  );
+                const recordPath = isComparablePath
+                  ? recordComparablePath
+                  : recordIdentityPath;
+                recordPath(
                   source.root,
                   [...source.path, ...identityPath],
                   {
@@ -2301,7 +2357,11 @@ export function analyzeFunctionCapabilities(
 
             if (paramSummary.passthrough && source.path.length === 0) {
               if (paramSummary.identityOnly) {
-                recordIdentityPath(source.root, []);
+                if (paramSummary.capability === "comparable") {
+                  recordComparablePath(source.root, []);
+                } else {
+                  recordIdentityPath(source.root, []);
+                }
               }
               markPassthrough(
                 source.root,
@@ -2361,7 +2421,9 @@ export function analyzeFunctionCapabilities(
                 }
               }
             } else if (identityEqualsCall) {
-              markIdentityUseRef(receiver, node.expression.expression);
+              markIdentityUseRef(receiver, node.expression.expression, {
+                comparable: true,
+              });
             } else if (WRITER_METHODS.has(methodName)) {
               trackWriteRef(receiver);
             } else if (ARRAY_IDENTITY_WRITER_METHODS.has(methodName)) {
@@ -2391,6 +2453,16 @@ export function analyzeFunctionCapabilities(
               if (!resolvedGetCalls.has(node)) {
                 trackReadRef(receiver);
               }
+            } else if (
+              OPAQUE_DERIVATION_METHODS.has(methodName) &&
+              (
+                !checker ||
+                isCellLikeExpression(node.expression.expression)
+              )
+            ) {
+              // These methods are available on opaque cells and return opaque
+              // results, so the receiver does not need read/write/comparable
+              // capabilities just because it is used as the derivation source.
             } else {
               // Unknown method call over a tracked source reads at least the receiver path.
               if (shouldTrackFullShape) {
@@ -2423,7 +2495,9 @@ export function analyzeFunctionCapabilities(
           for (const argument of node.arguments) {
             const source = resolveSourceRef(argument);
             if (source) {
-              markIdentityUseRef(source, argument);
+              markIdentityUseRef(source, argument, {
+                comparable: identityEqualsCall,
+              });
             }
           }
         }
