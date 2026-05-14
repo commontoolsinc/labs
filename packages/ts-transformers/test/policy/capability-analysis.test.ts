@@ -467,6 +467,54 @@ Deno.test("Capability analysis classifies read+write usage as writable", () => {
   assert(input.writePaths.includes("count"));
 });
 
+Deno.test("Capability analysis classifies update-only usage as writeonly", () => {
+  const fn = parseFirstCallback(
+    `const fn = (input) => {
+      input.key("profile").update({ name: "Ada" });
+    };`,
+  );
+  const summary = analyzeFunctionCapabilities(fn);
+  const input = getPaths(summary, "input");
+
+  assertEquals(input.capability, "writeonly");
+  assert(input.writePaths.includes("profile"));
+  assertEquals(input.readPaths.length, 0);
+});
+
+Deno.test("Capability analysis classifies push-only usage as writeonly", () => {
+  const fn = parseFirstCallback(
+    `const fn = (input) => {
+      input.key("items").push({ id: "1" });
+    };`,
+  );
+  const summary = analyzeFunctionCapabilities(fn);
+  const input = getPaths(summary, "input");
+
+  assertEquals(input.capability, "writeonly");
+  assert(input.writePaths.includes("items"));
+  assertEquals(input.readPaths.length, 0);
+});
+
+Deno.test("Capability analysis keeps opaque derivation methods opaque", () => {
+  const fn = parseFirstCallback(
+    `const fn = (input, mapper) => {
+      input.map(mapper);
+      input.flatMap(mapper);
+      input.filter(mapper);
+      input.mapWithPattern(mapper, {});
+      input.flatMapWithPattern(mapper, {});
+      input.filterWithPattern(mapper, {});
+    };`,
+  );
+  const summary = analyzeFunctionCapabilities(fn);
+  const input = getPaths(summary, "input");
+
+  assertEquals(input.capability, "opaque");
+  assertEquals(input.readPaths.length, 0);
+  assertEquals(input.writePaths.length, 0);
+  assertEquals(input.wildcard, false);
+});
+
 Deno.test("Capability analysis classifies pure passthrough as opaque", () => {
   const fn = parseFirstCallback(
     `const fn = (input) => {
@@ -1353,13 +1401,13 @@ Deno.test(
     const input = getPaths(summary, "input");
     const other = getPaths(summary, "other");
 
-    assertEquals(input.capability, "opaque");
+    assertEquals(input.capability, "comparable");
     assertEquals(input.passthrough, true);
     assertEquals(input.wildcard, false);
     assertEquals(input.identityOnly, true);
     assertEquals(input.readPaths.length, 0);
 
-    assertEquals(other.capability, "opaque");
+    assertEquals(other.capability, "comparable");
     assertEquals(other.passthrough, true);
     assertEquals(other.wildcard, false);
     assertEquals(other.identityOnly, true);
@@ -1379,13 +1427,39 @@ Deno.test(
     const input = getPaths(summary, "input");
     const other = getPaths(summary, "other");
 
-    assertEquals(input.capability, "opaque");
+    assertEquals(input.capability, "comparable");
     assertEquals(input.passthrough, true);
     assertEquals(input.wildcard, false);
     assertEquals(input.identityOnly, true);
     assertEquals(input.readPaths.length, 0);
 
-    assertEquals(other.capability, "opaque");
+    assertEquals(other.capability, "comparable");
+    assertEquals(other.passthrough, true);
+    assertEquals(other.wildcard, false);
+    assertEquals(other.identityOnly, true);
+    assertEquals(other.readPaths.length, 0);
+  },
+);
+
+Deno.test(
+  "Capability analysis treats .equalLinks() receiver and argument as comparable",
+  () => {
+    const fn = parseFirstCallback(
+      `const fn = (input, other) => {
+        return input.equalLinks(other);
+      };`,
+    );
+    const summary = analyzeFunctionCapabilities(fn);
+    const input = getPaths(summary, "input");
+    const other = getPaths(summary, "other");
+
+    assertEquals(input.capability, "comparable");
+    assertEquals(input.passthrough, true);
+    assertEquals(input.wildcard, false);
+    assertEquals(input.identityOnly, true);
+    assertEquals(input.readPaths.length, 0);
+
+    assertEquals(other.capability, "comparable");
     assertEquals(other.passthrough, true);
     assertEquals(other.wildcard, false);
     assertEquals(other.identityOnly, true);
