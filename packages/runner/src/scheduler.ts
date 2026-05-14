@@ -115,14 +115,7 @@ import {
   setThrottle as setThrottleState,
   shouldDebouncePullComputation,
 } from "./scheduler/delays.ts";
-import {
-  collectTriggeredActionsForChange,
-  createTriggerTraceActionRecord,
-  createTriggerTraceEntry,
-  hasRegisteredTriggers,
-  planTriggeredAction,
-  shouldRecordTriggerTraceEntry,
-} from "./scheduler/notifications.ts";
+import { processStorageNotification } from "./scheduler/notifications.ts";
 import {
   addStaleUpstream,
   clearDirectDirty as clearDirectDirtyState,
@@ -1263,137 +1256,32 @@ export class Scheduler {
   private createStorageSubscription(): IStorageSubscription {
     return {
       next: (notification) => {
-        const space = notification.space;
-
-        if ("changes" in notification) {
-          const sourceChangeGroup = notification.type === "commit"
-            ? notification.source?.changeGroup
-            : undefined;
-          const hasSourceChangeGroup = notification.type === "commit" &&
-            sourceChangeGroup !== undefined;
-
-          let changeIndex = 0;
-          for (const change of notification.changes) {
-            changeIndex++;
+        processStorageNotification({
+          triggers: this.triggers,
+          nonRecursiveTriggers: this.nonRecursiveTriggers,
+          pullMode: this.pullMode,
+          diagnosisEnabled: this.diagnosisEnabled,
+          collectTriggerTrace: this.collectTriggerTrace,
+          changeGroupToActionId: this.changeGroupToActionId,
+          causalEdges: this.causalEdges,
+          actionChangeGroups: this.actionChangeGroups,
+          effects: this.effects,
+          pending: this.pending,
+          dirty: this.dirty,
+          inFlightSources: this.inFlightSources,
+          conditionallyScheduledEffects: this.conditionallyScheduledEffects,
+          getActionId: (target) => this.getActionId(target),
+          recordCellUpdate: (change) =>
             this.runtime.telemetry.submit({
               type: "cell.update",
-              change: change,
-            });
-
-            if (
-              !hasRegisteredTriggers({
-                triggers: this.triggers,
-                nonRecursiveTriggers: this.nonRecursiveTriggers,
-              })
-            ) {
-              continue;
-            }
-
-            const {
-              entity: spaceAndURI,
-              hasMatchingTriggerPaths,
-              triggeredActions,
-            } = collectTriggeredActionsForChange(
-              {
-                triggers: this.triggers,
-                nonRecursiveTriggers: this.nonRecursiveTriggers,
-              },
-              space,
               change,
-            );
-
-            if (hasMatchingTriggerPaths) {
-              const writerActionId = hasSourceChangeGroup &&
-                  sourceChangeGroup !== undefined
-                ? this.changeGroupToActionId.get(sourceChangeGroup)
-                : undefined;
-              const triggerTraceEntry: TriggerTraceEntry | null =
-                this.collectTriggerTrace
-                  ? createTriggerTraceEntry({
-                    notificationType: notification.type,
-                    changeIndex,
-                    matchedActionCount: triggeredActions.length,
-                    pullMode: this.pullMode,
-                    writerActionId,
-                    space,
-                    change,
-                  })
-                  : null;
-
-              for (const action of triggeredActions) {
-                // Causal edge tracking for diagnosis
-                if (
-                  this.diagnosisEnabled && hasSourceChangeGroup &&
-                  sourceChangeGroup !== undefined
-                ) {
-                  const writerActionId = this.changeGroupToActionId.get(
-                    sourceChangeGroup,
-                  );
-                  if (writerActionId) {
-                    this.causalEdges.push({
-                      writer: writerActionId,
-                      cell: spaceAndURI,
-                      triggered: this.getActionId(action),
-                      timestamp: performance.now(),
-                    });
-                  }
-                }
-
-                const actionChangeGroup = this.actionChangeGroups.get(action);
-                const actionId = this.getActionId(action);
-                const actionIsEffect = this.effects.has(action);
-                const actionType = actionIsEffect ? "effect" : "computation";
-                const pendingBefore = this.pending.has(action);
-                const dirtyBefore = this.dirty.has(action);
-                const isOwnCommitSource = notification.type === "commit" &&
-                  notification.source !== undefined &&
-                  this.inFlightSources.get(action)?.has(notification.source) ===
-                    true;
-                const plan = planTriggeredAction({
-                  pullMode: this.pullMode,
-                  isEffect: actionIsEffect,
-                  dirtyBefore,
-                  isOwnCommitSource,
-                  hasSourceChangeGroup,
-                  actionChangeGroup,
-                  sourceChangeGroup,
-                });
-                let scheduledEffects: TriggerTraceScheduledEffect[] = [];
-
-                if (plan.operation === "schedule") {
-                  if (this.pullMode && actionIsEffect) {
-                    this.conditionallyScheduledEffects.delete(action);
-                  }
-                  this.scheduleWithDebounce(action);
-                } else if (plan.operation === "mark-dirty") {
-                  this.markDirty(action);
-                  scheduledEffects = this.scheduleAffectedEffects(action);
-                }
-
-                triggerTraceEntry?.triggered.push(
-                  createTriggerTraceActionRecord({
-                    actionId,
-                    actionType,
-                    pullMode: this.pullMode,
-                    decision: plan.decision,
-                    pendingBefore,
-                    pendingAfter: this.pending.has(action),
-                    dirtyBefore,
-                    dirtyAfter: this.dirty.has(action),
-                    scheduledEffects,
-                  }),
-                );
-              }
-
-              if (
-                triggerTraceEntry &&
-                shouldRecordTriggerTraceEntry(triggerTraceEntry)
-              ) {
-                this.recordTriggerTrace(triggerTraceEntry);
-              }
-            }
-          }
-        }
+            }),
+          recordTriggerTrace: (entry) => this.recordTriggerTrace(entry),
+          scheduleWithDebounce: (target) => this.scheduleWithDebounce(target),
+          markDirty: (target) => this.markDirty(target),
+          scheduleAffectedEffects: (target) =>
+            this.scheduleAffectedEffects(target),
+        }, notification);
         return { done: false };
       },
     } satisfies IStorageSubscription;
