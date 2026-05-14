@@ -25,13 +25,13 @@ const removeItem = handler({
             type: "array",
             items: {
                 type: "unknown",
-                asCell: ["opaque"]
+                asCell: ["comparable"]
             },
             asCell: ["cell"]
         },
         item: {
             type: "unknown",
-            asCell: ["opaque"]
+            asCell: ["comparable"]
         }
     },
     required: ["items", "item"]

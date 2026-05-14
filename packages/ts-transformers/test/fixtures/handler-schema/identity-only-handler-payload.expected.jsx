@@ -22,7 +22,7 @@ const addPiece = handler({
     properties: {
         piece: {
             type: "unknown",
-            asCell: ["opaque"]
+            asCell: ["comparable"]
         }
     },
     required: ["piece"]
@@ -33,7 +33,7 @@ const addPiece = handler({
             type: "array",
             items: {
                 type: "unknown",
-                asCell: ["opaque"]
+                asCell: ["comparable"]
             },
             asCell: ["cell"]
         }
@@ -53,7 +53,7 @@ const trackRecent = handler({
     properties: {
         piece: {
             type: "unknown",
-            asCell: ["opaque"]
+            asCell: ["comparable"]
         }
     },
     required: ["piece"]
@@ -64,7 +64,7 @@ const trackRecent = handler({
             type: "array",
             items: {
                 type: "unknown",
-                asCell: ["opaque"]
+                asCell: ["comparable"]
             },
             asCell: ["cell"]
         }

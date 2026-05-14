@@ -2461,8 +2461,11 @@ export function analyzeFunctionCapabilities(
               )
             ) {
               // These methods are available on opaque cells and return opaque
-              // results, so the receiver does not need read/write/comparable
-              // capabilities just because it is used as the derivation source.
+              // results. Root receivers need no extra capability, but nested
+              // receivers must still be retained in object-shaped inputs.
+              if (receiver.path.length > 0) {
+                trackReadRef(receiver);
+              }
             } else {
               // Unknown method call over a tracked source reads at least the receiver path.
               if (shouldTrackFullShape) {
