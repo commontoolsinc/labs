@@ -26,11 +26,11 @@ export default pattern(() => {
         properties: {
             prefix: {
                 type: "string",
-                asCell: ["cell"]
+                asCell: ["readonly"]
             },
             value: {
                 type: "number",
-                asCell: ["cell"]
+                asCell: ["readonly"]
             }
         },
         required: ["prefix", "value"]

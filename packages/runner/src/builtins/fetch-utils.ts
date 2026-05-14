@@ -1,5 +1,5 @@
-import { hashOf } from "@commonfabric/data-model/value-hash";
-import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { stripUndefinedProps } from "@commonfabric/utils/strip-undefined-props";
 import { type Cell } from "../cell.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
@@ -22,22 +22,37 @@ export const internalSchema = internSchema(
 );
 
 /**
- * Computes a hash of inputs for comparison.
- * Excludes the 'result' field which is used only as a TypeScript type hint,
- * not as an actual input parameter.
+ * Computes a stable string hash of fetch-style inputs, suitable for use as
+ * a comparison key (e.g. an idempotency key or mutex identifier).
+ *
+ * Two normalizations are applied before hashing:
+ *
+ * (1) The top-level `result` property is dropped. It exists only as a
+ *     TypeScript type hint at call sites, never as a real fetch parameter,
+ *     and so must not influence the hash.
+ *
+ * (2) `undefined`-valued object properties are dropped, recursively.
+ *     Callers commonly materialize snapshots via unconditional object
+ *     construction (e.g. `{ url, mode, options }`, or one level deeper
+ *     `{ method, body }`), and the resulting hash needs to be the same
+ *     regardless of whether an absent field is omitted entirely or
+ *     present-but-`undefined`. This matches the JSON-style normalization
+ *     that the legacy fabric-value layer applied implicitly; under the
+ *     modern layer `undefined` properties are preserved, so this
+ *     function must do the normalization itself to stay
+ *     data-model-flag-agnostic.
+ *
+ * `hashStringOf()` itself is happy to hash `undefined` values; no
+ * normalization for hashability per se is needed.
  */
 export function computeInputHashFromValue<T extends Record<string, any>>(
   inputs: T | undefined,
 ): string {
-  const safeInputs = inputs ?? {};
-  // Exclude 'result' type hint from the hash - only hash actual fetch parameters
-  const inputsOnly = { ...(safeInputs as Record<string, unknown>) };
-  delete (inputsOnly as Record<string, unknown>).result;
-  // hashOf() cannot hash undefined values; normalize to a deep fabric shape
-  // (omits undefined object props, converts undefined array elements to null).
-  const fabricInputs = fabricFromNativeValue(inputsOnly);
-  const normalized = fabricInputs === undefined ? {} : fabricInputs;
-  return hashOf(normalized as Record<string, unknown>).toString();
+  const { result: _result, ...inputsOnly } = (inputs ?? {}) as Record<
+    string,
+    unknown
+  >;
+  return hashStringOf(stripUndefinedProps(inputsOnly));
 }
 
 export function computeInputHash<T extends Record<string, any>>(

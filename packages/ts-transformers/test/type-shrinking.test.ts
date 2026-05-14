@@ -138,6 +138,7 @@ function createParamSummary(
     capability: "opaque",
     readPaths: [],
     writePaths: [],
+    opaquePaths: [],
     passthrough: false,
     wildcard: false,
     identityOnly: false,
@@ -314,6 +315,33 @@ Deno.test("applyShrinkAndWrap turns identity-only wrapped inputs into OpaqueCell
   );
 });
 
+Deno.test("applyShrinkAndWrap turns comparable wrapped inputs into ComparableCell<unknown>", () => {
+  const { sourceFile, checker } = createProgram(`
+    type Item = { name: string; nested: { value: number } };
+  `);
+  const alias = findTypeAlias(sourceFile, "Item");
+  const baseType = checker.getTypeAtLocation(alias.type);
+
+  const result = applyShrinkAndWrap(
+    createParamSummary({
+      capability: "comparable",
+      identityOnly: true,
+      passthrough: true,
+    }),
+    ts.factory.createTypeReferenceNode("Input"),
+    baseType,
+    true,
+    checker,
+    sourceFile,
+    ts.factory,
+  );
+
+  assertEquals(
+    printTypeNode(result, sourceFile),
+    "__cfHelpers.ComparableCell<unknown>",
+  );
+});
+
 Deno.test("applyShrinkAndWrap turns identity-only unwrapped inputs into unknown", () => {
   const { sourceFile, checker } = createProgram(`
     type Item = { name: string; nested: { value: number } };
@@ -367,6 +395,105 @@ Deno.test("applyShrinkAndWrap turns identity-only cell leaves into OpaqueCell<un
   const printed = printTypeNode(result, sourceFile);
   assertStringIncludes(printed, "left: __cfHelpers.OpaqueCell<unknown>");
   assertStringIncludes(printed, "right: __cfHelpers.OpaqueCell<unknown>");
+  assertEquals(printed.includes("name"), false);
+  assertEquals(printed.includes("nested"), false);
+});
+
+Deno.test("applyShrinkAndWrap turns read-only cell leaves into ReadonlyCell", () => {
+  const { sourceFile, checker } = createProgram(`
+    declare namespace __cfHelpers {
+      export type Writable<T> = { readonly value?: T };
+      export type ReadonlyCell<T> = { readonly readonly?: T };
+    }
+    type Input = {
+      value: __cfHelpers.Writable<number>;
+      untouched: __cfHelpers.Writable<string>;
+    };
+  `);
+  const alias = findTypeAlias(sourceFile, "Input");
+  const baseType = checker.getTypeAtLocation(alias.type);
+
+  const result = applyShrinkAndWrap(
+    createParamSummary({
+      capability: "readonly",
+      readPaths: [["value"]],
+    }),
+    alias.type,
+    baseType,
+    false,
+    checker,
+    sourceFile,
+    ts.factory,
+  );
+
+  const printed = printTypeNode(result, sourceFile);
+  assertStringIncludes(printed, "value: __cfHelpers.ReadonlyCell<number>");
+  assertEquals(printed.includes("untouched"), false);
+});
+
+Deno.test("applyShrinkAndWrap turns opaque derivation cell leaves into OpaqueCell", () => {
+  const { sourceFile, checker } = createProgram(`
+    declare namespace __cfHelpers {
+      export type Writable<T> = { readonly value?: T };
+      export type OpaqueCell<T> = { readonly opaque?: T };
+    }
+    type Input = {
+      items: __cfHelpers.Writable<{ name: string }[]>;
+      untouched: __cfHelpers.Writable<string>;
+    };
+  `);
+  const alias = findTypeAlias(sourceFile, "Input");
+  const baseType = checker.getTypeAtLocation(alias.type);
+
+  const result = applyShrinkAndWrap(
+    createParamSummary({
+      opaquePaths: [["items"]],
+    }),
+    alias.type,
+    baseType,
+    false,
+    checker,
+    sourceFile,
+    ts.factory,
+  );
+
+  const printed = printTypeNode(result, sourceFile);
+  assertStringIncludes(printed, "items: __cfHelpers.OpaqueCell");
+  assertStringIncludes(printed, "name: string");
+  assertEquals(printed.includes("untouched"), false);
+});
+
+Deno.test("applyShrinkAndWrap turns comparable cell leaves into ComparableCell<unknown>", () => {
+  const { sourceFile, checker } = createProgram(`
+    declare namespace __cfHelpers {
+      export type Writable<T> = { readonly value?: T };
+      export type ComparableCell<T> = { readonly comparable?: T };
+    }
+    type Input = {
+      left: __cfHelpers.Writable<{ name: string; nested: { value: number } }>;
+      right: __cfHelpers.Writable<{ name: string; nested: { value: number } }>;
+    };
+  `);
+  const alias = findTypeAlias(sourceFile, "Input");
+  const baseType = checker.getTypeAtLocation(alias.type);
+
+  const result = applyShrinkAndWrap(
+    createParamSummary({
+      capability: "comparable",
+      identityPaths: [["left"], ["right"]],
+      identityCellPaths: [["left"], ["right"]],
+    }),
+    alias.type,
+    baseType,
+    false,
+    checker,
+    sourceFile,
+    ts.factory,
+  );
+
+  const printed = printTypeNode(result, sourceFile);
+  assertStringIncludes(printed, "left: __cfHelpers.ComparableCell<unknown>");
+  assertStringIncludes(printed, "right: __cfHelpers.ComparableCell<unknown>");
   assertEquals(printed.includes("name"), false);
   assertEquals(printed.includes("nested"), false);
 });

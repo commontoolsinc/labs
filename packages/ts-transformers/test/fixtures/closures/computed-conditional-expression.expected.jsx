@@ -33,19 +33,19 @@ export default pattern(() => {
         properties: {
             value: {
                 type: "number",
-                asCell: ["cell"]
+                asCell: ["readonly"]
             },
             threshold: {
                 type: "number",
-                asCell: ["cell"]
+                asCell: ["readonly"]
             },
             a: {
                 type: "number",
-                asCell: ["cell"]
+                asCell: ["readonly"]
             },
             b: {
                 type: "number",
-                asCell: ["cell"]
+                asCell: ["readonly"]
             }
         },
         required: ["value", "threshold", "a", "b"]

@@ -85,7 +85,7 @@ export default pattern((state) => {
                         items: {
                             type: "unknown"
                         },
-                        asCell: ["cell"]
+                        asCell: ["readonly"]
                     }
                 },
                 required: ["sections"]
@@ -364,11 +364,11 @@ export default pattern((state) => {
                                     properties: {
                                         selectedTaskId: {
                                             type: ["string", "undefined"],
-                                            asCell: ["cell"]
+                                            asCell: ["readonly"]
                                         },
                                         hoveredSectionId: {
                                             type: ["string", "undefined"],
-                                            asCell: ["cell"]
+                                            asCell: ["readonly"]
                                         },
                                         section: {
                                             type: "object",
@@ -539,11 +539,11 @@ export default pattern((state) => {
                             },
                             selectedTaskId: {
                                 type: ["string", "undefined"],
-                                asCell: ["cell"]
+                                asCell: ["readonly"]
                             },
                             hoveredSectionId: {
                                 type: ["string", "undefined"],
-                                asCell: ["cell"]
+                                asCell: ["readonly"]
                             }
                         },
                         required: ["state", "selectedTaskId", "hoveredSectionId"]

@@ -31,7 +31,7 @@ export default pattern((_state) => {
             properties: {
                 count: {
                     type: "number",
-                    asCell: ["cell"]
+                    asCell: ["readonly"]
                 }
             },
             required: ["count"]
@@ -43,7 +43,7 @@ export default pattern((_state) => {
             properties: {
                 count: {
                     type: "number",
-                    asCell: ["cell"]
+                    asCell: ["readonly"]
                 }
             },
             required: ["count"]
@@ -55,7 +55,7 @@ export default pattern((_state) => {
             properties: {
                 price: {
                     type: "number",
-                    asCell: ["cell"]
+                    asCell: ["readonly"]
                 }
             },
             required: ["price"]
