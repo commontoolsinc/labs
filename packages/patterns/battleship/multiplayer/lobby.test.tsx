@@ -60,6 +60,23 @@ export default pattern(() => {
     lobby.joinPlayer1.send({ name: "" });
   });
 
+  const action_join_with_name_alice = action(() => {
+    lobby.joinWithName.send("Alice");
+  });
+
+  // Simulate another player resetting shared match state. This leaves the
+  // current viewer's scoped player assignment stale.
+  const action_clear_shared_match_state = action(() => {
+    player1Cell.set(null);
+    player2Cell.set(null);
+    shotsCell.set(createInitialShots());
+    gameStateCell.set(INITIAL_GAME_STATE);
+  });
+
+  const action_rejoin_after_stale_slot = action(() => {
+    lobby.joinWithName.send("Carol");
+  });
+
   // ==========================================================================
   // Initial State Assertions
   // ==========================================================================
@@ -163,6 +180,21 @@ export default pattern(() => {
   );
 
   // ==========================================================================
+  // Edge Case: Stale per-user slot should not block rejoin
+  // ==========================================================================
+  const assert_stale_slot_rejoined = computed(() =>
+    lobby.player1?.name === "Carol" &&
+    lobby.myName === "Carol" &&
+    lobby.myPlayerNumber === 1
+  );
+
+  const assert_stale_slot_prepared = computed(() =>
+    lobby.player1 === null &&
+    lobby.myName === "Alice" &&
+    lobby.myPlayerNumber === 1
+  );
+
+  // ==========================================================================
   // Edge Case: Empty name should be ignored
   // ==========================================================================
   const assert_empty_name_ignored = computed(() => lobby.player1 === null);
@@ -205,6 +237,13 @@ export default pattern(() => {
       { assertion: assert_reset_player2_null },
       { assertion: assert_reset_phase_waiting },
       { assertion: assert_reset_winner_null },
+
+      // === Rejoin after stale per-user assignment ===
+      { action: action_join_with_name_alice },
+      { action: action_clear_shared_match_state },
+      { assertion: assert_stale_slot_prepared },
+      { action: action_rejoin_after_stale_slot },
+      { assertion: assert_stale_slot_rejoined },
     ],
     lobby,
   };
