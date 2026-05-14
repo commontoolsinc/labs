@@ -1378,10 +1378,27 @@ export class CellImpl<T extends FabricValue>
     }) as SigilWriteRedirectLink;
   }
 
+  /**
+   * Read the cell's value at the fabric layer (no native unwrapping, no
+   * Proxy wrapping). By default returns a deep-frozen `FabricValue`
+   * snapshot; pass `{ frozen: false }` for a mutable deep copy.
+   *
+   * **Frozenness contract:** Defaults to `{ frozen: true }` regardless
+   * of the data-model flag, returning a deep-frozen `FabricValue`
+   * snapshot via `cloneIfNecessary()`. Under `modernDataModel: true`
+   * the underlying storage already holds a deep-frozen tree, so the
+   * clone is typically a no-op. Under `modernDataModel: false` (legacy)
+   * the snapshot is freshly frozen at read time. The `{ frozen: false }`
+   * variant returns a fresh mutable deep copy and never aliases storage
+   * state.
+   */
   getRaw(options?: IReadOptions): Immutable<T> | undefined {
     return this.getRawUntyped(options) as Immutable<T> | undefined;
   }
 
+  /**
+   * Untyped variant of `getRaw()`; same frozenness contract.
+   */
   getRawUntyped(
     options?: IReadOptions & { frozen?: true },
   ): Immutable<FabricValue>;
@@ -2201,6 +2218,10 @@ export function recursivelyAddIDIfNeeded<T>(
   // Can't add IDs without frame.
   if (!frame) return value;
 
+  // Snapshot the modern-data-model flag once; used below at the freshly-
+  // built-container freeze points.
+  const modern = getDataModelConfig();
+
   // Already seen, return previously annotated result. Check this before
   // shallowFabricFromNativeValue() to handle circular references properly.
   if (seen.has(value)) return seen.get(value) as T;
@@ -2272,7 +2293,7 @@ export function recursivelyAddIDIfNeeded<T>(
         const withId = { [ID]: frame.generatedIdCounter++, ...v };
         // Under modern, the ID-wrapped object is a freshly-built
         // container that must also be deep-frozen.
-        if (getDataModelConfig()) Object.freeze(withId);
+        if (modern) Object.freeze(withId);
         result[i] = withId;
       } else {
         if (!Object.is(v, el)) {
@@ -2291,7 +2312,7 @@ export function recursivelyAddIDIfNeeded<T>(
     // expects deep-frozen `FabricValue` trees. Children are already frozen
     // by `shallowFabricFromNativeValue()` above; freeze the freshly-built
     // top-level container so the returned tree is deep-frozen as a whole.
-    if (getDataModelConfig()) Object.freeze(result);
+    if (modern) Object.freeze(result);
     return result as T;
   } else {
     // At this point we know `value` is a non-array record (we returned early
@@ -2325,7 +2346,7 @@ export function recursivelyAddIDIfNeeded<T>(
     }
 
     // See array-branch comment above re: modern freeze.
-    if (getDataModelConfig()) Object.freeze(result);
+    if (modern) Object.freeze(result);
     return result as T;
   }
 }

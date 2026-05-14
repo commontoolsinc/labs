@@ -224,12 +224,35 @@ export interface IAnyCell<T> {}
 /**
  * Readable cells can retrieve their current value.
  */
+/**
+ * Readable cells provide a view onto stored data.
+ *
+ * **Frozenness contract (modern data model only):** `get()` and `sample()`
+ * return a JS Proxy over the stored value. Writes through the proxy are
+ * rejected with a "read-only" runtime error under both flag states (this
+ * is independent of the data-model flag — the proxy itself enforces
+ * non-mutation). Under `modernDataModel: true`, the underlying stored
+ * data is additionally a deep-frozen `FabricValue` tree, so callers that
+ * escape the proxy (e.g. via `getRaw()`) see frozen data without an
+ * extra clone. Under `modernDataModel: false` (legacy), only the proxy
+ * trap protects against mutation; the underlying data may be unfrozen.
+ *
+ * Note: `Object.isFrozen(proxy)` reports `false` regardless of the
+ * underlying state — that's a property of how JS Proxy reports
+ * extensibility, not a statement about mutability.
+ */
 export interface IReadable<T> {
+  /**
+   * Read the cell's current value as a Proxy view. See the
+   * {@link IReadable} interface docs for the modern-mode frozenness
+   * contract.
+   */
   get(options?: { traverseCells?: boolean }): Readonly<StripDefaultBrand<T>>;
   /**
    * Read the cell's current value without creating a reactive dependency.
    * Unlike `get()`, calling `sample()` inside a lift won't cause the lift
-   * to re-run when this cell's value changes.
+   * to re-run when this cell's value changes. The same frozenness
+   * contract from {@link IReadable} applies.
    */
   sample(): Readonly<StripDefaultBrand<T>>;
 }
