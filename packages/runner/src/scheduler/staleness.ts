@@ -4,8 +4,17 @@ export interface StalenessState {
   readonly dirty: Set<Action>;
   readonly stale: Set<Action>;
   readonly dependents: WeakMap<Action, Set<Action>>;
-  readonly upstreamStaleWriters: WeakMap<Action, Set<Action>>;
-  readonly upstreamStaleCount: WeakMap<Action, number>;
+  upstreamStaleWriters: WeakMap<Action, Set<Action>>;
+  upstreamStaleCount: WeakMap<Action, number>;
+}
+
+export interface DirtySchedulingState {
+  readonly stalenessState: StalenessState;
+  readonly computations: ReadonlySet<Action>;
+  readonly scheduleComputationDebounce: (action: Action) => void;
+  readonly clearComputationDebounceState: (action: Action) => void;
+  readonly isDemandedPullComputation: (action: Action) => boolean;
+  readonly queueExecution: () => void;
 }
 
 export function isActionStale(
@@ -33,6 +42,17 @@ export function markDirectDirty(
   return true;
 }
 
+export function markSchedulerDirty(
+  state: DirtySchedulingState,
+  action: Action,
+): void {
+  markDirectDirty(state.stalenessState, action);
+  state.scheduleComputationDebounce(action);
+  if (state.isDemandedPullComputation(action)) {
+    state.queueExecution();
+  }
+}
+
 export function clearDirectDirty(
   state: StalenessState,
   action: Action,
@@ -40,6 +60,24 @@ export function clearDirectDirty(
   if (!state.dirty.delete(action)) return false;
   setStaleFromInputs(state, action);
   return true;
+}
+
+export function clearSchedulerDirectDirty(
+  state: DirtySchedulingState,
+  action: Action,
+): boolean {
+  if (!state.stalenessState.dirty.has(action)) return false;
+  if (state.computations.has(action)) {
+    state.clearComputationDebounceState(action);
+  }
+  return clearDirectDirty(state.stalenessState, action);
+}
+
+export function clearSchedulerDirty(
+  state: DirtySchedulingState,
+  action: Action,
+): void {
+  clearSchedulerDirectDirty(state, action);
 }
 
 export function forceClearStale(

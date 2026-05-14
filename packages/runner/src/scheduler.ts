@@ -118,11 +118,14 @@ import {
 } from "./scheduler/delays.ts";
 import { processStorageNotification } from "./scheduler/notifications.ts";
 import {
-  clearDirectDirty as clearDirectDirtyState,
+  clearSchedulerDirectDirty,
+  clearSchedulerDirty,
+  type DirtySchedulingState,
   forceClearStale as forceClearStaleState,
   getUpstreamStaleCount as getUpstreamStaleCountFromState,
   isActionStale,
   markDirectDirty as markDirectDirtyState,
+  markSchedulerDirty,
   setStaleFromInputs,
   type StalenessState,
 } from "./scheduler/staleness.ts";
@@ -414,6 +417,17 @@ export class Scheduler {
         `Entities: ${entityCount}`,
       ]);
     },
+  };
+  private dirtySchedulingState: DirtySchedulingState = {
+    stalenessState: this.stalenessState,
+    computations: this.computations,
+    scheduleComputationDebounce: (action) =>
+      this.scheduleComputationDebounce(action),
+    clearComputationDebounceState: (action) =>
+      this.clearComputationDebounceState(action),
+    isDemandedPullComputation: (action) =>
+      this.isDemandedPullComputation(action),
+    queueExecution: () => this.queueExecution(),
   };
   private subscriptionState: SchedulerSubscriptionState = {
     actionChangeGroups: this.actionChangeGroups,
@@ -1429,11 +1443,9 @@ export class Scheduler {
   private resetUpstreamStaleState(): void {
     this.upstreamStaleWriters = new WeakMap();
     this.upstreamStaleCount = new WeakMap();
-    this.stalenessState = {
-      ...this.stalenessState,
-      upstreamStaleWriters: this.upstreamStaleWriters,
-      upstreamStaleCount: this.upstreamStaleCount,
-    };
+    // Keep the state object identity stable; helper state objects hold it.
+    this.stalenessState.upstreamStaleWriters = this.upstreamStaleWriters;
+    this.stalenessState.upstreamStaleCount = this.upstreamStaleCount;
   }
 
   // ============================================================
@@ -1509,11 +1521,7 @@ export class Scheduler {
    * on-demand by collectDirtyDependencies().
    */
   private markDirty(action: Action): void {
-    this.markDirectDirty(action);
-    this.scheduleComputationDebounce(action);
-    if (this.isDemandedPullComputation(action)) {
-      this.queueExecution();
-    }
+    markSchedulerDirty(this.dirtySchedulingState, action);
   }
 
   private markDirectDirty(action: Action): boolean {
@@ -1521,11 +1529,7 @@ export class Scheduler {
   }
 
   private clearDirectDirty(action: Action): boolean {
-    if (!this.dirty.has(action)) return false;
-    if (this.computations.has(action)) {
-      this.clearComputationDebounceState(action);
-    }
-    return clearDirectDirtyState(this.stalenessState, action);
+    return clearSchedulerDirectDirty(this.dirtySchedulingState, action);
   }
 
   private forceClearStale(action: Action): void {
@@ -1621,7 +1625,7 @@ export class Scheduler {
    * Clears the dirty flag for an action.
    */
   private clearDirty(action: Action): void {
-    this.clearDirectDirty(action);
+    clearSchedulerDirty(this.dirtySchedulingState, action);
   }
 
   /**
