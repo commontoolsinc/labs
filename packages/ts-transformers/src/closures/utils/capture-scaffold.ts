@@ -33,12 +33,16 @@ export function buildCapturedHandlerClosureCall(
   const builder = new PatternBuilder(context);
   builder.setCaptureTree(captureTree);
 
+  // The moved body keeps original parent links, so mark both callback nodes as
+  // safe handler contexts for later expression-site rewrites.
+  context.markAsSyntheticComputeCallback(callback);
   const handlerCallback = builder.buildHandlerCallback(
     callback,
     transformedBody,
     options?.eventParamName ?? "event",
     options?.paramsParamName ?? "params",
   );
+  context.markAsSyntheticComputeCallback(handlerCallback);
 
   const handlerCall = context.cfHelpers.createHelperCall(
     "handler",
