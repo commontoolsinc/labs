@@ -427,6 +427,11 @@ payload contains audit/provenance context plus optional trusted `cfcInputLabels`
 for supported startup inputs (`command`, `argv`, `args`, `env`, `cwd`, and
 `stdin`). `stdin` labels are modeled as labels on the stdin source and taint
 only after the sandbox reads or maps fd 0, not as automatic startup task taint.
+When a trusted prompt-slot binding is present, `cf-harness` also derives
+confidentiality-only prompt influence labels for model-authored invocation
+inputs such as shell commands, structured file-tool arguments, and stdin
+payloads. These labels are taint evidence, not integrity or authorization
+claims.
 
 On Docker Desktop for macOS, use the host path for `cf-harness` and the
 `/host_mnt/...` projection for Docker's runtime args. The gVisor

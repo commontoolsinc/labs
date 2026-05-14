@@ -59,7 +59,7 @@ export default pattern((__cf_pattern_input) => {
                 items: {
                     type: "string"
                 },
-                asCell: ["cell"]
+                asCell: ["writeonly"]
             }
         },
         required: ["path"]
@@ -92,7 +92,7 @@ export default pattern((__cf_pattern_input) => {
                             items: {
                                 type: "string"
                             },
-                            asCell: ["cell"]
+                            asCell: ["readonly"]
                         }
                     },
                     required: ["path"]
@@ -128,7 +128,7 @@ export default pattern((__cf_pattern_input) => {
                             items: {
                                 type: "string"
                             },
-                            asCell: ["cell"]
+                            asCell: ["readonly"]
                         }
                     },
                     required: ["path"]
@@ -146,7 +146,7 @@ export default pattern((__cf_pattern_input) => {
                             items: {
                                 $ref: "#/$defs/Entry"
                             },
-                            asCell: ["cell"]
+                            asCell: ["readonly"]
                         },
                         p: {
                             type: "array",

@@ -120,6 +120,7 @@ export const readFileTool: HarnessToolDefinition<
         cwd: context.currentDir,
         command,
         args,
+        cfcInputLabelPaths: [["args"]],
       }),
     });
     if (result.exitCode !== 0) {

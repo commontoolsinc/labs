@@ -17,6 +17,7 @@ import {
   typeToSchemaTypeNode,
   unwrapCellLikeType,
 } from "../ast/mod.ts";
+import { getCellKind } from "./opaque-ref/opaque-ref.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -29,6 +30,7 @@ interface CapabilityShrinkPlan {
   readonly fullShapePaths: readonly (readonly string[])[];
   readonly identityPaths: readonly (readonly string[])[];
   readonly identityCellPaths: readonly (readonly string[])[];
+  readonly comparableCellPaths: readonly (readonly string[])[];
   readonly identityOnlyRoot: boolean;
   readonly effectiveIdentityPaths: readonly (readonly string[])[];
 }
@@ -119,10 +121,15 @@ function deriveCapabilityShrinkPlan(
   const paths = uniquePaths([
     ...paramSummary.readPaths,
     ...paramSummary.writePaths,
+    ...(paramSummary.opaquePaths ?? []),
   ]);
   const fullShapePaths = uniquePaths(paramSummary.fullShapePaths ?? []);
   const identityPaths = uniquePaths(paramSummary.identityPaths ?? []);
   const identityCellPaths = uniquePaths(paramSummary.identityCellPaths ?? []);
+  const comparableCellPaths = uniquePaths([
+    ...(paramSummary.comparableCellPaths ?? []),
+    ...(paramSummary.capability === "comparable" ? identityCellPaths : []),
+  ]);
   const retainedPaths = uniquePaths([...paths, ...identityPaths]);
   const identityOnlyRoot = !!paramSummary.identityOnly &&
     !paramSummary.wildcard &&
@@ -137,6 +144,7 @@ function deriveCapabilityShrinkPlan(
     fullShapePaths,
     identityPaths,
     identityCellPaths,
+    comparableCellPaths,
     identityOnlyRoot,
     effectiveIdentityPaths,
   };
@@ -149,6 +157,12 @@ function shouldPreferNodeDrivenShrink(
   retainedPaths: readonly (readonly string[])[],
   checker: ts.TypeChecker,
 ): boolean {
+  if (
+    containsDefaultTypeNode(nodeDriven) && !containsDefaultTypeNode(typeDriven)
+  ) {
+    return true;
+  }
+
   const requestedHeads = getTopLevelRequestedHeads(retainedPaths);
   const typeDrivenCoverage = countRepresentedRequestedHeads(
     typeDriven,
@@ -177,6 +191,12 @@ function shouldPreferTypeDrivenShrink(
   checker: ts.TypeChecker,
   hasDirectAccess: boolean,
 ): boolean {
+  if (
+    containsDefaultTypeNode(nodeDriven) && !containsDefaultTypeNode(typeDriven)
+  ) {
+    return false;
+  }
+
   const requestedHeads = getTopLevelRequestedHeads(retainedPaths);
   const typeDrivenCoverage = countRepresentedRequestedHeads(
     typeDriven,
@@ -199,6 +219,27 @@ function shouldPreferTypeDrivenShrink(
       containsAnyOrUnknownTypeNode(nodeDriven) &&
       !containsAnyOrUnknownTypeNode(typeDriven)
     );
+}
+
+function containsDefaultTypeNode(node: ts.TypeNode): boolean {
+  let found = false;
+  const visit = (current: ts.Node) => {
+    if (found) return;
+    if (ts.isTypeReferenceNode(current)) {
+      const name = ts.isIdentifier(current.typeName)
+        ? current.typeName.text
+        : ts.isQualifiedName(current.typeName)
+        ? current.typeName.right.text
+        : undefined;
+      if (name === "Default") {
+        found = true;
+        return;
+      }
+    }
+    ts.forEachChild(current, visit);
+  };
+  visit(node);
+  return found;
 }
 
 function choosePreferredShrinkCandidate(
@@ -458,19 +499,38 @@ function findPropertySymbol(
 
 export function isCellLikeTypeNode(node: ts.TypeNode): boolean {
   if (!ts.isTypeReferenceNode(node)) return false;
-  const name = ts.isIdentifier(node.typeName)
-    ? node.typeName.text
-    : ts.isQualifiedName(node.typeName)
-    ? node.typeName.right.text
-    : undefined;
+  const name = getTypeReferenceNodeName(node);
   if (!name) return false;
   return name === "Cell" ||
     name === "Writable" ||
     name === "OpaqueCell" ||
     name === "OpaqueRef" ||
+    name === "ComparableCell" ||
     name === "ReadonlyCell" ||
     name === "WriteonlyCell" ||
     name === "Stream";
+}
+
+function getTypeReferenceNodeName(
+  node: ts.TypeReferenceNode,
+): string | undefined {
+  return ts.isIdentifier(node.typeName)
+    ? node.typeName.text
+    : ts.isQualifiedName(node.typeName)
+    ? node.typeName.right.text
+    : undefined;
+}
+
+export function isStreamTypeNode(node: ts.TypeNode): boolean {
+  return ts.isTypeReferenceNode(node) &&
+    getTypeReferenceNodeName(node) === "Stream";
+}
+
+function isStreamCellType(
+  type: ts.Type | undefined,
+  checker: ts.TypeChecker,
+): boolean {
+  return !!type && getCellKind(type, checker) === "stream";
 }
 
 export function printTypeNode(
@@ -1607,12 +1667,33 @@ export function wrapTypeNodeWithCapability(
 ): ts.TypeNode {
   const wrapperName = capability === "readonly"
     ? "ReadonlyCell"
+    : capability === "comparable"
+    ? "ComparableCell"
     : capability === "writeonly"
     ? "WriteonlyCell"
     : capability === "writable"
     ? "Writable"
     : "OpaqueCell";
 
+  return createHelperWrapperTypeNode(node, wrapperName, factory);
+}
+
+function wrapTypeNodeWithCapabilityOrStream(
+  node: ts.TypeNode,
+  capability: ReactiveCapability,
+  factory: ts.NodeFactory,
+  preserveStream: boolean,
+): ts.TypeNode {
+  return preserveStream
+    ? createHelperWrapperTypeNode(node, "Stream", factory)
+    : wrapTypeNodeWithCapability(node, capability, factory);
+}
+
+function createHelperWrapperTypeNode(
+  node: ts.TypeNode,
+  wrapperName: string,
+  factory: ts.NodeFactory,
+): ts.TypeNode {
   return factory.createTypeReferenceNode(
     factory.createQualifiedName(
       factory.createIdentifier("__cfHelpers"),
@@ -1622,10 +1703,255 @@ export function wrapTypeNodeWithCapability(
   );
 }
 
+interface CellCapabilityPath {
+  readonly path: readonly string[];
+  readonly capability: ReactiveCapability;
+}
+
+function extractCellLikeInnerTypeNode(
+  node: ts.TypeNode,
+  checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
+): ts.TypeNode | undefined {
+  const semanticType = getTypeFromTypeNodeWithFallback(
+    node,
+    checker,
+    typeRegistry,
+  );
+  const semanticInner = semanticType && isCellLikeType(semanticType, checker)
+    ? unwrapCellLikeType(semanticType, checker)
+    : undefined;
+  if (
+    ts.isTypeReferenceNode(node) &&
+    isCellLikeTypeNode(node) &&
+    node.typeArguments?.[0]
+  ) {
+    const inner = node.typeArguments[0];
+    const innerType = getTypeFromTypeNodeWithFallback(
+      inner,
+      checker,
+      typeRegistry,
+    );
+    const typeToRegister = semanticInner && !isAnyOrUnknownType(semanticInner)
+      ? semanticInner
+      : innerType;
+    if (typeToRegister) {
+      typeRegistry?.set(inner, typeToRegister);
+    }
+    return inner;
+  }
+  const innerNode = typeToSchemaTypeNode(semanticInner, checker, sourceFile);
+  if (innerNode && semanticInner) {
+    typeRegistry?.set(innerNode, semanticInner);
+  }
+  return innerNode;
+}
+
+function selectCellPathCapability(
+  entries: readonly CellCapabilityPath[],
+): ReactiveCapability | undefined {
+  let hasRead = false;
+  let hasWrite = false;
+  let hasOpaque = false;
+
+  for (const entry of entries) {
+    if (entry.capability === "writable") {
+      hasRead = true;
+      hasWrite = true;
+    } else if (entry.capability === "readonly") {
+      hasRead = true;
+    } else if (entry.capability === "writeonly") {
+      hasWrite = true;
+    } else if (entry.capability === "opaque") {
+      hasOpaque = true;
+    }
+  }
+
+  if (hasRead && hasWrite) return "writable";
+  if (hasRead) return "readonly";
+  if (hasWrite) return "writeonly";
+  if (hasOpaque) return "opaque";
+  return undefined;
+}
+
+function buildCellCapabilityPaths(
+  paramSummary: CapabilityParamSummary,
+): readonly CellCapabilityPath[] {
+  const byPath = new Map<
+    string,
+    {
+      path: readonly string[];
+      read: boolean;
+      write: boolean;
+      opaque: boolean;
+    }
+  >();
+  const ensure = (path: readonly string[]) => {
+    const key = JSON.stringify(path);
+    let entry = byPath.get(key);
+    if (!entry) {
+      entry = {
+        path,
+        read: false,
+        write: false,
+        opaque: false,
+      };
+      byPath.set(key, entry);
+    }
+    return entry;
+  };
+
+  for (const path of paramSummary.opaquePaths ?? []) {
+    if (path.length === 0) continue;
+    ensure(path).opaque = true;
+  }
+  for (const path of paramSummary.readPaths) {
+    if (path.length === 0) continue;
+    ensure(path).read = true;
+  }
+  for (const path of paramSummary.writePaths) {
+    if (path.length === 0) continue;
+    ensure(path).write = true;
+  }
+
+  return Array.from(byPath.values()).map((entry) => {
+    const capability = entry.read && entry.write
+      ? "writable"
+      : entry.read
+      ? "readonly"
+      : entry.write
+      ? "writeonly"
+      : "opaque";
+    return { path: entry.path, capability };
+  });
+}
+
+function groupCellCapabilityPathsByHead(
+  entries: readonly CellCapabilityPath[],
+): Map<string, CellCapabilityPath[]> {
+  const grouped = new Map<string, CellCapabilityPath[]>();
+  for (const entry of entries) {
+    if (entry.path.length === 0) continue;
+    const [head, ...tail] = entry.path;
+    if (!head) continue;
+    const existing = grouped.get(head);
+    const childEntry = { path: tail, capability: entry.capability };
+    if (existing) {
+      existing.push(childEntry);
+    } else {
+      grouped.set(head, [childEntry]);
+    }
+  }
+  return grouped;
+}
+
+function applyCellCapabilityPathsToTypeNode(
+  node: ts.TypeNode,
+  paths: readonly CellCapabilityPath[],
+  factory: ts.NodeFactory,
+  checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
+): ts.TypeNode {
+  if (paths.length === 0) {
+    return node;
+  }
+
+  if (ts.isParenthesizedTypeNode(node)) {
+    const updated = applyCellCapabilityPathsToTypeNode(
+      node.type,
+      paths,
+      factory,
+      checker,
+      sourceFile,
+      typeRegistry,
+    );
+    return updated === node.type
+      ? node
+      : factory.updateParenthesizedType(node, updated);
+  }
+
+  if (!ts.isTypeLiteralNode(node)) {
+    return node;
+  }
+
+  const grouped = groupCellCapabilityPathsByHead(paths);
+  let changed = false;
+  const members = node.members.map((member) => {
+    if (!ts.isPropertySignature(member) || !member.type || !member.name) {
+      return member;
+    }
+    const propertyName = getRequestedPropertyNameText(member.name, checker);
+    if (!propertyName) {
+      return member;
+    }
+    const childPaths = grouped.get(propertyName);
+    if (!childPaths) {
+      return member;
+    }
+
+    let updated = member.type;
+    const memberSemanticType = getTypeFromTypeNodeWithFallback(
+      updated,
+      checker,
+      typeRegistry,
+    );
+    const inner = extractCellLikeInnerTypeNode(
+      updated,
+      checker,
+      sourceFile,
+      typeRegistry,
+    );
+    if (inner) {
+      const capability = selectCellPathCapability(childPaths);
+      if (capability) {
+        updated = wrapTypeNodeWithCapabilityOrStream(
+          inner,
+          capability,
+          factory,
+          isStreamTypeNode(updated) ||
+            isStreamCellType(memberSemanticType, checker),
+        );
+        if (typeRegistry && isCellLikeType(memberSemanticType, checker)) {
+          typeRegistry.set(updated, memberSemanticType);
+        }
+      }
+    } else {
+      const nested = childPaths.filter((entry) => entry.path.length > 0);
+      if (nested.length > 0) {
+        updated = applyCellCapabilityPathsToTypeNode(
+          updated,
+          nested,
+          factory,
+          checker,
+          sourceFile,
+          typeRegistry,
+        );
+      }
+    }
+
+    if (updated === member.type) {
+      return member;
+    }
+    changed = true;
+    return factory.updatePropertySignature(
+      member,
+      member.modifiers,
+      member.name,
+      member.questionToken,
+      updated,
+    );
+  });
+
+  return changed ? factory.createTypeLiteralNode(members) : node;
+}
+
 function createIdentityOnlyReplacementTypeNode(
   node: ts.TypeNode,
   semanticType: ts.Type | undefined,
   forceOpaque: boolean,
+  forceComparable: boolean,
   checker: ts.TypeChecker,
   factory: ts.NodeFactory,
   typeRegistry?: WeakMap<ts.Node, ts.Type>,
@@ -1644,10 +1970,11 @@ function createIdentityOnlyReplacementTypeNode(
     isCellLikeTypeNode(node) ||
     isCellLikeType(resolvedType, checker)
   ) {
-    const wrappedNode = wrapTypeNodeWithCapability(
+    const wrappedNode = wrapTypeNodeWithCapabilityOrStream(
       unknownNode,
-      "opaque",
+      forceComparable ? "comparable" : "opaque",
       factory,
+      isStreamTypeNode(node) || isStreamCellType(resolvedType, checker),
     );
     const wrappedType = resolveIdentitySemanticType(
       wrappedNode,
@@ -1688,6 +2015,7 @@ function createIdentityOnlyRootTypeNode(
   node: ts.TypeNode,
   semanticType: ts.Type | undefined,
   forceOpaque: boolean,
+  forceComparable: boolean,
   checker: ts.TypeChecker,
   factory: ts.NodeFactory,
   typeRegistry?: WeakMap<ts.Node, ts.Type>,
@@ -1700,6 +2028,7 @@ function createIdentityOnlyRootTypeNode(
       node,
       resolvedType,
       forceOpaque,
+      forceComparable,
       checker,
       factory,
       typeRegistry,
@@ -1735,6 +2064,7 @@ function createIdentityOnlyRootTypeNode(
           ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
           memberType,
           forceOpaque,
+          forceComparable,
           checker,
           factory,
           typeRegistry,
@@ -1754,6 +2084,7 @@ function createIdentityOnlyRootTypeNode(
     node,
     resolvedType,
     forceOpaque,
+    forceComparable,
     checker,
     factory,
     typeRegistry,
@@ -1801,6 +2132,7 @@ function applyIdentityOnlyPathsToTypeNode(
   node: ts.TypeNode,
   paths: readonly (readonly string[])[],
   cellLikePaths: readonly (readonly string[])[],
+  comparableCellLikePaths: readonly (readonly string[])[],
   factory: ts.NodeFactory,
   checker: ts.TypeChecker,
   semanticType?: ts.Type,
@@ -1808,6 +2140,9 @@ function applyIdentityOnlyPathsToTypeNode(
 ): ts.TypeNode {
   const normalized = uniquePaths(paths);
   const normalizedCellLikePaths = uniquePaths(cellLikePaths);
+  const normalizedComparableCellLikePaths = uniquePaths(
+    comparableCellLikePaths,
+  );
   if (normalized.length === 0) {
     return node;
   }
@@ -1821,6 +2156,7 @@ function applyIdentityOnlyPathsToTypeNode(
       node,
       resolvedSemanticType,
       normalizedCellLikePaths.some((path) => path.length === 0),
+      normalizedComparableCellLikePaths.some((path) => path.length === 0),
       checker,
       factory,
       typeRegistry,
@@ -1832,6 +2168,7 @@ function applyIdentityOnlyPathsToTypeNode(
       node.type,
       normalized,
       normalizedCellLikePaths,
+      normalizedComparableCellLikePaths,
       factory,
       checker,
       resolvedSemanticType,
@@ -1844,6 +2181,9 @@ function applyIdentityOnlyPathsToTypeNode(
 
   const itemPaths = getArrayItemPaths(normalized);
   const itemCellLikePaths = getArrayItemPaths(normalizedCellLikePaths);
+  const itemComparableCellLikePaths = getArrayItemPaths(
+    normalizedComparableCellLikePaths,
+  );
   if (itemPaths.length > 0) {
     const itemSemanticType = resolvedSemanticType
       ? getArrayElementType(
@@ -1856,6 +2196,7 @@ function applyIdentityOnlyPathsToTypeNode(
         node.elementType,
         itemPaths,
         itemCellLikePaths,
+        itemComparableCellLikePaths,
         factory,
         checker,
         itemSemanticType,
@@ -1877,6 +2218,7 @@ function applyIdentityOnlyPathsToTypeNode(
         node.type.elementType,
         itemPaths,
         itemCellLikePaths,
+        itemComparableCellLikePaths,
         factory,
         checker,
         itemSemanticType,
@@ -1904,6 +2246,7 @@ function applyIdentityOnlyPathsToTypeNode(
         inner,
         itemPaths,
         itemCellLikePaths,
+        itemComparableCellLikePaths,
         factory,
         checker,
         itemSemanticType,
@@ -1924,6 +2267,9 @@ function applyIdentityOnlyPathsToTypeNode(
   if (ts.isTypeLiteralNode(node)) {
     const grouped = groupPathsByHead(normalized);
     const cellLikeGrouped = groupPathsByHead(normalizedCellLikePaths);
+    const comparableCellLikeGrouped = groupPathsByHead(
+      normalizedComparableCellLikePaths,
+    );
     let changed = false;
     const members = node.members.map((member) => {
       if (!ts.isPropertySignature(member) || !member.type || !member.name) {
@@ -1941,6 +2287,7 @@ function applyIdentityOnlyPathsToTypeNode(
         member.type,
         childPaths,
         cellLikeGrouped.get(propertyName) ?? [],
+        comparableCellLikeGrouped.get(propertyName) ?? [],
         factory,
         checker,
         getIdentityChildSemanticType(
@@ -1983,6 +2330,7 @@ function applyIdentityOnlyPathsToTypeNode(
       inner,
       normalized,
       normalizedCellLikePaths,
+      normalizedComparableCellLikePaths,
       factory,
       checker,
       unwrapCellLikeType(resolvedSemanticType, checker) ?? resolvedSemanticType,
@@ -2004,6 +2352,9 @@ function applyIdentityOnlyPathsToTypeNode(
     if (members) {
       const grouped = groupPathsByHead(normalized);
       const cellLikeGrouped = groupPathsByHead(normalizedCellLikePaths);
+      const comparableCellLikeGrouped = groupPathsByHead(
+        normalizedComparableCellLikePaths,
+      );
       let changed = false;
       const updatedMembers = members.map((member) => {
         if (!ts.isPropertySignature(member) || !member.type || !member.name) {
@@ -2021,6 +2372,7 @@ function applyIdentityOnlyPathsToTypeNode(
           member.type,
           childPaths,
           cellLikeGrouped.get(propertyName) ?? [],
+          comparableCellLikeGrouped.get(propertyName) ?? [],
           factory,
           checker,
           getIdentityChildSemanticType(
@@ -2061,6 +2413,7 @@ function applyIdentityOnlyPathsToTypeNode(
         member,
         normalized,
         normalizedCellLikePaths,
+        normalizedComparableCellLikePaths,
         factory,
         checker,
         resolvedSemanticType,
@@ -2376,6 +2729,7 @@ export function applyShrinkAndWrap(
   wrapCapability: ReactiveCapability = paramSummary.capability,
   context?: TransformationContext,
   fnNode?: ts.Node,
+  preserveStreamWrapper = false,
 ): ts.TypeNode {
   const shrinkPlan = deriveCapabilityShrinkPlan(paramSummary);
   const {
@@ -2383,9 +2737,17 @@ export function applyShrinkAndWrap(
     fullShapePaths,
     identityPaths,
     identityCellPaths,
+    comparableCellPaths,
     identityOnlyRoot,
     effectiveIdentityPaths,
   } = shrinkPlan;
+  const cellCapabilityPaths = buildCellCapabilityPaths(paramSummary);
+  const appliedIdentityCellPaths = shouldWrap
+    ? identityCellPaths.filter((path) => path.length > 0)
+    : identityCellPaths;
+  const appliedComparableCellPaths = shouldWrap
+    ? comparableCellPaths.filter((path) => path.length > 0)
+    : comparableCellPaths;
 
   if (mode === "defaults_only") {
     if (context && fnNode) {
@@ -2405,7 +2767,8 @@ export function applyShrinkAndWrap(
       ? applyIdentityOnlyPathsToTypeNode(
         baseTypeNode,
         effectiveIdentityPaths,
-        identityCellPaths,
+        appliedIdentityCellPaths,
+        appliedComparableCellPaths,
         factory,
         checker,
         baseType,
@@ -2430,14 +2793,20 @@ export function applyShrinkAndWrap(
     if (!shouldWrap) {
       return next;
     }
-    return wrapTypeNodeWithCapability(next, wrapCapability, factory);
+    return wrapTypeNodeWithCapabilityOrStream(
+      next,
+      wrapCapability,
+      factory,
+      preserveStreamWrapper,
+    );
   }
 
   let next = identityOnlyRoot
     ? applyIdentityOnlyPathsToTypeNode(
       baseTypeNode,
       effectiveIdentityPaths,
-      identityCellPaths,
+      appliedIdentityCellPaths,
+      appliedComparableCellPaths,
       factory,
       checker,
       baseType,
@@ -2447,7 +2816,8 @@ export function applyShrinkAndWrap(
     ? applyIdentityOnlyPathsToTypeNode(
       baseTypeNode,
       identityPaths,
-      identityCellPaths,
+      appliedIdentityCellPaths,
+      appliedComparableCellPaths,
       factory,
       checker,
       baseType,
@@ -2542,7 +2912,8 @@ export function applyShrinkAndWrap(
     next = applyIdentityOnlyPathsToTypeNode(
       next,
       identityPaths,
-      identityCellPaths,
+      appliedIdentityCellPaths,
+      appliedComparableCellPaths,
       factory,
       checker,
       baseType,
@@ -2573,9 +2944,22 @@ export function applyShrinkAndWrap(
     sourceFile,
     factory,
   );
+  next = applyCellCapabilityPathsToTypeNode(
+    next,
+    cellCapabilityPaths,
+    factory,
+    checker,
+    sourceFile,
+    context?.options.typeRegistry,
+  );
 
   if (!shouldWrap) {
     return next;
   }
-  return wrapTypeNodeWithCapability(next, wrapCapability, factory);
+  return wrapTypeNodeWithCapabilityOrStream(
+    next,
+    wrapCapability,
+    factory,
+    preserveStreamWrapper,
+  );
 }

@@ -25,7 +25,7 @@ const logCharmsList = lift({
             items: {
                 $ref: "#/$defs/CharmEntry"
             },
-            asCell: ["cell"]
+            asCell: ["readonly"]
         }
     },
     required: ["charmsList"],
@@ -47,11 +47,23 @@ const logCharmsList = lift({
     console.log("logCharmsList: ", charmsList.get());
     return charmsList;
 });
+const getStatus = lift({
+    type: "object",
+    properties: {
+        status: {
+            "enum": ["open", "closed"]
+        }
+    },
+    required: ["status"],
+    description: "Status input"
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema, ({ status }) => status);
 // FIXTURE: lift-explicit-toschema
 // Verifies: lift() with explicit toSchema<T>() is replaced by the generated JSON schema
 //   lift(toSchema<{ charmsList: Cell<CharmEntry[]> }>(), undefined, fn) → lift(generatedSchema, undefined, fn)
 // Context: The toSchema() call is compiled away and replaced with the actual JSON schema object
-export default logCharmsList;
+export default __cfHelpers.__cf_data({ logCharmsList, getStatus });
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

@@ -33,7 +33,7 @@ const addTodo = handler({
             items: {
                 type: "string"
             },
-            asCell: ["cell"]
+            asCell: ["writeonly"]
         }
     },
     required: ["items"]

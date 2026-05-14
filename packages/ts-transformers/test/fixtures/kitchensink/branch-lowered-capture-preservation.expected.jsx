@@ -426,20 +426,32 @@ export default pattern((__cf_pattern_input) => {
                                 }
                             },
                             editingNoteIndex: {
-                                type: ["number", "undefined"],
-                                asCell: ["cell"]
+                                anyOf: [{
+                                        type: "number"
+                                    }, {
+                                        type: "undefined"
+                                    }],
+                                asCell: ["readonly"]
                             },
                             editingNoteText: {
                                 type: "string",
-                                asCell: ["cell"]
+                                asCell: ["readonly"]
                             },
                             settingsModuleIndex: {
-                                type: ["number", "undefined"],
-                                asCell: ["cell"]
+                                anyOf: [{
+                                        type: "number"
+                                    }, {
+                                        type: "undefined"
+                                    }],
+                                asCell: ["readonly"]
                             },
                             expandedIndex: {
-                                type: ["number", "undefined"],
-                                asCell: ["cell"]
+                                anyOf: [{
+                                        type: "number"
+                                    }, {
+                                        type: "undefined"
+                                    }],
+                                asCell: ["readonly"]
                             },
                             trashedSubPieces: {
                                 type: "array",

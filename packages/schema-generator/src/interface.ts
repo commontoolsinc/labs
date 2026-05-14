@@ -36,6 +36,8 @@ export interface GenerationContext {
   typeNode?: ts.TypeNode;
   /** Source file name for authoring metadata that needs stable file identity */
   sourceFileName?: string;
+  /** Source file for resolving names from synthetic type nodes */
+  sourceFile?: ts.SourceFile;
   /** Optional type registry for synthetic nodes */
   typeRegistry?: WeakMap<ts.Node, ts.Type>;
   /** Widen literal types to base types during schema generation */
@@ -105,6 +107,7 @@ export interface SchemaGenerator {
         };
       }
     >,
+    sourceFile?: ts.SourceFile,
   ): SchemaDefinition;
 
   /**
@@ -135,5 +138,6 @@ export interface SchemaGenerator {
         };
       }
     >,
+    sourceFile?: ts.SourceFile,
   ): SchemaDefinition;
 }

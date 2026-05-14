@@ -75,7 +75,7 @@ export default pattern((state) => {
                             properties: {
                                 selectedIndex: {
                                     type: "number",
-                                    asCell: ["cell"]
+                                    asCell: ["writeonly"]
                                 }
                             },
                             required: ["selectedIndex"]
@@ -117,7 +117,7 @@ export default pattern((state) => {
                                     },
                                     selectedIndex: {
                                         type: "number",
-                                        asCell: ["cell"]
+                                        asCell: ["readonly"]
                                     }
                                 },
                                 required: ["discount", "selectedIndex"]

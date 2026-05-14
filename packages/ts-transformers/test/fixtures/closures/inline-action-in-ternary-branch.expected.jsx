@@ -64,7 +64,7 @@ export default pattern((state) => {
                         properties: {
                             isEditing: {
                                 type: "boolean",
-                                asCell: ["cell"]
+                                asCell: ["readonly"]
                             }
                         },
                         required: ["isEditing"]
@@ -101,7 +101,7 @@ export default pattern((state) => {
                         properties: {
                             isEditing: {
                                 type: "boolean",
-                                asCell: ["cell"]
+                                asCell: ["writeonly"]
                             }
                         },
                         required: ["isEditing"]

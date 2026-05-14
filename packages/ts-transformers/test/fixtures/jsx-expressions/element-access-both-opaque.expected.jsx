@@ -36,11 +36,11 @@ export default pattern((_state) => {
                     items: {
                         type: "string"
                     },
-                    asCell: ["cell"]
+                    asCell: ["readonly"]
                 },
                 index: {
                     type: "number",
-                    asCell: ["cell"]
+                    asCell: ["readonly"]
                 }
             },
             required: ["items", "index"]
