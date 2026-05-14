@@ -15,7 +15,6 @@
  */
 
 import {
-  computed,
   Default,
   derive,
   handler,
@@ -130,15 +129,6 @@ const newOptionId = () =>
 
 const colorForIndex = (i: number) => PLAYER_COLORS[i % PLAYER_COLORS.length];
 
-const getInitials = (name: string): string => {
-  const trimmed = name.trim();
-  if (!trimmed) return "?";
-  return trimmed.split(/\s+/).map((w) => w[0]).join("").toUpperCase().slice(
-    0,
-    2,
-  );
-};
-
 const joinAs = handler<JoinEvent, {
   users: UsersCell;
   myName: NameCell;
@@ -232,23 +222,6 @@ const resetVotes = handler<ResetVotesEvent, {
   votes.set([]);
 });
 
-export interface ClearVoteEvent {
-  optionId: string;
-}
-
-const clearMyVote = handler<ClearVoteEvent, {
-  votes: VotesCell;
-  myName: NameCell;
-}>(({ optionId }, { votes, myName }) => {
-  const me = trimmedName(myName.get());
-  if (!me) return;
-  votes.set(
-    votes.get().filter(
-      (v) => !(v.voterName === me && v.optionId === optionId),
-    ),
-  );
-});
-
 interface OptionTally {
   option: Option;
   green: number;
@@ -323,7 +296,6 @@ export interface CozyPollOutput {
   addOption: Stream<AddOptionEvent>;
   removeOption: Stream<RemoveOptionEvent>;
   castVote: Stream<CastVoteEvent>;
-  clearMyVote: Stream<ClearVoteEvent>;
   resetVotes: Stream<ResetVotesEvent>;
 }
 
@@ -354,7 +326,6 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       adminName,
     });
     const boundCastVote = castVote({ votes, myName });
-    const boundClearMyVote = clearMyVote({ votes, myName });
     const boundResetVotes = resetVotes({ votes, myName, adminName });
 
     const userCount = derive(users, (u) => u.length);
@@ -372,543 +343,170 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       ({ options, votes, users }) => tallyOptions(options, votes, users),
     );
 
-    const topChoice = derive(
-      { ranked, voteCount },
-      ({ ranked, voteCount }) =>
-        voteCount > 0 && ranked.length > 0 ? ranked[0] : null,
-    );
-
     return {
       [NAME]: "Cozy lunch poll",
       [UI]: (
         <cf-theme theme={POLL_THEME}>
           <cf-screen>
-            {/* Header */}
-            <div
-              slot="header"
-              style={{
-                padding: "16px 20px 12px",
-                borderBottom: "1px solid #e5e7eb",
-                background: "white",
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "flex-start",
-                  gap: "12px",
-                }}
-              >
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <h2
-                    style={{
-                      margin: 0,
-                      fontSize: "20px",
-                      fontWeight: 700,
-                      color: "#111827",
-                    }}
-                  >
-                    {question}
-                  </h2>
-                  {computed(() => {
-                    const u = userCount ?? 0;
-                    const o = optionCount ?? 0;
-                    const v = voteCount ?? 0;
-                    const admin = trimmedName(adminName);
-                    const me = trimmedName(myName);
-                    const amAdmin = me !== "" && me === admin;
-                    const hostNote = amAdmin
-                      ? " · you are the host"
-                      : me !== "" && admin !== ""
-                      ? ` · hosted by ${admin}`
-                      : "";
-                    return (
-                      <div
-                        style={{
-                          marginTop: "4px",
-                          fontSize: "13px",
-                          color: "#6b7280",
-                        }}
-                      >
-                        {u} joined · {o} options · {v} votes{hostNote}
-                      </div>
-                    );
-                  })}
-                </div>
-                {computed(() => {
-                  const me = trimmedName(myName);
-                  if (me === "") return null;
-                  return (
-                    <span
-                      title={me}
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: "6px",
-                        padding: "4px 10px",
-                        borderRadius: "9999px",
-                        background: "#f3f4f6",
-                        border: "1px solid #e5e7eb",
-                        fontSize: "12px",
-                        fontWeight: 600,
-                        color: "#374151",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      <span style={{ fontSize: "10px", color: "#10b981" }}>
-                        ●
-                      </span>
-                      {me}
-                    </span>
-                  );
-                })}
+            <cf-vstack slot="header" gap="2" padding="4">
+              <cf-heading level={2}>
+                {question}
+              </cf-heading>
+              <div style={{ color: "var(--cf-theme-color-text-muted)" }}>
+                {userCount} joined · {optionCount} options · {voteCount} votes
+                {isAdmin ? " · you are admin" : ""}
               </div>
-            </div>
+            </cf-vstack>
 
             <cf-vscroll flex showScrollbar fadeEdges>
-              <div
-                style={{
-                  padding: "16px 20px",
-                  maxWidth: "720px",
-                  margin: "0 auto",
-                }}
-              >
-                {
-                  /* Join card — always rendered (cf-input $value bindings
-                    must stay at static JSX level). Visually fine because
-                    once joined the user largely interacts elsewhere. */
-                }
-                <div
-                  style={{
-                    padding: "16px",
-                    marginBottom: "16px",
-                    border: "1px solid #fde68a",
-                    backgroundColor: "#fef3c7",
-                    borderRadius: "8px",
-                  }}
-                >
-                  <div
-                    style={{
-                      fontSize: "12px",
-                      fontWeight: 700,
-                      letterSpacing: "0.05em",
-                      textTransform: "uppercase",
-                      color: "#92400e",
-                      marginBottom: "8px",
-                    }}
-                  >
-                    Join the poll
-                  </div>
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: "8px",
-                      alignItems: "center",
-                    }}
-                  >
-                    <cf-input
-                      $value={joinName}
-                      placeholder="Your name"
-                      aria-label="Your name"
-                      timing-strategy="immediate"
-                      style="flex:1"
-                    />
-                    <cf-button onClick={boundJoin}>Join</cf-button>
-                  </div>
-                </div>
+              <cf-vstack gap="3" padding="4">
+                {isJoined
+                  ? (
+                    <cf-card>
+                      <div slot="content">
+                        Signed in as <strong>{myName}</strong>
+                      </div>
+                    </cf-card>
+                  )
+                  : (
+                    <cf-card>
+                      <cf-vstack slot="content" gap="2">
+                        <cf-label>Join the poll</cf-label>
+                        <cf-hstack gap="2">
+                          <cf-input
+                            $value={joinName}
+                            placeholder="Your name"
+                            aria-label="Your name"
+                            timing-strategy="immediate"
+                          />
+                          <cf-button onClick={boundJoin}>
+                            Join
+                          </cf-button>
+                        </cf-hstack>
+                      </cf-vstack>
+                    </cf-card>
+                  )}
 
-                {/* Top choice — only when there are votes */}
-                {computed(() => {
-                  const tally = topChoice;
-                  if (!tally) return null;
-                  const parts: string[] = [];
-                  if (tally.green > 0) parts.push(`${tally.green} love it`);
-                  if (tally.yellow > 0) {
-                    parts.push(`${tally.yellow} okay with it`);
-                  }
-                  if (tally.red > 0) parts.push(`${tally.red} can't accept`);
-                  const summary = parts.join(", ");
-                  const hasReds = tally.red > 0;
-                  return (
-                    <div
-                      style={{
-                        padding: "16px",
-                        marginBottom: "16px",
-                        border: "2px solid #10b981",
-                        borderRadius: "8px",
-                        backgroundColor: "#ecfdf5",
-                      }}
-                    >
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "8px",
-                          marginBottom: "6px",
-                        }}
-                      >
-                        <span style={{ fontSize: "22px" }}>🏆</span>
-                        <span
-                          style={{
-                            fontSize: "12px",
-                            fontWeight: 700,
-                            letterSpacing: "0.05em",
-                            textTransform: "uppercase",
-                            color: "#065f46",
-                          }}
-                        >
-                          Top choice
-                        </span>
-                      </div>
-                      <div
-                        style={{
-                          fontSize: "20px",
-                          fontWeight: 700,
-                          color: "#064e3b",
-                          marginBottom: "4px",
-                        }}
-                      >
-                        {tally.option.title}
-                      </div>
-                      <div
-                        style={{
-                          fontSize: "13px",
-                          color: hasReds ? "#b91c1c" : "#047857",
-                        }}
-                      >
-                        {summary}
-                      </div>
-                    </div>
-                  );
-                })}
+                {isAdmin
+                  ? (
+                    <cf-card>
+                      <cf-vstack slot="content" gap="2">
+                        <cf-label>Add an option (admin)</cf-label>
+                        <cf-hstack gap="2">
+                          <cf-input
+                            $value={optionDraft}
+                            placeholder="e.g. Sushi place"
+                            aria-label="Option title"
+                            timing-strategy="immediate"
+                          />
+                          <cf-button onClick={boundAddOption}>
+                            Add
+                          </cf-button>
+                          <cf-button onClick={boundResetVotes}>
+                            Reset votes
+                          </cf-button>
+                        </cf-hstack>
+                      </cf-vstack>
+                    </cf-card>
+                  )
+                  : null}
 
-                {/* All options summary — only when there are options */}
-                {computed(() => {
-                  const list = ranked;
-                  if (!list || list.length === 0) return null;
-                  const me = trimmedName(myName);
-                  return (
-                    <div
-                      style={{
-                        marginBottom: "16px",
-                        padding: "12px 16px",
-                        backgroundColor: "#f9fafb",
-                        border: "1px solid #e5e7eb",
-                        borderRadius: "8px",
-                      }}
-                    >
-                      <div
-                        style={{
-                          fontSize: "11px",
-                          fontWeight: 700,
-                          letterSpacing: "0.05em",
-                          textTransform: "uppercase",
-                          color: "#6b7280",
-                          marginBottom: "10px",
-                        }}
-                      >
-                        All options
-                      </div>
-                      {list.map((tally) => (
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "8px",
-                            padding: "6px 10px",
-                            marginBottom: "4px",
-                            backgroundColor: "white",
-                            border: "1px solid #e5e7eb",
-                            borderRadius: "6px",
-                          }}
-                        >
-                          <div
-                            style={{
-                              flex: 1,
-                              fontSize: "13px",
-                              fontWeight: 500,
-                              color: "#111827",
-                            }}
-                          >
-                            {tally.option.title}
-                          </div>
-                          <div
-                            style={{
-                              display: "flex",
-                              gap: "4px",
-                              flexWrap: "wrap",
-                              justifyContent: "flex-end",
-                            }}
-                          >
+                <cf-vstack gap="2">
+                  {ranked.map((tally) => {
+                    const oid = tally.option.id;
+                    const optionTitle = tally.option.title;
+                    const myVote = derive(
+                      { votes, myName, optionId: oid },
+                      ({ votes, myName, optionId }) =>
+                        myVoteFor(votes, trimmedName(myName), optionId),
+                    );
+                    return (
+                      <cf-card>
+                        <cf-vstack slot="content" gap="2">
+                          <cf-hstack justify="between" align="center">
+                            <cf-heading level={4}>
+                              {optionTitle}
+                            </cf-heading>
+                            <div
+                              style={{
+                                color: "var(--cf-theme-color-text-muted)",
+                                fontSize: "13px",
+                              }}
+                            >
+                              🟢 {tally.green} · 🟡 {tally.yellow} · 🔴{" "}
+                              {tally.red}
+                            </div>
+                          </cf-hstack>
+                          <cf-hstack gap="1" wrap>
                             {tally.voters.map((v) => (
                               <span
-                                title={v.name}
                                 style={{
                                   display: "inline-flex",
                                   alignItems: "center",
-                                  justifyContent: "center",
-                                  minWidth: "22px",
-                                  height: "22px",
-                                  padding: "0 6px",
-                                  borderRadius: "9999px",
-                                  backgroundColor: VOTE_SWATCH[v.voteType],
+                                  gap: "4px",
+                                  padding: "2px 8px",
+                                  borderRadius: "12px",
+                                  background: VOTE_SWATCH[v.voteType],
                                   color: "white",
-                                  fontSize: "11px",
-                                  fontWeight: 700,
-                                  boxShadow: v.name === me
-                                    ? "0 0 0 2px white, 0 0 0 3px #111827"
-                                    : "none",
+                                  fontSize: "12px",
+                                  borderLeft: `4px solid ${v.color}`,
                                 }}
                               >
-                                {getInitials(v.name)}
+                                {v.name}
                               </span>
                             ))}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  );
-                })}
-
-                {
-                  /* Host controls — always rendered; the handlers themselves
-                    enforce admin via myName === adminName checks. Non-admins
-                    can see the controls but their Add will no-op. (UX wart
-                    to fix once cf-input binding inside conditionals works.) */
-                }
-                <div
-                  style={{
-                    marginBottom: "16px",
-                    padding: "12px 16px",
-                    backgroundColor: "#eff6ff",
-                    border: "1px solid #bfdbfe",
-                    borderRadius: "8px",
-                  }}
-                >
-                  <div
-                    style={{
-                      fontSize: "11px",
-                      fontWeight: 700,
-                      letterSpacing: "0.05em",
-                      textTransform: "uppercase",
-                      color: "#1e40af",
-                      marginBottom: "8px",
-                    }}
-                  >
-                    Host controls
-                  </div>
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: "8px",
-                      alignItems: "center",
-                    }}
-                  >
-                    <cf-input
-                      $value={optionDraft}
-                      placeholder="Add an option (e.g. Sushi place)…"
-                      aria-label="Option title"
-                      timing-strategy="immediate"
-                      style="flex:1"
-                    />
-                    <cf-button onClick={boundAddOption}>Add</cf-button>
-                    <cf-button onClick={boundResetVotes}>
-                      Reset votes
-                    </cf-button>
-                  </div>
-                </div>
-
-                {/* Empty state */}
-                {computed(() => {
-                  if (options && options.length > 0) return null;
-                  const me = trimmedName(myName);
-                  const admin = trimmedName(adminName);
-                  const amAdmin = me !== "" && me === admin;
-                  const hint = amAdmin
-                    ? "Add the first one above."
-                    : admin !== ""
-                    ? `${admin} can add the first option.`
-                    : "Waiting for a host to join.";
-                  return (
-                    <div
-                      style={{
-                        padding: "32px 20px",
-                        border: "1px dashed #d1d5db",
-                        borderRadius: "8px",
-                        textAlign: "center",
-                        color: "#6b7280",
-                      }}
-                    >
-                      <div
-                        style={{
-                          fontSize: "32px",
-                          marginBottom: "8px",
-                        }}
-                      >
-                        🍽️
-                      </div>
-                      <div style={{ fontSize: "14px", fontWeight: 600 }}>
-                        No options yet
-                      </div>
-                      <div style={{ fontSize: "13px", marginTop: "4px" }}>
-                        {hint}
-                      </div>
-                    </div>
-                  );
-                })}
-
-                {/* Interactive options — vote per option */}
-                {options.map((option) => {
-                  const oid = option.id;
-                  const optionTitle = option.title;
-                  const myVote = derive(
-                    { votes, myName, optionId: oid },
-                    ({ votes, myName, optionId }) =>
-                      myVoteFor(votes, trimmedName(myName), optionId),
-                  );
-                  const rank = derive(
-                    { ranked, optionId: oid },
-                    ({ ranked, optionId }) => {
-                      const idx = ranked.findIndex(
-                        (t) => t.option.id === optionId,
-                      );
-                      return idx >= 0 ? idx + 1 : 0;
-                    },
-                  );
-                  return (
-                    <div
-                      style={{
-                        marginBottom: "10px",
-                        padding: "10px 12px",
-                        border: "1px solid #e5e7eb",
-                        borderRadius: "8px",
-                        backgroundColor: "white",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "10px",
-                      }}
-                    >
-                      <span
-                        style={{
-                          minWidth: "28px",
-                          height: "28px",
-                          display: "inline-flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          borderRadius: "9999px",
-                          backgroundColor: "#f3f4f6",
-                          color: "#374151",
-                          fontSize: "12px",
-                          fontWeight: 700,
-                        }}
-                      >
-                        #{rank}
-                      </span>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div
-                          style={{
-                            fontWeight: 600,
-                            fontSize: "14px",
-                            color: "#111827",
-                          }}
-                        >
-                          {optionTitle}
-                        </div>
-                        <div
-                          style={{
-                            fontSize: "11px",
-                            color: "#6b7280",
-                          }}
-                        >
-                          added by {option.addedByName}
-                        </div>
-                      </div>
-                      {isJoined
-                        ? (
-                          <div
-                            style={{
-                              display: "flex",
-                              gap: "6px",
-                              alignItems: "center",
-                            }}
-                          >
-                            <cf-button
-                              aria-label="Love it"
-                              style={myVote === "green"
-                                ? "background-color: #22c55e; color: white; font-weight: bold; border: 2px solid #16a34a;"
-                                : myVote
-                                ? "opacity: 0.4;"
-                                : ""}
-                              onClick={() =>
-                                boundCastVote.send({
-                                  optionId: oid,
-                                  voteType: "green",
-                                })}
-                            >
-                              🟢
-                            </cf-button>
-                            <cf-button
-                              aria-label="Okay with it"
-                              style={myVote === "yellow"
-                                ? "background-color: #eab308; color: white; font-weight: bold; border: 2px solid #ca8a04;"
-                                : myVote
-                                ? "opacity: 0.4;"
-                                : ""}
-                              onClick={() =>
-                                boundCastVote.send({
-                                  optionId: oid,
-                                  voteType: "yellow",
-                                })}
-                            >
-                              🟡
-                            </cf-button>
-                            <cf-button
-                              aria-label="Veto"
-                              style={myVote === "red"
-                                ? "background-color: #ef4444; color: white; font-weight: bold; border: 2px solid #dc2626;"
-                                : myVote
-                                ? "opacity: 0.4;"
-                                : ""}
-                              onClick={() =>
-                                boundCastVote.send({
-                                  optionId: oid,
-                                  voteType: "red",
-                                })}
-                            >
-                              🔴
-                            </cf-button>
-                            {myVote
-                              ? (
+                          </cf-hstack>
+                          {isJoined
+                            ? (
+                              <cf-hstack gap="2">
                                 <cf-button
-                                  aria-label="Clear my vote"
                                   onClick={() =>
-                                    boundClearMyVote.send({
+                                    boundCastVote.send({
                                       optionId: oid,
+                                      voteType: "green",
                                     })}
                                 >
-                                  Clear
+                                  {myVote === "green" ? "✓ " : ""}🟢 Love it
                                 </cf-button>
-                              )
-                              : null}
-                            {isAdmin
-                              ? (
                                 <cf-button
-                                  aria-label="Remove option"
                                   onClick={() =>
-                                    boundRemoveOption.send({ optionId: oid })}
+                                    boundCastVote.send({
+                                      optionId: oid,
+                                      voteType: "yellow",
+                                    })}
                                 >
-                                  ✕
+                                  {myVote === "yellow" ? "✓ " : ""}🟡 OK
                                 </cf-button>
-                              )
-                              : null}
-                          </div>
-                        )
-                        : null}
-                    </div>
-                  );
-                })}
-              </div>
+                                <cf-button
+                                  onClick={() =>
+                                    boundCastVote.send({
+                                      optionId: oid,
+                                      voteType: "red",
+                                    })}
+                                >
+                                  {myVote === "red" ? "✓ " : ""}🔴 Veto
+                                </cf-button>
+                                {isAdmin
+                                  ? (
+                                    <cf-button
+                                      onClick={() =>
+                                        boundRemoveOption.send({
+                                          optionId: oid,
+                                        })}
+                                    >
+                                      Remove
+                                    </cf-button>
+                                  )
+                                  : null}
+                              </cf-hstack>
+                            )
+                            : null}
+                        </cf-vstack>
+                      </cf-card>
+                    );
+                  })}
+                </cf-vstack>
+              </cf-vstack>
             </cf-vscroll>
           </cf-screen>
         </cf-theme>
@@ -928,7 +526,6 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       addOption: boundAddOption,
       removeOption: boundRemoveOption,
       castVote: boundCastVote,
-      clearMyVote: boundClearMyVote,
       resetVotes: boundResetVotes,
     };
   },
