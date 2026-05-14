@@ -8,13 +8,14 @@ import type { EntityDocument } from "@commonfabric/memory/v2";
 import type { FabricValue } from "@commonfabric/memory/interface";
 import { isRecord } from "@commonfabric/utils/types";
 
-// Under the modern data model, the materialized pending-version chain is
-// expected to hold deep-frozen values throughout (see audit
+// Converges the legacy materialized pending-version chain toward the modern
+// frozen-data-through-the-system discipline (see audit
 // `coordination/docs/2026-05-14-deep-freeze-discipline-audit.md` §4). Under
-// the legacy data model, callers reach storage-internal values through a
-// read path that bypasses `freezeReadValue` and expects mutable output (see
-// PR #3577's flag-bifurcated tests); the gate is transitional and will
-// dissolve when the modern flag becomes the default (#3569).
+// the modern data model, refreeze fires at the boundary so storage-internal
+// state matches the modern read-path contract. Under the legacy data model
+// the helper is a no-op, so PR #3577's bifurcated tests continue to observe
+// mutable reads; that contract is being intentionally narrowed and will
+// disappear once the modern flag becomes the default (#3569).
 const maybeRefreeze = <T>(value: T): T =>
   getDataModelConfig() ? deepFreeze(value) : value;
 

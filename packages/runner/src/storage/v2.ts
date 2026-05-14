@@ -275,11 +275,12 @@ const applyPendingVersion = (
     case "delete":
       return undefined;
     case "set": {
-      // The refreeze is gated on the modern data model: under legacy, the
-      // storage-internal pending chain is expected to hold mutable values
-      // (read paths bypass `freezeReadValue`, per PR #3577's flag-bifurcated
-      // contract). The gate is transitional and will dissolve once the
-      // modern flag becomes the default (#3569). See audit
+      // Converges the legacy storage-internal pending chain toward the
+      // modern frozen-data-through-the-system discipline. Under modern,
+      // refreeze fires so set-op materialized values are deep-frozen at
+      // boundary; under legacy the refreeze is skipped, leaving PR #3577's
+      // mutable-read contract intact until the modern flag becomes the
+      // default (#3569). See audit
       // `coordination/docs/2026-05-14-deep-freeze-discipline-audit.md` §4.
       const next = cloneIfNecessary(pending.value as FabricValue, {
         frozen: false,
