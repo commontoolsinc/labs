@@ -1,4 +1,3 @@
-import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
 import { type Frame } from "./builder/types.ts";
 import type { Cancel } from "./cancel.ts";
@@ -21,7 +20,6 @@ import {
   sortAndCompactPaths,
   type SortedAndCompactPaths,
 } from "./reactive-dependencies.ts";
-import { getTransactionWriteDetails } from "./storage/transaction-inspection.ts";
 import {
   allowMutableTransactionRead,
   ignoreReadForScheduling,
@@ -58,7 +56,6 @@ import {
 } from "./scheduler/diagnosis.ts";
 import {
   collectDirectWritersForLog,
-  collectReadersForWrite,
   type DependencyGraphState,
   type DependencyUpdateState,
   pendingDependencyCollectionMightAffect
@@ -139,6 +136,11 @@ import {
   updateSchedulerActionChangeGroup,
   updateSchedulerActionType,
 } from "./scheduler/subscriptions.ts";
+import {
+  markReadersDirtyForChangedWrites as markReadersDirtyForChangedWritesState,
+  recordChangedComputationWrites as recordChangedComputationWritesState,
+  type WritePropagationState,
+} from "./scheduler/write-propagation.ts";
 import {
   type ActionTimingState,
   getActionStats as getActionStatsFromState,
@@ -434,6 +436,20 @@ export class Scheduler {
     isDemandedPullComputation: (action) =>
       this.isDemandedPullComputation(action),
     queueExecution: () => this.queueExecution(),
+  };
+  private writePropagationState: WritePropagationState = {
+    triggers: this.triggers,
+    nonRecursiveTriggers: this.nonRecursiveTriggers,
+    changedWritesHistory: this.changedWritesHistory,
+    effects: this.effects,
+    computations: this.computations,
+    conditionallyScheduledEffects: this.conditionallyScheduledEffects,
+    isPullMode: () => this.pullMode,
+    scheduleWithDebounce: (action) => this.scheduleWithDebounce(action),
+    markDirty: (action) => this.markDirty(action),
+    scheduleAffectedEffects: (action) => {
+      this.scheduleAffectedEffects(action);
+    },
   };
   private subscriptionState: SchedulerSubscriptionState = {
     actionChangeGroups: this.actionChangeGroups,
@@ -1905,24 +1921,12 @@ export class Scheduler {
     tx: IExtendedStorageTransaction,
     log: ReactivityLog,
   ): IMemorySpaceAddress[] {
-    if (!this.pullMode || !this.computations.has(action)) return [];
-    if (log.writes.length === 0) return [];
-
-    const spaces = new Set(log.writes.map((write) => write.space));
-    const changedWrites: IMemorySpaceAddress[] = [];
-
-    for (const space of spaces) {
-      for (const detail of getTransactionWriteDetails(tx, space)) {
-        if (!deepEqual(detail.previousValue, detail.value)) {
-          changedWrites.push(detail.address);
-        }
-      }
-    }
-
-    if (changedWrites.length > 0) {
-      this.changedWritesHistory.push(...sortAndCompactPaths(changedWrites));
-    }
-    return changedWrites;
+    return recordChangedComputationWritesState(
+      this.writePropagationState,
+      action,
+      tx,
+      log,
+    );
   }
 
   private conditionalEffectHasChangedInputs(effect: Action): boolean {
@@ -1942,34 +1946,11 @@ export class Scheduler {
     sourceAction: Action,
     changedWrites: IMemorySpaceAddress[],
   ): void {
-    if (!this.pullMode || changedWrites.length === 0) return;
-
-    const readers = new Set<Action>();
-    for (const write of sortAndCompactPaths(changedWrites)) {
-      for (
-        const reader of collectReadersForWrite(
-          {
-            triggers: this.triggers,
-            nonRecursiveTriggers: this.nonRecursiveTriggers,
-          },
-          write,
-        )
-      ) {
-        if (reader !== sourceAction) {
-          readers.add(reader);
-        }
-      }
-    }
-
-    for (const reader of readers) {
-      if (this.effects.has(reader)) {
-        this.conditionallyScheduledEffects.delete(reader);
-        this.scheduleWithDebounce(reader);
-      } else if (this.computations.has(reader)) {
-        this.markDirty(reader);
-        this.scheduleAffectedEffects(reader);
-      }
-    }
+    markReadersDirtyForChangedWritesState(
+      this.writePropagationState,
+      sourceAction,
+      changedWrites,
+    );
   }
 
   private collectDirtyDependenciesForLog(
