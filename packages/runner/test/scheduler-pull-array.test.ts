@@ -18,6 +18,19 @@ import type {
   JSONSchema,
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
+import type {
+  NonIdempotentReport,
+  SchedulerDiagnosisResult,
+} from "../src/telemetry.ts";
+
+function nonIdempotentReportsForAction(
+  result: SchedulerDiagnosisResult,
+  action: Action,
+): NonIdempotentReport[] {
+  return result.nonIdempotent.filter((report) =>
+    report.actionId === action.name
+  );
+}
 
 describe("pull mode array reactivity", () => {
   let storageManager: SchedulerTestStorageManager;
@@ -102,6 +115,16 @@ describe("pull mode array reactivity", () => {
     );
 
     expect(sinkNode?.shallowReads ?? []).toContain(expectedRead);
+    const inputNode = graph.nodes.find((node) =>
+      node.type === "input" &&
+      node.id.includes(expectedAddress.id)
+    );
+    expect(inputNode).toBeDefined();
+    expect(
+      graph.edges.some((edge) =>
+        edge.from === inputNode?.id && edge.to === sinkNode?.id
+      ),
+    ).toBe(true);
 
     cancel();
   });
@@ -874,7 +897,9 @@ describe("pull mode array reactivity", () => {
       await runtime.scheduler.idle();
 
       const result = await runtime.scheduler.runIdempotencyCheck();
-      expect(result.nonIdempotent.length).toBeGreaterThan(0);
+      expect(
+        nonIdempotentReportsForAction(result, accumulator).length,
+      ).toBeGreaterThan(0);
     });
 
     it("passes idempotent computation", async () => {
@@ -907,13 +932,9 @@ describe("pull mode array reactivity", () => {
       await runtime.scheduler.idle();
 
       const result = await runtime.scheduler.runIdempotencyCheck();
-      // Filter for our specific action
-      const ourResult = result.nonIdempotent.filter((r) =>
-        r.runs.some((run) =>
-          Object.keys(run.writes).some((k) =>
-            k.includes("idempotency-idempotent")
-          )
-        )
+      const ourResult = nonIdempotentReportsForAction(
+        result,
+        doubler,
       );
       expect(ourResult.length).toBe(0);
     });
@@ -940,7 +961,9 @@ describe("pull mode array reactivity", () => {
       await runtime.scheduler.idle();
 
       const result = await runtime.scheduler.runIdempotencyCheck();
-      expect(result.nonIdempotent.length).toBeGreaterThan(0);
+      expect(
+        nonIdempotentReportsForAction(result, randomWriter).length,
+      ).toBeGreaterThan(0);
     });
   });
 });

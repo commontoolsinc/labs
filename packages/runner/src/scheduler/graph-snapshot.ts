@@ -131,7 +131,7 @@ export function buildSchedulerGraphSnapshot(
     const actionId = state.getActionId(action);
     const deps = state.dependencies.get(action);
     if (deps) {
-      for (const read of deps.reads) {
+      for (const read of [...deps.reads, ...deps.shallowReads]) {
         const entity = entityKey(read);
         if (!entityReaders.has(entity)) {
           entityReaders.set(entity, new Set());
@@ -227,7 +227,7 @@ export function findOverlappingCells(
 
   const overlapping: string[] = [];
   for (const write of producerWrites) {
-    for (const read of consumerDeps.reads) {
+    for (const read of [...consumerDeps.reads, ...consumerDeps.shallowReads]) {
       if (
         write.space === read.space &&
         write.id === read.id &&

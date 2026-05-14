@@ -1,5 +1,6 @@
 // Inline scheduler idempotency check tests.
 
+import { findDifferingWriteKeys } from "../src/scheduler/diagnosis.ts";
 import {
   afterEach,
   beforeEach,
@@ -109,5 +110,16 @@ describe("inline idempotency check mode", () => {
         )
       );
     expect(violations.length).toBe(0);
+  });
+
+  it("treats removed undefined writes as differing", () => {
+    const previousWrites = new Map<string, unknown>([
+      ["missing-output", undefined],
+    ]);
+    const latestWrites = new Map<string, unknown>();
+
+    expect(findDifferingWriteKeys(previousWrites, latestWrites)).toEqual([
+      "missing-output",
+    ]);
   });
 });

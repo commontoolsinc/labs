@@ -16,10 +16,7 @@ import type {
   IStorageSubscription,
   IStorageTransaction,
 } from "./storage/interface.ts";
-import {
-  sortAndCompactPaths,
-  type SortedAndCompactPaths,
-} from "./reactive-dependencies.ts";
+import type { SortedAndCompactPaths } from "./reactive-dependencies.ts";
 import {
   allowMutableTransactionRead,
   ignoreReadForScheduling,

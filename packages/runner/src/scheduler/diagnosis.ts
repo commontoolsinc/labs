@@ -102,7 +102,7 @@ export function findDifferingWriteKeys(
   const differingKeys: string[] = [];
 
   for (const key of keys) {
-    if (!previousWrites.has(key)) {
+    if (!previousWrites.has(key) || !latestWrites.has(key)) {
       differingKeys.push(key);
       continue;
     }

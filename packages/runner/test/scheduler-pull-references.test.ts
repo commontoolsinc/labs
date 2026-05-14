@@ -64,14 +64,14 @@ describe("pull mode with references", () => {
     innerOutput.set(undefined);
 
     // This cell holds a REFERENCE to innerOutput (simulating how lift passes results)
-    const outerInput = runtime.getCell<string | undefined>(
+    const outerInput = runtime.getCell<unknown>(
       space,
       "nested-ref-outer-input",
       undefined,
       tx,
     );
     // Set it to be a reference pointing to innerOutput
-    outerInput.set(undefined);
+    outerInput.setRaw(innerOutput.getAsLink());
 
     const outerOutput = runtime.getCell<string>(
       space,
@@ -105,10 +105,13 @@ describe("pull mode with references", () => {
     };
 
     // Outer lift: (name, firstItem) => name || firstItem || "default"
-    // For this test, we'll read innerOutput directly to simulate following the reference
+    // The read must go through outerInput so dependency collection observes the
+    // followed reference to innerOutput.
     const outerLift: Action = (actionTx) => {
       outerRuns++;
-      const firstItem = innerOutput.withTx(actionTx).get();
+      const firstItem = outerInput.withTx(actionTx).get() as
+        | string
+        | undefined;
       const result = firstItem || "default";
       outerOutput.withTx(actionTx).send(result);
     };
@@ -135,7 +138,7 @@ describe("pull mode with references", () => {
     runtime.scheduler.subscribe(
       outerLift,
       {
-        reads: [toMemorySpaceAddress(innerOutput.getAsNormalizedFullLink())],
+        reads: [toMemorySpaceAddress(outerInput.getAsNormalizedFullLink())],
         shallowReads: [],
         writes: [toMemorySpaceAddress(outerOutput.getAsNormalizedFullLink())],
       },

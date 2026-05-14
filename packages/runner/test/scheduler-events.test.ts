@@ -18,6 +18,17 @@ import type {
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
 
+async function waitForSchedulerCondition(
+  runtime: Runtime,
+  condition: () => boolean,
+) {
+  const deadline = performance.now() + 1_000;
+  while (!condition() && performance.now() < deadline) {
+    await runtime.idle();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
+
 describe("event handling", () => {
   let storageManager: SchedulerTestStorageManager;
   let runtime: Runtime;
@@ -326,10 +337,7 @@ describe("event handling", () => {
         1,
       );
 
-      // First idle may return before the commit callback schedules retries.
-      await runtime.idle();
-      // Wait for any re-queued events to process.
-      await runtime.idle();
+      await waitForSchedulerCondition(runtime, () => attempts >= 6);
 
       // Should attempt initial + default retries times (DEFAULT_RETRIES=5)
       expect(attempts).toBe(6);
