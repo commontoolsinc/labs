@@ -86,6 +86,23 @@ export type AuthorshipIntegrity<Author extends string> = {
   readonly subject: Author;
 };
 
+export type SlotSelectionValue = SlotId | Default<"participant-1">;
+export type SlotSelectionCell = Writable<SlotSelectionValue>;
+
+const normalizeSlotId = (value: SlotSelectionValue | undefined): SlotId => {
+  switch (value) {
+    case "participant-1":
+    case "participant-2":
+    case "participant-3":
+      return value;
+    default:
+      return "participant-1";
+  }
+};
+
+export const activeSlotValue = (slotId: SlotSelectionCell): SlotId =>
+  normalizeSlotId(slotId.get() as SlotSelectionValue | undefined);
+
 type TrustedParticipantOne = Cfc<
   ParticipantProfile<"participant-1">,
   { integrity: readonly [AuthorshipIntegrity<"participant-1">] }
@@ -162,6 +179,9 @@ export const messagesValue = (
   messages: SharedMessagesWritable,
 ): SharedChatMessage[] =>
   Array.from((messages.get() as SharedChatMessage[] | undefined) ?? []);
+
+const draftText = (draft: Writable<string | Default<"">>): string =>
+  (draft.get() as string | undefined) ?? "";
 
 const makeTrustedParticipant = (
   slotId: SlotId,
@@ -278,20 +298,21 @@ export const applyTrustedMessageSend = (
 export const commitTrustedProfileSave = handler<
   void,
   {
-    slotId: SlotId;
-    nameDraft: Writable<string>;
+    slotId: SlotSelectionCell;
+    nameDraft: Writable<string | Default<"">>;
     participants: SharedParticipantsWritable;
   }
 >((_, { slotId, nameDraft, participants }) => {
   const participantList = participantsValue(participants);
-  const trimmedName = nameDraft.get().trim();
+  const trimmedName = draftText(nameDraft).trim();
   if (!trimmedName) {
     return;
   }
 
-  const participant = makeTrustedParticipant(slotId, trimmedName);
+  const activeSlot = activeSlotValue(slotId);
+  const participant = makeTrustedParticipant(activeSlot, trimmedName);
   const existingIndex = participantList.findIndex((saved) =>
-    saved.id === slotId
+    saved.id === activeSlot
   );
   if (existingIndex >= 0) {
     participants.key(existingIndex).set(participant);
@@ -303,16 +324,16 @@ export const commitTrustedProfileSave = handler<
 export const commitTrustedMessageSend = handler<
   void,
   {
-    slotId: SlotId;
-    messageDraft: Writable<string>;
+    slotId: SlotSelectionCell;
+    messageDraft: Writable<string | Default<"">>;
     participants: SharedParticipantsWritable;
     messages: SharedMessagesWritable;
   }
 >((_, { slotId, messageDraft, participants, messages }) => {
   const { trimmedBody, message } = prepareTrustedMessageSend(
     participantsValue(participants),
-    slotId,
-    messageDraft.get(),
+    activeSlotValue(slotId),
+    draftText(messageDraft),
   );
   if (!trimmedBody || !message) {
     return;
@@ -338,7 +359,7 @@ export type SharedChatStateCell = Writable<SharedChatStateValue>;
 
 interface TrustedParticipantsPanelInput {
   participants: SharedParticipantsCell;
-  viewerSlotId: SlotId;
+  viewerSlotId: SlotSelectionCell;
   id: string;
 }
 
@@ -369,7 +390,7 @@ const TrustedParticipantsPanel = pattern<
                 participantsValue(participants),
                 slotId,
               );
-              if (slotId === viewerSlotId) {
+              if (slotId === activeSlotValue(viewerSlotId)) {
                 return "primary";
               }
               return saved ? "accent" : "default";
@@ -382,8 +403,8 @@ const TrustedParticipantsPanel = pattern<
 }));
 
 export interface TrustedProfileSaveSurfaceInput {
-  slotId: SlotId;
-  nameDraft: Writable<string>;
+  slotId: SlotSelectionCell;
+  nameDraft: Writable<string | Default<"">>;
   participants: SharedParticipantsCell;
 }
 
@@ -400,41 +421,45 @@ export const TrustedProfileSaveSurface = pattern<
 >((
   { slotId, nameDraft, participants }: TrustedProfileSaveSurfaceInput,
 ): TrustedProfileSaveSurfaceOutput => {
-  const meta = metaForSlot(slotId);
   const saveProfile = commitTrustedProfileSave({
     slotId,
     nameDraft,
     participants,
   });
+  const activeSlotLabel = computed(() =>
+    metaForSlot(activeSlotValue(slotId)).label
+  );
   const currentSavedName = computed(() => {
     const saved = findParticipantBySlot(
       participantsValue(participants),
-      slotId,
+      activeSlotValue(slotId),
     );
     return saved ? saved.name : "Name not set";
   });
-  const saveDisabled = computed(() => nameDraft.get().trim().length === 0);
+  const saveDisabled = computed(() => draftText(nameDraft).trim().length === 0);
 
   return {
-    [NAME]: computed(() => `${meta.label} profile save`),
+    [NAME]: computed(() =>
+      `${metaForSlot(activeSlotValue(slotId)).label} profile save`
+    ),
     [UI]: (
       <cf-card
-        id={`trusted-profile-surface-${slotId}`}
+        id="trusted-profile-surface"
         data-ui-pattern={TRUSTED_GROUP_CHAT_PROFILE_SURFACE}
         data-ui-event-integrity={TRUSTED_GROUP_CHAT_PROFILE_SURFACE}
       >
         <cf-hstack slot="content" gap="2" align="center" wrap>
-          <cf-chip label={meta.label} variant="primary" />
+          <cf-chip label={activeSlotLabel} variant="primary" />
           <cf-vgroup gap="sm" style={{ minWidth: "12rem", flex: "1 1 12rem" }}>
             <cf-input
-              id={`trusted-profile-name-${slotId}`}
+              id="trusted-profile-name"
               size="sm"
               $value={nameDraft}
               placeholder="Set your name"
             />
           </cf-vgroup>
           <cf-button
-            id={`trusted-profile-save-${slotId}`}
+            id="trusted-profile-save"
             data-ui-action={TRUSTED_GROUP_CHAT_SAVE_PROFILE_ACTION}
             size="sm"
             disabled={saveDisabled}
@@ -442,7 +467,7 @@ export const TrustedProfileSaveSurface = pattern<
           >
             Save name
           </cf-button>
-          <cf-label id={`trusted-profile-status-${slotId}`}>
+          <cf-label id="trusted-profile-status">
             {currentSavedName}
           </cf-label>
         </cf-hstack>
@@ -454,8 +479,8 @@ export const TrustedProfileSaveSurface = pattern<
 });
 
 export interface TrustedChatSendSurfaceInput {
-  slotId: SlotId;
-  messageDraft: Writable<string>;
+  slotId: SlotSelectionCell;
+  messageDraft: Writable<string | Default<"">>;
   participants: SharedParticipantsCell;
   messages: SharedMessagesCell;
 }
@@ -474,9 +499,11 @@ export const TrustedChatSendSurface = pattern<
   { slotId, messageDraft, participants, messages }: TrustedChatSendSurfaceInput,
 ): TrustedChatSendSurfaceOutput => {
   const sendDisabled = computed(() =>
-    findParticipantBySlot(participantsValue(participants), slotId) ===
-      undefined ||
-    messageDraft.get().trim().length === 0
+    findParticipantBySlot(
+        participantsValue(participants),
+        activeSlotValue(slotId),
+      ) === undefined ||
+    draftText(messageDraft).trim().length === 0
   );
   const sendMessage = commitTrustedMessageSend({
     slotId,
@@ -486,10 +513,12 @@ export const TrustedChatSendSurface = pattern<
   });
 
   return {
-    [NAME]: computed(() => `${metaForSlot(slotId).label} send surface`),
+    [NAME]: computed(() =>
+      `${metaForSlot(activeSlotValue(slotId)).label} send surface`
+    ),
     [UI]: (
       <cf-card
-        id={`trusted-send-surface-${slotId}`}
+        id="trusted-send-surface"
         data-ui-pattern={TRUSTED_GROUP_CHAT_SEND_SURFACE}
         data-ui-event-integrity={TRUSTED_GROUP_CHAT_SEND_SURFACE}
       >
@@ -497,7 +526,7 @@ export const TrustedChatSendSurface = pattern<
           {TrustedParticipantsPanel({
             participants,
             viewerSlotId: slotId,
-            id: `trusted-participants-panel-${slotId}`,
+            id: "trusted-participants-panel",
           })}
           <cf-hstack align="center" wrap gap="2">
             <cf-vgroup
@@ -505,14 +534,14 @@ export const TrustedChatSendSurface = pattern<
               style={{ minWidth: "16rem", flex: "1 1 16rem" }}
             >
               <cf-input
-                id={`trusted-message-draft-${slotId}`}
+                id="trusted-message-draft"
                 size="sm"
                 $value={messageDraft}
                 placeholder="Write a message"
               />
             </cf-vgroup>
             <cf-button
-              id={`trusted-send-button-${slotId}`}
+              id="trusted-send-button"
               data-ui-action={TRUSTED_GROUP_CHAT_SEND_ACTION}
               size="sm"
               disabled={sendDisabled}

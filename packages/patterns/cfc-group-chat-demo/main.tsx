@@ -4,9 +4,10 @@ import {
   Default,
   handler,
   NAME,
-  navigateTo,
   pattern,
-  SELF,
+  type PerSession,
+  type PerSpace,
+  type PerUser,
   Stream,
   UI,
   Writable,
@@ -15,10 +16,12 @@ import {
   createRandomImportedClaimedMessages,
   findParticipantBySlot,
   metaForSlot,
+  SLOT_IDS,
   type SlotId,
   sortDisplayMessages,
 } from "./logic.ts";
 import {
+  activeSlotValue,
   commitTrustedMessageSend,
   messagesValue,
   participantsValue,
@@ -27,46 +30,77 @@ import {
   type SharedMessagesValue,
   type SharedParticipantsCell,
   type SharedParticipantsValue,
+  type SlotSelectionCell,
+  type SlotSelectionValue,
   TrustedChatSendSurface,
   TrustedProfileSaveSurface,
   VerifiedChatBubble,
 } from "./trusted.tsx";
 
-type LobbyPiece = any;
+type DraftCell = Writable<string | Default<"">>;
 
-const writeDraftText = handler<string, { value: Writable<string> }>(
+const messageCountText = (count: number): string =>
+  count === 0 ? "No messages yet" : `${count} message${count === 1 ? "" : "s"}`;
+
+const draftText = (draft: DraftCell): string =>
+  (draft.get() as string | undefined) ?? "";
+
+const writeDraftText = handler<string, { value: DraftCell }>(
   (nextValue, { value }) => {
     value.set(nextValue);
   },
 );
 
-const messageCountText = (count: number): string =>
-  count === 0 ? "No messages yet" : `${count} message${count === 1 ? "" : "s"}`;
+const writeActiveSlot = handler<SlotId, { activeSlot: SlotSelectionCell }>(
+  (nextSlot, { activeSlot }) => {
+    activeSlot.set(nextSlot);
+  },
+);
 
-interface ParticipantStatusChipInput {
+const selectSlot = handler<
+  void,
+  {
+    activeSlot: SlotSelectionCell;
+    slotId: SlotId;
+  }
+>((_, { activeSlot, slotId }) => {
+  activeSlot.set(slotId);
+});
+
+interface SlotPickerInput {
+  activeSlot: SlotSelectionCell;
   participants: SharedParticipantsCell;
-  slotId: SlotId;
 }
 
-const ParticipantStatusChip = pattern<
-  ParticipantStatusChipInput,
-  { [NAME]: string; [UI]: any }
->((
-  { participants, slotId }: ParticipantStatusChipInput,
-): { [NAME]: string; [UI]: any } => {
-  const statusLabel = computed(() => {
-    const saved = findParticipantBySlot(
-      participantsValue(participants),
-      slotId,
-    );
-    return saved ? saved.name : "Profile pending";
-  });
-
-  return {
-    [NAME]: computed(() => `${slotId} status chip`),
-    [UI]: <cf-chip label={statusLabel} />,
-  };
-});
+const SlotPicker = pattern<SlotPickerInput, { [NAME]: string; [UI]: any }>((
+  { activeSlot, participants }: SlotPickerInput,
+): { [NAME]: string; [UI]: any } => ({
+  [NAME]: "demo participant picker",
+  [UI]: (
+    <cf-hstack id="active-slot-picker" gap="2" wrap>
+      {SLOT_IDS.map((slotId) => {
+        const label = computed(() => {
+          const saved = findParticipantBySlot(
+            participantsValue(participants),
+            slotId,
+          );
+          return saved ? saved.name : metaForSlot(slotId).label;
+        });
+        return (
+          <cf-button
+            id={`select-slot-${slotId}`}
+            variant={computed(() =>
+              activeSlotValue(activeSlot) === slotId ? "primary" : "secondary"
+            )}
+            onClick={selectSlot({ activeSlot, slotId })}
+          >
+            {label}
+          </cf-button>
+        );
+      })}
+    </cf-hstack>
+  ),
+}));
 
 interface SharedTranscriptInput {
   messages: SharedMessagesCell;
@@ -93,7 +127,7 @@ const SharedTranscript = pattern<
   return {
     [NAME]: computed(() => `${id} transcript`),
     [UI]: (
-      <cf-vstack id={id} gap="3">
+      <cf-vstack id={id} gap="3" style={{ minHeight: 0 }}>
         <cf-label>{messageCountLabel}</cf-label>
         <div
           style={{
@@ -113,134 +147,177 @@ const SharedTranscript = pattern<
   };
 });
 
-export interface ParticipantRoomInput {
-  slotId: SlotId;
-  participants: SharedParticipantsCell;
-  messages: SharedMessagesCell;
-  lobbyPiece: LobbyPiece | null | Default<null>;
+export interface GroupChatDemoInput {
+  participants?: PerSpace<SharedParticipantsCell>;
+  messages?: PerSpace<SharedMessagesCell>;
+  activeSlot?: PerUser<SlotSelectionCell>;
+  profileDraft?: PerUser<DraftCell>;
+  messageDraft?: PerUser<DraftCell>;
+  hostMessageDraft?: PerSession<DraftCell>;
 }
 
-export interface ParticipantRoomOutput {
+export interface GroupChatDemoOutput {
   [NAME]: string;
   [UI]: any;
-  slotId: SlotId;
+  participants: PerSpace<SharedParticipantsCell>;
+  messages: PerSpace<SharedMessagesCell>;
+  activeSlot: PerUser<SlotSelectionCell>;
+  profileDraft: PerUser<DraftCell>;
+  messageDraft: PerUser<DraftCell>;
+  hostMessageDraft: PerSession<DraftCell>;
+  setActiveSlot: Stream<SlotId>;
   setProfileDraft: Stream<string>;
-  saveProfile: Stream<void>;
   setMessageDraft: Stream<string>;
+  setHostMessageDraft: Stream<string>;
+  saveProfile: Stream<void>;
   sendTrustedMessage: Stream<void>;
 }
 
-export const ParticipantRoom = pattern<
-  ParticipantRoomInput,
-  ParticipantRoomOutput
->((
+export const GroupChatDemo = pattern<GroupChatDemoInput, GroupChatDemoOutput>((
   {
-    slotId,
     participants,
     messages,
-    lobbyPiece,
-  }: ParticipantRoomInput,
-): ParticipantRoomOutput => {
-  const meta = metaForSlot(slotId);
-  const profileDraft = Writable.of("");
-  const trustedMessageDraft = Writable.of("");
-  const hostMessageDraft = Writable.of("");
-  const setProfileDraft = writeDraftText({ value: profileDraft });
-  const setMessageDraft = writeDraftText({ value: trustedMessageDraft });
+    activeSlot,
+    profileDraft,
+    messageDraft,
+    hostMessageDraft,
+  }: GroupChatDemoInput,
+): GroupChatDemoOutput => {
+  const participantsCell = participants as SharedParticipantsCell;
+  const messagesCell = messages as SharedMessagesCell;
+  const activeSlotCell = activeSlot as SlotSelectionCell;
+  const profileDraftCell = profileDraft as DraftCell;
+  const messageDraftCell = messageDraft as DraftCell;
+  const hostMessageDraftCell = hostMessageDraft as DraftCell;
   const trustedProfileSave = TrustedProfileSaveSurface({
-    slotId,
-    nameDraft: profileDraft,
-    participants,
+    slotId: activeSlotCell,
+    nameDraft: profileDraftCell,
+    participants: participantsCell,
   });
   const trustedSend = TrustedChatSendSurface({
-    slotId,
-    messageDraft: trustedMessageDraft,
-    participants,
-    messages,
+    slotId: activeSlotCell,
+    messageDraft: messageDraftCell,
+    participants: participantsCell,
+    messages: messagesCell,
   });
+  const hostLookalikeSend = commitTrustedMessageSend({
+    slotId: activeSlotCell,
+    messageDraft: hostMessageDraftCell,
+    participants: participantsCell,
+    messages: messagesCell,
+  });
+  const setActiveSlot = writeActiveSlot({ activeSlot: activeSlotCell });
+  const setProfileDraft = writeDraftText({ value: profileDraftCell });
+  const setMessageDraft = writeDraftText({ value: messageDraftCell });
+  const setHostMessageDraft = writeDraftText({ value: hostMessageDraftCell });
+  const activeSlotLabel = computed(() =>
+    metaForSlot(activeSlotValue(activeSlotCell)).label
+  );
   const currentProfileLabel = computed(() => {
     const saved = findParticipantBySlot(
-      participantsValue(participants),
-      slotId,
+      participantsValue(participantsCell),
+      activeSlotValue(activeSlotCell),
     );
     return saved ? saved.name : "Name not set";
   });
-  const hostLookalikeSend = commitTrustedMessageSend({
-    slotId,
-    messageDraft: hostMessageDraft,
-    participants,
-    messages,
-  });
   const hostSendDisabled = computed(() =>
-    hostMessageDraft.get().trim().length === 0
+    draftText(hostMessageDraftCell).trim().length === 0
   );
   const addRandomMessagesDisabled = computed(() =>
-    participantsValue(participants).length === 0 ||
-    messagesValue(messages).length === 0
+    participantsValue(participantsCell).length === 0 ||
+    messagesValue(messagesCell).length === 0
   );
   const addRandomMessages = action(() => {
     const nextMessages = createRandomImportedClaimedMessages(
-      sortDisplayMessages(messagesValue(messages)),
-      participantsValue(participants),
+      sortDisplayMessages(messagesValue(messagesCell)),
+      participantsValue(participantsCell),
     );
     nextMessages.forEach((message) =>
-      messages.push(message as SharedChatMessage)
+      messagesCell.push(message as SharedChatMessage)
     );
   });
-  const goBackToLobby = action(() => {
-    if (lobbyPiece) {
-      return navigateTo(lobbyPiece);
-    }
-  });
-  const shouldShowBackButton = Boolean(lobbyPiece);
 
   return {
-    [NAME]: computed(() => `${meta.label} room`),
+    [NAME]: "CFC group chat demo",
     [UI]: (
-      <cf-screen title={`${meta.label} room`}>
-        <cf-vstack gap="4" style={{ padding: "1rem" }}>
-          <cf-hstack justify="between" align="center" wrap>
-            <cf-vstack gap="1">
-              <cf-heading level={2}>{meta.label}</cf-heading>
-              <cf-label>Current name: {currentProfileLabel}</cf-label>
-            </cf-vstack>
-            {shouldShowBackButton
-              ? (
-                <cf-button
-                  id={`back-to-lobby-${slotId}`}
-                  variant="ghost"
-                  onClick={goBackToLobby}
-                >
-                  Back to lobby
-                </cf-button>
-              )
-              : null}
-          </cf-hstack>
-          {trustedProfileSave}
-          <cf-card id={`chat-panel-${slotId}`}>
+      <cf-screen title="CFC group chat demo">
+        <cf-vstack
+          id="group-chat-demo"
+          gap="4"
+          style={{
+            height: "100%",
+            minHeight: "0",
+            padding: "1rem",
+          }}
+        >
+          <cf-card>
             <cf-vstack slot="content" gap="3">
+              <cf-hstack justify="between" align="start" wrap gap="3">
+                <cf-vstack gap="1">
+                  <cf-heading level={2}>Group chat</cf-heading>
+                  <cf-label>
+                    The chat shell is ordinary pattern code. Small reviewed
+                    components save profiles, send messages, and render verified
+                    author bubbles.
+                  </cf-label>
+                </cf-vstack>
+                <cf-hstack gap="2" wrap>
+                  <cf-chip
+                    label={computed(() =>
+                      `${participantsValue(participantsCell).length} profile${
+                        participantsValue(participantsCell).length === 1
+                          ? ""
+                          : "s"
+                      }`
+                    )}
+                  />
+                  <cf-chip
+                    label={computed(() =>
+                      messageCountText(messagesValue(messagesCell).length)
+                    )}
+                  />
+                </cf-hstack>
+              </cf-hstack>
+              <cf-vstack gap="2">
+                <cf-label>Demo participant for this user</cf-label>
+                {SlotPicker({
+                  activeSlot: activeSlotCell,
+                  participants: participantsCell,
+                })}
+                <cf-label id="current-profile-label">
+                  Acting as {activeSlotLabel}: {currentProfileLabel}
+                </cf-label>
+              </cf-vstack>
+            </cf-vstack>
+          </cf-card>
+
+          {trustedProfileSave}
+
+          <cf-card id="chat-panel">
+            <cf-vstack slot="content" gap="3" style={{ minHeight: 0 }}>
               {SharedTranscript({
-                messages,
-                id: `trusted-conversation-preview-${slotId}`,
+                messages: messagesCell,
+                id: "trusted-conversation-preview",
               })}
               {trustedSend}
             </cf-vstack>
           </cf-card>
-          <cf-card id={`host-send-panel-${slotId}`}>
+
+          <cf-card id="host-send-panel">
             <cf-hstack slot="content" gap="2" align="center" wrap>
               <cf-vgroup
                 gap="sm"
                 style={{ minWidth: "16rem", flex: "1 1 16rem" }}
               >
                 <cf-input
-                  id={`host-message-draft-${slotId}`}
+                  id="host-message-draft"
                   size="sm"
                   $value={hostMessageDraft}
                   placeholder="Write a message"
                 />
               </cf-vgroup>
               <cf-button
-                id={`host-send-button-${slotId}`}
+                id="host-send-button"
                 disabled={hostSendDisabled}
                 onClick={hostLookalikeSend}
               >
@@ -248,8 +325,9 @@ export const ParticipantRoom = pattern<
               </cf-button>
             </cf-hstack>
           </cf-card>
+
           <cf-button
-            id={`add-random-messages-${slotId}`}
+            id="add-random-messages"
             size="lg"
             style={{ width: "100%" }}
             disabled={addRandomMessagesDisabled}
@@ -260,143 +338,25 @@ export const ParticipantRoom = pattern<
         </cf-vstack>
       </cf-screen>
     ),
-    slotId,
+    participants: participantsCell as PerSpace<SharedParticipantsCell>,
+    messages: messagesCell as PerSpace<SharedMessagesCell>,
+    activeSlot: activeSlotCell as PerUser<SlotSelectionCell>,
+    profileDraft: profileDraftCell as PerUser<DraftCell>,
+    messageDraft: messageDraftCell as PerUser<DraftCell>,
+    hostMessageDraft: hostMessageDraftCell as PerSession<DraftCell>,
+    setActiveSlot,
     setProfileDraft,
-    saveProfile: trustedProfileSave.saveProfile,
     setMessageDraft,
+    setHostMessageDraft,
+    saveProfile: trustedProfileSave.saveProfile,
     sendTrustedMessage: trustedSend.sendMessage,
   };
 });
 
-const openGroupChatRoom = handler<
-  unknown,
-  {
-    slotId: SlotId;
-    participants: SharedParticipantsCell;
-    messages: SharedMessagesCell;
-    lobbyPiece: LobbyPiece;
-  }
->((_, { slotId, participants, messages, lobbyPiece }) => {
-  const room = ParticipantRoom({
-    slotId,
-    participants,
-    messages,
-    lobbyPiece,
-  });
-  return navigateTo(room);
-});
+export default GroupChatDemo;
 
-export interface GroupChatDemoOutput {
-  [NAME]: string;
-  [UI]: any;
-}
-
-export default pattern<unknown, GroupChatDemoOutput>(({
-  [SELF]: self,
-}): GroupChatDemoOutput => {
-  const participants = Writable.of<SharedParticipantsValue>(
-    [] as SharedParticipantsValue,
-  ).for("participants") as SharedParticipantsCell;
-  const messages = Writable.of<SharedMessagesValue>(
-    [] as SharedMessagesValue,
-  ).for("messages") as SharedMessagesCell;
-  const openParticipantOne = openGroupChatRoom({
-    slotId: "participant-1",
-    participants,
-    messages,
-    lobbyPiece: self,
-  });
-  const openParticipantTwo = openGroupChatRoom({
-    slotId: "participant-2",
-    participants,
-    messages,
-    lobbyPiece: self,
-  });
-  const openParticipantThree = openGroupChatRoom({
-    slotId: "participant-3",
-    participants,
-    messages,
-    lobbyPiece: self,
-  });
-
-  return {
-    [NAME]: "CFC group chat demo",
-    [UI]: (
-      <cf-screen title="CFC group chat demo">
-        <cf-vstack id="group-chat-lobby" gap="4" style={{ padding: "1rem" }}>
-          <cf-card>
-            <cf-vstack slot="content" gap="2">
-              <cf-heading level={2}>Group chat</cf-heading>
-              <cf-label>
-                The chat shell is ordinary pattern code. Small reviewed
-                components save profiles, send messages, and render verified
-                author bubbles.
-              </cf-label>
-              <cf-hstack gap="2" wrap>
-                <cf-chip
-                  label={computed(() =>
-                    `${participantsValue(participants).length} profile${
-                      participantsValue(participants).length === 1 ? "" : "s"
-                    }`
-                  )}
-                />
-                <cf-chip
-                  label={computed(() =>
-                    messageCountText(messagesValue(messages).length)
-                  )}
-                />
-              </cf-hstack>
-            </cf-vstack>
-          </cf-card>
-          <cf-grid columns="3" gap="4">
-            <cf-card id="lobby-slot-participant-1">
-              <cf-vstack slot="content" gap="3">
-                <cf-heading level={3}>Participant 1</cf-heading>
-                {ParticipantStatusChip({
-                  participants,
-                  slotId: "participant-1",
-                })}
-                <cf-button
-                  id="open-room-participant-1"
-                  onClick={openParticipantOne}
-                >
-                  Open room
-                </cf-button>
-              </cf-vstack>
-            </cf-card>
-            <cf-card id="lobby-slot-participant-2">
-              <cf-vstack slot="content" gap="3">
-                <cf-heading level={3}>Participant 2</cf-heading>
-                {ParticipantStatusChip({
-                  participants,
-                  slotId: "participant-2",
-                })}
-                <cf-button
-                  id="open-room-participant-2"
-                  onClick={openParticipantTwo}
-                >
-                  Open room
-                </cf-button>
-              </cf-vstack>
-            </cf-card>
-            <cf-card id="lobby-slot-participant-3">
-              <cf-vstack slot="content" gap="3">
-                <cf-heading level={3}>Participant 3</cf-heading>
-                {ParticipantStatusChip({
-                  participants,
-                  slotId: "participant-3",
-                })}
-                <cf-button
-                  id="open-room-participant-3"
-                  onClick={openParticipantThree}
-                >
-                  Open room
-                </cf-button>
-              </cf-vstack>
-            </cf-card>
-          </cf-grid>
-        </cf-vstack>
-      </cf-screen>
-    ),
-  };
-});
+export type {
+  SharedMessagesValue,
+  SharedParticipantsValue,
+  SlotSelectionValue,
+};

@@ -64,142 +64,138 @@ describe("cfc group chat demo integration test", () => {
     });
     await waitForRuntimeIdle(page);
 
-    await clickCfButton(page, "#open-room-participant-1");
-    await waitForRuntimeIdle(page);
-    await waitForDisabled(page, "#trusted-send-button-participant-1", true);
+    await waitForDisabled(page, "#trusted-send-button", true);
 
     await fillCfInput(
       page,
-      "#trusted-profile-name-participant-1",
+      "#trusted-profile-name",
       "Alice",
     );
-    await clickCfButton(page, "#trusted-profile-save-participant-1");
+    await clickCfButton(page, "#trusted-profile-save");
     await waitForDeepText(
       page,
-      "#trusted-participants-panel-participant-1",
+      "#trusted-participants-panel",
       "Alice",
     );
     await waitForRuntimeIdle(page);
 
     await fillCfInput(
       page,
-      "#host-message-draft-participant-1",
+      "#host-message-draft",
       "Fake hello from Alice",
     );
-    await clickCfButton(page, "#host-send-button-participant-1");
+    await clickCfButton(page, "#host-send-button");
     await waitForRuntimeIdle(page);
     await waitForTextAbsent(
       page,
-      "#trusted-conversation-preview-participant-1",
+      "#trusted-conversation-preview",
       "Fake hello from Alice",
     );
 
     await fillCfInput(
       page,
-      "#trusted-message-draft-participant-1",
+      "#trusted-message-draft",
       "Hello from Alice",
     );
     await waitForRuntimeIdle(page);
-    await waitForDisabled(page, "#trusted-send-button-participant-1", false);
-    await clickCfButton(page, "#trusted-send-button-participant-1");
+    await waitForDisabled(page, "#trusted-send-button", false);
+    await clickCfButton(page, "#trusted-send-button");
     await waitForText(
       page,
-      "#trusted-conversation-preview-participant-1",
+      "#trusted-conversation-preview",
       "1 message",
     );
     await waitForAuthorshipState(
       page,
       "Hello from Alice",
-      "#trusted-conversation-preview-participant-1",
+      "#trusted-conversation-preview",
     );
 
-    await clickCfButton(page, "#back-to-lobby-participant-1");
-    await waitForRuntimeIdle(page);
-    await clickCfButton(page, "#open-room-participant-2");
+    await clickCfButton(page, "#select-slot-participant-2");
     await waitForRuntimeIdle(page);
 
     await waitForText(
       page,
-      "#trusted-conversation-preview-participant-2",
+      "#trusted-conversation-preview",
       "1 message",
     );
     await waitForAuthorshipState(
       page,
       "Hello from Alice",
-      "#trusted-conversation-preview-participant-2",
+      "#trusted-conversation-preview",
     );
     await waitForDeepText(
       page,
-      "#trusted-participants-panel-participant-2",
+      "#trusted-participants-panel",
       "Alice",
     );
-    await waitForDisabled(page, "#trusted-send-button-participant-2", true);
+    await waitForDisabled(page, "#trusted-send-button", true);
 
     await fillCfInput(
       page,
-      "#trusted-profile-name-participant-2",
+      "#trusted-profile-name",
       "Bob",
     );
-    await clickCfButton(page, "#trusted-profile-save-participant-2");
+    await clickCfButton(page, "#trusted-profile-save");
     await waitForDeepText(
       page,
-      "#trusted-participants-panel-participant-2",
+      "#trusted-participants-panel",
       "Bob",
     );
     await waitForRuntimeIdle(page);
 
-    await scrollIntoView(page, "#trusted-message-draft-participant-2");
+    await scrollIntoView(page, "#trusted-message-draft");
     await fillCfInput(
       page,
-      "#trusted-message-draft-participant-2",
+      "#trusted-message-draft",
       "Hello from Bob",
     );
     await waitForRuntimeIdle(page);
-    await clickCfButton(page, "#trusted-send-button-participant-2");
+    await clickCfButton(page, "#trusted-send-button");
     await waitForText(
       page,
-      "#trusted-conversation-preview-participant-2",
+      "#trusted-conversation-preview",
       "2 messages",
     );
     await waitForAuthorshipState(
       page,
       "Hello from Bob",
-      "#trusted-conversation-preview-participant-2",
+      "#trusted-conversation-preview",
     );
 
-    await clickCfButton(page, "#add-random-messages-participant-2");
+    await clickCfButton(page, "#add-random-messages");
 
     await waitForText(
       page,
-      "#trusted-conversation-preview-participant-2",
+      "#trusted-conversation-preview",
       "4 messages",
     );
     await waitForTextAbsent(
       page,
-      "#trusted-conversation-preview-participant-2",
+      "#trusted-conversation-preview",
       "Invalid claim",
     );
     await waitForInvalidAuthorshipState(
       page,
-      "#trusted-conversation-preview-participant-2",
+      "#trusted-conversation-preview",
     );
 
     await fillCfInput(
       page,
-      "#trusted-message-draft-participant-2",
+      "#trusted-message-draft",
       "Bob after imported claims",
     );
     await waitForRuntimeIdle(page);
-    await clickCfButton(page, "#trusted-send-button-participant-2");
+    await clickCfButton(page, "#trusted-send-button");
     await waitForText(
       page,
-      "#trusted-conversation-preview-participant-2",
+      "#trusted-conversation-preview",
       "5 messages",
     );
     await waitForAuthorshipState(
       page,
       "Bob after imported claims",
-      "#trusted-conversation-preview-participant-2",
+      "#trusted-conversation-preview",
     );
   });
 });

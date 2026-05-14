@@ -799,7 +799,7 @@ const ifcEntryAppliesToAttemptedWrite = (
   target: {
     space: MemorySpace;
     id: URI;
-    type: MediaType;
+    scope: ReturnType<typeof normalizeCellScope>;
   },
   path: readonly string[],
 ): boolean => {
@@ -824,7 +824,6 @@ const verifyInputRequirements = (
     space: MemorySpace;
     id: URI;
     scope: ReturnType<typeof normalizeCellScope>;
-    type: MediaType;
   },
 ): string | undefined => {
   const consumed = [...(tx.getReadActivities?.() ?? [])].filter((read) =>
@@ -904,7 +903,6 @@ const verifyTrustedEventRequirements = (
     space: MemorySpace;
     id: URI;
     scope: ReturnType<typeof normalizeCellScope>;
-    type: MediaType;
   },
   schema: JSONSchema,
 ): string | undefined => {
@@ -920,7 +918,6 @@ const verifyTrustedEventRequirements = (
       input.target.space === target.space &&
       input.target.id === target.id &&
       input.target.scope === target.scope &&
-      input.target.type === target.type &&
       pathPatternMatches(entry.path, input.target.path) &&
       recordedTrustedEventProvenanceMatchesUiContract(
         input.provenance,
@@ -942,7 +939,6 @@ const verifyExactCopyRequirements = (
     space: MemorySpace;
     id: URI;
     scope: ReturnType<typeof normalizeCellScope>;
-    type: MediaType;
   },
   schema: JSONSchema,
 ): string | undefined => {

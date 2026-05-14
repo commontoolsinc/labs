@@ -650,7 +650,6 @@ export function normalizeAndDiff(
       space: link.space,
       scope: link.scope,
       path: [],
-      type: link.type,
       schema: resolveSchemaForValue(link.schema, rest),
     };
 
