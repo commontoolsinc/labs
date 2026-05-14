@@ -2922,7 +2922,7 @@ export class Scheduler {
 
         this.scheduledFirstTime.clear();
         if (this.conditionallyScheduledEffects.size === 0) {
-          this.changedWritesHistory = [];
+          this.changedWritesHistory.length = 0;
         }
       }
     } else {

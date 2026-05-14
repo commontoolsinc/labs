@@ -504,6 +504,16 @@ describe("pull-based scheduling", () => {
     expect(derived.get()).toBe(1);
     expect(effectRuns).toBe(1);
     expect(effectResult.get()).toBe(1);
+
+    source.withTx(tx).send(4);
+    await tx.commit();
+    tx = runtime.edit();
+    await runtime.scheduler.idle();
+
+    expect(computationRuns).toBe(3);
+    expect(derived.get()).toBe(0);
+    expect(effectRuns).toBe(2);
+    expect(effectResult.get()).toBe(0);
   });
 
   it("should schedule effects when affected by dirty computations", async () => {
