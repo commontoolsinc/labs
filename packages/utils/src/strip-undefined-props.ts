@@ -18,9 +18,18 @@ export function stripUndefinedProps(
   const out: Record<string, unknown> = {};
   for (const [key, val] of Object.entries(value)) {
     if (val === undefined) continue;
-    out[key] = isPlainObject(val)
-      ? stripUndefinedProps(val as Record<string, unknown>)
-      : val;
+    // Use `defineProperty` rather than `out[key] = ...` so that a special
+    // key like `"__proto__"` is written as a plain own data property
+    // rather than triggering the prototype setter on `out` (which would
+    // pollute the prototype chain of the returned object).
+    Object.defineProperty(out, key, {
+      value: isPlainObject(val)
+        ? stripUndefinedProps(val as Record<string, unknown>)
+        : val,
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
   }
   return out;
 }

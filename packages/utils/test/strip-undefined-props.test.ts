@@ -64,4 +64,23 @@ describe("stripUndefinedProps", () => {
     stripUndefinedProps(input);
     expect(input).toEqual({ a: 1, b: undefined, c: { d: undefined, e: 5 } });
   });
+
+  it("copies a `__proto__` own property as an own data property, not as a prototype", () => {
+    // `JSON.parse()` produces an object with an *own* `__proto__` property
+    // (it does not invoke the `__proto__` setter), so callers feeding
+    // parsed JSON in could reach this code with that shape. A naive
+    // assignment-based copy would invoke the setter on the output and
+    // pollute its prototype chain.
+    const input = JSON.parse('{"__proto__": {"polluted": true}, "x": 1}');
+    const out = stripUndefinedProps(input);
+    expect(Object.getPrototypeOf(out)).toBe(Object.prototype);
+    expect(({} as { polluted?: boolean }).polluted).toBeUndefined();
+    expect(Object.getOwnPropertyDescriptor(out, "__proto__")).toEqual({
+      value: { polluted: true },
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+    expect(out.x).toBe(1);
+  });
 });
