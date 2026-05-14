@@ -33,7 +33,6 @@ import {
   ignoreReadForScheduling,
   markReadAsPotentialWrite,
 } from "./storage/reactivity-log.ts";
-import { recordTrustedEventPolicyInputs } from "./cfc/ui-contract.ts";
 import { ensurePieceRunning } from "./ensure-piece-running.ts";
 import type {
   ActionStats,
@@ -148,10 +147,9 @@ import {
 } from "./scheduler/timing.ts";
 import {
   filterIgnoredAddresses,
-  hasAnnotatedWrites,
-  trustedEventWriteCandidatesFromTransaction,
   txToReactivityLog,
 } from "./scheduler/reactivity.ts";
+import { dispatchQueuedEvent } from "./scheduler/events.ts";
 import { buildSchedulerGraphSnapshot } from "./scheduler/graph-snapshot.ts";
 import { entityKey } from "./scheduler/keys.ts";
 import {
@@ -3270,8 +3268,7 @@ export class Scheduler {
       } else {
         delete queuedEvent.notBefore;
 
-        const { action, handler, event: eventValue, retriesLeft, onCommit } =
-          queuedEvent;
+        const { handler, event: eventValue } = queuedEvent;
         const handlerId = this.getActionId(handler);
 
         // In pull mode, ensure handler dependencies are computed before running.
@@ -3438,126 +3435,18 @@ export class Scheduler {
         }
 
         if (!shouldSkipEvent) {
-          this.runtime.telemetry.submit({
-            type: "scheduler.invocation",
-            handlerId,
-            handlerInfo: this.getActionTelemetryInfo(handler),
-          });
-          this.eventQueue.shift();
-
-          const tx = this.runtime.edit();
-          tx.tx.immediate = true;
-          const actionId = this.getActionId(action);
-          const runFinalCommitCallback = () => {
-            if (!onCommit) {
-              return;
-            }
-            try {
-              onCommit(tx);
-            } catch (callbackError) {
-              logger.error(
-                "schedule-error",
-                "Error in event commit callback:",
-                callbackError,
-              );
-            }
-          };
-
-          const finalize = (error?: unknown) => {
-            if (error) {
-              try {
-                this.handleError(error as Error, action);
-              } finally {
-                if (tx.status().status === "ready") {
-                  tx.abort(error);
-                }
-              }
-              return;
-            }
-
-            this.runtime.prepareTxForCommit(tx);
-            tx.commit().then((result) => {
-              if (result.error && retriesLeft > 0) {
-                logger.warn(
-                  "scheduler",
-                  `Event handler transaction failed, retrying (${retriesLeft} retries left)`,
-                  { error: result.error, handlerId },
-                );
-                this.eventQueue.unshift({
-                  action,
-                  eventLink: queuedEvent.eventLink,
-                  handler,
-                  event: eventValue,
-                  retriesLeft: retriesLeft - 1,
-                  onCommit,
-                });
-                this.queueExecution();
-                return;
-              }
-              runFinalCommitCallback();
-              if (result.error) {
-                logger.error(
-                  "schedule-error",
-                  "Event handler transaction failed after exhausting all retries",
-                  { error: result.error, handlerId },
-                );
-              }
-            }).catch((error) => {
-              logger.error(
-                "schedule-error",
-                "Event handler commit promise rejected:",
-                error,
-              );
-            });
-          };
-
-          try {
-            if (hasAnnotatedWrites(handler)) {
-              recordTrustedEventPolicyInputs(tx, handler.writes, eventValue);
-            }
-            const actionStartTime = performance.now();
-            logger.timeStart(
-              "scheduler",
-              "execute",
-              "event",
-              "handlerAction",
-            );
-            try {
-              this.runningPromise = Promise.resolve(
-                this.runtime.harness.invoke(() => action(tx)),
-              ).then(() => {
-                const trustedEventCandidates =
-                  trustedEventWriteCandidatesFromTransaction(tx, handler, [
-                    queuedEvent.eventLink.space,
-                  ]);
-                recordTrustedEventPolicyInputs(
-                  tx,
-                  trustedEventCandidates,
-                  eventValue,
-                );
-                const duration = (performance.now() - actionStartTime) / 1000;
-                if (duration > 10) {
-                  console.warn(`Slow action: ${duration.toFixed(3)}s`, action);
-                }
-                logger.debug("action-timing", () => {
-                  return [
-                    `Action ${actionId} completed in ${duration.toFixed(3)}s`,
-                  ];
-                });
-                finalize();
-              }).catch((error) => finalize(error));
-              await this.runningPromise;
-            } finally {
-              logger.timeEnd(
-                "scheduler",
-                "execute",
-                "event",
-                "handlerAction",
-              );
-            }
-          } catch (error) {
-            finalize(error);
-          }
+          await dispatchQueuedEvent({
+            runtime: this.runtime,
+            eventQueue: this.eventQueue,
+            setRunningPromise: (promise) => {
+              this.runningPromise = promise;
+            },
+            getActionId: (target) => this.getActionId(target),
+            getActionTelemetryInfo: (target) =>
+              this.getActionTelemetryInfo(target),
+            handleError: (error, target) => this.handleError(error, target),
+            queueExecution: () => this.queueExecution(),
+          }, queuedEvent);
         }
       }
     }
