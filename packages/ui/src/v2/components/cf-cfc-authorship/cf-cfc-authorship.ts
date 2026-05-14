@@ -520,7 +520,10 @@ export class CFCFCAuthorship extends BaseElement {
   }
 
   get authorClaim(): unknown {
-    return hasReadableClaim(this.author) ? this._authorClaim : this.author;
+    return hasReadableClaim(this.author) || hasLabelQuery(this.author) ||
+        hasLabelResolution(this.author)
+      ? this._authorClaim
+      : this.author;
   }
 
   override connectedCallback() {
@@ -632,7 +635,12 @@ export class CFCFCAuthorship extends BaseElement {
 
   async refreshAuthorClaim(): Promise<void> {
     const requestId = ++this._authorRequestId;
-    if (!hasReadableClaim(this.author)) {
+    const author = this.author;
+    const canReadAuthor = hasReadableClaim(author);
+    if (
+      !canReadAuthor && !hasLabelQuery(author) &&
+      !hasLabelResolution(author)
+    ) {
       const previous = this._authorClaim;
       this._authorClaim = undefined;
       this.requestUpdate("author", previous);
@@ -641,8 +649,10 @@ export class CFCFCAuthorship extends BaseElement {
 
     let authorClaim: unknown;
     try {
-      const valueClaim = await readClaimValue(this.author);
-      const profileLabel = await readLabelView(this.author);
+      const valueClaim = canReadAuthor
+        ? await readClaimValue(author)
+        : undefined;
+      const profileLabel = await readLabelView(author);
       const profileSubject = representsPrincipalSubjectForLabel(profileLabel);
       authorClaim = principalAuthorClaim(
         profileSubject,

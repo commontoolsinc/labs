@@ -26,7 +26,7 @@ import {
   UI,
   useCancelGroup,
 } from "@commonfabric/runner";
-import type { JSONValue } from "@commonfabric/runtime-client";
+import type { CellRef } from "@commonfabric/runtime-client";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
 import type {
@@ -541,60 +541,52 @@ export class WorkerReconciler {
       : [{ kind: "authored-by", subject }];
   }
 
-  private authorshipAuthorClaimFromAuthorCell(
-    state: NodeState,
-    authorCell: Cell<unknown>,
-  ): JSONValue | undefined {
-    if (state.tagName !== CFC_AUTHORSHIP_TAG) {
-      return undefined;
-    }
-
-    const subject = this.representsPrincipalSubjectForCell(authorCell);
-    if (subject === undefined) {
-      return undefined;
-    }
-
-    const sourceNode = {
-      name: state.tagName,
-      props: state.sourceProps,
-      children: state.sourceChildren ?? [],
-    } as WorkerVNode;
-    const authorName = this.nodePropForRenderPolicy(sourceNode, "authorName");
-    const resolvedAuthorName = isCell(authorName)
-      ? this.readCellPolicyValue(authorName as Cell<unknown>)
-      : authorName;
-
-    const claim: Record<string, JSONValue> = { subject };
-    if (typeof resolvedAuthorName === "string") {
-      claim.name = resolvedAuthorName;
-    }
-    return claim as JSONValue;
-  }
-
   private bindingOpsForCell(
     state: NodeState,
     propName: string,
     cell: Cell<unknown>,
   ): VDomOp[] {
-    if (propName === "author") {
-      const authorClaim = this.authorshipAuthorClaimFromAuthorCell(state, cell);
-      if (authorClaim !== undefined) {
-        return [{
-          op: "set-prop",
-          nodeId: state.nodeId,
-          key: "author",
-          value: authorClaim,
-        }];
-      }
-    }
-
-    const cellRef = cell.getAsNormalizedFullLink();
     return [{
       op: "set-binding",
       nodeId: state.nodeId,
       propName,
-      cellRef,
+      cellRef: this.cellRefForBinding(cell),
     }];
+  }
+
+  private cellRefForBinding(cell: Cell<unknown>): CellRef {
+    const link = cell.getAsNormalizedFullLink();
+    let labelView: CfcLabelView | undefined;
+    try {
+      labelView = cfcLabelViewForCell(cell);
+      if (labelView === undefined) {
+        labelView = cfcLabelViewForCell(cell.resolveAsCell());
+      }
+    } catch {
+      labelView = undefined;
+    }
+    return {
+      id: link.id,
+      space: link.space,
+      scope: link.scope,
+      path: [...link.path],
+      schema: this.bindingSchema(link.schema),
+      ...(link.overwrite !== undefined && { overwrite: link.overwrite }),
+      ...(labelView !== undefined && { cfcLabelView: labelView }),
+    };
+  }
+
+  private bindingSchema(schema: CellRef["schema"] | undefined): CellRef[
+    "schema"
+  ] {
+    if (
+      schema === undefined ||
+      (typeof schema === "object" && schema !== null &&
+        Object.keys(schema).length === 0)
+    ) {
+      return true;
+    }
+    return schema;
   }
 
   private representsPrincipalSubjectForCell(

@@ -256,6 +256,12 @@ export function sanitizeForPostMessage(
   }
 }
 
+export const hasExplicitSubscriptionSchema = (schema: unknown): boolean =>
+  schema === true ||
+  (schema !== undefined && schema !== false &&
+    typeof schema === "object" && schema !== null &&
+    Object.keys(schema).length > 0);
+
 export class RuntimeProcessor {
   private runtime: Runtime;
   private pieceManager: PieceManager;
@@ -486,9 +492,7 @@ export class RuntimeProcessor {
     const cancel = cell.sink((value) => {
       // Log empty-schema subscriptions that produce CellResult proxies.
       // These are the call sites that need real schemas added.
-      const hasSchema = request.cell.schema &&
-        typeof request.cell.schema === "object" &&
-        Object.keys(request.cell.schema).length > 0;
+      const hasSchema = hasExplicitSubscriptionSchema(request.cell.schema);
       if (!hasSchema && isCellResult(value)) {
         console.error(
           `[handleCellSubscribe] EMPTY SCHEMA SUBSCRIPTION producing ` +

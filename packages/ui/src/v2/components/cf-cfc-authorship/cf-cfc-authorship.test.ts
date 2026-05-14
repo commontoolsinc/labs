@@ -258,6 +258,50 @@ describe("CFCFCAuthorship", () => {
     });
   });
 
+  it("derives a claim from a represented-principal author label", async () => {
+    const messageLabel = {
+      version: 1 as const,
+      entries: [{
+        path: [],
+        label: {
+          integrity: [{
+            kind: "authored-by",
+            subject: "did:example:alice",
+          }],
+        },
+      }],
+    };
+    const profileLabel = {
+      version: 1 as const,
+      entries: [{
+        path: [],
+        label: {
+          integrity: [{
+            kind: "represents-principal",
+            subject: "did:example:alice",
+          }],
+        },
+      }],
+    };
+    const element = new CFCFCAuthorship();
+    element.value = {
+      getCfcLabel: () => Promise.resolve(messageLabel),
+    };
+    element.author = {
+      getCfcLabel: () => Promise.resolve(profileLabel),
+    };
+    element.authorName = "Alice Snapshot";
+
+    await element.refreshLabel();
+    await element.refreshAuthorClaim();
+
+    expect(element.authorshipState).toBe("verified");
+    expect(element.authorClaim).toEqual({
+      subject: "did:example:alice",
+      name: "Alice Snapshot",
+    });
+  });
+
   it("fails closed when a bound author claim cell changes away from the integrity subject", async () => {
     const cfcLabel = {
       version: 1 as const,

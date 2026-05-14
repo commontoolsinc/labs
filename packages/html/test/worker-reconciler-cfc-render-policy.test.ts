@@ -1016,15 +1016,26 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
             collector.getOpsOfType("set-binding").some((op) =>
               op.propName === "author"
             ),
-            false,
+            true,
+          );
+          const authorBinding = collector.getOpsOfType("set-binding").find(
+            (op) => op.propName === "author",
+          );
+          assertEquals(authorBinding?.cellRef.schema, true);
+          assertEquals(
+            authorBinding?.cellRef.cfcLabelView?.entries.some((entry) =>
+              entry.path.length === 0 &&
+              (entry.label.integrity ?? []).some((atom) =>
+                JSON.stringify(atom) === JSON.stringify(representedProfileAtom)
+              )
+            ),
+            true,
           );
           assertEquals(
             collector.getOpsOfType("set-prop").some((op) =>
-              op.key === "author" &&
-              JSON.stringify(op.value) ===
-                JSON.stringify({ subject: signer.did(), name: "Alice" })
+              op.key === "author"
             ),
-            true,
+            false,
           );
         } finally {
           cancel();
