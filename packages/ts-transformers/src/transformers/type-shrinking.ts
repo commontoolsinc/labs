@@ -474,6 +474,7 @@ export function isCellLikeTypeNode(node: ts.TypeNode): boolean {
     name === "Writable" ||
     name === "OpaqueCell" ||
     name === "OpaqueRef" ||
+    name === "ComparableCell" ||
     name === "ReadonlyCell" ||
     name === "WriteonlyCell" ||
     name === "Stream";
@@ -2422,6 +2423,12 @@ export function applyShrinkAndWrap(
     identityOnlyRoot,
     effectiveIdentityPaths,
   } = shrinkPlan;
+  const appliedIdentityCellPaths = shouldWrap
+    ? identityCellPaths.filter((path) => path.length > 0)
+    : identityCellPaths;
+  const appliedComparableCellPaths = shouldWrap
+    ? comparableCellPaths.filter((path) => path.length > 0)
+    : comparableCellPaths;
 
   if (mode === "defaults_only") {
     if (context && fnNode) {
@@ -2441,8 +2448,8 @@ export function applyShrinkAndWrap(
       ? applyIdentityOnlyPathsToTypeNode(
         baseTypeNode,
         effectiveIdentityPaths,
-        identityCellPaths,
-        comparableCellPaths,
+        appliedIdentityCellPaths,
+        appliedComparableCellPaths,
         factory,
         checker,
         baseType,
@@ -2474,8 +2481,8 @@ export function applyShrinkAndWrap(
     ? applyIdentityOnlyPathsToTypeNode(
       baseTypeNode,
       effectiveIdentityPaths,
-      identityCellPaths,
-      comparableCellPaths,
+      appliedIdentityCellPaths,
+      appliedComparableCellPaths,
       factory,
       checker,
       baseType,
@@ -2485,8 +2492,8 @@ export function applyShrinkAndWrap(
     ? applyIdentityOnlyPathsToTypeNode(
       baseTypeNode,
       identityPaths,
-      identityCellPaths,
-      comparableCellPaths,
+      appliedIdentityCellPaths,
+      appliedComparableCellPaths,
       factory,
       checker,
       baseType,
@@ -2581,8 +2588,8 @@ export function applyShrinkAndWrap(
     next = applyIdentityOnlyPathsToTypeNode(
       next,
       identityPaths,
-      identityCellPaths,
-      comparableCellPaths,
+      appliedIdentityCellPaths,
+      appliedComparableCellPaths,
       factory,
       checker,
       baseType,
