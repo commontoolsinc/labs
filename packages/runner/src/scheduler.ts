@@ -1,6 +1,5 @@
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
-import { isRecord } from "@commonfabric/utils/types";
 import { type Frame } from "./builder/types.ts";
 import type { Cancel } from "./cancel.ts";
 import { ConsoleEvent } from "./harness/console.ts";
@@ -41,12 +40,15 @@ import {
   DEFAULT_RETRIES_FOR_EVENTS,
   MAX_ITERATIONS_PER_RUN,
   MAX_SETTLE_STATS_HISTORY,
-  MAX_TRIGGER_TRACE_HISTORY,
 } from "./scheduler/constants.ts";
 import {
   getPieceMetadataFromFrame,
+  getSchedulerActionId,
+  getSchedulerActionTelemetryInfo,
   handleSchedulerError,
   queueTask,
+  recordTriggerTrace as recordTriggerTraceState,
+  type SchedulerActionIdentityState,
 } from "./scheduler/diagnostics.ts";
 import {
   captureDiagnosisRecord as captureDiagnosisRecordState,
@@ -262,8 +264,10 @@ export class Scheduler {
     actionStats: this.actionStats,
     getActionId: (action) => this.getActionId(action),
   };
-  private anonymousActionIds = new WeakMap<Action | EventHandler, string>();
-  private anonymousActionCounter = 0;
+  private actionIdentityState: SchedulerActionIdentityState = {
+    anonymousActionIds: new WeakMap<Action | EventHandler, string>(),
+    anonymousActionCounter: 0,
+  };
   // Cycle detection during dependency collection
   private collectStack = new Set<Action>();
   private dirtyDependencyTraceContext?: DirtyDependencyTraceContext;
@@ -485,62 +489,17 @@ export class Scheduler {
    * This ID is used for stats tracking to persist across action recreation.
    */
   private getActionId(action: Action | EventHandler): string {
-    const namedAction = action as Action & { src?: string };
-    if (namedAction.src) return namedAction.src;
-    if (action.name && action.name !== "anonymous") return action.name;
-
-    const existingId = this.anonymousActionIds.get(action);
-    if (existingId) return existingId;
-
-    const generatedId = `anon-${++this.anonymousActionCounter}`;
-    this.anonymousActionIds.set(action, generatedId);
-    return generatedId;
-  }
-
-  private formatTelemetryLink(link: NormalizedFullLink): string {
-    const path = link.path.length ? `/${link.path.join("/")}` : "";
-    return `${link.space}/${link.id}${path}`;
+    return getSchedulerActionId(this.actionIdentityState, action);
   }
 
   private getActionTelemetryInfo(
     action: Action | EventHandler,
   ): SchedulerActionInfo | undefined {
-    const annotated = action as Partial<TelemetryAnnotations>;
-
-    const patternName = this.getOptionalName(annotated.pattern);
-    const moduleName = this.getOptionalName(annotated.module);
-    const reads = Array.isArray(annotated.reads)
-      ? annotated.reads.map((link) => this.formatTelemetryLink(link))
-      : undefined;
-    const writes = Array.isArray(annotated.writes)
-      ? annotated.writes.map((link) => this.formatTelemetryLink(link))
-      : undefined;
-
-    if (!patternName && !moduleName && !reads?.length && !writes?.length) {
-      return undefined;
-    }
-
-    return {
-      patternName,
-      moduleName,
-      reads: reads?.length ? reads : undefined,
-      writes: writes?.length ? writes : undefined,
-    };
+    return getSchedulerActionTelemetryInfo(action);
   }
 
   private recordTriggerTrace(entry: TriggerTraceEntry): void {
-    this.triggerTrace.push(entry);
-    if (this.triggerTrace.length > MAX_TRIGGER_TRACE_HISTORY) {
-      this.triggerTrace.shift();
-    }
-  }
-
-  private getOptionalName(value: unknown): string | undefined {
-    if (!isRecord(value)) return undefined;
-    const debugName = value.debugName;
-    if (typeof debugName === "string") return debugName;
-    const name = value.name;
-    return typeof name === "string" ? name : undefined;
+    recordTriggerTraceState({ triggerTrace: this.triggerTrace }, entry);
   }
 
   // ── Inline idempotency check mode ──────────────────────────────────

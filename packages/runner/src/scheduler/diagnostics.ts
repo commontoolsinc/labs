@@ -9,10 +9,87 @@ import {
 import type { ErrorHandler, ErrorWithContext } from "../runtime.ts";
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
 import type {
+  Action,
   ActionRunTraceAddress,
   DirtyDependencyTraceContext,
+  EventHandler,
+  TelemetryAnnotations,
+  TriggerTraceEntry,
   TriggerTraceValueSummary,
 } from "./types.ts";
+import type { NormalizedFullLink } from "../link-utils.ts";
+import type { SchedulerActionInfo } from "../telemetry.ts";
+import { MAX_TRIGGER_TRACE_HISTORY } from "./constants.ts";
+
+export interface SchedulerActionIdentityState {
+  readonly anonymousActionIds: WeakMap<Action | EventHandler, string>;
+  anonymousActionCounter: number;
+}
+
+export function getSchedulerActionId(
+  state: SchedulerActionIdentityState,
+  action: Action | EventHandler,
+): string {
+  const namedAction = action as Action & { src?: string };
+  if (namedAction.src) return namedAction.src;
+  if (action.name && action.name !== "anonymous") return action.name;
+
+  const existingId = state.anonymousActionIds.get(action);
+  if (existingId) return existingId;
+
+  const generatedId = `anon-${++state.anonymousActionCounter}`;
+  state.anonymousActionIds.set(action, generatedId);
+  return generatedId;
+}
+
+export function getSchedulerActionTelemetryInfo(
+  action: Action | EventHandler,
+): SchedulerActionInfo | undefined {
+  const annotated = action as Partial<TelemetryAnnotations>;
+
+  const patternName = getOptionalName(annotated.pattern);
+  const moduleName = getOptionalName(annotated.module);
+  const reads = Array.isArray(annotated.reads)
+    ? annotated.reads.map(formatTelemetryLink)
+    : undefined;
+  const writes = Array.isArray(annotated.writes)
+    ? annotated.writes.map(formatTelemetryLink)
+    : undefined;
+
+  if (!patternName && !moduleName && !reads?.length && !writes?.length) {
+    return undefined;
+  }
+
+  return {
+    patternName,
+    moduleName,
+    reads: reads?.length ? reads : undefined,
+    writes: writes?.length ? writes : undefined,
+  };
+}
+
+function formatTelemetryLink(link: NormalizedFullLink): string {
+  const path = link.path.length ? `/${link.path.join("/")}` : "";
+  return `${link.space}/${link.id}${path}`;
+}
+
+function getOptionalName(value: unknown): string | undefined {
+  if (!isRecord(value)) return undefined;
+  const debugName = value.debugName;
+  if (typeof debugName === "string") return debugName;
+  const name = value.name;
+  return typeof name === "string" ? name : undefined;
+}
+
+export function recordTriggerTrace(
+  state: { readonly triggerTrace: TriggerTraceEntry[] },
+  entry: TriggerTraceEntry,
+): void {
+  state.triggerTrace.push(entry);
+  if (state.triggerTrace.length > MAX_TRIGGER_TRACE_HISTORY) {
+    state.triggerTrace.shift();
+  }
+}
 
 export function createDirtyDependencyTraceContext(): DirtyDependencyTraceContext {
   return {
