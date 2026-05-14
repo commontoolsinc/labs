@@ -2375,6 +2375,15 @@ export function analyzeFunctionCapabilities(
                 ...opaquePath,
               ]);
             }
+            if (
+              paramSummary.capability === "opaque" &&
+              !paramSummary.passthrough &&
+              paramSummary.readPaths.length === 0 &&
+              paramSummary.writePaths.length === 0 &&
+              (paramSummary.opaquePaths?.length ?? 0) === 0
+            ) {
+              markOpaqueUse(source.root, source.path);
+            }
 
             for (const identityPath of paramSummary.identityPaths ?? []) {
               if (source.dynamic) {

@@ -660,6 +660,36 @@ const fn = (input) => helper(input);`;
 );
 
 Deno.test(
+  "Capability analysis interprocedural propagation tracks root opaque use",
+  () => {
+    const source = `import { type Cell } from "commonfabric";
+const helper = (value: Cell<string[]>, mapper: (value: string) => string) => value.map(mapper);
+const fn = (input: Cell<string[]>, other: Cell<string[]>, mapper: (value: string) => string) => {
+  helper(input, mapper);
+  return input.equals(other);
+};`;
+    const { program, sourceFile } = createProgramWithFiles({
+      "/test.ts": source,
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
+    const checker = program.getTypeChecker();
+    const fn = findArrowByVariableName(sourceFile, "fn");
+
+    const summary = analyzeFunctionCapabilities(fn, {
+      checker,
+      interprocedural: true,
+    });
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.capability, "opaque");
+    assertEquals(input.readPaths.length, 0);
+    assertEquals(input.writePaths.length, 0);
+    assertEquals(input.wildcard, false);
+    assertEquals(input.identityOnly, false);
+  },
+);
+
+Deno.test(
   "Capability analysis without interprocedural propagation keeps conservative wildcard",
   () => {
     const source = `const helper = (value) => value.foo;

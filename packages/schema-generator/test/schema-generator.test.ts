@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import ts from "typescript";
 import { SchemaGenerator } from "../src/schema-generator.ts";
-import { getTypeFromCode } from "./utils.ts";
+import { createTestProgram, getTypeFromCode } from "./utils.ts";
 
 describe("SchemaGenerator", () => {
   describe("formatter chain", () => {
@@ -263,6 +263,56 @@ type Output = { [UI]: string; metadata: number };
         metadata: { type: "number" },
       });
       expect(schema.required).toEqual(["title", "metadata"]);
+    });
+
+    it("resolves local Date type references before applying native Date fallback", async () => {
+      const generator = new SchemaGenerator();
+      const code = `
+namespace Local {
+  export interface Date {
+    year: number;
+  }
+  export type Output = { createdAt: Date };
+}
+`;
+      const { checker, sourceFile } = await createTestProgram(code);
+      let outputNode: ts.TypeNode | undefined;
+      const visit = (node: ts.Node): void => {
+        if (
+          ts.isTypeAliasDeclaration(node) &&
+          node.name.text === "Output"
+        ) {
+          outputNode = node.type;
+          return;
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(sourceFile);
+      if (!outputNode) {
+        throw new Error("Expected Local.Output type node.");
+      }
+
+      const schema = generator.generateSchemaFromSyntheticTypeNode(
+        outputNode,
+        checker,
+        undefined,
+        undefined,
+        sourceFile,
+      ) as Record<string, unknown>;
+
+      expect(schema).toEqual({
+        type: "object",
+        properties: {
+          createdAt: {
+            type: "object",
+            properties: {
+              year: { type: "number" },
+            },
+            required: ["year"],
+          },
+        },
+        required: ["createdAt"],
+      });
     });
   });
 

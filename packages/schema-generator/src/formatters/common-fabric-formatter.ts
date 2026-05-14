@@ -265,7 +265,8 @@ export class CommonFabricFormatter implements TypeFormatter {
       resolvedWrapper &&
       resolvedWrapper.kind !== "Default" &&
       wrapperInfo &&
-      wrapperInfo.kind !== resolvedWrapper.kind
+      wrapperInfo.kind !== resolvedWrapper.kind &&
+      this.isSyntheticWrapperNode(resolvedWrapper.node)
     ) {
       return this.formatWrapperTypeFromNode(
         resolvedWrapper.node,
@@ -810,6 +811,10 @@ export class CommonFabricFormatter implements TypeFormatter {
       return resolvedWrapper.node;
     }
     return undefined;
+  }
+
+  private isSyntheticWrapperNode(node: ts.Node): boolean {
+    return node.pos < 0 || node.end < 0;
   }
 
   private getTypeRefIdentifierName(

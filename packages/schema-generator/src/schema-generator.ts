@@ -864,12 +864,6 @@ export class SchemaGenerator implements ISchemaGenerator {
         return this.formatChildType(wrapperType, context, typeNode);
       }
 
-      if (
-        ts.isIdentifier(typeNode.typeName) && typeNode.typeName.text === "Date"
-      ) {
-        return { type: "string", format: "date-time" };
-      }
-
       const resolved = this.resolveTypeReferenceFromScope(
         typeNode,
         checker,
@@ -877,6 +871,12 @@ export class SchemaGenerator implements ISchemaGenerator {
       );
       if (resolved) {
         return this.formatChildType(resolved, context, typeNode);
+      }
+
+      if (
+        ts.isIdentifier(typeNode.typeName) && typeNode.typeName.text === "Date"
+      ) {
+        return { type: "string", format: "date-time" };
       }
     }
 
