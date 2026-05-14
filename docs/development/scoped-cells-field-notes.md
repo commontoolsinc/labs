@@ -73,75 +73,56 @@ These are the things that bit during the build. Each is also captured in
 6. **`Math.random()` is blocked by SES.** Use `nonPrivateRandom()`. Not
    scope-specific but came up writing a per-option ID generator.
 
-### Suspected runtime bugs (for system designers)
+### Runtime bugs
 
-#### B1. `onClick={() => boundFoo.send({…})}` inside a `.map()` callback silently fails
+#### B1. `onClick={() => stream.send({...})}` is sometimes lowered as a `derive(...)` wrapper instead of a handler — FILED
 
-**Severity:** Blocking for any pattern that wants per-item actions on a
-dynamic list (which is most non-trivial collaborative patterns).
+**Status:** Issue body drafted at `DRAFT-ISSUE-onClick-derive-wrap.md`
+(repo root, untracked). Reproducer at
+`packages/patterns/scope-bug-lambda-in-map/main.tsx`.
 
-**Repro:** `packages/patterns/cozy-poll-scoped/main.tsx` deployed to local
-toolshed (`fid1:l1bj7B-…` in this session). Top-level `<cf-button
-onClick={boundAddOption}>` fires its handler correctly. Inside
-`ranked.map((tally) => …)`, every vote button using `<cf-button onClick={()
-=> boundCastVote.send({ optionId: oid, voteType: "green" })}>` and the
-Remove button with `onClick={() => boundRemoveOption.send({ optionId: oid
-})}` do **not** fire. Verified via:
+**Root cause (verified via `--show-transformed`):** For some patterns the
+ts-transformer hoists the JSX `onClick` lambda into a top-level
+`const __cfModuleCallback_N = __cfHardenFn(...)` and wraps its body in
+`__cfHelpers.derive(inputSchema, { asCell: ["opaque"] }, captures, body)` —
+treating the click handler as a reactive expression that should compute an
+opaque value, rather than as an event handler. The stream `.send` never
+fires.
 
-- Real Playwright `getByRole('button', { name: '🟢 Love it' }).click()` lands
-  on the cf-button host (per `cf-button.ts:99-114` the host's click listener
-  runs).
-- After the click, `cf piece inspect` shows `votes: [Array(0)]` and
-  `options: [Array(1)]` unchanged — the handler did not run.
-- No console errors from the pattern itself (only the unrelated
-  `summary-index.tsx: piece.get is not a function` that Berni already
-  flagged in PR #3584).
+The fix in PR #3582 (`fix(ts-transformers): lower property access in
+module-extracted callbacks`) is unrelated — it covers a different layer of
+the same general problem (property access lowering inside extracted
+callbacks). Cherry-picked and verified locally that it does **not** fix this.
 
-**Things that did not change the behavior:**
-- Hoisting `tally.option.id` to a local `const oid` before the lambda (so
-  the lambda captures a plain identifier, not a nested property access).
-- Real Playwright `.click()` vs. manual `MouseEvent` dispatch on the inner
-  shadow `<button>` element.
+`packages/patterns/cozy-poll-scoped/main.tsx` triggers the bug (4
+`__cfModuleCallback_*` declarations, all `derive`-wrapped). Five reduced
+variants in `scope-bug-lambda-in-map/main.tsx` do **not** trigger it — the
+exact context that causes the closure transformer to extract the lambda
+remains to be bisected. Cozy-poll-scoped is the smallest known in-tree
+trigger as of this writing.
 
-**Reference pattern that uses the same shape and works:**
-`packages/patterns/scoped-group-chat/main-plain-inputs.tsx:248-256` —
-`onClick={() => boundSelectRoom.send({ room })}` inside `rooms.map(…)`. The
-diffs vs. cozy-poll: it's `cf-tab` not `cf-button`, and the captured loop
-var is the whole object rather than a derived primitive. But pattern-critic
-inspected cozy-poll under its full checklist and reported 34/0/0 — the
-pattern code itself is not the problem.
+#### B2. ~~`array.length` on a top-level scoped array doesn't lift reactively~~ — NOT A BUG
 
-**Pattern-critic's guess (worth investigating):** the bug is in the dispatch
-path when a stream `.send()` is invoked from a closure created inside a
-`.map()` callback. Likely candidates:
-- The transformer not capturing the bound stream correctly into the map
-  closure
-- The bound stream losing its connection to its underlying cells when called
-  through a closure that was constructed inside a reactive map
-- Some interaction with how the scope-aware reactive system tracks the
-  dispatcher's read set when invoked from a deep closure
+**Status:** Investigated and closed. Per `--show-transformed` analysis,
+both `items.length` and `derive(items, i => i.length)` lower to the same
+underlying reads. The behavioral diff observed in the first cozy-poll test
+was likely an artifact of how the test asserted (see B3) or a misread.
 
-**Workarounds suggested but not yet verified:**
-- Hoist the lambda creation into a helper `createVoteHandler(oid, voteType)`
-  called at pattern scope.
-- Wrap the lambda in `action(() => …)`.
-- Refactor to a handler that takes `optionId` as a bound input rather than
-  as a closure capture.
+If someone *does* see `arr.length` go stale on a scoped array in the
+future, file fresh evidence here — but it's not currently a known runtime
+bug.
 
-If any of these work, the runtime should probably print a deprecation-style
-warning when the bare lambda shape is used; if none work, this is a real
-runtime bug.
+#### B3. ~~Initial reactive output reads can be `undefined`~~ — NOT A BUG
 
-#### B2. `userCount = users.length` doesn't lift reactively
+**Status:** Investigated and closed. Verified with a minimal `PerSpace<number
+| Default<0>>` pattern that `subject.value === 0` passes as the very first
+test assertion (no prior action). Default values hydrate correctly.
 
-See "what we got wrong" #2 above. Maybe-intentional, but the asymmetry with
-nested `object.array.length` is surprising and there's no compile-time hint.
-
-#### B3. Initial reactive output reads can be `undefined` before defaults hydrate
-
-See "what we got wrong" #5. Either the defaults should materialize before
-the pattern body runs, or there should be a "settled" signal authors can
-wait on in tests.
+The `Expected true, got undefined` failure in cozy-poll's test was JS
+short-circuit propagation through a long `A && B && C && …` chain in the
+test's assertion `computed()`, **not** a runtime hydration race. Fix is to
+split compound assertions into individual ones, or coerce with
+`Boolean(...)`.
 
 ### Open questions to bring to Berni
 
