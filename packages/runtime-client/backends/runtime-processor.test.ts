@@ -464,6 +464,7 @@ describe("RuntimeProcessor CFC label IPC", () => {
     const ref: CellRef = {
       id: "of:cfc-label-cell" as CellRef["id"],
       space: "did:key:test" as CellRef["space"],
+      scope: "space",
       path: [],
     };
     const processor = {
@@ -514,11 +515,13 @@ describe("RuntimeProcessor CFC label IPC", () => {
     const sourceRef: CellRef = {
       id: "of:cfc-label-source" as CellRef["id"],
       space: "did:key:test" as CellRef["space"],
+      scope: "space",
       path: [],
     };
     const resolvedRef: CellRef = {
       id: "of:cfc-label-resolved" as CellRef["id"],
       space: "did:key:test" as CellRef["space"],
+      scope: "space",
       path: [],
     };
     const resolvedCell = {
@@ -577,11 +580,13 @@ describe("RuntimeProcessor CFC label IPC", () => {
     const resultRef: CellRef = {
       id: "of:cfc-label-result" as CellRef["id"],
       space: "did:key:test" as CellRef["space"],
+      scope: "space",
       path: [],
     };
     const sourceRef: CellRef = {
       id: "of:cfc-label-source" as CellRef["id"],
       space: "did:key:test" as CellRef["space"],
+      scope: "space",
       path: [],
     };
     let resultSynced = false;
@@ -645,6 +650,7 @@ describe("RuntimeProcessor CFC commit preparation", () => {
   const ref: CellRef = {
     id: "of:cfc-client-write" as CellRef["id"],
     space: "did:key:test" as CellRef["space"],
+    scope: "space",
     path: [],
     schema: {
       type: "string",
@@ -723,6 +729,7 @@ describe("runtime-client CellRef conversion", () => {
     const ref: CellRef = {
       id: "of:cfc-label-cell" as CellRef["id"],
       space: "did:key:z6MkrX123abc" as CellRef["space"],
+      scope: "space",
       path: ["value"],
       cfcLabelView,
     };
@@ -732,6 +739,7 @@ describe("runtime-client CellRef conversion", () => {
         "link@1": {
           id: ref.id,
           space: ref.space,
+          scope: "space",
           path: ref.path,
           cfcLabelView,
         },

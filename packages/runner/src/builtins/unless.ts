@@ -2,6 +2,9 @@ import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import { type Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import { resolveLink } from "../link-resolution.ts";
+import { resolvedCellScope, scopedCell } from "./scope-policy.ts";
+import { parseLink } from "../link-utils.ts";
 
 /**
  * unless(condition, fallback) - || semantics
@@ -16,12 +19,15 @@ export function unless(
   runtime: Runtime,
 ): Action {
   return (tx: IExtendedStorageTransaction) => {
-    const result = runtime.getCell<any>(
+    const conditionCell = inputsCell.key("condition");
+    const resultScope = resolvedCellScope(runtime, tx, conditionCell);
+    const baseResult = runtime.getCell<any>(
       parentCell.space,
       { unless: cause },
       undefined,
       tx,
     );
+    const result = scopedCell(runtime, tx, baseResult, resultScope);
     sendResult(tx, result);
     const resultWithLog = result.withTx(tx);
     const inputsWithLog = inputsCell.withTx(tx);
@@ -32,7 +38,11 @@ export function unless(
     const ref = condition
       ? inputsWithLog.key("condition").getAsLink({ base: result })
       : inputsWithLog.key("fallback").getAsLink({ base: result });
+    const resolvedRef = resolveLink(runtime, tx, parseLink(ref, result));
+    const serializedRef = runtime.getCellFromLink(resolvedRef).getAsLink({
+      base: result,
+    });
 
-    resultWithLog.setRawUntyped(ref);
+    resultWithLog.setRawUntyped(serializedRef);
   };
 }

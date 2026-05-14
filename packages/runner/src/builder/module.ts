@@ -1,4 +1,5 @@
 import type {
+  CellScope,
   Handler,
   HandlerFactory,
   JSONSchema,
@@ -109,7 +110,7 @@ export function createNodeFactory<T = any, R = any>(
     module.argumentSchema,
     module.resultSchema,
   );
-  return Object.assign((inputs: Opaque<T>): OpaqueRef<R> => {
+  const factory = Object.assign((inputs: Opaque<T>): OpaqueRef<R> => {
     const outputs = opaqueRef<R>(undefined, module.resultSchema);
     const node: NodeRef = { module, inputs, outputs, frame: getTopFrame() };
 
@@ -117,7 +118,10 @@ export function createNodeFactory<T = any, R = any>(
     (outputs as OpaqueCell<R>).connect(node);
 
     return outputs;
-  }, module);
+  }, module) as ModuleFactory<T, R>;
+  factory.asScope = (scope: CellScope) =>
+    createNodeFactory({ ...module, defaultScope: scope });
+  return factory;
 }
 
 /** Extract file path and location from a stack frame line

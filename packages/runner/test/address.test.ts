@@ -14,7 +14,7 @@ describe("Address Module", () => {
 
       const result = Address.toString(address);
 
-      expect(result).toBe("/user:1/[]");
+      expect(result).toBe("/space/user:1/[]");
     });
 
     it("should convert address with single path element to string", () => {
@@ -26,7 +26,7 @@ describe("Address Module", () => {
 
       const result = Address.toString(address);
 
-      expect(result).toBe('/user:1/["profile"]');
+      expect(result).toBe('/space/user:1/["profile"]');
     });
 
     it("should convert address with nested path to string", () => {
@@ -39,7 +39,7 @@ describe("Address Module", () => {
       const result = Address.toString(address);
 
       expect(result).toBe(
-        '/user:1/["profile","settings","theme"]',
+        '/space/user:1/["profile","settings","theme"]',
       );
     });
 
@@ -52,7 +52,7 @@ describe("Address Module", () => {
 
       const result = Address.toString(address);
 
-      expect(result).toBe('/array:1/["items","0","name"]');
+      expect(result).toBe('/space/array:1/["items","0","name"]');
     });
 
     it("should handle address with special characters in id", () => {
@@ -65,7 +65,7 @@ describe("Address Module", () => {
       const result = Address.toString(address);
 
       expect(result).toBe(
-        '/user:special-chars_123/["data"]',
+        '/space/user:special-chars_123/["data"]',
       );
     });
 
@@ -78,7 +78,7 @@ describe("Address Module", () => {
 
       const result = Address.toString(address);
 
-      expect(result).toBe('/document:1/["metadata","title"]');
+      expect(result).toBe('/space/document:1/["metadata","title"]');
     });
   });
 
@@ -600,7 +600,7 @@ describe("Address Module", () => {
         path: [],
       } as const;
 
-      expect(Address.toString(address1)).toBe("/user:1/[]");
+      expect(Address.toString(address1)).toBe("/space/user:1/[]");
       expect(Address.includes(address1, address2)).toBe(true);
       expect(Address.intersects(address1, address2)).toBe(true);
     });
@@ -615,7 +615,7 @@ describe("Address Module", () => {
       const result = Address.toString(address);
 
       expect(result).toBe(
-        '/namespace:complex-id-with-dashes_and_underscores.123/["data","attributes","nested-property"]',
+        '/space/namespace:complex-id-with-dashes_and_underscores.123/["data","attributes","nested-property"]',
       );
     });
 

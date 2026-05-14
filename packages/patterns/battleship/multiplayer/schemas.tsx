@@ -8,7 +8,17 @@
  * in favor of properly typed Cell values.
  */
 
-import { Default, Stream, Writable } from "commonfabric";
+import {
+  Default,
+  NAME,
+  type PerSession,
+  type PerSpace,
+  type PerUser,
+  Stream,
+  UI,
+  type VNode,
+  Writable,
+} from "commonfabric";
 
 // ============ RE-EXPORT SHARED TYPES ============
 export type {
@@ -77,6 +87,14 @@ export interface ShotsState {
   2: SquareState[][];
 }
 
+export type PlayerCell = Writable<PlayerData | null | Default<null>>;
+export type ShotsCell = Writable<ShotsState | Default<typeof INITIAL_SHOTS>>;
+export type GameStateCell = Writable<
+  GameState | Default<typeof INITIAL_GAME_STATE>
+>;
+export type PlayerNameCell = Writable<string | Default<"">>;
+export type PlayerNumberCell = Writable<1 | 2 | null | Default<null>>;
+
 // ============ DEFAULT VALUES ============
 
 export const INITIAL_GAME_STATE: GameState = {
@@ -93,50 +111,56 @@ export function createInitialShots(): ShotsState {
   };
 }
 
+export const INITIAL_SHOTS = createInitialShots();
+
+export function normalizePlayerNumber(
+  value: 1 | 2 | null | undefined,
+): 1 | 2 | null {
+  return value === 1 || value === 2 ? value : null;
+}
+
+export function trimmedName(value: string | undefined): string {
+  return (value ?? "").trim();
+}
+
 // ============ PATTERN INPUT/OUTPUT TYPES ============
 
 /**
- * Lobby pattern owns all shared game state.
- * Uses proper typed Cells instead of JSON strings.
- *
- * Note: shots and gameState use inline default object literals
- * to provide initial values for the complex state objects.
+ * Shared match state is per-space; viewer identity and join-form text are
+ * scoped separately so the entry pattern does not need a navigation lobby.
  */
 export interface LobbyState {
-  gameName: string | Default<"Battleship">;
-  player1: Writable<PlayerData | null | Default<null>>;
-  player2: Writable<PlayerData | null | Default<null>>;
-  shots: Writable<
-    ShotsState | Default<{ 1: []; 2: [] }>
-  >;
-  gameState: Writable<
-    | GameState
-    | Default<
-      { phase: "waiting"; currentTurn: 1; winner: null; lastMessage: "" }
-    >
-  >;
+  gameName?: PerSpace<string | Default<"Battleship">>;
+  player1?: PerSpace<PlayerCell>;
+  player2?: PerSpace<PlayerCell>;
+  shots?: PerSpace<ShotsCell>;
+  gameState?: PerSpace<GameStateCell>;
+  myName?: PerUser<PlayerNameCell>;
+  myPlayerNumber?: PerUser<PlayerNumberCell>;
+  joinName?: PerSession<PlayerNameCell>;
 }
 
 /**
- * Room pattern receives shared cells plus player identity.
- * The cells are passed by reference from the lobby.
+ * Room pattern receives shared cells plus per-user player identity.
  */
 export interface RoomInput {
   gameName: string;
-  player1: Writable<PlayerData | null>;
-  player2: Writable<PlayerData | null>;
-  shots: Writable<ShotsState>;
-  gameState: Writable<GameState>;
-  myName: string;
-  myPlayerNumber: 1 | 2;
+  player1: PlayerCell;
+  player2: PlayerCell;
+  shots: ShotsCell;
+  gameState: GameStateCell;
+  myName: PlayerNameCell;
+  myPlayerNumber: PlayerNumberCell;
 }
 
 /**
  * Room pattern output exposes player identity and actions for testing.
  */
 export interface RoomOutput {
+  [NAME]: string;
+  [UI]: PerSession<VNode>;
   myName: string;
-  myPlayerNumber: 1 | 2;
+  myPlayerNumber: 1 | 2 | null;
   /** Fire a shot at the enemy board - exported for testing */
   fireShot: Stream<{ row: number; col: number }>;
 }

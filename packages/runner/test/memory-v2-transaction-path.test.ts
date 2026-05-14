@@ -30,6 +30,7 @@ describe("memory v2 transaction path semantics", () => {
     const tx = runtime.edit();
     tx.writeValueOrThrow({
       space,
+      scope: "space",
       id: "of:path-write-repeat",
       path: [],
     }, {
@@ -41,6 +42,7 @@ describe("memory v2 transaction path semantics", () => {
     for (let index = 0; index < 10; index += 1) {
       tx.writeValueOrThrow({
         space,
+        scope: "space",
         id: "of:path-write-repeat",
         path: ["count"],
       }, index);
@@ -49,6 +51,7 @@ describe("memory v2 transaction path semantics", () => {
     expect(
       tx.readValueOrThrow({
         space,
+        scope: "space",
         id: "of:path-write-repeat",
         path: [],
       }),
@@ -65,6 +68,7 @@ describe("memory v2 transaction path semantics", () => {
     const tx = runtime.edit();
     tx.writeValueOrThrow({
       space,
+      scope: "space",
       id: "of:path-read-missing",
       path: [],
     }, {
@@ -73,6 +77,7 @@ describe("memory v2 transaction path semantics", () => {
 
     const missingLeaf = tx.read({
       space,
+      scope: "space",
       id: "of:path-read-missing",
       path: ["nested", "missing"],
     });
@@ -80,6 +85,7 @@ describe("memory v2 transaction path semantics", () => {
 
     const missingParent = tx.read({
       space,
+      scope: "space",
       id: "of:path-read-missing",
       path: ["nested", "missing", "leaf"],
     });
@@ -92,6 +98,7 @@ describe("memory v2 transaction path semantics", () => {
     const tx = runtime.edit();
     tx.writeValueOrThrow({
       space,
+      scope: "space",
       id: "of:path-write-missing-parent",
       path: [],
     }, {
@@ -101,6 +108,7 @@ describe("memory v2 transaction path semantics", () => {
 
     tx.writeValueOrThrow({
       space,
+      scope: "space",
       id: "of:path-write-missing-parent",
       path: ["details", "profile", "name"],
     }, "Ada");
@@ -108,6 +116,7 @@ describe("memory v2 transaction path semantics", () => {
     expect(
       tx.readValueOrThrow({
         space,
+        scope: "space",
         id: "of:path-write-missing-parent",
         path: [],
       }),
@@ -128,6 +137,7 @@ describe("memory v2 transaction path semantics", () => {
     const tx = runtime.edit();
     tx.writeValueOrThrow({
       space,
+      scope: "space",
       id: "of:path-write-mixed-branches",
       path: [],
     }, {
@@ -137,11 +147,13 @@ describe("memory v2 transaction path semantics", () => {
 
     tx.writeValueOrThrow({
       space,
+      scope: "space",
       id: "of:path-write-mixed-branches",
       path: ["items", "1", "label"],
     }, "two");
     tx.writeValueOrThrow({
       space,
+      scope: "space",
       id: "of:path-write-mixed-branches",
       path: ["details", "flags", "active"],
     }, true);
@@ -149,6 +161,7 @@ describe("memory v2 transaction path semantics", () => {
     expect(
       tx.readValueOrThrow({
         space,
+        scope: "space",
         id: "of:path-write-mixed-branches",
         path: [],
       }),

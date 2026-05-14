@@ -184,6 +184,26 @@ export type CellKind =
   | "readonly"
   | "writeonly";
 
+export type CellScope = "space" | "user" | "session";
+export type SchemaScope = CellScope | "any";
+export type LinkScope = "inherit" | CellScope;
+
+export type AsCellEntry =
+  | CellKind
+  | {
+    readonly kind: CellKind;
+    readonly scope?: SchemaScope;
+  };
+
+export declare const SCOPE_BRAND: unique symbol;
+export type Scoped<T, Scope extends SchemaScope> = T & {
+  readonly [SCOPE_BRAND]?: Scope;
+};
+export type PerSpace<T> = Scoped<T, "space">;
+export type PerUser<T> = Scoped<T, "user">;
+export type PerSession<T> = Scoped<T, "session">;
+export type PerAny<T> = Scoped<T, "any">;
+
 // `string` acts as `any`, e.g. when wanting to match any kind of cell
 // The [CELL_INNER_TYPE] property is a phantom property that enables TypeScript
 // to infer T when using `AnyBrandedCell<infer U>`. Without it, T is a phantom
@@ -222,27 +242,70 @@ export type IsThisArray =
 export interface IAnyCell<T> {}
 
 /**
- * Readable cells can retrieve their current value.
+ * Readable cells provide a view onto stored data.
+ *
+ * **Frozenness contract (modern data model only):** `get()` and `sample()`
+ * return a JS Proxy over the stored value. Writes through the proxy are
+ * rejected with a "read-only" runtime error under both flag states (this
+ * is independent of the data-model flag — the proxy itself enforces
+ * non-mutation). Under `modernDataModel: true`, the underlying stored
+ * data is additionally a deep-frozen `FabricValue` tree, so callers that
+ * escape the proxy (e.g. via `getRaw()`) see frozen data without an
+ * extra clone. Under `modernDataModel: false` (legacy), only the proxy
+ * trap protects against mutation; the underlying data may be unfrozen.
+ *
+ * Note: `Object.isFrozen(proxy)` reports `false` regardless of the
+ * underlying state — that's a property of how JS Proxy reports
+ * extensibility, not a statement about mutability.
  */
 export interface IReadable<T> {
+  /**
+   * Read the cell's current value as a Proxy view. See the
+   * {@link IReadable} interface docs for the modern-mode frozenness
+   * contract.
+   */
   get(options?: { traverseCells?: boolean }): Readonly<StripDefaultBrand<T>>;
   /**
    * Read the cell's current value without creating a reactive dependency.
    * Unlike `get()`, calling `sample()` inside a lift won't cause the lift
-   * to re-run when this cell's value changes.
+   * to re-run when this cell's value changes. The same frozenness
+   * contract from {@link IReadable} applies.
    */
   sample(): Readonly<StripDefaultBrand<T>>;
 }
 
 /**
  * Writable cells can update their value.
+ *
+ * **Frozenness contract (modern data model only):** Values passed into
+ * `set()`, `update()`, and `push()` flow through a write-boundary
+ * normalization step that — under `modernDataModel: true` — shallowly
+ * freezes any plain unfrozen Object/Array levels it visits. Inputs that
+ * are already deep-frozen valid `FabricValue` trees are accepted
+ * identity-preservingly with no further cloning. Under
+ * `modernDataModel: false` (legacy), no freezing happens at the write
+ * boundary; storage handles its own frozenness invariants on commit.
  */
 export interface IWritable<T, C extends AnyBrandedCell<any>> {
+  /**
+   * Set the cell's value. See the {@link IWritable} interface docs for
+   * the modern-mode frozenness contract on the input.
+   */
   set(value: T | AnyCellWrapping<T>): C;
+  /**
+   * Merge a partial object value into the cell. Implemented as a
+   * per-key `set()`, so the same frozenness contract applies. See
+   * {@link IWritable}.
+   */
   update<V extends (Partial<T> | AnyCellWrapping<Partial<T>>)>(
     this: IsThisObject,
     values: V extends object ? AnyCellWrapping<V> : never,
   ): C;
+  /**
+   * Append one or more values to an array cell. See the
+   * {@link IWritable} interface docs for the modern-mode frozenness
+   * contract on the inputs.
+   */
   push(
     this: IsThisArray,
     ...value: T extends (infer U)[] ? (U | AnyCellWrapping<U>)[] : never
@@ -1198,9 +1261,11 @@ export interface Pattern {
   argumentSchema: JSONSchema;
   resultSchema: JSONSchema;
   internalSchema?: JSONSchema;
+  defaultScope?: CellScope;
 }
 export interface Module {
   type: "ref" | "javascript" | "pattern" | "raw" | "isolated" | "passthrough";
+  defaultScope?: CellScope;
 }
 
 export type toJSON = {
@@ -1214,17 +1279,26 @@ export type Handler<T = any, R = any> = Module & {
 export type NodeFactory<T, R> =
   & ((inputs: Opaque<T>) => OpaqueRef<R>)
   & (Module | Handler | Pattern)
-  & toJSON;
+  & toJSON
+  & {
+    asScope(scope: CellScope): NodeFactory<T, R>;
+  };
 
 export type PatternFactory<T, R> =
   & ((inputs: Opaque<T>) => OpaqueRef<R>)
   & Pattern
-  & toJSON;
+  & toJSON
+  & {
+    asScope(scope: CellScope): PatternFactory<T, R>;
+  };
 
 export type ModuleFactory<T, R> =
   & ((inputs: Opaque<T>) => OpaqueRef<R>)
   & Module
-  & toJSON;
+  & toJSON
+  & {
+    asScope(scope: CellScope): ModuleFactory<T, R>;
+  };
 
 export type HandlerFactory<T, R> =
   & ((inputs: Opaque<StripCell<T>>) => Stream<R>)
@@ -1287,7 +1361,7 @@ export type JSONSchemaTypes =
 // We can also do an `{ asCell: ["stream"] }` or `{ asCell: ["opaque"] }`.
 // While this is currently tightly coupled to the CellKind type, we can restrict it
 // to a subset
-export type AsCellType = CellKind;
+export type AsCellType = AsCellEntry;
 
 // See https://json-schema.org/draft/2020-12/json-schema-core
 // See https://json-schema.org/draft/2020-12/json-schema-validation
@@ -1372,6 +1446,7 @@ export type JSONSchemaObj = {
   // Common Fabric extensions
   readonly [ID]?: unknown;
   readonly [ID_FIELD]?: unknown;
+  readonly scope?: SchemaScope;
   // makes it so that your handler gets a Cell object for that property. So you can call .set()/.update()/.push()/etc on it.
   // A value of `true` is treated the same as `["cell"]`
   readonly asCell?: boolean | readonly AsCellType[];

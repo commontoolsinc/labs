@@ -1,5 +1,6 @@
 import { internSchemaAsHashString } from "@commonfabric/data-model/schema-hash";
 import {
+  type CellScope,
   type EntitySnapshot,
   type GraphQuery,
   type SessionSync,
@@ -7,10 +8,15 @@ import {
   type WatchSpec,
 } from "../v2.ts";
 
-export type SessionCacheEntry = SessionSyncUpsert;
+export type SessionCacheEntry = SessionSyncUpsert & { scope: CellScope };
 
-export const cacheKeyForEntity = (branch: string, id: string): string =>
-  `${branch}\0${id}`;
+const DEFAULT_SCOPE: CellScope = "space";
+
+export const cacheKeyForEntity = (
+  branch: string,
+  id: string,
+  scope: CellScope = DEFAULT_SCOPE,
+): string => `${branch}\0${scope}\0${id}`;
 
 export const sameSnapshot = (
   left: SessionCacheEntry | undefined,
@@ -21,6 +27,7 @@ export const sameSnapshot = (
   }
   return left.branch === right.branch &&
     left.id === right.id &&
+    left.scope === right.scope &&
     left.seq === right.seq &&
     left.deleted === right.deleted;
 };
@@ -35,6 +42,7 @@ export const toCacheEntry = (
     return {
       branch: entity.branch,
       id: entity.id,
+      scope: entity.scope ?? DEFAULT_SCOPE,
       seq: entity.seq,
       deleted: true,
     };
@@ -42,6 +50,7 @@ export const toCacheEntry = (
   return {
     branch: entity.branch,
     id: entity.id,
+    scope: entity.scope ?? DEFAULT_SCOPE,
     seq: entity.seq,
     doc: entity.document,
   };
@@ -52,10 +61,18 @@ export const trackedIdsFromEntries = (
 ): Set<string> => {
   const ids = new Set<string>();
   for (const entry of entries) {
-    ids.add(entry.id);
+    ids.add(`${entry.scope}\0${entry.id}`);
   }
   return ids;
 };
+
+const compareSyncAddress = (
+  left: { branch: string; id: string; scope?: CellScope },
+  right: { branch: string; id: string; scope?: CellScope },
+): number =>
+  left.branch.localeCompare(right.branch) ||
+  (left.scope ?? DEFAULT_SCOPE).localeCompare(right.scope ?? DEFAULT_SCOPE) ||
+  left.id.localeCompare(right.id);
 
 export const groupedQueries = (
   watches: readonly WatchSpec[],
@@ -90,6 +107,7 @@ export const mergeWatchesById = (
 const watchRootIdentity = (root: GraphQuery["roots"][number]): string =>
   JSON.stringify([
     root.id,
+    root.scope ?? DEFAULT_SCOPE,
     root.selector.path,
     root.selector.schema === undefined
       ? ""
@@ -119,14 +137,18 @@ export const buildFullSync = (
   toSeq: number,
 ): SessionSync => {
   const removes = [...previous.values()]
-    .filter((entry) => !next.has(cacheKeyForEntity(entry.branch, entry.id)))
-    .map((entry) => ({ branch: entry.branch, id: entry.id }))
-    .sort((left, right) =>
-      left.branch.localeCompare(right.branch) || left.id.localeCompare(right.id)
-    );
-  const upserts = [...next.values()].sort((left, right) =>
-    left.branch.localeCompare(right.branch) || left.id.localeCompare(right.id)
-  );
+    .filter((entry) =>
+      !next.has(
+        cacheKeyForEntity(entry.branch, entry.id, entry.scope),
+      )
+    )
+    .map((entry) => ({
+      branch: entry.branch,
+      id: entry.id,
+      scope: entry.scope,
+    }))
+    .sort(compareSyncAddress);
+  const upserts = [...next.values()].sort(compareSyncAddress);
   return {
     type: "sync",
     fromSeq,
@@ -150,17 +172,17 @@ export const buildDiffSync = (
   }
   const removes = [...previous.entries()]
     .filter(([key]) => !next.has(key))
-    .map(([, entry]) => ({ branch: entry.branch, id: entry.id }))
-    .sort((left, right) =>
-      left.branch.localeCompare(right.branch) || left.id.localeCompare(right.id)
-    );
+    .map(([, entry]) => ({
+      branch: entry.branch,
+      id: entry.id,
+      scope: entry.scope,
+    }))
+    .sort(compareSyncAddress);
   return {
     type: "sync",
     fromSeq,
     toSeq,
-    upserts: upserts.toSorted((left, right) =>
-      left.branch.localeCompare(right.branch) || left.id.localeCompare(right.id)
-    ),
+    upserts: upserts.toSorted(compareSyncAddress),
     removes,
   };
 };

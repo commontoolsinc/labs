@@ -64,6 +64,7 @@ Deno.test("memory v2 transactions use the native commit hook when available", as
         op: "set",
         id: "of:memory-v2-native-commit",
         type,
+        scope: "space",
         value: { value: { count: 1 } },
       }],
     }]);
@@ -146,6 +147,7 @@ Deno.test("memory v2 transactions emit patch drafts for safe object-path writes"
         op: "patch",
         id: "of:memory-v2-native-patch",
         type,
+        scope: "space",
         value: { value: { profile: { name: "Grace", title: "Dr" } } },
         patches: [{
           op: "replace",
@@ -184,6 +186,7 @@ Deno.test("memory v2 transactions emit set drafts for leaf writes into new docum
         op: "set",
         id: "of:memory-v2-native-create-via-patch",
         type,
+        scope: "space",
         value: { value: { profile: { name: "Ada" } } },
       }],
     }]);
@@ -224,6 +227,7 @@ Deno.test("memory v2 transactions emit add and remove patch drafts for safe obje
         op: "patch",
         id: "of:memory-v2-native-add-remove",
         type,
+        scope: "space",
         value: {
           value: { profile: { name: "Ada", title: "Dr", subtitle: "Analyst" } },
         },
@@ -252,6 +256,7 @@ Deno.test("memory v2 transactions emit add and remove patch drafts for safe obje
         op: "patch",
         id: "of:memory-v2-native-add-remove",
         type,
+        scope: "space",
         value: { value: { profile: { name: "Ada", subtitle: "Analyst" } } },
         patches: [{
           op: "remove",
@@ -297,6 +302,7 @@ Deno.test("memory v2 transactions emit index patch drafts for dense array elemen
         op: "patch",
         id: "of:memory-v2-native-array",
         type,
+        scope: "space",
         value: { value: { tags: ["zero", "two"] } },
         patches: [{
           op: "replace",
@@ -343,6 +349,7 @@ Deno.test("memory v2 transactions emit splice patch drafts for dense array appen
         op: "patch",
         id: "of:memory-v2-native-array-append",
         type,
+        scope: "space",
         value: { value: { tags: ["one", "two", "three"] } },
         patches: [{
           op: "splice",
@@ -405,6 +412,7 @@ Deno.test("memory v2 transactions drop same-tx add-then-remove paths from patch 
         op: "patch",
         id: "of:memory-v2-native-elide-noop-remove",
         type,
+        scope: "space",
         value: { value: { profile: { name: "Grace" } } },
         patches: [{
           op: "replace",
@@ -554,6 +562,7 @@ Deno.test("memory v2 transactions preserve the original previousValue across rep
     assertEquals(Array.from(tx.getWriteDetails?.(space) ?? []), [{
       address: {
         space,
+        scope: "space",
         id: "of:memory-v2-primitive-rewrite",
         path: ["value", "count"],
       },
@@ -587,6 +596,7 @@ Deno.test("memory v2 writeBatch keeps fine-grained patches and original previous
       {
         address: {
           space,
+          scope: "space",
           id: "of:memory-v2-batched-patch",
           path: ["value", "profile", "name"],
         },
@@ -595,6 +605,7 @@ Deno.test("memory v2 writeBatch keeps fine-grained patches and original previous
       {
         address: {
           space,
+          scope: "space",
           id: "of:memory-v2-batched-patch",
           path: ["value", "profile", "title"],
         },
@@ -615,6 +626,7 @@ Deno.test("memory v2 writeBatch keeps fine-grained patches and original previous
       {
         address: {
           space,
+          scope: "space",
           id: "of:memory-v2-batched-patch",
           path: ["value", "profile", "name"],
         },
@@ -624,6 +636,7 @@ Deno.test("memory v2 writeBatch keeps fine-grained patches and original previous
       {
         address: {
           space,
+          scope: "space",
           id: "of:memory-v2-batched-patch",
           path: ["value", "profile", "title"],
         },
@@ -639,6 +652,7 @@ Deno.test("memory v2 writeBatch keeps fine-grained patches and original previous
         op: "patch",
         id: "of:memory-v2-batched-patch",
         type,
+        scope: "space",
         value: {
           value: { profile: { name: "Grace", title: "Professor" } },
         },
@@ -694,6 +708,7 @@ Deno.test("memory v2 transactions emit splice patch drafts for dense array lengt
         op: "patch",
         id: "of:memory-v2-native-array-length",
         type,
+        scope: "space",
         value: { value: { tags: ["one"] } },
         patches: [{
           op: "splice",
@@ -756,6 +771,7 @@ Deno.test("memory v2 writeBatch combines dense array element and length writes i
         op: "patch",
         id: "of:memory-v2-batched-array-length",
         type,
+        scope: "space",
         value: { value: { tags: ["zero"] } },
         patches: [{
           op: "replace",
@@ -946,6 +962,7 @@ Deno.test("memory v2 transactions fall back to array replacement when filling sp
         op: "patch",
         id: "of:memory-v2-native-array-sparse-fill",
         type,
+        scope: "space",
         value: { value: { tags: ["one", "two", "three"] } },
         patches: [{
           op: "replace",
@@ -999,6 +1016,7 @@ Deno.test("memory v2 transactions collapse overlapping object-path writes into a
         op: "patch",
         id: "of:memory-v2-native-overlap",
         type,
+        scope: "space",
         value: { value: { profile: { name: "Grace", title: "Professor" } } },
         patches: [{
           op: "replace",
@@ -1059,6 +1077,7 @@ Deno.test("memory v2 transactions keep materialized-parent writes as fine-graine
         op: "patch",
         id: "of:memory-v2-native-materialized-parent",
         type,
+        scope: "space",
         value: { value: { count: 1, profile: { name: "Ada", age: 42 } } },
         patches: [
           {

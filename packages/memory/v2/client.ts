@@ -6,11 +6,11 @@ import {
   getMemoryProtocolFlags,
   type GraphQuery,
   type GraphQueryResult,
-  isMemoryProtocolFlags,
   MEMORY_PROTOCOL,
+  type MemoryProtocolFlags,
+  parseMemoryProtocolFlags,
   type ResponseMessage,
   sameMemoryProtocolFlags,
-  type ServerMessage,
   type SessionEffectMessage,
   type SessionOpenResult,
   type SessionRevokedMessage,
@@ -72,13 +72,19 @@ const reconnectDelayMs = (attempt: number): number => {
   );
 };
 
-const watchKey = (branch: string, id: string): string => `${branch}\0${id}`;
+const watchKey = (
+  branch: string,
+  id: string,
+  scope: string | undefined,
+): string => `${branch}\0${scope ?? "space"}\0${id}`;
 
 const compareEntitySnapshot = (
   left: EntitySnapshot,
   right: EntitySnapshot,
 ): number =>
-  left.branch.localeCompare(right.branch) || left.id.localeCompare(right.id);
+  left.branch.localeCompare(right.branch) ||
+  (left.scope ?? "space").localeCompare(right.scope ?? "space") ||
+  left.id.localeCompare(right.id);
 
 export class Client {
   #pending = new Map<string, PromiseWithResolvers<unknown>>();
@@ -204,13 +210,14 @@ export class Client {
     }
 
     if (this.#helloPending !== null) {
-      if (isHelloOk(message)) {
+      const helloOk = parseHelloOk(message);
+      if (helloOk !== null) {
         const expectedFlags = getMemoryProtocolFlags();
-        if (!sameMemoryProtocolFlags(message.flags, expectedFlags)) {
+        if (!sameMemoryProtocolFlags(helloOk.flags, expectedFlags)) {
           const error = new Error(
             `memory flag mismatch: client=${
               toCompactDebugString(expectedFlags)
-            } server=${toCompactDebugString(message.flags)}`,
+            } server=${toCompactDebugString(helloOk.flags)}`,
           );
           error.name = "ProtocolError";
           this.#helloPending.reject(error);
@@ -911,9 +918,10 @@ export class WatchView {
   applySync(sync: SessionSync, emit: boolean): void {
     const upserts = new Map<string, EntitySnapshot>();
     for (const upsert of sync.upserts) {
-      upserts.set(watchKey(upsert.branch, upsert.id), {
+      upserts.set(watchKey(upsert.branch, upsert.id, upsert.scope), {
         branch: upsert.branch,
         id: upsert.id,
+        ...(upsert.scope !== undefined ? { scope: upsert.scope } : {}),
         seq: upsert.seq,
         document: upsert.doc ?? null,
       });
@@ -921,7 +929,7 @@ export class WatchView {
 
     const removeKeys = new Set<string>();
     for (const remove of sync.removes) {
-      const key = watchKey(remove.branch, remove.id);
+      const key = watchKey(remove.branch, remove.id, remove.scope);
       removeKeys.add(key);
     }
 
@@ -1079,13 +1087,25 @@ const isConnectionError = (error: unknown): boolean =>
     error.message.includes("transport closed") ||
     error.message.includes("disconnect"));
 
-const isHelloOk = (
+const parseHelloOk = (
   message: unknown,
-): message is Extract<ServerMessage, { type: "hello.ok" }> => {
-  return typeof message === "object" && message !== null &&
-    (message as { type?: string }).type === "hello.ok" &&
-    (message as { protocol?: string }).protocol === MEMORY_PROTOCOL &&
-    isMemoryProtocolFlags((message as { flags?: unknown }).flags);
+): { flags: MemoryProtocolFlags } | null => {
+  if (typeof message !== "object" || message === null) {
+    return null;
+  }
+  const obj = message as {
+    type?: unknown;
+    protocol?: unknown;
+    flags?: unknown;
+  };
+  if (obj.type !== "hello.ok" || obj.protocol !== MEMORY_PROTOCOL) {
+    return null;
+  }
+  const parsed = parseMemoryProtocolFlags(obj.flags);
+  if (parsed === null) {
+    return null;
+  }
+  return { flags: parsed.flags };
 };
 
 const isSessionEffect = (

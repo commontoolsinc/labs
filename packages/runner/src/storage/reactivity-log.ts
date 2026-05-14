@@ -4,6 +4,7 @@ import type {
   Metadata,
   TransactionReactivityLog,
 } from "./interface.ts";
+import { normalizeCellScope } from "../scope.ts";
 
 const ignoreReadForSchedulingMarker: unique symbol = Symbol(
   "ignoreReadForSchedulingMarker",
@@ -68,6 +69,7 @@ export function reactivityLogFromActivities(
       }
       const address: IMemorySpaceAddress = {
         space: activity.read.space,
+        scope: normalizeCellScope(activity.read.scope),
         id: activity.read.id,
         path: [...activity.read.path],
       };
@@ -85,6 +87,7 @@ export function reactivityLogFromActivities(
     if ("write" in activity && activity.write) {
       log.writes.push({
         space: activity.write.space,
+        scope: normalizeCellScope(activity.write.scope),
         id: activity.write.id,
         path: [...activity.write.path],
       });

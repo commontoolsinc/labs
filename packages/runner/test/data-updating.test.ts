@@ -1346,6 +1346,7 @@ describe("compactChangeSet", () => {
     location: {
       id: docId,
       space: docSpace,
+      scope: "space",
       path,
     },
     value: value as any,
@@ -1609,6 +1610,7 @@ describe("compactChangeSet", () => {
       location: {
         id: "test:batched-doc",
         space: "did:test:space",
+        scope: "space",
         path,
       },
       value: value as any,
@@ -1642,6 +1644,7 @@ describe("compactChangeSet", () => {
           address: {
             id: "test:batched-doc",
             space: "did:test:space",
+            scope: "space",
             path: ["profile", "name"],
           },
           value: "Ada",
@@ -1650,6 +1653,7 @@ describe("compactChangeSet", () => {
           address: {
             id: "test:batched-doc",
             space: "did:test:space",
+            scope: "space",
             path: ["profile", "age"],
           },
           value: 42,

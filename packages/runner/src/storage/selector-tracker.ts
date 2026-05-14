@@ -13,11 +13,22 @@ import { ContextualFlowControl } from "../cfc.ts";
 import { BaseMemoryAddress, MapSetStringToStrings } from "../traverse.ts";
 import * as Address from "./transaction/address.ts";
 
-const toKey = ({ id }: BaseMemoryAddress) => id;
-const fromKey = (key: string): BaseMemoryAddress => ({
-  id: key as BaseMemoryAddress["id"],
-  type: "application/json",
-});
+const toKey = ({ id, scope }: BaseMemoryAddress) =>
+  `${scope ?? "space"}\0${id}`;
+const fromKey = (key: string): BaseMemoryAddress => {
+  const separator = key.indexOf("\0");
+  if (separator === -1) {
+    return {
+      id: key as BaseMemoryAddress["id"],
+      type: "application/json",
+    };
+  }
+  return {
+    scope: key.slice(0, separator) as BaseMemoryAddress["scope"],
+    id: key.slice(separator + 1) as BaseMemoryAddress["id"],
+    type: "application/json",
+  };
+};
 
 // Only cache against already-deep-frozen inputs. Mutable schemas can be edited
 // in place, and keying the cache by their identity would return stale results.

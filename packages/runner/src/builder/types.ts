@@ -99,6 +99,7 @@ export type {
   AsWriteonlyCell,
   Cell,
   CellKind,
+  CellScope,
   CellTypeConstructor,
   FabricValue,
   FsProjection,
@@ -122,6 +123,7 @@ export type {
   JSONSchemaTypes,
   JSONValue,
   KeyResultType,
+  LinkScope,
   Module,
   ModuleFactory,
   NodeFactory,
@@ -134,6 +136,7 @@ export type {
   Props,
   RenderNode,
   RequireDefaults,
+  SchemaScope,
   Stream,
   StripCell,
   StripDefaultBrand,
@@ -145,6 +148,7 @@ export type {
   UnwrapCell,
   VNode,
 } from "@commonfabric/api";
+export type { AsCellEntry } from "@commonfabric/api";
 export type { Schema, SchemaWithoutCell } from "@commonfabric/api/schema";
 
 export const isOpaqueRefMarker = Symbol("isOpaqueRef");

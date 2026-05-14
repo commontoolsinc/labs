@@ -8,6 +8,11 @@ import "@commonfabric/utils/equal-ignoring-symbols";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { FabricValue } from "@commonfabric/memory/interface";
+import {
+  getDataModelConfig,
+  resetDataModelConfig,
+  setDataModelConfig,
+} from "@commonfabric/data-model/fabric-value";
 import { isCell, recursivelyAddIDIfNeeded } from "../src/cell.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { isCellResult } from "../src/query-result-proxy.ts";
@@ -366,45 +371,168 @@ describe("Cell", () => {
     await sm.close();
   });
 
-  it("preserves identity when recursivelyAddIDIfNeeded has nothing to do", () => {
-    const frame: Frame = {
-      generatedIdCounter: 0,
-      opaqueRefs: new Set(),
-    };
-    const interests = ["coding", "reading"];
-    const value = {
-      firstName: "Ada",
-      lastName: "Lovelace",
-      interests,
-      stable: { nested: true },
-    };
+  // `recursivelyAddIDIfNeeded()` has a legacy "preserve reference identity
+  // when there's nothing to do" optimization. Under the modern data model
+  // (`modernDataModel: true`), the function instead guarantees a
+  // deep-frozen `FabricValue` result for unfrozen inputs: shallow fabric
+  // conversion freezes the visited sub-trees and the function freezes
+  // the freshly-built top-level container. However, when the input is
+  // *already* deep-frozen (a valid `FabricValue`), the shallow
+  // conversion returns it as-is, so identity *is* preserved end-to-end.
+  // The pairs below pin the legacy invariant explicitly and assert the
+  // modern shape (both sides: unfrozen vs. already-frozen) separately.
+  // (Direct unit tests of `recursivelyAddIDIfNeeded` don't go through a
+  // `Runtime`, so flag control happens via `setDataModelConfig()`
+  // rather than runtime construction.)
 
-    const result = recursivelyAddIDIfNeeded(value, frame);
+  it("preserves identity when recursivelyAddIDIfNeeded has nothing to do (legacy)", () => {
+    const savedFlag = getDataModelConfig();
+    setDataModelConfig(false);
+    try {
+      const frame: Frame = {
+        generatedIdCounter: 0,
+        opaqueRefs: new Set(),
+      };
+      const interests = ["coding", "reading"];
+      const value = {
+        firstName: "Ada",
+        lastName: "Lovelace",
+        interests,
+        stable: { nested: true },
+      };
 
-    expect(result).toBe(value);
-    expect(result.interests).toBe(interests);
-    expect(result.stable).toBe(value.stable);
+      const result = recursivelyAddIDIfNeeded(value, frame);
+
+      expect(result).toBe(value);
+      expect(result.interests).toBe(interests);
+      expect(result.stable).toBe(value.stable);
+    } finally {
+      setDataModelConfig(savedFlag);
+    }
   });
 
-  it("only clones branches that need generated IDs", () => {
-    const frame: Frame = {
-      generatedIdCounter: 0,
-      opaqueRefs: new Set(),
-    };
-    const stable = { nested: true };
-    const value = {
-      stable,
-      list: [{ name: "Ada" }, "plain"],
-    };
+  it("returns a deep-frozen structural copy when recursivelyAddIDIfNeeded has nothing to do (modern, unfrozen input)", () => {
+    const savedFlag = getDataModelConfig();
+    setDataModelConfig(true);
+    try {
+      const frame: Frame = {
+        generatedIdCounter: 0,
+        opaqueRefs: new Set(),
+      };
+      const interests = ["coding", "reading"];
+      const value = {
+        firstName: "Ada",
+        lastName: "Lovelace",
+        interests,
+        stable: { nested: true },
+      };
 
-    const result = recursivelyAddIDIfNeeded(value, frame) as typeof value;
+      const result = recursivelyAddIDIfNeeded(value, frame);
 
-    expect(result).not.toBe(value);
-    expect(result.stable).toBe(stable);
-    expect(result.list).not.toBe(value.list);
-    expect(result.list[0]).not.toBe(value.list[0]);
-    expect((result.list[0] as Record<PropertyKey, unknown>)[ID]).toBe(0);
-    expect(result.list[1]).toBe(value.list[1]);
+      // Modern: the legacy "preserve identity when nothing to do"
+      // optimization doesn't apply for unfrozen inputs. Instead the
+      // function returns a structurally equivalent, deep-frozen tree
+      // (top-level included).
+      expect(result).not.toBe(value);
+      expect(result).toEqual(value);
+      expect(Object.isFrozen(result)).toBe(true);
+      expect(Object.isFrozen(result.interests)).toBe(true);
+      expect(Object.isFrozen(result.stable)).toBe(true);
+    } finally {
+      setDataModelConfig(savedFlag);
+    }
+  });
+
+  it("preserves identity when input is already deep-frozen (modern)", () => {
+    const savedFlag = getDataModelConfig();
+    setDataModelConfig(true);
+    try {
+      const frame: Frame = {
+        generatedIdCounter: 0,
+        opaqueRefs: new Set(),
+      };
+      // Deep-freeze before passing in. Under modern, an already-frozen
+      // plain Object/Array is a valid `FabricValue` and shallow fabric
+      // conversion returns it as-is, so reference identity survives all
+      // the way out.
+      const interests = Object.freeze(["coding", "reading"]);
+      const stable = Object.freeze({ nested: true });
+      const value = Object.freeze({
+        firstName: "Ada",
+        lastName: "Lovelace",
+        interests,
+        stable,
+      });
+
+      const result = recursivelyAddIDIfNeeded(value, frame);
+
+      expect(result).toBe(value);
+      expect(result.interests).toBe(interests);
+      expect(result.stable).toBe(stable);
+    } finally {
+      setDataModelConfig(savedFlag);
+    }
+  });
+
+  it("only clones branches that need generated IDs (legacy)", () => {
+    const savedFlag = getDataModelConfig();
+    setDataModelConfig(false);
+    try {
+      const frame: Frame = {
+        generatedIdCounter: 0,
+        opaqueRefs: new Set(),
+      };
+      const stable = { nested: true };
+      const value = {
+        stable,
+        list: [{ name: "Ada" }, "plain"],
+      };
+
+      const result = recursivelyAddIDIfNeeded(value, frame) as typeof value;
+
+      expect(result).not.toBe(value);
+      expect(result.stable).toBe(stable);
+      expect(result.list).not.toBe(value.list);
+      expect(result.list[0]).not.toBe(value.list[0]);
+      expect((result.list[0] as Record<PropertyKey, unknown>)[ID]).toBe(0);
+      expect(result.list[1]).toBe(value.list[1]);
+    } finally {
+      setDataModelConfig(savedFlag);
+    }
+  });
+
+  it("adds generated IDs to objects in arrays regardless of clone depth (modern)", () => {
+    const savedFlag = getDataModelConfig();
+    setDataModelConfig(true);
+    try {
+      const frame: Frame = {
+        generatedIdCounter: 0,
+        opaqueRefs: new Set(),
+      };
+      const stable = { nested: true };
+      const value = {
+        stable,
+        list: [{ name: "Ada" }, "plain"],
+      };
+
+      const result = recursivelyAddIDIfNeeded(value, frame) as typeof value;
+
+      // Modern: shallow fabric conversion clones at each level, so no
+      // sub-branch is reference-preserved. The core invariants that
+      // remain: ID assignment for objects-in-arrays still fires, and
+      // primitive list elements still pass through unchanged. The
+      // returned tree is deep-frozen as a whole (top-level + sub-trees).
+      expect(result).not.toBe(value);
+      expect(result.stable).not.toBe(stable);
+      expect(result.stable).toEqual(stable);
+      expect((result.list[0] as Record<PropertyKey, unknown>)[ID]).toBe(0);
+      expect(result.list[1]).toBe("plain");
+      expect(Object.isFrozen(result)).toBe(true);
+      expect(Object.isFrozen(result.list)).toBe(true);
+      expect(Object.isFrozen(result.list[0])).toBe(true);
+    } finally {
+      setDataModelConfig(savedFlag);
+    }
   });
 
   it("should preserve holes and add IDs to objects in sparse arrays", () => {
@@ -664,83 +792,121 @@ describe("Cell", () => {
     expect(final).toEqual({ output: 200 });
   });
 
-  it("should translate circular references into links", () => {
-    const schema = {
-      $ref: "#/$defs/Root",
-      $defs: {
-        Root: {
-          type: "object",
-          properties: {
-            x: { type: "number" },
-            y: { type: "number" },
-            z: { $ref: "#/$defs/Root" },
-          },
-          required: ["x", "y", "z"],
-        },
-      },
-    } as const satisfies JSONSchema;
-    const c = runtime.getCell(
-      space,
-      "should translate circular references into links",
-      schema,
-      tx,
-    );
-    const data: any = { x: 1, y: 2 };
-    data.z = data;
-    c.set(data);
+  // Cycle-resolution tests live in a separate `describe` below so they can be
+  // pinned to both `modernDataModel` flag states explicitly.
+});
 
-    const proxy = c.getAsQueryResult();
-    expect(proxy.z).toBe(proxy);
+// Cycle-resolution behavior should hold under both `modernDataModel` flag
+// states, so these tests are run twice, once per state. Modeled on
+// `packages/data-model/test/clone-if-necessary.test.ts`. The flag is set in
+// `beforeEach` BEFORE constructing the `Runtime`, so the runtime captures
+// the correct value (the `Runtime` constructor snapshots
+// `getDataModelConfig()` at construction time).
+describe("Cell circular references", () => {
+  for (const modernMode of [false, true]) {
+    const label = modernMode ? "modern" : "legacy";
 
-    const value = c.get();
-    expect(value.z.z.z).toBe(value.z.z);
+    describe(`(${label})`, () => {
+      let runtime: Runtime;
+      let storageManager: ReturnType<typeof StorageManager.emulate>;
+      let tx: IExtendedStorageTransaction;
 
-    const raw = c.getRaw();
-    expect(raw?.z).toMatchObject({ "/": { [LINK_V1_TAG]: { path: [] } } });
-  });
+      beforeEach(() => {
+        setDataModelConfig(modernMode);
+        storageManager = StorageManager.emulate({ as: signer });
+        runtime = new Runtime({
+          apiUrl: new URL(import.meta.url),
+          storageManager,
+        });
+        tx = runtime.edit();
+      });
 
-  it("should translate circular references into links across cells", () => {
-    const schema = {
-      $ref: "#/$defs/Root",
-      $defs: {
-        Root: {
-          type: "object",
-          properties: {
-            list: {
-              type: "array",
-              items: {
-                type: "object",
-                properties: { parent: { $ref: "#/$defs/Root" } },
-                asCell: true,
-                required: ["parent"],
+      afterEach(async () => {
+        await tx.commit();
+        await runtime?.dispose();
+        await storageManager?.close();
+        resetDataModelConfig();
+      });
+
+      it("should translate circular references into links", () => {
+        const schema = {
+          $ref: "#/$defs/Root",
+          $defs: {
+            Root: {
+              type: "object",
+              properties: {
+                x: { type: "number" },
+                y: { type: "number" },
+                z: { $ref: "#/$defs/Root" },
               },
+              required: ["x", "y", "z"],
             },
           },
-          required: ["list"],
-        },
-      },
-    } as const satisfies JSONSchema;
-    const c = runtime.getCell(
-      space,
-      "should translate circular references into links",
-      schema,
-      tx,
-    );
-    const inner: any = { [ID]: 1 }; // ID will turn this into a separate cell
-    const outer: any = { list: [inner] };
-    inner.parent = outer;
-    c.set(outer);
+        } as const satisfies JSONSchema;
+        const c = runtime.getCell(
+          space,
+          "should translate circular references into links",
+          schema,
+          tx,
+        );
+        const data: any = { x: 1, y: 2 };
+        data.z = data;
+        c.set(data);
 
-    const proxy = c.getAsQueryResult();
-    expect(proxy.list[0].parent).toBe(proxy);
+        const proxy = c.getAsQueryResult();
+        expect(proxy.z).toBe(proxy);
 
-    const { id } = c.getAsNormalizedFullLink();
-    const innerCell = c.get().list[0];
-    const raw = innerCell.getRaw();
-    expect(raw).toMatchObject({
-      parent: { "/": { [LINK_V1_TAG]: { id } } },
+        const value = c.get();
+        expect(value.z.z.z).toBe(value.z.z);
+
+        const raw = c.getRaw();
+        expect(raw?.z).toMatchObject({ "/": { [LINK_V1_TAG]: { path: [] } } });
+      });
+
+      it("should translate circular references into links across cells", () => {
+        const schema = {
+          $ref: "#/$defs/Root",
+          $defs: {
+            Root: {
+              type: "object",
+              properties: {
+                list: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: { parent: { $ref: "#/$defs/Root" } },
+                    asCell: true,
+                    required: ["parent"],
+                  },
+                },
+              },
+              required: ["list"],
+            },
+          },
+        } as const satisfies JSONSchema;
+        const c = runtime.getCell(
+          space,
+          "should translate circular references into links",
+          schema,
+          tx,
+        );
+        const inner: any = { [ID]: 1 }; // ID will turn this into a separate cell
+        const outer: any = { list: [inner] };
+        inner.parent = outer;
+        c.set(outer);
+
+        const proxy = c.getAsQueryResult();
+        expect(proxy.list[0].parent).toBe(proxy);
+
+        const { id } = c.getAsNormalizedFullLink();
+        const innerCell = c.get().list[0];
+        const raw = innerCell.getRaw();
+        expect(raw).toMatchObject({
+          parent: { "/": { [LINK_V1_TAG]: { id } } },
+        });
+      });
     });
-  });
+  }
 });
 
 describe("Cell utility functions", () => {
@@ -932,7 +1098,7 @@ describe("Cell utility functions", () => {
     });
 
     it("getRawUntyped({ frozen: false }) _does_ clone (flag OFF)", () => {
-      // Even with `richStorableValues === false`, `cloneIfNecessary()` _will_
+      // Even with `modernDataModel === false`, `cloneIfNecessary()` _will_
       // make a clone of a frozen value to get a mutable result.
       const cell = runtime.getCell<{ items: number[] }>(
         space,
@@ -948,8 +1114,8 @@ describe("Cell utility functions", () => {
   });
 });
 
-// Separate top-level describe with richStorableValues enabled for frozen-ness.
-describe("Cell raw methods: frozen-or-not (richStorableValues ON)", () => {
+// Separate top-level describe with modernDataModel enabled for frozen-ness.
+describe("Cell raw methods: frozen-or-not (modernDataModel ON)", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -960,7 +1126,7 @@ describe("Cell raw methods: frozen-or-not (richStorableValues ON)", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
       experimental: {
-        richStorableValues: true,
+        modernDataModel: true,
       },
     });
     tx = runtime.edit();

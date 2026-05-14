@@ -26,7 +26,13 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { isBoolean, isObject, isRecord } from "@commonfabric/utils/types";
 import type { Cell, MemorySpace, Stream } from "../cell.ts";
 import { isCell, isStream } from "../cell.ts";
-import { ID, NAME, type Pattern } from "../builder/types.ts";
+import {
+  type CellScope,
+  ID,
+  NAME,
+  type Pattern,
+  TYPE,
+} from "../builder/types.ts";
 import { type Action, ignoreReadForScheduling } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
 import { spaceCellSchema } from "../runtime.ts";
@@ -60,6 +66,7 @@ import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
 import { resolveLink } from "../link-resolution.ts";
 import { internalVerifierRead } from "../storage/reactivity-log.ts";
 import type { RawBuiltinResult } from "../module.ts";
+import { scopedCell } from "./scope-policy.ts";
 
 // Avoid importing from @commonfabric/piece to prevent circular deps in tests
 
@@ -232,6 +239,11 @@ function prepareSchemaForLLM(schema: JSONSchema): JSONSchema {
 function getCellSchema(
   cell: Cell<unknown>,
 ): JSONSchema | undefined {
+  const internalProcessSchema = getInternalProcessCellSchema(cell);
+  if (isNontrivialSchema(internalProcessSchema)) {
+    return internalProcessSchema;
+  }
+
   // Extract schema from cell, including from resultSchema of associated pattern
   const { schema } = cell.asSchemaFromLinks().getAsNormalizedFullLink();
 
@@ -258,6 +270,40 @@ function getCellSchema(
 
   // Fall back to minimal schema based on current value
   return buildMinimalSchemaFromValue(cell);
+}
+
+function getInternalProcessCellSchema(
+  cell: Cell<unknown>,
+): JSONSchema | undefined {
+  const link = cell.getAsNormalizedFullLink();
+  if (link.path[0] !== "internal") {
+    return undefined;
+  }
+
+  try {
+    const tx = cell.runtime.readTx(
+      (cell as unknown as { tx?: IExtendedStorageTransaction }).tx,
+    );
+    const patternId = tx.readValueOrThrow(
+      { ...link, path: [TYPE] },
+      { meta: { ...ignoreReadForScheduling, ...internalVerifierRead } },
+    );
+    if (typeof patternId !== "string") {
+      return undefined;
+    }
+
+    const pattern = cell.runtime.patternManager.patternById(patternId);
+    if (pattern?.internalSchema === undefined) {
+      return undefined;
+    }
+    return cell.runtime.cfc.schemaAtPath(
+      pattern.internalSchema,
+      link.path.slice(1),
+    );
+  } catch (e) {
+    logger.debug("llm", "getInternalProcessCellSchema failed:", e);
+    return undefined;
+  }
 }
 
 function buildMinimalSchemaFromValue(piece: Cell<any>): JSONSchema | undefined {
@@ -787,16 +833,19 @@ function resolveContextCellRef(cell: unknown): Cell<any> | undefined {
 function readCellValueForObservation(
   cell: Cell<unknown>,
 ): unknown {
-  const readTx = cell.runtime.readTx();
+  const readTx = cell.runtime.readTx(
+    (cell as unknown as { tx?: IExtendedStorageTransaction }).tx,
+  );
   const link = resolveLink(
     cell.runtime,
     readTx,
     cell.getAsNormalizedFullLink(),
     "top",
   );
-  return readTx.readValueOrThrow(link, {
+  const value = readTx.readValueOrThrow(link, {
     meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
   });
+  return value === undefined ? cell.get() ?? cell.getRaw() : value;
 }
 
 function collectToolEntries(
@@ -2473,6 +2522,7 @@ export function llmDialog(
   let result: Cell<Schema<typeof resultSchema>>;
   let internal: Cell<Schema<typeof internalSchema>>;
   let pinnedCells: Cell<PinnedCell[]>;
+  let cellScope: CellScope | undefined;
   let requestId: string | undefined = undefined;
   let abortController: AbortController | undefined = undefined;
 
@@ -2496,29 +2546,35 @@ export function llmDialog(
   });
 
   const action: Action = (tx: IExtendedStorageTransaction) => {
+    tx.resetNarrowestReadScope();
+    inputs.withTx(tx).get();
+    const outputScope = tx.getNarrowestReadScope();
+
     // Setup cells on first run.
-    if (!cellsInitialized) {
+    if (!cellsInitialized || cellScope !== outputScope) {
       // Create result cell. The predictable cause means that it'll map to
       // previously existing results. Note that we might not yet have it loaded
       // and that this function will be called again once the data is loaded
       // (but this if branch will be skipped then).
-      result = runtime.getCell(
+      const baseResult = runtime.getCell(
         parentCell.space,
         { llmDialog: { result: cause } },
         resultSchema,
         tx,
       );
+      result = scopedCell(runtime, tx, baseResult, outputScope);
       result.sync(); // Kick off sync, no need to await
 
       // Create another cell to store the internal state. This isn't returned to
       // the caller. But again, the predictable cause means all instances tied
       // to the same input cells will coordinate via the same cell.
-      internal = runtime.getCell(
+      const baseInternal = runtime.getCell(
         parentCell.space,
         { llmDialog: { internal: cause } },
         internalSchema,
         tx,
       );
+      internal = scopedCell(runtime, tx, baseInternal, outputScope);
       internal.sync(); // Kick off sync, no need to await
 
       // Create pinnedCells cell to store the internal pinned cells state
@@ -2533,12 +2589,13 @@ export function llmDialog(
           required: ["path", "name"],
         },
       } as const;
-      pinnedCells = runtime.getCell(
+      const basePinnedCells = runtime.getCell(
         parentCell.space,
         { llmDialog: { pinnedCells: cause } },
         pinnedCellsSchema,
         tx,
       );
+      pinnedCells = scopedCell(runtime, tx, basePinnedCells, outputScope);
       pinnedCells.sync(); // Kick off sync, no need to await
 
       const pending = result.key("pending");
@@ -2723,6 +2780,7 @@ export function llmDialog(
       );
 
       cellsInitialized = true;
+      cellScope = outputScope;
     }
 
     sendResult(tx, result);

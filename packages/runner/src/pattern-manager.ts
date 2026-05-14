@@ -15,6 +15,8 @@ import type { CompileResult } from "./harness/types.ts";
 import { RuntimeProgram } from "./harness/types.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import { getTopFrame } from "./builder/pattern.ts";
+import { parseLink } from "./link-utils.ts";
+import { isRecord } from "@commonfabric/utils/types";
 
 const logger = getLogger("pattern-manager");
 
@@ -368,6 +370,41 @@ export class PatternManager {
     }
   }
 
+  private async syncLinkedPatternSource(
+    metaCell: Cell<PatternMeta>,
+    rawMeta: unknown,
+  ): Promise<void> {
+    if (!isRecord(rawMeta) || !isRecord(rawMeta.program)) {
+      return;
+    }
+    const program = rawMeta.program;
+
+    const base = metaCell.getAsNormalizedFullLink();
+    const seen = new Set<string>();
+    const linkedCells: Cell<unknown>[] = [];
+
+    const collectLinks = (value: unknown): void => {
+      const link = parseLink(value, base);
+      if (link?.space && link.id) {
+        const key = `${link.space}\0${link.scope}\0${link.id}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          linkedCells.push(this.runtime.getCellFromLink(link));
+        }
+        return;
+      }
+
+      if (Array.isArray(value)) {
+        for (const item of value) collectLinks(item);
+      } else if (isRecord(value)) {
+        for (const item of Object.values(value)) collectLinks(item);
+      }
+    };
+
+    collectLinks(program);
+    await Promise.all(linkedCells.map((cell) => cell.sync()));
+  }
+
   // returns a pattern already loaded
   patternById(patternId: string): Pattern | undefined {
     const pattern = this.patternIdMap.get(patternId);
@@ -502,12 +539,22 @@ export class PatternManager {
     let metaCell = this.getPatternMetaCell({ patternId, space }, tx);
     await metaCell.sync();
     let patternMeta = metaCell.get();
+    if (!patternMeta?.src && !patternMeta?.program) {
+      const rawMeta = metaCell.getRaw();
+      await this.syncLinkedPatternSource(metaCell, rawMeta);
+      patternMeta = metaCell.get();
+    }
 
     // Fall back to legacy {recipeId, type: "recipe"} cause
     if (!patternMeta?.src && !patternMeta?.program) {
       metaCell = this.getLegacyRecipeMetaCell({ patternId, space }, tx);
       await metaCell.sync();
       patternMeta = metaCell.get();
+      if (!patternMeta?.src && !patternMeta?.program) {
+        const rawMeta = metaCell.getRaw();
+        await this.syncLinkedPatternSource(metaCell, rawMeta);
+        patternMeta = metaCell.get();
+      }
     }
 
     if (!patternMeta?.src && !patternMeta?.program) {

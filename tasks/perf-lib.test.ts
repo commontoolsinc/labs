@@ -3,9 +3,14 @@ import {
   computeBaseline,
   computeCiWallTimeRevisitSignals,
   extractMetrics,
+  fetchCurrentPRBody,
   fetchPRBody,
   githubGet,
   type Job,
+  parsePerfMetricsBackfillFile,
+  parsePerfMetricsFile,
+  serializePerfMetrics,
+  serializePerfMetricsBackfill,
   type Step,
   timingArtifactLabel,
   type WorkflowRun,
@@ -365,6 +370,71 @@ Deno.test("timingArtifactLabel normalizes matrix shard artifacts", () => {
   );
 });
 
+Deno.test("perf metrics files round-trip stable metric samples", () => {
+  const metrics = new Map([
+    [
+      "step: Type check",
+      {
+        runId: 123,
+        runUrl: "https://example.test/run/123",
+        sha: "abc123",
+        createdAt: "2026-01-01T00:00:00Z",
+        durationSeconds: 42.5,
+      },
+    ],
+    [
+      "job: Check",
+      {
+        runId: 123,
+        runUrl: "https://example.test/run/123",
+        sha: "abc123",
+        createdAt: "2026-01-01T00:00:00Z",
+        durationSeconds: 60,
+      },
+    ],
+  ]);
+
+  const serialized = serializePerfMetrics(metrics);
+  assertEquals(
+    serialized.metrics.map((metric) => metric.name),
+    ["job: Check", "step: Type check"],
+  );
+
+  assertEquals(
+    parsePerfMetricsFile(JSON.stringify(serialized)),
+    metrics,
+  );
+});
+
+Deno.test("perf metrics backfill files round-trip run-keyed samples", () => {
+  const runMetrics = new Map([
+    [
+      123,
+      new Map([
+        [
+          "job: Check",
+          {
+            runId: 123,
+            runUrl: "https://example.test/run/123",
+            sha: "abc123",
+            createdAt: "2026-01-01T00:00:00Z",
+            durationSeconds: 60,
+          },
+        ],
+      ]),
+    ],
+  ]);
+
+  const serialized = serializePerfMetricsBackfill(runMetrics);
+  assertEquals(serialized.runs.map((run) => run.runId), [123]);
+  assertEquals(serialized.runs[0].metrics[0].name, "job: Check");
+
+  assertEquals(
+    parsePerfMetricsBackfillFile(JSON.stringify(serialized)),
+    runMetrics,
+  );
+});
+
 Deno.test("computeCiWallTimeRevisitSignals stays quiet for balanced CI", () => {
   const signals = computeCiWallTimeRevisitSignals([
     makeJob(
@@ -525,6 +595,50 @@ Deno.test("fetchPRBody reads the live pull request body from the GitHub API", as
     assertEquals(
       requestedUrl,
       "https://api.github.com/repos/commontoolsinc/labs/pulls/3427",
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("fetchCurrentPRBody prefers the live pull request body over stale event payloads", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = ((_input, _init) =>
+      Promise.resolve(
+        new Response(JSON.stringify({ body: "LIVE PR BODY" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )) as typeof fetch;
+
+    const result = await fetchCurrentPRBody(3427, {
+      pull_request: { body: "STALE EVENT BODY" },
+    });
+
+    assertEquals(result, { body: "LIVE PR BODY", source: "live" });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("fetchCurrentPRBody falls back to the event body if the live request fails", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = ((_input, _init) =>
+      Promise.resolve(
+        new Response("rate limited", { status: 429 }),
+      )) as typeof fetch;
+
+    const result = await fetchCurrentPRBody(3427, {
+      pull_request: { body: "EVENT BODY" },
+    });
+
+    assertEquals(result.body, "EVENT BODY");
+    assertEquals(result.source, "event-fallback");
+    assertEquals(
+      result.errorMessage?.includes("GitHub API 429:"),
+      true,
     );
   } finally {
     globalThis.fetch = originalFetch;

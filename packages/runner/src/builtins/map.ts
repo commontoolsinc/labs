@@ -18,6 +18,12 @@ import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { trustedFlowPrecisionSchemaForBuiltin } from "../cfc/flow-precision.ts";
 import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
+import { parseLink } from "../link-utils.ts";
+import {
+  cellIdentityKey,
+  exposedResultCell,
+  scopedCell,
+} from "./scope-policy.ts";
 
 /**
  * Implementation of built-in map module. Unlike regular modules, this will be
@@ -67,12 +73,23 @@ export function map(
   >();
 
   return (tx: IExtendedStorageTransaction) => {
-    if (!result) {
+    const { list, op } = inputsCell.asSchema(MAP_INPUT_SCHEMA)
+      .withTx(tx).get();
+    const listCell = inputsCell.key("list");
+    const listLink = parseLink(listCell.withTx(tx).getRaw(), listCell);
+    const listScope = listLink?.scope ??
+      listCell.getAsNormalizedFullLink().scope;
+    // .getRaw() because we want the pattern itself and avoid following the
+    // aliases in the pattern.
+    const opPattern = op.getRaw();
+
+    if (!result || result.getAsNormalizedFullLink().scope !== listScope) {
       const resultSchema = trustedFlowPrecisionSchemaForBuiltin(
         tx.getCfcState().implementationIdentity,
         "map",
+        opPattern.resultSchema,
       );
-      result = runtime.getCell<any[]>(
+      const baseResult = runtime.getCell<any[]>(
         parentCell.space,
         {
           map: parentCell.entityId,
@@ -82,17 +99,13 @@ export function map(
         resultSchema,
         tx,
       );
+      result = scopedCell(runtime, tx, baseResult, listScope);
       result.send([]);
       result.setSourceCell(parentCell);
       sendResult(tx, result);
     }
     const resultWithLog = result.withTx(tx);
-    const { list, op } = inputsCell.asSchema(MAP_INPUT_SCHEMA)
-      .withTx(tx).get();
 
-    // .getRaw() because we want the pattern itself and avoid following the
-    // aliases in the pattern
-    const opPattern = op.getRaw();
     const argumentUsage = inferListOpArgumentUsage(runtime.cfc, opPattern);
     const createRunInput = (element: Cell<any>, index: number) => ({
       ...(argumentUsage.usesElement ? { element } : {}),
@@ -127,11 +140,10 @@ export function map(
       // Skip sparse holes — don't create pattern runs for them
       if (!(i in list)) continue;
 
-      const { space: s, id, path } = list[i].getAsNormalizedFullLink();
-      const dedupKey = JSON.stringify([s, id, path]);
+      const { dedupKey, linkKey } = cellIdentityKey(list[i]);
       const occurrence = keyCounts.get(dedupKey) ?? 0;
       keyCounts.set(dedupKey, occurrence + 1);
-      const elementKey = JSON.stringify([s, id, path, occurrence]);
+      const elementKey = JSON.stringify([...linkKey, occurrence]);
 
       if (elementRuns.has(elementKey)) {
         const existing = elementRuns.get(elementKey)!;
@@ -145,7 +157,7 @@ export function map(
           );
         }
         existing.lastIndex = i;
-        newArrayValue[i] = existing.resultCell;
+        newArrayValue[i] = exposedResultCell(runtime, tx, existing.resultCell);
       } else {
         const resultCell = runtime.getCell(
           parentCell.space,
@@ -163,7 +175,7 @@ export function map(
         resultCell.getSourceCell()!.setSourceCell(parentCell);
         addCancel(() => runtime.runner.stop(resultCell));
         elementRuns.set(elementKey, { resultCell, lastIndex: i });
-        newArrayValue[i] = resultCell;
+        newArrayValue[i] = exposedResultCell(runtime, tx, resultCell);
       }
     }
     resultWithLog.set(newArrayValue);

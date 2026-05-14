@@ -311,9 +311,11 @@ export const read = (
  * Takes a source fact {@link State} and derives an attestion describing its
  * state.
  */
-export const attest = ({ the, of, is }: Omit<State, "cause">): IAttestation => {
+export const attest = (
+  { the, of, is, scope }: Omit<State, "cause"> & Pick<IMemoryAddress, "scope">,
+): IAttestation => {
   return {
-    address: { id: of, type: the, path: [] },
+    address: { id: of, type: the, path: [], scope },
     value: is,
   };
 };
@@ -337,9 +339,10 @@ export const claim = (
   const source = attest(state);
   const actual = type === "application/json" &&
       address.path.length === 0 &&
-      "getDocument" in replica &&
       typeof replica.getDocument === "function"
-    ? toTransactionDocumentValue(replica.getDocument(address.id as any))
+    ? toTransactionDocumentValue(
+      replica.getDocument(address.id, address.scope),
+    )
     : read(source, address)?.ok?.value;
 
   // Fast path: reference equality check avoids expensive comparison

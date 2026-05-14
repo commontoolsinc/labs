@@ -1,6 +1,6 @@
 import type { Immutable } from "@commonfabric/utils/types";
-import type { ImmutableJSONValue } from "@commonfabric/api";
-import type { PatchOp } from "@commonfabric/memory/v2";
+import type { CellScope, ImmutableJSONValue } from "@commonfabric/api";
+import type { EntityDocument, PatchOp } from "@commonfabric/memory/v2";
 import type { EntityId } from "../create-ref.ts";
 import {
   type Assertion,
@@ -191,6 +191,7 @@ export interface IStorageProvider {
   sync(
     uri: URI,
     selector?: SchemaPathSelector,
+    scope?: CellScope,
   ): Promise<Result<Unit, Error>>;
 
   /**
@@ -615,6 +616,9 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   markCfcRelevant(reason?: string): void;
   invalidateCfc(reason: string): void;
 
+  getNarrowestReadScope(): CellScope;
+  resetNarrowestReadScope(scope?: CellScope): void;
+
   /**
    * CFC recording / ownership-transfer API.
    *
@@ -970,6 +974,10 @@ export interface IMemoryAddress {
    */
   type?: MediaType;
   /**
+   * Declared scoped cell instance. Storage defaults omitted scope to `space`.
+   */
+  scope?: CellScope;
+  /**
    * Intra-value path to the {@link FabricValue} being referenced by this
    * address. It is a path within the `is` field of the fact in memory protocol.
    */
@@ -1015,6 +1023,8 @@ export interface ISpaceReplica extends ISpace {
    * does not have it.
    */
   get(entry: BaseMemoryAddress): State | undefined;
+
+  getDocument(id: URI, scope?: CellScope): EntityDocument | undefined;
 
   commit?(
     transaction: ITransaction,
@@ -1078,17 +1088,20 @@ export type NativeStorageCommitOperation =
     op: "set";
     id: URI;
     type: MediaType;
+    scope?: CellScope;
     value: FabricValue;
   }
   | {
     op: "delete";
     id: URI;
     type: MediaType;
+    scope?: CellScope;
   }
   | {
     op: "patch";
     id: URI;
     type: MediaType;
+    scope?: CellScope;
     patches: PatchOp[];
     value: FabricValue;
   };

@@ -173,6 +173,7 @@ export class FavoritesManager {
     return {
       id: `of:${pieceId}`,
       space: this.#currentSpaceDID,
+      scope: "space",
       path: [],
     };
   }

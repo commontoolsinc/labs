@@ -47,7 +47,7 @@ The client MUST declare its protocol version in the first WebSocket message:
   "type": "hello",
   "protocol": "memory/v2",
   "flags": {
-    "richStorableValues": true
+    "modernDataModel": true
   }
 }
 ```
@@ -59,7 +59,7 @@ If the server accepts the protocol, it returns:
   "type": "hello.ok",
   "protocol": "memory/v2",
   "flags": {
-    "richStorableValues": true
+    "modernDataModel": true
   }
 }
 ```
@@ -67,6 +67,13 @@ If the server accepts the protocol, it returns:
 If the server does not support the requested version or the advertised flags do
 not match what it implements, it returns a typed error response and does not
 mark the connection ready.
+
+For backward compatibility with older peers, both ends also accept the legacy
+field name `richStorableValues` in incoming `hello`/`hello.ok` messages and
+treat it as equivalent to `modernDataModel`. When responding to a `hello`,
+the server echoes whichever wire-key the client used, so an older client
+that sent `richStorableValues` receives a reply using the same field name.
+New clients SHOULD send `modernDataModel`.
 
 ### 4.1.2 Logical Sessions and Resume
 
@@ -137,7 +144,8 @@ interface HelloMessage {
   type: "hello";
   protocol: "memory/v2";
   flags: {
-    richStorableValues: boolean; // a/k/a `modernDataModel`
+    modernDataModel: boolean;
+    // `richStorableValues` is accepted as a legacy alias on input only.
   };
 }
 
