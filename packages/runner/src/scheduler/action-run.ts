@@ -22,6 +22,51 @@ const logger = getLogger("scheduler", {
   level: "warn",
 });
 
+export type ActionInvocationResult =
+  | { ok: true; result: any }
+  | { ok: false; error: unknown };
+
+export function invokeReactiveAction(state: {
+  readonly runtime: Runtime;
+  readonly setExecutingAction: (action: Action, actionId: string) => void;
+  readonly clearExecutingAction: () => void;
+}, args: {
+  readonly action: Action;
+  readonly actionId: string;
+  readonly tx: IExtendedStorageTransaction;
+  readonly actionStartTime: number;
+}): Promise<ActionInvocationResult> {
+  try {
+    // Track executing action for parent-child relationship tracking.
+    state.setExecutingAction(args.action, args.actionId);
+    logger.timeStart("scheduler", "run", "action");
+    return Promise.resolve(
+      state.runtime.harness.invoke(() => args.action(args.tx)),
+    )
+      .then((actionResult) => {
+        logger.timeEnd("scheduler", "run", "action");
+        state.clearExecutingAction();
+        logger.debug("schedule-action-timing", () => {
+          const duration = ((performance.now() - args.actionStartTime) / 1000)
+            .toFixed(3);
+          return [
+            `Action ${args.actionId} completed in ${duration}s`,
+          ];
+        });
+        return { ok: true as const, result: actionResult };
+      })
+      .catch((error) => {
+        logger.timeEnd("scheduler", "run", "action");
+        state.clearExecutingAction();
+        return { ok: false as const, error };
+      });
+  } catch (error) {
+    logger.timeEnd("scheduler", "run", "action");
+    state.clearExecutingAction();
+    return Promise.resolve({ ok: false as const, error });
+  }
+}
+
 export function startReactiveActionCommit(state: {
   readonly runtime: Runtime;
   readonly tx: IExtendedStorageTransaction;

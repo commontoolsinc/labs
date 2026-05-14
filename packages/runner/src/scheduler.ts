@@ -72,6 +72,7 @@ import {
 } from "./scheduler/dependency-index.ts";
 import {
   appendActionRunTrace,
+  invokeReactiveAction,
   startReactiveActionCommit,
   watchReactiveActionCommit,
 } from "./scheduler/action-run.ts";
@@ -1107,38 +1108,33 @@ export class Scheduler {
         }
       };
 
-      try {
-        // Track executing action for parent-child relationship tracking
-        this.executingAction = action;
-        this.currentActionId = actionId;
-        logger.timeStart("scheduler", "run", "action");
-        Promise.resolve(this.runtime.harness.invoke(() => action(tx)))
-          .then((actionResult) => {
-            logger.timeEnd("scheduler", "run", "action");
-            result = actionResult;
-            this.executingAction = null;
-            this.currentActionId = undefined;
-            logger.debug("schedule-action-timing", () => {
-              const duration = ((performance.now() - actionStartTime) / 1000)
-                .toFixed(3);
-              return [
-                `Action ${actionId} completed in ${duration}s`,
-              ];
-            });
+      invokeReactiveAction({
+        runtime: this.runtime,
+        setExecutingAction: (target, targetActionId) => {
+          this.executingAction = target;
+          this.currentActionId = targetActionId;
+        },
+        clearExecutingAction: () => {
+          this.executingAction = null;
+          this.currentActionId = undefined;
+        },
+      }, {
+        action,
+        actionId,
+        tx,
+        actionStartTime,
+      })
+        .then((invocation) => {
+          if (invocation.ok) {
+            result = invocation.result;
             finalizeAction();
-          })
-          .catch((error) => {
-            logger.timeEnd("scheduler", "run", "action");
-            this.executingAction = null;
-            this.currentActionId = undefined;
-            finalizeAction(error);
-          });
-      } catch (error) {
-        logger.timeEnd("scheduler", "run", "action");
-        this.executingAction = null;
-        this.currentActionId = undefined;
-        finalizeAction(error);
-      }
+          } else {
+            finalizeAction(invocation.error);
+          }
+        })
+        .catch((error) => {
+          finalizeAction(error);
+        });
     });
 
     return this.runningPromise.then((result) => {
