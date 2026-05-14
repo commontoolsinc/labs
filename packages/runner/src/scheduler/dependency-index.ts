@@ -296,6 +296,86 @@ export function collectDirectWritersForLog(state: {
   return directWriters;
 }
 
+export function collectReverseDependenciesForLog(
+  state: {
+    readonly writersByEntity: Map<SpaceScopeAndURI, Set<Action>>;
+    readonly getSchedulingWrites: (
+      action: Action,
+    ) => readonly IMemorySpaceAddress[] | undefined;
+  },
+  action: Action,
+  log: ReactivityLog,
+): Set<Action> {
+  const dependencies = new Set<Action>();
+
+  // Group reads by entity for efficient writer lookups.
+  const readsByEntity = groupReadsByEntity(log.reads);
+  const nonRecursiveByEntity = groupReadsByEntity(log.shallowReads);
+  const allEntities = new Set([
+    ...readsByEntity.keys(),
+    ...nonRecursiveByEntity.keys(),
+  ]);
+
+  // For each entity we read from, find actions that write to it.
+  for (const entity of allEntities) {
+    const writers = state.writersByEntity.get(entity);
+    if (!writers) continue;
+
+    const entityReads = readsByEntity.get(entity) ?? [];
+    const entityNonRecursiveReads = nonRecursiveByEntity.get(entity) ?? [];
+
+    for (const otherAction of writers) {
+      if (otherAction === action) continue;
+      if (dependencies.has(otherAction)) continue;
+
+      const otherWrites = state.getSchedulingWrites(otherAction) ?? [];
+      if (
+        readsOverlapWrites(
+          entityReads,
+          entityNonRecursiveReads,
+          otherWrites,
+        )
+      ) {
+        dependencies.add(otherAction);
+      }
+    }
+  }
+
+  return dependencies;
+}
+
+export function pendingDependencyCollectionMightAffect(
+  state: {
+    readonly pendingDependencyCollection: ReadonlySet<Action>;
+    readonly effects: ReadonlySet<Action>;
+    readonly isThrottled: (action: Action) => boolean;
+    readonly getSchedulingWrites: (
+      action: Action,
+    ) => readonly IMemorySpaceAddress[] | undefined;
+    readonly hasDependentPath: (from: Action, to: Action) => boolean;
+  },
+  action: Action,
+  reads: readonly IMemorySpaceAddress[],
+  shallowReads: readonly IMemorySpaceAddress[],
+): boolean {
+  if (reads.length === 0 && shallowReads.length === 0) return false;
+
+  for (const pendingAction of state.pendingDependencyCollection) {
+    if (pendingAction === action) continue;
+    if (state.effects.has(pendingAction)) continue;
+    if (state.isThrottled(pendingAction)) continue;
+
+    const writes = state.getSchedulingWrites(pendingAction);
+    if (!writes || writes.length === 0) return true;
+    if (state.hasDependentPath(pendingAction, action)) return true;
+    if (readsOverlapWrites(reads, shallowReads, writes)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 export function readsOverlapWrites(
   reads: readonly IMemorySpaceAddress[],
   shallowReads: readonly IMemorySpaceAddress[],

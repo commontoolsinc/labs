@@ -72,8 +72,10 @@ import {
   buildKnownSchedulingWrites,
   collectDirectWritersForLog,
   collectReadersForWrite,
+  collectReverseDependenciesForLog,
   diffSchedulingWrites,
-  groupReadsByEntity,
+  pendingDependencyCollectionMightAffect
+    as pendingDependencyCollectionMightAffectState,
   pruneStructuralAncestorWrites,
   readsOverlapWrites,
   removeActionFromTriggerIndex,
@@ -1715,44 +1717,17 @@ export class Scheduler {
       this.reverseDependencies.delete(action);
     }
 
-    const newDependencies = new Set<Action>();
+    const newDependencies = collectReverseDependenciesForLog(
+      {
+        writersByEntity: this.writersByEntity,
+        getSchedulingWrites: (candidate) => this.getSchedulingWrites(candidate),
+      },
+      action,
+      log,
+    );
 
-    // Group reads by entity for efficient writer lookups.
-    const readsByEntity = groupReadsByEntity(log.reads);
-    const nonRecursiveByEntity = groupReadsByEntity(log.shallowReads);
-    const allEntities = new Set([
-      ...readsByEntity.keys(),
-      ...nonRecursiveByEntity.keys(),
-    ]);
-
-    // For each entity we read from, find actions that write to it
-    for (const entity of allEntities) {
-      const writers = this.writersByEntity.get(entity);
-      if (!writers) continue;
-
-      const entityReads = readsByEntity.get(entity) ?? [];
-      const entityNonRecursiveReads = nonRecursiveByEntity.get(entity) ?? [];
-
-      for (const otherAction of writers) {
-        if (otherAction === action) continue;
-        // Skip if we already found this dependency
-        if (newDependencies.has(otherAction)) continue;
-
-        // Get paths this action writes to
-        const otherWrites = this.getSchedulingWrites(otherAction) ?? [];
-
-        if (
-          readsOverlapWrites(
-            entityReads,
-            entityNonRecursiveReads,
-            otherWrites,
-          )
-        ) {
-          // otherAction writes → this action reads, so this action depends on otherAction
-          this.registerDependentEdge(otherAction, action);
-          newDependencies.add(otherAction);
-        }
-      }
+    for (const dependency of newDependencies) {
+      this.registerDependentEdge(dependency, action);
     }
 
     this.reverseDependencies.set(action, newDependencies);
@@ -2279,22 +2254,19 @@ export class Scheduler {
     reads: IMemorySpaceAddress[],
     shallowReads: IMemorySpaceAddress[],
   ): boolean {
-    if (reads.length === 0 && shallowReads.length === 0) return false;
-
-    for (const pendingAction of this.pendingDependencyCollection) {
-      if (pendingAction === action) continue;
-      if (this.effects.has(pendingAction)) continue;
-      if (this.isThrottled(pendingAction)) continue;
-
-      const writes = this.getSchedulingWrites(pendingAction);
-      if (!writes || writes.length === 0) return true;
-      if (this.hasDependentPath(pendingAction, action)) return true;
-      if (readsOverlapWrites(reads, shallowReads, writes)) {
-        return true;
-      }
-    }
-
-    return false;
+    return pendingDependencyCollectionMightAffectState(
+      {
+        pendingDependencyCollection: this.pendingDependencyCollection,
+        effects: this.effects,
+        isThrottled: (pendingAction) => this.isThrottled(pendingAction),
+        getSchedulingWrites: (pendingAction) =>
+          this.getSchedulingWrites(pendingAction),
+        hasDependentPath: (from, to) => this.hasDependentPath(from, to),
+      },
+      action,
+      reads,
+      shallowReads,
+    );
   }
 
   private hasDependentPath(
