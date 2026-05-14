@@ -1,4 +1,8 @@
-import { cloneIfNecessary } from "@commonfabric/data-model/fabric-value";
+import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
+import {
+  cloneIfNecessary,
+  getDataModelConfig,
+} from "@commonfabric/data-model/fabric-value";
 import {
   type ConflictError as IConflictError,
   type ConnectionError as IConnectionError,
@@ -270,10 +274,19 @@ const applyPendingVersion = (
   switch (pending.op) {
     case "delete":
       return undefined;
-    case "set":
-      return cloneIfNecessary(pending.value as FabricValue, {
+    case "set": {
+      // The refreeze is gated on the modern data model: under legacy, the
+      // storage-internal pending chain is expected to hold mutable values
+      // (read paths bypass `freezeReadValue`, per PR #3577's flag-bifurcated
+      // contract). The gate is transitional and will dissolve once the
+      // modern flag becomes the default (#3569). See audit
+      // `coordination/docs/2026-05-14-deep-freeze-discipline-audit.md` §4.
+      const next = cloneIfNecessary(pending.value as FabricValue, {
         frozen: false,
-      }) as EntityDocument;
+      });
+      return (getDataModelConfig() ? deepFreeze(next) : next) as
+        EntityDocument;
+    }
     case "patch": {
       let next = base;
       for (

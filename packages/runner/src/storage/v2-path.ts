@@ -1,10 +1,22 @@
+import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import {
   cloneIfNecessary,
+  getDataModelConfig,
   isArrayIndexPropertyName,
 } from "@commonfabric/data-model/fabric-value";
 import type { EntityDocument } from "@commonfabric/memory/v2";
 import type { FabricValue } from "@commonfabric/memory/interface";
 import { isRecord } from "@commonfabric/utils/types";
+
+// Under the modern data model, the materialized pending-version chain is
+// expected to hold deep-frozen values throughout (see audit
+// `coordination/docs/2026-05-14-deep-freeze-discipline-audit.md` §4). Under
+// the legacy data model, callers reach storage-internal values through a
+// read path that bypasses `freezeReadValue` and expects mutable output (see
+// PR #3577's flag-bifurcated tests); the gate is transitional and will
+// dissolve when the modern flag becomes the default (#3569).
+const maybeRefreeze = <T>(value: T): T =>
+  getDataModelConfig() ? deepFreeze(value) : value;
 
 export type ReadPathOptions = {
   allowArrayLength?: boolean;
@@ -133,9 +145,9 @@ export const cloneWithValueAtPath = (
   if (path.length === 0) {
     return value === undefined
       ? undefined
-      : cloneIfNecessary(value as FabricValue, {
-        frozen: false,
-      }) as EntityDocument;
+      : maybeRefreeze(
+        cloneIfNecessary(value as FabricValue, { frozen: false }),
+      ) as EntityDocument;
   }
 
   const baseRoot = (root ?? {}) as Record<string, unknown>;
@@ -164,7 +176,7 @@ export const cloneWithValueAtPath = (
     ? undefined
     : cloneIfNecessary(value as FabricValue, { frozen: false });
   setPathSegmentValue(currentClone, last, nextValue);
-  return nextRoot as EntityDocument;
+  return maybeRefreeze(nextRoot) as EntityDocument;
 };
 
 export const cloneWithoutPath = (
@@ -215,7 +227,7 @@ export const cloneWithoutPath = (
     delete currentClone[last];
   }
 
-  return nextRoot as EntityDocument;
+  return maybeRefreeze(nextRoot) as EntityDocument;
 };
 
 export const ensureParentContainers = (
