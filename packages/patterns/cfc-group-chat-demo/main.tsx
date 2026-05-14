@@ -18,9 +18,11 @@ import {
 } from "./logic.ts";
 import {
   commitTrustedMessageSend,
+  currentProfileCell,
   messagesValue,
   type MyProfileCell,
   participantClaimsValue,
+  sameProfileCell,
   type SharedChatMessage,
   type SharedMessagesCell,
   type SharedMessagesValue,
@@ -44,6 +46,7 @@ const writeDraftText = handler<string, { value: DraftCell }>(
 );
 
 interface SharedTranscriptInput {
+  myProfile: MyProfileCell;
   messages: SharedMessagesCell;
   id: string;
 }
@@ -52,18 +55,32 @@ const SharedTranscript = pattern<
   SharedTranscriptInput,
   { [NAME]: string; [UI]: any }
 >((
-  { messages, id }: SharedTranscriptInput,
+  { myProfile, messages, id }: SharedTranscriptInput,
 ): { [NAME]: string; [UI]: any } => {
   const messageCountLabel = computed(() =>
     messageCountText(messagesValue(messages).length)
   );
-  const transcriptRows = messages.map((messageCell) => (
-    <div style={{ width: "min(34rem, 100%)" }}>
-      {VerifiedChatBubble({
-        message: messageCell,
-      })}
-    </div>
-  ));
+  const transcriptRows = messages.map((messageCell) => {
+    const authorProfile = messageCell.authorProfile;
+    const isMine = computed(() =>
+      sameProfileCell(currentProfileCell(myProfile), authorProfile)
+    );
+    return (
+      <div
+        style={{
+          display: "flex",
+          width: "100%",
+          justifyContent: isMine ? "flex-end" : "flex-start",
+        }}
+      >
+        <div style={{ width: "min(34rem, 100%)" }}>
+          {VerifiedChatBubble({
+            message: messageCell,
+          })}
+        </div>
+      </div>
+    );
+  });
 
   return {
     [NAME]: computed(() => `${id} transcript`),
@@ -207,6 +224,7 @@ export const GroupChatDemo = pattern<GroupChatDemoInput, GroupChatDemoOutput>((
           <cf-card id="chat-panel">
             <cf-vstack slot="content" gap="3" style={{ minHeight: 0 }}>
               {SharedTranscript({
+                myProfile: myProfileCell,
                 messages: messagesCell as any,
                 id: "trusted-conversation-preview",
               })}

@@ -115,19 +115,26 @@ export const currentProfileSnapshot = (
   myProfile: MyProfileCell,
 ): TrustedProfile | undefined => currentProfileCell(myProfile)?.get();
 
-const cellKey = (cell: unknown): string | undefined => {
+export const profileCellKey = (cell: unknown): string | undefined => {
   try {
-    const link = (cell as {
+    const resolved = (cell as { resolveAsCell?: () => unknown })
+      ?.resolveAsCell?.() ?? cell;
+    const link = (resolved as {
       getAsNormalizedFullLink?: () => { id?: string; scope?: string };
       getAsLink?: () => string;
     }).getAsNormalizedFullLink?.();
     if (link?.id) {
       return `${link.scope ?? "space"}:${link.id}`;
     }
-    return (cell as { getAsLink?: () => string }).getAsLink?.();
+    return (resolved as { getAsLink?: () => string }).getAsLink?.();
   } catch {
     return undefined;
   }
+};
+
+export const sameProfileCell = (left: unknown, right: unknown): boolean => {
+  const leftKey = profileCellKey(left);
+  return leftKey !== undefined && leftKey === profileCellKey(right);
 };
 
 export const participantClaimsValue = (
@@ -144,7 +151,7 @@ export const participantClaimsValue = (
     if (!name) {
       return;
     }
-    const key = cellKey(profile) ?? name;
+    const key = profileCellKey(profile) ?? name;
     if (seen.has(key)) {
       return;
     }
