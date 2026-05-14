@@ -1,12 +1,19 @@
 import ts from "typescript";
-import type { TransformationContext } from "../../core/mod.ts";
+import type {
+  CapabilityParamSummary,
+  TransformationContext,
+} from "../../core/mod.ts";
 import type { ClosureTransformationStrategy } from "./strategy.ts";
 import {
   detectCallKind,
   getDeriveInputAndCallbackArgument,
+  getTypeFromTypeNodeWithFallback,
+  setParentPointers,
   unwrapOpaqueLikeType,
 } from "../../ast/mod.ts";
+import { analyzeFunctionCapabilities } from "../../policy/capability-analysis.ts";
 import { registerDeriveCallType } from "../../ast/type-inference.ts";
+import { applyShrinkAndWrap } from "../../transformers/type-shrinking.ts";
 import { getCellKind } from "../../transformers/opaque-ref/opaque-ref.ts";
 import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
 import { buildCapturePropertyAssignments } from "../../utils/capture-tree.ts";
@@ -103,6 +110,22 @@ export function isDeriveCall(
 ): boolean {
   const callKind = detectCallKind(node, context.checker);
   return callKind?.kind === "derive";
+}
+
+function getFirstParameterCapabilitySummary(
+  callback: ts.ArrowFunction | ts.FunctionExpression,
+  checker: ts.TypeChecker,
+): CapabilityParamSummary | undefined {
+  const summary = analyzeFunctionCapabilities(callback, {
+    checker,
+    includeNestedCallbacks: true,
+  });
+  const parameter = callback.parameters[0];
+  if (!parameter) return undefined;
+  const parameterName = ts.isIdentifier(parameter.name)
+    ? parameter.name.text
+    : "__param0";
+  return summary.params.find((param) => param.name === parameterName);
 }
 
 /**
@@ -461,16 +484,40 @@ export function transformDeriveCall(
     null, // derive merges captures into top-level object
     hasExplicitReturnType ? resultTypeNode : null,
   );
+  setParentPointers(newCallback);
 
   // Build TypeNodes for schema generation
   const schemaFactory = new SchemaFactory(context);
-  const inputTypeNode = schemaFactory.createDeriveInputSchema(
+  let inputTypeNode = schemaFactory.createDeriveInputSchema(
     originalInputParamName,
     originalInput,
     captureTree,
     captureNameMap,
     hadZeroParameters,
   );
+  const inputParamSummary = getFirstParameterCapabilitySummary(
+    newCallback,
+    checker,
+  );
+  if (inputParamSummary) {
+    inputTypeNode = applyShrinkAndWrap(
+      inputParamSummary,
+      inputTypeNode,
+      getTypeFromTypeNodeWithFallback(
+        inputTypeNode,
+        checker,
+        options.typeRegistry,
+      ),
+      false,
+      checker,
+      context.sourceFile,
+      factory,
+      "full",
+      inputParamSummary.capability,
+      context,
+      newCallback,
+    );
+  }
 
   // Build the derive call expression
   const newDeriveCall = context.cfHelpers.createHelperCall(

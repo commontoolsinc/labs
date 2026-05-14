@@ -38,7 +38,7 @@ export default pattern(() => {
         properties: {
             value: {
                 type: "number",
-                asCell: ["cell"]
+                asCell: ["readonly"]
             },
             config: {
                 anyOf: [{
@@ -51,7 +51,7 @@ export default pattern(() => {
                     }, {
                         type: "null"
                     }],
-                asCell: ["cell"]
+                asCell: ["readonly"]
             }
         },
         required: ["value", "config"]

@@ -46,7 +46,7 @@ export default pattern((__cf_pattern_input) => {
                             items: {
                                 $ref: "#/$defs/HabitLog"
                             },
-                            asCell: ["cell"]
+                            asCell: ["readonly"]
                         },
                         habit: {
                             type: "object",
@@ -113,7 +113,7 @@ export default pattern((__cf_pattern_input) => {
                                 items: {
                                     $ref: "#/$defs/HabitLog"
                                 },
-                                asCell: ["cell"]
+                                asCell: ["readonly"]
                             },
                             todayDate: {
                                 type: "string"

@@ -69,7 +69,7 @@ export default pattern((__cf_pattern_input) => {
                             items: {
                                 type: "string"
                             },
-                            asCell: ["cell"]
+                            asCell: ["readonly"]
                         }
                     },
                     required: ["path"]
@@ -87,7 +87,7 @@ export default pattern((__cf_pattern_input) => {
                             items: {
                                 $ref: "#/$defs/Entry"
                             },
-                            asCell: ["cell"]
+                            asCell: ["readonly"]
                         },
                         p: {
                             type: "array",
@@ -145,7 +145,7 @@ export default pattern((__cf_pattern_input) => {
                             properties: {
                                 labelPrefix: {
                                     type: "string",
-                                    asCell: ["cell"]
+                                    asCell: ["readonly"]
                                 }
                             },
                             required: ["labelPrefix"]

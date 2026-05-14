@@ -67,7 +67,7 @@ export default pattern((__cf_pattern_input) => {
                 items: {
                     type: "string"
                 },
-                asCell: ["cell"]
+                asCell: ["writeonly"]
             }
         },
         required: ["path"]
@@ -101,7 +101,7 @@ export default pattern((__cf_pattern_input) => {
                             items: {
                                 type: "string"
                             },
-                            asCell: ["cell"]
+                            asCell: ["readonly"]
                         }
                     },
                     required: ["path"]
@@ -115,8 +115,11 @@ export default pattern((__cf_pattern_input) => {
                     type: "object",
                     properties: {
                         tree: {
-                            $ref: "#/$defs/AnonymousType_1",
-                            asCell: ["cell"]
+                            type: "array",
+                            items: {
+                                $ref: "#/$defs/Entry"
+                            },
+                            asCell: ["readonly"]
                         },
                         p: {
                             type: "array",
@@ -127,12 +130,6 @@ export default pattern((__cf_pattern_input) => {
                     },
                     required: ["tree", "p"],
                     $defs: {
-                        AnonymousType_1: {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/Entry"
-                            }
-                        },
                         Entry: {
                             type: "object",
                             properties: {
@@ -146,7 +143,10 @@ export default pattern((__cf_pattern_input) => {
                                     "enum": ["file", "folder"]
                                 },
                                 children: {
-                                    $ref: "#/$defs/AnonymousType_1"
+                                    type: "array",
+                                    items: {
+                                        $ref: "#/$defs/Entry"
+                                    }
                                 }
                             },
                             required: ["id", "name", "type"]
@@ -171,16 +171,13 @@ export default pattern((__cf_pattern_input) => {
                                     "enum": ["file", "folder"]
                                 },
                                 children: {
-                                    $ref: "#/$defs/AnonymousType_1"
+                                    type: "array",
+                                    items: {
+                                        $ref: "#/$defs/Entry"
+                                    }
                                 }
                             },
                             required: ["id", "name", "type"]
-                        },
-                        AnonymousType_1: {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/Entry"
-                            }
                         }
                     }
                 } as const satisfies __cfHelpers.JSONSchema, {
@@ -212,16 +209,13 @@ export default pattern((__cf_pattern_input) => {
                                     "enum": ["file", "folder"]
                                 },
                                 children: {
-                                    $ref: "#/$defs/AnonymousType_1"
+                                    type: "array",
+                                    items: {
+                                        $ref: "#/$defs/Entry"
+                                    }
                                 }
                             },
                             required: ["id", "name", "type"]
-                        },
-                        AnonymousType_1: {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/Entry"
-                            }
                         }
                     }
                 } as const satisfies __cfHelpers.JSONSchema, {
@@ -267,7 +261,7 @@ export default pattern((__cf_pattern_input) => {
                                     }
                                 },
                                 required: ["name"],
-                                asCell: ["stream"]
+                                asCell: ["readonly"]
                             },
                             item: {
                                 type: "object",
@@ -305,7 +299,7 @@ export default pattern((__cf_pattern_input) => {
                                         }
                                     },
                                     required: ["name"],
-                                    asCell: ["stream"]
+                                    asCell: ["readonly"]
                                 }
                             },
                             required: ["pushPath"]
