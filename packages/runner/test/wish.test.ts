@@ -2499,15 +2499,12 @@ describe("wish built-in", () => {
     });
 
     it("starts piece automatically when accessed via cross-space wish", async () => {
-      // Setup 1: Create a simple counter pattern/piece
+      // Setup 1: Create a simple piece. The actual returned shape doesn't
+      // matter for this test — we only care that the piece can be started
+      // and that its result is reachable through a cross-space wish.
       const counterPattern = pattern<{ count: number }>(() => {
         const count = 0;
-        return {
-          count,
-          increment: () => {
-            return count + 1;
-          },
-        };
+        return { count };
       });
 
       // Setup 2: Store the piece in home space
@@ -2562,10 +2559,9 @@ describe("wish built-in", () => {
       expect(pieceData).toBeDefined();
       expect(typeof pieceData).toBe("object");
 
-      // The piece should be running and have its state accessible
-      // Note: This test may need adjustment based on actual piece startup behavior
+      // The piece should be running and have its state accessible.
       if (typeof pieceData === "object" && pieceData !== null) {
-        expect("count" in pieceData || "increment" in pieceData).toBe(true);
+        expect("count" in pieceData).toBe(true);
       }
     });
   });

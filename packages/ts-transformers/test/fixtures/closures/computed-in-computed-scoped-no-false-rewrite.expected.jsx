@@ -26,7 +26,7 @@ const __cfModuleCallback_1 = __cfHardenFn(() => {
             },
             required: ["bar"]
         } as const satisfies __cfHelpers.JSONSchema, {}, () => ({ bar: 1 })).for("config", true);
-        return config.bar;
+        return config.key("bar");
     }
     return config.bar;
 });

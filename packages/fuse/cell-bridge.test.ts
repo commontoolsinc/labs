@@ -208,6 +208,8 @@ type RebuildPieceProp = (args: {
   spaceName: string;
 }) => Promise<void>;
 
+type EnqueuePiecePropRebuild = RebuildPieceProp;
+
 type BuildSourceTree = (
   pieceIno: bigint,
   piece: unknown,
@@ -990,6 +992,63 @@ Deno.test("CellBridge.rebuildPieceProp keeps replaced callable inodes alive brie
   assertEquals(currentToolIno !== undefined, true);
   assertEquals(currentToolIno === initialToolIno, false);
   assertEquals(tree.getNode(initialToolIno!)?.kind, "callable");
+});
+
+Deno.test("CellBridge queues piece prop rebuilds for the same prop", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
+  const cell = makeCell({}, undefined);
+
+  let releaseFirst: (() => void) | undefined;
+  const firstCanFinish = new Promise<void>((resolve) => {
+    releaseFirst = resolve;
+  });
+  let active = 0;
+  let maxActive = 0;
+  const events: string[] = [];
+
+  (bridge as unknown as { rebuildPieceProp: RebuildPieceProp })
+    .rebuildPieceProp = async (args) => {
+      active++;
+      maxActive = Math.max(maxActive, active);
+      events.push(`start-${String(args.newValue)}`);
+      if (args.newValue === "first") {
+        await firstCanFinish;
+      }
+      events.push(`end-${String(args.newValue)}`);
+      active--;
+    };
+
+  const enqueue = (bridge as unknown as {
+    enqueuePiecePropRebuild: EnqueuePiecePropRebuild;
+  }).enqueuePiecePropRebuild.bind(bridge);
+
+  const baseJob = {
+    cell,
+    pieceId: "of:queued-prop",
+    pieceIno: 42n,
+    pieceName: "Queued Prop",
+    propName: "result" as const,
+    resolveLink: () => null,
+    spaceName: "home",
+  };
+
+  const first = enqueue({ ...baseJob, newValue: "first" });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const second = enqueue({ ...baseJob, newValue: "second" });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assertEquals(events, ["start-first"]);
+  releaseFirst?.();
+  await Promise.all([first, second]);
+
+  assertEquals(maxActive, 1);
+  assertEquals(events, [
+    "start-first",
+    "end-first",
+    "start-second",
+    "end-second",
+  ]);
 });
 
 Deno.test("CellBridge.rebuildPieceProp clears stale result mounts when value becomes null", async () => {
