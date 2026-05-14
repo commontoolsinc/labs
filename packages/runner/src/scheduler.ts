@@ -101,12 +101,8 @@ import {
   clearSchedulerDirectDirty,
   clearSchedulerDirty,
   type DirtySchedulingState,
-  forceClearStale as forceClearStaleState,
-  isActionStale,
-  markDirectDirty as markDirectDirtyState,
   markSchedulerDirty,
-  setStaleFromInputs,
-  type StalenessState,
+  SchedulerStaleness,
 } from "./scheduler/staleness.ts";
 import {
   registerParentChildAction,
@@ -229,13 +225,9 @@ export class Scheduler {
   private isEffectAction = new WeakMap<Action, boolean>();
   // In pull mode, `dirty` means direct dirty. `stale` additionally includes
   // actions with dirty upstream computations.
-  private stalenessState: StalenessState = {
-    dirty: new Set<Action>(),
-    stale: new Set<Action>(),
+  private staleness = new SchedulerStaleness({
     dependents: this.dependents,
-    upstreamStaleWriters: new WeakMap<Action, Set<Action>>(),
-    upstreamStaleCount: new WeakMap<Action, number>(),
-  };
+  });
   private pullMode = true;
 
   // Debugger breakpoints: action IDs that should trigger `debugger` before execution
@@ -354,10 +346,10 @@ export class Scheduler {
     dependencies: this.dependencies,
     dependents: this.dependents,
     reverseDependencies: this.reverseDependencies,
-    stalenessState: this.stalenessState,
+    staleness: this.staleness,
     getSchedulingWrites: (action) =>
       getSchedulingWritesFromState(this.schedulingWriteState, action),
-    isStale: (action) => isActionStale(this.stalenessState, action),
+    isStale: (action) => this.staleness.isStale(action),
     isDemandedPullComputation: (action) =>
       this.isDemandedPullComputation(action),
     queueExecution: () => this.queueExecution(),
@@ -385,7 +377,7 @@ export class Scheduler {
     },
   };
   private dirtySchedulingState: DirtySchedulingState = {
-    stalenessState: this.stalenessState,
+    staleness: this.staleness,
     computations: this.computations,
     scheduleComputationDebounce: (action) =>
       this.scheduleComputationDebounce(action),
@@ -702,7 +694,7 @@ export class Scheduler {
 
     // Mark as dirty and pending for first-time execution
     // In pull mode this still doesn't mean execution: There needs to be an effect to trigger it.
-    markDirectDirtyState(this.stalenessState, action);
+    this.staleness.markDirectDirty(action);
     this.pending.add(action);
     this.scheduledFirstTime.add(action);
 
@@ -797,7 +789,7 @@ export class Scheduler {
     // pull those computations and see fresh data.
     // Skip throttled computations - they'll trigger via storage changes when unthrottled.
     // Use isEffectAction instead of effects because unsubscribe() clears effects before run()
-    if (this.pullMode && actionIsEffect && this.stalenessState.stale.size > 0) {
+    if (this.pullMode && actionIsEffect && this.staleness.stale.size > 0) {
       const effectReads = reads;
       const effectShallowReads = shallowReads;
       let shouldMarkDirty = false;
@@ -832,7 +824,7 @@ export class Scheduler {
 
           for (const writer of writers) {
             if (writer === action) continue;
-            if (!isActionStale(this.stalenessState, writer)) continue;
+            if (!this.staleness.isStale(writer)) continue;
             if (this.effects.has(writer)) continue; // Only check computations
             if (this.delays.isThrottled(writer)) continue; // Skip throttled - they trigger via storage
 
@@ -856,9 +848,9 @@ export class Scheduler {
         }
       }
 
-      if (shouldMarkDirty && !this.stalenessState.dirty.has(action)) {
+      if (shouldMarkDirty && !this.staleness.dirty.has(action)) {
         this.markEffectConditionallyScheduled(action);
-        markDirectDirtyState(this.stalenessState, action);
+        this.staleness.markDirectDirty(action);
         this.pending.add(action);
         this.queueExecution();
       }
@@ -889,8 +881,7 @@ export class Scheduler {
         getActionId: (target) => this.getActionId(target),
         clearDirectDirty: (target) =>
           clearSchedulerDirectDirty(this.dirtySchedulingState, target),
-        forceClearStale: (target) =>
-          forceClearStaleState(this.stalenessState, target),
+        forceClearStale: (target) => this.staleness.forceClearStale(target),
         cancelDebounceTimer: (target) =>
           this.delays.cancelDebounceTimer(target),
         clearComputationDebounceState: (target, targetOptions) =>
@@ -965,8 +956,7 @@ export class Scheduler {
             commitPromise,
             resubscribe: (target, targetLog) =>
               this.resubscribe(target, targetLog),
-            markDirectDirty: (target) =>
-              markDirectDirtyState(this.stalenessState, target),
+            markDirectDirty: (target) => this.staleness.markDirectDirty(target),
             queueExecution: () => this.queueExecution(),
             removeInFlightSource: (target, source) =>
               removeInFlightSourceState(
@@ -1226,7 +1216,7 @@ export class Scheduler {
           actionChangeGroups: this.actionChangeGroups,
           effects: this.effects,
           pending: this.pending,
-          dirty: this.stalenessState.dirty,
+          dirty: this.staleness.dirty,
           inFlightSources: this.inFlightSourceState.inFlightSources,
           conditionallyScheduledEffects: this.conditionallyScheduledEffects,
           getActionId: (target) => this.getActionId(target),
@@ -1384,7 +1374,7 @@ export class Scheduler {
       effects: this.effects,
       computations: this.computations,
       pending: this.pending,
-      dirty: this.stalenessState.dirty,
+      dirty: this.staleness.dirty,
       conditionallyScheduledEffects: this.conditionallyScheduledEffects,
       dependencies: this.dependencies,
       dependents: this.dependents,
@@ -1435,11 +1425,6 @@ export class Scheduler {
     return this.dependents.get(action) ?? new Set();
   }
 
-  private resetUpstreamStaleState(): void {
-    this.stalenessState.upstreamStaleWriters = new WeakMap();
-    this.stalenessState.upstreamStaleCount = new WeakMap();
-  }
-
   // ============================================================
   // Pull-based scheduling methods
   // ============================================================
@@ -1451,8 +1436,8 @@ export class Scheduler {
    */
   enablePullMode(): void {
     this.pullMode = true;
-    this.stalenessState.stale.clear();
-    this.resetUpstreamStaleState();
+    this.staleness.stale.clear();
+    this.staleness.resetUpstreamStaleState();
 
     // Rebuild reverse dependency graph (dependents map) from current dependencies.
     // In push mode, processRun() doesn't update dependents, so the map may be stale.
@@ -1463,8 +1448,8 @@ export class Scheduler {
         this.updateDependents(action, log);
       }
     }
-    for (const action of this.stalenessState.dirty) {
-      setStaleFromInputs(this.stalenessState, action);
+    for (const action of this.staleness.dirty) {
+      this.staleness.setStaleFromInputs(action);
     }
 
     this.runtime.telemetry.submit({
@@ -1480,9 +1465,7 @@ export class Scheduler {
   disablePullMode(): void {
     this.pullMode = false;
     // Clear dirty set when switching back to push mode
-    this.stalenessState.dirty.clear();
-    this.stalenessState.stale.clear();
-    this.resetUpstreamStaleState();
+    this.staleness.clearAll();
     this.runtime.telemetry.submit({
       type: "scheduler.mode.change",
       pullMode: false,
@@ -1527,7 +1510,7 @@ export class Scheduler {
         resultTrueCount: 0,
         reverseDependencyEdgeCount: 0,
         maxDirectWriterCount: 0,
-        dirty: this.stalenessState.dirty.has(action),
+        dirty: this.staleness.dirty.has(action),
         pending: this.pending.has(action),
         readCount: log?.reads.length ?? 0,
         shallowReadCount: log?.shallowReads.length ?? 0,
@@ -1535,7 +1518,7 @@ export class Scheduler {
       };
       trace.actionSummaries.set(action, summary);
     } else {
-      summary.dirty ||= this.stalenessState.dirty.has(action);
+      summary.dirty ||= this.staleness.dirty.has(action);
       summary.pending ||= this.pending.has(action);
     }
     return summary;
@@ -1580,7 +1563,7 @@ export class Scheduler {
    * Returns whether an action is marked as dirty.
    */
   isDirty(action: Action): boolean {
-    return this.stalenessState.dirty.has(action);
+    return this.staleness.dirty.has(action);
   }
 
   /**
@@ -1606,7 +1589,7 @@ export class Scheduler {
         trace.maxDepth = Math.max(trace.maxDepth, trace.depth);
         const actionSummary = this.getTraceActionSummary(trace, action);
         actionSummary.visitCount++;
-        if (this.stalenessState.dirty.has(action)) {
+        if (this.staleness.dirty.has(action)) {
           trace.dirtyInputCount++;
           actionSummary.dirtyInputCount++;
         }
@@ -1619,7 +1602,7 @@ export class Scheduler {
           this.getTraceActionSummary(trace, action).memoHitCount++;
         }
         if (
-          cached && this.stalenessState.dirty.has(action) &&
+          cached && this.staleness.dirty.has(action) &&
           this.computations.has(action)
         ) {
           if (!workSet.has(action) && trace) trace.workSetAddCount++;
@@ -1628,14 +1611,14 @@ export class Scheduler {
         return cached;
       }
 
-      if (!isActionStale(this.stalenessState, action)) {
+      if (!this.staleness.isStale(action)) {
         memo.set(action, false);
         return false;
       }
 
       if (this.collectStack.has(action)) {
         if (trace) trace.cycleHitCount++;
-        const cycleResult = isActionStale(this.stalenessState, action) ||
+        const cycleResult = this.staleness.isStale(action) ||
           workSet.has(action);
         memo.set(action, cycleResult);
         return cycleResult;
@@ -1644,7 +1627,7 @@ export class Scheduler {
       this.collectStack.add(action);
       addedToStack = true;
 
-      let actionNeedsRun = isActionStale(this.stalenessState, action);
+      let actionNeedsRun = this.staleness.isStale(action);
       const directWriters = this.reverseDependencies.get(action);
       if (directWriters) {
         if (trace) {
@@ -1658,7 +1641,7 @@ export class Scheduler {
           );
         }
         for (const writer of directWriters) {
-          if (!isActionStale(this.stalenessState, writer)) {
+          if (!this.staleness.isStale(writer)) {
             memo.set(writer, false);
             continue;
           }
@@ -1688,7 +1671,7 @@ export class Scheduler {
       }
 
       if (
-        this.stalenessState.dirty.has(action) && this.computations.has(action)
+        this.staleness.dirty.has(action) && this.computations.has(action)
       ) {
         if (!workSet.has(action) && trace) trace.workSetAddCount++;
         workSet.add(action);
@@ -1887,7 +1870,7 @@ export class Scheduler {
 
     let hasDirtyDependencies = false;
     for (const writer of directWriters) {
-      if (!isActionStale(this.stalenessState, writer)) {
+      if (!this.staleness.isStale(writer)) {
         memo.set(writer, false);
         continue;
       }
@@ -1906,7 +1889,7 @@ export class Scheduler {
       if (writerNeedsRun) {
         hasDirtyDependencies = true;
         if (
-          this.stalenessState.dirty.has(writer) && this.computations.has(writer)
+          this.staleness.dirty.has(writer) && this.computations.has(writer)
         ) {
           if (!workSet.has(writer) && trace) trace.workSetAddCount++;
           workSet.add(writer);
@@ -1931,7 +1914,7 @@ export class Scheduler {
       }
     }
 
-    for (const action of this.stalenessState.dirty) {
+    for (const action of this.staleness.dirty) {
       if (isDirtyPullActionRunnable(this.dirtyPullRunnableState, action)) {
         this.pending.add(action);
         workSet.add(action);
@@ -1946,7 +1929,7 @@ export class Scheduler {
       }
     }
 
-    for (const action of this.stalenessState.dirty) {
+    for (const action of this.staleness.dirty) {
       if (
         isDirtyPullActionRunnable(
           this.dirtyPullRunnableStateWithDebounce,
@@ -1960,7 +1943,7 @@ export class Scheduler {
     return false;
   }
   private hasDeferredDirtyEffectWork(): boolean {
-    for (const action of this.stalenessState.dirty) {
+    for (const action of this.staleness.dirty) {
       if (this.effects.has(action)) return true;
     }
     return false;
@@ -1983,7 +1966,7 @@ export class Scheduler {
         )
       ) {
         const pendingBefore = this.pending.has(effect);
-        const dirtyBefore = this.stalenessState.dirty.has(effect);
+        const dirtyBefore = this.staleness.dirty.has(effect);
         const debounceMs = this.delays.getDebounce(effect);
         if (
           !pendingBefore && !dirtyBefore &&
@@ -2061,7 +2044,7 @@ export class Scheduler {
         pullMode: this.pullMode,
         computations: this.computations,
         effects: this.effects,
-        dirty: this.stalenessState.dirty,
+        dirty: this.staleness.dirty,
       },
     );
   }
@@ -2073,7 +2056,7 @@ export class Scheduler {
         pullMode: this.pullMode,
         computations: this.computations,
         effects: this.effects,
-        dirty: this.stalenessState.dirty,
+        dirty: this.staleness.dirty,
         pending: this.pending,
         queueExecution: () => this.queueExecution(),
         logDebounce: (message) =>
@@ -2089,7 +2072,7 @@ export class Scheduler {
         pullMode: this.pullMode,
         computations: this.computations,
         effects: this.effects,
-        dirty: this.stalenessState.dirty,
+        dirty: this.staleness.dirty,
         pending: this.pending,
         queueExecution: () => this.queueExecution(),
         logDebounce: (message) =>
@@ -2450,7 +2433,7 @@ export class Scheduler {
       runtime: this.runtime,
       eventQueue: this.eventQueue,
       pullMode: this.pullMode,
-      dirty: this.stalenessState.dirty,
+      dirty: this.staleness.dirty,
       pending: this.pending,
       eventBlockingDeps,
       eventPreflightTelemetryEnabled: this.eventPreflightTelemetryEnabled,
@@ -2511,7 +2494,7 @@ export class Scheduler {
     const initialSeeds = buildPullInitialSeeds({
       pullMode: this.pullMode,
       pending: this.pending,
-      dirty: this.stalenessState.dirty,
+      dirty: this.staleness.dirty,
       effects: this.effects,
       newActionsWithoutDependencies,
       eventBlockingDeps,
@@ -2644,12 +2627,12 @@ export class Scheduler {
         // Check if action is still valid
         // In pull mode, check both pending (effects) and dirty (computations)
         const isInPending = this.pending.has(fn);
-        const isInDirty = this.stalenessState.dirty.has(fn);
+        const isInDirty = this.staleness.dirty.has(fn);
 
         if (this.pullMode) {
           // For effects: we cleared dirty upfront, so check if re-dirtied (cycle)
           if (this.effects.has(fn)) {
-            if (this.stalenessState.dirty.has(fn)) {
+            if (this.staleness.dirty.has(fn)) {
               // Effect was re-dirtied during this tick → cycle detected
               logger.debug("schedule-cycle", () => [
                 `[CYCLE] Effect ${
@@ -2693,7 +2676,7 @@ export class Scheduler {
           this.pending.delete(fn);
           // Keep pull-mode effects dirty so they wake when the throttle expires.
           if (this.pullMode && this.effects.has(fn)) {
-            markDirectDirtyState(this.stalenessState, fn);
+            this.staleness.markDirectDirty(fn);
           }
           continue;
         }
@@ -2795,7 +2778,7 @@ export class Scheduler {
       settledEarly,
       lastWorkSet,
       earlyIterationComputations,
-      dirty: this.stalenessState.dirty,
+      dirty: this.staleness.dirty,
       effects: this.effects,
       runsThisExecute: this.runsThisExecute,
       isThrottled: (action) => this.delays.isThrottled(action),
@@ -2822,7 +2805,7 @@ export class Scheduler {
       // Run all remaining dirty effects - these shouldn't be lost
       // But skip throttled effects - they should stay dirty for later
       for (const effect of cycleBreakPlan.dirtyEffectsToRun) {
-        if (this.effects.has(effect) && this.stalenessState.dirty.has(effect)) {
+        if (this.effects.has(effect) && this.staleness.dirty.has(effect)) {
           logger.debug("schedule-cycle", () => [
             `[CYCLE-BREAK] Running dirty effect: ${this.getActionId(effect)}`,
           ]);
@@ -2888,7 +2871,7 @@ export class Scheduler {
     const continuation = planExecuteContinuation({
       pullMode: this.pullMode,
       pending: this.pending,
-      dirty: this.stalenessState.dirty,
+      dirty: this.staleness.dirty,
       effects: this.effects,
       shouldRerunAfterCurrentExecute,
       hasQueuedEventReadyNow,

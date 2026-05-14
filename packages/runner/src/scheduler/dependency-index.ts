@@ -14,11 +14,7 @@ import type {
 } from "../storage/interface.ts";
 import { filterIgnoredAddresses } from "./reactivity.ts";
 import { entityKey } from "./keys.ts";
-import {
-  addStaleUpstream,
-  removeStaleUpstream,
-  type StalenessState,
-} from "./staleness.ts";
+import type { SchedulerStaleness } from "./staleness.ts";
 import type {
   Action,
   DirtyDependencyTraceContext,
@@ -63,7 +59,7 @@ export interface DependencyGraphState extends TriggerIndexState {
   readonly dependencies: WeakMap<Action, ReactivityLog>;
   readonly dependents: WeakMap<Action, Set<Action>>;
   readonly reverseDependencies: WeakMap<Action, Set<Action>>;
-  readonly stalenessState: StalenessState;
+  readonly staleness: SchedulerStaleness;
   readonly getSchedulingWrites: (
     action: Action,
   ) => readonly IMemorySpaceAddress[] | undefined;
@@ -586,7 +582,7 @@ export function registerDependentEdge(
   reverse.add(writer);
 
   if (!alreadyDependent && state.isStale(writer)) {
-    addStaleUpstream(state.stalenessState, writer, dependent);
+    state.staleness.addStaleUpstream(writer, dependent);
     if (state.isDemandedPullComputation(writer)) {
       state.queueExecution();
     }
@@ -611,7 +607,7 @@ export function unregisterDependentEdge(
   }
 
   if (hadDependent) {
-    removeStaleUpstream(state.stalenessState, writer, dependent);
+    state.staleness.removeStaleUpstream(writer, dependent);
   }
 }
 
