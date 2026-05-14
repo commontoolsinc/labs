@@ -16,7 +16,6 @@ import {
   type NormalizedFullLink,
   toMemorySpaceAddress,
 } from "./link-utils.ts";
-import { normalizeCellScope } from "./scope.ts";
 import type {
   ChangeGroup,
   IExtendedStorageTransaction,
@@ -25,7 +24,6 @@ import type {
   IStorageTransaction,
 } from "./storage/interface.ts";
 import {
-  arraysOverlap,
   sortAndCompactPaths,
   type SortedAndCompactPaths,
 } from "./reactive-dependencies.ts";
@@ -44,8 +42,6 @@ import type {
   SchedulerDiagnosisResult,
   SchedulerEventPreflightActionSummary,
   SchedulerEventPreflightStats,
-  SchedulerGraphEdge,
-  SchedulerGraphNode,
   SchedulerGraphSnapshot,
 } from "./telemetry.ts";
 import {
@@ -152,6 +148,7 @@ import {
   trustedEventWriteCandidatesFromTransaction,
   txToReactivityLog,
 } from "./scheduler/reactivity.ts";
+import { buildSchedulerGraphSnapshot } from "./scheduler/graph-snapshot.ts";
 import { entityKey } from "./scheduler/keys.ts";
 import {
   collectTransitiveEffects,
@@ -1900,209 +1897,36 @@ export class Scheduler {
    * Uses getActionId for the identifier (includes code location).
    */
   getGraphSnapshot(): SchedulerGraphSnapshot {
-    const nodes: SchedulerGraphNode[] = [];
-    const edges: SchedulerGraphEdge[] = [];
-    const actionById = new Map<string, Action>();
-
-    // Build nodes from all known actions (effects + computations)
-    for (const action of [...this.effects, ...this.computations]) {
-      const id = this.getActionId(action);
-      actionById.set(id, action);
-
-      // Get parent-child relationships
-      const parent = this.actionParent.get(action);
-      const parentId = parent ? this.getActionId(parent) : undefined;
-      const children = this.actionChildren.get(action);
-      const childCount = children ? children.size : undefined;
-
-      // Get reads and writes for diagnostics
-      const deps = this.dependencies.get(action);
-      const reads = deps?.reads.map((r) =>
-        `${r.space}/${r.id}/${normalizeCellScope(r.scope)}/${r.path.join("/")}`
-      );
-      const shallowReads = deps?.shallowReads.map((r) =>
-        `${r.space}/${r.id}/${normalizeCellScope(r.scope)}/${r.path.join("/")}`
-      );
-      const writes = this.getSchedulingWrites(action)?.map((w) =>
-        `${w.space}/${w.id}/${normalizeCellScope(w.scope)}/${w.path.join("/")}`
-      );
-
-      // Get timing controls
-      const now = performance.now();
-      const debounceMs = this.actionDebounce.get(action);
-      const throttleMs = this.actionThrottle.get(action);
-      const nextDebounceRunAt = this.getNextDebounceRunTime(action);
-      const nextEligibleRunAt = this.getNextEligibleRunTime(action);
-
-      // Get pattern association
-      const annotated = action as Partial<TelemetryAnnotations>;
-      const patternId = annotated.pattern
-        ? this.runtime.patternManager.getPatternId(annotated.pattern)
-        : undefined;
-
-      nodes.push({
-        id,
-        type: this.effects.has(action) ? "effect" : "computation",
-        stats: this.actionStats.get(id),
-        isDirty: this.dirty.has(action),
-        isPending: this.pending.has(action),
-        isDemanded: this.isDemandedPullComputation(action),
-        isLiveEffect: this.isLiveEffect(action),
-        isPullDemandRoot: this.isPullDemandRootEffect(action),
-        isConditionallyScheduled: this.conditionallyScheduledEffects.has(
-          action,
-        ),
-        isDebouncedWaiting: nextDebounceRunAt !== undefined &&
-          nextDebounceRunAt > now,
-        hasActiveDebounceTimer: this.debounceTimers.has(action),
-        nextDebounceRunInMs: nextDebounceRunAt !== undefined
-          ? Math.max(0, Math.round(nextDebounceRunAt - now))
-          : undefined,
-        nextEligibleRunInMs: nextEligibleRunAt !== undefined
-          ? Math.max(0, Math.round(nextEligibleRunAt - now))
-          : undefined,
-        parentId,
-        childCount: childCount && childCount > 0 ? childCount : undefined,
-        preview: (action as Action & {
-          module?: { implementation?: { preview?: string } };
-        }).module?.implementation?.preview,
-        reads,
-        shallowReads,
-        writes,
-        debounceMs: debounceMs && debounceMs > 0 ? debounceMs : undefined,
-        throttleMs: throttleMs && throttleMs > 0 ? throttleMs : undefined,
-        patternId,
-      });
-    }
-
-    // Build edges from dependents map
-    for (const action of [...this.effects, ...this.computations]) {
-      const actionId = this.getActionId(action);
-      const deps = this.dependents.get(action);
-      if (deps) {
-        for (const dependent of deps) {
-          const dependentId = this.getActionId(dependent);
-          // Find overlapping cells between action's writes and dependent's reads
-          const cells = this.findOverlappingCells(action, dependent);
-          edges.push({
-            from: actionId,
-            to: dependentId,
-            cells,
-          });
-        }
-      }
-    }
-
-    // Find source entities (read but not written by any action)
-    // These represent pattern inputs / external data
-    const entityReaders = new Map<string, Set<string>>(); // entity -> action IDs that read it
-    const writtenEntities = new Set<string>();
-
-    for (const action of [...this.effects, ...this.computations]) {
-      const actionId = this.getActionId(action);
-      const deps = this.dependencies.get(action);
-      if (deps) {
-        for (const read of deps.reads) {
-          const entity = entityKey(read);
-          if (!entityReaders.has(entity)) {
-            entityReaders.set(entity, new Set());
-          }
-          entityReaders.get(entity)!.add(actionId);
-        }
-      }
-
-      const writes = this.getSchedulingWrites(action);
-      if (writes) {
-        for (const write of writes) {
-          writtenEntities.add(entityKey(write));
-        }
-      }
-    }
-
-    // Add input nodes for source entities
-    for (const [entity, readers] of entityReaders) {
-      if (!writtenEntities.has(entity)) {
-        const inputId = `input:${entity}`;
-        nodes.push({
-          id: inputId,
-          type: "input",
-          isDirty: false,
-          isPending: false,
-        });
-
-        // Add edges from input to all actions that read it
-        for (const readerId of readers) {
-          edges.push({
-            from: inputId,
-            to: readerId,
-            cells: [entity],
-          });
-        }
-      }
-    }
-
-    // Add parent-child edges
-    for (const action of [...this.effects, ...this.computations]) {
-      const parent = this.actionParent.get(action);
-      if (parent) {
-        const parentId = this.getActionId(parent);
-        const childId = this.getActionId(action);
-        // Only add if both nodes exist in the graph
-        if (actionById.has(parentId)) {
-          edges.push({
-            from: parentId,
-            to: childId,
-            cells: [],
-            edgeType: "parent",
-          });
-        }
-      }
-    }
-
-    // Add inactive nodes for actions that have stats but are no longer registered
-    // This preserves visibility of actions that were unsubscribed
-    for (const [actionId, stats] of this.actionStats) {
-      if (!actionById.has(actionId)) {
-        nodes.push({
-          id: actionId,
-          type: "inactive",
-          stats,
-          isDirty: false,
-          isPending: false,
-        });
-      }
-    }
-
-    return {
-      nodes,
-      edges,
+    return buildSchedulerGraphSnapshot({
       pullMode: this.pullMode,
-      timestamp: performance.now(),
-    };
-  }
-
-  /**
-   * Finds the cell IDs that create a dependency between producer and consumer.
-   */
-  private findOverlappingCells(producer: Action, consumer: Action): string[] {
-    const producerWrites = this.getSchedulingWrites(producer) ?? [];
-    const consumerDeps = this.dependencies.get(consumer);
-    if (!consumerDeps) return [];
-
-    const overlapping: string[] = [];
-    for (const write of producerWrites) {
-      for (const read of consumerDeps.reads) {
-        if (
-          write.space === read.space &&
-          write.id === read.id &&
-          normalizeCellScope(write.scope) === normalizeCellScope(read.scope) &&
-          arraysOverlap(write.path, read.path)
-        ) {
-          overlapping.push(entityKey(write));
-        }
-      }
-    }
-    return [...new Set(overlapping)]; // Deduplicate
+      effects: this.effects,
+      computations: this.computations,
+      pending: this.pending,
+      dirty: this.dirty,
+      conditionallyScheduledEffects: this.conditionallyScheduledEffects,
+      dependencies: this.dependencies,
+      dependents: this.dependents,
+      actionParent: this.actionParent,
+      actionChildren: this.actionChildren,
+      actionStats: this.actionStats,
+      actionDebounce: this.actionDebounce,
+      actionThrottle: this.actionThrottle,
+      debounceTimers: this.debounceTimers,
+      getActionId: (action) => this.getActionId(action),
+      getSchedulingWrites: (action) => this.getSchedulingWrites(action),
+      getNextDebounceRunTime: (action) => this.getNextDebounceRunTime(action),
+      getNextEligibleRunTime: (action) => this.getNextEligibleRunTime(action),
+      isDemandedPullComputation: (action) =>
+        this.isDemandedPullComputation(action),
+      isLiveEffect: (action) => this.isLiveEffect(action),
+      isPullDemandRootEffect: (action) => this.isPullDemandRootEffect(action),
+      getPatternId: (action) => {
+        const annotated = action as Partial<TelemetryAnnotations>;
+        return annotated.pattern
+          ? this.runtime.patternManager.getPatternId(annotated.pattern)
+          : undefined;
+      },
+    });
   }
 
   /**
