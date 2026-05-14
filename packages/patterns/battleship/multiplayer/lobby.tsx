@@ -15,19 +15,23 @@ import {
   Stream,
   UI,
   type VNode,
-  Writable,
 } from "commonfabric";
 
 import BattleshipRoom from "./room.tsx";
 import {
   createInitialShots,
   type GameState,
+  type GameStateCell,
   generateRandomShips,
   getRandomColor,
   INITIAL_GAME_STATE,
   type LobbyState,
   normalizePlayerNumber,
+  type PlayerCell,
   type PlayerData,
+  type PlayerNameCell,
+  type PlayerNumberCell,
+  type ShotsCell,
   type ShotsState,
   trimmedName,
 } from "./schemas.tsx";
@@ -47,10 +51,10 @@ interface LobbyOutput {
 }
 
 const startIfReady = (
-  player1: Writable<PlayerData | null>,
-  player2: Writable<PlayerData | null>,
-  shots: Writable<ShotsState>,
-  gameState: Writable<GameState>,
+  player1: PlayerCell,
+  player2: PlayerCell,
+  shots: ShotsCell,
+  gameState: GameStateCell,
 ) => {
   const p1 = player1.get();
   const p2 = player2.get();
@@ -68,10 +72,10 @@ const startIfReady = (
 const joinSlot = (
   slot: 1 | 2,
   name: string,
-  player1: Writable<PlayerData | null>,
-  player2: Writable<PlayerData | null>,
-  shots: Writable<ShotsState>,
-  gameState: Writable<GameState>,
+  player1: PlayerCell,
+  player2: PlayerCell,
+  shots: ShotsCell,
+  gameState: GameStateCell,
 ) => {
   const playerData: PlayerData = {
     name,
@@ -92,13 +96,13 @@ const joinSlot = (
 const joinGame = handler<
   unknown,
   {
-    joinName: Writable<string>;
-    myName: Writable<string>;
-    myPlayerNumber: Writable<1 | 2 | null>;
-    player1: Writable<PlayerData | null>;
-    player2: Writable<PlayerData | null>;
-    shots: Writable<ShotsState>;
-    gameState: Writable<GameState>;
+    joinName: PlayerNameCell;
+    myName: PlayerNameCell;
+    myPlayerNumber: PlayerNumberCell;
+    player1: PlayerCell;
+    player2: PlayerCell;
+    shots: ShotsCell;
+    gameState: GameStateCell;
   }
 >((
   _event,
@@ -122,10 +126,10 @@ const joinPlayer = handler<
   { name: string },
   {
     slot: 1 | 2;
-    player1: Writable<PlayerData | null>;
-    player2: Writable<PlayerData | null>;
-    shots: Writable<ShotsState>;
-    gameState: Writable<GameState>;
+    player1: PlayerCell;
+    player2: PlayerCell;
+    shots: ShotsCell;
+    gameState: GameStateCell;
   }
 >(({ name }, { slot, player1, player2, shots, gameState }) => {
   const trimmed = trimmedName(name);
@@ -136,13 +140,13 @@ const joinPlayer = handler<
 const resetGame = handler<
   void,
   {
-    player1: Writable<PlayerData | null>;
-    player2: Writable<PlayerData | null>;
-    shots: Writable<ShotsState>;
-    gameState: Writable<GameState>;
-    myName: Writable<string>;
-    myPlayerNumber: Writable<1 | 2 | null>;
-    joinName: Writable<string>;
+    player1: PlayerCell;
+    player2: PlayerCell;
+    shots: ShotsCell;
+    gameState: GameStateCell;
+    myName: PlayerNameCell;
+    myPlayerNumber: PlayerNumberCell;
+    joinName: PlayerNameCell;
   }
 >((
   _event,
@@ -170,48 +174,34 @@ const BattleshipLobby = pattern<LobbyState, LobbyOutput>(
       joinName,
     },
   ) => {
+    const sharedCells = { player1, player2, shots, gameState };
     const join = joinGame({
       joinName,
       myName,
       myPlayerNumber,
-      player1,
-      player2,
-      shots,
-      gameState,
-    });
+      ...sharedCells,
+    } as any);
     const joinPlayer1 = joinPlayer({
       slot: 1,
-      player1,
-      player2,
-      shots,
-      gameState,
-    });
+      ...sharedCells,
+    } as any);
     const joinPlayer2 = joinPlayer({
       slot: 2,
-      player1,
-      player2,
-      shots,
-      gameState,
-    });
+      ...sharedCells,
+    } as any);
     const reset = resetGame({
-      player1,
-      player2,
-      shots,
-      gameState,
+      ...sharedCells,
       myName,
       myPlayerNumber,
       joinName,
-    });
+    } as any);
 
     const room = BattleshipRoom({
       gameName,
-      player1,
-      player2,
-      shots,
-      gameState,
+      ...sharedCells,
       myName,
       myPlayerNumber,
-    });
+    } as any);
 
     const player1Data = computed(() => player1.get());
     const player2Data = computed(() => player2.get());

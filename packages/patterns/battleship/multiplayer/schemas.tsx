@@ -87,6 +87,14 @@ export interface ShotsState {
   2: SquareState[][];
 }
 
+export type PlayerCell = Writable<PlayerData | null | Default<null>>;
+export type ShotsCell = Writable<ShotsState | Default<typeof INITIAL_SHOTS>>;
+export type GameStateCell = Writable<
+  GameState | Default<typeof INITIAL_GAME_STATE>
+>;
+export type PlayerNameCell = Writable<string | Default<"">>;
+export type PlayerNumberCell = Writable<1 | 2 | null | Default<null>>;
+
 // ============ DEFAULT VALUES ============
 
 export const INITIAL_GAME_STATE: GameState = {
@@ -123,15 +131,13 @@ export function trimmedName(value: string | undefined): string {
  */
 export interface LobbyState {
   gameName?: PerSpace<string | Default<"Battleship">>;
-  player1?: PerSpace<Writable<PlayerData | null | Default<null>>>;
-  player2?: PerSpace<Writable<PlayerData | null | Default<null>>>;
-  shots?: PerSpace<Writable<ShotsState | Default<typeof INITIAL_SHOTS>>>;
-  gameState?: PerSpace<
-    Writable<GameState | Default<typeof INITIAL_GAME_STATE>>
-  >;
-  myName?: PerUser<Writable<string | Default<"">>>;
-  myPlayerNumber?: PerUser<Writable<1 | 2 | null | Default<null>>>;
-  joinName?: PerSession<Writable<string | Default<"">>>;
+  player1?: PerSpace<PlayerCell>;
+  player2?: PerSpace<PlayerCell>;
+  shots?: PerSpace<ShotsCell>;
+  gameState?: PerSpace<GameStateCell>;
+  myName?: PerUser<PlayerNameCell>;
+  myPlayerNumber?: PerUser<PlayerNumberCell>;
+  joinName?: PerSession<PlayerNameCell>;
 }
 
 /**
@@ -139,12 +145,12 @@ export interface LobbyState {
  */
 export interface RoomInput {
   gameName: string;
-  player1: Writable<PlayerData | null | Default<null>>;
-  player2: Writable<PlayerData | null | Default<null>>;
-  shots: Writable<ShotsState | Default<typeof INITIAL_SHOTS>>;
-  gameState: Writable<GameState | Default<typeof INITIAL_GAME_STATE>>;
-  myName: Writable<string | Default<"">>;
-  myPlayerNumber: Writable<1 | 2 | null | Default<null>>;
+  player1: PlayerCell;
+  player2: PlayerCell;
+  shots: ShotsCell;
+  gameState: GameStateCell;
+  myName: PlayerNameCell;
+  myPlayerNumber: PlayerNumberCell;
 }
 
 /**

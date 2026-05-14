@@ -587,16 +587,6 @@ function calculateTurnScore(
   return { total: total + (bingoBonus ? 50 : 0), wordScores, bingoBonus };
 }
 
-function tileView(tile: PlacedTile, cellWithGap: number) {
-  return {
-    letter: tile.letter,
-    row: tile.row,
-    col: tile.col,
-    leftPx: `${tile.col * cellWithGap}px`,
-    topPx: `${tile.row * cellWithGap}px`,
-  };
-}
-
 function getDraggedLetterId(sourceCell: { get?: () => unknown } | undefined) {
   const source = sourceCell?.get?.();
   if (!source || typeof source !== "object") return undefined;
