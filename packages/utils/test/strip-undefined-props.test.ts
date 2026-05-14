@@ -1,0 +1,67 @@
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { stripUndefinedProps } from "@commonfabric/utils/strip-undefined-props";
+
+describe("stripUndefinedProps", () => {
+  it("returns an empty object given an empty object", () => {
+    expect(stripUndefinedProps({})).toEqual({});
+  });
+
+  it("returns a shallow copy when no properties are undefined", () => {
+    const input = { a: 1, b: "two", c: true, d: null };
+    const out = stripUndefinedProps(input);
+    expect(out).toEqual(input);
+    expect(out).not.toBe(input);
+  });
+
+  it("drops undefined-valued top-level properties", () => {
+    expect(stripUndefinedProps({ a: 1, b: undefined, c: 3 })).toEqual({
+      a: 1,
+      c: 3,
+    });
+  });
+
+  it("drops undefined-valued properties at nested depths", () => {
+    expect(stripUndefinedProps({
+      a: 1,
+      b: { c: undefined, d: 4, e: { f: undefined, g: 7 } },
+    })).toEqual({
+      a: 1,
+      b: { d: 4, e: { g: 7 } },
+    });
+  });
+
+  it("preserves `null` properties", () => {
+    expect(stripUndefinedProps({ a: null, b: undefined })).toEqual({ a: null });
+  });
+
+  it("preserves empty nested objects", () => {
+    expect(stripUndefinedProps({ a: {}, b: { c: undefined } })).toEqual({
+      a: {},
+      b: {},
+    });
+  });
+
+  it("leaves array values intact, including any `undefined` elements", () => {
+    const input = { xs: [1, undefined, 3], ys: undefined };
+    const out = stripUndefinedProps(input);
+    expect(out).toEqual({ xs: [1, undefined, 3] });
+    expect(out.xs).toBe(input.xs);
+  });
+
+  it("does not walk into class instances", () => {
+    class Tag {
+      constructor(public name: string, public maybe: string | undefined) {}
+    }
+    const tag = new Tag("t", undefined);
+    const out = stripUndefinedProps({ tag, dropped: undefined });
+    expect(out).toEqual({ tag });
+    expect(out.tag).toBe(tag);
+  });
+
+  it("does not mutate the input object", () => {
+    const input = { a: 1, b: undefined, c: { d: undefined, e: 5 } };
+    stripUndefinedProps(input);
+    expect(input).toEqual({ a: 1, b: undefined, c: { d: undefined, e: 5 } });
+  });
+});
