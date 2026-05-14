@@ -2,6 +2,7 @@ import {
   addressesToPathByEntity,
   arraysOverlap,
   nonRecursiveReadMayOverlapWrite,
+  sortAndCompactPaths,
   type SortedAndCompactPaths,
 } from "../reactive-dependencies.ts";
 import { normalizeCellScope } from "../scope.ts";
@@ -127,6 +128,68 @@ export function updateWriterIndex(
 
   state.actionWriteEntities.set(action, nextEntities);
   return { nextEntities, addedEntities, removedEntities };
+}
+
+export function buildKnownSchedulingWrites(state: {
+  readonly writes: readonly IMemorySpaceAddress[];
+  readonly potentialWrites: readonly IMemorySpaceAddress[];
+  readonly declaredWrites: readonly IMemorySpaceAddress[];
+  readonly existingCurrentWrites: readonly IMemorySpaceAddress[];
+  readonly existingHistoricalWrites: readonly IMemorySpaceAddress[];
+}): {
+  newCurrentKnownWrites: IMemorySpaceAddress[];
+  newHistoricalMightWrite: IMemorySpaceAddress[];
+} {
+  const currentSeedWrites = state.writes.length > 0
+    ? state.writes
+    : state.existingCurrentWrites.length > 0
+    ? state.existingCurrentWrites
+    : state.declaredWrites;
+  const dynamicParentWrites = deriveDynamicCollectionParentWrites(
+    state.writes,
+    state.declaredWrites,
+  );
+  const newCurrentKnownWrites = sortAndCompactPaths([
+    ...currentSeedWrites,
+    ...dynamicParentWrites,
+    ...state.potentialWrites,
+  ]);
+  const newHistoricalMightWrite = sortAndCompactPaths([
+    ...state.existingHistoricalWrites,
+    ...newCurrentKnownWrites,
+  ]);
+  return { newCurrentKnownWrites, newHistoricalMightWrite };
+}
+
+export function diffSchedulingWrites(
+  previousSchedulingWrites: readonly IMemorySpaceAddress[],
+  nextSchedulingWrites: readonly IMemorySpaceAddress[],
+): {
+  addedWrites: IMemorySpaceAddress[];
+  removedWrites: IMemorySpaceAddress[];
+} {
+  const addedWrites = nextSchedulingWrites.filter((write) =>
+    !previousSchedulingWrites.some((existing) =>
+      schedulingWriteSubsumes(existing, write)
+    )
+  );
+  const removedWrites = previousSchedulingWrites.filter((write) =>
+    !nextSchedulingWrites.some((existing) =>
+      schedulingWriteSubsumes(existing, write)
+    )
+  );
+  return { addedWrites, removedWrites };
+}
+
+function schedulingWriteSubsumes(
+  existing: IMemorySpaceAddress,
+  write: IMemorySpaceAddress,
+): boolean {
+  return existing.space === write.space &&
+    existing.id === write.id &&
+    normalizeCellScope(existing.scope) === normalizeCellScope(write.scope) &&
+    existing.path.length <= write.path.length &&
+    arraysOverlap(existing.path, write.path);
 }
 
 export function groupReadsByEntity(

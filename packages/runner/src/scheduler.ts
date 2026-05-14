@@ -76,8 +76,9 @@ import {
 } from "./scheduler/diagnosis.ts";
 import {
   addTriggerPathsToIndex,
+  buildKnownSchedulingWrites,
   collectReadersForWrite,
-  deriveDynamicCollectionParentWrites,
+  diffSchedulingWrites,
   groupReadsByEntity,
   pruneStructuralAncestorWrites,
   readsOverlapWrites,
@@ -1515,32 +1516,19 @@ export class Scheduler {
       rawExistingCurrentWrites,
       ignoredSchedulingWrites,
     );
-    const currentSeedWrites = writes.length > 0
-      ? writes
-      : existingCurrentWrites.length > 0
-      ? existingCurrentWrites
-      : declaredWrites;
-    const dynamicParentWrites = deriveDynamicCollectionParentWrites(
-      writes,
-      declaredWrites,
-    );
-    const newCurrentKnownWrites = sortAndCompactPaths([
-      ...currentSeedWrites,
-      ...dynamicParentWrites,
-      ...potentialWrites,
-    ]);
-    this.currentKnownWrites.set(action, newCurrentKnownWrites);
-
-    const rawExistingHistoricalWrites = this.historicalMightWrite.get(action) ??
-      [];
     const existingHistoricalWrites = filterIgnoredAddresses(
-      rawExistingHistoricalWrites,
+      this.historicalMightWrite.get(action) ?? [],
       ignoredSchedulingWrites,
     );
-    const newHistoricalMightWrite = sortAndCompactPaths([
-      ...existingHistoricalWrites,
-      ...newCurrentKnownWrites,
-    ]);
+    const { newCurrentKnownWrites, newHistoricalMightWrite } =
+      buildKnownSchedulingWrites({
+        writes,
+        potentialWrites,
+        declaredWrites,
+        existingCurrentWrites,
+        existingHistoricalWrites,
+      });
+    this.currentKnownWrites.set(action, newCurrentKnownWrites);
     this.historicalMightWrite.set(action, newHistoricalMightWrite);
 
     const previousSchedulingWrites = this.useHistoricalMightWrite()
@@ -1550,25 +1538,9 @@ export class Scheduler {
       ? newHistoricalMightWrite
       : newCurrentKnownWrites;
 
-    const addedWrites = nextSchedulingWrites.filter((write) =>
-      !previousSchedulingWrites.some((existing) =>
-        existing.space === write.space &&
-        existing.id === write.id &&
-        normalizeCellScope(existing.scope) ===
-          normalizeCellScope(write.scope) &&
-        existing.path.length <= write.path.length &&
-        arraysOverlap(existing.path, write.path)
-      )
-    );
-    const removedWrites = previousSchedulingWrites.filter((write) =>
-      !nextSchedulingWrites.some((existing) =>
-        existing.space === write.space &&
-        existing.id === write.id &&
-        normalizeCellScope(existing.scope) ===
-          normalizeCellScope(write.scope) &&
-        existing.path.length <= write.path.length &&
-        arraysOverlap(existing.path, write.path)
-      )
+    const { addedWrites, removedWrites } = diffSchedulingWrites(
+      previousSchedulingWrites,
+      nextSchedulingWrites,
     );
 
     updateWriterIndex(
