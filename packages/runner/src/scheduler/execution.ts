@@ -3,7 +3,14 @@ import {
   CYCLE_DEBOUNCE_MULTIPLIER,
   CYCLE_DEBOUNCE_THRESHOLD_MS,
 } from "./constants.ts";
-import type { Action, SettleIterationStats, SettleStats } from "./types.ts";
+import type {
+  Action,
+  PopulateDependenciesEntry,
+  ReactivityLog,
+  SettleIterationStats,
+  SettleStats,
+  SpaceScopeAndURI,
+} from "./types.ts";
 
 export interface SettlingTracker {
   windowStart: number;
@@ -118,6 +125,124 @@ export function buildPullInitialSeeds(state: {
   }
 
   return initialSeeds;
+}
+
+export function collectPendingDependencyActions(state: {
+  readonly pendingDependencyCollection: Set<Action>;
+  readonly populateDependenciesCallbacks: WeakMap<
+    Action,
+    PopulateDependenciesEntry
+  >;
+  readonly effects: ReadonlySet<Action>;
+  readonly getSchedulingWrites: (
+    action: Action,
+  ) => readonly unknown[] | undefined;
+  readonly collectDependenciesForAction: (
+    action: Action,
+    populateDependencies: PopulateDependenciesEntry,
+  ) => { log: ReactivityLog; entities: Set<SpaceScopeAndURI> };
+  readonly onCollected?: (
+    action: Action,
+    result: { log: ReactivityLog; entities: Set<SpaceScopeAndURI> },
+  ) => void;
+  readonly scheduleAffectedEffects?: (action: Action) => void;
+  readonly clearAfterCollect?: boolean;
+}): {
+  collectedActions: Action[];
+  newActionsWithoutDependencies: Action[];
+} {
+  const collectedActions: Action[] = [];
+
+  // Snapshot the collection before any callbacks can mutate the underlying set.
+  for (const action of [...state.pendingDependencyCollection]) {
+    const populateDependencies = state.populateDependenciesCallbacks.get(
+      action,
+    );
+    if (!populateDependencies) continue;
+
+    const result = state.collectDependenciesForAction(
+      action,
+      populateDependencies,
+    );
+    state.onCollected?.(action, result);
+    collectedActions.push(action);
+  }
+
+  // Now mark downstream nodes as dirty if we introduced new dependencies for them.
+  if (state.scheduleAffectedEffects) {
+    for (const action of collectedActions) {
+      state.scheduleAffectedEffects(action);
+    }
+  }
+
+  const newActionsWithoutDependencies = [...state.pendingDependencyCollection]
+    .filter((action) =>
+      !state.effects.has(action) &&
+      (state.getSchedulingWrites(action)?.length ?? 0) === 0
+    );
+
+  if (state.clearAfterCollect ?? true) {
+    state.pendingDependencyCollection.clear();
+  }
+
+  return { collectedActions, newActionsWithoutDependencies };
+}
+
+export function buildIterationWorkSet(state: {
+  readonly pullMode: boolean;
+  readonly pending: Set<Action>;
+  readonly initialSeeds: ReadonlySet<Action>;
+  readonly settleIter: number;
+  readonly collectPullIterationSeeds: (iterationSeeds: Set<Action>) => void;
+  readonly collectDirtyDependencies: (
+    seed: Action,
+    workSet: Set<Action>,
+    memo: Map<Action, boolean>,
+  ) => boolean;
+}): {
+  workSet: Set<Action>;
+  iterationSeeds: Set<Action>;
+  dirtyDependencyCount: number;
+} {
+  if (!state.pullMode) {
+    return {
+      // Push mode mutates pending while executing, preserving existing behavior.
+      workSet: state.pending,
+      iterationSeeds: new Set(),
+      dirtyDependencyCount: 0,
+    };
+  }
+
+  const workSet = new Set<Action>();
+  const iterationSeeds = new Set<Action>();
+
+  // Every iteration needs to consider newly created pending effects.
+  // Without this, nested/recursive patterns can stall after creating
+  // new demand-root effects in an earlier iteration.
+  state.collectPullIterationSeeds(iterationSeeds);
+
+  // On first iteration, add special-case seeds discovered before settle.
+  if (state.settleIter === 0) {
+    for (const seed of state.initialSeeds) {
+      iterationSeeds.add(seed);
+    }
+  }
+
+  for (const seed of iterationSeeds) {
+    workSet.add(seed);
+  }
+
+  // Pull in dirty computations that feed the currently runnable seeds.
+  const dirtyDependencyMemo = new Map<Action, boolean>();
+  for (const seed of iterationSeeds) {
+    state.collectDirtyDependencies(seed, workSet, dirtyDependencyMemo);
+  }
+
+  return {
+    workSet,
+    iterationSeeds,
+    dirtyDependencyCount: workSet.size - iterationSeeds.size,
+  };
 }
 
 export function recordEarlyIterationComputations(state: {

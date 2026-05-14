@@ -80,7 +80,9 @@ import {
   updateWriterIndex,
 } from "./scheduler/dependency-index.ts";
 import {
+  buildIterationWorkSet,
   buildPullInitialSeeds,
+  collectPendingDependencyActions,
   createSettlingTracker,
   isDirtyPullActionRunnable,
   isPendingPullActionRunnable,
@@ -3249,38 +3251,6 @@ export class Scheduler {
     markExecuteStart(this.settlingTracker);
 
     logger.timeStart("scheduler", "execute", "depCollect");
-    // Process pending dependency collection for newly subscribed actions.
-    // This discovers what cells each action will read before it runs.
-    for (const action of this.pendingDependencyCollection) {
-      const populateDependencies = this.populateDependenciesCallbacks.get(
-        action,
-      );
-      if (!populateDependencies) continue;
-
-      const { log, entities } = this.collectDependenciesForAction(
-        action,
-        populateDependencies,
-        {
-          errorLogLabel: "schedule-dep-error",
-          errorMessage: (target, error) =>
-            `Error populating dependencies for ${
-              this.getActionId(target)
-            }: ${error}`,
-        },
-      );
-
-      logger.debug("schedule-dep-collect", () => [
-        `Collected dependencies for ${
-          this.getActionId(action)
-        }: ${log.reads.length} reads, ${log.writes.length} writes, ${entities.size} entities`,
-      ]);
-    }
-
-    // Now mark downstream nodes as dirty if we introduced new dependencies for them
-    this.pendingDependencyCollection.forEach((action) => {
-      this.scheduleAffectedEffects(action);
-    });
-
     // Find computation actions whose writes are still unknown. We run them on
     // the first cycle to capture writes that cannot be inferred from declared
     // outputs or populateDependencies() potential writes.
@@ -3290,15 +3260,27 @@ export class Scheduler {
     // dependency collection process above. We'll have to re-run it whenever
     // inputs change, as they might change what they can write to. We hope that
     // for now this will be sufficiently captured in mightWrite.
-    const newActionsWithoutDependencies = [...this.pendingDependencyCollection]
-      .filter(
-        (action) =>
-          !this.effects.has(action) &&
-          (this.getSchedulingWrites(action)?.length ?? 0) === 0,
-      );
-
-    // Clear the pending collection set - dependencies have been collected
-    this.pendingDependencyCollection.clear();
+    const { newActionsWithoutDependencies } = collectPendingDependencyActions({
+      pendingDependencyCollection: this.pendingDependencyCollection,
+      populateDependenciesCallbacks: this.populateDependenciesCallbacks,
+      effects: this.effects,
+      getSchedulingWrites: (action) => this.getSchedulingWrites(action),
+      collectDependenciesForAction: (action, populateDependencies) =>
+        this.collectDependenciesForAction(action, populateDependencies, {
+          errorLogLabel: "schedule-dep-error",
+          errorMessage: (target, error) =>
+            `Error populating dependencies for ${
+              this.getActionId(target)
+            }: ${error}`,
+        }),
+      onCollected: (action, { log, entities }) =>
+        logger.debug("schedule-dep-collect", () => [
+          `Collected dependencies for ${
+            this.getActionId(action)
+          }: ${log.reads.length} reads, ${log.writes.length} writes, ${entities.size} entities`,
+        ]),
+      scheduleAffectedEffects: (action) => this.scheduleAffectedEffects(action),
+    });
     logger.timeEnd("scheduler", "execute", "depCollect");
 
     // Track dirty dependencies that block events - these must be added to workSet
@@ -3613,25 +3595,24 @@ export class Scheduler {
     // This handles cases like event handlers that create sub-patterns whose
     // computations need their dependencies discovered before we build the workSet.
     if (this.pendingDependencyCollection.size > 0) {
-      for (const action of this.pendingDependencyCollection) {
-        const populateDependencies = this.populateDependenciesCallbacks.get(
-          action,
-        );
-        if (!populateDependencies) continue;
-
-        this.collectDependenciesForAction(action, populateDependencies, {
-          errorLogLabel: "schedule-dep-error-post-event",
-          errorMessage: (target, error) =>
-            `Error populating dependencies for ${
-              this.getActionId(target)
-            }: ${error}`,
-        });
-
-        logger.debug("schedule-dep-collect-post-event", () => [
-          `Collected dependencies for ${this.getActionId(action)}`,
-        ]);
-      }
-      this.pendingDependencyCollection.clear();
+      collectPendingDependencyActions({
+        pendingDependencyCollection: this.pendingDependencyCollection,
+        populateDependenciesCallbacks: this.populateDependenciesCallbacks,
+        effects: this.effects,
+        getSchedulingWrites: (action) => this.getSchedulingWrites(action),
+        collectDependenciesForAction: (action, populateDependencies) =>
+          this.collectDependenciesForAction(action, populateDependencies, {
+            errorLogLabel: "schedule-dep-error-post-event",
+            errorMessage: (target, error) =>
+              `Error populating dependencies for ${
+                this.getActionId(target)
+              }: ${error}`,
+          }),
+        onCollected: (action) =>
+          logger.debug("schedule-dep-collect-post-event", () => [
+            `Collected dependencies for ${this.getActionId(action)}`,
+          ]),
+      });
     }
 
     // Build initial seeds for pull mode (effects + special actions).
@@ -3665,57 +3646,41 @@ export class Scheduler {
       // Process any newly subscribed actions from previous iteration.
       // This sets up their dependencies so collectDirtyDependencies can find them.
       if (this.pullMode && this.pendingDependencyCollection.size > 0) {
-        for (const action of this.pendingDependencyCollection) {
-          const populateDependencies = this.populateDependenciesCallbacks.get(
-            action,
-          );
-          if (!populateDependencies) continue;
-
-          this.collectDependenciesForAction(action, populateDependencies, {
-            errorLogLabel: "schedule-dep-error-pre-run",
-            errorMessage: (target, error) =>
-              `Error collecting deps for ${this.getActionId(target)}: ${error}`,
-            useRawReadsForTriggers: true,
-          });
-        }
-        this.pendingDependencyCollection.clear();
+        collectPendingDependencyActions({
+          pendingDependencyCollection: this.pendingDependencyCollection,
+          populateDependenciesCallbacks: this.populateDependenciesCallbacks,
+          effects: this.effects,
+          getSchedulingWrites: (action) => this.getSchedulingWrites(action),
+          collectDependenciesForAction: (action, populateDependencies) =>
+            this.collectDependenciesForAction(action, populateDependencies, {
+              errorLogLabel: "schedule-dep-error-pre-run",
+              errorMessage: (target, error) =>
+                `Error collecting deps for ${
+                  this.getActionId(target)
+                }: ${error}`,
+              useRawReadsForTriggers: true,
+            }),
+        });
       }
 
       // Build the work set for this iteration
-      let workSet: Set<Action>;
+      const buildPullWorkSetStart = this.pullMode ? performance.now() : 0;
+      const { workSet, iterationSeeds, dirtyDependencyCount } =
+        buildIterationWorkSet({
+          pullMode: this.pullMode,
+          pending: this.pending,
+          initialSeeds,
+          settleIter,
+          collectPullIterationSeeds: (seeds) =>
+            this.collectPullIterationSeeds(seeds),
+          collectDirtyDependencies: (seed, targetWorkSet, memo) =>
+            this.collectDirtyDependencies(seed, targetWorkSet, memo),
+        });
 
       if (this.pullMode) {
-        const buildPullWorkSetStart = performance.now();
-        workSet = new Set<Action>();
-        const iterationSeeds = new Set<Action>();
-
-        // Every iteration needs to consider newly created pending effects.
-        // Without this, nested/recursive patterns can stall after creating
-        // new demand-root effects in an earlier iteration.
-        this.collectPullIterationSeeds(iterationSeeds);
-
-        // On first iteration, add special-case seeds discovered before settle
-        if (settleIter === 0) {
-          for (const seed of initialSeeds) {
-            iterationSeeds.add(seed);
-          }
-        }
-
-        for (const seed of iterationSeeds) {
-          workSet.add(seed);
-        }
-
-        // Pull in dirty computations that feed the currently runnable seeds.
-        const dirtyDependencyMemo = new Map<Action, boolean>();
-        for (const seed of iterationSeeds) {
-          this.collectDirtyDependencies(seed, workSet, dirtyDependencyMemo);
-        }
-
         if (settleIter === 0) {
           logger.debug("schedule-execute-pull", () => [
-            `Pull mode: Seeds: ${iterationSeeds.size}, Dirty deps added: ${
-              workSet.size - iterationSeeds.size
-            }`,
+            `Pull mode: Seeds: ${iterationSeeds.size}, Dirty deps added: ${dirtyDependencyCount}`,
           ]);
         }
         logger.time(
@@ -3724,9 +3689,6 @@ export class Scheduler {
           "execute",
           "buildPullWorkSet",
         );
-      } else {
-        // Push mode: work set is just the pending actions
-        workSet = this.pending;
       }
 
       if (workSet.size === 0) {
