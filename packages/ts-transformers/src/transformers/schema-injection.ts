@@ -202,7 +202,9 @@ function findCapabilitySummaryForParameter(
     })
     : capabilityRegistry
     ? (capabilityRegistry.get(fn) ?? analyzeFunctionCapabilities(fn))
-    : undefined;
+    : analyzeFunctionCapabilities(fn, {
+      checker: options?.checker,
+    });
   if (!summary) return undefined;
   const parameter = fn.parameters[index];
   if (!parameter) return undefined;
@@ -241,8 +243,14 @@ function applyCapabilitySummaryToArgument(
   if (!paramSummary) {
     return argumentNode;
   }
-
-  const innerTypeNode = extractCellLikeInnerTypeNode(argumentNode);
+  const innerTypeNode = extractCellLikeInnerTypeNode(argumentNode) ??
+    typeToSchemaTypeNode(
+      argumentType && isCellLikeType(argumentType, checker)
+        ? unwrapCellLikeType(argumentType, checker)
+        : undefined,
+      checker,
+      sourceFile,
+    );
   const shouldWrap = !!innerTypeNode;
   const baseTypeNode = innerTypeNode ?? argumentNode;
   let baseType = shouldWrap && argumentType
@@ -653,6 +661,18 @@ function createToSchemaCall(
     [typeNode],
     args,
   );
+}
+
+function isToSchemaCall(node: ts.Expression): node is ts.CallExpression {
+  if (!ts.isCallExpression(node)) return false;
+  if (!node.typeArguments || node.typeArguments.length !== 1) return false;
+
+  if (ts.isIdentifier(node.expression)) {
+    return node.expression.text === "toSchema";
+  }
+
+  return ts.isPropertyAccessExpression(node.expression) &&
+    node.expression.name.text === "toSchema";
 }
 
 function createUnknownSchemaTypeNode(factory: ts.NodeFactory): ts.TypeNode {
@@ -3051,6 +3071,51 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
 
       if (callKind?.kind === "builder" && callKind.builderName === "lift") {
         const factory = transformation.factory;
+
+        const firstArgument = node.arguments[0];
+        if (firstArgument && isToSchemaCall(firstArgument)) {
+          const argumentType = firstArgument.typeArguments?.[0];
+          const liftCallback = resolveFunctionLikeExpression(
+            node.arguments[2],
+            checker,
+            sourceFile,
+          );
+          if (argumentType && liftCallback) {
+            const argumentTypeValue = getTypeFromTypeNodeWithFallback(
+              argumentType,
+              checker,
+              typeRegistry,
+            );
+            const {
+              argumentTypeNode: narrowedArgumentType,
+              argumentTypeValue: narrowedArgumentTypeValue,
+            } = applyCallbackBuilderArgumentCapabilitySummary(
+              liftCallback,
+              argumentType,
+              argumentTypeValue,
+              checker,
+              sourceFile,
+              factory,
+              capabilityRegistry,
+              context,
+            );
+            const inputSchema = createSchemaCallWithRegistryTransfer(
+              context,
+              narrowedArgumentType,
+              checker,
+              typeRegistry,
+            );
+            if (narrowedArgumentTypeValue && typeRegistry) {
+              typeRegistry.set(inputSchema, narrowedArgumentTypeValue);
+            }
+            const updated = factory.createCallExpression(
+              node.expression,
+              node.typeArguments,
+              [inputSchema, ...node.arguments.slice(1)],
+            );
+            return ts.visitEachChild(updated, visit, transformation);
+          }
+        }
 
         if (node.typeArguments && node.typeArguments.length >= 2) {
           const [argumentType, resultType] = node.typeArguments;
