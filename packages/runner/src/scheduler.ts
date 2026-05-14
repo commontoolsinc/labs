@@ -91,6 +91,7 @@ import {
   markExecuteStart,
   planAdaptiveCycleDebounce,
   planCycleBreak,
+  planEventDirtyDependencyScheduling,
   planExecuteContinuation,
   pushBoundedHistory,
   recordEarlyIterationComputations,
@@ -3641,9 +3642,6 @@ export class Scheduler {
           collectMs = performance.now() - stepStart;
 
           if (!shouldSkipEvent && hasDirtyDependencies) {
-            let nextEligibleAt: number | undefined;
-            let hasRunnableDirtyDependency = false;
-
             stepStart = performance.now();
             logger.timeStart(
               "scheduler",
@@ -3652,31 +3650,25 @@ export class Scheduler {
               "pullScheduleDirtyDependencies",
             );
             try {
-              for (const dep of dirtyDeps) {
-                if (this.isDebouncedComputationWaiting(dep)) {
-                  const depNextDebounceAt = this.getNextDebounceRunTime(dep);
-                  if (depNextDebounceAt !== undefined) {
-                    nextEligibleAt = nextEligibleAt === undefined
-                      ? depNextDebounceAt
-                      : Math.min(nextEligibleAt, depNextDebounceAt);
-                    continue;
-                  }
-                }
-
-                const depNextEligibleAt = this.getNextEligibleRunTime(dep);
-                if (
-                  depNextEligibleAt !== undefined &&
-                  depNextEligibleAt > performance.now()
-                ) {
-                  nextEligibleAt = nextEligibleAt === undefined
-                    ? depNextEligibleAt
-                    : Math.min(nextEligibleAt, depNextEligibleAt);
-                  continue;
-                }
-
-                hasRunnableDirtyDependency = true;
+              const eventDirtyPlan = planEventDirtyDependencyScheduling({
+                dirtyDeps,
+                isDebouncedComputationWaiting: (dep) =>
+                  this.isDebouncedComputationWaiting(dep),
+                getNextDebounceRunTime: (dep) =>
+                  this.getNextDebounceRunTime(dep),
+                getNextEligibleRunTime: (dep) =>
+                  this.getNextEligibleRunTime(dep),
+              });
+              for (const dep of eventDirtyPlan.runnableDeps) {
                 this.pending.add(dep);
                 eventBlockingDeps.add(dep);
+              }
+              if (eventDirtyPlan.runnableDeps.length > 0) {
+                shouldSkipEvent = true;
+              } else if (eventDirtyPlan.nextEligibleAt !== undefined) {
+                queuedEvent.notBefore = eventDirtyPlan.nextEligibleAt;
+                this.scheduleEventQueueWake(eventDirtyPlan.nextEligibleAt);
+                shouldSkipEvent = true;
               }
             } finally {
               logger.timeEnd(
@@ -3687,14 +3679,6 @@ export class Scheduler {
               );
             }
             scheduleMs = performance.now() - stepStart;
-
-            if (hasRunnableDirtyDependency) {
-              shouldSkipEvent = true;
-            } else if (nextEligibleAt !== undefined) {
-              queuedEvent.notBefore = nextEligibleAt;
-              this.scheduleEventQueueWake(nextEligibleAt);
-              shouldSkipEvent = true;
-            }
           }
 
           if (this.eventPreflightTelemetryEnabled) {

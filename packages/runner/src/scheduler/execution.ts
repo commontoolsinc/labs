@@ -283,6 +283,46 @@ export interface ExecuteContinuationPlan {
   shouldQueueAnotherTick: boolean;
 }
 
+export function planEventDirtyDependencyScheduling(state: {
+  readonly dirtyDeps: Iterable<Action>;
+  readonly isDebouncedComputationWaiting: (action: Action) => boolean;
+  readonly getNextDebounceRunTime: (action: Action) => number | undefined;
+  readonly getNextEligibleRunTime: (action: Action) => number | undefined;
+  readonly now?: number;
+}): {
+  runnableDeps: Action[];
+  nextEligibleAt?: number;
+} {
+  let nextEligibleAt: number | undefined;
+  const runnableDeps: Action[] = [];
+
+  for (const dep of state.dirtyDeps) {
+    if (state.isDebouncedComputationWaiting(dep)) {
+      const depNextDebounceAt = state.getNextDebounceRunTime(dep);
+      if (depNextDebounceAt !== undefined) {
+        nextEligibleAt = minDefined(nextEligibleAt, depNextDebounceAt);
+        continue;
+      }
+    }
+
+    const depNextEligibleAt = state.getNextEligibleRunTime(dep);
+    if (
+      depNextEligibleAt !== undefined &&
+      depNextEligibleAt > (state.now ?? performance.now())
+    ) {
+      nextEligibleAt = minDefined(nextEligibleAt, depNextEligibleAt);
+      continue;
+    }
+
+    runnableDeps.push(dep);
+  }
+
+  return {
+    runnableDeps,
+    ...(nextEligibleAt !== undefined ? { nextEligibleAt } : {}),
+  };
+}
+
 export function planExecuteContinuation(state: {
   readonly pullMode: boolean;
   readonly pending: ReadonlySet<Action>;
