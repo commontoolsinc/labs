@@ -315,7 +315,7 @@ export default pattern((__cf_pattern_input) => {
                                             }
                                         },
                                         required: ["name"],
-                                        asCell: ["readonly"]
+                                        asCell: ["stream"]
                                     },
                                     item: {
                                         type: "object",
@@ -347,7 +347,7 @@ export default pattern((__cf_pattern_input) => {
                                             }
                                         },
                                         required: ["item"],
-                                        asCell: ["readonly"]
+                                        asCell: ["stream"]
                                     },
                                     item: {
                                         $ref: "#/$defs/Entry"
@@ -406,7 +406,7 @@ export default pattern((__cf_pattern_input) => {
                                         }
                                     },
                                     required: ["name"],
-                                    asCell: ["readonly"]
+                                    asCell: ["stream"]
                                 },
                                 handleOpenFile: {
                                     type: "object",
@@ -416,7 +416,7 @@ export default pattern((__cf_pattern_input) => {
                                         }
                                     },
                                     required: ["item"],
-                                    asCell: ["readonly"]
+                                    asCell: ["stream"]
                                 }
                             },
                             required: ["handleNavigateInto", "handleOpenFile"]
