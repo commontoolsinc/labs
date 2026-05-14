@@ -56,16 +56,19 @@ import {
 } from "./scheduler/diagnosis.ts";
 import {
   addTriggerPathsToIndex,
+  backfillDependentsForNewWrites,
   buildKnownSchedulingWrites,
   collectDirectWritersForLog,
   collectReadersForWrite,
-  collectReverseDependenciesForLog,
+  type DependencyGraphState,
   diffSchedulingWrites,
   pendingDependencyCollectionMightAffect
     as pendingDependencyCollectionMightAffectState,
+  pruneDependentsForCurrentWrites,
   pruneStructuralAncestorWrites,
   readsOverlapWrites,
   removeActionFromTriggerIndex,
+  updateDependentEdgesForLog,
   updateWriterIndex,
 } from "./scheduler/dependency-index.ts";
 import {
@@ -116,13 +119,11 @@ import {
 } from "./scheduler/delays.ts";
 import { processStorageNotification } from "./scheduler/notifications.ts";
 import {
-  addStaleUpstream,
   clearDirectDirty as clearDirectDirtyState,
   forceClearStale as forceClearStaleState,
   getUpstreamStaleCount as getUpstreamStaleCountFromState,
   isActionStale,
   markDirectDirty as markDirectDirtyState,
-  removeStaleUpstream,
   setStaleFromInputs,
   type StalenessState,
 } from "./scheduler/staleness.ts";
@@ -370,6 +371,20 @@ export class Scheduler {
   currentActionId?: string;
   private actionParent = new WeakMap<Action, Action>();
   private actionChildren = new WeakMap<Action, Set<Action>>();
+  private dependencyGraphState: DependencyGraphState = {
+    triggers: this.triggers,
+    nonRecursiveTriggers: this.nonRecursiveTriggers,
+    writersByEntity: this.writersByEntity,
+    dependencies: this.dependencies,
+    dependents: this.dependents,
+    reverseDependencies: this.reverseDependencies,
+    stalenessState: this.stalenessState,
+    getSchedulingWrites: (action) => this.getSchedulingWrites(action),
+    isStale: (action) => this.isStale(action),
+    isDemandedPullComputation: (action) =>
+      this.isDemandedPullComputation(action),
+    queueExecution: () => this.queueExecution(),
+  };
   private subscriptionState: SchedulerSubscriptionState = {
     actionChangeGroups: this.actionChangeGroups,
     changeGroupToActionId: this.changeGroupToActionId,
@@ -1312,12 +1327,20 @@ export class Scheduler {
     );
 
     if (removedWrites.length > 0) {
-      this.pruneDependentsForCurrentWrites(action, nextSchedulingWrites);
+      pruneDependentsForCurrentWrites(
+        this.dependencyGraphState,
+        action,
+        nextSchedulingWrites,
+      );
     }
 
     if (this.pullMode && addedWrites.length > 0) {
       // Backfill reverse edges when new writers appear after readers are already subscribed.
-      this.backfillDependentsForNewWrites(action, addedWrites);
+      backfillDependentsForNewWrites(
+        this.dependencyGraphState,
+        action,
+        addedWrites,
+      );
     }
 
     return { reads, shallowReads, log: schedulingLog };
@@ -1431,28 +1454,7 @@ export class Scheduler {
    */
   private updateDependents(action: Action, log: ReactivityLog): void {
     const actionId = this.getActionId(action);
-    const previousDependencies = this.reverseDependencies.get(action);
-    if (previousDependencies) {
-      for (const dependency of [...previousDependencies]) {
-        this.unregisterDependentEdge(dependency, action);
-      }
-      this.reverseDependencies.delete(action);
-    }
-
-    const newDependencies = collectReverseDependenciesForLog(
-      {
-        writersByEntity: this.writersByEntity,
-        getSchedulingWrites: (candidate) => this.getSchedulingWrites(candidate),
-      },
-      action,
-      log,
-    );
-
-    for (const dependency of newDependencies) {
-      this.registerDependentEdge(dependency, action);
-    }
-
-    this.reverseDependencies.set(action, newDependencies);
+    updateDependentEdgesForLog(this.dependencyGraphState, action, log);
 
     // Emit telemetry for dependency updates
     this.runtime.telemetry.submit({
@@ -1463,96 +1465,6 @@ export class Scheduler {
       ),
       writes: log.writes.map((w) => `${w.space}/${w.id}/${w.path.join("/")}`),
     });
-  }
-
-  private registerDependentEdge(writer: Action, dependent: Action): void {
-    if (writer === dependent) return;
-
-    let dependents = this.dependents.get(writer);
-    if (!dependents) {
-      dependents = new Set();
-      this.dependents.set(writer, dependents);
-    }
-    const alreadyDependent = dependents.has(dependent);
-    dependents.add(dependent);
-
-    let reverse = this.reverseDependencies.get(dependent);
-    if (!reverse) {
-      reverse = new Set();
-      this.reverseDependencies.set(dependent, reverse);
-    }
-    reverse.add(writer);
-
-    if (!alreadyDependent && this.isStale(writer)) {
-      addStaleUpstream(this.stalenessState, writer, dependent);
-      if (this.isDemandedPullComputation(writer)) {
-        this.queueExecution();
-      }
-    }
-  }
-
-  private unregisterDependentEdge(writer: Action, dependent: Action): void {
-    const dependents = this.dependents.get(writer);
-    const hadDependent = dependents?.delete(dependent) ?? false;
-    if (dependents && dependents.size === 0) {
-      this.dependents.delete(writer);
-    }
-
-    const reverse = this.reverseDependencies.get(dependent);
-    reverse?.delete(writer);
-    if (reverse && reverse.size === 0) {
-      this.reverseDependencies.delete(dependent);
-    }
-
-    if (hadDependent) {
-      removeStaleUpstream(this.stalenessState, writer, dependent);
-    }
-  }
-
-  private backfillDependentsForNewWrites(
-    writer: Action,
-    writes: IMemorySpaceAddress[],
-  ): void {
-    if (writes.length === 0) return;
-    const readers = new Set<Action>();
-    for (const write of writes) {
-      for (
-        const action of collectReadersForWrite(
-          {
-            triggers: this.triggers,
-            nonRecursiveTriggers: this.nonRecursiveTriggers,
-          },
-          write,
-        )
-      ) {
-        readers.add(action);
-      }
-    }
-    readers.delete(writer);
-
-    for (const action of readers) {
-      this.registerDependentEdge(writer, action);
-    }
-  }
-
-  private pruneDependentsForCurrentWrites(
-    writer: Action,
-    writes: IMemorySpaceAddress[],
-  ): void {
-    const dependents = this.dependents.get(writer);
-    if (!dependents) return;
-
-    for (const dependent of [...dependents]) {
-      const log = this.dependencies.get(dependent);
-      if (
-        log &&
-        readsOverlapWrites(log.reads, log.shallowReads, writes)
-      ) {
-        continue;
-      }
-
-      this.unregisterDependentEdge(writer, dependent);
-    }
   }
 
   /**

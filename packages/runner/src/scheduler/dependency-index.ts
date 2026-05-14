@@ -11,6 +11,11 @@ import type {
   MemoryAddressPathComponent,
 } from "../storage/interface.ts";
 import { entityKey } from "./keys.ts";
+import {
+  addStaleUpstream,
+  removeStaleUpstream,
+  type StalenessState,
+} from "./staleness.ts";
 import type {
   Action,
   DirtyDependencyTraceContext,
@@ -32,6 +37,20 @@ export interface TriggerIndexState {
 export interface WriterIndexState {
   readonly writersByEntity: Map<SpaceScopeAndURI, Set<Action>>;
   readonly actionWriteEntities: WeakMap<Action, Set<SpaceScopeAndURI>>;
+}
+
+export interface DependencyGraphState extends TriggerIndexState {
+  readonly writersByEntity: Map<SpaceScopeAndURI, Set<Action>>;
+  readonly dependencies: WeakMap<Action, ReactivityLog>;
+  readonly dependents: WeakMap<Action, Set<Action>>;
+  readonly reverseDependencies: WeakMap<Action, Set<Action>>;
+  readonly stalenessState: StalenessState;
+  readonly getSchedulingWrites: (
+    action: Action,
+  ) => readonly IMemorySpaceAddress[] | undefined;
+  readonly isStale: (action: Action) => boolean;
+  readonly isDemandedPullComputation: (action: Action) => boolean;
+  readonly queueExecution: () => void;
 }
 
 export function addTriggerPathsToIndex(
@@ -342,6 +361,124 @@ export function collectReverseDependenciesForLog(
   }
 
   return dependencies;
+}
+
+export function updateDependentEdgesForLog(
+  state: DependencyGraphState,
+  action: Action,
+  log: ReactivityLog,
+): void {
+  const previousDependencies = state.reverseDependencies.get(action);
+  if (previousDependencies) {
+    for (const dependency of [...previousDependencies]) {
+      unregisterDependentEdge(state, dependency, action);
+    }
+    state.reverseDependencies.delete(action);
+  }
+
+  const newDependencies = collectReverseDependenciesForLog(
+    state,
+    action,
+    log,
+  );
+
+  for (const dependency of newDependencies) {
+    registerDependentEdge(state, dependency, action);
+  }
+
+  state.reverseDependencies.set(action, newDependencies);
+}
+
+export function registerDependentEdge(
+  state: DependencyGraphState,
+  writer: Action,
+  dependent: Action,
+): void {
+  if (writer === dependent) return;
+
+  let dependents = state.dependents.get(writer);
+  if (!dependents) {
+    dependents = new Set();
+    state.dependents.set(writer, dependents);
+  }
+  const alreadyDependent = dependents.has(dependent);
+  dependents.add(dependent);
+
+  let reverse = state.reverseDependencies.get(dependent);
+  if (!reverse) {
+    reverse = new Set();
+    state.reverseDependencies.set(dependent, reverse);
+  }
+  reverse.add(writer);
+
+  if (!alreadyDependent && state.isStale(writer)) {
+    addStaleUpstream(state.stalenessState, writer, dependent);
+    if (state.isDemandedPullComputation(writer)) {
+      state.queueExecution();
+    }
+  }
+}
+
+export function unregisterDependentEdge(
+  state: DependencyGraphState,
+  writer: Action,
+  dependent: Action,
+): void {
+  const dependents = state.dependents.get(writer);
+  const hadDependent = dependents?.delete(dependent) ?? false;
+  if (dependents && dependents.size === 0) {
+    state.dependents.delete(writer);
+  }
+
+  const reverse = state.reverseDependencies.get(dependent);
+  reverse?.delete(writer);
+  if (reverse && reverse.size === 0) {
+    state.reverseDependencies.delete(dependent);
+  }
+
+  if (hadDependent) {
+    removeStaleUpstream(state.stalenessState, writer, dependent);
+  }
+}
+
+export function backfillDependentsForNewWrites(
+  state: DependencyGraphState,
+  writer: Action,
+  writes: readonly IMemorySpaceAddress[],
+): void {
+  if (writes.length === 0) return;
+  const readers = new Set<Action>();
+  for (const write of writes) {
+    for (const action of collectReadersForWrite(state, write)) {
+      readers.add(action);
+    }
+  }
+  readers.delete(writer);
+
+  for (const action of readers) {
+    registerDependentEdge(state, writer, action);
+  }
+}
+
+export function pruneDependentsForCurrentWrites(
+  state: DependencyGraphState,
+  writer: Action,
+  writes: readonly IMemorySpaceAddress[],
+): void {
+  const dependents = state.dependents.get(writer);
+  if (!dependents) return;
+
+  for (const dependent of [...dependents]) {
+    const log = state.dependencies.get(dependent);
+    if (
+      log &&
+      readsOverlapWrites(log.reads, log.shallowReads, writes)
+    ) {
+      continue;
+    }
+
+    unregisterDependentEdge(state, writer, dependent);
+  }
 }
 
 export function pendingDependencyCollectionMightAffect(
