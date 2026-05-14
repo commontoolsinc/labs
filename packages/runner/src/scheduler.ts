@@ -71,8 +71,11 @@ import {
   updateDependentEdgesForLog,
 } from "./scheduler/dependency-index.ts";
 import {
+  addInFlightSource as addInFlightSourceState,
   appendActionRunTrace,
+  type InFlightSourceState,
   invokeReactiveAction,
+  removeInFlightSource as removeInFlightSourceState,
   startReactiveActionCommit,
   watchReactiveActionCommit,
 } from "./scheduler/action-run.ts";
@@ -347,6 +350,9 @@ export class Scheduler {
     getActionId: (action) => this.getActionId(action),
   };
   private inFlightSources = new WeakMap<Action, Set<IStorageTransaction>>();
+  private inFlightSourceState: InFlightSourceState = {
+    inFlightSources: this.inFlightSources,
+  };
 
   // Current-known writes are rebuilt on each dependency update from actual
   // writes plus declared/potential writes. This is the default scheduling view.
@@ -3180,24 +3186,14 @@ export class Scheduler {
     action: Action,
     source: IStorageTransaction,
   ): void {
-    let sources = this.inFlightSources.get(action);
-    if (!sources) {
-      sources = new Set<IStorageTransaction>();
-      this.inFlightSources.set(action, sources);
-    }
-    sources.add(source);
+    addInFlightSourceState(this.inFlightSourceState, action, source);
   }
 
   private removeInFlightSource(
     action: Action,
     source: IStorageTransaction,
   ): void {
-    const sources = this.inFlightSources.get(action);
-    if (!sources) return;
-    sources.delete(source);
-    if (sources.size === 0) {
-      this.inFlightSources.delete(action);
-    }
+    removeInFlightSourceState(this.inFlightSourceState, action, source);
   }
 
   /**

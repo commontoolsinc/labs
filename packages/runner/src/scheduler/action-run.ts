@@ -3,6 +3,7 @@ import type { Runtime } from "../runtime.ts";
 import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
+  IStorageTransaction,
 } from "../storage/interface.ts";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import {
@@ -25,6 +26,36 @@ const logger = getLogger("scheduler", {
 export type ActionInvocationResult =
   | { ok: true; result: any }
   | { ok: false; error: unknown };
+
+export interface InFlightSourceState {
+  readonly inFlightSources: WeakMap<Action, Set<IStorageTransaction>>;
+}
+
+export function addInFlightSource(
+  state: InFlightSourceState,
+  action: Action,
+  source: IStorageTransaction,
+): void {
+  let sources = state.inFlightSources.get(action);
+  if (!sources) {
+    sources = new Set<IStorageTransaction>();
+    state.inFlightSources.set(action, sources);
+  }
+  sources.add(source);
+}
+
+export function removeInFlightSource(
+  state: InFlightSourceState,
+  action: Action,
+  source: IStorageTransaction,
+): void {
+  const sources = state.inFlightSources.get(action);
+  if (!sources) return;
+  sources.delete(source);
+  if (sources.size === 0) {
+    state.inFlightSources.delete(action);
+  }
+}
 
 export function invokeReactiveAction(state: {
   readonly runtime: Runtime;
