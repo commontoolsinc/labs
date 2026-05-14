@@ -7,6 +7,7 @@ import {
   describe,
   disposeSchedulerTestRuntime,
   expect,
+  getStaleSchedulerInternals,
   it,
   Runtime,
   space,
@@ -21,7 +22,6 @@ import type {
   JSONSchema,
   RuntimeTelemetryMarker,
   SchedulerTestStorageManager,
-  StaleSchedulerInternals,
   TelemetryAnnotations,
 } from "./scheduler-test-utils.ts";
 
@@ -664,11 +664,7 @@ describe("pull-based scheduling", () => {
     await tx.commit();
     tx = runtime.edit();
 
-    const schedulerInternal = runtime.scheduler as unknown as {
-      pending: Set<Action>;
-      dirty: Set<Action>;
-      markDirty: (action: Action) => void;
-    };
+    const schedulerInternal = getStaleSchedulerInternals(runtime.scheduler);
     schedulerInternal.pending.delete(effect);
     schedulerInternal.dirty.delete(effect);
     schedulerInternal.markDirty(computation);
@@ -720,8 +716,7 @@ describe("pull-based scheduling", () => {
     const effect: Action = (actionTx) => {
       derived.withTx(actionTx).get();
     };
-    const schedulerInternal = runtime
-      .scheduler as unknown as StaleSchedulerInternals;
+    const schedulerInternal = getStaleSchedulerInternals(runtime.scheduler);
     schedulerInternal.isEffectAction.set(effect, true);
     const { log } = schedulerInternal.setDependencies(effect, {
       reads: [toMemorySpaceAddress(derived.getAsNormalizedFullLink())],
@@ -1009,15 +1004,7 @@ describe("pull-based scheduling", () => {
     expect(leftEffectRuns).toBe(2);
     expect(rightEffectRuns).toBe(2);
 
-    const schedulerInternal = runtime.scheduler as unknown as {
-      collectDirtyDependencies: (
-        action: Action,
-        workSet: Set<Action>,
-        memo?: Map<Action, boolean>,
-      ) => boolean;
-      markDirty: (action: Action) => void;
-      scheduleAffectedEffects: (action: Action) => void;
-    };
+    const schedulerInternal = getStaleSchedulerInternals(runtime.scheduler);
 
     const collectWorkSet = (seeds: Action[]) => {
       const workSet = new Set<Action>(seeds);
@@ -1380,8 +1367,7 @@ describe("pull-based scheduling", () => {
     source.withTx(updateTx).send(2);
     await updateTx.commit();
 
-    const schedulerInternal = runtime
-      .scheduler as unknown as StaleSchedulerInternals;
+    const schedulerInternal = getStaleSchedulerInternals(runtime.scheduler);
     expect(runtime.scheduler.isDirty(actionA)).toBe(true);
     expect(runtime.scheduler.isDirty(actionB)).toBe(false);
     expect(schedulerInternal.isStale(actionA)).toBe(true);
@@ -1561,8 +1547,7 @@ describe("pull-based scheduling", () => {
     expect(effectRuns).toBe(0);
     expect(sink.get()).toBe(2);
 
-    const schedulerInternal = runtime
-      .scheduler as unknown as StaleSchedulerInternals;
+    const schedulerInternal = getStaleSchedulerInternals(runtime.scheduler);
     expect(schedulerInternal.isStale(stableAction)).toBe(false);
     expect(schedulerInternal.isStale(downstreamAction)).toBe(false);
     expect(schedulerInternal.isStale(effect)).toBe(false);
@@ -1975,8 +1960,7 @@ describe("pull-based scheduling", () => {
     sourceA.withTx(updateOldSourceTx).send(2);
     await updateOldSourceTx.commit();
 
-    const schedulerInternal = runtime
-      .scheduler as unknown as StaleSchedulerInternals;
+    const schedulerInternal = getStaleSchedulerInternals(runtime.scheduler);
     expect(runtime.scheduler.isDirty(action)).toBe(false);
     expect(schedulerInternal.isStale(action)).toBe(false);
     expect(schedulerInternal.getUpstreamStaleCount(action)).toBe(0);
@@ -2046,8 +2030,7 @@ describe("pull-based scheduling", () => {
     source.withTx(updateTx).send(2);
     await updateTx.commit();
 
-    const schedulerInternal = runtime
-      .scheduler as unknown as StaleSchedulerInternals;
+    const schedulerInternal = getStaleSchedulerInternals(runtime.scheduler);
     expect(schedulerInternal.isStale(downstreamAction)).toBe(true);
 
     runtime.scheduler.unsubscribe(upstreamAction);
@@ -2107,8 +2090,7 @@ describe("pull-based scheduling", () => {
       {},
     );
 
-    const schedulerInternal = runtime
-      .scheduler as unknown as StaleSchedulerInternals;
+    const schedulerInternal = getStaleSchedulerInternals(runtime.scheduler);
     const workSet = new Set<Action>();
     expect(
       schedulerInternal.collectDirtyDependencies(

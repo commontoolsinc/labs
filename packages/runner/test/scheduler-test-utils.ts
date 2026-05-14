@@ -15,12 +15,21 @@ import {
   ignoreReadForScheduling,
   txToReactivityLog,
 } from "../src/scheduler.ts";
+import { setSchedulerDependencies } from "../src/scheduler/dependency-index.ts";
+import {
+  clearSchedulerDirectDirty,
+  getUpstreamStaleCount as getUpstreamStaleCountFromState,
+  isActionStale,
+  markDirectDirty as markDirectDirtyState,
+  markSchedulerDirty,
+} from "../src/scheduler/staleness.ts";
 import { toMemorySpaceAddress } from "../src/link-utils.ts";
 import type { Cell, JSONSchema } from "../src/builder/types.ts";
 import type {
   Action,
   ErrorWithContext,
   EventHandler,
+  ReactivityLog,
   TelemetryAnnotations,
 } from "../src/scheduler.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -77,39 +86,74 @@ async function disposeSchedulerTestRuntime(
 }
 
 type StaleSchedulerInternals = {
+  pending: Set<Action>;
+  dirty: Set<Action>;
   isStale: (action: Action) => boolean;
   isDemandedPullComputation: (action: Action) => boolean;
   getUpstreamStaleCount: (action: Action) => number;
   clearDirectDirty: (action: Action) => boolean;
+  markDirectDirty: (action: Action) => boolean;
+  markDirty: (action: Action) => void;
   isEffectAction: WeakMap<Action, boolean>;
   setDependencies: (
     action: Action,
-    log: {
-      reads: ReturnType<typeof toMemorySpaceAddress>[];
-      shallowReads: ReturnType<typeof toMemorySpaceAddress>[];
-      writes: ReturnType<typeof toMemorySpaceAddress>[];
-    },
-  ) => {
-    log: {
-      reads: ReturnType<typeof toMemorySpaceAddress>[];
-      shallowReads: ReturnType<typeof toMemorySpaceAddress>[];
-      writes: ReturnType<typeof toMemorySpaceAddress>[];
-    };
-  };
-  updateDependents: (
-    action: Action,
-    log: {
-      reads: ReturnType<typeof toMemorySpaceAddress>[];
-      shallowReads: ReturnType<typeof toMemorySpaceAddress>[];
-      writes: ReturnType<typeof toMemorySpaceAddress>[];
-    },
-  ) => void;
+    log: ReactivityLog,
+  ) => ReturnType<typeof setSchedulerDependencies>;
+  updateDependents: (action: Action, log: ReactivityLog) => void;
   collectDirtyDependencies: (
     action: Action,
     workSet: Set<Action>,
     memo?: Map<Action, boolean>,
   ) => boolean;
+  scheduleAffectedEffects: (action: Action) => void;
 };
+
+function getStaleSchedulerInternals(
+  scheduler: Runtime["scheduler"],
+): StaleSchedulerInternals {
+  const internal = scheduler as unknown as {
+    pending: Set<Action>;
+    dirty: Set<Action>;
+    stalenessState:
+      & Parameters<typeof isActionStale>[0]
+      & Parameters<typeof markDirectDirtyState>[0];
+    dirtySchedulingState: Parameters<typeof markSchedulerDirty>[0];
+    dependencyUpdateState: Parameters<typeof setSchedulerDependencies>[0];
+    isEffectAction: WeakMap<Action, boolean>;
+    isDemandedPullComputation: (action: Action) => boolean;
+    updateDependents: StaleSchedulerInternals["updateDependents"];
+    collectDirtyDependencies: StaleSchedulerInternals[
+      "collectDirtyDependencies"
+    ];
+    scheduleAffectedEffects: StaleSchedulerInternals["scheduleAffectedEffects"];
+  };
+
+  return {
+    pending: internal.pending,
+    dirty: internal.dirty,
+    isStale: (action) => isActionStale(internal.stalenessState, action),
+    isDemandedPullComputation: (action) =>
+      internal.isDemandedPullComputation(action),
+    getUpstreamStaleCount: (action) =>
+      getUpstreamStaleCountFromState(internal.stalenessState, action),
+    clearDirectDirty: (action) =>
+      clearSchedulerDirectDirty(internal.dirtySchedulingState, action),
+    markDirectDirty: (action) =>
+      markDirectDirtyState(internal.stalenessState, action),
+    markDirty: (action) =>
+      markSchedulerDirty(internal.dirtySchedulingState, action),
+    isEffectAction: internal.isEffectAction,
+    setDependencies: (action, log) =>
+      setSchedulerDependencies(internal.dependencyUpdateState, action, log),
+    updateDependents: (action, log) => internal.updateDependents(action, log),
+    collectDirtyDependencies: (action, workSet, memo) =>
+      internal.collectDirtyDependencies(action, workSet, memo),
+    scheduleAffectedEffects: (action) =>
+      internal.scheduleAffectedEffects(
+        action,
+      ),
+  };
+}
 
 type EventPreflightMarker = Extract<
   RuntimeTelemetryMarker,
@@ -125,6 +169,7 @@ export {
   describe,
   disposeSchedulerTestRuntime,
   expect,
+  getStaleSchedulerInternals,
   ignoreReadForScheduling,
   it,
   Runtime,
@@ -144,6 +189,7 @@ export type {
   EventPreflightMarker,
   IExtendedStorageTransaction,
   JSONSchema,
+  ReactivityLog,
   RuntimeTelemetryMarker,
   SchedulerTestRuntime,
   SchedulerTestStorageManager,

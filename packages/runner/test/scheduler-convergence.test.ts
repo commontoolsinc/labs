@@ -8,6 +8,7 @@ import {
   describe,
   disposeSchedulerTestRuntime,
   expect,
+  getStaleSchedulerInternals,
   it,
   Runtime,
   space,
@@ -392,17 +393,19 @@ describe("cycle-aware convergence", () => {
 
     const schedulerInternal = runtime.scheduler as unknown as {
       execute: () => Promise<void>;
-      markDirectDirty: (action: Action) => boolean;
       pendingQueueTaskTimer: number | null;
       scheduled: boolean;
     };
+    const staleSchedulerInternal = getStaleSchedulerInternals(
+      runtime.scheduler,
+    );
     let effectRuns = 0;
     const reDirtyLimit = 25;
 
     const selfDirtyingEffect: Action = () => {
       effectRuns++;
       if (effectRuns <= reDirtyLimit) {
-        schedulerInternal.markDirectDirty(selfDirtyingEffect);
+        staleSchedulerInternal.markDirectDirty(selfDirtyingEffect);
       }
     };
 

@@ -43,6 +43,12 @@ export interface WriterIndexState {
   readonly actionWriteEntities: WeakMap<Action, Set<SpaceScopeAndURI>>;
 }
 
+export interface SchedulingWriteState {
+  readonly currentKnownWrites: WeakMap<Action, IMemorySpaceAddress[]>;
+  readonly historicalMightWrite: WeakMap<Action, IMemorySpaceAddress[]>;
+  readonly useHistoricalMightWrite: () => boolean;
+}
+
 export interface TriggerSubscriptionState extends TriggerIndexState {
   readonly cancels: WeakMap<Action, Cancel>;
   readonly getActionId: (action: Action) => string;
@@ -66,13 +72,28 @@ export interface DependencyGraphState extends TriggerIndexState {
   readonly queueExecution: () => void;
 }
 
-export interface DependencyUpdateState extends WriterIndexState {
+export interface DependencyUpdateState
+  extends WriterIndexState, SchedulingWriteState {
   readonly dependencies: WeakMap<Action, ReactivityLog>;
-  readonly currentKnownWrites: WeakMap<Action, IMemorySpaceAddress[]>;
-  readonly historicalMightWrite: WeakMap<Action, IMemorySpaceAddress[]>;
   readonly dependencyGraph: DependencyGraphState;
-  readonly useHistoricalMightWrite: () => boolean;
   readonly isPullMode: () => boolean;
+}
+
+export function getSchedulingWrites(
+  state: SchedulingWriteState,
+  action: Action,
+): IMemorySpaceAddress[] | undefined {
+  return state.useHistoricalMightWrite()
+    ? state.historicalMightWrite.get(action)
+    : state.currentKnownWrites.get(action);
+}
+
+export function getSchedulingWritesMap(
+  state: SchedulingWriteState,
+): WeakMap<Action, IMemorySpaceAddress[]> {
+  return state.useHistoricalMightWrite()
+    ? state.historicalMightWrite
+    : state.currentKnownWrites;
 }
 
 export function setSchedulerDependencies(
