@@ -53,8 +53,8 @@ import {
   captureTransactionWrites,
   detectCausalCycles,
   type DiagnosisRecord,
-  findDifferingWriteKeys,
   findNonIdempotentPair,
+  runIdempotencyRecheck as runIdempotencyRecheckState,
 } from "./scheduler/diagnosis.ts";
 import {
   addTriggerPathsToIndex,
@@ -533,57 +533,18 @@ export class Scheduler {
     tx: IExtendedStorageTransaction,
     log: ReactivityLog,
   ): void {
-    const writes1 = captureTransactionWrites(tx, log.writes);
-
-    const tx2 = this.runtime.edit();
-    let isAsync = false;
-    try {
-      const result = this.runtime.harness.invoke(() => action(tx2));
-      // Async actions (e.g. raw module actions like wish) can't be safely
-      // rechecked: their continuations may fire side effects (runtime.runSynced,
-      // sub-pattern instantiation) that persist beyond tx2.abort(). Skip the
-      // comparison entirely and just swallow the dangling promise.
-      if (result && typeof result.then === "function") {
-        isAsync = true;
-        result.then(undefined, () => {});
-      }
-    } catch { /* ignore errors */ }
-    const log2 = txToReactivityLog(tx2);
-    const writes2 = isAsync
-      ? new Map()
-      : captureTransactionWrites(tx2, log2.writes);
-    tx2.abort();
-
-    // Skip comparison for async actions — writes are incomplete/unreliable
-    if (isAsync) return;
-
-    const differingKeys = findDifferingWriteKeys(writes1, writes2, {
-      keySet: "latest",
-    });
-
-    if (differingKeys.length > 0) {
-      const actionId = this.getActionId(action);
-      // Deduplicate: only record first violation per action
-      if (!this.idempotencyViolations.some((v) => v.actionId === actionId)) {
-        this.idempotencyViolations.push({
-          actionId,
-          actionInfo: this.getActionTelemetryInfo(action),
-          runs: [
-            {
-              timestamp: performance.now(),
-              reads: {},
-              writes: Object.fromEntries(writes1),
-            },
-            {
-              timestamp: performance.now(),
-              reads: {},
-              writes: Object.fromEntries(writes2),
-            },
-          ],
-          differingWriteKeys: differingKeys,
-        });
-      }
-    }
+    runIdempotencyRecheckState(
+      {
+        idempotencyViolations: this.idempotencyViolations,
+        createTx: () => this.runtime.edit(),
+        invoke: (fn) => this.runtime.harness.invoke(fn),
+        getActionId: (target) => this.getActionId(target),
+        getActionTelemetryInfo: (target) => this.getActionTelemetryInfo(target),
+      },
+      action,
+      tx,
+      log,
+    );
   }
 
   private updateActionType(

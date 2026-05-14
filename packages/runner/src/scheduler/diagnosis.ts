@@ -6,8 +6,14 @@ import type {
 } from "../storage/interface.ts";
 import { getTransactionWriteDetails } from "../storage/transaction-inspection.ts";
 import { ignoreReadForScheduling } from "../storage/reactivity-log.ts";
-import type { CycleReport } from "../telemetry.ts";
+import type {
+  CycleReport,
+  NonIdempotentReport,
+  SchedulerActionInfo,
+} from "../telemetry.ts";
+import { txToReactivityLog } from "./reactivity.ts";
 import { mapsEqual } from "./topology.ts";
+import type { Action, ReactivityLog } from "./types.ts";
 
 export type DiagnosisRecord = {
   readValues: Map<string, unknown>;
@@ -132,6 +138,75 @@ export function findNonIdempotentPair(
   }
 
   return undefined;
+}
+
+export function runIdempotencyRecheck(
+  state: {
+    readonly idempotencyViolations: NonIdempotentReport[];
+    readonly createTx: () => IExtendedStorageTransaction;
+    readonly invoke: (fn: () => unknown) => unknown;
+    readonly getActionId: (action: Action) => string;
+    readonly getActionTelemetryInfo: (
+      action: Action,
+    ) => SchedulerActionInfo | undefined;
+  },
+  action: Action,
+  tx: IExtendedStorageTransaction,
+  log: ReactivityLog,
+): void {
+  const writes1 = captureTransactionWrites(tx, log.writes);
+
+  const tx2 = state.createTx();
+  let isAsync = false;
+  try {
+    const result = state.invoke(() => action(tx2));
+    // Async actions (e.g. raw module actions like wish) can't be safely
+    // rechecked: their continuations may fire side effects (runtime.runSynced,
+    // sub-pattern instantiation) that persist beyond tx2.abort(). Skip the
+    // comparison entirely and just swallow the dangling promise.
+    if (result && typeof (result as Promise<unknown>).then === "function") {
+      isAsync = true;
+      (result as Promise<unknown>).then(undefined, () => {});
+    }
+  } catch { /* ignore errors */ }
+  const log2 = txToReactivityLog(tx2);
+  const writes2 = isAsync
+    ? new Map()
+    : captureTransactionWrites(tx2, log2.writes);
+  tx2.abort();
+
+  // Skip comparison for async actions; writes are incomplete/unreliable.
+  if (isAsync) return;
+
+  const differingKeys = findDifferingWriteKeys(writes1, writes2, {
+    keySet: "latest",
+  });
+
+  if (differingKeys.length === 0) return;
+
+  const actionId = state.getActionId(action);
+  // Deduplicate: only record first violation per action.
+  if (state.idempotencyViolations.some((v) => v.actionId === actionId)) {
+    return;
+  }
+
+  state.idempotencyViolations.push({
+    actionId,
+    actionInfo: state.getActionTelemetryInfo(action),
+    runs: [
+      {
+        timestamp: performance.now(),
+        reads: {},
+        writes: Object.fromEntries(writes1),
+      },
+      {
+        timestamp: performance.now(),
+        reads: {},
+        writes: Object.fromEntries(writes2),
+      },
+    ],
+    differingWriteKeys: differingKeys,
+  });
 }
 
 export function detectCausalCycles(
