@@ -247,6 +247,21 @@ const tryParseToolArguments = (
   }
 };
 
+const TRUSTED_ONLY_TOOL_INPUT_FIELDS = ["cfcInputLabels"];
+
+const stripTrustedOnlyToolInputFields = (
+  input: Record<string, unknown>,
+): Record<string, unknown> => {
+  let sanitized: Record<string, unknown> | undefined;
+  for (const field of TRUSTED_ONLY_TOOL_INPUT_FIELDS) {
+    if (Object.hasOwn(input, field)) {
+      sanitized ??= { ...input };
+      delete sanitized[field];
+    }
+  }
+  return sanitized ?? input;
+};
+
 const textBytes = (input: string): Uint8Array =>
   new TextEncoder().encode(input);
 
@@ -1622,7 +1637,10 @@ export class CfHarnessPromptLoop {
         `unknown builtin tool requested: ${toolCall.function.name}`,
       );
     }
-    const parsedInputForDeniedTool = tryParseToolArguments(toolCall);
+    const parsedInput = tryParseToolArguments(toolCall);
+    const parsedInputForDeniedTool = parsedInput === undefined
+      ? undefined
+      : stripTrustedOnlyToolInputFields(parsedInput);
     const deniedToolInputSummary = parsedInputForDeniedTool === undefined
       ? undefined
       : await summarizeToolInput(
@@ -1709,7 +1727,8 @@ export class CfHarnessPromptLoop {
         },
       };
     }
-    const input = parsedInputForDeniedTool ?? parseToolArguments(toolCall);
+    const input = parsedInputForDeniedTool ??
+      stripTrustedOnlyToolInputFields(parseToolArguments(toolCall));
     const toolInputSummary = deniedToolInputSummary ??
       await summarizeToolInput(toolCall.function.name, input);
     const decision = evaluateToolPolicy(

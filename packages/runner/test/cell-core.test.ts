@@ -10,6 +10,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { FabricValue } from "@commonfabric/memory/interface";
 import {
   getDataModelConfig,
+  resetDataModelConfig,
   setDataModelConfig,
 } from "@commonfabric/data-model/fabric-value";
 import { isCell, recursivelyAddIDIfNeeded } from "../src/cell.ts";
@@ -791,83 +792,121 @@ describe("Cell", () => {
     expect(final).toEqual({ output: 200 });
   });
 
-  it("should translate circular references into links", () => {
-    const schema = {
-      $ref: "#/$defs/Root",
-      $defs: {
-        Root: {
-          type: "object",
-          properties: {
-            x: { type: "number" },
-            y: { type: "number" },
-            z: { $ref: "#/$defs/Root" },
-          },
-          required: ["x", "y", "z"],
-        },
-      },
-    } as const satisfies JSONSchema;
-    const c = runtime.getCell(
-      space,
-      "should translate circular references into links",
-      schema,
-      tx,
-    );
-    const data: any = { x: 1, y: 2 };
-    data.z = data;
-    c.set(data);
+  // Cycle-resolution tests live in a separate `describe` below so they can be
+  // pinned to both `modernDataModel` flag states explicitly.
+});
 
-    const proxy = c.getAsQueryResult();
-    expect(proxy.z).toBe(proxy);
+// Cycle-resolution behavior should hold under both `modernDataModel` flag
+// states, so these tests are run twice, once per state. Modeled on
+// `packages/data-model/test/clone-if-necessary.test.ts`. The flag is set in
+// `beforeEach` BEFORE constructing the `Runtime`, so the runtime captures
+// the correct value (the `Runtime` constructor snapshots
+// `getDataModelConfig()` at construction time).
+describe("Cell circular references", () => {
+  for (const modernMode of [false, true]) {
+    const label = modernMode ? "modern" : "legacy";
 
-    const value = c.get();
-    expect(value.z.z.z).toBe(value.z.z);
+    describe(`(${label})`, () => {
+      let runtime: Runtime;
+      let storageManager: ReturnType<typeof StorageManager.emulate>;
+      let tx: IExtendedStorageTransaction;
 
-    const raw = c.getRaw();
-    expect(raw?.z).toMatchObject({ "/": { [LINK_V1_TAG]: { path: [] } } });
-  });
+      beforeEach(() => {
+        setDataModelConfig(modernMode);
+        storageManager = StorageManager.emulate({ as: signer });
+        runtime = new Runtime({
+          apiUrl: new URL(import.meta.url),
+          storageManager,
+        });
+        tx = runtime.edit();
+      });
 
-  it("should translate circular references into links across cells", () => {
-    const schema = {
-      $ref: "#/$defs/Root",
-      $defs: {
-        Root: {
-          type: "object",
-          properties: {
-            list: {
-              type: "array",
-              items: {
-                type: "object",
-                properties: { parent: { $ref: "#/$defs/Root" } },
-                asCell: true,
-                required: ["parent"],
+      afterEach(async () => {
+        await tx.commit();
+        await runtime?.dispose();
+        await storageManager?.close();
+        resetDataModelConfig();
+      });
+
+      it("should translate circular references into links", () => {
+        const schema = {
+          $ref: "#/$defs/Root",
+          $defs: {
+            Root: {
+              type: "object",
+              properties: {
+                x: { type: "number" },
+                y: { type: "number" },
+                z: { $ref: "#/$defs/Root" },
               },
+              required: ["x", "y", "z"],
             },
           },
-          required: ["list"],
-        },
-      },
-    } as const satisfies JSONSchema;
-    const c = runtime.getCell(
-      space,
-      "should translate circular references into links",
-      schema,
-      tx,
-    );
-    const inner: any = { [ID]: 1 }; // ID will turn this into a separate cell
-    const outer: any = { list: [inner] };
-    inner.parent = outer;
-    c.set(outer);
+        } as const satisfies JSONSchema;
+        const c = runtime.getCell(
+          space,
+          "should translate circular references into links",
+          schema,
+          tx,
+        );
+        const data: any = { x: 1, y: 2 };
+        data.z = data;
+        c.set(data);
 
-    const proxy = c.getAsQueryResult();
-    expect(proxy.list[0].parent).toBe(proxy);
+        const proxy = c.getAsQueryResult();
+        expect(proxy.z).toBe(proxy);
 
-    const { id } = c.getAsNormalizedFullLink();
-    const innerCell = c.get().list[0];
-    const raw = innerCell.getRaw();
-    expect(raw).toMatchObject({
-      parent: { "/": { [LINK_V1_TAG]: { id } } },
+        const value = c.get();
+        expect(value.z.z.z).toBe(value.z.z);
+
+        const raw = c.getRaw();
+        expect(raw?.z).toMatchObject({ "/": { [LINK_V1_TAG]: { path: [] } } });
+      });
+
+      it("should translate circular references into links across cells", () => {
+        const schema = {
+          $ref: "#/$defs/Root",
+          $defs: {
+            Root: {
+              type: "object",
+              properties: {
+                list: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: { parent: { $ref: "#/$defs/Root" } },
+                    asCell: true,
+                    required: ["parent"],
+                  },
+                },
+              },
+              required: ["list"],
+            },
+          },
+        } as const satisfies JSONSchema;
+        const c = runtime.getCell(
+          space,
+          "should translate circular references into links",
+          schema,
+          tx,
+        );
+        const inner: any = { [ID]: 1 }; // ID will turn this into a separate cell
+        const outer: any = { list: [inner] };
+        inner.parent = outer;
+        c.set(outer);
+
+        const proxy = c.getAsQueryResult();
+        expect(proxy.list[0].parent).toBe(proxy);
+
+        const { id } = c.getAsNormalizedFullLink();
+        const innerCell = c.get().list[0];
+        const raw = innerCell.getRaw();
+        expect(raw).toMatchObject({
+          parent: { "/": { [LINK_V1_TAG]: { id } } },
+        });
+      });
     });
-  });
+  }
 });
 
 describe("Cell utility functions", () => {
@@ -1059,7 +1098,7 @@ describe("Cell utility functions", () => {
     });
 
     it("getRawUntyped({ frozen: false }) _does_ clone (flag OFF)", () => {
-      // Even with `richStorableValues === false`, `cloneIfNecessary()` _will_
+      // Even with `modernDataModel === false`, `cloneIfNecessary()` _will_
       // make a clone of a frozen value to get a mutable result.
       const cell = runtime.getCell<{ items: number[] }>(
         space,
@@ -1075,8 +1114,8 @@ describe("Cell utility functions", () => {
   });
 });
 
-// Separate top-level describe with richStorableValues enabled for frozen-ness.
-describe("Cell raw methods: frozen-or-not (richStorableValues ON)", () => {
+// Separate top-level describe with modernDataModel enabled for frozen-ness.
+describe("Cell raw methods: frozen-or-not (modernDataModel ON)", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -1087,7 +1126,7 @@ describe("Cell raw methods: frozen-or-not (richStorableValues ON)", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
       experimental: {
-        richStorableValues: true,
+        modernDataModel: true,
       },
     });
     tx = runtime.edit();

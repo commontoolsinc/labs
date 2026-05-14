@@ -142,19 +142,31 @@ export interface SessionOpenResult {
 }
 
 export interface MemoryProtocolFlags {
-  richStorableValues: boolean;
+  modernDataModel: boolean;
 }
+
+/** Legacy field name accepted on the wire for backward compatibility. */
+const LEGACY_MODERN_DATA_MODEL_KEY = "richStorableValues";
+
+export type WireFlagsKey = "modernDataModel" | "richStorableValues";
+
+/**
+ * Wire-format flags object. May use the canonical `modernDataModel` key or
+ * the legacy `richStorableValues` alias. Use `parseMemoryProtocolFlags()` to
+ * normalize to a `MemoryProtocolFlags`.
+ */
+export type WireMemoryProtocolFlags = { [K in WireFlagsKey]?: boolean };
 
 export interface HelloMessage {
   type: "hello";
   protocol: typeof MEMORY_PROTOCOL;
-  flags: MemoryProtocolFlags;
+  flags: WireMemoryProtocolFlags;
 }
 
 export interface HelloOkMessage {
   type: "hello.ok";
   protocol: typeof MEMORY_PROTOCOL;
-  flags: MemoryProtocolFlags;
+  flags: WireMemoryProtocolFlags;
 }
 
 export interface SessionDescriptor {
@@ -349,23 +361,56 @@ const memoryReconstructionContext: ReconstructionContext = {
 };
 
 export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
-  richStorableValues: getDataModelConfig(),
+  modernDataModel: getDataModelConfig(),
 });
 
 export const sameMemoryProtocolFlags = (
   left: MemoryProtocolFlags,
   right: MemoryProtocolFlags,
-): boolean => left.richStorableValues === right.richStorableValues;
+): boolean => left.modernDataModel === right.modernDataModel;
 
-export const isMemoryProtocolFlags = (
+/**
+ * Parses and normalizes incoming wire-protocol flags. Accepts either the
+ * current `modernDataModel` key or the legacy `richStorableValues` key (which
+ * older peers may send). Returns `null` if the input is not a recognizable
+ * flags object. The `wireKey` field captures which key the peer used, so
+ * responders can echo the same key for backward compatibility.
+ */
+export const parseMemoryProtocolFlags = (
   value: unknown,
-): value is MemoryProtocolFlags => {
+): { flags: MemoryProtocolFlags; wireKey: WireFlagsKey } | null => {
   if (!isRecord(value) || Array.isArray(value)) {
-    return false;
+    return null;
   }
 
-  return typeof value.richStorableValues === "boolean";
+  if (typeof value.modernDataModel === "boolean") {
+    return {
+      flags: { modernDataModel: value.modernDataModel },
+      wireKey: "modernDataModel",
+    };
+  }
+
+  const legacy = value[LEGACY_MODERN_DATA_MODEL_KEY];
+  if (typeof legacy === "boolean") {
+    return {
+      flags: { modernDataModel: legacy },
+      wireKey: LEGACY_MODERN_DATA_MODEL_KEY,
+    };
+  }
+
+  return null;
 };
+
+/**
+ * Builds the wire-format flags object for a `hello`/`hello.ok` message,
+ * using the given key. Defaults to the canonical `modernDataModel` key;
+ * responders should pass the `wireKey` captured by
+ * `parseMemoryProtocolFlags()` to echo back what the peer used.
+ */
+export const wireMemoryProtocolFlags = (
+  flags: MemoryProtocolFlags,
+  wireKey: WireFlagsKey = "modernDataModel",
+): WireMemoryProtocolFlags => ({ [wireKey]: flags.modernDataModel });
 
 export const encodeMemoryBoundary = (value: unknown): string =>
   jsonFromValue(value as FabricValue);

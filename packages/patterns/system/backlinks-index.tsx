@@ -200,14 +200,13 @@ const BacklinksIndex = pattern<Input, Output>(({ allPieces }) => {
             {filteredCount} of {totalCount} pieces
           </span>
 
-          {filtered.map((entry) => {
-            const row = EntryRow({
-              piece: entry.piece,
-              name: entry.name,
-              backlinks: entry.backlinks,
-            });
-            return row[UI];
-          })}
+          {filtered.map((entry) => (
+            <EntryRow
+              piece={entry.piece}
+              name={entry.name}
+              backlinks={entry.backlinks}
+            />
+          ))}
         </cf-vstack>
       </cf-screen>
     ),

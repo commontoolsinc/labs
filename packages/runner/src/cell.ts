@@ -2291,31 +2291,49 @@ export function recursivelyAddIDIfNeeded<T>(
   // - Objects/arrays with toJSON() methods
   // - Sparse arrays (densified with null in holes)
   const converted = shallowFabricFromNativeValue(value);
-  const convertedIsRecord = isRecord(converted);
 
-  // If conversion changed the value, cache the result so shared references
-  // are preserved and we avoid redundant toJSON() calls.
-  if (converted !== value) {
-    const result = convertedIsRecord
-      ? recursivelyAddIDIfNeeded(converted as T, frame, seen)
-      : converted as T;
-    seen.set(value, result);
-    return result;
-  }
-
-  // Primitives that didn't need conversion don't need further processing.
-  if (!convertedIsRecord) {
+  // `FabricInstance` returned by the conversion step (e.g. `FabricError`
+  // wrapping a native `Error`). Same handling as the up-front
+  // `FabricInstance` branch above: record identity, walk via
+  // `[DECONSTRUCT]()` for side effects, return the instance unchanged.
+  if (converted instanceof FabricInstance) {
+    seen.set(value, converted);
+    const state = converted[DECONSTRUCT]();
+    if (isRecord(state) || Array.isArray(state)) {
+      recursivelyAddIDIfNeeded(state, frame, seen);
+    }
     return converted as T;
   }
 
-  if (Array.isArray(value)) {
-    const result = new Array<unknown>(value.length);
-    let changed = false;
+  // Primitives need no further processing. Cache the conversion when it
+  // changed the value (e.g. `-0 → 0`) so callers see consistent results.
+  if (!isRecord(converted)) {
+    if (converted !== value) seen.set(value, converted);
+    return converted as T;
+  }
 
-    // Set before traversing, otherwise we'll infinite recurse.
+  // From here `converted` is an array or record. The result container is
+  // pre-registered in `seen` against the original `value` BEFORE descending
+  // into entries, so circular back-references to `value` resolve correctly
+  // even under modern, where shallow conversion allocates a fresh frozen
+  // clone whose own properties still point at the original (unfrozen)
+  // input. Without this, a cycle would re-enter
+  // `shallowFabricFromNativeValue(value)` on every pass and recurse
+  // forever.
+  const convertedDiffers = converted !== value;
+
+  if (Array.isArray(converted)) {
+    // Typed as `any[]` (not `unknown[]`) to preserve the original code's
+    // looser inference inside the iteration body, where `{...v}` and
+    // `ID in v` operate post-narrowing without explicit casts.
+    const sourceArray = converted as any[];
+    const result = new Array<unknown>(sourceArray.length);
+    let changed = convertedDiffers;
+
     seen.set(value, result);
+    if (convertedDiffers) seen.set(converted, result);
 
-    value.forEach((el, i) => {
+    sourceArray.forEach((el, i) => {
       const v = recursivelyAddIDIfNeeded(el, frame, seen);
       // For objects on arrays only: Add ID if not already present.
       if (
@@ -2347,16 +2365,14 @@ export function recursivelyAddIDIfNeeded<T>(
     if (modern) Object.freeze(result);
     return result as T;
   } else {
-    // At this point we know `value` is a non-array record (we returned early
-    // for primitives and `Array.isArray` was false).
-    const valueRecord = value as Record<string, unknown>;
+    const sourceRecord = converted as Record<string, unknown>;
     const result: Record<string, unknown> = {};
-    let changed = false;
+    let changed = convertedDiffers;
 
-    // Set before traversing, otherwise we'll infinite recurse.
     seen.set(value, result);
+    if (convertedDiffers) seen.set(converted, result);
 
-    Object.entries(valueRecord).forEach(([key, v]) => {
+    Object.entries(sourceRecord).forEach(([key, v]) => {
       const next = recursivelyAddIDIfNeeded(v, frame, seen);
       if (!Object.is(next, v)) {
         changed = true;
@@ -2364,13 +2380,18 @@ export function recursivelyAddIDIfNeeded<T>(
       result[key] = next;
     });
 
-    // Copy supported symbols from original value.
-    [ID, ID_FIELD].forEach((symbol) => {
-      if (symbol in valueRecord) {
-        (result as IDFields)[symbol as keyof IDFields] =
-          (valueRecord as IDFields)[symbol as keyof IDFields];
-      }
-    });
+    // Copy supported symbols from the original value. Symbols are not
+    // enumerable via `Object.entries()` and are not preserved by the
+    // shallow fabric conversion.
+    if (isRecord(value)) {
+      const valueRecord = value as Record<string, unknown>;
+      [ID, ID_FIELD].forEach((symbol) => {
+        if (symbol in valueRecord) {
+          (result as IDFields)[symbol as keyof IDFields] =
+            (valueRecord as IDFields)[symbol as keyof IDFields];
+        }
+      });
+    }
 
     if (!changed) {
       seen.set(value, value);

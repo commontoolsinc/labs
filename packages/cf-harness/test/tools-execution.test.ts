@@ -276,7 +276,7 @@ Deno.test("bash tool executes the command through the sandbox shell runtime", as
     request: {
       command: [
         '__cf_harness_cwd_marker="__CF_HARNESS_CWD__run-1:bash:1__"',
-        'trap \'__cf_harness_status=$?; trap - EXIT; printf "%s%s" "$__cf_harness_cwd_marker" "$(pwd)"; exit "$__cf_harness_status"\' EXIT',
+        'trap \'__cf_harness_status=$?; trap - EXIT; { printf "%s%s" "$__cf_harness_cwd_marker" "$(pwd)" || true; }; exit "$__cf_harness_status"\' EXIT',
         "pwd",
       ].join("\n"),
       cwd: "/workspace/repo",
@@ -291,7 +291,7 @@ Deno.test("bash tool executes the command through the sandbox shell runtime", as
     sandbox.calls[0]?.request.cfcInvocationContext?.inputs.command?.bytes,
     [
       '__cf_harness_cwd_marker="__CF_HARNESS_CWD__run-1:bash:1__"',
-      'trap \'__cf_harness_status=$?; trap - EXIT; printf "%s%s" "$__cf_harness_cwd_marker" "$(pwd)"; exit "$__cf_harness_status"\' EXIT',
+      'trap \'__cf_harness_status=$?; trap - EXIT; { printf "%s%s" "$__cf_harness_cwd_marker" "$(pwd)" || true; }; exit "$__cf_harness_status"\' EXIT',
       "pwd",
     ].join("\n").length,
   );
@@ -330,7 +330,7 @@ Deno.test("bash tool allows curl to localhost through the sandbox shell runtime"
     request: {
       command: [
         '__cf_harness_cwd_marker="__CF_HARNESS_CWD__run-1:bash:1__"',
-        'trap \'__cf_harness_status=$?; trap - EXIT; printf "%s%s" "$__cf_harness_cwd_marker" "$(pwd)"; exit "$__cf_harness_status"\' EXIT',
+        'trap \'__cf_harness_status=$?; trap - EXIT; { printf "%s%s" "$__cf_harness_cwd_marker" "$(pwd)" || true; }; exit "$__cf_harness_status"\' EXIT',
         "curl -fsS http://localhost:8000/health",
       ].join("\n"),
       cwd: "/workspace",
