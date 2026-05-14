@@ -222,9 +222,6 @@ export type IsThisArray =
 export interface IAnyCell<T> {}
 
 /**
- * Readable cells can retrieve their current value.
- */
-/**
  * Readable cells provide a view onto stored data.
  *
  * **Frozenness contract (modern data model only):** `get()` and `sample()`
