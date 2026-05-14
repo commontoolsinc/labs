@@ -45,9 +45,7 @@ import type {
 } from "./telemetry.ts";
 import {
   DEFAULT_RETRIES_FOR_EVENTS,
-  MAX_ACTION_RUN_TRACE_HISTORY,
   MAX_ITERATIONS_PER_RUN,
-  MAX_RETRIES_FOR_REACTIVE,
   MAX_SETTLE_STATS_HISTORY,
   MAX_TRIGGER_TRACE_HISTORY,
 } from "./scheduler/constants.ts";
@@ -55,7 +53,6 @@ import {
   getPieceMetadataFromFrame,
   materializeHostVisibleStack,
   queueTask,
-  toActionRunTraceAddress,
 } from "./scheduler/diagnostics.ts";
 import {
   captureCommittedReads,
@@ -79,6 +76,11 @@ import {
   removeActionFromTriggerIndex,
   updateWriterIndex,
 } from "./scheduler/dependency-index.ts";
+import {
+  appendActionRunTrace,
+  startReactiveActionCommit,
+  watchReactiveActionCommit,
+} from "./scheduler/action-run.ts";
 import {
   buildIterationWorkSet,
   buildPullInitialSeeds,
@@ -1063,46 +1065,25 @@ export class Scheduler {
           // reactive functions based on it will be retriggered. But also, the
           // retry logic below will have re-scheduled this action, so
           // topological sorting should move it before the dependencies.
-          logger.timeStart("scheduler", "run", "commit");
-          this.runtime.prepareTxForCommit(tx);
-          const commitPromise = tx.commit();
-          logger.timeEnd("scheduler", "run", "commit");
-          commitPromise.then(({ error }) => {
-            // On error, retry up to MAX_RETRIES_FOR_REACTIVE times. Note that
-            // on every attempt we still call the re-subscribe below, so that
-            // even after we run out of retries, this will be re-triggered when
-            // input data changes.
-            if (error) {
-              logger.info(
-                "schedule-run-error",
-                "Error committing transaction",
-                error,
-              );
-
-              this.retries.set(action, (this.retries.get(action) ?? 0) + 1);
-              if (this.retries.get(action)! < MAX_RETRIES_FOR_REACTIVE) {
-                // Re-schedule the action to run again on conflict failure.
-                // Use resubscribe to set up dependencies/triggers from the log,
-                // then mark as dirty/pending to ensure it runs again.
-                this.resubscribe(action, log);
-                this.markDirectDirty(action);
-                this.pending.add(action);
-                this.queueExecution();
-              }
-            } else {
-              // Clear retries after successful commit.
-              this.retries.delete(action);
-            }
-          }).finally(() => {
-            this.removeInFlightSource(action, tx.tx);
-          }).catch((error) => {
-            logger.error(
-              "schedule-error",
-              "Commit promise rejected in finalizeAction:",
-              error,
-            );
+          const commitPromise = startReactiveActionCommit({
+            runtime: this.runtime,
+            tx,
           });
           const log = txToReactivityLog(tx);
+          watchReactiveActionCommit({
+            action,
+            tx,
+            log,
+            retries: this.retries,
+            pending: this.pending,
+            commitPromise,
+            resubscribe: (target, targetLog) =>
+              this.resubscribe(target, targetLog),
+            markDirectDirty: (target) => this.markDirectDirty(target),
+            queueExecution: () => this.queueExecution(),
+            removeInFlightSource: (target, source) =>
+              this.removeInFlightSource(target, source),
+          });
           const changedComputationWrites = this.recordChangedComputationWrites(
             action,
             tx,
@@ -1117,29 +1098,18 @@ export class Scheduler {
           ]);
 
           if (this.collectActionRunTrace) {
-            const parentAction = this.actionParent.get(action);
-            const declaredWrites = (this.getSchedulingWrites(action) ?? []).map(
-              toActionRunTraceAddress,
-            );
-            const actualWrites = sortAndCompactPaths(log.writes).map(
-              toActionRunTraceAddress,
-            );
-            this.actionRunTrace.push({
-              recordedAt: performance.now(),
+            appendActionRunTrace({
+              actionRunTrace: this.actionRunTrace,
+              actionParent: this.actionParent,
+              isEffectAction: this.isEffectAction,
+              getActionId: (target) => this.getActionId(target),
+              getSchedulingWrites: (target) => this.getSchedulingWrites(target),
+            }, {
+              action,
               actionId,
-              actionType: this.isEffectAction.get(action)
-                ? "effect"
-                : "computation",
-              parentActionId: parentAction
-                ? this.getActionId(parentAction)
-                : undefined,
               durationMs: elapsed,
-              declaredWrites,
-              actualWrites,
+              log,
             });
-            if (this.actionRunTrace.length > MAX_ACTION_RUN_TRACE_HISTORY) {
-              this.actionRunTrace.shift();
-            }
           }
 
           // Diagnosis capture: record read/write values for idempotency checking
