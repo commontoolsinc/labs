@@ -58,20 +58,16 @@ import {
 } from "./scheduler/diagnosis.ts";
 import {
   addTriggerPathsToIndex,
-  backfillDependentsForNewWrites,
-  buildKnownSchedulingWrites,
   collectDirectWritersForLog,
   collectReadersForWrite,
   type DependencyGraphState,
-  diffSchedulingWrites,
+  type DependencyUpdateState,
   pendingDependencyCollectionMightAffect
     as pendingDependencyCollectionMightAffectState,
-  pruneDependentsForCurrentWrites,
-  pruneStructuralAncestorWrites,
   readsOverlapWrites,
   removeActionFromTriggerIndex,
+  setSchedulerDependencies,
   updateDependentEdgesForLog,
-  updateWriterIndex,
 } from "./scheduler/dependency-index.ts";
 import {
   appendActionRunTrace,
@@ -141,10 +137,7 @@ import {
   getActionStats as getActionStatsFromState,
   recordActionTime as recordActionTimeState,
 } from "./scheduler/timing.ts";
-import {
-  filterIgnoredAddresses,
-  txToReactivityLog,
-} from "./scheduler/reactivity.ts";
+import { txToReactivityLog } from "./scheduler/reactivity.ts";
 import {
   addSchedulerEventHandler,
   processQueuedEventDuringExecute,
@@ -388,6 +381,16 @@ export class Scheduler {
     isDemandedPullComputation: (action) =>
       this.isDemandedPullComputation(action),
     queueExecution: () => this.queueExecution(),
+  };
+  private dependencyUpdateState: DependencyUpdateState = {
+    writersByEntity: this.writersByEntity,
+    actionWriteEntities: this.actionWriteEntities,
+    dependencies: this.dependencies,
+    currentKnownWrites: this.currentKnownWrites,
+    historicalMightWrite: this.historicalMightWrite,
+    dependencyGraph: this.dependencyGraphState,
+    useHistoricalMightWrite: () => this.useHistoricalMightWrite(),
+    isPullMode: () => this.pullMode,
   };
   private subscriptionState: SchedulerSubscriptionState = {
     actionChangeGroups: this.actionChangeGroups,
@@ -1212,97 +1215,11 @@ export class Scheduler {
     shallowReads: IMemorySpaceAddress[];
     log: ReactivityLog;
   } {
-    const reads = sortAndCompactPaths(log.reads);
-    const shallowReads = sortAndCompactPaths(log.shallowReads, false);
-    const ignoredSchedulingWrites =
-      (action as Partial<TelemetryAnnotations>).ignoredSchedulingWrites ?? [];
-    const writes = pruneStructuralAncestorWrites(
-      sortAndCompactPaths(
-        filterIgnoredAddresses(log.writes, ignoredSchedulingWrites),
-        false,
-      ),
-    );
-    const potentialWrites = sortAndCompactPaths(
-      filterIgnoredAddresses(log.potentialWrites, ignoredSchedulingWrites),
-    );
-    const declaredWrites = sortAndCompactPaths(
-      filterIgnoredAddresses(
-        ((action as Partial<TelemetryAnnotations>).writes ?? []).map(
-          toMemorySpaceAddress,
-        ),
-        ignoredSchedulingWrites,
-      ),
-    );
-    const schedulingLog: ReactivityLog = {
-      reads,
-      shallowReads,
-      writes,
-      ...(potentialWrites.length > 0 ? { potentialWrites } : {}),
-    };
-    this.dependencies.set(action, schedulingLog);
-
-    // Rebuild the current scheduling view from the latest writes plus
-    // declared/potential writes. Keep the cumulative legacy union separately
-    // so it can be enabled behind an experimental flag.
-    const rawExistingCurrentWrites = this.currentKnownWrites.get(action) ?? [];
-    const existingCurrentWrites = filterIgnoredAddresses(
-      rawExistingCurrentWrites,
-      ignoredSchedulingWrites,
-    );
-    const existingHistoricalWrites = filterIgnoredAddresses(
-      this.historicalMightWrite.get(action) ?? [],
-      ignoredSchedulingWrites,
-    );
-    const { newCurrentKnownWrites, newHistoricalMightWrite } =
-      buildKnownSchedulingWrites({
-        writes,
-        potentialWrites,
-        declaredWrites,
-        existingCurrentWrites,
-        existingHistoricalWrites,
-      });
-    this.currentKnownWrites.set(action, newCurrentKnownWrites);
-    this.historicalMightWrite.set(action, newHistoricalMightWrite);
-
-    const previousSchedulingWrites = this.useHistoricalMightWrite()
-      ? existingHistoricalWrites
-      : existingCurrentWrites;
-    const nextSchedulingWrites = this.useHistoricalMightWrite()
-      ? newHistoricalMightWrite
-      : newCurrentKnownWrites;
-
-    const { addedWrites, removedWrites } = diffSchedulingWrites(
-      previousSchedulingWrites,
-      nextSchedulingWrites,
-    );
-
-    updateWriterIndex(
-      {
-        writersByEntity: this.writersByEntity,
-        actionWriteEntities: this.actionWriteEntities,
-      },
+    return setSchedulerDependencies(
+      this.dependencyUpdateState,
       action,
-      nextSchedulingWrites,
+      log,
     );
-
-    if (removedWrites.length > 0) {
-      pruneDependentsForCurrentWrites(
-        this.dependencyGraphState,
-        action,
-        nextSchedulingWrites,
-      );
-    }
-
-    if (this.pullMode && addedWrites.length > 0) {
-      // Backfill reverse edges when new writers appear after readers are already subscribed.
-      backfillDependentsForNewWrites(
-        this.dependencyGraphState,
-        action,
-        addedWrites,
-      );
-    }
-
-    return { reads, shallowReads, log: schedulingLog };
   }
 
   private addTriggerPaths(
