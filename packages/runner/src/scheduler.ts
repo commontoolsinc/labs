@@ -23,13 +23,10 @@ import type {
   IMemorySpaceAddress,
   IStorageSubscription,
   IStorageTransaction,
-  MemoryAddressPathComponent,
 } from "./storage/interface.ts";
 import {
-  addressesToPathByEntity,
   arraysOverlap,
   determineTriggeredActions,
-  nonRecursiveReadMayOverlapWrite,
   sortAndCompactPaths,
   type SortedAndCompactPaths,
 } from "./reactive-dependencies.ts";
@@ -56,9 +53,6 @@ import {
   AUTO_DEBOUNCE_DELAY_MS,
   AUTO_DEBOUNCE_MIN_RUNS,
   AUTO_DEBOUNCE_THRESHOLD_MS,
-  CYCLE_DEBOUNCE_MIN_RUNS,
-  CYCLE_DEBOUNCE_MULTIPLIER,
-  CYCLE_DEBOUNCE_THRESHOLD_MS,
   DEFAULT_RETRIES_FOR_EVENTS,
   MAX_ACTION_RUN_TRACE_HISTORY,
   MAX_ITERATIONS_PER_RUN,
@@ -82,6 +76,30 @@ import {
   findDifferingWriteKeys,
   findNonIdempotentPair,
 } from "./scheduler/diagnosis.ts";
+import {
+  addTriggerPathsToIndex,
+  collectReadersForWrite,
+  deriveDynamicCollectionParentWrites,
+  groupReadsByEntity,
+  pruneStructuralAncestorWrites,
+  readsOverlapWrites,
+  removeActionFromTriggerIndex,
+  updateWriterIndex,
+} from "./scheduler/dependency-index.ts";
+import {
+  buildPullInitialSeeds,
+  createSettlingTracker,
+  markExecuteStart,
+  planAdaptiveCycleDebounce,
+  planCycleBreak,
+  planExecuteContinuation,
+  pushBoundedHistory,
+  recordEarlyIterationComputations,
+  recordExecuteEnd,
+  type SettlingTracker,
+  summarizeSettleIteration,
+  summarizeSettleRun,
+} from "./scheduler/execution.ts";
 import {
   filterIgnoredAddresses,
   hasAnnotatedWrites,
@@ -200,13 +218,7 @@ export class Scheduler {
   private rerunAfterCurrentExecute = false;
 
   // Non-settling heuristic (Phase 1): detects when the system is churning
-  private settlingTracker = {
-    windowStart: 0, // start of current tracking window
-    busyTime: 0, // cumulative ms spent in execute() within window
-    lastExecuteStart: 0, // timestamp when current execute() started
-    isExecuting: false,
-    nonSettlingDetected: false,
-  };
+  private settlingTracker: SettlingTracker = createSettlingTracker();
   private autoTriggerDiagnosis = false;
 
   // Idempotency diagnosis (Phase 2): captures read/write values per action run
@@ -840,7 +852,7 @@ export class Scheduler {
             // Check path overlap
             const writerWrites = this.getSchedulingWrites(writer) ?? [];
             if (
-              this.readsOverlapWrites(
+              readsOverlapWrites(
                 effectReads,
                 effectShallowReads,
                 writerWrites,
@@ -1489,7 +1501,7 @@ export class Scheduler {
     const shallowReads = sortAndCompactPaths(log.shallowReads, false);
     const ignoredSchedulingWrites =
       (action as Partial<TelemetryAnnotations>).ignoredSchedulingWrites ?? [];
-    const writes = this.pruneStructuralAncestorWrites(
+    const writes = pruneStructuralAncestorWrites(
       sortAndCompactPaths(
         filterIgnoredAddresses(log.writes, ignoredSchedulingWrites),
         false,
@@ -1527,7 +1539,7 @@ export class Scheduler {
       : existingCurrentWrites.length > 0
       ? existingCurrentWrites
       : declaredWrites;
-    const dynamicParentWrites = this.deriveDynamicCollectionParentWrites(
+    const dynamicParentWrites = deriveDynamicCollectionParentWrites(
       writes,
       declaredWrites,
     );
@@ -1578,44 +1590,14 @@ export class Scheduler {
       )
     );
 
-    // Update writersByEntity index for fast dependency lookup
-    // Collect new entities from writes
-    const existingEntities = this.actionWriteEntities.get(action) ?? new Set();
-    const nextEntities = new Set<SpaceScopeAndURI>();
-    const addedEntities = new Set<SpaceScopeAndURI>();
-    const removedEntities = new Set<SpaceScopeAndURI>();
-    for (const write of nextSchedulingWrites) {
-      const entity = entityKey(write);
-      nextEntities.add(entity);
-      if (!existingEntities.has(entity)) {
-        addedEntities.add(entity);
-      }
-    }
-    for (const entity of existingEntities) {
-      if (!nextEntities.has(entity)) {
-        removedEntities.add(entity);
-      }
-    }
-
-    for (const entity of removedEntities) {
-      const writers = this.writersByEntity.get(entity);
-      writers?.delete(action);
-      if (writers && writers.size === 0) {
-        this.writersByEntity.delete(entity);
-      }
-    }
-
-    // Add action to writersByEntity for each newly discovered entity
-    for (const entity of addedEntities) {
-      // Skip if already registered
-      let writers = this.writersByEntity.get(entity);
-      if (!writers) {
-        writers = new Set();
-        this.writersByEntity.set(entity, writers);
-      }
-      writers.add(action);
-    }
-    this.actionWriteEntities.set(action, nextEntities);
+    updateWriterIndex(
+      {
+        writersByEntity: this.writersByEntity,
+        actionWriteEntities: this.actionWriteEntities,
+      },
+      action,
+      nextSchedulingWrites,
+    );
 
     if (removedWrites.length > 0) {
       this.pruneDependentsForCurrentWrites(action, nextSchedulingWrites);
@@ -1629,58 +1611,6 @@ export class Scheduler {
     return { reads, shallowReads, log: schedulingLog };
   }
 
-  private pruneStructuralAncestorWrites(
-    writes: IMemorySpaceAddress[],
-  ): IMemorySpaceAddress[] {
-    // Transaction reactivity logs include ancestor paths when a child write
-    // changes shallow structure. For scheduling writes, the descendant path is
-    // precise enough; keeping the ancestor would make unrelated shallow root
-    // readers depend on this action.
-    return writes.filter((write) =>
-      !writes.some((other) =>
-        other !== write &&
-        other.space === write.space &&
-        other.id === write.id &&
-        other.type === write.type &&
-        write.path.length < other.path.length &&
-        arraysOverlap(write.path, other.path)
-      )
-    );
-  }
-
-  private deriveDynamicCollectionParentWrites(
-    writes: IMemorySpaceAddress[],
-    declaredWrites: IMemorySpaceAddress[],
-  ): IMemorySpaceAddress[] {
-    const parentWrites: IMemorySpaceAddress[] = [];
-    for (const declaredWrite of declaredWrites) {
-      for (const write of writes) {
-        if (
-          declaredWrite.space !== write.space ||
-          declaredWrite.id !== write.id ||
-          declaredWrite.type !== write.type ||
-          declaredWrite.path.length >= write.path.length ||
-          !arraysOverlap(declaredWrite.path, write.path)
-        ) {
-          continue;
-        }
-
-        const dynamicSegment = write.path[declaredWrite.path.length];
-        if (this.isDynamicCollectionSegment(dynamicSegment)) {
-          parentWrites.push(declaredWrite);
-        }
-      }
-    }
-    return parentWrites;
-  }
-
-  private isDynamicCollectionSegment(
-    segment: MemoryAddressPathComponent | undefined,
-  ): boolean {
-    if (typeof segment === "number") return Number.isInteger(segment);
-    return typeof segment === "string" && /^(0|[1-9]\d*)$/.test(segment);
-  }
-
   private addTriggerPaths(
     action: Action,
     reads: IMemorySpaceAddress[],
@@ -1690,33 +1620,15 @@ export class Scheduler {
     triggerPathsByEntity: Map<SpaceScopeAndURI, SortedAndCompactPaths>;
   } {
     this.clearActionTriggers(action);
-    const pathsByEntity = addressesToPathByEntity(reads);
-    const nonRecursivePathsByEntity = addressesToPathByEntity(
+    return addTriggerPathsToIndex(
+      {
+        triggers: this.triggers,
+        nonRecursiveTriggers: this.nonRecursiveTriggers,
+      },
+      action,
+      reads,
       shallowReads,
     );
-    const entities = new Set<SpaceScopeAndURI>();
-    const triggerPathsByEntity = new Map<
-      SpaceScopeAndURI,
-      SortedAndCompactPaths
-    >();
-
-    for (const [spaceAndURI, paths] of pathsByEntity) {
-      entities.add(spaceAndURI);
-      if (!this.triggers.has(spaceAndURI)) {
-        this.triggers.set(spaceAndURI, new Map());
-      }
-      this.triggers.get(spaceAndURI)!.set(action, paths);
-      triggerPathsByEntity.set(spaceAndURI, paths);
-    }
-    for (const [spaceAndURI, paths] of nonRecursivePathsByEntity) {
-      entities.add(spaceAndURI);
-      if (!this.nonRecursiveTriggers.has(spaceAndURI)) {
-        this.nonRecursiveTriggers.set(spaceAndURI, new Map());
-      }
-      this.nonRecursiveTriggers.get(spaceAndURI)!.set(action, paths);
-    }
-
-    return { entities, triggerPathsByEntity };
   }
 
   private clearActionTriggers(action: Action): void {
@@ -1737,10 +1649,14 @@ export class Scheduler {
         `Action: ${actionId}`,
         `Entities: ${entities.size}`,
       ]);
-      for (const spaceAndURI of entities) {
-        this.triggers.get(spaceAndURI)?.delete(action);
-        this.nonRecursiveTriggers.get(spaceAndURI)?.delete(action);
-      }
+      removeActionFromTriggerIndex(
+        {
+          triggers: this.triggers,
+          nonRecursiveTriggers: this.nonRecursiveTriggers,
+        },
+        action,
+        entities,
+      );
     });
   }
 
@@ -1813,30 +1729,9 @@ export class Scheduler {
 
     const newDependencies = new Set<Action>();
 
-    // Group reads by entity for efficient lookup
-    const readsByEntity = new Map<SpaceScopeAndURI, IMemorySpaceAddress[]>();
-    for (const read of log.reads) {
-      const entity = entityKey(read);
-      let entityReads = readsByEntity.get(entity);
-      if (!entityReads) {
-        entityReads = [];
-        readsByEntity.set(entity, entityReads);
-      }
-      entityReads.push(read);
-    }
-    const nonRecursiveByEntity = new Map<
-      SpaceScopeAndURI,
-      IMemorySpaceAddress[]
-    >();
-    for (const read of log.shallowReads) {
-      const entity = entityKey(read);
-      let entityReads = nonRecursiveByEntity.get(entity);
-      if (!entityReads) {
-        entityReads = [];
-        nonRecursiveByEntity.set(entity, entityReads);
-      }
-      entityReads.push(read);
-    }
+    // Group reads by entity for efficient writer lookups.
+    const readsByEntity = groupReadsByEntity(log.reads);
+    const nonRecursiveByEntity = groupReadsByEntity(log.shallowReads);
     const allEntities = new Set([
       ...readsByEntity.keys(),
       ...nonRecursiveByEntity.keys(),
@@ -1859,7 +1754,7 @@ export class Scheduler {
         const otherWrites = this.getSchedulingWrites(otherAction) ?? [];
 
         if (
-          this.readsOverlapWrites(
+          readsOverlapWrites(
             entityReads,
             entityNonRecursiveReads,
             otherWrites,
@@ -1929,42 +1824,6 @@ export class Scheduler {
     }
   }
 
-  private pathMatchesWrite(
-    readPath: readonly MemoryAddressPathComponent[],
-    writePath: readonly MemoryAddressPathComponent[],
-  ): boolean {
-    return arraysOverlap(writePath, readPath);
-  }
-
-  private collectReadersForWrite(write: IMemorySpaceAddress): Set<Action> {
-    const entity = entityKey(write);
-    const readers = new Set<Action>();
-
-    const recursiveReaders = this.triggers.get(entity);
-    if (recursiveReaders) {
-      for (const [action, paths] of recursiveReaders) {
-        if (paths.some((path) => this.pathMatchesWrite(path, write.path))) {
-          readers.add(action);
-        }
-      }
-    }
-
-    const nonRecursiveReaders = this.nonRecursiveTriggers.get(entity);
-    if (nonRecursiveReaders) {
-      for (const [action, reads] of nonRecursiveReaders) {
-        if (
-          reads.some((read) =>
-            nonRecursiveReadMayOverlapWrite(read, write.path)
-          )
-        ) {
-          readers.add(action);
-        }
-      }
-    }
-
-    return readers;
-  }
-
   private backfillDependentsForNewWrites(
     writer: Action,
     writes: IMemorySpaceAddress[],
@@ -1972,7 +1831,15 @@ export class Scheduler {
     if (writes.length === 0) return;
     const readers = new Set<Action>();
     for (const write of writes) {
-      for (const action of this.collectReadersForWrite(write)) {
+      for (
+        const action of collectReadersForWrite(
+          {
+            triggers: this.triggers,
+            nonRecursiveTriggers: this.nonRecursiveTriggers,
+          },
+          write,
+        )
+      ) {
         readers.add(action);
       }
     }
@@ -1994,47 +1861,13 @@ export class Scheduler {
       const log = this.dependencies.get(dependent);
       if (
         log &&
-        this.readsOverlapWrites(log.reads, log.shallowReads, writes)
+        readsOverlapWrites(log.reads, log.shallowReads, writes)
       ) {
         continue;
       }
 
       this.unregisterDependentEdge(writer, dependent);
     }
-  }
-
-  private readsOverlapWrites(
-    reads: IMemorySpaceAddress[],
-    shallowReads: IMemorySpaceAddress[],
-    writes: IMemorySpaceAddress[],
-  ): boolean {
-    for (const read of reads) {
-      for (const write of writes) {
-        if (
-          read.space === write.space &&
-          read.id === write.id &&
-          normalizeCellScope(read.scope) === normalizeCellScope(write.scope) &&
-          arraysOverlap(write.path, read.path)
-        ) {
-          return true;
-        }
-      }
-    }
-    // For non-recursive reads, only same/ancestor path or direct child writes
-    // create a dependency. Deep descendant writes cannot affect shallow structure.
-    for (const read of shallowReads) {
-      for (const write of writes) {
-        if (
-          read.space === write.space &&
-          read.id === write.id &&
-          normalizeCellScope(read.scope) === normalizeCellScope(write.scope) &&
-          nonRecursiveReadMayOverlapWrite(read.path, write.path)
-        ) {
-          return true;
-        }
-      }
-    }
-    return false;
   }
 
   /**
@@ -2698,7 +2531,7 @@ export class Scheduler {
       const writes = this.getSchedulingWrites(pendingAction);
       if (!writes || writes.length === 0) return true;
       if (this.hasDependentPath(pendingAction, action)) return true;
-      if (this.readsOverlapWrites(reads, shallowReads, writes)) {
+      if (readsOverlapWrites(reads, shallowReads, writes)) {
         return true;
       }
     }
@@ -2860,7 +2693,7 @@ export class Scheduler {
     const log = this.dependencies.get(effect);
     if (!log) return false;
 
-    return this.readsOverlapWrites(log.reads, log.shallowReads, changedWrites);
+    return readsOverlapWrites(log.reads, log.shallowReads, changedWrites);
   }
 
   private markReadersDirtyForChangedWrites(
@@ -2871,7 +2704,15 @@ export class Scheduler {
 
     const readers = new Set<Action>();
     for (const write of sortAndCompactPaths(changedWrites)) {
-      for (const reader of this.collectReadersForWrite(write)) {
+      for (
+        const reader of collectReadersForWrite(
+          {
+            triggers: this.triggers,
+            nonRecursiveTriggers: this.nonRecursiveTriggers,
+          },
+          write,
+        )
+      ) {
         if (reader !== sourceAction) {
           readers.add(reader);
         }
@@ -2911,7 +2752,7 @@ export class Scheduler {
           if (this.effects.has(writer)) continue;
           if (trace) trace.writerCandidateCount++;
           const writes = this.getSchedulingWrites(writer) ?? [];
-          if (this.readsOverlapWrites([read], [], writes)) {
+          if (readsOverlapWrites([read], [], writes)) {
             if (trace && !directWriters.has(writer)) {
               trace.writerOverlapCount++;
             }
@@ -2929,7 +2770,7 @@ export class Scheduler {
           if (this.effects.has(writer)) continue;
           if (trace) trace.writerCandidateCount++;
           const writes = this.getSchedulingWrites(writer) ?? [];
-          if (this.readsOverlapWrites([], [read], writes)) {
+          if (readsOverlapWrites([], [read], writes)) {
             if (trace && !directWriters.has(writer)) {
               trace.writerOverlapCount++;
             }
@@ -3765,13 +3606,7 @@ export class Scheduler {
     this.runsThisExecute.clear();
 
     // Non-settling heuristic: record execute() start
-    const tracker = this.settlingTracker;
-    const now = performance.now();
-    tracker.lastExecuteStart = now;
-    tracker.isExecuting = true;
-    if (tracker.windowStart === 0) {
-      tracker.windowStart = now;
-    }
+    markExecuteStart(this.settlingTracker);
 
     logger.timeStart("scheduler", "execute", "depCollect");
     // Process pending dependency collection for newly subscribed actions.
@@ -4176,36 +4011,16 @@ export class Scheduler {
       this.pendingDependencyCollection.clear();
     }
 
-    // Build initial seeds for pull mode (effects + special actions)
-    const initialSeeds = new Set<Action>();
-    if (this.pullMode) {
-      // Add pending effects (not computations)
-      for (const action of this.pending) {
-        if (this.effects.has(action)) {
-          initialSeeds.add(action);
-        }
-      }
-      // Add dirty effects - these may have been skipped due to cycle detection
-      // or throttling but still need to run
-      for (const action of this.dirty) {
-        if (this.effects.has(action)) {
-          initialSeeds.add(action);
-        }
-      }
-      // Add any actions that need to write to capture possible writes
-      for (const action of newActionsWithoutDependencies) {
-        initialSeeds.add(action);
-      }
-      // Add computations that are blocking deferred events
-      for (const action of eventBlockingDeps) {
-        initialSeeds.add(action);
-      }
-      // Add computations whose trailing debounce timer fired. These are pull
-      // computations, so they need an explicit demand seed to flush.
-      for (const action of this.computationDebounceFlushSeeds) {
-        initialSeeds.add(action);
-      }
-    }
+    // Build initial seeds for pull mode (effects + special actions).
+    const initialSeeds = buildPullInitialSeeds({
+      pullMode: this.pullMode,
+      pending: this.pending,
+      dirty: this.dirty,
+      effects: this.effects,
+      newActionsWithoutDependencies,
+      eventBlockingDeps,
+      computationDebounceFlushSeeds: this.computationDebounceFlushSeeds,
+    });
 
     // Settle loop: runs until no more dirty work is found.
     // First iteration processes initial seeds + their dirty deps.
@@ -4296,14 +4111,14 @@ export class Scheduler {
         break;
       }
 
-      // Track computations in early iterations for cycle detection
-      if (this.pullMode && settleIter < EARLY_ITERATION_THRESHOLD) {
-        for (const fn of workSet) {
-          if (!this.effects.has(fn)) {
-            earlyIterationComputations.add(fn);
-          }
-        }
-      }
+      recordEarlyIterationComputations({
+        pullMode: this.pullMode,
+        settleIter,
+        threshold: EARLY_ITERATION_THRESHOLD,
+        workSet,
+        effects: this.effects,
+        earlyIterationComputations,
+      });
       lastWorkSet = workSet;
 
       // Snapshot workSet size before topo sort (in push mode, workSet === this.pending
@@ -4465,42 +4280,31 @@ export class Scheduler {
 
       // Capture per-iteration settle stats (only when enabled)
       if (settleIterStats) {
-        const iterActions: { id: string; type: "effect" | "computation" }[] =
-          [];
-        // Use `order` (stable array) instead of `workSet` which may be mutated in push mode
-        for (const fn of order) {
-          iterActions.push({
-            id: this.getActionId(fn),
-            type: this.effects.has(fn) ? "effect" : "computation",
-          });
-          if (iterActions.length >= 30) break; // Cap to avoid huge arrays
-        }
-        settleIterStats.push({
+        settleIterStats.push(summarizeSettleIteration({
           workSetSize: iterWorkSetSize,
-          orderSize: order.length,
+          order,
           actionsRun: iterActionsRun,
-          actions: iterActions,
           durationMs: performance.now() - iterStart,
-        });
+          effects: this.effects,
+          getActionId: (action) => this.getActionId(action),
+        }));
       }
     }
 
     // Store settle stats for external access (only when enabled)
     if (settleIterStats) {
-      const settleStats = {
+      const settleStats = summarizeSettleRun({
         iterations: settleIterStats,
         totalDurationMs: performance.now() - settleStartTime,
         settledEarly,
         initialSeedCount: initialSeeds.size,
-      };
-      this.lastSettleStats = settleStats;
-      this.settleStatsHistory.push({
-        recordedAt: performance.now(),
-        stats: settleStats,
       });
-      if (this.settleStatsHistory.length > MAX_SETTLE_STATS_HISTORY) {
-        this.settleStatsHistory.shift();
-      }
+      this.lastSettleStats = settleStats;
+      pushBoundedHistory(
+        this.settleStatsHistory,
+        { recordedAt: performance.now(), stats: settleStats },
+        MAX_SETTLE_STATS_HISTORY,
+      );
     }
 
     logger.timeEnd("scheduler", "execute", "settle");
@@ -4508,7 +4312,17 @@ export class Scheduler {
     // If we hit max iterations without settling, break the cycle:
     // 1. Clear dirty/pending for computations that were in early iterations AND still in last workSet
     // 2. Run all remaining dirty effects so they don't get lost
-    if (this.pullMode && !settledEarly && lastWorkSet.size > 0) {
+    const cycleBreakPlan = planCycleBreak({
+      pullMode: this.pullMode,
+      settledEarly,
+      lastWorkSet,
+      earlyIterationComputations,
+      dirty: this.dirty,
+      effects: this.effects,
+      runsThisExecute: this.runsThisExecute,
+      isThrottled: (action) => this.isThrottled(action),
+    });
+    if (cycleBreakPlan.shouldBreak) {
       logger.debug("schedule-cycle", () => [
         `[CYCLE-BREAK] Hit max iterations (${maxSettleIterations}), breaking cycle`,
         `Early computations: ${earlyIterationComputations.size}, Last workSet: ${lastWorkSet.size}`,
@@ -4517,28 +4331,19 @@ export class Scheduler {
       // Clear computations that appear to be in the cycle
       // (present in early iterations AND still in the last workSet)
       // But don't clear throttled computations - they should stay dirty
-      for (const comp of earlyIterationComputations) {
-        if (
-          lastWorkSet.has(comp) && this.dirty.has(comp) &&
-          !this.isThrottled(comp) &&
-          (this.runsThisExecute.get(comp) ?? 0) > 1
-        ) {
-          logger.debug("schedule-cycle", () => [
-            `[CYCLE-BREAK] Clearing cyclic computation: ${
-              this.getActionId(comp)
-            }`,
-          ]);
-          this.clearDirty(comp);
-          this.pending.delete(comp);
-        }
+      for (const comp of cycleBreakPlan.computationsToClear) {
+        logger.debug("schedule-cycle", () => [
+          `[CYCLE-BREAK] Clearing cyclic computation: ${
+            this.getActionId(comp)
+          }`,
+        ]);
+        this.clearDirty(comp);
+        this.pending.delete(comp);
       }
 
       // Run all remaining dirty effects - these shouldn't be lost
       // But skip throttled effects - they should stay dirty for later
-      const dirtyEffects = [...this.effects].filter((effect) =>
-        this.dirty.has(effect) && !this.isThrottled(effect)
-      );
-      for (const effect of dirtyEffects) {
+      for (const effect of cycleBreakPlan.dirtyEffectsToRun) {
         if (this.effects.has(effect) && this.dirty.has(effect)) {
           logger.debug("schedule-cycle", () => [
             `[CYCLE-BREAK] Running dirty effect: ${this.getActionId(effect)}`,
@@ -4556,127 +4361,78 @@ export class Scheduler {
     // Pull computations are already demand-gated; debouncing them can leave a
     // live renderer observing stale materialized data until an arbitrary timer
     // fires.
-    const executeElapsed = performance.now() - this.executeStartTime;
-    if (this.pullMode && executeElapsed >= CYCLE_DEBOUNCE_THRESHOLD_MS) {
-      for (const [action, runs] of this.runsThisExecute) {
-        if (
-          this.canAutomaticallyDebounce(action) &&
-          runs >= CYCLE_DEBOUNCE_MIN_RUNS
-        ) {
-          // This action is cycling - apply adaptive debounce
-          const adaptiveDelay = Math.round(
-            CYCLE_DEBOUNCE_MULTIPLIER * executeElapsed,
-          );
-          const currentDebounce = this.actionDebounce.get(action) ?? 0;
-          if (adaptiveDelay > currentDebounce) {
-            this.actionDebounce.set(action, adaptiveDelay);
-            logger.debug("schedule-cycle-debounce", () => [
-              `[CYCLE-DEBOUNCE] Action ${this.getActionId(action)} ` +
-              `ran ${runs}x in ${executeElapsed.toFixed(1)}ms, ` +
-              `setting debounce to ${adaptiveDelay}ms`,
-            ]);
-          }
-        }
-      }
+    const cycleDebouncePlan = planAdaptiveCycleDebounce({
+      pullMode: this.pullMode,
+      executeStartTime: this.executeStartTime,
+      runsThisExecute: this.runsThisExecute,
+      canAutomaticallyDebounce: (action) =>
+        this.canAutomaticallyDebounce(
+          action,
+        ),
+      getCurrentDebounce: (action) => this.actionDebounce.get(action),
+    });
+    for (
+      const { action, runs, delayMs } of cycleDebouncePlan.updates
+    ) {
+      this.actionDebounce.set(action, delayMs);
+      logger.debug("schedule-cycle-debounce", () => [
+        `[CYCLE-DEBOUNCE] Action ${this.getActionId(action)} ` +
+        `ran ${runs}x in ${cycleDebouncePlan.elapsedMs.toFixed(1)}ms, ` +
+        `setting debounce to ${delayMs}ms`,
+      ]);
     }
 
     // Non-settling heuristic: accumulate busy time at end of execute()
-    {
-      const endNow = performance.now();
-      const elapsed = endNow - tracker.lastExecuteStart;
-      tracker.busyTime += elapsed;
-      if (this.diagnosisEnabled) {
-        this.diagnosisBusyTime += elapsed;
-      }
-      tracker.isExecuting = false;
-
-      const windowDuration = endNow - tracker.windowStart;
-      if (windowDuration > 5000) {
-        const busyRatio = tracker.busyTime / windowDuration;
-        if (busyRatio > 0.3 && tracker.busyTime > 1000) {
-          if (!tracker.nonSettlingDetected) {
-            tracker.nonSettlingDetected = true;
-            this.runtime.telemetry.submit({
-              type: "scheduler.non-settling",
-              busyTime: tracker.busyTime,
-              windowDuration,
-              busyRatio,
-            });
-            // Auto-trigger diagnosis if enabled
-            if (this.autoTriggerDiagnosis && !this.diagnosisEnabled) {
-              this.startDiagnosis();
-            }
-          }
-        }
-      }
-      // Slide the window if it exceeds 10s without idle
-      if (windowDuration > 10000) {
-        tracker.windowStart = endNow;
-        tracker.busyTime = tracker.busyTime / 2; // Rolling average
+    const executeEnd = recordExecuteEnd(this.settlingTracker);
+    if (this.diagnosisEnabled) {
+      this.diagnosisBusyTime += executeEnd.diagnosisBusyTimeMs;
+    }
+    if (executeEnd.nonSettlingTelemetry) {
+      this.runtime.telemetry.submit({
+        type: "scheduler.non-settling",
+        ...executeEnd.nonSettlingTelemetry,
+      });
+      // Auto-trigger diagnosis if enabled
+      if (this.autoTriggerDiagnosis && !this.diagnosisEnabled) {
+        this.startDiagnosis();
       }
     }
 
     // In pull mode, we consider ourselves done when there are no effects or
     // effect-demanded computations to execute.
-    const hasPendingPullWork = this.pullMode
-      ? [...this.pending].some((a) =>
-        this.effects.has(a) ||
-        this.isDemandedPullComputation(a) ||
-        this.shouldRunFirstPullComputationInDemandContext(a)
-      )
-      : this.pending.size > 0;
-    let nextDirtyPullRunAt: number | undefined;
-    let nextDirtyPullRunWaitsForIdle = false;
-    const hasDirtyPullWork = this.pullMode &&
-      [...this.dirty].some((action) => {
-        if (
-          !this.effects.has(action) &&
-          !this.isDemandedPullComputation(action)
-        ) {
-          return false;
-        }
-        if (this.isDebouncedComputationWaiting(action)) {
-          const nextDebounceAt = this.getNextDebounceRunTime(action);
-          if (nextDebounceAt !== undefined) {
-            nextDirtyPullRunAt = nextDirtyPullRunAt === undefined
-              ? nextDebounceAt
-              : Math.min(nextDirtyPullRunAt, nextDebounceAt);
-            nextDirtyPullRunWaitsForIdle ||= this.effects.has(action);
-          }
-          return false;
-        }
-        const nextEligibleAt = this.getNextEligibleRunTime(action);
-        if (
-          nextEligibleAt !== undefined &&
-          nextEligibleAt > performance.now()
-        ) {
-          nextDirtyPullRunAt = nextDirtyPullRunAt === undefined
-            ? nextEligibleAt
-            : Math.min(nextDirtyPullRunAt, nextEligibleAt);
-          nextDirtyPullRunWaitsForIdle ||= this.effects.has(action);
-          return false;
-        }
-        return true;
-      });
     const hasQueuedEventReadyNow = this.eventQueue.length > 0 &&
       !this.isHeadEventParked();
     const hasParkedHeadEvent = this.eventQueue.length > 0 &&
       this.isHeadEventParked();
     const shouldRerunAfterCurrentExecute = this.rerunAfterCurrentExecute;
     this.rerunAfterCurrentExecute = false;
-    const hasImmediateRerunRequest = shouldRerunAfterCurrentExecute &&
-      nextDirtyPullRunAt === undefined;
 
-    if (
-      !hasImmediateRerunRequest &&
-      !hasPendingPullWork &&
-      !hasDirtyPullWork &&
-      !hasQueuedEventReadyNow
-    ) {
-      if (nextDirtyPullRunAt !== undefined) {
-        this.scheduleEventQueueWake(nextDirtyPullRunAt);
+    const continuation = planExecuteContinuation({
+      pullMode: this.pullMode,
+      pending: this.pending,
+      dirty: this.dirty,
+      effects: this.effects,
+      shouldRerunAfterCurrentExecute,
+      hasQueuedEventReadyNow,
+      hasParkedHeadEvent,
+      isDemandedPullComputation: (action) =>
+        this.isDemandedPullComputation(action),
+      shouldRunFirstPullComputationInDemandContext: (action) =>
+        this.shouldRunFirstPullComputationInDemandContext(action),
+      isDebouncedComputationWaiting: (action) =>
+        this.isDebouncedComputationWaiting(action),
+      getNextDebounceRunTime: (action) => this.getNextDebounceRunTime(action),
+      getNextEligibleRunTime: (action) => this.getNextEligibleRunTime(action),
+    });
+
+    if (!continuation.shouldQueueAnotherTick) {
+      if (continuation.nextDirtyPullRunAt !== undefined) {
+        this.scheduleEventQueueWake(continuation.nextDirtyPullRunAt);
         const promises = this.idlePromises;
-        if (!hasParkedHeadEvent && !nextDirtyPullRunWaitsForIdle) {
+        if (
+          !continuation.hasParkedHeadEvent &&
+          !continuation.nextDirtyPullRunWaitsForIdle
+        ) {
           for (const resolve of promises) resolve();
           this.idlePromises.length = 0;
         }
@@ -4688,13 +4444,7 @@ export class Scheduler {
 
         // Waiting on a future wake is quiescent from the scheduler's
         // perspective, so reset the non-settling tracker.
-        this.settlingTracker = {
-          windowStart: 0,
-          busyTime: 0,
-          lastExecuteStart: 0,
-          isExecuting: false,
-          nonSettlingDetected: false,
-        };
+        this.settlingTracker = createSettlingTracker();
       } else {
         const promises = this.idlePromises;
         for (const resolve of promises) resolve();
@@ -4703,13 +4453,7 @@ export class Scheduler {
         this.scheduled = false;
 
         // Reset settling tracker on idle
-        this.settlingTracker = {
-          windowStart: 0,
-          busyTime: 0,
-          lastExecuteStart: 0,
-          isExecuting: false,
-          nonSettlingDetected: false,
-        };
+        this.settlingTracker = createSettlingTracker();
 
         this.scheduledFirstTime.clear();
         if (this.conditionallyScheduledEffects.size === 0) {
