@@ -3,6 +3,10 @@ import type {
   CfcLabelView,
 } from "@commonfabric/runner/cfc";
 import { mergeCfcLabelViews } from "@commonfabric/runner/cfc";
+import {
+  createHarnessCfcModelContextInputLabels,
+  type HarnessCfcModelContext,
+} from "./cfc-model-context.ts";
 import type { PromptSlotBinding, PromptSlotRole } from "./prompt-slot.ts";
 import type { HarnessRunManifest } from "./run-manifest.ts";
 import type { BuiltinToolId } from "./tool-descriptor.ts";
@@ -115,6 +119,7 @@ export interface CreateHarnessCfcInvocationContextOptions {
   env?: Record<string, string>;
   cfcInputLabels?: CfcLabelView;
   cfcInputLabelPaths?: readonly HarnessCfcInvocationInputLabelPath[];
+  cfcModelContext?: HarnessCfcModelContext;
 }
 
 const textEncoder = new TextEncoder();
@@ -281,6 +286,10 @@ export const createHarnessCfcInvocationContext = async (
     createHarnessPromptSlotInfluenceLabels({
       promptSlot: options.promptSlot,
       runManifest: options.runManifest,
+      paths: options.cfcInputLabelPaths,
+    }),
+    createHarnessCfcModelContextInputLabels({
+      modelContext: options.cfcModelContext,
       paths: options.cfcInputLabelPaths,
     }),
   ]);
