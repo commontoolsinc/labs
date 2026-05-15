@@ -422,11 +422,11 @@ export class JsonEncodingContext implements SerializationContext<string> {
       if (handler) {
         if (this.lenient) {
           try {
-            return handler.deserialize(
+            return deepFreeze(handler.deserialize(
               state,
               runtime,
               (v: JsonWireValue) => this.deserialize(v, runtime, registry),
-            );
+            ));
           } catch (e: unknown) {
             return new ProblematicValue(
               tag,
@@ -435,11 +435,11 @@ export class JsonEncodingContext implements SerializationContext<string> {
             ) as unknown as FabricValue;
           }
         }
-        return handler.deserialize(
+        return deepFreeze(handler.deserialize(
           state,
           runtime,
           (v: JsonWireValue) => this.deserialize(v, runtime, registry),
-        );
+        ));
       }
 
       // --- Class registry fallback ---
@@ -449,10 +449,10 @@ export class JsonEncodingContext implements SerializationContext<string> {
       if (cls) {
         if (this.lenient) {
           try {
-            return cls[RECONSTRUCT](
+            return deepFreeze(cls[RECONSTRUCT](
               deserializedState,
               runtime,
-            ) as unknown as FabricValue;
+            )) as unknown as FabricValue;
           } catch (e: unknown) {
             return new ProblematicValue(
               tag,
@@ -461,10 +461,10 @@ export class JsonEncodingContext implements SerializationContext<string> {
             ) as unknown as FabricValue;
           }
         }
-        return cls[RECONSTRUCT](
+        return deepFreeze(cls[RECONSTRUCT](
           deserializedState,
           runtime,
-        ) as unknown as FabricValue;
+        )) as unknown as FabricValue;
       }
 
       // Unknown type: preserve for round-tripping.
