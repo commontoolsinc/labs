@@ -152,11 +152,11 @@ export function isDeepFrozenFabricValue(value: unknown): value is FabricValue {
   // tests, so it should be safe to replace it.
 
   switch (typeof value) {
-    case 'function': {
+    case "function": {
       return false;
     }
 
-    case 'object': {
+    case "object": {
       if (value === null) {
         return true;
       } else if (!isDeepFrozen(value)) {
