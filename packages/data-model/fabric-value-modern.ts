@@ -515,7 +515,6 @@ export function isFabricCompatibleModern(
 // Unified clone: `cloneIfNecessary()`
 // ---------------------------------------------------------------------------
 
-
 function isFabricCompatibleInternal(
   value: unknown,
   seen: Set<object>,
