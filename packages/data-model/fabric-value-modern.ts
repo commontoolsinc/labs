@@ -240,13 +240,13 @@ export function fabricFromNativeValueModern(
   // Identity optimization: if the value is already a deep-frozen
   // `FabricValue`, return it without copying.
   if (freeze && isDeepFrozenFabricValue(value)) {
-    return value as FabricValue;
+    return value;
   }
   return fabricFromNativeValueModernInternal(
     value,
     new Map(),
     freeze,
-  ) as FabricValue;
+  );
 }
 
 /**
@@ -258,7 +258,7 @@ export function fabricFromNativeValueModern(
  */
 function fabricFromNativeValueModernInternal(
   original: unknown,
-  converted: Map<object, unknown>,
+  converted: Map<object, FabricValue>,
   freeze: boolean,
 ): FabricValue {
   const isOriginalRecord = isRecord(original);
@@ -268,7 +268,7 @@ function fabricFromNativeValueModernInternal(
     if (cached === PROCESSING) {
       throw new Error("Cannot store circular reference");
     }
-    return cached as FabricValue;
+    return cached;
   }
 
   if (isOriginalRecord) {
@@ -293,7 +293,7 @@ function fabricFromNativeValueModernInternal(
     if (isOriginalRecord) {
       converted.set(original, value);
     }
-    return value as FabricValue;
+    return value;
   }
 
   // TODO(danfuzz): Look into avoiding this special case for `FabricError`.
@@ -317,7 +317,7 @@ function fabricFromNativeValueModernInternal(
     if (isOriginalRecord) {
       converted.set(original, result);
     }
-    return result as FabricValue;
+    return result;
   }
 
   // `FabricSpecialObject` (primitives and protocol types) -- pass through
@@ -327,7 +327,7 @@ function fabricFromNativeValueModernInternal(
     if (isOriginalRecord) {
       converted.set(original, value);
     }
-    return value as FabricValue;
+    return value;
   }
 
   let result: FabricValue;
@@ -349,7 +349,7 @@ function fabricFromNativeValueModernInternal(
       }
     }
     if (freeze) Object.freeze(resultArray);
-    result = resultArray as FabricValue;
+    result = resultArray;
   } else {
     // Recurse into object properties. Preserve `undefined`-valued properties.
     // Use `Object.create()` to preserve null prototypes (`Object.fromEntries()`
@@ -385,7 +385,7 @@ function fabricFromNativeValueModernInternal(
  */
 function convertErrorInternals(
   error: Error,
-  converted: Map<object, unknown>,
+  converted: Map<object, FabricValue>,
   freeze: boolean,
 ): Error {
   // Construct the same `Error` subclass.
@@ -647,7 +647,7 @@ export function nativeFromFabricValueModern(
         result.length = i + 1;
       } else {
         result[i] = nativeFromFabricValueModern(
-          value[i] as FabricValue,
+          value[i],
           frozen,
         );
       }
@@ -659,10 +659,7 @@ export function nativeFromFabricValueModern(
   const result: Record<string, unknown> = {};
   for (const [key, val] of Object.entries(value)) {
     if (!UNSAFE_KEYS.has(key)) {
-      result[key] = nativeFromFabricValueModern(
-        val as FabricValue,
-        frozen,
-      );
+      result[key] = nativeFromFabricValueModern(val, frozen);
     }
   }
   if (frozen) Object.freeze(result);
