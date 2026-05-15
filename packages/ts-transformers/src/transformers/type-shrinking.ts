@@ -107,12 +107,38 @@ function countRepresentedRequestedHeads(
   requestedHeads: ReadonlySet<string>,
   checker?: ts.TypeChecker,
 ): number {
+  if (typeNodeIsArrayShape(node, checker)) {
+    let count = 0;
+    for (const head of requestedHeads) {
+      if (isNumericPathSegment(head) || isArrayRootOnlyPath([head])) {
+        count++;
+      }
+    }
+    return count;
+  }
+
   const represented = getTopLevelRepresentedHeads(node, checker);
   let count = 0;
   for (const head of requestedHeads) {
     if (represented.has(head)) count++;
   }
   return count;
+}
+
+function isArrayCompatibleRequestedHead(head: string): boolean {
+  return isNumericPathSegment(head) || isArrayRootOnlyPath([head]);
+}
+
+function shouldPreferArrayShapedShrink(
+  nodeDriven: ts.TypeNode,
+  typeDriven: ts.TypeNode,
+  requestedHeads: ReadonlySet<string>,
+  checker: ts.TypeChecker,
+): boolean {
+  if (requestedHeads.size === 0) return false;
+  return typeNodeIsArrayShape(typeDriven, checker) &&
+    !typeNodeIsArrayShape(nodeDriven, checker) &&
+    [...requestedHeads].every(isArrayCompatibleRequestedHead);
 }
 
 function deriveCapabilityShrinkPlan(
@@ -164,6 +190,17 @@ function shouldPreferNodeDrivenShrink(
   }
 
   const requestedHeads = getTopLevelRequestedHeads(retainedPaths);
+  if (
+    shouldPreferArrayShapedShrink(
+      nodeDriven,
+      typeDriven,
+      requestedHeads,
+      checker,
+    )
+  ) {
+    return false;
+  }
+
   const typeDrivenCoverage = countRepresentedRequestedHeads(
     typeDriven,
     requestedHeads,
@@ -198,6 +235,17 @@ function shouldPreferTypeDrivenShrink(
   }
 
   const requestedHeads = getTopLevelRequestedHeads(retainedPaths);
+  if (
+    shouldPreferArrayShapedShrink(
+      nodeDriven,
+      typeDriven,
+      requestedHeads,
+      checker,
+    )
+  ) {
+    return true;
+  }
+
   const typeDrivenCoverage = countRepresentedRequestedHeads(
     typeDriven,
     requestedHeads,
@@ -372,7 +420,8 @@ function isArrayShapeType(type: ts.Type, checker: ts.TypeChecker): boolean {
     typeChecker.isArrayType?.(type) ||
     typeChecker.isTupleType?.(type) ||
     symbolName === "Array" ||
-    symbolName === "ReadonlyArray"
+    symbolName === "ReadonlyArray" ||
+    isArrayLikeIndexType(type, checker)
   );
 }
 
@@ -391,7 +440,52 @@ function isHomogeneousArrayType(
     return true;
   }
   const symbolName = type.getSymbol()?.getName();
-  return symbolName === "Array" || symbolName === "ReadonlyArray";
+  return symbolName === "Array" || symbolName === "ReadonlyArray" ||
+    isArrayLikeIndexType(type, checker);
+}
+
+function isArrayLikeIndexType(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+): boolean {
+  // The transformer sometimes sees array values after narrowing as anonymous
+  // array-like types rather than concrete Array<T> symbols. Requiring both a
+  // numeric index and `length` keeps plain numeric maps object-shaped.
+  return !!checker.getIndexTypeOfType(type, ts.IndexKind.Number) &&
+    !!findPropertySymbol(type, "length", checker);
+}
+
+function typeNodeIsArrayShape(
+  node: ts.TypeNode,
+  checker?: ts.TypeChecker,
+): boolean {
+  const current = ts.isParenthesizedTypeNode(node) ? node.type : node;
+  if (ts.isArrayTypeNode(current)) {
+    return true;
+  }
+  if (
+    ts.isTypeOperatorNode(current) &&
+    current.operator === ts.SyntaxKind.ReadonlyKeyword &&
+    ts.isArrayTypeNode(current.type)
+  ) {
+    return true;
+  }
+  if (
+    ts.isTypeReferenceNode(current) &&
+    ts.isIdentifier(current.typeName) &&
+    (current.typeName.text === "Array" ||
+      current.typeName.text === "ReadonlyArray")
+  ) {
+    return true;
+  }
+  if (ts.isTypeLiteralNode(current)) {
+    return !!getArrayLikeTypeLiteralElementType(current, checker);
+  }
+  if (!checker) {
+    return false;
+  }
+  const resolvedType = getTypeFromTypeNodeWithFallback(current, checker);
+  return isArrayShapeType(resolvedType, checker);
 }
 
 function isNumericIndexableType(
@@ -454,6 +548,102 @@ function getArrayElementType(
   }
 
   return undefined;
+}
+
+function getArrayLikeTypeLiteralElementType(
+  node: ts.TypeLiteralNode,
+  checker?: ts.TypeChecker,
+): ts.TypeNode | undefined {
+  let hasLength = false;
+  let elementType: ts.TypeNode | undefined;
+
+  for (const member of node.members) {
+    if (!ts.isPropertySignature(member) || !member.name || !member.type) {
+      continue;
+    }
+    const name = getRequestedPropertyNameText(member.name, checker);
+    if (name === "length") {
+      hasLength = true;
+    } else if (name && isNumericPathSegment(name) && !elementType) {
+      elementType = member.type;
+    }
+  }
+
+  return hasLength ? elementType : undefined;
+}
+
+function isAnyOrUnknownTypeNode(node: ts.TypeNode): boolean {
+  return node.kind === ts.SyntaxKind.AnyKeyword ||
+    node.kind === ts.SyntaxKind.UnknownKeyword;
+}
+
+function buildUnknownShapeTypeNodeFromPaths(
+  paths: readonly (readonly string[])[],
+  factory: ts.NodeFactory,
+  checker?: ts.TypeChecker,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
+): ts.TypeNode | undefined {
+  const grouped = groupPathsByHead(paths);
+  const members: ts.TypeElement[] = [];
+
+  for (const [head, childPaths] of grouped) {
+    const hasDirectAccess = childPaths.some((path) => path.length === 0);
+    const nestedPaths = childPaths.filter((path) => path.length > 0);
+    const childType = !hasDirectAccess && nestedPaths.length > 0
+      ? buildUnknownShapeTypeNodeFromPaths(
+        nestedPaths,
+        factory,
+        checker,
+        typeRegistry,
+      ) ?? factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword)
+      : factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+
+    members.push(
+      factory.createPropertySignature(
+        undefined,
+        createPropertyName(head, factory),
+        undefined,
+        childType,
+      ),
+    );
+  }
+
+  if (members.length === 0) {
+    return undefined;
+  }
+  return checker
+    ? createRegisteredTypeLiteral(members, { factory, checker, typeRegistry })
+    : factory.createTypeLiteralNode(members);
+}
+
+function shrinkArrayElementTypeNode(
+  elementType: ts.TypeNode,
+  itemPaths: readonly (readonly string[])[],
+  fullShapeItemPaths: readonly (readonly string[])[],
+  factory: ts.NodeFactory,
+  checker?: ts.TypeChecker,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
+): ts.TypeNode {
+  let shrunkElement = buildShrunkTypeNodeFromTypeNode(
+    elementType,
+    itemPaths,
+    factory,
+    checker,
+    typeRegistry,
+    fullShapeItemPaths,
+  ) ?? elementType;
+  if (
+    isAnyOrUnknownTypeNode(shrunkElement) &&
+    itemPaths.some((path) => path.length > 0)
+  ) {
+    shrunkElement = buildUnknownShapeTypeNodeFromPaths(
+      itemPaths,
+      factory,
+      checker,
+      typeRegistry,
+    ) ?? shrunkElement;
+  }
+  return shrunkElement;
 }
 
 function getSymbolPropertyHead(
@@ -857,6 +1047,10 @@ function buildShrunkTypeNodeFromTypeNode(
       };
       isArray = !!tc.isArrayType?.(resolvedType);
     }
+    const arrayLikeElementType = ts.isTypeLiteralNode(node)
+      ? getArrayLikeTypeLiteralElementType(node, checker)
+      : undefined;
+    isArray ||= !!arrayLikeElementType;
     if (isArray) {
       const itemPaths = getArrayItemPaths(normalized);
       const fullShapeItemPaths = getArrayItemPaths(normalizedFullShapePaths);
@@ -871,15 +1065,31 @@ function buildShrunkTypeNodeFromTypeNode(
         return arrayNode;
       }
       if (itemPaths.length > 0) {
-        if (ts.isArrayTypeNode(node)) {
-          const shrunkElement = buildShrunkTypeNodeFromTypeNode(
-            node.elementType,
+        if (arrayLikeElementType) {
+          const shrunkElement = shrinkArrayElementTypeNode(
+            arrayLikeElementType,
             itemPaths,
+            fullShapeItemPaths,
             factory,
             checker,
             typeRegistry,
+          );
+          const arrayNode = factory.createArrayTypeNode(shrunkElement);
+          if (checker) {
+            ensureTypeNodeRegistered(arrayNode, checker, typeRegistry);
+          }
+          return arrayNode;
+        }
+
+        if (ts.isArrayTypeNode(node)) {
+          const shrunkElement = shrinkArrayElementTypeNode(
+            node.elementType,
+            itemPaths,
             fullShapeItemPaths,
-          ) ?? node.elementType;
+            factory,
+            checker,
+            typeRegistry,
+          );
           return factory.updateArrayTypeNode(node, shrunkElement);
         }
 
@@ -888,14 +1098,14 @@ function buildShrunkTypeNodeFromTypeNode(
           node.operator === ts.SyntaxKind.ReadonlyKeyword &&
           ts.isArrayTypeNode(node.type)
         ) {
-          const shrunkElement = buildShrunkTypeNodeFromTypeNode(
+          const shrunkElement = shrinkArrayElementTypeNode(
             node.type.elementType,
             itemPaths,
+            fullShapeItemPaths,
             factory,
             checker,
             typeRegistry,
-            fullShapeItemPaths,
-          ) ?? node.type.elementType;
+          );
           return factory.updateTypeOperatorNode(
             node,
             factory.updateArrayTypeNode(node.type, shrunkElement),
@@ -910,14 +1120,14 @@ function buildShrunkTypeNodeFromTypeNode(
             node.typeName.text === "ReadonlyArray")
         ) {
           const [inner] = node.typeArguments;
-          const shrunkInner = buildShrunkTypeNodeFromTypeNode(
+          const shrunkInner = shrinkArrayElementTypeNode(
             inner,
             itemPaths,
+            fullShapeItemPaths,
             factory,
             checker,
             typeRegistry,
-            fullShapeItemPaths,
-          ) ?? inner;
+          );
           return factory.updateTypeReferenceNode(
             node,
             node.typeName,
@@ -1284,6 +1494,10 @@ function typeNodeHasHead(
   head: string,
   checker: ts.TypeChecker,
 ): boolean {
+  if (typeNodeIsArrayShape(node, checker)) {
+    return isNumericPathSegment(head) || isArrayRootOnlyPath([head]);
+  }
+
   if (ts.isTypeLiteralNode(node)) {
     return node.members.some(
       (m) =>
@@ -1417,6 +1631,10 @@ function getArrayElementTypeNode(
     return current.typeArguments[0];
   }
 
+  if (ts.isTypeLiteralNode(current)) {
+    return getArrayLikeTypeLiteralElementType(current, checker);
+  }
+
   const resolvedType = getTypeFromTypeNodeWithFallback(
     current,
     checker,
@@ -1493,6 +1711,39 @@ export function validateShrinkCoverage(
   const nonNullableBaseType = baseType
     ? checker.getNonNullableType(baseType)
     : undefined;
+
+  const topLevelHeads = getTopLevelRequestedHeads(paths);
+  if (
+    shrunk &&
+    typeNodeIsArrayShape(shrunk, checker) &&
+    [...topLevelHeads].every(isArrayCompatibleRequestedHead)
+  ) {
+    const arrayItemPaths = getArrayItemPaths(paths);
+    if (arrayItemPaths.length > 0) {
+      const elementType =
+        nonNullableBaseType && isArrayShapeType(nonNullableBaseType, checker)
+          ? getArrayElementType(nonNullableBaseType, checker)
+          : undefined;
+      const elementTypeNode = getArrayElementTypeNode(
+        shrunk,
+        checker,
+        context.sourceFile,
+        context.options.typeRegistry,
+      ) ?? ts.factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+
+      validateShrinkCoverage(
+        paramSummary,
+        elementTypeNode,
+        elementType,
+        arrayItemPaths,
+        elementTypeNode,
+        context,
+        fnNode,
+        checker,
+      );
+    }
+    return;
+  }
 
   if (nonNullableBaseType && isArrayShapeType(nonNullableBaseType, checker)) {
     const arrayRootPaths = uniquePaths(
