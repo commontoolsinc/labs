@@ -484,20 +484,30 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                             </div>
                           </cf-hstack>
                           <cf-hstack gap="1" wrap>
-                            {tally.voters.map((v) => (
-                              <span
-                                title={v.name}
-                                style={v.name === myName
-                                  ? `display:inline-flex;align-items:center;justify-content:center;min-width:26px;height:26px;padding:0 8px;border-radius:9999px;background:${
+                            {tally.voters.map((v) => {
+                              // Derive the full style string. Comparing the
+                              // plain `v.name` against the `myName` PerUser
+                              // cell directly is always false (the cell isn't
+                              // auto-unwrapped in JSX attributes), so the
+                              // "you" highlight ring never rendered before.
+                              // Doing the comparison inside derive() unwraps
+                              // myName and produces a reactive OpaqueRef.
+                              const pillStyle = derive(myName, (n) => {
+                                const base =
+                                  `display:inline-flex;align-items:center;justify-content:center;min-width:26px;height:26px;padding:0 8px;border-radius:9999px;background:${
                                     VOTE_SWATCH[v.voteType]
-                                  };color:white;font-size:11px;font-weight:700;box-shadow:0 0 0 2px white,0 0 0 3px #111827;cursor:default;`
-                                  : `display:inline-flex;align-items:center;justify-content:center;min-width:26px;height:26px;padding:0 8px;border-radius:9999px;background:${
-                                    VOTE_SWATCH[v.voteType]
-                                  };color:white;font-size:11px;font-weight:700;cursor:default;`}
-                              >
-                                {getInitials(v.name)}
-                              </span>
-                            ))}
+                                  };color:white;font-size:11px;font-weight:700;cursor:default;`;
+                                return v.name === trimmedName(n)
+                                  ? base +
+                                    "box-shadow:0 0 0 2px white,0 0 0 3px #111827;"
+                                  : base;
+                              });
+                              return (
+                                <span title={v.name} style={pillStyle}>
+                                  {getInitials(v.name)}
+                                </span>
+                              );
+                            })}
                           </cf-hstack>
                           {isJoined
                             ? (
