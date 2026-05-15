@@ -240,13 +240,13 @@ export function fabricFromNativeValueModern(
   // Identity optimization: if the value is already a deep-frozen
   // `FabricValue`, return it without copying.
   if (freeze && isDeepFrozenFabricValue(value)) {
-    return value as FabricValue;
+    return value;
   }
   return fabricFromNativeValueModernInternal(
     value,
     new Map(),
     freeze,
-  ) as FabricValue;
+  );
 }
 
 /**
