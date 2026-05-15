@@ -327,7 +327,7 @@ function fabricFromNativeValueModernInternal(
     if (isOriginalRecord) {
       converted.set(original, value);
     }
-    return value as FabricValue;
+    return value;
   }
 
   let result: FabricValue;
@@ -349,7 +349,7 @@ function fabricFromNativeValueModernInternal(
       }
     }
     if (freeze) Object.freeze(resultArray);
-    result = resultArray as FabricValue;
+    result = resultArray;
   } else {
     // Recurse into object properties. Preserve `undefined`-valued properties.
     // Use `Object.create()` to preserve null prototypes (`Object.fromEntries()`
