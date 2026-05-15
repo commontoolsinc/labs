@@ -647,7 +647,7 @@ export function nativeFromFabricValueModern(
         result.length = i + 1;
       } else {
         result[i] = nativeFromFabricValueModern(
-          value[i] as FabricValue,
+          value[i],
           frozen,
         );
       }
@@ -659,10 +659,7 @@ export function nativeFromFabricValueModern(
   const result: Record<string, unknown> = {};
   for (const [key, val] of Object.entries(value)) {
     if (!UNSAFE_KEYS.has(key)) {
-      result[key] = nativeFromFabricValueModern(
-        val as FabricValue,
-        frozen,
-      );
+      result[key] = nativeFromFabricValueModern(val, frozen);
     }
   }
   if (frozen) Object.freeze(result);
