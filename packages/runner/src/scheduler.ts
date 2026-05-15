@@ -1,5 +1,4 @@
 import { getLogger } from "@commonfabric/utils/logger";
-import { type Frame } from "./builder/types.ts";
 import type { Cancel } from "./cancel.ts";
 import { ConsoleEvent } from "./harness/console.ts";
 import type {
@@ -32,7 +31,6 @@ import type {
 } from "./telemetry.ts";
 import {
   DEFAULT_RETRIES_FOR_EVENTS,
-  MAX_ITERATIONS_PER_RUN,
   MAX_SETTLE_STATS_HISTORY,
 } from "./scheduler/constants.ts";
 import {
@@ -78,7 +76,6 @@ import {
   watchReactiveActionCommit,
 } from "./scheduler/action-run.ts";
 import {
-  buildIterationWorkSet,
   buildPullInitialSeeds,
   collectPendingDependencyActions,
   createSettlingTracker,
@@ -89,11 +86,10 @@ import {
   planCycleBreak,
   planExecuteContinuation,
   pushBoundedHistory,
-  recordEarlyIterationComputations,
   recordExecuteEnd,
+  runSchedulerSettleLoop,
+  type SchedulerSettleResult,
   type SettlingTracker,
-  summarizeSettleIteration,
-  summarizeSettleRun,
 } from "./scheduler/execution.ts";
 import { SchedulerDelays } from "./scheduler/delays.ts";
 import { processStorageNotification } from "./scheduler/notifications.ts";
@@ -134,10 +130,7 @@ import {
 } from "./scheduler/events.ts";
 import { buildSchedulerGraphSnapshot } from "./scheduler/graph-snapshot.ts";
 import { entityKey } from "./scheduler/keys.ts";
-import {
-  collectTransitiveEffects,
-  topologicalSort,
-} from "./scheduler/topology.ts";
+import { collectTransitiveEffects } from "./scheduler/topology.ts";
 import type {
   Action,
   ActionRunTraceEntry,
@@ -147,7 +140,6 @@ import type {
   PopulateDependenciesEntry,
   QueuedEvent,
   ReactivityLog,
-  SettleIterationStats,
   SettleStats,
   SettleStatsHistoryEntry,
   SpaceScopeAndURI,
@@ -192,13 +184,6 @@ export {
   allowMutableTransactionRead,
   ignoreReadForScheduling,
   markReadAsPotentialWrite,
-};
-
-type SchedulerSettleResult = {
-  settledEarly: boolean;
-  lastWorkSet: Set<Action>;
-  earlyIterationComputations: Set<Action>;
-  maxSettleIterations: number;
 };
 
 export class Scheduler {
@@ -2519,281 +2504,63 @@ export class Scheduler {
   private async runSettleLoop(
     initialSeeds: ReadonlySet<Action>,
   ): Promise<SchedulerSettleResult> {
-    // Settle loop: runs until no more dirty work is found.
-    // First iteration processes initial seeds + their dirty deps.
-    // Subsequent iterations process new subscriptions and re-collect dirty deps.
-    logger.timeStart("scheduler", "execute", "settle");
-    const maxSettleIterations = this.pullMode ? 10 : 10;
-    const EARLY_ITERATION_THRESHOLD = 5;
-    const earlyIterationComputations = new Set<Action>(); // Track computations in first N iterations
-    let lastWorkSet: Set<Action> = new Set();
-    let settledEarly = false;
-    const settleIterStats: SettleIterationStats[] | undefined =
-      this.collectSettleStats ? [] : undefined;
-    const settleStartTime = this.collectSettleStats ? performance.now() : 0;
-
-    for (let settleIter = 0; settleIter < maxSettleIterations; settleIter++) {
-      const iterStart = settleIterStats ? performance.now() : 0;
-      let iterActionsRun = 0;
-
-      // Process any newly subscribed actions from previous iteration.
-      // This sets up their dependencies so collectDirtyDependencies can find them.
-      if (this.pullMode && this.pendingDependencyCollection.size > 0) {
-        collectPendingDependencyActions({
-          pendingDependencyCollection: this.pendingDependencyCollection,
-          populateDependenciesCallbacks: this.populateDependenciesCallbacks,
-          effects: this.effects,
-          getSchedulingWrites: (action) =>
-            getSchedulingWritesFromState(this.schedulingWriteState, action),
-          collectDependenciesForAction: (action, populateDependencies) =>
-            this.collectDependenciesForAction(action, populateDependencies, {
-              errorLogLabel: "schedule-dep-error-pre-run",
-              errorMessage: (target, error) =>
-                `Error collecting deps for ${
-                  this.getActionId(target)
-                }: ${error}`,
-              useRawReadsForTriggers: true,
-            }),
-        });
-      }
-
-      // Build the work set for this iteration
-      const buildPullWorkSetStart = this.pullMode ? performance.now() : 0;
-      const { workSet, iterationSeeds, dirtyDependencyCount } =
-        buildIterationWorkSet({
-          pullMode: this.pullMode,
-          pending: this.pending,
-          initialSeeds,
-          settleIter,
-          collectPullIterationSeeds: (seeds) =>
-            this.collectPullIterationSeeds(seeds),
-          collectDirtyDependencies: (seed, targetWorkSet, memo) =>
-            this.collectDirtyDependencies(seed, targetWorkSet, memo),
-        });
-
-      if (this.pullMode) {
-        if (settleIter === 0) {
-          logger.debug("schedule-execute-pull", () => [
-            `Pull mode: Seeds: ${iterationSeeds.size}, Dirty deps added: ${dirtyDependencyCount}`,
-          ]);
-        }
-        logger.time(
-          buildPullWorkSetStart,
-          "scheduler",
-          "execute",
-          "buildPullWorkSet",
-        );
-      }
-
-      if (workSet.size === 0) {
-        settledEarly = true;
-        break;
-      }
-
-      recordEarlyIterationComputations({
-        pullMode: this.pullMode,
-        settleIter,
-        threshold: EARLY_ITERATION_THRESHOLD,
-        workSet,
-        effects: this.effects,
-        earlyIterationComputations,
-      });
-      lastWorkSet = workSet;
-
-      // Snapshot workSet size before topo sort (in push mode, workSet === this.pending
-      // which gets mutated during execution)
-      const iterWorkSetSize = workSet.size;
-
-      const topologicalSortStart = performance.now();
-      const order = topologicalSort(
-        workSet,
-        this.dependencies,
+    const settleResult = await runSchedulerSettleLoop({
+      pullMode: this.pullMode,
+      collectSettleStats: this.collectSettleStats,
+      pendingDependencyCollection: this.pendingDependencyCollection,
+      populateDependenciesCallbacks: this.populateDependenciesCallbacks,
+      effects: this.effects,
+      computations: this.computations,
+      pending: this.pending,
+      dirty: this.staleness.dirty,
+      dependencies: this.dependencies,
+      actionParent: this.actionParent,
+      dependents: this.dependents,
+      conditionallyScheduledEffects: this.conditionallyScheduledEffects,
+      filterStats: this.filterStats,
+      loopCounter: this.loopCounter,
+      runsThisExecute: this.runsThisExecute,
+      activePullDemandActions: this.activePullDemandActions,
+      getSchedulingWrites: (action) =>
+        getSchedulingWritesFromState(this.schedulingWriteState, action),
+      getSchedulingWritesMap: () =>
         getSchedulingWritesMapFromState(this.schedulingWriteState),
-        this.actionParent,
-        this.pullMode ? this.dependents : undefined,
-      );
-      logger.time(
-        topologicalSortStart,
-        "scheduler",
-        "execute",
-        "topologicalSort",
-      );
+      collectDependenciesForAction: (action, populateDependencies, options) =>
+        this.collectDependenciesForAction(
+          action,
+          populateDependencies,
+          options,
+        ),
+      collectPullIterationSeeds: (seeds) =>
+        this.collectPullIterationSeeds(seeds),
+      collectDirtyDependencies: (seed, targetWorkSet, memo) =>
+        this.collectDirtyDependencies(seed, targetWorkSet, memo),
+      getActionId: (action) => this.getActionId(action),
+      clearDirty: (action) =>
+        clearSchedulerDirty(this.dirtySchedulingState, action),
+      markDirectDirty: (action) => this.staleness.markDirectDirty(action),
+      isThrottled: (action) => this.delays.isThrottled(action),
+      isDebouncedComputationWaiting: (action) =>
+        this.isDebouncedComputationWaiting(action),
+      clearComputationDebounceState: (action) =>
+        this.delays.clearComputationDebounceState(action),
+      conditionalEffectHasChangedInputs: (action) =>
+        this.conditionalEffectHasChangedInputs(action),
+      isPullDemandRootEffect: (action) => this.isPullDemandRootEffect(action),
+      handleError: (error, action) => this.handleError(error, action),
+      runAction: (action) => this.run(action),
+    }, initialSeeds);
 
-      logger.debug("schedule-execute", () => [
-        `Running ${order.length} actions (settle iteration ${settleIter})`,
-      ]);
-
-      // Implicit cycle detection for effects:
-      // Clear dirty flags for all effects upfront. If an effect becomes dirty again
-      // by the time we run it, something in the execution re-dirtied it → cycle.
-      if (this.pullMode) {
-        for (const fn of order) {
-          if (this.effects.has(fn)) {
-            clearSchedulerDirty(this.dirtySchedulingState, fn);
-          }
-        }
-      }
-
-      // Run all functions. This will resubscribe actions with their new dependencies.
-      for (const fn of order) {
-        // Check if action is still scheduled (not unsubscribed during this tick).
-        // Running an action might unsubscribe other actions in the workSet.
-        const isStillScheduled = this.computations.has(fn) ||
-          this.effects.has(fn);
-        if (!isStillScheduled) continue;
-
-        // Check if action is still valid
-        // In pull mode, check both pending (effects) and dirty (computations)
-        const isInPending = this.pending.has(fn);
-        const isInDirty = this.staleness.dirty.has(fn);
-
-        if (this.pullMode) {
-          // For effects: we cleared dirty upfront, so check if re-dirtied (cycle)
-          if (this.effects.has(fn)) {
-            if (this.staleness.dirty.has(fn)) {
-              // Effect was re-dirtied during this tick → cycle detected
-              logger.debug("schedule-cycle", () => [
-                `[CYCLE] Effect ${
-                  this.getActionId(fn)
-                } re-dirtied, skipping (cycle detected)`,
-              ]);
-              // Skip this effect - it will run on a future tick after cycle settles
-              this.pending.delete(fn);
-              continue;
-            }
-            if (!isInPending) continue;
-          } else {
-            // For computations: must be pending or dirty
-            if (!isInPending && !isInDirty) continue;
-          }
-        } else {
-          // Push mode: action must be in pending
-          if (!isInPending) continue;
-        }
-
-        if (this.isDebouncedComputationWaiting(fn)) {
-          logger.debug("schedule-debounce", () => [
-            `[DEBOUNCE] Skipping debounced computation: ${
-              this.getActionId(fn)
-            }`,
-          ]);
-          this.filterStats.filtered++;
-          this.pending.delete(fn);
-          continue;
-        }
-
-        // Check throttle: skip recently-run actions but keep them dirty
-        // They'll be pulled next time an effect needs them (if throttle expired)
-        if (this.delays.isThrottled(fn)) {
-          logger.debug("schedule-throttle", () => [
-            `[THROTTLE] Skipping throttled action: ${this.getActionId(fn)}`,
-          ]);
-          this.filterStats.filtered++;
-          // Don't clear from pending or dirty - action stays in its current state
-          // but we remove from pending so it doesn't run this cycle
-          this.pending.delete(fn);
-          // Keep pull-mode effects dirty so they wake when the throttle expires.
-          if (this.pullMode && this.effects.has(fn)) {
-            this.staleness.markDirectDirty(fn);
-          }
-          continue;
-        }
-
-        if (
-          this.pullMode &&
-          this.effects.has(fn) &&
-          this.conditionallyScheduledEffects.has(fn) &&
-          !this.conditionalEffectHasChangedInputs(fn)
-        ) {
-          this.conditionallyScheduledEffects.delete(fn);
-          this.pending.delete(fn);
-          clearSchedulerDirty(this.dirtySchedulingState, fn);
-          this.filterStats.filtered++;
-          continue;
-        }
-
-        // Clean up from pending/dirty before running
-        this.pending.delete(fn);
-        this.conditionallyScheduledEffects.delete(fn);
-        if (this.computations.has(fn)) {
-          this.delays.clearComputationDebounceState(fn);
-        }
-        if (this.pullMode && this.effects.has(fn)) {
-          clearSchedulerDirty(this.dirtySchedulingState, fn);
-        }
-
-        this.filterStats.executed++;
-        iterActionsRun++;
-        this.loopCounter.set(fn, (this.loopCounter.get(fn) || 0) + 1);
-        // Track runs for cycle-aware debounce
-        this.runsThisExecute.set(fn, (this.runsThisExecute.get(fn) ?? 0) + 1);
-        if (this.loopCounter.get(fn)! > MAX_ITERATIONS_PER_RUN) {
-          const error = new Error(
-            `Too many iterations: ${this.loopCounter.get(fn)} ${
-              this.getActionId(fn)
-            }`,
-          );
-          // Attach the last frame from the action so handleError can
-          // extract piece/spell metadata (CT-1316: fixes message:null).
-          const lastFrame = (fn as Action & { lastFrame?: Frame }).lastFrame;
-          if (lastFrame) {
-            (error as Error & { frame?: Frame }).frame = lastFrame;
-          }
-          this.handleError(error, fn);
-        } else {
-          const activePullDemand = this.pullMode &&
-            (this.computations.has(fn) ||
-              this.isPullDemandRootEffect(fn));
-          if (activePullDemand) {
-            this.activePullDemandActions.add(fn);
-          }
-          try {
-            await this.run(fn);
-          } finally {
-            if (activePullDemand) {
-              this.activePullDemandActions.delete(fn);
-            }
-          }
-        }
-      }
-
-      // Capture per-iteration settle stats (only when enabled)
-      if (settleIterStats) {
-        settleIterStats.push(summarizeSettleIteration({
-          workSetSize: iterWorkSetSize,
-          order,
-          actionsRun: iterActionsRun,
-          durationMs: performance.now() - iterStart,
-          effects: this.effects,
-          getActionId: (action) => this.getActionId(action),
-        }));
-      }
-    }
-
-    // Store settle stats for external access (only when enabled)
-    if (settleIterStats) {
-      const settleStats = summarizeSettleRun({
-        iterations: settleIterStats,
-        totalDurationMs: performance.now() - settleStartTime,
-        settledEarly,
-        initialSeedCount: initialSeeds.size,
-      });
-      this.lastSettleStats = settleStats;
+    if (settleResult.settleStats) {
+      this.lastSettleStats = settleResult.settleStats;
       pushBoundedHistory(
         this.settleStatsHistory,
-        { recordedAt: performance.now(), stats: settleStats },
+        { recordedAt: performance.now(), stats: settleResult.settleStats },
         MAX_SETTLE_STATS_HISTORY,
       );
     }
 
-    logger.timeEnd("scheduler", "execute", "settle");
-
-    return {
-      settledEarly,
-      lastWorkSet,
-      earlyIterationComputations,
-      maxSettleIterations,
-    };
+    return settleResult;
   }
 
   private async breakCyclesIfNeeded(
