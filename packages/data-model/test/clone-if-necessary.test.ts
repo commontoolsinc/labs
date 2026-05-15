@@ -13,8 +13,7 @@ import { FabricError } from "../fabric-native-instances.ts";
 // Tests
 // ============================================================================
 //
-// Both legacy and modern flag states use modern clone semantics: the legacy
-// dispatch target delegates to `cloneIfNecessaryModern`. Test cases are
+// Both legacy and modern flag states use modern clone semantics. Test cases are
 // parameterized across both modes to ensure the contract is durable under
 // either flag setting.
 
