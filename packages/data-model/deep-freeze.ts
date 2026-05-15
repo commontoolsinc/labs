@@ -1,4 +1,8 @@
-import { FabricInstance, FabricPrimitive } from "./interface.ts";
+import {
+  FabricInstance,
+  FabricPrimitive,
+  FabricValue,
+} from "./interface.ts";
 
 /**
  * Cache of confirmed deep-frozen objects.
@@ -143,7 +147,7 @@ export function deepFreeze<T>(value: T): T {
  * the value is a primitive, or a frozen object/array whose children are all
  * also deep-frozen `FabricValue`s.
  */
-export function isDeepFrozenFabricValue(value: unknown): boolean {
+export function isDeepFrozenFabricValue(value: unknown): value is FabricValue {
   // TODO(@danfuzz): A function `isFabricValue()` should ultimately get
   // extracted from this function, which does just the recursive type check.
   // Note that, as of this writing, the existing function with that name (a)
