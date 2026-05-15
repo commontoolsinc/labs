@@ -156,7 +156,8 @@ export function isDeepFrozenFabricValue(value: unknown): value is FabricValue {
   // tests, so it should be safe to replace it.
 
   if (value === null || (typeof value !== "object")) {
-    // It's a primitive.
+    // It's a primitive. Return here for efficiency, rather than do the
+    // heavyweight setup for recursive tracing.
     return true;
   } else if (!isDeepFrozen(value)) {
     return false;
@@ -166,8 +167,11 @@ export function isDeepFrozenFabricValue(value: unknown): value is FabricValue {
   // structure, but we don't know if it's actually a `FabricValue`.
 
   const seen = new Set();
-  const checkValue = (item: object) => {
-    if (seen.has(item)) {
+  const checkValue = (item: unknown): boolean => {
+    if (item === null || (typeof item !== "object")) {
+      // It's a primitive.
+      return true;
+    } else if (seen.has(item)) {
       return true;
     }
 
