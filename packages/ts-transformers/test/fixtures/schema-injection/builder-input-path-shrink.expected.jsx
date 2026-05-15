@@ -18,10 +18,10 @@ const liftOptional = lift({
     type: "object",
     properties: {
         foo: {
-            type: ["string", "undefined"]
+            type: "string"
         }
     },
-    asCell: ["cell"]
+    asCell: ["readonly"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["string", "undefined"]
 } as const satisfies __cfHelpers.JSONSchema, (input: Writable<{
@@ -40,7 +40,7 @@ const deriveObserved = __cfHelpers.__cf_data(derive({
         }
     },
     required: ["foo"],
-    asCell: ["cell"]
+    asCell: ["readonly"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, deriveInput, (input: Writable<{
@@ -55,7 +55,7 @@ const deriveExplicit = __cfHelpers.__cf_data(derive({
         }
     },
     required: ["foo"],
-    asCell: ["cell"]
+    asCell: ["readonly"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, deriveInput, (value) => value.key("foo").get()).for("deriveExplicit", true));
@@ -67,7 +67,7 @@ const handlerObserved = handler(false as const satisfies __cfHelpers.JSONSchema,
         }
     },
     required: ["foo"],
-    asCell: ["cell"]
+    asCell: ["readonly"]
 } as const satisfies __cfHelpers.JSONSchema, (_event: {
     id: string;
 }, state: Writable<{
@@ -98,7 +98,7 @@ const handlerExplicit = handler({
         }
     },
     required: ["foo"],
-    asCell: ["cell"]
+    asCell: ["readonly"]
 } as const satisfies __cfHelpers.JSONSchema, (event, state) => {
     event.detail.message;
     state.key("foo").get();
@@ -115,7 +115,7 @@ const liftInterprocedural = lift({
         }
     },
     required: ["foo"],
-    asCell: ["cell"]
+    asCell: ["readonly"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, (input: Writable<{
@@ -130,7 +130,7 @@ const liftWriteOnly = lift({
         }
     },
     required: ["foo"],
-    asCell: ["cell"]
+    asCell: ["writeonly"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, (input: Writable<{
@@ -148,7 +148,7 @@ const liftExplicit = lift({
         }
     },
     required: ["foo"],
-    asCell: ["cell"]
+    asCell: ["readonly"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, (input) => input.key("foo").get());
@@ -167,7 +167,7 @@ const actionPattern = pattern((input: Writable<{
                     }
                 },
                 required: ["foo"],
-                asCell: ["cell"]
+                asCell: ["readonly"]
             }
         },
         required: ["input"]

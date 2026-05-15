@@ -1,10 +1,51 @@
-import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
-import type { PromptSlotBinding } from "./prompt-slot.ts";
+import type {
+  CfcEnforcementMode,
+  CfcLabelView,
+} from "@commonfabric/runner/cfc";
+import { mergeCfcLabelViews } from "@commonfabric/runner/cfc";
+import {
+  createHarnessCfcModelContextInputLabels,
+  type HarnessCfcModelContext,
+} from "./cfc-model-context.ts";
+import type { PromptSlotBinding, PromptSlotRole } from "./prompt-slot.ts";
 import type { HarnessRunManifest } from "./run-manifest.ts";
 import type { BuiltinToolId } from "./tool-descriptor.ts";
 import type { ToolOutputId } from "./tool-result.ts";
 
 export type HarnessCfcInvocationOperation = "command" | "shell";
+export type HarnessCfcInvocationInputLabelRoot =
+  | "command"
+  | "argv"
+  | "args"
+  | "env"
+  | "cwd"
+  | "stdin";
+export type HarnessCfcInvocationInputLabelPath = readonly [
+  HarnessCfcInvocationInputLabelRoot,
+  ...string[],
+];
+
+export const CF_HARNESS_PROMPT_SLOT_INFLUENCE_ATOM_TYPE =
+  "cf-harness.cfc/PromptSlotInfluence" as const;
+
+export interface HarnessPromptSlotInfluenceAtom {
+  type: typeof CF_HARNESS_PROMPT_SLOT_INFLUENCE_ATOM_TYPE;
+  version: 1;
+  role: PromptSlotRole;
+  kernelName: string;
+  surface: string;
+  subject?: string;
+  eventId?: string;
+  valueDigest?: string;
+  slotDigest?: string;
+  snapshotDigest?: string;
+  targetPath?: string;
+  runManifest?: {
+    source?: string;
+    wishId?: string;
+    dispatchClass?: string;
+  };
+}
 
 export interface HarnessCfcRedactedTextSummary {
   type: "cf-harness.redacted-text-summary";
@@ -57,6 +98,7 @@ export interface HarnessCfcInvocationContext {
   promptSlot?: PromptSlotBinding;
   runManifest: HarnessCfcInvocationRunManifestSummary;
   inputs: HarnessCfcInvocationInputSummary;
+  cfcInputLabels?: CfcLabelView;
 }
 
 export interface CreateHarnessCfcInvocationContextOptions {
@@ -75,6 +117,9 @@ export interface CreateHarnessCfcInvocationContextOptions {
   args?: readonly string[];
   stdinText?: string;
   env?: Record<string, string>;
+  cfcInputLabels?: CfcLabelView;
+  cfcInputLabelPaths?: readonly HarnessCfcInvocationInputLabelPath[];
+  cfcModelContext?: HarnessCfcModelContext;
 }
 
 const textEncoder = new TextEncoder();
@@ -154,6 +199,72 @@ export const summarizeCfcInvocationRunManifest = (
     : {}),
 });
 
+const createPromptSlotInfluenceAtom = (
+  promptSlot: PromptSlotBinding,
+  runManifest: HarnessCfcInvocationRunManifestSummary,
+): HarnessPromptSlotInfluenceAtom => ({
+  type: CF_HARNESS_PROMPT_SLOT_INFLUENCE_ATOM_TYPE,
+  version: 1,
+  role: promptSlot.role,
+  kernelName: promptSlot.kernelName,
+  surface: promptSlot.surface,
+  ...(promptSlot.subject !== undefined ? { subject: promptSlot.subject } : {}),
+  ...(promptSlot.eventId !== undefined ? { eventId: promptSlot.eventId } : {}),
+  ...(promptSlot.valueDigest !== undefined
+    ? { valueDigest: promptSlot.valueDigest }
+    : {}),
+  ...(promptSlot.slotDigest !== undefined
+    ? { slotDigest: promptSlot.slotDigest }
+    : {}),
+  ...(promptSlot.snapshotDigest !== undefined
+    ? { snapshotDigest: promptSlot.snapshotDigest }
+    : {}),
+  ...(promptSlot.targetPath !== undefined
+    ? { targetPath: promptSlot.targetPath }
+    : {}),
+  ...(runManifest.source !== undefined ||
+      runManifest.wishId !== undefined ||
+      runManifest.dispatchClass !== undefined
+    ? {
+      runManifest: {
+        ...(runManifest.source !== undefined
+          ? { source: runManifest.source }
+          : {}),
+        ...(runManifest.wishId !== undefined
+          ? { wishId: runManifest.wishId }
+          : {}),
+        ...(runManifest.dispatchClass !== undefined
+          ? { dispatchClass: runManifest.dispatchClass }
+          : {}),
+      },
+    }
+    : {}),
+});
+
+export const createHarnessPromptSlotInfluenceLabels = (options: {
+  promptSlot?: PromptSlotBinding;
+  runManifest: HarnessCfcInvocationRunManifestSummary;
+  paths?: readonly HarnessCfcInvocationInputLabelPath[];
+}): CfcLabelView | undefined => {
+  if (options.promptSlot === undefined || options.paths === undefined) {
+    return undefined;
+  }
+  if (options.paths.length === 0) {
+    return undefined;
+  }
+  const atom = createPromptSlotInfluenceAtom(
+    options.promptSlot,
+    options.runManifest,
+  );
+  return {
+    version: 1,
+    entries: options.paths.map((path) => ({
+      path: [...path],
+      label: { confidentiality: [atom] },
+    })),
+  };
+};
+
 export const createHarnessCfcInvocationContext = async (
   options: CreateHarnessCfcInvocationContextOptions,
 ): Promise<HarnessCfcInvocationContext> => {
@@ -170,6 +281,18 @@ export const createHarnessCfcInvocationContext = async (
     ? undefined
     : await summarizeCfcInvocationText(options.stdinText);
   const env = summarizeCfcInvocationEnv(options.env);
+  const cfcInputLabels = mergeCfcLabelViews([
+    options.cfcInputLabels,
+    createHarnessPromptSlotInfluenceLabels({
+      promptSlot: options.promptSlot,
+      runManifest: options.runManifest,
+      paths: options.cfcInputLabelPaths,
+    }),
+    createHarnessCfcModelContextInputLabels({
+      modelContext: options.cfcModelContext,
+      paths: options.cfcInputLabelPaths,
+    }),
+  ]);
 
   return {
     type: "cf-harness.cfc-invocation-context",
@@ -195,5 +318,6 @@ export const createHarnessCfcInvocationContext = async (
       ...(stdin !== undefined ? { stdin } : {}),
       ...(env !== undefined ? { env } : {}),
     },
+    ...(cfcInputLabels !== undefined ? { cfcInputLabels } : {}),
   };
 };

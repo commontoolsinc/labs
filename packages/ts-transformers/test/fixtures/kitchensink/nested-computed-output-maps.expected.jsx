@@ -282,8 +282,12 @@ export default pattern((state) => {
                 }
             },
             selectedCommentId: {
-                type: ["string", "undefined"],
-                asCell: ["cell"]
+                anyOf: [{
+                        type: "string"
+                    }, {
+                        type: "undefined"
+                    }],
+                asCell: ["readonly"]
             },
             state: {
                 type: "object",

@@ -214,4 +214,81 @@ describe("Schema: Capability wrapper types", () => {
       asCell: ["cell"],
     });
   });
+
+  it("uses semantic wrapper kind when a non-synthetic type node disagrees", async () => {
+    const code = `
+      interface X {
+        authored: Cell<string>;
+        narrowed: ReadonlyCell<string>;
+      }
+    `;
+    const { checker, sourceFile } = await createTestProgram(code);
+    const symbol = checker.getSymbolsInScope(
+      sourceFile,
+      ts.SymbolFlags.Interface,
+    ).find((candidate) => candidate.name === "X");
+    if (!symbol) throw new Error("Interface X not found");
+
+    const type = checker.getDeclaredTypeOfSymbol(symbol);
+    const narrowed = type.getProperty("narrowed");
+    if (!narrowed) throw new Error("Property X.narrowed not found");
+    const narrowedType = checker.getTypeOfSymbolAtLocation(
+      narrowed,
+      sourceFile,
+    );
+    const authoredNode = findInterfaceMemberTypeNode(
+      sourceFile,
+      "X",
+      "authored",
+    );
+
+    const gen = createSchemaTransformerV2();
+    const result = gen.generateSchema(
+      narrowedType,
+      checker,
+      authoredNode,
+    ) as Record<string, any>;
+
+    expect(result).toEqual({ type: "string", asCell: ["readonly"] });
+  });
+
+  it("allows registered synthetic wrapper nodes to override semantic wrapper kind", async () => {
+    const code = `
+      interface X {
+        authored: Cell<string>;
+      }
+    `;
+    const { checker, sourceFile } = await createTestProgram(code);
+    const symbol = checker.getSymbolsInScope(
+      sourceFile,
+      ts.SymbolFlags.Interface,
+    ).find((candidate) => candidate.name === "X");
+    if (!symbol) throw new Error("Interface X not found");
+
+    const type = checker.getDeclaredTypeOfSymbol(symbol);
+    const authored = type.getProperty("authored");
+    if (!authored) throw new Error("Property X.authored not found");
+    const authoredType = checker.getTypeOfSymbolAtLocation(
+      authored,
+      sourceFile,
+    );
+    const syntheticNode = ts.factory.createTypeReferenceNode(
+      ts.factory.createQualifiedName(
+        ts.factory.createIdentifier("__cfHelpers"),
+        ts.factory.createIdentifier("WriteonlyCell"),
+      ),
+      [ts.factory.createKeywordTypeNode(ts.SyntaxKind.StringKeyword)],
+    );
+    const typeRegistry = new WeakMap<ts.Node, ts.Type>();
+    typeRegistry.set(syntheticNode, authoredType);
+
+    const gen = createSchemaTransformerV2();
+    const result = gen.generateSchemaFromSyntheticTypeNode(
+      syntheticNode,
+      checker,
+      typeRegistry,
+    ) as Record<string, any>;
+
+    expect(result).toEqual({ type: "string", asCell: ["writeonly"] });
+  });
 });

@@ -32,7 +32,7 @@ const timedHandler = handler({
         lastUpdate: {
             type: "string",
             format: "date-time",
-            asCell: ["cell"]
+            asCell: ["writeonly"]
         }
     },
     required: ["lastUpdate"]

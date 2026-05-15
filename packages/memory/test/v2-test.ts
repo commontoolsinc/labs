@@ -11,6 +11,7 @@ import {
   getMemoryProtocolFlags,
   isSourceLink,
   MEMORY_PROTOCOL,
+  parseMemoryProtocolFlags,
   toDocumentPath,
   toDocumentSelector,
   toValuePath,
@@ -110,16 +111,63 @@ describe("memory v2 flags", () => {
     setDataModelConfig(false);
 
     assertEquals(getMemoryProtocolFlags(), {
-      richStorableValues: false,
+      modernDataModel: false,
     });
 
     setDataModelConfig(true);
 
     assertEquals(getMemoryProtocolFlags(), {
-      richStorableValues: true,
+      modernDataModel: true,
     });
 
     resetDataModelConfig();
+  });
+});
+
+describe("parseMemoryProtocolFlags", () => {
+  it("accepts the canonical modernDataModel key", () => {
+    assertEquals(parseMemoryProtocolFlags({ modernDataModel: true }), {
+      flags: { modernDataModel: true },
+      wireKey: "modernDataModel",
+    });
+    assertEquals(parseMemoryProtocolFlags({ modernDataModel: false }), {
+      flags: { modernDataModel: false },
+      wireKey: "modernDataModel",
+    });
+  });
+
+  it("accepts the legacy richStorableValues key and normalizes it", () => {
+    assertEquals(parseMemoryProtocolFlags({ richStorableValues: true }), {
+      flags: { modernDataModel: true },
+      wireKey: "richStorableValues",
+    });
+    assertEquals(parseMemoryProtocolFlags({ richStorableValues: false }), {
+      flags: { modernDataModel: false },
+      wireKey: "richStorableValues",
+    });
+  });
+
+  it("prefers the canonical key when both are present", () => {
+    assertEquals(
+      parseMemoryProtocolFlags({
+        modernDataModel: true,
+        richStorableValues: false,
+      }),
+      { flags: { modernDataModel: true }, wireKey: "modernDataModel" },
+    );
+  });
+
+  it("rejects values that are not a recognizable flags shape", () => {
+    assertEquals(parseMemoryProtocolFlags(null), null);
+    assertEquals(parseMemoryProtocolFlags(undefined), null);
+    assertEquals(parseMemoryProtocolFlags("modernDataModel"), null);
+    assertEquals(parseMemoryProtocolFlags([true]), null);
+    assertEquals(parseMemoryProtocolFlags({}), null);
+    assertEquals(parseMemoryProtocolFlags({ modernDataModel: "true" }), null);
+    assertEquals(
+      parseMemoryProtocolFlags({ richStorableValues: 1 }),
+      null,
+    );
   });
 });
 

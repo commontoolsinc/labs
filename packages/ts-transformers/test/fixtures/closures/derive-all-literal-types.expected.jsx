@@ -30,7 +30,7 @@ export default pattern(() => {
         properties: {
             value: {
                 type: "number",
-                asCell: ["cell"]
+                asCell: ["readonly"]
             },
             numLiteral: {
                 type: "number"

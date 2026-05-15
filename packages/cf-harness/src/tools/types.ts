@@ -1,6 +1,10 @@
-import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
+import type {
+  CfcEnforcementMode,
+  CfcLabelView,
+} from "@commonfabric/runner/cfc";
 import type {
   HarnessCfcInvocationContext,
+  HarnessCfcInvocationInputLabelPath,
   HarnessCfcInvocationOperation,
 } from "../contracts/cfc-invocation-context.ts";
 import type {
@@ -49,6 +53,8 @@ export interface HarnessToolContext {
     args?: readonly string[];
     stdinText?: string;
     env?: Record<string, string>;
+    cfcInputLabels?: CfcLabelView;
+    cfcInputLabelPaths?: readonly HarnessCfcInvocationInputLabelPath[];
   }): Promise<HarnessCfcInvocationContext>;
 }
 

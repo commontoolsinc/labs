@@ -369,6 +369,43 @@ That opt-in case verifies that cf-harness can navigate `/fabric` through
 `runsc-cfc` and read the FUSE `.status` file. Without
 `CF_HARNESS_INTEGRATION_FABRIC_MOUNT`, the Fabric mount case is skipped.
 
+To exercise label flow through a live Fabric FUSE projection, enable the
+additional CFC flow tests and provide concrete read/write projection paths under
+`/fabric`:
+
+```bash
+# In another terminal, mount FUSE with Docker traversal enabled.
+cf fuse mount /tmp/cf --allow-other --cfc-mode=observe --cfc-writeback-xattrs
+
+cd packages/cf-harness
+CF_HARNESS_RUNSC_CFC_RESULT_DIR="$HOME/.local/share/runsc-cfc/cfc-results" \
+CF_HARNESS_RUNSC_CFC_INVOCATION_CONTEXT_DIR="$HOME/.local/share/runsc-cfc/cfc-invocations" \
+CF_HARNESS_INTEGRATION_FABRIC_MOUNT=/tmp/cf \
+CF_HARNESS_INTEGRATION_FABRIC_CFC_FLOW=1 \
+CF_HARNESS_INTEGRATION_FABRIC_CFC_READ_PATH=/fabric/home/pieces/example/result/secret \
+CF_HARNESS_INTEGRATION_FABRIC_CFC_WRITE_PATH=/fabric/home/pieces/example/result/output \
+CF_HARNESS_INTEGRATION_FABRIC_CFC_LABEL_SUBJECT=did:key:fabric \
+deno task test:integration
+```
+
+When those env vars point at a real labeled FUSE fixture, the extra tests probe
+FUSE-to-sandbox taint, command completion after a FUSE read, FUSE write
+attempts, and joins between explicit `cfcInputLabels` and a prior FUSE read. The
+result sidecar env var is required for all CFC flow assertions, and the
+invocation context sidecar env var is required for the cases that seed
+`cfcInputLabels`. The installed Docker `runsc-cfc` runtime must also be
+configured with the same `--cfc-invocation-context-dir`, otherwise those
+invocation-label cases are skipped even if cf-harness writes sidecars.
+
+The default Fabric CFC flow gate exercises the immediate result sidecar after a
+FUSE read. The stricter host-bind readback probe is opt-in with
+`CF_HARNESS_INTEGRATION_FABRIC_CFC_DURABLE_HOST_LABEL=1` because durable
+`FUSE -> sandbox -> host -> sandbox` label persistence is still a live-stack
+validation target. FUSE write assertions are also probes of the live stack:
+durable cell-label writeback depends on the runner/runtime emitting FUSE
+prepare/finalize metadata, not arbitrary direct writes to
+`trusted.cfc.contentLabel`.
+
 On Linux, Docker/runsc runs default to the host UID/GID. On macOS, the default
 omits `--user` because Docker Desktop bind mounts may expose host files as
 `root:root`, which prevents non-root container users from writing mounted Loom
@@ -386,8 +423,24 @@ directory. Configure runsc with
 `CF_HARNESS_RUNSC_CFC_INVOCATION_CONTEXT_DIR=/path/to/invocations` or pass
 `cfcInvocationContextDir` in the explicit sandbox config. `cf-harness` writes
 `<containerID>.json` after `docker create` and before `docker start`; the
-current payload is an audit/provenance context, not yet an argv/stdin/cwd/env
-label enforcement contract.
+payload contains audit/provenance context plus optional trusted `cfcInputLabels`
+for supported startup inputs (`command`, `argv`, `args`, `env`, `cwd`, and
+`stdin`). `stdin` labels are modeled as labels on the stdin source and taint
+only after the sandbox reads or maps fd 0, not as automatic startup task taint.
+When a trusted prompt-slot binding is present, `cf-harness` also derives
+confidentiality-only prompt influence labels for model-authored invocation
+inputs such as shell commands, structured file-tool arguments, and stdin
+payloads. These labels are taint evidence, not integrity or authorization
+claims. When CFC-mediated bash output is released to the model, `cf-harness`
+records the observed output labels in run state and merges those confidentiality
+labels into later model-authored invocation inputs. Opaque and denied outputs
+are not added to this model-context accumulator.
+
+The persisted model-context accumulator is sensitive retained run metadata. It
+does not store raw stdout/stderr bytes, but its labels and observation refs can
+still disclose which confidential sources influenced model-visible context.
+Handle it under the same access and retention boundary as transcripts, tool
+outputs, run state, and CFC policy traces.
 
 On Docker Desktop for macOS, use the host path for `cf-harness` and the
 `/host_mnt/...` projection for Docker's runtime args. The gVisor

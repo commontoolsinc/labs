@@ -1,5 +1,5 @@
 import type { JSONSchema } from "@commonfabric/api";
-import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
+import type { CfcLabelView, CfcSandboxResult } from "@commonfabric/runner/cfc";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import {
   BASH_COMMAND_DENIED_EXIT_CODE,
@@ -17,6 +17,9 @@ export interface BashToolInput {
   command: string;
   cwd?: string;
   timeoutMs?: number;
+  // Trusted harness/test plumbing for invocation input labels. This is omitted
+  // from the public tool schema so model-authored tool calls do not mint labels.
+  cfcInputLabels?: CfcLabelView;
 }
 
 export interface BashToolOutput {
@@ -104,6 +107,12 @@ export const bashTool: HarnessToolDefinition<BashToolInput, BashToolOutput> = {
         operation: "shell",
         cwd: commandCwd,
         command,
+        ...(input.cfcInputLabels !== undefined
+          ? { cfcInputLabels: input.cfcInputLabels }
+          : {}),
+        cfcInputLabelPaths: input.cwd !== undefined
+          ? [["command"], ["cwd"]]
+          : [["command"]],
       }),
     });
     const mayTrustCwdMarker = context.cfcEnforcementMode === "disabled" ||

@@ -30,19 +30,19 @@ export default pattern(() => {
     const result = __cfHelpers.derive({
         type: "object",
         properties: {
+            multiplier: {
+                type: "number",
+                asCell: ["readonly"]
+            },
             numbers: {
                 type: "array",
                 items: {
                     type: "number"
                 },
-                asCell: ["cell"]
-            },
-            multiplier: {
-                type: "number",
-                asCell: ["cell"]
+                asCell: ["opaque"]
             }
         },
-        required: ["numbers", "multiplier"]
+        required: ["multiplier", "numbers"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "array",
         items: {
@@ -66,7 +66,7 @@ export default pattern(() => {
                 properties: {
                     multiplier: {
                         type: "number",
-                        asCell: ["cell"]
+                        asCell: ["readonly"]
                     }
                 },
                 required: ["multiplier"]

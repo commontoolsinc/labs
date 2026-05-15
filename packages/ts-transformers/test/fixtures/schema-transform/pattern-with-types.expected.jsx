@@ -113,7 +113,7 @@ const addItem = handler // <
             items: {
                 $ref: "#/$defs/Item"
             },
-            asCell: ["cell"]
+            asCell: ["writeonly"]
         }
     },
     required: ["items"],

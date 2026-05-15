@@ -40,7 +40,7 @@ export default pattern((__cf_pattern_input) => {
                 items: {
                     $ref: "#/$defs/Person"
                 },
-                asCell: ["cell"]
+                asCell: ["readonly"]
             }
         },
         required: ["people"],
@@ -86,7 +86,7 @@ export default pattern((__cf_pattern_input) => {
                 items: {
                     type: "unknown"
                 },
-                asCell: ["cell"]
+                asCell: ["readonly"]
             }
         },
         required: ["people"]

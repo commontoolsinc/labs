@@ -34,6 +34,9 @@ interface MutableCapabilityState {
   readonly writes: Set<string>;
   readonly rawIdentityPaths: Set<string>;
   readonly rawIdentityCellPaths: Set<string>;
+  readonly rawComparablePaths: Set<string>;
+  readonly rawComparableCellPaths: Set<string>;
+  readonly rawOpaquePaths: Set<string>;
   passthrough: boolean;
   wildcard: boolean;
   hasIdentityUse: boolean;
@@ -45,11 +48,14 @@ interface ObservedCapabilityUsage {
   readonly readPaths: readonly (readonly string[])[];
   readonly fullShapePaths: readonly (readonly string[])[];
   readonly writePaths: readonly (readonly string[])[];
+  readonly opaquePaths: readonly (readonly string[])[];
   readonly passthrough: boolean;
   readonly wildcard: boolean;
   readonly identityOnly: boolean;
   readonly identityPaths: readonly (readonly string[])[];
   readonly identityCellPaths: readonly (readonly string[])[];
+  readonly comparablePaths: readonly (readonly string[])[];
+  readonly comparableCellPaths: readonly (readonly string[])[];
 }
 
 interface AccessPathInfo {
@@ -101,9 +107,23 @@ function extendSourceRef(
 const PARAMETER_SUMMARY_PREFIX = "__param";
 
 const WRITER_METHODS = new Set(["set", "update"]);
-const ARRAY_IDENTITY_WRITER_METHODS = new Set(["push", "unshift", "splice"]);
+const ARRAY_IDENTITY_WRITER_METHODS = new Set([
+  "push",
+  "unshift",
+  "splice",
+  "remove",
+  "removeAll",
+]);
 const ARRAY_IDENTITY_PRESERVING_CHAIN_METHODS = new Set(["slice"]);
 const READER_METHODS = new Set(["get"]);
+const OPAQUE_DERIVATION_METHODS = new Set([
+  "map",
+  "mapWithPattern",
+  "flatMap",
+  "flatMapWithPattern",
+  "filter",
+  "filterWithPattern",
+]);
 const FALLBACK_OPERATORS = new Set<ts.SyntaxKind>([
   ts.SyntaxKind.QuestionQuestionToken,
   ts.SyntaxKind.BarBarToken,
@@ -761,15 +781,18 @@ function isKnownIdentityEqualsCallee(
   const current = unwrapExpression(expr);
 
   if (ts.isIdentifier(current)) {
+    if (current.text !== "equals" && current.text !== "equalLinks") {
+      return false;
+    }
     if (!checker) {
-      return current.text === "equals";
+      return true;
     }
     const symbol = checker.getSymbolAtLocation(current);
-    return resolvesToCommonFabricSymbol(symbol, checker, "equals");
+    return resolvesToCommonFabricSymbol(symbol, checker, current.text);
   }
 
   if (ts.isPropertyAccessExpression(current)) {
-    if (current.name.text !== "equals") {
+    if (current.name.text !== "equals" && current.name.text !== "equalLinks") {
       return false;
     }
     return !checker ||
@@ -781,7 +804,8 @@ function isKnownIdentityEqualsCallee(
     current.argumentExpression &&
     isLiteralElement(current.argumentExpression)
   ) {
-    if (getLiteralElementText(current.argumentExpression) !== "equals") {
+    const methodName = getLiteralElementText(current.argumentExpression);
+    if (methodName !== "equals" && methodName !== "equalLinks") {
       return false;
     }
     return !checker ||
@@ -957,6 +981,9 @@ function toCapability(state: MutableCapabilityState): ReactiveCapability {
   if (hasReads && hasWrites) return "writable";
   if (hasReads) return "readonly";
   if (hasWrites) return "writeonly";
+  if (state.rawComparablePaths.size > 0 && !state.hasNonIdentityUse) {
+    return "comparable";
+  }
   return "opaque";
 }
 
@@ -966,6 +993,18 @@ function normalizeObservedCapabilityUsage(
   const readPaths = Array.from(state.reads).map(decodePath);
   const fullShapePaths = Array.from(state.fullShapeReads).map(decodePath);
   const writePaths = Array.from(state.writes).map(decodePath);
+  const opaquePaths = Array.from(state.rawOpaquePaths)
+    .map(decodePath)
+    .filter((opaquePath) =>
+      ![
+        ...readPaths,
+        ...fullShapePaths,
+        ...writePaths,
+      ].some((path) =>
+        path.length >= opaquePath.length &&
+        opaquePath.every((segment, index) => path[index] === segment)
+      )
+    );
   const identityPaths = Array.from(state.rawIdentityPaths)
     .map(decodePath)
     .filter((identityPath) => {
@@ -979,6 +1018,7 @@ function normalizeObservedCapabilityUsage(
         ...readPaths,
         ...fullShapePaths,
         ...writePaths,
+        ...opaquePaths,
       ].some((path) =>
         path.length >= identityPath.length &&
         identityPath.every((segment, index) => path[index] === segment)
@@ -989,11 +1029,19 @@ function normalizeObservedCapabilityUsage(
   const identityCellPaths = Array.from(state.rawIdentityCellPaths)
     .filter((path) => keptIdentityPaths.has(path))
     .map(decodePath);
+  const comparablePaths = Array.from(state.rawComparablePaths)
+    .filter((path) => keptIdentityPaths.has(path))
+    .map(decodePath);
+  const keptComparablePaths = new Set(comparablePaths.map(encodePath));
+  const comparableCellPaths = Array.from(state.rawComparableCellPaths)
+    .filter((path) => keptComparablePaths.has(path))
+    .map(decodePath);
 
   return {
     readPaths,
     fullShapePaths,
     writePaths,
+    opaquePaths,
     passthrough: state.passthrough,
     wildcard: state.wildcard,
     identityOnly: identityPaths.some((path) => path.length === 0) &&
@@ -1003,6 +1051,8 @@ function normalizeObservedCapabilityUsage(
       !state.wildcard,
     identityPaths,
     identityCellPaths,
+    comparablePaths,
+    comparableCellPaths,
   };
 }
 
@@ -1064,6 +1114,9 @@ export function analyzeFunctionCapabilities(
           writes: new Set<string>(),
           rawIdentityPaths: new Set<string>(),
           rawIdentityCellPaths: new Set<string>(),
+          rawComparablePaths: new Set<string>(),
+          rawComparableCellPaths: new Set<string>(),
+          rawOpaquePaths: new Set<string>(),
           passthrough: false,
           wildcard: false,
           hasIdentityUse: false,
@@ -1124,6 +1177,26 @@ export function analyzeFunctionCapabilities(
       }
     };
 
+    const markOpaqueUse = (name: string, path: readonly string[]): void => {
+      const state = ensureState(name);
+      state.hasNonIdentityUse = true;
+      if (path.length === 0) {
+        state.hasNonIdentityRootUse = true;
+      }
+    };
+
+    const recordOpaquePath = (
+      name: string,
+      path: readonly string[],
+    ): void => {
+      const state = ensureState(name);
+      state.rawOpaquePaths.add(encodePath(path));
+      state.hasNonIdentityUse = true;
+      if (path.length === 0) {
+        state.hasNonIdentityRootUse = true;
+      }
+    };
+
     const recordIdentityPath = (
       name: string,
       path: readonly string[],
@@ -1136,6 +1209,20 @@ export function analyzeFunctionCapabilities(
         state.rawIdentityCellPaths.add(encoded);
       }
       state.hasIdentityUse = true;
+    };
+
+    const recordComparablePath = (
+      name: string,
+      path: readonly string[],
+      options?: { cellLike?: boolean },
+    ): void => {
+      recordIdentityPath(name, path, options);
+      const state = ensureState(name);
+      const encoded = encodePath(path);
+      state.rawComparablePaths.add(encoded);
+      if (options?.cellLike) {
+        state.rawComparableCellPaths.add(encoded);
+      }
     };
 
     const hasRecordedIdentityPath = (
@@ -1797,17 +1884,21 @@ export function analyzeFunctionCapabilities(
     const markIdentityUseRef = (
       ref: SourceRef,
       expr?: ts.Expression,
+      options?: { comparable?: boolean },
     ): void => {
       const cellLike = expr
         ? isCellLikeExpression(expr) || !isPrimitiveLikeExpression(expr)
         : false;
+      const record = options?.comparable
+        ? recordComparablePath
+        : recordIdentityPath;
       if (ref.dynamic) {
         markWildcard(ref.root);
       } else if (ref.path.length === 0) {
-        recordIdentityPath(ref.root, [], { cellLike });
+        record(ref.root, [], { cellLike });
         markPassthrough(ref.root, { identityOnly: true });
       } else {
-        recordIdentityPath(ref.root, ref.path, { cellLike });
+        record(ref.root, ref.path, { cellLike });
       }
     };
 
@@ -2278,12 +2369,37 @@ export function analyzeFunctionCapabilities(
             for (const writePath of paramSummary.writePaths) {
               trackWrite(source.root, [...source.path, ...writePath]);
             }
+            for (const opaquePath of paramSummary.opaquePaths ?? []) {
+              recordOpaquePath(source.root, [
+                ...source.path,
+                ...opaquePath,
+              ]);
+            }
+            if (
+              paramSummary.capability === "opaque" &&
+              !paramSummary.passthrough &&
+              paramSummary.readPaths.length === 0 &&
+              paramSummary.writePaths.length === 0 &&
+              (paramSummary.opaquePaths?.length ?? 0) === 0
+            ) {
+              markOpaqueUse(source.root, source.path);
+            }
 
             for (const identityPath of paramSummary.identityPaths ?? []) {
               if (source.dynamic) {
                 markWildcard(source.root);
               } else {
-                recordIdentityPath(
+                const isComparablePath = (paramSummary.comparablePaths ?? [])
+                  .some((path) =>
+                    path.length === identityPath.length &&
+                    path.every((segment, index) =>
+                      segment === identityPath[index]
+                    )
+                  );
+                const recordPath = isComparablePath
+                  ? recordComparablePath
+                  : recordIdentityPath;
+                recordPath(
                   source.root,
                   [...source.path, ...identityPath],
                   {
@@ -2301,7 +2417,11 @@ export function analyzeFunctionCapabilities(
 
             if (paramSummary.passthrough && source.path.length === 0) {
               if (paramSummary.identityOnly) {
-                recordIdentityPath(source.root, []);
+                if (paramSummary.capability === "comparable") {
+                  recordComparablePath(source.root, []);
+                } else {
+                  recordIdentityPath(source.root, []);
+                }
               }
               markPassthrough(
                 source.root,
@@ -2361,7 +2481,9 @@ export function analyzeFunctionCapabilities(
                 }
               }
             } else if (identityEqualsCall) {
-              markIdentityUseRef(receiver, node.expression.expression);
+              markIdentityUseRef(receiver, node.expression.expression, {
+                comparable: true,
+              });
             } else if (WRITER_METHODS.has(methodName)) {
               trackWriteRef(receiver);
             } else if (ARRAY_IDENTITY_WRITER_METHODS.has(methodName)) {
@@ -2390,6 +2512,23 @@ export function analyzeFunctionCapabilities(
               // ["notes", "length"]), skip the blanket read.
               if (!resolvedGetCalls.has(node)) {
                 trackReadRef(receiver);
+              }
+            } else if (
+              OPAQUE_DERIVATION_METHODS.has(methodName) &&
+              (
+                !checker ||
+                isCellLikeExpression(node.expression.expression)
+              )
+            ) {
+              // These methods are available on opaque cells and return opaque
+              // results. Dynamic receivers can hide which branch is used, so
+              // they must disable shrinking for the root.
+              if (receiver.dynamic) {
+                markWildcard(receiver.root);
+              } else if (receiver.path.length > 0) {
+                recordOpaquePath(receiver.root, receiver.path);
+              } else {
+                markOpaqueUse(receiver.root, receiver.path);
               }
             } else {
               // Unknown method call over a tracked source reads at least the receiver path.
@@ -2423,7 +2562,9 @@ export function analyzeFunctionCapabilities(
           for (const argument of node.arguments) {
             const source = resolveSourceRef(argument);
             if (source) {
-              markIdentityUseRef(source, argument);
+              markIdentityUseRef(source, argument, {
+                comparable: identityEqualsCall,
+              });
             }
           }
         }

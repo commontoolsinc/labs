@@ -16,6 +16,7 @@
     "./logger": "./src/logger.ts",
     "./sandbox-contract": "./src/sandbox-contract.ts",
     "./sleep": "./src/sleep.ts",
+    "./strip-undefined-props": "./src/strip-undefined-props.ts",
     "./types": "./src/types.ts",
     "./utf8": "./src/utf8.ts",
     "./zod-utils": "./src/zod-utils.ts"

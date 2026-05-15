@@ -16,6 +16,7 @@ export {
   classifyWildcardTraversalCall,
   detectCallKind,
   detectDirectBuilderCall,
+  FUNCTION_HARDENING_HELPER_PREFIX,
   getCapabilitySummaryCallbackArgument,
   getDeriveInputAndCallbackArgument,
   getLoweredArrayMethodName,
@@ -28,6 +29,7 @@ export {
   isReactiveValueSymbol,
   isSimpleReactiveAccessExpression,
   isWildcardTraversalCall,
+  SYNTHETIC_MODULE_CALLBACK_PREFIX,
 } from "./call-kind.ts";
 export * from "./dataflow.ts";
 export {

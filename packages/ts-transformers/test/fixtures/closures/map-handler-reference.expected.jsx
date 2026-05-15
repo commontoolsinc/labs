@@ -69,7 +69,7 @@ export default pattern((state) => {
                                 properties: {
                                     count: {
                                         type: "number",
-                                        asCell: ["cell"]
+                                        asCell: ["readonly"]
                                     }
                                 },
                                 required: ["count"]

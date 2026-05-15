@@ -30,7 +30,7 @@ export default pattern((__cf_pattern_input) => {
             properties: {
                 a: {
                     type: "string",
-                    asCell: ["cell"]
+                    asCell: ["writeonly"]
                 }
             },
             required: ["a"]
@@ -42,7 +42,7 @@ export default pattern((__cf_pattern_input) => {
             properties: {
                 b: {
                     type: "number",
-                    asCell: ["cell"]
+                    asCell: ["writeonly"]
                 }
             },
             required: ["b"]
