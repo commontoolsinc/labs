@@ -80,14 +80,16 @@ import {
   isPendingPullActionRunnable,
   markExecuteStart,
   planAdaptiveCycleDebounce,
-  planCycleBreak,
-  planExecuteContinuation,
   pushBoundedHistory,
   recordExecuteEnd,
   runSchedulerSettleLoop,
   type SchedulerSettleResult,
   type SettlingTracker,
 } from "./scheduler/execution.ts";
+import { breakCyclesIfNeeded } from "./scheduler/cycle-break.ts";
+import { applyExecuteContinuation } from "./scheduler/continuation.ts";
+import type { CycleBreakState } from "./scheduler/cycle-break.ts";
+import type { ExecuteContinuationState } from "./scheduler/continuation.ts";
 import { SchedulerDelays } from "./scheduler/delays.ts";
 import { processStorageNotification } from "./scheduler/notifications.ts";
 import {
@@ -460,6 +462,61 @@ export class Scheduler {
   private _running: Promise<unknown> | undefined = undefined;
   private scheduled = false;
   private disposed = false;
+  private cycleBreakState: CycleBreakState = {
+    getPullMode: () => this.pullMode,
+    dirty: this.staleness.dirty,
+    effects: this.effects,
+    runsThisExecute: this.runsThisExecute,
+    pending: this.pending,
+    isThrottled: (action) => this.delays.isThrottled(action),
+    clearDirty: (action) =>
+      clearSchedulerDirty(this.dirtySchedulingState, action),
+    unsubscribe: (action) => this.unsubscribe(action),
+    recordExecuted: () => {
+      this.filterStats.executed++;
+    },
+    getActionId: (action) => this.getActionId(action),
+    runAction: (action) => this.run(action),
+  };
+  private executeContinuationState: ExecuteContinuationState = {
+    getPullMode: () => this.pullMode,
+    pending: this.pending,
+    dirty: this.staleness.dirty,
+    effects: this.effects,
+    eventQueue: this.eventQueue,
+    eventQueueWakeState: this.eventQueueWakeState,
+    idlePromises: this.idlePromises,
+    scheduledFirstTime: this.scheduledFirstTime,
+    conditionallyScheduledEffects: this.conditionallyScheduledEffects,
+    changedWritesHistory: this.changedWritesHistory,
+    consumeRerunAfterCurrentExecute: () => {
+      const shouldRerun = this.rerunAfterCurrentExecute;
+      this.rerunAfterCurrentExecute = false;
+      return shouldRerun;
+    },
+    isDemandedPullComputation: (action) =>
+      this.isDemandedPullComputation(action),
+    shouldRunFirstPullComputationInDemandContext: (action) =>
+      this.shouldRunFirstPullComputationInDemandContext(action),
+    isDebouncedComputationWaiting: (action) =>
+      this.isDebouncedComputationWaiting(action),
+    getNextDebounceRunTime: (action) => this.getNextDebounceRunTime(action),
+    getNextEligibleRunTime: (action) =>
+      this.delays.getNextEligibleRunTime(action),
+    resetLoopCounter: () => {
+      this.loopCounter = new WeakMap();
+    },
+    setScheduled: (scheduled) => {
+      this.scheduled = scheduled;
+    },
+    resetSettlingTracker: () => {
+      this.settlingTracker = createSettlingTracker();
+    },
+    setPendingQueueTaskTimer: (timer) => {
+      this.pendingQueueTaskTimer = timer;
+    },
+    execute: () => this.execute(),
+  };
 
   get runningPromise(): Promise<unknown> | undefined {
     return this._running;
@@ -2082,10 +2139,10 @@ export class Scheduler {
     );
 
     const settleResult = await this.runSettleLoop(initialSeeds);
-    await this.breakCyclesIfNeeded(settleResult);
+    await breakCyclesIfNeeded(this.cycleBreakState, settleResult);
     this.applyAdaptiveCycleDebounce();
     this.recordExecuteEndTelemetry();
-    this.applyExecuteContinuation();
+    applyExecuteContinuation(this.executeContinuationState);
     logger.timeEnd("scheduler", "execute");
   }
 
@@ -2260,56 +2317,6 @@ export class Scheduler {
     return settleResult;
   }
 
-  private async breakCyclesIfNeeded(
-    settleResult: SchedulerSettleResult,
-  ): Promise<void> {
-    // If we hit max iterations without settling, break the cycle:
-    // 1. Clear dirty/pending for computations that were in early iterations AND still in last workSet
-    // 2. Run all remaining dirty effects so they don't get lost
-    const cycleBreakPlan = planCycleBreak({
-      pullMode: this.pullMode,
-      settledEarly: settleResult.settledEarly,
-      lastWorkSet: settleResult.lastWorkSet,
-      earlyIterationComputations: settleResult.earlyIterationComputations,
-      dirty: this.staleness.dirty,
-      effects: this.effects,
-      runsThisExecute: this.runsThisExecute,
-      isThrottled: (action) => this.delays.isThrottled(action),
-    });
-    if (!cycleBreakPlan.shouldBreak) return;
-
-    logger.debug("schedule-cycle", () => [
-      `[CYCLE-BREAK] Hit max iterations (${settleResult.maxSettleIterations}), breaking cycle`,
-      `Early computations: ${settleResult.earlyIterationComputations.size}, Last workSet: ${settleResult.lastWorkSet.size}`,
-    ]);
-
-    // Clear computations that appear to be in the cycle
-    // (present in early iterations AND still in the last workSet)
-    // But don't clear throttled computations - they should stay dirty
-    for (const comp of cycleBreakPlan.computationsToClear) {
-      logger.debug("schedule-cycle", () => [
-        `[CYCLE-BREAK] Clearing cyclic computation: ${this.getActionId(comp)}`,
-      ]);
-      clearSchedulerDirty(this.dirtySchedulingState, comp);
-      this.pending.delete(comp);
-    }
-
-    // Run all remaining dirty effects - these shouldn't be lost
-    // But skip throttled effects - they should stay dirty for later
-    for (const effect of cycleBreakPlan.dirtyEffectsToRun) {
-      if (this.effects.has(effect) && this.staleness.dirty.has(effect)) {
-        logger.debug("schedule-cycle", () => [
-          `[CYCLE-BREAK] Running dirty effect: ${this.getActionId(effect)}`,
-        ]);
-        clearSchedulerDirty(this.dirtySchedulingState, effect);
-        this.pending.delete(effect);
-        this.unsubscribe(effect);
-        this.filterStats.executed++;
-        await this.run(effect);
-      }
-    }
-  }
-
   private applyAdaptiveCycleDebounce(): void {
     // Apply cycle-aware debounce to effects that ran multiple times this execute().
     // Pull computations are already demand-gated; debouncing them can leave a
@@ -2352,82 +2359,6 @@ export class Scheduler {
       if (this.autoTriggerDiagnosis && !this.diagnosisEnabled) {
         this.startDiagnosis();
       }
-    }
-  }
-
-  private applyExecuteContinuation(): void {
-    // In pull mode, we consider ourselves done when there are no effects or
-    // effect-demanded computations to execute.
-    const hasQueuedEventReadyNow = this.eventQueue.length > 0 &&
-      !isHeadEventParkedState(this.eventQueueWakeState);
-    const hasParkedHeadEvent = this.eventQueue.length > 0 &&
-      isHeadEventParkedState(this.eventQueueWakeState);
-    const shouldRerunAfterCurrentExecute = this.rerunAfterCurrentExecute;
-    this.rerunAfterCurrentExecute = false;
-
-    const continuation = planExecuteContinuation({
-      pullMode: this.pullMode,
-      pending: this.pending,
-      dirty: this.staleness.dirty,
-      effects: this.effects,
-      shouldRerunAfterCurrentExecute,
-      hasQueuedEventReadyNow,
-      hasParkedHeadEvent,
-      isDemandedPullComputation: (action) =>
-        this.isDemandedPullComputation(action),
-      shouldRunFirstPullComputationInDemandContext: (action) =>
-        this.shouldRunFirstPullComputationInDemandContext(action),
-      isDebouncedComputationWaiting: (action) =>
-        this.isDebouncedComputationWaiting(action),
-      getNextDebounceRunTime: (action) => this.getNextDebounceRunTime(action),
-      getNextEligibleRunTime: (action) =>
-        this.delays.getNextEligibleRunTime(action),
-    });
-
-    if (!continuation.shouldQueueAnotherTick) {
-      if (continuation.nextDirtyPullRunAt !== undefined) {
-        scheduleEventQueueWakeState(
-          this.eventQueueWakeState,
-          continuation.nextDirtyPullRunAt,
-        );
-        const promises = this.idlePromises;
-        if (
-          !continuation.hasParkedHeadEvent &&
-          !continuation.nextDirtyPullRunWaitsForIdle
-        ) {
-          for (const resolve of promises) resolve();
-          this.idlePromises.length = 0;
-        }
-        this.loopCounter = new WeakMap();
-        this.scheduled = false;
-      } else if (hasEventQueueWakeTimer(this.eventQueueWakeState)) {
-        this.loopCounter = new WeakMap();
-        this.scheduled = false;
-
-        // Waiting on a future wake is quiescent from the scheduler's
-        // perspective, so reset the non-settling tracker.
-        this.settlingTracker = createSettlingTracker();
-      } else {
-        const promises = this.idlePromises;
-        for (const resolve of promises) resolve();
-        this.idlePromises.length = 0;
-        this.loopCounter = new WeakMap();
-        this.scheduled = false;
-
-        // Reset settling tracker on idle
-        this.settlingTracker = createSettlingTracker();
-
-        this.scheduledFirstTime.clear();
-        if (this.conditionallyScheduledEffects.size === 0) {
-          this.changedWritesHistory.length = 0;
-        }
-      }
-    } else {
-      // Keep scheduled = true since we're queuing another execution
-      this.pendingQueueTaskTimer = queueTask(() => {
-        this.pendingQueueTaskTimer = null;
-        this.execute();
-      });
     }
   }
 
