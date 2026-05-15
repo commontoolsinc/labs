@@ -52,7 +52,7 @@ export default pattern((__cf_pattern_input) => {
                 items: {
                     type: "unknown"
                 },
-                asCell: ["cell"]
+                asCell: ["readonly"]
             }
         },
         required: ["items"]

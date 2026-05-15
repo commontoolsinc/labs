@@ -56,6 +56,7 @@ const writeDocument = (
 ) => {
   tx.writeValueOrThrow({
     space,
+    scope: "space",
     id: id as `test:${string}`,
     path: [],
   }, value);
@@ -67,6 +68,7 @@ const readDocument = (
 ) => {
   tx.readValueOrThrow({
     space,
+    scope: "space",
     id: id as `test:${string}`,
     path: [],
   });
@@ -86,6 +88,7 @@ Deno.bench(
       tx.write(
         {
           space,
+          scope: "space",
           id: `test:raw-w-${i}`,
           path: ["value"],
         },
@@ -107,6 +110,7 @@ Deno.bench(
       tx.writeOrThrow(
         {
           space,
+          scope: "space",
           id: `test:throw-w-${i}`,
           path: ["value"],
         },
@@ -128,6 +132,7 @@ Deno.bench(
       tx.writeValueOrThrow(
         {
           space,
+          scope: "space",
           id: `test:value-w-${i}`,
           path: [],
         },
@@ -149,6 +154,7 @@ Deno.bench(
       tx.write(
         {
           space,
+          scope: "space",
           id: `test:root-write-${i}`,
           path: [],
         },
@@ -170,6 +176,7 @@ Deno.bench(
       tx.writeValueOrThrow(
         {
           space,
+          scope: "space",
           id: `test:nested-loop-${i}`,
           path: ["profile", "name"],
         },
@@ -191,6 +198,7 @@ Deno.bench(
       Array.from({ length: 100 }, (_, i) => ({
         address: {
           space,
+          scope: "space",
           id: `test:nested-batch-${i}`,
           path: ["profile", "name"],
         },
@@ -217,6 +225,7 @@ Deno.bench(
       tx.write(
         {
           space,
+          scope: "space",
           id: `test:read-raw-${i}`,
           path: [],
         },
@@ -228,6 +237,7 @@ Deno.bench(
     for (let i = 0; i < 100; i++) {
       tx.read({
         space,
+        scope: "space",
         id: `test:read-raw-${i}`,
         path: ["value"],
       });
@@ -248,6 +258,7 @@ Deno.bench(
       tx.write(
         {
           space,
+          scope: "space",
           id: `test:read-throw-${i}`,
           path: [],
         },
@@ -259,6 +270,7 @@ Deno.bench(
     for (let i = 0; i < 100; i++) {
       tx.readOrThrow({
         space,
+        scope: "space",
         id: `test:read-throw-${i}`,
         path: ["value"],
       });
@@ -279,6 +291,7 @@ Deno.bench(
       tx.writeValueOrThrow(
         {
           space,
+          scope: "space",
           id: `test:read-value-${i}`,
           path: [],
         },
@@ -290,6 +303,7 @@ Deno.bench(
     for (let i = 0; i < 100; i++) {
       tx.readValueOrThrow({
         space,
+        scope: "space",
         id: `test:read-value-${i}`,
         path: [],
       });
@@ -310,6 +324,7 @@ Deno.bench(
       tx.write(
         {
           space,
+          scope: "space",
           id: `test:prewrite-${i}`,
           path: [],
         },
@@ -321,6 +336,7 @@ Deno.bench(
     for (let j = 0; j < 1000; j++) {
       tx.read({
         space,
+        scope: "space",
         id: `test:prewrite-${j % 100}`,
         path: ["value"],
       });
@@ -345,6 +361,7 @@ Deno.bench(
       const result = tx.write(
         {
           space,
+          scope: "space",
           id: `test:create-${i}`,
           path: [],
         },
@@ -367,6 +384,7 @@ Deno.bench(
     tx.write(
       {
         space,
+        scope: "space",
         id: "test:same-entity-repeat",
         path: [],
       },
@@ -378,6 +396,7 @@ Deno.bench(
       tx.write(
         {
           space,
+          scope: "space",
           id: "test:same-entity-repeat",
           path: [],
         },
@@ -400,6 +419,7 @@ Deno.bench(
       tx.write(
         {
           space,
+          scope: "space",
           id: `test:existing-${i}`,
           path: [],
         },
@@ -412,6 +432,7 @@ Deno.bench(
       const result = tx.write(
         {
           space,
+          scope: "space",
           id: `test:existing-${i}`,
           path: ["value"],
         },
@@ -439,6 +460,7 @@ Deno.bench(
       tx.write(
         {
           space,
+          scope: "space",
           id: `test:path-${i}`,
           path: [],
         },
@@ -450,6 +472,7 @@ Deno.bench(
     for (let i = 0; i < 100; i++) {
       tx.read({
         space,
+        scope: "space",
         id: `test:path-${i}`,
         path: ["a"],
       });
@@ -470,6 +493,7 @@ Deno.bench(
       tx.write(
         {
           space,
+          scope: "space",
           id: `test:deep-path-${i}`,
           path: [],
         },
@@ -481,6 +505,7 @@ Deno.bench(
     for (let i = 0; i < 100; i++) {
       tx.read({
         space,
+        scope: "space",
         id: `test:deep-path-${i}`,
         path: ["a", "b", "c", "d", "e", "f"],
       });
@@ -516,6 +541,7 @@ Deno.bench(
       tx.write(
         {
           space,
+          scope: "space",
           id: `test:commit-${i}`,
           path: [],
         },
@@ -540,6 +566,7 @@ Deno.bench(
     for (let i = 0; i < 1000; i++) {
       const _addr = {
         space,
+        scope: "space",
         id: `test:obj-${i}`,
         path: ["value", "nested"],
       };
@@ -553,6 +580,7 @@ Deno.bench(
   () => {
     const base = {
       space,
+      scope: "space",
       id: "test:base",
       path: [] as string[],
     };
@@ -594,6 +622,7 @@ Deno.bench(
       activity.push({
         read: {
           space,
+          scope: "space",
           id: `test:activity-${i}`,
           path: ["value"],
           meta: {},
@@ -618,6 +647,7 @@ Deno.bench(
       tx.write(
         {
           space,
+          scope: "space",
           id: `test:first-write-${i}`,
           path: [],
         },
@@ -639,6 +669,7 @@ Deno.bench(
     tx.write(
       {
         space,
+        scope: "space",
         id: "test:single-entity",
         path: [],
       },
@@ -650,6 +681,7 @@ Deno.bench(
       tx.write(
         {
           space,
+          scope: "space",
           id: "test:single-entity",
           path: [],
         },
@@ -672,6 +704,7 @@ Deno.bench(
       tx.write(
         {
           space,
+          scope: "space",
           id: `test:ten-entities-${i % 10}`,
           path: [],
         },
@@ -694,6 +727,7 @@ Deno.bench(
       tx.write(
         {
           space,
+          scope: "space",
           id: `test:nested-${i}`,
           path: [],
         },
@@ -706,6 +740,7 @@ Deno.bench(
       tx.write(
         {
           space,
+          scope: "space",
           id: `test:nested-${i}`,
           path: ["data", "nested", "value"],
         },
@@ -819,6 +854,7 @@ Deno.bench(
       tx.write(
         {
           space,
+          scope: "space",
           id: `test:wvc-new-${i}`,
           path: [],
         },
@@ -842,6 +878,7 @@ Deno.bench(
       tx.write(
         {
           space,
+          scope: "space",
           id: "test:wvc-same",
           path: [],
         },
@@ -864,6 +901,7 @@ Deno.bench(
       tx.write(
         {
           space,
+          scope: "space",
           id: `test:wvc-commit-new-${i}`,
           path: [],
         },
@@ -890,6 +928,7 @@ Deno.bench(
       tx.write(
         {
           space,
+          scope: "space",
           id: "test:wvc-commit-same",
           path: [],
         },

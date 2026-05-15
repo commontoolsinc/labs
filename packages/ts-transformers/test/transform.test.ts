@@ -376,6 +376,35 @@ export default pattern(() => {
     assertStringIncludes(main, '.for(["picked", "param"], true)');
   });
 
+  it("lowers local reactive roots in zero-input pattern bodies", async () => {
+    const source = `
+import { Default, pattern, wish, Writable } from "commonfabric";
+
+type MentionablePiece = { name: string };
+
+export default pattern<Record<string, never>>(() => {
+  const mentionableWish = wish<Writable<MentionablePiece>[] | Default<[]>>({
+    query: "#mentionable",
+  });
+  const mentionable = mentionableWish.result;
+  return { mentionable };
+});
+`;
+
+    const output = await transformFiles({
+      "/main.tsx": source,
+    }, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const main = output["/main.tsx"]!;
+
+    assertStringIncludes(main, '.for("mentionableWish", true)');
+    assertStringIncludes(
+      main,
+      'const mentionable = mentionableWish.key("result")',
+    );
+  });
+
   it("does not add root causes to pattern factory outputs", async () => {
     const source = `
 import { pattern, Writable } from "commonfabric";

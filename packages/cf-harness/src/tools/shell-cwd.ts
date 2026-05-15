@@ -14,7 +14,7 @@ export const commandWithFinalWorkingDirectoryMarker = (
 ): string =>
   [
     `__cf_harness_cwd_marker=${JSON.stringify(cwdMarker)}`,
-    'trap \'__cf_harness_status=$?; trap - EXIT; printf "%s%s" "$__cf_harness_cwd_marker" "$(pwd)"; exit "$__cf_harness_status"\' EXIT',
+    'trap \'__cf_harness_status=$?; trap - EXIT; { printf "%s%s" "$__cf_harness_cwd_marker" "$(pwd)" || true; }; exit "$__cf_harness_status"\' EXIT',
     command,
   ].join("\n");
 

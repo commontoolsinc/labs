@@ -48,6 +48,7 @@ describe("CFCellLink", () => {
     const ref: CellRef = {
       id: "of:test-cell" as CellRef["id"],
       space: "did:key:test-space" as CellRef["space"],
+      scope: "space",
       path: [],
       schema: { type: "object" },
     };
@@ -89,6 +90,7 @@ describe("CFCellLink", () => {
     const ref: CellRef = {
       id: "of:test-cell" as CellRef["id"],
       space: "did:key:test-space" as CellRef["space"],
+      scope: "space",
       path: [],
       schema: { type: "object" },
     };
@@ -125,6 +127,7 @@ describe("CFCellLink", () => {
     const refA: CellRef = {
       id: "of:slow-cell" as CellRef["id"],
       space: "did:key:test-space" as CellRef["space"],
+      scope: "space",
       path: [],
       schema: { type: "object" },
     };
@@ -193,6 +196,7 @@ describe("CFCellLink", () => {
     const ref: CellRef = {
       id: "of:detached-cell" as CellRef["id"],
       space: "did:key:test-space" as CellRef["space"],
+      scope: "space",
       path: [],
       schema: { type: "object" },
     };

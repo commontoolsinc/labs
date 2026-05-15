@@ -16,11 +16,11 @@ const liftSummary = lift({
     properties: {
         primary: {
             type: "number",
-            asCell: ["cell"]
+            asCell: ["readonly"]
         },
         secondary: {
             type: "number",
-            asCell: ["cell"]
+            asCell: ["readonly"]
         }
     },
     required: ["primary", "secondary"]

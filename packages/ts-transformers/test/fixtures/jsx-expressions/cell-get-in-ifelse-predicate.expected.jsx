@@ -44,7 +44,7 @@ export default pattern((__cf_pattern_input) => {
                 },
                 dismissedIndex: {
                     type: "number",
-                    asCell: ["cell"]
+                    asCell: ["readonly"]
                 }
             },
             required: ["messageCount", "dismissedIndex"]

@@ -17,6 +17,7 @@ Deno.test("memory v2 treats an identical root write as a no-op", async () => {
   const address = {
     id: "bench:no-op-root-write" as const,
     type: "application/json" as const,
+    scope: "space" as const,
     path: [],
   };
 
@@ -67,6 +68,7 @@ Deno.test("memory v2 no-op commits do not reopen storage for an empty native com
   const address = {
     id: "bench:no-op-commit-open" as const,
     type: "application/json" as const,
+    scope: "space" as const,
     path: [],
   };
 
@@ -108,6 +110,7 @@ Deno.test("memory v2 no-op commits skip stale-read validation when there are no 
   const address = {
     id: "bench:no-op-stale-read" as const,
     type: "application/json" as const,
+    scope: "space" as const,
     path: [] as string[],
   };
 
@@ -148,6 +151,7 @@ Deno.test("memory v2 treats an identical nested write as a no-op", async () => {
   const address = {
     id: "bench:no-op-nested-write" as const,
     type: "application/json" as const,
+    scope: "space" as const,
     path: [] as string[],
   };
 

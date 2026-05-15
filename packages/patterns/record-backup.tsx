@@ -360,40 +360,36 @@ function parseImportJson(jsonText: string): {
 }
 
 /**
- * Create a module from imported data
- * Returns the piece instance or null if type is unknown
- * Throws if module creation fails
+ * Extract Note input from imported data without instantiating the Note pattern.
+ */
+function noteInputFromImportedData(
+  data: Record<string, unknown>,
+  recordPatternJson: string,
+): Record<string, unknown> {
+  let content = "";
+  if (typeof data.content === "string") {
+    content = data.content;
+  } else if (typeof data.notes === "string") {
+    // Fallback for legacy field name
+    content = data.notes;
+  }
+
+  return {
+    content,
+    embedded: true,
+    linkPattern: recordPatternJson,
+  };
+}
+
+/**
+ * Create a non-Note module from imported data.
+ * Returns the piece instance or null if type is unknown.
+ * Throws if module creation fails.
  */
 function createModuleFromData(
   type: string,
   data: Record<string, unknown>,
-  recordPatternJson: string,
 ): unknown | null {
-  // Special handling for notes - needs embedded flag and linkPattern
-  if (type === "notes") {
-    // Type-safe content extraction
-    let content = "";
-    if (typeof data.content === "string") {
-      content = data.content;
-    } else if (typeof data.notes === "string") {
-      // Fallback for legacy field name
-      content = data.notes;
-    }
-    // Silently use empty string for non-string values
-
-    const note = Note({
-      content,
-      embedded: true,
-      linkPattern: recordPatternJson,
-      // deno-lint-ignore no-explicit-any
-    } as any);
-
-    if (!note) {
-      throw new Error("Note constructor returned null/undefined");
-    }
-    return note;
-  }
-
   // Check if type is known
   const def = getDefinition(type);
   if (!def) {
@@ -460,11 +456,15 @@ const importRecords = handler<
 
       for (const moduleData of recordData.modules) {
         try {
-          const piece = createModuleFromData(
-            moduleData.type,
-            moduleData.data,
-            recordPatternJson,
-          );
+          const piece = moduleData.type === "notes"
+            ? Note(
+              // deno-lint-ignore no-explicit-any
+              noteInputFromImportedData(
+                moduleData.data,
+                recordPatternJson,
+              ) as any,
+            )
+            : createModuleFromData(moduleData.type, moduleData.data);
 
           if (piece === null) {
             // Unknown module type - skip with warning
@@ -497,11 +497,15 @@ const importRecords = handler<
 
       for (const moduleData of recordData.trashedModules) {
         try {
-          const piece = createModuleFromData(
-            moduleData.type,
-            moduleData.data,
-            recordPatternJson,
-          );
+          const piece = moduleData.type === "notes"
+            ? Note(
+              // deno-lint-ignore no-explicit-any
+              noteInputFromImportedData(
+                moduleData.data,
+                recordPatternJson,
+              ) as any,
+            )
+            : createModuleFromData(moduleData.type, moduleData.data);
 
           if (piece === null) {
             result.errors.push({

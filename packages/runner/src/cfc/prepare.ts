@@ -8,6 +8,7 @@ import type {
 } from "@commonfabric/memory/interface";
 import { isRecord } from "@commonfabric/utils/types";
 import type { JSONSchema } from "../builder/types.ts";
+import { normalizeCellScope } from "../scope.ts";
 import { ignoreReadForScheduling } from "../scheduler.ts";
 import type {
   IExtendedStorageTransaction,
@@ -25,6 +26,7 @@ import {
 import { getValueAtPath } from "../path-utils.ts";
 import { encodePointer } from "../../../memory/v2/path.ts";
 import { canonicalizeLogicalPath } from "./canonical.ts";
+import { uniqueCfcAtoms } from "./observation.ts";
 import { mergeCfcSchemaEnvelopes } from "./schema-merge.ts";
 import {
   CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
@@ -79,11 +81,13 @@ const labelAtPath = (
 const mergeLabelValues = (
   ...sources: Array<readonly unknown[] | undefined>
 ) => {
-  const merged = [
-    ...new Set(
-      sources.flatMap((source) => source ? [...source] : []),
-    ),
-  ];
+  // Structural dedup via `uniqueCfcAtoms()` rather than reference dedup
+  // via `new Set()`. Atoms can be fabric-converted clones (each
+  // `cloneIfNecessary()` produces a fresh frozen object), so two
+  // logically-identical caveats may not share a JS reference.
+  const merged = uniqueCfcAtoms(
+    sources.flatMap((source) => source ? [...source] : []),
+  );
   return merged.length > 0 ? merged : undefined;
 };
 
@@ -251,6 +255,7 @@ const structuralProvenanceForPath = (
   target: {
     space: MemorySpace;
     id: URI;
+    scope: ReturnType<typeof normalizeCellScope>;
   },
   path: readonly string[],
   claim: string,
@@ -263,6 +268,7 @@ const structuralProvenanceForPath = (
     input.claim === claim &&
     input.target.space === target.space &&
     input.target.id === target.id &&
+    input.target.scope === target.scope &&
     arraysEqual(canonicalizeLogicalPath(input.target.path), logicalPath)
   );
 };
@@ -272,6 +278,7 @@ const setupProjectionSourceMatchesValue = (
   target: {
     space: MemorySpace;
     id: URI;
+    scope: ReturnType<typeof normalizeCellScope>;
   },
   path: readonly string[],
 ): boolean => {
@@ -304,11 +311,13 @@ const storedMetadataFor = (
   tx: IExtendedStorageTransaction,
   space: MemorySpace,
   id: URI,
+  scope: ReturnType<typeof normalizeCellScope>,
   type: MediaType,
 ): CfcMetadata | undefined => {
   const document = tx.readOrThrow({
     space,
     id,
+    scope,
     type,
     path: [],
   }, {
@@ -354,7 +363,22 @@ const candidateSchemasByTarget = (
 const targetKey = (target: {
   space: MemorySpace;
   id: string;
-}): string => `${target.space}\u0000${target.id}`;
+  scope?: ReturnType<typeof normalizeCellScope>;
+}): string =>
+  `${target.space}\u0000${normalizeCellScope(target.scope)}\u0000${target.id}`;
+
+const targetFromKey = (key: string): {
+  space: MemorySpace;
+  scope: ReturnType<typeof normalizeCellScope>;
+  id: URI;
+} => {
+  const [space, scope, id] = key.split("\u0000") as [
+    MemorySpace,
+    ReturnType<typeof normalizeCellScope>,
+    URI,
+  ];
+  return { space, scope, id };
+};
 
 const linkWritesByTarget = (
   inputs: readonly WritePolicyInput[],
@@ -490,6 +514,7 @@ const valueWriteTargets = (
   string,
   {
     space: MemorySpace;
+    scope: ReturnType<typeof normalizeCellScope>;
     id: URI;
     type: MediaType;
     paths: (readonly string[])[];
@@ -499,6 +524,7 @@ const valueWriteTargets = (
     string,
     {
       space: MemorySpace;
+      scope: ReturnType<typeof normalizeCellScope>;
       id: URI;
       type: MediaType;
       paths: (readonly string[])[];
@@ -531,6 +557,7 @@ const valueWriteTargets = (
       } else {
         result.set(key, {
           space: write.address.space,
+          scope: normalizeCellScope(write.address.scope),
           id: write.address.id as URI,
           type: (write.address.type ?? "application/json") as MediaType,
           paths: [writePath],
@@ -641,6 +668,7 @@ const writeValueForTarget = (
   target: {
     space: MemorySpace;
     id: URI;
+    scope: ReturnType<typeof normalizeCellScope>;
     path: readonly string[];
   },
 ): FabricValue => {
@@ -658,6 +686,7 @@ const writeValueForTarget = (
   let matchingWritePath: string[] | undefined;
   for (const write of writeDetails) {
     if (write.address.id !== target.id) continue;
+    if (normalizeCellScope(write.address.scope) !== target.scope) continue;
     if (write.address.path[0] !== "value") {
       continue;
     }
@@ -695,6 +724,7 @@ const verifyInputRequirements = (
   target: {
     space: MemorySpace;
     id: URI;
+    scope: ReturnType<typeof normalizeCellScope>;
   },
 ): string | undefined => {
   const consumed = [...(tx.getReadActivities?.() ?? [])].filter((read) =>
@@ -707,6 +737,7 @@ const verifyInputRequirements = (
         tx,
         read.space,
         read.id,
+        normalizeCellScope(read.scope),
         read.type ?? "application/json",
       ),
       canonicalizeLogicalPath(read.path),
@@ -769,6 +800,7 @@ const verifyTrustedEventRequirements = (
   target: {
     space: MemorySpace;
     id: URI;
+    scope: ReturnType<typeof normalizeCellScope>;
   },
   schema: JSONSchema,
 ): string | undefined => {
@@ -780,6 +812,7 @@ const verifyTrustedEventRequirements = (
       input.kind === "trusted-event" &&
       input.target.space === target.space &&
       input.target.id === target.id &&
+      input.target.scope === target.scope &&
       arraysEqual(input.target.path, entry.path) &&
       recordedTrustedEventProvenanceMatchesUiContract(
         input.provenance,
@@ -800,6 +833,7 @@ const verifyExactCopyRequirements = (
   target: {
     space: MemorySpace;
     id: URI;
+    scope: ReturnType<typeof normalizeCellScope>;
   },
   schema: JSONSchema,
 ): string | undefined => {
@@ -914,6 +948,7 @@ const derivePersistedLinkLabel = (
     tx,
     input.source.space,
     input.source.id as URI,
+    input.source.scope,
     "application/json",
   );
   const pendingSourceLabel = candidateSchemas.get(targetKey(input.source)) !==
@@ -1061,6 +1096,7 @@ export const prepareBoundaryCommit = (
       tx,
       target.space,
       target.id,
+      target.scope,
       target.type,
     );
     if (existing === undefined) {
@@ -1089,13 +1125,15 @@ export const prepareBoundaryCommit = (
     const candidateSchema = candidates.get(key);
     const schema = candidateSchema ?? emptySchemaObject();
     const undefinedCandidate = candidateSchema === undefined;
-    const [space, id] = key.split("\u0000") as [
-      MemorySpace,
-      URI,
-    ];
-
-    const target = { space, id };
-    const existing = storedMetadataFor(tx, space, id, "application/json");
+    const target = targetFromKey(key);
+    const { space, id, scope } = target;
+    const existing = storedMetadataFor(
+      tx,
+      space,
+      id,
+      scope,
+      "application/json",
+    );
     let storedSchema: JSONSchema | undefined;
     let mergedSchema = schema;
     if (existing !== undefined && undefinedCandidate) {
@@ -1252,6 +1290,7 @@ export const prepareBoundaryCommit = (
     tx.writeOrThrow({
       space,
       id,
+      scope,
       type: "application/json",
       path: ["cfc"],
       // System-owned embedded metadata write. Boundary evaluation is driven by

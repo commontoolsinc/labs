@@ -18,6 +18,62 @@ debugging pattern state:
 These are required context for Common Fabric pattern work. TypeScript surface
 types can look like plain values even when runtime values are reactive cells.
 
+Decide each state field's sharing boundary before building the UI:
+
+- `PerSpace<T>`: shared durable state for everyone in the space.
+- `PerUser<T>`: state that follows one authenticated user across sessions.
+- `PerSession<T>`: ephemeral state for one session, such as navigation, selected
+  tab, selected room, selected item, local filter text, open modal, or focused
+  item.
+
+Default transient UI state to `PerSession<>` unless it intentionally needs to
+persist for the user across sessions. A useful test: if the user opens the same
+instance in a new tab, should this state carry over? If not, it is probably
+`PerSession<>`. Multi-user patterns make this boundary especially important, but
+the rule is about state lifetime, not only collaboration. Do not store user ids
+or session ids in ordinary data to simulate isolation; use scope wrappers on the
+relevant input and output types.
+
+Two common scoped authoring styles are useful:
+
+```ts
+// Plain-input style: public API looks like ordinary data.
+interface ChatInput {
+  conversation?: PerSpace<Conversation | Default<typeof DEFAULT_CONVERSATION>>;
+  name?: PerUser<string | Default<"">>;
+  selectedRoom?: PerSession<SelectedRoom | Default<EmptySelectedRoom>>;
+}
+
+// Writable-input style: handlers need stable writable cell handles.
+type NameCell = Writable<string | Default<"">>;
+type SelectedRoomCell = Writable<SelectedRoom | Default<EmptySelectedRoom>>;
+
+interface ChatInputWithCells {
+  name?: PerUser<NameCell>;
+  selectedRoom?: PerSession<SelectedRoomCell>;
+  conversation?: PerSpace<Writable<Conversation>>;
+}
+```
+
+Use the plain-input style when the pattern API should stay data-shaped. Use the
+writable-input style when handlers need `.key(...)`, `.equals(...)`, or stable
+cell bindings, especially in mutation-heavy multi-user UI.
+
+`PerAny<T>` is rare. Use it only when an inner value must override an outer
+scope declaration and may validly come from any concrete scope:
+
+```ts
+type Selection = PerSession<{
+  item: PerUser<Item>;
+  attachment: PerAny<Attachment>;
+}>;
+```
+
+Prefer `PerSpace<>`, `PerUser<>`, or `PerSession<>` whenever the inner value's
+scope is known. Do not directly stack scope wrappers on the same value, such as
+`PerUser<PerSession<T>>`; put the inner scoped declaration on the field or cell
+that actually has that scope.
+
 When working in a Pattern Factory Build workspace, also read:
 
 - `docs/common/ai/pattern-factory-build-guide.md`
@@ -29,6 +85,11 @@ When you're unsure whether a reactive expression site lowers the way you expect,
 inspect the emitted source directly with:
 
 - `deno task cf check <pattern>.tsx --show-transformed`
+
+Also inspect the emitted source when a composed pattern result is assigned to a
+`PerUser<>` or `PerSession<>` typed variable or output. Contextual scope types
+should lower into the factory call; if they do not, the pattern may instantiate
+state at the wrong sharing boundary.
 
 Current main handles plain ternaries well in normal pattern code. Prefer direct
 authored expressions first; if an unusual site seems ambiguous, inspect the

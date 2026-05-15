@@ -1,5 +1,5 @@
 /**
- * Descriptor interface for auth manager factory.
+ * Descriptor interface for the shared auth manager base pattern.
  *
  * Each OAuth provider supplies a descriptor that parameterizes the
  * generic auth manager logic (wish tags, token field, scope handling, UI).

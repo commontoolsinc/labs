@@ -38,9 +38,12 @@ const __cfModuleCallback_1 = __cfHardenFn(({ element: item, params: { state, mul
                 }
             },
             required: ["discount", "taxRate"]
+        },
+        multiplier: {
+            type: "number"
         }
     },
-    required: ["item", "state"]
+    required: ["item", "state", "multiplier"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, {
@@ -51,8 +54,9 @@ const __cfModuleCallback_1 = __cfHardenFn(({ element: item, params: { state, mul
     state: {
         discount: state.discount,
         taxRate: state.taxRate
-    }
-}, ({ item, state }) => item.price * item.quantity * state.discount * state.taxRate * multiplier + shippingCost)}
+    },
+    multiplier: multiplier
+}, ({ item, state, multiplier }) => item.price * item.quantity * state.discount * state.taxRate * multiplier + shippingCost)}
           </span>));
 interface Item {
     price: number;
@@ -67,8 +71,13 @@ const shippingCost = 5.99;
 // FIXTURE: map-multiple-captures
 // Verifies: .map() on reactive array captures multiple outer variables (state + local)
 //   .map(fn) → .mapWithPattern(pattern(...), {state: {discount, taxRate}, multiplier})
-//   expression → derive() combining item + state reactively while closing over local multiplier
-// Context: state.discount and state.taxRate are explicit derive inputs; multiplier stays callback-local via params; module-level shippingCost is not captured
+//   expression → derive() combining item + state reactively with `multiplier`
+//     wired in as an explicit input (not via lexical closure)
+// Context: state.discount and state.taxRate are explicit derive inputs;
+//   `multiplier` (a plain-JS value declared in the enclosing pattern callback)
+//   is also wired in as an explicit derive input so the callback stays
+//   self-contained; module-level `shippingCost` is left lexical (module-scope
+//   bindings are stable across hoist boundaries).
 export default pattern((state) => {
     const multiplier = 2;
     return {
@@ -102,9 +111,12 @@ export default pattern((state) => {
                                     }
                                 },
                                 required: ["discount", "taxRate"]
+                            },
+                            multiplier: {
+                                type: "number"
                             }
                         },
-                        required: ["state"]
+                        required: ["state", "multiplier"]
                     }
                 },
                 required: ["element", "params"]

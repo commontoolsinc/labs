@@ -1,38 +1,39 @@
 // Cycle-aware convergence tests: verifying that the scheduler correctly
 // detects and handles circular dependencies between reactive computations.
 
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import { expect } from "@std/expect";
-import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { Runtime } from "../src/runtime.ts";
-import { type Action } from "../src/scheduler.ts";
-import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { toMemorySpaceAddress } from "../src/link-utils.ts";
-
-const signer = await Identity.fromPassphrase("test operator");
-const space = signer.did();
+import {
+  afterEach,
+  beforeEach,
+  createSchedulerTestRuntime,
+  describe,
+  disposeSchedulerTestRuntime,
+  expect,
+  getStaleSchedulerInternals,
+  it,
+  Runtime,
+  space,
+  toMemorySpaceAddress,
+} from "./scheduler-test-utils.ts";
+import type {
+  Action,
+  IExtendedStorageTransaction,
+  SchedulerTestStorageManager,
+} from "./scheduler-test-utils.ts";
 
 describe("cycle-aware convergence", () => {
-  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let storageManager: SchedulerTestStorageManager;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
 
   beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: signer });
-    runtime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager,
-    });
-    // Use push mode for cycle-aware convergence tests
-    runtime.scheduler.disablePullMode();
-    tx = runtime.edit();
+    ({ storageManager, runtime, tx } = createSchedulerTestRuntime(
+      import.meta.url,
+      { pullMode: "disabled" },
+    ));
   });
 
   afterEach(async () => {
-    await tx.commit();
-    await runtime?.dispose();
-    await storageManager?.close();
+    await disposeSchedulerTestRuntime({ storageManager, runtime, tx });
   });
 
   it("should track action execution time", async () => {
@@ -385,6 +386,53 @@ describe("cycle-aware convergence", () => {
     // Note: With implicit cycle detection, errors may or may not be thrown
     // depending on timing. The key invariant is that runs are bounded.
     expect(runCountA + runCountB).toBeGreaterThan(0);
+  });
+
+  it("should snapshot dirty effects when breaking a pull-mode cycle", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const schedulerInternal = runtime.scheduler as unknown as {
+      execute: () => Promise<void>;
+      pendingQueueTaskTimer: number | null;
+      scheduled: boolean;
+    };
+    const staleSchedulerInternal = getStaleSchedulerInternals(
+      runtime.scheduler,
+    );
+    let effectRuns = 0;
+    const reDirtyLimit = 25;
+
+    const selfDirtyingEffect: Action = () => {
+      effectRuns++;
+      if (effectRuns <= reDirtyLimit) {
+        staleSchedulerInternal.markDirectDirty(selfDirtyingEffect);
+      }
+    };
+
+    runtime.scheduler.subscribe(
+      selfDirtyingEffect,
+      { reads: [], shallowReads: [], writes: [] },
+      { isEffect: true },
+    );
+
+    if (schedulerInternal.pendingQueueTaskTimer !== null) {
+      clearTimeout(schedulerInternal.pendingQueueTaskTimer);
+      schedulerInternal.pendingQueueTaskTimer = null;
+    }
+
+    await schedulerInternal.execute();
+
+    if (schedulerInternal.pendingQueueTaskTimer !== null) {
+      clearTimeout(schedulerInternal.pendingQueueTaskTimer);
+      schedulerInternal.pendingQueueTaskTimer = null;
+      schedulerInternal.scheduled = false;
+    }
+
+    // The settle loop runs the dirty effect for each bounded iteration, then
+    // cycle-break gets one snapshot entry. A live Set iteration would revisit
+    // the effect as it re-subscribes and re-dirties itself.
+    expect(effectRuns).toBe(11);
+    expect(runtime.scheduler.isDirty(selfDirtyingEffect)).toBe(true);
   });
 
   it("should not create infinite loops in collectDirtyDependencies", async () => {

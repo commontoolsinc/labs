@@ -2,12 +2,14 @@ import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import type { CellScope } from "../builder/types.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { HttpProgramResolver } from "@commonfabric/js-compiler";
 import { resolveProgram, TARGET } from "@commonfabric/js-compiler/typescript";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
 import { computeInputHashFromValue } from "./fetch-utils.ts";
+import { scopedCell } from "./scope-policy.ts";
 
 const PROGRAM_REQUEST_TIMEOUT = 1000 * 10; // 10 seconds for program resolution
 
@@ -128,6 +130,7 @@ export function fetchProgram(
   let result: Cell<ProgramResult | undefined>;
   let error: Cell<any | undefined>;
   let cache: Cell<Record<string, FetchCacheEntry>>;
+  let cellScope: CellScope | undefined;
   let myRequestId: string | undefined = undefined;
   let abortController: AbortController | undefined = undefined;
 
@@ -171,15 +174,20 @@ export function fetchProgram(
   });
 
   return (tx: IExtendedStorageTransaction) => {
-    if (!cellsInitialized) {
-      pending = runtime.getCell(
+    tx.resetNarrowestReadScope();
+    const requestSnapshot = snapshotFetchProgramInputs(inputsCell.withTx(tx));
+    const outputScope = tx.getNarrowestReadScope();
+
+    if (!cellsInitialized || cellScope !== outputScope) {
+      const basePending = runtime.getCell<boolean>(
         parentCell.space,
         { fetchProgram: { pending: cause } },
         undefined,
         tx,
       );
+      pending = scopedCell(runtime, tx, basePending, outputScope);
 
-      result = runtime.getCell<ProgramResult | undefined>(
+      const baseResult = runtime.getCell<ProgramResult | undefined>(
         parentCell.space,
         {
           fetchProgram: { result: cause },
@@ -187,8 +195,9 @@ export function fetchProgram(
         undefined,
         tx,
       );
+      result = scopedCell(runtime, tx, baseResult, outputScope);
 
-      error = runtime.getCell<any | undefined>(
+      const baseError = runtime.getCell<any | undefined>(
         parentCell.space,
         {
           fetchProgram: { error: cause },
@@ -196,12 +205,19 @@ export function fetchProgram(
         undefined,
         tx,
       );
+      error = scopedCell(runtime, tx, baseError, outputScope);
 
-      cache = runtime.getCell(
+      const baseCache = runtime.getCell(
         parentCell.space,
         { fetchProgram: { cache: cause } },
         cacheSchema,
         tx,
+      ) as Cell<Record<string, FetchCacheEntry>>;
+      cache = scopedCell(
+        runtime,
+        tx,
+        baseCache,
+        outputScope,
       ) as Cell<Record<string, FetchCacheEntry>>;
 
       pending.setSourceCell(parentCell);
@@ -216,9 +232,9 @@ export function fetchProgram(
       cache.sync();
 
       cellsInitialized = true;
+      cellScope = outputScope;
     }
 
-    const requestSnapshot = snapshotFetchProgramInputs(inputsCell.withTx(tx));
     const { url } = requestSnapshot;
     const inputHash = computeInputHashFromValue(requestSnapshot);
 

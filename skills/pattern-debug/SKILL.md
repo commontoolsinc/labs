@@ -106,6 +106,35 @@ a function:**
 - Fix: use bare JSX ternaries, hoist `computed()` for data only
 - See `docs/common/concepts/computed/computed.md`
 
+**Transient UI state carries over when it should not:**
+
+- Check whether navigation, active tab, selected item, selected room, modal,
+  filter, or other ephemeral UI state is unscoped or space scoped.
+- Ask whether the state should carry over if the user opens the same instance in
+  a new tab. If not, it is probably session state.
+- Use `PerSession<>` for per-session UI state and `PerUser<>` for user-owned
+  durable state.
+- Use data-shaped scoped inputs for simple APIs. Use scoped `Writable` aliases
+  when handlers need stable cell handles, `.key(...)`, `.equals(...)`, or
+  per-item bindings.
+- Confirm the generated schema and transformed source with
+  `deno task cf check pattern.tsx --show-transformed`.
+- If a value unexpectedly becomes `undefined`, check for schema-scope traversal
+  restrictions: a narrower linked value may be unavailable to a broader declared
+  schema.
+- Scope is data scoping, not authorization; do not use it as a replacement for
+  CFC/IFC policy.
+
+**`PerAny<>` used to fix a scope issue:**
+
+- Treat `PerAny<>` as a rare inner override under an outer `Per*` declaration,
+  not as a fourth default scope.
+- Prefer the concrete inner scope when known:
+  `PerSession<{ item: PerUser<Item>; attachment: PerAny<Attachment> }>` is valid
+  when attachments intentionally may come from any scope.
+- If the inner scope is known, use `PerSpace<>`, `PerUser<>`, or `PerSession<>`
+  instead.
+
 ## Runtime Debugging (browser)
 
 When the pattern compiles but behaves wrong at runtime, use the browser console
@@ -140,6 +169,7 @@ When tests or CLI calls succeed but browser-visible UI stays stale:
 
 - inspect the live piece state first
 - confirm whether the handler actually wrote the expected value
+- inspect raw links or transformed schema when the bug could be a scope mismatch
 - only then decide whether the bug is in mutation semantics, rendering, or
   browser harness behavior
 

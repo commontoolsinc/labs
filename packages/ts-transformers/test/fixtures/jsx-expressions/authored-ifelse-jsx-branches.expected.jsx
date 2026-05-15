@@ -126,7 +126,7 @@ export default pattern((__cf_pattern_input) => {
             properties: {
                 count: {
                     type: "number",
-                    asCell: ["cell"]
+                    asCell: ["readonly"]
                 }
             },
             required: ["count"]

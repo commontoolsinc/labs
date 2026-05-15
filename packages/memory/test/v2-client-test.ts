@@ -230,6 +230,7 @@ Deno.test("memory v2 client watch views expose incremental sync effects", async 
       upserts: [{
         branch: "",
         id: "of:doc:1",
+        scope: "space",
         seq: 2,
         doc: {
           value: {
@@ -1131,6 +1132,7 @@ Deno.test(
       assertEquals(resumed.value.upserts, [{
         branch: "",
         id: "of:doc:1",
+        scope: "space",
         seq: 1,
         doc: {
           value: {
@@ -1620,7 +1622,7 @@ Deno.test("memory v2 client rejects hello.ok when flags disagree", async () => {
           type: "hello.ok",
           protocol: MEMORY_PROTOCOL,
           flags: {
-            richStorableValues: !getMemoryProtocolFlags().richStorableValues,
+            modernDataModel: !getMemoryProtocolFlags().modernDataModel,
           },
         }));
       }
@@ -1638,6 +1640,35 @@ Deno.test("memory v2 client rejects hello.ok when flags disagree", async () => {
     Error,
     "memory flag mismatch",
   );
+});
+
+Deno.test("memory v2 client accepts hello.ok with legacy richStorableValues flag", async () => {
+  let receiver = (_payload: string) => {};
+  const transport: Transport = {
+    send(payload): Promise<void> {
+      const message = decodeMemoryBoundary(payload) as { type?: string };
+      if (message.type === "hello") {
+        // Server-side reply uses the legacy field name with the matching
+        // value; the client should normalize this and accept the handshake.
+        receiver(encodeMemoryBoundary({
+          type: "hello.ok",
+          protocol: MEMORY_PROTOCOL,
+          flags: {
+            richStorableValues: getMemoryProtocolFlags().modernDataModel,
+          },
+        }));
+      }
+      return Promise.resolve();
+    },
+    async close() {},
+    setReceiver(next) {
+      receiver = next;
+    },
+    setCloseReceiver() {},
+  };
+
+  const client = await connect({ transport });
+  await client.close();
 });
 
 Deno.test("memory v2 client wraps close errors with connection error names", async () => {

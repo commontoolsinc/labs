@@ -93,6 +93,7 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
             checker,
             typeRegistry,
             schemaHints,
+            sourceFile,
           );
         } else {
           // Normal Type path
@@ -102,6 +103,7 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
             schemaTypeArg,
             generationOptions,
             schemaHints,
+            sourceFile,
           );
         }
 

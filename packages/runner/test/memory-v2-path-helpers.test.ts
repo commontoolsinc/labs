@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import type { FabricValue } from "@commonfabric/memory/interface";
 import type { EntityDocument } from "@commonfabric/memory/v2";
 import {
@@ -129,5 +130,45 @@ describe("memory v2 path helpers", () => {
 
     expect(cloneWithoutPath(root, ["value", "right"])).toBe(root);
     expect(cloneWithoutPath(root, ["value", "left", "missing"])).toBe(root);
+  });
+});
+
+describe("memory v2 path helpers — deep-freeze contract", () => {
+  it("cloneWithValueAtPath returns a deep-frozen result for path writes", () => {
+    const root: EntityDocument = {
+      value: {
+        left: { nested: { stable: true } },
+        right: { count: 1 },
+      },
+    };
+
+    const result = cloneWithValueAtPath(
+      root,
+      ["value", "right", "count"],
+      2,
+    )!;
+
+    expect(isDeepFrozen(result)).toBe(true);
+  });
+
+  it("cloneWithValueAtPath returns a deep-frozen result for empty-path writes", () => {
+    const replacement: FabricValue = { value: { a: 1, b: [2, 3] } };
+
+    const result = cloneWithValueAtPath(undefined, [], replacement)!;
+
+    expect(isDeepFrozen(result)).toBe(true);
+  });
+
+  it("cloneWithoutPath returns a deep-frozen result for path deletes", () => {
+    const root: EntityDocument = {
+      value: {
+        left: { nested: { stable: true } },
+        right: { keep: 1, remove: 2 },
+      },
+    };
+
+    const result = cloneWithoutPath(root, ["value", "right", "remove"])!;
+
+    expect(isDeepFrozen(result)).toBe(true);
   });
 });

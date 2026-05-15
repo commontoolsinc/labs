@@ -3,6 +3,7 @@ import ts from "typescript";
 import type { JSONSchemaMutable } from "@commonfabric/api";
 import { NativeTypeFormatter } from "./formatters/native-type-formatter.ts";
 import { getPropertyNameText } from "./typescript/property-name.ts";
+import type { CellWrapperKind } from "./typescript/cell-brand.ts";
 
 /**
  * Names that should be treated as Cell-like wrapper types.
@@ -13,11 +14,31 @@ const CELL_LIKE_WRAPPER_NAMES = new Set([
   "Writable",
   "ReadonlyCell",
   "WriteonlyCell",
+  "ComparableCell",
 ]);
 const OPAQUE_WRAPPER_NAMES = new Set(["OpaqueCell"]);
+type NodeWrapperKind = "Default" | CellWrapperKind;
 
 function getEntityNameText(name: ts.EntityName): string {
   return ts.isIdentifier(name) ? name.text : name.right.text;
+}
+
+function wrapperKindForName(name: string): NodeWrapperKind | undefined {
+  switch (name) {
+    case "Default":
+      return "Default";
+    case "Cell":
+    case "Writable":
+      return "Cell";
+    case "ReadonlyCell":
+    case "WriteonlyCell":
+    case "ComparableCell":
+    case "Stream":
+    case "OpaqueCell":
+      return name;
+    default:
+      return undefined;
+  }
 }
 
 export { getPropertyNameText };
@@ -726,7 +747,7 @@ export function isDefaultTypeRef(
 export function detectWrapperViaNode(
   typeNode: ts.TypeNode | undefined,
   typeChecker: ts.TypeChecker,
-): "Default" | "Cell" | "Stream" | "OpaqueRef" | undefined {
+): NodeWrapperKind | undefined {
   const result = resolveWrapperNode(typeNode, typeChecker);
   return result?.kind;
 }
@@ -739,7 +760,7 @@ export function resolveWrapperNode(
   typeNode: ts.TypeNode | undefined,
   typeChecker: ts.TypeChecker,
 ): {
-  kind: "Default" | "Cell" | "Stream" | "OpaqueRef";
+  kind: NodeWrapperKind;
   node: ts.TypeReferenceNode;
 } | undefined {
   if (!typeNode || !ts.isTypeReferenceNode(typeNode)) {
@@ -749,18 +770,10 @@ export function resolveWrapperNode(
   const literalName = getEntityNameText(typeNode.typeName);
 
   // Fast path: direct wrapper reference
-  if (
-    literalName === "Default" || CELL_LIKE_WRAPPER_NAMES.has(literalName) ||
-    literalName === "Stream" || OPAQUE_WRAPPER_NAMES.has(literalName)
-  ) {
-    // Normalize "Writable" to "Cell" for internal processing
-    const kind = CELL_LIKE_WRAPPER_NAMES.has(literalName)
-      ? "Cell"
-      : OPAQUE_WRAPPER_NAMES.has(literalName)
-      ? "OpaqueRef"
-      : literalName;
+  const directKind = wrapperKindForName(literalName);
+  if (directKind) {
     return {
-      kind: kind as "Default" | "Cell" | "Stream" | "OpaqueRef",
+      kind: directKind,
       node: typeNode,
     };
   }
@@ -781,7 +794,7 @@ function followAliasToWrapperNode(
   typeChecker: ts.TypeChecker,
   visited: Set<string>,
 ): {
-  kind: "Default" | "Cell" | "Stream" | "OpaqueRef";
+  kind: NodeWrapperKind;
   node: ts.TypeReferenceNode;
 } | undefined {
   if (!ts.isIdentifier(typeNode.typeName)) {
@@ -800,18 +813,10 @@ function followAliasToWrapperNode(
   visited.add(typeName);
 
   // Check if we've reached a wrapper type
-  if (
-    typeName === "Default" || CELL_LIKE_WRAPPER_NAMES.has(typeName) ||
-    typeName === "Stream" || OPAQUE_WRAPPER_NAMES.has(typeName)
-  ) {
-    // Normalize "Writable" to "Cell" for internal processing
-    const kind = CELL_LIKE_WRAPPER_NAMES.has(typeName)
-      ? "Cell"
-      : OPAQUE_WRAPPER_NAMES.has(typeName)
-      ? "OpaqueRef"
-      : typeName;
+  const directKind = wrapperKindForName(typeName);
+  if (directKind) {
     return {
-      kind: kind as "Default" | "Cell" | "Stream" | "OpaqueRef",
+      kind: directKind,
       node: typeNode,
     };
   }

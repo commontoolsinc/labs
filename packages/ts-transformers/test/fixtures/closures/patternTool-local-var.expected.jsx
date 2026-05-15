@@ -59,8 +59,8 @@ const __cfModuleCallback_1 = __cfHardenFn(({ language, content }: {
     } as const satisfies __cfHelpers.JSONSchema, {
         type: ["string", "undefined"]
     } as const satisfies __cfHelpers.JSONSchema, { genResult: {
-            pending: genResult.pending,
-            result: genResult.result
+            pending: genResult.key("pending"),
+            result: genResult.key("result")
         } }, ({ genResult }) => {
         if (genResult.pending)
             return undefined;
@@ -124,9 +124,15 @@ export default pattern(() => {
             properties: {
                 argumentSchema: true,
                 resultSchema: true,
-                internalSchema: true
+                internalSchema: true,
+                defaultScope: {
+                    $ref: "#/$defs/CellScope"
+                }
             },
             required: ["argumentSchema", "resultSchema"]
+        },
+        CellScope: {
+            "enum": ["space", "user", "session"]
         }
     }
 } as const satisfies __cfHelpers.JSONSchema);

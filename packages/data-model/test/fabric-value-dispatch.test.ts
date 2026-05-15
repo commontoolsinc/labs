@@ -2,6 +2,7 @@ import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   fabricFromNativeValue,
+  getDataModelConfig,
   nativeFromFabricValue,
   resetDataModelConfig,
   setDataModelConfig,
@@ -25,11 +26,12 @@ describe("fabric-value-dispatch", () => {
   });
 
   // --------------------------------------------------------------------------
-  // Default state (flag OFF)
+  // Flag OFF: legacy fabric value conversion
   // --------------------------------------------------------------------------
 
-  describe("default state (flag OFF)", () => {
+  describe("flag OFF: legacy fabric value conversion", () => {
     it("fabricFromNativeValue performs legacy deep conversion", () => {
+      setDataModelConfig(false);
       const value = { hello: "world" } as FabricValue;
       // fabricFromNativeValue returns a new frozen copy for objects.
       const stored = fabricFromNativeValue(value);
@@ -37,11 +39,13 @@ describe("fabric-value-dispatch", () => {
     });
 
     it("nativeFromFabricValue is identity passthrough", () => {
+      setDataModelConfig(false);
       const value = { hello: "world" } as FabricValue;
       expect(nativeFromFabricValue(value)).toBe(value);
     });
 
     it("fabricFromNativeValue converts Error via legacy path", () => {
+      setDataModelConfig(false);
       // `fabricFromNativeValue()` handles Error conversion directly.
       const error = new Error("legacy error");
       const stored = fabricFromNativeValue(error as unknown as FabricValue);
@@ -54,6 +58,7 @@ describe("fabric-value-dispatch", () => {
     });
 
     it("primitives pass through", () => {
+      setDataModelConfig(false);
       expect(fabricFromNativeValue(42 as FabricValue)).toBe(42);
       expect(fabricFromNativeValue("hello" as FabricValue)).toBe("hello");
       expect(fabricFromNativeValue(null)).toBe(null);
@@ -145,51 +150,24 @@ describe("fabric-value-dispatch", () => {
       expect(stored).toBeInstanceOf(FabricError);
     });
 
-    it("resetDataModelConfig() restores legacy conversion", () => {
-      setDataModelConfig(true);
+    it("resetDataModelConfig() restores the default state", () => {
+      const defaultState = getDataModelConfig();
+      setDataModelConfig(!defaultState);
+      expect(getDataModelConfig()).toBe(!defaultState);
       resetDataModelConfig();
-      const error = new Error("reset test");
-      const stored = fabricFromNativeValue(error as unknown as FabricValue);
-      // Back to legacy path: Error becomes @Error object, not FabricError.
-      expect(stored).not.toBeInstanceOf(FabricError);
-      const obj = stored as Record<string, unknown>;
-      expect(obj["@Error"]).toBeDefined();
+      expect(getDataModelConfig()).toBe(defaultState);
     });
 
     it("multiple set/reset cycles work correctly", () => {
-      // Cycle 1: ON — modern conversion
-      setDataModelConfig(true);
-      const error1 = new Error("test1");
-      expect(fabricFromNativeValue(error1 as unknown as FabricValue))
-        .toBeInstanceOf(
-          FabricError,
-        );
-
-      // Cycle 1: OFF — legacy conversion
-      resetDataModelConfig();
-      const error1b = new Error("test1b");
-      const stored1 = fabricFromNativeValue(
-        error1b as unknown as FabricValue,
-      );
-      expect(stored1).not.toBeInstanceOf(FabricError);
-      expect((stored1 as Record<string, unknown>)["@Error"]).toBeDefined();
-
-      // Cycle 2: ON — modern conversion
-      setDataModelConfig(true);
-      const error2 = new Error("test2");
-      expect(fabricFromNativeValue(error2 as unknown as FabricValue))
-        .toBeInstanceOf(
-          FabricError,
-        );
-
-      // Cycle 2: OFF — legacy conversion
-      resetDataModelConfig();
-      const error2b = new Error("test2b");
-      const stored2 = fabricFromNativeValue(
-        error2b as unknown as FabricValue,
-      );
-      expect(stored2).not.toBeInstanceOf(FabricError);
-      expect((stored2 as Record<string, unknown>)["@Error"]).toBeDefined();
+      const defaultState = getDataModelConfig();
+      for (let i = 0; i < 3; i++) {
+        setDataModelConfig(true);
+        expect(getDataModelConfig()).toBe(true);
+        setDataModelConfig(false);
+        expect(getDataModelConfig()).toBe(false);
+        resetDataModelConfig();
+        expect(getDataModelConfig()).toBe(defaultState);
+      }
     });
 
     it("setDataModelConfig(false) after true restores legacy conversion", () => {

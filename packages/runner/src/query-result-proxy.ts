@@ -120,6 +120,20 @@ const arrayMethods: { [key: string]: ArrayMethodType } = {
   toLocaleString: ArrayMethodType.ReadOnly,
 };
 
+/**
+ * Builds a JS proxy view over a stored cell. Read traps resolve links
+ * and wrap nested values; write-side array mutators (`push`, `splice`,
+ * `unshift`, etc.) route through the same write-boundary normalization
+ * as `Cell.set()` / `Cell.push()`.
+ *
+ * **Frozenness contract (modern data model only):** Values handed to
+ * the write-side array mutators flow through `recursivelyAddIDIfNeeded`
+ * and so inherit its modern-mode contract: plain unfrozen Object/Array
+ * inputs get shallowly frozen at each visited level; already-deep-
+ * frozen valid `FabricValue` inputs are accepted identity-preservingly.
+ * Under `modernDataModel: false` (legacy), no freezing happens at the
+ * write boundary.
+ */
 export function createQueryResultProxy<T>(
   runtime: Runtime,
   tx: IExtendedStorageTransaction | undefined,
@@ -158,14 +172,6 @@ export function createQueryResultProxy<T>(
   }
 
   if (!isRecord(value)) return value;
-
-  // When modernDataModel is OFF, frozen objects are terminal values that
-  // don't need proxy wrapping (the legacy assumption: "frozen = terminal").
-  // When modernDataModel is ON, frozen objects may contain link structures
-  // that need resolution, so we fall through to proxy-wrap them below.
-  if (Object.isFrozen(value) && !runtime.experimental.modernDataModel) {
-    return value as T;
-  }
 
   // When modernDataModel is enabled, stored objects are deep-frozen during
   // storage normalization (fabricFromNativeValueModern). A frozen proxy target
@@ -399,6 +405,7 @@ export function createQueryResultProxy<T>(
               const resultLink: NormalizedFullLink = {
                 id: toURI(hashOf(cause)),
                 space: link.space,
+                scope: link.scope,
                 path: [],
               };
 

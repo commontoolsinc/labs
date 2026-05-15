@@ -1771,7 +1771,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
   );
 
   await t.step(
-    "derive preserves cell wrappers when callback uses .get() on inferred input",
+    "derive narrows cell wrappers when callback only uses .get() on inferred input",
     async () => {
       const source = [
         "/// <cts-enable />",
@@ -1793,13 +1793,13 @@ Deno.test("Schema Shrink Validation", async (t) => {
         }`,
       );
       const inputSchema = extractSchemas(result.output)[0] ?? "";
-      assertStringIncludes(inputSchema, 'asCell: ["cell"]');
+      assertStringIncludes(inputSchema, 'asCell: ["readonly"]');
       assertEquals(inputSchema.includes("asOpaque: true"), false);
     },
   );
 
   await t.step(
-    "derive preserves cell wrappers when expression-bodied callback is a direct .get() call",
+    "derive narrows cell wrappers when expression-bodied callback is a direct .get() call",
     async () => {
       const source = [
         "/// <cts-enable />",
@@ -1821,7 +1821,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
         }`,
       );
       const inputSchema = extractSchemas(result.output)[0] ?? "";
-      assertStringIncludes(inputSchema, 'asCell: ["cell"]');
+      assertStringIncludes(inputSchema, 'asCell: ["readonly"]');
       assertEquals(inputSchema.includes("asOpaque: true"), false);
     },
   );
@@ -2003,7 +2003,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
   );
 
   await t.step(
-    "derive shrinks equals-only cell inputs to opaque unknown cells",
+    "derive shrinks equals-only cell inputs to comparable unknown cells",
     async () => {
       const source = [
         "/// <cts-enable />",
@@ -2027,7 +2027,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
         }`,
       );
       const inputSchema = extractSchemas(result.output)[0] ?? "";
-      assertStringIncludes(inputSchema, 'asCell: ["opaque"]');
+      assertStringIncludes(inputSchema, 'asCell: ["comparable"]');
       assertEquals(inputSchema.includes("name"), false);
       assertEquals(inputSchema.includes("extra"), false);
       assertEquals(inputSchema.includes("nested"), false);
@@ -2058,7 +2058,38 @@ Deno.test("Schema Shrink Validation", async (t) => {
       );
       const inputSchema = extractSchemas(result.output)[0] ?? "";
       assertStringIncludes(inputSchema, 'type: "undefined"');
+      assertStringIncludes(inputSchema, 'asCell: ["comparable"]');
+    },
+  );
+
+  await t.step(
+    "derive keeps root cell opaque when derivation and equality are both used",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { derive, type Writable } from "commonfabric";',
+        "const input = {} as Writable<number[]>;",
+        "const summary = derive(input, (input) => {",
+        "  input.map((value) => value);",
+        "  return input.equals(input);",
+        "});",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      const inputSchema = extractSchemas(result.output)[0] ?? "";
       assertStringIncludes(inputSchema, 'asCell: ["opaque"]');
+      assertEquals(inputSchema.includes('asCell: ["comparable"]'), false);
     },
   );
 
@@ -2123,7 +2154,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
           errors.map((e) => `${e.type}: ${e.message}`).join("; ")
         }`,
       );
-      assertStringIncludes(result.output, 'asCell: ["cell"]');
+      assertStringIncludes(result.output, 'asCell: ["readonly"]');
       assertStringIncludes(result.output, '"foo"');
       assertStringIncludes(result.output, '"bar"');
     },
@@ -2153,7 +2184,7 @@ Deno.test("Schema Shrink Validation", async (t) => {
           errors.map((e) => `${e.type}: ${e.message}`).join("; ")
         }`,
       );
-      assertStringIncludes(result.output, 'asCell: ["cell"]');
+      assertStringIncludes(result.output, 'asCell: ["readonly"]');
       assertStringIncludes(result.output, '"foo"');
       assertStringIncludes(result.output, '"bar"');
     },

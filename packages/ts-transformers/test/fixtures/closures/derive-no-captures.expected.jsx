@@ -22,7 +22,7 @@ export default pattern(() => {
     // No captures - should not be transformed
     const result = derive({
         type: "number",
-        asCell: ["cell"]
+        asCell: ["readonly"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema, value, (v) => v.get() * 2).for("result", true);

@@ -267,6 +267,7 @@ Deno.test("serializeForLLMObservation keeps below-ceiling data inline", () => {
   const rootLink: NormalizedFullLink = {
     id: "of:test-inline",
     space: "did:test:inline",
+    scope: "space",
     path: [],
   };
   const result = serializeForLLMObservation({
@@ -293,6 +294,7 @@ Deno.test("serializeForLLMObservation redacts above-ceiling fields to links", ()
   const rootLink: NormalizedFullLink = {
     id: "of:test-redacted",
     space: "did:test:redacted",
+    scope: "space",
     path: [],
   };
   const result = serializeForLLMObservation({
@@ -334,6 +336,7 @@ Deno.test("serializeForLLMObservation exposes injection-safe booleans but links 
   const rootLink: NormalizedFullLink = {
     id: "of:test-assessment",
     space: "did:test:assessment",
+    scope: "space",
     path: [],
   };
   const schema = schemaWithInjectionSafeAnnotations({
@@ -368,6 +371,7 @@ Deno.test("serializeForLLMObservation does not taint from redacted nested values
   const rootLink: NormalizedFullLink = {
     id: "of:test-mixed",
     space: "did:test:mixed",
+    scope: "space",
     path: [],
   };
   const result = serializeForLLMObservation({

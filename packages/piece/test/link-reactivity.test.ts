@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Runtime } from "@commonfabric/runner";
+import { resolveCellPath, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createSession, Identity } from "@commonfabric/identity";
 import { PieceManager } from "../src/manager.ts";
@@ -121,5 +121,51 @@ describe("PieceManager.link() reactivity", () => {
     });
     await runtime.idle();
     expect(targetCell.key("linked").get()).toBe("updated");
+  });
+
+  it("should link through exposed cell-valued source fields", async () => {
+    const cellSchema = {
+      type: "number",
+      default: 0,
+      asCell: ["cell"],
+    } as const;
+    const modelSchema = {
+      type: "object",
+      properties: { value: cellSchema },
+      default: { value: 0 },
+    } as const;
+    const sourceArgument = runtime.getCell(manager.getSpace(), "source-arg");
+    const sourceResult = runtime.getCell(manager.getSpace(), "source-result");
+    const targetArgument = runtime.getCell(
+      manager.getSpace(),
+      "target-arg",
+      modelSchema,
+    );
+
+    await runtime.editWithRetry((tx) => {
+      sourceArgument.withTx(tx).set({ value: 10 });
+      targetArgument.withTx(tx).set({ value: 0 });
+    });
+    await runtime.editWithRetry((tx) => {
+      sourceResult.withTx(tx).set({
+        value: sourceArgument.withTx(tx).key("value").asSchema(cellSchema),
+      });
+    });
+    await runtime.idle();
+
+    await runtime.editWithRetry((tx) => {
+      const target = targetArgument.withTx(tx).key("value");
+      const source = sourceResult.asSchemaFromLinks().key("value");
+      target.setRawUntyped(
+        source.getAsLink({
+          base: targetArgument,
+          includeSchema: true,
+          keepStreams: true,
+        }),
+      );
+    });
+    await runtime.idle();
+
+    expect(resolveCellPath(targetArgument, ["value"])).toBe(10);
   });
 });

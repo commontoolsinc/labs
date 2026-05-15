@@ -63,6 +63,7 @@ const compareAddress = (left: CfcAddress, right: CfcAddress): number => {
     return left.space < right.space ? -1 : 1;
   }
   if (left.id !== right.id) return left.id < right.id ? -1 : 1;
+  if (left.scope !== right.scope) return left.scope < right.scope ? -1 : 1;
   const leftPointer = logicalPathToPointer(left.path);
   const rightPointer = logicalPathToPointer(right.path);
   return leftPointer < rightPointer ? -1 : leftPointer > rightPointer ? 1 : 0;

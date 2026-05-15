@@ -39,11 +39,11 @@ export default pattern(() => {
                 items: {
                     type: "number"
                 },
-                asCell: ["cell"]
+                asCell: ["readonly"]
             },
             multiplier: {
                 type: "number",
-                asCell: ["cell"]
+                asCell: ["readonly"]
             }
         },
         required: ["numbers", "multiplier"]
@@ -70,7 +70,7 @@ export default pattern(() => {
                 properties: {
                     multiplier: {
                         type: "number",
-                        asCell: ["cell"]
+                        asCell: ["readonly"]
                     }
                 },
                 required: ["multiplier"]

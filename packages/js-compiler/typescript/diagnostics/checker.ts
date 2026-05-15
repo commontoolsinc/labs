@@ -19,6 +19,7 @@ const KNOWN_EXPORTED_SYMBOLS = [
   "CELL_BRAND",
   "CELL_INNER_TYPE",
   "DEFAULT_MARKER",
+  "SCOPE_BRAND",
 ];
 
 export class Checker {

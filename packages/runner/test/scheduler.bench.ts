@@ -687,6 +687,7 @@ Deno.bench(
       tx.writeValueOrThrow(
         {
           space,
+          scope: "space",
           id: `test:raw-write-${i}`,
           path: [],
         },
@@ -713,6 +714,7 @@ function generateAddresses(
   for (let i = 0; i < count; i++) {
     addresses.push({
       space: space,
+      scope: "space",
       id: `test:entity-${i % entitiesCount}`,
       path: ["field", `sub${i % 5}`, `deep${i % 3}`],
     });
@@ -772,9 +774,10 @@ Deno.bench(
     const actions: Action[] = [];
     const baseLink = {
       space,
+      scope: "space",
       id: "test:entity" as const,
       path: ["value"],
-    };
+    } as const;
 
     for (let i = 0; i < 100; i++) {
       const action: Action = () => {};
@@ -807,9 +810,10 @@ Deno.bench(
     const actions: Action[] = [];
     const sharedRead = {
       space,
+      scope: "space",
       id: "test:shared-source" as const,
       path: ["value"],
-    };
+    } as const;
 
     for (let i = 0; i < 100; i++) {
       const action: Action = () => {};
@@ -821,6 +825,7 @@ Deno.bench(
           shallowReads: [],
           writes: [{
             space,
+            scope: "space",
             id: `test:output-${i}` as const,
             path: ["value"],
           }],
@@ -847,6 +852,7 @@ Deno.bench(
     const reads: IMemorySpaceAddress[] = [
       {
         space,
+        scope: "space",
         id: "test:source",
         path: ["value"],
       },
@@ -854,6 +860,7 @@ Deno.bench(
     const writes: IMemorySpaceAddress[] = [
       {
         space,
+        scope: "space",
         id: "test:output",
         path: ["value"],
       },

@@ -1,5 +1,6 @@
 import { isRecord } from "@commonfabric/utils/types";
 import {
+  FabricInstance,
   type FabricObject,
   type FabricValue,
   isArrayIndexPropertyName,
@@ -62,6 +63,7 @@ const NO_PRECOMPUTED = Symbol("no-precomputed");
 const cfcAddressFromLink = (link: NormalizedFullLink): CfcAddress => ({
   space: link.space,
   id: link.id,
+  scope: link.scope,
   path: [...link.path],
 });
 
@@ -641,6 +643,7 @@ export function normalizeAndDiff(
     const newEntryLink: NormalizedFullLink = {
       id: toURI(entityId),
       space: link.space,
+      scope: link.scope,
       path: [],
     };
 
@@ -761,6 +764,26 @@ export function normalizeAndDiff(
       });
     }
 
+    return changes;
+  }
+
+  // `FabricInstance` values (`FabricError`, `FabricMap`, `FabricSet`,
+  // `FabricRegExp`) are atomic from this layer's perspective: their
+  // own-enumerable properties are implementation details, not
+  // user-visible structure, and iterating them via the generic
+  // `isRecord` branch below would re-wrap embedded native values (e.g.,
+  // `FabricError.error` is a native `Error`) on each pass, recursing
+  // forever. Emit a single change at this link with the wrapper as the
+  // value — the storage layer's JSON encoding handles serialization via
+  // `[DECONSTRUCT]`/`[RECONSTRUCT]`. Placed after the write-redirect
+  // resolution above so writes through a redirect land on the target,
+  // not on the redirect itself.
+  if (newValue instanceof FabricInstance) {
+    diffLogger.debug(
+      "diff",
+      () => `[BRANCH_FABRIC_INSTANCE] Atomic FabricInstance at path=${pathStr}`,
+    );
+    changes.push({ location: link, value: newValue as FabricValue });
     return changes;
   }
 

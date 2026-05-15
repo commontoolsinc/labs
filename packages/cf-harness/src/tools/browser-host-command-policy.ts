@@ -67,6 +67,11 @@ const deny = (reason: string): BrowserHostCommandPolicyResult => ({
 const validateAgentBrowserCommand = (
   args: readonly string[],
 ): BrowserHostCommandPolicyResult => {
+  const cdpEndpoint = extractAgentBrowserCdpEndpoint(args);
+  if (cdpEndpoint.error !== undefined) {
+    return deny(cdpEndpoint.error);
+  }
+
   for (const arg of args) {
     const flag = normalizeLongFlag(arg);
     if (
@@ -91,8 +96,22 @@ const validateAgentBrowserCommand = (
       return deny("agent-browser open file: URLs are not allowed");
     }
   }
+  if (
+    command !== undefined &&
+    !AGENT_BROWSER_LOCAL_COMMANDS.has(command.name) &&
+    cdpEndpoint.endpoint === undefined
+  ) {
+    return deny(
+      "agent-browser page commands must use --cdp with an approved local endpoint",
+    );
+  }
   return allow([AGENT_BROWSER_COMMAND, ...args]);
 };
+
+const AGENT_BROWSER_LOCAL_COMMANDS = new Set([
+  "help",
+  "version",
+]);
 
 const DISALLOWED_AGENT_BROWSER_COMMANDS = new Set([
   "connect",
@@ -112,7 +131,6 @@ const DISALLOWED_AGENT_BROWSER_FLAGS = new Set([
   "--allow-file-access",
   "--args",
   "--auto-connect",
-  "--cdp",
   "--config",
   "--device",
   "--executable-path",
@@ -128,9 +146,80 @@ const DISALLOWED_AGENT_BROWSER_FLAGS = new Set([
 ]);
 
 const AGENT_BROWSER_VALUE_FLAGS = new Set([
+  "--cdp",
   "--session",
   "--session-name",
 ]);
+
+const ALLOWED_CDP_HOSTS = new Set([
+  "127.0.0.1",
+  "::1",
+  "[::1]",
+  "host.docker.internal",
+  "localhost",
+]);
+
+const extractAgentBrowserCdpEndpoint = (
+  args: readonly string[],
+): { endpoint?: string; error?: undefined } | {
+  endpoint?: undefined;
+  error: string;
+} => {
+  let endpoint: string | undefined;
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index]!;
+    if (normalizeLongFlag(arg) !== "--cdp") {
+      continue;
+    }
+    if (endpoint !== undefined) {
+      return { error: "agent-browser --cdp may only be supplied once" };
+    }
+    const equalsIndex = arg.indexOf("=");
+    const value = equalsIndex === -1
+      ? args[index + 1]
+      : arg.slice(equalsIndex + 1);
+    if (value === undefined || value === "") {
+      return { error: "agent-browser --cdp requires a local endpoint value" };
+    }
+    const endpointError = validateAgentBrowserCdpEndpoint(value);
+    if (endpointError !== undefined) {
+      return { error: endpointError };
+    }
+    endpoint = value;
+    if (equalsIndex === -1) {
+      index += 1;
+    }
+  }
+  return { endpoint };
+};
+
+const validateAgentBrowserCdpEndpoint = (
+  endpoint: string,
+): string | undefined => {
+  let url: URL;
+  try {
+    url = new URL(endpoint);
+  } catch {
+    return "agent-browser --cdp must be an http:// local endpoint";
+  }
+  if (url.protocol !== "http:") {
+    return "agent-browser --cdp must use http://";
+  }
+  if (!ALLOWED_CDP_HOSTS.has(url.hostname)) {
+    return "agent-browser --cdp must target localhost or host.docker.internal";
+  }
+  if (url.port === "") {
+    return "agent-browser --cdp must include an explicit port";
+  }
+  const port = Number.parseInt(url.port, 10);
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    return "agent-browser --cdp port must be between 1 and 65535";
+  }
+  if (url.pathname !== "/" || url.search !== "" || url.hash !== "") {
+    return "agent-browser --cdp must be an origin without path, query, or fragment";
+  }
+  return undefined;
+};
 
 const normalizeLongFlag = (arg: string): string => {
   if (!arg.startsWith("--")) {

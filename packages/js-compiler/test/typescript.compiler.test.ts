@@ -162,6 +162,30 @@ export default <div>{new Counter().count}</div>;
     expect(compiled.sourceMap).toBeDefined();
   });
 
+  it("allows exported APIs to use scoped phantom wrapper types", async () => {
+    const program = new InMemoryProgram("/main.tsx", {
+      "/main.tsx": `
+import type { PerUser } from "commonfabric";
+
+export interface ScopedOutput {
+  name: PerUser<string>;
+}
+
+export default function build(): ScopedOutput {
+  return { name: "Ada" as PerUser<string> };
+}
+`,
+      "commonfabric.d.ts": `
+export declare const SCOPE_BRAND: unique symbol;
+export type PerUser<T> = T & { readonly [SCOPE_BRAND]?: "user" };
+`,
+    });
+    const compiler = new TypeScriptCompiler(types);
+    await compiler.resolveAndCompile(program, {
+      runtimeModules: ["commonfabric"],
+    });
+  });
+
   it("Inlines errors", async () => {
     const compiler = new TypeScriptCompiler(types);
     const program = new InMemoryProgram("/main.tsx", {

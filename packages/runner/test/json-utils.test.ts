@@ -772,6 +772,7 @@ describe("json-utils", () => {
             "cell",
           ],
           schema: false,
+          scope: "space",
         },
       });
     });

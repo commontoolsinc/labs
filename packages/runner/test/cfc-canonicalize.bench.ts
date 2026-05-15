@@ -30,6 +30,7 @@ const SPACE: MemorySpace =
 const makeAddress = (idSuffix: string, ...path: (string | number)[]) => ({
   space: SPACE,
   id: `of:doc-${idSuffix}`,
+  scope: "space" as const,
   type: "application/json",
   path: ["value", ...path.map(String)],
 });
@@ -186,27 +187,32 @@ const PATH_HEAVY_INPUT: PreparedDigestInput = {
   consumedReads: Array.from({ length: 12 }, (_, i) => ({
     space: SPACE,
     id: "of:doc-shared",
+    scope: "space" as const,
     path: ["value", "items", String(i), "field", String(i)],
   })),
   potentialWrites: Array.from({ length: 4 }, (_, i) => ({
     space: SPACE,
     id: "of:doc-shared",
+    scope: "space" as const,
     path: ["value", "out", String(i)],
   })),
   writes: Array.from({ length: 4 }, (_, i) => ({
     space: SPACE,
     id: "of:doc-shared",
+    scope: "space" as const,
     path: ["value", "out", String(i)],
   })),
   dereferenceTraces: Array.from({ length: 6 }, (_, i) => ({
     source: {
       space: SPACE,
       id: "of:doc-shared",
+      scope: "space" as const,
       path: ["value", "src", String(i)],
     },
     target: {
       space: SPACE,
       id: "of:doc-shared",
+      scope: "space" as const,
       path: ["value", "dst", String(i)],
     },
     kind: i % 2 === 0 ? "value" as const : "write-redirect" as const,

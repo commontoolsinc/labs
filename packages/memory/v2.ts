@@ -1,7 +1,4 @@
-import {
-  cloneIfNecessary,
-  getDataModelConfig,
-} from "@commonfabric/data-model/fabric-value";
+import { getDataModelConfig } from "@commonfabric/data-model/fabric-value";
 import {
   jsonFromValue,
   valueFromJson,
@@ -18,6 +15,7 @@ export type EntityId = string;
 export type BranchName = string;
 export type SessionId = string;
 export type SessionToken = string;
+export type CellScope = "space" | "user" | "session";
 export type JobId = `job:${string}`;
 export type Reference = string & {
   readonly __memoryV2Reference: unique symbol;
@@ -71,24 +69,28 @@ export type PatchOp =
 export interface SetOperation {
   op: "set";
   id: EntityId;
+  scope?: CellScope;
   value: EntityDocument;
 }
 
 export interface PatchOperation {
   op: "patch";
   id: EntityId;
+  scope?: CellScope;
   patches: PatchOp[];
 }
 
 export interface DeleteOperation {
   op: "delete";
   id: EntityId;
+  scope?: CellScope;
 }
 
 export type Operation = SetOperation | PatchOperation | DeleteOperation;
 
 export interface ConfirmedRead {
   id: EntityId;
+  scope?: CellScope;
   branch?: BranchName;
   path: ReadPath;
   seq: number;
@@ -96,6 +98,7 @@ export interface ConfirmedRead {
 
 export interface PendingRead {
   id: EntityId;
+  scope?: CellScope;
   path: ReadPath;
   localSeq: number;
 }
@@ -139,19 +142,31 @@ export interface SessionOpenResult {
 }
 
 export interface MemoryProtocolFlags {
-  richStorableValues: boolean;
+  modernDataModel: boolean;
 }
+
+/** Legacy field name accepted on the wire for backward compatibility. */
+const LEGACY_MODERN_DATA_MODEL_KEY = "richStorableValues";
+
+export type WireFlagsKey = "modernDataModel" | "richStorableValues";
+
+/**
+ * Wire-format flags object. May use the canonical `modernDataModel` key or
+ * the legacy `richStorableValues` alias. Use `parseMemoryProtocolFlags()` to
+ * normalize to a `MemoryProtocolFlags`.
+ */
+export type WireMemoryProtocolFlags = { [K in WireFlagsKey]?: boolean };
 
 export interface HelloMessage {
   type: "hello";
   protocol: typeof MEMORY_PROTOCOL;
-  flags: MemoryProtocolFlags;
+  flags: WireMemoryProtocolFlags;
 }
 
 export interface HelloOkMessage {
   type: "hello.ok";
   protocol: typeof MEMORY_PROTOCOL;
-  flags: MemoryProtocolFlags;
+  flags: WireMemoryProtocolFlags;
 }
 
 export interface SessionDescriptor {
@@ -171,6 +186,7 @@ export interface SessionOpenRequest {
 
 export interface GraphQueryRoot {
   id: EntityId;
+  scope?: CellScope;
   selector: SchemaPathSelector;
 }
 
@@ -184,6 +200,7 @@ export interface GraphQuery {
 export interface EntitySnapshot {
   branch: BranchName;
   id: EntityId;
+  scope?: CellScope;
   seq: number;
   document: EntityDocument | null;
 }
@@ -210,6 +227,7 @@ export type WatchSpec = QueryWatchSpec | GraphWatchSpec;
 export interface SessionSyncUpsert {
   branch: BranchName;
   id: EntityId;
+  scope?: CellScope;
   seq: number;
   doc?: EntityDocument;
   deleted?: true;
@@ -218,6 +236,7 @@ export interface SessionSyncUpsert {
 export interface SessionSyncRemove {
   branch: BranchName;
   id: EntityId;
+  scope?: CellScope;
 }
 
 export interface SessionSync {
@@ -342,23 +361,56 @@ const memoryReconstructionContext: ReconstructionContext = {
 };
 
 export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
-  richStorableValues: getDataModelConfig(),
+  modernDataModel: getDataModelConfig(),
 });
 
 export const sameMemoryProtocolFlags = (
   left: MemoryProtocolFlags,
   right: MemoryProtocolFlags,
-): boolean => left.richStorableValues === right.richStorableValues;
+): boolean => left.modernDataModel === right.modernDataModel;
 
-export const isMemoryProtocolFlags = (
+/**
+ * Parses and normalizes incoming wire-protocol flags. Accepts either the
+ * current `modernDataModel` key or the legacy `richStorableValues` key (which
+ * older peers may send). Returns `null` if the input is not a recognizable
+ * flags object. The `wireKey` field captures which key the peer used, so
+ * responders can echo the same key for backward compatibility.
+ */
+export const parseMemoryProtocolFlags = (
   value: unknown,
-): value is MemoryProtocolFlags => {
+): { flags: MemoryProtocolFlags; wireKey: WireFlagsKey } | null => {
   if (!isRecord(value) || Array.isArray(value)) {
-    return false;
+    return null;
   }
 
-  return typeof value.richStorableValues === "boolean";
+  if (typeof value.modernDataModel === "boolean") {
+    return {
+      flags: { modernDataModel: value.modernDataModel },
+      wireKey: "modernDataModel",
+    };
+  }
+
+  const legacy = value[LEGACY_MODERN_DATA_MODEL_KEY];
+  if (typeof legacy === "boolean") {
+    return {
+      flags: { modernDataModel: legacy },
+      wireKey: LEGACY_MODERN_DATA_MODEL_KEY,
+    };
+  }
+
+  return null;
 };
+
+/**
+ * Builds the wire-format flags object for a `hello`/`hello.ok` message,
+ * using the given key. Defaults to the canonical `modernDataModel` key;
+ * responders should pass the `wireKey` captured by
+ * `parseMemoryProtocolFlags()` to echo back what the peer used.
+ */
+export const wireMemoryProtocolFlags = (
+  flags: MemoryProtocolFlags,
+  wireKey: WireFlagsKey = "modernDataModel",
+): WireMemoryProtocolFlags => ({ [wireKey]: flags.modernDataModel });
 
 export const encodeMemoryBoundary = (value: unknown): string =>
   jsonFromValue(value as FabricValue);
@@ -371,13 +423,7 @@ export const decodeMemoryBoundary = <Value = FabricValue>(
     memoryReconstructionContext,
   ) as FabricValue;
 
-  // TODO(danfuzz): It shouldn't be necessary to thaw values coming out of the
-  // JSON decoder. See what happens when this gets replaced with just
-  // `return value`.
-  return cloneIfNecessary(
-    decoded,
-    { frozen: false, deep: true, force: true },
-  ) as Value;
+  return decoded as Value;
 };
 
 export const toDocumentPath = (path: readonly string[]): DocumentPath =>

@@ -28,7 +28,7 @@ export default pattern(() => {
             type: ["string", "undefined"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: ["string", "undefined"]
-        } as const satisfies __cfHelpers.JSONSchema, text.pending, "Loading", text.result)}</div>,
+        } as const satisfies __cfHelpers.JSONSchema, text.key("pending"), "Loading", text.key("result"))}</div>,
     };
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",

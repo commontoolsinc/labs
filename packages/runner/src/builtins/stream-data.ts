@@ -2,10 +2,12 @@ import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import type { CellScope } from "../builder/types.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
+import { scopedCell } from "./scope-policy.ts";
 
 /**
  * Stream data from a URL, used for querying Synopsys.
@@ -41,18 +43,27 @@ export function streamData(
   let pending: Cell<boolean>;
   let result: Cell<any | undefined>;
   let error: Cell<any | undefined>;
+  let cellScope: CellScope | undefined;
 
   return (tx: IExtendedStorageTransaction) => {
-    if (!cellsInitialized) {
-      pending = runtime.getCell(
+    tx.resetNarrowestReadScope();
+    const requestSnapshot = snapshotStreamDataInputs(inputsCell.withTx(tx));
+    const outputScope = tx.getNarrowestReadScope();
+
+    if (!cellsInitialized || cellScope !== outputScope) {
+      if (cellsInitialized && cellScope !== outputScope) {
+        previousCall = "";
+      }
+      const basePending = runtime.getCell<boolean>(
         parentCell.space,
         { streamData: { pending: cause } },
         undefined,
         tx,
       );
+      pending = scopedCell(runtime, tx, basePending, outputScope);
       pending.send(false);
 
-      result = runtime.getCell<any | undefined>(
+      const baseResult = runtime.getCell<any | undefined>(
         parentCell.space,
         {
           streamData: { result: cause },
@@ -60,8 +71,9 @@ export function streamData(
         undefined,
         tx,
       );
+      result = scopedCell(runtime, tx, baseResult, outputScope);
 
-      error = runtime.getCell<any | undefined>(
+      const baseError = runtime.getCell<any | undefined>(
         parentCell.space,
         {
           streamData: { error: cause },
@@ -69,6 +81,7 @@ export function streamData(
         undefined,
         tx,
       );
+      error = scopedCell(runtime, tx, baseError, outputScope);
 
       pending.setSourceCell(parentCell);
       result.setSourceCell(parentCell);
@@ -78,12 +91,13 @@ export function streamData(
       // here, instead of in the action.
       sendResult(tx, { pending, result, error });
       cellsInitialized = true;
+      cellScope = outputScope;
     }
     const pendingWithLog = pending.withTx(tx);
     const resultWithLog = result.withTx(tx);
     const errorWithLog = error.withTx(tx);
 
-    const { url, options } = snapshotStreamDataInputs(inputsCell.withTx(tx));
+    const { url, options } = requestSnapshot;
 
     // Re-entrancy guard: Don't restart the stream if it's the same request.
     const currentCall = `${url}${JSON.stringify(options)}`;
@@ -119,7 +133,6 @@ export function streamData(
     errorWithLog.set(undefined);
 
     const thisRun = ++status.run;
-    const requestSnapshot = snapshotStreamDataInputs(inputsCell.withTx(tx));
     const requestId = hashOf(requestSnapshot).toString();
 
     enqueueSinkRequestPostCommitEffect(

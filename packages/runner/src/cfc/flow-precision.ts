@@ -69,16 +69,39 @@ const FLOW_PRECISION_SCHEMAS = new Map<string, JSONSchema>(
 
 export const flowPrecisionSchemaForBuiltin = (
   builtinId: string,
+  itemSchema?: JSONSchema,
 ): JSONSchema | undefined => {
-  return FLOW_PRECISION_SCHEMAS.get(builtinId);
+  const schema = FLOW_PRECISION_SCHEMAS.get(builtinId);
+  if (schema === undefined || itemSchema === undefined) {
+    return schema;
+  }
+  if (typeof schema === "boolean") return schema;
+  if (typeof itemSchema === "boolean") {
+    return internSchema({
+      ...schema,
+      items: itemSchema,
+    });
+  }
+  const { $defs, ...itemSchemaWithoutDefs } = itemSchema;
+  return internSchema({
+    ...schema,
+    items: itemSchemaWithoutDefs,
+    ...($defs !== undefined && {
+      $defs: {
+        ...schema.$defs,
+        ...$defs,
+      },
+    }),
+  });
 };
 
 export const trustedFlowPrecisionSchemaForBuiltin = (
   identity: ImplementationIdentity | undefined,
   builtinId: string,
+  itemSchema?: JSONSchema,
 ): JSONSchema | undefined => {
   if (identity?.kind !== "builtin" || identity.builtinId !== builtinId) {
     return undefined;
   }
-  return flowPrecisionSchemaForBuiltin(builtinId);
+  return flowPrecisionSchemaForBuiltin(builtinId, itemSchema);
 };
