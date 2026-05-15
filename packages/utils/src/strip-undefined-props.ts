@@ -1,3 +1,5 @@
+import { isPlainObject } from "./types.ts";
+
 /**
  * Returns a copy of `value` with `undefined`-valued properties removed,
  * recursively through plain-object values. Non-plain-object values
@@ -32,10 +34,4 @@ export function stripUndefinedProps(
     });
   }
   return out;
-}
-
-function isPlainObject(value: unknown): boolean {
-  if (value === null || typeof value !== "object") return false;
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
 }
