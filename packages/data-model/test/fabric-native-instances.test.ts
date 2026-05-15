@@ -2,8 +2,10 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   DECONSTRUCT,
+  DEEP_FREEZE,
   FabricInstance,
   type FabricValue,
+  IS_DEEP_FROZEN,
   RECONSTRUCT,
   type ReconstructionContext,
 } from "../interface.ts";
@@ -11,6 +13,7 @@ import {
   FabricError,
   FabricMap,
   FabricNativeWrapper,
+  FabricRegExp,
   FabricSet,
   isConvertibleNativeInstance,
 } from "../fabric-native-instances.ts";
@@ -24,6 +27,7 @@ import {
 import { UnknownValue } from "../unknown-value.ts";
 import { ProblematicValue } from "../problematic-value.ts";
 import { ExplicitTagValue } from "../explicit-tag-value.ts";
+import { deepFreeze, isDeepFrozenFabricValue } from "../deep-freeze.ts";
 
 /** Dummy reconstruction context for tests. */
 const dummyContext: ReconstructionContext = {
@@ -838,6 +842,16 @@ describe("fabric-native-instances", () => {
         [DECONSTRUCT](): FabricValue {
           return { value: 42 };
         }
+        [DEEP_FREEZE](
+          _subFreeze: (value: FabricValue) => FabricValue,
+        ): FabricValue {
+          return this as unknown as FabricValue;
+        }
+        [IS_DEEP_FROZEN](
+          _isSubDeepFrozen: (value: FabricValue) => boolean,
+        ): boolean {
+          return Object.isFrozen(this);
+        }
         deepClone(_frozen: boolean): CustomFabInst {
           return new CustomFabInst();
         }
@@ -924,6 +938,157 @@ describe("fabric-native-instances", () => {
       );
       expect(ps.typeTag).toBe("Bad@1");
       expect(ps.state).toBe("data");
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // [DEEP_FREEZE] / [IS_DEEP_FROZEN] protocol (F1)
+  // --------------------------------------------------------------------------
+
+  describe("[DEEP_FREEZE] / [IS_DEEP_FROZEN] protocol", () => {
+    describe("FabricError", () => {
+      it("[DEEP_FREEZE] freezes wrapper + Error + recurses cause", () => {
+        const inner = new Error("cause");
+        const fe = new FabricError(new Error("outer", { cause: inner }));
+        const result = deepFreeze(fe);
+        expect(result).toBe(fe); // freeze-in-place identity
+        expect(Object.isFrozen(fe)).toBe(true);
+        expect(Object.isFrozen(fe.error)).toBe(true);
+        expect(Object.isFrozen(inner)).toBe(true);
+      });
+
+      it("[DEEP_FREEZE] recurses enumerable custom props, no string-narrow", () => {
+        const err = new Error("e");
+        const childObj = { nested: 1 };
+        (err as unknown as Record<string, unknown>).custom = childObj;
+        const fe = new FabricError(err);
+        deepFreeze(fe);
+        // Non-string custom state is preserved AND deep-frozen (it must not
+        // be dropped -- that narrowing is a deepClone stop-gap, not this).
+        expect((fe.error as unknown as Record<string, unknown>).custom)
+          .toBe(childObj);
+        expect(Object.isFrozen(childObj)).toBe(true);
+      });
+
+      it("[IS_DEEP_FROZEN] true only when wrapper + Error frozen", () => {
+        const fe = new FabricError(new Error("test"));
+        expect(isDeepFrozenFabricValue(fe)).toBe(false);
+        Object.freeze(fe); // wrapper only; inner Error still mutable
+        expect(isDeepFrozenFabricValue(fe)).toBe(false);
+        deepFreeze(fe);
+        expect(isDeepFrozenFabricValue(fe)).toBe(true);
+      });
+    });
+
+    describe("FabricMap", () => {
+      it("[DEEP_FREEZE] verifies FrozenMap internal + recurses entries", () => {
+        const childKey = { k: 1 };
+        const childVal = { v: 2 };
+        const fm = new FabricMap(
+          new FrozenMap<FabricValue, FabricValue>([[childKey, childVal]]),
+        );
+        const result = deepFreeze(fm);
+        expect(result).toBe(fm);
+        expect(Object.isFrozen(fm)).toBe(true);
+        expect(Object.isFrozen(childKey)).toBe(true);
+        expect(Object.isFrozen(childVal)).toBe(true);
+      });
+
+      it("[DEEP_FREEZE] throws if internal slot is not a FrozenMap", () => {
+        const fm = new FabricMap(new Map<FabricValue, FabricValue>());
+        expect(() => deepFreeze(fm)).toThrow("is not a `FrozenMap`");
+      });
+
+      it("[IS_DEEP_FROZEN] false (no throw) for non-FrozenMap internal", () => {
+        const fm = new FabricMap(new Map<FabricValue, FabricValue>());
+        Object.freeze(fm);
+        expect(() => isDeepFrozenFabricValue(fm)).not.toThrow();
+        expect(isDeepFrozenFabricValue(fm)).toBe(false);
+      });
+
+      it("[IS_DEEP_FROZEN] true for canonical-form FabricMap", () => {
+        const fm = new FabricMap(
+          new FrozenMap<FabricValue, FabricValue>([["a", 1]]),
+        );
+        deepFreeze(fm);
+        expect(isDeepFrozenFabricValue(fm)).toBe(true);
+      });
+    });
+
+    describe("FabricSet", () => {
+      it("[DEEP_FREEZE] verifies FrozenSet internal + recurses elements", () => {
+        const child = { v: 1 };
+        const fs = new FabricSet(new FrozenSet<FabricValue>([child]));
+        const result = deepFreeze(fs);
+        expect(result).toBe(fs);
+        expect(Object.isFrozen(fs)).toBe(true);
+        expect(Object.isFrozen(child)).toBe(true);
+      });
+
+      it("[DEEP_FREEZE] throws if internal slot is not a FrozenSet", () => {
+        const fs = new FabricSet(new Set<FabricValue>());
+        expect(() => deepFreeze(fs)).toThrow("is not a `FrozenSet`");
+      });
+
+      it("[IS_DEEP_FROZEN] false (no throw) for non-FrozenSet internal", () => {
+        const fs = new FabricSet(new Set<FabricValue>());
+        Object.freeze(fs);
+        expect(() => isDeepFrozenFabricValue(fs)).not.toThrow();
+        expect(isDeepFrozenFabricValue(fs)).toBe(false);
+      });
+
+      it("[IS_DEEP_FROZEN] true for canonical-form FabricSet", () => {
+        const fs = new FabricSet(new FrozenSet<FabricValue>([1, 2]));
+        deepFreeze(fs);
+        expect(isDeepFrozenFabricValue(fs)).toBe(true);
+      });
+    });
+
+    describe("FabricRegExp", () => {
+      it("[DEEP_FREEZE] freezes the wrapped RegExp in place", () => {
+        const fr = new FabricRegExp(/abc/g);
+        expect(Object.isFrozen(fr.regex)).toBe(false);
+        const result = deepFreeze(fr);
+        expect(result).toBe(fr);
+        expect(Object.isFrozen(fr)).toBe(true);
+        expect(Object.isFrozen(fr.regex)).toBe(true);
+      });
+
+      it("[IS_DEEP_FROZEN] true only when wrapper + RegExp frozen", () => {
+        const fr = new FabricRegExp(/abc/g);
+        expect(isDeepFrozenFabricValue(fr)).toBe(false);
+        deepFreeze(fr);
+        expect(isDeepFrozenFabricValue(fr)).toBe(true);
+      });
+    });
+
+    describe("ExplicitTagValue subclasses", () => {
+      it("ProblematicValue [DEEP_FREEZE] recurses state, freezes in place", () => {
+        const child = { x: 1 };
+        const pv = new ProblematicValue(
+          "Bad@1",
+          child as unknown as FabricValue,
+          "oops",
+        );
+        const result = deepFreeze(pv);
+        expect(result).toBe(pv);
+        expect(Object.isFrozen(pv)).toBe(true);
+        expect(Object.isFrozen(child)).toBe(true);
+        expect(isDeepFrozenFabricValue(pv)).toBe(true);
+      });
+
+      it("UnknownValue [DEEP_FREEZE] recurses state, freezes in place", () => {
+        const child = { y: 2 };
+        const uv = new UnknownValue(
+          "Fancy@3",
+          child as unknown as FabricValue,
+        );
+        const result = deepFreeze(uv);
+        expect(result).toBe(uv);
+        expect(Object.isFrozen(uv)).toBe(true);
+        expect(Object.isFrozen(child)).toBe(true);
+        expect(isDeepFrozenFabricValue(uv)).toBe(true);
+      });
     });
   });
 });

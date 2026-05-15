@@ -3,6 +3,7 @@ import {
   FabricInstance,
   FabricPrimitive,
   FabricValue,
+  IS_DEEP_FROZEN,
 } from "./interface.ts";
 import { isPlainObject } from "@commonfabric/utils/types";
 
@@ -230,11 +231,22 @@ export function isDeepFrozenFabricValue(value: unknown): value is FabricValue {
       // references.
       return true;
     } else if (item instanceof FabricInstance) {
-      // `FabricInstance`s might have references, but -- TODO(@danfuzz) -- we
-      // have no way of handling them yet.
-      throw new Error(
-        `Cannot yet handle instance of class ${item.constructor.name}`,
-      );
+      // `FabricInstance`s answer the deep-frozen question via the
+      // `[IS_DEEP_FROZEN]` protocol member (the side-effect-free sibling of
+      // `[DEEP_FREEZE]`), recursing through `checkValue`. The duck-typed
+      // check keeps this guard free of per-class knowledge. An instance
+      // that doesn't carry the protocol is not a recognized deep-frozen
+      // `FabricValue` instance, so it answers `false` (matching the
+      // unrecognized-class arm below) -- it does not throw.
+      const checkable = item as unknown as {
+        [IS_DEEP_FROZEN]?: (
+          isSubDeepFrozen: (value: FabricValue) => boolean,
+        ) => boolean;
+      };
+      if (typeof checkable[IS_DEEP_FROZEN] !== "function") {
+        return false;
+      }
+      return checkable[IS_DEEP_FROZEN]((v) => checkValue(v));
     } else if (Array.isArray(item)) {
       for (let i = 0; i <= item.length; i++) {
         if (i in item && !checkValue(item[i])) return false;

@@ -54,12 +54,30 @@ export const RECONSTRUCT: unique symbol = Symbol.for("common.reconstruct");
 export const DEEP_FREEZE: unique symbol = Symbol.for("common.deepFreeze");
 
 /**
+ * Well-known symbol for checking whether a fabric instance is already deeply
+ * frozen, without mutating it. The sibling-of-`[DEEP_FREEZE]` *check*: it
+ * verifies the instance's own internal slot(s) are in canonical deep-frozen
+ * form and recurses into any nested `FabricValue`s via the provided
+ * `isSubDeepFrozen` callback, returning the boolean conjunction. This lets
+ * the generic deep-frozen type guard operate on `FabricInstance`s without
+ * building per-class knowledge into it (it duck-types this symbol).
+ *
+ * Unlike `[DEEP_FREEZE]`, this method is side-effect-free and never throws:
+ * a not-in-canonical-deep-frozen-form instance answers `false`, it does not
+ * crash. (`[DEEP_FREEZE]` is a mutator and uses "death before confusion" on
+ * a malformed internal slot; a status check must not.)
+ */
+export const IS_DEEP_FROZEN: unique symbol = Symbol.for(
+  "common.isDeepFrozen",
+);
+
+/**
  * Abstract base class for values that participate in the fabric protocol.
  * See Section 2.3 of the formal spec.
  *
  * Subclasses must implement `[DECONSTRUCT]()`, `[DEEP_FREEZE]()`,
- * `deepClone()`, and `shallowUnfrozenClone()`. * Subclasses must also define
- * a static member `[RECONSTRUCT]()`.
+ * `[IS_DEEP_FROZEN]()`, `deepClone()`, and `shallowUnfrozenClone()`.
+ * Subclasses must also define a static member `[RECONSTRUCT]()`.
  */
 export abstract class FabricInstance extends FabricSpecialObject {
   /**
@@ -83,6 +101,22 @@ export abstract class FabricInstance extends FabricSpecialObject {
   abstract [DEEP_FREEZE](
     subFreeze: (value: FabricValue) => FabricValue,
   ): FabricValue;
+
+  /**
+   * Indicates whether this instance is already deeply frozen, without
+   * mutating it. Checks this instance's own internal slot(s) are in
+   * canonical deep-frozen form and recurses into each nested `FabricValue`
+   * via the provided `isSubDeepFrozen` callback, returning the boolean
+   * conjunction. Implementations must NOT import or call the deep-frozen
+   * type guard directly -- recursion is handed through the callback,
+   * mirroring `[DEEP_FREEZE]`'s callback shape and avoiding an import cycle.
+   *
+   * Side-effect-free and must not throw: an instance that is not in
+   * canonical deep-frozen form returns `false`.
+   */
+  abstract [IS_DEEP_FROZEN](
+    isSubDeepFrozen: (value: FabricValue) => boolean,
+  ): boolean;
 
   /**
    * Returns a new deep clone of this instance with equivalent data but no

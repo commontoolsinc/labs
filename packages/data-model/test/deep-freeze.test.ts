@@ -1,6 +1,13 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { deepFreeze, isDeepFrozen } from "../deep-freeze.ts";
+import {
+  deepFreeze,
+  isDeepFrozen,
+  isDeepFrozenFabricValue,
+} from "../deep-freeze.ts";
+import type { FabricValue } from "../interface.ts";
+import { FabricError } from "../fabric-native-instances.ts";
+import { FabricEpochNsec } from "../fabric-epoch.ts";
 
 describe("isDeepFrozen", () => {
   describe("primitives", () => {
@@ -191,5 +198,69 @@ describe("isDeepFrozen", () => {
       expect(accessCount).toBe(0);
       expect(firstCallAccesses).toBeGreaterThan(0);
     });
+  });
+});
+
+describe("deepFreeze [DEEP_FREEZE] protocol dispatch", () => {
+  it("arm 2: FabricPrimitive short-circuits unchanged", () => {
+    const epoch = new FabricEpochNsec(1234567890n);
+    // `FabricPrimitive`s self-freeze at construction; `deepFreeze` must
+    // return them unchanged without entering the object-walk.
+    expect(deepFreeze(epoch)).toBe(epoch);
+  });
+
+  it("arm 3: delegates to [DEEP_FREEZE] and freezes in place", () => {
+    const inner = new Error("cause");
+    const outer = new Error("outer", { cause: inner });
+    const fe = new FabricError(outer);
+    expect(Object.isFrozen(fe)).toBe(false);
+
+    const result = deepFreeze(fe);
+
+    // Freeze-in-place: same identity, now deep-frozen (wrapper + wrapped
+    // Error + recursed cause).
+    expect(result).toBe(fe);
+    expect(Object.isFrozen(fe)).toBe(true);
+    expect(Object.isFrozen(fe.error)).toBe(true);
+    expect(Object.isFrozen(inner)).toBe(true);
+  });
+
+  it("arm 3: recurses [DEEP_FREEZE] into nested FabricValues", () => {
+    const fe = new FabricError(new Error("e"));
+    const container = { wrapped: fe as unknown as FabricValue, n: 1 };
+    deepFreeze(container);
+    expect(Object.isFrozen(container)).toBe(true);
+    expect(Object.isFrozen(fe)).toBe(true);
+    expect(Object.isFrozen(fe.error)).toBe(true);
+  });
+});
+
+describe("isDeepFrozenFabricValue with FabricInstance (R6)", () => {
+  it("no longer throws on a FabricInstance; classifies via protocol", () => {
+    const fe = new FabricError(new Error("test"));
+    // Pre-freeze: not deep-frozen, but must NOT throw (the #3604
+    // `FabricInstance`-arm throw is retired).
+    expect(() => isDeepFrozenFabricValue(fe)).not.toThrow();
+    expect(isDeepFrozenFabricValue(fe)).toBe(false);
+  });
+
+  it("returns true for a deep-frozen FabricInstance", () => {
+    const fe = new FabricError(new Error("test"));
+    deepFreeze(fe);
+    expect(isDeepFrozenFabricValue(fe)).toBe(true);
+  });
+
+  it("returns true for a deep-frozen FabricInstance nested in a tree", () => {
+    const fe = new FabricError(new Error("nested"));
+    const tree = deepFreeze({ a: 1, e: fe as unknown as FabricValue });
+    expect(isDeepFrozenFabricValue(tree)).toBe(true);
+  });
+
+  it("returns false (no throw) for a non-canonical-form instance", () => {
+    // Wrapper frozen but inner Error left unfrozen -> not deep-frozen.
+    const fe = new FabricError(new Error("partial"));
+    Object.freeze(fe);
+    expect(() => isDeepFrozenFabricValue(fe)).not.toThrow();
+    expect(isDeepFrozenFabricValue(fe)).toBe(false);
   });
 });
