@@ -7,6 +7,7 @@ import {
   isInstance,
   isNumber,
   isObject,
+  isPlainObject,
   isRecord,
   isString,
   Mutable,
@@ -195,6 +196,39 @@ describe("types", () => {
 
     it("returns false for functions", () => {
       expect(isObject(() => {})).toBe(false);
+    });
+  });
+
+  describe("isPlainObject", () => {
+    it("returns true for object literals", () => {
+      expect(isPlainObject({})).toBe(true);
+      expect(isPlainObject({ a: 1 })).toBe(true);
+      expect(isPlainObject(new Object())).toBe(true);
+    });
+
+    it("returns true for null-prototype objects", () => {
+      expect(isPlainObject(Object.create(null))).toBe(true);
+    });
+
+    it("returns false for arrays and class instances", () => {
+      class MyClass {}
+      expect(isPlainObject([])).toBe(false);
+      expect(isPlainObject([1, 2, 3])).toBe(false);
+      expect(isPlainObject(new Date())).toBe(false);
+      expect(isPlainObject(new Map())).toBe(false);
+      expect(isPlainObject(/regex/)).toBe(false);
+      expect(isPlainObject(new MyClass())).toBe(false);
+      expect(isPlainObject(Object.create({}))).toBe(false);
+    });
+
+    it("returns false for null, primitives, and functions", () => {
+      expect(isPlainObject(null)).toBe(false);
+      expect(isPlainObject(undefined)).toBe(false);
+      expect(isPlainObject(42)).toBe(false);
+      expect(isPlainObject("string")).toBe(false);
+      expect(isPlainObject(true)).toBe(false);
+      expect(isPlainObject(Symbol("test"))).toBe(false);
+      expect(isPlainObject(() => {})).toBe(false);
     });
   });
 

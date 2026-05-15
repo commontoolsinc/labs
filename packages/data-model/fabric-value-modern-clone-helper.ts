@@ -9,7 +9,6 @@ import { FabricInstance, FabricValue } from "./interface.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { isDeepFrozenFabricValue } from "./fabric-value-modern.ts";
 
-
 /**
  * Tracks an object for circular reference detection during deep cloning.
  * Lazily allocates the `seen` set on first use, throws if a cycle is
@@ -50,8 +49,9 @@ export function cloneHelperModern(
   seen: Set<object> | null,
 ): FabricValue {
   // Identity optimization: when `force` is off, check if the value's frozenness
-  // already matches the requested state. Deep mode uses `isDeepFrozenFabricValue()`;
-  // shallow mode uses `Object.isFrozen(v) === frozen`.
+  // already matches the requested state. Deep mode uses
+  // `isDeepFrozenFabricValue()`; shallow mode uses `Object.isFrozen(v) ===
+  // frozen`.
   function canReturnAsIs(v: FabricValue): boolean {
     if (force) return false;
     if (deep) {
@@ -72,10 +72,16 @@ export function cloneHelperModern(
     case NATIVE_TAGS.FabricBytes:
       return value;
 
-    case NATIVE_TAGS.FabricInstance:
+    case NATIVE_TAGS.FabricInstance: {
       // Identity optimization: already-correct frozenness needs no clone.
-      if (canReturnAsIs(value)) return value;
-      return (value as FabricInstance).shallowClone(frozen) as FabricValue;
+      if (canReturnAsIs(value)) {
+        return value;
+      } else if (deep) {
+        return (value as FabricInstance).deepClone(frozen);
+      } else {
+        return (value as FabricInstance).shallowClone(frozen);
+      }
+    }
 
     case NATIVE_TAGS.Array: {
       if (canReturnAsIs(value)) return value;
