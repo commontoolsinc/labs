@@ -1,6 +1,5 @@
 import { isInstance, isRecord } from "@commonfabric/utils/types";
 import {
-  FabricInstance,
   type FabricNativeObject,
   FabricSpecialObject,
   type FabricValue,

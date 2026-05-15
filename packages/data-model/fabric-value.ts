@@ -20,14 +20,11 @@ export {
 export { cloneIfNecessary, type CloneOptions } from "./value-clone.ts";
 
 import type {
-  FabricInstance,
   FabricNativeObject,
   FabricValue,
   FabricValueLayer,
 } from "./interface.ts";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
-import { isDeepFrozenFabricValue } from "./deep-freeze.ts";
-import type { Immutable } from "@commonfabric/utils/types";
 import {
   fabricFromNativeValueModern,
   isFabricCompatibleModern,
@@ -35,7 +32,6 @@ import {
   nativeFromFabricValueModern,
   shallowFabricFromNativeValueModern,
 } from "./fabric-value-modern.ts";
-import { cloneHelperModern } from "./value-clone.ts";
 import {
   fabricFromNativeValueLegacy,
   isFabricCompatibleLegacy,
@@ -46,7 +42,6 @@ export {
   isArrayIndexPropertyName,
   isArrayWithOnlyIndexProperties,
 } from "./array-utils.ts";
-import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 
 //
 // Configuration flags
