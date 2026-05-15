@@ -43,10 +43,8 @@ import {
   type SchedulerActionIdentityState,
 } from "./scheduler/diagnostics.ts";
 import {
-  captureDiagnosisRecord as captureDiagnosisRecordState,
   detectCausalCycles,
   type DiagnosisRecord,
-  runIdempotencyRecheck as runIdempotencyRecheckState,
 } from "./scheduler/diagnosis.ts";
 import {
   collectDirectWritersForLog,
@@ -67,13 +65,8 @@ import {
   type WriterIndexState,
 } from "./scheduler/dependency-index.ts";
 import {
-  addInFlightSource as addInFlightSourceState,
-  appendActionRunTrace,
   type InFlightSourceState,
-  invokeReactiveAction,
-  removeInFlightSource as removeInFlightSourceState,
-  startReactiveActionCommit,
-  watchReactiveActionCommit,
+  runSchedulerAction,
 } from "./scheduler/action-run.ts";
 import {
   buildPullInitialSeeds,
@@ -107,15 +100,10 @@ import {
   updateSchedulerActionChangeGroup,
   updateSchedulerActionType,
 } from "./scheduler/subscriptions.ts";
-import {
-  markReadersDirtyForChangedWrites as markReadersDirtyForChangedWritesState,
-  recordChangedComputationWrites as recordChangedComputationWritesState,
-  type WritePropagationState,
-} from "./scheduler/write-propagation.ts";
+import { type WritePropagationState } from "./scheduler/write-propagation.ts";
 import {
   type ActionTimingState,
   getActionStats as getActionStatsFromState,
-  recordActionTime as recordActionTimeState,
 } from "./scheduler/timing.ts";
 import { txToReactivityLog } from "./scheduler/reactivity.ts";
 import {
@@ -885,207 +873,52 @@ export class Scheduler {
   }
 
   async run(action: Action): Promise<any> {
-    logger.timeStart("scheduler", "run");
-    const actionId = this.getActionId(action);
-    this.runtime.telemetry.submit({
-      type: "scheduler.run",
-      actionId,
-      actionInfo: getSchedulerActionTelemetryInfo(action),
-    });
-
-    logger.debug("schedule-run-start", () => [
-      `[RUN] Starting action: ${actionId}`,
-      `Pull mode: ${this.pullMode}`,
-    ]);
-
-    if (this.runningPromise) await this.runningPromise;
-
-    const tx = this.runtime.edit({
-      changeGroup: this.actionChangeGroups.get(action),
-    });
-    (tx.tx as { debugActionId?: string }).debugActionId = actionId;
-    addInFlightSourceState(this.inFlightSourceState, action, tx.tx);
-    const actionStartTime = performance.now();
-
-    let result: any;
-    this.runningPromise = new Promise((resolve) => {
-      const finalizeAction = (error?: unknown) => {
-        // Record action execution time for cycle-aware scheduling
-        const elapsed = performance.now() - actionStartTime;
-        recordActionTimeState(this.actionTimingState, action, elapsed);
-        this.maybeAutoDebounce(action);
-        this.delays.markActionHasRun(action);
-        this.pullDemandedFirstRunComputations.delete(action);
-
-        try {
-          if (error) {
-            logger.error("schedule-error", () => [
-              `[RUN] Action failed: ${actionId}`,
-              `Error: ${error}`,
-            ]);
-            this.handleError(error as Error, action);
-          }
-        } finally {
-          // Set up new reactive subscriptions after the action runs
-
-          // Commit the transaction. The code continues synchronously after
-          // kicking off the commit, i.e. it assumes the commit will be
-          // successful. If it isn't, the data will be rolled back and all other
-          // reactive functions based on it will be retriggered. But also, the
-          // retry logic below will have re-scheduled this action, so
-          // topological sorting should move it before the dependencies.
-          const commitPromise = startReactiveActionCommit({
-            runtime: this.runtime,
-            tx,
-          });
-          const log = txToReactivityLog(tx);
-          watchReactiveActionCommit({
-            action,
-            tx,
-            log,
-            retries: this.retries,
-            pending: this.pending,
-            commitPromise,
-            resubscribe: (target, targetLog) =>
-              this.resubscribe(target, targetLog),
-            markDirectDirty: (target) => this.staleness.markDirectDirty(target),
-            queueExecution: () => this.queueExecution(),
-            removeInFlightSource: (target, source) =>
-              removeInFlightSourceState(
-                this.inFlightSourceState,
-                target,
-                source,
-              ),
-          });
-          const changedComputationWrites = recordChangedComputationWritesState(
-            this.writePropagationState,
-            action,
-            tx,
-            log,
-          );
-
-          logger.debug("schedule-run-complete", () => [
-            `[RUN] Action completed: ${actionId}`,
-            `Reads: ${log.reads.length}`,
-            `Writes: ${log.writes.length}`,
-            `Elapsed: ${elapsed.toFixed(2)}ms`,
-          ]);
-
-          if (this.collectActionRunTrace) {
-            appendActionRunTrace({
-              actionRunTrace: this.actionRunTrace,
-              actionParent: this.actionParent,
-              isEffectAction: this.isEffectAction,
-              getActionId: (target) => this.getActionId(target),
-              getSchedulingWrites: (target) =>
-                getSchedulingWritesFromState(
-                  this.schedulingWriteState,
-                  target,
-                ),
-            }, {
-              action,
-              actionId,
-              durationMs: elapsed,
-              log,
-            });
-          }
-
-          // Diagnosis capture: record read/write values for idempotency checking
-          if (this.diagnosisEnabled) {
-            captureDiagnosisRecordState({
-              diagnosisHistory: this.diagnosisHistory,
-              diagnosisNonIdempotent: this.diagnosisNonIdempotent,
-              createReadTx: () => this.runtime.edit(),
-              getActionTelemetryInfo: (target) =>
-                getSchedulerActionTelemetryInfo(target),
-            }, {
-              actionId,
-              action,
-              tx,
-              log,
-            });
-          }
-
-          // Inline idempotency re-run: when the mode is on, every
-          // computation gets a second synchronous run against post-commit
-          // state. An idempotent computation produces the same writes
-          // both times. Uses isEffectAction (persists past unsubscribe)
-          // since execute() calls unsubscribe() before run().
-          if (
-            this.idempotencyCheckMode &&
-            !this.isEffectAction.get(action)
-          ) {
-            logger.timeStart("scheduler", "run", "idempotencyRecheck");
-            try {
-              runIdempotencyRecheckState(
-                {
-                  idempotencyViolations: this.idempotencyViolations,
-                  createTx: () => this.runtime.edit(),
-                  invoke: (fn) => this.runtime.harness.invoke(fn),
-                  getActionId: (target) => this.getActionId(target),
-                  getActionTelemetryInfo: (target) =>
-                    getSchedulerActionTelemetryInfo(target),
-                },
-                action,
-                tx,
-                log,
-              );
-            } finally {
-              logger.timeEnd("scheduler", "run", "idempotencyRecheck");
-            }
-          }
-
-          logger.timeStart("scheduler", "run", "resubscribe");
-          try {
-            this.resubscribe(action, log);
-          } finally {
-            logger.timeEnd("scheduler", "run", "resubscribe");
-          }
-          if (this.pullMode && this.computations.has(action)) {
-            clearSchedulerDirectDirty(this.dirtySchedulingState, action);
-            markReadersDirtyForChangedWritesState(
-              this.writePropagationState,
-              action,
-              changedComputationWrites,
-            );
-          }
-          resolve(result);
-        }
-      };
-
-      invokeReactiveAction({
-        runtime: this.runtime,
-        setExecutingAction: (target, targetActionId) => {
-          this.executingAction = target;
-          this.currentActionId = targetActionId;
-        },
-        clearExecutingAction: () => {
-          this.executingAction = null;
-          this.currentActionId = undefined;
-        },
-      }, {
-        action,
-        actionId,
-        tx,
-        actionStartTime,
-      })
-        .then((invocation) => {
-          if (invocation.ok) {
-            result = invocation.result;
-            finalizeAction();
-          } else {
-            finalizeAction(invocation.error);
-          }
-        })
-        .catch((error) => {
-          finalizeAction(error);
-        });
-    });
-
-    return this.runningPromise.then((result) => {
-      logger.timeEnd("scheduler", "run");
-      return result;
-    });
+    return await runSchedulerAction({
+      runtime: this.runtime,
+      actionChangeGroups: this.actionChangeGroups,
+      inFlightSourceState: this.inFlightSourceState,
+      actionTimingState: this.actionTimingState,
+      pullDemandedFirstRunComputations: this.pullDemandedFirstRunComputations,
+      retries: this.retries,
+      pending: this.pending,
+      actionRunTrace: this.actionRunTrace,
+      actionParent: this.actionParent,
+      isEffectAction: this.isEffectAction,
+      diagnosisHistory: this.diagnosisHistory,
+      diagnosisNonIdempotent: this.diagnosisNonIdempotent,
+      idempotencyViolations: this.idempotencyViolations,
+      writePropagationState: this.writePropagationState,
+      computations: this.computations,
+      getRunningPromise: () => this.runningPromise,
+      setRunningPromise: (promise) => {
+        this.runningPromise = promise;
+      },
+      getPullMode: () => this.pullMode,
+      getCollectActionRunTrace: () => this.collectActionRunTrace,
+      getDiagnosisEnabled: () => this.diagnosisEnabled,
+      getIdempotencyCheckMode: () => this.idempotencyCheckMode,
+      getActionId: (target) => this.getActionId(target),
+      getActionTelemetryInfo: (target) =>
+        getSchedulerActionTelemetryInfo(target),
+      getSchedulingWrites: (target) =>
+        getSchedulingWritesFromState(this.schedulingWriteState, target),
+      maybeAutoDebounce: (target) => this.maybeAutoDebounce(target),
+      markActionHasRun: (target) => this.delays.markActionHasRun(target),
+      handleError: (error, target) => this.handleError(error, target),
+      resubscribe: (target, log) => this.resubscribe(target, log),
+      markDirectDirty: (target) => this.staleness.markDirectDirty(target),
+      clearDirectDirty: (target) =>
+        clearSchedulerDirectDirty(this.dirtySchedulingState, target),
+      queueExecution: () => this.queueExecution(),
+      setExecutingAction: (target, targetActionId) => {
+        this.executingAction = target;
+        this.currentActionId = targetActionId;
+      },
+      clearExecutingAction: () => {
+        this.executingAction = null;
+        this.currentActionId = undefined;
+      },
+    }, action);
   }
 
   idle(): Promise<void> {

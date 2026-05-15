@@ -1,6 +1,7 @@
 import { getLogger } from "@commonfabric/utils/logger";
 import type { Runtime } from "../runtime.ts";
 import type {
+  ChangeGroup,
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
   IStorageTransaction,
@@ -10,13 +11,26 @@ import {
   MAX_ACTION_RUN_TRACE_HISTORY,
   MAX_RETRIES_FOR_REACTIVE,
 } from "./constants.ts";
+import {
+  captureDiagnosisRecord,
+  type DiagnosisRecord,
+  runIdempotencyRecheck,
+} from "./diagnosis.ts";
 import { toActionRunTraceAddress } from "./diagnostics.ts";
+import { txToReactivityLog } from "./reactivity.ts";
+import { type ActionTimingState, recordActionTime } from "./timing.ts";
 import type {
   Action,
   ActionRunTraceEntry,
   EventHandler,
   ReactivityLog,
 } from "./types.ts";
+import {
+  markReadersDirtyForChangedWrites,
+  recordChangedComputationWrites,
+  type WritePropagationState,
+} from "./write-propagation.ts";
+import type { NonIdempotentReport, SchedulerActionInfo } from "../telemetry.ts";
 
 const logger = getLogger("scheduler", {
   enabled: true,
@@ -202,5 +216,291 @@ export function appendActionRunTrace(state: {
       (args.maxHistory ?? MAX_ACTION_RUN_TRACE_HISTORY)
   ) {
     state.actionRunTrace.shift();
+  }
+}
+
+export interface SchedulerActionRunState {
+  readonly runtime: Runtime;
+  readonly actionChangeGroups: WeakMap<Action, ChangeGroup>;
+  readonly inFlightSourceState: InFlightSourceState;
+  readonly actionTimingState: ActionTimingState;
+  readonly pullDemandedFirstRunComputations: WeakSet<Action>;
+  readonly retries: WeakMap<Action, number>;
+  readonly pending: Set<Action>;
+  readonly actionRunTrace: ActionRunTraceEntry[];
+  readonly actionParent: WeakMap<Action, Action>;
+  readonly isEffectAction: WeakMap<Action, boolean>;
+  readonly diagnosisHistory: Map<string, DiagnosisRecord[]>;
+  readonly diagnosisNonIdempotent: NonIdempotentReport[];
+  readonly idempotencyViolations: NonIdempotentReport[];
+  readonly writePropagationState: WritePropagationState;
+  readonly computations: ReadonlySet<Action>;
+  readonly getRunningPromise: () => Promise<unknown> | undefined;
+  readonly setRunningPromise: (promise: Promise<unknown>) => void;
+  readonly getPullMode: () => boolean;
+  readonly getCollectActionRunTrace: () => boolean;
+  readonly getDiagnosisEnabled: () => boolean;
+  readonly getIdempotencyCheckMode: () => boolean;
+  readonly getActionId: (action: Action | EventHandler) => string;
+  readonly getActionTelemetryInfo: (
+    action: Action | EventHandler,
+  ) => SchedulerActionInfo | undefined;
+  readonly getSchedulingWrites: (
+    action: Action,
+  ) => readonly IMemorySpaceAddress[] | undefined;
+  readonly maybeAutoDebounce: (action: Action) => void;
+  readonly markActionHasRun: (action: Action) => void;
+  readonly handleError: (error: Error, action: Action) => void;
+  readonly resubscribe: (action: Action, log: ReactivityLog) => void;
+  readonly markDirectDirty: (action: Action) => void;
+  readonly clearDirectDirty: (action: Action) => void;
+  readonly queueExecution: () => void;
+  readonly setExecutingAction: (action: Action, actionId: string) => void;
+  readonly clearExecutingAction: () => void;
+}
+
+export async function runSchedulerAction(
+  state: SchedulerActionRunState,
+  action: Action,
+): Promise<any> {
+  logger.timeStart("scheduler", "run");
+  const actionId = state.getActionId(action);
+  state.runtime.telemetry.submit({
+    type: "scheduler.run",
+    actionId,
+    actionInfo: state.getActionTelemetryInfo(action),
+  });
+
+  logger.debug("schedule-run-start", () => [
+    `[RUN] Starting action: ${actionId}`,
+    `Pull mode: ${state.getPullMode()}`,
+  ]);
+
+  const runningPromise = state.getRunningPromise();
+  if (runningPromise) await runningPromise;
+
+  const tx = state.runtime.edit({
+    changeGroup: state.actionChangeGroups.get(action),
+  });
+  (tx.tx as { debugActionId?: string }).debugActionId = actionId;
+  addInFlightSource(state.inFlightSourceState, action, tx.tx);
+  const actionStartTime = performance.now();
+
+  let result: any;
+  const nextRunningPromise = new Promise((resolve) => {
+    const finalizeAction = (error?: unknown) => {
+      finalizeSchedulerAction(state, {
+        action,
+        actionId,
+        tx,
+        actionStartTime,
+        result,
+        error,
+        resolve,
+      });
+    };
+
+    invokeReactiveAction({
+      runtime: state.runtime,
+      setExecutingAction: state.setExecutingAction,
+      clearExecutingAction: state.clearExecutingAction,
+    }, {
+      action,
+      actionId,
+      tx,
+      actionStartTime,
+    })
+      .then((invocation) => {
+        if (invocation.ok) {
+          result = invocation.result;
+          finalizeAction();
+        } else {
+          finalizeAction(invocation.error);
+        }
+      })
+      .catch((error) => {
+        finalizeAction(error);
+      });
+  });
+  state.setRunningPromise(nextRunningPromise);
+
+  return nextRunningPromise.then((result) => {
+    logger.timeEnd("scheduler", "run");
+    return result;
+  });
+}
+
+function finalizeSchedulerAction(
+  state: SchedulerActionRunState,
+  args: {
+    readonly action: Action;
+    readonly actionId: string;
+    readonly tx: IExtendedStorageTransaction;
+    readonly actionStartTime: number;
+    readonly result: unknown;
+    readonly error?: unknown;
+    readonly resolve: (value: unknown) => void;
+  },
+): void {
+  // Record action execution time for cycle-aware scheduling
+  const elapsed = performance.now() - args.actionStartTime;
+  recordActionTime(state.actionTimingState, args.action, elapsed);
+  state.maybeAutoDebounce(args.action);
+  state.markActionHasRun(args.action);
+  state.pullDemandedFirstRunComputations.delete(args.action);
+
+  try {
+    if (args.error) {
+      logger.error("schedule-error", () => [
+        `[RUN] Action failed: ${args.actionId}`,
+        `Error: ${args.error}`,
+      ]);
+      state.handleError(args.error as Error, args.action);
+    }
+  } finally {
+    finalizeReactiveActionCommit(state, args, elapsed);
+  }
+}
+
+function finalizeReactiveActionCommit(
+  state: SchedulerActionRunState,
+  args: {
+    readonly action: Action;
+    readonly actionId: string;
+    readonly tx: IExtendedStorageTransaction;
+    readonly result: unknown;
+    readonly resolve: (value: unknown) => void;
+  },
+  elapsed: number,
+): void {
+  // Set up new reactive subscriptions after the action runs
+
+  // Commit the transaction. The code continues synchronously after
+  // kicking off the commit, i.e. it assumes the commit will be
+  // successful. If it isn't, the data will be rolled back and all other
+  // reactive functions based on it will be retriggered. But also, the
+  // retry logic below will have re-scheduled this action, so
+  // topological sorting should move it before the dependencies.
+  const commitPromise = startReactiveActionCommit({
+    runtime: state.runtime,
+    tx: args.tx,
+  });
+  const log = txToReactivityLog(args.tx);
+  watchReactiveActionCommit({
+    action: args.action,
+    tx: args.tx,
+    log,
+    retries: state.retries,
+    pending: state.pending,
+    commitPromise,
+    resubscribe: state.resubscribe,
+    markDirectDirty: state.markDirectDirty,
+    queueExecution: state.queueExecution,
+    removeInFlightSource: (target, source) =>
+      removeInFlightSource(
+        state.inFlightSourceState,
+        target,
+        source,
+      ),
+  });
+  const changedComputationWrites = recordChangedComputationWrites(
+    state.writePropagationState,
+    args.action,
+    args.tx,
+    log,
+  );
+
+  logger.debug("schedule-run-complete", () => [
+    `[RUN] Action completed: ${args.actionId}`,
+    `Reads: ${log.reads.length}`,
+    `Writes: ${log.writes.length}`,
+    `Elapsed: ${elapsed.toFixed(2)}ms`,
+  ]);
+
+  recordOptionalActionRunDiagnostics(state, args, log, elapsed);
+
+  logger.timeStart("scheduler", "run", "resubscribe");
+  try {
+    state.resubscribe(args.action, log);
+  } finally {
+    logger.timeEnd("scheduler", "run", "resubscribe");
+  }
+  if (state.getPullMode() && state.computations.has(args.action)) {
+    state.clearDirectDirty(args.action);
+    markReadersDirtyForChangedWrites(
+      state.writePropagationState,
+      args.action,
+      changedComputationWrites,
+    );
+  }
+  args.resolve(args.result);
+}
+
+function recordOptionalActionRunDiagnostics(
+  state: SchedulerActionRunState,
+  args: {
+    readonly action: Action;
+    readonly actionId: string;
+    readonly tx: IExtendedStorageTransaction;
+  },
+  log: ReactivityLog,
+  elapsed: number,
+): void {
+  if (state.getCollectActionRunTrace()) {
+    appendActionRunTrace({
+      actionRunTrace: state.actionRunTrace,
+      actionParent: state.actionParent,
+      isEffectAction: state.isEffectAction,
+      getActionId: state.getActionId,
+      getSchedulingWrites: state.getSchedulingWrites,
+    }, {
+      action: args.action,
+      actionId: args.actionId,
+      durationMs: elapsed,
+      log,
+    });
+  }
+
+  // Diagnosis capture: record read/write values for idempotency checking
+  if (state.getDiagnosisEnabled()) {
+    captureDiagnosisRecord({
+      diagnosisHistory: state.diagnosisHistory,
+      diagnosisNonIdempotent: state.diagnosisNonIdempotent,
+      createReadTx: () => state.runtime.edit(),
+      getActionTelemetryInfo: state.getActionTelemetryInfo,
+    }, {
+      actionId: args.actionId,
+      action: args.action,
+      tx: args.tx,
+      log,
+    });
+  }
+
+  // Inline idempotency re-run: when the mode is on, every
+  // computation gets a second synchronous run against post-commit
+  // state. An idempotent computation produces the same writes
+  // both times. Uses isEffectAction (persists past unsubscribe)
+  // since execute() calls unsubscribe() before run().
+  if (
+    state.getIdempotencyCheckMode() &&
+    !state.isEffectAction.get(args.action)
+  ) {
+    logger.timeStart("scheduler", "run", "idempotencyRecheck");
+    try {
+      runIdempotencyRecheck(
+        {
+          idempotencyViolations: state.idempotencyViolations,
+          createTx: () => state.runtime.edit(),
+          invoke: (fn) => state.runtime.harness.invoke(fn),
+          getActionId: state.getActionId,
+          getActionTelemetryInfo: state.getActionTelemetryInfo,
+        },
+        args.action,
+        args.tx,
+        log,
+      );
+    } finally {
+      logger.timeEnd("scheduler", "run", "idempotencyRecheck");
+    }
   }
 }
