@@ -1290,6 +1290,43 @@ describe("link-utils", () => {
       });
     });
 
+    it("should parse scope suffixes on the handle segment", () => {
+      const link = `/${longId}@user/path/to/cell`;
+      const result = parseLLMFriendlyLink(link, space);
+
+      expect(result).toEqual({
+        id: longId,
+        path: ["path", "to", "cell"],
+        space: space,
+        scope: "user",
+      });
+    });
+
+    it("should parse scope suffixes on cross-space handles", () => {
+      const otherSpace = "did:key:z6MkrX123abc";
+      const link = `/@${otherSpace}/${longId}@session/path`;
+      const result = parseLLMFriendlyLink(link, space);
+
+      expect(result).toEqual({
+        id: longId,
+        path: ["path"],
+        space: otherSpace,
+        scope: "session",
+      });
+    });
+
+    it("should reject invalid scope suffixes on the handle segment", () => {
+      expect(() => parseLLMFriendlyLink(`/${longId}@any/path`, space)).toThrow(
+        /Invalid scope suffix/,
+      );
+      expect(() =>
+        parseLLMFriendlyLink(`/${longId}@inherit/path`, space)
+      ).toThrow(/Invalid scope suffix/);
+      expect(() => parseLLMFriendlyLink(`/${longId}@/path`, space)).toThrow(
+        /Invalid scope suffix/,
+      );
+    });
+
     it("should parse link without space if optional", () => {
       const link = `/${longId}/path`;
       const result = parseLLMFriendlyLink(link);
@@ -1333,6 +1370,30 @@ describe("link-utils", () => {
       const result = createLLMFriendlyLink(link as any);
 
       expect(result).toBe(`/${longId}/path/to/cell`);
+    });
+
+    it("should create LLM friendly links with non-space scope suffixes", () => {
+      const link: NormalizedLink = {
+        id: longId,
+        path: ["path"],
+        space: space,
+        scope: "user",
+      };
+      const result = createLLMFriendlyLink(link as any);
+
+      expect(result).toBe(`/${longId}@user/path`);
+    });
+
+    it("should omit explicit space scope when creating LLM friendly links", () => {
+      const link: NormalizedLink = {
+        id: longId,
+        path: ["path"],
+        space: space,
+        scope: "space",
+      };
+      const result = createLLMFriendlyLink(link as any);
+
+      expect(result).toBe(`/${longId}/path`);
     });
 
     it("should handle empty path", () => {
