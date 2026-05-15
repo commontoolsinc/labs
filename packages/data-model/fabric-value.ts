@@ -17,6 +17,8 @@ export {
   type SerializationContext,
 } from "./interface.ts";
 
+export { cloneIfNecessary, type CloneOptions } from "./value-clone.ts";
+
 import type {
   FabricInstance,
   FabricNativeObject,
@@ -45,32 +47,6 @@ export {
   isArrayWithOnlyIndexProperties,
 } from "./array-utils.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
-
-/**
- * Options for `cloneIfNecessary()`.
- */
-export interface CloneOptions {
-  /** Whether the result should be frozen. Default: `true`. */
-  frozen?: boolean;
-  /** Whether to clone deeply or shallowly. Default: `true`. */
-  deep?: boolean;
-  /**
-   * Force a copy to be made.
-   *
-   * - When `frozen = false`: defaults to `true` (always clone to guarantee
-   *   mutable isolation).
-   * - When `frozen = true`: defaults to `false` (clone only if necessary
-   *   to achieve frozenness).
-   * - `{ frozen: true, force: true }` is an error (pointless to force-copy
-   *   something that will be immutable anyway).
-   * - `{ frozen: false, force: false, deep: false }`: valid -- caller owns
-   *   the reference and wants it mutable; thaws if frozen, returns as-is
-   *   if already mutable.
-   * - `{ frozen: false, force: false, deep: true }`: error -- ambiguous
-   *   semantics for trees with mixed frozenness.
-   */
-  force?: boolean;
-}
 
 //
 // Configuration flags
@@ -237,84 +213,4 @@ export function valueEqual(a: unknown, b: unknown): boolean {
   return modernDataModelEnabled
     ? deepEqual(a, b)
     : JSON.stringify(a) === JSON.stringify(b);
-}
-
-//
-// Non-flag-dispatched functions
-//
-
-/**
- * Clones an already-valid `FabricValue` to achieve a desired frozenness,
- * with control over depth and copy semantics.
- *
- * Unlike `fabricFromNativeValue()` (which converts native JS values into
- * fabric wrappers), this function assumes the input is already a valid
- * `FabricValue` and only adjusts frozenness by cloning where necessary.
- *
- * Both flag states use modern clone semantics; the legacy dispatch target
- * delegates to the modern implementation.
- *
- * @param value - An already-valid `FabricValue`.
- * @param options - See `CloneOptions`. Defaults: `{ frozen: true, deep: true }`.
- */
-export function cloneIfNecessary<T extends FabricValue>(
-  value: T,
-  options?: CloneOptions & { frozen?: true },
-): Immutable<T>;
-export function cloneIfNecessary<T extends FabricValue>(
-  value: T,
-  options: CloneOptions & { frozen: false },
-): T;
-export function cloneIfNecessary<T extends FabricValue>(
-  value: T,
-  options?: CloneOptions,
-): T;
-export function cloneIfNecessary<T extends FabricValue>(
-  value: T,
-  options?: CloneOptions,
-): T {
-  const frozen = options?.frozen ?? true;
-  const deep = options?.deep ?? true;
-  const force = options?.force ?? (frozen ? false : true);
-
-  if (frozen && force) {
-    throw new Error(
-      "cloneIfNecessary: { frozen: true, force: true } is invalid " +
-        "(pointless to force-copy an immutable value)",
-    );
-  }
-
-  if (!frozen && !force && deep) {
-    throw new Error(
-      "cloneIfNecessary: { frozen: false, force: false, deep: true } is invalid " +
-        "(ambiguous: mixed-frozenness trees have no clear shallow-thaw semantics)",
-    );
-  }
-
-  return cloneIfNecessaryModern(value, frozen, deep, force) as T;
-}
-
-/**
- * Clones an assumed-valid `FabricValue` to achieve a desired frozenness,
- * with control over depth and copy semantics.
- *
- * Unlike `fabricFromNativeValue()` (which converts native JS values into
- * fabric wrappers), this function assumes the input is already a valid
- * `FabricValue` and only adjusts frozenness by cloning where necessary.
- *
- * Callers must resolve `CloneOptions` defaults and validate before calling;
- * the dispatcher in `fabric-value.ts` handles that.
- *
- * @param value - An already-valid `FabricValue`.
- * @param frozen - Whether the result should be frozen.
- * @param deep - Whether to clone deeply or shallowly.
- * @param force - Whether to force a copy.
- */
-export function cloneIfNecessaryModern(
-  value: FabricValue,
-  frozen: boolean,
-  deep: boolean,
-  force: boolean,
-): FabricValue {
-  return cloneHelperModern(value, frozen, deep, force, null);
 }

@@ -1,13 +1,33 @@
-/**
- * This file exists as an intermediate stepping stone as the modern data model
- * gets rolled out. Once the experiment flag is retired, the modern code will
- * end up fully merged into `fabric-value.ts`, including the contents of this
- * file.
- */
-
 import { FabricInstance, FabricValue } from "./interface.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { isDeepFrozenFabricValue } from "./deep-freeze.ts";
+import type { Immutable } from "@commonfabric/utils/types";
+
+/**
+ * Options for `cloneIfNecessary()`.
+ */
+export interface CloneOptions {
+  /** Whether the result should be frozen. Default: `true`. */
+  frozen?: boolean;
+  /** Whether to clone deeply or shallowly. Default: `true`. */
+  deep?: boolean;
+  /**
+   * Force a copy to be made.
+   *
+   * - When `frozen = false`: defaults to `true` (always clone to guarantee
+   *   mutable isolation).
+   * - When `frozen = true`: defaults to `false` (clone only if necessary
+   *   to achieve frozenness).
+   * - `{ frozen: true, force: true }` is an error (pointless to force-copy
+   *   something that will be immutable anyway).
+   * - `{ frozen: false, force: false, deep: false }`: valid -- caller owns
+   *   the reference and wants it mutable; thaws if frozen, returns as-is
+   *   if already mutable.
+   * - `{ frozen: false, force: false, deep: true }`: error -- ambiguous
+   *   semantics for trees with mixed frozenness.
+   */
+  force?: boolean;
+}
 
 /**
  * Tracks an object for circular reference detection during deep cloning.
@@ -25,6 +45,57 @@ function trackForCircularity(
   }
   seen.add(obj);
   return seen;
+}
+
+/**
+ * Clones an already-valid `FabricValue` to achieve a desired frozenness,
+ * with control over depth and copy semantics.
+ *
+ * Unlike `fabricFromNativeValue()` (which converts native JS values into
+ * fabric wrappers), this function assumes the input is already a valid
+ * `FabricValue` and only adjusts frozenness by cloning where necessary.
+ *
+ * Both flag states use modern clone semantics; the legacy dispatch target
+ * delegates to the modern implementation.
+ *
+ * @param value - An already-valid `FabricValue`.
+ * @param options - See `CloneOptions`. Defaults: `{ frozen: true, deep: true }`.
+ */
+export function cloneIfNecessary<T extends FabricValue>(
+  value: T,
+  options?: CloneOptions & { frozen?: true },
+): Immutable<T>;
+export function cloneIfNecessary<T extends FabricValue>(
+  value: T,
+  options: CloneOptions & { frozen: false },
+): T;
+export function cloneIfNecessary<T extends FabricValue>(
+  value: T,
+  options?: CloneOptions,
+): T;
+export function cloneIfNecessary<T extends FabricValue>(
+  value: T,
+  options?: CloneOptions,
+): T {
+  const frozen = options?.frozen ?? true;
+  const deep = options?.deep ?? true;
+  const force = options?.force ?? (frozen ? false : true);
+
+  if (frozen && force) {
+    throw new Error(
+      "cloneIfNecessary: { frozen: true, force: true } is invalid " +
+        "(pointless to force-copy an immutable value)",
+    );
+  }
+
+  if (!frozen && !force && deep) {
+    throw new Error(
+      "cloneIfNecessary: { frozen: false, force: false, deep: true } is invalid " +
+        "(ambiguous: mixed-frozenness trees have no clear shallow-thaw semantics)",
+    );
+  }
+
+  return cloneHelperModern(value, frozen, deep, force) as T;
 }
 
 /**
@@ -46,7 +117,7 @@ export function cloneHelperModern(
   frozen: boolean,
   deep: boolean,
   force: boolean,
-  seen: Set<object> | null,
+  seen: Set<object> | null = null,
 ): FabricValue {
   // Identity optimization: when `force` is off, check if the value's frozenness
   // already matches the requested state. Deep mode uses
