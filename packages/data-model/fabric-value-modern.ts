@@ -633,9 +633,9 @@ function cloneHelper(
       if (canReturnAsIs(value)) {
         return value;
       } else if (deep) {
-        throw new Error("Cannot yet handle deep cloning of `FabricInstance`s.");
+        return (value as FabricInstance).deepClone(frozen);
       } else {
-        return (value as FabricInstance).shallowClone(frozen) as FabricValue;
+        return (value as FabricInstance).shallowClone(frozen);
       }
     }
 
