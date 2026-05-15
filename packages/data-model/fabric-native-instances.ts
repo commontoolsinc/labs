@@ -5,7 +5,7 @@ import {
   RECONSTRUCT,
   type ReconstructionContext,
 } from "./interface.ts";
-import { isDeepFrozen } from "./deep-freeze.ts";
+import { deepFreeze, isDeepFrozen } from "./deep-freeze.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { TAGS } from "./fabric-type-tags.ts";
 import { FrozenMap, FrozenSet } from "./frozen-builtins.ts";
@@ -260,7 +260,7 @@ export class FabricError extends FabricNativeWrapper<Error> {
       EMPTY_RECONSTRUCTION_CONTEXT,
     );
 
-    return frozen ? Object.freeze(result) as FabricError : result;
+    return frozen ? deepFreeze(result) : result;
   }
 
   /**
