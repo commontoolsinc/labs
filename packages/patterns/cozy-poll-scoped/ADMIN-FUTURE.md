@@ -1,27 +1,111 @@
 # Admin: future direction (CFC integrity)
 
-Current implementation: the first user to join the poll is captured into
-`adminName: PerSpace<string>`. Admin actions (add/remove option, reset votes)
-short-circuit when `myName !== adminName`. This is enforced at the pattern level
-— a determined caller can invoke a handler with arbitrary inputs and the runtime
-will not stop them.
+## Current implementation
 
-Per Berni: the right way to model authority is via CFC integrity labels rather
-than runtime equality checks.
+The first user to join the poll is captured into `adminName: PerSpace<string>`.
+Admin actions (add/remove option, reset votes) short-circuit when
+`myName !== adminName`. This is enforced at the pattern level — a determined
+caller can invoke a handler with arbitrary inputs and the runtime will not stop
+them. The "OCC + auto-retry" guarantees in `packages/runner/src/scheduler.ts`
+make the _claim race_ safe, but they don't make the admin role itself
+unforgeable.
 
-Sketch of the target shape:
+## Target direction
 
-- Each `User` entity in the directory carries an `admin` integrity label,
-  applied once at claim time.
-- The `options` (and possibly `votes`) cells declare a write-side IFC
-  constraint, e.g. `ifc: { requiredIntegrity: ["admin"] }`.
-- Handlers that mutate `options` run only when the invocation credentials carry
-  the `admin` label — non-admin writes are rejected at the kernel layer.
-- Pattern-level conditionals (e.g. hiding admin UI when `!isAdmin`) remain as
-  UX, but are no longer the security boundary.
+Authority should be modeled via **CFC integrity claims** rather than runtime
+equality checks. The reference implementation arrived in **PR
+[#3358](https://github.com/commontoolsinc/labs/pull/3358) "[codex] Add CFC group
+chat demo and authorship fixes"** by Berni (open at time of writing), which
+introduces the missing primitives:
 
-This deferral is intentional. The CFC wiring (label propagation through
-handlers, integrity-aware schema fields, CFC tooling around scoped reads/writes)
-needs more end-to-end coverage before patterns start depending on it for
-authority decisions. Once it lands, the pattern-level `adminName` check can be
-removed and the `isAdmin` derive becomes a UX-only signal.
+```ts
+// New in @commonfabric/api/cfc.ts (PR #3358):
+type RepresentsCurrentUser<T> = Cfc<T, {
+  addIntegrity: [
+    { kind: "represents-principal"; subject: { __ctCurrentPrincipal: true } },
+  ];
+}>;
+type AuthoredByCurrentUser<T> = Cfc<T, {
+  addIntegrity: [
+    { kind: "authored-by"; subject: { __ctCurrentPrincipal: true } },
+  ];
+}>;
+```
+
+The PR also fixes the runner so nested CFC labels survive array-item persistence
+— required for "every item in a per-space list carries its own integrity claim."
+
+## Canonical reference once PR #3358 lands
+
+`packages/patterns/cfc-group-chat-demo/` (added in #3358) is the worked example.
+The shape that translates to cozy-poll:
+
+```ts
+// Per-user pointer to my profile in the space-scoped directory.
+// (Same idiom we already use here for `me: PerUser<{user?: User}>`
+//  and verified in packages/patterns/scoped-user-directory/.)
+myProfile: PerUser<{ profile?: ProfileCell }>;
+
+// The profile value carries "represents me" — the runtime checks
+// the current principal against this when reading.
+type TrustedProfile = RepresentsCurrentUser<
+  TrustedActionWrite<ChatProfile, ...>
+>;
+
+// Each item in the per-space list carries an authorship claim that's
+// verified at render time. No manual requiredIntegrity plumbing needed —
+// render policy auto-infers it from the author cell type.
+type TrustedSentChatMessage = AuthoredByCurrentUser<
+  TrustedActionWrite<SentChatMessage<ProfileCell>, ...>
+>;
+```
+
+UI rendering uses a component like `VerifiedChatBubble({ message })` which
+transparently verifies the integrity claim before showing trusted content.
+
+## Translation for cozy-poll
+
+When the wiring lands, the cozy-poll equivalents would be roughly:
+
+- `users: PerSpace<TrustedProfile[]>` — directory entries carry
+  `RepresentsCurrentUser` and a `TrustedActionWrite` constraint on the
+  profile-save handler.
+- `votes: PerSpace<AuthoredByCurrentUser<Vote>[]>` — each vote is
+  signed-by-construction; spoofing another user's vote is rejected at the kernel
+  before persistence.
+- `options: PerSpace<...>` — write-gate this on an admin integrity claim. Exact
+  shape TBD; likely a separate `IsAdmin` integrity claim added to the admin's
+  profile on first-join, and `RequiresIntegrity<...,
+  ["IsAdmin"]>` on the
+  options/votes-reset write paths.
+- The pattern-level `myName === adminName` check becomes UX-only — hide the
+  admin UI when the viewer doesn't carry the claim, but the security boundary
+  moves to the kernel.
+
+## Why we deferred
+
+PR #3358 is the first end-to-end demonstration of nested CFC labels through
+per-space arrays _and_ the `RepresentsCurrentUser` / `AuthoredByCurrentUser`
+primitives. Until it merges, building cozy-poll against this would mean either:
+
+- Vendoring the PR's branch locally (fragile; API may still shift).
+- Reimplementing the runner-side CFC label propagation ourselves (out of scope
+  for a pattern).
+
+Once #3358 lands, the path forward is straightforward: the pattern-level
+`adminName` equality check stays for compatibility, but the actual security
+boundary moves to CFC labels on the write paths, with the `cfc-group-chat-demo`
+as the reference for the exact API shape.
+
+## Cross-references
+
+- [PR #3358](https://github.com/commontoolsinc/labs/pull/3358) — the enabling
+  work. `packages/patterns/cfc-group-chat-demo/trusted.tsx` is the most
+  condensed reference for the layered type shape.
+- [`packages/patterns/scoped-user-directory/`](../scoped-user-directory/) —
+  verified that the per-user-pointer-into-per-space-directory idiom works; this
+  is the structural baseline that PR #3358's chat demo also uses (just with
+  CFC-typed value wrappers).
+- [`docs/development/scoped-cells-field-notes.md`](../../../docs/development/scoped-cells-field-notes.md)
+  — session notes from the original cozy-poll-scoped build, including the OCC +
+  retry guarantees the current admin-claim flow relies on.
