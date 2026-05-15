@@ -293,7 +293,7 @@ function fabricFromNativeValueModernInternal(
     if (isOriginalRecord) {
       converted.set(original, value);
     }
-    return value as FabricValue;
+    return value;
   }
 
   // TODO(danfuzz): Look into avoiding this special case for `FabricError`.
@@ -317,7 +317,7 @@ function fabricFromNativeValueModernInternal(
     if (isOriginalRecord) {
       converted.set(original, result);
     }
-    return result as FabricValue;
+    return result;
   }
 
   // `FabricSpecialObject` (primitives and protocol types) -- pass through
