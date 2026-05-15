@@ -7,7 +7,7 @@
 
 import { FabricInstance, FabricValue } from "./interface.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
-import { isDeepFrozenFabricValue } from "./fabric-value-modern.ts";
+import { isDeepFrozenFabricValue } from "./deep-freeze.ts";
 
 /**
  * Tracks an object for circular reference detection during deep cloning.

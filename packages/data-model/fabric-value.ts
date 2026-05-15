@@ -24,10 +24,10 @@ import type {
   FabricValueLayer,
 } from "./interface.ts";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { isDeepFrozenFabricValue } from "./deep-freeze.ts";
 import type { Immutable } from "@commonfabric/utils/types";
 import {
   fabricFromNativeValueModern,
-  isDeepFrozenFabricValue,
   isFabricCompatibleModern,
   isFabricValueModern,
   nativeFromFabricValueModern,
