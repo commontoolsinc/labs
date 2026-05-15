@@ -253,24 +253,42 @@ describe("cloneIfNecessary", () => {
         expect(func).toThrow(/Cannot yet handle/);
       });
 
-      it("produces mutable FabricError clone when frozen=false", () => {
+      it("produces mutable FabricError clone (shallow, frozen=false)", () => {
+        // A *deep* clone of a `FabricInstance` now throws (we can't yet
+        // traverse its internals), so the only way to get a mutable clone is
+        // a shallow one: `deep: false` yields a `shallowClone()`.
         const error = new FabricError(new Error("test"));
         Object.freeze(error);
         const result = cloneIfNecessary(
           error as unknown as FabricValue,
-          { frozen: false },
+          { frozen: false, deep: false },
         );
         expect(result).toBeInstanceOf(FabricError);
         expect(result).not.toBe(error);
         expect(Object.isFrozen(result)).toBe(false);
       });
 
-      it("handles FabricError nested in an object", () => {
+      it("cannot yet deep-clone a FabricError nested in an object", () => {
+        // The can't-handle guard fires for *nested* `FabricInstance`s too,
+        // not just a top-level one.
         const error = new FabricError(new Error("nested"));
         const value = { err: error, x: 42 } as FabricValue;
-        const result = cloneIfNecessary(value) as Record<string, unknown>;
+        expect(() => cloneIfNecessary(value)).toThrow(/Cannot yet handle/);
+      });
+
+      it("shallow-clones an object containing a FabricError (deep=false)", () => {
+        // The guard is specifically about *deep* traversal: a shallow clone
+        // of a container is fine -- the nested instance is shared by
+        // reference, never traversed.
+        const error = new FabricError(new Error("nested"));
+        const value = { err: error, x: 42 } as FabricValue;
+        const result = cloneIfNecessary(value, { deep: false }) as Record<
+          string,
+          unknown
+        >;
+        expect(result).not.toBe(value);
         expect(Object.isFrozen(result)).toBe(true);
-        expect(result.err).toBeInstanceOf(FabricError);
+        expect(result.err).toBe(error);
         expect(result.x).toBe(42);
       });
     });
