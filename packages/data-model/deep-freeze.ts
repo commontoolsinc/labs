@@ -184,12 +184,12 @@ export function isDeepFrozenFabricValue(value: unknown): value is FabricValue {
       );
     } else if (Array.isArray(item)) {
       for (let i = 0; i <= item.length; i++) {
-        if (i in item && !isDeepFrozenFabricValue(item[i])) return false;
+        if (i in item && !checkValue(item[i])) return false;
       }
       return true;
     } else {
       for (const v of Object.values(item)) {
-        if (!isDeepFrozenFabricValue(v)) return false;
+        if (!checkValue(v)) return false;
       }
       return true;
     }
