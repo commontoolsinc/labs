@@ -16,7 +16,7 @@ import {
 import { FabricBytes } from "./fabric-bytes.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { isArrayWithOnlyIndexProperties } from "./array-utils.ts";
-import { cloneHelperModern } from "./value-clone.ts";
+import { cloneHelper } from "./value-clone.ts";
 import { isDeepFrozenFabricValue } from "./deep-freeze.ts";
 
 /**
@@ -101,8 +101,8 @@ export function shallowFabricFromNativeValueModern(
 
     case NATIVE_TAGS.Array:
     case NATIVE_TAGS.Object:
-      // Arrays and plain objects: delegate frozenness handling to `cloneHelperModern()`.
-      return cloneHelperModern(
+      // Arrays and plain objects: delegate frozenness handling to `cloneHelper()`.
+      return cloneHelper(
         value as FabricValue,
         freeze,
         false,
@@ -119,7 +119,7 @@ export function shallowFabricFromNativeValueModern(
           `\`toJSON()\` on ${typeof value} returned something other than a fabric value`,
         );
       }
-      return cloneHelperModern(
+      return cloneHelper(
         converted as FabricValue,
         freeze,
         false,
@@ -131,8 +131,8 @@ export function shallowFabricFromNativeValueModern(
     case NATIVE_TAGS.FabricInstance: {
       // `FabricInstance` values (`FabricError`, `UnknownValue`, etc.)
       // are already valid `FabricValue` members. Delegate frozenness
-      // handling to `cloneHelperModern()`.
-      return cloneHelperModern(
+      // handling to `cloneHelper()`.
+      return cloneHelper(
         value as FabricValue,
         freeze,
         false,

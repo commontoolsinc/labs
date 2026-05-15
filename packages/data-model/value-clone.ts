@@ -95,7 +95,7 @@ export function cloneIfNecessary<T extends FabricValue>(
     );
   }
 
-  return cloneHelperModern(value, frozen, deep, force) as T;
+  return cloneHelper(value, frozen, deep, force) as T;
 }
 
 /**
@@ -112,7 +112,7 @@ export function cloneIfNecessary<T extends FabricValue>(
  * Deep mode uses `isDeepFrozenFabricValue()` for identity optimization;
  * shallow mode uses `Object.isFrozen(value) === frozen`.
  */
-export function cloneHelperModern(
+export function cloneHelper(
   value: FabricValue,
   frozen: boolean,
   deep: boolean,
@@ -162,7 +162,7 @@ export function cloneHelperModern(
       for (let i = 0; i < arr.length; i++) {
         if (i in arr) {
           copy[i] = deep
-            ? cloneHelperModern(arr[i], frozen, deep, force, seen)
+            ? cloneHelper(arr[i], frozen, deep, force, seen)
             : arr[i];
         }
       }
@@ -180,7 +180,7 @@ export function cloneHelperModern(
       const copy = Object.create(proto) as Record<string, FabricValue>;
       if (deep) {
         for (const [key, val] of Object.entries(obj)) {
-          copy[key] = cloneHelperModern(
+          copy[key] = cloneHelper(
             val as FabricValue,
             frozen,
             deep,
