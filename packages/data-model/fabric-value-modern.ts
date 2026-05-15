@@ -2,7 +2,6 @@ import { isInstance, isRecord } from "@commonfabric/utils/types";
 import {
   FabricInstance,
   type FabricNativeObject,
-  FabricPrimitive,
   FabricSpecialObject,
   type FabricValue,
   type FabricValueLayer,
@@ -629,10 +628,16 @@ function cloneHelper(
     case NATIVE_TAGS.FabricBytes:
       return value;
 
-    case NATIVE_TAGS.FabricInstance:
+    case NATIVE_TAGS.FabricInstance: {
       // Identity optimization: already-correct frozenness needs no clone.
-      if (canReturnAsIs(value)) return value;
-      return (value as FabricInstance).shallowClone(frozen) as FabricValue;
+      if (canReturnAsIs(value)) {
+        return value;
+      } else if (deep) {
+        throw new Error("Cannot yet handle deep cloning of `FabricInstance`s.");
+      } else {
+        return (value as FabricInstance).shallowClone(frozen) as FabricValue;
+      }
+    }
 
     case NATIVE_TAGS.Array: {
       if (canReturnAsIs(value)) return value;

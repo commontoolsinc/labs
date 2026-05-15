@@ -144,30 +144,52 @@ export function deepFreeze<T>(value: T): T {
  * also deep-frozen `FabricValue`s.
  */
 export function isDeepFrozenFabricValue(value: unknown): boolean {
-  if (value === null || (typeof value !== "object")) return true; // primitives
-  if (!Object.isFrozen(value)) return false;
+  // TODO(@danfuzz): A function `isFabricValue()` should ultimately get
+  // extracted from this function, which does just the recursive type check.
+  // Note that, as of this writing, the existing function with that name (a)
+  // only does a single layer check, and (b) is only ever exercised in unit
+  // tests, so it should be safe to replace it.
 
-  if (Array.isArray(value)) {
-    for (let i = 0; i < value.length; i++) {
-      if (i in value && !isDeepFrozenFabricValue(value[i])) return false;
-    }
+  if (value === null || (typeof value !== "object")) {
+    // It's a primitive.
     return true;
+  } else if (!isDeepFrozen(value)) {
+    return false;
   }
 
-  // `FabricPrimitive`s are by definition frozen and have no outbound
-  // references.
-  if (value instanceof FabricPrimitive) return true;
+  // At this point, it's known to be a deep-frozen value with internal
+  // structure, but we don't know if it's actually a `FabricValue`.
 
-  // `FabricInstance`s might have references, but -- TODO(@danfuzz) -- we have
-  // no way of handling them yet.
-  if (value instanceof FabricInstance) {
-    throw new Error(
-      `Cannot yet handle instance of class ${value.constructor.name}`,
-    );
-  }
+  const seen = new Set();
+  const checkValue = (item: object) => {
+    if (seen.has(item)) {
+      return true;
+    }
 
-  for (const v of Object.values(value)) {
-    if (!isDeepFrozenFabricValue(v)) return false;
-  }
-  return true;
+    seen.add(item);
+
+    if (item instanceof FabricPrimitive) {
+      // `FabricPrimitive`s are by definition frozen and have no outbound
+      // references.
+      return true;
+    } else if (item instanceof FabricInstance) {
+      // `FabricInstance`s might have references, but -- TODO(@danfuzz) -- we
+      // have no way of handling them yet.
+      throw new Error(
+        `Cannot yet handle instance of class ${item.constructor.name}`,
+      );
+    } else if (Array.isArray(item)) {
+      for (let i = 0; i <= item.length; i++) {
+        if (i in item && !isDeepFrozenFabricValue(item[i])) return false;
+      }
+      return true;
+    } else {
+      for (const v of Object.values(item)) {
+        if (!isDeepFrozenFabricValue(v)) return false;
+      }
+      return true;
+    }
+  };
+
+  return checkValue(value);
 }
