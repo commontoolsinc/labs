@@ -592,6 +592,8 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
         {
           start: options.start,
           allowNonExisting: !!(options as any).allowNonExisting,
+          sourceScope: source.scope,
+          targetScope: target.scope,
         },
       );
     } catch (error) {

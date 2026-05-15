@@ -694,25 +694,28 @@ export class Runtime {
     cause: any,
     schema: S,
     tx?: IExtendedStorageTransaction,
+    scope?: NormalizedFullLink["scope"],
   ): Cell<Schema<S>>;
   getCell<T>(
     space: MemorySpace,
     cause: any,
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
+    scope?: NormalizedFullLink["scope"],
   ): Cell<T>;
   getCell(
     space: MemorySpace,
     cause: any,
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
+    scope: NormalizedFullLink["scope"] = "space",
   ): Cell<any> {
     return this.getCellFromLink(
       {
         id: toURI(createRef({}, cause)),
         path: [],
         space,
-        scope: "space",
+        scope,
       },
       schema,
       tx,
