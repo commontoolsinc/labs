@@ -838,6 +838,9 @@ describe("fabric-native-instances", () => {
         [DECONSTRUCT](): FabricValue {
           return { value: 42 };
         }
+        deepClone(_frozen: boolean): CustomFabInst {
+          return new CustomFabInst();
+        }
         protected shallowUnfrozenClone(): CustomFabInst {
           return new CustomFabInst();
         }
