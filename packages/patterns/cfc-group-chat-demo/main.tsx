@@ -76,6 +76,7 @@ const SharedTranscript = pattern<
         <div style={{ width: "min(34rem, 100%)" }}>
           {VerifiedChatBubble({
             message: messageCell,
+            mine: isMine,
           })}
         </div>
       </div>

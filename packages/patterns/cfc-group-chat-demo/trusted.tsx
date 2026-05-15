@@ -473,13 +473,14 @@ export const TrustedChatSendSurface = pattern<
 
 interface VerifiedChatBubbleInput {
   message: any;
+  mine?: boolean;
 }
 
 export const VerifiedChatBubble = pattern<
   VerifiedChatBubbleInput,
   { [NAME]: string; [UI]: any }
 >((
-  { message }: VerifiedChatBubbleInput,
+  { message, mine }: VerifiedChatBubbleInput,
 ): { [NAME]: string; [UI]: any } => ({
   [NAME]: "verified message bubble",
   [UI]: (
@@ -488,12 +489,13 @@ export const VerifiedChatBubble = pattern<
       $value={message}
       $author={message.authorProfile}
       authorName={message.authorName}
+      data-badge-placement={mine ? "end" : "start"}
       verifyTextIntegrity
       allowLiteralText={false}
     >
       <cf-chat-message
         compact
-        role="assistant"
+        role={mine ? "user" : "assistant"}
         name={message.authorName}
         content={message.body}
       />

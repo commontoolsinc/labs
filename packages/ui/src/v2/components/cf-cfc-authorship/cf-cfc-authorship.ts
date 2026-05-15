@@ -351,6 +351,11 @@ export class CFCFCAuthorship extends BaseElement {
         align-items: start;
       }
 
+      :host([badge-placement="end"]) .authorship,
+      :host([data-badge-placement="end"]) .authorship {
+        grid-template-columns: minmax(0, 1fr) minmax(0, auto);
+      }
+
       .badge {
         display: inline-grid;
         grid-template-columns: auto minmax(0, 1fr);
@@ -361,6 +366,27 @@ export class CFCFCAuthorship extends BaseElement {
         border-radius: 999px;
         border: 1px solid var(--cf-theme-color-border, hsl(220, 14%, 86%));
         background: var(--cf-theme-color-surface, hsl(220, 20%, 98%));
+      }
+
+      :host([badge-placement="end"]) .badge,
+      :host([data-badge-placement="end"]) .badge {
+        grid-column: 2;
+        grid-row: 1;
+        grid-template-columns: minmax(0, 1fr) auto;
+      }
+
+      :host([badge-placement="end"]) .avatar,
+      :host([badge-placement="end"]) .status-dot,
+      :host([data-badge-placement="end"]) .avatar,
+      :host([data-badge-placement="end"]) .status-dot {
+        grid-column: 2;
+      }
+
+      :host([badge-placement="end"]) .label,
+      :host([data-badge-placement="end"]) .label {
+        grid-column: 1;
+        grid-row: 1;
+        text-align: right;
       }
 
       .authorship.verified .badge {
@@ -427,6 +453,12 @@ export class CFCFCAuthorship extends BaseElement {
       .content {
         min-width: 0;
       }
+
+      :host([badge-placement="end"]) .content,
+      :host([data-badge-placement="end"]) .content {
+        grid-column: 1;
+        grid-row: 1;
+      }
     `,
   ];
 
@@ -436,6 +468,11 @@ export class CFCFCAuthorship extends BaseElement {
     author: { attribute: false },
     authorName: { attribute: false },
     avatar: { attribute: false },
+    badgePlacement: {
+      type: String,
+      attribute: "badge-placement",
+      reflect: true,
+    },
     kind: { type: String },
     verifyTextIntegrity: {
       type: Boolean,
@@ -455,6 +492,7 @@ export class CFCFCAuthorship extends BaseElement {
   declare cfcLabel: CfcLabelView | undefined;
   declare authorName: unknown;
   declare avatar: unknown;
+  declare badgePlacement: "start" | "end";
   declare kind: string | undefined;
   declare verifyTextIntegrity: boolean;
   declare allowLiteralText: boolean;
@@ -475,6 +513,7 @@ export class CFCFCAuthorship extends BaseElement {
     this.cfcLabel = undefined;
     this.authorName = undefined;
     this.avatar = undefined;
+    this.badgePlacement = "start";
     this.kind = DEFAULT_AUTHORSHIP_KIND;
     this.verifyTextIntegrity = false;
     this.allowLiteralText = false;

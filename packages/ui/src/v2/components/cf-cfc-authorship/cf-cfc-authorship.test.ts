@@ -11,6 +11,15 @@ describe("CFCFCAuthorship", () => {
     expect(customElements.get("cf-cfc-authorship")).toBe(CFCFCAuthorship);
   });
 
+  it("declares reflected badge placement for mirrored chat rows", () => {
+    const element = new CFCFCAuthorship();
+    const property = CFCFCAuthorship.properties.badgePlacement;
+
+    expect(element.badgePlacement).toBe("start");
+    expect(property.attribute).toBe("badge-placement");
+    expect(property.reflect).toBe(true);
+  });
+
   it("verifies object-shaped authored-by integrity atoms", async () => {
     const cfcLabel = {
       version: 1 as const,
