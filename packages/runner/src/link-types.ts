@@ -356,7 +356,7 @@ export function parseLLMFriendlyLink(
   }
 
   // Check if first segment is a space DID (cross-space link)
-  let id: string;
+  let id: string | undefined;
   let path: string[];
   const spaceMatch = firstSegment?.match(matchSpacePrefix);
   if (spaceMatch) {
@@ -368,6 +368,11 @@ export function parseLLMFriendlyLink(
     // Standard format: /of:bafyabc123/path
     id = firstSegment;
     path = rest;
+  }
+  if (id === undefined) {
+    throw new Error(
+      'Target must include a piece handle, e.g. "/of:bafyabc123/path".',
+    );
   }
   const scopedId = parseScopedIdSegment(id);
   id = scopedId.id;

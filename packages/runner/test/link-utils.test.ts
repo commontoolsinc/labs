@@ -1366,6 +1366,13 @@ describe("link-utils", () => {
       );
     });
 
+    it("should throw a controlled error if cross-space target omits handle", () => {
+      expect(() => parseLLMFriendlyLink("/@did:key:z6MkrX123abc", space))
+        .toThrow(
+          'Target must include a piece handle, e.g. "/of:bafyabc123/path".',
+        );
+    });
+
     it("should throw if handle is too short (human name)", () => {
       expect(() => parseLLMFriendlyLink("/of:short/path", space)).toThrow(
         'Piece references must use handles (e.g., "/of:bafyabc123/path"), not human names (e.g., "of:short").',
