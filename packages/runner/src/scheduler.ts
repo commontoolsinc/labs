@@ -70,7 +70,8 @@ import {
 } from "./scheduler/action-run.ts";
 import {
   buildPullInitialSeeds,
-  collectPendingDependencyActions,
+  collectInitialExecuteDependencies as collectInitialExecuteDependenciesState,
+  collectPostEventDependencies as collectPostEventDependenciesState,
   createSettlingTracker,
   isDirtyPullActionRunnable,
   isPendingPullActionRunnable,
@@ -2209,114 +2210,123 @@ export class Scheduler {
     // In case a directly invoked `run` is still running, wait for it to finish.
     if (this.runningPromise) await this.runningPromise;
 
+    this.beginExecuteCycle();
+    const { newActionsWithoutDependencies } = this
+      .collectInitialExecuteDependencies();
+    const eventBlockingDeps = await this.processExecuteEventPhase();
+    this.collectPostEventDependencies();
+    const initialSeeds = this.buildInitialExecuteSeeds(
+      newActionsWithoutDependencies,
+      eventBlockingDeps,
+    );
+
+    const settleResult = await this.runSettleLoop(initialSeeds);
+    await this.breakCyclesIfNeeded(settleResult);
+    this.applyAdaptiveCycleDebounce();
+    this.recordExecuteEndTelemetry();
+    this.applyExecuteContinuation();
+    logger.timeEnd("scheduler", "execute");
+  }
+
+  private beginExecuteCycle(): void {
     // Track timing for cycle-aware debounce
     this.executeStartTime = performance.now();
     this.runsThisExecute.clear();
 
     // Non-settling heuristic: record execute() start
     markExecuteStart(this.settlingTracker);
+  }
 
-    logger.timeStart("scheduler", "execute", "depCollect");
-    // Find computation actions whose writes are still unknown. We run them on
-    // the first cycle to capture writes that cannot be inferred from declared
-    // outputs or populateDependencies() potential writes.
-    //
-    // TODO(seefeld): Once we more reliably capture what they can write via
-    // WriteableCell or so, then we can treat this more deliberately via the
-    // dependency collection process above. We'll have to re-run it whenever
-    // inputs change, as they might change what they can write to. We hope that
-    // for now this will be sufficiently captured in mightWrite.
-    const { newActionsWithoutDependencies } = collectPendingDependencyActions({
+  private collectInitialExecuteDependencies(): {
+    newActionsWithoutDependencies: Action[];
+  } {
+    return collectInitialExecuteDependenciesState({
       pendingDependencyCollection: this.pendingDependencyCollection,
       populateDependenciesCallbacks: this.populateDependenciesCallbacks,
       effects: this.effects,
       getSchedulingWrites: (action) =>
         getSchedulingWritesFromState(this.schedulingWriteState, action),
-      collectDependenciesForAction: (action, populateDependencies) =>
-        this.collectDependenciesForAction(action, populateDependencies, {
-          errorLogLabel: "schedule-dep-error",
-          errorMessage: (target, error) =>
-            `Error populating dependencies for ${
-              this.getActionId(target)
-            }: ${error}`,
-        }),
-      onCollected: (action, { log, entities }) =>
-        logger.debug("schedule-dep-collect", () => [
-          `Collected dependencies for ${
-            this.getActionId(action)
-          }: ${log.reads.length} reads, ${log.writes.length} writes, ${entities.size} entities`,
-        ]),
+      collectDependenciesForAction: (action, populateDependencies, options) =>
+        this.collectDependenciesForAction(
+          action,
+          populateDependencies,
+          options,
+        ),
+      getActionId: (action) => this.getActionId(action),
       scheduleAffectedEffects: (action) => this.scheduleAffectedEffects(action),
     });
-    logger.timeEnd("scheduler", "execute", "depCollect");
+  }
 
+  private async processExecuteEventPhase(): Promise<Set<Action>> {
     // Track dirty dependencies that block events - these must be added to workSet
     const eventBlockingDeps = new Set<Action>();
 
     logger.timeStart("scheduler", "execute", "event");
-    await processQueuedEventDuringExecute({
-      runtime: this.runtime,
-      eventQueue: this.eventQueue,
-      pullMode: this.pullMode,
-      dirty: this.staleness.dirty,
-      pending: this.pending,
-      eventBlockingDeps,
-      eventPreflightTelemetryEnabled: this.eventPreflightTelemetryEnabled,
-      setRunningPromise: (promise) => {
-        this.runningPromise = promise;
-      },
-      getActionId: (target) => this.getActionId(target),
-      getActionTelemetryInfo: (target) =>
-        getSchedulerActionTelemetryInfo(target),
-      handleError: (error, target) => this.handleError(error, target),
-      queueExecution: () => this.queueExecution(),
-      setDirtyDependencyTraceContext: (trace) => {
-        this.dirtyDependencyTraceContext = trace;
-      },
-      collectDirtyDependenciesForLog: (deps, dirtyDeps, dirtyDepMemo) =>
-        this.collectDirtyDependenciesForLog(
-          deps,
-          dirtyDeps,
-          dirtyDepMemo,
-        ),
-      isDebouncedComputationWaiting: (dep) =>
-        this.isDebouncedComputationWaiting(dep),
-      getNextDebounceRunTime: (dep) => this.getNextDebounceRunTime(dep),
-      getNextEligibleRunTime: (dep) => this.delays.getNextEligibleRunTime(dep),
-      scheduleEventQueueWake: (notBefore) =>
-        scheduleEventQueueWakeState(this.eventQueueWakeState, notBefore),
-      snapshotDirtyDependencyTraceContext: (trace) =>
-        this.snapshotDirtyDependencyTraceContext(trace),
-    });
-    logger.timeEnd("scheduler", "execute", "event");
-
-    // Process any newly subscribed actions that were added during event handling.
-    // This handles cases like event handlers that create sub-patterns whose
-    // computations need their dependencies discovered before we build the workSet.
-    if (this.pendingDependencyCollection.size > 0) {
-      collectPendingDependencyActions({
-        pendingDependencyCollection: this.pendingDependencyCollection,
-        populateDependenciesCallbacks: this.populateDependenciesCallbacks,
-        effects: this.effects,
-        getSchedulingWrites: (action) =>
-          getSchedulingWritesFromState(this.schedulingWriteState, action),
-        collectDependenciesForAction: (action, populateDependencies) =>
-          this.collectDependenciesForAction(action, populateDependencies, {
-            errorLogLabel: "schedule-dep-error-post-event",
-            errorMessage: (target, error) =>
-              `Error populating dependencies for ${
-                this.getActionId(target)
-              }: ${error}`,
-          }),
-        onCollected: (action) =>
-          logger.debug("schedule-dep-collect-post-event", () => [
-            `Collected dependencies for ${this.getActionId(action)}`,
-          ]),
+    try {
+      await processQueuedEventDuringExecute({
+        runtime: this.runtime,
+        eventQueue: this.eventQueue,
+        pullMode: this.pullMode,
+        dirty: this.staleness.dirty,
+        pending: this.pending,
+        eventBlockingDeps,
+        eventPreflightTelemetryEnabled: this.eventPreflightTelemetryEnabled,
+        setRunningPromise: (promise) => {
+          this.runningPromise = promise;
+        },
+        getActionId: (target) => this.getActionId(target),
+        getActionTelemetryInfo: (target) =>
+          getSchedulerActionTelemetryInfo(target),
+        handleError: (error, target) => this.handleError(error, target),
+        queueExecution: () => this.queueExecution(),
+        setDirtyDependencyTraceContext: (trace) => {
+          this.dirtyDependencyTraceContext = trace;
+        },
+        collectDirtyDependenciesForLog: (deps, dirtyDeps, dirtyDepMemo) =>
+          this.collectDirtyDependenciesForLog(
+            deps,
+            dirtyDeps,
+            dirtyDepMemo,
+          ),
+        isDebouncedComputationWaiting: (dep) =>
+          this.isDebouncedComputationWaiting(dep),
+        getNextDebounceRunTime: (dep) => this.getNextDebounceRunTime(dep),
+        getNextEligibleRunTime: (dep) =>
+          this.delays.getNextEligibleRunTime(dep),
+        scheduleEventQueueWake: (notBefore) =>
+          scheduleEventQueueWakeState(this.eventQueueWakeState, notBefore),
+        snapshotDirtyDependencyTraceContext: (trace) =>
+          this.snapshotDirtyDependencyTraceContext(trace),
       });
+      return eventBlockingDeps;
+    } finally {
+      logger.timeEnd("scheduler", "execute", "event");
     }
+  }
 
+  private collectPostEventDependencies(): void {
+    collectPostEventDependenciesState({
+      pendingDependencyCollection: this.pendingDependencyCollection,
+      populateDependenciesCallbacks: this.populateDependenciesCallbacks,
+      effects: this.effects,
+      getSchedulingWrites: (action) =>
+        getSchedulingWritesFromState(this.schedulingWriteState, action),
+      collectDependenciesForAction: (action, populateDependencies, options) =>
+        this.collectDependenciesForAction(
+          action,
+          populateDependencies,
+          options,
+        ),
+      getActionId: (action) => this.getActionId(action),
+    });
+  }
+
+  private buildInitialExecuteSeeds(
+    newActionsWithoutDependencies: Iterable<Action>,
+    eventBlockingDeps: Iterable<Action>,
+  ): Set<Action> {
     // Build initial seeds for pull mode (effects + special actions).
-    const initialSeeds = buildPullInitialSeeds({
+    return buildPullInitialSeeds({
       pullMode: this.pullMode,
       pending: this.pending,
       dirty: this.staleness.dirty,
@@ -2325,13 +2335,6 @@ export class Scheduler {
       eventBlockingDeps,
       computationDebounceFlushSeeds: this.delays.computationDebounceFlushSeeds,
     });
-
-    const settleResult = await this.runSettleLoop(initialSeeds);
-    await this.breakCyclesIfNeeded(settleResult);
-    this.applyAdaptiveCycleDebounce();
-    this.recordExecuteEndTelemetry();
-    this.applyExecuteContinuation();
-    logger.timeEnd("scheduler", "execute");
   }
 
   private async runSettleLoop(
