@@ -2,6 +2,7 @@ import { action, computed, Default, pattern, Writable } from "commonfabric";
 import { sortDisplayMessages } from "./logic.ts";
 import {
   type EmptyMyProfileValue,
+  type MyProfileCellValue,
   type MyProfileValue,
   type SharedChatMessage,
   type SharedMessagesValue,
@@ -9,7 +10,7 @@ import {
 import { GroupChatDemo } from "./main.tsx";
 
 export default pattern(() => {
-  const myProfile = Writable.of<MyProfileValue | Default<EmptyMyProfileValue>>(
+  const myProfile = Writable.of<MyProfileCellValue>(
     {} as Default<EmptyMyProfileValue>,
   );
   const messages = Writable.of<SharedMessagesValue>(
