@@ -5,6 +5,7 @@ import {
   RuntimeProgram,
   type Schema,
 } from "@commonfabric/runner";
+import type { CellScope } from "@commonfabric/api";
 import { StorageManager } from "@commonfabric/runner/storage/cache";
 import { type NameSchema, nameSchema } from "@commonfabric/runner/schemas";
 import { PieceManager } from "../index.ts";
@@ -78,19 +79,23 @@ export class PiecesController<T = unknown> {
     pieceId: string,
     runIt: boolean,
     schema: S,
+    scope?: CellScope,
   ): Promise<PieceController<Schema<S>>>;
   async get<T = unknown>(
     pieceId: string,
     runIt?: boolean,
     schema?: JSONSchema,
+    scope?: CellScope,
   ): Promise<PieceController<T>>;
   async get(
     pieceId: string,
     runIt: boolean = false,
     schema?: JSONSchema,
+    scope?: CellScope,
   ): Promise<PieceController> {
     this.disposeCheck();
-    const cell = await (await this.#manager.get(pieceId, runIt, schema)).sync();
+    const cell = await (await this.#manager.get(pieceId, runIt, schema, scope))
+      .sync();
     return new PieceController(this.#manager, cell);
   }
 

@@ -95,6 +95,31 @@ describe("cli piece parsing", () => {
       identity: ID,
     })).toMatchObject(expected);
   });
+
+  it("parsePieceOptions() parses scope suffixes from piece ids and urls", () => {
+    expect(parsePieceOptions({
+      apiUrl: API_URL,
+      space: SPACE,
+      identity: ID,
+      piece: `${PIECE}@user`,
+    })).toMatchObject({
+      apiUrl: API_URL,
+      space: SPACE,
+      identity: ID,
+      piece: PIECE,
+      pieceScope: "user",
+    });
+    expect(parsePieceOptions({
+      url: `${API_URL}/${SPACE}/${PIECE}@session`,
+      identity: ID,
+    })).toMatchObject({
+      apiUrl: API_URL,
+      space: SPACE,
+      identity: ID,
+      piece: PIECE,
+      pieceScope: "session",
+    });
+  });
   it("parsePieceOptions() throws on incomplete input", () => {
     expect(() =>
       parsePieceOptions({
@@ -208,6 +233,31 @@ describe("cli piece parsing", () => {
       expect(result.path).toBeUndefined();
     });
 
+    it("should parse scope suffixes on the piece ID segment", () => {
+      expect(parseLink("piece1@user")).toEqual({
+        pieceId: "piece1",
+        scope: "user",
+      });
+      expect(parseLink("piece1@session/path/0")).toEqual({
+        pieceId: "piece1",
+        scope: "session",
+        path: ["path", 0],
+      });
+      expect(parseLink("piece1@space/path")).toEqual({
+        pieceId: "piece1",
+        scope: "space",
+        path: ["path"],
+      });
+    });
+
+    it("should reject invalid scope suffixes on the piece ID segment", () => {
+      expect(() => parseLink("piece1@any")).toThrow(/Invalid scope suffix/);
+      expect(() => parseLink("piece1@inherit")).toThrow(
+        /Invalid scope suffix/,
+      );
+      expect(() => parseLink("piece1@")).toThrow(/Invalid scope suffix/);
+    });
+
     it("should parse simple paths correctly", () => {
       const result = parseLink("piece1/field");
       expect(result.pieceId).toBe("piece1");
@@ -230,6 +280,13 @@ describe("cli piece parsing", () => {
       const result = parseLink("piece/0/1/2");
       expect(result.pieceId).toBe("piece");
       expect(result.path).toEqual([0, 1, 2]);
+    });
+
+    it("should preserve @ in path segments after the piece ID", () => {
+      const result = parseLink("piece/user@email");
+      expect(result.pieceId).toBe("piece");
+      expect(result.path).toEqual(["user@email"]);
+      expect(result.scope).toBeUndefined();
     });
 
     it("should handle empty string after slash", () => {
