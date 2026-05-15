@@ -520,6 +520,98 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("allows first-time uiContract fields to install their schema default", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const schema = {
+        type: "object",
+        properties: {
+          argument: {
+            type: "object",
+            properties: {
+              savedTitle: {
+                type: "string",
+                default: "",
+                ifc: {
+                  uiContract: {
+                    helper: "UiAction",
+                    action: "TrustedSave",
+                    trustedPattern: "TrustedSaveSurface",
+                  },
+                },
+              },
+            },
+            required: ["savedTitle"],
+          },
+        },
+      } as const satisfies JSONSchema;
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-ui-contract-default-setup",
+        schema,
+        tx,
+      );
+      cell.set({ argument: { savedTitle: "" } });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.ok).toBeDefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("rejects first-time uiContract fields initialized away from their default", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const schema = {
+        type: "object",
+        properties: {
+          argument: {
+            type: "object",
+            properties: {
+              savedTitle: {
+                type: "string",
+                default: "",
+                ifc: {
+                  uiContract: {
+                    helper: "UiAction",
+                    action: "TrustedSave",
+                    trustedPattern: "TrustedSaveSurface",
+                  },
+                },
+              },
+            },
+            required: ["savedTitle"],
+          },
+        },
+      } as const satisfies JSONSchema;
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-ui-contract-non-default-setup",
+        schema,
+        tx,
+      );
+      cell.set({ argument: { savedTitle: "not default" } });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain(
+        "missing trusted-event policy input",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("rejects relevant unprepared commits in enforcing modes", async () => {
     const { runtime, storageManager } = createRuntime();
     try {

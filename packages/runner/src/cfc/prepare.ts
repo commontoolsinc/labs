@@ -886,7 +886,7 @@ const currentPrincipalIntegrityReason = (
   return undefined;
 };
 
-const writeValueForTarget = (
+const writeDetailValueForTarget = (
   tx: IExtendedStorageTransaction,
   target: {
     space: MemorySpace;
@@ -894,6 +894,7 @@ const writeValueForTarget = (
     scope: ReturnType<typeof normalizeCellScope>;
     path: readonly string[];
   },
+  key: "value" | "previousValue",
 ): FabricValue => {
   const writeDetails = [...(tx.getWriteDetails?.(target.space) ?? [])];
   let matchingWrite:
@@ -904,6 +905,7 @@ const writeValueForTarget = (
         path: readonly string[];
       };
       value?: FabricValue;
+      previousValue?: FabricValue;
     }
     | undefined;
   let matchingWritePath: string[] | undefined;
@@ -930,7 +932,7 @@ const writeValueForTarget = (
     }
   }
 
-  const value = matchingWrite?.value;
+  const value = matchingWrite?.[key];
   if (value === undefined || matchingWritePath === undefined) {
     return undefined;
   }
@@ -939,6 +941,44 @@ const writeValueForTarget = (
     return value;
   }
   return getValueAtPath(value, targetPath.slice(matchingWritePath.length));
+};
+
+const writeValueForTarget = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: URI;
+    scope: ReturnType<typeof normalizeCellScope>;
+    path: readonly string[];
+  },
+): FabricValue => writeDetailValueForTarget(tx, target, "value");
+
+const previousWriteValueForTarget = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: URI;
+    scope: ReturnType<typeof normalizeCellScope>;
+    path: readonly string[];
+  },
+): FabricValue => writeDetailValueForTarget(tx, target, "previousValue");
+
+const writeInstallsInitialSchemaDefault = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: URI;
+    scope: ReturnType<typeof normalizeCellScope>;
+  },
+  path: readonly string[],
+  schema: JSONSchema | undefined,
+): boolean => {
+  if (!isRecord(schema) || !("default" in schema)) {
+    return false;
+  }
+  const pathTarget = { ...target, path };
+  return previousWriteValueForTarget(tx, pathTarget) === undefined &&
+    deepEqual(writeValueForTarget(tx, pathTarget), schema.default);
 };
 
 const linkedWriteValueForPolicy = (
@@ -1351,6 +1391,11 @@ const verifyTrustedEventRequirements = (
       continue;
     }
     if (setupProjectionSourceMatchesValue(tx, target, entry.path)) {
+      continue;
+    }
+    if (
+      writeInstallsInitialSchemaDefault(tx, target, entry.path, entry.schema)
+    ) {
       continue;
     }
     const matched = tx.getCfcState().writePolicyInputs.some((input) =>
