@@ -9,6 +9,7 @@ import {
   UI,
   VNode,
 } from "@commonfabric/runner";
+import type { CellScope } from "@commonfabric/api";
 import { StorageManager } from "@commonfabric/runner/storage/cache";
 import { pieceId, PieceManager } from "@commonfabric/piece";
 import { PiecesController } from "@commonfabric/piece/ops";
@@ -50,6 +51,7 @@ export interface SpaceConfig {
 
 export interface PieceConfig extends SpaceConfig {
   piece: string;
+  pieceScope?: CellScope;
 }
 
 export interface ResolvedPieceCallable extends CallableResolution {

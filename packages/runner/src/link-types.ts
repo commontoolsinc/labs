@@ -20,6 +20,26 @@ import type {
   MemoryAddressPathComponent,
 } from "./storage/interface.ts";
 
+const CELL_SCOPE_VALUES = new Set(["space", "user", "session"]);
+
+function parseScopedIdSegment(idSegment: string): {
+  id: string;
+  scope?: CellScope;
+} {
+  const scopeSeparator = idSegment.lastIndexOf("@");
+  if (scopeSeparator === -1) return { id: idSegment };
+
+  const id = idSegment.slice(0, scopeSeparator);
+  const scope = idSegment.slice(scopeSeparator + 1);
+  if (!id || !CELL_SCOPE_VALUES.has(scope)) {
+    throw new Error(
+      `Invalid scope suffix "@${scope}" in link handle. Expected @space, @user, or @session.`,
+    );
+  }
+
+  return { id, scope: scope as CellScope };
+}
+
 /**
  * Normalized link structure returned by parsers
  */
@@ -349,6 +369,8 @@ export function parseLLMFriendlyLink(
     id = firstSegment;
     path = rest;
   }
+  const scopedId = parseScopedIdSegment(id);
+  id = scopedId.id;
 
   // Check if first segment looks like a CID/handle by length
   //
@@ -371,6 +393,7 @@ export function parseLLMFriendlyLink(
     id: id as `${string}:${string}`,
     path,
     ...(space && { space }),
+    ...(scopedId.scope && { scope: scopedId.scope }),
   };
 }
 
@@ -387,9 +410,12 @@ export function createLLMFriendlyLink(
   link: NormalizedFullLink,
   contextSpace?: MemorySpace,
 ): string {
+  const id = link.scope && link.scope !== "space"
+    ? `${link.id}@${link.scope}`
+    : link.id;
   // If contextSpace provided and differs, include space in link
   if (contextSpace && link.space && link.space !== contextSpace) {
-    return encodeJsonPointer(["", `@${link.space}`, link.id, ...link.path]);
+    return encodeJsonPointer(["", `@${link.space}`, id, ...link.path]);
   }
-  return encodeJsonPointer(["", link.id, ...link.path]);
+  return encodeJsonPointer(["", id, ...link.path]);
 }
