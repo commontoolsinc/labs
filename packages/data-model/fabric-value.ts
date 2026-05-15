@@ -33,7 +33,7 @@ import {
   nativeFromFabricValueModern,
   shallowFabricFromNativeValueModern,
 } from "./fabric-value-modern.ts";
-import { cloneHelperModern } from "./fabric-value-modern-clone-helper.ts";
+import { cloneHelperModern } from "./value-clone.ts";
 import {
   fabricFromNativeValueLegacy,
   isFabricCompatibleLegacy,

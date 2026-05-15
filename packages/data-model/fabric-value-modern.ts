@@ -17,7 +17,7 @@ import {
 import { FabricBytes } from "./fabric-bytes.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { isArrayWithOnlyIndexProperties } from "./array-utils.ts";
-import { cloneHelperModern } from "./fabric-value-modern-clone-helper.ts";
+import { cloneHelperModern } from "./value-clone.ts";
 import { isDeepFrozenFabricValue } from "./deep-freeze.ts";
 
 /**
