@@ -258,7 +258,7 @@ export function fabricFromNativeValueModern(
  */
 function fabricFromNativeValueModernInternal(
   original: unknown,
-  converted: Map<object, unknown>,
+  converted: Map<object, FabricValue>,
   freeze: boolean,
 ): FabricValue {
   const isOriginalRecord = isRecord(original);
@@ -268,7 +268,7 @@ function fabricFromNativeValueModernInternal(
     if (cached === PROCESSING) {
       throw new Error("Cannot store circular reference");
     }
-    return cached as FabricValue;
+    return cached;
   }
 
   if (isOriginalRecord) {
@@ -385,7 +385,7 @@ function fabricFromNativeValueModernInternal(
  */
 function convertErrorInternals(
   error: Error,
-  converted: Map<object, unknown>,
+  converted: Map<object, FabricValue>,
   freeze: boolean,
 ): Error {
   // Construct the same `Error` subclass.
