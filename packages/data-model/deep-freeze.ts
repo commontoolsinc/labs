@@ -3,6 +3,7 @@ import {
   FabricPrimitive,
   FabricValue,
 } from "./interface.ts";
+import { isPlainObject } from "@commonfabric/utils/types";
 
 /**
  * Cache of confirmed deep-frozen objects.
@@ -187,11 +188,15 @@ export function isDeepFrozenFabricValue(value: unknown): value is FabricValue {
         if (i in item && !checkValue(item[i])) return false;
       }
       return true;
-    } else {
+    } else if (isPlainObject(item)) {
       for (const v of Object.values(item)) {
         if (!checkValue(v)) return false;
       }
       return true;
+    } else {
+      // It's an instance of a class that isn't covered by the `FabricValue`
+      // type definition.
+      return false;
     }
   };
 
