@@ -22,6 +22,11 @@ export class UnknownValue extends ExplicitTagValue {
     return { type: this.typeTag, state: this.state };
   }
 
+  /** @inheritDoc */
+  deepClone(_frozen: boolean): UnknownValue {
+    throw new Error("Cannot yet handle deep cloning of `UnknownValue`.");
+  }
+
   protected shallowUnfrozenClone(): UnknownValue {
     return new UnknownValue(this.typeTag, this.state);
   }

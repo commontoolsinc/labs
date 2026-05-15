@@ -4,7 +4,6 @@ import type {
   FabricValue,
   FabricValueLayer,
 } from "./fabric-value.ts";
-import { cloneIfNecessaryModern } from "./fabric-value-modern.ts";
 import { isArrayWithOnlyIndexProperties } from "./array-utils.ts";
 
 /**
@@ -121,37 +120,6 @@ export function isFabricCompatibleLegacy(
   value: unknown,
 ): value is FabricValue | FabricNativeObject {
   return isFabricValueLegacy(value);
-}
-
-/**
- * Legacy implementation of `cloneIfNecessary()`. Delegates to
- * `cloneIfNecessaryModern()`: the modern clone semantics (deep freeze,
- * circular-reference detection, identity optimization for already-correctly-
- * frozen subtrees) are durable under legacy values, since legacy values are a
- * subset of modern values. Adopting modern cloning here unconditionally
- * removes the legacy path's prior identity-passthrough behavior, which was an
- * intentional simplification that no longer pays its way once modern cloning
- * is the source of truth.
- *
- * This function still exists rather than being deleted because it is the
- * legacy-flag dispatch target in `fabric-value.ts`; collapsing the dispatcher
- * is a separate cleanup.
- *
- * Callers must resolve `CloneOptions` defaults and validate before calling;
- * the dispatcher in `fabric-value.ts` handles that.
- *
- * @param value - An already-valid `FabricValue`.
- * @param frozen - Whether the result should be frozen.
- * @param deep - Whether to clone deeply or shallowly.
- * @param force - Whether to force a copy.
- */
-export function cloneIfNecessaryLegacy(
-  value: FabricValue,
-  frozen: boolean,
-  deep: boolean,
-  force: boolean,
-): FabricValue {
-  return cloneIfNecessaryModern(value, frozen, deep, force);
 }
 
 /**

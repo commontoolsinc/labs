@@ -44,7 +44,7 @@ export default pattern(() => {
                 properties: {
                     secondToggle: {
                         type: "boolean",
-                        asCell: ["cell"]
+                        asCell: ["readonly"]
                     }
                 },
                 required: ["secondToggle"]
@@ -80,7 +80,7 @@ export default pattern(() => {
                     properties: {
                         secondToggle: {
                             type: "boolean",
-                            asCell: ["cell"]
+                            asCell: ["readonly"]
                         }
                     },
                     required: ["secondToggle"]

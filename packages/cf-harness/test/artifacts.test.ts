@@ -1,4 +1,5 @@
 import { assert, assertEquals, assertThrows } from "@std/assert";
+import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
 import { join } from "@std/path";
 import { normalize } from "@std/path/posix";
 import {
@@ -9,6 +10,7 @@ import {
   readHarnessTranscript,
 } from "../src/artifacts.ts";
 import { CFC_PROMPT_SLOT_BOUND_ATOM_TYPE } from "../src/contracts/prompt-slot.ts";
+import type { HarnessPolicyTrace } from "../src/contracts/policy-trace.ts";
 import { createToolOutputId } from "../src/contracts/tool-result.ts";
 import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
@@ -66,6 +68,87 @@ class FakeSandboxRuntime implements SandboxRuntime {
     );
   }
 }
+
+const observedCfcResult = (
+  stdout: string,
+  options: {
+    stderrPolicy?: "observed" | "denied";
+    stderr?: string;
+    exitCode?: number;
+    stdoutLabel?: CfcSandboxResult["stdout"]["label"];
+    stderrLabel?: CfcSandboxResult["stderr"]["label"];
+    exitCodeLabel?: CfcSandboxResult["exitCode"]["label"];
+  } = {},
+): CfcSandboxResult => ({
+  version: 1,
+  stdout: {
+    channel: "stdout",
+    policy: "observed",
+    label: options.stdoutLabel ?? { confidentiality: ["public"] },
+    segments: [{
+      text: stdout,
+      label: options.stdoutLabel ?? { confidentiality: ["public"] },
+    }],
+  },
+  stderr: options.stderrPolicy === "denied"
+    ? {
+      channel: "stderr",
+      policy: "denied",
+      label: options.stderrLabel ?? {},
+      reason: "stderr release denied",
+    }
+    : {
+      channel: "stderr",
+      policy: "observed",
+      label: options.stderrLabel ?? {},
+      segments: [{
+        text: options.stderr ?? "",
+        label: options.stderrLabel ?? {},
+      }],
+    },
+  exitCode: {
+    policy: "observed",
+    label: options.exitCodeLabel ?? {},
+    value: options.exitCode ?? 0,
+  },
+});
+
+const labelHasConfidentialityValue = (
+  label: unknown,
+  value: unknown,
+): boolean =>
+  typeof label === "object" &&
+  label !== null &&
+  "confidentiality" in label &&
+  Array.isArray(label.confidentiality) &&
+  label.confidentiality.some((entry) =>
+    JSON.stringify(entry) === JSON.stringify(value)
+  );
+
+const cfcInputLabelContains = (
+  labels: unknown,
+  pathRoot: string,
+  value: unknown,
+): boolean => {
+  if (
+    typeof labels !== "object" ||
+    labels === null ||
+    !("entries" in labels) ||
+    !Array.isArray(labels.entries)
+  ) {
+    return false;
+  }
+  const entry = labels.entries.find((entry) =>
+    typeof entry === "object" &&
+    entry !== null &&
+    "path" in entry &&
+    Array.isArray(entry.path) &&
+    entry.path.length === 1 &&
+    entry.path[0] === pathRoot
+  );
+  return typeof entry === "object" && entry !== null && "label" in entry &&
+    labelHasConfidentialityValue(entry.label, value);
+};
 
 Deno.test({
   name:
@@ -630,6 +713,247 @@ Deno.test({
           terminalReason: "assistant_completed",
         },
       );
+    } finally {
+      await Deno.remove(artifactRoot, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name:
+    "CfHarnessPromptLoop persists CFC model-context continuity across run artifacts",
+  permissions: { read: true, write: true },
+  async fn() {
+    const artifactRoot = await Deno.makeTempDir({
+      prefix: "cf-harness-cfc-continuity-",
+    });
+    const promptSlotBinding = {
+      type: CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
+      source: {
+        type: "test.prompt-slot",
+        subject: "cfc-continuity-artifact-test",
+      },
+      role: "direct-command",
+      kernelName: "cf-harness",
+      surface: "test",
+      subject: "cfc-continuity-artifact-test",
+      eventId: "event-cfc-continuity",
+      valueDigest: "sha256:test-prompt-value",
+    } as const;
+    const runManifest = {
+      type: "cf-harness.loom-run-manifest",
+      version: 1,
+      source: "loom",
+      instanceId: "loom-test",
+      wishId: "W-CFC-CONTINUITY",
+      dispatchClass: "gtd-ops",
+      capabilityProfile: "read_file write_file bash",
+      promptSlot: promptSlotBinding,
+      cfc: {
+        enforcementMode: "enforce-explicit",
+        labelSource: "loom-run-manifest",
+      },
+    } as const;
+    const secretLabel = {
+      type: "test.cfc/source",
+      id: "alice-secret",
+    };
+    try {
+      const loop = new CfHarnessPromptLoop({
+        apiKey: "test-key",
+        engine: new CfHarnessEngine({
+          artifactRoot,
+          sandboxRuntime: new FakeSandboxRuntime([
+            {
+              stdout: "raw secret\n",
+              stderr: "",
+              exitCode: 0,
+              cfcResult: observedCfcResult("released secret\n", {
+                stderrPolicy: "denied",
+                stdoutLabel: { confidentiality: [secretLabel] },
+              }),
+            },
+            {
+              stdout: "raw later\n",
+              stderr: "",
+              exitCode: 0,
+              cfcResult: observedCfcResult("released later\n", {
+                stdoutLabel: {},
+              }),
+            },
+          ]),
+          runId: "run-cfc-continuity-artifacts",
+          model: "gpt-5.4",
+          runManifest,
+          runManifestPath: "/tmp/original-cfc-continuity-manifest.json",
+        }),
+        fetchFn: (_input, init) => {
+          const body = JSON.parse(String(init?.body)) as {
+            messages: Array<{ role: string; content?: string }>;
+          };
+          const hasToolResponse = body.messages.some((message) =>
+            message.role === "tool"
+          );
+          const toolResponseCount = body.messages.filter((message) =>
+            message.role === "tool"
+          ).length;
+          const payload = !hasToolResponse
+            ? {
+              choices: [{
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content: "",
+                  tool_calls: [{
+                    id: "call-read-secret",
+                    type: "function",
+                    function: {
+                      name: "bash",
+                      arguments: JSON.stringify({
+                        command: "cat secret.txt",
+                      }),
+                    },
+                  }],
+                },
+              }],
+            }
+            : toolResponseCount === 1
+            ? {
+              choices: [{
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content: "",
+                  tool_calls: [{
+                    id: "call-use-secret",
+                    type: "function",
+                    function: {
+                      name: "bash",
+                      arguments: JSON.stringify({
+                        command: "printf done",
+                      }),
+                    },
+                  }],
+                },
+              }],
+            }
+            : {
+              choices: [{
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content: "CFC continuity smoke complete.",
+                },
+              }],
+            };
+          return Promise.resolve(
+            new Response(JSON.stringify(payload), { status: 200 }),
+          );
+        },
+      });
+
+      const result = await loop.runPrompt({
+        prompt: "Run a CFC continuity smoke.",
+        promptSlotBinding,
+      });
+
+      const runRoot = join(artifactRoot, "run-cfc-continuity-artifacts");
+      const persistedState = await readHarnessRunState(
+        join(runRoot, "run-state.json"),
+      );
+      const persistedPolicyTrace = JSON.parse(
+        await Deno.readTextFile(join(runRoot, "policy-trace.json")),
+      ) as HarnessPolicyTrace;
+      const persistedReport = await readHarnessRunReport(
+        join(runRoot, "run-report.json"),
+      );
+
+      assertEquals(result.finalAssistantText, "CFC continuity smoke complete.");
+      assertEquals(persistedState.cfcEnforcementMode, "enforce-explicit");
+      assertEquals(persistedState.runManifest, runManifest);
+      assertEquals(
+        persistedState.runManifestPath,
+        join(runRoot, "run-manifest.json"),
+      );
+      assertEquals(persistedState.promptSlotBinding, promptSlotBinding);
+      assertEquals(persistedState.cfcInvocationContexts?.length, 2);
+      assertEquals(
+        persistedState.cfcInvocationContexts?.map((context) => context.toolId),
+        ["bash", "bash"],
+      );
+      assertEquals(
+        persistedState.cfcInvocationContexts?.[0].runManifest,
+        {
+          present: true,
+          path: join(runRoot, "run-manifest.json"),
+          source: "loom",
+          wishId: "W-CFC-CONTINUITY",
+          dispatchClass: "gtd-ops",
+          cfcEnforcementMode: "enforce-explicit",
+          promptSlotPresent: true,
+        },
+      );
+      assertEquals(
+        cfcInputLabelContains(
+          persistedState.cfcInvocationContexts?.[0].cfcInputLabels,
+          "command",
+          secretLabel,
+        ),
+        false,
+      );
+      assertEquals(
+        cfcInputLabelContains(
+          persistedState.cfcInvocationContexts?.[1].cfcInputLabels,
+          "command",
+          secretLabel,
+        ),
+        true,
+      );
+      assertEquals(
+        labelHasConfidentialityValue(
+          persistedState.cfcModelContext?.label,
+          secretLabel,
+        ),
+        true,
+      );
+      const cfcModelContext = persistedState.cfcModelContext;
+      assert(cfcModelContext !== undefined);
+      assertEquals(cfcModelContext.observations.length, 1);
+      assertEquals(
+        cfcModelContext.observations[0],
+        {
+          type: "cf-harness.cfc-model-context-observation",
+          sequence: 1,
+          at: cfcModelContext.updatedAt,
+          toolCallId: "call-read-secret",
+          toolId: "bash",
+          outputId: createToolOutputId(
+            "run-cfc-continuity-artifacts",
+            "bash",
+            1,
+          ),
+          channels: ["stdout"],
+          policy: "observed",
+          label: { confidentiality: [secretLabel] },
+        },
+      );
+      assertEquals(
+        persistedPolicyTrace.cfcInvocationContexts?.length,
+        2,
+      );
+      assertEquals(
+        cfcInputLabelContains(
+          persistedPolicyTrace.cfcInvocationContexts?.[1].cfcInputLabels,
+          "command",
+          secretLabel,
+        ),
+        true,
+      );
+      assertEquals(
+        persistedReport.policyTrace?.cfcInvocationContexts?.length,
+        2,
+      );
+      assertEquals(persistedReport.modelTurns, 3);
     } finally {
       await Deno.remove(artifactRoot, { recursive: true });
     }

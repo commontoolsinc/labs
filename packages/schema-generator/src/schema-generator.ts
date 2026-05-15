@@ -71,6 +71,7 @@ export class SchemaGenerator implements ISchemaGenerator {
         };
       }
     >,
+    sourceFile?: ts.SourceFile,
   ): JSONSchemaMutable {
     return this.generateSchemaInternal(
       type,
@@ -79,6 +80,7 @@ export class SchemaGenerator implements ISchemaGenerator {
       undefined,
       options,
       schemaHints,
+      sourceFile,
     );
   }
 
@@ -108,6 +110,7 @@ export class SchemaGenerator implements ISchemaGenerator {
         };
       }
     >,
+    sourceFile?: ts.SourceFile,
   ): JSONSchemaMutable {
     // Pass 'any' type with the typeNode - auto-detection will choose node-based analysis
     const anyType = checker.getAnyType();
@@ -118,6 +121,7 @@ export class SchemaGenerator implements ISchemaGenerator {
       typeRegistry,
       undefined,
       schemaHints,
+      sourceFile,
     );
   }
 
@@ -146,6 +150,7 @@ export class SchemaGenerator implements ISchemaGenerator {
         };
       }
     >,
+    sourceFile?: ts.SourceFile,
   ): JSONSchemaMutable {
     // Create unified context with all state
     const cycles = this.getCycles(type, checker);
@@ -167,6 +172,10 @@ export class SchemaGenerator implements ISchemaGenerator {
       ...(typeNode && { typeNode }),
       ...(typeNode?.getSourceFile()?.fileName && {
         sourceFileName: typeNode.getSourceFile().fileName,
+      }),
+      ...(sourceFile && {
+        sourceFile,
+        sourceFileName: sourceFile.fileName,
       }),
       ...(typeRegistry && { typeRegistry }),
       ...(options?.widenLiterals && { widenLiterals: true }),
@@ -794,7 +803,8 @@ export class SchemaGenerator implements ISchemaGenerator {
 
     // Handle ArrayTypeNode (e.g., number[], string[])
     if (ts.isArrayTypeNode(typeNode)) {
-      const elementType = checker.getTypeFromTypeNode(typeNode.elementType);
+      const elementType = typeRegistry?.get(typeNode.elementType) ??
+        checker.getTypeFromTypeNode(typeNode.elementType);
       const items = this.formatChildType(
         elementType,
         context,
@@ -824,6 +834,26 @@ export class SchemaGenerator implements ISchemaGenerator {
       if (filtered.length === 1) return filtered[0]!;
       return { anyOf: filtered as JSONSchemaObjMutable[] };
     }
+
+    if (ts.isLiteralTypeNode(typeNode)) {
+      const literal = typeNode.literal;
+      if (ts.isStringLiteral(literal)) {
+        return { type: "string", const: literal.text };
+      }
+      if (ts.isNumericLiteral(literal)) {
+        return { type: "number", const: Number(literal.text) };
+      }
+      if (literal.kind === ts.SyntaxKind.TrueKeyword) {
+        return { type: "boolean", const: true };
+      }
+      if (literal.kind === ts.SyntaxKind.FalseKeyword) {
+        return { type: "boolean", const: false };
+      }
+      if (literal.kind === ts.SyntaxKind.NullKeyword) {
+        return { type: "null" };
+      }
+    }
+
     // Synthetic TypeReferenceNodes may fail to bind in checker APIs directly.
     // Resolve by name from source scope as a fallback (e.g., CharmEntry in
     // Cell<CharmEntry[]>).
@@ -841,6 +871,12 @@ export class SchemaGenerator implements ISchemaGenerator {
       );
       if (resolved) {
         return this.formatChildType(resolved, context, typeNode);
+      }
+
+      if (
+        ts.isIdentifier(typeNode.typeName) && typeNode.typeName.text === "Date"
+      ) {
+        return { type: "string", format: "date-time" };
       }
     }
 
@@ -898,7 +934,17 @@ export class SchemaGenerator implements ISchemaGenerator {
       }
     }
 
-    const scopeNode = context.typeNode?.getSourceFile?.() ??
+    const checkerWithProgram = checker as ts.TypeChecker & {
+      getProgram?: () => ts.Program;
+    };
+    const sourceFromContext = context.sourceFile ??
+      (context.sourceFileName
+        ? checkerWithProgram.getProgram?.().getSourceFile(
+          context.sourceFileName,
+        )
+        : undefined);
+    const scopeNode = sourceFromContext ??
+      context.typeNode?.getSourceFile?.() ??
       typeNode.getSourceFile?.();
     if (!scopeNode) return undefined;
 

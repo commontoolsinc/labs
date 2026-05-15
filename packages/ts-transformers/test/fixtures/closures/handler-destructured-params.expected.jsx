@@ -57,11 +57,11 @@ export default pattern((state) => {
                     properties: {
                         selectedValue: {
                             type: "string",
-                            asCell: ["cell"]
+                            asCell: ["writeonly"]
                         },
                         lastItems: {
                             type: "string",
-                            asCell: ["cell"]
+                            asCell: ["writeonly"]
                         }
                     },
                     required: ["selectedValue", "lastItems"]

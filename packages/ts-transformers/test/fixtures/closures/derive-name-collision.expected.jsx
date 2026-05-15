@@ -26,11 +26,11 @@ export default pattern(() => {
         properties: {
             multiplier: {
                 type: "number",
-                asCell: ["cell"]
+                asCell: ["readonly"]
             },
             multiplier_1: {
                 type: "number",
-                asCell: ["cell"]
+                asCell: ["readonly"]
             }
         },
         required: ["multiplier", "multiplier_1"]

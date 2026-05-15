@@ -1,15 +1,5 @@
-/**
- * Recursively freeze an object tree in place. Primitives pass through
- * unchanged. Arrays and plain objects are frozen after their children are
- * recursively frozen.
- *
- * Objects already confirmed as deep-frozen (present in the cache) are
- * returned immediately. Otherwise, already-frozen objects are still recursed
- * into (their children may not be frozen). After freezing, the result is
- * recorded in the cache so subsequent calls return in O(1).
- *
- * Handles sparse arrays correctly (only visits populated indices).
- */
+import { FabricInstance, FabricPrimitive, FabricValue } from "./interface.ts";
+import { isPlainObject } from "@commonfabric/utils/types";
 
 /**
  * Cache of confirmed deep-frozen objects.
@@ -147,4 +137,83 @@ export function deepFreeze<T>(value: T): T {
   if (!alreadyFrozen) Object.freeze(value);
   addToDeepFrozenCache(value as object);
   return value;
+}
+
+/**
+ * Indicates whether the value is a deep-frozen `FabricValue`. Returns `true` if
+ * the value is a primitive, or a frozen object/array whose children are all
+ * also deep-frozen `FabricValue`s.
+ */
+export function isDeepFrozenFabricValue(value: unknown): value is FabricValue {
+  // TODO(@danfuzz): A function `isFabricValue()` should ultimately get
+  // extracted from this function, which does just the recursive type check.
+  // Note that, as of this writing, the existing function with that name (a)
+  // only does a single layer check, and (b) is only ever exercised in unit
+  // tests, so it should be safe to replace it.
+
+  switch (typeof value) {
+    case "function": {
+      return false;
+    }
+
+    case "object": {
+      if (value === null) {
+        return true;
+      } else if (!isDeepFrozen(value)) {
+        return false;
+      }
+
+      // Continue below the `switch`.
+      break;
+    }
+
+    default: {
+      // It's a primitive. Return here for efficiency, rather than do the
+      // heavyweight setup for recursive tracing.
+      return true;
+    }
+  }
+
+  // At this point, it's known to be a deep-frozen value with internal
+  // structure, but we don't know if it's actually a `FabricValue`.
+
+  const seen = new Set();
+  const checkValue = (item: unknown): boolean => {
+    if (item === null || (typeof item !== "object")) {
+      // It's a primitive.
+      return true;
+    } else if (seen.has(item)) {
+      return true;
+    }
+
+    seen.add(item);
+
+    if (item instanceof FabricPrimitive) {
+      // `FabricPrimitive`s are by definition frozen and have no outbound
+      // references.
+      return true;
+    } else if (item instanceof FabricInstance) {
+      // `FabricInstance`s might have references, but -- TODO(@danfuzz) -- we
+      // have no way of handling them yet.
+      throw new Error(
+        `Cannot yet handle instance of class ${item.constructor.name}`,
+      );
+    } else if (Array.isArray(item)) {
+      for (let i = 0; i <= item.length; i++) {
+        if (i in item && !checkValue(item[i])) return false;
+      }
+      return true;
+    } else if (isPlainObject(item)) {
+      for (const v of Object.values(item)) {
+        if (!checkValue(v)) return false;
+      }
+      return true;
+    } else {
+      // It's an instance of a class that isn't covered by the `FabricValue`
+      // type definition.
+      return false;
+    }
+  };
+
+  return checkValue(value);
 }

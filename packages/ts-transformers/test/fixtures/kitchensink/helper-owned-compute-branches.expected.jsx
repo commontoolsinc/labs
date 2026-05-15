@@ -172,7 +172,7 @@ export default pattern((state) => {
                 items: {
                     type: "string"
                 },
-                asCell: ["cell"]
+                asCell: ["readonly"]
             }
         },
         required: ["visibleProjects", "state", "fallbackMembers"]

@@ -4,6 +4,7 @@ import type {
 } from "@commonfabric/runner/cfc";
 import type {
   HarnessCfcInvocationContext,
+  HarnessCfcInvocationInputLabelPath,
   HarnessCfcInvocationOperation,
 } from "../contracts/cfc-invocation-context.ts";
 import type {
@@ -53,6 +54,7 @@ export interface HarnessToolContext {
     stdinText?: string;
     env?: Record<string, string>;
     cfcInputLabels?: CfcLabelView;
+    cfcInputLabelPaths?: readonly HarnessCfcInvocationInputLabelPath[];
   }): Promise<HarnessCfcInvocationContext>;
 }
 

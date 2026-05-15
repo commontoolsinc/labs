@@ -5,10 +5,13 @@ import {
   RECONSTRUCT,
   type ReconstructionContext,
 } from "./interface.ts";
-
+import { deepFreeze, isDeepFrozen } from "./deep-freeze.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { TAGS } from "./fabric-type-tags.ts";
 import { FrozenMap, FrozenSet } from "./frozen-builtins.ts";
+import {
+  EMPTY_RECONSTRUCTION_CONTEXT,
+} from "./empty-reconstruction-context.ts";
 
 // ---------------------------------------------------------------------------
 // Utility: native-instance type guard
@@ -140,6 +143,13 @@ export abstract class FabricNativeWrapper<T extends object>
     if (frozen === Object.isFrozen(value)) return value;
     return frozen ? this.toNativeFrozen() : this.toNativeThawed();
   }
+
+  /** @inheritDoc */
+  deepClone(_frozen: boolean): FabricInstance {
+    throw new Error(
+      `Cannot yet handle deep cloning of \`${this.constructor.name}\`.`,
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -219,6 +229,38 @@ export class FabricError extends FabricNativeWrapper<Error> {
   /** @inheritDoc */
   protected toNativeThawed(): Error {
     return copyError(this.error);
+  }
+
+  /** @inheritDoc */
+  override deepClone(frozen: boolean): FabricError {
+    // TODO(danfuzz): This is a partial implementation, meant to keep thins
+    // working well enough as the modern data model gets fleshed out.
+    // Ultimately, concrete classes should not have to implement this method at
+    // all.
+
+    if (frozen && isDeepFrozen(this)) {
+      return this;
+    }
+
+    // This makes a result that just has the  string properties of the original.
+
+    const state: Record<string, unknown> = this[DECONSTRUCT]() as Record<
+      string,
+      unknown
+    >;
+
+    for (const key in state) {
+      if (typeof state[key] !== "string") {
+        delete state[key];
+      }
+    }
+
+    const result = FabricError[RECONSTRUCT](
+      state,
+      EMPTY_RECONSTRUCTION_CONTEXT,
+    );
+
+    return frozen ? deepFreeze(result) : result;
   }
 
   /**

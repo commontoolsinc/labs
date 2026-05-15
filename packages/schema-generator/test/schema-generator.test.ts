@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import ts from "typescript";
 import { SchemaGenerator } from "../src/schema-generator.ts";
-import { getTypeFromCode } from "./utils.ts";
+import { createTestProgram, getTypeFromCode } from "./utils.ts";
 
 describe("SchemaGenerator", () => {
   describe("formatter chain", () => {
@@ -264,6 +264,56 @@ type Output = { [UI]: string; metadata: number };
       });
       expect(schema.required).toEqual(["title", "metadata"]);
     });
+
+    it("resolves local Date type references before applying native Date fallback", async () => {
+      const generator = new SchemaGenerator();
+      const code = `
+namespace Local {
+  export interface Date {
+    year: number;
+  }
+  export type Output = { createdAt: Date };
+}
+`;
+      const { checker, sourceFile } = await createTestProgram(code);
+      let outputNode: ts.TypeNode | undefined;
+      const visit = (node: ts.Node): void => {
+        if (
+          ts.isTypeAliasDeclaration(node) &&
+          node.name.text === "Output"
+        ) {
+          outputNode = node.type;
+          return;
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(sourceFile);
+      if (!outputNode) {
+        throw new Error("Expected Local.Output type node.");
+      }
+
+      const schema = generator.generateSchemaFromSyntheticTypeNode(
+        outputNode,
+        checker,
+        undefined,
+        undefined,
+        sourceFile,
+      ) as Record<string, unknown>;
+
+      expect(schema).toEqual({
+        type: "object",
+        properties: {
+          createdAt: {
+            type: "object",
+            properties: {
+              year: { type: "number" },
+            },
+            required: ["year"],
+          },
+        },
+        required: ["createdAt"],
+      });
+    });
   });
 
   describe("union members", () => {
@@ -372,6 +422,82 @@ interface HasUrl {
         | undefined;
 
       expect(objectSchema.$defs).toBeUndefined();
+      expect(props?.homepage).toEqual({
+        type: "string",
+        format: "uri",
+      });
+    });
+
+    it("formats URL from @types/node as string with uri format", () => {
+      const generator = new SchemaGenerator();
+      const sourceFiles = new Map([
+        [
+          "/test.ts",
+          ts.createSourceFile(
+            "/test.ts",
+            `
+interface HasNodeUrl {
+  homepage: URL;
+}`,
+            ts.ScriptTarget.ES2023,
+            true,
+          ),
+        ],
+        [
+          "/node_modules/@types/node/url.d.ts",
+          ts.createSourceFile(
+            "/node_modules/@types/node/url.d.ts",
+            `
+declare interface URL {
+  href: string;
+}`,
+            ts.ScriptTarget.ES2023,
+            true,
+          ),
+        ],
+      ]);
+      const compilerHost: ts.CompilerHost = {
+        getSourceFile: (fileName) => sourceFiles.get(fileName),
+        writeFile: () => {},
+        getCurrentDirectory: () => "/",
+        getDirectories: () => [],
+        fileExists: (fileName) => sourceFiles.has(fileName),
+        readFile: (fileName) => sourceFiles.get(fileName)?.text,
+        getCanonicalFileName: (fileName) => fileName,
+        useCaseSensitiveFileNames: () => true,
+        getNewLine: () => "\n",
+        getDefaultLibFileName: () => "lib.d.ts",
+      };
+      const program = ts.createProgram(
+        [...sourceFiles.keys()],
+        {
+          target: ts.ScriptTarget.ES2023,
+          module: ts.ModuleKind.ESNext,
+          noLib: true,
+          strict: true,
+        },
+        compilerHost,
+      );
+      const checker = program.getTypeChecker();
+      const sourceFile = program.getSourceFile("/test.ts");
+      if (!sourceFile) throw new Error("Expected test source file");
+      let foundType: ts.Type | undefined;
+      ts.forEachChild(sourceFile, (node) => {
+        if (
+          ts.isInterfaceDeclaration(node) && node.name.text === "HasNodeUrl"
+        ) {
+          const symbol = checker.getSymbolAtLocation(node.name);
+          if (symbol) foundType = checker.getDeclaredTypeOfSymbol(symbol);
+        }
+      });
+      if (!foundType) throw new Error("Expected HasNodeUrl type");
+
+      const schema = generator.generateSchema(foundType, checker);
+      const objectSchema = schema as Record<string, unknown>;
+      const props = objectSchema.properties as
+        | Record<string, Record<string, unknown>>
+        | undefined;
+
       expect(props?.homepage).toEqual({
         type: "string",
         format: "uri",
