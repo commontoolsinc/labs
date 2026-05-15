@@ -7,7 +7,7 @@ import type {
   ErrorWithContext,
   Runtime,
 } from "./runtime.ts";
-import { type NormalizedFullLink, toMemorySpaceAddress } from "./link-utils.ts";
+import { type NormalizedFullLink } from "./link-utils.ts";
 import type {
   ChangeGroup,
   IExtendedStorageTransaction,
@@ -51,8 +51,6 @@ import {
   type DependencyUpdateState,
   getSchedulingWrites as getSchedulingWritesFromState,
   getSchedulingWritesMap as getSchedulingWritesMapFromState,
-  pendingDependencyCollectionMightAffect
-    as pendingDependencyCollectionMightAffectState,
   readsOverlapWrites,
   replaceActionTriggerPaths,
   type SchedulingWriteState,
@@ -100,11 +98,11 @@ import {
   SchedulerStaleness,
 } from "./scheduler/staleness.ts";
 import {
-  registerParentChildAction,
+  resubscribeSchedulerAction,
+  type SchedulerSubscribeActionState,
   type SchedulerSubscriptionState,
+  subscribeSchedulerAction,
   unsubscribeSchedulerAction,
-  updateSchedulerActionChangeGroup,
-  updateSchedulerActionType,
 } from "./scheduler/subscriptions.ts";
 import { type WritePropagationState } from "./scheduler/write-propagation.ts";
 import {
@@ -123,7 +121,6 @@ import {
   scheduleEventQueueWake as scheduleEventQueueWakeState,
 } from "./scheduler/events.ts";
 import { buildSchedulerGraphSnapshot } from "./scheduler/graph-snapshot.ts";
-import { entityKey } from "./scheduler/keys.ts";
 import { collectTransitiveEffects } from "./scheduler/topology.ts";
 import type {
   Action,
@@ -453,6 +450,44 @@ export class Scheduler {
     hasDependentPath: (from: Action, to: Action) =>
       this.hasDependentPath(from, to),
   };
+  private subscribeActionState: SchedulerSubscribeActionState = {
+    subscriptionState: this.subscriptionState,
+    dependencyUpdateState: this.dependencyUpdateState,
+    triggerSubscriptionState: this.triggerSubscriptionState,
+    pendingDependencyCollectionState: this.pendingDependencyCollectionState,
+    populateDependenciesCallbacks: this.populateDependenciesCallbacks,
+    pendingDependencyCollection: this.pendingDependencyCollection,
+    activePullDemandActions: this.activePullDemandActions,
+    pullDemandedFirstRunComputations: this.pullDemandedFirstRunComputations,
+    actionParent: this.actionParent,
+    pending: this.pending,
+    scheduledFirstTime: this.scheduledFirstTime,
+    effects: this.effects,
+    dirty: this.staleness.dirty,
+    stale: this.staleness.stale,
+    writersByEntity: this.writerIndexState.writersByEntity,
+    getPullMode: () => this.pullMode,
+    setDebounce: (action, ms) => this.setDebounce(action, ms),
+    setNoDebounce: (action, optOut) => this.setNoDebounce(action, optOut),
+    setThrottle: (action, ms) => this.setThrottle(action, ms),
+    getSchedulingWrites: (action) =>
+      getSchedulingWritesFromState(this.schedulingWriteState, action),
+    isThrottled: (action) => this.delays.isThrottled(action),
+    isStale: (action) => this.staleness.isStale(action),
+    markDirectDirty: (action) => {
+      this.staleness.markDirectDirty(action);
+    },
+    markEffectConditionallyScheduled: (action) =>
+      this.markEffectConditionallyScheduled(action),
+    updateDependents: (action, log) => this.updateDependents(action, log),
+    scheduleAffectedEffects: (action) => this.scheduleAffectedEffects(action),
+    queueExecution: () => this.queueExecution(),
+    getActionId: (action) => this.getActionId(action),
+    unsubscribe: (action) => this.unsubscribe(action),
+    submitSubscribeTelemetry: (event) => {
+      this.runtime.telemetry.submit(event);
+    },
+  };
 
   private idlePromises: (() => void)[] = [];
   private backgroundTasks = new Set<Promise<unknown>>();
@@ -616,146 +651,12 @@ export class Scheduler {
       changeGroup?: ChangeGroup;
     } = {},
   ): Cancel {
-    // Handle backwards-compatible ReactivityLog argument
-    let populateDependenciesEntry: PopulateDependenciesEntry;
-    let immediateLog: ReactivityLog | undefined;
-    if (typeof populateDependencies === "function") {
-      populateDependenciesEntry = populateDependencies;
-    } else {
-      // ReactivityLog provided directly - set up dependencies immediately
-      // (for backwards compatibility with code that passes reads/writes)
-      immediateLog = populateDependencies;
-      populateDependenciesEntry = immediateLog;
-    }
-    const {
-      isEffect = false,
-      debounce,
-      noDebounce,
-      throttle,
-    } = options;
-
-    updateSchedulerActionChangeGroup(this.subscriptionState, action, options);
-
-    // Apply debounce settings if provided
-    if (debounce !== undefined) {
-      this.setDebounce(action, debounce);
-    }
-    if (noDebounce !== undefined) {
-      this.setNoDebounce(action, noDebounce);
-    }
-    // Apply throttle setting if provided
-    if (throttle !== undefined) {
-      this.setThrottle(action, throttle);
-    }
-
-    const actionIsEffect = updateSchedulerActionType(
-      this.subscriptionState,
+    return subscribeSchedulerAction(
+      this.subscribeActionState,
       action,
-      isEffect,
-      {
-        queueExecution: true,
-      },
+      populateDependencies,
+      options,
     );
-
-    // Track parent-child relationship if action is created during another action's execution
-    registerParentChildAction(this.subscriptionState, action);
-    const parent = this.actionParent.get(action);
-    if (
-      this.pullMode &&
-      !actionIsEffect &&
-      parent &&
-      this.activePullDemandActions.has(parent)
-    ) {
-      this.pullDemandedFirstRunComputations.add(action);
-      this.queueExecution();
-    }
-
-    logger.debug(
-      "schedule",
-      () => [
-        "Subscribing to action:",
-        action,
-        actionIsEffect ? "effect" : "computation",
-      ],
-    );
-
-    // Store the populateDependencies callback for use in execute()
-    this.populateDependenciesCallbacks.set(action, populateDependenciesEntry);
-
-    // In pull mode, newly subscribed computations can be the replacement for an
-    // already-running child graph (for example after a $TYPE change). Seed any
-    // statically declared writes immediately so existing effects can discover
-    // the new writer before the first execute() cycle.
-    if (
-      this.pullMode &&
-      !actionIsEffect &&
-      !immediateLog
-    ) {
-      const declaredWrites = (action as Partial<TelemetryAnnotations>).writes;
-      if (declaredWrites && declaredWrites.length > 0) {
-        setSchedulerDependencies(
-          this.dependencyUpdateState,
-          action,
-          {
-            reads: [],
-            shallowReads: [],
-            writes: declaredWrites.map(toMemorySpaceAddress),
-          },
-        );
-      }
-    }
-
-    // If a ReactivityLog was provided directly, set up dependencies immediately.
-    // This ensures writes are tracked right away for reverse dependency graph.
-    if (immediateLog) {
-      const { reads, shallowReads, log: schedulingLog } =
-        setSchedulerDependencies(
-          this.dependencyUpdateState,
-          action,
-          immediateLog,
-        );
-      this.updateDependents(action, schedulingLog);
-      const { entities } = replaceActionTriggerPaths(
-        this.triggerSubscriptionState,
-        action,
-        reads,
-        shallowReads,
-      );
-
-      // Register the cancel function for the latest trigger set.
-      setCancelForTriggerEntities(
-        this.triggerSubscriptionState,
-        action,
-        entities,
-      );
-    } else {
-      // Mark action for dependency collection before first run
-      this.pendingDependencyCollection.add(action);
-    }
-
-    // Mark as dirty and pending for first-time execution
-    // In pull mode this still doesn't mean execution: There needs to be an effect to trigger it.
-    this.staleness.markDirectDirty(action);
-    this.pending.add(action);
-    this.scheduledFirstTime.add(action);
-
-    if (
-      this.pullMode &&
-      !actionIsEffect &&
-      getSchedulingWritesFromState(this.schedulingWriteState, action)?.length
-    ) {
-      this.scheduleAffectedEffects(action);
-    }
-
-    // Emit telemetry for new subscription
-    const actionId = this.getActionId(action);
-    this.runtime.telemetry.submit({
-      type: "scheduler.subscribe",
-      actionId,
-      isEffect: actionIsEffect,
-    });
-
-    return () => this.unsubscribe(action);
   }
 
   /**
@@ -779,123 +680,12 @@ export class Scheduler {
       changeGroup?: ChangeGroup;
     } = {},
   ): void {
-    const { isEffect } = options;
-
-    updateSchedulerActionChangeGroup(this.subscriptionState, action, options);
-
-    const { reads, shallowReads, log: schedulingLog } =
-      setSchedulerDependencies(this.dependencyUpdateState, action, log);
-
-    // Track action type for pull-based scheduling
-    // Once an action is marked as an effect, it stays an effect
-    const actionIsEffect = updateSchedulerActionType(
-      this.subscriptionState,
+    resubscribeSchedulerAction(
+      this.subscribeActionState,
       action,
-      isEffect,
+      log,
+      options,
     );
-    const actionId = this.getActionId(action);
-
-    // Update reverse dependency graph after the action type is restored. In
-    // pull mode, registering a new edge to a live effect can be the moment a
-    // stale upstream computation becomes demanded.
-    if (this.pullMode) this.updateDependents(action, schedulingLog);
-
-    // Track parent-child relationship if action is created during another action's execution
-    // Only set if not already set (resubscribe can be called multiple times)
-    registerParentChildAction(this.subscriptionState, action, {
-      allowExisting: false,
-    });
-
-    const { entities, triggerPathsByEntity } = replaceActionTriggerPaths(
-      this.triggerSubscriptionState,
-      action,
-      reads,
-      shallowReads,
-    );
-
-    logger.debug("schedule-resubscribe", () => [
-      `Action: ${actionId}`,
-      `Entities: ${triggerPathsByEntity.size}`,
-      `Reads: ${reads.length}`,
-    ]);
-
-    setCancelForTriggerEntities(
-      this.triggerSubscriptionState,
-      action,
-      entities,
-    );
-
-    // In pull mode: When an effect resubscribes, check if any non-throttled dirty
-    // computations write to what it reads. If so, mark the effect dirty so it can
-    // pull those computations and see fresh data.
-    // Skip throttled computations - they'll trigger via storage changes when unthrottled.
-    // Use isEffectAction instead of effects because unsubscribe() clears effects before run()
-    if (this.pullMode && actionIsEffect && this.staleness.stale.size > 0) {
-      const effectReads = reads;
-      const effectShallowReads = shallowReads;
-      let shouldMarkDirty = false;
-
-      // If there are pending computations whose dependencies haven't been
-      // collected yet, only fall back to conservatism for unknown writes or
-      // known writes that overlap what this effect reads.
-      if (
-        pendingDependencyCollectionMightAffectState(
-          this.pendingDependencyCollectionState,
-          action,
-          effectReads,
-          effectShallowReads,
-        )
-      ) {
-        shouldMarkDirty = true;
-      }
-
-      // Use writersByEntity index for efficient lookup
-      if (!shouldMarkDirty) {
-        const entities = new Set<SpaceScopeAndURI>();
-        for (const read of effectReads) {
-          entities.add(entityKey(read));
-        }
-        for (const read of effectShallowReads) {
-          entities.add(entityKey(read));
-        }
-
-        for (const entity of entities) {
-          const writers = this.writerIndexState.writersByEntity.get(entity);
-          if (!writers) continue;
-
-          for (const writer of writers) {
-            if (writer === action) continue;
-            if (!this.staleness.isStale(writer)) continue;
-            if (this.effects.has(writer)) continue; // Only check computations
-            if (this.delays.isThrottled(writer)) continue; // Skip throttled - they trigger via storage
-
-            // Check path overlap
-            const writerWrites =
-              getSchedulingWritesFromState(this.schedulingWriteState, writer) ??
-                [];
-            if (
-              readsOverlapWrites(
-                effectReads,
-                effectShallowReads,
-                writerWrites,
-              )
-            ) {
-              shouldMarkDirty = true;
-              break;
-            }
-            if (shouldMarkDirty) break;
-          }
-          if (shouldMarkDirty) break;
-        }
-      }
-
-      if (shouldMarkDirty && !this.staleness.dirty.has(action)) {
-        this.markEffectConditionallyScheduled(action);
-        this.staleness.markDirectDirty(action);
-        this.pending.add(action);
-        this.queueExecution();
-      }
-    }
   }
 
   unsubscribe(
