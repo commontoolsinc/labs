@@ -130,6 +130,7 @@ function buildCellRef(
   return {
     id,
     space: space as DID,
+    scope: "space",
     path,
     type: "application/json",
   } as CellRef;

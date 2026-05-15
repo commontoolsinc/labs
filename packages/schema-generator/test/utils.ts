@@ -21,6 +21,12 @@ declare interface Stream<T> extends BrandedCell<T, "stream"> {}
 declare interface ComparableCell<T> extends BrandedCell<T, "comparable"> {}
 declare interface ReadonlyCell<T> extends BrandedCell<T, "readonly"> {}
 declare interface WriteonlyCell<T> extends BrandedCell<T, "writeonly"> {}
+
+declare const SCOPE_BRAND: unique symbol;
+declare type PerSpace<T> = T & { readonly [SCOPE_BRAND]?: "space" };
+declare type PerUser<T> = T & { readonly [SCOPE_BRAND]?: "user" };
+declare type PerSession<T> = T & { readonly [SCOPE_BRAND]?: "session" };
+declare type PerAny<T> = T & { readonly [SCOPE_BRAND]?: "any" };
 `;
 
 /**

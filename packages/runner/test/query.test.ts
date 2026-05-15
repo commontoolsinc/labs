@@ -155,10 +155,10 @@ describe("Query", () => {
       value: (assert2.is as JSONObject).value,
     });
     const selectorSet1 = schemaTracker.get(
-      `did:null:null/of:${entityId1["/"]}`,
+      `did:null:null/space/of:${entityId1["/"]}`,
     );
     const selectorSet2 = schemaTracker.get(
-      `did:null:null/of:${entityId2["/"]}`,
+      `did:null:null/space/of:${entityId2["/"]}`,
     );
     expect(selectorSet1?.size).toBe(1);
     expect(selectorSet2?.size).toBe(1);
@@ -251,10 +251,10 @@ describe("Query", () => {
       value: (assert2.is as JSONObject).value,
     });
     const selectorSet1 = schemaTracker.get(
-      `did:null:null/of:${entityId1["/"]}`,
+      `did:null:null/space/of:${entityId1["/"]}`,
     );
     const selectorSet2 = schemaTracker.get(
-      `did:null:null/of:${entityId2["/"]}`,
+      `did:null:null/space/of:${entityId2["/"]}`,
     );
     expect(selectorSet1?.size).toBe(1);
     expect(selectorSet2?.size).toBe(1);
@@ -345,7 +345,7 @@ describe("Query", () => {
       value: assert1.is.value,
     });
     const selectorSet1 = schemaTracker.get(
-      `did:null:null/of:${entityId1["/"]}`,
+      `did:null:null/space/of:${entityId1["/"]}`,
     );
     expect(selectorSet1?.size).toBe(2);
     expect(selectorSet1).toContainEqual({ path: ["value"], schema });
@@ -475,14 +475,14 @@ describe("Query", () => {
     // Our matching selectors for both entries should each have one entry for
     // the top level schema, and one entry for the schema at `self`.
     const selectors1 = schemaTracker.get(
-      `did:null:null/${testCell1.sourceURI}`,
+      `did:null:null/space/${testCell1.sourceURI}`,
     );
     expect(selectors1).not.toBeUndefined();
     expect(selectors1?.size).toBe(2);
     expect(selectors1).toContainEqual({ path: ["value"], schema });
 
     const selectors2 = schemaTracker.get(
-      `did:null:null/${testCell2.sourceURI}`,
+      `did:null:null/space/${testCell2.sourceURI}`,
     );
     expect(selectors2).not.toBeUndefined();
     expect(selectors2?.size).toBe(2);
@@ -575,10 +575,10 @@ describe("Query", () => {
       value: (assert2.is as JSONObject).value,
     });
     const selectorSet1 = schemaTracker.get(
-      `did:null:null/of:${entityId1["/"]}`,
+      `did:null:null/space/of:${entityId1["/"]}`,
     );
     const selectorSet2 = schemaTracker.get(
-      `did:null:null/of:${entityId2["/"]}`,
+      `did:null:null/space/of:${entityId2["/"]}`,
     );
     expect(selectorSet1?.size).toBe(1);
     expect(selectorSet2?.size).toBe(1);

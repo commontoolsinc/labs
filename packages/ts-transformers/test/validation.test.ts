@@ -2853,6 +2853,55 @@ Deno.test("Standalone Function Validation", async (t) => {
     },
   );
 
+  const builderFactoryCases = [
+    {
+      name: "action()",
+      imports: "action",
+      body: `return action(() => {});`,
+    },
+    {
+      name: "handler()",
+      imports: "handler",
+      body: `return handler((event: MouseEvent) => console.log(event));`,
+    },
+    {
+      name: "lift()",
+      imports: "lift",
+      body: `return lift((value: number) => value * 2);`,
+    },
+    {
+      name: "pattern()",
+      imports: "pattern, h",
+      body: `return pattern(() => <div />);`,
+    },
+  ] as const;
+
+  for (const testCase of builderFactoryCases) {
+    await t.step(
+      `errors on ${testCase.name} inside standalone function`,
+      async () => {
+        const source =
+          `      import { ${testCase.imports} } from "commonfabric";
+
+      const helper = () => {
+        ${testCase.body}
+      };
+    `;
+        const { diagnostics } = await validateSource(source, {
+          types: COMMONFABRIC_TYPES,
+        });
+        const errors = getErrors(diagnostics);
+        assertGreater(errors.length, 0, "Expected at least one error");
+        assertHasErrorType(errors, "standalone-function:reactive-operation");
+        assertEquals(
+          errors.some((error) => error.message.includes(testCase.name)),
+          true,
+          `Error should mention ${testCase.name}`,
+        );
+      },
+    );
+  }
+
   await t.step(
     "errors on .map() on reactive type inside standalone function",
     async () => {
@@ -3042,6 +3091,338 @@ Deno.test("Standalone Function Validation", async (t) => {
         errors.length,
         1,
         "Should flag inner standalone function but not outer",
+      );
+    },
+  );
+});
+
+Deno.test("SES Callback Self-Containment Validation", async (t) => {
+  await t.step(
+    "errors when derive callback captures enclosing helper function",
+    async () => {
+      const source =
+        `      import { computed, derive, pattern } from "commonfabric";
+
+      export default pattern(() => {
+        const label = computed(() => {
+          const helper = (value: string) => value.toUpperCase();
+          return derive("x", () => helper("x"));
+        });
+        return { label };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertHasErrorType(errors, "ses-callback:callable-capture");
+    },
+  );
+
+  await t.step(
+    "errors when derive callback captures forwarded enclosing helper function",
+    async () => {
+      const source =
+        `      import { computed, derive, pattern } from "commonfabric";
+
+      export default pattern(() => {
+        const label = computed(() => {
+          const helper = (value: string) => value.toUpperCase();
+          const forwarded = helper;
+          return derive("x", () => ({ helper: forwarded }));
+        });
+        return { label };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertHasErrorType(errors, "ses-callback:callable-capture");
+    },
+  );
+
+  await t.step(
+    "errors when derive callback captures forwarded function-typed pattern input",
+    async () => {
+      const source =
+        `      import { computed, derive, pattern } from "commonfabric";
+
+      export default pattern<{
+        helper: (value: string) => string;
+      }>(({ helper }) => {
+        const label = computed(() => {
+          return derive("x", () => ({ helper }));
+        });
+        return { label };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertHasErrorType(errors, "ses-callback:callable-capture");
+    },
+  );
+
+  await t.step(
+    "errors when action callback captures enclosing helper function",
+    async () => {
+      const source =
+        `      import { action, computed, pattern } from "commonfabric";
+
+      export default pattern(() => {
+        const stream = computed(() => {
+          const helper = (value: string) => value.toUpperCase();
+          return action(() => helper("x"));
+        });
+        return { stream };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertHasErrorType(errors, "ses-callback:callable-capture");
+    },
+  );
+
+  await t.step(
+    "errors when JSX event handler captures enclosing helper function",
+    async () => {
+      const source = `      import { computed, h, pattern } from "commonfabric";
+
+      export default pattern(() => {
+        const button = computed(() => {
+          const helper = (value: string) => value.toUpperCase();
+          return <button onClick={() => helper("x")}>Click</button>;
+        });
+        return <div>{button}</div>;
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertHasErrorType(errors, "ses-callback:callable-capture");
+    },
+  );
+
+  await t.step(
+    "errors when patternTool callback captures enclosing helper function",
+    async () => {
+      const source =
+        `      import { computed, pattern, patternTool } from "commonfabric";
+
+      export default pattern(() => {
+        const tool = computed(() => {
+          const helper = (value: string) => value.toUpperCase();
+          return patternTool(({ query }: { query: string }) => helper(query));
+        });
+        return { tool };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertHasErrorType(errors, "ses-callback:callable-capture");
+    },
+  );
+
+  await t.step(
+    "errors when reactive map callback captures function-typed pattern input",
+    async () => {
+      const source = `      import { h, pattern } from "commonfabric";
+
+      export default pattern<{
+        items: string[];
+        helper: (value: string) => string;
+      }>(({ items, helper }) => {
+        return <ul>{items.map((item) => <li>{helper(item)}</li>)}</ul>;
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertHasErrorType(errors, "ses-callback:callable-capture");
+    },
+  );
+
+  await t.step(
+    "allows derive callback to capture forwarded non-callable data",
+    async () => {
+      const source =
+        `      import { computed, derive, pattern } from "commonfabric";
+
+      export default pattern(() => {
+        const label = computed(() => {
+          const value = "x";
+          const forwarded = value;
+          return derive("x", () => forwarded);
+        });
+        return { label };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics).filter((error) =>
+        error.type === "ses-callback:callable-capture"
+      );
+      assertEquals(
+        errors.length,
+        0,
+        "Forwarded non-callable data should remain valid callback state",
+      );
+    },
+  );
+
+  await t.step(
+    "allows module-scope helper functions in callbacks",
+    async () => {
+      const source = `      import { derive, pattern } from "commonfabric";
+
+      const helper = (value: string) => value.toUpperCase();
+
+      export default pattern(() => {
+        return { label: derive("x", () => helper("x")) };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics).filter((error) =>
+        error.type === "ses-callback:callable-capture"
+      );
+      assertEquals(
+        errors.length,
+        0,
+        "Module-scope helpers should remain valid callback dependencies",
+      );
+    },
+  );
+
+  await t.step(
+    "allows action callbacks to capture reactive state cells",
+    async () => {
+      const source =
+        `      import { action, Cell, h, pattern } from "commonfabric";
+
+      export default pattern<{ count: Cell<number> }>(({ count }) => {
+        const increment = action(() => count.set(count.get() + 1));
+        return <button onClick={increment}>Increment</button>;
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics).filter((error) =>
+        error.type === "ses-callback:callable-capture"
+      );
+      assertEquals(
+        errors.length,
+        0,
+        "Schema-backed reactive state captures should not be rejected by the callable-capture validator",
+      );
+    },
+  );
+});
+
+Deno.test("Inline reactive-root access diagnostic", async (t) => {
+  await t.step(
+    "does not flag identity-preserving methods on reactive-origin calls",
+    async () => {
+      // `Writable.of(...).for(...)` is the standard cell-naming idiom — the
+      // `.for(...)` call returns the same cell (identity-preserving), so this
+      // shape is not the broken-reactivity pattern the diagnostic guards.
+      const source = `
+        import { pattern, Writable } from "commonfabric";
+
+        export default pattern<Record<string, never>>(() => {
+          const flag = Writable.of(false).for("flag");
+          return { flag };
+        });
+      `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const inlineErrors = getErrors(diagnostics).filter((d) =>
+        d.type === "pattern-context:inline-reactive-root-access"
+      );
+      assertEquals(
+        inlineErrors.length,
+        0,
+        "Writable.of(...).for(...) should not trigger the inline-reactive-root diagnostic",
+      );
+    },
+  );
+
+  await t.step(
+    "flags chains like wish(...).result.get() that read off the unwrapped value",
+    async () => {
+      // `wish(...).result.get()` is the broken shape: `.result` is plain JS
+      // access that defeats reactivity, and `.get()` then tries to call a
+      // method on the unwrapped value. The fact that `.get()` is a call
+      // does not make this access site safe.
+      const source = `
+        import { pattern, wish } from "commonfabric";
+
+        export default pattern<Record<string, never>>(() => {
+          const broken = wish<{ result: number }>({ query: "/" }).result.get();
+          return { broken };
+        });
+      `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const inlineErrors = getErrors(diagnostics).filter((d) =>
+        d.type === "pattern-context:inline-reactive-root-access"
+      );
+      assertGreater(
+        inlineErrors.length,
+        0,
+        "wish(...).result.get() should still trigger the inline-reactive-root diagnostic",
+      );
+    },
+  );
+});
+
+Deno.test("Inline reactive-root chain rewrite", async (t) => {
+  await t.step(
+    "preserves cast wrappers around the call when rewriting one-line chains",
+    async () => {
+      // `(wish(...) as T).result` carries load-bearing type information in
+      // the `as T` cast — downstream schema-injection / type-aware passes
+      // rely on it. The rewrite must keep the cast attached to the call so
+      // the destructure form sees the same type.
+      const source = `
+        import { pattern, wish } from "commonfabric";
+
+        type ResultShape = { allCharms: { id: string }[] };
+
+        export default pattern<Record<string, never>>(() => {
+          const { allCharms } =
+            (wish({ query: "/" }) as { result: ResultShape }).result;
+          return { count: allCharms.length };
+        });
+      `;
+      const { diagnostics, output } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        `Rewrite should produce clean output (got: ${
+          errors.map((e) => e.message).join("; ")
+        })`,
+      );
+      assertStringIncludes(
+        output,
+        "result: ResultShape",
+        "The `as { result: ResultShape }` cast should survive the chain rewrite",
       );
     },
   );

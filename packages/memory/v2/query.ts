@@ -21,13 +21,16 @@ import { type Immutable, isObject } from "@commonfabric/utils/types";
 import type { FabricValue, MemorySpace, MIME, URI } from "../interface.ts";
 import { internPathSelector } from "@commonfabric/data-model/schema-utils";
 import {
+  type CellScope,
   type EntitySnapshot,
   type GraphQuery,
   toDocumentSelector,
 } from "../v2.ts";
 import * as Engine from "./engine.ts";
 
-export type QueryDocKey = `${string}/${string}`;
+const DEFAULT_SCOPE: CellScope = "space";
+
+export type QueryDocKey = `${string}/${CellScope}/${string}`;
 
 export interface TrackedGraphState {
   branch: string;
@@ -86,20 +89,31 @@ export class EngineObjectManager implements ObjectStorageManager {
   constructor(
     private readonly engine: Engine.Engine,
     private readonly branch: string,
+    readonly principal?: string,
+    readonly sessionId?: string,
     private readonly readSeq?: number,
   ) {}
 
-  readState(id: string): Engine.EntityState | null {
+  readState(
+    id: string,
+    scope: CellScope = DEFAULT_SCOPE,
+  ): Engine.EntityState | null {
     return Engine.readState(this.engine, {
       id,
+      scope,
+      principal: this.principal,
+      sessionId: this.sessionId,
       branch: this.branch,
       ...(this.readSeq === undefined ? {} : { seq: this.readSeq }),
     });
   }
 
-  load(address: { id: string; type?: string }): IAttestation | null {
+  load(
+    address: { id: string; type?: string; scope?: CellScope },
+  ): IAttestation | null {
     const type = address.type ?? "application/json";
-    const key = `${address.id}/${type}`;
+    const scope = address.scope ?? DEFAULT_SCOPE;
+    const key = `${scope}/${address.id}/${type}`;
     if (this.#attestations.has(key)) {
       return this.#attestations.get(key)!;
     }
@@ -111,7 +125,7 @@ export class EngineObjectManager implements ObjectStorageManager {
       return null;
     }
 
-    const state = this.readState(address.id);
+    const state = this.readState(address.id, scope);
     this.#readCount++;
     if (state === null || state.document === null) {
       this.#missing.add(key);
@@ -121,6 +135,7 @@ export class EngineObjectManager implements ObjectStorageManager {
     const attestation: IAttestation = {
       address: {
         id: address.id as URI,
+        scope,
         type: type as MIME,
         path: [],
       },
@@ -134,9 +149,11 @@ export class EngineObjectManager implements ObjectStorageManager {
     return attestation;
   }
 
-  detail(address: { id: string; type?: string }) {
+  detail(address: { id: string; type?: string; scope?: CellScope }) {
     return this.#details.get(
-      `${address.id}/${address.type ?? "application/json"}`,
+      `${address.scope ?? DEFAULT_SCOPE}/${address.id}/${
+        address.type ?? "application/json"
+      }`,
     );
   }
 
@@ -144,16 +161,17 @@ export class EngineObjectManager implements ObjectStorageManager {
     return this.#readCount;
   }
 
-  loadedAddresses(): Array<{ id: string; type: string }> {
+  loadedAddresses(): Array<{ id: string; type: string; scope: CellScope }> {
     return [...this.#attestations.values()].map((attestation) => ({
       id: attestation.address.id,
       type: attestation.address.type ?? "application/json",
+      scope: attestation.address.scope ?? DEFAULT_SCOPE,
     }));
   }
 
-  invalidateIds(ids: Iterable<string>): void {
+  invalidateIds(ids: Iterable<string>, scope: CellScope = DEFAULT_SCOPE): void {
     for (const id of ids) {
-      const key = `${id}/application/json`;
+      const key = `${scope}/${id}/application/json`;
       this.#attestations.delete(key);
       this.#details.delete(key);
       this.#missing.delete(key);
@@ -183,6 +201,8 @@ export interface QueryGraphReuseContext {
 
 export interface TrackGraphOptions {
   readSeq?: number;
+  principal?: string;
+  sessionId?: string;
 }
 
 export const cloneTrackedGraphState = (
@@ -196,7 +216,12 @@ export const cloneTrackedGraphState = (
     }
   }
 
-  const manager = new EngineObjectManager(engine, state.branch);
+  const manager = new EngineObjectManager(
+    engine,
+    state.branch,
+    state.manager.principal,
+    state.manager.sessionId,
+  );
   manager.mergeFrom(state.manager);
 
   return {
@@ -217,13 +242,14 @@ const snapshotForDocKey = (
   if (!key.startsWith(`${space}/`)) {
     return null;
   }
-  const { id } = fromDocKey(key);
+  const { id, scope } = fromDocKey(key);
   const type = "application/json";
-  const detail = manager.detail({ id, type });
-  const state = detail === undefined ? manager.readState(id) : null;
+  const detail = manager.detail({ id, type, scope });
+  const state = detail === undefined ? manager.readState(id, scope) : null;
   return {
     branch,
     id,
+    ...(scope !== DEFAULT_SCOPE ? { scope } : {}),
     seq: detail?.seq ?? state?.seq ?? 0,
     document: detail?.document === undefined
       ? state?.document === null || state?.document === undefined
@@ -267,11 +293,19 @@ export const trackGraph = (
 } => {
   const branch = query.branch ?? "";
   const managerKey = options.readSeq === undefined
-    ? branch
-    : `${branch}\0${options.readSeq}`;
+    ? `${branch}\0${options.principal ?? ""}\0${options.sessionId ?? ""}`
+    : `${branch}\0${options.readSeq}\0${options.principal ?? ""}\0${
+      options.sessionId ?? ""
+    }`;
   let manager = reuse?.managers?.get(managerKey);
   if (manager === undefined) {
-    manager = new EngineObjectManager(engine, branch, options.readSeq);
+    manager = new EngineObjectManager(
+      engine,
+      branch,
+      options.principal,
+      options.sessionId,
+      options.readSeq,
+    );
     reuse?.managers?.set(managerKey, manager);
   }
   const tracker = new CompoundCycleTracker<
@@ -292,7 +326,12 @@ export const trackGraph = (
 
   for (const root of query.roots) {
     const selector = toDocumentSelector(root.selector);
-    const loaded = manager.load({ id: root.id, type: "application/json" });
+    const rootScope = root.scope ?? DEFAULT_SCOPE;
+    const loaded = manager.load({
+      id: root.id,
+      scope: rootScope,
+      type: "application/json",
+    });
     if (loaded !== null) {
       loadFactsForDoc(
         manager,
@@ -305,7 +344,7 @@ export const trackGraph = (
       );
     } else {
       schemaTracker.add(
-        toDocKey(space, root.id),
+        toDocKey(space, root.id, rootScope),
         selector,
       );
     }
@@ -345,18 +384,25 @@ export const extendTrackedGraph = (
   const stats = createQueryTraversalStats();
   const readCountBefore = manager.readCount;
   const previouslyLoaded = new Set(
-    manager.loadedAddresses().map((address) => address.id),
+    manager.loadedAddresses().map((address) =>
+      `${address.scope}\0${address.id}`
+    ),
   );
   const touched = new Set<QueryDocKey>();
 
   for (const root of query.roots) {
     const selector = toDocumentSelector(root.selector);
-    const rootKey = toDocKey(space, root.id);
+    const rootScope = root.scope ?? DEFAULT_SCOPE;
+    const rootKey = toDocKey(
+      space,
+      root.id,
+      rootScope,
+    );
     touched.add(rootKey);
     evaluateTrackedDocument(
       space,
       manager,
-      { id: root.id, type: "application/json" },
+      { id: root.id, scope: rootScope },
       selector,
       state.tracker,
       state.memo,
@@ -365,11 +411,11 @@ export const extendTrackedGraph = (
   }
 
   for (const address of manager.loadedAddresses()) {
-    const key = address.id;
+    const key = `${address.scope}\0${address.id}`;
     if (previouslyLoaded.has(key)) {
       continue;
     }
-    touched.add(toDocKey(space, address.id));
+    touched.add(toDocKey(space, address.id, address.scope));
   }
 
   const updates = new Map<QueryDocKey, EntitySnapshot>();
@@ -406,7 +452,7 @@ export const isGraphQueryCoveredByState = (
 ): boolean =>
   query.roots.every((root) => {
     const selector = toDocumentSelector(root.selector);
-    const rootKey = toDocKey(space, root.id);
+    const rootKey = toDocKey(space, root.id, root.scope ?? DEFAULT_SCOPE);
     return schemaTrackerCoversSelector(state.tracker, rootKey, selector);
   });
 
@@ -415,11 +461,13 @@ export const queryGraph = (
   engine: Engine.Engine,
   query: GraphQuery,
   reuse?: QueryGraphReuseContext,
+  options: TrackGraphOptions = {},
 ): {
   serverSeq: number;
   entities: EntitySnapshot[];
 } => {
   const tracked = trackGraph(space, engine, query, reuse, {
+    ...options,
     readSeq: query.atSeq,
   });
   return {
@@ -440,8 +488,16 @@ export const refreshTrackedGraph = (
   stats: QueryTraversalStats;
 } | null => {
   const affectedDocs = new Map<QueryDocKey, Set<SchemaPathSelector>>();
+  const invalidations = new Map<CellScope, Set<string>>();
   for (const dirtyId of dirtyIds) {
-    const key = toDocKey(space, dirtyId);
+    const { id, scope } = fromDirtyKey(dirtyId);
+    let scopedIds = invalidations.get(scope);
+    if (scopedIds === undefined) {
+      scopedIds = new Set();
+      invalidations.set(scope, scopedIds);
+    }
+    scopedIds.add(id);
+    const key = toDocKey(space, id, scope);
     const selectors = state.tracker.get(key);
     if (selectors !== undefined && selectors.size > 0) {
       affectedDocs.set(key, new Set(selectors));
@@ -451,7 +507,12 @@ export const refreshTrackedGraph = (
     return null;
   }
 
-  const manager = new EngineObjectManager(engine, state.branch);
+  const manager = new EngineObjectManager(
+    engine,
+    state.branch,
+    state.manager.principal,
+    state.manager.sessionId,
+  );
   const sharedMemo = createSchemaMemo();
   const stats = createQueryTraversalStats();
   const readCountBefore = manager.readCount;
@@ -461,12 +522,12 @@ export const refreshTrackedGraph = (
   }
 
   for (const [key, selectors] of affectedDocs) {
-    const { id } = fromDocKey(key);
+    const { id, scope } = fromDocKey(key);
     for (const selector of selectors) {
       evaluateTrackedDocument(
         space,
         manager,
-        { id },
+        { id, scope },
         selector,
         state.tracker,
         sharedMemo,
@@ -477,9 +538,9 @@ export const refreshTrackedGraph = (
 
   const touched = new Set<QueryDocKey>(affectedDocs.keys());
   for (const address of manager.loadedAddresses()) {
-    const key = toDocKey(space, address.id);
+    const key = toDocKey(space, address.id, address.scope);
     const previous = state.entities.get(key);
-    const detail = manager.detail({ id: address.id });
+    const detail = manager.detail({ id: address.id, scope: address.scope });
     if (previous !== undefined && detail?.seq === previous.seq) {
       continue;
     }
@@ -504,7 +565,9 @@ export const refreshTrackedGraph = (
     updates.set(key, snapshot);
   }
 
-  state.manager.invalidateIds(dirtyIds);
+  for (const [scope, ids] of invalidations) {
+    state.manager.invalidateIds(ids, scope);
+  }
   state.manager.mergeFrom(manager);
 
   stats.managerReads = manager.readCount - readCountBefore;
@@ -529,7 +592,11 @@ const loadFactsForDoc = (
     selector = { ...selector, schema: false };
   }
 
-  const docKey = toDocKey(space, fact.address.id);
+  const docKey = toDocKey(
+    space,
+    fact.address.id,
+    fact.address.scope ?? DEFAULT_SCOPE,
+  );
   const internedSelector = internPathSelector(selector);
   if (
     schemaTrackerCoversSelector(
@@ -595,7 +662,7 @@ const loadFactsForDoc = (
 const evaluateTrackedDocument = (
   space: string,
   manager: EngineObjectManager,
-  address: { id: string; type?: string },
+  address: { id: string; scope?: CellScope },
   selector: SchemaPathSelector,
   schemaTracker: MapSetStringToPathSelectors,
   sharedMemo: ReturnType<typeof createSchemaMemo>,
@@ -604,7 +671,7 @@ const evaluateTrackedDocument = (
   const loaded = manager.load(address);
   if (loaded === null || loaded.value === undefined) {
     schemaTracker.add(
-      toDocKey(space, address.id),
+      toDocKey(space, address.id, address.scope ?? DEFAULT_SCOPE),
       internPathSelector(selector),
     );
     return;
@@ -634,16 +701,38 @@ const evaluateTrackedDocument = (
 export const toDocKey = (
   space: string,
   id: string,
-): QueryDocKey => `${space}/${id}`;
+  scope: CellScope = DEFAULT_SCOPE,
+): QueryDocKey => `${space}/${scope}/${id}`;
 
-export const fromDocKey = (key: QueryDocKey) => {
-  const separator = key.indexOf("/");
-  if (separator === -1) {
-    return { space: key, id: "", type: "application/json" };
+export const fromDocKey = (key: QueryDocKey): {
+  space: string;
+  id: string;
+  scope: CellScope;
+} => {
+  const parts = key.split("/");
+  if (parts.length === 3) {
+    const [space, scope, id] = parts;
+    if (scope === "space" || scope === "user" || scope === "session") {
+      return { space, scope, id };
+    }
   }
-  return {
-    space: key.slice(0, separator),
-    id: key.slice(separator + 1),
-    type: "application/json",
-  };
+  throw new Error(`invalid memory v2 query doc key: ${key}`);
+};
+
+export const toDirtyKey = (
+  id: string,
+  scope: CellScope = DEFAULT_SCOPE,
+): string => `${scope}\0${id}`;
+
+export const fromDirtyKey = (
+  key: string,
+): { id: string; scope: CellScope } => {
+  const separator = key.indexOf("\0");
+  if (separator > 0) {
+    const scope = key.slice(0, separator);
+    if (scope === "space" || scope === "user" || scope === "session") {
+      return { scope, id: key.slice(separator + 1) };
+    }
+  }
+  throw new Error(`invalid memory v2 dirty key: ${key}`);
 };

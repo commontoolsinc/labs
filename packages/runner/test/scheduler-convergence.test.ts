@@ -387,6 +387,51 @@ describe("cycle-aware convergence", () => {
     expect(runCountA + runCountB).toBeGreaterThan(0);
   });
 
+  it("should snapshot dirty effects when breaking a pull-mode cycle", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const schedulerInternal = runtime.scheduler as unknown as {
+      execute: () => Promise<void>;
+      markDirectDirty: (action: Action) => boolean;
+      pendingQueueTaskTimer: number | null;
+      scheduled: boolean;
+    };
+    let effectRuns = 0;
+    const reDirtyLimit = 25;
+
+    const selfDirtyingEffect: Action = () => {
+      effectRuns++;
+      if (effectRuns <= reDirtyLimit) {
+        schedulerInternal.markDirectDirty(selfDirtyingEffect);
+      }
+    };
+
+    runtime.scheduler.subscribe(
+      selfDirtyingEffect,
+      { reads: [], shallowReads: [], writes: [] },
+      { isEffect: true },
+    );
+
+    if (schedulerInternal.pendingQueueTaskTimer !== null) {
+      clearTimeout(schedulerInternal.pendingQueueTaskTimer);
+      schedulerInternal.pendingQueueTaskTimer = null;
+    }
+
+    await schedulerInternal.execute();
+
+    if (schedulerInternal.pendingQueueTaskTimer !== null) {
+      clearTimeout(schedulerInternal.pendingQueueTaskTimer);
+      schedulerInternal.pendingQueueTaskTimer = null;
+      schedulerInternal.scheduled = false;
+    }
+
+    // The settle loop runs the dirty effect for each bounded iteration, then
+    // cycle-break gets one snapshot entry. A live Set iteration would revisit
+    // the effect as it re-subscribes and re-dirties itself.
+    expect(effectRuns).toBe(11);
+    expect(runtime.scheduler.isDirty(selfDirtyingEffect)).toBe(true);
+  });
+
   it("should not create infinite loops in collectDirtyDependencies", async () => {
     runtime.scheduler.enablePullMode();
 

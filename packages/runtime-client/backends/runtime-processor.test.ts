@@ -14,26 +14,19 @@ import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
 import { FabricBytes } from "@commonfabric/data-model/fabric-bytes";
 import { cellRefToSigilLink } from "./utils.ts";
 import {
-  getJsonEncodingConfig,
-  setJsonEncodingConfig,
-} from "@commonfabric/data-model/json-encoding";
-import {
   getDataModelConfig,
   setDataModelConfig,
 } from "@commonfabric/data-model/fabric-value";
 
-const withUnifiedJsonEncoding = async <T>(
+const withModernDataModel = async <T>(
   fn: () => Promise<T> | T,
 ): Promise<T> => {
-  const previousJson = getJsonEncodingConfig();
   const previousDataModel = getDataModelConfig();
   setDataModelConfig(true);
-  setJsonEncodingConfig(true);
   try {
     return await fn();
   } finally {
     setDataModelConfig(previousDataModel);
-    setJsonEncodingConfig(previousJson);
   }
 };
 
@@ -439,7 +432,7 @@ describe("RuntimeProcessor blob upload IPC", () => {
     } as unknown as RuntimeProcessor;
 
     try {
-      await withUnifiedJsonEncoding(async () => {
+      await withModernDataModel(async () => {
         await expect(
           RuntimeProcessor.prototype.handleUploadBlob.call(processor, {
             type: RequestType.UploadBlob,
@@ -471,6 +464,7 @@ describe("RuntimeProcessor CFC label IPC", () => {
     const ref: CellRef = {
       id: "of:cfc-label-cell" as CellRef["id"],
       space: "did:key:test" as CellRef["space"],
+      scope: "space",
       path: [],
     };
     const processor = {
@@ -521,11 +515,13 @@ describe("RuntimeProcessor CFC label IPC", () => {
     const sourceRef: CellRef = {
       id: "of:cfc-label-source" as CellRef["id"],
       space: "did:key:test" as CellRef["space"],
+      scope: "space",
       path: [],
     };
     const resolvedRef: CellRef = {
       id: "of:cfc-label-resolved" as CellRef["id"],
       space: "did:key:test" as CellRef["space"],
+      scope: "space",
       path: [],
     };
     const resolvedCell = {
@@ -584,11 +580,13 @@ describe("RuntimeProcessor CFC label IPC", () => {
     const resultRef: CellRef = {
       id: "of:cfc-label-result" as CellRef["id"],
       space: "did:key:test" as CellRef["space"],
+      scope: "space",
       path: [],
     };
     const sourceRef: CellRef = {
       id: "of:cfc-label-source" as CellRef["id"],
       space: "did:key:test" as CellRef["space"],
+      scope: "space",
       path: [],
     };
     let resultSynced = false;
@@ -657,6 +655,7 @@ describe("RuntimeProcessor CFC commit preparation", () => {
   const ref: CellRef = {
     id: "of:cfc-client-write" as CellRef["id"],
     space: "did:key:test" as CellRef["space"],
+    scope: "space",
     path: [],
     schema: {
       type: "string",
@@ -735,6 +734,7 @@ describe("runtime-client CellRef conversion", () => {
     const ref: CellRef = {
       id: "of:cfc-label-cell" as CellRef["id"],
       space: "did:key:z6MkrX123abc" as CellRef["space"],
+      scope: "space",
       path: ["value"],
       cfcLabelView,
     };
@@ -744,6 +744,7 @@ describe("runtime-client CellRef conversion", () => {
         "link@1": {
           id: ref.id,
           space: ref.space,
+          scope: "space",
           path: ref.path,
           cfcLabelView,
         },

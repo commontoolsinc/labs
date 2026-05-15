@@ -30,6 +30,10 @@ describe("ContextualFlowControl.schemaAtPath array index validation", () => {
     expect(ContextualFlowControl.isTrueSchema(schema)).toBe(true);
   });
 
+  it("considers a schema with only scope metadata true", () => {
+    expect(ContextualFlowControl.isTrueSchema({ scope: "any" })).toBe(true);
+  });
+
   it("carries nested property $defs while traversing through array item refs", () => {
     const cfc = new ContextualFlowControl();
     const schema: JSONSchema = {

@@ -15,6 +15,7 @@ import type {
 } from "./builder/types.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import {
+  getDataModelConfig,
   resetDataModelConfig,
   setDataModelConfig,
 } from "@commonfabric/data-model/fabric-value";
@@ -54,6 +55,7 @@ import { ModuleRegistry } from "./module.ts";
 import { Runner } from "./runner.ts";
 import { registerBuiltins } from "./builtins/index.ts";
 import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
+import { isCellScope, normalizeCellScope } from "./scope.ts";
 import { toURI } from "./uri-utils.ts";
 import { isDeno } from "@commonfabric/utils/env";
 import { popFrame, pushFrame } from "./builder/pattern.ts";
@@ -73,6 +75,26 @@ import {
   type UnsafeHostTrust,
   type UnsafeHostTrustOptions,
 } from "./unsafe-host-trust.ts";
+
+const isFullNormalizedLinkShape = (
+  value: unknown,
+): value is NormalizedLink & {
+  id: string;
+  space: MemorySpace;
+  path: string[];
+} => {
+  if (typeof value !== "object" || value === null) return false;
+  const link = value as NormalizedLink;
+  if (link.scope === "inherit") {
+    throw new Error(
+      "NormalizedFullLink.scope cannot be 'inherit'; resolve scope before creating a full link",
+    );
+  }
+  return typeof link.id === "string" &&
+    typeof link.space === "string" &&
+    Array.isArray(link.path) &&
+    (link.scope === undefined || isCellScope(link.scope));
+};
 
 interface WriteDebugContextStore<T> {
   getStore(): T | undefined;
@@ -144,8 +166,6 @@ export type PieceCreatedCallback = (piece: Cell<any>) => void;
 export interface ExperimentalOptions {
   /** Enable the new fabric value type system (bigint, Map, Set, Uint8Array, Date, FabricInstance). */
   modernDataModel?: boolean | undefined;
-  /** Backward-compat alias for `modernDataModel`. */
-  richStorableValues?: boolean | undefined;
   /** Preserve cumulative scheduler write history instead of using current-known writes. */
   schedulerHistoricalMightWrite?: boolean | undefined;
 }
@@ -284,18 +304,9 @@ export class Runtime {
   constructor(options: RuntimeOptions) {
     this.experimental = {
       modernDataModel: undefined,
-      richStorableValues: undefined,
       schedulerHistoricalMightWrite: undefined,
       ...options.experimental,
     };
-
-    if (
-      options.experimental?.modernDataModel === undefined &&
-      options.experimental?.richStorableValues !== undefined
-    ) {
-      this.experimental.modernDataModel =
-        options.experimental.richStorableValues;
-    }
 
     // Log any overridden experimental flags.
     const overrideFlags = Object.entries(this.experimental)
@@ -307,8 +318,14 @@ export class Runtime {
       );
     }
 
-    // Propagate experimental flags to their ambient control points.
+    // Propagate experimental flags to their ambient control points, then
+    // read back the effective state so `experimental.modernDataModel` reflects
+    // what is actually in effect (matters when the caller didn't pass an
+    // explicit value — without this, consumers like `createQueryResultProxy`
+    // see `undefined` and treat the runtime as legacy even when the global
+    // default is modern).
     setDataModelConfig(this.experimental.modernDataModel);
+    this.experimental.modernDataModel = getDataModelConfig();
 
     this.id = options.storageManager.id;
     this.apiUrl = new URL(options.apiUrl);
@@ -695,6 +712,7 @@ export class Runtime {
         id: toURI(createRef({}, cause)),
         path: [],
         space,
+        scope: "space",
       },
       schema,
       tx,
@@ -756,6 +774,7 @@ export class Runtime {
         id: toURI(entityId),
         path: path?.map(String) ?? [],
         space,
+        scope: "space",
       },
       schema,
       tx,
@@ -792,6 +811,13 @@ export class Runtime {
       ? parseLink(cellLink)
       : isNormalizedFullLink(cellLink)
       ? cellLink
+      : isFullNormalizedLinkShape(cellLink)
+      ? {
+        ...cellLink,
+        scope: isCellScope(cellLink.scope)
+          ? cellLink.scope
+          : normalizeCellScope(undefined),
+      }
       : undefined;
     if (!link) throw new Error("Invalid cell link");
     if ("cfcLabelView" in link) {

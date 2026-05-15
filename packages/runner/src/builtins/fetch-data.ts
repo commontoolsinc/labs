@@ -4,6 +4,7 @@ import type { Runtime } from "../runtime.ts";
 import { getPatternEnvironment } from "../builder/env.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { Schema } from "../builder/types.ts";
+import type { CellScope } from "../builder/types.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
@@ -14,6 +15,7 @@ import {
   tryWriteResult,
 } from "./fetch-utils.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
+import { scopedCell } from "./scope-policy.ts";
 
 /** The shape of fetchData's input cell. */
 type FetchDataInputs = {
@@ -91,6 +93,7 @@ export function fetchData(
   let result: Cell<any | undefined>;
   let error: Cell<any | undefined>;
   let internal: Cell<Schema<typeof internalSchema>>;
+  let cellScope: CellScope | undefined;
   let myRequestId: string | undefined = undefined;
   let abortController: AbortController | undefined = undefined;
 
@@ -123,15 +126,20 @@ export function fetchData(
   });
 
   return (tx: IExtendedStorageTransaction) => {
-    if (!cellsInitialized) {
-      pending = runtime.getCell(
+    tx.resetNarrowestReadScope();
+    const inputsSnapshot = snapshotFetchDataInputs(inputsCell.withTx(tx));
+    const outputScope = tx.getNarrowestReadScope();
+
+    if (!cellsInitialized || cellScope !== outputScope) {
+      const basePending = runtime.getCell<boolean>(
         parentCell.space,
         { fetchData: { pending: cause } },
         undefined,
         tx,
       );
+      pending = scopedCell(runtime, tx, basePending, outputScope);
 
-      result = runtime.getCell<any | undefined>(
+      const baseResult = runtime.getCell<any | undefined>(
         parentCell.space,
         {
           fetchData: { result: cause },
@@ -139,8 +147,9 @@ export function fetchData(
         undefined,
         tx,
       );
+      result = scopedCell(runtime, tx, baseResult, outputScope);
 
-      error = runtime.getCell<any | undefined>(
+      const baseError = runtime.getCell<any | undefined>(
         parentCell.space,
         {
           fetchData: { error: cause },
@@ -148,13 +157,16 @@ export function fetchData(
         undefined,
         tx,
       );
+      error = scopedCell(runtime, tx, baseError, outputScope);
 
-      internal = runtime.getCell(
+      const baseInternal = runtime.getCell(
         parentCell.space,
         { fetchData: { internal: cause } },
         internalSchema,
         tx,
       );
+      internal = scopedCell(runtime, tx, baseInternal, outputScope);
+
       // Link the new result cells to the parent result cell
       setResultCell(pending, parentCell);
       setResultCell(result, parentCell);
@@ -174,6 +186,7 @@ export function fetchData(
       internal.sync();
 
       cellsInitialized = true;
+      cellScope = outputScope;
     }
 
     // Set results to links to our cells. We have to do this outside of
@@ -183,7 +196,6 @@ export function fetchData(
     // should be fine.
     sendResult(tx, { pending, result, error });
 
-    const inputsSnapshot = snapshotFetchDataInputs(inputsCell.withTx(tx));
     const url = inputsSnapshot?.url;
     if (!url) {
       // Only update if values actually need to change to reduce transaction conflicts

@@ -24,6 +24,14 @@ export interface SchedulerGraphNode {
   stats?: ActionStats;
   isDirty: boolean;
   isPending: boolean;
+  isDemanded?: boolean;
+  isLiveEffect?: boolean;
+  isPullDemandRoot?: boolean;
+  isConditionallyScheduled?: boolean;
+  isDebouncedWaiting?: boolean;
+  hasActiveDebounceTimer?: boolean;
+  nextDebounceRunInMs?: number;
+  nextEligibleRunInMs?: number;
   parentId?: string; // ID of parent action if this was created during parent's execution
   childCount?: number; // Number of child actions created during this action's execution
   preview?: string; // First ~200 chars of function body for hover tooltips

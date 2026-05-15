@@ -34,6 +34,7 @@ import {
 } from "./link-types.ts";
 import { MetaField } from "@commonfabric/api";
 import { ignoreReadForScheduling } from "./scheduler.ts";
+import { createRef } from "./create-ref.ts";
 
 export * from "./link-types.ts";
 
@@ -65,12 +66,17 @@ export function isCellLink(
  * Beware: Unlike all the other types that `isLink` is checking for, this could
  * appear in regular data and not actually be meant as a link. So only use this
  * if you know for sure that the value is a link.
+ *
+ * We don't verify that the id and space are URI or MemorySpace, but we do
+ * verify that they are strings.
  */
 export function isNormalizedFullLink(value: any): value is NormalizedFullLink {
   return (
     isRecord(value) &&
     typeof value.id === "string" &&
     typeof value.space === "string" &&
+    (value.scope === "space" || value.scope === "user" ||
+      value.scope === "session") &&
     Array.isArray(value.path)
   );
 }
@@ -199,6 +205,7 @@ export function areNormalizedLinksSame(
   link2: NormalizedLink,
 ): boolean {
   return link1.id === link2.id && link1.space === link2.space &&
+    (link1.scope ?? "space") === (link2.scope ?? "space") &&
     arrayEqual(link1.path, link2.path);
 }
 
@@ -238,11 +245,15 @@ export function createSigilLinkFromParsedLink(
     if (link.space && link.space !== baseLink.space) {
       reference.space = link.space;
     }
+    if (link.scope && link.scope !== baseLink.scope) {
+      reference.scope = link.scope;
+    }
   } else {
     reference.id = link.id;
 
     // Handle baseSpace option - only include space if different from baseSpace
     if (link.space !== options.baseSpace) reference.space = link.space;
+    if (link.scope) reference.scope = link.scope;
   }
 
   // Include schema if requested. Empty `{}` and JSON Schema `true` are
@@ -360,7 +371,7 @@ export function createDataCellURI(
   data: any,
   base?: Cell | NormalizedLink,
 ): URI {
-  const baseId = isCell(base) ? base.getAsNormalizedFullLink().id : base?.id;
+  const baseLink = isCell(base) ? base.getAsNormalizedFullLink() : base;
 
   function traverseAndAddBaseIdToRelativeLinks(
     value: any,
@@ -373,12 +384,11 @@ export function createDataCellURI(
     seen.add(value);
     try {
       if (isPrimitiveCellLink(value)) {
-        const link = parseLink(value);
-        if (!link.id) {
-          return createSigilLinkFromParsedLink({ ...link, id: baseId });
-        } else {
-          return value;
-        }
+        const link = parseLink(value, baseLink);
+        return createSigilLinkFromParsedLink(link, {
+          includeSchema: true,
+          keepAsCell: true,
+        });
       } else if (Array.isArray(value)) {
         return value.map((item) =>
           traverseAndAddBaseIdToRelativeLinks(item, seen)
@@ -551,7 +561,10 @@ function recursiveStripAsCellFromSchema(
     const { asCell: _c, asStream: _s, ...restSchema } = schema;
     const asCellValues = ContextualFlowControl.getAsCellValues(schema);
     // If we're keeping streams and the outermost is a stream, keep it
-    if (context.options.keepStreams && asCellValues.at(0) === "stream") {
+    if (
+      context.options.keepStreams &&
+      ContextualFlowControl.getAsCellKind(asCellValues.at(0)) === "stream"
+    ) {
       result = { asCell: asCellValues, ...restSchema };
     } else {
       result = restSchema;
@@ -627,13 +640,16 @@ export function getMetaCell(
   tx: IExtendedStorageTransaction,
   schema?: JSONSchema,
 ): Cell {
-  const metaCell = resultCell.runtime.getCell<unknown>(
-    resultCell.space,
-    { type, parent: resultCell },
-    schema,
-    tx,
-  );
-  return metaCell;
+  const metaCause = { type, parent: resultCell };
+  const resultCellLink = resultCell.getAsNormalizedFullLink();
+  const metaLink = {
+    space: resultCellLink.space,
+    id: toURI(createRef({}, metaCause)),
+    path: [],
+    ...(resultCellLink.scope !== undefined && { scope: resultCellLink.scope }),
+    ...(schema !== undefined && { schema }),
+  };
+  return resultCell.runtime.getCellFromLink(metaLink, undefined, tx);
 }
 
 const META_READ_OPTIONS = {

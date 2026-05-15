@@ -659,27 +659,18 @@ ${FACTORY_SHADOW_GUARDS}
     );
   });
 
-  it("wraps default-exported call-result wrappers in __cf_data", async () => {
+  it("rejects default-exported functions returning builder call results", async () => {
     const program: RuntimeProgram = {
       main: "/main.ts",
       files: [
         {
           name: "/main.ts",
           contents: [
-            'import { action, lift, navigateTo, pattern, type NodeFactory, type Opaque } from "commonfabric";',
-            "function makeWrapper<T, R>(Child: NodeFactory<T, R>) {",
-            "  return pattern(() => {",
-            "    const go = action(() => {",
-            '      return navigateTo(Child({ value: "x" } as Opaque<T>));',
-            "    });",
-            "    return { go };",
-            "  });",
-            "}",
-            "const Child = lift<{ value: string }, { value: string }>(",
-            "  ({ value }) => ({ value }),",
-            ");",
+            'import { pattern, type Opaque } from "commonfabric";',
+            "const Wrapper = pattern(() => ({ value: 1 }));",
             "function ChildManager(input: Opaque<{}>) {",
-            "  return makeWrapper(Child)(input);",
+            "  input;",
+            "  return Wrapper({});",
             "}",
             "export default ChildManager;",
           ].join("\n"),
@@ -687,24 +678,21 @@ ${FACTORY_SHADOW_GUARDS}
       ],
     };
 
-    const { jsScript, id } = await engine.compile(program);
-    expect(jsScript.js).toContain("__cf_data(ChildManager)");
-
-    await expect(engine.evaluate(id, jsScript, program.files)).rejects.toThrow(
-      "Unsupported value type 'function'",
+    await expect(engine.compile(program)).rejects.toThrow(
+      "pattern() is not allowed inside standalone functions",
     );
   });
 
-  it("wraps nested and branched default-exported call-result wrappers", async () => {
+  it("rejects nested and branched default-exported builder call results", async () => {
     const bodyVariants = [
       [
         "  return true",
-        "    ? makeWrapper(Child)(input as Opaque<{ value: string }>)",
+        "    ? Wrapper({})",
         "    : null;",
       ],
       [
         "  return {",
-        "    child: makeWrapper(Child)(input as Opaque<{ value: string }>),",
+        "    child: Wrapper({}),",
         "  };",
       ],
     ];
@@ -716,19 +704,10 @@ ${FACTORY_SHADOW_GUARDS}
           {
             name: "/main.ts",
             contents: [
-              'import { action, lift, navigateTo, pattern, type NodeFactory, type Opaque } from "commonfabric";',
-              "function makeWrapper<T, R>(Child: NodeFactory<T, R>) {",
-              "  return pattern(() => {",
-              "    const go = action(() => {",
-              '      return navigateTo(Child({ value: "x" } as Opaque<T>));',
-              "    });",
-              "    return { go };",
-              "  });",
-              "}",
-              "const Child = lift<{ value: string }, { value: string }>(",
-              "  ({ value }) => ({ value }),",
-              ");",
+              'import { pattern, type Opaque } from "commonfabric";',
+              "const Wrapper = pattern(() => ({ value: 1 }));",
               "function ChildManager(input: Opaque<{}>) {",
+              "  input;",
               ...body,
               "}",
               "export default ChildManager;",
@@ -737,13 +716,8 @@ ${FACTORY_SHADOW_GUARDS}
         ],
       };
 
-      const { jsScript, id } = await engine.compile(program);
-      expect(jsScript.js).toContain("__cf_data(ChildManager)");
-
-      await expect(
-        engine.evaluate(id, jsScript, program.files),
-      ).rejects.toThrow(
-        "Unsupported value type 'function'",
+      await expect(engine.compile(program)).rejects.toThrow(
+        "pattern() is not allowed inside standalone functions",
       );
     }
   });

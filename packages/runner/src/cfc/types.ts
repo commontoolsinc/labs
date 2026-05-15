@@ -1,4 +1,4 @@
-import type { JSONSchema } from "../builder/types.ts";
+import type { CellScope, JSONSchema } from "../builder/types.ts";
 import type { FabricValue, MemorySpace } from "@commonfabric/memory/interface";
 import type { Immutable } from "@commonfabric/utils/types";
 import type { Metadata } from "../storage/interface.ts";
@@ -130,6 +130,7 @@ export type EntityDocumentWithCfc = {
 export type CfcAddress = Immutable<{
   space: MemorySpace;
   id: string;
+  scope: CellScope;
   path: string[];
 }>;
 

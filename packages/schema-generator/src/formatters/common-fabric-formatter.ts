@@ -9,8 +9,10 @@ import {
 } from "../typescript/cell-brand.ts";
 import { isDefaultAliasSymbol } from "../typescript/property-optionality.ts";
 import type {
+  AsCellEntry,
   JSONSchemaMutable,
   JSONSchemaObjMutable,
+  SchemaScope,
 } from "@commonfabric/api";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
@@ -25,10 +27,52 @@ import { CFC_CANONICAL_ALIAS_NAMES } from "@commonfabric/api/cfc";
 
 type WrapperKind = CellWrapperKind;
 const CFC_ALIAS_NAMES: ReadonlySet<string> = new Set(CFC_CANONICAL_ALIAS_NAMES);
+const SCOPE_WRAPPER_SCOPES: Readonly<Record<string, SchemaScope>> = {
+  PerSpace: "space",
+  PerUser: "user",
+  PerSession: "session",
+  PerAny: "any",
+};
 type ResolvedCfcAlias = {
   readonly aliasName: string;
   readonly aliasArgs: readonly ts.Type[];
   readonly aliasArgNodes?: readonly ts.TypeNode[];
+};
+
+type ResolvedScopeWrapper = {
+  readonly scope: SchemaScope;
+  readonly node: ts.TypeReferenceNode;
+};
+
+const scopeForWrapperName = (
+  name: string | undefined,
+): SchemaScope | undefined =>
+  name === undefined ? undefined : SCOPE_WRAPPER_SCOPES[name];
+
+const resolveScopeWrapperNode = (
+  typeNode: ts.TypeNode | undefined,
+): ResolvedScopeWrapper | undefined => {
+  if (!typeNode || !ts.isTypeReferenceNode(typeNode)) {
+    return undefined;
+  }
+  const name = ts.isIdentifier(typeNode.typeName)
+    ? typeNode.typeName.text
+    : typeNode.typeName.right.text;
+  const scope = scopeForWrapperName(name);
+  return scope === undefined ? undefined : { scope, node: typeNode };
+};
+
+const applyScopeToAsCellEntry = (
+  entry: AsCellEntry,
+  scope: SchemaScope,
+): AsCellEntry => {
+  if (typeof entry === "string") {
+    return { kind: entry, scope };
+  }
+  if (isRecord(entry)) {
+    return { ...entry, scope };
+  }
+  return entry;
 };
 
 /**
@@ -48,6 +92,14 @@ export class CommonFabricFormatter implements TypeFormatter {
 
   supportsType(type: ts.Type, context: GenerationContext): boolean {
     const aliasName = (type as TypeWithInternals).aliasSymbol?.name;
+    if (scopeForWrapperName(aliasName) !== undefined) {
+      return true;
+    }
+
+    if (resolveScopeWrapperNode(context.typeNode)) {
+      return true;
+    }
+
     if (aliasName && CFC_ALIAS_NAMES.has(aliasName)) {
       return true;
     }
@@ -98,7 +150,32 @@ export class CommonFabricFormatter implements TypeFormatter {
     context: GenerationContext,
   ): JSONSchemaMutable {
     const n = context.typeNode;
+    const resolvedScopeWrapper = resolveScopeWrapperNode(n);
+    if (resolvedScopeWrapper) {
+      return this.formatScopeWrapperTypeFromNode(
+        resolvedScopeWrapper.node,
+        context,
+        resolvedScopeWrapper.scope,
+      );
+    }
+
     const aliasType = type as TypeWithInternals;
+    const aliasScope = scopeForWrapperName(aliasType.aliasSymbol?.name);
+    if (aliasScope !== undefined) {
+      const innerType = aliasType.aliasTypeArguments?.[0];
+      if (!innerType) {
+        throw new Error(
+          `${aliasType.aliasSymbol?.name}<T> requires type argument`,
+        );
+      }
+      const innerSchema = this.schemaGenerator.formatChildType(
+        innerType,
+        context,
+        undefined,
+      );
+      return this.applyScopeWrapperSemantics(innerSchema, aliasScope);
+    }
+
     const resolvedCfcAlias = this.resolveCfcAliasInstantiation(
       aliasType,
       context,
@@ -314,6 +391,61 @@ export class CommonFabricFormatter implements TypeFormatter {
     }
 
     return this.applyWrapperSemantics(innerSchema, wrapperKind);
+  }
+
+  private formatScopeWrapperTypeFromNode(
+    typeRefNode: ts.TypeReferenceNode,
+    context: GenerationContext,
+    scope: SchemaScope,
+  ): JSONSchemaMutable {
+    const innerTypeNode = typeRefNode.typeArguments?.[0];
+    if (!innerTypeNode) {
+      throw new Error(`Scoped wrapper requires type argument`);
+    }
+
+    let innerType: ts.Type;
+    try {
+      innerType = context.typeChecker.getTypeFromTypeNode(innerTypeNode);
+    } catch {
+      innerType = context.typeChecker.getAnyType();
+    }
+
+    const innerSchema = this.schemaGenerator.formatChildType(
+      innerType,
+      context,
+      innerTypeNode,
+    );
+
+    return this.applyScopeWrapperSemantics(innerSchema, scope);
+  }
+
+  private applyScopeWrapperSemantics(
+    schema: JSONSchemaMutable,
+    scope: SchemaScope,
+  ): JSONSchemaMutable {
+    if (typeof schema === "boolean") {
+      return schema === false ? { not: true, scope } : { scope };
+    }
+
+    if (schema.asCell === true) {
+      return { ...schema, asCell: [{ kind: "cell", scope }] };
+    }
+
+    if (Array.isArray(schema.asCell) && schema.asCell.length > 0) {
+      const [first, ...rest] = schema.asCell;
+      return {
+        ...schema,
+        asCell: [applyScopeToAsCellEntry(first!, scope), ...rest],
+      };
+    }
+
+    if (schema.scope !== undefined) {
+      throw new Error(
+        "Nested scope wrappers require a cell boundary between scopes.",
+      );
+    }
+
+    return { ...schema, scope };
   }
 
   private formatWrapperType(

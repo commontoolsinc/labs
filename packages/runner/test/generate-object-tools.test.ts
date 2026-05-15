@@ -85,6 +85,7 @@ describe("generateObject with tools", () => {
     const rootLink = {
       id: "of:llm-wildcard-label-root",
       space,
+      scope: "space",
       type: "application/json",
       path: [],
     } as const;
@@ -1846,7 +1847,8 @@ describe("generateObject with tools", () => {
     );
 
     runtime.run(tx, testPattern, {}, resultCell);
-    tx.commit();
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
 
     await expect(waitForCondition(() => capturedSystem.length > 0)).resolves
       .toBeUndefined();
@@ -1915,7 +1917,8 @@ describe("generateObject with tools", () => {
     );
 
     runtime.run(tx, testPattern, {}, resultCell);
-    tx.commit();
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
 
     await expect(waitForCondition(() => capturedSystem.length > 0)).resolves
       .toBeUndefined();

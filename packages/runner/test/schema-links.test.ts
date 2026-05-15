@@ -6,7 +6,7 @@ import { expect } from "@std/expect";
 import "@commonfabric/utils/equal-ignoring-symbols";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { isCell } from "../src/cell.ts";
+import { createCell, isCell } from "../src/cell.ts";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { ID, type JSONSchema } from "../src/builder/types.ts";
 import { diffAndUpdate } from "../src/data-updating.ts";
@@ -43,6 +43,57 @@ describe("Schema - Link Resolution", () => {
   });
 
   describe("Array element link resolution", () => {
+    it("should treat blocked narrower-scope links as undefined", () => {
+      const sessionCell = createCell<string>(
+        runtime,
+        {
+          ...runtime.getCell(
+            space,
+            "schema-scope-filter-session-target",
+            { type: "string" },
+            tx,
+          ).getAsNormalizedFullLink(),
+          schema: { type: "string" },
+          scope: "session",
+        },
+        tx,
+      );
+      sessionCell.set("session private");
+
+      const source = runtime.getCell<{ current?: string }>(
+        space,
+        "schema-scope-filter-source",
+        {
+          type: "object",
+          properties: {
+            current: { type: "string" },
+          },
+        } as const satisfies JSONSchema,
+        tx,
+      );
+      source.set({ current: sessionCell as any });
+
+      const cappedSchema = {
+        type: "object",
+        properties: {
+          current: { type: "string", scope: "user" },
+        },
+      } as const satisfies JSONSchema;
+      const unrestrictedSchema = {
+        type: "object",
+        properties: {
+          current: { type: "string", scope: "any" },
+        },
+      } as const satisfies JSONSchema;
+
+      expect(source.asSchema(cappedSchema).get()).toEqual({
+        current: undefined,
+      });
+      expect(source.asSchema(unrestrictedSchema).get()).toEqual({
+        current: "session private",
+      });
+    });
+
     it("should resolve array element links to the actual nested documents", () => {
       const schema = {
         type: "object",

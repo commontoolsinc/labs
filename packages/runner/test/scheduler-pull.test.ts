@@ -80,8 +80,8 @@ describe("pull-based scheduling", () => {
     await storageManager?.close();
   });
 
-  it("should default to push mode", () => {
-    expect(runtime.scheduler.isPullModeEnabled()).toBe(false);
+  it("should default to pull mode", () => {
+    expect(runtime.scheduler.isPullModeEnabled()).toBe(true);
   });
 
   it("should dispatch schema-marked streams without a materialized stream marker", async () => {
@@ -3653,9 +3653,10 @@ describe("pull mode array reactivity", () => {
 
     const link = arrayCell.getAsNormalizedFullLink();
     const expectedAddress = toMemorySpaceAddress(link);
-    const expectedRead = `${expectedAddress.space}/${expectedAddress.id}/${
-      expectedAddress.path.join("/")
-    }`;
+    const expectedRead =
+      `${expectedAddress.space}/${expectedAddress.id}/${expectedAddress.scope}/${
+        expectedAddress.path.join("/")
+      }`;
     const graph = runtime.scheduler.getGraphSnapshot();
     const sinkNode = graph.nodes.find((node) =>
       node.type === "effect" &&

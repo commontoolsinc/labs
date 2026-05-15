@@ -1,7 +1,51 @@
 import { assertEquals } from "@std/assert";
 import { Server } from "../v2/server.ts";
-import { connect, loopback } from "../v2/client.ts";
+import { connect, loopback, WatchView } from "../v2/client.ts";
 import type { EntitySnapshot } from "../v2.ts";
+
+Deno.test("memory v2 watch view keeps same id snapshots in different scopes", () => {
+  const view = WatchView.fromSync({
+    type: "sync",
+    fromSeq: 0,
+    toSeq: 1,
+    upserts: [
+      {
+        branch: "",
+        id: "of:scoped-watch-view",
+        seq: 1,
+        doc: { value: { scope: "space" } },
+      },
+      {
+        branch: "",
+        id: "of:scoped-watch-view",
+        scope: "user",
+        seq: 1,
+        doc: { value: { scope: "user" } },
+      },
+    ],
+    removes: [],
+  });
+
+  assertEquals(
+    view.entities.map(({ id, scope, document }) => ({
+      id,
+      scope,
+      document,
+    })),
+    [
+      {
+        id: "of:scoped-watch-view",
+        scope: undefined,
+        document: { value: { scope: "space" } },
+      },
+      {
+        id: "of:scoped-watch-view",
+        scope: "user",
+        document: { value: { scope: "user" } },
+      },
+    ],
+  );
+});
 
 Deno.test("memory v2 client installs a watch set and receives live updates", async () => {
   const server = new Server({

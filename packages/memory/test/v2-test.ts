@@ -1,5 +1,5 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
-import { assert, assertEquals, assertFalse } from "@std/assert";
+import { assert, assertEquals, assertFalse, assertThrows } from "@std/assert";
 import {
   resetDataModelConfig,
   setDataModelConfig,
@@ -11,6 +11,7 @@ import {
   getMemoryProtocolFlags,
   isSourceLink,
   MEMORY_PROTOCOL,
+  parseMemoryProtocolFlags,
   toDocumentPath,
   toDocumentSelector,
   toValuePath,
@@ -110,16 +111,63 @@ describe("memory v2 flags", () => {
     setDataModelConfig(false);
 
     assertEquals(getMemoryProtocolFlags(), {
-      richStorableValues: false,
+      modernDataModel: false,
     });
 
     setDataModelConfig(true);
 
     assertEquals(getMemoryProtocolFlags(), {
-      richStorableValues: true,
+      modernDataModel: true,
     });
 
     resetDataModelConfig();
+  });
+});
+
+describe("parseMemoryProtocolFlags", () => {
+  it("accepts the canonical modernDataModel key", () => {
+    assertEquals(parseMemoryProtocolFlags({ modernDataModel: true }), {
+      flags: { modernDataModel: true },
+      wireKey: "modernDataModel",
+    });
+    assertEquals(parseMemoryProtocolFlags({ modernDataModel: false }), {
+      flags: { modernDataModel: false },
+      wireKey: "modernDataModel",
+    });
+  });
+
+  it("accepts the legacy richStorableValues key and normalizes it", () => {
+    assertEquals(parseMemoryProtocolFlags({ richStorableValues: true }), {
+      flags: { modernDataModel: true },
+      wireKey: "richStorableValues",
+    });
+    assertEquals(parseMemoryProtocolFlags({ richStorableValues: false }), {
+      flags: { modernDataModel: false },
+      wireKey: "richStorableValues",
+    });
+  });
+
+  it("prefers the canonical key when both are present", () => {
+    assertEquals(
+      parseMemoryProtocolFlags({
+        modernDataModel: true,
+        richStorableValues: false,
+      }),
+      { flags: { modernDataModel: true }, wireKey: "modernDataModel" },
+    );
+  });
+
+  it("rejects values that are not a recognizable flags shape", () => {
+    assertEquals(parseMemoryProtocolFlags(null), null);
+    assertEquals(parseMemoryProtocolFlags(undefined), null);
+    assertEquals(parseMemoryProtocolFlags("modernDataModel"), null);
+    assertEquals(parseMemoryProtocolFlags([true]), null);
+    assertEquals(parseMemoryProtocolFlags({}), null);
+    assertEquals(parseMemoryProtocolFlags({ modernDataModel: "true" }), null);
+    assertEquals(
+      parseMemoryProtocolFlags({ richStorableValues: 1 }),
+      null,
+    );
   });
 });
 
@@ -132,7 +180,7 @@ describe("memory v2 boundary decode", () => {
     resetDataModelConfig();
   });
 
-  it("returns mutable plain JSON trees", () => {
+  it("returns deeply-frozen plain JSON trees", () => {
     const decoded = decodeMemoryBoundary<{
       value: {
         nested: {
@@ -156,11 +204,13 @@ describe("memory v2 boundary decode", () => {
         },
       },
     });
-    assertFalse(Object.isFrozen(decoded));
-    assertFalse(Object.isFrozen(decoded.value));
-    assertFalse(Object.isFrozen(decoded.value.nested));
+    assert(Object.isFrozen(decoded));
+    assert(Object.isFrozen(decoded.value));
+    assert(Object.isFrozen(decoded.value.nested));
 
-    decoded.value.nested.count = 2;
-    assertEquals(decoded.value.nested.count, 2);
+    assertThrows(() => {
+      decoded.value.nested.count = 2;
+    }, TypeError);
+    assertEquals(decoded.value.nested.count, 1);
   });
 });

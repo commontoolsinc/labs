@@ -33,6 +33,7 @@ describe("CellHandle CFC label IPC", () => {
     const ref: CellRef = {
       id: "of:cfc-label-cell" as CellRef["id"],
       space: "did:key:test" as CellRef["space"],
+      scope: "space",
       path: [],
     };
 
@@ -60,6 +61,7 @@ describe("CellHandle CFC label IPC", () => {
     const ref = {
       id: "of:cfc-label-cell" as CellRef["id"],
       space: "did:key:test" as CellRef["space"],
+      scope: "space",
       path: [],
       cfcLabelView: {
         version: 1 as const,
@@ -82,6 +84,7 @@ describe("CellHandle CFC label IPC", () => {
       cell: {
         id: ref.id,
         space: ref.space,
+        scope: "space",
         path: ["details"],
         cfcLabelView: {
           version: 1,
@@ -107,6 +110,7 @@ describe("CellHandle CFC label IPC", () => {
     const cell = new CellHandle(runtime, {
       id: "of:cfc-label-cell" as CellRef["id"],
       space: "did:key:test" as CellRef["space"],
+      scope: "space",
       path: ["value"],
       cfcLabelView: {
         version: 1 as const,
@@ -122,6 +126,7 @@ describe("CellHandle CFC label IPC", () => {
         "link@1": {
           id: "of:cfc-label-cell",
           space: "did:key:test",
+          scope: "space",
           path: ["value"],
           cfcLabelView: {
             version: 1,
@@ -139,6 +144,7 @@ describe("CellHandle CFC label IPC", () => {
     const first: CellRef = {
       id: "of:cfc-label-cell" as CellRef["id"],
       space: "did:key:test" as CellRef["space"],
+      scope: "space",
       path: [],
       cfcLabelView: {
         version: 1 as const,
@@ -177,12 +183,14 @@ describe("CellHandle CFC label IPC", () => {
     const baseRef: CellRef = {
       id: "of:cfc-label-parent" as CellRef["id"],
       space: "did:key:test" as CellRef["space"],
+      scope: "space",
       path: [],
       schema: true,
     };
     const childRef = {
       id: "of:cfc-label-child",
       space: "did:key:test",
+      scope: "space",
       path: [],
     };
     const firstLabel = {

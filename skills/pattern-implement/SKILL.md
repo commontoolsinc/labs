@@ -65,6 +65,25 @@ reactive value into `Writable.of()`. If the pattern receives writable state, use
 that input cell directly; if a draft needs to copy from input state, copy in an
 action or another valid reactive/event context.
 
+For Pattern Factory Build, this rule applies to the top-level pattern input
+object too. Do not initialize local state with `Writable.of(input.name || "")`,
+`Writable.of(input.items || [])`, `Cell.of(input.field)`, or helper calls around
+`input.field`. First decide whether each field is primary pattern state, static
+local UI state, or draft/editing state:
+
+- Primary pattern state: expose it in the `Input`/`Output` contract with
+  `Default<>` and `Writable<>` as needed, then use the reactive input directly.
+- Static local UI state: create it with `Writable.of(...)` from static literals
+  only.
+- Draft/editing state: create it from a static value, then copy from input state
+  inside an `action()` or another valid event/reactive context.
+
+For transient UI state, prefer `PerSession<>` unless the state should persist
+across sessions. This includes active tab, selected item, selected room, local
+filter text, open modal, and focused item. A useful test: if the user opens the
+same instance in a new tab, should this state carry over? If not, it is probably
+`PerSession<>`.
+
 Use `safeDateNow()` and `nonPrivateRandom()` instead of ambient `Date.now()` and
 `Math.random()` when a pattern needs explicit time or randomness. If a control
 is already bound to a cell, usually via `$value` or `$checked`, let that binding

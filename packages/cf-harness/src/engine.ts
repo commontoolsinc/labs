@@ -70,6 +70,7 @@ import {
 } from "./contracts/tool-result.ts";
 import type { HarnessTranscriptMessage } from "./contracts/transcript.ts";
 import type { BuiltinToolId } from "./contracts/tool-descriptor.ts";
+import type { CfcLabelView } from "@commonfabric/runner/cfc";
 import {
   DockerRunscSandboxRuntime,
   resolveDockerRunscSandboxConfig,
@@ -968,6 +969,7 @@ export class CfHarnessEngine {
     args?: readonly string[];
     stdinText?: string;
     env?: Record<string, string>;
+    cfcInputLabels?: CfcLabelView;
   }): Promise<HarnessCfcInvocationContext> {
     const now = this.#now();
     const invocation = await createHarnessCfcInvocationContext({
@@ -995,6 +997,9 @@ export class CfHarnessEngine {
         ? { stdinText: options.stdinText }
         : {}),
       ...(options.env !== undefined ? { env: options.env } : {}),
+      ...(options.cfcInputLabels !== undefined
+        ? { cfcInputLabels: options.cfcInputLabels }
+        : {}),
     });
     this.#runState = appendHarnessCfcInvocationContext(
       this.#runState,
@@ -1059,6 +1064,7 @@ export class CfHarnessEngine {
         args?: readonly string[];
         stdinText?: string;
         env?: Record<string, string>;
+        cfcInputLabels?: CfcLabelView;
       }) => this.#createCfcInvocationContext(options),
     };
   }

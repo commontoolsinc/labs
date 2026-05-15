@@ -1,4 +1,4 @@
-import type { Cell } from "./cell.ts";
+import { type Cell, isCell } from "./cell.ts";
 import type { MemorySpace } from "./storage/interface.ts";
 import type { Pattern } from "./builder/types.ts";
 import type { Runtime } from "./runtime.ts";
@@ -61,7 +61,7 @@ export function resolveCellPath<T>(
     );
   }
 
-  return resolvedValue;
+  return isCell(resolvedValue) ? resolvedValue.get() : resolvedValue;
 }
 
 export function cellEntityIdString(cell: Cell<unknown>): string | undefined {

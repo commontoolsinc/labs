@@ -188,6 +188,7 @@ describe("module", () => {
             cell: "internal",
             path: ["stream:click"],
             schema: true,
+            scope: "space",
           },
         },
       });
@@ -204,6 +205,7 @@ describe("module", () => {
           cell: "internal",
           path: ["stream:click"],
           schema: true,
+          scope: "space",
         },
       });
     });
@@ -224,7 +226,7 @@ describe("module", () => {
 
       expect(arrayCausePattern.result).toEqual({
         value: {
-          $alias: { cell: "internal", path: ['["a","b"]'] },
+          $alias: { cell: "internal", path: ['["a","b"]'], scope: "space" },
         },
       });
       expect(arrayCausePattern.initial).toEqual({

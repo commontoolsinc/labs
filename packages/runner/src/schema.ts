@@ -49,6 +49,7 @@ import {
   rebaseCfcLabelView,
 } from "./cfc/label-view-state.ts";
 import type { CfcAddress } from "./cfc/types.ts";
+import { isCellScope } from "./scope.ts";
 
 const logger = getLogger("validateAndTransform", {
   enabled: true,
@@ -58,8 +59,19 @@ const logger = getLogger("validateAndTransform", {
 const cfcAddressFromLink = (link: NormalizedFullLink): CfcAddress => ({
   space: link.space,
   id: link.id,
+  scope: link.scope,
   path: [...link.path],
 });
+
+const linkWithAsCellScope = (
+  link: NormalizedFullLink,
+  entry:
+    | ReturnType<typeof ContextualFlowControl.getAsCellValues>[number]
+    | undefined,
+): NormalizedFullLink => {
+  const scope = ContextualFlowControl.getAsCellScope(entry);
+  return isCellScope(scope) ? { ...link, scope } : link;
+};
 
 export type CellViewRef = {
   link: NormalizedFullLink;
@@ -335,7 +347,9 @@ export function processDefaultValue(
     const { asCell: _c, asStream: _s, ...restSchema } = resolvedSchema;
     resolvedSchema = restSchema;
 
-    if (asCellValues.at(0) === "stream") {
+    if (
+      ContextualFlowControl.getAsCellKind(asCellValues.at(0)) === "stream"
+    ) {
       logger.warn(
         "Created asStream as a default value, but this is likely unintentional",
       );
@@ -349,6 +363,11 @@ export function processDefaultValue(
         cfcLabelView,
       );
     } else {
+      const asCellEntry = asCellValues.at(0);
+      const asCellKind = ContextualFlowControl.getAsCellKind(asCellEntry);
+      if (asCellKind === undefined) {
+        return undefined;
+      }
       // If schema indicates this should be some sort of a cell
       // If the cell itself has a default value, make it its own (immutable)
       // doc, to emulate the behavior of .get() returning a different underlying
@@ -366,12 +385,12 @@ export function processDefaultValue(
         return createCell(
           runtime,
           {
-            ...link,
+            ...linkWithAsCellScope(link, asCellEntry),
             schema: mergeDefaults(resolvedSchema, defaultValue),
           },
           getTransactionForChildCells(tx),
           synced,
-          asCellValues.at(0),
+          asCellKind,
           cfcLabelView,
         );
       }
@@ -411,7 +430,11 @@ export function processDefaultValue(
           const asCellValues = ContextualFlowControl.getAsCellValues(
             propSchema,
           );
-          if (asCellValues.length > 0 && asCellValues.at(0) !== "stream") {
+          if (
+            asCellValues.length > 0 &&
+            ContextualFlowControl.getAsCellKind(asCellValues.at(0)) !==
+              "stream"
+          ) {
             // asCell are always created, it's their value that can be `undefined`
             result[key] = processDefaultValue(
               runtime,
@@ -642,7 +665,7 @@ export function validateAndTransform(
   // transaction, since opaque cells should preserve identity without materializing
   // the pointed-to value.
   const asCellValues = ContextualFlowControl.getAsCellValues(resolvedSchema);
-  if (asCellValues.at(0) === "opaque") {
+  if (ContextualFlowControl.getAsCellKind(asCellValues.at(0)) === "opaque") {
     return new TransformObjectCreator(
       runtime,
       tx!,
@@ -915,12 +938,16 @@ class TransformObjectCreator
       if (asCellValues.length > 0) {
         // We'll use the first asCell for the outermost, and pass the rest
         // in with the schema for the created cell.
-        const cellKind = asCellValues[0];
+        const asCellEntry = asCellValues[0];
+        const cellKind = ContextualFlowControl.getAsCellKind(asCellEntry);
+        if (cellKind === undefined) {
+          return undefined;
+        }
         // TODO(@ubik2): deal with anyOf/oneOf with asCell/asStream
         return createCell(
           this.runtime,
           {
-            ...link,
+            ...linkWithAsCellScope(link, asCellEntry),
             schema: {
               ...restSchema,
               ...(asCellValues.length > 1) && { asCell: asCellValues.slice(1) },

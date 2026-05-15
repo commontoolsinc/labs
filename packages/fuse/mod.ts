@@ -350,6 +350,25 @@ export async function main(argv: string[] = Deno.args) {
     lastErrorAt: null as string | null,
   };
 
+  // Number of FUSE requests whose reply is intentionally delayed while async
+  // bridge work runs. Reverse invalidations are unsafe while these requests are
+  // outstanding because the kernel may still be waiting in request_wait_answer.
+  let pendingFuseReplies = 0;
+  let onPendingFuseRepliesDrained: (() => void) | undefined;
+
+  function trackPendingFuseReply(): () => void {
+    pendingFuseReplies++;
+    let done = false;
+    return () => {
+      if (done) return;
+      done = true;
+      pendingFuseReplies--;
+      if (pendingFuseReplies === 0) {
+        onPendingFuseRepliesDrained?.();
+      }
+    };
+  }
+
   // Populate tree
   const apiUrl = args["api-url"];
   if (apiUrl) {
@@ -791,12 +810,15 @@ export async function main(argv: string[] = Deno.args) {
         if (replyLookupFromTree(req, parent, lookup.directoryName)) {
           return;
         }
+        const finishPendingReply = trackPendingFuseReply();
         bridge.connectSpace(lookup.spaceName).then(() => {
           if (!replyLookupFromTree(req, parent, lookup.directoryName)) {
             fuse.symbols.fuse_reply_err(req, ENOENT);
           }
+          finishPendingReply();
         }).catch(() => {
           fuse.symbols.fuse_reply_err(req, ENOENT);
+          finishPendingReply();
         });
         return;
       }
@@ -808,16 +830,21 @@ export async function main(argv: string[] = Deno.args) {
         // previously hydrated data), reply immediately and trigger
         // hydration in the background for not-yet-populated entries.
         if (!mustSynchronize && replyLookupFromTree(req, parent, name)) {
-          bridge.prepareLookup(parent, name).catch(() => {});
+          setTimeout(() => {
+            bridge.prepareLookup(parent, name).catch(() => {});
+          }, 0);
           return;
         }
         // Slow path: entry not in tree, must hydrate before replying.
+        const finishPendingReply = trackPendingFuseReply();
         bridge.prepareLookup(parent, name).then(() => {
           if (!replyLookupFromTree(req, parent, name)) {
             fuse.symbols.fuse_reply_err(req, ENOENT);
           }
+          finishPendingReply();
         }).catch(() => {
           fuse.symbols.fuse_reply_err(req, ENOENT);
+          finishPendingReply();
         });
         return;
       }
@@ -1198,10 +1225,13 @@ export async function main(argv: string[] = Deno.args) {
       };
 
       if (bridge?.shouldPrepareDirectory(inode)) {
+        const finishPendingReply = trackPendingFuseReply();
         bridge.prepareDirectory(inode).then(() => {
           sendDirectoryReply();
+          finishPendingReply();
         }).catch(() => {
           fuse.symbols.fuse_reply_err(req, ENOENT);
+          finishPendingReply();
         });
         return;
       }
@@ -2974,41 +3004,121 @@ export async function main(argv: string[] = Deno.args) {
 
   let unmounting = false;
 
-  // Wire up kernel cache invalidation for subscriptions
+  // Wire up kernel cache invalidation for subscriptions.
+  //
+  // libfuse reverse invalidation can block while the kernel answers the notify
+  // request. Some bridge paths run while a FUSE request is still awaiting its
+  // reply (for example, lookup -> connectSpace -> syncPieceList). Calling
+  // notify inline from those paths can deadlock the daemon against the kernel's
+  // pending request. Queue notifications onto a timer and wait for all tracked
+  // async replies to drain before issuing reverse invalidations.
   if (bridge) {
-    let notifySupported = true;
-    bridge.onInvalidate = (parentIno: bigint, names: string[]) => {
-      if (!notifySupported || unmounting) return;
-      for (const name of names) {
-        const nameBuf = encoder.encode(name + "\0");
-        const rc = fuse.symbols.fuse_lowlevel_notify_inval_entry(
-          handle.notifyTarget,
-          parentIno,
-          nameBuf,
-          BigInt(name.length),
-        );
-        if (rc === -38) {
-          // ENOSYS — FUSE-T doesn't support notify_inval_entry
-          console.log(
-            "notify_inval_entry not supported (FUSE-T); relying on short timeouts",
-          );
-          notifySupported = false;
-          break;
+    let entryNotifySupported = true;
+    let inodeNotifySupported = true;
+    const pendingEntryInvalidations = new Map<
+      string,
+      { parentIno: bigint; names: Set<string> }
+    >();
+    const pendingInodeInvalidations = new Set<bigint>();
+    let invalidationTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const scheduleInvalidationFlush = () => {
+      if (invalidationTimer !== undefined) return;
+      invalidationTimer = setTimeout(() => {
+        invalidationTimer = undefined;
+        if (pendingFuseReplies > 0) return;
+        flushDeferredInvalidations();
+      }, 0);
+    };
+    onPendingFuseRepliesDrained = scheduleInvalidationFlush;
+
+    const flushDeferredInvalidations = () => {
+      if (unmounting) {
+        pendingEntryInvalidations.clear();
+        pendingInodeInvalidations.clear();
+        return;
+      }
+
+      if (entryNotifySupported) {
+        for (const { parentIno, names } of pendingEntryInvalidations.values()) {
+          for (const name of names) {
+            const nameBuf = encoder.encode(name + "\0");
+            try {
+              const rc = fuse.symbols.fuse_lowlevel_notify_inval_entry(
+                handle.notifyTarget,
+                parentIno,
+                nameBuf,
+                BigInt(nameBuf.length - 1),
+              );
+              if (rc === -38) {
+                // ENOSYS — FUSE-T doesn't support notify_inval_entry.
+                console.log(
+                  "notify_inval_entry not supported (FUSE-T); relying on short timeouts",
+                );
+                entryNotifySupported = false;
+                break;
+              }
+              if (debug && rc !== 0) {
+                console.log(
+                  `notify_inval_entry(parent=${parentIno}, name=${name}) => ${rc}`,
+                );
+              }
+            } catch (e) {
+              console.warn(`notify_inval_entry failed: ${e}`);
+              entryNotifySupported = false;
+              break;
+            }
+          }
+          if (!entryNotifySupported) break;
         }
       }
+      pendingEntryInvalidations.clear();
+
+      if (inodeNotifySupported) {
+        for (const ino of pendingInodeInvalidations) {
+          try {
+            // Invalidate all cached data for this inode (off=0, len=-1 means all)
+            const ret = fuse.symbols.fuse_lowlevel_notify_inval_inode(
+              handle.notifyTarget,
+              ino,
+              0n,
+              -1n,
+            );
+            if (ret === -38) {
+              // ENOSYS — FUSE-T doesn't support notify_inval_inode.
+              inodeNotifySupported = false;
+              break;
+            }
+            if (debug) {
+              console.log(`notify_inval_inode(ino=${ino}) => ${ret}`);
+            }
+          } catch (e) {
+            console.warn(`notify_inval_inode failed: ${e}`);
+            inodeNotifySupported = false;
+            break;
+          }
+        }
+      }
+      pendingInodeInvalidations.clear();
+    };
+
+    bridge.onInvalidate = (parentIno: bigint, names: string[]) => {
+      if (!entryNotifySupported || unmounting) return;
+      const key = parentIno.toString();
+      let pending = pendingEntryInvalidations.get(key);
+      if (!pending) {
+        pending = { parentIno, names: new Set<string>() };
+        pendingEntryInvalidations.set(key, pending);
+      }
+      for (const name of names) {
+        pending.names.add(name);
+      }
+      scheduleInvalidationFlush();
     };
     bridge.onInvalidateInode = (ino: bigint) => {
-      if (unmounting) return;
-      // Invalidate all cached data for this inode (off=0, len=-1 means all)
-      const ret = fuse.symbols.fuse_lowlevel_notify_inval_inode(
-        handle.notifyTarget,
-        ino,
-        0n,
-        -1n,
-      );
-      if (debug) {
-        console.log(`notify_inval_inode(ino=${ino}) => ${ret}`);
-      }
+      if (!inodeNotifySupported || unmounting) return;
+      pendingInodeInvalidations.add(ino);
+      scheduleInvalidationFlush();
     };
   }
 

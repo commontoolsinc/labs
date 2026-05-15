@@ -22,14 +22,12 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
 import { resetDataModelConfig } from "@commonfabric/data-model/fabric-value";
-import { resetJsonEncodingConfig } from "@commonfabric/data-model/json-encoding";
 
 const signer = await Identity.fromPassphrase("test frozen mutation");
 const space = signer.did();
 
 function resetAllConfigs() {
   resetDataModelConfig();
-  resetJsonEncodingConfig();
 }
 
 describe("frozen-object safety contracts", () => {

@@ -158,6 +158,35 @@ describe("SelectorTracker", () => {
         }, runtime.cfc);
       expect(existingSelector1).toEqual(standardInitialSelector);
     });
+
+    it("does not treat selectors for the same id in different scopes as supersets", () => {
+      const userAddress: BaseMemoryAddress = {
+        id: "of:scoped-selector-doc",
+        type: "application/json",
+        scope: "user",
+      };
+      const sessionAddress: BaseMemoryAddress = {
+        ...userAddress,
+        scope: "session",
+      };
+      const { promise } = Promise.withResolvers<
+        Result<Unit, Error>
+      >();
+      const selector = {
+        path: [],
+        schema: { type: "object" },
+      } as const satisfies { path: string[]; schema: JSONSchema };
+
+      selectorTracker.add(userAddress, selector, promise);
+
+      const [existingSelector] = selectorTracker.getSupersetSelector(
+        sessionAddress,
+        selector,
+        runtime.cfc,
+      );
+
+      expect(existingSelector).toBeUndefined();
+    });
   });
 
   describe("getStandardSchema", () => {

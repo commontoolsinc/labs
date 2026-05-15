@@ -290,6 +290,11 @@ export function buildDenoArgs(opts: {
   execCli: string;
   logFile?: string;
   allowOther?: boolean;
+  cfcMode?: string;
+  cfcAnnotations?: boolean;
+  cfcXattrNamespace?: string;
+  cfcWritebackXattrs?: boolean;
+  cfcWritebackState?: string;
 }): string[] {
   const args = [
     "run",
@@ -308,6 +313,15 @@ export function buildDenoArgs(opts: {
   if (opts.execCli) args.push("--exec-cli", opts.execCli);
   if (opts.logFile) args.push("--log-file", opts.logFile);
   if (opts.allowOther) args.push("--allow-other");
+  if (opts.cfcMode) args.push("--cfc-mode", opts.cfcMode);
+  if (opts.cfcAnnotations) args.push("--cfc-annotations");
+  if (opts.cfcXattrNamespace) {
+    args.push("--cfc-xattr-namespace", opts.cfcXattrNamespace);
+  }
+  if (opts.cfcWritebackXattrs) args.push("--cfc-writeback-xattrs");
+  if (opts.cfcWritebackState) {
+    args.push("--cfc-writeback-state", opts.cfcWritebackState);
+  }
 
   return args;
 }

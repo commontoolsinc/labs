@@ -170,6 +170,7 @@ describe("Memory v2 storage notifications", () => {
       address: {
         id: uri,
         type: "application/json",
+        scope: "space",
         path: ["value", "profile", "name"],
       },
       before: { value: { profile: { name: "Ada", title: "Dr" } } },
@@ -214,6 +215,7 @@ describe("Memory v2 storage notifications", () => {
       address: {
         id: uri,
         type: "application/json",
+        scope: "space",
         path: ["value", "tags"],
       },
       before: { value: { tags: ["alpha", "beta", "gamma"] } },
@@ -302,6 +304,7 @@ describe("Memory v2 storage notifications", () => {
       address: {
         id: uri,
         type: "application/json",
+        scope: "space",
         path: ["value", "version"],
       },
       before: { value: { version: 2 } },

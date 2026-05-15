@@ -33,6 +33,7 @@ function makeChanges(count: number, overlapPercent: number): ChangeSet {
       location: {
         id: docId,
         space,
+        scope: "space",
         path: ["item" + i],
       },
       value: { a: 1, b: 2, c: 3 },
@@ -46,6 +47,7 @@ function makeChanges(count: number, overlapPercent: number): ChangeSet {
       location: {
         id: docId,
         space,
+        scope: "space",
         path: ["item" + parentIdx, "a"],
       },
       value: 1,

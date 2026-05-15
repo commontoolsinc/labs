@@ -98,6 +98,51 @@ export default pattern<Input>(({ deck }) => ({
 return <>{showDetails ? <div>Details content</div> : null}</>;
 ```
 
+### Scoped State Review
+
+Review whether each state field has the right sharing boundary. A useful test
+for UI state: if the user opens the same instance in a new tab, should this
+state carry over? If not, it is probably `PerSession<>`.
+
+| State                                                                                                     | Expected scope |
+| --------------------------------------------------------------------------------------------------------- | -------------- |
+| shared records, rooms, documents, canonical task lists                                                    | `PerSpace<>`   |
+| display name, user preference, personal draft, account-local setting                                      | `PerUser<>`    |
+| navigation, selected tab, selected item, selected room, modal/open state, local filter text, focused item | `PerSession<>` |
+
+Flag these issues:
+
+| Violation                                                      | Fix                                                                                                                                 |
+| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| transient UI state stored as unscoped or shared space state    | Use `PerSession<>`                                                                                                                  |
+| user-owned state stored as shared space state                  | Use `PerUser<>`                                                                                                                     |
+| shared canonical content stored per-session                    | Use `PerSpace<>` unless isolation is intentional                                                                                    |
+| user ids or session ids embedded in data to simulate isolation | Use scope wrappers                                                                                                                  |
+| `PerAny<>` used where the inner scope is known                 | Replace with the known scope; reserve `PerAny<>` for intentionally scope-polymorphic inner values under an outer `Per*` declaration |
+| scope used as an authorization boundary                        | Keep CFC/IFC/security policy separate                                                                                               |
+
+Accept either scoped authoring style:
+
+```ts
+// Plain data-shaped inputs.
+conversation?: PerSpace<Conversation | Default<typeof DEFAULT_CONVERSATION>>;
+name?: PerUser<string | Default<"">>;
+selectedRoom?: PerSession<SelectedRoom | Default<{}>>;
+
+// Writable aliases when handlers need stable cell handles.
+name?: PerUser<Writable<string | Default<"">>>;
+selectedRoom?: PerSession<Writable<SelectedRoom | Default<{}>>>;
+```
+
+`PerAny<>` should normally appear only as an inner override, for example:
+
+```ts
+type Selection = PerSession<{
+  item: PerUser<Item>;
+  attachment: PerAny<Attachment>;
+}>;
+```
+
 ### Visual Review Reminder
 
 When UI is important to the pattern, also look for:

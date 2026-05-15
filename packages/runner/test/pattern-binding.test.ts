@@ -8,8 +8,14 @@ import {
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { areLinksSame, getMetaCell } from "../src/link-utils.ts";
+import {
+  areLinksSame,
+  areNormalizedLinksSame,
+  getMetaCell,
+  parseLink,
+} from "../src/link-utils.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { isCell } from "../src/cell.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -152,6 +158,109 @@ describe("pattern-binding", () => {
           age: 25,
         },
       });
+    });
+
+    it("normalizes cell values before writing a narrower scoped binding", () => {
+      const output = runtime.getCell<{ value: unknown }>(
+        space,
+        "narrow scoped binding cell value output",
+        undefined,
+        tx,
+      );
+      output.set({ value: null });
+      const argumentCellLink = getMetaCell(output, "argument", tx)
+        .getAsNormalizedFullLink();
+      const internalCellLink = getMetaCell(output, "internal", tx)
+        .getAsNormalizedFullLink();
+
+      const source = runtime.getCell<string>(
+        space,
+        "narrow scoped binding cell value source",
+        undefined,
+        tx,
+      );
+      source.set("secret");
+
+      sendValueToBinding(
+        tx,
+        output,
+        argumentCellLink,
+        internalCellLink,
+        output.key("value").getAsWriteRedirectLink(),
+        source,
+        { narrowestReadScope: "user" },
+      );
+
+      const scopedValue = runtime.getCellFromLink(
+        { ...output.key("value").getAsNormalizedFullLink(), scope: "user" },
+        undefined,
+        tx,
+      );
+      const scopedRaw = scopedValue.getRaw();
+      expect(isCell(scopedRaw)).toBe(false);
+      expect(
+        areNormalizedLinksSame(parseLink(scopedRaw as any, scopedValue)!, {
+          ...source.getAsNormalizedFullLink(),
+          path: [],
+        }),
+      ).toBe(true);
+
+      const broadRaw = output.key("value").getRaw();
+      expect(
+        areNormalizedLinksSame(
+          parseLink(broadRaw as any, output.key("value"))!,
+          scopedValue.getAsNormalizedFullLink(),
+        ),
+      ).toBe(true);
+    });
+
+    it("normalizes nested cell values before writing a narrower scoped binding", () => {
+      const output = runtime.getCell<{ value: unknown }>(
+        space,
+        "narrow scoped binding nested cell output",
+        undefined,
+        tx,
+      );
+      output.set({ value: null });
+      const argumentCellLink = getMetaCell(output, "argument", tx)
+        .getAsNormalizedFullLink();
+      const internalCellLink = getMetaCell(output, "internal", tx)
+        .getAsNormalizedFullLink();
+
+      const source = runtime.getCell<string>(
+        space,
+        "narrow scoped binding nested cell source",
+        undefined,
+        tx,
+      );
+      source.set("secret");
+
+      sendValueToBinding(
+        tx,
+        output,
+        argumentCellLink,
+        internalCellLink,
+        output.key("value").getAsWriteRedirectLink(),
+        { nested: source },
+        { narrowestReadScope: "user" },
+      );
+
+      const scopedValue = runtime.getCellFromLink(
+        { ...output.key("value").getAsNormalizedFullLink(), scope: "user" },
+        undefined,
+        tx,
+      );
+      const scopedRaw = scopedValue.getRaw() as { nested?: unknown };
+      expect(isCell(scopedRaw.nested)).toBe(false);
+      expect(
+        areNormalizedLinksSame(
+          parseLink(scopedRaw.nested as any, scopedValue)!,
+          {
+            ...source.getAsNormalizedFullLink(),
+            path: [],
+          },
+        ),
+      ).toBe(true);
     });
   });
 

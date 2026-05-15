@@ -508,6 +508,24 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: deno run --allow-net --allow-env --allow-read --allow-run --allow-write tasks/perf-check.ts
 
+      - name: 📤 Upload performance metrics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-metrics
+          path: perf-metrics.json
+          retention-days: 90
+          if-no-files-found: ignore
+
+      - name: 📤 Upload performance metrics backfill
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-metrics-backfill
+          path: perf-metrics-backfill.json
+          retention-days: 90
+          if-no-files-found: ignore
+
   attest-binaries:
     name: "Attest and Upload Binaries"
     if: github.ref == 'refs/heads/main'

@@ -874,6 +874,7 @@ export class PieceManager {
     await linkCell.sync();
     linkCell = linkCell.asSchemaFromLinks(); // Make sure we have the full schema
     linkCell = linkCell.key(...linkPath);
+    linkCell = linkCell.resolveAsCell();
 
     // Get target cell (piece or arbitrary cell)
     const { cell: targetCell, isPiece: targetIsPiece } =

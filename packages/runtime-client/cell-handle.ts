@@ -280,6 +280,7 @@ export class CellHandle<T = unknown> {
     return {
       id: this.#ref.id,
       space: this.#ref.space,
+      scope: this.#ref.scope,
       path: [...this.#ref.path, key],
       // Child schema is unknown, so we don't include it
       ...(this.#ref.cfcLabelView !== undefined && {
@@ -296,6 +297,7 @@ export class CellHandle<T = unknown> {
         [LINK_V1_TAG]: {
           id: this.#ref.id,
           space: this.#ref.space,
+          scope: this.#ref.scope,
           path: this.#ref.path,
           ...(this.#ref.schema !== undefined && { schema: this.#ref.schema }),
           ...(this.#ref.overwrite !== undefined &&
@@ -515,6 +517,10 @@ function parseAsCellRef(
     return {
       id: linkData.id ?? from.id,
       space: linkData.space ?? from.space,
+      scope: linkData.scope === "space" || linkData.scope === "user" ||
+          linkData.scope === "session"
+        ? linkData.scope
+        : from.scope,
       path: (linkData.path ?? []).map((p) => p.toString()),
       ...(linkData.schema !== undefined && { schema: linkData.schema }),
       ...((linkData as { cfcLabelView?: CfcLabelView }).cfcLabelView !==
@@ -538,6 +544,7 @@ function parseAsCellRef(
     return {
       id: entityId,
       space: from.space,
+      scope: from.scope,
       path: aliasPath,
       ...(alias.schema !== undefined && { schema: alias.schema }),
     };

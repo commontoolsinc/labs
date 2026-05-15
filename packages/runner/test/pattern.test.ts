@@ -109,7 +109,9 @@ describe("pattern", () => {
     expect(isPattern(doublePattern)).toBe(true);
     expect(argumentSchema).toBe(true);
     expect(result).toEqual({
-      double: { $alias: { cell: "internal", path: ["double"] } },
+      double: {
+        $alias: { cell: "internal", path: ["double"], scope: "space" },
+      },
     });
 
     expect(nodes.length).toBe(2);
@@ -117,16 +119,16 @@ describe("pattern", () => {
       "javascript",
     );
     expect(nodes[0].inputs).toEqual({
-      $alias: { cell: "argument", path: ["x"] },
+      $alias: { cell: "argument", path: ["x"], scope: "space" },
     });
     expect(nodes[0].outputs).toEqual({
-      $alias: { cell: "internal", path: ["__#0"] },
+      $alias: { cell: "internal", path: ["__#0"], scope: "space" },
     });
     expect(nodes[1].inputs).toEqual({
-      $alias: { cell: "internal", path: ["__#0"] },
+      $alias: { cell: "internal", path: ["__#0"], scope: "space" },
     });
     expect(nodes[1].outputs).toEqual({
-      $alias: { cell: "internal", path: ["double"] },
+      $alias: { cell: "internal", path: ["double"], scope: "space" },
     });
   });
 
@@ -201,7 +203,9 @@ describe("pattern", () => {
     expect(isPattern(doublePattern)).toBe(true);
     expect(argumentSchema).toBe(true);
     expect(result).toEqual({
-      double: { $alias: { cell: "internal", path: ["__#1", "doubled"] } },
+      double: {
+        $alias: { cell: "internal", path: ["__#1", "doubled"], scope: "space" },
+      },
     });
 
     expect(nodes.length).toBe(2);
@@ -209,16 +213,18 @@ describe("pattern", () => {
       "javascript",
     );
     expect(nodes[0].inputs).toEqual({
-      x: { $alias: { cell: "argument", path: ["x"] } },
+      x: { $alias: { cell: "argument", path: ["x"], scope: "space" } },
     });
     expect(nodes[0].outputs).toEqual({
-      $alias: { cell: "internal", path: ["__#0"] },
+      $alias: { cell: "internal", path: ["__#0"], scope: "space" },
     });
     expect(nodes[1].inputs).toEqual({
-      x: { $alias: { cell: "internal", path: ["__#0", "doubled"] } },
+      x: {
+        $alias: { cell: "internal", path: ["__#0", "doubled"], scope: "space" },
+      },
     });
     expect(nodes[1].outputs).toEqual({
-      $alias: { cell: "internal", path: ["__#1"] },
+      $alias: { cell: "internal", path: ["__#1"], scope: "space" },
     });
 
     const json = JSON.stringify(doublePattern);

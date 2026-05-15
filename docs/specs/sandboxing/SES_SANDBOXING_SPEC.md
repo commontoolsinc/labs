@@ -84,7 +84,7 @@ mutator methods remain live unless they are handled specially. This spec
 therefore requires an additional runtime module-safe-data checker/freezer for
 top-level non-function values.
 
-Alternative considered: QuickJS (via `js-sandbox` package). SES is preferred because:
+Alternative considered: QuickJS as a separate JavaScript runtime. SES is preferred because:
 - Runs in the same V8/SpiderMonkey engine (no serialization overhead)
 - Same JavaScript semantics (no edge cases)
 - Can share frozen objects between Compartments without copying

@@ -6,7 +6,10 @@ import {
 } from "@commonfabric/utils/types";
 import {
   cloneIfNecessary,
+  DECONSTRUCT,
+  FabricInstance,
   type FabricValue,
+  getDataModelConfig,
   isArrayIndexPropertyName,
   shallowFabricFromNativeValue,
 } from "@commonfabric/data-model/fabric-value";
@@ -20,6 +23,7 @@ import {
   type Apply,
   type Cell,
   type CellKind,
+  type CellScope,
   type CellTypeConstructor,
   type Frame,
   type HKT,
@@ -91,6 +95,7 @@ import {
   type SanitizeSchemaForLinksOptions,
   toMemorySpaceAddress,
 } from "./link-utils.ts";
+import { isCellScope, normalizeCellScope } from "./scope.ts";
 import type {
   ChangeGroup,
   IExtendedStorageTransaction,
@@ -149,6 +154,7 @@ const recordSchemaWritePolicyInput = (
     target: {
       space: link.space,
       id: link.id,
+      scope: link.scope,
       path: [...link.path],
     },
     schemaHash: schemaAndHash.hashString,
@@ -314,6 +320,7 @@ declare module "@commonfabric/api" {
       cell: OpaqueCell<any>;
       path: readonly PropertyKey[];
       schema?: JSONSchema;
+      scope?: CellScope;
       nodes: Set<NodeRef>;
       frame: Frame;
       value?: Opaque<T> | T;
@@ -478,7 +485,12 @@ export class CellImpl<T extends FabricValue>
     this._frame = getTopFrame();
 
     // Store this cell's own link
-    this._link = link ?? { path: [] };
+    this._link = {
+      ...(link ?? { path: [] }),
+      scope: isCellScope(link?.scope) ? link.scope : normalizeCellScope(
+        undefined,
+      ),
+    };
 
     // Use provided container or create one
     // If link has an id, extract it to the container
@@ -1140,6 +1152,10 @@ export class CellImpl<T extends FabricValue>
         path: [...currentLink.path, key.toString()] as string[],
         schema: childSchema,
       };
+
+      if (isRecord(childSchema) && isCellScope(childSchema.scope)) {
+        currentLink = { ...currentLink, scope: childSchema.scope };
+      }
     }
 
     // Determine the kind based on schema flags
@@ -1148,7 +1164,15 @@ export class CellImpl<T extends FabricValue>
       const asCellValues = ContextualFlowControl.getAsCellValues(childSchema);
       // we can override the kind of cell we use for a key
       if (asCellValues.length > 0) {
-        kind = asCellValues[0];
+        const asCellEntry = asCellValues[0];
+        const asCellKind = ContextualFlowControl.getAsCellKind(asCellEntry);
+        if (asCellKind !== undefined) {
+          kind = asCellKind;
+        }
+        const asCellScope = ContextualFlowControl.getAsCellScope(asCellEntry);
+        if (isCellScope(asCellScope)) {
+          currentLink = { ...currentLink, scope: asCellScope };
+        }
       }
     }
 
@@ -1370,10 +1394,27 @@ export class CellImpl<T extends FabricValue>
     }) as SigilWriteRedirectLink;
   }
 
+  /**
+   * Read the cell's value at the fabric layer (no native unwrapping, no
+   * Proxy wrapping). By default returns a deep-frozen `FabricValue`
+   * snapshot; pass `{ frozen: false }` for a mutable deep copy.
+   *
+   * **Frozenness contract:** Defaults to `{ frozen: true }` regardless
+   * of the data-model flag, returning a deep-frozen `FabricValue`
+   * snapshot via `cloneIfNecessary()`. Under `modernDataModel: true`
+   * the underlying storage already holds a deep-frozen tree, so the
+   * clone is typically a no-op. Under `modernDataModel: false` (legacy)
+   * the snapshot is freshly frozen at read time. The `{ frozen: false }`
+   * variant returns a fresh mutable deep copy and never aliases storage
+   * state.
+   */
   getRaw(options?: IReadOptions): Immutable<T> | undefined {
     return this.getRawUntyped(options) as Immutable<T> | undefined;
   }
 
+  /**
+   * Untyped variant of `getRaw()`; same frozenness contract.
+   */
   getRawUntyped(
     options?: IReadOptions & { frozen?: true },
   ): Immutable<FabricValue>;
@@ -1448,6 +1489,7 @@ export class CellImpl<T extends FabricValue>
       space: this.link.space,
       id: this.link.id,
       path: [metaField],
+      ...(this.link.scope !== undefined && { scope: this.link.scope }),
     };
     return this.runtime.readTx(this.tx).readOrThrow(metaAddr, options);
   }
@@ -1461,6 +1503,7 @@ export class CellImpl<T extends FabricValue>
       space: this.link.space,
       id: this.link.id,
       path: [metaField],
+      ...(this.link.scope !== undefined && { scope: this.link.scope }),
     };
     this.tx.writeOrThrow(metaAddr, value as FabricValue);
   }
@@ -1509,6 +1552,7 @@ export class CellImpl<T extends FabricValue>
     cell: OpaqueCell<unknown>;
     path: readonly PropertyKey[];
     schema?: JSONSchema;
+    scope?: CellScope;
     nodes: Set<NodeRef>;
     frame: Frame;
     value?: Opaque<T> | T;
@@ -1522,6 +1566,7 @@ export class CellImpl<T extends FabricValue>
       cell: this._causeContainer.cell,
       path: this.path,
       schema: this.schema,
+      scope: isCellScope(this._link.scope) ? this._link.scope : undefined,
       nodes: cellNodes.get(this._causeContainer.cell) ?? new Set(),
       frame: this._frame,
       // Cast needed: stream sentinel marker isn't actually of type T
@@ -1625,13 +1670,14 @@ export class CellImpl<T extends FabricValue>
         implementation: "map",
       });
     }
+    const op = pattern(
+      ({ element, index, array }: Opaque<any>) => fn(element, index, array),
+    );
     const result = mapFactory({
       list: this as unknown as OpaqueRef<T>,
-      op: pattern(
-        ({ element, index, array }: Opaque<any>) => fn(element, index, array),
-      ),
+      op,
     });
-    const schema = flowPrecisionSchemaForBuiltin("map");
+    const schema = flowPrecisionSchemaForBuiltin("map", op.resultSchema);
     if (schema !== undefined) {
       result.setSchema(schema);
     }
@@ -1660,7 +1706,7 @@ export class CellImpl<T extends FabricValue>
       op: op,
       params: params,
     });
-    const schema = flowPrecisionSchemaForBuiltin("map");
+    const schema = flowPrecisionSchemaForBuiltin("map", op.resultSchema);
     if (schema !== undefined) {
       result.setSchema(schema);
     }
@@ -2148,6 +2194,18 @@ function validateStaticData(value: unknown): void {
  * This ensures that mutable arrays only consist of links to documents, at least
  * when written to only via .set, .update and .push above.
  *
+ * **Frozenness contract (modern data model only):** This function sits at
+ * the write boundary into runner/memory storage. Under
+ * `modernDataModel: true`, the returned tree is always a valid
+ * deep-frozen `FabricValue`: the shallow fabric conversion freezes the
+ * sub-trees it visits, and the function freezes the freshly-built
+ * top-level container before returning. If the input is already a
+ * deep-frozen valid `FabricValue`, the shallow conversion returns it
+ * as-is and reference identity is preserved end-to-end. Under
+ * `modernDataModel: false` (legacy), no freezing happens here at all
+ * and the legacy "preserve identity when there's nothing to do"
+ * optimization applies regardless of input frozenness.
+ *
  * TODO(seefeld): When an array has default entries and is rewritten as [...old,
  * new], this will still break, because the previous entries will point back to
  * the array itself instead of being new entries.
@@ -2163,6 +2221,10 @@ export function recursivelyAddIDIfNeeded<T>(
   // Can't add IDs without frame.
   if (!frame) return value;
 
+  // Snapshot the modern-data-model flag once; used below at the freshly-
+  // built-container freeze points.
+  const modern = getDataModelConfig();
+
   // Already seen, return previously annotated result. Check this before
   // shallowFabricFromNativeValue() to handle circular references properly.
   if (seen.has(value)) return seen.get(value) as T;
@@ -2172,44 +2234,88 @@ export function recursivelyAddIDIfNeeded<T>(
     return value;
   }
 
+  // `FabricInstance` values (`FabricError`, `FabricMap`, `FabricSet`,
+  // `FabricRegExp`) are immutable wrappers with class-defined identity.
+  // Their own-enumerable properties are implementation details (e.g.,
+  // `FabricError.error` is the wrapped native `Error`), not user-visible
+  // structure; iterating them would re-wrap the embedded native value on
+  // each pass and recurse forever. Instead, walk the observable internal
+  // structure via `[DECONSTRUCT]()` (the same mechanism the serialization
+  // system uses) for side effects only — tracking shared references in
+  // `seen` and populating `frame.generatedIdCounter` for any
+  // objects-in-arrays nested inside — then return the original instance
+  // unchanged. Subclasses that haven't implemented `[DECONSTRUCT]` yet
+  // will throw from this path; that's the right signal the moment they
+  // start seeing traffic.
+  if (value instanceof FabricInstance) {
+    seen.set(value, value);
+    const state = value[DECONSTRUCT]();
+    if (isRecord(state) || Array.isArray(state)) {
+      recursivelyAddIDIfNeeded(state, frame, seen);
+    }
+    return value;
+  }
+
   // Convert value to fabric form. This handles:
   // - Primitives (e.g., -0 → 0, reject NaN/Infinity/Symbol/BigInt)
   // - Instances (e.g., Error → @Error wrapper)
   // - Objects/arrays with toJSON() methods
   // - Sparse arrays (densified with null in holes)
   const converted = shallowFabricFromNativeValue(value);
-  const convertedIsRecord = isRecord(converted);
 
-  // If conversion changed the value, cache the result so shared references
-  // are preserved and we avoid redundant toJSON() calls.
-  if (converted !== value) {
-    const result = convertedIsRecord
-      ? recursivelyAddIDIfNeeded(converted as T, frame, seen)
-      : converted as T;
-    seen.set(value, result);
-    return result;
-  }
-
-  // Primitives that didn't need conversion don't need further processing.
-  if (!convertedIsRecord) {
+  // `FabricInstance` returned by the conversion step (e.g. `FabricError`
+  // wrapping a native `Error`). Same handling as the up-front
+  // `FabricInstance` branch above: record identity, walk via
+  // `[DECONSTRUCT]()` for side effects, return the instance unchanged.
+  if (converted instanceof FabricInstance) {
+    seen.set(value, converted);
+    const state = converted[DECONSTRUCT]();
+    if (isRecord(state) || Array.isArray(state)) {
+      recursivelyAddIDIfNeeded(state, frame, seen);
+    }
     return converted as T;
   }
 
-  if (Array.isArray(value)) {
-    const result = new Array<unknown>(value.length);
-    let changed = false;
+  // Primitives need no further processing. Cache the conversion when it
+  // changed the value (e.g. `-0 → 0`) so callers see consistent results.
+  if (!isRecord(converted)) {
+    if (converted !== value) seen.set(value, converted);
+    return converted as T;
+  }
 
-    // Set before traversing, otherwise we'll infinite recurse.
+  // From here `converted` is an array or record. The result container is
+  // pre-registered in `seen` against the original `value` BEFORE descending
+  // into entries, so circular back-references to `value` resolve correctly
+  // even under modern, where shallow conversion allocates a fresh frozen
+  // clone whose own properties still point at the original (unfrozen)
+  // input. Without this, a cycle would re-enter
+  // `shallowFabricFromNativeValue(value)` on every pass and recurse
+  // forever.
+  const convertedDiffers = converted !== value;
+
+  if (Array.isArray(converted)) {
+    // Typed as `any[]` (not `unknown[]`) to preserve the original code's
+    // looser inference inside the iteration body, where `{...v}` and
+    // `ID in v` operate post-narrowing without explicit casts.
+    const sourceArray = converted as any[];
+    const result = new Array<unknown>(sourceArray.length);
+    let changed = convertedDiffers;
+
     seen.set(value, result);
+    if (convertedDiffers) seen.set(converted, result);
 
-    value.forEach((el, i) => {
+    sourceArray.forEach((el, i) => {
       const v = recursivelyAddIDIfNeeded(el, frame, seen);
       // For objects on arrays only: Add ID if not already present.
       if (
         isObject(v) && !isCellLink(v) && !(ID in v)
       ) {
         changed = true;
-        result[i] = { [ID]: frame.generatedIdCounter++, ...v };
+        const withId = { [ID]: frame.generatedIdCounter++, ...v };
+        // Under modern, the ID-wrapped object is a freshly-built
+        // container that must also be deep-frozen.
+        if (modern) Object.freeze(withId);
+        result[i] = withId;
       } else {
         if (!Object.is(v, el)) {
           changed = true;
@@ -2223,18 +2329,21 @@ export function recursivelyAddIDIfNeeded<T>(
       return value;
     }
 
+    // Under the modern data model, the value enters a write-boundary that
+    // expects deep-frozen `FabricValue` trees. Children are already frozen
+    // by `shallowFabricFromNativeValue()` above; freeze the freshly-built
+    // top-level container so the returned tree is deep-frozen as a whole.
+    if (modern) Object.freeze(result);
     return result as T;
   } else {
-    // At this point we know `value` is a non-array record (we returned early
-    // for primitives and `Array.isArray` was false).
-    const valueRecord = value as Record<string, unknown>;
+    const sourceRecord = converted as Record<string, unknown>;
     const result: Record<string, unknown> = {};
-    let changed = false;
+    let changed = convertedDiffers;
 
-    // Set before traversing, otherwise we'll infinite recurse.
     seen.set(value, result);
+    if (convertedDiffers) seen.set(converted, result);
 
-    Object.entries(valueRecord).forEach(([key, v]) => {
+    Object.entries(sourceRecord).forEach(([key, v]) => {
       const next = recursivelyAddIDIfNeeded(v, frame, seen);
       if (!Object.is(next, v)) {
         changed = true;
@@ -2242,19 +2351,26 @@ export function recursivelyAddIDIfNeeded<T>(
       result[key] = next;
     });
 
-    // Copy supported symbols from original value.
-    [ID, ID_FIELD].forEach((symbol) => {
-      if (symbol in valueRecord) {
-        (result as IDFields)[symbol as keyof IDFields] =
-          (valueRecord as IDFields)[symbol as keyof IDFields];
-      }
-    });
+    // Copy supported symbols from the original value. Symbols are not
+    // enumerable via `Object.entries()` and are not preserved by the
+    // shallow fabric conversion.
+    if (isRecord(value)) {
+      const valueRecord = value as Record<string, unknown>;
+      [ID, ID_FIELD].forEach((symbol) => {
+        if (symbol in valueRecord) {
+          (result as IDFields)[symbol as keyof IDFields] =
+            (valueRecord as IDFields)[symbol as keyof IDFields];
+        }
+      });
+    }
 
     if (!changed) {
       seen.set(value, value);
       return value;
     }
 
+    // See array-branch comment above re: modern freeze.
+    if (modern) Object.freeze(result);
     return result as T;
   }
 }

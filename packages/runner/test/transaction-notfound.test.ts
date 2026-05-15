@@ -24,6 +24,10 @@ class MockReplica implements ISpaceReplica {
     return this.data.get(key);
   }
 
+  getDocument() {
+    return undefined;
+  }
+
   commit() {
     return Promise.resolve({ ok: {} as any });
   }

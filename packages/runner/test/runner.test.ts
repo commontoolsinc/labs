@@ -959,7 +959,7 @@ describe("storage subscription", () => {
     };
 
     const uri = "pattern-cache-test" as URI;
-    const key = `${space}/${uri}`;
+    const key = `${space}/space/${uri}`;
     internals.resultPatternCache.set(key, "cached-pattern");
 
     const notification = {

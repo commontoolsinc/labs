@@ -22,6 +22,12 @@ import {
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import { ignoreReadForScheduling } from "./scheduler.ts";
 import { ContextualFlowControl } from "@commonfabric/runner";
+import type { CellScope } from "./builder/types.ts";
+import { scopeRank } from "./scope.ts";
+
+type SendValueToBindingOptions = {
+  narrowestReadScope?: CellScope;
+};
 
 /**
  * Sends a value to a binding. If the binding is an array or object, it'll
@@ -44,32 +50,34 @@ export function sendValueToBinding<T>(
   internalCellLink: NormalizedFullLink,
   binding: unknown,
   value: unknown,
+  options: SendValueToBindingOptions = {},
 ): void {
   // Handle both legacy $alias format and new sigil link format
   if (isWriteRedirectLink(binding)) {
     if (isLegacyAlias(binding)) {
-      if (typeof binding.$alias.cell !== "string") {
+      const alias = binding.$alias;
+      if (typeof alias.cell !== "string") {
         console.log("Binding:", binding);
         throw new Error(
           "Invalid pseudo-alias cell: " + JSON.stringify(binding),
         );
       }
       // Certain strings have special meaning as the cell id
-      const link = binding.$alias.cell === "argument"
+      const link = alias.cell === "argument"
         ? argumentCellLink
-        : binding.$alias.cell === "internal"
+        : alias.cell === "internal"
         ? internalCellLink
-        : binding.$alias.cell === "result"
+        : alias.cell === "result"
         ? cell.getAsWriteRedirectLink()
         : undefined;
       if (link === undefined) {
-        throw new Error("Invalid pseudo-alias path: " + binding.$alias.path);
+        throw new Error("Invalid pseudo-alias path: " + alias.path);
       }
       binding = createSigilLinkFromParsedLink({
         ...link,
-        path: binding.$alias.path.map((p) => p.toString()),
-        ...(binding.$alias.schema !== undefined &&
-          { schema: binding.$alias.schema }),
+        path: alias.path.map((p) => p.toString()),
+        ...(alias.scope !== undefined) && { scope: alias.scope },
+        ...(alias.schema !== undefined && { schema: alias.schema }),
       }, { includeSchema: true, overwrite: "redirect" });
     }
 
@@ -79,6 +87,32 @@ export function sendValueToBinding<T>(
       parseLink(binding, cell)!,
       "writeRedirect",
     );
+    const outputScope = options.narrowestReadScope;
+    if (
+      outputScope !== undefined &&
+      scopeRank(outputScope) > scopeRank(ref.scope)
+    ) {
+      const scopedRef = { ...ref, scope: outputScope };
+      const valueLink = isCellLink(value) ? parseLink(value, ref) : undefined;
+      if (
+        valueLink === undefined ||
+        !areNormalizedLinksSame(valueLink, scopedRef)
+      ) {
+        diffAndUpdate(
+          cell.runtime,
+          tx,
+          scopedRef,
+          value as FabricValue,
+          { cell: cell.getAsNormalizedFullLink(), binding },
+          { meta: ignoreReadForScheduling },
+        );
+      }
+      tx.writeValueOrThrow(
+        ref,
+        createSigilLinkFromParsedLink(scopedRef, { base: ref }) as FabricValue,
+      );
+      return;
+    }
     diffAndUpdate(
       cell.runtime,
       tx,
@@ -97,6 +131,7 @@ export function sendValueToBinding<T>(
           internalCellLink,
           binding[i],
           value[i],
+          options,
         );
       }
     }
@@ -110,6 +145,7 @@ export function sendValueToBinding<T>(
           internalCellLink,
           binding[key],
           value[key],
+          options,
         );
       }
     }

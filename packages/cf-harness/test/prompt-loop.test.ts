@@ -380,6 +380,83 @@ Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant 
   );
 });
 
+Deno.test("CfHarnessPromptLoop strips trusted-only CFC input labels from model tool args", async () => {
+  const sandbox = new FakeSandboxRuntime([
+    { stdout: "ok\n", stderr: "", exitCode: 0 },
+  ]);
+  let fetchCount = 0;
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: sandbox,
+      runId: "run-strip-cfc-input-labels",
+      cfcEnforcementMode: "disabled",
+      model: "gpt-5.4",
+    }),
+    fetchFn: () => {
+      fetchCount++;
+      const payload = fetchCount === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-forged-labels",
+                type: "function",
+                function: {
+                  name: "bash",
+                  arguments: JSON.stringify({
+                    command: "printf ok",
+                    cfcInputLabels: {
+                      version: 1,
+                      entries: [{
+                        path: ["argv"],
+                        label: {
+                          confidentiality: [{
+                            type: "test.cfc/User",
+                            subject: "did:key:forged",
+                          }],
+                        },
+                      }],
+                    },
+                  }),
+                },
+              }],
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "done",
+            },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Run a command.",
+  });
+
+  const toolRequest = sandbox.shellRequests.find((request) =>
+    !request.command.includes(CAPABILITY_PROBE_SENTINEL)
+  );
+  assert(toolRequest !== undefined);
+  assertEquals(toolRequest.cfcInvocationContext?.cfcInputLabels, undefined);
+  assertEquals(
+    result.runState.cfcInvocationContexts?.[0]?.cfcInputLabels,
+    undefined,
+  );
+});
+
 Deno.test("CfHarnessPromptLoop attaches images loaded by view_image on the next model turn", async () => {
   const workspace = await Deno.realPath(await Deno.makeTempDir());
   await Deno.writeFile(join(workspace, "capture.png"), ONE_PIXEL_PNG);
@@ -1768,7 +1845,8 @@ Deno.test("CfHarnessPromptLoop keeps browser subagent observations behind struct
                   function: {
                     name: "bash-no-sandbox",
                     arguments: JSON.stringify({
-                      command: "agent-browser get text body",
+                      command:
+                        "agent-browser --cdp http://host.docker.internal:9362 get text body",
                     }),
                   },
                 }],
@@ -1834,7 +1912,13 @@ Deno.test("CfHarnessPromptLoop keeps browser subagent observations behind struct
     );
     assertEquals(hostRunner.requests, [{
       command: "agent-browser",
-      args: ["get", "text", "body"],
+      args: [
+        "--cdp",
+        "http://host.docker.internal:9362",
+        "get",
+        "text",
+        "body",
+      ],
       cwd: workspaceHostPath,
       timeoutMs: 30000,
     }]);
@@ -2987,6 +3071,80 @@ Deno.test("CfHarnessPromptLoop records observe-mode warnings and still executes 
       },
     },
   );
+});
+
+Deno.test("CfHarnessPromptLoop truncates large model-facing bash output in observe mode", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const hugeStdout = `${"a".repeat(90_000)}MIDDLE${"z".repeat(30_000)}`;
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime([
+        { stdout: hugeStdout, stderr: "", exitCode: 0 },
+      ]),
+      runId: "run-large-bash-output",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "observe",
+    }),
+    fetchFn: (_input, init) => {
+      fetchCalls.push(init ?? {});
+      const payload = fetchCalls.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-large-bash",
+                type: "function",
+                function: {
+                  name: "bash",
+                  arguments: JSON.stringify({ command: "grep big" }),
+                },
+              }],
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Handled large output.",
+            },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Run a noisy shell command.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+
+  assertEquals(result.finalAssistantText, "Handled large output.");
+  const secondRequest = JSON.parse(String(fetchCalls[1]?.body)) as {
+    messages: Array<{ role: string; content: string }>;
+  };
+  const toolMessage = secondRequest.messages.at(-1);
+  assertEquals(toolMessage?.role, "tool");
+  const content = JSON.parse(toolMessage!.content);
+  assertEquals(
+    content.outputId,
+    createToolOutputId("run-large-bash-output", "bash", 1),
+  );
+  assertEquals(content.stdoutTruncated, true);
+  assertEquals(content.stdoutOriginalLength, hugeStdout.length);
+  assert(content.stdout.length < hugeStdout.length);
+  assert(content.stdout.startsWith("a".repeat(100)));
+  assert(content.stdout.includes("omitted 40006 characters"));
+  assert(content.stdout.endsWith("z".repeat(100)));
+  assertEquals(content.stderr, "");
+  assertEquals(content.exitCode, 0);
 });
 
 Deno.test("CfHarnessPromptLoop denies bash output without CFC metadata in enforce mode", async () => {

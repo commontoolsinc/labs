@@ -350,6 +350,7 @@ describe("Schema - Examples", () => {
         id: toURI(docCell.entityId!),
         path: ["current", "label"],
         space,
+        scope: "space",
         schema: current.schema,
       });
 
@@ -378,6 +379,7 @@ describe("Schema - Examples", () => {
         id: toURI(initialEntityId),
         path: ["foo"],
         space,
+        scope: "space",
         schema: omitSchema,
       });
       const log = txToReactivityLog(tx);

@@ -10,6 +10,7 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { isRecord } from "@commonfabric/utils/types";
 import { rendererVDOMSchema } from "./schemas.ts";
 import {
+  type CellScope,
   type Frame,
   isModule,
   isPattern,
@@ -26,7 +27,7 @@ import {
   popFrame,
   pushFrameFromCause,
 } from "./builder/pattern.ts";
-import { type Cell, isCell } from "./cell.ts";
+import { type Cell, createCell, isCell } from "./cell.ts";
 import { type Action } from "./scheduler.ts";
 import {
   findAllWriteRedirectCells,
@@ -64,6 +65,7 @@ import { FunctionCache } from "./function-cache.ts";
 import { isRawBuiltinResult, type RawBuiltinReturnType } from "./module.ts";
 import "./builtins/index.ts";
 import { isCellResult } from "./query-result-proxy.ts";
+import { isCellScope, narrowestScope } from "./scope.ts";
 import {
   cellAwareDeepCopy,
   describePatternOrModule,
@@ -115,6 +117,18 @@ const EAGER_RESULT_BUILTIN_REFS = new Set([
   "streamData",
 ]);
 
+function schemaCellScope(
+  schema: JSONSchema | undefined,
+): CellScope | undefined {
+  return isRecord(schema) && isCellScope(schema.scope)
+    ? schema.scope
+    : undefined;
+}
+
+function patternDefaultScope(pattern: Pattern): CellScope | undefined {
+  return schemaCellScope(pattern.resultSchema) ?? pattern.defaultScope;
+}
+
 const recordOutputSchemaPolicyInputs = (
   tx: IExtendedStorageTransaction,
   runtime: Runtime,
@@ -147,6 +161,7 @@ const recordOutputSchemaPolicyInputs = (
         target: {
           space: targetLink.space,
           id: targetLink.id,
+          scope: targetLink.scope,
           path: [...targetLink.path],
         },
         schema,
@@ -196,6 +211,7 @@ const recordSchemaPolicyInputForLink = (
     target: {
       space: link.space,
       id: link.id,
+      scope: link.scope,
       path: [...link.path],
     },
     schema,
@@ -324,12 +340,14 @@ const recordSetupProjectionPolicyInputs = (
       target: {
         space: target.space,
         id: target.id,
+        scope: target.scope,
         path: [...target.path, ...schemaPath],
       },
       claim: CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
       sources: [{
         space: source.space,
         id: source.id,
+        scope: source.scope,
         path: [...source.path],
       }],
     });
@@ -395,6 +413,10 @@ type JavaScriptNodeContext = BoundNodeIO & {
   verifiedLoadId: string | undefined;
 };
 
+type JavaScriptActionResultCells = {
+  byScope: Map<CellScope, Cell<any>>;
+};
+
 export class Runner {
   readonly cancels = new Map<`${MemorySpace}/${URI}`, Cancel>();
   private allCancels = new Set<Cancel>();
@@ -402,7 +424,10 @@ export class Runner {
   private locallyPreparedResults = new Set<`${MemorySpace}/${URI}`>();
   // Map whose key is the result cell's full key, and whose values are the
   // patterns as strings
-  private resultPatternCache = new Map<`${MemorySpace}/${URI}`, string>();
+  private resultPatternCache = new Map<
+    `${MemorySpace}/${CellScope}/${URI}`,
+    string
+  >();
 
   constructor(readonly runtime: Runtime) {
     this.runtime.storageManager.subscribe(this.createStorageSubscription());
@@ -423,7 +448,11 @@ export class Runner {
         const space = notification.space;
         if ("changes" in notification) {
           for (const change of notification.changes) {
-            this.resultPatternCache.delete(`${space}/${change.address.id}`);
+            this.resultPatternCache.delete(
+              `${space}/${
+                change.address.scope ?? "space"
+              }/${change.address.id}`,
+            );
           }
         } else if (notification.type === "reset") {
           // copy keys, since we'll mutate the collection while iterating
@@ -1022,6 +1051,22 @@ export class Runner {
         new Error(`Cannot start: no pattern ID (pattern)`),
       );
     }
+    return this.startAvailablePattern(
+      rootCell,
+      patternId,
+      wasSyncedAtEntry,
+      wasPreparedLocally,
+      seenCells,
+    );
+  }
+
+  private startAvailablePattern<T = any>(
+    rootCell: Cell<T>,
+    patternId: URI,
+    wasSyncedAtEntry: boolean,
+    wasPreparedLocally: boolean,
+    seenCells: Set<Cell>,
+  ): Promise<boolean> {
     const pattern = this.runtime.patternManager.patternById(patternId);
     if (!pattern) {
       return this.runtime.patternManager.loadPattern(
@@ -1321,9 +1366,9 @@ export class Runner {
       : resultCell;
   }
 
-  private getDocKey(cell: Cell<any>): `${MemorySpace}/${URI}` {
-    const { space, id } = cell.getAsNormalizedFullLink();
-    return `${space}/${id}`;
+  private getDocKey(cell: Cell<any>): `${MemorySpace}/${CellScope}/${URI}` {
+    const { space, id, scope } = cell.getAsNormalizedFullLink();
+    return `${space}/${scope}/${id}`;
   }
 
   private async syncCellsForRunningPattern(
@@ -2003,7 +2048,8 @@ export class Runner {
     outputs: FabricValue,
     addCancel: AddCancel,
     _resultFor: { inputs: FabricValue; outputs: FabricValue; fn: string },
-    previousResultCellRef: { current?: Cell<any> },
+    previousResultCellRef: JavaScriptActionResultCells,
+    narrowestReadScope?: CellScope,
   ): any {
     if (
       !validateAndCheckOpaqueRefs(result, name) &&
@@ -2023,14 +2069,42 @@ export class Runner {
         getMetaLink(resultCell, "internal")!,
         outputs,
         result,
+        {
+          narrowestReadScope,
+        },
       );
       return result;
     }
 
     const resultPattern = patternFromFrame(() => result);
+    const effectiveOutputScope = narrowestScope([
+      schemaCellScope(resultSchema),
+      schemaCellScope(resultPattern.resultSchema),
+      narrowestReadScope,
+    ]);
+    // See if the resultCell was already in this effective output scope
+    const previousScopedResultCell = previousResultCellRef.byScope.get(
+      effectiveOutputScope,
+    );
+    if (previousScopedResultCell === undefined) {
+      // If our effective output scope is "space", we can use the existing result cell.
+      // TODO(@ubik2): I'm not sure the logic is right here if our existing is "user", and effective is "space".
+      const newResultCell = effectiveOutputScope === "space"
+        ? resultCell
+        : createCell(
+          this.runtime,
+          {
+            ...resultCell.getAsNormalizedFullLink(),
+            scope: effectiveOutputScope,
+          },
+          tx,
+        );
+      previousResultCellRef.byScope.set(effectiveOutputScope, newResultCell);
+      resultCell = newResultCell;
+    }
 
     const resultPatternAsString = JSON.stringify(resultPattern);
-    const cacheKey = `${resultCell.space}/${resultCell.sourceURI}` as const;
+    const cacheKey = this.getDocKey(resultCell);
     const previousResultPatternAsString = this.resultPatternCache.get(cacheKey);
     const patternUnchanged =
       previousResultPatternAsString === resultPatternAsString;
@@ -2057,7 +2131,6 @@ export class Runner {
       this.pullCellOnceAfterSuccessfulCommit(tx, resultCell);
     }
 
-    previousResultCellRef.current ??= resultCell;
     const effectiveResultSchema = resultSchema ?? resultPattern.resultSchema ??
       resultCell.schema;
     recordOutputSchemaPolicyInputs(
@@ -2074,6 +2147,7 @@ export class Runner {
       getMetaLink(resultCell, "internal")!,
       outputs,
       resultCell.getAsLink(),
+      { narrowestReadScope: effectiveOutputScope },
     );
     return result;
   }
@@ -2294,7 +2368,9 @@ export class Runner {
       undefined,
       tx,
     );
-    const previousResultCellRef: { current?: Cell<any> } = {};
+    const previousResultCellRef: JavaScriptActionResultCells = {
+      byScope: new Map(),
+    };
     let previouslyInvalidArgument = false;
     const fnSource = fn.toString();
 
@@ -2325,13 +2401,7 @@ export class Runner {
         tx.setCfcImplementationIdentity(policyFacingIdentity);
       }
 
-      const resultCell = previousResultCellRef.current ??
-        this.runtime.getCell(
-          patternResultCell.space,
-          { resultFor },
-          undefined,
-          tx,
-        );
+      const resultCell = patternResultCell;
 
       const handleErrorOutput = (error: unknown) => {
         if (
@@ -2361,6 +2431,7 @@ export class Runner {
 
       try {
         logger.timeStart("action", "readInputs");
+        tx.resetNarrowestReadScope();
         const { argument, isValidArgument } = (() => {
           try {
             return this.readJavaScriptArgument(
@@ -2440,6 +2511,7 @@ export class Runner {
               addCancel,
               resultFor,
               previousResultCellRef,
+              tx.getNarrowestReadScope(),
             );
           } finally {
             logger.timeEnd("action", "postRun");
@@ -2897,17 +2969,16 @@ export class Runner {
 
     // If output bindings is a link to a non-redirect cell,
     // use that instead of creating a new cell.
-    let nextResultCell;
     let sendToBindings: boolean;
     if (isSigilLink(outputBindings) && !isWriteRedirectLink(outputBindings)) {
-      nextResultCell = this.runtime.getCellFromLink(
+      resultCell = this.runtime.getCellFromLink(
         parseLink(outputBindings, resultCell),
         patternImpl.resultSchema,
         tx,
       );
       sendToBindings = false;
     } else {
-      nextResultCell = this.runtime.getCell(
+      const baseResultCell = this.runtime.getCell(
         resultCell.space,
         {
           pattern: module.implementation,
@@ -2917,18 +2988,30 @@ export class Runner {
         patternImpl.resultSchema,
         tx,
       );
+      const resultScope = patternDefaultScope(patternImpl) ??
+        module.defaultScope;
+      resultCell = resultScope === undefined || resultScope === "space"
+        ? baseResultCell
+        : createCell(
+          this.runtime,
+          {
+            ...baseResultCell.getAsNormalizedFullLink(),
+            scope: resultScope,
+          },
+          tx,
+        );
       sendToBindings = true;
     }
 
     const sourceKey = getTxDebugActionId(tx) ?? "none";
     triggerFlowLogger.debug(`instantiate-pattern-node/${sourceKey}`, () => [
       `[PATTERN-NODE] source=${sourceKey}`,
-      `result=${nextResultCell.getAsNormalizedFullLink().id}`,
+      `result=${resultCell.getAsNormalizedFullLink().id}`,
       `pattern=${describePatternOrModule(patternImpl)}`,
       `sendToBindings=${sendToBindings}`,
     ]);
 
-    this.run(tx, patternImpl, inputs, nextResultCell);
+    this.run(tx, patternImpl, inputs, resultCell);
 
     if (sendToBindings) {
       sendValueToBinding(
@@ -2937,14 +3020,14 @@ export class Runner {
         argumentCellLink,
         internalCellLink,
         outputBindings,
-        nextResultCell.getAsLink({ base: resultCell }),
+        resultCell.getAsLink(),
       );
     }
 
     // TODO(seefeld): Make sure to not cancel after a pattern is elevated to a
     // piece, e.g. via navigateTo. Nothing is cancelling right now, so leaving
     // this as TODO.
-    addCancel(() => this.stop(nextResultCell));
+    addCancel(() => this.stop(resultCell));
   }
 }
 

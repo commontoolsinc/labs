@@ -725,6 +725,27 @@ describe("Schema - Basic Types and References", () => {
       expect(innerStringCell.get()).toBe("hello double asCell");
     });
 
+    it("should honor scoped asCell object entries", () => {
+      const outer = runtime.getCell<{ current: Cell<string> }>(
+        space,
+        "scoped-ascell-object-entry",
+        {
+          type: "object",
+          properties: {
+            current: {
+              type: "string",
+              asCell: [{ kind: "cell", scope: "user" }],
+            },
+          },
+          required: ["current"],
+        } as const satisfies JSONSchema,
+        tx,
+      );
+
+      const currentCell = outer.key("current");
+      expect(currentCell.getAsNormalizedFullLink().scope).toBe("user");
+    });
+
     it("should preserve nested asCell wrappers through anyOf branches", () => {
       const inner = runtime.getCell<string>(
         space,

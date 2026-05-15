@@ -6,6 +6,7 @@ import {
   resolveDockerRunscSandboxConfig,
 } from "../src/sandbox/docker-runsc.ts";
 import { createHarnessCfcInvocationContext } from "../src/contracts/cfc-invocation-context.ts";
+import { CFC_PROMPT_SLOT_BOUND_ATOM_TYPE } from "../src/contracts/prompt-slot.ts";
 import { createToolOutputId } from "../src/contracts/tool-result.ts";
 import type {
   ProcessRunner,
@@ -290,8 +291,28 @@ Deno.test("DockerRunscSandboxRuntime writes invocation context sidecars before s
       operation: "shell",
       cfcEnforcementMode: "observe",
       cwd: "/workspace",
+      promptSlot: {
+        type: CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
+        source: { type: "cf-harness.test-input", surface: "cli" },
+        role: "direct-command",
+        kernelName: "cli",
+        surface: "cli",
+      },
       runManifest: { present: false },
       command: "echo hello",
+      cfcInputLabels: {
+        version: 1,
+        entries: [
+          {
+            path: ["argv"],
+            label: {
+              confidentiality: [
+                { type: "test.cfc/User", subject: "did:key:argv-reader" },
+              ],
+            },
+          },
+        ],
+      },
     });
     const runner = new FakeProcessRunner(dockerLifecycleResults());
     const runtime = new DockerRunscSandboxRuntime(

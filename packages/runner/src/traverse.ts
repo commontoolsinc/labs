@@ -35,7 +35,7 @@ import {
   internSchemaPairAsKey,
   schemaWithProperties,
 } from "@commonfabric/data-model/schema-utils";
-import type { JSONObject, JSONSchema } from "./builder/types.ts";
+import type { CellScope, JSONObject, JSONSchema } from "./builder/types.ts";
 import {
   addressKey,
   createDataCellURI,
@@ -43,6 +43,7 @@ import {
   NormalizedFullLink,
   parseLink,
 } from "./link-utils.ts";
+import { canFollowScopedLink, isSchemaScope } from "./scope.ts";
 import type {
   Activity,
   CommitError,
@@ -72,6 +73,18 @@ import type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
 import { SigilLink } from "./sigil-types.ts";
 
 const logger = getLogger("traverse", { enabled: true, level: "warn" });
+
+type ScopedMemorySpaceValueAddress = IMemorySpaceValueAddress & {
+  scope: CellScope;
+};
+
+const scopedAddressForKey = (
+  address: IMemorySpaceValueAddress,
+): ScopedMemorySpaceValueAddress => ({
+  ...address,
+  // Storage value addresses may omit scope on legacy/default-space paths.
+  scope: address.scope ?? "space",
+});
 
 const READ_NON_RECURSIVE: IReadOptions = {
   nonRecursive: true,
@@ -683,8 +696,8 @@ export function mergeAnyOfMatches<T>(
   // schema, but the address is ignored, and a second option where
   // address is set, and name is ignored, we want to include both.
   if (matches.length > 1) {
-    // If all our matches are objects, merge the properties.
-    if (matches.every((v) => isRecord(v))) {
+    // If all our matches are non-array objects, merge the properties.
+    if (matches.every((v) => isObject(v))) {
       const unified: Record<string, T> = {};
       for (const match of matches) {
         Object.assign(unified, match);
@@ -714,6 +727,7 @@ function getNormalizedLink(
   return {
     space,
     id,
+    scope: address.scope ?? "space",
     path: path.slice(1),
     ...(schema !== undefined && { schema }),
   };
@@ -783,8 +797,9 @@ export abstract class BaseObjectTraverser {
     // Skip when defaultValue is provided since it can alter the result.
     if (defaultValue === undefined) {
       const memoKey = itemLink
-        ? addressKey(doc.address) + "|" + addressKey(itemLink)
-        : addressKey(doc.address);
+        ? addressKey(scopedAddressForKey(doc.address)) + "|" +
+          addressKey(itemLink)
+        : addressKey(scopedAddressForKey(doc.address));
       const cached = this.dagMemo.get(memoKey);
       if (cached !== undefined) {
         return cached;
@@ -796,7 +811,7 @@ export abstract class BaseObjectTraverser {
       // doc.path can be [] here, so we can't just normalize the link, which
       // would trim "value". This does impact the back to cell symbols.
       return this.objectCreator.applyDefault(
-        doc.address,
+        { ...doc.address, scope: doc.address.scope ?? "space" },
         defaultValue,
       );
     } else if (isPrimitive(doc.value)) {
@@ -861,8 +876,9 @@ export abstract class BaseObjectTraverser {
       const arrayResult = this.objectCreator.createObject(newLink, newValue);
       if (defaultValue === undefined) {
         const memoKey = itemLink
-          ? addressKey(doc.address) + "|" + addressKey(itemLink)
-          : addressKey(doc.address);
+          ? addressKey(scopedAddressForKey(doc.address)) + "|" +
+            addressKey(itemLink)
+          : addressKey(scopedAddressForKey(doc.address));
         this.dagMemo.set(memoKey, arrayResult);
       }
       return arrayResult;
@@ -951,8 +967,9 @@ export abstract class BaseObjectTraverser {
         const recordResult = this.objectCreator.createObject(newLink, newValue);
         if (defaultValue === undefined) {
           const memoKey = itemLink
-            ? addressKey(doc.address) + "|" + addressKey(itemLink)
-            : addressKey(doc.address);
+            ? addressKey(scopedAddressForKey(doc.address)) + "|" +
+              addressKey(itemLink)
+            : addressKey(scopedAddressForKey(doc.address));
           this.dagMemo.set(memoKey, recordResult);
         }
         return recordResult;
@@ -1019,7 +1036,7 @@ export abstract class BaseObjectTraverser {
 
     return schemaTrackerCoversSelector(
       this.schemaTracker,
-      `${link.space}/${link.id}`,
+      `${link.space}/${link.scope}/${link.id}`,
       this.internCoverageSelector(targetSelector),
     );
   }
@@ -1211,6 +1228,11 @@ function notFound(
   };
 }
 
+const schemaScopeForSelector = (selector?: SchemaPathSelector) =>
+  isRecord(selector?.schema) && isSchemaScope(selector.schema.scope)
+    ? selector.schema.scope
+    : undefined;
+
 /**
  * Get a string to use as a key for the specified address
  *
@@ -1219,7 +1241,7 @@ function notFound(
 function getTrackerKey(
   address: IMemorySpaceAddress,
 ): string {
-  return `${address.space}/${address.id}`;
+  return `${address.space}/${address.scope ?? "space"}/${address.id}`;
 }
 
 /**
@@ -1274,10 +1296,24 @@ function followPointer(
   const target: IMemorySpaceValueAddress = {
     space: link.space,
     id: link.id,
+    scope: link.scope,
     type: "application/json",
     // The link.path doesn't include the initial "value", so prepend it
     path: ["value", ...link.path as string[]],
   };
+  const schemaScope = schemaScopeForSelector(selector);
+  if (!canFollowScopedLink(schemaScope, link.scope)) {
+    logger.info("traverse", () => [
+      "blocked narrower-scope link follow",
+      {
+        schemaScope,
+        linkScope: link.scope,
+        source: doc.address,
+        target,
+      },
+    ]);
+    return [notFound(target), selector];
+  }
   if (selector !== undefined) {
     // We'll need to re-root the selector for the target doc
     // Remove the portions of doc.path from selector.path, limiting schema if
@@ -1445,11 +1481,19 @@ export function loadMetaLinkedDoc(
     : (meta === "cfc") // cfc links are different
     ? cfcMetaToSigilLink(targetObj["cfc"])
     : undefined;
-  if (linkObj === undefined) return undefined;
+  if (linkObj === undefined) {
+    // undefined is strange, but acceptable
+    logger.warn(
+      "traverse",
+      () => ["Invalid meta link", meta, "in", valueEntry.address],
+    );
+    return undefined;
+  }
   const link = parseLink(linkObj, valueEntry.address)!;
   const address = {
     space: link.space,
     id: link.id!,
+    scope: link.scope,
     path: [],
   };
   if (address === undefined) {
@@ -2419,7 +2463,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     const schemaObj = resolved;
     const asCellValues = ContextualFlowControl.getAsCellValues(schemaObj);
     // Don't walk into opaque cells
-    if (asCellValues.at(0) === "opaque") {
+    if (ContextualFlowControl.getAsCellKind(asCellValues.at(0)) === "opaque") {
       const newLink = link ?? getNormalizedLink(
         doc.address,
         schemaObj,
@@ -2689,6 +2733,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     this.traverseArrayCalls++;
     const docArray = doc.value as Immutable<FabricValue>[];
     const arrayObj = new Array<Immutable<FabricValue>>(docArray.length);
+    this.tx.read(doc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
 
     // Rendering or otherwise consuming a schema-backed array depends on its
     // direct structure, not just the indices that exist right now. Record a
@@ -3058,7 +3103,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     // In the case of an opaque cell, we want to skip any deeper reads
     // This means we don't follow any redirects
     const asCellValues = ContextualFlowControl.getAsCellValues(schema);
-    if (asCellValues.at(0) === "opaque") {
+    if (ContextualFlowControl.getAsCellKind(asCellValues.at(0)) === "opaque") {
       const cellLink = getNextCellLink(doc, schema);
       return { ok: this.objectCreator.createObject(cellLink, undefined) };
     }
@@ -3091,11 +3136,19 @@ export class SchemaObjectTraverser<V extends FabricValue>
         redirSelector?.schema === undefined ||
         SchemaObjectTraverser.hasAsCell(redirSelector.schema)
       ) {
-        const schema = redirSelector?.schema;
+        const schema = combineOptionalSchema(
+          redirSelector?.schema,
+          doc.value && isPrimitiveCellLink(doc.value)
+            ? parseLink(doc.value, doc.address)?.schema
+            : undefined,
+        ) ?? redirSelector?.schema;
         const asCellValues = ContextualFlowControl.getAsCellValues(
           schema,
         );
-        if (schema !== undefined && asCellValues.at(0) === "stream") {
+        if (
+          schema !== undefined &&
+          ContextualFlowControl.getAsCellKind(asCellValues.at(0)) !== undefined
+        ) {
           const cellLink = getNormalizedLink(
             redirDoc.address,
             schema,
