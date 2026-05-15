@@ -4,7 +4,6 @@ import type {
   FabricValue,
   FabricValueLayer,
 } from "./fabric-value.ts";
-import { cloneIfNecessaryModern } from "./fabric-value-modern.ts";
 import { isArrayWithOnlyIndexProperties } from "./array-utils.ts";
 
 /**
