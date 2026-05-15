@@ -754,6 +754,7 @@ export class Runtime {
     path?: readonly PropertyKey[],
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
+    scope?: NormalizedFullLink["scope"],
   ): Cell<T>;
   getCellFromEntityId<S extends JSONSchema = JSONSchema>(
     space: MemorySpace,
@@ -761,6 +762,7 @@ export class Runtime {
     path: readonly PropertyKey[],
     schema: S,
     tx?: IExtendedStorageTransaction,
+    scope?: NormalizedFullLink["scope"],
   ): Cell<Schema<S>>;
   getCellFromEntityId(
     space: MemorySpace,
@@ -768,13 +770,14 @@ export class Runtime {
     path: readonly PropertyKey[] = [],
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
+    scope: NormalizedFullLink["scope"] = "space",
   ): Cell<any> {
     return this.getCellFromLink(
       {
         id: toURI(entityId),
         path: path?.map(String) ?? [],
         space,
-        scope: "space",
+        scope,
       },
       schema,
       tx,

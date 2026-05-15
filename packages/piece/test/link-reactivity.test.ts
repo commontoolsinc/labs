@@ -150,6 +150,7 @@ describe("PieceManager.link() reactivity", () => {
       ["linked"],
       { start: false, sourceScope: "user", targetScope: "session" },
     );
+    await targetCell.sync();
 
     const rawLink = targetCell.key("linked").getRaw();
     expect(parseLink(rawLink, targetCell)?.scope).toBe("user");
