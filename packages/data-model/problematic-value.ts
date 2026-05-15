@@ -26,6 +26,11 @@ export class ProblematicValue extends ExplicitTagValue {
     return { type: this.typeTag, state: this.state, error: this.error };
   }
 
+  /** @inheritDoc */
+  deepClone(frozen: boolean): ProblematicValue {
+    throw new Error("Cannot yet handle deep cloning of `ProblematicValue`.");
+  }
+
   protected shallowUnfrozenClone(): ProblematicValue {
     return new ProblematicValue(this.typeTag, this.state, this.error);
   }

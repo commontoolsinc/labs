@@ -46,16 +46,9 @@ export const RECONSTRUCT: unique symbol = Symbol.for("common.reconstruct");
  * Abstract base class for values that participate in the fabric protocol.
  * See Section 2.3 of the formal spec.
  *
- * Subclasses must implement:
- * - `[DECONSTRUCT]()` -- returns essential state for serialization.
- * - `shallowUnfrozenClone()` -- returns a new unfrozen copy of this instance.
- *
- * `shallowClone(frozen)` is an effectively-final method that manages the
- * frozenness contract:
- * - `shallowClone(true)` on a frozen instance returns `this` (identity).
- * - `shallowClone(true)` on an unfrozen instance returns a frozen clone.
- * - `shallowClone(false)` always returns a new unfrozen clone -- even if the
- *   instance is already unfrozen. The caller gets a distinct, mutable object.
+ * Subclasses must implement `[DECONSTRUCT]()`, `deepClone()`, and
+ * `shallowUnfrozenClone()`. * Subclasses must also define a static member
+ * `[RECONSTRUCT]()`.
  */
 export abstract class FabricInstance extends FabricSpecialObject {
   /**
@@ -64,6 +57,19 @@ export abstract class FabricInstance extends FabricSpecialObject {
    * serialization system handles that.
    */
   abstract [DECONSTRUCT](): FabricValue;
+
+  /**
+   * Returns a new deep clone of this instance with equivalent data but no
+   * shared structure for any unfrozen data in the original. When `frozen ===
+   * true`, produces a frozen instance with maximal structural sharing, including
+   * returning `this` if it is already deep-frozen. When `frozen === false`,
+   * produces a deeply-mutable instance with no visible shared reference
+   * structure with the original.
+   *
+   * TODO(danfuzz): This method should have a base implementation which defers
+   * to a _different_ `protected abstract` method.
+   */
+  abstract deepClone(frozen: boolean): FabricInstance;
 
   /**
    * Returns a new unfrozen copy of this instance with the same data. Called
