@@ -311,7 +311,12 @@ export async function setPiecePattern(
 ): Promise<void> {
   const manager = await loadManager(config);
   const pieces = new PiecesController(manager);
-  const piece = await pieces.get(config.piece, false, undefined, config.pieceScope);
+  const piece = await pieces.get(
+    config.piece,
+    false,
+    undefined,
+    config.pieceScope,
+  );
   await piece.setPattern(await getProgramFromFile(manager, entry));
 }
 
@@ -322,7 +327,12 @@ export async function savePiecePattern(
   await ensureDir(outPath);
   const manager = await loadManager(config);
   const pieces = new PiecesController(manager);
-  const piece = await pieces.get(config.piece, false, undefined, config.pieceScope);
+  const piece = await pieces.get(
+    config.piece,
+    false,
+    undefined,
+    config.pieceScope,
+  );
   const meta = await piece.getPatternMeta();
 
   if (meta.src) {
@@ -347,7 +357,12 @@ export async function savePiecePattern(
 export async function applyPieceInput(config: PieceConfig, input: object) {
   const manager = await loadManager(config);
   const pieces = new PiecesController(manager);
-  const piece = await pieces.get(config.piece, false, undefined, config.pieceScope);
+  const piece = await pieces.get(
+    config.piece,
+    false,
+    undefined,
+    config.pieceScope,
+  );
   await piece.setInput(input);
 }
 
@@ -512,7 +527,7 @@ async function resolvePieceCallable(
   }
 
   if (resolved.callableKind === "tool") {
-  const liveCallableCell = await tryResolveLivePieceToolCallable(
+    const liveCallableCell = await tryResolveLivePieceToolCallable(
       piece,
       manager,
       space,
@@ -856,7 +871,12 @@ export async function inspectPiece(config: PieceConfig): Promise<{
 }> {
   const manager = await loadManager(config);
   const pieces = new PiecesController(manager);
-  const piece = await pieces.get(config.piece, false, undefined, config.pieceScope);
+  const piece = await pieces.get(
+    config.piece,
+    false,
+    undefined,
+    config.pieceScope,
+  );
 
   const id = piece.id;
   const name = piece.name();
@@ -916,7 +936,12 @@ export async function getCellValue(
 ): Promise<unknown> {
   const manager = await loadManager(config);
   const pieces = new PiecesController(manager);
-  const piece = await pieces.get(config.piece, false, undefined, config.pieceScope);
+  const piece = await pieces.get(
+    config.piece,
+    false,
+    undefined,
+    config.pieceScope,
+  );
   if (options?.input) {
     return await piece.input.get(path);
   } else {
@@ -932,7 +957,12 @@ export async function setCellValue(
 ): Promise<void> {
   const manager = await loadManager(config);
   const pieces = new PiecesController(manager);
-  const piece = await pieces.get(config.piece, false, undefined, config.pieceScope);
+  const piece = await pieces.get(
+    config.piece,
+    false,
+    undefined,
+    config.pieceScope,
+  );
   if (options?.input) {
     await piece.input.set(value, path);
   } else {

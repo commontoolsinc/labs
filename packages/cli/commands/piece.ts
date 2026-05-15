@@ -552,6 +552,12 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
   )
   .example(
     cliText(
+      `cf piece link ${EX_ID} ${EX_COMP} bafypiece1@user/profile bafypiece2@session/currentProfile`,
+    ),
+    `Link scoped cell instances using @user or @session on the piece ID.`,
+  )
+  .example(
+    cliText(
       `cf piece link ${EX_ID} ${EX_COMP} baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye bafypiece1/allPieces`,
     ),
     `Link well-known "allPieces" list to a piece field.`,
@@ -626,6 +632,13 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
       `cf piece get ${EX_ID} ${EX_COMP_PIECE} data/users/0/email --input`,
     ),
     `Get a nested field value from piece input "${RAW_EX_COMP.piece!}".`,
+  )
+  .example(
+    cliText(
+      `cf piece get ${EX_ID} ${EX_COMP} --piece ${RAW_EX_COMP
+        .piece!}@session draft`,
+    ),
+    `Get a value from a session-scoped piece instance.`,
   )
   .example(
     cliText(`cf piece get ${EX_ID} ${EX_COMP_PIECE}`),

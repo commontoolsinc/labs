@@ -630,10 +630,10 @@ function createPieceCallableHarness(options: {
       ...(options.callableKind === "handler"
         ? {
           send: (
-          value: unknown,
-          onCommit?: (
-            tx: { status: () => { status: string; error?: Error } },
-          ) => void,
+            value: unknown,
+            onCommit?: (
+              tx: { status: () => { status: string; error?: Error } },
+            ) => void,
           ) => {
             tracker.handlerWrites.push({
               cellProp: "result",

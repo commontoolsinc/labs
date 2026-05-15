@@ -1337,9 +1337,8 @@ describe("link-utils", () => {
       expect(() => parseLLMFriendlyLink(`/${longId}@any/path`, space)).toThrow(
         /Invalid scope suffix/,
       );
-      expect(() =>
-        parseLLMFriendlyLink(`/${longId}@inherit/path`, space)
-      ).toThrow(/Invalid scope suffix/);
+      expect(() => parseLLMFriendlyLink(`/${longId}@inherit/path`, space))
+        .toThrow(/Invalid scope suffix/);
       expect(() => parseLLMFriendlyLink(`/${longId}@/path`, space)).toThrow(
         /Invalid scope suffix/,
       );
