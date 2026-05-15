@@ -47,7 +47,6 @@ import {
   type DiagnosisRecord,
 } from "./scheduler/diagnosis.ts";
 import {
-  collectDirectWritersForLog,
   type DependencyGraphState,
   type DependencyUpdateState,
   getSchedulingWrites as getSchedulingWritesFromState,
@@ -64,6 +63,10 @@ import {
   updateDependentEdgesForLog,
   type WriterIndexState,
 } from "./scheduler/dependency-index.ts";
+import {
+  collectDirtyDependencies as collectDirtyDependenciesState,
+  collectDirtyDependenciesForLog as collectDirtyDependenciesForLogState,
+} from "./scheduler/dirty-dependencies.ts";
 import {
   type InFlightSourceState,
   runSchedulerAction,
@@ -1405,121 +1408,12 @@ export class Scheduler {
     workSet: Set<Action>,
     memo = new Map<Action, boolean>(),
   ): boolean {
-    const collectStart = performance.now();
-    let addedToStack = false;
-    const trace = this.dirtyDependencyTraceContext;
-
-    try {
-      if (trace) {
-        trace.visitCount++;
-        trace.maxDepth = Math.max(trace.maxDepth, trace.depth);
-        const actionSummary = this.getTraceActionSummary(trace, action);
-        actionSummary.visitCount++;
-        if (this.staleness.dirty.has(action)) {
-          trace.dirtyInputCount++;
-          actionSummary.dirtyInputCount++;
-        }
-      }
-
-      const cached = memo.get(action);
-      if (cached !== undefined) {
-        if (trace) {
-          trace.memoHitCount++;
-          this.getTraceActionSummary(trace, action).memoHitCount++;
-        }
-        if (
-          cached && this.staleness.dirty.has(action) &&
-          this.computations.has(action)
-        ) {
-          if (!workSet.has(action) && trace) trace.workSetAddCount++;
-          workSet.add(action);
-        }
-        return cached;
-      }
-
-      if (!this.staleness.isStale(action)) {
-        memo.set(action, false);
-        return false;
-      }
-
-      if (this.collectStack.has(action)) {
-        if (trace) trace.cycleHitCount++;
-        const cycleResult = this.staleness.isStale(action) ||
-          workSet.has(action);
-        memo.set(action, cycleResult);
-        return cycleResult;
-      }
-
-      this.collectStack.add(action);
-      addedToStack = true;
-
-      let actionNeedsRun = this.staleness.isStale(action);
-      const directWriters = this.reverseDependencies.get(action);
-      if (directWriters) {
-        if (trace) {
-          trace.reverseDependencyActionCount++;
-          trace.reverseDependencyEdgeCount += directWriters.size;
-          const actionSummary = this.getTraceActionSummary(trace, action);
-          actionSummary.reverseDependencyEdgeCount += directWriters.size;
-          actionSummary.maxDirectWriterCount = Math.max(
-            actionSummary.maxDirectWriterCount,
-            directWriters.size,
-          );
-        }
-        for (const writer of directWriters) {
-          if (!this.staleness.isStale(writer)) {
-            memo.set(writer, false);
-            continue;
-          }
-          if (trace) trace.depth++;
-          let writerNeedsRun: boolean;
-          try {
-            writerNeedsRun = this.collectDirtyDependencies(
-              writer,
-              workSet,
-              memo,
-            );
-          } finally {
-            if (trace) trace.depth--;
-          }
-          if (writerNeedsRun) {
-            actionNeedsRun = true;
-          }
-        }
-      } else {
-        if (trace) trace.logFallbackCount++;
-        const log = this.dependencies.get(action);
-        if (log) {
-          if (this.collectDirtyDependenciesForLog(log, workSet, memo)) {
-            actionNeedsRun = true;
-          }
-        }
-      }
-
-      if (
-        this.staleness.dirty.has(action) && this.computations.has(action)
-      ) {
-        if (!workSet.has(action) && trace) trace.workSetAddCount++;
-        workSet.add(action);
-      }
-
-      if (actionNeedsRun && trace) {
-        trace.resultTrueCount++;
-        this.getTraceActionSummary(trace, action).resultTrueCount++;
-      }
-      memo.set(action, actionNeedsRun);
-      return actionNeedsRun;
-    } finally {
-      if (addedToStack) {
-        this.collectStack.delete(action);
-      }
-      logger.time(
-        collectStart,
-        "scheduler",
-        "execute",
-        "collectDirtyDependencies",
-      );
-    }
+    return collectDirtyDependenciesState(
+      this.dirtyDependencyCollectionState(),
+      action,
+      workSet,
+      memo,
+    );
   }
 
   private hasDependentPath(
@@ -1665,65 +1559,32 @@ export class Scheduler {
     workSet: Set<Action>,
     memo = new Map<Action, boolean>(),
   ): boolean {
-    const lookupStart = performance.now();
-    const trace = this.dirtyDependencyTraceContext;
-    let directWriters: Set<Action>;
-    try {
-      directWriters = collectDirectWritersForLog({
-        writersByEntity: this.writerIndexState.writersByEntity,
-        effects: this.effects,
-        getSchedulingWrites: (writer) =>
-          getSchedulingWritesFromState(this.schedulingWriteState, writer),
-        trace,
-      }, log);
-    } finally {
-      logger.time(
-        lookupStart,
-        "scheduler",
-        "execute",
-        "collectDirtyDependencies",
-        "writerLookup",
-      );
-    }
+    return collectDirtyDependenciesForLogState(
+      this.dirtyDependencyCollectionState(),
+      log,
+      workSet,
+      memo,
+    );
+  }
 
-    if (trace) trace.directWriterCount += directWriters.size;
-    if (trace && trace.depth === 0) {
-      for (const writer of directWriters) {
-        trace.rootDirectWriterActions.add(writer);
-        this.getTraceActionSummary(trace, writer);
-      }
-    }
-
-    let hasDirtyDependencies = false;
-    for (const writer of directWriters) {
-      if (!this.staleness.isStale(writer)) {
-        memo.set(writer, false);
-        continue;
-      }
-
-      if (trace) trace.depth++;
-      let writerNeedsRun: boolean;
-      try {
-        writerNeedsRun = this.collectDirtyDependencies(
-          writer,
-          workSet,
-          memo,
-        );
-      } finally {
-        if (trace) trace.depth--;
-      }
-      if (writerNeedsRun) {
-        hasDirtyDependencies = true;
-        if (
-          this.staleness.dirty.has(writer) && this.computations.has(writer)
-        ) {
-          if (!workSet.has(writer) && trace) trace.workSetAddCount++;
-          workSet.add(writer);
-        }
-      }
-    }
-
-    return hasDirtyDependencies;
+  private dirtyDependencyCollectionState() {
+    return {
+      collectStack: this.collectStack,
+      trace: this.dirtyDependencyTraceContext,
+      dirty: this.staleness.dirty,
+      computations: this.computations,
+      reverseDependencies: this.reverseDependencies,
+      dependencies: this.dependencies,
+      writersByEntity: this.writerIndexState.writersByEntity,
+      effects: this.effects,
+      isStale: (target: Action) => this.staleness.isStale(target),
+      getSchedulingWrites: (target: Action) =>
+        getSchedulingWritesFromState(this.schedulingWriteState, target),
+      getTraceActionSummary: (
+        trace: DirtyDependencyTraceContext,
+        target: Action,
+      ) => this.getTraceActionSummary(trace, target),
+    };
   }
 
   /**
