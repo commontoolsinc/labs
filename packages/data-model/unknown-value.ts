@@ -23,7 +23,7 @@ export class UnknownValue extends ExplicitTagValue {
   }
 
   /** @inheritDoc */
-  deepClone(frozen: boolean): UnknownValue {
+  deepClone(_frozen: boolean): UnknownValue {
     throw new Error("Cannot yet handle deep cloning of `UnknownValue`.");
   }
 

@@ -5,7 +5,7 @@ import {
   RECONSTRUCT,
   type ReconstructionContext,
 } from "./interface.ts";
-import { deepFreeze, isDeepFrozen } from "./deep-freeze.ts";
+import { isDeepFrozen } from "./deep-freeze.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { TAGS } from "./fabric-type-tags.ts";
 import { FrozenMap, FrozenSet } from "./frozen-builtins.ts";
@@ -145,7 +145,7 @@ export abstract class FabricNativeWrapper<T extends object>
   }
 
   /** @inheritDoc */
-  deepClone(frozen: boolean): FabricInstance {
+  deepClone(_frozen: boolean): FabricInstance {
     throw new Error(
       `Cannot yet handle deep cloning of \`${this.constructor.name}\`.`,
     );

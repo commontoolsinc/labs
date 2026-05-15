@@ -27,7 +27,7 @@ export class ProblematicValue extends ExplicitTagValue {
   }
 
   /** @inheritDoc */
-  deepClone(frozen: boolean): ProblematicValue {
+  deepClone(_frozen: boolean): ProblematicValue {
     throw new Error("Cannot yet handle deep cloning of `ProblematicValue`.");
   }
 
