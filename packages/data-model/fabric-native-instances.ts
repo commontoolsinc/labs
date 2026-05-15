@@ -1,5 +1,6 @@
 import {
   DECONSTRUCT,
+  DEEP_FREEZE,
   FabricInstance,
   type FabricValue,
   RECONSTRUCT,
@@ -211,6 +212,31 @@ export class FabricError extends FabricNativeWrapper<Error> {
     return state as FabricValue;
   }
 
+  /**
+   * Deep-freezes in place. `Object.freeze` on the wrapped `Error` covers the
+   * standard non-enumerable slots (`message`, `name`, `stack`); the only
+   * deep-freeze gap is the (`FabricValue`-typed, per the `[DECONSTRUCT]`
+   * invariant) `cause` and any custom enumerable own properties, which are
+   * recursed via `subFreeze`. This freezes the existing instance -- it does
+   * NOT rebuild and does NOT narrow to string-valued state (that narrowing
+   * is a `deepClone()` stop-gap detail, not a `[DEEP_FREEZE]` requirement).
+   */
+  [DEEP_FREEZE](
+    subFreeze: (value: FabricValue) => FabricValue,
+  ): FabricValue {
+    if (this.error.cause !== undefined) {
+      subFreeze(this.error.cause as FabricValue);
+    }
+    for (const key of Object.keys(this.error)) {
+      if (UNSAFE_KEYS.has(key) || key === "cause") continue;
+      subFreeze(
+        (this.error as unknown as Record<string, FabricValue>)[key],
+      );
+    }
+    Object.freeze(this.error);
+    return Object.freeze(this) as unknown as FabricValue;
+  }
+
   /** @inheritDoc */
   protected shallowUnfrozenClone(): FabricError {
     return new FabricError(this.error);
@@ -328,6 +354,30 @@ export class FabricMap
     throw new Error("FabricMap: not yet implemented");
   }
 
+  /**
+   * Deep-freezes in place. A `Map`'s `.set`/`.delete` bypass property
+   * descriptors, so `Object.freeze` alone cannot make the collection
+   * immutable -- the only fully-immutable form is `FrozenMap`. By the time
+   * `[DEEP_FREEZE]` runs at the memory-model egress boundary, the internal
+   * slot must already be that frozen-variant form; this method verifies
+   * (death before confusion) and then recurses into each key and value.
+   */
+  [DEEP_FREEZE](
+    subFreeze: (value: FabricValue) => FabricValue,
+  ): FabricValue {
+    if (!(this.map instanceof FrozenMap)) {
+      throw new Error(
+        "Cannot deep-freeze `FabricMap` whose internal slot is not a " +
+          "`FrozenMap`.",
+      );
+    }
+    for (const [key, value] of this.map) {
+      subFreeze(key);
+      subFreeze(value);
+    }
+    return Object.freeze(this) as unknown as FabricValue;
+  }
+
   /** @inheritDoc */
   protected shallowUnfrozenClone(): FabricMap {
     return new FabricMap(this.map);
@@ -370,6 +420,29 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
 
   [DECONSTRUCT](): FabricValue {
     throw new Error("FabricSet: not yet implemented");
+  }
+
+  /**
+   * Deep-freezes in place. A `Set`'s `.add`/`.delete` bypass property
+   * descriptors, so `Object.freeze` alone cannot make the collection
+   * immutable -- the only fully-immutable form is `FrozenSet`. By the time
+   * `[DEEP_FREEZE]` runs at the memory-model egress boundary, the internal
+   * slot must already be that frozen-variant form; this method verifies
+   * (death before confusion) and then recurses into each element.
+   */
+  [DEEP_FREEZE](
+    subFreeze: (value: FabricValue) => FabricValue,
+  ): FabricValue {
+    if (!(this.set instanceof FrozenSet)) {
+      throw new Error(
+        "Cannot deep-freeze `FabricSet` whose internal slot is not a " +
+          "`FrozenSet`.",
+      );
+    }
+    for (const value of this.set) {
+      subFreeze(value);
+    }
+    return Object.freeze(this) as unknown as FabricValue;
   }
 
   /** @inheritDoc */
@@ -432,6 +505,26 @@ export class FabricRegExp extends FabricNativeWrapper<RegExp> {
       flags: this.regex.flags,
       flavor: this.flavor,
     } as FabricValue;
+  }
+
+  /**
+   * Deep-freezes in place. The deep-frozen form of a `FabricRegExp` is one
+   * whose wrapped `RegExp` came from `toNativeFrozen()` (a frozen copy with
+   * an immutable `.lastIndex`). By the time `[DEEP_FREEZE]` runs at the
+   * memory-model egress boundary, `this.regex` must already be that frozen
+   * form; this method verifies (death before confusion). There are no
+   * `FabricValue` children to recurse.
+   */
+  [DEEP_FREEZE](
+    _subFreeze: (value: FabricValue) => FabricValue,
+  ): FabricValue {
+    if (!Object.isFrozen(this.regex)) {
+      throw new Error(
+        "Cannot deep-freeze `FabricRegExp` whose wrapped `RegExp` is not " +
+          "frozen.",
+      );
+    }
+    return Object.freeze(this) as unknown as FabricValue;
   }
 
   /** @inheritDoc */

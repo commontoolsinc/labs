@@ -1,4 +1,9 @@
-import { FabricInstance, FabricPrimitive, FabricValue } from "./interface.ts";
+import {
+  DEEP_FREEZE,
+  FabricInstance,
+  FabricPrimitive,
+  FabricValue,
+} from "./interface.ts";
 import { isPlainObject } from "@commonfabric/utils/types";
 
 /**
@@ -111,16 +116,48 @@ function isDeepFrozenInProgress(
 }
 
 /**
- * Recursively freezes the given value in place: arrays and plain objects are
- * frozen after their children are recursively frozen. Primitives pass through
- * unchanged. Records the result in the deep-frozen cache so subsequent
- * `isDeepFrozen()` checks return in O(1). Returns the (now-frozen) value.
+ * Recursively freezes the given value in place. Dispatches on four arms, in
+ * order:
+ *
+ * 1. Necessarily- or already-known-deep-frozen value (primitives and cached
+ *    objects): short-circuit unchanged.
+ * 2. `FabricPrimitive` instance: short-circuit unchanged -- these self-freeze
+ *    at construction and have no outbound references.
+ * 3. Value carrying the `[DEEP_FREEZE]` symbol method (e.g. a
+ *    `FabricInstance` subclass): delegate generically to that method,
+ *    handing recursion through as the `subFreeze` callback. `deepFreeze()`
+ *    itself stays class-agnostic (no per-class knowledge).
+ * 4. Plain object or array: recursively freeze children, then freeze the
+ *    container.
+ *
+ * Arrays and plain objects are frozen after their children are recursively
+ * frozen. Primitives pass through unchanged. Records the result in the
+ * deep-frozen cache so subsequent `isDeepFrozen()` checks return in O(1).
+ * Returns the (now-frozen) value.
  */
 export function deepFreeze<T>(value: T): T {
+  // Arm 1: necessarily- or already-known-deep-frozen.
   if (isNecessarilyOrKnownDeepFrozen(value)) {
     return value;
   }
 
+  // Arm 2: `FabricPrimitive`s are by definition frozen (they self-freeze at
+  // construction) and have no outbound references.
+  if (value instanceof FabricPrimitive) {
+    return value;
+  }
+
+  // Arm 3: anything carrying the `[DEEP_FREEZE]` symbol method freezes itself
+  // in place via that method, recursing through the `deepFreeze` callback.
+  // The duck-typed check keeps `deepFreeze()` free of per-class knowledge.
+  const deepFreezable = value as {
+    [DEEP_FREEZE]?: (subFreeze: (value: FabricValue) => FabricValue) => unknown;
+  };
+  if (typeof deepFreezable[DEEP_FREEZE] === "function") {
+    return deepFreezable[DEEP_FREEZE]((v) => deepFreeze(v)) as T;
+  }
+
+  // Arm 4: plain object or array -- recurse into children, then freeze.
   const alreadyFrozen = Object.isFrozen(value);
 
   if (Array.isArray(value)) {

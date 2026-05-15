@@ -1,5 +1,6 @@
 import {
   DECONSTRUCT,
+  DEEP_FREEZE,
   type FabricValue,
   RECONSTRUCT,
   type ReconstructionContext,
@@ -24,6 +25,13 @@ export class ProblematicValue extends ExplicitTagValue {
 
   [DECONSTRUCT](): FabricValue {
     return { type: this.typeTag, state: this.state, error: this.error };
+  }
+
+  /** @inheritDoc */
+  [DEEP_FREEZE](
+    _subFreeze: (value: FabricValue) => FabricValue,
+  ): FabricValue {
+    throw new Error("Cannot yet deep-freeze `ProblematicValue`.");
   }
 
   /** @inheritDoc */

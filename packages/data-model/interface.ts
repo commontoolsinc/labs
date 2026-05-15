@@ -43,12 +43,23 @@ export const DECONSTRUCT: unique symbol = Symbol.for("common.deconstruct");
 export const RECONSTRUCT: unique symbol = Symbol.for("common.reconstruct");
 
 /**
+ * Well-known symbol for deeply freezing a fabric instance in place. The method
+ * freezes the instance's own internal slot(s) and recurses into any nested
+ * `FabricValue`s via the provided `subFreeze` callback. This lets the
+ * generic `deepFreeze()` operate on `FabricInstance`s without building
+ * per-class knowledge into the freeze utility (it duck-types this symbol).
+ * Distinct from `deepClone()`: `[DEEP_FREEZE]` freezes the existing instance
+ * in place; `deepClone()` constructs a new instance.
+ */
+export const DEEP_FREEZE: unique symbol = Symbol.for("common.deepFreeze");
+
+/**
  * Abstract base class for values that participate in the fabric protocol.
  * See Section 2.3 of the formal spec.
  *
- * Subclasses must implement `[DECONSTRUCT]()`, `deepClone()`, and
- * `shallowUnfrozenClone()`. * Subclasses must also define a static member
- * `[RECONSTRUCT]()`.
+ * Subclasses must implement `[DECONSTRUCT]()`, `[DEEP_FREEZE]()`,
+ * `deepClone()`, and `shallowUnfrozenClone()`. * Subclasses must also define
+ * a static member `[RECONSTRUCT]()`.
  */
 export abstract class FabricInstance extends FabricSpecialObject {
   /**
@@ -57,6 +68,21 @@ export abstract class FabricInstance extends FabricSpecialObject {
    * serialization system handles that.
    */
   abstract [DECONSTRUCT](): FabricValue;
+
+  /**
+   * Deeply freezes this instance in place: freezes this instance's own
+   * internal slot(s) and recurses into each nested `FabricValue` by calling
+   * the provided `subFreeze` callback on it. Implementations must NOT import
+   * or call `deepFreeze()` directly -- recursion is handed through the
+   * callback so that the freeze utility's caching / cycle-detection
+   * bookkeeping is preserved and no import cycle is introduced.
+   *
+   * Returns the (now deeply-frozen) value. Freeze-in-place implementations
+   * return `this`.
+   */
+  abstract [DEEP_FREEZE](
+    subFreeze: (value: FabricValue) => FabricValue,
+  ): FabricValue;
 
   /**
    * Returns a new deep clone of this instance with equivalent data but no
