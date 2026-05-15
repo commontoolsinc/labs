@@ -520,6 +520,86 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("allows setup to install alias-backed CFC pattern arguments", async () => {
+    const storageManager = StorageManager.emulate({
+      as: signer,
+    });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+      trustSnapshotProvider: () => ({
+        id: "trust-snapshot-argument-setup",
+        actingPrincipal: signer.did(),
+      }),
+    });
+    try {
+      const sourceCell = runtime.getCell(
+        signer.did(),
+        "cfc-setup-argument-source",
+        {
+          type: "object",
+          properties: {
+            savedTitle: { type: "string", default: "" },
+          },
+          required: ["savedTitle"],
+        } as const satisfies JSONSchema,
+      );
+      await runtime.editWithRetry((tx) =>
+        sourceCell.withTx(tx).set({ savedTitle: "" })
+      );
+
+      const trustedTitleSchema = {
+        type: "string",
+        default: "",
+        ifc: {
+          uiContract: {
+            helper: "UiAction",
+            action: "TrustedSave",
+            trustedPattern: "TrustedSaveSurface",
+          },
+        },
+      } as const satisfies JSONSchema;
+      const argumentSchema = {
+        type: "object",
+        properties: {
+          savedTitle: trustedTitleSchema,
+        },
+        required: ["savedTitle"],
+      } as const satisfies JSONSchema;
+      const pattern = {
+        argumentSchema,
+        resultSchema: {
+          type: "object",
+          properties: {},
+        } as const satisfies JSONSchema,
+        result: {},
+        nodes: [],
+      } satisfies Pattern;
+      const resultCell = runtime.getCell(
+        signer.did(),
+        "cfc-setup-argument-target",
+        undefined,
+      );
+
+      await runtime.setup(undefined, pattern, {
+        savedTitle: sourceCell.key("savedTitle").getAsWriteRedirectLink({
+          includeSchema: true,
+        }),
+      }, resultCell);
+
+      expect(resultCell.getSourceCell()).toBeDefined();
+      expect(
+        (resultCell.getSourceCell()?.getRaw() as any)?.argument?.savedTitle?.[
+          "/"
+        ]?.["link@1"]?.id,
+      ).toBe(sourceCell.getAsNormalizedFullLink().id);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("allows first-time uiContract fields to install their schema default", async () => {
     const { runtime, storageManager } = createRuntime();
     try {

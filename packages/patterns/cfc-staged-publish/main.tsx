@@ -5,6 +5,7 @@ import {
   pattern,
   Stream,
   UI,
+  type VNode,
   Writable,
 } from "commonfabric";
 import {
@@ -32,7 +33,7 @@ interface StagedPublishInput {
 
 interface StagedPublishOutput {
   [NAME]: string;
-  [UI]: unknown;
+  [UI]: VNode;
   draftTitle: string;
   draftBody: string;
   savedTitle: TrustedSavedDraftTitleUiContract;
