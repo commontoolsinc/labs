@@ -151,12 +151,27 @@ export function isDeepFrozenFabricValue(value: unknown): value is FabricValue {
   // only does a single layer check, and (b) is only ever exercised in unit
   // tests, so it should be safe to replace it.
 
-  if (value === null || (typeof value !== "object")) {
-    // It's a primitive. Return here for efficiency, rather than do the
-    // heavyweight setup for recursive tracing.
-    return true;
-  } else if (!isDeepFrozen(value)) {
-    return false;
+  switch (typeof value) {
+    case 'function': {
+      return false;
+    }
+
+    case 'object': {
+      if (value === null) {
+        return true;
+      } else if (!isDeepFrozen(value)) {
+        return false;
+      }
+
+      // Continue below the `switch`.
+      break;
+    }
+
+    default: {
+      // It's a primitive. Return here for efficiency, rather than do the
+      // heavyweight setup for recursive tracing.
+      return true;
+    }
   }
 
   // At this point, it's known to be a deep-frozen value with internal
