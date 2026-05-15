@@ -32,6 +32,7 @@
     "./fabric-value": "./fabric-value.ts",
     "./fabric-value-legacy": "./fabric-value-legacy.ts",
     "./fabric-value-modern": "./fabric-value-modern.ts",
+    "./fabric-value-modern-clone-helper": "./fabric-value-modern-clone-helper.ts",
     "./frozen-builtins": "./frozen-builtins.ts",
     "./interface": "./interface.ts",
     "./json-encoding": "./json-encoding.ts",
