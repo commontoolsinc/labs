@@ -831,6 +831,43 @@ export async function generateSpaceMap(
   return formatSpaceMap(connections, format);
 }
 
+/**
+ * Read a cell's value with per-property scope awareness.
+ *
+ * `cell.get()` on a top-level cell returns whatever is stored *inline* in the
+ * underlying document at the cell's effective scope. For per-property scoped
+ * fields (e.g. `PerUser<string>` on an otherwise space-scoped argument), the
+ * inline value is the default (e.g. `""`); the real per-user value lives in a
+ * separate scoped instance and is only resolved when the read traverses through
+ * a per-property link.
+ *
+ * `cell.key(prop)` constructs a child cell that inherits the property schema's
+ * declared scope (see `cell.ts` Cell.key()), so calling `.get()` on the child
+ * cell correctly reaches the scoped storage instance.
+ *
+ * For `cf piece inspect`, we want the caller to see the values they would see
+ * as if they were running the pattern (per-user fields resolved against the
+ * caller's identity). So we read top-level object properties via `cell.key()`
+ * rather than using the parent's flat `.get()` value directly. See CT-1598.
+ */
+export function readWithPropertyScope(cell: Cell<unknown>): unknown {
+  const value = cell.get();
+  if (
+    value === null || value === undefined || typeof value !== "object" ||
+    Array.isArray(value)
+  ) {
+    return value;
+  }
+  const out: Record<string, unknown> = {};
+  for (const propKey of Object.keys(value as Record<string, unknown>)) {
+    const childCell = (cell as Cell<Record<string, unknown>>).key(
+      propKey as keyof Record<string, unknown>,
+    ) as Cell<unknown>;
+    out[propKey] = childCell.get();
+  }
+  return out;
+}
+
 export async function inspectPiece(config: PieceConfig): Promise<{
   id: string;
   name?: string;
@@ -847,8 +884,15 @@ export async function inspectPiece(config: PieceConfig): Promise<{
   const id = piece.id;
   const name = piece.name();
   const patternName = (await piece.getPatternMeta()).patternName;
-  const source = (await piece.input.get()) as Readonly<unknown>;
-  const result = (await piece.result.get()) as Readonly<unknown>;
+
+  const sourceCell = await piece.input.getCell();
+  await sourceCell.pull();
+  const source = readWithPropertyScope(sourceCell) as Readonly<unknown>;
+
+  const resultCell = await piece.result.getCell();
+  await resultCell.pull();
+  const result = readWithPropertyScope(resultCell) as Readonly<unknown>;
+
   const readingFrom = (await piece.readingFrom()).map((piece) => ({
     id: piece.id,
     name: piece.name(),
