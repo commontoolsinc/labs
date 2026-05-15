@@ -17,25 +17,22 @@ export {
   type SerializationContext,
 } from "./interface.ts";
 
+export { cloneIfNecessary, type CloneOptions } from "./value-clone.ts";
+
 import type {
   FabricNativeObject,
   FabricValue,
   FabricValueLayer,
 } from "./interface.ts";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
-import type { Immutable } from "@commonfabric/utils/types";
 import {
-  cloneIfNecessaryModern,
-  type CloneOptions,
   fabricFromNativeValueModern,
   isFabricCompatibleModern,
   isFabricValueModern,
   nativeFromFabricValueModern,
   shallowFabricFromNativeValueModern,
 } from "./fabric-value-modern.ts";
-export type { CloneOptions } from "./fabric-value-modern.ts";
 import {
-  cloneIfNecessaryLegacy,
   fabricFromNativeValueLegacy,
   isFabricCompatibleLegacy,
   isFabricValueLegacy,
@@ -46,9 +43,9 @@ export {
   isArrayWithOnlyIndexProperties,
 } from "./array-utils.ts";
 
-// ===========================================================================
-// Experimental data model configuration
-// ===========================================================================
+//
+// Configuration flags
+//
 
 /**
  * Module-level flag for modern data model mode, set by the `Runtime`
@@ -83,9 +80,9 @@ export function resetDataModelConfig(): void {
   modernDataModelEnabled = true;
 }
 
-// ---------------------------------------------------------------------------
-// Flag-dispatched deep conversion
-// ---------------------------------------------------------------------------
+//
+// Flag-dispatched functions
+//
 
 /**
  * Converts a native JS value to fabric form (deep, recursive).
@@ -131,63 +128,6 @@ export function nativeFromFabricValue(
 }
 
 /**
- * Clones an already-valid `FabricValue` to achieve a desired frozenness,
- * with control over depth and copy semantics.
- *
- * Unlike `fabricFromNativeValue()` (which converts native JS values into
- * fabric wrappers), this function assumes the input is already a valid
- * `FabricValue` and only adjusts frozenness by cloning where necessary.
- *
- * Both flag states use modern clone semantics; the legacy dispatch target
- * delegates to the modern implementation.
- *
- * @param value - An already-valid `FabricValue`.
- * @param options - See `CloneOptions`. Defaults: `{ frozen: true, deep: true }`.
- */
-export function cloneIfNecessary<T extends FabricValue>(
-  value: T,
-  options?: CloneOptions & { frozen?: true },
-): Immutable<T>;
-export function cloneIfNecessary<T extends FabricValue>(
-  value: T,
-  options: CloneOptions & { frozen: false },
-): T;
-export function cloneIfNecessary<T extends FabricValue>(
-  value: T,
-  options?: CloneOptions,
-): T;
-export function cloneIfNecessary<T extends FabricValue>(
-  value: T,
-  options?: CloneOptions,
-): T {
-  const frozen = options?.frozen ?? true;
-  const deep = options?.deep ?? true;
-  const force = options?.force ?? (frozen ? false : true);
-
-  if (frozen && force) {
-    throw new Error(
-      "cloneIfNecessary: { frozen: true, force: true } is invalid " +
-        "(pointless to force-copy an immutable value)",
-    );
-  }
-
-  if (!frozen && !force && deep) {
-    throw new Error(
-      "cloneIfNecessary: { frozen: false, force: false, deep: true } is invalid " +
-        "(ambiguous: mixed-frozenness trees have no clear shallow-thaw semantics)",
-    );
-  }
-
-  return (modernDataModelEnabled
-    ? cloneIfNecessaryModern(value, frozen, deep, force)
-    : cloneIfNecessaryLegacy(value, frozen, deep, force)) as T;
-}
-
-// ---------------------------------------------------------------------------
-// Flag-dispatched type checks
-// ---------------------------------------------------------------------------
-
-/**
  * Determines if the given value is considered "fabric-compatible" by the system per se
  * (without invoking any conversions such as `toJSON()`). This function does
  * not recursively validate nested values in arrays or objects.
@@ -231,10 +171,6 @@ export function isFabricCompatible(
     : isFabricCompatibleLegacy(value);
 }
 
-// ---------------------------------------------------------------------------
-// Flag-dispatched shallow conversion
-// ---------------------------------------------------------------------------
-
 /**
  * Converts a value to fabric form without recursing into nested values.
  * JSON-encodable values pass through as-is. Functions and instances are
@@ -257,10 +193,6 @@ export function shallowFabricFromNativeValue(
     ? shallowFabricFromNativeValueModern(value, freeze)
     : shallowFabricFromNativeValueLegacy(value);
 }
-
-// ---------------------------------------------------------------------------
-// Flag-dispatched comparison
-// ---------------------------------------------------------------------------
 
 /**
  * Compares two fabric values for equality.

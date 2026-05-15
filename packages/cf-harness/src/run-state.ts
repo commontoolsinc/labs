@@ -1,5 +1,10 @@
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import type { HarnessCfcInvocationContext } from "./contracts/cfc-invocation-context.ts";
+import {
+  appendHarnessCfcModelContextObservations as appendCfcModelContextObservations,
+  type HarnessCfcModelContext,
+  type HarnessCfcModelContextObservationInput,
+} from "./contracts/cfc-model-context.ts";
 import type { HarnessCfcPolicySnapshot } from "./contracts/cfc-policy-snapshot.ts";
 import type { HarnessPolicyEvent } from "./contracts/policy.ts";
 import type {
@@ -63,6 +68,7 @@ export interface HarnessRunState {
   cfcPolicySnapshotPath?: string;
   policyTrace?: HarnessPolicyTrace;
   policyTracePath?: string;
+  cfcModelContext?: HarnessCfcModelContext;
   cfcInvocationContexts?: HarnessCfcInvocationContext[];
   policyEvents: HarnessPolicyEvent[];
   policyDecisions?: HarnessPolicyDecisionRecord[];
@@ -98,6 +104,7 @@ export interface CreateHarnessRunStateOptions {
   cfcPolicySnapshotPath?: string;
   policyTrace?: HarnessPolicyTrace;
   policyTracePath?: string;
+  cfcModelContext?: HarnessCfcModelContext;
   cfcInvocationContexts?: HarnessCfcInvocationContext[];
   policyDecisions?: HarnessPolicyDecisionRecord[];
   subagentRuns?: HarnessSubagentRunRef[];
@@ -175,6 +182,9 @@ export const createHarnessRunState = (
       : {}),
     ...(options.policyTracePath !== undefined
       ? { policyTracePath: options.policyTracePath }
+      : {}),
+    ...(options.cfcModelContext !== undefined
+      ? { cfcModelContext: structuredClone(options.cfcModelContext) }
       : {}),
     ...(options.cfcInvocationContexts !== undefined
       ? { cfcInvocationContexts: [...options.cfcInvocationContexts] }
@@ -258,6 +268,26 @@ export const appendHarnessCfcInvocationContext = (
   updatedAt: now,
   cfcInvocationContexts: [...(state.cfcInvocationContexts ?? []), context],
 });
+
+export const appendHarnessCfcModelContextObservations = (
+  state: HarnessRunState,
+  observations: readonly HarnessCfcModelContextObservationInput[],
+  now = new Date().toISOString(),
+): HarnessRunState => {
+  const cfcModelContext = appendCfcModelContextObservations(
+    state.cfcModelContext,
+    observations,
+    now,
+  );
+  if (cfcModelContext === state.cfcModelContext) {
+    return state;
+  }
+  return {
+    ...state,
+    updatedAt: now,
+    ...(cfcModelContext !== undefined ? { cfcModelContext } : {}),
+  };
+};
 
 export const appendHarnessSubagentRun = (
   state: HarnessRunState,

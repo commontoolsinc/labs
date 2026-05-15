@@ -431,7 +431,16 @@ When a trusted prompt-slot binding is present, `cf-harness` also derives
 confidentiality-only prompt influence labels for model-authored invocation
 inputs such as shell commands, structured file-tool arguments, and stdin
 payloads. These labels are taint evidence, not integrity or authorization
-claims.
+claims. When CFC-mediated bash output is released to the model, `cf-harness`
+records the observed output labels in run state and merges those confidentiality
+labels into later model-authored invocation inputs. Opaque and denied outputs
+are not added to this model-context accumulator.
+
+The persisted model-context accumulator is sensitive retained run metadata. It
+does not store raw stdout/stderr bytes, but its labels and observation refs can
+still disclose which confidential sources influenced model-visible context.
+Handle it under the same access and retention boundary as transcripts, tool
+outputs, run state, and CFC policy traces.
 
 On Docker Desktop for macOS, use the host path for `cf-harness` and the
 `/host_mnt/...` projection for Docker's runtime args. The gVisor
