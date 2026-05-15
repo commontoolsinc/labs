@@ -124,10 +124,11 @@ function isDeepFrozenInProgress(
  *    objects): short-circuit unchanged.
  * 2. `FabricPrimitive` instance: short-circuit unchanged -- these self-freeze
  *    at construction and have no outbound references.
- * 3. Value carrying the `[DEEP_FREEZE]` symbol method (e.g. a
- *    `FabricInstance` subclass): delegate generically to that method,
- *    handing recursion through as the `subFreeze` callback. `deepFreeze()`
- *    itself stays class-agnostic (no per-class knowledge).
+ * 3. `FabricInstance` (the abstract base): delegate generically to its
+ *    `[DEEP_FREEZE]` protocol member, handing recursion through as the
+ *    `subFreeze` callback. The dispatch gates on `instanceof` against the
+ *    abstract base -- it operates generically and does not enumerate
+ *    concrete subclasses.
  * 4. Plain object or array: recursively freeze children, then freeze the
  *    container.
  *
@@ -148,14 +149,14 @@ export function deepFreeze<T>(value: T): T {
     return value;
   }
 
-  // Arm 3: anything carrying the `[DEEP_FREEZE]` symbol method freezes itself
-  // in place via that method, recursing through the `deepFreeze` callback.
-  // The duck-typed check keeps `deepFreeze()` free of per-class knowledge.
-  const deepFreezable = value as {
-    [DEEP_FREEZE]?: (subFreeze: (value: FabricValue) => FabricValue) => unknown;
-  };
-  if (typeof deepFreezable[DEEP_FREEZE] === "function") {
-    return deepFreezable[DEEP_FREEZE]((v) => deepFreeze(v)) as T;
+  // Arm 3: a `FabricInstance` freezes itself in place via its `[DEEP_FREEZE]`
+  // protocol member, recursing through the `deepFreeze` callback. Gating on
+  // `instanceof` against the abstract base keeps `deepFreeze()` generic --
+  // it dispatches on the base class, not an enumeration of concrete
+  // subclasses (the `[DEEP_FREEZE]` member is abstract on `FabricInstance`,
+  // so every instance is guaranteed to implement it).
+  if (value instanceof FabricInstance) {
+    return value[DEEP_FREEZE]((v) => deepFreeze(v)) as T;
   }
 
   // Arm 4: plain object or array -- recurse into children, then freeze.
@@ -231,22 +232,13 @@ export function isDeepFrozenFabricValue(value: unknown): value is FabricValue {
       // references.
       return true;
     } else if (item instanceof FabricInstance) {
-      // `FabricInstance`s answer the deep-frozen question via the
+      // `FabricInstance`s answer the deep-frozen question via their
       // `[IS_DEEP_FROZEN]` protocol member (the side-effect-free sibling of
-      // `[DEEP_FREEZE]`), recursing through `checkValue`. The duck-typed
-      // check keeps this guard free of per-class knowledge. An instance
-      // that doesn't carry the protocol is not a recognized deep-frozen
-      // `FabricValue` instance, so it answers `false` (matching the
-      // unrecognized-class arm below) -- it does not throw.
-      const checkable = item as unknown as {
-        [IS_DEEP_FROZEN]?: (
-          isSubDeepFrozen: (value: FabricValue) => boolean,
-        ) => boolean;
-      };
-      if (typeof checkable[IS_DEEP_FROZEN] !== "function") {
-        return false;
-      }
-      return checkable[IS_DEEP_FROZEN]((v) => checkValue(v));
+      // `[DEEP_FREEZE]`), recursing through `checkValue`. Gating on
+      // `instanceof` against the abstract base keeps this guard generic; the
+      // `[IS_DEEP_FROZEN]` member is abstract on `FabricInstance`, so every
+      // instance is guaranteed to implement it.
+      return item[IS_DEEP_FROZEN]((v) => checkValue(v));
     } else if (Array.isArray(item)) {
       for (let i = 0; i <= item.length; i++) {
         if (i in item && !checkValue(item[i])) return false;

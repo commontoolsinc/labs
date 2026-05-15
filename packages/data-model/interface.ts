@@ -45,9 +45,10 @@ export const RECONSTRUCT: unique symbol = Symbol.for("common.reconstruct");
 /**
  * Well-known symbol for deeply freezing a fabric instance in place. The method
  * freezes the instance's own internal slot(s) and recurses into any nested
- * `FabricValue`s via the provided `subFreeze` callback. This lets the
- * generic `deepFreeze()` operate on `FabricInstance`s without building
- * per-class knowledge into the freeze utility (it duck-types this symbol).
+ * `FabricValue`s via the provided `subFreeze` callback. This is an abstract
+ * member of `FabricInstance`, so the generic `deepFreeze()` operates on any
+ * `FabricInstance` by gating on `instanceof` against the abstract base and
+ * invoking this member -- it does not enumerate concrete subclasses.
  * Distinct from `deepClone()`: `[DEEP_FREEZE]` freezes the existing instance
  * in place; `deepClone()` constructs a new instance.
  */
@@ -58,9 +59,11 @@ export const DEEP_FREEZE: unique symbol = Symbol.for("common.deepFreeze");
  * frozen, without mutating it. The sibling-of-`[DEEP_FREEZE]` *check*: it
  * verifies the instance's own internal slot(s) are in canonical deep-frozen
  * form and recurses into any nested `FabricValue`s via the provided
- * `isSubDeepFrozen` callback, returning the boolean conjunction. This lets
- * the generic deep-frozen type guard operate on `FabricInstance`s without
- * building per-class knowledge into it (it duck-types this symbol).
+ * `isSubDeepFrozen` callback, returning the boolean conjunction. This is an
+ * abstract member of `FabricInstance`, so the generic deep-frozen type guard
+ * operates on any `FabricInstance` by gating on `instanceof` against the
+ * abstract base and invoking this member -- it does not enumerate concrete
+ * subclasses.
  *
  * Unlike `[DEEP_FREEZE]`, this method is side-effect-free and never throws:
  * a not-in-canonical-deep-frozen-form instance answers `false`, it does not
