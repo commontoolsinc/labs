@@ -194,6 +194,13 @@ export {
   markReadAsPotentialWrite,
 };
 
+type SchedulerSettleResult = {
+  settledEarly: boolean;
+  lastWorkSet: Set<Action>;
+  earlyIterationComputations: Set<Action>;
+  maxSettleIterations: number;
+};
+
 export class Scheduler {
   private eventQueue: QueuedEvent[] = [];
   private eventHandlers: [NormalizedFullLink, EventHandler][] = [];
@@ -2501,6 +2508,17 @@ export class Scheduler {
       computationDebounceFlushSeeds: this.delays.computationDebounceFlushSeeds,
     });
 
+    const settleResult = await this.runSettleLoop(initialSeeds);
+    await this.breakCyclesIfNeeded(settleResult);
+    this.applyAdaptiveCycleDebounce();
+    this.recordExecuteEndTelemetry();
+    this.applyExecuteContinuation();
+    logger.timeEnd("scheduler", "execute");
+  }
+
+  private async runSettleLoop(
+    initialSeeds: ReadonlySet<Action>,
+  ): Promise<SchedulerSettleResult> {
     // Settle loop: runs until no more dirty work is found.
     // First iteration processes initial seeds + their dirty deps.
     // Subsequent iterations process new subscriptions and re-collect dirty deps.
@@ -2770,54 +2788,65 @@ export class Scheduler {
 
     logger.timeEnd("scheduler", "execute", "settle");
 
+    return {
+      settledEarly,
+      lastWorkSet,
+      earlyIterationComputations,
+      maxSettleIterations,
+    };
+  }
+
+  private async breakCyclesIfNeeded(
+    settleResult: SchedulerSettleResult,
+  ): Promise<void> {
     // If we hit max iterations without settling, break the cycle:
     // 1. Clear dirty/pending for computations that were in early iterations AND still in last workSet
     // 2. Run all remaining dirty effects so they don't get lost
     const cycleBreakPlan = planCycleBreak({
       pullMode: this.pullMode,
-      settledEarly,
-      lastWorkSet,
-      earlyIterationComputations,
+      settledEarly: settleResult.settledEarly,
+      lastWorkSet: settleResult.lastWorkSet,
+      earlyIterationComputations: settleResult.earlyIterationComputations,
       dirty: this.staleness.dirty,
       effects: this.effects,
       runsThisExecute: this.runsThisExecute,
       isThrottled: (action) => this.delays.isThrottled(action),
     });
-    if (cycleBreakPlan.shouldBreak) {
+    if (!cycleBreakPlan.shouldBreak) return;
+
+    logger.debug("schedule-cycle", () => [
+      `[CYCLE-BREAK] Hit max iterations (${settleResult.maxSettleIterations}), breaking cycle`,
+      `Early computations: ${settleResult.earlyIterationComputations.size}, Last workSet: ${settleResult.lastWorkSet.size}`,
+    ]);
+
+    // Clear computations that appear to be in the cycle
+    // (present in early iterations AND still in the last workSet)
+    // But don't clear throttled computations - they should stay dirty
+    for (const comp of cycleBreakPlan.computationsToClear) {
       logger.debug("schedule-cycle", () => [
-        `[CYCLE-BREAK] Hit max iterations (${maxSettleIterations}), breaking cycle`,
-        `Early computations: ${earlyIterationComputations.size}, Last workSet: ${lastWorkSet.size}`,
+        `[CYCLE-BREAK] Clearing cyclic computation: ${this.getActionId(comp)}`,
       ]);
-
-      // Clear computations that appear to be in the cycle
-      // (present in early iterations AND still in the last workSet)
-      // But don't clear throttled computations - they should stay dirty
-      for (const comp of cycleBreakPlan.computationsToClear) {
-        logger.debug("schedule-cycle", () => [
-          `[CYCLE-BREAK] Clearing cyclic computation: ${
-            this.getActionId(comp)
-          }`,
-        ]);
-        clearSchedulerDirty(this.dirtySchedulingState, comp);
-        this.pending.delete(comp);
-      }
-
-      // Run all remaining dirty effects - these shouldn't be lost
-      // But skip throttled effects - they should stay dirty for later
-      for (const effect of cycleBreakPlan.dirtyEffectsToRun) {
-        if (this.effects.has(effect) && this.staleness.dirty.has(effect)) {
-          logger.debug("schedule-cycle", () => [
-            `[CYCLE-BREAK] Running dirty effect: ${this.getActionId(effect)}`,
-          ]);
-          clearSchedulerDirty(this.dirtySchedulingState, effect);
-          this.pending.delete(effect);
-          this.unsubscribe(effect);
-          this.filterStats.executed++;
-          await this.run(effect);
-        }
-      }
+      clearSchedulerDirty(this.dirtySchedulingState, comp);
+      this.pending.delete(comp);
     }
 
+    // Run all remaining dirty effects - these shouldn't be lost
+    // But skip throttled effects - they should stay dirty for later
+    for (const effect of cycleBreakPlan.dirtyEffectsToRun) {
+      if (this.effects.has(effect) && this.staleness.dirty.has(effect)) {
+        logger.debug("schedule-cycle", () => [
+          `[CYCLE-BREAK] Running dirty effect: ${this.getActionId(effect)}`,
+        ]);
+        clearSchedulerDirty(this.dirtySchedulingState, effect);
+        this.pending.delete(effect);
+        this.unsubscribe(effect);
+        this.filterStats.executed++;
+        await this.run(effect);
+      }
+    }
+  }
+
+  private applyAdaptiveCycleDebounce(): void {
     // Apply cycle-aware debounce to effects that ran multiple times this execute().
     // Pull computations are already demand-gated; debouncing them can leave a
     // live renderer observing stale materialized data until an arbitrary timer
@@ -2842,7 +2871,9 @@ export class Scheduler {
         `setting debounce to ${delayMs}ms`,
       ]);
     }
+  }
 
+  private recordExecuteEndTelemetry(): void {
     // Non-settling heuristic: accumulate busy time at end of execute()
     const executeEnd = recordExecuteEnd(this.settlingTracker);
     if (this.diagnosisEnabled) {
@@ -2858,7 +2889,9 @@ export class Scheduler {
         this.startDiagnosis();
       }
     }
+  }
 
+  private applyExecuteContinuation(): void {
     // In pull mode, we consider ourselves done when there are no effects or
     // effect-demanded computations to execute.
     const hasQueuedEventReadyNow = this.eventQueue.length > 0 &&
@@ -2932,7 +2965,6 @@ export class Scheduler {
         this.execute();
       });
     }
-    logger.timeEnd("scheduler", "execute");
   }
 
   /**
