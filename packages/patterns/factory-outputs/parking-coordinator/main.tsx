@@ -5,9 +5,7 @@ import {
   NAME,
   nonPrivateRandom,
   pattern,
-  type PerSession,
   type PerSpace,
-  type PerUser,
   safeDateNow,
   Stream,
   UI,
@@ -64,12 +62,6 @@ type SpotsCell = Writable<
 >;
 type PeopleCell = Writable<Person[] | Default<[]>>;
 type RequestsCell = Writable<SpotRequest[] | Default<[]>>;
-type BoolCell = Writable<boolean | Default<false>>;
-type StringCell = Writable<string | Default<"">>;
-type NullableStringCell = Writable<string | null | Default<null>>;
-type CommuteModeCell = Writable<CommuteMode | Default<"drive">>;
-type PriorityCell = Writable<string | Default<"1">>;
-type ActiveCell = Writable<boolean | Default<true>>;
 
 // ============================================================
 // Pattern I/O Types
@@ -79,40 +71,6 @@ export interface ParkingCoordinatorInput {
   spots?: PerSpace<SpotsCell>;
   people?: PerSpace<PeopleCell>;
   requests?: PerSpace<RequestsCell>;
-  selectedPersonName?: PerUser<StringCell>;
-  adminMode?: PerSession<BoolCell>;
-  requestDate?: PerSession<StringCell>;
-  requestResult?: PerSession<StringCell>;
-  addPersonFormOpen?: PerSession<BoolCell>;
-  addSpotFormOpen?: PerSession<BoolCell>;
-  editingPersonName?: PerSession<NullableStringCell>;
-  editingSpotNumber?: PerSession<NullableStringCell>;
-  removePersonConfirmTarget?: PerSession<NullableStringCell>;
-  removeSpotConfirmTarget?: PerSession<NullableStringCell>;
-  newPersonName?: PerSession<StringCell>;
-  newPersonEmail?: PerSession<StringCell>;
-  newPersonCommuteMode?: PerSession<CommuteModeCell>;
-  newPersonPriority?: PerSession<PriorityCell>;
-  newPersonDefaultSpot?: PerSession<StringCell>;
-  newPersonPreferences?: PerSession<StringCell>;
-  addPersonError?: PerSession<StringCell>;
-  newSpotNumber?: PerSession<StringCell>;
-  newSpotLabel?: PerSession<StringCell>;
-  newSpotNotes?: PerSession<StringCell>;
-  addSpotError?: PerSession<StringCell>;
-  editName?: PerSession<StringCell>;
-  editEmail?: PerSession<StringCell>;
-  editCommuteMode?: PerSession<CommuteModeCell>;
-  editPriorityRank?: PerSession<PriorityCell>;
-  editDefaultSpot?: PerSession<StringCell>;
-  editPreferences?: PerSession<StringCell>;
-  editSpotNum?: PerSession<StringCell>;
-  editSpotLabel?: PerSession<StringCell>;
-  editSpotNotes?: PerSession<StringCell>;
-  editSpotActive?: PerSession<ActiveCell>;
-  gridOverrideSpot?: PerSession<StringCell>;
-  gridOverrideDate?: PerSession<StringCell>;
-  overridePersonName?: PerSession<StringCell>;
 }
 
 export interface ParkingCoordinatorOutput {
@@ -294,52 +252,62 @@ export const DEFAULT_SPOTS: ParkingSpot[] = [
 // ============================================================
 
 export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
-  (
-    {
-      spots,
-      people,
-      requests,
-      selectedPersonName,
-      adminMode,
-      requestDate,
-      requestResult,
-      addPersonFormOpen,
-      addSpotFormOpen,
-      editingPersonName,
-      editingSpotNumber,
-      removePersonConfirmTarget,
-      removeSpotConfirmTarget,
-      newPersonName,
-      newPersonEmail,
-      newPersonCommuteMode,
-      newPersonPriority,
-      newPersonDefaultSpot,
-      newPersonPreferences,
-      addPersonError,
-      newSpotNumber,
-      newSpotLabel,
-      newSpotNotes,
-      addSpotError,
-      editName,
-      editEmail,
-      editCommuteMode,
-      editPriorityRank,
-      editDefaultSpot,
-      editPreferences,
-      editSpotNum,
-      editSpotLabel,
-      editSpotNotes,
-      editSpotActive,
-      gridOverrideSpot,
-      gridOverrideDate,
-      overridePersonName,
-    },
-  ) => {
+  ({ spots, people, requests }) => {
     const nowTimestamp = wish<number>({ query: "#now" });
     const todayStr = computed(() =>
       toLocalDateStr(nowTimestamp.result || safeDateNow())
     );
     const weekDatesArr = computed(() => getWeekDates(todayStr));
+
+    // User/session UI state
+    const selectedPersonName = Writable.perUser.of("");
+    const adminMode = Writable.perSession.of(false);
+    const requestDate = Writable.perSession.of(toLocalDateStr(safeDateNow()));
+    const requestResult = Writable.perSession.of("");
+
+    // Admin form state
+    const addPersonFormOpen = Writable.perSession.of(false);
+    const addSpotFormOpen = Writable.perSession.of(false);
+    const editingPersonName = Writable.perSession.of<string | null>(null);
+    const editingSpotNumber = Writable.perSession.of<string | null>(null);
+    const removePersonConfirmTarget = Writable.perSession.of<string | null>(
+      null,
+    );
+    const removeSpotConfirmTarget = Writable.perSession.of<string | null>(null);
+
+    // Add person form fields
+    const newPersonName = Writable.perSession.of("");
+    const newPersonEmail = Writable.perSession.of("");
+    const newPersonCommuteMode = Writable.perSession.of<CommuteMode>("drive");
+    const newPersonPriority = Writable.perSession.of("1");
+    const newPersonDefaultSpot = Writable.perSession.of("");
+    const newPersonPreferences = Writable.perSession.of("");
+    const addPersonError = Writable.perSession.of("");
+
+    // Add spot form fields
+    const newSpotNumber = Writable.perSession.of("");
+    const newSpotLabel = Writable.perSession.of("");
+    const newSpotNotes = Writable.perSession.of("");
+    const addSpotError = Writable.perSession.of("");
+
+    // Edit person form fields
+    const editName = Writable.perSession.of("");
+    const editEmail = Writable.perSession.of("");
+    const editCommuteMode = Writable.perSession.of<CommuteMode>("drive");
+    const editPriorityRank = Writable.perSession.of("1");
+    const editDefaultSpot = Writable.perSession.of("");
+    const editPreferences = Writable.perSession.of("");
+
+    // Edit spot form fields
+    const editSpotNum = Writable.perSession.of("");
+    const editSpotLabel = Writable.perSession.of("");
+    const editSpotNotes = Writable.perSession.of("");
+    const editSpotActive = Writable.perSession.of(true);
+
+    // Override state
+    const gridOverrideSpot = Writable.perSession.of("");
+    const gridOverrideDate = Writable.perSession.of("");
+    const overridePersonName = Writable.perSession.of("");
     const activeRequestDate = computed(() => requestDate.get() || todayStr);
 
     // --------------------------------------------------------

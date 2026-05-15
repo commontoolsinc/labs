@@ -2518,18 +2518,49 @@ export type DeepKeyLookup<T, Path extends PropertyKey[]> = Path extends [] ? T
     : any
   : any;
 
+const scopedConstructorNames = {
+  space: "perSpace",
+  user: "perUser",
+  session: "perSession",
+} as const satisfies Record<CellScope, string>;
+
+function mergeSchemaScope(
+  providedSchema: JSONSchema | undefined,
+  scope: CellScope | undefined,
+): JSONSchema | undefined {
+  if (!scope) return providedSchema;
+
+  const schema = ContextualFlowControl.toSchemaObj(providedSchema);
+  if (schema.scope !== undefined && schema.scope !== scope) {
+    throw new Error(
+      `Cannot use ${
+        scopedConstructorNames[scope]
+      } with schema scope "${schema.scope}".`,
+    );
+  }
+  return { ...schema, scope };
+}
+
+function schemaWithDefaultAndScope<T>(
+  value: T | undefined,
+  providedSchema: JSONSchema | undefined,
+  scope: CellScope | undefined,
+): JSONSchema | undefined {
+  const scopedSchema = mergeSchemaScope(providedSchema, scope);
+  if (value !== undefined && !isCell(value)) {
+    return {
+      ...ContextualFlowControl.toSchemaObj(scopedSchema),
+      default: value as any,
+    };
+  }
+  return scopedSchema;
+}
+
 /**
  * Factory function to create Cell constructor with static methods for a specific cell kind
  */
 export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
-  return {
-    /**
-     * Create a Cell wrapping a value with optional schema.
-     * This is a convenience method that creates a cell with a schema that has a default value.
-     * @param value - The value to wrap in a Cell
-     * @param providedSchema - Optional JSON schema for the cell
-     * @returns A new Cell wrapping the value
-     */
+  const createCellConstructor = (scope?: CellScope) => ({
     of<T>(value?: T, providedSchema?: JSONSchema): Apply<Wrap, T> {
       const frame = getTopFrame();
       if (!frame || !frame.runtime) {
@@ -2547,15 +2578,7 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
       // BUT: Don't embed Cell objects in the schema's default property, as this
       // causes infinite recursion when the schema is serialized
       // TODO(ubik2): Use Cell links for default here once that's supported
-      const schema: JSONSchema | undefined =
-        value !== undefined && !isCell(value)
-          ? {
-            ...ContextualFlowControl.toSchemaObj(providedSchema),
-            default: value as any,
-          }
-          : providedSchema === undefined
-          ? undefined
-          : ContextualFlowControl.toSchemaObj(providedSchema);
+      const schema = schemaWithDefaultAndScope(value, providedSchema, scope);
 
       // Create a cell without a link - it will be created on demand via .for()
       const cell = createCell<T>(
@@ -2577,6 +2600,49 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
 
       return cell;
     },
+
+    for<T>(cause: unknown): Apply<Wrap, T> {
+      const frame = getTopFrame();
+      if (!frame || !frame.runtime) {
+        throw new Error(
+          "Can't invoke Cell.for() outside of a pattern/handler/lift context",
+        );
+      }
+
+      const schema = mergeSchemaScope(undefined, scope);
+
+      // Create a cell without a link
+      const cell = createCell<T>(
+        frame.runtime,
+        {
+          path: [],
+          ...(schema !== undefined && { schema }),
+          ...(frame.space && { space: frame.space }),
+        },
+        frame.tx,
+        false,
+        kind,
+      );
+
+      // Associate it with the cause
+      cell.for(cause);
+
+      return cell;
+    },
+  });
+
+  const baseConstructor = createCellConstructor();
+  return {
+    ...baseConstructor,
+    perSpace: createCellConstructor("space") as CellTypeConstructor<
+      Wrap
+    >["perSpace"],
+    perUser: createCellConstructor("user") as CellTypeConstructor<
+      Wrap
+    >["perUser"],
+    perSession: createCellConstructor("session") as CellTypeConstructor<
+      Wrap
+    >["perSession"],
 
     /**
      * Compare two cells or values for equality, after resolving them.
@@ -2604,37 +2670,6 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
      */
     equalLinks(a: AnyCell<any> | object, b: AnyCell<any> | object): boolean {
       return areLinksSame(a, b);
-    },
-
-    /**
-     * Create a Cell with an optional cause.
-     * @param cause - The cause to associate with this cell
-     * @returns A new Cell
-     */
-    for<T>(cause: unknown): Apply<Wrap, T> {
-      const frame = getTopFrame();
-      if (!frame || !frame.runtime) {
-        throw new Error(
-          "Can't invoke Cell.for() outside of a pattern/handler/lift context",
-        );
-      }
-
-      // Create a cell without a link
-      const cell = createCell<T>(
-        frame.runtime,
-        {
-          path: [],
-          ...(frame.space && { space: frame.space }),
-        },
-        frame.tx,
-        false,
-        kind,
-      );
-
-      // Associate it with the cause
-      cell.for(cause);
-
-      return cell;
     },
   } satisfies CellTypeConstructor<Wrap>;
 }
