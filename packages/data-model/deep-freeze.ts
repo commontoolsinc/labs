@@ -1,15 +1,4 @@
-/**
- * Recursively freeze an object tree in place. Primitives pass through
- * unchanged. Arrays and plain objects are frozen after their children are
- * recursively frozen.
- *
- * Objects already confirmed as deep-frozen (present in the cache) are
- * returned immediately. Otherwise, already-frozen objects are still recursed
- * into (their children may not be frozen). After freezing, the result is
- * recorded in the cache so subsequent calls return in O(1).
- *
- * Handles sparse arrays correctly (only visits populated indices).
- */
+import { FabricInstance, FabricPrimitive } from "./interface.ts";
 
 /**
  * Cache of confirmed deep-frozen objects.
@@ -147,4 +136,38 @@ export function deepFreeze<T>(value: T): T {
   if (!alreadyFrozen) Object.freeze(value);
   addToDeepFrozenCache(value as object);
   return value;
+}
+
+/**
+ * Indicates whether the value is a deep-frozen `FabricValue`. Returns `true` if
+ * the value is a primitive, or a frozen object/array whose children are all
+ * also deep-frozen `FabricValue`s.
+ */
+export function isDeepFrozenFabricValue(value: unknown): boolean {
+  if (value === null || (typeof value !== "object")) return true; // primitives
+  if (!Object.isFrozen(value)) return false;
+
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) {
+      if (i in value && !isDeepFrozenFabricValue(value[i])) return false;
+    }
+    return true;
+  }
+
+  // `FabricPrimitive`s are by definition frozen and have no outbound
+  // references.
+  if (value instanceof FabricPrimitive) return true;
+
+  // `FabricInstance`s might have references, but -- TODO(@danfuzz) -- we have
+  // no way of handling them yet.
+  if (value instanceof FabricInstance) {
+    throw new Error(
+      `Cannot yet handle instance of class ${value.constructor.name}`,
+    );
+  }
+
+  for (const v of Object.values(value)) {
+    if (!isDeepFrozenFabricValue(v)) return false;
+  }
+  return true;
 }

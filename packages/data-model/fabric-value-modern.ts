@@ -18,6 +18,7 @@ import {
 import { FabricBytes } from "./fabric-bytes.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { isArrayWithOnlyIndexProperties } from "./array-utils.ts";
+import { isDeepFrozenFabricValue } from "./deep-freeze.ts";
 
 /**
  * Helper for `shallowFabricFromNativeValueModern()`, which rejects native
@@ -247,41 +248,6 @@ export function fabricFromNativeValueModern(
     new Map(),
     freeze,
   ) as FabricValue;
-}
-
-/**
- * Helper for `fabricFromNativeValueModern()` and `cloneHelper()`, which
- * indicates whether the value is a deep-frozen `FabricValue` (naive recursive
- * check). Returns `true` if the value is a primitive, or a frozen
- * object/array whose children are all also deep-frozen `FabricValue`s.
- */
-function isDeepFrozenFabricValue(value: unknown): boolean {
-  if (value === null || (typeof value !== "object")) return true; // primitives
-  if (!Object.isFrozen(value)) return false;
-
-  if (Array.isArray(value)) {
-    for (let i = 0; i < value.length; i++) {
-      if (i in value && !isDeepFrozenFabricValue(value[i])) return false;
-    }
-    return true;
-  }
-
-  // `FabricPrimitive`s are by definition frozen and have no outbound
-  // references.
-  if (value instanceof FabricPrimitive) return true;
-
-  // `FabricInstance`s might have references, but -- TODO(@danfuzz) -- we have
-  // no way of handling them yet.
-  if (value instanceof FabricInstance) {
-    throw new Error(
-      `Cannot yet handle instance of class ${value.constructor.name}`,
-    );
-  }
-
-  for (const v of Object.values(value)) {
-    if (!isDeepFrozenFabricValue(v)) return false;
-  }
-  return true;
 }
 
 /**
@@ -640,8 +606,9 @@ function cloneHelper(
   seen: Set<object> | null,
 ): FabricValue {
   // Identity optimization: when `force` is off, check if the value's frozenness
-  // already matches the requested state. Deep mode uses `isDeepFrozenFabricValue()`;
-  // shallow mode uses `Object.isFrozen(v) === frozen`.
+  // already matches the requested state. Deep mode uses
+  // `isDeepFrozenFabricValue()`; shallow mode uses `Object.isFrozen(v) ===
+  // frozen`.
   function canReturnAsIs(v: FabricValue): boolean {
     if (force) return false;
     if (deep) {
