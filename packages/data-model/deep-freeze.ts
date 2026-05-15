@@ -1,8 +1,4 @@
-import {
-  FabricInstance,
-  FabricPrimitive,
-  FabricValue,
-} from "./interface.ts";
+import { FabricInstance, FabricPrimitive, FabricValue } from "./interface.ts";
 import { isPlainObject } from "@commonfabric/utils/types";
 
 /**

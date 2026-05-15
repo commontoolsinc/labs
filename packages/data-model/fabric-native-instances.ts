@@ -5,7 +5,7 @@ import {
   RECONSTRUCT,
   type ReconstructionContext,
 } from "./interface.ts";
-import { isDeepFrozen, deepFreeze } from "./deep-freeze.ts";
+import { deepFreeze, isDeepFrozen } from "./deep-freeze.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { TAGS } from "./fabric-type-tags.ts";
 import { FrozenMap, FrozenSet } from "./frozen-builtins.ts";
@@ -146,7 +146,9 @@ export abstract class FabricNativeWrapper<T extends object>
 
   /** @inheritDoc */
   deepClone(frozen: boolean): FabricInstance {
-    throw new Error(`Cannot yet handle deep cloning of \`${this.constructor.name}\`.`);
+    throw new Error(
+      `Cannot yet handle deep cloning of \`${this.constructor.name}\`.`,
+    );
   }
 }
 
@@ -242,8 +244,10 @@ export class FabricError extends FabricNativeWrapper<Error> {
 
     // This makes a result that just has the  string properties of the original.
 
-    const state: Record<string, unknown> =
-      this[DECONSTRUCT]() as Record<string, unknown>;
+    const state: Record<string, unknown> = this[DECONSTRUCT]() as Record<
+      string,
+      unknown
+    >;
 
     for (const key in state) {
       if (typeof state[key] !== "string") {
@@ -251,12 +255,12 @@ export class FabricError extends FabricNativeWrapper<Error> {
       }
     }
 
-    const result =
-      FabricError[RECONSTRUCT](state, EMPTY_RECONSTRUCTION_CONTEXT);
+    const result = FabricError[RECONSTRUCT](
+      state,
+      EMPTY_RECONSTRUCTION_CONTEXT,
+    );
 
-    return frozen
-      ? Object.freeze(result) as FabricError
-      : result;
+    return frozen ? Object.freeze(result) as FabricError : result;
   }
 
   /**
