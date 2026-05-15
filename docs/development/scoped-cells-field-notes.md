@@ -106,9 +106,9 @@ The vote onClick now lowers to a bare
 at the call site. End-to-end browser test: clicking 🟢 Love it landed
 `votes: [Array(1)]` and rendered the voter chip with selected state.
 
-The minimal repro at `packages/patterns/scope-bug-lambda-in-map/main.tsx` is
-kept for now as a regression reference; it can be removed once the runtime
-team has a permanent fixture (PR #3595 likely added one).
+PR #3595 added a transformer fixture
+(`packages/ts-transformers/test/fixtures/closures/map-conditional-inline-handler-send.*`)
+that locks this case in.
 
 #### B2. ~~`array.length` on a top-level scoped array doesn't lift reactively~~ — NOT A BUG
 
@@ -126,6 +126,47 @@ bug.
 **Status:** Investigated and closed. Verified with a minimal `PerSpace<number
 | Default<0>>` pattern that `subject.value === 0` passes as the very first
 test assertion (no prior action). Default values hydrate correctly.
+
+The `Expected true, got undefined` failure in cozy-poll's test was JS
+short-circuit propagation through a long `A && B && C && …` chain in the
+test's assertion `computed()`, **not** a runtime hydration race. Fix is to
+split compound assertions into individual ones, or coerce with
+`Boolean(...)`.
+
+#### B4. Cozy-poll UI rewrite renders blank — FILED (CT-1597)
+
+**Status:** Filed as
+[CT-1597](https://linear.app/common-tools/issue/CT-1597/cozy-poll-scoped-ui-rewrite-renders-blank-bisection-rules-out-style).
+The substantial canonical-UI rewrite (commit
+[`93d545ad6`](https://github.com/commontoolsinc/labs/commit/93d545ad6) on
+this branch) renders **completely blank** in the browser despite passing
+unit tests and `cf check`.
+
+Bisection harness at `packages/patterns/scope-bug-computed-vnode-blank/main.tsx`
+rules out four suspected mechanisms (style-derive-as-object,
+style-derive-as-string, multiple top-level `{computed(() => <VNode/>)}`
+blocks, and `cf-input $value=` inside `computed`). All four work fine.
+
+The trigger remains unidentified — likely something specific to the
+`<cf-screen>` + `slot="header"` + `<cf-vscroll>` shell or the
+`<cf-card>` nesting inside the WIP rewrite's `computed` blocks. Next
+investigation step (left to whoever picks up CT-1597): start from the
+WIP commit and progressively comment out sections until the pattern
+renders.
+
+#### B5. CLI `cf piece inspect` doesn't reflect the caller's PerUser values — FILED (CT-1598)
+
+**Status:** Filed as
+[CT-1598](https://linear.app/common-tools/issue/CT-1598/cf-piece-inspect-doesnt-reflect-the-callers-peruser-values-even-when).
+`cf piece inspect --identity <key>` reads PerUser fields like `myName` as
+empty `""` regardless of which identity inspects, even when that identity
+has demonstrably written a value (verified via per-space consequences
+like `votes[].voterName`). Handlers see the correct per-user value;
+inspect doesn't.
+
+Workaround for multi-user testing: verify per-user behavior via PerSpace
+consequences (vote attribution, directory entries) rather than via the
+inspect view of PerUser fields.
 
 The `Expected true, got undefined` failure in cozy-poll's test was JS
 short-circuit propagation through a long `A && B && C && …` chain in the
