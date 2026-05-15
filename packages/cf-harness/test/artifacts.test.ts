@@ -389,7 +389,12 @@ Deno.test({
         engine: new CfHarnessEngine({
           artifactRoot,
           sandboxRuntime: new FakeSandboxRuntime([
-            { stdout: "hello from file", stderr: "", exitCode: 0 },
+            {
+              stdout: "hello from file",
+              stderr: "",
+              exitCode: 0,
+              cfcResult: observedCfcResult("hello from file"),
+            },
           ]),
           runId: "run-loop-persisted",
           model: "gpt-5.4",
