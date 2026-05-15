@@ -211,12 +211,10 @@ describe("CFC builtin implementation identity", () => {
   it("registers exported trusted builder bindings with source identity", async () => {
     storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: "v2",
     });
 
     const program = {

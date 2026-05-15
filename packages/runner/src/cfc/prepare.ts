@@ -447,6 +447,8 @@ const candidateSchemasByTarget = (
       key,
       existing === undefined
         ? internSchema(candidate)
+        : schemasEqualIgnoringWriterBundleIds(existing, candidate)
+        ? existing
         : mergeCfcSchemaEnvelopes(existing, candidate), // Guaranteed interned.
     );
   }
@@ -492,10 +494,20 @@ const linkWritesByTarget = (
 const pathKey = (path: readonly string[]): string =>
   encodePointer(canonicalizeLogicalPath(path));
 
+const pathPatternsOverlap = (
+  prefix: readonly string[],
+  path: readonly string[],
+): boolean =>
+  prefix.length <= path.length &&
+  prefix.every((segment, index) =>
+    segment === "*" || path[index] === "*" || segment === path[index]
+  );
+
 const pathsOverlap = (
   left: readonly string[],
   right: readonly string[],
-): boolean => isPrefix(left, right) || isPrefix(right, left);
+): boolean =>
+  pathPatternsOverlap(left, right) || pathPatternsOverlap(right, left);
 
 const linkWriteCoversAffectedPath = (
   writePath: readonly string[],
@@ -519,6 +531,33 @@ const linkWritesCoverCfcAffectedPaths = (
       return !pathsOverlap(entryPath, writePath) ||
         linkWriteCoversAffectedPath(writePath, entryPath, inputs);
     })
+  );
+
+const stripWriterIdentityBundleIds = (value: unknown): unknown => {
+  if (Array.isArray(value)) {
+    return value.map(stripWriterIdentityBundleIds);
+  }
+  if (!isRecord(value)) {
+    return value;
+  }
+
+  const next: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (key === "bundleId" && typeof value.file === "string") {
+      continue;
+    }
+    next[key] = stripWriterIdentityBundleIds(entry);
+  }
+  return next;
+};
+
+const schemasEqualIgnoringWriterBundleIds = (
+  left: JSONSchema,
+  right: JSONSchema,
+): boolean =>
+  deepEqual(
+    stripWriterIdentityBundleIds(left),
+    stripWriterIdentityBundleIds(right),
   );
 
 const rebindWriteAuthorizedByClaims = (
@@ -902,6 +941,40 @@ const writeValueForTarget = (
   return getValueAtPath(value, targetPath.slice(matchingWritePath.length));
 };
 
+const linkedWriteValueForPolicy = (
+  tx: IExtendedStorageTransaction,
+  baseTarget: {
+    space: MemorySpace;
+    id: URI;
+    scope: ReturnType<typeof normalizeCellScope>;
+  },
+  value: unknown,
+): unknown => {
+  if (!isPrimitiveCellLink(value)) {
+    return undefined;
+  }
+
+  const link = parseLink(value, { ...baseTarget, path: [] });
+  if (link?.id === undefined || link.space === undefined) {
+    return undefined;
+  }
+
+  const linkedTarget = {
+    space: link.space,
+    id: link.id as URI,
+    scope: normalizeCellScope(link.scope),
+    path: canonicalizeLogicalPath(link.path),
+  };
+  const written = writeValueForTarget(tx, linkedTarget);
+  if (written !== undefined) {
+    return written;
+  }
+
+  return tx.readValueOrThrow(linkedTarget, {
+    meta: INTERNAL_VERIFIER_META,
+  });
+};
+
 const valuesAtPatternPath = (
   value: unknown,
   path: readonly string[],
@@ -929,6 +1002,166 @@ const valuesAtPatternPath = (
   return valuesAtPatternPath((value as Record<string, unknown>)[head], rest);
 };
 
+const changedValuesAtPatternPath = (
+  value: unknown,
+  previousValue: unknown,
+  path: readonly string[],
+): unknown[] => {
+  if (path.length === 0) {
+    return deepEqual(value, previousValue) ? [] : [value];
+  }
+
+  const [head, ...rest] = path;
+  if (head === "*") {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+    const previousArray = Array.isArray(previousValue) ? previousValue : [];
+    return value.flatMap((item, index) =>
+      index in value
+        ? changedValuesAtPatternPath(item, previousArray[index], rest)
+        : []
+    );
+  }
+
+  if (value === null || value === undefined || typeof value !== "object") {
+    return [];
+  }
+  const previousChild = previousValue !== null &&
+      previousValue !== undefined &&
+      typeof previousValue === "object"
+    ? (previousValue as Record<string, unknown>)[head]
+    : undefined;
+  if (!(head in value)) {
+    return [];
+  }
+  return changedValuesAtPatternPath(
+    (value as Record<string, unknown>)[head],
+    previousChild,
+    rest,
+  );
+};
+
+const concretePathHasPrefix = (
+  path: readonly string[],
+  prefix: readonly string[],
+): boolean =>
+  prefix.length <= path.length &&
+  prefix.every((segment, index) => segment === path[index]);
+
+const schemaTypeMatchesValue = (
+  type: unknown,
+  value: unknown,
+): boolean => {
+  const types = Array.isArray(type) ? type : [type];
+  return types.some((candidate) => {
+    switch (candidate) {
+      case "array":
+        return Array.isArray(value);
+      case "boolean":
+        return typeof value === "boolean";
+      case "integer":
+        return typeof value === "number" && Number.isInteger(value);
+      case "null":
+        return value === null;
+      case "number":
+        return typeof value === "number";
+      case "object":
+        return isRecord(value) && !Array.isArray(value);
+      case "string":
+        return typeof value === "string";
+      default:
+        return true;
+    }
+  });
+};
+
+const policySchemaMatchesValue = (
+  schema: JSONSchema,
+  value: unknown,
+): boolean => {
+  if (typeof schema === "boolean") {
+    return schema;
+  }
+  if (typeof schema.$ref === "string") {
+    const resolved = ContextualFlowControl.resolveSchemaRefs(schema, schema);
+    if (resolved !== undefined && resolved !== schema) {
+      return policySchemaMatchesValue(resolved, value);
+    }
+  }
+  if (schema.const !== undefined && !deepEqual(schema.const, value)) {
+    return false;
+  }
+  if (
+    Array.isArray(schema.enum) &&
+    !schema.enum.some((candidate) => deepEqual(candidate, value))
+  ) {
+    return false;
+  }
+  if (
+    schema.type !== undefined && !schemaTypeMatchesValue(schema.type, value)
+  ) {
+    return false;
+  }
+  if (Array.isArray(schema.anyOf)) {
+    return schema.anyOf.some((branch) =>
+      policySchemaMatchesValue(branch, value)
+    );
+  }
+  if (Array.isArray(schema.oneOf)) {
+    return schema.oneOf.filter((branch) =>
+      policySchemaMatchesValue(branch, value)
+    ).length === 1;
+  }
+  if (Array.isArray(schema.allOf)) {
+    return schema.allOf.every((branch) =>
+      policySchemaMatchesValue(branch, value)
+    );
+  }
+  if (isRecord(value) && isRecord(schema.properties)) {
+    return Object.entries(schema.properties).every(([key, childSchema]) =>
+      value[key] === undefined ||
+      policySchemaMatchesValue(childSchema, value[key])
+    );
+  }
+  if (
+    Array.isArray(value) && typeof schema.items === "object" &&
+    schema.items !== null
+  ) {
+    const itemSchema = schema.items;
+    return value.every((item) => policySchemaMatchesValue(itemSchema, item));
+  }
+  return true;
+};
+
+const wildcardPolicyMatchesValue = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: URI;
+    scope: ReturnType<typeof normalizeCellScope>;
+  },
+  schema: JSONSchema | undefined,
+  value: unknown,
+): boolean => {
+  if (schema === undefined) {
+    return true;
+  }
+
+  if (!isPrimitiveCellLink(value)) {
+    return policySchemaMatchesValue(schema, value);
+  }
+
+  const linkedValue = linkedWriteValueForPolicy(tx, target, value);
+  if (linkedValue !== undefined) {
+    return policySchemaMatchesValue(schema, linkedValue);
+  }
+
+  const link = parseLink(value, { ...target, path: [] });
+  return link?.schema === undefined ||
+    schemasEqualIgnoringWriterBundleIds(schema, link.schema);
+};
+
 const ifcEntryAppliesToAttemptedWrite = (
   tx: IExtendedStorageTransaction,
   target: {
@@ -937,19 +1170,79 @@ const ifcEntryAppliesToAttemptedWrite = (
     scope: ReturnType<typeof normalizeCellScope>;
   },
   path: readonly string[],
+  schema?: JSONSchema,
 ): boolean => {
   const wildcardIndex = path.indexOf("*");
   if (wildcardIndex === -1) {
     return true;
   }
 
+  const exactAttemptedPaths = [
+    ...(tx.getReactivityLog?.().writes ?? []),
+    ...(tx.getReactivityLog?.().potentialWrites ?? []),
+  ].filter((write) =>
+    write.space === target.space &&
+    write.id === target.id &&
+    normalizeCellScope(write.scope) === target.scope &&
+    pathPatternMatches(path, canonicalizeLogicalPath(write.path))
+  ).map((write) => canonicalizeLogicalPath(write.path));
+  if (exactAttemptedPaths.length > 0) {
+    return exactAttemptedPaths.some((writePath) =>
+      wildcardPolicyMatchesValue(
+        tx,
+        target,
+        schema,
+        writeValueForTarget(tx, { ...target, path: writePath }),
+      )
+    );
+  }
+
+  const writes = [...(tx.getWriteDetails?.(target.space) ?? [])];
+  let sawTargetWrite = false;
   const prefix = path.slice(0, wildcardIndex);
+  for (const write of writes) {
+    if (write.address.id !== target.id) continue;
+    if (normalizeCellScope(write.address.scope) !== target.scope) continue;
+    if (write.address.path[0] !== "value") continue;
+    sawTargetWrite = true;
+    const writePath = write.address.path.slice(1).map((entry) => String(entry));
+    if (pathPatternMatches(path, writePath)) {
+      return !deepEqual(write.value, write.previousValue) &&
+        wildcardPolicyMatchesValue(tx, target, schema, write.value);
+    }
+    if (concretePathHasPrefix(prefix, writePath)) {
+      const relativePrefix = prefix.slice(writePath.length);
+      const value = getValueAtPath(write.value, relativePrefix);
+      const previousValue = write.previousValue === undefined
+        ? undefined
+        : getValueAtPath(write.previousValue, relativePrefix);
+      const matches = changedValuesAtPatternPath(
+        value,
+        previousValue,
+        path.slice(wildcardIndex),
+      );
+      if (
+        matches.some((match) =>
+          wildcardPolicyMatchesValue(tx, target, schema, match)
+        )
+      ) {
+        return true;
+      }
+    }
+  }
+
+  if (sawTargetWrite) {
+    return false;
+  }
+
   const value = writeValueForTarget(tx, { ...target, path: prefix });
   if (value === undefined) {
     return false;
   }
   const matches = valuesAtPatternPath(value, path.slice(wildcardIndex));
-  return matches.some((match) => !isPrimitiveCellLink(match));
+  return matches.some((match) =>
+    wildcardPolicyMatchesValue(tx, target, schema, match)
+  );
 };
 
 const verifyInputRequirements = (
@@ -979,7 +1272,9 @@ const verifyInputRequirements = (
   })).filter((read) => read.label !== undefined);
 
   for (const entry of walkIfcSchema(schema)) {
-    if (!ifcEntryAppliesToAttemptedWrite(tx, target, entry.path)) {
+    if (
+      !ifcEntryAppliesToAttemptedWrite(tx, target, entry.path, entry.schema)
+    ) {
       continue;
     }
     const ifc = isRecord(entry.schema) ? entry.schema.ifc : undefined;
@@ -1050,7 +1345,9 @@ const verifyTrustedEventRequirements = (
   schema: JSONSchema,
 ): string | undefined => {
   for (const entry of uiContractsFromSchema(schema)) {
-    if (!ifcEntryAppliesToAttemptedWrite(tx, target, entry.path)) {
+    if (
+      !ifcEntryAppliesToAttemptedWrite(tx, target, entry.path, entry.schema)
+    ) {
       continue;
     }
     if (setupProjectionSourceMatchesValue(tx, target, entry.path)) {
@@ -1213,11 +1510,11 @@ const derivePersistedLinkLabel = (
     input.source.scope,
     "application/json",
   );
-  const pendingSourceLabel = candidateSchemas.get(targetKey(input.source)) !==
-      undefined
+  const pendingSourceSchema = candidateSchemas.get(targetKey(input.source));
+  const pendingSourceLabel = pendingSourceSchema !== undefined
     ? persistedLabelFromSchemaAtPath(
       tx,
-      candidateSchemas.get(targetKey(input.source))!,
+      pendingSourceSchema,
       input.source.path,
     )
     : undefined;
@@ -1226,7 +1523,7 @@ const derivePersistedLinkLabel = (
     input.cfcLabelView?.entries.some((entry) => hasLabelValues(entry.label)) ??
       false;
   if (
-    sourceMetadata === undefined && pendingSourceLabel === undefined &&
+    sourceMetadata === undefined && pendingSourceSchema === undefined &&
     !hasLabelValues(linkSchemaLabel) && !hasCarriedLabel
   ) {
     return {
@@ -1236,7 +1533,7 @@ const derivePersistedLinkLabel = (
     };
   }
   if (
-    sourceMetadata === undefined && pendingSourceLabel === undefined &&
+    sourceMetadata === undefined && pendingSourceSchema === undefined &&
     !hasLabelValues(linkSchemaLabel) && hasCarriedLabel
   ) {
     return {};
@@ -1403,7 +1700,9 @@ export const prepareBoundaryCommit = (
     } else if (existing !== undefined) {
       try {
         storedSchema = loadSchemaDocument(tx, space, existing.schemaHash);
-        mergedSchema = mergeCfcSchemaEnvelopes(storedSchema, schema);
+        mergedSchema = schemasEqualIgnoringWriterBundleIds(storedSchema, schema)
+          ? storedSchema
+          : mergeCfcSchemaEnvelopes(storedSchema, schema);
       } catch (error) {
         reasons.push(
           error instanceof Error
@@ -1463,7 +1762,9 @@ export const prepareBoundaryCommit = (
       ]),
     );
     const persistedLabelEntries = mergedSchemaEntries.flatMap((entry) => {
-      if (!ifcEntryAppliesToAttemptedWrite(tx, target, entry.path)) {
+      if (
+        !ifcEntryAppliesToAttemptedWrite(tx, target, entry.path, entry.schema)
+      ) {
         return [];
       }
       const label = derivePersistedLabel(

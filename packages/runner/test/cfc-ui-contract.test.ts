@@ -512,7 +512,7 @@ describe("CFC trusted UI event enforcement", () => {
       target: {
         space,
         id: "of:cfc-ui-contract-array-document",
-        type: "application/json",
+        scope: "space",
         path: [],
       },
       schema: {
@@ -539,7 +539,7 @@ describe("CFC trusted UI event enforcement", () => {
       [{
         space,
         id: "of:cfc-ui-contract-array-document",
-        type: "application/json",
+        scope: "space",
         path: ["messages", "0"],
       }],
       rendererEvent({
@@ -563,7 +563,7 @@ describe("CFC trusted UI event enforcement", () => {
         input.kind === "trusted-event" &&
         input.target.space === space &&
         input.target.id === "of:cfc-ui-contract-array-document" &&
-        input.target.type === "application/json" &&
+        input.target.scope === "space" &&
         input.target.path.join("/") === "messages/0"
       ),
     ).toBe(true);
@@ -801,7 +801,7 @@ describe("CFC trusted UI event enforcement", () => {
       [{
         space,
         id: "of:cfc-ui-contract-context-array-document",
-        type: "application/json",
+        scope: "space",
         path: ["argument", "messages", "0"],
       }],
       rendererEvent(eventEnvelopeLink),
@@ -1108,12 +1108,10 @@ describe("CFC trusted UI event enforcement", () => {
   it("commits trusted event pushes for array item contracts", async () => {
     storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: "v2",
       cfcEnforcementMode: "enforce-explicit",
     });
 
@@ -1191,12 +1189,10 @@ describe("CFC trusted UI event enforcement", () => {
   it("enforces branch-level writeAuthorizedBy on mixed array pushes", async () => {
     storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: "v2",
       cfcEnforcementMode: "enforce-explicit",
       trustSnapshotProvider: () => ({
         id: "trust-snapshot-1",
@@ -1407,12 +1403,10 @@ describe("CFC trusted UI event enforcement", () => {
   it("enforces branch-level writeAuthorizedBy on nested mixed array pushes", async () => {
     storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: "v2",
       cfcEnforcementMode: "enforce-explicit",
       trustSnapshotProvider: () => ({
         id: "trust-snapshot-1",
@@ -1631,12 +1625,10 @@ describe("CFC trusted UI event enforcement", () => {
   it("fails closed for untrusted array pushes guarded by a root uiContract", async () => {
     storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: "v2",
       cfcEnforcementMode: "enforce-explicit",
     });
 
@@ -1699,12 +1691,10 @@ describe("CFC trusted UI event enforcement", () => {
   it("fails closed for untrusted pushes into object arrays guarded by a root uiContract", async () => {
     storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: "v2",
       cfcEnforcementMode: "enforce-explicit",
     });
 
@@ -1779,12 +1769,10 @@ describe("CFC trusted UI event enforcement", () => {
   it("preserves nested cell-link schemas so later untrusted writes still fail closed", async () => {
     storageManager = StorageManager.emulate({
       as: signer,
-      memoryVersion: "v2",
     });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      memoryVersion: "v2",
       cfcEnforcementMode: "enforce-explicit",
     });
 

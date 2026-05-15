@@ -63,7 +63,10 @@ export interface MyProfileValue {
   readonly profile?: ProfileCell;
 }
 
-export type MyProfileCell = Writable<MyProfileValue | Default<{}>>;
+export type EmptyMyProfileValue = Record<PropertyKey, never>;
+export type MyProfileCell = Writable<
+  MyProfileValue | Default<EmptyMyProfileValue>
+>;
 const MY_PROFILE_VALUE_SCHEMA = toSchema<MyProfileValue>();
 const TRUSTED_PROFILE_SCHEMA = toSchema<TrustedProfile>();
 

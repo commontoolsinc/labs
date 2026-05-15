@@ -39,6 +39,22 @@ export type UiContract =
 export type UiContractEntry = {
   path: string[];
   contract: UiContract;
+  schema?: JSONSchema;
+};
+
+const uiContractEntry = (
+  path: string[],
+  contract: UiContract,
+  schema?: JSONSchema,
+): UiContractEntry => {
+  const entry: UiContractEntry = { path, contract };
+  if (schema !== undefined) {
+    Object.defineProperty(entry, "schema", {
+      value: schema,
+      enumerable: false,
+    });
+  }
+  return entry;
 };
 
 type SerializedTrustedEvent = {
@@ -221,7 +237,7 @@ const uiContractsFromSchemaInternal = (
     new Set(),
   );
   if (contract !== undefined) {
-    entries.push({ path: [...path], contract });
+    entries.push(uiContractEntry([...path], contract, resolvedSchema));
   }
 
   const hasProperties = isRecord(resolvedSchema.properties);
@@ -249,7 +265,7 @@ const uiContractsFromSchemaInternal = (
       )
       .map((entry) => entry.contract);
     if (definitionContracts.length === 1) {
-      entries.push({ path: [...path], contract: definitionContracts[0] });
+      entries.push(uiContractEntry([...path], definitionContracts[0]));
     }
   }
 

@@ -1,6 +1,10 @@
 import { isRecord } from "@commonfabric/utils/types";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import type { NormalizedFullLink } from "../link-utils.ts";
+import {
+  isPrimitiveCellLink,
+  type NormalizedFullLink,
+  parseLink,
+} from "../link-utils.ts";
 import type { Runtime } from "../runtime.ts";
 import { readStoredCfcMetadata } from "./metadata.ts";
 import type { CfcMetadata } from "./types.ts";
@@ -49,6 +53,33 @@ const storedMetadataForCell = (
   }
 };
 
+const linkedValueMetadataForCell = (
+  cell: LabelQueryableCell,
+  link: NormalizedFullLink,
+): CfcMetadata | undefined => {
+  if (!cell.runtime || link.path.length === 0) {
+    return undefined;
+  }
+  try {
+    const tx = cell.runtime.readTx(cell.tx);
+    const value = tx.readValueOrThrow(link);
+    if (!isPrimitiveCellLink(value)) {
+      return undefined;
+    }
+    const target = parseLink(value, link);
+    if (target?.id === undefined || target.space === undefined) {
+      return undefined;
+    }
+    return readStoredCfcMetadata(tx, {
+      space: target.space,
+      id: target.id,
+      scope: target.scope,
+    });
+  } catch {
+    return undefined;
+  }
+};
+
 export const cfcLabelViewForCell = (
   cell: unknown,
 ): CfcLabelView | undefined => {
@@ -70,9 +101,14 @@ export const cfcLabelViewForCell = (
     storedMetadataForCell(cell as LabelQueryableCell, link),
     link.path,
   );
+  const linkedValueView = cfcLabelViewFromMetadata(
+    linkedValueMetadataForCell(cell as LabelQueryableCell, link),
+    [],
+  );
 
   return mergeCfcLabelViews([
     metadataView,
+    linkedValueView,
     getCarriedCfcLabelView(cell),
   ]);
 };

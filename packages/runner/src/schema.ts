@@ -74,6 +74,34 @@ const linkWithAsCellScope = (
   return isCellScope(scope) ? { ...link, scope } : link;
 };
 
+const asCellCompoundSchemaForValue = (
+  schema: JSONSchemaObj,
+  value: unknown,
+): JSONSchemaObj | undefined => {
+  const branches = [
+    ...(Array.isArray(schema.anyOf) ? schema.anyOf : []),
+    ...(Array.isArray(schema.oneOf) ? schema.oneOf : []),
+  ];
+  if (branches.length === 0) {
+    return undefined;
+  }
+
+  const { anyOf: _anyOf, oneOf: _oneOf, ...baseSchema } = schema;
+  for (const branch of branches) {
+    const branchWithDefs = branchWithParentDefs(schema, branch);
+    const resolved = resolveSchema(branchWithDefs) ?? branchWithDefs;
+    const merged = combineSchema(baseSchema as JSONSchemaObj, resolved);
+    if (
+      isRecord(merged) &&
+      ContextualFlowControl.getAsCellValues(merged).length > 0 &&
+      (value === undefined || matchesConcreteValue(merged, value))
+    ) {
+      return merged;
+    }
+  }
+  return undefined;
+};
+
 export type CellViewRef = {
   link: NormalizedFullLink;
   cfcLabelView?: CfcLabelView;
@@ -963,10 +991,13 @@ export function validateAndTransform(
     // link, but this one should be more accurate
     // Otherwise, we won't return a cell like we are supposed to.
     if (resolvedValueLink.schema !== undefined) {
-      link.schema = mergeSchemaFlags(
+      const mergedSchemaFlags = mergeSchemaFlags(
         effectiveSchema!,
         resolvedValueLink.schema,
       );
+      link.schema = SchemaObjectTraverser.hasAsCell(mergedSchemaFlags)
+        ? mergedSchemaFlags
+        : effectiveSchema!;
     }
     objectCreator.setBase(link, cfcLabelView);
     return objectCreator.createObject(link, undefined);
@@ -982,10 +1013,13 @@ export function validateAndTransform(
     meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
   });
   const doc = { address, value: value };
+  const valueSelectedSchema = isRecord(effectiveSchema)
+    ? asCellCompoundSchemaForValue(effectiveSchema, value)
+    : undefined;
   // If we have a ref with a schema, use that; otherwise, use the link's schema
   const selector = {
     path: doc.address.path,
-    schema: resolvedValueLink.schema ?? link.schema!,
+    schema: valueSelectedSchema ?? resolvedValueLink.schema ?? link.schema!,
   };
   // TODO(@ubik2): these constructor parameters are complex enough that we should
   // use an options struct
@@ -1129,8 +1163,10 @@ class TransformObjectCreator
         this.labelViewFor(link),
       );
     } else if (isRecord(link.schema)) {
-      const { asCell: _c, asStream: _s, ...restSchema } = link.schema;
-      const asCellValues = ContextualFlowControl.getAsCellValues(link.schema);
+      const schema = asCellCompoundSchemaForValue(link.schema, value) ??
+        link.schema;
+      const { asCell: _c, asStream: _s, ...restSchema } = schema;
+      const asCellValues = ContextualFlowControl.getAsCellValues(schema);
       if (asCellValues.length > 0) {
         // We'll use the first asCell for the outermost, and pass the rest
         // in with the schema for the created cell.
@@ -1157,7 +1193,7 @@ class TransformObjectCreator
       }
       // If it's not a cell/stream, but the schema is true-ish, use a
       // QueryResultProxy
-      if (ContextualFlowControl.isTrueSchema(link.schema)) {
+      if (ContextualFlowControl.isTrueSchema(schema)) {
         return createQueryResultProxy(
           this.runtime,
           this.tx,
@@ -1169,13 +1205,13 @@ class TransformObjectCreator
       }
       // link.schema is not true, and not asCell/asStream
       // If we're undefined, check for a default and apply that
-      if (link.schema.default !== undefined && value === undefined) {
+      if (schema.default !== undefined && value === undefined) {
         // processDefaultValue already annotates with back to cell
         return processDefaultValue(
           this.runtime,
           this.tx,
           link,
-          link.schema.default,
+          schema.default,
           this.synced,
           this.labelViewFor(link),
         );
@@ -1184,7 +1220,7 @@ class TransformObjectCreator
       // default.
       if (
         isRecord(value) && !Array.isArray(value) &&
-        link.schema.properties !== undefined
+        schema.properties !== undefined
       ) {
         // Ensure value is mutable before injecting default properties.
         // cloneIfNecessary with { deep: false, frozen: false, force: false }
@@ -1194,7 +1230,7 @@ class TransformObjectCreator
           frozen: false,
           force: false,
         }) as typeof value;
-        const propertyEntries = Object.entries(link.schema.properties) as [
+        const propertyEntries = Object.entries(schema.properties) as [
           string,
           JSONSchema,
         ][];

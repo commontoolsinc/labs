@@ -2821,7 +2821,8 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         },
       });
       tx.prepareCfc();
-      expect((await tx.commit()).ok).toBeDefined();
+      const result = await tx.commit();
+      expect(result.ok).toBeDefined();
 
       const rootId = parseLink(cell.getAsLink()).id!;
       const replica = storageManager.open(signer.did()).replica as unknown as {

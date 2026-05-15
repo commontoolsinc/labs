@@ -63,12 +63,11 @@ const createRuntime = () => {
   const server = new MemoryV2Server.Server();
   const storageManager = new SharedV2StorageManager({
     as: cfcSigner,
-    memoryVersion: "v2",
+    address: new URL("memory://"),
   }, server);
   const runtime = new Runtime({
     apiUrl: new URL("http://localhost/"),
     storageManager,
-    memoryVersion: "v2",
   });
   return { runtime, storageManager };
 };
@@ -760,7 +759,7 @@ describe("RuntimeProcessor CFC label IPC", () => {
       );
       const tx = runtime.edit() as any;
       tx.setCfcEnforcementMode("enforce-explicit");
-      root.withTx(tx).set({
+      (root.withTx(tx) as any).set({
         messages: [{ piece: { id: "alice", body: "hello" } }],
       });
       tx.prepareCfc();
@@ -776,7 +775,7 @@ describe("RuntimeProcessor CFC label IPC", () => {
       const rootId = parseLink(root.getAsLink()).id!;
       const nestedId = parseLink(
         replica.getDocument(rootId)?.value?.messages?.[0],
-      ).id!;
+      )!.id!;
       const processor = { runtime } as unknown as RuntimeProcessor;
 
       const response = await RuntimeProcessor.prototype.handleCellGetCfcLabel
@@ -787,8 +786,8 @@ describe("RuntimeProcessor CFC label IPC", () => {
             cell: {
               id: nestedId as CellRef["id"],
               space: cfcSigner.did() as CellRef["space"],
+              scope: "space",
               path: ["piece"],
-              type: "application/json",
               schema: pieceSchema,
             },
           },
@@ -930,7 +929,7 @@ describe("RuntimeProcessor CFC label IPC", () => {
       const rootId = parseLink(root.getAsLink()).id!;
       const nestedId = parseLink(
         replica.getDocument(rootId)?.value?.messages?.[0],
-      ).id!;
+      )!.id!;
       const processor = { runtime } as unknown as RuntimeProcessor;
 
       const response = await RuntimeProcessor.prototype.handleCellGetCfcLabel
@@ -941,8 +940,8 @@ describe("RuntimeProcessor CFC label IPC", () => {
             cell: {
               id: nestedId as CellRef["id"],
               space: cfcSigner.did() as CellRef["space"],
+              scope: "space",
               path: ["piece"],
-              type: "application/json",
               schema: { $ref: "#/$defs/TrustedMessage" },
             },
           },
