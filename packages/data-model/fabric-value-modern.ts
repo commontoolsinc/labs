@@ -550,32 +550,6 @@ export function isFabricCompatibleModern(
 // ---------------------------------------------------------------------------
 
 /**
- * Options for `cloneIfNecessary()`.
- */
-export interface CloneOptions {
-  /** Whether the result should be frozen. Default: `true`. */
-  frozen?: boolean;
-  /** Whether to clone deeply or shallowly. Default: `true`. */
-  deep?: boolean;
-  /**
-   * Force a copy to be made.
-   *
-   * - When `frozen = false`: defaults to `true` (always clone to guarantee
-   *   mutable isolation).
-   * - When `frozen = true`: defaults to `false` (clone only if necessary
-   *   to achieve frozenness).
-   * - `{ frozen: true, force: true }` is an error (pointless to force-copy
-   *   something that will be immutable anyway).
-   * - `{ frozen: false, force: false, deep: false }`: valid -- caller owns
-   *   the reference and wants it mutable; thaws if frozen, returns as-is
-   *   if already mutable.
-   * - `{ frozen: false, force: false, deep: true }`: error -- ambiguous
-   *   semantics for trees with mixed frozenness.
-   */
-  force?: boolean;
-}
-
-/**
  * Clones an already-valid `FabricValue` to achieve a desired frozenness,
  * with control over depth and copy semantics.
  *
