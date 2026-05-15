@@ -129,6 +129,15 @@ const newOptionId = () =>
 
 const colorForIndex = (i: number) => PLAYER_COLORS[i % PLAYER_COLORS.length];
 
+const getInitials = (name: string): string => {
+  const trimmed = name.trim();
+  if (!trimmed) return "?";
+  return trimmed.split(/\s+/).map((w) => w[0]).join("").toUpperCase().slice(
+    0,
+    2,
+  );
+};
+
 const joinAs = handler<JoinEvent, {
   users: UsersCell;
   myName: NameCell;
@@ -342,6 +351,16 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       { options, votes, users },
       ({ options, votes, users }) => tallyOptions(options, votes, users),
     );
+    const hostNote = derive(
+      { myName, adminName },
+      ({ myName, adminName }) => {
+        const me = trimmedName(myName);
+        const admin = trimmedName(adminName);
+        if (!admin) return "";
+        if (me !== "" && me === admin) return " · you are the host";
+        return ` · hosted by ${admin}`;
+      },
+    );
 
     return {
       [NAME]: "Cozy lunch poll",
@@ -354,7 +373,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
               </cf-heading>
               <div style={{ color: "var(--cf-theme-color-text-muted)" }}>
                 {userCount} joined · {optionCount} options · {voteCount} votes
-                {isAdmin ? " · you are admin" : ""}
+                {hostNote}
               </div>
             </cf-vstack>
 
@@ -412,9 +431,16 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                   : null}
 
                 <cf-vstack gap="2">
-                  {ranked.map((tally) => {
+                  {ranked.map((tally, idx) => {
                     const oid = tally.option.id;
                     const optionTitle = tally.option.title;
+                    const addedBy = tally.option.addedByName;
+                    const rank = idx + 1;
+                    // Use unwrapped tally fields rather than the outer
+                    // voteCount derive, which isn't a plain number in this
+                    // map-callback scope.
+                    const totalVotes = tally.green + tally.yellow + tally.red;
+                    const isWinner = idx === 0 && totalVotes > 0;
                     const myVote = derive(
                       { votes, myName, optionId: oid },
                       ({ votes, myName, optionId }) =>
@@ -424,13 +450,33 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                       <cf-card>
                         <cf-vstack slot="content" gap="2">
                           <cf-hstack justify="between" align="center">
-                            <cf-heading level={4}>
-                              {optionTitle}
-                            </cf-heading>
+                            <cf-hstack gap="2" align="center">
+                              <span
+                                style={isWinner
+                                  ? "display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:28px;padding:0 8px;border-radius:9999px;background:#10b981;color:white;font-size:13px;font-weight:700;"
+                                  : "display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:28px;padding:0 8px;border-radius:9999px;background:#f3f4f6;color:#374151;font-size:12px;font-weight:700;"}
+                              >
+                                {isWinner ? "🏆" : `#${rank}`}
+                              </span>
+                              <div>
+                                <cf-heading level={4}>
+                                  {optionTitle}
+                                </cf-heading>
+                                <div
+                                  style={{
+                                    fontSize: "11px",
+                                    color: "var(--cf-theme-color-text-muted)",
+                                  }}
+                                >
+                                  added by {addedBy}
+                                </div>
+                              </div>
+                            </cf-hstack>
                             <div
                               style={{
                                 color: "var(--cf-theme-color-text-muted)",
                                 fontSize: "13px",
+                                whiteSpace: "nowrap",
                               }}
                             >
                               🟢 {tally.green} · 🟡 {tally.yellow} · 🔴{" "}
@@ -440,61 +486,77 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                           <cf-hstack gap="1" wrap>
                             {tally.voters.map((v) => (
                               <span
-                                style={{
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  gap: "4px",
-                                  padding: "2px 8px",
-                                  borderRadius: "12px",
-                                  background: VOTE_SWATCH[v.voteType],
-                                  color: "white",
-                                  fontSize: "12px",
-                                  borderLeft: `4px solid ${v.color}`,
-                                }}
+                                title={v.name}
+                                style={v.name === myName
+                                  ? `display:inline-flex;align-items:center;justify-content:center;min-width:26px;height:26px;padding:0 8px;border-radius:9999px;background:${
+                                    VOTE_SWATCH[v.voteType]
+                                  };color:white;font-size:11px;font-weight:700;box-shadow:0 0 0 2px white,0 0 0 3px #111827;cursor:default;`
+                                  : `display:inline-flex;align-items:center;justify-content:center;min-width:26px;height:26px;padding:0 8px;border-radius:9999px;background:${
+                                    VOTE_SWATCH[v.voteType]
+                                  };color:white;font-size:11px;font-weight:700;cursor:default;`}
                               >
-                                {v.name}
+                                {getInitials(v.name)}
                               </span>
                             ))}
                           </cf-hstack>
                           {isJoined
                             ? (
-                              <cf-hstack gap="2">
+                              <cf-hstack gap="2" align="center">
                                 <cf-button
+                                  aria-label="Love it"
+                                  style={myVote === "green"
+                                    ? "background-color: #22c55e; color: white; font-weight: bold; border: 2px solid #16a34a;"
+                                    : myVote
+                                    ? "opacity: 0.4;"
+                                    : ""}
                                   onClick={() =>
                                     boundCastVote.send({
                                       optionId: oid,
                                       voteType: "green",
                                     })}
                                 >
-                                  {myVote === "green" ? "✓ " : ""}🟢 Love it
+                                  🟢 Love it
                                 </cf-button>
                                 <cf-button
+                                  aria-label="OK with it"
+                                  style={myVote === "yellow"
+                                    ? "background-color: #eab308; color: white; font-weight: bold; border: 2px solid #ca8a04;"
+                                    : myVote
+                                    ? "opacity: 0.4;"
+                                    : ""}
                                   onClick={() =>
                                     boundCastVote.send({
                                       optionId: oid,
                                       voteType: "yellow",
                                     })}
                                 >
-                                  {myVote === "yellow" ? "✓ " : ""}🟡 OK
+                                  🟡 OK
                                 </cf-button>
                                 <cf-button
+                                  aria-label="Veto"
+                                  style={myVote === "red"
+                                    ? "background-color: #ef4444; color: white; font-weight: bold; border: 2px solid #dc2626;"
+                                    : myVote
+                                    ? "opacity: 0.4;"
+                                    : ""}
                                   onClick={() =>
                                     boundCastVote.send({
                                       optionId: oid,
                                       voteType: "red",
                                     })}
                                 >
-                                  {myVote === "red" ? "✓ " : ""}🔴 Veto
+                                  🔴 Veto
                                 </cf-button>
                                 {isAdmin
                                   ? (
                                     <cf-button
+                                      aria-label="Remove option"
                                       onClick={() =>
                                         boundRemoveOption.send({
                                           optionId: oid,
                                         })}
                                     >
-                                      Remove
+                                      ✕
                                     </cf-button>
                                   )
                                   : null}
