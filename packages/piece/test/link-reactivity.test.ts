@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { resolveCellPath, Runtime } from "@commonfabric/runner";
+import { parseLink, resolveCellPath, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createSession, Identity } from "@commonfabric/identity";
 import { PieceManager } from "../src/manager.ts";
@@ -121,6 +121,39 @@ describe("PieceManager.link() reactivity", () => {
     });
     await runtime.idle();
     expect(targetCell.key("linked").get()).toBe("updated");
+  });
+
+  it("links scoped source cells into scoped target cells", async () => {
+    const sourceCell = runtime.getCellFromLink({
+      id: "of:scoped-source",
+      path: [],
+      space: manager.getSpace(),
+      scope: "user",
+    });
+    const targetCell = runtime.getCellFromLink({
+      id: "of:scoped-target",
+      path: [],
+      space: manager.getSpace(),
+      scope: "session",
+    });
+
+    await runtime.editWithRetry((tx) => {
+      sourceCell.withTx(tx).set({ data: "scoped value" });
+      targetCell.withTx(tx).set({ linked: null });
+    });
+    await runtime.idle();
+
+    await manager.link(
+      "scoped-source",
+      ["data"],
+      "scoped-target",
+      ["linked"],
+      { start: false, sourceScope: "user", targetScope: "session" },
+    );
+
+    const rawLink = targetCell.key("linked").getRaw();
+    expect(parseLink(rawLink, targetCell)?.scope).toBe("user");
+    expect(targetCell.key("linked").get()).toBe("scoped value");
   });
 
   it("should link through exposed cell-valued source fields", async () => {

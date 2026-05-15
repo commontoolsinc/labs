@@ -211,6 +211,24 @@ describe("link-utils", () => {
   });
 
   describe("parseLink", () => {
+    it("runtime getCellFromEntityId should accept an explicit scope", () => {
+      const cell = runtime.getCellFromEntityId(
+        space,
+        { "/": "scoped-entity" },
+        [],
+        undefined,
+        undefined,
+        "user",
+      );
+
+      expect(cell.getAsNormalizedFullLink()).toMatchObject({
+        id: "of:scoped-entity",
+        path: [],
+        space,
+        scope: "user",
+      });
+    });
+
     it("should parse cells to normalized links", () => {
       const cell = runtime.getCell(space, "test", undefined, tx);
       cell.set({ value: 42 });
