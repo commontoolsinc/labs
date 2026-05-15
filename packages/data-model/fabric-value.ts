@@ -35,7 +35,6 @@ import {
 } from "./fabric-value-modern.ts";
 export type { CloneOptions } from "./fabric-value-modern.ts";
 import {
-  cloneIfNecessaryLegacy,
   fabricFromNativeValueLegacy,
   isFabricCompatibleLegacy,
   isFabricValueLegacy,
@@ -178,9 +177,7 @@ export function cloneIfNecessary<T extends FabricValue>(
     );
   }
 
-  return (modernDataModelEnabled
-    ? cloneIfNecessaryModern(value, frozen, deep, force)
-    : cloneIfNecessaryLegacy(value, frozen, deep, force)) as T;
+  return cloneIfNecessaryModern(value, frozen, deep, force) as T;
 }
 
 // ---------------------------------------------------------------------------
