@@ -980,67 +980,39 @@ describe("fabric-native-instances", () => {
       });
     });
 
-    describe("FabricMap", () => {
-      it("[DEEP_FREEZE] verifies FrozenMap internal + recurses entries", () => {
-        const childKey = { k: 1 };
-        const childVal = { v: 2 };
-        const fm = new FabricMap(
-          new FrozenMap<FabricValue, FabricValue>([[childKey, childVal]]),
-        );
-        const result = deepFreeze(fm);
-        expect(result).toBe(fm);
-        expect(Object.isFrozen(fm)).toBe(true);
-        expect(Object.isFrozen(childKey)).toBe(true);
-        expect(Object.isFrozen(childVal)).toBe(true);
-      });
-
-      it("[DEEP_FREEZE] throws if internal slot is not a FrozenMap", () => {
-        const fm = new FabricMap(new Map<FabricValue, FabricValue>());
-        expect(() => deepFreeze(fm)).toThrow("is not a `FrozenMap`");
-      });
-
-      it("[IS_DEEP_FROZEN] false (no throw) for non-FrozenMap internal", () => {
-        const fm = new FabricMap(new Map<FabricValue, FabricValue>());
-        Object.freeze(fm);
-        expect(() => isDeepFrozenFabricValue(fm)).not.toThrow();
-        expect(isDeepFrozenFabricValue(fm)).toBe(false);
-      });
-
-      it("[IS_DEEP_FROZEN] true for canonical-form FabricMap", () => {
+    // FabricMap/FabricSet deliberately keep throwing stubs for the protocol
+    // methods (per Dan's PR #3612 review: not yet used, reworked separately).
+    describe("FabricMap (throwing stub)", () => {
+      it("[DEEP_FREEZE] throws not-yet-implemented", () => {
         const fm = new FabricMap(
           new FrozenMap<FabricValue, FabricValue>([["a", 1]]),
         );
-        deepFreeze(fm);
-        expect(isDeepFrozenFabricValue(fm)).toBe(true);
+        expect(() => deepFreeze(fm)).toThrow("FabricMap: not yet implemented");
+      });
+
+      it("[IS_DEEP_FROZEN] throws not-yet-implemented (via type guard)", () => {
+        const fm = new FabricMap(
+          new FrozenMap<FabricValue, FabricValue>([["a", 1]]),
+        );
+        Object.freeze(fm);
+        expect(() => isDeepFrozenFabricValue(fm)).toThrow(
+          "FabricMap: not yet implemented",
+        );
       });
     });
 
-    describe("FabricSet", () => {
-      it("[DEEP_FREEZE] verifies FrozenSet internal + recurses elements", () => {
-        const child = { v: 1 };
-        const fs = new FabricSet(new FrozenSet<FabricValue>([child]));
-        const result = deepFreeze(fs);
-        expect(result).toBe(fs);
-        expect(Object.isFrozen(fs)).toBe(true);
-        expect(Object.isFrozen(child)).toBe(true);
-      });
-
-      it("[DEEP_FREEZE] throws if internal slot is not a FrozenSet", () => {
-        const fs = new FabricSet(new Set<FabricValue>());
-        expect(() => deepFreeze(fs)).toThrow("is not a `FrozenSet`");
-      });
-
-      it("[IS_DEEP_FROZEN] false (no throw) for non-FrozenSet internal", () => {
-        const fs = new FabricSet(new Set<FabricValue>());
-        Object.freeze(fs);
-        expect(() => isDeepFrozenFabricValue(fs)).not.toThrow();
-        expect(isDeepFrozenFabricValue(fs)).toBe(false);
-      });
-
-      it("[IS_DEEP_FROZEN] true for canonical-form FabricSet", () => {
+    describe("FabricSet (throwing stub)", () => {
+      it("[DEEP_FREEZE] throws not-yet-implemented", () => {
         const fs = new FabricSet(new FrozenSet<FabricValue>([1, 2]));
-        deepFreeze(fs);
-        expect(isDeepFrozenFabricValue(fs)).toBe(true);
+        expect(() => deepFreeze(fs)).toThrow("FabricSet: not yet implemented");
+      });
+
+      it("[IS_DEEP_FROZEN] throws not-yet-implemented (via type guard)", () => {
+        const fs = new FabricSet(new FrozenSet<FabricValue>([1, 2]));
+        Object.freeze(fs);
+        expect(() => isDeepFrozenFabricValue(fs)).toThrow(
+          "FabricSet: not yet implemented",
+        );
       });
     });
 

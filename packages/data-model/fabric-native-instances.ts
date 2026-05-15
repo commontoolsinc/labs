@@ -387,47 +387,24 @@ export class FabricMap
   }
 
   /**
-   * Deep-freezes in place. A `Map`'s `.set`/`.delete` bypass property
-   * descriptors, so `Object.freeze` alone cannot make the collection
-   * immutable -- the only fully-immutable form is `FrozenMap`. By the time
-   * `[DEEP_FREEZE]` runs at the memory-model egress boundary, the internal
-   * slot must already be that frozen-variant form; this method verifies
-   * (death before confusion) and then recurses into each key and value.
+   * Stub -- throws until `Map` support is fully implemented. `FabricMap` is
+   * not yet used and is being reworked separately; the protocol methods are
+   * deliberately left as throwing stubs (per Dan's PR #3612 review).
    */
   [DEEP_FREEZE](
-    subFreeze: (value: FabricValue) => FabricValue,
+    _subFreeze: (value: FabricValue) => FabricValue,
   ): FabricValue {
-    if (!(this.map instanceof FrozenMap)) {
-      throw new Error(
-        "Cannot deep-freeze `FabricMap` whose internal slot is not a " +
-          "`FrozenMap`.",
-      );
-    }
-    for (const [key, value] of this.map) {
-      subFreeze(key);
-      subFreeze(value);
-    }
-    return Object.freeze(this) as unknown as FabricValue;
+    throw new Error("FabricMap: not yet implemented");
   }
 
   /**
-   * Side-effect-free check mirroring `[DEEP_FREEZE]`'s canonical form: this
-   * wrapper is frozen, the internal slot is a `FrozenMap`, and every key and
-   * value is recursively deep-frozen. A non-`FrozenMap` internal answers
-   * `false` (it is simply not in canonical deep-frozen form) -- never throws.
+   * Stub -- throws until `Map` support is fully implemented. See
+   * `[DEEP_FREEZE]` above.
    */
   [IS_DEEP_FROZEN](
-    isSubDeepFrozen: (value: FabricValue) => boolean,
+    _isSubDeepFrozen: (value: FabricValue) => boolean,
   ): boolean {
-    if (!Object.isFrozen(this) || !(this.map instanceof FrozenMap)) {
-      return false;
-    }
-    for (const [key, value] of this.map) {
-      if (!isSubDeepFrozen(key) || !isSubDeepFrozen(value)) {
-        return false;
-      }
-    }
-    return true;
+    throw new Error("FabricMap: not yet implemented");
   }
 
   /** @inheritDoc */
@@ -475,46 +452,24 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
   }
 
   /**
-   * Deep-freezes in place. A `Set`'s `.add`/`.delete` bypass property
-   * descriptors, so `Object.freeze` alone cannot make the collection
-   * immutable -- the only fully-immutable form is `FrozenSet`. By the time
-   * `[DEEP_FREEZE]` runs at the memory-model egress boundary, the internal
-   * slot must already be that frozen-variant form; this method verifies
-   * (death before confusion) and then recurses into each element.
+   * Stub -- throws until `Set` support is fully implemented. `FabricSet` is
+   * not yet used and is being reworked separately; the protocol methods are
+   * deliberately left as throwing stubs (per Dan's PR #3612 review).
    */
   [DEEP_FREEZE](
-    subFreeze: (value: FabricValue) => FabricValue,
+    _subFreeze: (value: FabricValue) => FabricValue,
   ): FabricValue {
-    if (!(this.set instanceof FrozenSet)) {
-      throw new Error(
-        "Cannot deep-freeze `FabricSet` whose internal slot is not a " +
-          "`FrozenSet`.",
-      );
-    }
-    for (const value of this.set) {
-      subFreeze(value);
-    }
-    return Object.freeze(this) as unknown as FabricValue;
+    throw new Error("FabricSet: not yet implemented");
   }
 
   /**
-   * Side-effect-free check mirroring `[DEEP_FREEZE]`'s canonical form: this
-   * wrapper is frozen, the internal slot is a `FrozenSet`, and every element
-   * is recursively deep-frozen. A non-`FrozenSet` internal answers `false`
-   * (it is simply not in canonical deep-frozen form) -- never throws.
+   * Stub -- throws until `Set` support is fully implemented. See
+   * `[DEEP_FREEZE]` above.
    */
   [IS_DEEP_FROZEN](
-    isSubDeepFrozen: (value: FabricValue) => boolean,
+    _isSubDeepFrozen: (value: FabricValue) => boolean,
   ): boolean {
-    if (!Object.isFrozen(this) || !(this.set instanceof FrozenSet)) {
-      return false;
-    }
-    for (const value of this.set) {
-      if (!isSubDeepFrozen(value)) {
-        return false;
-      }
-    }
-    return true;
+    throw new Error("FabricSet: not yet implemented");
   }
 
   /** @inheritDoc */
