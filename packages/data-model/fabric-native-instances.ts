@@ -1,7 +1,9 @@
 import {
   DECONSTRUCT,
+  DEEP_FREEZE,
   FabricInstance,
   type FabricValue,
+  IS_DEEP_FROZEN,
   RECONSTRUCT,
   type ReconstructionContext,
 } from "./interface.ts";
@@ -211,6 +213,62 @@ export class FabricError extends FabricNativeWrapper<Error> {
     return state as FabricValue;
   }
 
+  /**
+   * Deep-freezes in place. `Object.freeze` on the wrapped `Error` covers the
+   * standard non-enumerable slots (`message`, `name`, `stack`); the only
+   * deep-freeze gap is the (`FabricValue`-typed, per the `[DECONSTRUCT]`
+   * invariant) `cause` and any custom enumerable own properties, which are
+   * recursed via `subFreeze`. This freezes the existing instance -- it does
+   * NOT rebuild and does NOT narrow to string-valued state (that narrowing
+   * is a `deepClone()` stop-gap detail, not a `[DEEP_FREEZE]` requirement).
+   */
+  [DEEP_FREEZE](
+    subFreeze: (value: FabricValue) => FabricValue,
+  ): FabricValue {
+    if (this.error.cause !== undefined) {
+      subFreeze(this.error.cause as FabricValue);
+    }
+    for (const key of Object.keys(this.error)) {
+      if (UNSAFE_KEYS.has(key) || key === "cause") continue;
+      subFreeze(
+        (this.error as unknown as Record<string, FabricValue>)[key],
+      );
+    }
+    Object.freeze(this.error);
+    return Object.freeze(this) as unknown as FabricValue;
+  }
+
+  /**
+   * Side-effect-free check mirroring `[DEEP_FREEZE]`'s canonical form: this
+   * wrapper and its wrapped `Error` are frozen, and the (`FabricValue`-typed)
+   * `cause` plus any custom enumerable own properties are recursively
+   * deep-frozen. Never throws.
+   */
+  [IS_DEEP_FROZEN](
+    isSubDeepFrozen: (value: FabricValue) => boolean,
+  ): boolean {
+    if (!Object.isFrozen(this) || !Object.isFrozen(this.error)) {
+      return false;
+    }
+    if (
+      this.error.cause !== undefined &&
+      !isSubDeepFrozen(this.error.cause as FabricValue)
+    ) {
+      return false;
+    }
+    for (const key of Object.keys(this.error)) {
+      if (UNSAFE_KEYS.has(key) || key === "cause") continue;
+      if (
+        !isSubDeepFrozen(
+          (this.error as unknown as Record<string, FabricValue>)[key],
+        )
+      ) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   /** @inheritDoc */
   protected shallowUnfrozenClone(): FabricError {
     return new FabricError(this.error);
@@ -328,6 +386,27 @@ export class FabricMap
     throw new Error("FabricMap: not yet implemented");
   }
 
+  /**
+   * Stub -- throws until `Map` support is fully implemented. `FabricMap` is
+   * not yet used and is being reworked separately; the protocol methods are
+   * deliberately left as throwing stubs (per Dan's PR #3612 review).
+   */
+  [DEEP_FREEZE](
+    _subFreeze: (value: FabricValue) => FabricValue,
+  ): FabricValue {
+    throw new Error("FabricMap: not yet implemented");
+  }
+
+  /**
+   * Stub -- throws until `Map` support is fully implemented. See
+   * `[DEEP_FREEZE]` above.
+   */
+  [IS_DEEP_FROZEN](
+    _isSubDeepFrozen: (value: FabricValue) => boolean,
+  ): boolean {
+    throw new Error("FabricMap: not yet implemented");
+  }
+
   /** @inheritDoc */
   protected shallowUnfrozenClone(): FabricMap {
     return new FabricMap(this.map);
@@ -369,6 +448,27 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
   }
 
   [DECONSTRUCT](): FabricValue {
+    throw new Error("FabricSet: not yet implemented");
+  }
+
+  /**
+   * Stub -- throws until `Set` support is fully implemented. `FabricSet` is
+   * not yet used and is being reworked separately; the protocol methods are
+   * deliberately left as throwing stubs (per Dan's PR #3612 review).
+   */
+  [DEEP_FREEZE](
+    _subFreeze: (value: FabricValue) => FabricValue,
+  ): FabricValue {
+    throw new Error("FabricSet: not yet implemented");
+  }
+
+  /**
+   * Stub -- throws until `Set` support is fully implemented. See
+   * `[DEEP_FREEZE]` above.
+   */
+  [IS_DEEP_FROZEN](
+    _isSubDeepFrozen: (value: FabricValue) => boolean,
+  ): boolean {
     throw new Error("FabricSet: not yet implemented");
   }
 
@@ -432,6 +532,36 @@ export class FabricRegExp extends FabricNativeWrapper<RegExp> {
       flags: this.regex.flags,
       flavor: this.flavor,
     } as FabricValue;
+  }
+
+  /**
+   * Deep-freezes in place. The deep-frozen form of a `FabricRegExp` is one
+   * whose wrapped `RegExp` is frozen (an immutable `.lastIndex`, so stateful
+   * methods won't mutate it -- matching `toNativeFrozen()`'s semantics).
+   * `Object.freeze` fully immutabilizes a `RegExp` in place (unlike `Map` /
+   * `Set`, whose mutating methods bypass property descriptors), so this
+   * freezes `this.regex` directly rather than requiring it pre-frozen --
+   * which lets a freshly-`[RECONSTRUCT]`ed `FabricRegExp` flow through the
+   * deserialize-boundary `deepFreeze()` wrap without a fix-up step. There
+   * are no `FabricValue` children to recurse.
+   */
+  [DEEP_FREEZE](
+    _subFreeze: (value: FabricValue) => FabricValue,
+  ): FabricValue {
+    Object.freeze(this.regex);
+    return Object.freeze(this) as unknown as FabricValue;
+  }
+
+  /**
+   * Side-effect-free check mirroring `[DEEP_FREEZE]`'s canonical form: this
+   * wrapper and its wrapped `RegExp` are frozen. There are no `FabricValue`
+   * children to recurse. An unfrozen wrapped `RegExp` answers `false` --
+   * never throws.
+   */
+  [IS_DEEP_FROZEN](
+    _isSubDeepFrozen: (value: FabricValue) => boolean,
+  ): boolean {
+    return Object.isFrozen(this) && Object.isFrozen(this.regex);
   }
 
   /** @inheritDoc */
