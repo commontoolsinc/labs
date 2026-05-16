@@ -20,13 +20,13 @@ const MAX_ARRAY_INDEX = 2 ** 32 - 2;
  * generically and its wrapped native `Error` -- whose `message`/`stack`
  * are non-enumerable -- collapses to `{}`, losing the error entirely.
  *
- * `cloneIfNecessary({ frozen: true })` deep-clones via the fabric value
- * machinery (`FabricInstance.deepClone()` for wrappers), preserving the
- * class. The frozen result is consistent with `applyPatch`'s deep-freeze
- * contract, and already-deep-frozen inputs are returned as-is.
+ * `cloneIfNecessary()`'s defaults are exactly right here: it deep-clones
+ * via the fabric value machinery (`FabricInstance.deepClone()` for
+ * wrappers), preserving the class; the deep-frozen result matches
+ * `applyPatch`'s deep-freeze contract; and an already-deep-frozen input
+ * is returned as-is (immutable, so no isolation copy is needed).
  */
-const cloneValue = (value: FabricValue): FabricValue =>
-  cloneIfNecessary(value, { frozen: true });
+const cloneValue = (value: FabricValue): FabricValue => cloneIfNecessary(value);
 
 /**
  * Applies a sequence of RFC 6902 JSON Patch operations (`replace`, `add`,
