@@ -20,13 +20,24 @@ const MAX_ARRAY_INDEX = 2 ** 32 - 2;
  * generically and its wrapped native `Error` -- whose `message`/`stack`
  * are non-enumerable -- collapses to `{}`, losing the error entirely.
  *
- * `cloneIfNecessary()`'s defaults are exactly right here: it deep-clones
- * via the fabric value machinery (`FabricInstance.deepClone()` for
- * wrappers), preserving the class; the deep-frozen result matches
- * `applyPatch`'s deep-freeze contract; and an already-deep-frozen input
- * is returned as-is (immutable, so no isolation copy is needed).
+ * `cloneIfNecessary()` deep-clones via the fabric value machinery
+ * (`FabricInstance.deepClone()` for wrappers), preserving the class.
+ *
+ * `{ frozen: false }` (which implies `force: true`) is required, NOT the
+ * `{ frozen: true }` default: with the default, `cloneIfNecessary`'s
+ * identity check calls `isDeepFrozenFabricValue()`, whose `checkValue()`
+ * currently THROWS on a `FabricInstance` ("Cannot yet handle instance of
+ * class ..."). That path is hit whenever the engine replays a stored
+ * patch sequence over an already-deep-frozen tree (e.g. a `move`/`add`
+ * that re-clones a frozen subtree holding a `FabricError`). `force`
+ * short-circuits the identity check before that throw. The result is
+ * still deep-frozen: `applyPatch` deep-freezes the assembled tree at its
+ * boundary regardless. (TODO: once `checkValue()`/`isDeepFrozenFabricValue`
+ * handle `FabricInstance`, the default could be used and would also reuse
+ * already-frozen inputs identity-preservingly.)
  */
-const cloneValue = (value: FabricValue): FabricValue => cloneIfNecessary(value);
+const cloneValue = (value: FabricValue): FabricValue =>
+  cloneIfNecessary(value, { frozen: false });
 
 /**
  * Applies a sequence of RFC 6902 JSON Patch operations (`replace`, `add`,
