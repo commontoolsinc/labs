@@ -32,7 +32,7 @@ const MAX_ARRAY_INDEX = 2 ** 32 - 2;
  * that re-clones a frozen subtree holding a `FabricError`). `force`
  * short-circuits the identity check before that throw. The result is
  * still deep-frozen: `applyPatch` deep-freezes the assembled tree at its
- * boundary regardless. (TODO: once `checkValue()`/`isDeepFrozenFabricValue`
+ * boundary regardless. (TODO(@danfuzz): once `checkValue()`/`isDeepFrozenFabricValue`
  * handle `FabricInstance`, the default could be used and would also reuse
  * already-frozen inputs identity-preservingly.)
  */
