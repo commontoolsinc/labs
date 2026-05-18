@@ -11,6 +11,72 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
+    const section = __cf_pattern_input.key("element");
+    const tasks = section.key("tasks");
+    return (<div>
+            {section.key("tags").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+            const tag = __cf_pattern_input.key("element");
+            const tasks = __cf_pattern_input.key("params", "tasks");
+            return (<span>
+                {tag.key("name")}:{tasks.key("length")}
+              </span>);
+        }, {
+            type: "object",
+            properties: {
+                element: {
+                    type: "object",
+                    properties: {
+                        name: {
+                            type: "string"
+                        }
+                    },
+                    required: ["name"]
+                },
+                params: {
+                    type: "object",
+                    properties: {
+                        tasks: {
+                            type: "object",
+                            properties: {
+                                length: {
+                                    type: "number"
+                                }
+                            },
+                            required: ["length"]
+                        }
+                    },
+                    required: ["tasks"]
+                }
+            },
+            required: ["element", "params"]
+        } as const satisfies __cfHelpers.JSONSchema, {
+            anyOf: [{
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
+                    type: "object",
+                    properties: {}
+                }],
+            $defs: {
+                UIRenderable: {
+                    type: "object",
+                    properties: {
+                        $UI: {
+                            $ref: "https://commonfabric.org/schemas/vnode.json"
+                        }
+                    },
+                    required: ["$UI"]
+                }
+            }
+        } as const satisfies __cfHelpers.JSONSchema), {
+            tasks: {
+                length: tasks.key("length")
+            }
+        })}
+          </div>);
+});
 interface State {
     sections: {
         tasks: {
@@ -27,72 +93,7 @@ interface State {
 //   nested tag callback reads tasks.length through key("length"), not plain params values
 export default pattern((state) => ({
     [UI]: (<div>
-      {state.key("sections").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-            const section = __cf_pattern_input.key("element");
-            const tasks = section.key("tasks");
-            return (<div>
-            {section.key("tags").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                    const tag = __cf_pattern_input.key("element");
-                    const tasks = __cf_pattern_input.key("params", "tasks");
-                    return (<span>
-                {tag.key("name")}:{tasks.key("length")}
-              </span>);
-                }, {
-                    type: "object",
-                    properties: {
-                        element: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["name"]
-                        },
-                        params: {
-                            type: "object",
-                            properties: {
-                                tasks: {
-                                    type: "object",
-                                    properties: {
-                                        length: {
-                                            type: "number"
-                                        }
-                                    },
-                                    required: ["length"]
-                                }
-                            },
-                            required: ["tasks"]
-                        }
-                    },
-                    required: ["element", "params"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    anyOf: [{
-                            $ref: "https://commonfabric.org/schemas/vnode.json"
-                        }, {
-                            $ref: "#/$defs/UIRenderable"
-                        }, {
-                            type: "object",
-                            properties: {}
-                        }],
-                    $defs: {
-                        UIRenderable: {
-                            type: "object",
-                            properties: {
-                                $UI: {
-                                    $ref: "https://commonfabric.org/schemas/vnode.json"
-                                }
-                            },
-                            required: ["$UI"]
-                        }
-                    }
-                } as const satisfies __cfHelpers.JSONSchema), {
-                    tasks: {
-                        length: tasks.key("length")
-                    }
-                })}
-          </div>);
-        }, {
+      {state.key("sections").mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
             type: "object",
             properties: {
                 element: {

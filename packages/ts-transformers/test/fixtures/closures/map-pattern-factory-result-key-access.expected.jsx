@@ -11,6 +11,18 @@ import { NAME, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
+    const entry = __cf_pattern_input.key("element");
+    const row = EntryRow({
+        piece: entry.key("piece"),
+        name: entry.key("name"),
+        backlinks: entry.key("backlinks"),
+    });
+    return {
+        ui: row.key(__cfHelpers.UI),
+        n: row.key(__cfHelpers.NAME),
+    };
+});
 interface Entry {
     piece: string;
     name: string;
@@ -79,18 +91,7 @@ export default pattern((__cf_pattern_input) => {
     const filtered = __cf_pattern_input.key("filtered");
     return ({
         [UI]: (<div>
-      {filtered.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const entry = __cf_pattern_input.key("element");
-                const row = EntryRow({
-                    piece: entry.key("piece"),
-                    name: entry.key("name"),
-                    backlinks: entry.key("backlinks"),
-                });
-                return {
-                    ui: row.key(__cfHelpers.UI),
-                    n: row.key(__cfHelpers.NAME),
-                };
-            }, {
+      {filtered.mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
                 type: "object",
                 properties: {
                     element: {

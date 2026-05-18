@@ -17,6 +17,22 @@ import { Default, pattern, UI, VNode, Writable, } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
+    const file = __cf_pattern_input.key("element");
+    const kind = file.key("type");
+    const label = __cfHelpers.derive({
+        type: "object",
+        properties: {
+            kind: {
+                type: "string"
+            }
+        },
+        required: ["kind"]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, { kind: kind }, ({ kind }) => describeKind(kind)).for("label", true);
+    return <span>{label}</span>;
+});
 interface FileEntry {
     name: string;
     type: "file" | "folder";
@@ -33,22 +49,7 @@ export default pattern((__cf_pattern_input) => {
     const files = __cf_pattern_input.key("files");
     return {
         [UI]: (<div>
-        {files.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const file = __cf_pattern_input.key("element");
-                const kind = file.key("type");
-                const label = __cfHelpers.derive({
-                    type: "object",
-                    properties: {
-                        kind: {
-                            type: "string"
-                        }
-                    },
-                    required: ["kind"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, { kind: kind }, ({ kind }) => describeKind(kind)).for("label", true);
-                return <span>{label}</span>;
-            }, {
+        {files.mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
                 type: "object",
                 properties: {
                     element: {
@@ -91,7 +92,7 @@ export default pattern((__cf_pattern_input) => {
                     }
                 }
             } as const satisfies __cfHelpers.JSONSchema), {})}
-      </div>)
+      </div>),
     };
 }, {
     type: "object",

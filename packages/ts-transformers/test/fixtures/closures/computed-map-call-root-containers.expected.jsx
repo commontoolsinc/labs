@@ -11,27 +11,10 @@ import { computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(({ element: row, params: {} }) => ({
-    value: __cfHelpers.derive({
-        type: "object",
-        properties: {
-            row: {
-                type: "object",
-                properties: {
-                    done: {
-                        type: "boolean"
-                    }
-                },
-                required: ["done"]
-            }
-        },
-        required: ["row"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, { row: {
-            done: row.done
-        } }, ({ row }) => identity(row.done ? "Done" : "Pending")),
-    list: [__cfHelpers.derive({
+const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
+    const row = __cf_pattern_input.key("element");
+    return ({
+        value: __cfHelpers.derive({
             type: "object",
             properties: {
                 row: {
@@ -48,28 +31,51 @@ const __cfModuleCallback_1 = __cfHardenFn(({ element: row, params: {} }) => ({
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, { row: {
-                done: row.done
-            } }, ({ row }) => identity(row.done ? "Done" : "Pending"))],
-}));
-const __cfModuleCallback_2 = __cfHardenFn(({ element: row, params: {} }) => __cfHelpers.derive({
-    type: "object",
-    properties: {
-        row: {
-            type: "object",
-            properties: {
-                done: {
-                    type: "boolean"
-                }
-            },
-            required: ["done"]
-        }
-    },
-    required: ["row"]
-} as const satisfies __cfHelpers.JSONSchema, {
-    type: "string"
-} as const satisfies __cfHelpers.JSONSchema, { row: {
-        done: row.done
-    } }, ({ row }) => identity(row.done ? "Done" : "Pending")));
+                done: row.key("done")
+            } }, ({ row }) => identity(row.done ? "Done" : "Pending")),
+        list: [__cfHelpers.derive({
+                type: "object",
+                properties: {
+                    row: {
+                        type: "object",
+                        properties: {
+                            done: {
+                                type: "boolean"
+                            }
+                        },
+                        required: ["done"]
+                    }
+                },
+                required: ["row"]
+            } as const satisfies __cfHelpers.JSONSchema, {
+                type: "string"
+            } as const satisfies __cfHelpers.JSONSchema, { row: {
+                    done: row.key("done")
+                } }, ({ row }) => identity(row.done ? "Done" : "Pending"))],
+    });
+});
+const __cfModuleCallback_2 = __cfHardenFn(__cf_pattern_input => {
+    const row = __cf_pattern_input.key("element");
+    return __cfHelpers.derive({
+        type: "object",
+        properties: {
+            row: {
+                type: "object",
+                properties: {
+                    done: {
+                        type: "boolean"
+                    }
+                },
+                required: ["done"]
+            }
+        },
+        required: ["row"]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, { row: {
+            done: row.key("done")
+        } }, ({ row }) => identity(row.done ? "Done" : "Pending"));
+});
 const identity = __cfHardenFn((value: string) => value);
 interface Item {
     done: boolean;
@@ -139,6 +145,12 @@ export default pattern((state) => {
         type: "object",
         properties: {
             element: {
+                $ref: "#/$defs/Item"
+            }
+        },
+        required: ["element"],
+        $defs: {
+            Item: {
                 type: "object",
                 properties: {
                     done: {
@@ -147,8 +159,7 @@ export default pattern((state) => {
                 },
                 required: ["done"]
             }
-        },
-        required: ["element"]
+        }
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "object",
         properties: {
@@ -168,6 +179,12 @@ export default pattern((state) => {
         type: "object",
         properties: {
             element: {
+                $ref: "#/$defs/Item"
+            }
+        },
+        required: ["element"],
+        $defs: {
+            Item: {
                 type: "object",
                 properties: {
                     done: {
@@ -176,8 +193,7 @@ export default pattern((state) => {
                 },
                 required: ["done"]
             }
-        },
-        required: ["element"]
+        }
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
     } as const satisfies __cfHelpers.JSONSchema), {}).for("labels", true);

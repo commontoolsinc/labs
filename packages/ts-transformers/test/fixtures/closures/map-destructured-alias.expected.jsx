@@ -11,31 +11,35 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(({ element: { price: cost }, params: { state } }) => (<span>{__cfHelpers.derive({
-    type: "object",
-    properties: {
-        cost: {
-            type: "number"
-        },
-        state: {
-            type: "object",
-            properties: {
-                discount: {
-                    type: "number"
-                }
+const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
+    const cost = __cf_pattern_input.key("element", "price");
+    const state = __cf_pattern_input.key("params", "state");
+    return (<span>{__cfHelpers.derive({
+        type: "object",
+        properties: {
+            cost: {
+                type: "number"
             },
-            required: ["discount"]
+            state: {
+                type: "object",
+                properties: {
+                    discount: {
+                        type: "number"
+                    }
+                },
+                required: ["discount"]
+            }
+        },
+        required: ["cost", "state"]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "number"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        cost: cost,
+        state: {
+            discount: state.key("discount")
         }
-    },
-    required: ["cost", "state"]
-} as const satisfies __cfHelpers.JSONSchema, {
-    type: "number"
-} as const satisfies __cfHelpers.JSONSchema, {
-    cost: cost,
-    state: {
-        discount: state.discount
-    }
-}, ({ cost, state }) => cost * state.discount)}</span>));
+    }, ({ cost, state }) => cost * state.discount)}</span>);
+});
 interface State {
     items: Array<{
         price: number;

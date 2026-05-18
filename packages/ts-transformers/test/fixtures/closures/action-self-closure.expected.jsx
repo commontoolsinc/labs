@@ -15,6 +15,13 @@ import { action, type Default, NAME, pattern, SELF, UI, type VNode, Writable } f
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn((_, { self }) => {
+    console.log("self.title:", self.title);
+});
+const __cfModuleCallback_2 = __cfHardenFn((_, { self, count }) => {
+    console.log("self:", self);
+    count.set(count.get() + 1);
+});
 interface TestOutput {
     [NAME]: string;
     [UI]: VNode;
@@ -51,9 +58,7 @@ export default pattern((__cf_pattern_input) => {
             }
         },
         required: ["self"]
-    } as const satisfies __cfHelpers.JSONSchema, (_, { self }) => {
-        console.log("self.title:", self.title);
-    })({
+    } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({
         self: {
             title: self.key("title")
         }
@@ -67,38 +72,17 @@ export default pattern((__cf_pattern_input) => {
         type: "object",
         properties: {
             self: {
-                $ref: "#/$defs/TestOutput"
-            },
-            count: {
-                type: "number",
-                asCell: ["cell"]
-            }
-        },
-        required: ["self", "count"],
-        $defs: {
-            TestOutput: {
                 type: "object",
                 properties: {
                     title: {
                         type: "string"
-                    },
-                    count: {
-                        type: "number"
-                    },
-                    $NAME: {
-                        type: "string"
-                    },
-                    $UI: {
-                        $ref: "https://commonfabric.org/schemas/vnode.json"
                     }
                 },
-                required: ["title", "count", "$NAME", "$UI"]
+                required: ["title"]
             }
-        }
-    } as const satisfies __cfHelpers.JSONSchema, (_, { self, count }) => {
-        console.log("self:", self);
-        count.set(count.get() + 1);
-    })({
+        },
+        required: ["self"]
+    } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_2)({
         self: self,
         count: count
     }).for({ stream: "incrementWithSelf" }, true);

@@ -11,6 +11,31 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    const index = __cf_pattern_input.key("index");
+    return (<div>
+            Item #{index}: {__cfHelpers.derive({
+        type: "object",
+        properties: {
+            item: {
+                type: "object",
+                properties: {
+                    name: {
+                        type: "string"
+                    }
+                },
+                required: ["name"]
+            }
+        },
+        required: ["item"]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, { item: {
+            name: item.key("name")
+        } }, ({ item }) => item.name.toUpperCase())}
+          </div>);
+});
 interface Item {
     id: number;
     name: string;
@@ -28,31 +53,7 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Performs computation on element property - should wrap in computed() */}
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const item = __cf_pattern_input.key("element");
-                const index = __cf_pattern_input.key("index");
-                return (<div>
-            Item #{index}: {__cfHelpers.derive({
-                    type: "object",
-                    properties: {
-                        item: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["name"]
-                        }
-                    },
-                    required: ["item"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, { item: {
-                        name: item.key("name")
-                    } }, ({ item }) => item.name.toUpperCase())}
-          </div>);
-            }, {
+        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
                 type: "object",
                 properties: {
                     element: {

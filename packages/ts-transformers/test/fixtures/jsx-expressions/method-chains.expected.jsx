@@ -11,42 +11,97 @@ import { computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(({ element: x, params: { state } }) => (<li>Value: {__cfHelpers.derive({
-    type: "object",
-    properties: {
-        x: {
-            type: "number"
-        },
-        state: {
-            type: "object",
-            properties: {
-                factor: {
-                    type: "number"
-                }
+const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
+    const x = __cf_pattern_input.key("element");
+    const state = __cf_pattern_input.key("params", "state");
+    return (<li>Value: {__cfHelpers.derive({
+        type: "object",
+        properties: {
+            x: {
+                type: "number"
             },
-            required: ["factor"]
+            state: {
+                type: "object",
+                properties: {
+                    factor: {
+                        type: "number"
+                    }
+                },
+                required: ["factor"]
+            }
+        },
+        required: ["x", "state"]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "number"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        x: x,
+        state: {
+            factor: state.key("factor")
         }
-    },
-    required: ["x", "state"]
-} as const satisfies __cfHelpers.JSONSchema, {
-    type: "number"
-} as const satisfies __cfHelpers.JSONSchema, {
-    x: x,
-    state: {
-        factor: state.factor
-    }
-}, ({ x, state }) => x * state.factor)}</li>));
-const __cfModuleCallback_2 = __cfHardenFn(({ element: name, params: {} }) => (<li>{__cfHelpers.derive({
-    type: "object",
-    properties: {
-        name: {
-            type: "string"
-        }
-    },
-    required: ["name"]
-} as const satisfies __cfHelpers.JSONSchema, {
-    type: "string"
-} as const satisfies __cfHelpers.JSONSchema, { name: name }, ({ name }) => name.trim().toLowerCase().replace(" ", "-"))}</li>));
+    }, ({ x, state }) => x * state.factor)}</li>);
+});
+const __cfModuleCallback_2 = __cfHardenFn(__cf_pattern_input => {
+    const name = __cf_pattern_input.key("element");
+    return (<li>{__cfHelpers.derive({
+        type: "object",
+        properties: {
+            name: {
+                type: "string"
+            }
+        },
+        required: ["name"]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, { name: name }, ({ name }) => name.trim().toLowerCase().replace(" ", "-"))}</li>);
+});
+const __cfModuleCallback_3 = __cfHardenFn(__cf_pattern_input => {
+    const u = __cf_pattern_input.key("element");
+    return (<li>{__cfHelpers.ifElse({
+        type: "boolean"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, u.key("active"), __cfHelpers.derive({
+        type: "object",
+        properties: {
+            u: {
+                type: "object",
+                properties: {
+                    name: {
+                        type: "string"
+                    }
+                },
+                required: ["name"]
+            }
+        },
+        required: ["u"]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, { u: {
+            name: u.key("name")
+        } }, ({ u }) => u.name.toUpperCase()), __cfHelpers.derive({
+        type: "object",
+        properties: {
+            u: {
+                type: "object",
+                properties: {
+                    name: {
+                        type: "string"
+                    }
+                },
+                required: ["name"]
+            }
+        },
+        required: ["u"]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, { u: {
+            name: u.key("name")
+        } }, ({ u }) => u.name.toLowerCase()))}</li>);
+});
 interface State {
     text: string;
     searchTerm: string;
@@ -627,54 +682,7 @@ export default pattern((state) => {
 
         {/* Map with conditional logic */}
         <ul>
-          {state.key("users").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const u = __cf_pattern_input.key("element");
-                return (<li>{__cfHelpers.ifElse({
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, u.key("active"), __cfHelpers.derive({
-                    type: "object",
-                    properties: {
-                        u: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["name"]
-                        }
-                    },
-                    required: ["u"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, { u: {
-                        name: u.key("name")
-                    } }, ({ u }) => u.name.toUpperCase()), __cfHelpers.derive({
-                    type: "object",
-                    properties: {
-                        u: {
-                            type: "object",
-                            properties: {
-                                name: {
-                                    type: "string"
-                                }
-                            },
-                            required: ["name"]
-                        }
-                    },
-                    required: ["u"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, { u: {
-                        name: u.key("name")
-                    } }, ({ u }) => u.name.toLowerCase()))}</li>);
-            }, {
+          {state.key("users").mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_3, {
                 type: "object",
                 properties: {
                     element: {

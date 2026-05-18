@@ -11,31 +11,35 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(({ element: item, params: { settings } }) => (<span>{__cfHelpers.derive({
-    type: "object",
-    properties: {
-        item: {
-            type: "number"
-        },
-        settings: {
-            type: "object",
-            properties: {
-                multiplier: {
-                    type: "number"
-                }
+const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    const settings = __cf_pattern_input.key("params", "settings");
+    return (<span>{__cfHelpers.derive({
+        type: "object",
+        properties: {
+            item: {
+                type: "number"
             },
-            required: ["multiplier"]
+            settings: {
+                type: "object",
+                properties: {
+                    multiplier: {
+                        type: "number"
+                    }
+                },
+                required: ["multiplier"]
+            }
+        },
+        required: ["item", "settings"]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "number"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        item: item,
+        settings: {
+            multiplier: settings.key("multiplier")
         }
-    },
-    required: ["item", "settings"]
-} as const satisfies __cfHelpers.JSONSchema, {
-    type: "number"
-} as const satisfies __cfHelpers.JSONSchema, {
-    item: item,
-    settings: {
-        multiplier: settings.multiplier
-    }
-}, ({ item, settings }) => item * settings.multiplier)}</span>));
+    }, ({ item, settings }) => item * settings.multiplier)}</span>);
+});
 interface State {
     items: number[];
     settings: {

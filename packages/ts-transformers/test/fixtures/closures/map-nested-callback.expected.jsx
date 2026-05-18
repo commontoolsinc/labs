@@ -11,6 +11,81 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    const state = __cf_pattern_input.key("params", "state");
+    return (<div>
+            {state.key("prefix")}: {item.key("name")}
+            <ul>
+              {item.key("tags").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+            const tag = __cf_pattern_input.key("element");
+            const item = __cf_pattern_input.key("params", "item");
+            return (<li>{item.key("name")} - {tag.key("name")}</li>);
+        }, {
+            type: "object",
+            properties: {
+                element: {
+                    $ref: "#/$defs/Tag"
+                },
+                params: {
+                    type: "object",
+                    properties: {
+                        item: {
+                            type: "object",
+                            properties: {
+                                name: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["name"]
+                        }
+                    },
+                    required: ["item"]
+                }
+            },
+            required: ["element", "params"],
+            $defs: {
+                Tag: {
+                    type: "object",
+                    properties: {
+                        id: {
+                            type: "number"
+                        },
+                        name: {
+                            type: "string"
+                        }
+                    },
+                    required: ["id", "name"]
+                }
+            }
+        } as const satisfies __cfHelpers.JSONSchema, {
+            anyOf: [{
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
+                    type: "object",
+                    properties: {}
+                }],
+            $defs: {
+                UIRenderable: {
+                    type: "object",
+                    properties: {
+                        $UI: {
+                            $ref: "https://commonfabric.org/schemas/vnode.json"
+                        }
+                    },
+                    required: ["$UI"]
+                }
+            }
+        } as const satisfies __cfHelpers.JSONSchema), {
+            item: {
+                name: item.key("name")
+            }
+        })}
+            </ul>
+          </div>);
+});
 interface Tag {
     id: number;
     name: string;
@@ -33,81 +108,7 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Outer map captures state.prefix, inner map closes over item from outer callback */}
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const item = __cf_pattern_input.key("element");
-                const state = __cf_pattern_input.key("params", "state");
-                return (<div>
-            {state.key("prefix")}: {item.key("name")}
-            <ul>
-              {item.key("tags").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                        const tag = __cf_pattern_input.key("element");
-                        const item = __cf_pattern_input.key("params", "item");
-                        return (<li>{item.key("name")} - {tag.key("name")}</li>);
-                    }, {
-                        type: "object",
-                        properties: {
-                            element: {
-                                $ref: "#/$defs/Tag"
-                            },
-                            params: {
-                                type: "object",
-                                properties: {
-                                    item: {
-                                        type: "object",
-                                        properties: {
-                                            name: {
-                                                type: "string"
-                                            }
-                                        },
-                                        required: ["name"]
-                                    }
-                                },
-                                required: ["item"]
-                            }
-                        },
-                        required: ["element", "params"],
-                        $defs: {
-                            Tag: {
-                                type: "object",
-                                properties: {
-                                    id: {
-                                        type: "number"
-                                    },
-                                    name: {
-                                        type: "string"
-                                    }
-                                },
-                                required: ["id", "name"]
-                            }
-                        }
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        anyOf: [{
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }, {
-                                $ref: "#/$defs/UIRenderable"
-                            }, {
-                                type: "object",
-                                properties: {}
-                            }],
-                        $defs: {
-                            UIRenderable: {
-                                type: "object",
-                                properties: {
-                                    $UI: {
-                                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                                    }
-                                },
-                                required: ["$UI"]
-                            }
-                        }
-                    } as const satisfies __cfHelpers.JSONSchema), {
-                        item: {
-                            name: item.key("name")
-                        }
-                    })}
-            </ul>
-          </div>);
-            }, {
+        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
                 type: "object",
                 properties: {
                     element: {

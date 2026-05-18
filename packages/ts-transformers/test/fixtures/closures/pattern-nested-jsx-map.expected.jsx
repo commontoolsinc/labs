@@ -22,6 +22,47 @@ import { Cell, computed, Default, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
+    const tag = __cf_pattern_input.key("element");
+    const i = __cf_pattern_input.key("index");
+    const item = __cf_pattern_input.key("params", "item");
+    return (<li>
+                    {__cfHelpers.ifElse({
+        type: "boolean"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        "enum": ["", "* "]
+    } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        type: "object",
+        properties: {
+            i: {
+                type: "number"
+            },
+            item: {
+                type: "object",
+                properties: {
+                    selectedIndex: {
+                        type: "number"
+                    }
+                },
+                required: ["selectedIndex"]
+            }
+        },
+        required: ["i", "item"]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "boolean"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        i: i,
+        item: {
+            selectedIndex: item.key("selectedIndex")
+        }
+    }, ({ i, item }) => i === item.selectedIndex), "* ", "")}
+                    {tag.key("name")}
+                  </li>);
+});
 interface Tag {
     name: string;
 }
@@ -85,47 +126,7 @@ export default pattern((__cf_pattern_input) => {
             return (<div>
               <strong>{item.key("label")}</strong>
               <ul>
-                {item.key("tags").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                    const tag = __cf_pattern_input.key("element");
-                    const i = __cf_pattern_input.key("index");
-                    const item = __cf_pattern_input.key("params", "item");
-                    return (<li>
-                    {__cfHelpers.ifElse({
-                        type: "boolean"
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        type: "string"
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        type: "string"
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        "enum": ["", "* "]
-                    } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
-                        type: "object",
-                        properties: {
-                            i: {
-                                type: "number"
-                            },
-                            item: {
-                                type: "object",
-                                properties: {
-                                    selectedIndex: {
-                                        type: "number"
-                                    }
-                                },
-                                required: ["selectedIndex"]
-                            }
-                        },
-                        required: ["i", "item"]
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        type: "boolean"
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        i: i,
-                        item: {
-                            selectedIndex: item.key("selectedIndex")
-                        }
-                    }, ({ i, item }) => i === item.selectedIndex), "* ", "")}
-                    {tag.key("name")}
-                  </li>);
-                }, {
+                {item.key("tags").mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
                     type: "object",
                     properties: {
                         element: {

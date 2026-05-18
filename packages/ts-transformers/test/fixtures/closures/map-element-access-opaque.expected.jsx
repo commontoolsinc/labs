@@ -11,6 +11,41 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
+    const tag = __cf_pattern_input.key("element");
+    const state = __cf_pattern_input.key("params", "state");
+    return (<span>
+            {tag}: {__cfHelpers.derive({
+        type: "object",
+        properties: {
+            state: {
+                type: "object",
+                properties: {
+                    tagCounts: {
+                        type: "object",
+                        properties: {},
+                        additionalProperties: {
+                            type: "number"
+                        }
+                    }
+                },
+                required: ["tagCounts"]
+            },
+            tag: {
+                type: "string"
+            }
+        },
+        required: ["state", "tag"]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: ["number", "undefined"]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        state: {
+            tagCounts: state.key("tagCounts")
+        },
+        tag: tag
+    }, ({ state, tag }) => state.tagCounts[tag])}
+          </span>);
+});
 interface State {
     sortedTags: string[];
     tagCounts: Record<string, number>;
@@ -23,41 +58,7 @@ interface State {
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        {state.key("sortedTags").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const tag = __cf_pattern_input.key("element");
-                const state = __cf_pattern_input.key("params", "state");
-                return (<span>
-            {tag}: {__cfHelpers.derive({
-                    type: "object",
-                    properties: {
-                        state: {
-                            type: "object",
-                            properties: {
-                                tagCounts: {
-                                    type: "object",
-                                    properties: {},
-                                    additionalProperties: {
-                                        type: "number"
-                                    }
-                                }
-                            },
-                            required: ["tagCounts"]
-                        },
-                        tag: {
-                            type: "string"
-                        }
-                    },
-                    required: ["state", "tag"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: ["number", "undefined"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    state: {
-                        tagCounts: state.key("tagCounts")
-                    },
-                    tag: tag
-                }, ({ state, tag }) => state.tagCounts[tag])}
-          </span>);
-            }, {
+        {state.key("sortedTags").mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
                 type: "object",
                 properties: {
                     element: {

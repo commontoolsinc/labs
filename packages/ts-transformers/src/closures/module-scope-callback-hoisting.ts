@@ -189,6 +189,29 @@ function analyzeCallbackForHoisting(
   let usesModuleScopedReferences = false;
   const capturedEnclosingNames = new Set<string>();
 
+  // Pre-compute names declared locally inside the callback (its
+  // parameter binding targets plus variable declarations in its body,
+  // not descending into nested function-likes). When a referenced
+  // identifier's name is in this set, classify it as `local` without
+  // going through `getReferenceScope`.
+  //
+  // This sidesteps the documented synthetic-node hazard in
+  // `isDeclaredWithinFunction` (see ast/scope-analysis.ts:70-86):
+  // upstream transformers can synthesize callbacks whose body declares
+  // locals via synthesized nodes (pos = -1). For those, the
+  // symbol-resolution path falls back to the original-AST declaration
+  // and concludes the local is captured from enclosing scope, poisoning
+  // the hoist decision. Name-based recognition is safe here because the
+  // walker already stops at nested function boundaries — we only need
+  // to cover names declared in this exact scope.
+  const localNames = new Set<string>();
+  for (const parameter of callback.parameters) {
+    collectBindingNames(parameter.name, localNames);
+  }
+  if (callback.body) {
+    collectLocalDeclarationNames(callback.body, callback, localNames);
+  }
+
   const visit = (node: ts.Node): void => {
     if (
       node !== callback &&
@@ -198,6 +221,15 @@ function analyzeCallbackForHoisting(
     }
 
     if (ts.isIdentifier(node)) {
+      if (
+        !shouldIgnoreReferenceSite(node) &&
+        localNames.has(node.text)
+      ) {
+        // Locally-declared in this callback — skip enclosing/module
+        // classification entirely.
+        ts.forEachChild(node, visit);
+        return;
+      }
       const scope = getReferenceScope(node, callback, checker);
       if (scope === "module") {
         usesModuleScopedReferences = true;
@@ -223,6 +255,37 @@ function analyzeCallbackForHoisting(
     canHoist: usesModuleScopedReferences && capturedEnclosingNames.size === 0,
     capturedEnclosingNames,
   };
+}
+
+function collectBindingNames(
+  name: ts.BindingName,
+  bucket: Set<string>,
+): void {
+  if (ts.isIdentifier(name)) {
+    bucket.add(name.text);
+    return;
+  }
+  for (const element of name.elements) {
+    if (ts.isOmittedExpression(element)) continue;
+    collectBindingNames(element.name, bucket);
+  }
+}
+
+function collectLocalDeclarationNames(
+  body: ts.Node,
+  callback: ts.FunctionLikeDeclaration,
+  bucket: Set<string>,
+): void {
+  const visit = (node: ts.Node): void => {
+    if (node !== body && node !== callback && isFunctionLikeDeclaration(node)) {
+      return;
+    }
+    if (ts.isVariableDeclaration(node)) {
+      collectBindingNames(node.name, bucket);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(body);
 }
 
 type ReferenceScope = "local" | "module" | "enclosing" | "other";

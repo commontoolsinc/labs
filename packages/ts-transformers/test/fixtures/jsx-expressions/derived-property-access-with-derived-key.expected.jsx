@@ -11,6 +11,159 @@ import { Cell, derive, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
+    const aisleName = __cf_pattern_input.key("element");
+    const groupedByAisle = __cf_pattern_input.key("params", "groupedByAisle");
+    return (<div>
+              <h3>{aisleName}</h3>
+              {__cfHelpers.derive({
+            type: "object",
+            properties: {
+                groupedByAisle: {
+                    type: "object",
+                    properties: {},
+                    additionalProperties: {
+                        type: "array",
+                        items: {
+                            $ref: "#/$defs/Assignment"
+                        }
+                    }
+                },
+                aisleName: {
+                    type: "string"
+                }
+            },
+            required: ["groupedByAisle", "aisleName"],
+            $defs: {
+                Assignment: {
+                    type: "object",
+                    properties: {
+                        aisle: {
+                            type: "string"
+                        },
+                        item: {
+                            $ref: "#/$defs/Item"
+                        }
+                    },
+                    required: ["aisle", "item"]
+                },
+                Item: {
+                    type: "object",
+                    properties: {
+                        name: {
+                            type: "string"
+                        },
+                        done: {
+                            type: "boolean",
+                            asCell: ["cell"]
+                        }
+                    },
+                    required: ["name", "done"]
+                }
+            }
+        } as const satisfies __cfHelpers.JSONSchema, {
+            anyOf: [{
+                    type: "undefined"
+                }, {
+                    type: "array",
+                    items: {
+                        $ref: "#/$defs/Assignment"
+                    }
+                }],
+            $defs: {
+                Assignment: {
+                    type: "object",
+                    properties: {
+                        aisle: {
+                            type: "string"
+                        },
+                        item: {
+                            $ref: "#/$defs/Item"
+                        }
+                    },
+                    required: ["aisle", "item"]
+                },
+                Item: {
+                    type: "object",
+                    properties: {
+                        name: {
+                            type: "string"
+                        },
+                        done: {
+                            type: "boolean",
+                            asCell: ["cell"]
+                        }
+                    },
+                    required: ["name", "done"]
+                }
+            }
+        } as const satisfies __cfHelpers.JSONSchema, {
+            groupedByAisle: groupedByAisle,
+            aisleName: aisleName
+        }, ({ groupedByAisle, aisleName }) => groupedByAisle[aisleName])!.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+            const assignment = __cf_pattern_input.key("element");
+            return (<div>
+                  <span>{assignment.key("item", "name")}</span>
+                  <cf-checkbox $checked={assignment.key("item", "done")}/>
+                </div>);
+        }, {
+            type: "object",
+            properties: {
+                element: {
+                    $ref: "#/$defs/Assignment"
+                }
+            },
+            required: ["element"],
+            $defs: {
+                Assignment: {
+                    type: "object",
+                    properties: {
+                        aisle: {
+                            type: "string"
+                        },
+                        item: {
+                            $ref: "#/$defs/Item"
+                        }
+                    },
+                    required: ["aisle", "item"]
+                },
+                Item: {
+                    type: "object",
+                    properties: {
+                        name: {
+                            type: "string"
+                        },
+                        done: {
+                            type: "boolean",
+                            asCell: ["cell"]
+                        }
+                    },
+                    required: ["name", "done"]
+                }
+            }
+        } as const satisfies __cfHelpers.JSONSchema, {
+            anyOf: [{
+                    $ref: "https://commonfabric.org/schemas/vnode.json"
+                }, {
+                    $ref: "#/$defs/UIRenderable"
+                }, {
+                    type: "object",
+                    properties: {}
+                }],
+            $defs: {
+                UIRenderable: {
+                    type: "object",
+                    properties: {
+                        $UI: {
+                            $ref: "https://commonfabric.org/schemas/vnode.json"
+                        }
+                    },
+                    required: ["$UI"]
+                }
+            }
+        } as const satisfies __cfHelpers.JSONSchema), {})}
+            </div>);
+});
 interface Item {
     name: string;
     done: Cell<boolean>;
@@ -226,159 +379,7 @@ export default pattern((__cf_pattern_input) => {
     // - Map over the result
     return {
         [UI]: (<div>
-          {aisleNames.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const aisleName = __cf_pattern_input.key("element");
-                const groupedByAisle = __cf_pattern_input.key("params", "groupedByAisle");
-                return (<div>
-              <h3>{aisleName}</h3>
-              {__cfHelpers.derive({
-                        type: "object",
-                        properties: {
-                            groupedByAisle: {
-                                type: "object",
-                                properties: {},
-                                additionalProperties: {
-                                    type: "array",
-                                    items: {
-                                        $ref: "#/$defs/Assignment"
-                                    }
-                                }
-                            },
-                            aisleName: {
-                                type: "string"
-                            }
-                        },
-                        required: ["groupedByAisle", "aisleName"],
-                        $defs: {
-                            Assignment: {
-                                type: "object",
-                                properties: {
-                                    aisle: {
-                                        type: "string"
-                                    },
-                                    item: {
-                                        $ref: "#/$defs/Item"
-                                    }
-                                },
-                                required: ["aisle", "item"]
-                            },
-                            Item: {
-                                type: "object",
-                                properties: {
-                                    name: {
-                                        type: "string"
-                                    },
-                                    done: {
-                                        type: "boolean",
-                                        asCell: ["cell"]
-                                    }
-                                },
-                                required: ["name", "done"]
-                            }
-                        }
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        anyOf: [{
-                                type: "undefined"
-                            }, {
-                                type: "array",
-                                items: {
-                                    $ref: "#/$defs/Assignment"
-                                }
-                            }],
-                        $defs: {
-                            Assignment: {
-                                type: "object",
-                                properties: {
-                                    aisle: {
-                                        type: "string"
-                                    },
-                                    item: {
-                                        $ref: "#/$defs/Item"
-                                    }
-                                },
-                                required: ["aisle", "item"]
-                            },
-                            Item: {
-                                type: "object",
-                                properties: {
-                                    name: {
-                                        type: "string"
-                                    },
-                                    done: {
-                                        type: "boolean",
-                                        asCell: ["cell"]
-                                    }
-                                },
-                                required: ["name", "done"]
-                            }
-                        }
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        groupedByAisle: groupedByAisle,
-                        aisleName: aisleName
-                    }, ({ groupedByAisle, aisleName }) => groupedByAisle[aisleName])!.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                        const assignment = __cf_pattern_input.key("element");
-                        return (<div>
-                  <span>{assignment.key("item", "name")}</span>
-                  <cf-checkbox $checked={assignment.key("item", "done")}/>
-                </div>);
-                    }, {
-                        type: "object",
-                        properties: {
-                            element: {
-                                $ref: "#/$defs/Assignment"
-                            }
-                        },
-                        required: ["element"],
-                        $defs: {
-                            Assignment: {
-                                type: "object",
-                                properties: {
-                                    aisle: {
-                                        type: "string"
-                                    },
-                                    item: {
-                                        $ref: "#/$defs/Item"
-                                    }
-                                },
-                                required: ["aisle", "item"]
-                            },
-                            Item: {
-                                type: "object",
-                                properties: {
-                                    name: {
-                                        type: "string"
-                                    },
-                                    done: {
-                                        type: "boolean",
-                                        asCell: ["cell"]
-                                    }
-                                },
-                                required: ["name", "done"]
-                            }
-                        }
-                    } as const satisfies __cfHelpers.JSONSchema, {
-                        anyOf: [{
-                                $ref: "https://commonfabric.org/schemas/vnode.json"
-                            }, {
-                                $ref: "#/$defs/UIRenderable"
-                            }, {
-                                type: "object",
-                                properties: {}
-                            }],
-                        $defs: {
-                            UIRenderable: {
-                                type: "object",
-                                properties: {
-                                    $UI: {
-                                        $ref: "https://commonfabric.org/schemas/vnode.json"
-                                    }
-                                },
-                                required: ["$UI"]
-                            }
-                        }
-                    } as const satisfies __cfHelpers.JSONSchema), {})}
-            </div>);
-            }, {
+          {aisleNames.mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
                 type: "object",
                 properties: {
                     element: {

@@ -11,61 +11,65 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(({ element: item, params: { state } }) => (<span>
+const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    const state = __cf_pattern_input.key("params", "state");
+    return (<span>
             {__cfHelpers.derive({
-    type: "object",
-    properties: {
-        item: {
-            type: "object",
-            properties: {
-                price: {
-                    type: "number"
-                }
+        type: "object",
+        properties: {
+            item: {
+                type: "object",
+                properties: {
+                    price: {
+                        type: "number"
+                    }
+                },
+                required: ["price"]
             },
-            required: ["price"]
+            state: {
+                type: "object",
+                properties: {
+                    checkout: {
+                        type: "object",
+                        properties: {
+                            discount: {
+                                type: "number"
+                            }
+                        },
+                        required: ["discount"]
+                    },
+                    upsell: {
+                        type: "object",
+                        properties: {
+                            discount: {
+                                type: "number"
+                            }
+                        },
+                        required: ["discount"]
+                    }
+                },
+                required: ["checkout", "upsell"]
+            }
+        },
+        required: ["item", "state"]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "number"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        item: {
+            price: item.key("price")
         },
         state: {
-            type: "object",
-            properties: {
-                checkout: {
-                    type: "object",
-                    properties: {
-                        discount: {
-                            type: "number"
-                        }
-                    },
-                    required: ["discount"]
-                },
-                upsell: {
-                    type: "object",
-                    properties: {
-                        discount: {
-                            type: "number"
-                        }
-                    },
-                    required: ["discount"]
-                }
+            checkout: {
+                discount: state.key("checkout", "discount")
             },
-            required: ["checkout", "upsell"]
+            upsell: {
+                discount: state.key("upsell", "discount")
+            }
         }
-    },
-    required: ["item", "state"]
-} as const satisfies __cfHelpers.JSONSchema, {
-    type: "number"
-} as const satisfies __cfHelpers.JSONSchema, {
-    item: {
-        price: item.price
-    },
-    state: {
-        checkout: {
-            discount: state.checkout.discount
-        },
-        upsell: {
-            discount: state.upsell.discount
-        }
-    }
-}, ({ item, state }) => item.price * state.checkout.discount * state.upsell.discount)}
-          </span>));
+    }, ({ item, state }) => item.price * state.checkout.discount * state.upsell.discount)}
+          </span>);
+});
 interface State {
     items: Array<{
         price: number;

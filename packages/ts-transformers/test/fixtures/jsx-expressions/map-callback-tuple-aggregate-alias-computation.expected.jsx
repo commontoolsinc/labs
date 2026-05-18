@@ -17,6 +17,33 @@ import { Default, pattern, UI, VNode, Writable, } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
+    const file = __cf_pattern_input.key("element");
+    const info = [file.key("type"), file.key("name")] as const;
+    const isFolder = __cfHelpers.derive({
+        type: "object",
+        properties: {
+            info: {
+                type: "array",
+                items: {
+                    type: "string"
+                }
+            }
+        },
+        required: ["info"]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "boolean"
+    } as const satisfies __cfHelpers.JSONSchema, { info: info }, ({ info }) => info[0] === "folder").for("isFolder", true);
+    return <span>{__cfHelpers.ifElse({
+        type: "boolean"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, isFolder, info[1], "locked")}</span>;
+});
 interface FileEntry {
     name: string;
     type: "file" | "folder";
@@ -32,33 +59,7 @@ export default pattern((__cf_pattern_input) => {
     const files = __cf_pattern_input.key("files");
     return {
         [UI]: (<div>
-        {files.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const file = __cf_pattern_input.key("element");
-                const info = [file.key("type"), file.key("name")] as const;
-                const isFolder = __cfHelpers.derive({
-                    type: "object",
-                    properties: {
-                        info: {
-                            type: "array",
-                            items: {
-                                type: "string"
-                            }
-                        }
-                    },
-                    required: ["info"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, { info: info }, ({ info }) => info[0] === "folder").for("isFolder", true);
-                return <span>{__cfHelpers.ifElse({
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, isFolder, info[1], "locked")}</span>;
-            }, {
+        {files.mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
                 type: "object",
                 properties: {
                     element: {
@@ -101,7 +102,7 @@ export default pattern((__cf_pattern_input) => {
                     }
                 }
             } as const satisfies __cfHelpers.JSONSchema), {})}
-      </div>)
+      </div>),
     };
 }, {
     type: "object",

@@ -25,6 +25,14 @@ import { action, Default, pattern, Stream, Writable } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn((_, { timer, fileId, content, savedContent, onSaveFile }) => {
+    const prev = timer.get();
+    if (prev !== null)
+        clearTimeout(prev);
+    timer.set(setTimeout(() => {
+        flushLater(fileId, content, savedContent, onSaveFile);
+    }, 10));
+});
 function flushLater(fileId: Writable<Default<string, "">>, content: Writable<Default<string, "">>, savedContent: Writable<Default<string, "">>, onSaveFile: Stream<{
     fileId: string;
     content: string;
@@ -99,14 +107,7 @@ export default pattern((__cf_pattern_input) => {
             }
         },
         required: ["timer", "fileId", "content", "savedContent", "onSaveFile"]
-    } as const satisfies __cfHelpers.JSONSchema, (_, { timer, fileId, content, savedContent, onSaveFile }) => {
-        const prev = timer.get();
-        if (prev !== null)
-            clearTimeout(prev);
-        timer.set(setTimeout(() => {
-            flushLater(fileId, content, savedContent, onSaveFile);
-        }, 10));
-    })({
+    } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({
         timer: timer,
         fileId: fileId,
         content: content,

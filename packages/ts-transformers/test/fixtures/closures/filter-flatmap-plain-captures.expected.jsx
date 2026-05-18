@@ -11,31 +11,56 @@ import { pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(({ element: item, params: { suffix } }) => __cfHelpers.derive({
-    type: "object",
-    properties: {
-        item: {
-            type: "object",
-            properties: {
-                label: {
-                    type: "string"
-                }
-            },
-            required: ["label"]
-        },
-        suffix: {
+const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    const prefix = __cf_pattern_input.params.prefix;
+    return __cfHelpers.ifElse({
+        type: "number"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "array",
+        items: {
             type: "string"
         }
-    },
-    required: ["item", "suffix"]
-} as const satisfies __cfHelpers.JSONSchema, {
-    type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, {
-    item: {
-        label: item.label
-    },
-    suffix: suffix
-}, ({ item, suffix }) => item.label.endsWith(suffix)));
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "array",
+        items: false
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "array",
+        items: {
+            type: "string"
+        }
+    } as const satisfies __cfHelpers.JSONSchema, item.key("tags", "length"), __cfHelpers.derive({
+        type: "object",
+        properties: {
+            prefix: {
+                type: "string"
+            },
+            item: {
+                type: "object",
+                properties: {
+                    tags: {
+                        type: "array",
+                        items: {
+                            type: "string"
+                        }
+                    }
+                },
+                required: ["tags"]
+            }
+        },
+        required: ["prefix", "item"]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "array",
+        items: {
+            type: "string"
+        }
+    } as const satisfies __cfHelpers.JSONSchema, {
+        item: {
+            tags: item.key("tags")
+        },
+        prefix: prefix
+    }, ({ item, prefix }) => [prefix + item.tags[0]]), []);
+});
 // FIXTURE: filter-flatmap-plain-captures
 // Verifies: plain lexical captures in reactive filter/flatMap chains become
 // params values, not reactive key(...) lookups
@@ -48,7 +73,35 @@ export default pattern((__cf_pattern_input) => {
     const suffix = "!";
     const prefix = "#";
     return {
-        labels: items.filterWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
+        labels: items.filterWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+            const item = __cf_pattern_input.key("element");
+            const suffix = __cf_pattern_input.params.suffix;
+            return __cfHelpers.derive({
+                type: "object",
+                properties: {
+                    item: {
+                        type: "object",
+                        properties: {
+                            label: {
+                                type: "string"
+                            }
+                        },
+                        required: ["label"]
+                    },
+                    suffix: {
+                        type: "string"
+                    }
+                },
+                required: ["item", "suffix"]
+            } as const satisfies __cfHelpers.JSONSchema, {
+                type: "boolean"
+            } as const satisfies __cfHelpers.JSONSchema, {
+                item: {
+                    label: item.key("label")
+                },
+                suffix: suffix
+            }, ({ item, suffix }) => item.label.endsWith(suffix));
+        }, {
             type: "object",
             properties: {
                 element: {
@@ -56,9 +109,15 @@ export default pattern((__cf_pattern_input) => {
                     properties: {
                         label: {
                             type: "string"
+                        },
+                        tags: {
+                            type: "array",
+                            items: {
+                                type: "string"
+                            }
                         }
                     },
-                    required: ["label"]
+                    required: ["label", "tags"]
                 },
                 params: {
                     type: "object",
@@ -75,56 +134,7 @@ export default pattern((__cf_pattern_input) => {
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema), {
             suffix: suffix
-        }).flatMapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-            const item = __cf_pattern_input.key("element");
-            const prefix = __cf_pattern_input.params.prefix;
-            return __cfHelpers.ifElse({
-                type: "number"
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "array",
-                items: {
-                    type: "string"
-                }
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "array",
-                items: false
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "array",
-                items: {
-                    type: "string"
-                }
-            } as const satisfies __cfHelpers.JSONSchema, item.key("tags", "length"), __cfHelpers.derive({
-                type: "object",
-                properties: {
-                    prefix: {
-                        type: "string"
-                    },
-                    item: {
-                        type: "object",
-                        properties: {
-                            tags: {
-                                type: "array",
-                                items: {
-                                    type: "string"
-                                }
-                            }
-                        },
-                        required: ["tags"]
-                    }
-                },
-                required: ["prefix", "item"]
-            } as const satisfies __cfHelpers.JSONSchema, {
-                type: "array",
-                items: {
-                    type: "string"
-                }
-            } as const satisfies __cfHelpers.JSONSchema, {
-                item: {
-                    tags: item.key("tags")
-                },
-                prefix: prefix
-            }, ({ item, prefix }) => [prefix + item.tags[0]]), []);
-        }, {
+        }).flatMapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
             type: "object",
             properties: {
                 element: {

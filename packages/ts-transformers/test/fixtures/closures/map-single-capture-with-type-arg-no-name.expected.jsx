@@ -11,39 +11,43 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(({ element: item, params: { state } }) => (<span>{__cfHelpers.derive({
-    type: "object",
-    properties: {
-        item: {
-            type: "object",
-            properties: {
-                price: {
-                    type: "number"
-                }
+const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
+    const item = __cf_pattern_input.key("element");
+    const state = __cf_pattern_input.key("params", "state");
+    return (<span>{__cfHelpers.derive({
+        type: "object",
+        properties: {
+            item: {
+                type: "object",
+                properties: {
+                    price: {
+                        type: "number"
+                    }
+                },
+                required: ["price"]
             },
-            required: ["price"]
+            state: {
+                type: "object",
+                properties: {
+                    discount: {
+                        type: "number"
+                    }
+                },
+                required: ["discount"]
+            }
+        },
+        required: ["item", "state"]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "number"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        item: {
+            price: item.key("price")
         },
         state: {
-            type: "object",
-            properties: {
-                discount: {
-                    type: "number"
-                }
-            },
-            required: ["discount"]
+            discount: state.key("discount")
         }
-    },
-    required: ["item", "state"]
-} as const satisfies __cfHelpers.JSONSchema, {
-    type: "number"
-} as const satisfies __cfHelpers.JSONSchema, {
-    item: {
-        price: item.price
-    },
-    state: {
-        discount: state.discount
-    }
-}, ({ item, state }) => item.price * state.discount)}</span>));
+    }, ({ item, state }) => item.price * state.discount)}</span>);
+});
 interface State {
     items: Array<{
         price: number;
