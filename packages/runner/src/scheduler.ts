@@ -146,6 +146,7 @@ import {
   processQueuedEventDuringExecute,
   queueSchedulerEvent,
   scheduleEventQueueWake as scheduleEventQueueWakeState,
+  type SchedulerEventExecutionState,
   type SchedulerEventQueueState,
 } from "./scheduler/events.ts";
 import {
@@ -303,6 +304,7 @@ export class Scheduler {
   private pendingQueueTaskTimer: ReturnType<typeof setTimeout> | null = null;
   private eventQueueWakeState!: EventQueueWakeState;
   private eventQueueState!: SchedulerEventQueueState;
+  private eventExecutionState!: SchedulerEventExecutionState;
   private delays = new SchedulerDelays({
     actionStats: this.actionStats,
     getActionId: (action) => this.getActionId(action),
@@ -471,6 +473,7 @@ export class Scheduler {
     this.settleLoopState = this.createSettleLoopState();
     this.executeContinuationState = this.createExecuteContinuationState();
     this.eventQueueState = this.createEventQueueState();
+    this.eventExecutionState = this.createEventExecutionState();
     this.dependencyCollectionState = this.createDependencyCollectionState();
     this.actionRunState = this.createActionRunState();
     this.graphSnapshotState = this.createGraphSnapshotState();
@@ -938,6 +941,53 @@ export class Scheduler {
           targetRetries,
           targetOnCommit,
           targetDoNotLoad,
+        ),
+    };
+  }
+
+  private createEventExecutionState(): SchedulerEventExecutionState {
+    const getPullMode = () => this.pullMode;
+    const getEventPreflightTelemetryEnabled = () =>
+      this.eventPreflightTelemetryEnabled;
+    return {
+      runtime: this.runtime,
+      eventQueue: this.eventQueue,
+      get pullMode() {
+        return getPullMode();
+      },
+      dirty: this.staleness.dirty,
+      pending: this.pending,
+      get eventPreflightTelemetryEnabled() {
+        return getEventPreflightTelemetryEnabled();
+      },
+      setRunningPromise: (promise) => {
+        this.runningPromise = promise;
+      },
+      getActionId: (target) => this.getActionId(target),
+      getActionTelemetryInfo: (target) =>
+        getSchedulerActionTelemetryInfo(target),
+      handleError: (error, target) => this.handleError(error, target),
+      queueExecution: () => this.queueExecution(),
+      setDirtyDependencyTraceContext: (trace) => {
+        this.dirtyDependencyTraceContext = trace;
+      },
+      collectDirtyDependenciesForLog: (deps, dirtyDeps, dirtyDepMemo) =>
+        this.collectDirtyDependenciesForLog(
+          deps,
+          dirtyDeps,
+          dirtyDepMemo,
+        ),
+      isDebouncedComputationWaiting: (target) =>
+        this.isDebouncedComputationWaiting(target),
+      getNextDebounceRunTime: (target) => this.getNextDebounceRunTime(target),
+      getNextEligibleRunTime: (target) =>
+        this.delays.getNextEligibleRunTime(target),
+      scheduleEventQueueWake: (notBefore) =>
+        scheduleEventQueueWakeState(this.eventQueueWakeState, notBefore),
+      snapshotDirtyDependencyTraceContext: (trace) =>
+        snapshotDirtyDependencyTraceContext(
+          this.dirtyDependencyCollectionState,
+          trace,
         ),
     };
   }
@@ -1898,44 +1948,10 @@ export class Scheduler {
 
     logger.timeStart("scheduler", "execute", "event");
     try {
-      await processQueuedEventDuringExecute({
-        runtime: this.runtime,
-        eventQueue: this.eventQueue,
-        pullMode: this.pullMode,
-        dirty: this.staleness.dirty,
-        pending: this.pending,
+      await processQueuedEventDuringExecute(
+        this.eventExecutionState,
         eventBlockingDeps,
-        eventPreflightTelemetryEnabled: this.eventPreflightTelemetryEnabled,
-        setRunningPromise: (promise) => {
-          this.runningPromise = promise;
-        },
-        getActionId: (target) => this.getActionId(target),
-        getActionTelemetryInfo: (target) =>
-          getSchedulerActionTelemetryInfo(target),
-        handleError: (error, target) => this.handleError(error, target),
-        queueExecution: () => this.queueExecution(),
-        setDirtyDependencyTraceContext: (trace) => {
-          this.dirtyDependencyTraceContext = trace;
-        },
-        collectDirtyDependenciesForLog: (deps, dirtyDeps, dirtyDepMemo) =>
-          this.collectDirtyDependenciesForLog(
-            deps,
-            dirtyDeps,
-            dirtyDepMemo,
-          ),
-        isDebouncedComputationWaiting: (dep) =>
-          this.isDebouncedComputationWaiting(dep),
-        getNextDebounceRunTime: (dep) => this.getNextDebounceRunTime(dep),
-        getNextEligibleRunTime: (dep) =>
-          this.delays.getNextEligibleRunTime(dep),
-        scheduleEventQueueWake: (notBefore) =>
-          scheduleEventQueueWakeState(this.eventQueueWakeState, notBefore),
-        snapshotDirtyDependencyTraceContext: (trace) =>
-          snapshotDirtyDependencyTraceContext(
-            this.dirtyDependencyCollectionState,
-            trace,
-          ),
-      });
+      );
       return eventBlockingDeps;
     } finally {
       logger.timeEnd("scheduler", "execute", "event");
