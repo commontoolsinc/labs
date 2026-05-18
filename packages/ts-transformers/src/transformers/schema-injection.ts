@@ -19,7 +19,6 @@ import {
   registerSyntheticCallType,
   typeToSchemaTypeNode,
   unwrapCellLikeType,
-  unwrapOpaqueLikeType,
   widenLiteralType,
 } from "../ast/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";

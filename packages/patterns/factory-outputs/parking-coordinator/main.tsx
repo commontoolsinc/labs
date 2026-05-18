@@ -463,19 +463,20 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
         defaultSpot: string;
         preferences: string;
       }
-    >((
-      {
-        originalName,
-        name = "",
-        email = "",
-        commuteMode = "drive",
-        priorityRank = 1,
-        defaultSpot = "",
-        preferences = "",
-      },
-    ) => {
-      const trimName = name.trim();
-      const trimEmail = email.trim();
+    >((event) => {
+      const {
+        originalName = editingPersonName.get() ?? "",
+        name: editPersonNameArg = editName.get() ?? "",
+        email: editPersonEmailArg = editEmail.get() ?? "",
+        commuteMode: editPersonCommuteModeArg = editCommuteMode.get() ??
+          "drive",
+        priorityRank: editPersonPriorityArg =
+          parseInt(editPriorityRank.get() ?? "") || 1,
+        defaultSpot: editPersonDefaultSpotArg = editDefaultSpot.get() ?? "",
+        preferences: editPersonPreferencesArg = editPreferences.get() ?? "",
+      } = event ?? {};
+      const trimName = editPersonNameArg.trim();
+      const trimEmail = editPersonEmailArg.trim();
       if (!trimName || !trimEmail) return;
 
       const current = people.get();
@@ -489,10 +490,10 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
             ...p,
             name: trimName,
             email: trimEmail,
-            commuteMode,
-            priorityRank: priorityRank || p.priorityRank,
-            defaultSpot: defaultSpot || "",
-            spotPreferences: parsePreferences(preferences),
+            commuteMode: editPersonCommuteModeArg,
+            priorityRank: editPersonPriorityArg || p.priorityRank,
+            defaultSpot: editPersonDefaultSpotArg || "",
+            spotPreferences: parsePreferences(editPersonPreferencesArg),
           }
           : p
       ));
@@ -595,15 +596,14 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
         notes: string;
         active: boolean;
       }
-    >((
-      {
-        originalNumber,
-        spotNumber: spotNumArg2 = "",
-        label = "",
-        notes = "",
-        active = true,
-      },
-    ) => {
+    >((event) => {
+      const {
+        originalNumber = editingSpotNumber.get() ?? "",
+        spotNumber: spotNumArg2 = editSpotNum.get() ?? "",
+        label: editSpotLabelArg = editSpotLabel.get() ?? "",
+        notes: editSpotNotesArg = editSpotNotes.get() ?? "",
+        active: editSpotActiveArg = editSpotActive.get() ?? true,
+      } = event ?? {};
       const trimNum = spotNumArg2.trim();
       if (!trimNum) return;
       const current = spots.get();
@@ -618,9 +618,9 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
             ? {
               ...s,
               spotNumber: trimNum,
-              label: label.trim(),
-              notes: notes.trim(),
-              active,
+              label: editSpotLabelArg.trim(),
+              notes: editSpotNotesArg.trim(),
+              active: editSpotActiveArg,
             }
             : s
         ),
