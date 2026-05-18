@@ -22,6 +22,8 @@ import {
  * JSON-compatible wire format value. This is the intermediate tree
  * representation used during serialization tree walking -- NOT the final
  * serialized form (which is `string`). Internal to the JSON implementation.
+ * Immediately after construction, all instances of this type are expected to be
+ * deep-frozen.
  */
 export type JsonWireValue =
   | null
