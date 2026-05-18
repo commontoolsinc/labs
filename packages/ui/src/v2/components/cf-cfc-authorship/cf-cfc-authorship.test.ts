@@ -122,6 +122,86 @@ describe("CFCFCAuthorship", () => {
     expect(element.authorshipState).toBe("verified");
   });
 
+  it("uses resolved root authorship when the direct label only has nested entries", async () => {
+    const directLabel = {
+      version: 1 as const,
+      entries: [{
+        path: ["argument", "element"],
+        label: {
+          integrity: [{
+            kind: "authored-by",
+            subject: "alice",
+          }],
+        },
+      }],
+    };
+    const resolvedLabel = {
+      version: 1 as const,
+      entries: [{
+        path: [],
+        label: {
+          integrity: [{
+            kind: "authored-by",
+            subject: "alice",
+          }],
+        },
+      }],
+    };
+    const element = new CFCFCAuthorship();
+    element.author = "alice";
+    element.value = {
+      getCfcLabel: () => Promise.resolve(directLabel),
+      resolveAsCell: () =>
+        Promise.resolve({
+          getCfcLabel: () => Promise.resolve(resolvedLabel),
+        }),
+    };
+
+    await element.refreshLabel();
+
+    expect(element.authorshipState).toBe("verified");
+  });
+
+  it("does not let resolved authorship override direct root authorship", async () => {
+    const directLabel = {
+      version: 1 as const,
+      entries: [{
+        path: [],
+        label: {
+          integrity: [{
+            kind: "authored-by",
+            subject: "bob",
+          }],
+        },
+      }],
+    };
+    const resolvedLabel = {
+      version: 1 as const,
+      entries: [{
+        path: [],
+        label: {
+          integrity: [{
+            kind: "authored-by",
+            subject: "alice",
+          }],
+        },
+      }],
+    };
+    const element = new CFCFCAuthorship();
+    element.author = "alice";
+    element.value = {
+      getCfcLabel: () => Promise.resolve(directLabel),
+      resolveAsCell: () =>
+        Promise.resolve({
+          getCfcLabel: () => Promise.resolve(resolvedLabel),
+        }),
+    };
+
+    await element.refreshLabel();
+
+    expect(element.authorshipState).toBe("unverified");
+  });
+
   it("verifies object-shaped bound author claims by id", async () => {
     const cfcLabel = {
       version: 1 as const,
@@ -300,6 +380,66 @@ describe("CFCFCAuthorship", () => {
       getCfcLabel: () => Promise.resolve(profileLabel),
     };
     element.authorName = "Alice Snapshot";
+
+    await element.refreshLabel();
+    await element.refreshAuthorClaim();
+
+    expect(element.authorshipState).toBe("verified");
+    expect(element.authorClaim).toEqual({
+      subject: "did:example:alice",
+      name: "Alice Snapshot",
+    });
+  });
+
+  it("derives a represented-principal claim from a resolved author label", async () => {
+    const messageLabel = {
+      version: 1 as const,
+      entries: [{
+        path: [],
+        label: {
+          integrity: [{
+            kind: "authored-by",
+            subject: "did:example:alice",
+          }],
+        },
+      }],
+    };
+    const directProfileLabel = {
+      version: 1 as const,
+      entries: [{
+        path: ["profile"],
+        label: {
+          integrity: [{
+            kind: "represents-principal",
+            subject: "did:example:alice",
+          }],
+        },
+      }],
+    };
+    const resolvedProfileLabel = {
+      version: 1 as const,
+      entries: [{
+        path: [],
+        label: {
+          integrity: [{
+            kind: "represents-principal",
+            subject: "did:example:alice",
+          }],
+        },
+      }],
+    };
+    const element = new CFCFCAuthorship();
+    element.value = {
+      getCfcLabel: () => Promise.resolve(messageLabel),
+    };
+    element.author = {
+      get: () => ({ name: "Alice Snapshot" }),
+      getCfcLabel: () => Promise.resolve(directProfileLabel),
+      resolveAsCell: () =>
+        Promise.resolve({
+          getCfcLabel: () => Promise.resolve(resolvedProfileLabel),
+        }),
+    };
 
     await element.refreshLabel();
     await element.refreshAuthorClaim();

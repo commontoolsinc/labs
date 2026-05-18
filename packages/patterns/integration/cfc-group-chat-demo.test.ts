@@ -19,12 +19,14 @@ describe("cfc group chat demo integration test", () => {
   shell.bindLifecycle();
 
   let identity: Identity;
+  let secondIdentity: Identity;
   let cc: PiecesController;
   let pieceId: string;
   let pieceSinkCancel: (() => void) | undefined;
 
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
+    secondIdentity = await Identity.generate({ implementation: "noble" });
     cc = await PiecesController.initialize({
       spaceName: SPACE_NAME,
       apiUrl: new URL(API_URL),
@@ -71,7 +73,9 @@ describe("cfc group chat demo integration test", () => {
       "#trusted-profile-name",
       "Alice",
     );
+    await waitForDisabled(page, "#trusted-profile-save", false);
     await clickCfButton(page, "#trusted-profile-save");
+    await waitForText(page, "#trusted-profile-status", "Alice");
     await waitForDeepText(
       page,
       "#trusted-participants-panel",
@@ -111,8 +115,14 @@ describe("cfc group chat demo integration test", () => {
       "#trusted-conversation-preview",
     );
 
-    await clickCfButton(page, "#select-slot-participant-2");
-    await waitForRuntimeIdle(page);
+    await shell.login(secondIdentity);
+    await shell.waitForState({
+      identity: secondIdentity,
+      view: {
+        spaceName: SPACE_NAME,
+        pieceId,
+      },
+    });
 
     await waitForText(
       page,
@@ -136,7 +146,9 @@ describe("cfc group chat demo integration test", () => {
       "#trusted-profile-name",
       "Bob",
     );
+    await waitForDisabled(page, "#trusted-profile-save", false);
     await clickCfButton(page, "#trusted-profile-save");
+    await waitForText(page, "#trusted-profile-status", "Bob");
     await waitForDeepText(
       page,
       "#trusted-participants-panel",

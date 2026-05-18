@@ -67,6 +67,46 @@ const hasReadableClaim = (
   (typeof (value as { get?: unknown }).get === "function" ||
     typeof (value as { sync?: unknown }).sync === "function");
 
+const labelHasRootIntegrityKind = (
+  view: CfcLabelView,
+  kind: string,
+): boolean =>
+  view.entries.some((entry) =>
+    entry.path.length === 0 &&
+    (entry.label.integrity ?? []).some((atom) => {
+      if (typeof atom === "string") {
+        return atom.startsWith(`${kind}:`);
+      }
+      if (
+        typeof atom !== "object" || atom === null || Array.isArray(atom)
+      ) {
+        return false;
+      }
+      return (atom as Record<string, unknown>).kind === kind;
+    })
+  );
+
+const mergeLabelViews = (
+  ...views: Array<CfcLabelView | undefined>
+): CfcLabelView | undefined => {
+  const entries: CfcLabelView["entries"] = [];
+  const seen = new Set<string>();
+  for (const view of views) {
+    if (view === undefined) {
+      continue;
+    }
+    for (const entry of view.entries) {
+      const key = JSON.stringify(entry);
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      entries.push(entry);
+    }
+  }
+  return entries.length === 0 ? undefined : { version: 1, entries };
+};
+
 const isConcreteAuthorClaim = (value: unknown): boolean => {
   if (
     typeof value === "string" || typeof value === "number" ||
@@ -127,20 +167,29 @@ const readClaimValue = async (
 
 const readLabelView = async (
   value: unknown,
+  requiredRootIntegrityKind?: string,
 ): Promise<CfcLabelView | undefined> => {
+  let direct: CfcLabelView | undefined;
   if (hasLabelQuery(value)) {
-    const direct = await value.getCfcLabel();
-    if (direct !== undefined) {
-      return direct;
-    }
+    direct = await value.getCfcLabel();
   }
+
+  let resolvedLabel: CfcLabelView | undefined;
   if (hasLabelResolution(value)) {
     const resolved = await value.resolveAsCell();
     if (hasLabelQuery(resolved)) {
-      return await resolved.getCfcLabel();
+      resolvedLabel = await resolved.getCfcLabel();
     }
   }
-  return undefined;
+
+  if (
+    direct !== undefined && requiredRootIntegrityKind !== undefined &&
+    labelHasRootIntegrityKind(direct, requiredRootIntegrityKind)
+  ) {
+    return direct;
+  }
+
+  return mergeLabelViews(direct, resolvedLabel);
 };
 
 const primitiveToString = (value: unknown): string | undefined => {
@@ -653,18 +702,10 @@ export class CFCFCAuthorship extends BaseElement {
 
   async refreshLabel(): Promise<void> {
     const requestId = ++this._labelRequestId;
-    if (!hasLabelQuery(this.value)) {
-      const previous = this.cfcLabel;
-      this.cfcLabel = undefined;
-      this.requestUpdate("cfcLabel", previous);
-      return;
-    }
-
-    let cfcLabel = await this.value.getCfcLabel();
-    if (!cfcLabel && hasLabelResolution(this.value)) {
-      const resolved = await this.value.resolveAsCell();
-      cfcLabel = await resolved.getCfcLabel();
-    }
+    const cfcLabel = await readLabelView(
+      this.value,
+      this.kind ?? DEFAULT_AUTHORSHIP_KIND,
+    );
     if (requestId === this._labelRequestId) {
       const previous = this.cfcLabel;
       this.cfcLabel = cfcLabel;
@@ -691,7 +732,7 @@ export class CFCFCAuthorship extends BaseElement {
       const valueClaim = canReadAuthor
         ? await readClaimValue(author)
         : undefined;
-      const profileLabel = await readLabelView(author);
+      const profileLabel = await readLabelView(author, "represents-principal");
       const profileSubject = representsPrincipalSubjectForLabel(profileLabel);
       authorClaim = principalAuthorClaim(
         profileSubject,
