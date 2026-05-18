@@ -3,6 +3,7 @@ import { determineTriggeredActions } from "../reactive-dependencies.ts";
 import type {
   ChangeGroup,
   IMemoryChange,
+  IStorageSubscription,
   IStorageTransaction,
   StorageNotification,
 } from "../storage/interface.ts";
@@ -180,19 +181,21 @@ export function shouldRecordTriggerTraceEntry(
   return entry.triggered.length > 0 || entry.matchedActionCount > 0;
 }
 
-export function processStorageNotification(state: {
+interface CausalEdge {
+  writer: string;
+  cell: string;
+  triggered: string;
+  timestamp: number;
+}
+
+export interface StorageNotificationState {
   readonly triggers: TriggerIndexState["triggers"];
   readonly nonRecursiveTriggers: TriggerIndexState["nonRecursiveTriggers"];
-  readonly pullMode: boolean;
-  readonly diagnosisEnabled: boolean;
-  readonly collectTriggerTrace: boolean;
+  readonly getPullMode: () => boolean;
+  readonly getDiagnosisEnabled: () => boolean;
+  readonly getCollectTriggerTrace: () => boolean;
   readonly changeGroupToActionId: Map<ChangeGroup, string>;
-  readonly causalEdges: {
-    writer: string;
-    cell: string;
-    triggered: string;
-    timestamp: number;
-  }[];
+  readonly recordCausalEdge: (edge: CausalEdge) => void;
   readonly actionChangeGroups: WeakMap<Action, ChangeGroup>;
   readonly effects: ReadonlySet<Action>;
   readonly pending: ReadonlySet<Action>;
@@ -207,7 +210,23 @@ export function processStorageNotification(state: {
   readonly scheduleAffectedEffects: (
     action: Action,
   ) => TriggerTraceScheduledEffect[];
-}, notification: StorageNotification): void {
+}
+
+export function createStorageSubscription(
+  state: StorageNotificationState,
+): IStorageSubscription {
+  return {
+    next: (notification) => {
+      processStorageNotification(state, notification);
+      return { done: false };
+    },
+  };
+}
+
+export function processStorageNotification(
+  state: StorageNotificationState,
+  notification: StorageNotification,
+): void {
   const space = notification.space;
 
   if (!("changes" in notification)) {
@@ -219,6 +238,9 @@ export function processStorageNotification(state: {
     : undefined;
   const hasSourceChangeGroup = notification.type === "commit" &&
     sourceChangeGroup !== undefined;
+  const pullMode = state.getPullMode();
+  const collectTriggerTrace = state.getCollectTriggerTrace();
+  const diagnosisEnabled = state.getDiagnosisEnabled();
 
   let changeIndex = 0;
   for (const change of notification.changes) {
@@ -255,30 +277,29 @@ export function processStorageNotification(state: {
         sourceChangeGroup !== undefined
       ? state.changeGroupToActionId.get(sourceChangeGroup)
       : undefined;
-    const triggerTraceEntry: TriggerTraceEntry | null =
-      state.collectTriggerTrace
-        ? createTriggerTraceEntry({
-          notificationType: notification.type,
-          changeIndex,
-          matchedActionCount: triggeredActions.length,
-          pullMode: state.pullMode,
-          writerActionId,
-          space,
-          change,
-        })
-        : null;
+    const triggerTraceEntry: TriggerTraceEntry | null = collectTriggerTrace
+      ? createTriggerTraceEntry({
+        notificationType: notification.type,
+        changeIndex,
+        matchedActionCount: triggeredActions.length,
+        pullMode,
+        writerActionId,
+        space,
+        change,
+      })
+      : null;
 
     for (const action of triggeredActions) {
       // Causal edge tracking for diagnosis.
       if (
-        state.diagnosisEnabled && hasSourceChangeGroup &&
+        diagnosisEnabled && hasSourceChangeGroup &&
         sourceChangeGroup !== undefined
       ) {
         const writerActionId = state.changeGroupToActionId.get(
           sourceChangeGroup,
         );
         if (writerActionId) {
-          state.causalEdges.push({
+          state.recordCausalEdge({
             writer: writerActionId,
             cell: spaceAndURI,
             triggered: state.getActionId(action),
@@ -297,7 +318,7 @@ export function processStorageNotification(state: {
         notification.source !== undefined &&
         state.inFlightSources.get(action)?.has(notification.source) === true;
       const plan = planTriggeredAction({
-        pullMode: state.pullMode,
+        pullMode,
         isEffect: actionIsEffect,
         dirtyBefore,
         isOwnCommitSource,
@@ -308,7 +329,7 @@ export function processStorageNotification(state: {
       let scheduledEffects: TriggerTraceScheduledEffect[] = [];
 
       if (plan.operation === "schedule") {
-        if (state.pullMode && actionIsEffect) {
+        if (pullMode && actionIsEffect) {
           state.conditionallyScheduledEffects.delete(action);
         }
         state.scheduleWithDebounce(action);
@@ -321,7 +342,7 @@ export function processStorageNotification(state: {
         createTriggerTraceActionRecord({
           actionId,
           actionType,
-          pullMode: state.pullMode,
+          pullMode,
           decision: plan.decision,
           pendingBefore,
           pendingAfter: state.pending.has(action),

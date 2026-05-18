@@ -97,7 +97,7 @@ export interface EventDependencyPreflightResult {
   preflightStats: DirtyDependencyTraceContext;
 }
 
-export function queueSchedulerEvent(state: {
+export interface SchedulerEventQueueState {
   readonly runtime: Runtime;
   readonly eventHandlers: readonly [NormalizedFullLink, EventHandler][];
   readonly eventQueue: QueuedEvent[];
@@ -110,7 +110,9 @@ export function queueSchedulerEvent(state: {
     onCommit: QueuedEvent["onCommit"] | undefined,
     doNotLoadPieceIfNotRunning: boolean,
   ) => void;
-}, args: {
+}
+
+export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
   readonly eventLink: NormalizedFullLink;
   readonly event: unknown;
   readonly retries: number;

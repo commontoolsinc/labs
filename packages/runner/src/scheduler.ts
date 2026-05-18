@@ -12,7 +12,6 @@ import type {
   ChangeGroup,
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
-  IStorageSubscription,
   IStorageTransaction,
 } from "./storage/interface.ts";
 import type { SortedAndCompactPaths } from "./reactive-dependencies.ts";
@@ -101,7 +100,10 @@ import {
   scheduleWithDebounce as scheduleWithDebounceState,
 } from "./scheduler/delay-control.ts";
 import { SchedulerDelays } from "./scheduler/delays.ts";
-import { processStorageNotification } from "./scheduler/notifications.ts";
+import {
+  createStorageSubscription,
+  type StorageNotificationState,
+} from "./scheduler/notifications.ts";
 import {
   clearSchedulerDirectDirty,
   clearSchedulerDirty,
@@ -130,6 +132,7 @@ import {
   processQueuedEventDuringExecute,
   queueSchedulerEvent,
   scheduleEventQueueWake as scheduleEventQueueWakeState,
+  type SchedulerEventQueueState,
 } from "./scheduler/events.ts";
 import { buildSchedulerGraphSnapshot } from "./scheduler/graph-snapshot.ts";
 import { collectTransitiveEffects } from "./scheduler/topology.ts";
@@ -285,6 +288,7 @@ export class Scheduler {
     isDisposed: () => this.disposed,
     queueExecution: () => this.queueExecution(),
   };
+  private eventQueueState!: SchedulerEventQueueState;
   private delays = new SchedulerDelays({
     actionStats: this.actionStats,
     getActionId: (action) => this.getActionId(action),
@@ -338,6 +342,35 @@ export class Scheduler {
   private eventPreflightTelemetryEnabled = false;
   private changedWritesHistory: IMemorySpaceAddress[] = [];
   private conditionallyScheduledEffects = new Map<Action, number>();
+  private storageNotificationState: StorageNotificationState = {
+    triggers: this.triggerIndexState.triggers,
+    nonRecursiveTriggers: this.triggerIndexState.nonRecursiveTriggers,
+    getPullMode: () => this.pullMode,
+    getDiagnosisEnabled: () => this.diagnosisEnabled,
+    getCollectTriggerTrace: () => this.collectTriggerTrace,
+    changeGroupToActionId: this.changeGroupToActionId,
+    recordCausalEdge: (edge) => {
+      this.causalEdges.push(edge);
+    },
+    actionChangeGroups: this.actionChangeGroups,
+    effects: this.effects,
+    pending: this.pending,
+    dirty: this.staleness.dirty,
+    inFlightSources: this.inFlightSourceState.inFlightSources,
+    conditionallyScheduledEffects: this.conditionallyScheduledEffects,
+    getActionId: (target) => this.getActionId(target),
+    recordCellUpdate: (change) =>
+      this.runtime.telemetry.submit({
+        type: "cell.update",
+        change,
+      }),
+    recordTriggerTrace: (entry) =>
+      recordTriggerTraceState({ triggerTrace: this.triggerTrace }, entry),
+    scheduleWithDebounce: (target) => this.scheduleWithDebounce(target),
+    markDirty: (target) =>
+      markSchedulerDirty(this.dirtySchedulingState, target),
+    scheduleAffectedEffects: (target) => this.scheduleAffectedEffects(target),
+  };
 
   // Parent-child action tracking for proper execution ordering
   // When a child action is created during parent execution, parent must run first
@@ -645,6 +678,28 @@ export class Scheduler {
     consoleHandler?: ConsoleHandler,
     errorHandlers?: ErrorHandler[],
   ) {
+    this.eventQueueState = {
+      runtime: this.runtime,
+      eventHandlers: this.eventHandlers,
+      eventQueue: this.eventQueue,
+      backgroundTasks: this.backgroundTasks,
+      queueExecution: () => this.queueExecution(),
+      queueEvent: (
+        targetEventLink,
+        targetEvent,
+        targetRetries,
+        targetOnCommit,
+        targetDoNotLoad,
+      ) =>
+        this.queueEvent(
+          targetEventLink,
+          targetEvent,
+          targetRetries,
+          targetOnCommit,
+          targetDoNotLoad,
+        ),
+    };
+
     this.dependencyCollectionState = {
       runtime: this.runtime,
       dependencyUpdateState: this.dependencyUpdateState,
@@ -710,7 +765,9 @@ export class Scheduler {
     }
 
     // Subscribe to storage notifications
-    this.runtime.storageManager.subscribe(this.createStorageSubscription());
+    this.runtime.storageManager.subscribe(
+      createStorageSubscription(this.storageNotificationState),
+    );
 
     // Set up harness event listeners
     this.runtime.harness.addEventListener("console", (e: Event) => {
@@ -898,27 +955,7 @@ export class Scheduler {
     onCommit?: (tx: IExtendedStorageTransaction) => void,
     doNotLoadPieceIfNotRunning: boolean = false,
   ): void {
-    queueSchedulerEvent({
-      runtime: this.runtime,
-      eventHandlers: this.eventHandlers,
-      eventQueue: this.eventQueue,
-      backgroundTasks: this.backgroundTasks,
-      queueExecution: () => this.queueExecution(),
-      queueEvent: (
-        targetEventLink,
-        targetEvent,
-        targetRetries,
-        targetOnCommit,
-        targetDoNotLoad,
-      ) =>
-        this.queueEvent(
-          targetEventLink,
-          targetEvent,
-          targetRetries,
-          targetOnCommit,
-          targetDoNotLoad,
-        ),
-    }, {
+    queueSchedulerEvent(this.eventQueueState, {
       eventLink,
       event,
       retries,
@@ -950,47 +987,6 @@ export class Scheduler {
 
   onError(fn: ErrorHandler): void {
     this.errorHandlers.add(fn);
-  }
-
-  /**
-   * Creates and returns a new storage subscription that can be used to receive storage notifications.
-   *
-   * @returns A new IStorageSubscription instance
-   */
-  private createStorageSubscription(): IStorageSubscription {
-    return {
-      next: (notification) => {
-        processStorageNotification({
-          triggers: this.triggerIndexState.triggers,
-          nonRecursiveTriggers: this.triggerIndexState.nonRecursiveTriggers,
-          pullMode: this.pullMode,
-          diagnosisEnabled: this.diagnosisEnabled,
-          collectTriggerTrace: this.collectTriggerTrace,
-          changeGroupToActionId: this.changeGroupToActionId,
-          causalEdges: this.causalEdges,
-          actionChangeGroups: this.actionChangeGroups,
-          effects: this.effects,
-          pending: this.pending,
-          dirty: this.staleness.dirty,
-          inFlightSources: this.inFlightSourceState.inFlightSources,
-          conditionallyScheduledEffects: this.conditionallyScheduledEffects,
-          getActionId: (target) => this.getActionId(target),
-          recordCellUpdate: (change) =>
-            this.runtime.telemetry.submit({
-              type: "cell.update",
-              change,
-            }),
-          recordTriggerTrace: (entry) =>
-            recordTriggerTraceState({ triggerTrace: this.triggerTrace }, entry),
-          scheduleWithDebounce: (target) => this.scheduleWithDebounce(target),
-          markDirty: (target) =>
-            markSchedulerDirty(this.dirtySchedulingState, target),
-          scheduleAffectedEffects: (target) =>
-            this.scheduleAffectedEffects(target),
-        }, notification);
-        return { done: false };
-      },
-    } satisfies IStorageSubscription;
   }
 
   queueExecution(): void {
