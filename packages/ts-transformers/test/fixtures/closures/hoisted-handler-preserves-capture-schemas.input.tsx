@@ -65,7 +65,7 @@ export default pattern<{ items: Writable<Item[]> }, ListOutput>(
     );
     return {
       [NAME]: "List",
-      [UI]: <button onClick={write}>Create</button>,
+      [UI]: <button type="button" onClick={write}>Create</button>,
       read,
       write,
     };

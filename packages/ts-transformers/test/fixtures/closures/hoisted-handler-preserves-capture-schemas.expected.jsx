@@ -178,7 +178,7 @@ export default pattern((__cf_pattern_input) => {
     }).for({ stream: "write" }, true);
     return {
         [NAME]: "List",
-        [UI]: <button onClick={write}>Create</button>,
+        [UI]: <button type="button" onClick={write}>Create</button>,
         read: read.for({ stream: ["__patternResult", "read"] }, true),
         write: write.for({ stream: ["__patternResult", "write"] }, true)
     };
