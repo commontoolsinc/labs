@@ -69,6 +69,7 @@ const CELL_LIKE_CLASSES = new Set([
   "ReadonlyCell",
   "WriteonlyCell",
   "CellTypeConstructor",
+  "ScopedCellTypeConstructor",
 ]);
 
 const CELL_FACTORY_NAMES = new Set(["of"]);
