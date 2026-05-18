@@ -6,19 +6,6 @@ import {
 } from "./interface.ts";
 import { ExplicitTagValue } from "./explicit-tag-value.ts";
 import { ProblematicValue } from "./problematic-value.ts";
-
-/**
- * JSON-compatible wire format value. This is the intermediate tree
- * representation used during serialization tree walking -- NOT the final
- * serialized form (which is `string`). Internal to the JSON implementation.
- */
-export type JsonWireValue =
-  | null
-  | boolean
-  | number
-  | string
-  | JsonWireValue[]
-  | { [key: string]: JsonWireValue };
 import { FabricEpochDays, FabricEpochNsec } from "./fabric-epoch.ts";
 import { FabricBytes } from "./fabric-bytes.ts";
 import { TAGS } from "./fabric-type-tags.ts";
@@ -30,6 +17,19 @@ import {
   bigintFromMinimalTwosComplement,
   bigintToMinimalTwosComplement,
 } from "./bigint-encoding.ts";
+
+/**
+ * JSON-compatible wire format value. This is the intermediate tree
+ * representation used during serialization tree walking -- NOT the final
+ * serialized form (which is `string`). Internal to the JSON implementation.
+ */
+export type JsonWireValue =
+  | null
+  | boolean
+  | number
+  | string
+  | readonly JsonWireValue[]
+  | { [key: string]: JsonWireValue };
 
 /**
  * Narrow interface for what type handlers need from the encoding context
