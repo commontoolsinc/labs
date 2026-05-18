@@ -368,7 +368,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
     const keys = Object.keys(result);
     if (keys.some((k) => k.startsWith("/"))) {
       if (Object.values(result).every((v) => isQuoteSafe(v))) {
-        const unquoted = deepFreeze(
+        const unquoted = Object.freeze(
           Object.fromEntries(
             Object.entries(result).map(([k, v]) => [k, unquote(v)]),
           ),
