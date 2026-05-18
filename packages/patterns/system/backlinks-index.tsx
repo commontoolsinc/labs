@@ -21,12 +21,12 @@ export type MentionablePiece = {
   [NAME]?: string;
   isHidden?: boolean;
   isMentionable?: boolean;
-  mentioned?: MentionablePiece[];
-  backlinks?: MentionablePiece[];
+  mentioned?: MentionableCell[];
+  backlinks?: MentionableCell[];
   mentionable?: MentionableCell[];
 };
 
-export type MentionableCell = Writable<MentionablePiece>;
+export type MentionableCell = Writable<MentionablePiece> & MentionablePiece;
 
 type Input = {
   allPieces: Writable<MentionableCell[]>;
@@ -46,7 +46,7 @@ const computeIndex = lift<{ allPieces: Writable<MentionableCell[]> }, void>(
     // Also skip undefined/null entries that may exist in the array.
     for (const c of cs) {
       if (!c) continue;
-      (c as any).key?.("backlinks")?.set?.([]);
+      c.key("backlinks").set([]);
     }
 
     // Populate backlinks from mentioned references.
@@ -55,7 +55,7 @@ const computeIndex = lift<{ allPieces: Writable<MentionableCell[]> }, void>(
       if (!c) continue;
       const mentions = c.get()?.mentioned ?? [];
       for (const m of mentions) {
-        m?.backlinks?.push?.(c as any);
+        m.key("backlinks").push(c);
       }
     }
   },
@@ -111,9 +111,9 @@ function computeMentionableCells(
 }
 
 type Entry = {
-  piece: any;
+  piece: MentionableCell;
   name: string;
-  backlinks: any[];
+  backlinks: MentionableCell[];
 };
 
 /** Sub-pattern to render a single entry row with its backlinks. */
@@ -141,7 +141,7 @@ const EntryRow = pattern<Entry, { [UI]: VNode }>(({ piece, backlinks }) => {
 });
 
 const BacklinksIndex = pattern<Input, Output>(({ allPieces }) => {
-  computeIndex({ allPieces: allPieces as any });
+  computeIndex({ allPieces });
 
   // Preserve cells in the mentionable list. A lift() result schema materializes
   // these into plain values, which loses scoped fields and breaks cell links.
