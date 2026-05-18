@@ -191,6 +191,68 @@ Deno.test("createHarnessCfcInvocationContext derives prompt-slot influence label
   }
 });
 
+Deno.test("createHarnessCfcInvocationContext can label prompt-slot and model-context inputs separately", async () => {
+  const promptSlot = {
+    type: CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
+    source: { type: "cf-harness.test-input", surface: "cli" },
+    role: "direct-command",
+    kernelName: "cf-harness",
+    surface: "cli",
+  } as const;
+  const observedSecret = {
+    type: "test.cfc/ObservedOutput",
+    subject: "did:key:observed-secret",
+  };
+
+  const context = await createHarnessCfcInvocationContext({
+    sequence: 3,
+    runId: "run-split-label-paths",
+    createdAt: "2026-05-18T22:01:00.000Z",
+    toolId: "read_file",
+    operation: "shell",
+    cfcEnforcementMode: "enforce-explicit",
+    cwd: "/workspace",
+    promptSlot,
+    runManifest: { present: false },
+    command: 'cat "$1"',
+    args: ["/workspace/notes/public.txt"],
+    cfcPromptSlotInputLabelPaths: [["command"]],
+    cfcModelContextInputLabelPaths: [["args"]],
+    cfcModelContext: {
+      type: "cf-harness.cfc-model-context",
+      version: 1,
+      updatedAt: "2026-05-18T22:00:00.000Z",
+      label: {
+        confidentiality: [observedSecret],
+        integrity: [{ type: "test.cfc/ShouldNotFlow" }],
+      },
+      observations: [],
+    },
+  });
+
+  assertEquals(context.cfcInputLabels, {
+    version: 1,
+    entries: [
+      {
+        path: ["args"],
+        label: { confidentiality: [observedSecret] },
+      },
+      {
+        path: ["command"],
+        label: {
+          confidentiality: [{
+            type: CF_HARNESS_PROMPT_SLOT_INFLUENCE_ATOM_TYPE,
+            version: 1,
+            role: "direct-command",
+            kernelName: "cf-harness",
+            surface: "cli",
+          }],
+        },
+      },
+    ],
+  });
+});
+
 Deno.test("createHarnessCfcInvocationContext merges explicit trusted labels with derived prompt-slot labels", async () => {
   const explicitAtom = {
     type: "test.cfc/ExplicitTrustedInput",

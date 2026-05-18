@@ -986,6 +986,10 @@ export class CfHarnessEngine {
     env?: Record<string, string>;
     cfcInputLabels?: CfcLabelView;
     cfcInputLabelPaths?: readonly HarnessCfcInvocationInputLabelPath[];
+    cfcPromptSlotInputLabelPaths?:
+      readonly HarnessCfcInvocationInputLabelPath[];
+    cfcModelContextInputLabelPaths?:
+      readonly HarnessCfcInvocationInputLabelPath[];
   }): Promise<HarnessCfcInvocationContext> {
     const now = this.#now();
     const invocation = await createHarnessCfcInvocationContext({
@@ -1018,6 +1022,15 @@ export class CfHarnessEngine {
         : {}),
       ...(options.cfcInputLabelPaths !== undefined
         ? { cfcInputLabelPaths: options.cfcInputLabelPaths }
+        : {}),
+      ...(options.cfcPromptSlotInputLabelPaths !== undefined
+        ? { cfcPromptSlotInputLabelPaths: options.cfcPromptSlotInputLabelPaths }
+        : {}),
+      ...(options.cfcModelContextInputLabelPaths !== undefined
+        ? {
+          cfcModelContextInputLabelPaths:
+            options.cfcModelContextInputLabelPaths,
+        }
         : {}),
       ...(this.#runState.cfcModelContext !== undefined
         ? { cfcModelContext: this.#runState.cfcModelContext }
@@ -1088,6 +1101,10 @@ export class CfHarnessEngine {
         env?: Record<string, string>;
         cfcInputLabels?: CfcLabelView;
         cfcInputLabelPaths?: readonly HarnessCfcInvocationInputLabelPath[];
+        cfcPromptSlotInputLabelPaths?:
+          readonly HarnessCfcInvocationInputLabelPath[];
+        cfcModelContextInputLabelPaths?:
+          readonly HarnessCfcInvocationInputLabelPath[];
       }) => this.#createCfcInvocationContext(options),
     };
   }

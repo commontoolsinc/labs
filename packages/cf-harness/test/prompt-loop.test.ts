@@ -3498,6 +3498,10 @@ Deno.test("CfHarnessPromptLoop exposes mediated read_file content and tracks mod
   assertEquals(content.content, "released file secret\n");
   assertEquals(content.cfc.stdout.policy, "observed");
   assertEquals(
+    result.runState.cfcInvocationContexts?.[0]?.cfcInputLabels,
+    undefined,
+  );
+  assertEquals(
     result.runState.cfcModelContext?.observations.some((observation) =>
       observation.toolCallId === "call-read-secret-file" &&
       observation.toolId === "read_file" &&
