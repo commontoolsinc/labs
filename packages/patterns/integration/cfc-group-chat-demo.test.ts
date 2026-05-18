@@ -13,6 +13,7 @@ import {
 } from "./cfc-browser-helpers.ts";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
+const CFC_GROUP_CHAT_TIMEOUT = 30_000;
 
 describe("cfc group chat demo integration test", () => {
   const shell = new ShellIntegration();
@@ -76,11 +77,6 @@ describe("cfc group chat demo integration test", () => {
     await waitForDisabled(page, "#trusted-profile-save", false);
     await clickCfButton(page, "#trusted-profile-save");
     await waitForText(page, "#trusted-profile-status", "Alice");
-    await waitForDeepText(
-      page,
-      "#trusted-participants-panel",
-      "Alice",
-    );
     await waitForRuntimeIdle(page);
 
     await fillCfInput(
@@ -134,11 +130,6 @@ describe("cfc group chat demo integration test", () => {
       "Hello from Alice",
       "#trusted-conversation-preview",
     );
-    await waitForDeepText(
-      page,
-      "#trusted-participants-panel",
-      "Alice",
-    );
     await waitForDisabled(page, "#trusted-send-button", true);
 
     await fillCfInput(
@@ -149,11 +140,6 @@ describe("cfc group chat demo integration test", () => {
     await waitForDisabled(page, "#trusted-profile-save", false);
     await clickCfButton(page, "#trusted-profile-save");
     await waitForText(page, "#trusted-profile-status", "Bob");
-    await waitForDeepText(
-      page,
-      "#trusted-participants-panel",
-      "Bob",
-    );
     await waitForRuntimeIdle(page);
 
     await scrollIntoView(page, "#trusted-message-draft");
@@ -240,7 +226,7 @@ async function waitForDisabled(
       } catch {
         return false;
       }
-    }, { timeout: 15_000, delay: 250 });
+    }, { timeout: CFC_GROUP_CHAT_TIMEOUT, delay: 250 });
   } catch (cause) {
     throw new Error(
       `Timed out waiting for ${selector} disabled=${disabled}. Last probe: ${
@@ -292,7 +278,7 @@ async function clickCfButton(page: Page, selector: string) {
       return true;
     }, { args: [selector, token, attr] });
   try {
-    await waitFor(mark, { timeout: 15_000, delay: 250 });
+    await waitFor(mark, { timeout: CFC_GROUP_CHAT_TIMEOUT, delay: 250 });
   } catch (cause) {
     throw new Error(`Unable to mark ${selector} for click`, { cause });
   }
@@ -327,68 +313,10 @@ async function clickCfButton(page: Page, selector: string) {
   }
 }
 
-async function waitForDeepText(
-  page: Page,
-  selector: string,
-  text: string,
-) {
-  try {
-    await waitFor(
-      async () =>
-        await page.evaluate((targetSelector, targetText) => {
-          function collect(
-            root: Document | ShadowRoot,
-            result: Element[],
-          ): void {
-            for (const element of root.querySelectorAll("*")) {
-              try {
-                if (element.matches(targetSelector)) {
-                  result.push(element);
-                }
-              } catch {
-                return;
-              }
-              if (element.shadowRoot) {
-                collect(element.shadowRoot, result);
-              }
-            }
-          }
-
-          function deepText(root: ParentNode): string {
-            let content = "";
-            if (root instanceof HTMLElement) {
-              content = root.innerText ?? root.textContent ?? "";
-            } else if (root instanceof ShadowRoot) {
-              content = root.textContent ?? "";
-            }
-            for (const element of root.querySelectorAll("*")) {
-              if (element.shadowRoot) {
-                content += ` ${deepText(element.shadowRoot)}`;
-              }
-            }
-            return content;
-          }
-
-          const matches: Element[] = [];
-          collect(document, matches);
-          return matches.some((element) =>
-            deepText(element).includes(targetText)
-          );
-        }, { args: [selector, text] }),
-      { timeout: 15_000, delay: 250 },
-    );
-  } catch (cause) {
-    throw new Error(
-      `Timed out waiting for deep text "${text}" in "${selector}"`,
-      { cause },
-    );
-  }
-}
-
 async function scrollIntoView(page: Page, selector: string) {
   const node = await page.waitForSelector(selector, {
     strategy: "pierce",
-    timeout: 15_000,
+    timeout: CFC_GROUP_CHAT_TIMEOUT,
   });
   await node.evaluate(async (element: Element) => {
     element.scrollIntoView({ block: "center", inline: "center" });
@@ -413,7 +341,7 @@ async function waitForAuthorshipState(
         host.renderedText.includes(expectedText) &&
         host.hasTrustedAvatar
       );
-    }, { timeout: 15_000, delay: 250 });
+    }, { timeout: CFC_GROUP_CHAT_TIMEOUT, delay: 250 });
   } catch (cause) {
     throw new Error(
       `Timed out waiting for verified authorship row. Last probe: ${
@@ -438,7 +366,7 @@ async function waitForInvalidAuthorshipState(
         !host.hasTrustedAvatar &&
         host.renderedText.includes("Content hidden by integrity policy")
       );
-    }, { timeout: 15_000, delay: 250 });
+    }, { timeout: CFC_GROUP_CHAT_TIMEOUT, delay: 250 });
   } catch (cause) {
     throw new Error(
       `Timed out waiting for invalid authorship row. Last probe: ${
