@@ -313,10 +313,15 @@ export class FabricError extends FabricNativeWrapper<Error> {
       }
     }
 
-    const result = FabricError[RECONSTRUCT](
-      state,
-      EMPTY_RECONSTRUCTION_CONTEXT,
-    );
+    // `[RECONSTRUCT]` now honors `context.shouldDeepFreeze`. This clone path
+    // owns its own frozenness decision (the `frozen ? deepFreeze : result`
+    // below), so it must NOT have `[RECONSTRUCT]` pre-freeze: pass a context
+    // whose `shouldDeepFreeze` matches this clone's `frozen` intent.
+    const reconstructContext: ReconstructionContext = {
+      getCell: EMPTY_RECONSTRUCTION_CONTEXT.getCell,
+      shouldDeepFreeze: frozen,
+    };
+    const result = FabricError[RECONSTRUCT](state, reconstructContext);
 
     return frozen ? deepFreeze(result) : result;
   }
@@ -329,7 +334,7 @@ export class FabricError extends FabricNativeWrapper<Error> {
    */
   static [RECONSTRUCT](
     state: FabricValue,
-    _context: ReconstructionContext,
+    context: ReconstructionContext,
   ): FabricError {
     const s = state as Record<string, FabricValue>;
     const type = (s.type as string) ?? (s.name as string) ?? "Error";
@@ -361,7 +366,12 @@ export class FabricError extends FabricNativeWrapper<Error> {
       }
     }
 
-    return new FabricError(error);
+    const result = new FabricError(error);
+    // Honor `shouldDeepFreeze`: produce the type's correct deep-frozen form
+    // via its `[DEEP_FREEZE]` member (recursing through `deepFreeze`).
+    return context.shouldDeepFreeze
+      ? result[DEEP_FREEZE]((v) => deepFreeze(v)) as unknown as FabricError
+      : result;
   }
 }
 
@@ -594,13 +604,18 @@ export class FabricRegExp extends FabricNativeWrapper<RegExp> {
    */
   static [RECONSTRUCT](
     state: FabricValue,
-    _context: ReconstructionContext,
+    context: ReconstructionContext,
   ): FabricRegExp {
     const s = state as Record<string, FabricValue>;
     const source = (s.source as string) ?? "";
     const flags = (s.flags as string) ?? "";
     const flavor = (s.flavor as string) ?? "es2025";
-    return new FabricRegExp(new RegExp(source, flags), flavor);
+    const result = new FabricRegExp(new RegExp(source, flags), flavor);
+    // Honor `shouldDeepFreeze`: produce the type's correct deep-frozen form
+    // via its `[DEEP_FREEZE]` member (recursing through `deepFreeze`).
+    return context.shouldDeepFreeze
+      ? result[DEEP_FREEZE]((v) => deepFreeze(v)) as unknown as FabricRegExp
+      : result;
   }
 }
 

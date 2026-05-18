@@ -7,6 +7,7 @@ import {
   type ReconstructionContext,
 } from "./interface.ts";
 import { ExplicitTagValue } from "./explicit-tag-value.ts";
+import { deepFreeze } from "./deep-freeze.ts";
 
 /**
  * Container for a value whose deconstruction or reconstruction failed.
@@ -61,8 +62,13 @@ export class ProblematicValue extends ExplicitTagValue {
 
   static [RECONSTRUCT](
     state: { type: string; state: FabricValue; error: string },
-    _context: ReconstructionContext,
+    context: ReconstructionContext,
   ): ProblematicValue {
-    return new ProblematicValue(state.type, state.state, state.error);
+    const result = new ProblematicValue(state.type, state.state, state.error);
+    // Honor `shouldDeepFreeze`: produce the type's correct deep-frozen form
+    // via its `[DEEP_FREEZE]` member (recursing through `deepFreeze`).
+    return context.shouldDeepFreeze
+      ? result[DEEP_FREEZE]((v) => deepFreeze(v)) as unknown as ProblematicValue
+      : result;
   }
 }

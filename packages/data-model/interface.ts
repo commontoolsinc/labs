@@ -338,12 +338,14 @@ export interface ReconstructionContext {
    * free by extending `BaseReconstructionContext`, which centralizes the
    * getter; the `cloneIfNecessary`-style `true` default lives there.
    *
-   * Scope note: this declares the signal and its default. The `[RECONSTRUCT]`
-   * implementations do not yet consult it — query-and-abide enforcement at
-   * the reconstruction sites is the arm-2 / class-registry follow-on's
-   * responsibility and is intentionally NOT provided here. Until that lands,
-   * a `[RECONSTRUCT]` impl that ignores this signal is over-conservative
-   * (the default is `true` ⇒ the safe, deep-frozen outcome), never wrong.
+   * Enforcement: the concrete `[RECONSTRUCT]` implementations query this and
+   * abide by it — they produce a deep-frozen result when it is `true`. The
+   * one place this is *not* applied is the class-registry fallback
+   * call-site wrap (`json-encoding-context.ts`'s `cls[RECONSTRUCT]` path);
+   * that call-site deep-freeze is a separate follow-on's responsibility and
+   * is intentionally NOT covered here. The per-implementation honoring is
+   * sufficient for correctness regardless: each impl freezes its own output
+   * when asked.
    */
   readonly shouldDeepFreeze: boolean;
 }
