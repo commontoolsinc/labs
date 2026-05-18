@@ -323,6 +323,18 @@ describe("Cell Static Methods", () => {
       });
     });
 
+    it("should apply schema scopes to plain constructor links", () => {
+      withinLiftContext(runtime, space, tx, () => {
+        const { commonfabric } = createTrustedBuilder(runtime);
+        const cell = commonfabric.Writable.of("Ada", {
+          type: "string",
+          scope: "user",
+        } as JSONSchema).for("contextual", true) as any;
+
+        expect(cell.getAsNormalizedFullLink().scope).toBe("user");
+      });
+    });
+
     it("should reject conflicting schema scopes", () => {
       withinHandlerContext(runtime, space, tx, () => {
         expect(() =>

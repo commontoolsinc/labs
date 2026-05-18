@@ -2556,6 +2556,14 @@ function schemaWithDefaultAndScope<T>(
   return scopedSchema;
 }
 
+function schemaCellScope(
+  schema: JSONSchema | undefined,
+): CellScope | undefined {
+  return isRecord(schema) && isCellScope(schema.scope)
+    ? schema.scope
+    : undefined;
+}
+
 /**
  * Factory function to create Cell constructor with static methods for a specific cell kind
  */
@@ -2579,6 +2587,7 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
       // causes infinite recursion when the schema is serialized
       // TODO(ubik2): Use Cell links for default here once that's supported
       const schema = schemaWithDefaultAndScope(value, providedSchema, scope);
+      const linkScope = scope ?? schemaCellScope(schema);
 
       // Create a cell without a link - it will be created on demand via .for()
       const cell = createCell<T>(
@@ -2587,7 +2596,7 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
           path: [],
           ...(schema !== undefined && { schema }),
           ...(frame.space && { space: frame.space }),
-          ...(scope !== undefined && { scope }),
+          ...(linkScope !== undefined && { scope: linkScope }),
         },
         frame.tx,
         false,
@@ -2611,6 +2620,7 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
       }
 
       const schema = mergeSchemaScope(undefined, scope);
+      const linkScope = scope ?? schemaCellScope(schema);
 
       // Create a cell without a link
       const cell = createCell<T>(
@@ -2619,7 +2629,7 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
           path: [],
           ...(schema !== undefined && { schema }),
           ...(frame.space && { space: frame.space }),
-          ...(scope !== undefined && { scope }),
+          ...(linkScope !== undefined && { scope: linkScope }),
         },
         frame.tx,
         false,
