@@ -24,8 +24,6 @@ import type {
   ActionStats,
   NonIdempotentReport,
   SchedulerDiagnosisResult,
-  SchedulerEventPreflightActionSummary,
-  SchedulerEventPreflightStats,
   SchedulerGraphSnapshot,
 } from "./telemetry.ts";
 import {
@@ -68,6 +66,8 @@ import {
 import {
   collectDirtyDependencies as collectDirtyDependenciesState,
   collectDirtyDependenciesForLog as collectDirtyDependenciesForLogState,
+  type DirtyDependencyCollectionState,
+  snapshotDirtyDependencyTraceContext,
 } from "./scheduler/dirty-dependencies.ts";
 import {
   type InFlightSourceState,
@@ -104,6 +104,14 @@ import {
   scheduleWithDebounce as scheduleWithDebounceState,
 } from "./scheduler/delay-control.ts";
 import { SchedulerDelays } from "./scheduler/delays.ts";
+import {
+  hasDependentPath,
+  isDemandedPullComputation,
+  isLiveEffect,
+  isPullDemandRootEffect,
+  type PullDemandState,
+  shouldRunFirstPullComputationInDemandContext,
+} from "./scheduler/demand.ts";
 import {
   createStorageSubscription,
   type StorageNotificationState,
@@ -335,7 +343,8 @@ export class Scheduler {
     dirty: this.staleness.dirty,
     pending: this.pending,
     getPullMode: () => this.pullMode,
-    isPullDemandRootEffect: (action) => this.isPullDemandRootEffect(action),
+    isPullDemandRootEffect: (action) =>
+      isPullDemandRootEffect(this.pullDemandState, action),
     queueExecution: () => this.queueExecution(),
     logDebounce: (message) =>
       logger.debug("schedule-debounce", () => [message]),
@@ -360,6 +369,21 @@ export class Scheduler {
     writersByEntity: new Map<SpaceScopeAndURI, Set<Action>>(),
     // Reverse index: action -> entities it writes to (for cleanup)
     actionWriteEntities: new WeakMap<Action, Set<SpaceScopeAndURI>>(),
+  };
+  private dirtyDependencyCollectionState: DirtyDependencyCollectionState = {
+    collectStack: this.collectStack,
+    getTrace: () => this.dirtyDependencyTraceContext,
+    dirty: this.staleness.dirty,
+    pending: this.pending,
+    computations: this.computations,
+    reverseDependencies: this.reverseDependencies,
+    dependencies: this.dependencies,
+    writersByEntity: this.writerIndexState.writersByEntity,
+    effects: this.effects,
+    isStale: (target) => this.staleness.isStale(target),
+    getSchedulingWrites: (target) =>
+      getSchedulingWritesFromState(this.schedulingWriteState, target),
+    getActionId: (target) => this.getActionId(target),
   };
   // Track actions scheduled for first time (bypass filter)
   private scheduledFirstTime = new Set<Action>();
@@ -413,6 +437,19 @@ export class Scheduler {
   currentActionId?: string;
   private actionParent = new WeakMap<Action, Action>();
   private actionChildren = new WeakMap<Action, Set<Action>>();
+  private pullDemandState: PullDemandState = {
+    getPullMode: () => this.pullMode,
+    computations: this.computations,
+    effects: this.effects,
+    dependents: this.dependents,
+    dependencies: this.dependencies,
+    actionParent: this.actionParent,
+    isEffectAction: this.isEffectAction,
+    pullDemandedFirstRunComputations: this.pullDemandedFirstRunComputations,
+    hasActionRun: (action) => this.delays.hasActionRun(action),
+    getSchedulingWrites: (action) =>
+      getSchedulingWritesFromState(this.schedulingWriteState, action),
+  };
   private dependencyGraphState: DependencyGraphState = {
     triggers: this.triggerIndexState.triggers,
     nonRecursiveTriggers: this.triggerIndexState.nonRecursiveTriggers,
@@ -425,7 +462,7 @@ export class Scheduler {
       getSchedulingWritesFromState(this.schedulingWriteState, action),
     isStale: (action) => this.staleness.isStale(action),
     isDemandedPullComputation: (action) =>
-      this.isDemandedPullComputation(action),
+      isDemandedPullComputation(this.pullDemandState, action),
     queueExecution: () => this.queueExecution(),
   };
   private dependencyUpdateState: DependencyUpdateState = {
@@ -458,20 +495,23 @@ export class Scheduler {
     clearComputationDebounceState: (action) =>
       this.delays.clearComputationDebounceState(action),
     isDemandedPullComputation: (action) =>
-      this.isDemandedPullComputation(action),
+      isDemandedPullComputation(this.pullDemandState, action),
     queueExecution: () => this.queueExecution(),
   };
   private pendingPullRunnableState = {
     effects: this.effects,
     isDemandedPullComputation: (action: Action) =>
-      this.isDemandedPullComputation(action),
+      isDemandedPullComputation(this.pullDemandState, action),
     shouldRunFirstPullComputationInDemandContext: (action: Action) =>
-      this.shouldRunFirstPullComputationInDemandContext(action),
+      shouldRunFirstPullComputationInDemandContext(
+        this.pullDemandState,
+        action,
+      ),
   };
   private dirtyPullRunnableState = {
     effects: this.effects,
     isDemandedPullComputation: (action: Action) =>
-      this.isDemandedPullComputation(action),
+      isDemandedPullComputation(this.pullDemandState, action),
     isThrottled: (action: Action) => this.delays.isThrottled(action),
   };
   private dirtyPullRunnableStateWithDebounce = {
@@ -539,7 +579,7 @@ export class Scheduler {
     getSchedulingWrites: (action: Action) =>
       getSchedulingWritesFromState(this.schedulingWriteState, action),
     hasDependentPath: (from: Action, to: Action) =>
-      this.hasDependentPath(from, to),
+      hasDependentPath(this.pullDemandState, from, to),
   };
   private dependencyCollectionState!: DependencyCollectionState;
   private subscribeActionState: SchedulerSubscribeActionState = {
@@ -647,7 +687,8 @@ export class Scheduler {
       this.delays.clearComputationDebounceState(action),
     conditionalEffectHasChangedInputs: (action) =>
       this.conditionalEffectHasChangedInputs(action),
-    isPullDemandRootEffect: (action) => this.isPullDemandRootEffect(action),
+    isPullDemandRootEffect: (action) =>
+      isPullDemandRootEffect(this.pullDemandState, action),
     handleError: (error, action) => this.handleError(error, action),
     runAction: (action) => this.run(action),
   };
@@ -668,9 +709,12 @@ export class Scheduler {
       return shouldRerun;
     },
     isDemandedPullComputation: (action) =>
-      this.isDemandedPullComputation(action),
+      isDemandedPullComputation(this.pullDemandState, action),
     shouldRunFirstPullComputationInDemandContext: (action) =>
-      this.shouldRunFirstPullComputationInDemandContext(action),
+      shouldRunFirstPullComputationInDemandContext(
+        this.pullDemandState,
+        action,
+      ),
     isDebouncedComputationWaiting: (action) =>
       this.isDebouncedComputationWaiting(action),
     getNextDebounceRunTime: (action) => this.getNextDebounceRunTime(action),
@@ -1140,9 +1184,10 @@ export class Scheduler {
       getNextEligibleRunTime: (action) =>
         this.delays.getNextEligibleRunTime(action),
       isDemandedPullComputation: (action) =>
-        this.isDemandedPullComputation(action),
-      isLiveEffect: (action) => this.isLiveEffect(action),
-      isPullDemandRootEffect: (action) => this.isPullDemandRootEffect(action),
+        isDemandedPullComputation(this.pullDemandState, action),
+      isLiveEffect: (action) => isLiveEffect(this.pullDemandState, action),
+      isPullDemandRootEffect: (action) =>
+        isPullDemandRootEffect(this.pullDemandState, action),
       getPatternId: (action) => {
         const annotated = action as Partial<TelemetryAnnotations>;
         return annotated.pattern
@@ -1236,77 +1281,6 @@ export class Scheduler {
     return this.eventPreflightTelemetryEnabled;
   }
 
-  private getTraceActionSummary(
-    trace: DirtyDependencyTraceContext,
-    action: Action,
-  ): SchedulerEventPreflightActionSummary {
-    let summary = trace.actionSummaries.get(action);
-    if (!summary) {
-      const log = this.dependencies.get(action);
-      const writes =
-        getSchedulingWritesFromState(this.schedulingWriteState, action) ?? [];
-      summary = {
-        actionId: this.getActionId(action),
-        actionType: this.effects.has(action)
-          ? "effect"
-          : this.computations.has(action)
-          ? "computation"
-          : "unknown",
-        visitCount: 0,
-        memoHitCount: 0,
-        dirtyInputCount: 0,
-        resultTrueCount: 0,
-        reverseDependencyEdgeCount: 0,
-        maxDirectWriterCount: 0,
-        dirty: this.staleness.dirty.has(action),
-        pending: this.pending.has(action),
-        readCount: log?.reads.length ?? 0,
-        shallowReadCount: log?.shallowReads.length ?? 0,
-        writeCount: writes.length,
-      };
-      trace.actionSummaries.set(action, summary);
-    } else {
-      summary.dirty ||= this.staleness.dirty.has(action);
-      summary.pending ||= this.pending.has(action);
-    }
-    return summary;
-  }
-
-  private snapshotDirtyDependencyTraceContext(
-    context: DirtyDependencyTraceContext,
-  ): SchedulerEventPreflightStats {
-    const {
-      depth: _depth,
-      actionSummaries,
-      rootDirectWriterActions,
-      ...stats
-    } = context;
-    const actionRows = [...actionSummaries.values()];
-    const topBy = (
-      rows: SchedulerEventPreflightActionSummary[],
-      key: "visitCount" | "reverseDependencyEdgeCount",
-    ) =>
-      rows
-        .filter((row) => row[key] > 0)
-        .sort((a, b) =>
-          b[key] - a[key] ||
-          b.visitCount - a.visitCount ||
-          a.actionId.localeCompare(b.actionId)
-        )
-        .slice(0, 12);
-
-    const rootDirectWriterRows = [...rootDirectWriterActions].map((action) =>
-      this.getTraceActionSummary(context, action)
-    );
-
-    return {
-      ...stats,
-      hotActions: topBy(actionRows, "visitCount"),
-      hotFanoutActions: topBy(actionRows, "reverseDependencyEdgeCount"),
-      rootDirectWriters: topBy(rootDirectWriterRows, "visitCount"),
-    };
-  }
-
   /**
    * Returns whether an action is marked as dirty.
    */
@@ -1328,123 +1302,15 @@ export class Scheduler {
     memo = new Map<Action, boolean>(),
   ): boolean {
     return collectDirtyDependenciesState(
-      this.dirtyDependencyCollectionState(),
+      this.dirtyDependencyCollectionState,
       action,
       workSet,
       memo,
     );
   }
 
-  private hasDependentPath(
-    from: Action,
-    to: Action,
-    visited = new Set<Action>(),
-  ): boolean {
-    if (from === to) return true;
-    if (visited.has(from)) return false;
-    visited.add(from);
-
-    const dependents = this.dependents.get(from);
-    if (!dependents) return false;
-
-    for (const dependent of dependents) {
-      if (this.hasDependentPath(dependent, to, visited)) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  private hasTransitiveEffectDependent(
-    action: Action,
-    visited = new Set<Action>(),
-  ): boolean {
-    if (visited.has(action)) return false;
-    visited.add(action);
-
-    const dependents = this.dependents.get(action);
-    if (!dependents) return false;
-
-    for (const dependent of dependents) {
-      if (this.isLiveEffect(dependent)) return true;
-      if (this.hasTransitiveEffectDependent(dependent, visited)) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  private isDemandedPullComputation(
-    action: Action,
-    visited = new Set<Action>(),
-  ): boolean {
-    if (
-      !this.pullMode ||
-      !this.computations.has(action) ||
-      this.isLiveEffect(action)
-    ) {
-      return false;
-    }
-    if (visited.has(action)) return false;
-    visited.add(action);
-
-    return this.hasTransitiveEffectDependent(action) ||
-      this.hasDemandedParentContext(action, visited);
-  }
-
-  private hasDemandedParentContext(
-    action: Action,
-    visited = new Set<Action>(),
-  ): boolean {
-    const parent = this.actionParent.get(action);
-    if (!parent) return false;
-
-    if (this.isLiveEffect(parent)) {
-      return (
-        getSchedulingWritesFromState(this.schedulingWriteState, parent)
-          ?.length ?? 0
-      ) === 0;
-    }
-
-    return this.isDemandedPullComputation(parent, visited);
-  }
-
-  private isLiveEffect(action: Action): boolean {
-    if (this.effects.has(action)) return true;
-
-    // During resubscribe, dependencies can be registered before all effect
-    // bookkeeping is restored. Treat only dependency-bearing historical effects
-    // as live so unsubscribed effects do not keep old pull graphs demanded.
-    return (this.isEffectAction.get(action) ?? false) &&
-      this.dependencies.has(action);
-  }
-
-  private isPullDemandRootEffect(action: Action): boolean {
-    return this.pullMode &&
-      this.effects.has(action) &&
-      (getSchedulingWritesFromState(this.schedulingWriteState, action)
-          ?.length ?? 0) === 0;
-  }
-
   private canAutomaticallyDebounce(action: Action): boolean {
     return canAutomaticallyDebounceState(this.delayControlState, action);
-  }
-
-  private shouldRunFirstPullComputationInDemandContext(
-    action: Action,
-  ): boolean {
-    if (
-      !this.pullMode ||
-      !this.computations.has(action) ||
-      this.effects.has(action) ||
-      this.delays.hasActionRun(action)
-    ) {
-      return false;
-    }
-
-    return this.pullDemandedFirstRunComputations.has(action);
   }
 
   private markEffectConditionallyScheduled(effect: Action): void {
@@ -1475,31 +1341,11 @@ export class Scheduler {
     memo = new Map<Action, boolean>(),
   ): boolean {
     return collectDirtyDependenciesForLogState(
-      this.dirtyDependencyCollectionState(),
+      this.dirtyDependencyCollectionState,
       log,
       workSet,
       memo,
     );
-  }
-
-  private dirtyDependencyCollectionState() {
-    return {
-      collectStack: this.collectStack,
-      trace: this.dirtyDependencyTraceContext,
-      dirty: this.staleness.dirty,
-      computations: this.computations,
-      reverseDependencies: this.reverseDependencies,
-      dependencies: this.dependencies,
-      writersByEntity: this.writerIndexState.writersByEntity,
-      effects: this.effects,
-      isStale: (target: Action) => this.staleness.isStale(target),
-      getSchedulingWrites: (target: Action) =>
-        getSchedulingWritesFromState(this.schedulingWriteState, target),
-      getTraceActionSummary: (
-        trace: DirtyDependencyTraceContext,
-        target: Action,
-      ) => this.getTraceActionSummary(trace, target),
-    };
   }
 
   /**
@@ -1965,7 +1811,10 @@ export class Scheduler {
         scheduleEventQueueWake: (notBefore) =>
           scheduleEventQueueWakeState(this.eventQueueWakeState, notBefore),
         snapshotDirtyDependencyTraceContext: (trace) =>
-          this.snapshotDirtyDependencyTraceContext(trace),
+          snapshotDirtyDependencyTraceContext(
+            this.dirtyDependencyCollectionState,
+            trace,
+          ),
       });
       return eventBlockingDeps;
     } finally {

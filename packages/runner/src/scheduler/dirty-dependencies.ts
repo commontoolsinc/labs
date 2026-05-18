@@ -1,6 +1,9 @@
 import { getLogger } from "@commonfabric/utils/logger";
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
-import type { SchedulerEventPreflightActionSummary } from "../telemetry.ts";
+import type {
+  SchedulerEventPreflightActionSummary,
+  SchedulerEventPreflightStats,
+} from "../telemetry.ts";
 import { collectDirectWritersForLog } from "./dependency-index.ts";
 import type {
   Action,
@@ -16,8 +19,9 @@ const logger = getLogger("scheduler", {
 
 export interface DirtyDependencyCollectionState {
   readonly collectStack: Set<Action>;
-  readonly trace?: DirtyDependencyTraceContext;
+  readonly getTrace: () => DirtyDependencyTraceContext | undefined;
   readonly dirty: ReadonlySet<Action>;
+  readonly pending: ReadonlySet<Action>;
   readonly computations: ReadonlySet<Action>;
   readonly reverseDependencies: WeakMap<Action, Set<Action>>;
   readonly dependencies: WeakMap<Action, ReactivityLog>;
@@ -27,10 +31,7 @@ export interface DirtyDependencyCollectionState {
   readonly getSchedulingWrites: (
     action: Action,
   ) => readonly IMemorySpaceAddress[] | undefined;
-  readonly getTraceActionSummary: (
-    trace: DirtyDependencyTraceContext,
-    action: Action,
-  ) => SchedulerEventPreflightActionSummary;
+  readonly getActionId: (action: Action) => string;
 }
 
 /**
@@ -49,13 +50,13 @@ export function collectDirtyDependencies(
 ): boolean {
   const collectStart = performance.now();
   let addedToStack = false;
-  const trace = state.trace;
+  const trace = state.getTrace();
 
   try {
     if (trace) {
       trace.visitCount++;
       trace.maxDepth = Math.max(trace.maxDepth, trace.depth);
-      const actionSummary = state.getTraceActionSummary(trace, action);
+      const actionSummary = getTraceActionSummary(state, trace, action);
       actionSummary.visitCount++;
       if (state.dirty.has(action)) {
         trace.dirtyInputCount++;
@@ -67,7 +68,7 @@ export function collectDirtyDependencies(
     if (cached !== undefined) {
       if (trace) {
         trace.memoHitCount++;
-        state.getTraceActionSummary(trace, action).memoHitCount++;
+        getTraceActionSummary(state, trace, action).memoHitCount++;
       }
       if (cached && state.dirty.has(action) && state.computations.has(action)) {
         if (!workSet.has(action) && trace) trace.workSetAddCount++;
@@ -133,7 +134,7 @@ export function collectDirtyDependencies(
 
     if (actionNeedsRun && trace) {
       trace.resultTrueCount++;
-      state.getTraceActionSummary(trace, action).resultTrueCount++;
+      getTraceActionSummary(state, trace, action).resultTrueCount++;
     }
     memo.set(action, actionNeedsRun);
     return actionNeedsRun;
@@ -155,12 +156,12 @@ function recordReverseDependencyTrace(
   action: Action,
   directWriters: Set<Action>,
 ): void {
-  const trace = state.trace;
+  const trace = state.getTrace();
   if (!trace) return;
 
   trace.reverseDependencyActionCount++;
   trace.reverseDependencyEdgeCount += directWriters.size;
-  const actionSummary = state.getTraceActionSummary(trace, action);
+  const actionSummary = getTraceActionSummary(state, trace, action);
   actionSummary.reverseDependencyEdgeCount += directWriters.size;
   actionSummary.maxDirectWriterCount = Math.max(
     actionSummary.maxDirectWriterCount,
@@ -175,7 +176,7 @@ export function collectDirtyDependenciesForLog(
   memo = new Map<Action, boolean>(),
 ): boolean {
   const lookupStart = performance.now();
-  const trace = state.trace;
+  const trace = state.getTrace();
   let directWriters: Set<Action>;
   try {
     directWriters = collectDirectWritersForLog({
@@ -198,7 +199,7 @@ export function collectDirtyDependenciesForLog(
   if (trace && trace.depth === 0) {
     for (const writer of directWriters) {
       trace.rootDirectWriterActions.add(writer);
-      state.getTraceActionSummary(trace, writer);
+      getTraceActionSummary(state, trace, writer);
     }
   }
 
@@ -231,4 +232,76 @@ export function collectDirtyDependenciesForLog(
   }
 
   return hasDirtyDependencies;
+}
+
+export function snapshotDirtyDependencyTraceContext(
+  state: DirtyDependencyCollectionState,
+  context: DirtyDependencyTraceContext,
+): SchedulerEventPreflightStats {
+  const {
+    depth: _depth,
+    actionSummaries,
+    rootDirectWriterActions,
+    ...stats
+  } = context;
+  const actionRows = [...actionSummaries.values()];
+  const topBy = (
+    rows: SchedulerEventPreflightActionSummary[],
+    key: "visitCount" | "reverseDependencyEdgeCount",
+  ) =>
+    rows
+      .filter((row) => row[key] > 0)
+      .sort((a, b) =>
+        b[key] - a[key] ||
+        b.visitCount - a.visitCount ||
+        a.actionId.localeCompare(b.actionId)
+      )
+      .slice(0, 12);
+
+  const rootDirectWriterRows = [...rootDirectWriterActions].map((action) =>
+    getTraceActionSummary(state, context, action)
+  );
+
+  return {
+    ...stats,
+    hotActions: topBy(actionRows, "visitCount"),
+    hotFanoutActions: topBy(actionRows, "reverseDependencyEdgeCount"),
+    rootDirectWriters: topBy(rootDirectWriterRows, "visitCount"),
+  };
+}
+
+function getTraceActionSummary(
+  state: DirtyDependencyCollectionState,
+  trace: DirtyDependencyTraceContext,
+  action: Action,
+): SchedulerEventPreflightActionSummary {
+  let summary = trace.actionSummaries.get(action);
+  if (!summary) {
+    const log = state.dependencies.get(action);
+    const writes = state.getSchedulingWrites(action) ?? [];
+    summary = {
+      actionId: state.getActionId(action),
+      actionType: state.effects.has(action)
+        ? "effect"
+        : state.computations.has(action)
+        ? "computation"
+        : "unknown",
+      visitCount: 0,
+      memoHitCount: 0,
+      dirtyInputCount: 0,
+      resultTrueCount: 0,
+      reverseDependencyEdgeCount: 0,
+      maxDirectWriterCount: 0,
+      dirty: state.dirty.has(action),
+      pending: state.pending.has(action),
+      readCount: log?.reads.length ?? 0,
+      shallowReadCount: log?.shallowReads.length ?? 0,
+      writeCount: writes.length,
+    };
+    trace.actionSummaries.set(action, summary);
+  } else {
+    summary.dirty ||= state.dirty.has(action);
+    summary.pending ||= state.pending.has(action);
+  }
+  return summary;
 }
