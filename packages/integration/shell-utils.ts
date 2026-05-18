@@ -56,6 +56,7 @@ export async function login(page: Page, identity: Identity): Promise<void> {
 
 export interface ShellIntegrationConfig {
   pipeConsole?: boolean;
+  failOnConsoleError?: boolean;
 }
 
 export class ShellIntegration {
@@ -68,6 +69,7 @@ export class ShellIntegration {
   constructor(config: ShellIntegrationConfig = {}) {
     this.#config = {
       pipeConsole: config.pipeConsole ?? env.PIPE_CONSOLE,
+      failOnConsoleError: config.failOnConsoleError ?? false,
     };
   }
 
@@ -187,10 +189,9 @@ export class ShellIntegration {
     if (this.#exceptions.length > 0) {
       throw new Error(`Exceptions recorded: \n${this.#exceptions.join("\n")}`);
     }
-    // TODO(CT-840)
-    // if (this.#errorLogs.length > 0) {
-    //  throw new Error(`Errors logged: \n${this.#errorLogs.join("\n")}`);
-    // }
+    if (this.#config.failOnConsoleError && this.#errorLogs.length > 0) {
+      throw new Error(`Errors logged: \n${this.#errorLogs.join("\n")}`);
+    }
   };
 
   #afterAll = async () => {
