@@ -1,5 +1,5 @@
 import { queueTask } from "./diagnostics.ts";
-import { planExecuteContinuation } from "./execution.ts";
+import { planPullExecuteContinuation } from "./execution.ts";
 import {
   type EventQueueWakeState,
   hasEventQueueWakeTimer,
@@ -39,6 +39,38 @@ export interface ExecuteContinuationState {
 export function applyExecuteContinuation(
   state: ExecuteContinuationState,
 ): void {
+  if (state.getPullMode()) {
+    applyPullExecuteContinuation(state);
+    return;
+  }
+  applyPushExecuteContinuation(state);
+}
+
+function applyPushExecuteContinuation(
+  state: ExecuteContinuationState,
+): void {
+  const hasQueuedEventReadyNow = state.eventQueue.length > 0 &&
+    !isHeadEventParked(state.eventQueueWakeState);
+  const hasParkedHeadEvent = state.eventQueue.length > 0 &&
+    isHeadEventParked(state.eventQueueWakeState);
+  const shouldRerunAfterCurrentExecute = state
+    .consumeRerunAfterCurrentExecute();
+
+  if (
+    shouldRerunAfterCurrentExecute ||
+    state.pending.size > 0 ||
+    hasQueuedEventReadyNow
+  ) {
+    queueAnotherExecutionTick(state);
+    return;
+  }
+
+  applyQuiescentContinuation(state, { hasParkedHeadEvent });
+}
+
+function applyPullExecuteContinuation(
+  state: ExecuteContinuationState,
+): void {
   // In pull mode, we consider ourselves done when there are no effects or
   // effect-demanded computations to execute.
   const hasQueuedEventReadyNow = state.eventQueue.length > 0 &&
@@ -48,8 +80,7 @@ export function applyExecuteContinuation(
   const shouldRerunAfterCurrentExecute = state
     .consumeRerunAfterCurrentExecute();
 
-  const continuation = planExecuteContinuation({
-    pullMode: state.getPullMode(),
+  const continuation = planPullExecuteContinuation({
     pending: state.pending,
     dirty: state.dirty,
     effects: state.effects,
@@ -69,17 +100,18 @@ export function applyExecuteContinuation(
     return;
   }
 
-  // Keep scheduled = true since we're queuing another execution.
-  const timer = queueTask(() => {
-    state.setPendingQueueTaskTimer(null);
-    state.execute();
-  });
-  state.setPendingQueueTaskTimer(timer);
+  queueAnotherExecutionTick(state);
+}
+
+interface QuiescentContinuation {
+  readonly hasParkedHeadEvent: boolean;
+  readonly nextDirtyPullRunAt?: number;
+  readonly nextDirtyPullRunWaitsForIdle?: boolean;
 }
 
 function applyQuiescentContinuation(
   state: ExecuteContinuationState,
-  continuation: ReturnType<typeof planExecuteContinuation>,
+  continuation: QuiescentContinuation,
 ): void {
   if (continuation.nextDirtyPullRunAt !== undefined) {
     scheduleEventQueueWake(
@@ -115,6 +147,15 @@ function applyQuiescentContinuation(
   if (state.conditionallyScheduledEffects.size === 0) {
     state.changedWritesHistory.length = 0;
   }
+}
+
+function queueAnotherExecutionTick(state: ExecuteContinuationState): void {
+  // Keep scheduled = true since we're queuing another execution.
+  const timer = queueTask(() => {
+    state.setPendingQueueTaskTimer(null);
+    state.execute();
+  });
+  state.setPendingQueueTaskTimer(timer);
 }
 
 function markNotScheduled(state: ExecuteContinuationState): void {

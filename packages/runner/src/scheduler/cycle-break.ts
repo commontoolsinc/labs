@@ -1,5 +1,5 @@
 import { getLogger } from "@commonfabric/utils/logger";
-import { planCycleBreak, type SchedulerSettleResult } from "./execution.ts";
+import { planPullCycleBreak, type SchedulerSettleResult } from "./execution.ts";
 import type { Action } from "./types.ts";
 
 const logger = getLogger("scheduler", {
@@ -25,11 +25,12 @@ export async function breakCyclesIfNeeded(
   state: CycleBreakState,
   settleResult: SchedulerSettleResult,
 ): Promise<void> {
+  if (!state.getPullMode()) return;
+
   // If we hit max iterations without settling, break the cycle:
   // 1. Clear dirty/pending for computations that were in early iterations AND still in last workSet
   // 2. Run all remaining dirty effects so they don't get lost
-  const cycleBreakPlan = planCycleBreak({
-    pullMode: state.getPullMode(),
+  const cycleBreakPlan = planPullCycleBreak({
     settledEarly: settleResult.settledEarly,
     lastWorkSet: settleResult.lastWorkSet,
     earlyIterationComputations: settleResult.earlyIterationComputations,

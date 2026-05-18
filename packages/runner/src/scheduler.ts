@@ -78,7 +78,7 @@ import {
   collectPostEventDependencies as collectPostEventDependenciesState,
   createSettlingTracker,
   markExecuteStart,
-  planAdaptiveCycleDebounce,
+  planPullAdaptiveCycleDebounce,
   pushBoundedHistory,
   recordExecuteEnd,
   runSchedulerSettleLoop,
@@ -1145,12 +1145,13 @@ export class Scheduler {
   }
 
   private applyAdaptiveCycleDebounce(): void {
+    if (!this.pullMode) return;
+
     // Apply cycle-aware debounce to effects that ran multiple times this execute().
     // Pull computations are already demand-gated; debouncing them can leave a
     // live renderer observing stale materialized data until an arbitrary timer
     // fires.
-    const cycleDebouncePlan = planAdaptiveCycleDebounce({
-      pullMode: this.pullMode,
+    const cycleDebouncePlan = planPullAdaptiveCycleDebounce({
       executeStartTime: this.executeStartTime,
       runsThisExecute: this.runsThisExecute,
       canAutomaticallyDebounce: (action) =>

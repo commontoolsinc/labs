@@ -886,7 +886,6 @@ function skipUnchangedConditionalEffect(
   fn: Action,
 ): boolean {
   if (
-    !state.getPullMode() ||
     !state.effects.has(fn) ||
     !state.conditionallyScheduledEffects.has(fn) ||
     state.conditionalEffectHasChangedInputs(fn)
@@ -1001,8 +1000,7 @@ export interface CycleBreakPlan {
   dirtyEffectsToRun: Action[];
 }
 
-export function planCycleBreak(state: {
-  readonly pullMode: boolean;
+export function planPullCycleBreak(state: {
   readonly settledEarly: boolean;
   readonly lastWorkSet: ReadonlySet<Action>;
   readonly earlyIterationComputations: ReadonlySet<Action>;
@@ -1011,9 +1009,7 @@ export function planCycleBreak(state: {
   readonly runsThisExecute: ReadonlyMap<Action, number>;
   readonly isThrottled: (action: Action) => boolean;
 }): CycleBreakPlan {
-  const shouldBreak = state.pullMode &&
-    !state.settledEarly &&
-    state.lastWorkSet.size > 0;
+  const shouldBreak = !state.settledEarly && state.lastWorkSet.size > 0;
   if (!shouldBreak) {
     return { shouldBreak, computationsToClear: [], dirtyEffectsToRun: [] };
   }
@@ -1043,8 +1039,7 @@ export interface CycleDebounceUpdate {
   delayMs: number;
 }
 
-export function planAdaptiveCycleDebounce(state: {
-  readonly pullMode: boolean;
+export function planPullAdaptiveCycleDebounce(state: {
   readonly executeStartTime: number;
   readonly runsThisExecute: ReadonlyMap<Action, number>;
   readonly canAutomaticallyDebounce: (action: Action) => boolean;
@@ -1056,7 +1051,7 @@ export function planAdaptiveCycleDebounce(state: {
 } {
   const now = state.now ?? performance.now();
   const elapsedMs = now - state.executeStartTime;
-  if (!state.pullMode || elapsedMs < CYCLE_DEBOUNCE_THRESHOLD_MS) {
+  if (elapsedMs < CYCLE_DEBOUNCE_THRESHOLD_MS) {
     return { elapsedMs, updates: [] };
   }
 
@@ -1129,8 +1124,7 @@ export function planEventDirtyDependencyScheduling(state: {
   };
 }
 
-export function planExecuteContinuation(state: {
-  readonly pullMode: boolean;
+export function planPullExecuteContinuation(state: {
   readonly pending: ReadonlySet<Action>;
   readonly dirty: ReadonlySet<Action>;
   readonly effects: ReadonlySet<Action>;
@@ -1147,46 +1141,43 @@ export function planExecuteContinuation(state: {
   readonly now?: number;
 }): ExecuteContinuationPlan {
   const now = state.now ?? performance.now();
-  const hasPendingPullWork = state.pullMode
-    ? [...state.pending].some((action) =>
-      state.effects.has(action) ||
-      state.isDemandedPullComputation(action) ||
-      state.shouldRunFirstPullComputationInDemandContext(action)
-    )
-    : state.pending.size > 0;
+  const hasPendingPullWork = [...state.pending].some((action) =>
+    state.effects.has(action) ||
+    state.isDemandedPullComputation(action) ||
+    state.shouldRunFirstPullComputationInDemandContext(action)
+  );
 
   let nextDirtyPullRunAt: number | undefined;
   let nextDirtyPullRunWaitsForIdle = false;
-  const hasDirtyPullWork = state.pullMode &&
-    [...state.dirty].some((action) => {
-      if (
-        !state.effects.has(action) &&
-        !state.isDemandedPullComputation(action)
-      ) {
-        return false;
-      }
+  const hasDirtyPullWork = [...state.dirty].some((action) => {
+    if (
+      !state.effects.has(action) &&
+      !state.isDemandedPullComputation(action)
+    ) {
+      return false;
+    }
 
-      if (state.isDebouncedComputationWaiting(action)) {
-        const nextDebounceAt = state.getNextDebounceRunTime(action);
-        if (nextDebounceAt !== undefined) {
-          nextDirtyPullRunAt = minDefined(
-            nextDirtyPullRunAt,
-            nextDebounceAt,
-          );
-          nextDirtyPullRunWaitsForIdle ||= state.effects.has(action);
-        }
-        return false;
-      }
-
-      const nextEligibleAt = state.getNextEligibleRunTime(action);
-      if (nextEligibleAt !== undefined && nextEligibleAt > now) {
-        nextDirtyPullRunAt = minDefined(nextDirtyPullRunAt, nextEligibleAt);
+    if (state.isDebouncedComputationWaiting(action)) {
+      const nextDebounceAt = state.getNextDebounceRunTime(action);
+      if (nextDebounceAt !== undefined) {
+        nextDirtyPullRunAt = minDefined(
+          nextDirtyPullRunAt,
+          nextDebounceAt,
+        );
         nextDirtyPullRunWaitsForIdle ||= state.effects.has(action);
-        return false;
       }
+      return false;
+    }
 
-      return true;
-    });
+    const nextEligibleAt = state.getNextEligibleRunTime(action);
+    if (nextEligibleAt !== undefined && nextEligibleAt > now) {
+      nextDirtyPullRunAt = minDefined(nextDirtyPullRunAt, nextEligibleAt);
+      nextDirtyPullRunWaitsForIdle ||= state.effects.has(action);
+      return false;
+    }
+
+    return true;
+  });
 
   const hasImmediateRerunRequest = state.shouldRerunAfterCurrentExecute &&
     nextDirtyPullRunAt === undefined;
