@@ -1111,9 +1111,10 @@ export class Scheduler {
     newActionsWithoutDependencies: Iterable<Action>,
     eventBlockingDeps: Iterable<Action>,
   ): Set<Action> {
+    if (!this.pullMode) return new Set();
+
     // Build initial seeds for pull mode (effects + special actions).
     return buildPullInitialSeeds({
-      pullMode: this.pullMode,
       pending: this.pending,
       dirty: this.staleness.dirty,
       effects: this.effects,
