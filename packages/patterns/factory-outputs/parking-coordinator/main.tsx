@@ -315,7 +315,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     // --------------------------------------------------------
 
     const toggleAdminMode = action(() => {
-      adminMode.set(!(adminMode.get() ?? false));
+      adminMode.set(!adminMode.get());
     });
 
     const submitRequest = action<{ personName: string; date: string }>(
@@ -810,10 +810,10 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     });
 
     const toggleAddPersonForm = action(() =>
-      addPersonFormOpen.set(!(addPersonFormOpen.get() ?? false))
+      addPersonFormOpen.set(!addPersonFormOpen.get())
     );
     const toggleAddSpotForm = action(() =>
-      addSpotFormOpen.set(!(addSpotFormOpen.get() ?? false))
+      addSpotFormOpen.set(!addSpotFormOpen.get())
     );
 
     // --------------------------------------------------------
@@ -842,13 +842,6 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       !selectedPersonName.get() ||
       activeRequestDate < todayStr || people.get().length === 0
     );
-
-    const addPersonDisabled = computed(() =>
-      !(newPersonName.get() ?? "") || !(newPersonEmail.get() ?? "") ||
-      !(newPersonPriority.get() ?? "")
-    );
-
-    const addSpotDisabled = computed(() => !(newSpotNumber.get() ?? ""));
 
     const commuteModeOptions = [
       { label: "🚗 Drive", value: "drive" },
@@ -881,7 +874,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       const overrideSpot = gridOverrideSpot.get();
       const overrideDate = gridOverrideDate.get();
       const overridePerson = overridePersonName.get();
-      const weekGridShowAdmin = adminMode.get() ?? false;
+      const weekGridShowAdmin = adminMode.get();
 
       return allSpots.map((spot) => {
         const spotNum = spot.spotNumber;
@@ -927,7 +920,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       const allSpots = spots.get().filter((s) => s != null && s.active);
       const allRequests = requests.get();
       const currentPerson = selectedPersonName.get();
-      const todayStripShowAdmin = adminMode.get() ?? false;
+      const todayStripShowAdmin = adminMode.get();
 
       return allSpots.map((spot) => {
         const req = allRequests.find(
@@ -993,14 +986,12 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
               </span>
               <cf-button
                 variant={computed(() =>
-                  (adminMode.get() ?? false) ? "primary" : "secondary"
+                  adminMode.get() ? "primary" : "secondary"
                 )}
                 size="sm"
                 onClick={() => toggleAdminMode.send()}
               >
-                {computed(() =>
-                  `Admin: ${(adminMode.get() ?? false) ? "ON" : "OFF"}`
-                )}
+                {computed(() => `Admin: ${adminMode.get() ? "ON" : "OFF"}`)}
               </cf-button>
             </div>
           </div>
@@ -1389,7 +1380,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
               </cf-vstack>
 
               {/* === Section D: Admin (admin mode only) === */}
-              {adminMode
+              {adminMode.get()
                 ? (
                   <>
                     {/* People */}
@@ -1687,7 +1678,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                         );
                       })}
 
-                      {addPersonFormOpen
+                      {addPersonFormOpen.get()
                         ? (
                           <cf-card style="border: 2px dashed var(--cf-color-gray-200);">
                             <cf-vstack gap="2">
@@ -1784,7 +1775,6 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                 <cf-button
                                   variant="primary"
                                   size="sm"
-                                  disabled={addPersonDisabled}
                                   onClick={() => submitAddPerson.send()}
                                 >
                                   Add Person
@@ -2009,7 +1999,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                         );
                       })}
 
-                      {addSpotFormOpen
+                      {addSpotFormOpen.get()
                         ? (
                           <cf-card style="border: 2px dashed var(--cf-color-gray-200);">
                             <cf-vstack gap="2">
@@ -2059,7 +2049,6 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                 <cf-button
                                   variant="primary"
                                   size="sm"
-                                  disabled={addSpotDisabled}
                                   onClick={() => submitAddSpot.send()}
                                 >
                                   Add Spot
@@ -2089,7 +2078,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       spots,
       people,
       requests,
-      adminMode: computed(() => adminMode.get() ?? false),
+      adminMode: computed(() => Boolean(adminMode.get())),
       selectedPersonName: computed(() => selectedPersonName.get() ?? ""),
       requestDate: activeRequestDate,
       requestResult: computed(() => requestResult.get() ?? ""),
