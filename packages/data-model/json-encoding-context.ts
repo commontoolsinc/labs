@@ -418,28 +418,39 @@ export class JsonEncodingContext implements SerializationContext<string> {
       }
 
       // --- Type handler dispatch ---
+      //
+      // `TypeHandler.deserialize()` makes a contractual guarantee that its
+      // results are deep-frozen, rather than relying on every caller to
+      // freeze: every return out of this arm passes through `deepFreeze()`.
+      // This covers the handler's produced value (e.g. `FabricPrimitive`
+      // subclasses -- already frozen, so this is an O(1) cache hit) and the
+      // lenient-mode `ProblematicValue` fallback. The class-registry
+      // fallback below is a separate arm and is intentionally NOT covered by
+      // this contract.
       const handler = registry.getDeserializer(tag);
       if (handler) {
         if (this.lenient) {
           try {
-            return handler.deserialize(
+            return deepFreeze(handler.deserialize(
               state,
               runtime,
               (v: JsonWireValue) => this.deserialize(v, runtime, registry),
-            );
+            ));
           } catch (e: unknown) {
-            return new ProblematicValue(
-              tag,
-              state as unknown as FabricValue,
-              e instanceof Error ? e.message : String(e),
-            ) as unknown as FabricValue;
+            return deepFreeze(
+              new ProblematicValue(
+                tag,
+                state as unknown as FabricValue,
+                e instanceof Error ? e.message : String(e),
+              ) as unknown as FabricValue,
+            );
           }
         }
-        return handler.deserialize(
+        return deepFreeze(handler.deserialize(
           state,
           runtime,
           (v: JsonWireValue) => this.deserialize(v, runtime, registry),
-        );
+        ));
       }
 
       // --- Class registry fallback ---
