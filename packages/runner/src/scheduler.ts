@@ -42,8 +42,12 @@ import {
   type SchedulerActionIdentityState,
 } from "./scheduler/diagnostics.ts";
 import {
-  detectCausalCycles,
   type DiagnosisRecord,
+  runSchedulerDiagnosis,
+  runSchedulerIdempotencyCheck,
+  type SchedulerDiagnosisControlState,
+  startSchedulerDiagnosis,
+  stopSchedulerDiagnosis,
 } from "./scheduler/diagnosis.ts";
 import {
   type DependencyGraphState,
@@ -278,6 +282,37 @@ export class Scheduler {
     timestamp: number;
   }[] = [];
   private changeGroupToActionId = new Map<ChangeGroup, string>();
+  private diagnosisControlState: SchedulerDiagnosisControlState = {
+    getDiagnosisEnabled: () => this.diagnosisEnabled,
+    setDiagnosisEnabled: (enabled) => {
+      this.diagnosisEnabled = enabled;
+    },
+    getDiagnosisTimeout: () => this.diagnosisTimeout,
+    setDiagnosisTimeout: (timeout) => {
+      this.diagnosisTimeout = timeout;
+    },
+    getDiagnosisStartTime: () => this.diagnosisStartTime,
+    setDiagnosisStartTime: (time) => {
+      this.diagnosisStartTime = time;
+    },
+    getDiagnosisBusyTime: () => this.diagnosisBusyTime,
+    setDiagnosisBusyTime: (time) => {
+      this.diagnosisBusyTime = time;
+    },
+    getDiagnosisResolve: () => this.diagnosisResolve,
+    setDiagnosisResolve: (resolve) => {
+      this.diagnosisResolve = resolve;
+    },
+    diagnosisHistory: this.diagnosisHistory,
+    diagnosisNonIdempotent: this.diagnosisNonIdempotent,
+    causalEdges: this.causalEdges,
+    idempotencyViolations: this.idempotencyViolations,
+    computations: this.computations,
+    setIdempotencyCheckMode: (enabled) => {
+      this.idempotencyCheckMode = enabled;
+    },
+    runAction: (action) => this.run(action),
+  };
 
   // Debounce infrastructure for throttling slow actions
   private pendingQueueTaskTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1799,53 +1834,14 @@ export class Scheduler {
    * Automatically stops after durationMs.
    */
   private startDiagnosis(durationMs = 5000): void {
-    if (this.diagnosisEnabled) return;
-
-    this.diagnosisEnabled = true;
-    this.diagnosisStartTime = performance.now();
-    this.diagnosisBusyTime = 0;
-    this.diagnosisHistory.clear();
-    this.diagnosisNonIdempotent.length = 0;
-    this.causalEdges = [];
-
-    this.diagnosisTimeout = setTimeout(() => {
-      this.stopDiagnosis();
-    }, durationMs);
+    startSchedulerDiagnosis(this.diagnosisControlState, durationMs);
   }
 
   /**
    * Stops diagnosis mode and finalizes results.
    */
   private stopDiagnosis(): void {
-    if (!this.diagnosisEnabled) return;
-
-    this.diagnosisEnabled = false;
-    if (this.diagnosisTimeout) {
-      clearTimeout(this.diagnosisTimeout);
-      this.diagnosisTimeout = null;
-    }
-
-    const duration = performance.now() - this.diagnosisStartTime;
-
-    // Detect cycles from causal edges
-    const cycles = detectCausalCycles(this.causalEdges);
-
-    const result: SchedulerDiagnosisResult = {
-      nonIdempotent: this.diagnosisNonIdempotent,
-      cycles,
-      duration,
-      busyTime: this.diagnosisBusyTime,
-    };
-
-    // Clean up
-    this.diagnosisHistory.clear();
-    this.causalEdges = [];
-
-    // Resolve the promise if someone is waiting
-    if (this.diagnosisResolve) {
-      this.diagnosisResolve(result);
-      this.diagnosisResolve = null;
-    }
+    stopSchedulerDiagnosis(this.diagnosisControlState);
   }
 
   /**
@@ -1853,15 +1849,7 @@ export class Scheduler {
    * This is the main entry point for external callers (IPC, console).
    */
   runDiagnosis(durationMs = 5000): Promise<SchedulerDiagnosisResult> {
-    // If already running, stop and start fresh
-    if (this.diagnosisEnabled) {
-      this.stopDiagnosis();
-    }
-
-    return new Promise<SchedulerDiagnosisResult>((resolve) => {
-      this.diagnosisResolve = resolve;
-      this.startDiagnosis(durationMs);
-    });
+    return runSchedulerDiagnosis(this.diagnosisControlState, durationMs);
   }
 
   /**
@@ -1870,25 +1858,7 @@ export class Scheduler {
    * automatically gets a second synchronous run for comparison.
    */
   async runIdempotencyCheck(): Promise<SchedulerDiagnosisResult> {
-    this.idempotencyViolations.length = 0;
-    this.idempotencyCheckMode = true;
-
-    try {
-      // Snapshot computations to avoid iterating a live Set
-      const computationsSnapshot = [...this.computations];
-      for (const action of computationsSnapshot) {
-        await this.run(action);
-      }
-    } finally {
-      this.idempotencyCheckMode = false;
-    }
-
-    return {
-      nonIdempotent: [...this.idempotencyViolations],
-      cycles: [],
-      duration: 0,
-      busyTime: 0,
-    };
+    return await runSchedulerIdempotencyCheck(this.diagnosisControlState);
   }
 
   private handleError(error: Error, action: any) {
