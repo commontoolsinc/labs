@@ -23,15 +23,10 @@ export type MentionablePiece = {
   isMentionable?: boolean;
   mentioned?: MentionablePiece[];
   backlinks?: MentionablePiece[];
-  mentionable?: MentionableCell[] | { get?: () => MentionableCell[] };
+  mentionable?: MentionableCell[];
 };
 
 export type MentionableCell = Writable<MentionablePiece>;
-
-export type WritableBacklinks = {
-  mentioned?: WritableBacklinks[];
-  backlinks?: Writable<WritableBacklinks[]>;
-};
 
 type Input = {
   allPieces: Writable<MentionableCell[]>;
@@ -76,7 +71,7 @@ const computeIndex = lift<{ allPieces: Writable<MentionableCell[]> }, void>(
  * - Mentionable list is a union of:
  *   - every piece in `allPieces`
  *   - any items a piece exports via a `mentionable` property
- *     (either an array of pieces or a Cell of such an array)
+ *     (as an array of piece cells)
  *
  * The backlinks map is keyed by a piece's `content` value (falling back to
  * its `[NAME]`). This mirrors how existing note patterns identify notes when
@@ -95,22 +90,15 @@ function computeMentionableCells(
   }
 
   function collect(piece: MentionableCell, depth: number) {
-    const value = piece?.get?.();
+    if (!piece) return;
+    const value = piece.get();
     if (!value || value.isMentionable === false) return;
     if (isVisited(piece)) return;
     out.push(piece);
 
     if (depth >= MAX_MENTIONABLE_DEPTH) return;
 
-    const exported = value.mentionable;
-    let items: MentionableCell[] = [];
-    if (Array.isArray(exported)) {
-      items = exported;
-    } else if (exported && typeof (exported as any).get === "function") {
-      items = (exported as { get: () => MentionableCell[] }).get() ?? [];
-    }
-
-    for (const m of items) {
+    for (const m of value.mentionable ?? []) {
       collect(m, depth + 1);
     }
   }
