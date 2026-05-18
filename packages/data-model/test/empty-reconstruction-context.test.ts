@@ -32,4 +32,8 @@ describe("EMPTY_RECONSTRUCTION_CONTEXT", () => {
   it("is frozen (cannot have getCell replaced)", () => {
     expect(Object.isFrozen(EMPTY_RECONSTRUCTION_CONTEXT)).toBe(true);
   });
+
+  it("shouldDeepFreeze is true (the safe default, mirrors cloneIfNecessary frozen)", () => {
+    expect(EMPTY_RECONSTRUCTION_CONTEXT.shouldDeepFreeze).toBe(true);
+  });
 });

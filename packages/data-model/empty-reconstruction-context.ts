@@ -22,4 +22,8 @@ export const EMPTY_RECONSTRUCTION_CONTEXT: ReconstructionContext = Object
         `Cannot reconstruct cell reference \`${ref.id}\`: no runtime context provided.`,
       );
     },
+
+    // The deep-frozen result is the safe default (mirrors
+    // `cloneIfNecessary`'s `frozen` defaulting to `true`).
+    shouldDeepFreeze: true,
   });
