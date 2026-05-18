@@ -327,18 +327,23 @@ export interface ReconstructionContext {
   ): FabricInstance;
 
   /**
-   * Whether a reconstruction call should produce a deep-frozen result.
-   * `[RECONSTRUCT]` implementations query this and abide by it: when `true`,
-   * the reconstructed value they return must be deep-frozen; when `false`, a
-   * mutable result is acceptable.
-   *
-   * This is the same contract as `frozen` passed to `cloneIfNecessary()`
-   * (see `value-clone.ts`): `shouldDeepFreeze === true` corresponds to
+   * Signals whether a reconstruction call should produce a deep-frozen
+   * result: `true` means the reconstructed value should be deep-frozen,
+   * `false` means a mutable result is acceptable. Same contract as `frozen`
+   * passed to `cloneIfNecessary()` (see `value-clone.ts`):
+   * `shouldDeepFreeze === true` corresponds to
    * `cloneIfNecessary(value, { frozen: true })`.
    *
-   * Required (not optional): every context declares it. Implementations get
-   * it for free by extending `BaseReconstructionContext`, which centralizes
-   * the getter; the `cloneIfNecessary`-style `true` default lives there.
+   * Required (not optional): every context declares it. Contexts get it for
+   * free by extending `BaseReconstructionContext`, which centralizes the
+   * getter; the `cloneIfNecessary`-style `true` default lives there.
+   *
+   * Scope note: this declares the signal and its default. The `[RECONSTRUCT]`
+   * implementations do not yet consult it — query-and-abide enforcement at
+   * the reconstruction sites is the arm-2 / class-registry follow-on's
+   * responsibility and is intentionally NOT provided here. Until that lands,
+   * a `[RECONSTRUCT]` impl that ignores this signal is over-conservative
+   * (the default is `true` ⇒ the safe, deep-frozen outcome), never wrong.
    */
   readonly shouldDeepFreeze: boolean;
 }
