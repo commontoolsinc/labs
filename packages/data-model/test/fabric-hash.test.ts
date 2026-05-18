@@ -100,11 +100,7 @@ describe("FabricHash", () => {
   });
 });
 
-// -----------------------------------------------------------------
-// Tests of things in `value-hash.ts` that end up in `FabricHash`
-// -----------------------------------------------------------------
-
-describe("stuff from value-hash.ts", () => {
+describe("static methods", () => {
   it("FabricHash.fromJson() works on the result of instance method FabricHash.toJSON()", () => {
     const original = new FabricHash(SAMPLE_HASH, "fid1");
     const json = original.toJSON();
