@@ -848,7 +848,7 @@ describe("fabric-native-instances", () => {
           return this as unknown as FabricValue;
         }
         [IS_DEEP_FROZEN](
-          _isSubDeepFrozen: (value: FabricValue) => boolean,
+          _subIsDeepFrozen: (value: FabricValue) => boolean,
         ): boolean {
           return Object.isFrozen(this);
         }
@@ -956,7 +956,7 @@ describe("fabric-native-instances", () => {
   // instance itself.
   describe("[DEEP_FREEZE] / [IS_DEEP_FROZEN] protocol", () => {
     const subFreeze = (v: FabricValue): FabricValue => deepFreeze(v);
-    const isSubDeepFrozen = (v: FabricValue): boolean => isDeepFrozen(v);
+    const subIsDeepFrozen = (v: FabricValue): boolean => isDeepFrozen(v);
 
     describe("FabricError", () => {
       it("[DEEP_FREEZE] freezes wrapper + Error + recurses cause", () => {
@@ -984,11 +984,11 @@ describe("fabric-native-instances", () => {
 
       it("[IS_DEEP_FROZEN] true only when wrapper + Error frozen", () => {
         const fe = new FabricError(new Error("test"));
-        expect(fe[IS_DEEP_FROZEN](isSubDeepFrozen)).toBe(false);
+        expect(fe[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(false);
         Object.freeze(fe); // wrapper only; inner Error still mutable
-        expect(fe[IS_DEEP_FROZEN](isSubDeepFrozen)).toBe(false);
+        expect(fe[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(false);
         fe[DEEP_FREEZE](subFreeze);
-        expect(fe[IS_DEEP_FROZEN](isSubDeepFrozen)).toBe(true);
+        expect(fe[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(true);
       });
     });
 
@@ -1009,7 +1009,7 @@ describe("fabric-native-instances", () => {
           new FrozenMap<FabricValue, FabricValue>([["a", 1]]),
         );
         Object.freeze(fm);
-        expect(() => fm[IS_DEEP_FROZEN](isSubDeepFrozen)).toThrow(
+        expect(() => fm[IS_DEEP_FROZEN](subIsDeepFrozen)).toThrow(
           "FabricMap: not yet implemented",
         );
       });
@@ -1026,7 +1026,7 @@ describe("fabric-native-instances", () => {
       it("[IS_DEEP_FROZEN] throws not-yet-implemented", () => {
         const fs = new FabricSet(new FrozenSet<FabricValue>([1, 2]));
         Object.freeze(fs);
-        expect(() => fs[IS_DEEP_FROZEN](isSubDeepFrozen)).toThrow(
+        expect(() => fs[IS_DEEP_FROZEN](subIsDeepFrozen)).toThrow(
           "FabricSet: not yet implemented",
         );
       });
@@ -1044,9 +1044,9 @@ describe("fabric-native-instances", () => {
 
       it("[IS_DEEP_FROZEN] true only when wrapper + RegExp frozen", () => {
         const fr = new FabricRegExp(/abc/g);
-        expect(fr[IS_DEEP_FROZEN](isSubDeepFrozen)).toBe(false);
+        expect(fr[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(false);
         fr[DEEP_FREEZE](subFreeze);
-        expect(fr[IS_DEEP_FROZEN](isSubDeepFrozen)).toBe(true);
+        expect(fr[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(true);
       });
     });
 
@@ -1062,7 +1062,7 @@ describe("fabric-native-instances", () => {
         expect(result).toBe(pv);
         expect(Object.isFrozen(pv)).toBe(true);
         expect(Object.isFrozen(child)).toBe(true);
-        expect(pv[IS_DEEP_FROZEN](isSubDeepFrozen)).toBe(true);
+        expect(pv[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(true);
       });
 
       it("UnknownValue [DEEP_FREEZE] recurses state, freezes in place", () => {
@@ -1075,7 +1075,7 @@ describe("fabric-native-instances", () => {
         expect(result).toBe(uv);
         expect(Object.isFrozen(uv)).toBe(true);
         expect(Object.isFrozen(child)).toBe(true);
-        expect(uv[IS_DEEP_FROZEN](isSubDeepFrozen)).toBe(true);
+        expect(uv[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(true);
       });
     });
   });

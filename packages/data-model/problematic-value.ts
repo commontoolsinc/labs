@@ -45,9 +45,9 @@ export class ProblematicValue extends ExplicitTagValue {
    * wrapper is frozen and `state` is recursively deep-frozen. Never throws.
    */
   [IS_DEEP_FROZEN](
-    isSubDeepFrozen: (value: FabricValue) => boolean,
+    subIsDeepFrozen: (value: FabricValue) => boolean,
   ): boolean {
-    return Object.isFrozen(this) && isSubDeepFrozen(this.state);
+    return Object.isFrozen(this) && subIsDeepFrozen(this.state);
   }
 
   /** @inheritDoc */
