@@ -380,6 +380,11 @@ export class JsonEncodingContext implements SerializationContext<string> {
   /**
    * Deserializes a wire-format value back into modern runtime types.
    * See Section 4.5 of the formal spec.
+   *
+   * Frozen-ness contract: values returned via the type-handler dispatch arm
+   * are guaranteed deep-frozen at this boundary, so callers do not each have
+   * to freeze. The class-registry fallback arm is a separate sibling branch
+   * and is intentionally NOT covered by this contract.
    */
   private deserialize(
     data: JsonWireValue,

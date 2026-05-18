@@ -7,6 +7,7 @@ import { UnknownValue } from "../unknown-value.ts";
 import { ProblematicValue } from "../problematic-value.ts";
 import { FabricEpochDays, FabricEpochNsec } from "../fabric-epoch.ts";
 import { FabricError } from "../fabric-native-instances.ts";
+import { isDeepFrozen } from "../deep-freeze.ts";
 import {
   resetDataModelConfig,
   setDataModelConfig,
@@ -1673,7 +1674,7 @@ describe("JsonEncodingContext", () => {
         { "/EpochNsec@1": "AA" } as JsonWireValue,
       );
       expect(result).toBeInstanceOf(FabricEpochNsec);
-      expect(Object.isFrozen(result as object)).toBe(true);
+      expect(isDeepFrozen(result)).toBe(true);
     });
 
     it("lenient-mode ProblematicValue from a handler is deep-frozen", () => {
@@ -1692,7 +1693,7 @@ describe("JsonEncodingContext", () => {
         runtime,
       );
       expect(result).toBeInstanceOf(ProblematicValue);
-      expect(Object.isFrozen(result as object)).toBe(true);
+      expect(isDeepFrozen(result)).toBe(true);
     });
 
     it("handler round-trip yields a deep-frozen result", () => {
@@ -1700,7 +1701,7 @@ describe("JsonEncodingContext", () => {
         new FabricEpochNsec(1704067200000000000n) as FabricValue,
       );
       expect(result).toBeInstanceOf(FabricEpochNsec);
-      expect(Object.isFrozen(result as object)).toBe(true);
+      expect(isDeepFrozen(result)).toBe(true);
     });
   });
 
