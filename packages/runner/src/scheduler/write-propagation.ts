@@ -5,13 +5,11 @@ import type {
   IMemorySpaceAddress,
 } from "../storage/interface.ts";
 import { getTransactionWriteDetails } from "../storage/transaction-inspection.ts";
-import {
-  collectReadersForWrite,
-  type TriggerIndexState,
-} from "./trigger-index.ts";
+import type { TriggerIndexState } from "./trigger-index.ts";
 import type { Action, ReactivityLog } from "./types.ts";
 
-export interface WritePropagationState extends TriggerIndexState {
+export interface WritePropagationState {
+  readonly triggerIndex: TriggerIndexState;
   readonly changedWritesHistory: IMemorySpaceAddress[];
   readonly effects: ReadonlySet<Action>;
   readonly computations: ReadonlySet<Action>;
@@ -57,7 +55,7 @@ export function markReadersDirtyForChangedWrites(
 
   const readers = new Set<Action>();
   for (const write of sortAndCompactPaths([...changedWrites])) {
-    for (const reader of collectReadersForWrite(state, write)) {
+    for (const reader of state.triggerIndex.collectReadersForWrite(write)) {
       if (reader !== sourceAction) {
         readers.add(reader);
       }

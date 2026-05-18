@@ -1,5 +1,4 @@
 import type { MemorySpace } from "@commonfabric/memory/interface";
-import { determineTriggeredActions } from "../reactive-dependencies.ts";
 import type {
   ChangeGroup,
   IMemoryChange,
@@ -9,7 +8,6 @@ import type {
 } from "../storage/interface.ts";
 import type { TriggerIndexState } from "./trigger-index.ts";
 import { summarizeTriggerTraceValue } from "./diagnostics.ts";
-import { entityKey } from "./keys.ts";
 import type {
   Action,
   SpaceScopeAndURI,
@@ -27,7 +25,7 @@ export function schedulerMode(pullMode: boolean): SchedulerMode {
 export function hasRegisteredTriggers(
   state: TriggerIndexState,
 ): boolean {
-  return state.triggers.size > 0 || state.nonRecursiveTriggers.size > 0;
+  return state.hasRegisteredTriggers();
 }
 
 export function collectTriggeredActionsForChange(
@@ -39,50 +37,7 @@ export function collectTriggeredActionsForChange(
   hasMatchingTriggerPaths: boolean;
   triggeredActions: Action[];
 } {
-  const entity = entityKey({ ...change.address, space });
-  const paths = state.triggers.get(entity);
-  const nonRecursivePaths = state.nonRecursiveTriggers.get(entity);
-
-  if (!paths && !nonRecursivePaths) {
-    return {
-      entity,
-      hasMatchingTriggerPaths: false,
-      triggeredActions: [],
-    };
-  }
-
-  const triggeredActionSet = new Set<Action>();
-  if (paths) {
-    for (
-      const action of determineTriggeredActions(
-        paths,
-        change.before,
-        change.after,
-        change.address.path,
-      )
-    ) {
-      triggeredActionSet.add(action);
-    }
-  }
-  if (nonRecursivePaths) {
-    for (
-      const action of determineTriggeredActions(
-        nonRecursivePaths,
-        change.before,
-        change.after,
-        change.address.path,
-        { nonRecursive: true },
-      )
-    ) {
-      triggeredActionSet.add(action);
-    }
-  }
-
-  return {
-    entity,
-    hasMatchingTriggerPaths: true,
-    triggeredActions: [...triggeredActionSet],
-  };
+  return state.collectTriggeredActionsForChange(space, change);
 }
 
 export function createTriggerTraceEntry(state: {
@@ -189,8 +144,7 @@ interface CausalEdge {
 }
 
 export interface StorageNotificationState {
-  readonly triggers: TriggerIndexState["triggers"];
-  readonly nonRecursiveTriggers: TriggerIndexState["nonRecursiveTriggers"];
+  readonly triggerIndex: TriggerIndexState;
   readonly getPullMode: () => boolean;
   readonly getDiagnosisEnabled: () => boolean;
   readonly getCollectTriggerTrace: () => boolean;
@@ -248,10 +202,7 @@ export function processStorageNotification(
     state.recordCellUpdate(change);
 
     if (
-      !hasRegisteredTriggers({
-        triggers: state.triggers,
-        nonRecursiveTriggers: state.nonRecursiveTriggers,
-      })
+      !hasRegisteredTriggers(state.triggerIndex)
     ) {
       continue;
     }
@@ -261,10 +212,7 @@ export function processStorageNotification(
       hasMatchingTriggerPaths,
       triggeredActions,
     } = collectTriggeredActionsForChange(
-      {
-        triggers: state.triggers,
-        nonRecursiveTriggers: state.nonRecursiveTriggers,
-      },
+      state.triggerIndex,
       space,
       change,
     );

@@ -8,7 +8,10 @@ import {
   type DependencyUpdateState,
   setSchedulerDependencies,
 } from "./dependency-updates.ts";
-import { readsOverlapWrites } from "./scheduling-writes.ts";
+import {
+  readsOverlapWrites,
+  type WriterIndexState,
+} from "./scheduling-writes.ts";
 import {
   replaceActionTriggerPaths,
   setCancelForTriggerEntities,
@@ -94,7 +97,7 @@ export interface SchedulerSubscribeActionState {
   readonly effects: ReadonlySet<Action>;
   readonly dirty: ReadonlySet<Action>;
   readonly stale: ReadonlySet<Action>;
-  readonly writersByEntity: Map<SpaceScopeAndURI, Set<Action>>;
+  readonly writeIndex: WriterIndexState;
   readonly getPullMode: () => boolean;
   readonly setDebounce: (action: Action, ms: number) => void;
   readonly setNoDebounce: (action: Action, optOut: boolean) => void;
@@ -388,7 +391,7 @@ function hasStaleWriterForEffectReads(
   }
 
   for (const entity of entities) {
-    const writers = state.writersByEntity.get(entity);
+    const writers = state.writeIndex.writersByEntity.get(entity);
     if (!writers) continue;
 
     for (const writer of writers) {
@@ -492,7 +495,7 @@ export function registerParentChildAction(
   children.add(action);
 }
 
-interface SchedulerUnsubscribeActionState {
+export interface SchedulerUnsubscribeActionState {
   readonly cancels: WeakMap<Action, Cancel>;
   readonly dependencies: WeakMap<Action, ReactivityLog>;
   readonly actionChangeGroups: WeakMap<Action, ChangeGroup>;
@@ -504,8 +507,7 @@ interface SchedulerUnsubscribeActionState {
   readonly effects: Set<Action>;
   readonly computations: Set<Action>;
   readonly pullDemandedFirstRunComputations: WeakSet<Action>;
-  readonly actionWriteEntities: WeakMap<Action, Set<SpaceScopeAndURI>>;
-  readonly writersByEntity: Map<SpaceScopeAndURI, Set<Action>>;
+  readonly writeIndex: WriterIndexState;
   readonly populateDependenciesCallbacks: WeakMap<
     Action,
     PopulateDependenciesEntry
@@ -613,18 +615,7 @@ function removeActionWriteIndexes(
   state: SchedulerUnsubscribeActionState,
   action: Action,
 ): void {
-  const writeEntities = state.actionWriteEntities.get(action);
-  if (writeEntities) {
-    for (const entity of writeEntities) {
-      const writers = state.writersByEntity.get(entity);
-      writers?.delete(action);
-      if (writers && writers.size === 0) {
-        state.writersByEntity.delete(entity);
-      }
-    }
-    // Clear actionWriteEntities so resubscribe will re-register the action.
-    state.actionWriteEntities.delete(action);
-  }
+  state.writeIndex.clearAction(action);
 }
 
 function clearActionDelayState(
