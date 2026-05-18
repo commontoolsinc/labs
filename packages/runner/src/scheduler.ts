@@ -51,10 +51,7 @@ import {
   updateDependentEdgesForLog,
 } from "./scheduler/dependency-graph.ts";
 import { type DependencyUpdateState } from "./scheduler/dependency-updates.ts";
-import {
-  readsOverlapWrites,
-  SchedulerWriteIndex,
-} from "./scheduler/scheduling-writes.ts";
+import { SchedulerWriteIndex } from "./scheduler/scheduling-writes.ts";
 import {
   SchedulerTriggerIndex,
   SchedulerTriggerSubscriptions,
@@ -80,8 +77,6 @@ import {
   collectInitialExecuteDependencies as collectInitialExecuteDependenciesState,
   collectPostEventDependencies as collectPostEventDependenciesState,
   createSettlingTracker,
-  isDirtyPullActionRunnable,
-  isPendingPullActionRunnable,
   markExecuteStart,
   planAdaptiveCycleDebounce,
   pushBoundedHistory,
@@ -91,6 +86,18 @@ import {
   type SchedulerSettleResult,
   type SettlingTracker,
 } from "./scheduler/execution.ts";
+import {
+  collectPullIterationSeeds as collectPullIterationSeedsState,
+  conditionalEffectHasChangedInputs as conditionalEffectHasChangedInputsState,
+  type DirtyPullRunnableState,
+  type DirtyPullRunnableStateWithDebounce,
+  hasDeferredDirtyEffectWork as hasDeferredDirtyEffectWorkState,
+  hasRunnablePullWork as hasRunnablePullWorkState,
+  markEffectConditionallyScheduled as markEffectConditionallyScheduledState,
+  type PendingPullRunnableState,
+  type PullSchedulingState,
+  scheduleAffectedEffects as scheduleAffectedEffectsState,
+} from "./scheduler/pull-scheduling.ts";
 import { breakCyclesIfNeeded } from "./scheduler/cycle-break.ts";
 import { applyExecuteContinuation } from "./scheduler/continuation.ts";
 import type { CycleBreakState } from "./scheduler/cycle-break.ts";
@@ -153,7 +160,6 @@ import {
   buildSchedulerGraphSnapshot,
   type SchedulerGraphSnapshotState,
 } from "./scheduler/graph-snapshot.ts";
-import { collectTransitiveEffects } from "./scheduler/topology.ts";
 import type {
   Action,
   ActionRunTraceEntry,
@@ -178,13 +184,6 @@ const logger = getLogger("scheduler", {
   level: "warn",
 });
 
-type PendingPullRunnableState = Parameters<typeof isPendingPullActionRunnable>[
-  0
-];
-type DirtyPullRunnableState = Parameters<typeof isDirtyPullActionRunnable>[0];
-type DirtyPullRunnableStateWithDebounce = DirtyPullRunnableState & {
-  readonly isDebouncedComputationWaiting: (action: Action) => boolean;
-};
 type PendingDependencyCollectionState =
   SchedulerSubscribeActionState["pendingDependencyCollectionState"];
 type FilterStatsState = { filtered: number; executed: number };
@@ -349,6 +348,7 @@ export class Scheduler {
   private dirtyPullRunnableState!: DirtyPullRunnableState;
   private dirtyPullRunnableStateWithDebounce!:
     DirtyPullRunnableStateWithDebounce;
+  private pullSchedulingState!: PullSchedulingState;
   private writePropagationState!: WritePropagationState;
   private subscriptionState!: SchedulerSubscriptionState;
 
@@ -463,6 +463,7 @@ export class Scheduler {
     this.dirtyPullRunnableState = this.createDirtyPullRunnableState();
     this.dirtyPullRunnableStateWithDebounce = this
       .createDirtyPullRunnableStateWithDebounce();
+    this.pullSchedulingState = this.createPullSchedulingState();
     this.writePropagationState = this.createWritePropagationState();
     this.subscriptionState = this.createSubscriptionState();
     this.pendingDependencyCollectionState = this
@@ -692,6 +693,25 @@ export class Scheduler {
       ...this.dirtyPullRunnableState,
       isDebouncedComputationWaiting: (action) =>
         this.isDebouncedComputationWaiting(action),
+    };
+  }
+
+  private createPullSchedulingState(): PullSchedulingState {
+    return {
+      changedWritesHistory: this.changedWritesHistory,
+      conditionallyScheduledEffects: this.conditionallyScheduledEffects,
+      dependencies: this.dependencies,
+      pending: this.pending,
+      dirty: this.staleness.dirty,
+      effects: this.effects,
+      dependents: this.dependents,
+      pendingPullRunnableState: this.pendingPullRunnableState,
+      dirtyPullRunnableState: this.dirtyPullRunnableState,
+      dirtyPullRunnableStateWithDebounce: this
+        .dirtyPullRunnableStateWithDebounce,
+      getDebounce: (action) => this.delays.getDebounce(action),
+      scheduleWithDebounce: (action) => this.scheduleWithDebounce(action),
+      getActionId: (action) => this.getActionId(action),
     };
   }
 
@@ -1484,25 +1504,14 @@ export class Scheduler {
   }
 
   private markEffectConditionallyScheduled(effect: Action): void {
-    if (!this.conditionallyScheduledEffects.has(effect)) {
-      this.conditionallyScheduledEffects.set(
-        effect,
-        this.changedWritesHistory.length,
-      );
-    }
+    markEffectConditionallyScheduledState(this.pullSchedulingState, effect);
   }
 
   private conditionalEffectHasChangedInputs(effect: Action): boolean {
-    const changedWritesStart = this.conditionallyScheduledEffects.get(effect);
-    if (changedWritesStart === undefined) return true;
-
-    const changedWrites = this.changedWritesHistory.slice(changedWritesStart);
-    if (changedWrites.length === 0) return false;
-
-    const log = this.dependencies.get(effect);
-    if (!log) return false;
-
-    return readsOverlapWrites(log.reads, log.shallowReads, changedWrites);
+    return conditionalEffectHasChangedInputsState(
+      this.pullSchedulingState,
+      effect,
+    );
   }
 
   private collectDirtyDependenciesForLog(
@@ -1518,92 +1527,21 @@ export class Scheduler {
     );
   }
 
-  /**
-   * In pull mode, only effects are runnable seeds by default.
-   *
-   * Inline idempotency mode intentionally does not widen this to computations:
-   * it rechecks computations that already run due to explicit demand or an
-   * effect pull, rather than turning pull mode back into eager push mode.
-   */
   private collectPullIterationSeeds(workSet: Set<Action>): void {
-    for (const action of this.pending) {
-      if (isPendingPullActionRunnable(this.pendingPullRunnableState, action)) {
-        workSet.add(action);
-      }
-    }
-
-    for (const action of this.staleness.dirty) {
-      if (isDirtyPullActionRunnable(this.dirtyPullRunnableState, action)) {
-        this.pending.add(action);
-        workSet.add(action);
-      }
-    }
+    collectPullIterationSeedsState(this.pullSchedulingState, workSet);
   }
 
   private hasRunnablePullWork(): boolean {
-    for (const action of this.pending) {
-      if (isPendingPullActionRunnable(this.pendingPullRunnableState, action)) {
-        return true;
-      }
-    }
-
-    for (const action of this.staleness.dirty) {
-      if (
-        isDirtyPullActionRunnable(
-          this.dirtyPullRunnableStateWithDebounce,
-          action,
-        )
-      ) {
-        return true;
-      }
-    }
-
-    return false;
+    return hasRunnablePullWorkState(this.pullSchedulingState);
   }
   private hasDeferredDirtyEffectWork(): boolean {
-    for (const action of this.staleness.dirty) {
-      if (this.effects.has(action)) return true;
-    }
-    return false;
+    return hasDeferredDirtyEffectWorkState(this.pullSchedulingState);
   }
 
-  /**
-   * Finds and schedules all effects that transitively depend on the given computation.
-   */
   private scheduleAffectedEffects(
     computation: Action,
   ): TriggerTraceScheduledEffect[] {
-    const start = performance.now();
-    const scheduledEffects: TriggerTraceScheduledEffect[] = [];
-
-    try {
-      for (
-        const effect of collectTransitiveEffects(
-          { dependents: this.dependents, effects: this.effects },
-          computation,
-        )
-      ) {
-        const pendingBefore = this.pending.has(effect);
-        const dirtyBefore = this.staleness.dirty.has(effect);
-        const debounceMs = this.delays.getDebounce(effect);
-        if (
-          !pendingBefore && !dirtyBefore &&
-          !this.conditionallyScheduledEffects.has(effect)
-        ) {
-          this.markEffectConditionallyScheduled(effect);
-        }
-        this.scheduleWithDebounce(effect);
-        scheduledEffects.push({
-          actionId: this.getActionId(effect),
-          pendingBefore,
-          dirtyBefore,
-          debounceMs,
-        });
-      }
-    } finally {
-      logger.time(start, "scheduler", "scheduleAffectedEffects");
-    }
-    return scheduledEffects;
+    return scheduleAffectedEffectsState(this.pullSchedulingState, computation);
   }
 
   // ============================================================
