@@ -848,7 +848,7 @@ describe("fabric-native-instances", () => {
           return this as unknown as FabricValue;
         }
         [IS_DEEP_FROZEN](
-          _isSubDeepFrozen: (value: FabricValue) => boolean,
+          _subIsDeepFrozen: (value: FabricValue) => boolean,
         ): boolean {
           return Object.isFrozen(this);
         }

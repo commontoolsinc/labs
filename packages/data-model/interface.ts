@@ -59,7 +59,7 @@ export const DEEP_FREEZE: unique symbol = Symbol.for("common.deepFreeze");
  * frozen, without mutating it. The sibling-of-`[DEEP_FREEZE]` *check*: it
  * verifies the instance's own internal slot(s) are in canonical deep-frozen
  * form and recurses into any nested `FabricValue`s via the provided
- * `isSubDeepFrozen` callback, returning the boolean conjunction. This is an
+ * `subIsDeepFrozen` callback, returning the boolean conjunction. This is an
  * abstract member of `FabricInstance`, so the generic deep-frozen type guard
  * operates on any `FabricInstance` by gating on `instanceof` against the
  * abstract base and invoking this member -- it does not enumerate concrete
@@ -109,7 +109,7 @@ export abstract class FabricInstance extends FabricSpecialObject {
    * Indicates whether this instance is already deeply frozen, without
    * mutating it. Checks this instance's own internal slot(s) are in
    * canonical deep-frozen form and recurses into each nested `FabricValue`
-   * via the provided `isSubDeepFrozen` callback, returning the boolean
+   * via the provided `subIsDeepFrozen` callback, returning the boolean
    * conjunction. Implementations must NOT import or call the deep-frozen
    * type guard directly -- recursion is handed through the callback,
    * mirroring `[DEEP_FREEZE]`'s callback shape and avoiding an import cycle.
@@ -118,7 +118,7 @@ export abstract class FabricInstance extends FabricSpecialObject {
    * canonical deep-frozen form returns `false`.
    */
   abstract [IS_DEEP_FROZEN](
-    isSubDeepFrozen: (value: FabricValue) => boolean,
+    subIsDeepFrozen: (value: FabricValue) => boolean,
   ): boolean;
 
   /**

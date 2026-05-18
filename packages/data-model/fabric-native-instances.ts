@@ -245,21 +245,21 @@ export class FabricError extends FabricNativeWrapper<Error> {
    * deep-frozen. Never throws.
    */
   [IS_DEEP_FROZEN](
-    isSubDeepFrozen: (value: FabricValue) => boolean,
+    subIsDeepFrozen: (value: FabricValue) => boolean,
   ): boolean {
     if (!Object.isFrozen(this) || !Object.isFrozen(this.error)) {
       return false;
     }
     if (
       this.error.cause !== undefined &&
-      !isSubDeepFrozen(this.error.cause as FabricValue)
+      !subIsDeepFrozen(this.error.cause as FabricValue)
     ) {
       return false;
     }
     for (const key of Object.keys(this.error)) {
       if (UNSAFE_KEYS.has(key) || key === "cause") continue;
       if (
-        !isSubDeepFrozen(
+        !subIsDeepFrozen(
           (this.error as unknown as Record<string, FabricValue>)[key],
         )
       ) {
@@ -402,7 +402,7 @@ export class FabricMap
    * `[DEEP_FREEZE]` above.
    */
   [IS_DEEP_FROZEN](
-    _isSubDeepFrozen: (value: FabricValue) => boolean,
+    _subIsDeepFrozen: (value: FabricValue) => boolean,
   ): boolean {
     throw new Error("FabricMap: not yet implemented");
   }
@@ -467,7 +467,7 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
    * `[DEEP_FREEZE]` above.
    */
   [IS_DEEP_FROZEN](
-    _isSubDeepFrozen: (value: FabricValue) => boolean,
+    _subIsDeepFrozen: (value: FabricValue) => boolean,
   ): boolean {
     throw new Error("FabricSet: not yet implemented");
   }
@@ -559,7 +559,7 @@ export class FabricRegExp extends FabricNativeWrapper<RegExp> {
    * never throws.
    */
   [IS_DEEP_FROZEN](
-    _isSubDeepFrozen: (value: FabricValue) => boolean,
+    _subIsDeepFrozen: (value: FabricValue) => boolean,
   ): boolean {
     return Object.isFrozen(this) && Object.isFrozen(this.regex);
   }
