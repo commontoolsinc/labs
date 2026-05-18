@@ -47,14 +47,13 @@ export default pattern((__cf_pattern_input) => {
             properties: {
                 b: {
                     anyOf: [{
-                            type: "undefined"
+                            type: "number"
                         }, {
-                            type: "number",
-                            asCell: ["cell"]
-                        }]
+                            type: "undefined"
+                        }],
+                    asCell: ["readonly"]
                 }
-            },
-            required: ["b"]
+            }
         } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_2)({
             b: b
         }).for({ stream: ["__patternResult", "readB"] }, true)

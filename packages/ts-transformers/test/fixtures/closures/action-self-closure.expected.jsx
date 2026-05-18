@@ -72,16 +72,34 @@ export default pattern((__cf_pattern_input) => {
         type: "object",
         properties: {
             self: {
+                $ref: "#/$defs/TestOutput"
+            },
+            count: {
+                type: "number",
+                asCell: ["cell"]
+            }
+        },
+        required: ["self", "count"],
+        $defs: {
+            TestOutput: {
                 type: "object",
                 properties: {
                     title: {
                         type: "string"
+                    },
+                    count: {
+                        type: "number"
+                    },
+                    $NAME: {
+                        type: "string"
+                    },
+                    $UI: {
+                        $ref: "https://commonfabric.org/schemas/vnode.json"
                     }
                 },
-                required: ["title"]
+                required: ["title", "count", "$NAME", "$UI"]
             }
-        },
-        required: ["self"]
+        }
     } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_2)({
         self: self,
         count: count

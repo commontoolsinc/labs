@@ -19,6 +19,21 @@ export function hoistModuleScopedBuilderCallbacks(
   context: TransformationContext,
 ): ts.SourceFile {
   const hoistedStatements: ts.Statement[] = [];
+  // Counter for synthesizing unique hoisted-callback names per source file.
+  // We deliberately do NOT use `context.factory.createUniqueName` here: that
+  // helper returns identifiers whose `.text` is the bare prefix
+  // (`"__cfModuleCallback"`) and defers numeric suffixing to the emitter at
+  // print time. Downstream stages — notably `SchemaInjectionTransformer`'s
+  // `getSyntheticModuleCallbackInitializer` (`schema-injection.ts`) — match
+  // call-site `__cfModuleCallback_N` references back to their initializers
+  // by `identifier.text === declaration.name.text`. With `createUniqueName`
+  // every hoisted identifier has the same `.text`, so every lookup matches
+  // the first declaration regardless of which `_N` the printed source shows
+  // — and capability summaries from the *first* hoisted callback get
+  // applied to *every* hoisted callback's call site. Synthesizing the
+  // suffix into `.text` directly keeps the identifier's stored name and
+  // its printed name in sync, so identity-by-text resolution is sound.
+  let hoistCounter = 0;
 
   const visit: ts.Visitor = (node: ts.Node): ts.Node => {
     const visited = ts.visitEachChild(node, visit, context.tsContext);
@@ -82,8 +97,9 @@ export function hoistModuleScopedBuilderCallbacks(
       }
 
       changed = true;
-      const callbackName = context.factory.createUniqueName(
-        "__cfModuleCallback",
+      hoistCounter += 1;
+      const callbackName = context.factory.createIdentifier(
+        `__cfModuleCallback_${hoistCounter}`,
       );
       hoistedStatements.push(
         context.factory.createVariableStatement(
