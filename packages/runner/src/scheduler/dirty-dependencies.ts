@@ -4,7 +4,7 @@ import type {
   SchedulerEventPreflightActionSummary,
   SchedulerEventPreflightStats,
 } from "../telemetry.ts";
-import { collectDirectWritersForLog } from "./dependency-index.ts";
+import { collectDirectWritersForLog } from "./dependency-graph.ts";
 import type {
   Action,
   DirtyDependencyTraceContext,

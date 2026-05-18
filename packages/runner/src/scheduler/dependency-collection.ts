@@ -3,11 +3,13 @@ import type { Runtime } from "../runtime.ts";
 import { txToReactivityLog } from "./reactivity.ts";
 import {
   type DependencyUpdateState,
+  setSchedulerDependencies,
+} from "./dependency-updates.ts";
+import {
   replaceActionTriggerPaths,
   setCancelForTriggerEntities,
-  setSchedulerDependencies,
   type TriggerSubscriptionState,
-} from "./dependency-index.ts";
+} from "./trigger-index.ts";
 import type {
   Action,
   PopulateDependenciesEntry,

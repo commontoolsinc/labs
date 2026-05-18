@@ -15,7 +15,7 @@ import {
   ignoreReadForScheduling,
   txToReactivityLog,
 } from "../src/scheduler.ts";
-import { setSchedulerDependencies } from "../src/scheduler/dependency-index.ts";
+import { setSchedulerDependencies } from "../src/scheduler/dependency-updates.ts";
 import {
   isDemandedPullComputation,
   type PullDemandState,

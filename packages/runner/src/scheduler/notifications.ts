@@ -7,7 +7,7 @@ import type {
   IStorageTransaction,
   StorageNotification,
 } from "../storage/interface.ts";
-import type { TriggerIndexState } from "./dependency-index.ts";
+import type { TriggerIndexState } from "./trigger-index.ts";
 import { summarizeTriggerTraceValue } from "./diagnostics.ts";
 import { entityKey } from "./keys.ts";
 import type {

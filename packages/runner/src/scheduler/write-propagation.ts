@@ -8,7 +8,7 @@ import { getTransactionWriteDetails } from "../storage/transaction-inspection.ts
 import {
   collectReadersForWrite,
   type TriggerIndexState,
-} from "./dependency-index.ts";
+} from "./trigger-index.ts";
 import type { Action, ReactivityLog } from "./types.ts";
 
 export interface WritePropagationState extends TriggerIndexState {

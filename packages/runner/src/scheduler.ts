@@ -49,16 +49,20 @@ import {
 } from "./scheduler/diagnosis.ts";
 import {
   type DependencyGraphState,
-  type DependencyUpdateState,
+  updateDependentEdgesForLog,
+} from "./scheduler/dependency-graph.ts";
+import { type DependencyUpdateState } from "./scheduler/dependency-updates.ts";
+import {
   getSchedulingWrites as getSchedulingWritesFromState,
   getSchedulingWritesMap as getSchedulingWritesMapFromState,
   readsOverlapWrites,
   type SchedulingWriteState,
+  type WriterIndexState,
+} from "./scheduler/scheduling-writes.ts";
+import {
   type TriggerIndexState,
   type TriggerSubscriptionState,
-  updateDependentEdgesForLog,
-  type WriterIndexState,
-} from "./scheduler/dependency-index.ts";
+} from "./scheduler/trigger-index.ts";
 import {
   collectDependenciesForAction as collectDependenciesForActionState,
   type DependencyCollectionState,

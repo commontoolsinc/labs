@@ -3,15 +3,17 @@ import type { Cancel } from "../cancel.ts";
 import { toMemorySpaceAddress } from "../link-utils.ts";
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
 import type { ChangeGroup } from "../storage/interface.ts";
+import { pendingDependencyCollectionMightAffect } from "./dependency-graph.ts";
 import {
   type DependencyUpdateState,
-  pendingDependencyCollectionMightAffect,
-  readsOverlapWrites,
+  setSchedulerDependencies,
+} from "./dependency-updates.ts";
+import { readsOverlapWrites } from "./scheduling-writes.ts";
+import {
   replaceActionTriggerPaths,
   setCancelForTriggerEntities,
-  setSchedulerDependencies,
   type TriggerSubscriptionState,
-} from "./dependency-index.ts";
+} from "./trigger-index.ts";
 import { entityKey } from "./keys.ts";
 import type {
   Action,
