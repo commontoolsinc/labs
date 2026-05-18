@@ -32,6 +32,7 @@ export function collectSummaryEntries(
 ): SummaryIndexEntry[] {
   return collectSummaryEntriesImpl<SummarizablePiece>(
     mentionable,
+    { logUnexpected: true },
   ) as SummaryIndexEntry[];
 }
 

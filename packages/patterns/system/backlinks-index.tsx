@@ -23,8 +23,10 @@ export type MentionablePiece = {
   isMentionable?: boolean;
   mentioned?: MentionablePiece[];
   backlinks?: MentionablePiece[];
-  mentionable?: MentionablePiece[] | { get?: () => MentionablePiece[] };
+  mentionable?: MentionableCell[] | { get?: () => MentionableCell[] };
 };
+
+export type MentionableCell = Writable<MentionablePiece>;
 
 export type WritableBacklinks = {
   mentioned?: WritableBacklinks[];
@@ -32,16 +34,16 @@ export type WritableBacklinks = {
 };
 
 type Input = {
-  allPieces: MentionablePiece[];
+  allPieces: Writable<MentionableCell[]>;
 };
 
 type Output = {
-  mentionable: MentionablePiece[];
+  mentionable: MentionableCell[];
 };
 
-const computeIndex = lift<{ allPieces: WritableBacklinks[] | undefined }, void>(
+const computeIndex = lift<{ allPieces: Writable<MentionableCell[]> }, void>(
   ({ allPieces }) => {
-    const cs = allPieces ?? [];
+    const cs = allPieces.get() ?? [];
 
     // Reset backlinks for pieces that support it.
     // Many pieces don't have backlinks (e.g., auth pieces, google patterns),
@@ -49,16 +51,16 @@ const computeIndex = lift<{ allPieces: WritableBacklinks[] | undefined }, void>(
     // Also skip undefined/null entries that may exist in the array.
     for (const c of cs) {
       if (!c) continue;
-      c.backlinks?.set?.([]);
+      (c as any).key?.("backlinks")?.set?.([]);
     }
 
     // Populate backlinks from mentioned references.
     // Again, use optional chaining since not all pieces support backlinks.
     for (const c of cs) {
       if (!c) continue;
-      const mentions = c.mentioned ?? [];
+      const mentions = c.get()?.mentioned ?? [];
       for (const m of mentions) {
-        m?.backlinks?.push?.(c);
+        m?.backlinks?.push?.(c as any);
       }
     }
   },
@@ -82,30 +84,30 @@ const computeIndex = lift<{ allPieces: WritableBacklinks[] | undefined }, void>(
  */
 const MAX_MENTIONABLE_DEPTH = 5;
 
-const computeMentionable = lift<
-  { allPieces: MentionablePiece[] },
-  MentionablePiece[]
->(({ allPieces: pieceList }) => {
+function computeMentionableCells(
+  pieceList: readonly MentionableCell[],
+): MentionableCell[] {
   const cs = pieceList ?? [];
-  const out: MentionablePiece[] = [];
+  const out: MentionableCell[] = [];
 
-  function isVisited(piece: MentionablePiece): boolean {
+  function isVisited(piece: MentionableCell): boolean {
     return out.some((other) => equals(piece, other));
   }
 
-  function collect(piece: MentionablePiece, depth: number) {
-    if (!piece || piece.isMentionable === false) return;
+  function collect(piece: MentionableCell, depth: number) {
+    const value = piece?.get?.();
+    if (!value || value.isMentionable === false) return;
     if (isVisited(piece)) return;
     out.push(piece);
 
     if (depth >= MAX_MENTIONABLE_DEPTH) return;
 
-    const exported = piece.mentionable;
-    let items: MentionablePiece[] = [];
+    const exported = value.mentionable;
+    let items: MentionableCell[] = [];
     if (Array.isArray(exported)) {
       items = exported;
     } else if (exported && typeof (exported as any).get === "function") {
-      items = (exported as { get: () => MentionablePiece[] }).get() ?? [];
+      items = (exported as { get: () => MentionableCell[] }).get() ?? [];
     }
 
     for (const m of items) {
@@ -118,7 +120,7 @@ const computeMentionable = lift<
   }
 
   return out;
-});
+}
 
 type Entry = {
   piece: any;
@@ -151,10 +153,11 @@ const EntryRow = pattern<Entry, { [UI]: VNode }>(({ piece, backlinks }) => {
 });
 
 const BacklinksIndex = pattern<Input, Output>(({ allPieces }) => {
-  computeIndex({ allPieces } as { allPieces: WritableBacklinks[] });
+  computeIndex({ allPieces: allPieces as any });
 
-  // Compute mentionable list from allPieces reactively
-  const mentionable = computeMentionable({ allPieces });
+  // Preserve cells in the mentionable list. A lift() result schema materializes
+  // these into plain values, which loses scoped fields and breaks cell links.
+  const mentionable = computed(() => computeMentionableCells(allPieces.get()));
 
   const query = Writable.of("");
 
@@ -164,8 +167,9 @@ const BacklinksIndex = pattern<Input, Output>(({ allPieces }) => {
     const result: Entry[] = [];
     for (const piece of items) {
       if (!piece) continue;
-      const name = (piece[NAME] ?? "").toString();
-      const bl = Array.isArray(piece.backlinks) ? piece.backlinks : [];
+      const value = piece.get();
+      const name = (value?.[NAME] ?? "").toString();
+      const bl = Array.isArray(value?.backlinks) ? value.backlinks : [];
       result.push({ piece, name, backlinks: bl });
     }
     return result;
