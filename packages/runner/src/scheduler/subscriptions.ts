@@ -490,61 +490,100 @@ export function registerParentChildAction(
   children.add(action);
 }
 
+interface SchedulerUnsubscribeActionState {
+  readonly cancels: WeakMap<Action, Cancel>;
+  readonly dependencies: WeakMap<Action, ReactivityLog>;
+  readonly actionChangeGroups: WeakMap<Action, ChangeGroup>;
+  readonly changeGroupToActionId: Map<ChangeGroup, string>;
+  readonly pending: Set<Action>;
+  readonly conditionallyScheduledEffects: Map<Action, number>;
+  readonly reverseDependencies: WeakMap<Action, Set<Action>>;
+  readonly dependents: WeakMap<Action, Set<Action>>;
+  readonly effects: Set<Action>;
+  readonly computations: Set<Action>;
+  readonly pullDemandedFirstRunComputations: WeakSet<Action>;
+  readonly actionWriteEntities: WeakMap<Action, Set<SpaceScopeAndURI>>;
+  readonly writersByEntity: Map<SpaceScopeAndURI, Set<Action>>;
+  readonly populateDependenciesCallbacks: WeakMap<
+    Action,
+    PopulateDependenciesEntry
+  >;
+  readonly pendingDependencyCollection: Set<Action>;
+  readonly getActionId: (action: Action) => string;
+  readonly clearDirectDirty: (action: Action) => void;
+  readonly forceClearStale: (action: Action) => void;
+  readonly cancelDebounceTimer: (action: Action) => void;
+  readonly clearComputationDebounceState: (
+    action: Action,
+    options?: { cancelTimer?: boolean },
+  ) => void;
+}
+
 export function unsubscribeSchedulerAction(
-  state: {
-    readonly cancels: WeakMap<Action, Cancel>;
-    readonly dependencies: WeakMap<Action, ReactivityLog>;
-    readonly actionChangeGroups: WeakMap<Action, ChangeGroup>;
-    readonly changeGroupToActionId: Map<ChangeGroup, string>;
-    readonly pending: Set<Action>;
-    readonly conditionallyScheduledEffects: Map<Action, number>;
-    readonly reverseDependencies: WeakMap<Action, Set<Action>>;
-    readonly dependents: WeakMap<Action, Set<Action>>;
-    readonly effects: Set<Action>;
-    readonly computations: Set<Action>;
-    readonly pullDemandedFirstRunComputations: WeakSet<Action>;
-    readonly actionWriteEntities: WeakMap<Action, Set<SpaceScopeAndURI>>;
-    readonly writersByEntity: Map<SpaceScopeAndURI, Set<Action>>;
-    readonly populateDependenciesCallbacks: WeakMap<
-      Action,
-      PopulateDependenciesEntry
-    >;
-    readonly pendingDependencyCollection: Set<Action>;
-    readonly getActionId: (action: Action) => string;
-    readonly clearDirectDirty: (action: Action) => void;
-    readonly forceClearStale: (action: Action) => void;
-    readonly cancelDebounceTimer: (action: Action) => void;
-    readonly clearComputationDebounceState: (
-      action: Action,
-      options?: { cancelTimer?: boolean },
-    ) => void;
-  },
+  state: SchedulerUnsubscribeActionState,
   action: Action,
   options: {
     preserveChangeGroup?: boolean;
   } = {},
 ): void {
   const { preserveChangeGroup = false } = options;
+  cancelActionSubscription(state, action);
+  state.dependencies.delete(action);
+  clearActionChangeGroup(state, action, preserveChangeGroup);
+  clearActionSchedulingState(state, action);
+  removeReverseDependencyEdges(state, action);
+  clearActionTypeTracking(state, action);
+  removeActionWriteIndexes(state, action);
+  // NOTE: We intentionally keep parent-child relationships intact.
+  // They're needed for cycle detection (identifying obsolete children
+  // when parent is re-running). They'll be cleaned up when parent is
+  // garbage collected (WeakMap).
+  clearActionDelayState(state, action);
+  clearDependencyCollectionState(state, action);
+}
+
+function cancelActionSubscription(
+  state: SchedulerUnsubscribeActionState,
+  action: Action,
+): void {
   state.cancels.get(action)?.();
   state.cancels.delete(action);
-  state.dependencies.delete(action);
-  if (!preserveChangeGroup) {
-    const changeGroup = state.actionChangeGroups.get(action);
-    const actionId = state.getActionId(action);
-    if (
-      changeGroup !== undefined &&
-      state.changeGroupToActionId.get(changeGroup) === actionId
-    ) {
-      state.changeGroupToActionId.delete(changeGroup);
-    }
-    state.actionChangeGroups.delete(action);
+}
+
+function clearActionChangeGroup(
+  state: SchedulerUnsubscribeActionState,
+  action: Action,
+  preserveChangeGroup: boolean,
+): void {
+  if (preserveChangeGroup) return;
+
+  const changeGroup = state.actionChangeGroups.get(action);
+  const actionId = state.getActionId(action);
+  if (
+    changeGroup !== undefined &&
+    state.changeGroupToActionId.get(changeGroup) === actionId
+  ) {
+    state.changeGroupToActionId.delete(changeGroup);
   }
+  state.actionChangeGroups.delete(action);
+}
+
+function clearActionSchedulingState(
+  state: SchedulerUnsubscribeActionState,
+  action: Action,
+): void {
   state.pending.delete(action);
   state.conditionallyScheduledEffects.delete(action);
   // Clear direct/stale state before removing outgoing edges so downstream
   // stale counts are decremented through normal propagation.
   state.clearDirectDirty(action);
   state.forceClearStale(action);
+}
+
+function removeReverseDependencyEdges(
+  state: SchedulerUnsubscribeActionState,
+  action: Action,
+): void {
   const dependencies = state.reverseDependencies.get(action);
   if (dependencies) {
     for (const dependency of dependencies) {
@@ -557,11 +596,21 @@ export function unsubscribeSchedulerAction(
     state.reverseDependencies.delete(action);
   }
   state.dependents.delete(action);
-  // Clean up effect/computation tracking.
+}
+
+function clearActionTypeTracking(
+  state: SchedulerUnsubscribeActionState,
+  action: Action,
+): void {
   state.effects.delete(action);
   state.computations.delete(action);
   state.pullDemandedFirstRunComputations.delete(action);
-  // Clean up writersByEntity index.
+}
+
+function removeActionWriteIndexes(
+  state: SchedulerUnsubscribeActionState,
+  action: Action,
+): void {
   const writeEntities = state.actionWriteEntities.get(action);
   if (writeEntities) {
     for (const entity of writeEntities) {
@@ -574,13 +623,20 @@ export function unsubscribeSchedulerAction(
     // Clear actionWriteEntities so resubscribe will re-register the action.
     state.actionWriteEntities.delete(action);
   }
-  // NOTE: We intentionally keep parent-child relationships intact.
-  // They're needed for cycle detection (identifying obsolete children
-  // when parent is re-running). They'll be cleaned up when parent is
-  // garbage collected (WeakMap).
+}
+
+function clearActionDelayState(
+  state: SchedulerUnsubscribeActionState,
+  action: Action,
+): void {
   state.cancelDebounceTimer(action);
   state.clearComputationDebounceState(action, { cancelTimer: false });
-  // Clean up dependency collection tracking.
+}
+
+function clearDependencyCollectionState(
+  state: SchedulerUnsubscribeActionState,
+  action: Action,
+): void {
   state.populateDependenciesCallbacks.delete(action);
   state.pendingDependencyCollection.delete(action);
 }
