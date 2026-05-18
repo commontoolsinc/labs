@@ -7,15 +7,16 @@ import {
   valueFromJson,
 } from "../json-encoding.ts";
 import { FabricError } from "../fabric-native-instances.ts";
-import type { ReconstructionContext } from "../fabric-value.ts";
 import type { FabricValue } from "../fabric-value.ts";
+import { BaseReconstructionContext } from "../base-reconstruction-context.ts";
 
 /** Mock runtime for deserialization calls. */
-const mockRuntime: ReconstructionContext = {
-  getCell(_ref) {
+class MockRuntime extends BaseReconstructionContext {
+  override getCell(): never {
     throw new Error("getCell not implemented in test runtime");
-  },
-};
+  }
+}
+const mockRuntime = new MockRuntime();
 
 /** Encode then decode a value through the current dispatch configuration. */
 function roundTrip(value: FabricValue): FabricValue {

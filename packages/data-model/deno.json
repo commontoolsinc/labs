@@ -21,6 +21,7 @@
   },
   "exports": {
     "./array-utils": "./array-utils.ts",
+    "./base-reconstruction-context": "./base-reconstruction-context.ts",
     "./bigint-encoding": "./bigint-encoding.ts",
     "./deep-freeze": "./deep-freeze.ts",
     "./explicit-tag-value": "./explicit-tag-value.ts",

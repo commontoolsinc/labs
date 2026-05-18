@@ -328,18 +328,19 @@ export interface ReconstructionContext {
 
   /**
    * Whether a reconstruction call should produce a deep-frozen result.
-   * `[RECONSTRUCT]` implementations are expected to query this and abide by
-   * it: when `true`, the reconstructed value they return must be deep-frozen;
-   * when `false`, a mutable result is acceptable.
+   * `[RECONSTRUCT]` implementations query this and abide by it: when `true`,
+   * the reconstructed value they return must be deep-frozen; when `false`, a
+   * mutable result is acceptable.
    *
    * This is the same contract as `frozen` passed to `cloneIfNecessary()`
    * (see `value-clone.ts`): `shouldDeepFreeze === true` corresponds to
-   * `cloneIfNecessary(value, { frozen: true })`. Like that option, it
-   * defaults to `true` when not provided — the deep-frozen result is the
-   * safe default, so an implementation that does not yet consult this
-   * signal still behaves correctly (over-conservatively), never wrongly.
+   * `cloneIfNecessary(value, { frozen: true })`.
+   *
+   * Required (not optional): every context declares it. Implementations get
+   * it for free by extending `BaseReconstructionContext`, which centralizes
+   * the getter; the `cloneIfNecessary`-style `true` default lives there.
    */
-  readonly shouldDeepFreeze?: boolean;
+  readonly shouldDeepFreeze: boolean;
 }
 
 /**

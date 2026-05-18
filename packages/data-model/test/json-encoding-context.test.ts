@@ -1,27 +1,35 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { JsonEncodingContext } from "../json-encoding-context.ts";
-import type { FabricValue, ReconstructionContext } from "../interface.ts";
+import type { FabricValue } from "../interface.ts";
 import type { JsonWireValue } from "../json-type-handlers.ts";
 import { UnknownValue } from "../unknown-value.ts";
 import { ProblematicValue } from "../problematic-value.ts";
 import { FabricEpochDays, FabricEpochNsec } from "../fabric-epoch.ts";
 import { FabricError } from "../fabric-native-instances.ts";
 import { isDeepFrozen } from "../deep-freeze.ts";
+import { BaseReconstructionContext } from "../base-reconstruction-context.ts";
 import {
   resetDataModelConfig,
   setDataModelConfig,
   shallowFabricFromNativeValue,
 } from "../fabric-value.ts";
 
+/**
+ * Shared test `ReconstructionContext`: `getCell()` always throws (no test
+ * here reaches it); `shouldDeepFreeze` is inherited from
+ * `BaseReconstructionContext` (defaults to `true`).
+ */
+class TestReconstructionContext extends BaseReconstructionContext {
+  override getCell(): never {
+    throw new Error("getCell not implemented in test runtime");
+  }
+}
+
 /** Creates a standard test context (non-lenient) and a mock runtime. */
 function makeTestContext() {
   const context = new JsonEncodingContext();
-  const runtime: ReconstructionContext = {
-    getCell(_ref) {
-      throw new Error("getCell not implemented in test runtime");
-    },
-  };
+  const runtime = new TestReconstructionContext();
   return { context, runtime };
 }
 
@@ -491,11 +499,7 @@ describe("JsonEncodingContext", () => {
 
     it("non-string state -> ProblematicValue (lenient)", () => {
       const ctx = new JsonEncodingContext({ lenient: true });
-      const runtime: ReconstructionContext = {
-        getCell(_ref) {
-          throw new Error("getCell not implemented in test runtime");
-        },
-      };
+      const runtime = new TestReconstructionContext();
       const encoded = ENCODING_PREFIX +
         JSON.stringify({ "/SpecialNumber@1": 0 });
       const result = ctx.decode(encoded, runtime);
@@ -507,11 +511,7 @@ describe("JsonEncodingContext", () => {
 
     it("unknown literal -> ProblematicValue (lenient)", () => {
       const ctx = new JsonEncodingContext({ lenient: true });
-      const runtime: ReconstructionContext = {
-        getCell(_ref) {
-          throw new Error("getCell not implemented in test runtime");
-        },
-      };
+      const runtime = new TestReconstructionContext();
       const encoded = ENCODING_PREFIX +
         JSON.stringify({ "/SpecialNumber@1": "Infinity" }); // missing leading +
       const result = ctx.decode(encoded, runtime);
@@ -589,11 +589,7 @@ describe("JsonEncodingContext", () => {
 
     it("non-string state -> ProblematicValue (lenient)", () => {
       const ctx = new JsonEncodingContext({ lenient: true });
-      const runtime: ReconstructionContext = {
-        getCell(_ref) {
-          throw new Error("getCell not implemented in test runtime");
-        },
-      };
+      const runtime = new TestReconstructionContext();
       const encodedJson = ENCODING_PREFIX +
         JSON.stringify({ "/Symbol@1": 42 });
       const result = ctx.decode(encodedJson, runtime);
@@ -1560,11 +1556,7 @@ describe("JsonEncodingContext", () => {
 
     it("lenient mode wraps failed handler reconstruction", () => {
       const context = new JsonEncodingContext({ lenient: true });
-      const runtime: ReconstructionContext = {
-        getCell(_ref) {
-          throw new Error("not available");
-        },
-      };
+      const runtime = new TestReconstructionContext();
 
       // BigInt@1 with a non-string state produces ProblematicValue
       // in lenient mode because the handler validates the state type.
@@ -1580,11 +1572,7 @@ describe("JsonEncodingContext", () => {
 
     it("lenient mode wraps failed class-registry reconstruction", () => {
       const context = new JsonEncodingContext({ lenient: true });
-      const runtime: ReconstructionContext = {
-        getCell(_ref) {
-          throw new Error("not available");
-        },
-      };
+      const runtime = new TestReconstructionContext();
 
       // Map@1 always throws on RECONSTRUCT ("not yet implemented"),
       // triggering lenient wrapping.
@@ -1683,11 +1671,7 @@ describe("JsonEncodingContext", () => {
       // so the contract deep-freezes it (not a crash: it is the value
       // lenient mode produces precisely to avoid crashing).
       const ctx = new JsonEncodingContext({ lenient: true });
-      const runtime: ReconstructionContext = {
-        getCell(_ref) {
-          throw new Error("not available");
-        },
-      };
+      const runtime = new TestReconstructionContext();
       const result = ctx.decode(
         ENCODING_PREFIX + JSON.stringify({ "/BigInt@1": 42 }),
         runtime,
@@ -1720,22 +1704,14 @@ describe("JsonEncodingContext", () => {
 
     it("decode parses a prefixed JSON string back to a value", () => {
       const ctx = new JsonEncodingContext();
-      const runtime: ReconstructionContext = {
-        getCell(_ref) {
-          throw new Error("not implemented");
-        },
-      };
+      const runtime = new TestReconstructionContext();
       const result = ctx.decode(ENCODING_PREFIX + "42", runtime);
       expect(result).toBe(42);
     });
 
     it("encode/decode round-trip for tagged types", () => {
       const ctx = new JsonEncodingContext();
-      const runtime: ReconstructionContext = {
-        getCell(_ref) {
-          throw new Error("not implemented");
-        },
-      };
+      const runtime = new TestReconstructionContext();
       const se = new FabricError(new Error("test"));
       const encoded = ctx.encode(se as FabricValue);
       const decoded = ctx.decode(encoded, runtime);
@@ -1745,11 +1721,7 @@ describe("JsonEncodingContext", () => {
 
     it("encodeToBytes/decodeFromBytes round-trip", () => {
       const ctx = new JsonEncodingContext();
-      const runtime: ReconstructionContext = {
-        getCell(_ref) {
-          throw new Error("not implemented");
-        },
-      };
+      const runtime = new TestReconstructionContext();
       const data = {
         name: "test",
         error: new FabricError(new Error("fail")),

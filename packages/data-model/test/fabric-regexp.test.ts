@@ -5,8 +5,8 @@ import {
   FabricInstance,
   type FabricValue,
   RECONSTRUCT,
-  type ReconstructionContext,
 } from "../interface.ts";
+import { BaseReconstructionContext } from "../base-reconstruction-context.ts";
 import {
   FabricNativeWrapper,
   FabricRegExp,
@@ -26,11 +26,12 @@ import {
 import { hashOf } from "../value-hash.ts";
 
 /** Dummy reconstruction context for tests. */
-const dummyContext: ReconstructionContext = {
-  getCell(_ref) {
+class DummyReconstructionContext extends BaseReconstructionContext {
+  override getCell(): never {
     throw new Error("getCell not implemented in test");
-  },
-};
+  }
+}
+const dummyContext = new DummyReconstructionContext();
 
 // ============================================================================
 // Tests

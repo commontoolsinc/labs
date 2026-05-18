@@ -20,7 +20,7 @@ import {
   getMemoryProtocolFlags,
   type PatchOp,
 } from "@commonfabric/memory/v2";
-import type { ReconstructionContext } from "@commonfabric/data-model/interface";
+import { BaseReconstructionContext } from "@commonfabric/data-model/base-reconstruction-context";
 import type {
   ClientCommit,
   ConfirmedRead,
@@ -53,11 +53,12 @@ const helloOk = () => ({
   protocol: "memory",
   flags: getMemoryProtocolFlags(),
 } as const);
-const testReconstructionContext: ReconstructionContext = {
-  getCell() {
+class TestReconstructionContext extends BaseReconstructionContext {
+  override getCell(): never {
     throw new Error("getCell is not available in stacked commit transport");
-  },
-};
+  }
+}
+const testReconstructionContext = new TestReconstructionContext();
 const DOCS = {
   A: "of:memory-v2-stacked-A" as URI,
   B: "of:memory-v2-stacked-B" as URI,

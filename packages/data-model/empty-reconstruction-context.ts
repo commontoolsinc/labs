@@ -6,6 +6,21 @@
  */
 
 import type { FabricInstance, ReconstructionContext } from "./interface.ts";
+import { BaseReconstructionContext } from "./base-reconstruction-context.ts";
+
+/**
+ * `ReconstructionContext` whose `getCell()` always throws. `shouldDeepFreeze`
+ * is inherited from `BaseReconstructionContext` (defaults to `true`).
+ */
+class EmptyReconstructionContext extends BaseReconstructionContext {
+  override getCell(
+    ref: { id: string; path: string[]; space: string },
+  ): FabricInstance {
+    throw new Error(
+      `Cannot reconstruct cell reference \`${ref.id}\`: no runtime context provided.`,
+    );
+  }
+}
 
 /**
  * Shared `ReconstructionContext` instance whose `getCell()` always throws.
@@ -14,16 +29,4 @@ import type { FabricInstance, ReconstructionContext } from "./interface.ts";
  * unexpected reconstruction obvious instead of silent.
  */
 export const EMPTY_RECONSTRUCTION_CONTEXT: ReconstructionContext = Object
-  .freeze({
-    getCell(
-      ref: { id: string; path: string[]; space: string },
-    ): FabricInstance {
-      throw new Error(
-        `Cannot reconstruct cell reference \`${ref.id}\`: no runtime context provided.`,
-      );
-    },
-
-    // The deep-frozen result is the safe default (mirrors
-    // `cloneIfNecessary`'s `frozen` defaulting to `true`).
-    shouldDeepFreeze: true,
-  });
+  .freeze(new EmptyReconstructionContext());

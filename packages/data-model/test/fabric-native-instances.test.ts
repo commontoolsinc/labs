@@ -7,8 +7,8 @@ import {
   type FabricValue,
   IS_DEEP_FROZEN,
   RECONSTRUCT,
-  type ReconstructionContext,
 } from "../interface.ts";
+import { BaseReconstructionContext } from "../base-reconstruction-context.ts";
 import {
   FabricError,
   FabricMap,
@@ -30,11 +30,12 @@ import { ExplicitTagValue } from "../explicit-tag-value.ts";
 import { deepFreeze, isDeepFrozen } from "../deep-freeze.ts";
 
 /** Dummy reconstruction context for tests. */
-const dummyContext: ReconstructionContext = {
-  getCell(_ref) {
+class DummyReconstructionContext extends BaseReconstructionContext {
+  override getCell(): never {
     throw new Error("getCell not implemented in test");
-  },
-};
+  }
+}
+const dummyContext = new DummyReconstructionContext();
 
 // ============================================================================
 // Tests
