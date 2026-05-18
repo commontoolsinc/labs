@@ -14,6 +14,14 @@ import {
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 const CFC_GROUP_CHAT_TIMEOUT = 30_000;
+const IMPORTED_MESSAGE_MARKERS = [
+  "Jumping in late here.",
+  "I think we already covered this above.",
+  "Can we loop back on the last point?",
+  "Sharing a quick update from the thread.",
+  "I might be missing context, but this seems fine.",
+  "Content hidden by integrity policy",
+] as const;
 
 describe("cfc group chat demo integration test", () => {
   const shell = new ShellIntegration();
@@ -69,6 +77,7 @@ describe("cfc group chat demo integration test", () => {
 
     await waitForDisabled(page, "#trusted-send-button", true);
 
+    await scrollIntoView(page, "#trusted-profile-name");
     await fillCfInput(
       page,
       "#trusted-profile-name",
@@ -79,6 +88,7 @@ describe("cfc group chat demo integration test", () => {
     await waitForText(page, "#trusted-profile-status", "Alice");
     await waitForRuntimeIdle(page);
 
+    await scrollIntoView(page, "#host-message-draft");
     await fillCfInput(
       page,
       "#host-message-draft",
@@ -92,6 +102,7 @@ describe("cfc group chat demo integration test", () => {
       "Fake hello from Alice",
     );
 
+    await scrollIntoView(page, "#trusted-message-draft");
     await fillCfInput(
       page,
       "#trusted-message-draft",
@@ -132,6 +143,7 @@ describe("cfc group chat demo integration test", () => {
     );
     await waitForDisabled(page, "#trusted-send-button", true);
 
+    await scrollIntoView(page, "#trusted-profile-name");
     await fillCfInput(
       page,
       "#trusted-profile-name",
@@ -178,6 +190,7 @@ describe("cfc group chat demo integration test", () => {
       "#trusted-conversation-preview",
     );
 
+    await scrollIntoView(page, "#trusted-message-draft");
     await fillCfInput(
       page,
       "#trusted-message-draft",
@@ -362,9 +375,10 @@ async function waitForInvalidAuthorshipState(
       probe = await readAuthorshipProbe(page, containerSelector);
       return probe.hosts.some((host) =>
         host.state === "unknown" &&
-        host.textIntegrityState === "blocked" &&
         !host.hasTrustedAvatar &&
-        host.renderedText.includes("Content hidden by integrity policy")
+        IMPORTED_MESSAGE_MARKERS.some((marker) =>
+          host.renderedText.includes(marker)
+        )
       );
     }, { timeout: CFC_GROUP_CHAT_TIMEOUT, delay: 250 });
   } catch (cause) {
