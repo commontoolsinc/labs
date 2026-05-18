@@ -3,7 +3,7 @@ import { hashOf, hashStringOf } from "@commonfabric/data-model/value-hash";
 import {
   hashSchema,
   internSchema,
-  internSchemaAsHashString,
+  internSchemaAsTaggedHashString,
 } from "@commonfabric/data-model/schema-hash";
 import { MIME } from "@commonfabric/memory/interface";
 import type { JSONSchemaObj } from "@commonfabric/api";
@@ -384,7 +384,7 @@ export class CycleTracker<K> {
  *
  * Identity check on `partialKey`, structural check on `extraKey` via
  * the interned hash string of `extraKey`: the inner per-partialKey map
- * is keyed on `internSchemaAsHashString(extraKey ?? true)`, so repeat
+ * is keyed on `internSchemaAsTaggedHashString(extraKey ?? true)`, so repeat
  * calls with a structurally-equal schema re-lookup the same entry in
  * O(1) without re-hashing — the intern cache's WeakMap returns the
  * canonical hash string without invoking `hashStringOf()` on
@@ -419,7 +419,7 @@ export class CompoundCycleTracker<
       existing = new Map();
       this.partial.set(partialKey, existing);
     }
-    const hash = internSchemaAsHashString(extraKey ?? true);
+    const hash = internSchemaAsTaggedHashString(extraKey ?? true);
     if (existing.has(hash)) {
       return null;
     }
@@ -443,7 +443,7 @@ export class CompoundCycleTracker<
     if (existing === undefined) {
       return undefined;
     }
-    const hash = internSchemaAsHashString(extraKey ?? true);
+    const hash = internSchemaAsTaggedHashString(extraKey ?? true);
     return existing.get(hash);
   }
 }
@@ -3415,8 +3415,8 @@ export function mergeAnyOfBranchSchemas(
   // Interning each input stabilizes its identity so downstream callers
   // hit the hash-cache fast path; `||` separates outer from branches,
   // `|` separates branches.
-  const key = `${internSchemaAsHashString(outerSchema)}||` +
-    branches.map(internSchemaAsHashString).join("|");
+  const key = `${internSchemaAsTaggedHashString(outerSchema)}||` +
+    branches.map(internSchemaAsTaggedHashString).join("|");
   const cached = _mergeAnyOfBranchCache.get(key);
   if (cached !== undefined) return cached;
 
@@ -3500,7 +3500,7 @@ function _mergeAnyOfBranchSchemasUncached(
     // identities for any downstream caller that re-hashes them.
     const uniqueHashes = new Map<string, JSONSchema>();
     for (const s of schemas) {
-      uniqueHashes.set(internSchemaAsHashString(s), s);
+      uniqueHashes.set(internSchemaAsTaggedHashString(s), s);
     }
     if (uniqueHashes.size === 1) {
       // All branches agree on this property's schema

@@ -1275,12 +1275,12 @@ export const prepareBoundaryCommit = (
     ensureSchemaDocument(
       tx,
       space,
-      schemaAndHash.hashString,
+      schemaAndHash.taggedHashString,
       schemaAndHash.schema,
     );
     const metadata: CfcMetadata = {
       version: 1,
-      schemaHash: schemaAndHash.hashString,
+      schemaHash: schemaAndHash.taggedHashString,
       labelMap: {
         version: 1,
         entries: coalescedLabelEntries,

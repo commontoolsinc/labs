@@ -35,21 +35,21 @@ describe("constructor", () => {
   });
 });
 
-describe("hashString getter", () => {
+describe("`.taggedHashString` getter", () => {
   it("returns a string", () => {
     const sah = new SchemaAndHash(true, HASH_A);
-    expect(typeof sah.hashString).toBe("string");
+    expect(typeof sah.taggedHashString).toBe("string");
   });
 
-  it("matches hash.toString()", () => {
+  it("matches hash.taggedHashString", () => {
     const sah = new SchemaAndHash(true, HASH_A);
-    expect(sah.hashString).toBe(sah.hash.toString());
+    expect(sah.taggedHashString).toBe(sah.hash.taggedHashString);
   });
 
-  it("different hashes produce different hashStrings", () => {
+  it("different hashes produce different results", () => {
     const sahA = new SchemaAndHash(true, HASH_A);
     const sahB = new SchemaAndHash(true, HASH_B);
-    expect(sahA.hashString).not.toBe(sahB.hashString);
+    expect(sahA.taggedHashString).not.toBe(sahB.taggedHashString);
   });
 });
 
