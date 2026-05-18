@@ -227,7 +227,10 @@ export class JsonEncodingContext implements SerializationContext<string> {
 
   /**
    * Unwraps a wire representation. Detects single-key objects with `/`-prefixed
-   * keys. Returns `{ tag, state }` or `null` if not a tagged value.
+   * keys. Returns `{ tag, state }` or `null` if not a tagged value. The
+   * returned `state` is extracted directly from `data`, so if `data` is
+   * deep-frozen (as it should be) then `state` will be too.
+   *
    * See Section 5.4 of the formal spec.
    */
   private unwrapTag(
@@ -427,7 +430,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
 
       // `TAGS.quote` literal handling (Section 5.6).
       if (tag === TAGS.quote) {
-        return deepFreeze(state) as FabricValue;
+        return state as FabricValue;
       }
 
       // --- Type handler dispatch ---
