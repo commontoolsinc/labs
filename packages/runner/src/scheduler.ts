@@ -176,6 +176,17 @@ const logger = getLogger("scheduler", {
   level: "warn",
 });
 
+type PendingPullRunnableState = Parameters<typeof isPendingPullActionRunnable>[
+  0
+];
+type DirtyPullRunnableState = Parameters<typeof isDirtyPullActionRunnable>[0];
+type DirtyPullRunnableStateWithDebounce = DirtyPullRunnableState & {
+  readonly isDebouncedComputationWaiting: (action: Action) => boolean;
+};
+type PendingDependencyCollectionState =
+  SchedulerSubscribeActionState["pendingDependencyCollectionState"];
+type FilterStatsState = { filtered: number; executed: number };
+
 // Re-export types that tests expect from scheduler
 export type { ErrorWithContext };
 export type {
@@ -294,79 +305,22 @@ export class Scheduler {
     timestamp: number;
   }[] = [];
   private changeGroupToActionId = new Map<ChangeGroup, string>();
-  private diagnosisControlState: SchedulerDiagnosisControlState = {
-    getDiagnosisEnabled: () => this.diagnosisEnabled,
-    setDiagnosisEnabled: (enabled) => {
-      this.diagnosisEnabled = enabled;
-    },
-    getDiagnosisTimeout: () => this.diagnosisTimeout,
-    setDiagnosisTimeout: (timeout) => {
-      this.diagnosisTimeout = timeout;
-    },
-    getDiagnosisStartTime: () => this.diagnosisStartTime,
-    setDiagnosisStartTime: (time) => {
-      this.diagnosisStartTime = time;
-    },
-    getDiagnosisBusyTime: () => this.diagnosisBusyTime,
-    setDiagnosisBusyTime: (time) => {
-      this.diagnosisBusyTime = time;
-    },
-    getDiagnosisResolve: () => this.diagnosisResolve,
-    setDiagnosisResolve: (resolve) => {
-      this.diagnosisResolve = resolve;
-    },
-    diagnosisHistory: this.diagnosisHistory,
-    diagnosisNonIdempotent: this.diagnosisNonIdempotent,
-    causalEdges: this.causalEdges,
-    idempotencyViolations: this.idempotencyViolations,
-    computations: this.computations,
-    setIdempotencyCheckMode: (enabled) => {
-      this.idempotencyCheckMode = enabled;
-    },
-    runAction: (action) => this.run(action),
-  };
+  private diagnosisControlState!: SchedulerDiagnosisControlState;
 
   // Debounce infrastructure for throttling slow actions
   private pendingQueueTaskTimer: ReturnType<typeof setTimeout> | null = null;
-  private eventQueueWakeState: EventQueueWakeState = {
-    timer: null,
-    wakeAt: null,
-    eventQueue: this.eventQueue,
-    isDisposed: () => this.disposed,
-    queueExecution: () => this.queueExecution(),
-  };
+  private eventQueueWakeState!: EventQueueWakeState;
   private eventQueueState!: SchedulerEventQueueState;
   private delays = new SchedulerDelays({
     actionStats: this.actionStats,
     getActionId: (action) => this.getActionId(action),
   });
-  private delayControlState: SchedulerDelayControlState = {
-    delays: this.delays,
-    computations: this.computations,
-    effects: this.effects,
-    dirty: this.staleness.dirty,
-    pending: this.pending,
-    getPullMode: () => this.pullMode,
-    isPullDemandRootEffect: (action) =>
-      isPullDemandRootEffect(this.pullDemandState, action),
-    queueExecution: () => this.queueExecution(),
-    logDebounce: (message) =>
-      logger.debug("schedule-debounce", () => [message]),
-  };
+  private delayControlState!: SchedulerDelayControlState;
   private inFlightSourceState: InFlightSourceState = {
     inFlightSources: new WeakMap<Action, Set<IStorageTransaction>>(),
   };
 
-  private schedulingWriteState: SchedulingWriteState = {
-    // Current-known writes are rebuilt on each dependency update from actual
-    // writes plus declared/potential writes. This is the default scheduling view.
-    currentKnownWrites: new WeakMap<Action, IMemorySpaceAddress[]>(),
-    // Historical writes preserve the legacy cumulative union and are only used
-    // when the experimental historical-write mode is enabled.
-    historicalMightWrite: new WeakMap<Action, IMemorySpaceAddress[]>(),
-    useHistoricalMightWrite: () =>
-      this.runtime.experimental.schedulerHistoricalMightWrite === true,
-  };
+  private schedulingWriteState!: SchedulingWriteState;
   private writerIndexState: WriterIndexState = {
     // Index: entity -> actions that write to it (for fast dependency lookup).
     // Updated from the active scheduling write set.
@@ -374,25 +328,11 @@ export class Scheduler {
     // Reverse index: action -> entities it writes to (for cleanup)
     actionWriteEntities: new WeakMap<Action, Set<SpaceScopeAndURI>>(),
   };
-  private dirtyDependencyCollectionState: DirtyDependencyCollectionState = {
-    collectStack: this.collectStack,
-    getTrace: () => this.dirtyDependencyTraceContext,
-    dirty: this.staleness.dirty,
-    pending: this.pending,
-    computations: this.computations,
-    reverseDependencies: this.reverseDependencies,
-    dependencies: this.dependencies,
-    writersByEntity: this.writerIndexState.writersByEntity,
-    effects: this.effects,
-    isStale: (target) => this.staleness.isStale(target),
-    getSchedulingWrites: (target) =>
-      getSchedulingWritesFromState(this.schedulingWriteState, target),
-    getActionId: (target) => this.getActionId(target),
-  };
+  private dirtyDependencyCollectionState!: DirtyDependencyCollectionState;
   // Track actions scheduled for first time (bypass filter)
   private scheduledFirstTime = new Set<Action>();
   // Filter stats for diagnostics
-  private filterStats = { filtered: 0, executed: 0 };
+  private filterStats: FilterStatsState = { filtered: 0, executed: 0 };
 
   // Settle stats for performance analysis (opt-in via enableSettleStats())
   private collectSettleStats = false;
@@ -405,35 +345,7 @@ export class Scheduler {
   private eventPreflightTelemetryEnabled = false;
   private changedWritesHistory: IMemorySpaceAddress[] = [];
   private conditionallyScheduledEffects = new Map<Action, number>();
-  private storageNotificationState: StorageNotificationState = {
-    triggers: this.triggerIndexState.triggers,
-    nonRecursiveTriggers: this.triggerIndexState.nonRecursiveTriggers,
-    getPullMode: () => this.pullMode,
-    getDiagnosisEnabled: () => this.diagnosisEnabled,
-    getCollectTriggerTrace: () => this.collectTriggerTrace,
-    changeGroupToActionId: this.changeGroupToActionId,
-    recordCausalEdge: (edge) => {
-      this.causalEdges.push(edge);
-    },
-    actionChangeGroups: this.actionChangeGroups,
-    effects: this.effects,
-    pending: this.pending,
-    dirty: this.staleness.dirty,
-    inFlightSources: this.inFlightSourceState.inFlightSources,
-    conditionallyScheduledEffects: this.conditionallyScheduledEffects,
-    getActionId: (target) => this.getActionId(target),
-    recordCellUpdate: (change) =>
-      this.runtime.telemetry.submit({
-        type: "cell.update",
-        change,
-      }),
-    recordTriggerTrace: (entry) =>
-      recordTriggerTraceState({ triggerTrace: this.triggerTrace }, entry),
-    scheduleWithDebounce: (target) => this.scheduleWithDebounce(target),
-    markDirty: (target) =>
-      markSchedulerDirty(this.dirtySchedulingState, target),
-    scheduleAffectedEffects: (target) => this.scheduleAffectedEffects(target),
-  };
+  private storageNotificationState!: StorageNotificationState;
 
   // Parent-child action tracking for proper execution ordering
   // When a child action is created during parent execution, parent must run first
@@ -441,117 +353,17 @@ export class Scheduler {
   currentActionId?: string;
   private actionParent = new WeakMap<Action, Action>();
   private actionChildren = new WeakMap<Action, Set<Action>>();
-  private pullDemandState: PullDemandState = {
-    getPullMode: () => this.pullMode,
-    computations: this.computations,
-    effects: this.effects,
-    dependents: this.dependents,
-    dependencies: this.dependencies,
-    actionParent: this.actionParent,
-    isEffectAction: this.isEffectAction,
-    pullDemandedFirstRunComputations: this.pullDemandedFirstRunComputations,
-    hasActionRun: (action) => this.delays.hasActionRun(action),
-    getSchedulingWrites: (action) =>
-      getSchedulingWritesFromState(this.schedulingWriteState, action),
-  };
-  private dependencyGraphState: DependencyGraphState = {
-    triggers: this.triggerIndexState.triggers,
-    nonRecursiveTriggers: this.triggerIndexState.nonRecursiveTriggers,
-    writersByEntity: this.writerIndexState.writersByEntity,
-    dependencies: this.dependencies,
-    dependents: this.dependents,
-    reverseDependencies: this.reverseDependencies,
-    staleness: this.staleness,
-    getSchedulingWrites: (action) =>
-      getSchedulingWritesFromState(this.schedulingWriteState, action),
-    isStale: (action) => this.staleness.isStale(action),
-    isDemandedPullComputation: (action) =>
-      isDemandedPullComputation(this.pullDemandState, action),
-    queueExecution: () => this.queueExecution(),
-  };
-  private dependencyUpdateState: DependencyUpdateState = {
-    writersByEntity: this.writerIndexState.writersByEntity,
-    actionWriteEntities: this.writerIndexState.actionWriteEntities,
-    dependencies: this.dependencies,
-    currentKnownWrites: this.schedulingWriteState.currentKnownWrites,
-    historicalMightWrite: this.schedulingWriteState.historicalMightWrite,
-    dependencyGraph: this.dependencyGraphState,
-    useHistoricalMightWrite: this.schedulingWriteState.useHistoricalMightWrite,
-    isPullMode: () => this.pullMode,
-  };
-  private triggerSubscriptionState: TriggerSubscriptionState = {
-    triggers: this.triggerIndexState.triggers,
-    nonRecursiveTriggers: this.triggerIndexState.nonRecursiveTriggers,
-    cancels: this.cancels,
-    getActionId: (action) => this.getActionId(action),
-    onTriggerUnsubscribe: (actionId, entityCount) => {
-      logger.debug("schedule-unsubscribe", () => [
-        `Action: ${actionId}`,
-        `Entities: ${entityCount}`,
-      ]);
-    },
-  };
-  private dirtySchedulingState: DirtySchedulingState = {
-    staleness: this.staleness,
-    computations: this.computations,
-    scheduleComputationDebounce: (action) =>
-      this.scheduleComputationDebounce(action),
-    clearComputationDebounceState: (action) =>
-      this.delays.clearComputationDebounceState(action),
-    isDemandedPullComputation: (action) =>
-      isDemandedPullComputation(this.pullDemandState, action),
-    queueExecution: () => this.queueExecution(),
-  };
-  private pendingPullRunnableState = {
-    effects: this.effects,
-    isDemandedPullComputation: (action: Action) =>
-      isDemandedPullComputation(this.pullDemandState, action),
-    shouldRunFirstPullComputationInDemandContext: (action: Action) =>
-      shouldRunFirstPullComputationInDemandContext(
-        this.pullDemandState,
-        action,
-      ),
-  };
-  private dirtyPullRunnableState = {
-    effects: this.effects,
-    isDemandedPullComputation: (action: Action) =>
-      isDemandedPullComputation(this.pullDemandState, action),
-    isThrottled: (action: Action) => this.delays.isThrottled(action),
-  };
-  private dirtyPullRunnableStateWithDebounce = {
-    ...this.dirtyPullRunnableState,
-    isDebouncedComputationWaiting: (action: Action) =>
-      this.isDebouncedComputationWaiting(action),
-  };
-  private writePropagationState: WritePropagationState = {
-    triggers: this.triggerIndexState.triggers,
-    nonRecursiveTriggers: this.triggerIndexState.nonRecursiveTriggers,
-    changedWritesHistory: this.changedWritesHistory,
-    effects: this.effects,
-    computations: this.computations,
-    conditionallyScheduledEffects: this.conditionallyScheduledEffects,
-    isPullMode: () => this.pullMode,
-    scheduleWithDebounce: (action) => this.scheduleWithDebounce(action),
-    markDirty: (action) =>
-      markSchedulerDirty(this.dirtySchedulingState, action),
-    scheduleAffectedEffects: (action) => {
-      this.scheduleAffectedEffects(action);
-    },
-  };
-  private subscriptionState: SchedulerSubscriptionState = {
-    actionChangeGroups: this.actionChangeGroups,
-    changeGroupToActionId: this.changeGroupToActionId,
-    isEffectAction: this.isEffectAction,
-    effects: this.effects,
-    computations: this.computations,
-    getPullMode: () => this.pullMode,
-    getIdempotencyCheckMode: () => this.idempotencyCheckMode,
-    queueExecution: () => this.queueExecution(),
-    getActionId: (target) => this.getActionId(target),
-    getExecutingAction: () => this.executingAction,
-    actionParent: this.actionParent,
-    actionChildren: this.actionChildren,
-  };
+  private pullDemandState!: PullDemandState;
+  private dependencyGraphState!: DependencyGraphState;
+  private dependencyUpdateState!: DependencyUpdateState;
+  private triggerSubscriptionState!: TriggerSubscriptionState;
+  private dirtySchedulingState!: DirtySchedulingState;
+  private pendingPullRunnableState!: PendingPullRunnableState;
+  private dirtyPullRunnableState!: DirtyPullRunnableState;
+  private dirtyPullRunnableStateWithDebounce!:
+    DirtyPullRunnableStateWithDebounce;
+  private writePropagationState!: WritePropagationState;
+  private subscriptionState!: SchedulerSubscriptionState;
 
   /**
    * Temporarily set the executing action so that any child actions created
@@ -576,54 +388,9 @@ export class Scheduler {
   >();
   // Actions that need dependency population before first run
   private pendingDependencyCollection = new Set<Action>();
-  private pendingDependencyCollectionState = {
-    pendingDependencyCollection: this.pendingDependencyCollection,
-    effects: this.effects,
-    isThrottled: (action: Action) => this.delays.isThrottled(action),
-    getSchedulingWrites: (action: Action) =>
-      getSchedulingWritesFromState(this.schedulingWriteState, action),
-    hasDependentPath: (from: Action, to: Action) =>
-      hasDependentPath(this.pullDemandState, from, to),
-  };
+  private pendingDependencyCollectionState!: PendingDependencyCollectionState;
   private dependencyCollectionState!: DependencyCollectionState;
-  private subscribeActionState: SchedulerSubscribeActionState = {
-    subscriptionState: this.subscriptionState,
-    dependencyUpdateState: this.dependencyUpdateState,
-    triggerSubscriptionState: this.triggerSubscriptionState,
-    pendingDependencyCollectionState: this.pendingDependencyCollectionState,
-    populateDependenciesCallbacks: this.populateDependenciesCallbacks,
-    pendingDependencyCollection: this.pendingDependencyCollection,
-    activePullDemandActions: this.activePullDemandActions,
-    pullDemandedFirstRunComputations: this.pullDemandedFirstRunComputations,
-    actionParent: this.actionParent,
-    pending: this.pending,
-    scheduledFirstTime: this.scheduledFirstTime,
-    effects: this.effects,
-    dirty: this.staleness.dirty,
-    stale: this.staleness.stale,
-    writersByEntity: this.writerIndexState.writersByEntity,
-    getPullMode: () => this.pullMode,
-    setDebounce: (action, ms) => this.setDebounce(action, ms),
-    setNoDebounce: (action, optOut) => this.setNoDebounce(action, optOut),
-    setThrottle: (action, ms) => this.setThrottle(action, ms),
-    getSchedulingWrites: (action) =>
-      getSchedulingWritesFromState(this.schedulingWriteState, action),
-    isThrottled: (action) => this.delays.isThrottled(action),
-    isStale: (action) => this.staleness.isStale(action),
-    markDirectDirty: (action) => {
-      this.staleness.markDirectDirty(action);
-    },
-    markEffectConditionallyScheduled: (action) =>
-      this.markEffectConditionallyScheduled(action),
-    updateDependents: (action, log) => this.updateDependents(action, log),
-    scheduleAffectedEffects: (action) => this.scheduleAffectedEffects(action),
-    queueExecution: () => this.queueExecution(),
-    getActionId: (action) => this.getActionId(action),
-    unsubscribe: (action) => this.unsubscribe(action),
-    submitSubscribeTelemetry: (event) => {
-      this.runtime.telemetry.submit(event);
-    },
-  };
+  private subscribeActionState!: SchedulerSubscribeActionState;
 
   private idlePromises: (() => void)[] = [];
   private backgroundTasks = new Set<Promise<unknown>>();
@@ -634,110 +401,9 @@ export class Scheduler {
   private scheduled = false;
   private disposed = false;
   private actionRunState!: SchedulerActionRunState;
-  private cycleBreakState: CycleBreakState = {
-    getPullMode: () => this.pullMode,
-    dirty: this.staleness.dirty,
-    effects: this.effects,
-    runsThisExecute: this.runsThisExecute,
-    pending: this.pending,
-    isThrottled: (action) => this.delays.isThrottled(action),
-    clearDirty: (action) =>
-      clearSchedulerDirty(this.dirtySchedulingState, action),
-    unsubscribe: (action) => this.unsubscribe(action),
-    recordExecuted: () => {
-      this.filterStats.executed++;
-    },
-    getActionId: (action) => this.getActionId(action),
-    runAction: (action) => this.run(action),
-  };
-  private settleLoopState: SchedulerSettleLoopState = {
-    getPullMode: () => this.pullMode,
-    getCollectSettleStats: () => this.collectSettleStats,
-    pendingDependencyCollection: this.pendingDependencyCollection,
-    populateDependenciesCallbacks: this.populateDependenciesCallbacks,
-    effects: this.effects,
-    computations: this.computations,
-    pending: this.pending,
-    dirty: this.staleness.dirty,
-    dependencies: this.dependencies,
-    actionParent: this.actionParent,
-    dependents: this.dependents,
-    conditionallyScheduledEffects: this.conditionallyScheduledEffects,
-    filterStats: this.filterStats,
-    getLoopCounter: () => this.loopCounter,
-    runsThisExecute: this.runsThisExecute,
-    activePullDemandActions: this.activePullDemandActions,
-    getSchedulingWrites: (action) =>
-      getSchedulingWritesFromState(this.schedulingWriteState, action),
-    getSchedulingWritesMap: () =>
-      getSchedulingWritesMapFromState(this.schedulingWriteState),
-    collectDependenciesForAction: (action, populateDependencies, options) =>
-      this.collectDependenciesForAction(
-        action,
-        populateDependencies,
-        options,
-      ),
-    collectPullIterationSeeds: (seeds) => this.collectPullIterationSeeds(seeds),
-    collectDirtyDependencies: (seed, targetWorkSet, memo) =>
-      this.collectDirtyDependencies(seed, targetWorkSet, memo),
-    getActionId: (action) => this.getActionId(action),
-    clearDirty: (action) =>
-      clearSchedulerDirty(this.dirtySchedulingState, action),
-    markDirectDirty: (action) => this.staleness.markDirectDirty(action),
-    isThrottled: (action) => this.delays.isThrottled(action),
-    isDebouncedComputationWaiting: (action) =>
-      this.isDebouncedComputationWaiting(action),
-    clearComputationDebounceState: (action) =>
-      this.delays.clearComputationDebounceState(action),
-    conditionalEffectHasChangedInputs: (action) =>
-      this.conditionalEffectHasChangedInputs(action),
-    isPullDemandRootEffect: (action) =>
-      isPullDemandRootEffect(this.pullDemandState, action),
-    handleError: (error, action) => this.handleError(error, action),
-    runAction: (action) => this.run(action),
-  };
-  private executeContinuationState: ExecuteContinuationState = {
-    getPullMode: () => this.pullMode,
-    pending: this.pending,
-    dirty: this.staleness.dirty,
-    effects: this.effects,
-    eventQueue: this.eventQueue,
-    eventQueueWakeState: this.eventQueueWakeState,
-    idlePromises: this.idlePromises,
-    scheduledFirstTime: this.scheduledFirstTime,
-    conditionallyScheduledEffects: this.conditionallyScheduledEffects,
-    changedWritesHistory: this.changedWritesHistory,
-    consumeRerunAfterCurrentExecute: () => {
-      const shouldRerun = this.rerunAfterCurrentExecute;
-      this.rerunAfterCurrentExecute = false;
-      return shouldRerun;
-    },
-    isDemandedPullComputation: (action) =>
-      isDemandedPullComputation(this.pullDemandState, action),
-    shouldRunFirstPullComputationInDemandContext: (action) =>
-      shouldRunFirstPullComputationInDemandContext(
-        this.pullDemandState,
-        action,
-      ),
-    isDebouncedComputationWaiting: (action) =>
-      this.isDebouncedComputationWaiting(action),
-    getNextDebounceRunTime: (action) => this.getNextDebounceRunTime(action),
-    getNextEligibleRunTime: (action) =>
-      this.delays.getNextEligibleRunTime(action),
-    resetLoopCounter: () => {
-      this.loopCounter = new WeakMap();
-    },
-    setScheduled: (scheduled) => {
-      this.scheduled = scheduled;
-    },
-    resetSettlingTracker: () => {
-      this.settlingTracker = createSettlingTracker();
-    },
-    setPendingQueueTaskTimer: (timer) => {
-      this.pendingQueueTaskTimer = timer;
-    },
-    execute: () => this.execute(),
-  };
+  private cycleBreakState!: CycleBreakState;
+  private settleLoopState!: SchedulerSettleLoopState;
+  private executeContinuationState!: ExecuteContinuationState;
 
   get runningPromise(): Promise<unknown> | undefined {
     return this._running;
@@ -761,7 +427,500 @@ export class Scheduler {
     consoleHandler?: ConsoleHandler,
     errorHandlers?: ErrorHandler[],
   ) {
-    this.eventQueueState = {
+    this.initializeSchedulerState();
+
+    this.consoleHandler = consoleHandler ||
+      function (data) {
+        // Default console handler returns arguments unaffected.
+        return data.args;
+      };
+
+    if (errorHandlers) {
+      errorHandlers.forEach((handler) => this.errorHandlers.add(handler));
+    }
+
+    // Subscribe to storage notifications
+    this.runtime.storageManager.subscribe(
+      createStorageSubscription(this.storageNotificationState),
+    );
+
+    // Set up harness event listeners
+    this.runtime.harness.addEventListener("console", (e: Event) => {
+      // Called synchronously when `console` methods are
+      // called within the runtime.
+      const { method, args } = e as ConsoleEvent;
+      const metadata = getPieceMetadataFromFrame();
+      const result = this.consoleHandler({ metadata, method, args });
+      console[method].apply(console, result);
+    });
+  }
+
+  // Keep state-bundle wiring explicit without making the field declarations
+  // read like one large object graph.
+  private initializeSchedulerState(): void {
+    this.diagnosisControlState = this.createDiagnosisControlState();
+    this.eventQueueWakeState = this.createEventQueueWakeState();
+    this.schedulingWriteState = this.createSchedulingWriteState();
+    this.pullDemandState = this.createPullDemandState();
+    this.delayControlState = this.createDelayControlState();
+    this.dirtyDependencyCollectionState = this
+      .createDirtyDependencyCollectionState();
+    this.dependencyGraphState = this.createDependencyGraphState();
+    this.dependencyUpdateState = this.createDependencyUpdateState();
+    this.triggerSubscriptionState = this.createTriggerSubscriptionState();
+    this.dirtySchedulingState = this.createDirtySchedulingState();
+    this.storageNotificationState = this.createStorageNotificationState();
+    this.pendingPullRunnableState = this.createPendingPullRunnableState();
+    this.dirtyPullRunnableState = this.createDirtyPullRunnableState();
+    this.dirtyPullRunnableStateWithDebounce = this
+      .createDirtyPullRunnableStateWithDebounce();
+    this.writePropagationState = this.createWritePropagationState();
+    this.subscriptionState = this.createSubscriptionState();
+    this.pendingDependencyCollectionState = this
+      .createPendingDependencyCollectionState();
+    this.subscribeActionState = this.createSubscribeActionState();
+    this.cycleBreakState = this.createCycleBreakState();
+    this.settleLoopState = this.createSettleLoopState();
+    this.executeContinuationState = this.createExecuteContinuationState();
+    this.eventQueueState = this.createEventQueueState();
+    this.dependencyCollectionState = this.createDependencyCollectionState();
+    this.actionRunState = this.createActionRunState();
+  }
+
+  private createDiagnosisControlState(): SchedulerDiagnosisControlState {
+    return {
+      getDiagnosisEnabled: () => this.diagnosisEnabled,
+      setDiagnosisEnabled: (enabled) => {
+        this.diagnosisEnabled = enabled;
+      },
+      getDiagnosisTimeout: () => this.diagnosisTimeout,
+      setDiagnosisTimeout: (timeout) => {
+        this.diagnosisTimeout = timeout;
+      },
+      getDiagnosisStartTime: () => this.diagnosisStartTime,
+      setDiagnosisStartTime: (time) => {
+        this.diagnosisStartTime = time;
+      },
+      getDiagnosisBusyTime: () => this.diagnosisBusyTime,
+      setDiagnosisBusyTime: (time) => {
+        this.diagnosisBusyTime = time;
+      },
+      getDiagnosisResolve: () => this.diagnosisResolve,
+      setDiagnosisResolve: (resolve) => {
+        this.diagnosisResolve = resolve;
+      },
+      diagnosisHistory: this.diagnosisHistory,
+      diagnosisNonIdempotent: this.diagnosisNonIdempotent,
+      causalEdges: this.causalEdges,
+      idempotencyViolations: this.idempotencyViolations,
+      computations: this.computations,
+      setIdempotencyCheckMode: (enabled) => {
+        this.idempotencyCheckMode = enabled;
+      },
+      runAction: (action) => this.run(action),
+    };
+  }
+
+  private createEventQueueWakeState(): EventQueueWakeState {
+    return {
+      timer: null,
+      wakeAt: null,
+      eventQueue: this.eventQueue,
+      isDisposed: () => this.disposed,
+      queueExecution: () => this.queueExecution(),
+    };
+  }
+
+  private createSchedulingWriteState(): SchedulingWriteState {
+    return {
+      // Current-known writes are rebuilt on each dependency update from actual
+      // writes plus declared/potential writes. This is the default scheduling view.
+      currentKnownWrites: new WeakMap<Action, IMemorySpaceAddress[]>(),
+      // Historical writes preserve the legacy cumulative union and are only used
+      // when the experimental historical-write mode is enabled.
+      historicalMightWrite: new WeakMap<Action, IMemorySpaceAddress[]>(),
+      useHistoricalMightWrite: () =>
+        this.runtime.experimental.schedulerHistoricalMightWrite === true,
+    };
+  }
+
+  private createPullDemandState(): PullDemandState {
+    return {
+      getPullMode: () => this.pullMode,
+      computations: this.computations,
+      effects: this.effects,
+      dependents: this.dependents,
+      dependencies: this.dependencies,
+      actionParent: this.actionParent,
+      isEffectAction: this.isEffectAction,
+      pullDemandedFirstRunComputations: this.pullDemandedFirstRunComputations,
+      hasActionRun: (action) => this.delays.hasActionRun(action),
+      getSchedulingWrites: (action) =>
+        getSchedulingWritesFromState(this.schedulingWriteState, action),
+    };
+  }
+
+  private createDelayControlState(): SchedulerDelayControlState {
+    return {
+      delays: this.delays,
+      computations: this.computations,
+      effects: this.effects,
+      dirty: this.staleness.dirty,
+      pending: this.pending,
+      getPullMode: () => this.pullMode,
+      isPullDemandRootEffect: (action) =>
+        isPullDemandRootEffect(this.pullDemandState, action),
+      queueExecution: () => this.queueExecution(),
+      logDebounce: (message) =>
+        logger.debug("schedule-debounce", () => [message]),
+    };
+  }
+
+  private createDirtyDependencyCollectionState(): DirtyDependencyCollectionState {
+    return {
+      collectStack: this.collectStack,
+      getTrace: () => this.dirtyDependencyTraceContext,
+      dirty: this.staleness.dirty,
+      pending: this.pending,
+      computations: this.computations,
+      reverseDependencies: this.reverseDependencies,
+      dependencies: this.dependencies,
+      writersByEntity: this.writerIndexState.writersByEntity,
+      effects: this.effects,
+      isStale: (target) => this.staleness.isStale(target),
+      getSchedulingWrites: (target) =>
+        getSchedulingWritesFromState(this.schedulingWriteState, target),
+      getActionId: (target) => this.getActionId(target),
+    };
+  }
+
+  private createDependencyGraphState(): DependencyGraphState {
+    return {
+      triggers: this.triggerIndexState.triggers,
+      nonRecursiveTriggers: this.triggerIndexState.nonRecursiveTriggers,
+      writersByEntity: this.writerIndexState.writersByEntity,
+      dependencies: this.dependencies,
+      dependents: this.dependents,
+      reverseDependencies: this.reverseDependencies,
+      staleness: this.staleness,
+      getSchedulingWrites: (action) =>
+        getSchedulingWritesFromState(this.schedulingWriteState, action),
+      isStale: (action) => this.staleness.isStale(action),
+      isDemandedPullComputation: (action) =>
+        isDemandedPullComputation(this.pullDemandState, action),
+      queueExecution: () => this.queueExecution(),
+    };
+  }
+
+  private createDependencyUpdateState(): DependencyUpdateState {
+    return {
+      writersByEntity: this.writerIndexState.writersByEntity,
+      actionWriteEntities: this.writerIndexState.actionWriteEntities,
+      dependencies: this.dependencies,
+      currentKnownWrites: this.schedulingWriteState.currentKnownWrites,
+      historicalMightWrite: this.schedulingWriteState.historicalMightWrite,
+      dependencyGraph: this.dependencyGraphState,
+      useHistoricalMightWrite:
+        this.schedulingWriteState.useHistoricalMightWrite,
+      isPullMode: () => this.pullMode,
+    };
+  }
+
+  private createTriggerSubscriptionState(): TriggerSubscriptionState {
+    return {
+      triggers: this.triggerIndexState.triggers,
+      nonRecursiveTriggers: this.triggerIndexState.nonRecursiveTriggers,
+      cancels: this.cancels,
+      getActionId: (action) => this.getActionId(action),
+      onTriggerUnsubscribe: (actionId, entityCount) => {
+        logger.debug("schedule-unsubscribe", () => [
+          `Action: ${actionId}`,
+          `Entities: ${entityCount}`,
+        ]);
+      },
+    };
+  }
+
+  private createDirtySchedulingState(): DirtySchedulingState {
+    return {
+      staleness: this.staleness,
+      computations: this.computations,
+      scheduleComputationDebounce: (action) =>
+        this.scheduleComputationDebounce(action),
+      clearComputationDebounceState: (action) =>
+        this.delays.clearComputationDebounceState(action),
+      isDemandedPullComputation: (action) =>
+        isDemandedPullComputation(this.pullDemandState, action),
+      queueExecution: () => this.queueExecution(),
+    };
+  }
+
+  private createStorageNotificationState(): StorageNotificationState {
+    return {
+      triggers: this.triggerIndexState.triggers,
+      nonRecursiveTriggers: this.triggerIndexState.nonRecursiveTriggers,
+      getPullMode: () => this.pullMode,
+      getDiagnosisEnabled: () => this.diagnosisEnabled,
+      getCollectTriggerTrace: () => this.collectTriggerTrace,
+      changeGroupToActionId: this.changeGroupToActionId,
+      recordCausalEdge: (edge) => {
+        this.causalEdges.push(edge);
+      },
+      actionChangeGroups: this.actionChangeGroups,
+      effects: this.effects,
+      pending: this.pending,
+      dirty: this.staleness.dirty,
+      inFlightSources: this.inFlightSourceState.inFlightSources,
+      conditionallyScheduledEffects: this.conditionallyScheduledEffects,
+      getActionId: (target) => this.getActionId(target),
+      recordCellUpdate: (change) =>
+        this.runtime.telemetry.submit({
+          type: "cell.update",
+          change,
+        }),
+      recordTriggerTrace: (entry) =>
+        recordTriggerTraceState({ triggerTrace: this.triggerTrace }, entry),
+      scheduleWithDebounce: (target) => this.scheduleWithDebounce(target),
+      markDirty: (target) =>
+        markSchedulerDirty(this.dirtySchedulingState, target),
+      scheduleAffectedEffects: (target) => this.scheduleAffectedEffects(target),
+    };
+  }
+
+  private createPendingPullRunnableState(): PendingPullRunnableState {
+    return {
+      effects: this.effects,
+      isDemandedPullComputation: (action) =>
+        isDemandedPullComputation(this.pullDemandState, action),
+      shouldRunFirstPullComputationInDemandContext: (action) =>
+        shouldRunFirstPullComputationInDemandContext(
+          this.pullDemandState,
+          action,
+        ),
+    };
+  }
+
+  private createDirtyPullRunnableState(): DirtyPullRunnableState {
+    return {
+      effects: this.effects,
+      isDemandedPullComputation: (action) =>
+        isDemandedPullComputation(this.pullDemandState, action),
+      isThrottled: (action) => this.delays.isThrottled(action),
+    };
+  }
+
+  private createDirtyPullRunnableStateWithDebounce(): DirtyPullRunnableStateWithDebounce {
+    return {
+      ...this.dirtyPullRunnableState,
+      isDebouncedComputationWaiting: (action) =>
+        this.isDebouncedComputationWaiting(action),
+    };
+  }
+
+  private createWritePropagationState(): WritePropagationState {
+    return {
+      triggers: this.triggerIndexState.triggers,
+      nonRecursiveTriggers: this.triggerIndexState.nonRecursiveTriggers,
+      changedWritesHistory: this.changedWritesHistory,
+      effects: this.effects,
+      computations: this.computations,
+      conditionallyScheduledEffects: this.conditionallyScheduledEffects,
+      isPullMode: () => this.pullMode,
+      scheduleWithDebounce: (action) => this.scheduleWithDebounce(action),
+      markDirty: (action) =>
+        markSchedulerDirty(this.dirtySchedulingState, action),
+      scheduleAffectedEffects: (action) => {
+        this.scheduleAffectedEffects(action);
+      },
+    };
+  }
+
+  private createSubscriptionState(): SchedulerSubscriptionState {
+    return {
+      actionChangeGroups: this.actionChangeGroups,
+      changeGroupToActionId: this.changeGroupToActionId,
+      isEffectAction: this.isEffectAction,
+      effects: this.effects,
+      computations: this.computations,
+      getPullMode: () => this.pullMode,
+      getIdempotencyCheckMode: () => this.idempotencyCheckMode,
+      queueExecution: () => this.queueExecution(),
+      getActionId: (target) => this.getActionId(target),
+      getExecutingAction: () => this.executingAction,
+      actionParent: this.actionParent,
+      actionChildren: this.actionChildren,
+    };
+  }
+
+  private createPendingDependencyCollectionState(): PendingDependencyCollectionState {
+    return {
+      pendingDependencyCollection: this.pendingDependencyCollection,
+      effects: this.effects,
+      isThrottled: (action) => this.delays.isThrottled(action),
+      getSchedulingWrites: (action) =>
+        getSchedulingWritesFromState(this.schedulingWriteState, action),
+      hasDependentPath: (from, to) =>
+        hasDependentPath(this.pullDemandState, from, to),
+    };
+  }
+
+  private createSubscribeActionState(): SchedulerSubscribeActionState {
+    return {
+      subscriptionState: this.subscriptionState,
+      dependencyUpdateState: this.dependencyUpdateState,
+      triggerSubscriptionState: this.triggerSubscriptionState,
+      pendingDependencyCollectionState: this.pendingDependencyCollectionState,
+      populateDependenciesCallbacks: this.populateDependenciesCallbacks,
+      pendingDependencyCollection: this.pendingDependencyCollection,
+      activePullDemandActions: this.activePullDemandActions,
+      pullDemandedFirstRunComputations: this.pullDemandedFirstRunComputations,
+      actionParent: this.actionParent,
+      pending: this.pending,
+      scheduledFirstTime: this.scheduledFirstTime,
+      effects: this.effects,
+      dirty: this.staleness.dirty,
+      stale: this.staleness.stale,
+      writersByEntity: this.writerIndexState.writersByEntity,
+      getPullMode: () => this.pullMode,
+      setDebounce: (action, ms) => this.setDebounce(action, ms),
+      setNoDebounce: (action, optOut) => this.setNoDebounce(action, optOut),
+      setThrottle: (action, ms) => this.setThrottle(action, ms),
+      getSchedulingWrites: (action) =>
+        getSchedulingWritesFromState(this.schedulingWriteState, action),
+      isThrottled: (action) => this.delays.isThrottled(action),
+      isStale: (action) => this.staleness.isStale(action),
+      markDirectDirty: (action) => {
+        this.staleness.markDirectDirty(action);
+      },
+      markEffectConditionallyScheduled: (action) =>
+        this.markEffectConditionallyScheduled(action),
+      updateDependents: (action, log) => this.updateDependents(action, log),
+      scheduleAffectedEffects: (action) => this.scheduleAffectedEffects(action),
+      queueExecution: () => this.queueExecution(),
+      getActionId: (action) => this.getActionId(action),
+      unsubscribe: (action) => this.unsubscribe(action),
+      submitSubscribeTelemetry: (event) => {
+        this.runtime.telemetry.submit(event);
+      },
+    };
+  }
+
+  private createCycleBreakState(): CycleBreakState {
+    return {
+      getPullMode: () => this.pullMode,
+      dirty: this.staleness.dirty,
+      effects: this.effects,
+      runsThisExecute: this.runsThisExecute,
+      pending: this.pending,
+      isThrottled: (action) => this.delays.isThrottled(action),
+      clearDirty: (action) =>
+        clearSchedulerDirty(this.dirtySchedulingState, action),
+      unsubscribe: (action) => this.unsubscribe(action),
+      recordExecuted: () => {
+        this.filterStats.executed++;
+      },
+      getActionId: (action) => this.getActionId(action),
+      runAction: (action) => this.run(action),
+    };
+  }
+
+  private createSettleLoopState(): SchedulerSettleLoopState {
+    return {
+      getPullMode: () => this.pullMode,
+      getCollectSettleStats: () => this.collectSettleStats,
+      pendingDependencyCollection: this.pendingDependencyCollection,
+      populateDependenciesCallbacks: this.populateDependenciesCallbacks,
+      effects: this.effects,
+      computations: this.computations,
+      pending: this.pending,
+      dirty: this.staleness.dirty,
+      dependencies: this.dependencies,
+      actionParent: this.actionParent,
+      dependents: this.dependents,
+      conditionallyScheduledEffects: this.conditionallyScheduledEffects,
+      filterStats: this.filterStats,
+      getLoopCounter: () => this.loopCounter,
+      runsThisExecute: this.runsThisExecute,
+      activePullDemandActions: this.activePullDemandActions,
+      getSchedulingWrites: (action) =>
+        getSchedulingWritesFromState(this.schedulingWriteState, action),
+      getSchedulingWritesMap: () =>
+        getSchedulingWritesMapFromState(this.schedulingWriteState),
+      collectDependenciesForAction: (action, populateDependencies, options) =>
+        this.collectDependenciesForAction(
+          action,
+          populateDependencies,
+          options,
+        ),
+      collectPullIterationSeeds: (seeds) =>
+        this.collectPullIterationSeeds(seeds),
+      collectDirtyDependencies: (seed, targetWorkSet, memo) =>
+        this.collectDirtyDependencies(seed, targetWorkSet, memo),
+      getActionId: (action) => this.getActionId(action),
+      clearDirty: (action) =>
+        clearSchedulerDirty(this.dirtySchedulingState, action),
+      markDirectDirty: (action) => this.staleness.markDirectDirty(action),
+      isThrottled: (action) => this.delays.isThrottled(action),
+      isDebouncedComputationWaiting: (action) =>
+        this.isDebouncedComputationWaiting(action),
+      clearComputationDebounceState: (action) =>
+        this.delays.clearComputationDebounceState(action),
+      conditionalEffectHasChangedInputs: (action) =>
+        this.conditionalEffectHasChangedInputs(action),
+      isPullDemandRootEffect: (action) =>
+        isPullDemandRootEffect(this.pullDemandState, action),
+      handleError: (error, action) => this.handleError(error, action),
+      runAction: (action) => this.run(action),
+    };
+  }
+
+  private createExecuteContinuationState(): ExecuteContinuationState {
+    return {
+      getPullMode: () => this.pullMode,
+      pending: this.pending,
+      dirty: this.staleness.dirty,
+      effects: this.effects,
+      eventQueue: this.eventQueue,
+      eventQueueWakeState: this.eventQueueWakeState,
+      idlePromises: this.idlePromises,
+      scheduledFirstTime: this.scheduledFirstTime,
+      conditionallyScheduledEffects: this.conditionallyScheduledEffects,
+      changedWritesHistory: this.changedWritesHistory,
+      consumeRerunAfterCurrentExecute: () => {
+        const shouldRerun = this.rerunAfterCurrentExecute;
+        this.rerunAfterCurrentExecute = false;
+        return shouldRerun;
+      },
+      isDemandedPullComputation: (action) =>
+        isDemandedPullComputation(this.pullDemandState, action),
+      shouldRunFirstPullComputationInDemandContext: (action) =>
+        shouldRunFirstPullComputationInDemandContext(
+          this.pullDemandState,
+          action,
+        ),
+      isDebouncedComputationWaiting: (action) =>
+        this.isDebouncedComputationWaiting(action),
+      getNextDebounceRunTime: (action) => this.getNextDebounceRunTime(action),
+      getNextEligibleRunTime: (action) =>
+        this.delays.getNextEligibleRunTime(action),
+      resetLoopCounter: () => {
+        this.loopCounter = new WeakMap();
+      },
+      setScheduled: (scheduled) => {
+        this.scheduled = scheduled;
+      },
+      resetSettlingTracker: () => {
+        this.settlingTracker = createSettlingTracker();
+      },
+      setPendingQueueTaskTimer: (timer) => {
+        this.pendingQueueTaskTimer = timer;
+      },
+      execute: () => this.execute(),
+    };
+  }
+
+  private createEventQueueState(): SchedulerEventQueueState {
+    return {
       runtime: this.runtime,
       eventHandlers: this.eventHandlers,
       eventQueue: this.eventQueue,
@@ -782,15 +941,19 @@ export class Scheduler {
           targetDoNotLoad,
         ),
     };
+  }
 
-    this.dependencyCollectionState = {
+  private createDependencyCollectionState(): DependencyCollectionState {
+    return {
       runtime: this.runtime,
       dependencyUpdateState: this.dependencyUpdateState,
       triggerSubscriptionState: this.triggerSubscriptionState,
       updateDependents: (action, log) => this.updateDependents(action, log),
     };
+  }
 
-    this.actionRunState = {
+  private createActionRunState(): SchedulerActionRunState {
+    return {
       runtime: this.runtime,
       actionChangeGroups: this.actionChangeGroups,
       inFlightSourceState: this.inFlightSourceState,
@@ -836,31 +999,6 @@ export class Scheduler {
         this.currentActionId = undefined;
       },
     };
-
-    this.consoleHandler = consoleHandler ||
-      function (data) {
-        // Default console handler returns arguments unaffected.
-        return data.args;
-      };
-
-    if (errorHandlers) {
-      errorHandlers.forEach((handler) => this.errorHandlers.add(handler));
-    }
-
-    // Subscribe to storage notifications
-    this.runtime.storageManager.subscribe(
-      createStorageSubscription(this.storageNotificationState),
-    );
-
-    // Set up harness event listeners
-    this.runtime.harness.addEventListener("console", (e: Event) => {
-      // Called synchronously when `console` methods are
-      // called within the runtime.
-      const { method, args } = e as ConsoleEvent;
-      const metadata = getPieceMetadataFromFrame();
-      const result = this.consoleHandler({ metadata, method, args });
-      console[method].apply(console, result);
-    });
   }
 
   /**
