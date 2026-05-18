@@ -5,7 +5,7 @@ import {
   findInternedSchema,
   hashSchema,
   internSchema,
-  internSchemaAsHashString,
+  internSchemaAsTaggedHashString,
   isInternedSchema,
 } from "../schema-hash.ts";
 import { SchemaAndHash } from "../schema-and-hash.ts";
@@ -287,21 +287,21 @@ describe("schema-hash dispatch", () => {
     }
   });
 
-  describe("internSchemaAsHashString()", () => {
+  describe("internSchemaAsTaggedHashString()", () => {
     it("returns the interned schema's `.taggedHashString` for an object", () => {
       const schema: JSONSchema = { type: "number" };
       const sah = internSchema(schema, true);
-      expect(internSchemaAsHashString(schema)).toBe(sah.taggedHashString);
+      expect(internSchemaAsTaggedHashString(schema)).toBe(sah.taggedHashString);
     });
 
     it("returns the boolean schema's prefab `.taggedHashString` for `true`", () => {
       const expected = internSchema(true, true).taggedHashString;
-      expect(internSchemaAsHashString(true)).toBe(expected);
+      expect(internSchemaAsTaggedHashString(true)).toBe(expected);
     });
 
     it("returns the boolean schema's prefab `.taggedHashString` for `false`", () => {
       const expected = internSchema(false, true).taggedHashString;
-      expect(internSchemaAsHashString(false)).toBe(expected);
+      expect(internSchemaAsTaggedHashString(false)).toBe(expected);
     });
 
     it("produces matching strings for structurally-equal objects", () => {
@@ -313,15 +313,15 @@ describe("schema-hash dispatch", () => {
         type: "object",
         properties: { x: { type: "string" } },
       };
-      expect(internSchemaAsHashString(a)).toBe(internSchemaAsHashString(b));
+      expect(internSchemaAsTaggedHashString(a)).toBe(internSchemaAsTaggedHashString(b));
     });
 
     it("produces different strings for different schemas", () => {
-      expect(internSchemaAsHashString({ type: "number" })).not.toEqual(
-        internSchemaAsHashString({ type: "string" }),
+      expect(internSchemaAsTaggedHashString({ type: "number" })).not.toEqual(
+        internSchemaAsTaggedHashString({ type: "string" }),
       );
-      expect(internSchemaAsHashString(true)).not.toEqual(
-        internSchemaAsHashString(false),
+      expect(internSchemaAsTaggedHashString(true)).not.toEqual(
+        internSchemaAsTaggedHashString(false),
       );
     });
 
@@ -333,15 +333,15 @@ describe("schema-hash dispatch", () => {
         title: `schemaHashTestAt${Date.now()}-${Math.random()}`,
       };
       expect(isInternedSchema(schema)).toBe(false);
-      internSchemaAsHashString(schema);
+      internSchemaAsTaggedHashString(schema);
       expect(isInternedSchema(schema)).toBe(true);
       assert(isDeepFrozen(schema));
     });
 
     it("is idempotent on already-interned schemas", () => {
       const schema: JSONSchema = { type: "number" };
-      const first = internSchemaAsHashString(schema);
-      const second = internSchemaAsHashString(schema);
+      const first = internSchemaAsTaggedHashString(schema);
+      const second = internSchemaAsTaggedHashString(schema);
       expect(first).toBe(second);
     });
   });

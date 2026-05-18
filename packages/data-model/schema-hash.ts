@@ -252,6 +252,6 @@ export function isInternedSchema(schema: JSONSchema): boolean {
  * names the operation and avoids the non-obvious `true` (`wantSchemaAndHash`)
  * argument at call sites.
  */
-export function internSchemaAsHashString(schema: JSONSchema): string {
+export function internSchemaAsTaggedHashString(schema: JSONSchema): string {
   return internSchema(schema, true).taggedHashString;
 }
