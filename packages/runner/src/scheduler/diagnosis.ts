@@ -10,6 +10,7 @@ import type {
   CycleReport,
   NonIdempotentReport,
   SchedulerActionInfo,
+  SchedulerDiagnosisResult,
 } from "../telemetry.ts";
 import { txToReactivityLog } from "./reactivity.ts";
 import { mapsEqual } from "./topology.ts";
@@ -20,6 +21,39 @@ export type DiagnosisRecord = {
   writeValues: Map<string, unknown>;
   timestamp: number;
 };
+
+export type CausalEdge = {
+  writer: string;
+  cell: string;
+  triggered: string;
+  timestamp: number;
+};
+
+export interface SchedulerDiagnosisControlState {
+  readonly getDiagnosisEnabled: () => boolean;
+  readonly setDiagnosisEnabled: (enabled: boolean) => void;
+  readonly getDiagnosisTimeout: () => ReturnType<typeof setTimeout> | null;
+  readonly setDiagnosisTimeout: (
+    timeout: ReturnType<typeof setTimeout> | null,
+  ) => void;
+  readonly getDiagnosisStartTime: () => number;
+  readonly setDiagnosisStartTime: (time: number) => void;
+  readonly getDiagnosisBusyTime: () => number;
+  readonly setDiagnosisBusyTime: (time: number) => void;
+  readonly getDiagnosisResolve: () =>
+    | ((result: SchedulerDiagnosisResult) => void)
+    | null;
+  readonly setDiagnosisResolve: (
+    resolve: ((result: SchedulerDiagnosisResult) => void) | null,
+  ) => void;
+  readonly diagnosisHistory: Map<string, DiagnosisRecord[]>;
+  readonly diagnosisNonIdempotent: NonIdempotentReport[];
+  readonly causalEdges: CausalEdge[];
+  readonly idempotencyViolations: NonIdempotentReport[];
+  readonly computations: ReadonlySet<Action>;
+  readonly setIdempotencyCheckMode: (enabled: boolean) => void;
+  readonly runAction: (action: Action) => Promise<unknown>;
+}
 
 export function makeAddressKey(addr: IMemorySpaceAddress): string {
   return `${addr.space}/${addr.id}/${addr.path.join("/")}`;
@@ -270,8 +304,98 @@ export function captureDiagnosisRecord(state: {
   });
 }
 
+export function startSchedulerDiagnosis(
+  state: SchedulerDiagnosisControlState,
+  durationMs = 5000,
+): void {
+  if (state.getDiagnosisEnabled()) return;
+
+  state.setDiagnosisEnabled(true);
+  state.setDiagnosisStartTime(performance.now());
+  state.setDiagnosisBusyTime(0);
+  state.diagnosisHistory.clear();
+  state.diagnosisNonIdempotent.length = 0;
+  state.causalEdges.length = 0;
+
+  state.setDiagnosisTimeout(
+    setTimeout(() => {
+      stopSchedulerDiagnosis(state);
+    }, durationMs),
+  );
+}
+
+export function stopSchedulerDiagnosis(
+  state: SchedulerDiagnosisControlState,
+): void {
+  if (!state.getDiagnosisEnabled()) return;
+
+  state.setDiagnosisEnabled(false);
+  const diagnosisTimeout = state.getDiagnosisTimeout();
+  if (diagnosisTimeout) {
+    clearTimeout(diagnosisTimeout);
+    state.setDiagnosisTimeout(null);
+  }
+
+  const duration = performance.now() - state.getDiagnosisStartTime();
+  const cycles = detectCausalCycles(state.causalEdges);
+
+  const result: SchedulerDiagnosisResult = {
+    nonIdempotent: state.diagnosisNonIdempotent,
+    cycles,
+    duration,
+    busyTime: state.getDiagnosisBusyTime(),
+  };
+
+  state.diagnosisHistory.clear();
+  state.causalEdges.length = 0;
+
+  const resolve = state.getDiagnosisResolve();
+  if (resolve) {
+    resolve(result);
+    state.setDiagnosisResolve(null);
+  }
+}
+
+export function runSchedulerDiagnosis(
+  state: SchedulerDiagnosisControlState,
+  durationMs = 5000,
+): Promise<SchedulerDiagnosisResult> {
+  if (state.getDiagnosisEnabled()) {
+    stopSchedulerDiagnosis(state);
+  }
+
+  return new Promise<SchedulerDiagnosisResult>((resolve) => {
+    state.setDiagnosisResolve(resolve);
+    startSchedulerDiagnosis(state, durationMs);
+  });
+}
+
+export async function runSchedulerIdempotencyCheck(
+  state: SchedulerDiagnosisControlState,
+): Promise<SchedulerDiagnosisResult> {
+  state.idempotencyViolations.length = 0;
+  state.setIdempotencyCheckMode(true);
+
+  try {
+    // Snapshot computations to avoid iterating a live Set.
+    const computationsSnapshot = [...state.computations];
+    for (const action of computationsSnapshot) {
+      await state.runAction(action);
+    }
+  } finally {
+    state.setIdempotencyCheckMode(false);
+  }
+
+  return {
+    nonIdempotent: [...state.idempotencyViolations],
+    cycles: [],
+    duration: 0,
+    busyTime: 0,
+  };
+}
+
 export function detectCausalCycles(
-  causalEdges: readonly { writer: string; triggered: string; cell: string }[],
+  causalEdges: readonly Pick<CausalEdge, "writer" | "triggered" | "cell">[],
 ): CycleReport[] {
   // Build adjacency list: writer -> [{ triggered, cell }]
   const adj = new Map<string, { triggered: string; cell: string }[]>();

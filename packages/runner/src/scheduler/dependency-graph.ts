@@ -2,10 +2,7 @@ import type { IMemorySpaceAddress } from "../storage/interface.ts";
 import { entityKey } from "./keys.ts";
 import { readsOverlapWrites } from "./scheduling-writes.ts";
 import type { SchedulerStaleness } from "./staleness.ts";
-import {
-  collectReadersForWrite,
-  type TriggerIndexState,
-} from "./trigger-index.ts";
+import type { TriggerIndexState } from "./trigger-index.ts";
 import type {
   Action,
   DirtyDependencyTraceContext,
@@ -13,7 +10,8 @@ import type {
   SpaceScopeAndURI,
 } from "./types.ts";
 
-export interface DependencyGraphState extends TriggerIndexState {
+export interface DependencyGraphState {
+  readonly triggerIndex: TriggerIndexState;
   readonly writersByEntity: Map<SpaceScopeAndURI, Set<Action>>;
   readonly dependencies: WeakMap<Action, ReactivityLog>;
   readonly dependents: WeakMap<Action, Set<Action>>;
@@ -230,7 +228,7 @@ export function backfillDependentsForNewWrites(
   if (writes.length === 0) return;
   const readers = new Set<Action>();
   for (const write of writes) {
-    for (const action of collectReadersForWrite(state, write)) {
+    for (const action of state.triggerIndex.collectReadersForWrite(write)) {
       readers.add(action);
     }
   }
