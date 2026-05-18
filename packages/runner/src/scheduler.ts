@@ -12,7 +12,9 @@ import type {
   ChangeGroup,
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
+  IStorageSubscription,
   IStorageTransaction,
+  StorageNotification,
 } from "./storage/interface.ts";
 import {
   allowMutableTransactionRead,
@@ -47,6 +49,7 @@ import {
   stopSchedulerDiagnosis,
 } from "./scheduler/diagnosis.ts";
 import {
+  backfillDependentsForNewWrites,
   type DependencyGraphState,
   updateDependentEdgesForLog,
 } from "./scheduler/dependency-graph.ts";
@@ -81,11 +84,12 @@ import {
   planPullAdaptiveCycleDebounce,
   pushBoundedHistory,
   recordExecuteEnd,
-  runSchedulerSettleLoop,
   type SchedulerSettleLoopState,
   type SchedulerSettleResult,
   type SettlingTracker,
 } from "./scheduler/execution.ts";
+import { runPullSchedulerSettleLoop } from "./scheduler/pull-execution.ts";
+import { runPushSchedulerSettleLoop } from "./scheduler/push-execution.ts";
 import {
   collectPullIterationSeeds as collectPullIterationSeedsState,
   conditionalEffectHasChangedInputs as conditionalEffectHasChangedInputsState,
@@ -98,10 +102,13 @@ import {
   type PullSchedulingState,
   scheduleAffectedEffects as scheduleAffectedEffectsState,
 } from "./scheduler/pull-scheduling.ts";
-import { breakCyclesIfNeeded } from "./scheduler/cycle-break.ts";
-import { applyExecuteContinuation } from "./scheduler/continuation.ts";
-import type { CycleBreakState } from "./scheduler/cycle-break.ts";
+import {
+  breakPullCyclesIfNeeded,
+  type PullCycleBreakState,
+} from "./scheduler/pull-cycle-break.ts";
 import type { ExecuteContinuationState } from "./scheduler/continuation.ts";
+import { applyPullExecuteContinuation } from "./scheduler/pull-continuation.ts";
+import { applyPushExecuteContinuation } from "./scheduler/push-continuation.ts";
 import {
   canAutomaticallyDebounce as canAutomaticallyDebounceState,
   getNextDebounceRunTime as getNextDebounceRunTimeState,
@@ -120,10 +127,9 @@ import {
   type PullDemandState,
   shouldRunFirstPullComputationInDemandContext,
 } from "./scheduler/demand.ts";
-import {
-  createStorageSubscription,
-  type StorageNotificationState,
-} from "./scheduler/notifications.ts";
+import { type StorageNotificationState } from "./scheduler/notifications.ts";
+import { processPullStorageNotification } from "./scheduler/pull-notifications.ts";
+import { processPushStorageNotification } from "./scheduler/push-notifications.ts";
 import {
   clearSchedulerDirectDirty,
   clearSchedulerDirty,
@@ -132,14 +138,24 @@ import {
   SchedulerStaleness,
 } from "./scheduler/staleness.ts";
 import {
-  resubscribeSchedulerAction,
   type SchedulerSubscribeActionState,
   type SchedulerSubscriptionState,
   type SchedulerUnsubscribeActionState,
-  subscribeSchedulerAction,
   unsubscribeSchedulerAction,
 } from "./scheduler/subscriptions.ts";
-import { type WritePropagationState } from "./scheduler/write-propagation.ts";
+import {
+  markReadersDirtyForChangedWrites,
+  recordChangedComputationWrites,
+  type WritePropagationState,
+} from "./scheduler/write-propagation.ts";
+import {
+  resubscribePullSchedulerAction,
+  subscribePullSchedulerAction,
+} from "./scheduler/pull-subscriptions.ts";
+import {
+  resubscribePushSchedulerAction,
+  subscribePushSchedulerAction,
+} from "./scheduler/push-subscriptions.ts";
 import {
   type ActionTimingState,
   getActionStats as getActionStatsFromState,
@@ -150,12 +166,13 @@ import {
   type EventQueueWakeState,
   hasEventQueueWakeTimer,
   isHeadEventParked as isHeadEventParkedState,
-  processQueuedEventDuringExecute,
   queueSchedulerEvent,
   scheduleEventQueueWake as scheduleEventQueueWakeState,
   type SchedulerEventExecutionState,
   type SchedulerEventQueueState,
 } from "./scheduler/events.ts";
+import { processPullQueuedEventDuringExecute } from "./scheduler/pull-events.ts";
+import { processPushQueuedEventDuringExecute } from "./scheduler/push-events.ts";
 import {
   buildSchedulerGraphSnapshot,
   type SchedulerGraphSnapshotState,
@@ -375,7 +392,7 @@ export class Scheduler {
   private disposed = false;
   private actionRunState!: SchedulerActionRunState;
   private graphSnapshotState!: SchedulerGraphSnapshotState;
-  private cycleBreakState!: CycleBreakState;
+  private cycleBreakState!: PullCycleBreakState;
   private settleLoopState!: SchedulerSettleLoopState;
   private executeContinuationState!: ExecuteContinuationState;
 
@@ -402,7 +419,7 @@ export class Scheduler {
 
     // Subscribe to storage notifications
     this.runtime.storageManager.subscribe(
-      createStorageSubscription(this.storageNotificationState),
+      this.createStorageSubscription(),
     );
 
     // Set up harness event listeners
@@ -473,7 +490,15 @@ export class Scheduler {
       changeGroup?: ChangeGroup;
     } = {},
   ): Cancel {
-    return subscribeSchedulerAction(
+    if (this.pullMode) {
+      return subscribePullSchedulerAction(
+        this.subscribeActionState,
+        action,
+        populateDependencies,
+        options,
+      );
+    }
+    return subscribePushSchedulerAction(
       this.subscribeActionState,
       action,
       populateDependencies,
@@ -502,7 +527,16 @@ export class Scheduler {
       changeGroup?: ChangeGroup;
     } = {},
   ): void {
-    resubscribeSchedulerAction(
+    if (this.pullMode) {
+      resubscribePullSchedulerAction(
+        this.subscribeActionState,
+        action,
+        log,
+        options,
+      );
+      return;
+    }
+    resubscribePushSchedulerAction(
       this.subscribeActionState,
       action,
       log,
@@ -1038,10 +1072,12 @@ export class Scheduler {
     );
 
     const settleResult = await this.runSettleLoop(initialSeeds);
-    await breakCyclesIfNeeded(this.cycleBreakState, settleResult);
+    if (this.pullMode) {
+      await breakPullCyclesIfNeeded(this.cycleBreakState, settleResult);
+    }
     this.applyAdaptiveCycleDebounce();
     this.recordExecuteEndTelemetry();
-    applyExecuteContinuation(this.executeContinuationState);
+    this.applyExecuteContinuation();
     logger.timeEnd("scheduler", "execute");
   }
 
@@ -1080,10 +1116,17 @@ export class Scheduler {
 
     logger.timeStart("scheduler", "execute", "event");
     try {
-      await processQueuedEventDuringExecute(
-        this.eventExecutionState,
-        eventBlockingDeps,
-      );
+      if (this.pullMode) {
+        await processPullQueuedEventDuringExecute(
+          this.eventExecutionState,
+          eventBlockingDeps,
+        );
+      } else {
+        await processPushQueuedEventDuringExecute(
+          this.eventExecutionState,
+          eventBlockingDeps,
+        );
+      }
       return eventBlockingDeps;
     } finally {
       logger.timeEnd("scheduler", "execute", "event");
@@ -1127,10 +1170,9 @@ export class Scheduler {
   private async runSettleLoop(
     initialSeeds: ReadonlySet<Action>,
   ): Promise<SchedulerSettleResult> {
-    const settleResult = await runSchedulerSettleLoop(
-      this.settleLoopState,
-      initialSeeds,
-    );
+    const settleResult = this.pullMode
+      ? await runPullSchedulerSettleLoop(this.settleLoopState, initialSeeds)
+      : await runPushSchedulerSettleLoop(this.settleLoopState);
 
     if (settleResult.settleStats) {
       this.lastSettleStats = settleResult.settleStats;
@@ -1142,6 +1184,14 @@ export class Scheduler {
     }
 
     return settleResult;
+  }
+
+  private applyExecuteContinuation(): void {
+    if (this.pullMode) {
+      applyPullExecuteContinuation(this.executeContinuationState);
+      return;
+    }
+    applyPushExecuteContinuation(this.executeContinuationState);
   }
 
   private applyAdaptiveCycleDebounce(): void {
@@ -1339,7 +1389,6 @@ export class Scheduler {
 
   private createPullDemandState(): PullDemandState {
     return {
-      getPullMode: () => this.pullMode,
       computations: this.computations,
       effects: this.effects,
       dependents: this.dependents,
@@ -1360,9 +1409,7 @@ export class Scheduler {
       effects: this.effects,
       dirty: this.staleness.dirty,
       pending: this.pending,
-      getPullMode: () => this.pullMode,
-      isPullDemandRootEffect: (action) =>
-        isPullDemandRootEffect(this.pullDemandState, action),
+      isPullDemandRootEffect: (action) => this.isPullDemandRootEffect(action),
       queueExecution: () => this.queueExecution(),
       logDebounce: (message) =>
         logger.debug("schedule-debounce", () => [message]),
@@ -1399,7 +1446,7 @@ export class Scheduler {
         this.writeIndex.getSchedulingWrites(action),
       isStale: (action) => this.staleness.isStale(action),
       isDemandedPullComputation: (action) =>
-        isDemandedPullComputation(this.pullDemandState, action),
+        this.isDemandedPullComputation(action),
       queueExecution: () => this.queueExecution(),
     };
   }
@@ -1409,7 +1456,14 @@ export class Scheduler {
       writeIndex: this.writeIndex,
       dependencies: this.dependencies,
       dependencyGraph: this.dependencyGraphState,
-      isPullMode: () => this.pullMode,
+      backfillDependentsForNewWrites: (action, addedWrites) => {
+        if (!this.pullMode) return;
+        backfillDependentsForNewWrites(
+          this.dependencyGraphState,
+          action,
+          addedWrites,
+        );
+      },
     };
   }
 
@@ -1436,7 +1490,7 @@ export class Scheduler {
       clearComputationDebounceState: (action) =>
         this.delays.clearComputationDebounceState(action),
       isDemandedPullComputation: (action) =>
-        isDemandedPullComputation(this.pullDemandState, action),
+        this.isDemandedPullComputation(action),
       queueExecution: () => this.queueExecution(),
     };
   }
@@ -1444,7 +1498,6 @@ export class Scheduler {
   private createStorageNotificationState(): StorageNotificationState {
     return {
       triggerIndex: this.triggerIndex,
-      getPullMode: () => this.pullMode,
       getDiagnosisEnabled: () => this.diagnosisEnabled,
       getCollectTriggerTrace: () => this.collectTriggerTrace,
       changeGroupToActionId: this.changeGroupToActionId,
@@ -1472,16 +1525,33 @@ export class Scheduler {
     };
   }
 
+  private createStorageSubscription(): IStorageSubscription {
+    return {
+      next: (notification: StorageNotification) => {
+        this.processStorageNotification(notification);
+        return { done: false };
+      },
+    };
+  }
+
+  private processStorageNotification(notification: StorageNotification): void {
+    if (this.pullMode) {
+      processPullStorageNotification(
+        this.storageNotificationState,
+        notification,
+      );
+      return;
+    }
+    processPushStorageNotification(this.storageNotificationState, notification);
+  }
+
   private createPendingPullRunnableState(): PendingPullRunnableState {
     return {
       effects: this.effects,
       isDemandedPullComputation: (action) =>
-        isDemandedPullComputation(this.pullDemandState, action),
+        this.isDemandedPullComputation(action),
       shouldRunFirstPullComputationInDemandContext: (action) =>
-        shouldRunFirstPullComputationInDemandContext(
-          this.pullDemandState,
-          action,
-        ),
+        this.shouldRunFirstPullComputationInDemandContext(action),
     };
   }
 
@@ -1489,7 +1559,7 @@ export class Scheduler {
     return {
       effects: this.effects,
       isDemandedPullComputation: (action) =>
-        isDemandedPullComputation(this.pullDemandState, action),
+        this.isDemandedPullComputation(action),
       isThrottled: (action) => this.delays.isThrottled(action),
     };
   }
@@ -1528,7 +1598,6 @@ export class Scheduler {
       effects: this.effects,
       computations: this.computations,
       conditionallyScheduledEffects: this.conditionallyScheduledEffects,
-      isPullMode: () => this.pullMode,
       scheduleWithDebounce: (action) => this.scheduleWithDebounce(action),
       markDirty: (action) =>
         markSchedulerDirty(this.dirtySchedulingState, action),
@@ -1545,7 +1614,6 @@ export class Scheduler {
       isEffectAction: this.isEffectAction,
       effects: this.effects,
       computations: this.computations,
-      getPullMode: () => this.pullMode,
       getIdempotencyCheckMode: () => this.idempotencyCheckMode,
       queueExecution: () => this.queueExecution(),
       getActionId: (target) => this.getActionId(target),
@@ -1584,7 +1652,6 @@ export class Scheduler {
       dirty: this.staleness.dirty,
       stale: this.staleness.stale,
       writeIndex: this.writeIndex,
-      getPullMode: () => this.pullMode,
       setDebounce: (action, ms) => this.setDebounce(action, ms),
       setNoDebounce: (action, optOut) => this.setNoDebounce(action, optOut),
       setThrottle: (action, ms) => this.setThrottle(action, ms),
@@ -1634,9 +1701,8 @@ export class Scheduler {
     };
   }
 
-  private createCycleBreakState(): CycleBreakState {
+  private createCycleBreakState(): PullCycleBreakState {
     return {
-      getPullMode: () => this.pullMode,
       dirty: this.staleness.dirty,
       effects: this.effects,
       runsThisExecute: this.runsThisExecute,
@@ -1655,7 +1721,6 @@ export class Scheduler {
 
   private createSettleLoopState(): SchedulerSettleLoopState {
     return {
-      getPullMode: () => this.pullMode,
       getCollectSettleStats: () => this.collectSettleStats,
       pendingDependencyCollection: this.pendingDependencyCollection,
       populateDependenciesCallbacks: this.populateDependenciesCallbacks,
@@ -1695,8 +1760,7 @@ export class Scheduler {
         this.delays.clearComputationDebounceState(action),
       conditionalEffectHasChangedInputs: (action) =>
         this.conditionalEffectHasChangedInputs(action),
-      isPullDemandRootEffect: (action) =>
-        isPullDemandRootEffect(this.pullDemandState, action),
+      isPullDemandRootEffect: (action) => this.isPullDemandRootEffect(action),
       handleError: (error, action) => this.handleError(error, action),
       runAction: (action) => this.run(action),
     };
@@ -1704,7 +1768,6 @@ export class Scheduler {
 
   private createExecuteContinuationState(): ExecuteContinuationState {
     return {
-      getPullMode: () => this.pullMode,
       pending: this.pending,
       dirty: this.staleness.dirty,
       effects: this.effects,
@@ -1720,12 +1783,9 @@ export class Scheduler {
         return shouldRerun;
       },
       isDemandedPullComputation: (action) =>
-        isDemandedPullComputation(this.pullDemandState, action),
+        this.isDemandedPullComputation(action),
       shouldRunFirstPullComputationInDemandContext: (action) =>
-        shouldRunFirstPullComputationInDemandContext(
-          this.pullDemandState,
-          action,
-        ),
+        this.shouldRunFirstPullComputationInDemandContext(action),
       isDebouncedComputationWaiting: (action) =>
         this.isDebouncedComputationWaiting(action),
       getNextDebounceRunTime: (action) => this.getNextDebounceRunTime(action),
@@ -1772,15 +1832,11 @@ export class Scheduler {
   }
 
   private createEventExecutionState(): SchedulerEventExecutionState {
-    const getPullMode = () => this.pullMode;
     const getEventPreflightTelemetryEnabled = () =>
       this.eventPreflightTelemetryEnabled;
     return {
       runtime: this.runtime,
       eventQueue: this.eventQueue,
-      get pullMode() {
-        return getPullMode();
-      },
       dirty: this.staleness.dirty,
       pending: this.pending,
       get eventPreflightTelemetryEnabled() {
@@ -1842,13 +1898,11 @@ export class Scheduler {
       diagnosisHistory: this.diagnosisHistory,
       diagnosisNonIdempotent: this.diagnosisNonIdempotent,
       idempotencyViolations: this.idempotencyViolations,
-      writePropagationState: this.writePropagationState,
-      computations: this.computations,
       getRunningPromise: () => this.runningPromise,
       setRunningPromise: (promise) => {
         this.runningPromise = promise;
       },
-      getPullMode: () => this.pullMode,
+      modeLabel: () => this.pullMode ? "pull" : "push",
       getCollectActionRunTrace: () => this.collectActionRunTrace,
       getDiagnosisEnabled: () => this.diagnosisEnabled,
       getIdempotencyCheckMode: () => this.idempotencyCheckMode,
@@ -1862,8 +1916,24 @@ export class Scheduler {
       handleError: (error, target) => this.handleError(error, target),
       resubscribe: (target, log) => this.resubscribe(target, log),
       markDirectDirty: (target) => this.staleness.markDirectDirty(target),
-      clearDirectDirty: (target) =>
-        clearSchedulerDirectDirty(this.dirtySchedulingState, target),
+      recordChangedComputationWrites: (target, tx, log) => {
+        if (!this.pullMode) return [];
+        return recordChangedComputationWrites(
+          this.writePropagationState,
+          target,
+          tx,
+          log,
+        );
+      },
+      markReadersDirtyForChangedWrites: (target, changedWrites) => {
+        if (!this.pullMode || !this.computations.has(target)) return;
+        clearSchedulerDirectDirty(this.dirtySchedulingState, target);
+        markReadersDirtyForChangedWrites(
+          this.writePropagationState,
+          target,
+          changedWrites,
+        );
+      },
       queueExecution: () => this.queueExecution(),
       setExecutingAction: (target, targetActionId) => {
         this.executingAction = target;
@@ -1903,10 +1973,9 @@ export class Scheduler {
       getNextEligibleRunTime: (action) =>
         this.delays.getNextEligibleRunTime(action),
       isDemandedPullComputation: (action) =>
-        isDemandedPullComputation(this.pullDemandState, action),
+        this.isDemandedPullComputation(action),
       isLiveEffect: (action) => isLiveEffect(this.pullDemandState, action),
-      isPullDemandRootEffect: (action) =>
-        isPullDemandRootEffect(this.pullDemandState, action),
+      isPullDemandRootEffect: (action) => this.isPullDemandRootEffect(action),
       getPatternId: (action) => {
         const annotated = action as Partial<TelemetryAnnotations>;
         return annotated.pattern
@@ -1927,6 +1996,26 @@ export class Scheduler {
    */
   private getActionId(action: Action | EventHandler): string {
     return getSchedulerActionId(this.actionIdentityState, action);
+  }
+
+  private isDemandedPullComputation(action: Action): boolean {
+    return this.pullMode &&
+      isDemandedPullComputation(this.pullDemandState, action);
+  }
+
+  private shouldRunFirstPullComputationInDemandContext(
+    action: Action,
+  ): boolean {
+    return this.pullMode &&
+      shouldRunFirstPullComputationInDemandContext(
+        this.pullDemandState,
+        action,
+      );
+  }
+
+  private isPullDemandRootEffect(action: Action): boolean {
+    return this.pullMode &&
+      isPullDemandRootEffect(this.pullDemandState, action);
   }
 
   /**
@@ -1997,14 +2086,17 @@ export class Scheduler {
   }
 
   private getNextDebounceRunTime(action: Action): number | undefined {
+    if (!this.pullMode) return undefined;
     return getNextDebounceRunTimeState(this.delayControlState, action);
   }
 
   private isDebouncedComputationWaiting(action: Action): boolean {
+    if (!this.pullMode) return false;
     return isDebouncedComputationWaitingState(this.delayControlState, action);
   }
 
   private scheduleComputationDebounce(action: Action): void {
+    if (!this.pullMode) return;
     scheduleComputationDebounceState(this.delayControlState, action);
   }
 

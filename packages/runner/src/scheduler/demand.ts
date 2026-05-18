@@ -2,7 +2,6 @@ import type { IMemorySpaceAddress } from "../storage/interface.ts";
 import type { Action, ReactivityLog } from "./types.ts";
 
 export interface PullDemandState {
-  readonly getPullMode: () => boolean;
   readonly computations: ReadonlySet<Action>;
   readonly effects: ReadonlySet<Action>;
   readonly dependents: WeakMap<Action, Set<Action>>;
@@ -44,9 +43,7 @@ export function isDemandedPullComputation(
   visited = new Set<Action>(),
 ): boolean {
   if (
-    !state.getPullMode() ||
-    !state.computations.has(action) ||
-    isLiveEffect(state, action)
+    !state.computations.has(action) || isLiveEffect(state, action)
   ) {
     return false;
   }
@@ -76,19 +73,17 @@ export function isLiveEffect(
 export function isPullDemandRootEffect(
   state: Pick<
     PullDemandState,
-    "getPullMode" | "effects" | "getSchedulingWrites"
+    "effects" | "getSchedulingWrites"
   >,
   action: Action,
 ): boolean {
-  return state.getPullMode() &&
-    state.effects.has(action) &&
+  return state.effects.has(action) &&
     (state.getSchedulingWrites(action)?.length ?? 0) === 0;
 }
 
 export function shouldRunFirstPullComputationInDemandContext(
   state: Pick<
     PullDemandState,
-    | "getPullMode"
     | "computations"
     | "effects"
     | "hasActionRun"
@@ -97,7 +92,6 @@ export function shouldRunFirstPullComputationInDemandContext(
   action: Action,
 ): boolean {
   if (
-    !state.getPullMode() ||
     !state.computations.has(action) ||
     state.effects.has(action) ||
     state.hasActionRun(action)

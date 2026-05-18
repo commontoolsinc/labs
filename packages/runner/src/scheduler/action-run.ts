@@ -25,11 +25,6 @@ import type {
   EventHandler,
   ReactivityLog,
 } from "./types.ts";
-import {
-  markReadersDirtyForChangedWrites,
-  recordChangedComputationWrites,
-  type WritePropagationState,
-} from "./write-propagation.ts";
 import type { NonIdempotentReport, SchedulerActionInfo } from "../telemetry.ts";
 
 const logger = getLogger("scheduler", {
@@ -233,11 +228,9 @@ export interface SchedulerActionRunState {
   readonly diagnosisHistory: Map<string, DiagnosisRecord[]>;
   readonly diagnosisNonIdempotent: NonIdempotentReport[];
   readonly idempotencyViolations: NonIdempotentReport[];
-  readonly writePropagationState: WritePropagationState;
-  readonly computations: ReadonlySet<Action>;
   readonly getRunningPromise: () => Promise<unknown> | undefined;
   readonly setRunningPromise: (promise: Promise<unknown>) => void;
-  readonly getPullMode: () => boolean;
+  readonly modeLabel: () => "pull" | "push";
   readonly getCollectActionRunTrace: () => boolean;
   readonly getDiagnosisEnabled: () => boolean;
   readonly getIdempotencyCheckMode: () => boolean;
@@ -253,7 +246,15 @@ export interface SchedulerActionRunState {
   readonly handleError: (error: Error, action: Action) => void;
   readonly resubscribe: (action: Action, log: ReactivityLog) => void;
   readonly markDirectDirty: (action: Action) => void;
-  readonly clearDirectDirty: (action: Action) => void;
+  readonly recordChangedComputationWrites: (
+    action: Action,
+    tx: IExtendedStorageTransaction,
+    log: ReactivityLog,
+  ) => IMemorySpaceAddress[];
+  readonly markReadersDirtyForChangedWrites: (
+    sourceAction: Action,
+    changedWrites: readonly IMemorySpaceAddress[],
+  ) => void;
   readonly queueExecution: () => void;
   readonly setExecutingAction: (action: Action, actionId: string) => void;
   readonly clearExecutingAction: () => void;
@@ -273,7 +274,7 @@ export async function runSchedulerAction(
 
   logger.debug("schedule-run-start", () => [
     `[RUN] Starting action: ${actionId}`,
-    `Pull mode: ${state.getPullMode()}`,
+    `Scheduler mode: ${state.modeLabel()}`,
   ]);
 
   const runningPromise = state.getRunningPromise();
@@ -407,8 +408,7 @@ function finalizeReactiveActionCommit(
         source,
       ),
   });
-  const changedComputationWrites = recordChangedComputationWrites(
-    state.writePropagationState,
+  const changedComputationWrites = state.recordChangedComputationWrites(
     args.action,
     args.tx,
     log,
@@ -429,14 +429,10 @@ function finalizeReactiveActionCommit(
   } finally {
     logger.timeEnd("scheduler", "run", "resubscribe");
   }
-  if (state.getPullMode() && state.computations.has(args.action)) {
-    state.clearDirectDirty(args.action);
-    markReadersDirtyForChangedWrites(
-      state.writePropagationState,
-      args.action,
-      changedComputationWrites,
-    );
-  }
+  state.markReadersDirtyForChangedWrites(
+    args.action,
+    changedComputationWrites,
+  );
   args.resolve(args.result);
 }
 

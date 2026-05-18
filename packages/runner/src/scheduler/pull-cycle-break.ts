@@ -7,8 +7,7 @@ const logger = getLogger("scheduler", {
   level: "warn",
 });
 
-export interface CycleBreakState {
-  readonly getPullMode: () => boolean;
+export interface PullCycleBreakState {
   readonly dirty: ReadonlySet<Action>;
   readonly effects: ReadonlySet<Action>;
   readonly runsThisExecute: ReadonlyMap<Action, number>;
@@ -21,12 +20,10 @@ export interface CycleBreakState {
   readonly runAction: (action: Action) => Promise<unknown>;
 }
 
-export async function breakCyclesIfNeeded(
-  state: CycleBreakState,
+export async function breakPullCyclesIfNeeded(
+  state: PullCycleBreakState,
   settleResult: SchedulerSettleResult,
 ): Promise<void> {
-  if (!state.getPullMode()) return;
-
   // If we hit max iterations without settling, break the cycle:
   // 1. Clear dirty/pending for computations that were in early iterations AND still in last workSet
   // 2. Run all remaining dirty effects so they don't get lost

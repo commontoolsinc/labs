@@ -7,7 +7,6 @@ import {
 import type { Action } from "./types.ts";
 
 interface DebouncedComputationContext {
-  readonly pullMode: boolean;
   readonly computations: ReadonlySet<Action>;
   readonly effects: ReadonlySet<Action>;
   readonly dirty: ReadonlySet<Action>;
@@ -151,7 +150,6 @@ export class SchedulerDelays {
   getNextDebounceRunTime(
     action: Action,
     context: {
-      readonly pullMode: boolean;
       readonly computations: ReadonlySet<Action>;
       readonly effects: ReadonlySet<Action>;
       readonly dirty: ReadonlySet<Action>;
@@ -298,14 +296,12 @@ export class SchedulerDelays {
   private shouldDebouncePullComputation(
     action: Action,
     context: {
-      readonly pullMode: boolean;
       readonly computations: ReadonlySet<Action>;
       readonly effects: ReadonlySet<Action>;
     },
   ): boolean {
     const debounceMs = this.actionDebounce.get(action);
-    return context.pullMode &&
-      context.computations.has(action) &&
+    return context.computations.has(action) &&
       !context.effects.has(action) &&
       this.actionHasRun.has(action) &&
       debounceMs !== undefined &&
