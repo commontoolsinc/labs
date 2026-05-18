@@ -94,7 +94,8 @@ const asCellCompoundSchemaForValue = (
     if (
       isRecord(merged) &&
       ContextualFlowControl.getAsCellValues(merged).length > 0 &&
-      (value === undefined || matchesConcreteValue(merged, value))
+      value !== undefined &&
+      matchesConcreteValue(merged, value)
     ) {
       return merged;
     }

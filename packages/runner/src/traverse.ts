@@ -2282,6 +2282,9 @@ export class SchemaObjectTraverser<V extends FabricValue>
       }
     }
     if (isRecord(resolved)) {
+      if (doc.value === undefined && resolved.default !== undefined) {
+        return { ok: this.applyDefault(doc, resolved) };
+      }
       // There are a lot of valid logical schema flags, and we only handle
       // a very limited set here, with no support for combinations.
       if (resolved.anyOf) {

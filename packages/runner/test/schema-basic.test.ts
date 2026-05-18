@@ -808,5 +808,35 @@ describe("Schema - Basic Types and References", () => {
       expect(isCell(innerStringCell)).toBe(true);
       expect(innerStringCell.get()).toBe("hello nested default");
     });
+
+    it("should apply nullable defaults before choosing anyOf asCell branches", () => {
+      const outer = runtime.getCell<any>(
+        space,
+        "nullable-anyof-default-cell",
+        {
+          type: "object",
+          properties: {
+            current: {
+              anyOf: [
+                {
+                  type: "object",
+                  properties: {
+                    name: { type: "string" },
+                  },
+                  required: ["name"],
+                  asCell: ["cell"],
+                },
+                { type: "null" },
+              ],
+              default: null,
+            },
+          },
+          required: ["current"],
+        } as const satisfies JSONSchema,
+        tx,
+      );
+
+      expect(outer.key("current").get()).toBe(null);
+    });
   });
 });
