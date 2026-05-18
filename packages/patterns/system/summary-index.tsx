@@ -10,6 +10,7 @@ import {
   Writable,
 } from "commonfabric";
 import { type MentionablePiece } from "./backlinks-index.tsx";
+import { collectSummaryEntries as collectSummaryEntriesImpl } from "./summary-index-entries.ts";
 
 export type SummarizablePiece = MentionablePiece & { summary?: string };
 
@@ -26,16 +27,12 @@ type Output = {
   search: PatternToolResult<{ entries: SummaryIndexEntry[] }>;
 };
 
-function extractSummary(piece: any): string | undefined {
-  const summary = piece?.summary;
-  if (!summary) return undefined;
-
-  if (typeof summary === "object" && "get" in summary) {
-    const value = summary.get();
-    return typeof value === "string" && value.trim() ? value : undefined;
-  }
-
-  return typeof summary === "string" && summary.trim() ? summary : undefined;
+export function collectSummaryEntries(
+  mentionable: unknown,
+): SummaryIndexEntry[] {
+  return collectSummaryEntriesImpl<SummarizablePiece>(
+    mentionable,
+  ) as SummaryIndexEntry[];
 }
 
 /** Search sub-pattern: filters entries by query matching summary or name. */
@@ -68,16 +65,7 @@ const SummaryIndex = pattern<Input, Output>(() => {
   const query = Writable.of("");
 
   const entries = computed(() => {
-    const result: SummaryIndexEntry[] = [];
-    for (const piece of (Array.isArray(mentionable) ? mentionable : [])) {
-      if (!piece) continue;
-      const value = piece.get();
-      const summary = extractSummary(value);
-      if (!summary) continue;
-      const name = (value[NAME] ?? "").toString();
-      result.push({ piece, summary, name });
-    }
-    return result;
+    return collectSummaryEntries(mentionable);
   });
 
   const filtered = computed(() => {
