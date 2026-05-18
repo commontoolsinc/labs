@@ -448,11 +448,12 @@ export async function runSchedulerSettleLoop(
     }
 
     lastWorkSet = iteration.workSet;
+    const iterationWorkSetSize = iteration.workSet.size;
     const iterActionsRun = await runSettleOrder(state, iteration.order);
 
     if (settleIterStats) {
       settleIterStats.push(summarizeSettleIteration({
-        workSetSize: iteration.workSet.size,
+        workSetSize: iterationWorkSetSize,
         order: iteration.order,
         actionsRun: iterActionsRun,
         durationMs: performance.now() - iterStart,

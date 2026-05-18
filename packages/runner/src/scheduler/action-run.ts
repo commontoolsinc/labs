@@ -355,11 +355,15 @@ function finalizeSchedulerAction(
         `[RUN] Action failed: ${args.actionId}`,
         `Error: ${args.error}`,
       ]);
-      state.handleError(args.error as Error, args.action);
+      state.handleError(normalizeThrownError(args.error), args.action);
     }
   } finally {
     finalizeReactiveActionCommit(state, args, elapsed);
   }
+}
+
+function normalizeThrownError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
 }
 
 function finalizeReactiveActionCommit(
