@@ -371,5 +371,7 @@ export const DEFAULT_SELECTOR: SchemaPathSelector = Object.freeze({
  * for the motivating regression.
  */
 export function internSchemaPairAsKey(a: JSONSchema, b: JSONSchema): string {
-  return `${internSchemaAsTaggedHashString(a)}|${internSchemaAsTaggedHashString(b)}`;
+  return `${internSchemaAsTaggedHashString(a)}|${
+    internSchemaAsTaggedHashString(b)
+  }`;
 }

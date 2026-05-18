@@ -313,7 +313,9 @@ describe("schema-hash dispatch", () => {
         type: "object",
         properties: { x: { type: "string" } },
       };
-      expect(internSchemaAsTaggedHashString(a)).toBe(internSchemaAsTaggedHashString(b));
+      expect(internSchemaAsTaggedHashString(a)).toBe(
+        internSchemaAsTaggedHashString(b),
+      );
     });
 
     it("produces different strings for different schemas", () => {
