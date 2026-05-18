@@ -153,7 +153,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
     }
 
     const json = data.slice(ENCODING_PREFIX_TAG.length);
-    const parsed = JSON.parse(json) as JsonWireValue;
+    const parsed = deepFreeze(JSON.parse(json) as JsonWireValue);
     return this.deserialize(parsed, runtime);
   }
 
