@@ -71,15 +71,16 @@ export interface TriggeredActionPlan {
   operation: "none" | "schedule" | "mark-dirty";
 }
 
-export function planTriggeredAction(state: {
-  readonly pullMode: boolean;
-  readonly isEffect: boolean;
-  readonly dirtyBefore: boolean;
+interface TriggeredActionSkipState {
   readonly isOwnCommitSource: boolean;
   readonly hasSourceChangeGroup: boolean;
   readonly actionChangeGroup: ChangeGroup | undefined;
   readonly sourceChangeGroup: ChangeGroup | undefined;
-}): TriggeredActionPlan {
+}
+
+function planSkippedTriggeredAction(
+  state: TriggeredActionSkipState,
+): TriggeredActionPlan | undefined {
   if (state.isOwnCommitSource) {
     return { decision: "skip-own-commit-source", operation: "none" };
   }
@@ -92,9 +93,24 @@ export function planTriggeredAction(state: {
     return { decision: "skip-same-change-group", operation: "none" };
   }
 
-  if (!state.pullMode) {
-    return { decision: "schedule-push", operation: "schedule" };
-  }
+  return undefined;
+}
+
+export function planPushTriggeredAction(
+  state: TriggeredActionSkipState,
+): TriggeredActionPlan {
+  return planSkippedTriggeredAction(state) ??
+    { decision: "schedule-push", operation: "schedule" };
+}
+
+export function planPullTriggeredAction(
+  state: TriggeredActionSkipState & {
+    readonly isEffect: boolean;
+    readonly dirtyBefore: boolean;
+  },
+): TriggeredActionPlan {
+  const skipped = planSkippedTriggeredAction(state);
+  if (skipped) return skipped;
 
   if (state.isEffect) {
     return { decision: "schedule-effect", operation: "schedule" };
@@ -134,6 +150,54 @@ export function shouldRecordTriggerTraceEntry(
   entry: TriggerTraceEntry,
 ): boolean {
   return entry.triggered.length > 0 || entry.matchedActionCount > 0;
+}
+
+function planTriggeredNotificationAction(state: {
+  readonly pullMode: boolean;
+  readonly isEffect: boolean;
+  readonly dirtyBefore: boolean;
+  readonly isOwnCommitSource: boolean;
+  readonly hasSourceChangeGroup: boolean;
+  readonly actionChangeGroup: ChangeGroup | undefined;
+  readonly sourceChangeGroup: ChangeGroup | undefined;
+}): TriggeredActionPlan {
+  if (state.pullMode) {
+    return planPullTriggeredAction(state);
+  }
+
+  return planPushTriggeredAction(state);
+}
+
+function applyPushTriggeredActionPlan(
+  state: StorageNotificationState,
+  action: Action,
+  plan: TriggeredActionPlan,
+): void {
+  if (plan.operation === "schedule") {
+    state.scheduleWithDebounce(action);
+  }
+}
+
+function applyPullTriggeredActionPlan(
+  state: StorageNotificationState,
+  action: Action,
+  isEffect: boolean,
+  plan: TriggeredActionPlan,
+): TriggerTraceScheduledEffect[] {
+  if (plan.operation === "schedule") {
+    if (isEffect) {
+      state.conditionallyScheduledEffects.delete(action);
+    }
+    state.scheduleWithDebounce(action);
+    return [];
+  }
+
+  if (plan.operation === "mark-dirty") {
+    state.markDirty(action);
+    return state.scheduleAffectedEffects(action);
+  }
+
+  return [];
 }
 
 interface CausalEdge {
@@ -265,7 +329,7 @@ export function processStorageNotification(
       const isOwnCommitSource = notification.type === "commit" &&
         notification.source !== undefined &&
         state.inFlightSources.get(action)?.has(notification.source) === true;
-      const plan = planTriggeredAction({
+      const plan = planTriggeredNotificationAction({
         pullMode,
         isEffect: actionIsEffect,
         dirtyBefore,
@@ -276,14 +340,15 @@ export function processStorageNotification(
       });
       let scheduledEffects: TriggerTraceScheduledEffect[] = [];
 
-      if (plan.operation === "schedule") {
-        if (pullMode && actionIsEffect) {
-          state.conditionallyScheduledEffects.delete(action);
-        }
-        state.scheduleWithDebounce(action);
-      } else if (plan.operation === "mark-dirty") {
-        state.markDirty(action);
-        scheduledEffects = state.scheduleAffectedEffects(action);
+      if (pullMode) {
+        scheduledEffects = applyPullTriggeredActionPlan(
+          state,
+          action,
+          actionIsEffect,
+          plan,
+        );
+      } else {
+        applyPushTriggeredActionPlan(state, action, plan);
       }
 
       triggerTraceEntry?.triggered.push(
