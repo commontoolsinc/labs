@@ -352,21 +352,6 @@ export class Scheduler {
   private writePropagationState!: WritePropagationState;
   private subscriptionState!: SchedulerSubscriptionState;
 
-  /**
-   * Temporarily set the executing action so that any child actions created
-   * during `fn` are registered as children of `action`. Restores the previous
-   * executing action afterwards (stack-like nesting).
-   */
-  withExecutingAction<T>(action: Action, fn: () => T): T {
-    const prev = this.executingAction;
-    this.executingAction = action;
-    try {
-      return fn();
-    } finally {
-      this.executingAction = prev;
-    }
-  }
-
   // Dependency population callbacks for first-time subscriptions
   // Called in execute() to discover what cells the action will read
   private populateDependenciesCallbacks = new WeakMap<
@@ -394,22 +379,9 @@ export class Scheduler {
   private settleLoopState!: SchedulerSettleLoopState;
   private executeContinuationState!: ExecuteContinuationState;
 
-  get runningPromise(): Promise<unknown> | undefined {
-    return this._running;
-  }
-
-  set runningPromise(promise: Promise<unknown> | undefined) {
-    if (this._running !== undefined) {
-      throw new Error(
-        "Cannot set running while another promise is in progress",
-      );
-    }
-    if (promise !== undefined) {
-      this._running = promise.finally(() => {
-        this._running = undefined;
-      });
-    }
-  }
+  // ============================================================
+  // Public API
+  // ============================================================
 
   constructor(
     readonly runtime: Runtime,
@@ -443,6 +415,838 @@ export class Scheduler {
       console[method].apply(console, result);
     });
   }
+
+  get runningPromise(): Promise<unknown> | undefined {
+    return this._running;
+  }
+
+  set runningPromise(promise: Promise<unknown> | undefined) {
+    if (this._running !== undefined) {
+      throw new Error(
+        "Cannot set running while another promise is in progress",
+      );
+    }
+    if (promise !== undefined) {
+      this._running = promise.finally(() => {
+        this._running = undefined;
+      });
+    }
+  }
+
+  /**
+   * Temporarily set the executing action so that any child actions created
+   * during `fn` are registered as children of `action`. Restores the previous
+   * executing action afterwards (stack-like nesting).
+   */
+  withExecutingAction<T>(action: Action, fn: () => T): T {
+    const prev = this.executingAction;
+    this.executingAction = action;
+    try {
+      return fn();
+    } finally {
+      this.executingAction = prev;
+    }
+  }
+
+  /**
+   * Subscribes an action to run when its dependencies change.
+   *
+   * The action will be scheduled to run immediately. Before running, the
+   * populateDependencies callback will be called to discover what cells the
+   * action will read. After running, the scheduler automatically re-subscribes
+   * using the reactivity log from the run.
+   *
+   * @param action The action to subscribe
+   * @param populateDependencies Callback to discover the action's read dependencies,
+   *   or a ReactivityLog for backwards compatibility (deprecated)
+   * @param options Configuration options for the subscription
+   * @returns A cancel function to unsubscribe
+   */
+  subscribe(
+    action: Action,
+    populateDependencies: PopulateDependencies | ReactivityLog,
+    options: {
+      isEffect?: boolean;
+      debounce?: number;
+      noDebounce?: boolean;
+      throttle?: number;
+      changeGroup?: ChangeGroup;
+    } = {},
+  ): Cancel {
+    return subscribeSchedulerAction(
+      this.subscribeActionState,
+      action,
+      populateDependencies,
+      options,
+    );
+  }
+
+  /**
+   * Re-subscribes an action after it has already run, using the reactivity log
+   * from the completed run. This sets up triggers for future changes without
+   * scheduling the action to run immediately.
+   *
+   * Use this method when:
+   * - An action has just completed running and you have its reactivity log
+   * - You want to register triggers for future changes
+   *
+   * @param action The action to re-subscribe
+   * @param log The reactivity log from the action's previous run
+   * @param options Optional configuration (e.g., isEffect to mark as side-effectful)
+   */
+  resubscribe(
+    action: Action,
+    log: ReactivityLog,
+    options: {
+      isEffect?: boolean;
+      changeGroup?: ChangeGroup;
+    } = {},
+  ): void {
+    resubscribeSchedulerAction(
+      this.subscribeActionState,
+      action,
+      log,
+      options,
+    );
+  }
+
+  unsubscribe(
+    action: Action,
+    options: { preserveChangeGroup?: boolean } = {},
+  ): void {
+    unsubscribeSchedulerAction(this.unsubscribeState, action, options);
+  }
+
+  async run(action: Action): Promise<any> {
+    return await runSchedulerAction(this.actionRunState, action);
+  }
+
+  idle(): Promise<void> {
+    return new Promise<void>((resolve) => {
+      if (this.runningPromise) {
+        // Something is currently running - wait for it then check again
+        this.runningPromise.then(() => this.idle().then(resolve));
+      } else if (this.backgroundTasks.size > 0) {
+        // Async scheduler work, such as event-triggered auto-start, is still in
+        // flight. Wait for it to settle and then re-check the scheduler state.
+        Promise.allSettled([...this.backgroundTasks]).then(() =>
+          this.idle().then(resolve)
+        );
+      } else if (
+        hasEventQueueWakeTimer(this.eventQueueWakeState) &&
+        ((this.eventQueue.length > 0 &&
+          isHeadEventParkedState(this.eventQueueWakeState)) ||
+          this.hasDeferredDirtyEffectWork())
+      ) {
+        // A queued event is parked behind a throttled dependency. Wait for the
+        // wake timer to re-schedule the queue and then re-check.
+        this.idlePromises.push(resolve);
+      } else if (!this.scheduled) {
+        if (this.pullMode && this.hasRunnablePullWork()) {
+          this.queueExecution();
+          this.idlePromises.push(resolve);
+          return;
+        }
+        // Nothing is scheduled to run - we're idle.
+        // In pull mode, pending computations won't run without an effect to pull them,
+        // so we don't wait for them.
+        resolve();
+      } else {
+        // Execution is scheduled - wait for it to complete
+        this.idlePromises.push(resolve);
+      }
+    });
+  }
+
+  queueExecution(): void {
+    if (this.disposed) return;
+    if (this.scheduled) {
+      if (this.pendingQueueTaskTimer === null) {
+        this.rerunAfterCurrentExecute = true;
+      }
+      return;
+    }
+    this.pendingQueueTaskTimer = queueTask(() => {
+      this.pendingQueueTaskTimer = null;
+      this.execute();
+    });
+    this.scheduled = true;
+  }
+
+  queueEvent(
+    eventLink: NormalizedFullLink,
+    event: any,
+    retries: number = DEFAULT_RETRIES_FOR_EVENTS,
+    // Internal-only commit callback. This runs after the final commit result,
+    // including exhausted failure, so it must not perform external side
+    // effects. Use the post-commit outbox for success-only effect release.
+    onCommit?: (tx: IExtendedStorageTransaction) => void,
+    doNotLoadPieceIfNotRunning: boolean = false,
+  ): void {
+    queueSchedulerEvent(this.eventQueueState, {
+      eventLink,
+      event,
+      retries,
+      onCommit,
+      doNotLoadPieceIfNotRunning,
+    });
+  }
+
+  addEventHandler(
+    handler: EventHandler,
+    ref: NormalizedFullLink,
+    populateDependencies?: (
+      tx: IExtendedStorageTransaction,
+      event: any,
+    ) => void,
+  ): Cancel {
+    return addSchedulerEventHandler({
+      eventHandlers: this.eventHandlers,
+    }, {
+      handler,
+      ref,
+      populateDependencies,
+    });
+  }
+
+  onConsole(fn: ConsoleHandler): void {
+    this.consoleHandler = fn;
+  }
+
+  onError(fn: ErrorHandler): void {
+    this.errorHandlers.add(fn);
+  }
+
+  setEventPreflightTelemetryEnabled(enabled: boolean): void {
+    this.eventPreflightTelemetryEnabled = enabled;
+  }
+
+  isEventPreflightTelemetryEnabled(): boolean {
+    return this.eventPreflightTelemetryEnabled;
+  }
+
+  // ============================================================
+  // Pull-based scheduling methods
+  // ============================================================
+
+  /**
+   * Enables pull-based scheduling mode.
+   * In pull mode, only effects are scheduled; computations are marked dirty
+   * and pulled on demand when effects need their values.
+   */
+  enablePullMode(): void {
+    this.pullMode = true;
+    this.staleness.stale.clear();
+    this.staleness.resetUpstreamStaleState();
+
+    // Rebuild reverse dependency graph (dependents map) from current dependencies.
+    // In push mode, processRun() doesn't update dependents, so the map may be stale.
+    // We need accurate dependents for markDirty() propagation and scheduleAffectedEffects().
+    for (const action of [...this.effects, ...this.computations]) {
+      const log = this.dependencies.get(action);
+      if (log) {
+        this.updateDependents(action, log);
+      }
+    }
+    for (const action of this.staleness.dirty) {
+      this.staleness.setStaleFromInputs(action);
+    }
+
+    this.runtime.telemetry.submit({
+      type: "scheduler.mode.change",
+      pullMode: true,
+    });
+    this.queueExecution();
+  }
+
+  /**
+   * Disables pull-based scheduling mode (returns to push mode).
+   */
+  disablePullMode(): void {
+    this.pullMode = false;
+    // Clear dirty set when switching back to push mode
+    this.staleness.clearAll();
+    this.runtime.telemetry.submit({
+      type: "scheduler.mode.change",
+      pullMode: false,
+    });
+    this.queueExecution();
+  }
+
+  /**
+   * Returns whether pull mode is enabled.
+   */
+  isPullModeEnabled(): boolean {
+    return this.pullMode;
+  }
+
+  // ============================================================
+  // Debounce infrastructure for throttling slow actions
+  // ============================================================
+
+  /**
+   * Sets a debounce delay for an action.
+   * When the action is triggered, it will wait for the specified delay before running.
+   * If triggered again during the delay, the timer resets.
+   */
+  setDebounce(action: Action, ms: number): void {
+    this.delays.setDebounce(action, ms);
+  }
+
+  /**
+   * Gets the current debounce delay for an action, if set.
+   */
+  getDebounce(action: Action): number | undefined {
+    return this.delays.getDebounce(action);
+  }
+
+  /**
+   * Clears the debounce setting for an action.
+   */
+  clearDebounce(action: Action): void {
+    this.delays.clearDebounce(action);
+  }
+
+  /**
+   * Enables or disables auto-debounce detection for an action.
+   * When set to true, this action opts OUT of auto-debounce.
+   * By default, slow actions (> 50ms avg after 3 runs) will automatically get debounced.
+   */
+  setNoDebounce(action: Action, optOut: boolean): void {
+    this.delays.setNoDebounce(action, optOut);
+  }
+
+  // ============================================================
+  // Throttle infrastructure - "value can be stale by T ms"
+  // ============================================================
+
+  /**
+   * Sets a throttle period for an action.
+   * The action won't run if it ran within the last `ms` milliseconds.
+   * Unlike debounce, throttled actions stay dirty and will be pulled
+   * by effects when the throttle period expires. Event handlers whose head
+   * dependencies are throttled are parked until the earliest eligible wake time.
+   */
+  setThrottle(action: Action, ms: number): void {
+    this.delays.setThrottle(action, ms);
+  }
+
+  /**
+   * Gets the current throttle period for an action, if set.
+   */
+  getThrottle(action: Action): number | undefined {
+    return this.delays.getThrottle(action);
+  }
+
+  /**
+   * Clears the throttle setting for an action.
+   */
+  clearThrottle(action: Action): void {
+    this.delays.clearThrottle(action);
+  }
+
+  /**
+   * Set action IDs that should trigger a debugger breakpoint before execution.
+   */
+  setBreakpoints(actionIds: string[]): void {
+    this.breakpoints.clear();
+    for (const id of actionIds) {
+      this.breakpoints.add(id);
+    }
+  }
+
+  /**
+   * Get currently set breakpoint action IDs.
+   */
+  getBreakpoints(): string[] {
+    return Array.from(this.breakpoints);
+  }
+
+  /**
+   * Check if an action ID has a breakpoint set.
+   */
+  hasBreakpoint(actionId: string): boolean {
+    return this.breakpoints.has(actionId);
+  }
+
+  /**
+   * Returns diagnostic statistics about the scheduler state.
+   * Useful for debugging and monitoring pull-based scheduling behavior.
+   */
+  getStats(): { effects: number; computations: number; pending: number } {
+    return {
+      effects: this.effects.size,
+      computations: this.computations.size,
+      pending: this.pending.size,
+    };
+  }
+
+  /**
+   * Returns whether an action is registered as an effect.
+   */
+  isEffect(action: Action): boolean {
+    return this.effects.has(action);
+  }
+
+  /**
+   * Returns whether an action is registered as a computation.
+   */
+  isComputation(action: Action): boolean {
+    return this.computations.has(action);
+  }
+
+  /**
+   * Returns whether an action is marked as dirty.
+   */
+  isDirty(action: Action): boolean {
+    return this.staleness.dirty.has(action);
+  }
+
+  /**
+   * Returns the set of actions that depend on this action's output.
+   */
+  getDependents(action: Action): Set<Action> {
+    return this.dependents.get(action) ?? new Set();
+  }
+
+  /**
+   * Returns a snapshot of the current dependency graph for visualization.
+   * Uses getActionId for the identifier (includes code location).
+   */
+  getGraphSnapshot(): SchedulerGraphSnapshot {
+    return buildSchedulerGraphSnapshot(this.graphSnapshotState);
+  }
+
+  // ============================================================
+  // Push-triggered filtering
+  // ============================================================
+
+  /**
+   * Returns the active scheduling write set for an action. By default this is
+   * the current-known write set; experimental historical mode returns the
+   * cumulative legacy view instead.
+   */
+  getMightWrite(action: Action): IMemorySpaceAddress[] | undefined {
+    return this.writeIndex.getSchedulingWrites(action);
+  }
+
+  // ============================================================
+  // Compute time tracking for cycle-aware scheduling
+  // ============================================================
+
+  /**
+   * Returns the execution statistics for an action, if available.
+   * Useful for diagnostics and determining cycle convergence strategy.
+   * Accepts either an Action or an action ID string.
+   */
+  getActionStats(action: Action | string): ActionStats | undefined {
+    return getActionStatsFromState(this.actionTimingState, action);
+  }
+
+  /**
+   * Returns filter statistics for the current/last execution cycle.
+   */
+  getFilterStats(): { filtered: number; executed: number } {
+    return { ...this.filterStats };
+  }
+
+  /**
+   * Resets filter statistics.
+   */
+  resetFilterStats(): void {
+    this.filterStats.filtered = 0;
+    this.filterStats.executed = 0;
+  }
+
+  /**
+   * Enables collection of per-iteration settle stats during execute().
+   * Call this once before running patterns to opt in to the overhead.
+   */
+  enableSettleStats(): void {
+    this.setSettleStatsEnabled(true);
+  }
+
+  /**
+   * Enables or disables collection of per-iteration settle stats during execute().
+   * Disabling also clears the last collected stats to avoid stale reads.
+   */
+  setSettleStatsEnabled(enabled: boolean): void {
+    this.collectSettleStats = enabled;
+    if (!enabled) {
+      this.lastSettleStats = null;
+      this.settleStatsHistory = [];
+    }
+  }
+
+  /**
+   * Returns settle stats from the last execute() call, or null if not enabled/collected.
+   */
+  getSettleStats(): SettleStats | null {
+    return this.lastSettleStats;
+  }
+
+  /**
+   * Returns recent settle stats history from execute() calls, oldest first.
+   */
+  getSettleStatsHistory(): SettleStatsHistoryEntry[] {
+    return [...this.settleStatsHistory];
+  }
+
+  /**
+   * Enables or disables collection of exact action-run history.
+   * Disabling clears the current ring buffer to avoid stale reads.
+   */
+  setActionRunTraceEnabled(enabled: boolean): void {
+    this.collectActionRunTrace = enabled;
+    if (!enabled) {
+      this.actionRunTrace.length = 0;
+    }
+  }
+
+  /**
+   * Returns recent exact action-run history, oldest first.
+   */
+  getActionRunTrace(): ActionRunTraceEntry[] {
+    return [...this.actionRunTrace];
+  }
+
+  /**
+   * Enables or disables collection of structured trigger-trace entries.
+   * Disabling clears the current ring buffer to avoid stale reads.
+   */
+  setTriggerTraceEnabled(enabled: boolean): void {
+    this.collectTriggerTrace = enabled;
+    if (!enabled) {
+      this.triggerTrace = [];
+    }
+  }
+
+  /**
+   * Returns recent structured trigger-trace entries, oldest first.
+   */
+  getTriggerTrace(): TriggerTraceEntry[] {
+    return [...this.triggerTrace];
+  }
+
+  // ============================================================
+  // Non-settling detection API
+  // ============================================================
+
+  /**
+   * Returns whether the scheduler has detected a non-settling condition.
+   * This means execute() is consuming a high fraction of wall-clock time,
+   * indicating the system is churning.
+   */
+  isNonSettling(): boolean {
+    return this.settlingTracker.nonSettlingDetected;
+  }
+
+  /**
+   * Enables or disables automatic triggering of diagnosis when non-settling
+   * is detected. Off by default.
+   */
+  setAutoTriggerDiagnosis(enabled: boolean): void {
+    this.autoTriggerDiagnosis = enabled;
+  }
+
+  /**
+   * Runs a diagnosis for the specified duration and returns the result.
+   * This is the main entry point for external callers (IPC, console).
+   */
+  runDiagnosis(durationMs = 5000): Promise<SchedulerDiagnosisResult> {
+    return runSchedulerDiagnosis(this.diagnosisControlState, durationMs);
+  }
+
+  // ── Inline idempotency check mode ──────────────────────────────────
+
+  enableIdempotencyCheck(): void {
+    this.idempotencyCheckMode = true;
+    this.idempotencyViolations.length = 0;
+    if (this.pullMode) {
+      this.queueExecution();
+    }
+  }
+
+  disableIdempotencyCheck(): void {
+    this.idempotencyCheckMode = false;
+  }
+
+  getIdempotencyViolations(): NonIdempotentReport[] {
+    return [...this.idempotencyViolations];
+  }
+
+  /**
+   * Checks all computations for idempotency by enabling inline mode
+   * and force-running each computation through run(). Each run()
+   * automatically gets a second synchronous run for comparison.
+   */
+  async runIdempotencyCheck(): Promise<SchedulerDiagnosisResult> {
+    return await runSchedulerIdempotencyCheck(this.diagnosisControlState);
+  }
+
+  /**
+   * Clean up all pending timers and resources.
+   * Should be called when the scheduler is being torn down.
+   */
+  dispose(): void {
+    this.disposed = true;
+    // Clear all active debounce timers
+    this.delays.clearActiveDebounceTimers();
+    if (this.pendingQueueTaskTimer !== null) {
+      clearTimeout(this.pendingQueueTaskTimer);
+      this.pendingQueueTaskTimer = null;
+    }
+    cancelEventQueueWakeState(this.eventQueueWakeState);
+    // Clean up diagnosis state
+    if (this.diagnosisTimeout) {
+      clearTimeout(this.diagnosisTimeout);
+      this.diagnosisTimeout = null;
+    }
+    this.diagnosisEnabled = false;
+  }
+
+  // ============================================================
+  // Execution orchestration
+  // ============================================================
+
+  private handleError(error: Error, action: any) {
+    handleSchedulerError(
+      {
+        errorHandlers: this.errorHandlers,
+        parseStack: (stack) => this.runtime.harness.parseStack(stack),
+      },
+      error,
+      action,
+    );
+  }
+
+  private async execute(): Promise<void> {
+    if (this.disposed) return;
+    logger.timeStart("scheduler", "execute");
+
+    // In case a directly invoked `run` is still running, wait for it to finish.
+    if (this.runningPromise) await this.runningPromise;
+
+    this.beginExecuteCycle();
+    const { newActionsWithoutDependencies } = this
+      .collectInitialExecuteDependencies();
+    const eventBlockingDeps = await this.processExecuteEventPhase();
+    this.collectPostEventDependencies();
+    const initialSeeds = this.buildInitialExecuteSeeds(
+      newActionsWithoutDependencies,
+      eventBlockingDeps,
+    );
+
+    const settleResult = await this.runSettleLoop(initialSeeds);
+    await breakCyclesIfNeeded(this.cycleBreakState, settleResult);
+    this.applyAdaptiveCycleDebounce();
+    this.recordExecuteEndTelemetry();
+    applyExecuteContinuation(this.executeContinuationState);
+    logger.timeEnd("scheduler", "execute");
+  }
+
+  private beginExecuteCycle(): void {
+    // Track timing for cycle-aware debounce
+    this.executeStartTime = performance.now();
+    this.runsThisExecute.clear();
+
+    // Non-settling heuristic: record execute() start
+    markExecuteStart(this.settlingTracker);
+  }
+
+  private collectInitialExecuteDependencies(): {
+    newActionsWithoutDependencies: Action[];
+  } {
+    return collectInitialExecuteDependenciesState({
+      pendingDependencyCollection: this.pendingDependencyCollection,
+      populateDependenciesCallbacks: this.populateDependenciesCallbacks,
+      effects: this.effects,
+      getSchedulingWrites: (action) =>
+        this.writeIndex.getSchedulingWrites(action),
+      collectDependenciesForAction: (action, populateDependencies, options) =>
+        this.collectDependenciesForAction(
+          action,
+          populateDependencies,
+          options,
+        ),
+      getActionId: (action) => this.getActionId(action),
+      scheduleAffectedEffects: (action) => this.scheduleAffectedEffects(action),
+    });
+  }
+
+  private async processExecuteEventPhase(): Promise<Set<Action>> {
+    // Track dirty dependencies that block events - these must be added to workSet
+    const eventBlockingDeps = new Set<Action>();
+
+    logger.timeStart("scheduler", "execute", "event");
+    try {
+      await processQueuedEventDuringExecute(
+        this.eventExecutionState,
+        eventBlockingDeps,
+      );
+      return eventBlockingDeps;
+    } finally {
+      logger.timeEnd("scheduler", "execute", "event");
+    }
+  }
+
+  private collectPostEventDependencies(): void {
+    collectPostEventDependenciesState({
+      pendingDependencyCollection: this.pendingDependencyCollection,
+      populateDependenciesCallbacks: this.populateDependenciesCallbacks,
+      effects: this.effects,
+      getSchedulingWrites: (action) =>
+        this.writeIndex.getSchedulingWrites(action),
+      collectDependenciesForAction: (action, populateDependencies, options) =>
+        this.collectDependenciesForAction(
+          action,
+          populateDependencies,
+          options,
+        ),
+      getActionId: (action) => this.getActionId(action),
+    });
+  }
+
+  private buildInitialExecuteSeeds(
+    newActionsWithoutDependencies: Iterable<Action>,
+    eventBlockingDeps: Iterable<Action>,
+  ): Set<Action> {
+    // Build initial seeds for pull mode (effects + special actions).
+    return buildPullInitialSeeds({
+      pullMode: this.pullMode,
+      pending: this.pending,
+      dirty: this.staleness.dirty,
+      effects: this.effects,
+      newActionsWithoutDependencies,
+      eventBlockingDeps,
+      computationDebounceFlushSeeds: this.delays.computationDebounceFlushSeeds,
+    });
+  }
+
+  private async runSettleLoop(
+    initialSeeds: ReadonlySet<Action>,
+  ): Promise<SchedulerSettleResult> {
+    const settleResult = await runSchedulerSettleLoop(
+      this.settleLoopState,
+      initialSeeds,
+    );
+
+    if (settleResult.settleStats) {
+      this.lastSettleStats = settleResult.settleStats;
+      pushBoundedHistory(
+        this.settleStatsHistory,
+        { recordedAt: performance.now(), stats: settleResult.settleStats },
+        MAX_SETTLE_STATS_HISTORY,
+      );
+    }
+
+    return settleResult;
+  }
+
+  private applyAdaptiveCycleDebounce(): void {
+    // Apply cycle-aware debounce to effects that ran multiple times this execute().
+    // Pull computations are already demand-gated; debouncing them can leave a
+    // live renderer observing stale materialized data until an arbitrary timer
+    // fires.
+    const cycleDebouncePlan = planAdaptiveCycleDebounce({
+      pullMode: this.pullMode,
+      executeStartTime: this.executeStartTime,
+      runsThisExecute: this.runsThisExecute,
+      canAutomaticallyDebounce: (action) =>
+        this.canAutomaticallyDebounce(
+          action,
+        ),
+      getCurrentDebounce: (action) => this.delays.getDebounce(action),
+    });
+    for (
+      const { action, runs, delayMs } of cycleDebouncePlan.updates
+    ) {
+      this.delays.setDebounce(action, delayMs);
+      logger.debug("schedule-cycle-debounce", () => [
+        `[CYCLE-DEBOUNCE] Action ${this.getActionId(action)} ` +
+        `ran ${runs}x in ${cycleDebouncePlan.elapsedMs.toFixed(1)}ms, ` +
+        `setting debounce to ${delayMs}ms`,
+      ]);
+    }
+  }
+
+  private recordExecuteEndTelemetry(): void {
+    // Non-settling heuristic: accumulate busy time at end of execute()
+    const executeEnd = recordExecuteEnd(this.settlingTracker);
+    if (this.diagnosisEnabled) {
+      this.diagnosisBusyTime += executeEnd.diagnosisBusyTimeMs;
+    }
+    if (executeEnd.nonSettlingTelemetry) {
+      this.runtime.telemetry.submit({
+        type: "scheduler.non-settling",
+        ...executeEnd.nonSettlingTelemetry,
+      });
+      // Auto-trigger diagnosis if enabled
+      if (this.autoTriggerDiagnosis && !this.diagnosisEnabled) {
+        this.startDiagnosis();
+      }
+    }
+  }
+
+  // ============================================================
+  // Idempotency diagnosis API (Phase 2 + 3)
+  // ============================================================
+
+  /**
+   * Starts diagnosis mode: captures read/write values and causal edges.
+   * Automatically stops after durationMs.
+   */
+  private startDiagnosis(durationMs = 5000): void {
+    startSchedulerDiagnosis(this.diagnosisControlState, durationMs);
+  }
+
+  /**
+   * Stops diagnosis mode and finalizes results.
+   */
+  private stopDiagnosis(): void {
+    stopSchedulerDiagnosis(this.diagnosisControlState);
+  }
+
+  private collectDependenciesForAction(
+    action: Action,
+    populateDependencies: PopulateDependenciesEntry,
+    options: {
+      errorLogLabel: string;
+      errorMessage: (action: Action, error: unknown) => string;
+      updateDependents?: boolean;
+      useRawReadsForTriggers?: boolean;
+    },
+  ): { log: ReactivityLog; entities: Set<SpaceScopeAndURI> } {
+    return collectDependenciesForActionState(
+      this.dependencyCollectionState,
+      action,
+      populateDependencies,
+      options,
+    );
+  }
+
+  /**
+   * Updates the reverse dependency graph (dependents map).
+   * For each action that writes to paths this action reads, add this action as a dependent.
+   */
+  private updateDependents(action: Action, log: ReactivityLog): void {
+    const actionId = this.getActionId(action);
+    updateDependentEdgesForLog(this.dependencyGraphState, action, log);
+
+    // Emit telemetry for dependency updates
+    this.runtime.telemetry.submit({
+      type: "scheduler.dependencies.update",
+      actionId,
+      reads: [...log.reads, ...log.shallowReads].map((r) =>
+        `${r.space}/${r.id}/${r.path.join("/")}`
+      ),
+      writes: log.writes.map((w) => `${w.space}/${w.id}/${w.path.join("/")}`),
+    });
+  }
+
+  // ============================================================
+  // State wiring
+  // ============================================================
 
   // Keep state-bundle wiring explicit without making the field declarations
   // read like one large object graph.
@@ -1110,6 +1914,10 @@ export class Scheduler {
     };
   }
 
+  // ============================================================
+  // Private forwarding helpers
+  // ============================================================
+
   /**
    * Gets a stable identifier for an action based on its source location.
    * Prefers .src (set as backup) over .name, falls back to a generated ID.
@@ -1117,365 +1925,6 @@ export class Scheduler {
    */
   private getActionId(action: Action | EventHandler): string {
     return getSchedulerActionId(this.actionIdentityState, action);
-  }
-
-  // ── Inline idempotency check mode ──────────────────────────────────
-
-  enableIdempotencyCheck(): void {
-    this.idempotencyCheckMode = true;
-    this.idempotencyViolations.length = 0;
-    if (this.pullMode) {
-      this.queueExecution();
-    }
-  }
-
-  disableIdempotencyCheck(): void {
-    this.idempotencyCheckMode = false;
-  }
-
-  getIdempotencyViolations(): NonIdempotentReport[] {
-    return [...this.idempotencyViolations];
-  }
-
-  /**
-   * Subscribes an action to run when its dependencies change.
-   *
-   * The action will be scheduled to run immediately. Before running, the
-   * populateDependencies callback will be called to discover what cells the
-   * action will read. After running, the scheduler automatically re-subscribes
-   * using the reactivity log from the run.
-   *
-   * @param action The action to subscribe
-   * @param populateDependencies Callback to discover the action's read dependencies,
-   *   or a ReactivityLog for backwards compatibility (deprecated)
-   * @param options Configuration options for the subscription
-   * @returns A cancel function to unsubscribe
-   */
-  subscribe(
-    action: Action,
-    populateDependencies: PopulateDependencies | ReactivityLog,
-    options: {
-      isEffect?: boolean;
-      debounce?: number;
-      noDebounce?: boolean;
-      throttle?: number;
-      changeGroup?: ChangeGroup;
-    } = {},
-  ): Cancel {
-    return subscribeSchedulerAction(
-      this.subscribeActionState,
-      action,
-      populateDependencies,
-      options,
-    );
-  }
-
-  /**
-   * Re-subscribes an action after it has already run, using the reactivity log
-   * from the completed run. This sets up triggers for future changes without
-   * scheduling the action to run immediately.
-   *
-   * Use this method when:
-   * - An action has just completed running and you have its reactivity log
-   * - You want to register triggers for future changes
-   *
-   * @param action The action to re-subscribe
-   * @param log The reactivity log from the action's previous run
-   * @param options Optional configuration (e.g., isEffect to mark as side-effectful)
-   */
-  resubscribe(
-    action: Action,
-    log: ReactivityLog,
-    options: {
-      isEffect?: boolean;
-      changeGroup?: ChangeGroup;
-    } = {},
-  ): void {
-    resubscribeSchedulerAction(
-      this.subscribeActionState,
-      action,
-      log,
-      options,
-    );
-  }
-
-  unsubscribe(
-    action: Action,
-    options: { preserveChangeGroup?: boolean } = {},
-  ): void {
-    unsubscribeSchedulerAction(this.unsubscribeState, action, options);
-  }
-
-  async run(action: Action): Promise<any> {
-    return await runSchedulerAction(this.actionRunState, action);
-  }
-
-  idle(): Promise<void> {
-    return new Promise<void>((resolve) => {
-      if (this.runningPromise) {
-        // Something is currently running - wait for it then check again
-        this.runningPromise.then(() => this.idle().then(resolve));
-      } else if (this.backgroundTasks.size > 0) {
-        // Async scheduler work, such as event-triggered auto-start, is still in
-        // flight. Wait for it to settle and then re-check the scheduler state.
-        Promise.allSettled([...this.backgroundTasks]).then(() =>
-          this.idle().then(resolve)
-        );
-      } else if (
-        hasEventQueueWakeTimer(this.eventQueueWakeState) &&
-        ((this.eventQueue.length > 0 &&
-          isHeadEventParkedState(this.eventQueueWakeState)) ||
-          this.hasDeferredDirtyEffectWork())
-      ) {
-        // A queued event is parked behind a throttled dependency. Wait for the
-        // wake timer to re-schedule the queue and then re-check.
-        this.idlePromises.push(resolve);
-      } else if (!this.scheduled) {
-        if (this.pullMode && this.hasRunnablePullWork()) {
-          this.queueExecution();
-          this.idlePromises.push(resolve);
-          return;
-        }
-        // Nothing is scheduled to run - we're idle.
-        // In pull mode, pending computations won't run without an effect to pull them,
-        // so we don't wait for them.
-        resolve();
-      } else {
-        // Execution is scheduled - wait for it to complete
-        this.idlePromises.push(resolve);
-      }
-    });
-  }
-
-  queueEvent(
-    eventLink: NormalizedFullLink,
-    event: any,
-    retries: number = DEFAULT_RETRIES_FOR_EVENTS,
-    // Internal-only commit callback. This runs after the final commit result,
-    // including exhausted failure, so it must not perform external side
-    // effects. Use the post-commit outbox for success-only effect release.
-    onCommit?: (tx: IExtendedStorageTransaction) => void,
-    doNotLoadPieceIfNotRunning: boolean = false,
-  ): void {
-    queueSchedulerEvent(this.eventQueueState, {
-      eventLink,
-      event,
-      retries,
-      onCommit,
-      doNotLoadPieceIfNotRunning,
-    });
-  }
-
-  addEventHandler(
-    handler: EventHandler,
-    ref: NormalizedFullLink,
-    populateDependencies?: (
-      tx: IExtendedStorageTransaction,
-      event: any,
-    ) => void,
-  ): Cancel {
-    return addSchedulerEventHandler({
-      eventHandlers: this.eventHandlers,
-    }, {
-      handler,
-      ref,
-      populateDependencies,
-    });
-  }
-
-  onConsole(fn: ConsoleHandler): void {
-    this.consoleHandler = fn;
-  }
-
-  onError(fn: ErrorHandler): void {
-    this.errorHandlers.add(fn);
-  }
-
-  queueExecution(): void {
-    if (this.disposed) return;
-    if (this.scheduled) {
-      if (this.pendingQueueTaskTimer === null) {
-        this.rerunAfterCurrentExecute = true;
-      }
-      return;
-    }
-    this.pendingQueueTaskTimer = queueTask(() => {
-      this.pendingQueueTaskTimer = null;
-      this.execute();
-    });
-    this.scheduled = true;
-  }
-
-  private collectDependenciesForAction(
-    action: Action,
-    populateDependencies: PopulateDependenciesEntry,
-    options: {
-      errorLogLabel: string;
-      errorMessage: (action: Action, error: unknown) => string;
-      updateDependents?: boolean;
-      useRawReadsForTriggers?: boolean;
-    },
-  ): { log: ReactivityLog; entities: Set<SpaceScopeAndURI> } {
-    return collectDependenciesForActionState(
-      this.dependencyCollectionState,
-      action,
-      populateDependencies,
-      options,
-    );
-  }
-
-  /**
-   * Updates the reverse dependency graph (dependents map).
-   * For each action that writes to paths this action reads, add this action as a dependent.
-   */
-  private updateDependents(action: Action, log: ReactivityLog): void {
-    const actionId = this.getActionId(action);
-    updateDependentEdgesForLog(this.dependencyGraphState, action, log);
-
-    // Emit telemetry for dependency updates
-    this.runtime.telemetry.submit({
-      type: "scheduler.dependencies.update",
-      actionId,
-      reads: [...log.reads, ...log.shallowReads].map((r) =>
-        `${r.space}/${r.id}/${r.path.join("/")}`
-      ),
-      writes: log.writes.map((w) => `${w.space}/${w.id}/${w.path.join("/")}`),
-    });
-  }
-
-  /**
-   * Returns diagnostic statistics about the scheduler state.
-   * Useful for debugging and monitoring pull-based scheduling behavior.
-   */
-  getStats(): { effects: number; computations: number; pending: number } {
-    return {
-      effects: this.effects.size,
-      computations: this.computations.size,
-      pending: this.pending.size,
-    };
-  }
-
-  /**
-   * Set action IDs that should trigger a debugger breakpoint before execution.
-   */
-  setBreakpoints(actionIds: string[]): void {
-    this.breakpoints.clear();
-    for (const id of actionIds) {
-      this.breakpoints.add(id);
-    }
-  }
-
-  /**
-   * Get currently set breakpoint action IDs.
-   */
-  getBreakpoints(): string[] {
-    return Array.from(this.breakpoints);
-  }
-
-  /**
-   * Check if an action ID has a breakpoint set.
-   */
-  hasBreakpoint(actionId: string): boolean {
-    return this.breakpoints.has(actionId);
-  }
-
-  /**
-   * Returns a snapshot of the current dependency graph for visualization.
-   * Uses getActionId for the identifier (includes code location).
-   */
-  getGraphSnapshot(): SchedulerGraphSnapshot {
-    return buildSchedulerGraphSnapshot(this.graphSnapshotState);
-  }
-
-  /**
-   * Returns whether an action is registered as an effect.
-   */
-  isEffect(action: Action): boolean {
-    return this.effects.has(action);
-  }
-
-  /**
-   * Returns whether an action is registered as a computation.
-   */
-  isComputation(action: Action): boolean {
-    return this.computations.has(action);
-  }
-
-  /**
-   * Returns the set of actions that depend on this action's output.
-   */
-  getDependents(action: Action): Set<Action> {
-    return this.dependents.get(action) ?? new Set();
-  }
-
-  // ============================================================
-  // Pull-based scheduling methods
-  // ============================================================
-
-  /**
-   * Enables pull-based scheduling mode.
-   * In pull mode, only effects are scheduled; computations are marked dirty
-   * and pulled on demand when effects need their values.
-   */
-  enablePullMode(): void {
-    this.pullMode = true;
-    this.staleness.stale.clear();
-    this.staleness.resetUpstreamStaleState();
-
-    // Rebuild reverse dependency graph (dependents map) from current dependencies.
-    // In push mode, processRun() doesn't update dependents, so the map may be stale.
-    // We need accurate dependents for markDirty() propagation and scheduleAffectedEffects().
-    for (const action of [...this.effects, ...this.computations]) {
-      const log = this.dependencies.get(action);
-      if (log) {
-        this.updateDependents(action, log);
-      }
-    }
-    for (const action of this.staleness.dirty) {
-      this.staleness.setStaleFromInputs(action);
-    }
-
-    this.runtime.telemetry.submit({
-      type: "scheduler.mode.change",
-      pullMode: true,
-    });
-    this.queueExecution();
-  }
-
-  /**
-   * Disables pull-based scheduling mode (returns to push mode).
-   */
-  disablePullMode(): void {
-    this.pullMode = false;
-    // Clear dirty set when switching back to push mode
-    this.staleness.clearAll();
-    this.runtime.telemetry.submit({
-      type: "scheduler.mode.change",
-      pullMode: false,
-    });
-    this.queueExecution();
-  }
-
-  /**
-   * Returns whether pull mode is enabled.
-   */
-  isPullModeEnabled(): boolean {
-    return this.pullMode;
-  }
-
-  setEventPreflightTelemetryEnabled(enabled: boolean): void {
-    this.eventPreflightTelemetryEnabled = enabled;
-  }
-
-  isEventPreflightTelemetryEnabled(): boolean {
-    return this.eventPreflightTelemetryEnabled;
-  }
-
-  /**
-   * Returns whether an action is marked as dirty.
-   */
-  isDirty(action: Action): boolean {
-    return this.staleness.dirty.has(action);
   }
 
   /**
@@ -1499,6 +1948,19 @@ export class Scheduler {
     );
   }
 
+  private collectDirtyDependenciesForLog(
+    log: ReactivityLog,
+    workSet: Set<Action>,
+    memo = new Map<Action, boolean>(),
+  ): boolean {
+    return collectDirtyDependenciesForLogState(
+      this.dirtyDependencyCollectionState,
+      log,
+      workSet,
+      memo,
+    );
+  }
+
   private canAutomaticallyDebounce(action: Action): boolean {
     return canAutomaticallyDebounceState(this.delayControlState, action);
   }
@@ -1514,19 +1976,6 @@ export class Scheduler {
     );
   }
 
-  private collectDirtyDependenciesForLog(
-    log: ReactivityLog,
-    workSet: Set<Action>,
-    memo = new Map<Action, boolean>(),
-  ): boolean {
-    return collectDirtyDependenciesForLogState(
-      this.dirtyDependencyCollectionState,
-      log,
-      workSet,
-      memo,
-    );
-  }
-
   private collectPullIterationSeeds(workSet: Set<Action>): void {
     collectPullIterationSeedsState(this.pullSchedulingState, workSet);
   }
@@ -1534,6 +1983,7 @@ export class Scheduler {
   private hasRunnablePullWork(): boolean {
     return hasRunnablePullWorkState(this.pullSchedulingState);
   }
+
   private hasDeferredDirtyEffectWork(): boolean {
     return hasDeferredDirtyEffectWorkState(this.pullSchedulingState);
   }
@@ -1542,55 +1992,6 @@ export class Scheduler {
     computation: Action,
   ): TriggerTraceScheduledEffect[] {
     return scheduleAffectedEffectsState(this.pullSchedulingState, computation);
-  }
-
-  // ============================================================
-  // Compute time tracking for cycle-aware scheduling
-  // ============================================================
-
-  /**
-   * Returns the execution statistics for an action, if available.
-   * Useful for diagnostics and determining cycle convergence strategy.
-   * Accepts either an Action or an action ID string.
-   */
-  getActionStats(action: Action | string): ActionStats | undefined {
-    return getActionStatsFromState(this.actionTimingState, action);
-  }
-
-  // ============================================================
-  // Debounce infrastructure for throttling slow actions
-  // ============================================================
-
-  /**
-   * Sets a debounce delay for an action.
-   * When the action is triggered, it will wait for the specified delay before running.
-   * If triggered again during the delay, the timer resets.
-   */
-  setDebounce(action: Action, ms: number): void {
-    this.delays.setDebounce(action, ms);
-  }
-
-  /**
-   * Gets the current debounce delay for an action, if set.
-   */
-  getDebounce(action: Action): number | undefined {
-    return this.delays.getDebounce(action);
-  }
-
-  /**
-   * Clears the debounce setting for an action.
-   */
-  clearDebounce(action: Action): void {
-    this.delays.clearDebounce(action);
-  }
-
-  /**
-   * Enables or disables auto-debounce detection for an action.
-   * When set to true, this action opts OUT of auto-debounce.
-   * By default, slow actions (> 50ms avg after 3 runs) will automatically get debounced.
-   */
-  setNoDebounce(action: Action, optOut: boolean): void {
-    this.delays.setNoDebounce(action, optOut);
   }
 
   private getNextDebounceRunTime(action: Action): number | undefined {
@@ -1629,389 +2030,5 @@ export class Scheduler {
         }ms >= ${update.thresholdMs}ms)`,
       ]);
     }
-  }
-
-  // ============================================================
-  // Throttle infrastructure - "value can be stale by T ms"
-  // ============================================================
-
-  /**
-   * Sets a throttle period for an action.
-   * The action won't run if it ran within the last `ms` milliseconds.
-   * Unlike debounce, throttled actions stay dirty and will be pulled
-   * by effects when the throttle period expires. Event handlers whose head
-   * dependencies are throttled are parked until the earliest eligible wake time.
-   */
-  setThrottle(action: Action, ms: number): void {
-    this.delays.setThrottle(action, ms);
-  }
-
-  /**
-   * Gets the current throttle period for an action, if set.
-   */
-  getThrottle(action: Action): number | undefined {
-    return this.delays.getThrottle(action);
-  }
-
-  /**
-   * Clears the throttle setting for an action.
-   */
-  clearThrottle(action: Action): void {
-    this.delays.clearThrottle(action);
-  }
-
-  // ============================================================
-  // Push-triggered filtering
-  // ============================================================
-
-  /**
-   * Returns the active scheduling write set for an action. By default this is
-   * the current-known write set; experimental historical mode returns the
-   * cumulative legacy view instead.
-   */
-  getMightWrite(action: Action): IMemorySpaceAddress[] | undefined {
-    return this.writeIndex.getSchedulingWrites(action);
-  }
-
-  /**
-   * Returns filter statistics for the current/last execution cycle.
-   */
-  getFilterStats(): { filtered: number; executed: number } {
-    return { ...this.filterStats };
-  }
-
-  /**
-   * Resets filter statistics.
-   */
-  resetFilterStats(): void {
-    this.filterStats.filtered = 0;
-    this.filterStats.executed = 0;
-  }
-
-  /**
-   * Enables collection of per-iteration settle stats during execute().
-   * Call this once before running patterns to opt in to the overhead.
-   */
-  enableSettleStats(): void {
-    this.setSettleStatsEnabled(true);
-  }
-
-  /**
-   * Enables or disables collection of per-iteration settle stats during execute().
-   * Disabling also clears the last collected stats to avoid stale reads.
-   */
-  setSettleStatsEnabled(enabled: boolean): void {
-    this.collectSettleStats = enabled;
-    if (!enabled) {
-      this.lastSettleStats = null;
-      this.settleStatsHistory = [];
-    }
-  }
-
-  /**
-   * Returns settle stats from the last execute() call, or null if not enabled/collected.
-   */
-  getSettleStats(): SettleStats | null {
-    return this.lastSettleStats;
-  }
-
-  /**
-   * Returns recent settle stats history from execute() calls, oldest first.
-   */
-  getSettleStatsHistory(): SettleStatsHistoryEntry[] {
-    return [...this.settleStatsHistory];
-  }
-
-  /**
-   * Enables or disables collection of exact action-run history.
-   * Disabling clears the current ring buffer to avoid stale reads.
-   */
-  setActionRunTraceEnabled(enabled: boolean): void {
-    this.collectActionRunTrace = enabled;
-    if (!enabled) {
-      this.actionRunTrace.length = 0;
-    }
-  }
-
-  /**
-   * Returns recent exact action-run history, oldest first.
-   */
-  getActionRunTrace(): ActionRunTraceEntry[] {
-    return [...this.actionRunTrace];
-  }
-
-  /**
-   * Enables or disables collection of structured trigger-trace entries.
-   * Disabling clears the current ring buffer to avoid stale reads.
-   */
-  setTriggerTraceEnabled(enabled: boolean): void {
-    this.collectTriggerTrace = enabled;
-    if (!enabled) {
-      this.triggerTrace = [];
-    }
-  }
-
-  /**
-   * Returns recent structured trigger-trace entries, oldest first.
-   */
-  getTriggerTrace(): TriggerTraceEntry[] {
-    return [...this.triggerTrace];
-  }
-
-  // ============================================================
-  // Non-settling detection API
-  // ============================================================
-
-  /**
-   * Returns whether the scheduler has detected a non-settling condition.
-   * This means execute() is consuming a high fraction of wall-clock time,
-   * indicating the system is churning.
-   */
-  isNonSettling(): boolean {
-    return this.settlingTracker.nonSettlingDetected;
-  }
-
-  /**
-   * Enables or disables automatic triggering of diagnosis when non-settling
-   * is detected. Off by default.
-   */
-  setAutoTriggerDiagnosis(enabled: boolean): void {
-    this.autoTriggerDiagnosis = enabled;
-  }
-
-  // ============================================================
-  // Idempotency diagnosis API (Phase 2 + 3)
-  // ============================================================
-
-  /**
-   * Starts diagnosis mode: captures read/write values and causal edges.
-   * Automatically stops after durationMs.
-   */
-  private startDiagnosis(durationMs = 5000): void {
-    startSchedulerDiagnosis(this.diagnosisControlState, durationMs);
-  }
-
-  /**
-   * Stops diagnosis mode and finalizes results.
-   */
-  private stopDiagnosis(): void {
-    stopSchedulerDiagnosis(this.diagnosisControlState);
-  }
-
-  /**
-   * Runs a diagnosis for the specified duration and returns the result.
-   * This is the main entry point for external callers (IPC, console).
-   */
-  runDiagnosis(durationMs = 5000): Promise<SchedulerDiagnosisResult> {
-    return runSchedulerDiagnosis(this.diagnosisControlState, durationMs);
-  }
-
-  /**
-   * Checks all computations for idempotency by enabling inline mode
-   * and force-running each computation through run(). Each run()
-   * automatically gets a second synchronous run for comparison.
-   */
-  async runIdempotencyCheck(): Promise<SchedulerDiagnosisResult> {
-    return await runSchedulerIdempotencyCheck(this.diagnosisControlState);
-  }
-
-  private handleError(error: Error, action: any) {
-    handleSchedulerError(
-      {
-        errorHandlers: this.errorHandlers,
-        parseStack: (stack) => this.runtime.harness.parseStack(stack),
-      },
-      error,
-      action,
-    );
-  }
-
-  private async execute(): Promise<void> {
-    if (this.disposed) return;
-    logger.timeStart("scheduler", "execute");
-
-    // In case a directly invoked `run` is still running, wait for it to finish.
-    if (this.runningPromise) await this.runningPromise;
-
-    this.beginExecuteCycle();
-    const { newActionsWithoutDependencies } = this
-      .collectInitialExecuteDependencies();
-    const eventBlockingDeps = await this.processExecuteEventPhase();
-    this.collectPostEventDependencies();
-    const initialSeeds = this.buildInitialExecuteSeeds(
-      newActionsWithoutDependencies,
-      eventBlockingDeps,
-    );
-
-    const settleResult = await this.runSettleLoop(initialSeeds);
-    await breakCyclesIfNeeded(this.cycleBreakState, settleResult);
-    this.applyAdaptiveCycleDebounce();
-    this.recordExecuteEndTelemetry();
-    applyExecuteContinuation(this.executeContinuationState);
-    logger.timeEnd("scheduler", "execute");
-  }
-
-  private beginExecuteCycle(): void {
-    // Track timing for cycle-aware debounce
-    this.executeStartTime = performance.now();
-    this.runsThisExecute.clear();
-
-    // Non-settling heuristic: record execute() start
-    markExecuteStart(this.settlingTracker);
-  }
-
-  private collectInitialExecuteDependencies(): {
-    newActionsWithoutDependencies: Action[];
-  } {
-    return collectInitialExecuteDependenciesState({
-      pendingDependencyCollection: this.pendingDependencyCollection,
-      populateDependenciesCallbacks: this.populateDependenciesCallbacks,
-      effects: this.effects,
-      getSchedulingWrites: (action) =>
-        this.writeIndex.getSchedulingWrites(action),
-      collectDependenciesForAction: (action, populateDependencies, options) =>
-        this.collectDependenciesForAction(
-          action,
-          populateDependencies,
-          options,
-        ),
-      getActionId: (action) => this.getActionId(action),
-      scheduleAffectedEffects: (action) => this.scheduleAffectedEffects(action),
-    });
-  }
-
-  private async processExecuteEventPhase(): Promise<Set<Action>> {
-    // Track dirty dependencies that block events - these must be added to workSet
-    const eventBlockingDeps = new Set<Action>();
-
-    logger.timeStart("scheduler", "execute", "event");
-    try {
-      await processQueuedEventDuringExecute(
-        this.eventExecutionState,
-        eventBlockingDeps,
-      );
-      return eventBlockingDeps;
-    } finally {
-      logger.timeEnd("scheduler", "execute", "event");
-    }
-  }
-
-  private collectPostEventDependencies(): void {
-    collectPostEventDependenciesState({
-      pendingDependencyCollection: this.pendingDependencyCollection,
-      populateDependenciesCallbacks: this.populateDependenciesCallbacks,
-      effects: this.effects,
-      getSchedulingWrites: (action) =>
-        this.writeIndex.getSchedulingWrites(action),
-      collectDependenciesForAction: (action, populateDependencies, options) =>
-        this.collectDependenciesForAction(
-          action,
-          populateDependencies,
-          options,
-        ),
-      getActionId: (action) => this.getActionId(action),
-    });
-  }
-
-  private buildInitialExecuteSeeds(
-    newActionsWithoutDependencies: Iterable<Action>,
-    eventBlockingDeps: Iterable<Action>,
-  ): Set<Action> {
-    // Build initial seeds for pull mode (effects + special actions).
-    return buildPullInitialSeeds({
-      pullMode: this.pullMode,
-      pending: this.pending,
-      dirty: this.staleness.dirty,
-      effects: this.effects,
-      newActionsWithoutDependencies,
-      eventBlockingDeps,
-      computationDebounceFlushSeeds: this.delays.computationDebounceFlushSeeds,
-    });
-  }
-
-  private async runSettleLoop(
-    initialSeeds: ReadonlySet<Action>,
-  ): Promise<SchedulerSettleResult> {
-    const settleResult = await runSchedulerSettleLoop(
-      this.settleLoopState,
-      initialSeeds,
-    );
-
-    if (settleResult.settleStats) {
-      this.lastSettleStats = settleResult.settleStats;
-      pushBoundedHistory(
-        this.settleStatsHistory,
-        { recordedAt: performance.now(), stats: settleResult.settleStats },
-        MAX_SETTLE_STATS_HISTORY,
-      );
-    }
-
-    return settleResult;
-  }
-
-  private applyAdaptiveCycleDebounce(): void {
-    // Apply cycle-aware debounce to effects that ran multiple times this execute().
-    // Pull computations are already demand-gated; debouncing them can leave a
-    // live renderer observing stale materialized data until an arbitrary timer
-    // fires.
-    const cycleDebouncePlan = planAdaptiveCycleDebounce({
-      pullMode: this.pullMode,
-      executeStartTime: this.executeStartTime,
-      runsThisExecute: this.runsThisExecute,
-      canAutomaticallyDebounce: (action) =>
-        this.canAutomaticallyDebounce(
-          action,
-        ),
-      getCurrentDebounce: (action) => this.delays.getDebounce(action),
-    });
-    for (
-      const { action, runs, delayMs } of cycleDebouncePlan.updates
-    ) {
-      this.delays.setDebounce(action, delayMs);
-      logger.debug("schedule-cycle-debounce", () => [
-        `[CYCLE-DEBOUNCE] Action ${this.getActionId(action)} ` +
-        `ran ${runs}x in ${cycleDebouncePlan.elapsedMs.toFixed(1)}ms, ` +
-        `setting debounce to ${delayMs}ms`,
-      ]);
-    }
-  }
-
-  private recordExecuteEndTelemetry(): void {
-    // Non-settling heuristic: accumulate busy time at end of execute()
-    const executeEnd = recordExecuteEnd(this.settlingTracker);
-    if (this.diagnosisEnabled) {
-      this.diagnosisBusyTime += executeEnd.diagnosisBusyTimeMs;
-    }
-    if (executeEnd.nonSettlingTelemetry) {
-      this.runtime.telemetry.submit({
-        type: "scheduler.non-settling",
-        ...executeEnd.nonSettlingTelemetry,
-      });
-      // Auto-trigger diagnosis if enabled
-      if (this.autoTriggerDiagnosis && !this.diagnosisEnabled) {
-        this.startDiagnosis();
-      }
-    }
-  }
-
-  /**
-   * Clean up all pending timers and resources.
-   * Should be called when the scheduler is being torn down.
-   */
-  dispose(): void {
-    this.disposed = true;
-    // Clear all active debounce timers
-    this.delays.clearActiveDebounceTimers();
-    if (this.pendingQueueTaskTimer !== null) {
-      clearTimeout(this.pendingQueueTaskTimer);
-      this.pendingQueueTaskTimer = null;
-    }
-    cancelEventQueueWakeState(this.eventQueueWakeState);
-    // Clean up diagnosis state
-    if (this.diagnosisTimeout) {
-      clearTimeout(this.diagnosisTimeout);
-      this.diagnosisTimeout = null;
-    }
-    this.diagnosisEnabled = false;
   }
 }
