@@ -779,3 +779,63 @@ export default pattern<{ enabled: Writable<boolean> }>(({ enabled }) => ({
     assertStringIncludes(output, "({ enabled }) => enabled.get()");
   },
 );
+
+Deno.test(
+  "Pipeline regression: nullable computed capture keeps source array schema array-shaped",
+  async () => {
+    const source =
+      `import { computed, derive, pattern, UI } from "commonfabric";
+
+interface Option {
+  title: string;
+  ignored: string;
+}
+
+export default pattern<{ options: Option[] }, { [UI]: any }>(({ options }) => {
+  const minimalNullable = derive(
+    options,
+    (o) => o.length > 0 ? o[0].title : null,
+  );
+
+  return {
+    [UI]: (
+      <div>
+        {computed(() => {
+          const value = minimalNullable;
+          return <span>{value ?? "null"}</span>;
+        })}
+      </div>
+    ),
+  };
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const minimalNullableStart = output.indexOf(
+      "const minimalNullable = derive(",
+    );
+    assert(
+      minimalNullableStart >= 0,
+      "expected transformed minimalNullable derive",
+    );
+    const minimalNullableWindow = output.slice(
+      minimalNullableStart,
+      minimalNullableStart + 1200,
+    );
+
+    assertStringIncludes(minimalNullableWindow, 'type: "array"');
+    assertStringIncludes(minimalNullableWindow, "items:");
+    assertStringIncludes(minimalNullableWindow, "title:");
+    assertStringIncludes(minimalNullableWindow, 'type: "null"');
+    assert(
+      !minimalNullableWindow.includes('properties: {\n        "0"'),
+      "expected the derive input schema to stay array-shaped, not shrink to an object with numeric keys",
+    );
+    assert(
+      !minimalNullableWindow.includes('required: ["length", "0"]'),
+      "expected the derive input schema not to require object-style array members",
+    );
+  },
+);
