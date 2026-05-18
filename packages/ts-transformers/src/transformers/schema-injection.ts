@@ -19,7 +19,6 @@ import {
   registerSyntheticCallType,
   typeToSchemaTypeNode,
   unwrapCellLikeType,
-  unwrapOpaqueLikeType,
   widenLiteralType,
 } from "../ast/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
@@ -662,15 +661,25 @@ function createToSchemaCall(
   const args: ts.Expression[] = [];
   if (isSchemaCallOptionExpressions(options)) {
     args.push(...options);
-  } else if (options?.widenLiterals) {
-    args.push(
-      factory.createObjectLiteralExpression([
+  } else if (options?.widenLiterals || options?.scope) {
+    const properties: ts.ObjectLiteralElementLike[] = [];
+    if (options.widenLiterals) {
+      properties.push(
         factory.createPropertyAssignment(
           "widenLiterals",
           factory.createTrue(),
         ),
-      ]),
-    );
+      );
+    }
+    if (options.scope) {
+      properties.push(
+        factory.createPropertyAssignment(
+          "scope",
+          factory.createStringLiteral(options.scope),
+        ),
+      );
+    }
+    args.push(factory.createObjectLiteralExpression(properties));
   }
 
   return factory.createCallExpression(
@@ -680,7 +689,9 @@ function createToSchemaCall(
   );
 }
 
-type SchemaCallOptions = { widenLiterals?: boolean } | readonly ts.Expression[];
+type SchemaCallOptions =
+  | { widenLiterals?: boolean; scope?: CellScope }
+  | readonly ts.Expression[];
 
 function isSchemaCallOptionExpressions(
   options: SchemaCallOptions | undefined,
@@ -822,6 +833,35 @@ function cellScopeFromScopeBrandType(type: ts.Type): CellScope | undefined {
 
 function isCellScopeValue(value: string): value is CellScope {
   return value === "space" || value === "user" || value === "session";
+}
+
+function scopedConstructorAccessorScope(
+  node: ts.CallExpression,
+): CellScope | undefined {
+  const callee = unwrapExpression(node.expression);
+  if (!ts.isPropertyAccessExpression(callee)) return undefined;
+
+  const constructorView = unwrapExpression(callee.expression);
+  if (!ts.isPropertyAccessExpression(constructorView)) return undefined;
+
+  switch (constructorView.name.text) {
+    case "perSpace":
+      return "space";
+    case "perUser":
+      return "user";
+    case "perSession":
+      return "session";
+    default:
+      return undefined;
+  }
+}
+
+function cellConstructorCallScope(
+  node: ts.CallExpression,
+  checker: ts.TypeChecker,
+): CellScope | undefined {
+  return scopedConstructorAccessorScope(node) ??
+    scopedFactoryContextualScope(node, checker);
 }
 
 function isAlreadyScopedFactoryCall(node: ts.CallExpression): boolean {
@@ -991,7 +1031,7 @@ function createRegisteredSchemaCallFromResolvedType(
   resolved: ResolvedInjectableSchemaType,
   checker: ts.TypeChecker,
   typeRegistry?: TypeRegistry,
-  options?: { widenLiterals?: boolean },
+  options?: SchemaCallOptions,
 ): ts.CallExpression | undefined {
   if (!resolved.typeNode) {
     return undefined;
@@ -3288,6 +3328,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
         const factory = transformation.factory;
         const typeArgs = node.typeArguments;
         const args = node.arguments;
+        const scope = cellConstructorCallScope(node, checker);
 
         // If already has 2 arguments, assume schema is already present
         if (args.length >= 2) {
@@ -3302,21 +3343,27 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           typeRegistry,
           () => {
             const valueArg = args[0];
-            if (!valueArg) {
+            if (valueArg) {
+              const valueType = inferExpressionTypeWithInitializerFallback(
+                valueArg,
+                checker,
+                sourceFile,
+                factory,
+                typeRegistry,
+                capabilityRegistry,
+                context,
+              );
+              return valueType && !isUnresolvedSchemaType(valueType)
+                ? widenLiteralType(valueType, checker)
+                : valueType;
+            }
+            if (!scope) {
               return undefined;
             }
-            const valueType = inferExpressionTypeWithInitializerFallback(
-              valueArg,
-              checker,
-              sourceFile,
-              factory,
-              typeRegistry,
-              capabilityRegistry,
-              context,
-            );
-            return valueType && !isUnresolvedSchemaType(valueType)
-              ? widenLiteralType(valueType, checker)
-              : valueType;
+            const contextualType = inferSchemaContextualType(node, checker);
+            return contextualType
+              ? unwrapCellLikeType(contextualType, checker)
+              : undefined;
           },
         );
 
@@ -3325,7 +3372,9 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           resolved,
           checker,
           typeRegistry,
-          resolved.inferred ? { widenLiterals: true } : undefined,
+          resolved.inferred || scope
+            ? { ...(resolved.inferred && { widenLiterals: true }), scope }
+            : undefined,
         );
 
         if (schemaCall) {
@@ -3347,6 +3396,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
       if (callKind?.kind === "cell-for") {
         const factory = transformation.factory;
         const typeArgs = node.typeArguments;
+        const scope = cellConstructorCallScope(node, checker);
 
         // Check if already wrapped in asSchema
         if (
@@ -3365,7 +3415,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           () => {
             const contextualType = inferSchemaContextualType(node, checker);
             return contextualType
-              ? unwrapOpaqueLikeType(contextualType, checker)
+              ? unwrapCellLikeType(contextualType, checker)
               : undefined;
           },
         );
@@ -3375,6 +3425,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           resolved,
           checker,
           typeRegistry,
+          scope ? { scope } : undefined,
         );
 
         if (schemaCall) {
