@@ -33,6 +33,12 @@ import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
  */
 const ENCODING_PREFIX_TAG = "fvj1:";
 
+/** Shared text encoder, created once. */
+const textEncoder = new TextEncoder();
+
+/** Shared text decoder, created once. */
+const textDecoder = new TextDecoder();
+
 /** Shared default handler registry, created once. */
 const defaultRegistry: TypeHandlerRegistry = createDefaultRegistry();
 
@@ -153,7 +159,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
     }
 
     const json = data.slice(ENCODING_PREFIX_TAG.length);
-    const parsed = deepFreeze(JSON.parse(json) as JsonWireValue);
+    const parsed = JsonEncodingContext.#parseWireText(json);
     return this.deserialize(parsed, runtime);
   }
 
@@ -258,13 +264,13 @@ export class JsonEncodingContext implements SerializationContext<string> {
 
   /** Converts a wire-format tree to UTF-8-encoded JSON bytes. */
   private toBytes(data: JsonWireValue): Uint8Array {
-    return new TextEncoder().encode(JSON.stringify(data));
+    return textEncoder.encode(JSON.stringify(data));
   }
 
   /** Parses UTF-8-encoded JSON bytes back into a wire-format tree. */
   private fromBytes(bytes: Uint8Array): JsonWireValue {
-    const result = JSON.parse(new TextDecoder().decode(bytes)) as JsonWireValue;
-    return deepFreeze(result);
+    const json = textDecoder.decode(bytes);
+    return JsonEncodingContext.#parseWireText(json);
   }
 
   // -------------------------------------------------------------------------
@@ -550,5 +556,12 @@ export class JsonEncodingContext implements SerializationContext<string> {
       result[key] = this.deserialize(val, runtime, registry);
     }
     return Object.freeze(result);
+  }
+
+  /**
+   * Parses the JSON-text wire form, _without_ a tag prefix.
+   */
+  static #parseWireText(jsonText: string): JsonWireValue {
+    return deepFreeze(JSON.parse(jsonText) as JsonWireValue);
   }
 }
