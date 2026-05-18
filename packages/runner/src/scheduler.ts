@@ -91,6 +91,15 @@ import { breakCyclesIfNeeded } from "./scheduler/cycle-break.ts";
 import { applyExecuteContinuation } from "./scheduler/continuation.ts";
 import type { CycleBreakState } from "./scheduler/cycle-break.ts";
 import type { ExecuteContinuationState } from "./scheduler/continuation.ts";
+import {
+  canAutomaticallyDebounce as canAutomaticallyDebounceState,
+  getNextDebounceRunTime as getNextDebounceRunTimeState,
+  isDebouncedComputationWaiting as isDebouncedComputationWaitingState,
+  maybeAutoDebounce as maybeAutoDebounceState,
+  scheduleComputationDebounce as scheduleComputationDebounceState,
+  type SchedulerDelayControlState,
+  scheduleWithDebounce as scheduleWithDebounceState,
+} from "./scheduler/delay-control.ts";
 import { SchedulerDelays } from "./scheduler/delays.ts";
 import { processStorageNotification } from "./scheduler/notifications.ts";
 import {
@@ -280,6 +289,18 @@ export class Scheduler {
     actionStats: this.actionStats,
     getActionId: (action) => this.getActionId(action),
   });
+  private delayControlState: SchedulerDelayControlState = {
+    delays: this.delays,
+    computations: this.computations,
+    effects: this.effects,
+    dirty: this.staleness.dirty,
+    pending: this.pending,
+    getPullMode: () => this.pullMode,
+    isPullDemandRootEffect: (action) => this.isPullDemandRootEffect(action),
+    queueExecution: () => this.queueExecution(),
+    logDebounce: (message) =>
+      logger.debug("schedule-debounce", () => [message]),
+  };
   private inFlightSourceState: InFlightSourceState = {
     inFlightSources: new WeakMap<Action, Set<IStorageTransaction>>(),
   };
@@ -1377,11 +1398,7 @@ export class Scheduler {
   }
 
   private canAutomaticallyDebounce(action: Action): boolean {
-    return this.delays.canAutomaticallyDebounce(action, {
-      effects: this.effects,
-      isPullDemandRootEffect: (candidate) =>
-        this.isPullDemandRootEffect(candidate),
-    });
+    return canAutomaticallyDebounceState(this.delayControlState, action);
   }
 
   private shouldRunFirstPullComputationInDemandContext(
@@ -1592,47 +1609,15 @@ export class Scheduler {
   }
 
   private getNextDebounceRunTime(action: Action): number | undefined {
-    return this.delays.getNextDebounceRunTime(
-      action,
-      {
-        pullMode: this.pullMode,
-        computations: this.computations,
-        effects: this.effects,
-        dirty: this.staleness.dirty,
-      },
-    );
+    return getNextDebounceRunTimeState(this.delayControlState, action);
   }
 
   private isDebouncedComputationWaiting(action: Action): boolean {
-    return this.delays.isDebouncedComputationWaiting(
-      action,
-      {
-        pullMode: this.pullMode,
-        computations: this.computations,
-        effects: this.effects,
-        dirty: this.staleness.dirty,
-        pending: this.pending,
-        queueExecution: () => this.queueExecution(),
-        logDebounce: (message) =>
-          logger.debug("schedule-debounce", () => [message]),
-      },
-    );
+    return isDebouncedComputationWaitingState(this.delayControlState, action);
   }
 
   private scheduleComputationDebounce(action: Action): void {
-    this.delays.scheduleComputationDebounce(
-      action,
-      {
-        pullMode: this.pullMode,
-        computations: this.computations,
-        effects: this.effects,
-        dirty: this.staleness.dirty,
-        pending: this.pending,
-        queueExecution: () => this.queueExecution(),
-        logDebounce: (message) =>
-          logger.debug("schedule-debounce", () => [message]),
-      },
-    );
+    scheduleComputationDebounceState(this.delayControlState, action);
   }
 
   /**
@@ -1641,15 +1626,7 @@ export class Scheduler {
    * Otherwise, it's added immediately.
    */
   private scheduleWithDebounce(action: Action): void {
-    this.delays.scheduleWithDebounce(
-      action,
-      {
-        pending: this.pending,
-        queueExecution: () => this.queueExecution(),
-        logDebounce: (message) =>
-          logger.debug("schedule-debounce", () => [message]),
-      },
-    );
+    scheduleWithDebounceState(this.delayControlState, action);
   }
 
   /**
@@ -1658,10 +1635,7 @@ export class Scheduler {
    * Auto-debounce is enabled by default; use noDebounce to opt out.
    */
   private maybeAutoDebounce(action: Action): void {
-    const update = this.delays.maybeAutoDebounce(action, {
-      canAutomaticallyDebounce: (candidate) =>
-        this.canAutomaticallyDebounce(candidate),
-    });
+    const update = maybeAutoDebounceState(this.delayControlState, action);
     if (update) {
       logger.debug("schedule-debounce", () => [
         `[AUTO-DEBOUNCE] Action ${update.actionId} ` +
