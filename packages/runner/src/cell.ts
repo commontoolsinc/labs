@@ -156,7 +156,7 @@ const recordSchemaWritePolicyInput = (
       scope: link.scope,
       path: [...link.path],
     },
-    schemaHash: schemaAndHash.hashString,
+    schemaHash: schemaAndHash.taggedHashString,
     schema: schemaAndHash.schema,
   });
 };

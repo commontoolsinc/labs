@@ -265,7 +265,7 @@ describe("schema-hash dispatch", () => {
             },
             true,
           );
-          const found = callFind(sah.hashString);
+          const found = callFind(sah.taggedHashString);
           expectSame(found, sah);
         });
 
@@ -288,19 +288,19 @@ describe("schema-hash dispatch", () => {
   });
 
   describe("internSchemaAsHashString()", () => {
-    it("returns the interned schema's hashString for an object", () => {
+    it("returns the interned schema's `.taggedHashString` for an object", () => {
       const schema: JSONSchema = { type: "number" };
       const sah = internSchema(schema, true);
-      expect(internSchemaAsHashString(schema)).toBe(sah.hashString);
+      expect(internSchemaAsHashString(schema)).toBe(sah.taggedHashString);
     });
 
-    it("returns the boolean schema's prefab hashString for `true`", () => {
-      const expected = internSchema(true, true).hashString;
+    it("returns the boolean schema's prefab `.taggedHashString` for `true`", () => {
+      const expected = internSchema(true, true).taggedHashString;
       expect(internSchemaAsHashString(true)).toBe(expected);
     });
 
-    it("returns the boolean schema's prefab hashString for `false`", () => {
-      const expected = internSchema(false, true).hashString;
+    it("returns the boolean schema's prefab `.taggedHashString` for `false`", () => {
+      const expected = internSchema(false, true).taggedHashString;
       expect(internSchemaAsHashString(false)).toBe(expected);
     });
 
