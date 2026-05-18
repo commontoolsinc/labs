@@ -1,6 +1,8 @@
 import {
   DECONSTRUCT,
+  DEEP_FREEZE,
   type FabricValue,
+  IS_DEEP_FROZEN,
   RECONSTRUCT,
   type ReconstructionContext,
 } from "./interface.ts";
@@ -20,6 +22,28 @@ export class UnknownValue extends ExplicitTagValue {
 
   [DECONSTRUCT](): FabricValue {
     return { type: this.typeTag, state: this.state };
+  }
+
+  /**
+   * Deep-freezes in place. `typeTag` is an immutable string; the only
+   * `FabricValue`-typed slot is `state`, which is recursed via `subFreeze`
+   * before the wrapper itself is frozen.
+   */
+  [DEEP_FREEZE](
+    subFreeze: (value: FabricValue) => FabricValue,
+  ): FabricValue {
+    subFreeze(this.state);
+    return Object.freeze(this) as unknown as FabricValue;
+  }
+
+  /**
+   * Side-effect-free check mirroring `[DEEP_FREEZE]`'s canonical form: this
+   * wrapper is frozen and `state` is recursively deep-frozen. Never throws.
+   */
+  [IS_DEEP_FROZEN](
+    subIsDeepFrozen: (value: FabricValue) => boolean,
+  ): boolean {
+    return Object.isFrozen(this) && subIsDeepFrozen(this.state);
   }
 
   /** @inheritDoc */
