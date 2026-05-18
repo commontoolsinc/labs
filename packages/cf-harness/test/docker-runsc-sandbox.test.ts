@@ -450,6 +450,32 @@ Deno.test("DockerRunscSandboxRuntime attaches observed CFC sidecar output", asyn
   }
 });
 
+Deno.test("DockerRunscSandboxRuntime leaves output unmediated when CFC sidecar is missing", async () => {
+  const cfcResultDir = await Deno.makeTempDir();
+  try {
+    const runner = new FakeProcessRunner(
+      dockerLifecycleResults({ stdout: "raw without sidecar\n" }),
+    );
+    const runtime = new DockerRunscSandboxRuntime(
+      resolveDockerRunscSandboxConfig({
+        workspaceHostPath: "/host/project",
+        cfcResultDir,
+      }),
+      runner,
+    );
+
+    const result = await runtime.run({ argv: ["/bin/echo", "public"] });
+
+    assertEquals(result, {
+      stdout: "raw without sidecar\n",
+      stderr: "",
+      exitCode: 0,
+    });
+  } finally {
+    await Deno.remove(cfcResultDir, { recursive: true });
+  }
+});
+
 Deno.test("DockerRunscSandboxRuntime makes tainted sidecar output opaque", async () => {
   const cfcResultDir = await Deno.makeTempDir();
   try {
