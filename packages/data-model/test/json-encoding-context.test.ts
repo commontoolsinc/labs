@@ -7,6 +7,7 @@ import { UnknownValue } from "../unknown-value.ts";
 import { ProblematicValue } from "../problematic-value.ts";
 import { FabricEpochDays, FabricEpochNsec } from "../fabric-epoch.ts";
 import { FabricError } from "../fabric-native-instances.ts";
+import { isDeepFrozen } from "../deep-freeze.ts";
 import {
   resetDataModelConfig,
   setDataModelConfig,
@@ -1652,6 +1653,55 @@ describe("JsonEncodingContext", () => {
         FabricValue
       >;
       expect(Object.isFrozen(result)).toBe(true);
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // TypeHandler.deserialize() deep-frozen contract (arm-1 only)
+  // --------------------------------------------------------------------------
+
+  describe("TypeHandler.deserialize() deep-frozen contract", () => {
+    // The contract is scoped to the type-handler dispatch arm only: anything
+    // returned via a registered `TypeHandler` is guaranteed deep-frozen at
+    // the `deserialize()` boundary, so callers do not each have to freeze.
+    // The class-registry fallback arm is a separate sibling branch and is
+    // intentionally NOT covered by this contract.
+
+    it("handler-produced value is deep-frozen at the boundary", () => {
+      // `/EpochNsec@1` dispatches through a registered TypeHandler (arm-1);
+      // the reconstructed FabricEpochNsec must be deep-frozen on return.
+      const result = fromWireFormat(
+        { "/EpochNsec@1": "AA" } as JsonWireValue,
+      );
+      expect(result).toBeInstanceOf(FabricEpochNsec);
+      expect(isDeepFrozen(result)).toBe(true);
+    });
+
+    it("lenient-mode ProblematicValue from a handler is deep-frozen", () => {
+      // `/BigInt@1` with non-string state fails handler validation; the
+      // lenient catch produces a ProblematicValue -- still an arm-1 return,
+      // so the contract deep-freezes it (not a crash: it is the value
+      // lenient mode produces precisely to avoid crashing).
+      const ctx = new JsonEncodingContext({ lenient: true });
+      const runtime: ReconstructionContext = {
+        getCell(_ref) {
+          throw new Error("not available");
+        },
+      };
+      const result = ctx.decode(
+        ENCODING_PREFIX + JSON.stringify({ "/BigInt@1": 42 }),
+        runtime,
+      );
+      expect(result).toBeInstanceOf(ProblematicValue);
+      expect(isDeepFrozen(result)).toBe(true);
+    });
+
+    it("handler round-trip yields a deep-frozen result", () => {
+      const result = roundTrip(
+        new FabricEpochNsec(1704067200000000000n) as FabricValue,
+      );
+      expect(result).toBeInstanceOf(FabricEpochNsec);
+      expect(isDeepFrozen(result)).toBe(true);
     });
   });
 
