@@ -21,30 +21,6 @@ import { Cell, computed, Default, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
-    const tag = __cf_pattern_input.key("element");
-    const showInactive = __cf_pattern_input.key("params", "showInactive");
-    return (<li>
-                    {/* This ternary should be transformed to ifElse */}
-                    {__cfHelpers.ifElse({
-        type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, tag.key("active"), tag.key("name"), __cfHelpers.ifElse({
-        type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, showInactive, `(${tag.key("name")})`, ""))}
-                  </li>);
-});
 interface Tag {
     name: string;
     active: boolean;
@@ -144,7 +120,30 @@ export default pattern((__cf_pattern_input) => {
                     }
                 } }, ({ item }) => item.tags.length > 0), item.key("label"), "No tags")}</strong>
               <ul>
-                {item.key("tags").mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
+                {item.key("tags").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                    const tag = __cf_pattern_input.key("element");
+                    const showInactive = __cf_pattern_input.key("params", "showInactive");
+                    return (<li>
+                    {/* This ternary should be transformed to ifElse */}
+                    {__cfHelpers.ifElse({
+                        type: "boolean"
+                    } as const satisfies __cfHelpers.JSONSchema, {
+                        type: "string"
+                    } as const satisfies __cfHelpers.JSONSchema, {
+                        type: "string"
+                    } as const satisfies __cfHelpers.JSONSchema, {
+                        type: "string"
+                    } as const satisfies __cfHelpers.JSONSchema, tag.key("active"), tag.key("name"), __cfHelpers.ifElse({
+                        type: "boolean"
+                    } as const satisfies __cfHelpers.JSONSchema, {
+                        type: "string"
+                    } as const satisfies __cfHelpers.JSONSchema, {
+                        type: "string"
+                    } as const satisfies __cfHelpers.JSONSchema, {
+                        type: "string"
+                    } as const satisfies __cfHelpers.JSONSchema, showInactive, `(${tag.key("name")})`, ""))}
+                  </li>);
+                }, {
                     type: "object",
                     properties: {
                         element: {
@@ -204,19 +203,7 @@ export default pattern((__cf_pattern_input) => {
             type: "object",
             properties: {
                 element: {
-                    type: "object",
-                    properties: {
-                        label: {
-                            type: "string"
-                        },
-                        tags: {
-                            type: "array",
-                            items: {
-                                type: "unknown"
-                            }
-                        }
-                    },
-                    required: ["label", "tags"]
+                    $ref: "#/$defs/Item"
                 },
                 params: {
                     type: "object",
@@ -228,7 +215,36 @@ export default pattern((__cf_pattern_input) => {
                     required: ["showInactive"]
                 }
             },
-            required: ["element", "params"]
+            required: ["element", "params"],
+            $defs: {
+                Item: {
+                    type: "object",
+                    properties: {
+                        label: {
+                            type: "string"
+                        },
+                        tags: {
+                            type: "array",
+                            items: {
+                                $ref: "#/$defs/Tag"
+                            }
+                        }
+                    },
+                    required: ["label", "tags"]
+                },
+                Tag: {
+                    type: "object",
+                    properties: {
+                        name: {
+                            type: "string"
+                        },
+                        active: {
+                            type: "boolean"
+                        }
+                    },
+                    required: ["name", "active"]
+                }
+            }
         } as const satisfies __cfHelpers.JSONSchema, {
             anyOf: [{
                     $ref: "https://commonfabric.org/schemas/vnode.json"

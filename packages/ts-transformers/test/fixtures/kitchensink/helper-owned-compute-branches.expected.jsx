@@ -22,56 +22,6 @@ import { computed, ifElse, pattern, UI, Writable } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
-    const member = __cf_pattern_input.key("element");
-    const memberIndex = __cf_pattern_input.key("index");
-    const project = __cf_pattern_input.params.project;
-    return (<small>
-              {__cfHelpers.ifElse({
-        type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
-        type: "object",
-        properties: {
-            memberIndex: {
-                type: "number"
-            }
-        },
-        required: ["memberIndex"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, { memberIndex: memberIndex }, ({ memberIndex }) => memberIndex === 0), __cfHelpers.derive({
-        type: "object",
-        properties: {
-            project: {
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string"
-                    }
-                },
-                required: ["name"]
-            },
-            member: {
-                type: "string"
-            }
-        },
-        required: ["project", "member"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        project: {
-            name: project.name
-        },
-        member: member
-    }, ({ project, member }) => `${project.name}-${member}`), member)}
-            </small>);
-});
 interface Badge {
     text: string;
     active: boolean;
@@ -207,9 +157,25 @@ export default pattern((state) => {
                     },
                     required: ["name", "badges", "members"]
                 }
+            },
+            state: {
+                type: "object",
+                properties: {
+                    prefix: {
+                        type: "string"
+                    }
+                },
+                required: ["prefix"]
+            },
+            fallbackMembers: {
+                type: "array",
+                items: {
+                    type: "string"
+                },
+                asCell: ["readonly"]
             }
         },
-        required: ["visibleProjects"]
+        required: ["visibleProjects", "state", "fallbackMembers"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "array",
         items: {
@@ -265,7 +231,56 @@ export default pattern((state) => {
                         : ""}
             </span>))}
           {/* [TRANSFORM] .map() → mapWithPattern: fallbackMembers is a Writable (reactive Cell), lowered even inside derive */}
-          {fallbackMembers.mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
+          {fallbackMembers.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const member = __cf_pattern_input.key("element");
+                const memberIndex = __cf_pattern_input.key("index");
+                const project = __cf_pattern_input.params.project;
+                return (<small>
+              {__cfHelpers.ifElse({
+                    type: "boolean"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+                    type: "object",
+                    properties: {
+                        memberIndex: {
+                            type: "number"
+                        }
+                    },
+                    required: ["memberIndex"]
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "boolean"
+                } as const satisfies __cfHelpers.JSONSchema, { memberIndex: memberIndex }, ({ memberIndex }) => memberIndex === 0), __cfHelpers.derive({
+                    type: "object",
+                    properties: {
+                        project: {
+                            type: "object",
+                            properties: {
+                                name: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["name"]
+                        },
+                        member: {
+                            type: "string"
+                        }
+                    },
+                    required: ["project", "member"]
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    project: {
+                        name: project.name
+                    },
+                    member: member
+                }, ({ project, member }) => `${project.name}-${member}`), member)}
+            </small>);
+            }, {
                 type: "object",
                 properties: {
                     element: {

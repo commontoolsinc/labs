@@ -11,10 +11,6 @@ import { NAME, UI, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
-    const item = __cf_pattern_input.key("element");
-    return ({ n: item.key(__cfHelpers.NAME), u: item.key(__cfHelpers.UI) });
-});
 interface Entry {
     [NAME]: string;
     [UI]: string;
@@ -29,7 +25,10 @@ interface Input {
 // Context: Symbol-keyed property access (NAME, UI) is lowered to .key() with helper references
 const _p = pattern((__cf_pattern_input) => {
     const items = __cf_pattern_input.key("items");
-    return items.mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
+    return items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+        const item = __cf_pattern_input.key("element");
+        return ({ n: item.key(__cfHelpers.NAME), u: item.key(__cfHelpers.UI) });
+    }, {
         type: "object",
         properties: {
             element: {

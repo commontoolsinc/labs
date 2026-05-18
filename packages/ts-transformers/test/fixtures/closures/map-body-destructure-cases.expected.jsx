@@ -11,56 +11,6 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
-    const person = __cf_pattern_input.key("element");
-    const name = person.key("name"), spotPreferences = person.key("spotPreferences");
-    return (<li>
-                <span>{name}</span>
-                {__cfHelpers.ifElse({
-        type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        anyOf: [{}, {
-                type: "object",
-                properties: {}
-            }]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "null"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        anyOf: [{
-                type: "null"
-            }, {}, {
-                type: "object",
-                properties: {}
-            }]
-    } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
-        type: "object",
-        properties: {
-            spotPreferences: {
-                type: "array",
-                items: {
-                    type: "unknown"
-                }
-            }
-        },
-        required: ["spotPreferences"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, { spotPreferences: spotPreferences }, ({ spotPreferences }) => spotPreferences.length > 0), <span>{__cfHelpers.derive({
-        type: "object",
-        properties: {
-            spotPreferences: {
-                type: "array",
-                items: {
-                    type: "string"
-                }
-            }
-        },
-        required: ["spotPreferences"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, { spotPreferences: spotPreferences }, ({ spotPreferences }) => spotPreferences.map((n) => "#" + n).join(", "))}</span>, null)}
-              </li>);
-});
 interface Spot {
     spotNumber: string;
 }
@@ -130,7 +80,56 @@ export default pattern((state) => {
         </ul>
 
         <ul>
-          {state.key("people").mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
+          {state.key("people").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const person = __cf_pattern_input.key("element");
+                const name = person.key("name"), spotPreferences = person.key("spotPreferences");
+                return (<li>
+                <span>{name}</span>
+                {__cfHelpers.ifElse({
+                    type: "boolean"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    anyOf: [{}, {
+                            type: "object",
+                            properties: {}
+                        }]
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "null"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    anyOf: [{
+                            type: "null"
+                        }, {}, {
+                            type: "object",
+                            properties: {}
+                        }]
+                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+                    type: "object",
+                    properties: {
+                        spotPreferences: {
+                            type: "array",
+                            items: {
+                                type: "unknown"
+                            }
+                        }
+                    },
+                    required: ["spotPreferences"]
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "boolean"
+                } as const satisfies __cfHelpers.JSONSchema, { spotPreferences: spotPreferences }, ({ spotPreferences }) => spotPreferences.length > 0), <span>{__cfHelpers.derive({
+                    type: "object",
+                    properties: {
+                        spotPreferences: {
+                            type: "array",
+                            items: {
+                                type: "string"
+                            }
+                        }
+                    },
+                    required: ["spotPreferences"]
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __cfHelpers.JSONSchema, { spotPreferences: spotPreferences }, ({ spotPreferences }) => spotPreferences.map((n) => "#" + n).join(", "))}</span>, null)}
+              </li>);
+            }, {
                 type: "object",
                 properties: {
                     element: {

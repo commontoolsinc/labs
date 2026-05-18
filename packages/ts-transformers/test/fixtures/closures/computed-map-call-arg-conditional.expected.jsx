@@ -11,29 +11,6 @@ import { computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
-    const row = __cf_pattern_input.key("element");
-    const label = __cfHelpers.derive({
-        type: "object",
-        properties: {
-            row: {
-                type: "object",
-                properties: {
-                    done: {
-                        type: "boolean"
-                    }
-                },
-                required: ["done"]
-            }
-        },
-        required: ["row"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, { row: {
-            done: row.key("done")
-        } }, ({ row }) => identity(row.done ? "Done" : "Pending")).for("label", true);
-    return <span>{label}</span>;
-});
 const identity = __cfHardenFn((x: string) => x);
 interface Item {
     done: boolean;
@@ -97,7 +74,29 @@ export default pattern((state) => {
         } }, ({ state }) => state.items).for("rows", true);
     return {
         [UI]: (<div>
-        {rows.mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
+        {rows.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const row = __cf_pattern_input.key("element");
+                const label = __cfHelpers.derive({
+                    type: "object",
+                    properties: {
+                        row: {
+                            type: "object",
+                            properties: {
+                                done: {
+                                    type: "boolean"
+                                }
+                            },
+                            required: ["done"]
+                        }
+                    },
+                    required: ["row"]
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __cfHelpers.JSONSchema, { row: {
+                        done: row.key("done")
+                    } }, ({ row }) => identity(row.done ? "Done" : "Pending")).for("label", true);
+                return <span>{label}</span>;
+            }, {
                 type: "object",
                 properties: {
                     element: {
@@ -137,7 +136,7 @@ export default pattern((state) => {
                     }
                 }
             } as const satisfies __cfHelpers.JSONSchema), {})}
-      </div>),
+      </div>)
     };
 }, {
     type: "object",

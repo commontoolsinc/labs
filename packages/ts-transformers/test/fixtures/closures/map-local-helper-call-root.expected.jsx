@@ -11,20 +11,6 @@ import { pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
-    const item = __cf_pattern_input.key("element");
-    return __cfHelpers.derive({
-        type: "object",
-        properties: {
-            item: {
-                type: "string"
-            }
-        },
-        required: ["item"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, { item: item }, ({ item }) => identity(item.toUpperCase()));
-});
 const identity = __cfHardenFn(<T,>(value: T) => value);
 // FIXTURE: map-local-helper-call-root
 // Verifies: non-JSX pattern-owned map callbacks lift ordinary local helper
@@ -34,7 +20,20 @@ const identity = __cfHardenFn(<T,>(value: T) => value);
 //   -> mapWithPattern(..., ({ item }) => derive(..., ({ item }) => identity(item.toUpperCase())))
 export default pattern((__cf_pattern_input) => {
     const items = __cf_pattern_input.key("items");
-    return items.mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
+    return items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+        const item = __cf_pattern_input.key("element");
+        return __cfHelpers.derive({
+            type: "object",
+            properties: {
+                item: {
+                    type: "string"
+                }
+            },
+            required: ["item"]
+        } as const satisfies __cfHelpers.JSONSchema, {
+            type: "string"
+        } as const satisfies __cfHelpers.JSONSchema, { item: item }, ({ item }) => identity(item.toUpperCase()));
+    }, {
         type: "object",
         properties: {
             element: {

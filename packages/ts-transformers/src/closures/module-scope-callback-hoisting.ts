@@ -1,8 +1,10 @@
 import ts from "typescript";
+import { FUNCTION_HARDENING_HELPER_NAME } from "@commonfabric/utils/sandbox-contract";
 import {
   isDeclaredWithinFunction,
   isModuleScopedDeclaration,
 } from "../ast/scope-analysis.ts";
+import { CF_HELPERS_IDENTIFIER } from "../core/cf-helpers.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 import type { TransformationContext } from "../core/mod.ts";
 
@@ -13,6 +15,27 @@ const HOISTABLE_BUILDER_NAMES = new Set([
   "pattern",
   "patternTool",
 ]);
+
+/**
+ * Identifiers that the pipeline itself injects into transformed source
+ * (`__cfHelpers.*` for the helper module, `__cfHardenFn` for module-scope
+ * function hardening) and that consequently appear in many lowered
+ * callback bodies as transformer scaffolding rather than user-authored
+ * references. Treat references to these as not contributing to the
+ * "uses module-scoped references" signal that gates hoisting — a
+ * callback whose only module-level references are synthesized helpers
+ * isn't materially benefiting from being moved to module scope.
+ *
+ * `FUNCTION_HARDENING_HELPER_NAME` is matched as a prefix because
+ * `module-scope-function-hardening` uses `createUniqueName` (which
+ * defers numeric suffixing to emit; see CT-1585 commit 3 for context),
+ * so a single source file can carry references like `__cfHardenFn` and
+ * `__cfHardenFn_1` for the same conceptual helper.
+ */
+function isTransformerInjectedIdentifier(text: string): boolean {
+  return text === CF_HELPERS_IDENTIFIER ||
+    text.startsWith(FUNCTION_HARDENING_HELPER_NAME);
+}
 
 export function hoistModuleScopedBuilderCallbacks(
   sourceFile: ts.SourceFile,
@@ -315,6 +338,17 @@ function getReferenceScope(
     return "local";
   }
 
+  // Transformer-injected scaffolding (`__cfHelpers`, `__cfHardenFn*`)
+  // appears in many lowered callback bodies but doesn't reflect any user-
+  // authored module-level reference. Treat as `"other"` so it neither
+  // contributes to `usesModuleScopedReferences` nor flags an enclosing
+  // capture. Without this, ~60% of array-method callback hoists in the
+  // existing fixture suite were false positives — pointed out by Berni
+  // in the CT-1585 PR review.
+  if (isTransformerInjectedIdentifier(node.text)) {
+    return "other";
+  }
+
   const symbol = ts.isShorthandPropertyAssignment(node.parent)
     ? checker.getShorthandAssignmentValueSymbol(node.parent) ??
       getShorthandAssignmentValueSymbol(
@@ -340,6 +374,18 @@ function getReferenceScope(
 
   if (declarations.some((decl) => ts.isTypeParameterDeclaration(decl))) {
     return "local";
+  }
+
+  // Ambient globals (e.g. `console`, `Math`, `JSON`, `Promise`) have all
+  // their declarations in TypeScript's `lib.*.d.ts` files. They aren't
+  // module-level bindings of the current module — they're part of the
+  // runtime's ambient environment, available everywhere. A callback that
+  // only "uses module-scoped references" because it references `console`
+  // isn't materially benefiting from being moved to module scope, so
+  // classify these as `"other"` rather than `"module"`. Pointed out by
+  // Berni in the CT-1585 PR review.
+  if (declarations.every((decl) => decl.getSourceFile().isDeclarationFile)) {
+    return "other";
   }
 
   if (

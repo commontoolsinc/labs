@@ -11,56 +11,6 @@ import { pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
-    const item = __cf_pattern_input.key("element");
-    const prefix = __cf_pattern_input.params.prefix;
-    return __cfHelpers.ifElse({
-        type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "array",
-        items: {
-            type: "string"
-        }
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "array",
-        items: false
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "array",
-        items: {
-            type: "string"
-        }
-    } as const satisfies __cfHelpers.JSONSchema, item.key("tags", "length"), __cfHelpers.derive({
-        type: "object",
-        properties: {
-            prefix: {
-                type: "string"
-            },
-            item: {
-                type: "object",
-                properties: {
-                    tags: {
-                        type: "array",
-                        items: {
-                            type: "string"
-                        }
-                    }
-                },
-                required: ["tags"]
-            }
-        },
-        required: ["prefix", "item"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "array",
-        items: {
-            type: "string"
-        }
-    } as const satisfies __cfHelpers.JSONSchema, {
-        item: {
-            tags: item.key("tags")
-        },
-        prefix: prefix
-    }, ({ item, prefix }) => [prefix + item.tags[0]]), []);
-});
 // FIXTURE: filter-flatmap-plain-captures
 // Verifies: plain lexical captures in reactive filter/flatMap chains become
 // params values, not reactive key(...) lookups
@@ -134,7 +84,56 @@ export default pattern((__cf_pattern_input) => {
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema), {
             suffix: suffix
-        }).flatMapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
+        }).flatMapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+            const item = __cf_pattern_input.key("element");
+            const prefix = __cf_pattern_input.params.prefix;
+            return __cfHelpers.ifElse({
+                type: "number"
+            } as const satisfies __cfHelpers.JSONSchema, {
+                type: "array",
+                items: {
+                    type: "string"
+                }
+            } as const satisfies __cfHelpers.JSONSchema, {
+                type: "array",
+                items: false
+            } as const satisfies __cfHelpers.JSONSchema, {
+                type: "array",
+                items: {
+                    type: "string"
+                }
+            } as const satisfies __cfHelpers.JSONSchema, item.key("tags", "length"), __cfHelpers.derive({
+                type: "object",
+                properties: {
+                    prefix: {
+                        type: "string"
+                    },
+                    item: {
+                        type: "object",
+                        properties: {
+                            tags: {
+                                type: "array",
+                                items: {
+                                    type: "string"
+                                }
+                            }
+                        },
+                        required: ["tags"]
+                    }
+                },
+                required: ["prefix", "item"]
+            } as const satisfies __cfHelpers.JSONSchema, {
+                type: "array",
+                items: {
+                    type: "string"
+                }
+            } as const satisfies __cfHelpers.JSONSchema, {
+                item: {
+                    tags: item.key("tags")
+                },
+                prefix: prefix
+            }, ({ item, prefix }) => [prefix + item.tags[0]]), []);
+        }, {
             type: "object",
             properties: {
                 element: {

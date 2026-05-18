@@ -11,85 +11,6 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
-    const item = __cf_pattern_input.key("element");
-    const state = __cf_pattern_input.key("params", "state");
-    return (<div>
-            Price: ${__cfHelpers.ifElse({
-        type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
-        type: "object",
-        properties: {
-            item: {
-                type: "object",
-                properties: {
-                    price: {
-                        type: "number"
-                    }
-                },
-                required: ["price"]
-            },
-            state: {
-                type: "object",
-                properties: {
-                    threshold: {
-                        type: "number"
-                    }
-                },
-                required: ["threshold"]
-            }
-        },
-        required: ["item", "state"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        item: {
-            price: item.key("price")
-        },
-        state: {
-            threshold: state.key("threshold")
-        }
-    }, ({ item, state }) => item.price > state.threshold), __cfHelpers.derive({
-        type: "object",
-        properties: {
-            item: {
-                type: "object",
-                properties: {
-                    price: {
-                        type: "number"
-                    }
-                },
-                required: ["price"]
-            },
-            state: {
-                type: "object",
-                properties: {
-                    discount: {
-                        type: "number"
-                    }
-                },
-                required: ["discount"]
-            }
-        },
-        required: ["item", "state"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        item: {
-            price: item.key("price")
-        },
-        state: {
-            discount: state.key("discount")
-        }
-    }, ({ item, state }) => item.price * (1 - state.discount)), item.key("price"))}
-          </div>);
-});
 interface Item {
     id: number;
     price: number;
@@ -108,7 +29,85 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Ternary with captures in map callback */}
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
+        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const item = __cf_pattern_input.key("element");
+                const state = __cf_pattern_input.key("params", "state");
+                return (<div>
+            Price: ${__cfHelpers.ifElse({
+                    type: "boolean"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "number"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "number"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "number"
+                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+                    type: "object",
+                    properties: {
+                        item: {
+                            type: "object",
+                            properties: {
+                                price: {
+                                    type: "number"
+                                }
+                            },
+                            required: ["price"]
+                        },
+                        state: {
+                            type: "object",
+                            properties: {
+                                threshold: {
+                                    type: "number"
+                                }
+                            },
+                            required: ["threshold"]
+                        }
+                    },
+                    required: ["item", "state"]
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "boolean"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    item: {
+                        price: item.key("price")
+                    },
+                    state: {
+                        threshold: state.key("threshold")
+                    }
+                }, ({ item, state }) => item.price > state.threshold), __cfHelpers.derive({
+                    type: "object",
+                    properties: {
+                        item: {
+                            type: "object",
+                            properties: {
+                                price: {
+                                    type: "number"
+                                }
+                            },
+                            required: ["price"]
+                        },
+                        state: {
+                            type: "object",
+                            properties: {
+                                discount: {
+                                    type: "number"
+                                }
+                            },
+                            required: ["discount"]
+                        }
+                    },
+                    required: ["item", "state"]
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "number"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    item: {
+                        price: item.key("price")
+                    },
+                    state: {
+                        discount: state.key("discount")
+                    }
+                }, ({ item, state }) => item.price * (1 - state.discount)), item.key("price"))}
+          </div>);
+            }, {
                 type: "object",
                 properties: {
                     element: {

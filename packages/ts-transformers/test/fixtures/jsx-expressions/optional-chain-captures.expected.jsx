@@ -11,33 +11,6 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
-    const item = __cf_pattern_input.key("element");
-    return (<span>{__cfHelpers.derive({
-        type: "object",
-        properties: {
-            item: {
-                type: "object",
-                properties: {
-                    maybe: {
-                        type: "object",
-                        properties: {
-                            value: {
-                                type: "number"
-                            }
-                        },
-                        required: ["value"]
-                    }
-                }
-            }
-        },
-        required: ["item"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, { item: {
-            maybe: item.key("maybe")
-        } }, ({ item }) => item.maybe?.value ?? 0)}</span>);
-});
 interface Item {
     maybe?: {
         value: number;
@@ -58,7 +31,33 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         <span>{state.key("maybe", "value")}</span>
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
+        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const item = __cf_pattern_input.key("element");
+                return (<span>{__cfHelpers.derive({
+                    type: "object",
+                    properties: {
+                        item: {
+                            type: "object",
+                            properties: {
+                                maybe: {
+                                    type: "object",
+                                    properties: {
+                                        value: {
+                                            type: "number"
+                                        }
+                                    },
+                                    required: ["value"]
+                                }
+                            }
+                        }
+                    },
+                    required: ["item"]
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "number"
+                } as const satisfies __cfHelpers.JSONSchema, { item: {
+                        maybe: item.key("maybe")
+                    } }, ({ item }) => item.maybe?.value ?? 0)}</span>);
+            }, {
                 type: "object",
                 properties: {
                     element: {

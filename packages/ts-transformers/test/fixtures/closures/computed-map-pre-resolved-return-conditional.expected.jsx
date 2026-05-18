@@ -11,18 +11,6 @@ import { computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
-    const row = __cf_pattern_input.key("element");
-    return __cfHelpers.ifElse({
-        type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        "enum": ["Done", "Pending"]
-    } as const satisfies __cfHelpers.JSONSchema, row.key("done"), "Done", "Pending");
-});
 interface Item {
     done: boolean;
 }
@@ -75,7 +63,18 @@ export default pattern((state) => {
         } }, ({ state }) => state.items.map((item) => ({ done: item.done }))).for("rows", true);
     return {
         [UI]: (<div>
-        {rows.mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
+        {rows.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+            const row = __cf_pattern_input.key("element");
+            return __cfHelpers.ifElse({
+                type: "boolean"
+            } as const satisfies __cfHelpers.JSONSchema, {
+                type: "string"
+            } as const satisfies __cfHelpers.JSONSchema, {
+                type: "string"
+            } as const satisfies __cfHelpers.JSONSchema, {
+                "enum": ["Done", "Pending"]
+            } as const satisfies __cfHelpers.JSONSchema, row.key("done"), "Done", "Pending").for("__patternResult", true);
+        }, {
             type: "object",
             properties: {
                 element: {
@@ -92,7 +91,7 @@ export default pattern((state) => {
         } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["Done", "Pending"]
         } as const satisfies __cfHelpers.JSONSchema), {})}
-      </div>),
+      </div>)
     };
 }, {
     type: "object",

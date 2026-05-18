@@ -18,33 +18,6 @@ import { Default, pattern, UI, VNode, Writable, } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
-    const file = __cf_pattern_input.key("element");
-    __cfHelpers.derive({
-        type: "object",
-        properties: {
-            file: {
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string"
-                    },
-                    type: {
-                        type: "string"
-                    }
-                },
-                required: ["name", "type"]
-            }
-        },
-        required: ["file"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        asCell: ["opaque"]
-    } as const satisfies __cfHelpers.JSONSchema, { file: {
-            name: file.key("name"),
-            type: file.key("type")
-        } }, ({ file }) => console.log("mapping", file.name, file.type));
-    return <span>{file.key("name")}</span>;
-});
 interface FileEntry {
     name: string;
     type: "file" | "folder";
@@ -60,7 +33,33 @@ export default pattern((__cf_pattern_input) => {
     const files = __cf_pattern_input.key("files");
     return {
         [UI]: (<div>
-        {files.mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
+        {files.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const file = __cf_pattern_input.key("element");
+                __cfHelpers.derive({
+                    type: "object",
+                    properties: {
+                        file: {
+                            type: "object",
+                            properties: {
+                                name: {
+                                    type: "string"
+                                },
+                                type: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["name", "type"]
+                        }
+                    },
+                    required: ["file"]
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    asCell: ["opaque"]
+                } as const satisfies __cfHelpers.JSONSchema, { file: {
+                        name: file.key("name"),
+                        type: file.key("type")
+                    } }, ({ file }) => console.log("mapping", file.name, file.type));
+                return <span>{file.key("name")}</span>;
+            }, {
                 type: "object",
                 properties: {
                     element: {

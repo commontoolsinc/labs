@@ -11,26 +11,6 @@ import { cell, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
-    const item = __cf_pattern_input.key("element");
-    return (<div>
-                {__cfHelpers.when({
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        anyOf: [{}, {
-                type: "object",
-                properties: {}
-            }]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        anyOf: [{
-                type: "string"
-            }, {}, {
-                type: "object",
-                properties: {}
-            }]
-    } as const satisfies __cfHelpers.JSONSchema, item.key("name"), <span>{item.key("name")}</span>)}
-              </div>);
-});
 // FIXTURE: map-nested-conditional-no-name
 // Verifies: same nested conditional map transforms work when pattern param is typed as any
 //   showList && <div>{items.map(...)}</div> → when(showList, <div>{items.mapWithPattern(...)}</div>)
@@ -67,7 +47,26 @@ export default pattern((_state: any) => {
                     properties: {}
                 }]
         } as const satisfies __cfHelpers.JSONSchema, showList, <div>
-            {items.mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
+            {items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const item = __cf_pattern_input.key("element");
+                return (<div>
+                {__cfHelpers.when({
+                    type: "string"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    anyOf: [{}, {
+                            type: "object",
+                            properties: {}
+                        }]
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    anyOf: [{
+                            type: "string"
+                        }, {}, {
+                            type: "object",
+                            properties: {}
+                        }]
+                } as const satisfies __cfHelpers.JSONSchema, item.key("name"), <span>{item.key("name")}</span>)}
+              </div>);
+            }, {
                 type: "object",
                 properties: {
                     element: {

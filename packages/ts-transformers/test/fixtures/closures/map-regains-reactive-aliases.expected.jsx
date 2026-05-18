@@ -35,20 +35,6 @@ const __cfModuleCallback_1 = __cfHardenFn(() => {
         type: "string"
     } as const satisfies __cfHelpers.JSONSchema), {});
 });
-const __cfModuleCallback_2 = __cfHardenFn(__cf_pattern_input => {
-    const item = __cf_pattern_input.key("element");
-    return __cfHelpers.derive({
-        type: "object",
-        properties: {
-            item: {
-                type: "string"
-            }
-        },
-        required: ["item"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, { item: item }, ({ item }) => item.toUpperCase());
-});
 const passthrough = lift({
     type: "array",
     items: {
@@ -300,7 +286,20 @@ export default pattern((state) => {
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema), {}).for("filtered", true);
-        return filtered.mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_2, {
+        return filtered.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+            const item = __cf_pattern_input.key("element");
+            return __cfHelpers.derive({
+                type: "object",
+                properties: {
+                    item: {
+                        type: "string"
+                    }
+                },
+                required: ["item"]
+            } as const satisfies __cfHelpers.JSONSchema, {
+                type: "string"
+            } as const satisfies __cfHelpers.JSONSchema, { item: item }, ({ item }) => item.toUpperCase()).for("__patternResult", true);
+        }, {
             type: "object",
             properties: {
                 element: {

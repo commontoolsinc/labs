@@ -11,8 +11,6 @@ import { Cell, pattern, action } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn((_, { a }) => console.log(a));
-const __cfModuleCallback_2 = __cfHardenFn((_, { b }) => console.log(b));
 interface BaseState {
     a: Cell<string>;
     b: Cell<number>;
@@ -39,7 +37,7 @@ export default pattern((__cf_pattern_input) => {
                     asCell: ["readonly"]
                 }
             }
-        } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({
+        } as const satisfies __cfHelpers.JSONSchema, (_, { a }) => console.log(a))({
             a: a
         }).for({ stream: ["__patternResult", "readA"] }, true),
         readB: __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
@@ -54,7 +52,7 @@ export default pattern((__cf_pattern_input) => {
                     asCell: ["readonly"]
                 }
             }
-        } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_2)({
+        } as const satisfies __cfHelpers.JSONSchema, (_, { b }) => console.log(b))({
             b: b
         }).for({ stream: ["__patternResult", "readB"] }, true)
     };

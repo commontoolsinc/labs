@@ -11,10 +11,6 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn((__cf_handler_event, { state }) => {
-    const scaled = state.items.map((item) => item.value * state.multiplier);
-    console.log(scaled);
-});
 interface State {
     items: Array<{
         value: number;
@@ -53,7 +49,10 @@ export default pattern((state) => {
                 }
             },
             required: ["state"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({
+        } as const satisfies __cfHelpers.JSONSchema, (__cf_handler_event, { state }) => {
+            const scaled = state.items.map((item) => item.value * state.multiplier);
+            console.log(scaled);
+        })({
             state: {
                 items: state.key("items"),
                 multiplier: state.key("multiplier")

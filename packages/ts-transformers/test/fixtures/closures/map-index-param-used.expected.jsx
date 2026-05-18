@@ -11,38 +11,6 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
-    const item = __cf_pattern_input.key("element");
-    const index = __cf_pattern_input.key("index");
-    const state = __cf_pattern_input.key("params", "state");
-    return (<div>
-            Item #{__cfHelpers.derive({
-        type: "object",
-        properties: {
-            index: {
-                type: "number"
-            },
-            state: {
-                type: "object",
-                properties: {
-                    offset: {
-                        type: "number"
-                    }
-                },
-                required: ["offset"]
-            }
-        },
-        required: ["index", "state"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        index: index,
-        state: {
-            offset: state.key("offset")
-        }
-    }, ({ index, state }) => index + state.offset)}: {item.key("name")}
-          </div>);
-});
 interface Item {
     id: number;
     name: string;
@@ -60,7 +28,38 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Uses both index parameter and captures state.offset */}
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
+        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const item = __cf_pattern_input.key("element");
+                const index = __cf_pattern_input.key("index");
+                const state = __cf_pattern_input.key("params", "state");
+                return (<div>
+            Item #{__cfHelpers.derive({
+                    type: "object",
+                    properties: {
+                        index: {
+                            type: "number"
+                        },
+                        state: {
+                            type: "object",
+                            properties: {
+                                offset: {
+                                    type: "number"
+                                }
+                            },
+                            required: ["offset"]
+                        }
+                    },
+                    required: ["index", "state"]
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "number"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    index: index,
+                    state: {
+                        offset: state.key("offset")
+                    }
+                }, ({ index, state }) => index + state.offset)}: {item.key("name")}
+          </div>);
+            }, {
                 type: "object",
                 properties: {
                     element: {

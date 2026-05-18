@@ -17,62 +17,6 @@ import { Default, pattern, UI, VNode, Writable, } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
-    const file = __cf_pattern_input.key("element");
-    const isFolder = __cfHelpers.derive({
-        type: "object",
-        properties: {
-            file: {
-                type: "object",
-                properties: {
-                    type: {
-                        type: "string"
-                    }
-                },
-                required: ["type"]
-            }
-        },
-        required: ["file"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, { file: {
-            type: file.key("type")
-        } }, ({ file }) => file.type === "folder").for("isFolder", true);
-    const isOpenable = __cfHelpers.unless({
-        type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, isFolder, __cfHelpers.derive({
-        type: "object",
-        properties: {
-            file: {
-                type: "object",
-                properties: {
-                    contentType: {
-                        type: "string"
-                    }
-                },
-                required: ["contentType"]
-            }
-        },
-        required: ["file"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, { file: {
-            contentType: file.key("contentType")
-        } }, ({ file }) => file.contentType !== "binary").for(["isOpenable", 4], true)).for("isOpenable", true);
-    return <span>{__cfHelpers.ifElse({
-        type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, isOpenable, file.key("name"), "locked")}</span>;
-});
 interface FileEntry {
     name: string;
     type: "file" | "folder";
@@ -89,7 +33,62 @@ export default pattern((__cf_pattern_input) => {
     const files = __cf_pattern_input.key("files");
     return {
         [UI]: (<div>
-        {files.mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
+        {files.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const file = __cf_pattern_input.key("element");
+                const isFolder = __cfHelpers.derive({
+                    type: "object",
+                    properties: {
+                        file: {
+                            type: "object",
+                            properties: {
+                                type: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["type"]
+                        }
+                    },
+                    required: ["file"]
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "boolean"
+                } as const satisfies __cfHelpers.JSONSchema, { file: {
+                        type: file.key("type")
+                    } }, ({ file }) => file.type === "folder").for("isFolder", true);
+                const isOpenable = __cfHelpers.unless({
+                    type: "boolean"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "boolean"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "boolean"
+                } as const satisfies __cfHelpers.JSONSchema, isFolder, __cfHelpers.derive({
+                    type: "object",
+                    properties: {
+                        file: {
+                            type: "object",
+                            properties: {
+                                contentType: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["contentType"]
+                        }
+                    },
+                    required: ["file"]
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "boolean"
+                } as const satisfies __cfHelpers.JSONSchema, { file: {
+                        contentType: file.key("contentType")
+                    } }, ({ file }) => file.contentType !== "binary").for(["isOpenable", 4], true)).for("isOpenable", true);
+                return <span>{__cfHelpers.ifElse({
+                    type: "boolean"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __cfHelpers.JSONSchema, isOpenable, file.key("name"), "locked")}</span>;
+            }, {
                 type: "object",
                 properties: {
                     element: {
@@ -135,7 +134,7 @@ export default pattern((__cf_pattern_input) => {
                     }
                 }
             } as const satisfies __cfHelpers.JSONSchema), {})}
-      </div>),
+      </div>)
     };
 }, {
     type: "object",

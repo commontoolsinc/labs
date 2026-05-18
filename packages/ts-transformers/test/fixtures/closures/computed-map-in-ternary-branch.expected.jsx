@@ -11,21 +11,6 @@ import { Cell, computed, Default, pattern, UI, Writable } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
-    const entry = __cf_pattern_input.key("element");
-    return (<li>
-                    {__cfHelpers.ifElse({
-        type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        "enum": ["", "\u2605 "]
-    } as const satisfies __cfHelpers.JSONSchema, entry.key("isFirst"), "★ ", "")}
-                    {entry.key("name")}
-                  </li>);
-});
 interface Person {
     name: string;
     rank: number;
@@ -186,7 +171,21 @@ export default pattern((__cf_pattern_input) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, { count: count }, ({ count }) => count + " people")}</span>
               <ul>
-                {adminData.mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
+                {adminData.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const entry = __cf_pattern_input.key("element");
+                return (<li>
+                    {__cfHelpers.ifElse({
+                    type: "boolean"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    "enum": ["", "\u2605 "]
+                } as const satisfies __cfHelpers.JSONSchema, entry.key("isFirst"), "★ ", "")}
+                    {entry.key("name")}
+                  </li>);
+            }, {
                 type: "object",
                 properties: {
                     element: {

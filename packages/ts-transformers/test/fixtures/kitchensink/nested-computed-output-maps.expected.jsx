@@ -27,128 +27,6 @@ import { computed, handler, ifElse, lift, pattern, UI, Writable, } from "commonf
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
-    const comment = __cf_pattern_input.key("element");
-    const reboundIndex = __cf_pattern_input.key("index");
-    const outerIndex = __cf_pattern_input.params.outerIndex;
-    const state = __cf_pattern_input.key("params", "state");
-    return (<aside>
-              {__cfHelpers.ifElse({
-        type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
-        type: "object",
-        properties: {
-            reboundIndex: {
-                type: "number"
-            },
-            outerIndex: {
-                type: "number"
-            }
-        },
-        required: ["reboundIndex", "outerIndex"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        reboundIndex: reboundIndex,
-        outerIndex: outerIndex
-    }, ({ reboundIndex, outerIndex }) => reboundIndex === outerIndex), __cfHelpers.derive({
-        type: "object",
-        properties: {
-            state: {
-                type: "object",
-                properties: {
-                    lane: {
-                        type: "string"
-                    }
-                },
-                required: ["lane"]
-            },
-            comment: {
-                type: "object",
-                properties: {
-                    id: {
-                        type: "string"
-                    }
-                },
-                required: ["id"]
-            }
-        },
-        required: ["state", "comment"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        state: {
-            lane: state.key("lane")
-        },
-        comment: {
-            id: comment.key("id")
-        }
-    }, ({ state, comment }) => `${state.lane}:${comment.id}`), comment.key("text"))}
-            </aside>);
-});
-const __cfModuleCallback_2 = __cfHardenFn(__cf_pattern_input => {
-    const edge = __cf_pattern_input.key("element");
-    const edgeIndex = __cf_pattern_input.key("index");
-    const outerIndex = __cf_pattern_input.params.outerIndex;
-    const state = __cf_pattern_input.key("params", "state");
-    return (<small>
-              {__cfHelpers.ifElse({
-        type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
-        type: "object",
-        properties: {
-            edgeIndex: {
-                type: "number"
-            },
-            outerIndex: {
-                type: "number"
-            }
-        },
-        required: ["edgeIndex", "outerIndex"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        edgeIndex: edgeIndex,
-        outerIndex: outerIndex
-    }, ({ edgeIndex, outerIndex }) => edgeIndex === outerIndex), __cfHelpers.derive({
-        type: "object",
-        properties: {
-            state: {
-                type: "object",
-                properties: {
-                    lane: {
-                        type: "string"
-                    }
-                },
-                required: ["lane"]
-            },
-            edge: {
-                type: "string"
-            }
-        },
-        required: ["state", "edge"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        state: {
-            lane: state.key("lane")
-        },
-        edge: edge
-    }, ({ state, edge }) => `${state.lane}:${edge}`), edge)}
-            </small>);
-});
 interface Comment {
     id: string;
     text: string;
@@ -402,9 +280,26 @@ export default pattern((state) => {
                     },
                     required: ["thread", "visibleComments", "outerIndex"]
                 }
+            },
+            selectedCommentId: {
+                anyOf: [{
+                        type: "string"
+                    }, {
+                        type: "undefined"
+                    }],
+                asCell: ["readonly"]
+            },
+            state: {
+                type: "object",
+                properties: {
+                    lane: {
+                        type: "string"
+                    }
+                },
+                required: ["lane"]
             }
         },
-        required: ["visibleThreads"]
+        required: ["visibleThreads", "selectedCommentId", "state"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "array",
         items: {
@@ -544,7 +439,71 @@ export default pattern((state) => {
             </div>))}
           {/* [TRANSFORM] .map() → mapWithPattern: reboundComments is output of nested derive() — reactive even inside outer derive */}
           {/* [TRANSFORM] closure captures: outerIndex (via params opaque), state.lane (via params reactive .key()) */}
-          {reboundComments.mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
+          {reboundComments.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const comment = __cf_pattern_input.key("element");
+                const reboundIndex = __cf_pattern_input.key("index");
+                const outerIndex = __cf_pattern_input.params.outerIndex;
+                const state = __cf_pattern_input.key("params", "state");
+                return (<aside>
+              {__cfHelpers.ifElse({
+                    type: "boolean"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+                    type: "object",
+                    properties: {
+                        reboundIndex: {
+                            type: "number"
+                        },
+                        outerIndex: {
+                            type: "number"
+                        }
+                    },
+                    required: ["reboundIndex", "outerIndex"]
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "boolean"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    reboundIndex: reboundIndex,
+                    outerIndex: outerIndex
+                }, ({ reboundIndex, outerIndex }) => reboundIndex === outerIndex), __cfHelpers.derive({
+                    type: "object",
+                    properties: {
+                        state: {
+                            type: "object",
+                            properties: {
+                                lane: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["lane"]
+                        },
+                        comment: {
+                            type: "object",
+                            properties: {
+                                id: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["id"]
+                        }
+                    },
+                    required: ["state", "comment"]
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    state: {
+                        lane: state.key("lane")
+                    },
+                    comment: {
+                        id: comment.key("id")
+                    }
+                }, ({ state, comment }) => `${state.lane}:${comment.id}`), comment.key("text"))}
+            </aside>);
+            }, {
                 type: "object",
                 properties: {
                     element: {
@@ -610,7 +569,63 @@ export default pattern((state) => {
             })}
           {/* [TRANSFORM] .map() → mapWithPattern: liftedSeparators is output of lift() — reactive even inside outer derive */}
           {/* [TRANSFORM] closure captures: outerIndex (via params opaque), state.lane (via params reactive .key()) */}
-          {liftedSeparators.mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_2, {
+          {liftedSeparators.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const edge = __cf_pattern_input.key("element");
+                const edgeIndex = __cf_pattern_input.key("index");
+                const outerIndex = __cf_pattern_input.params.outerIndex;
+                const state = __cf_pattern_input.key("params", "state");
+                return (<small>
+              {__cfHelpers.ifElse({
+                    type: "boolean"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+                    type: "object",
+                    properties: {
+                        edgeIndex: {
+                            type: "number"
+                        },
+                        outerIndex: {
+                            type: "number"
+                        }
+                    },
+                    required: ["edgeIndex", "outerIndex"]
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "boolean"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    edgeIndex: edgeIndex,
+                    outerIndex: outerIndex
+                }, ({ edgeIndex, outerIndex }) => edgeIndex === outerIndex), __cfHelpers.derive({
+                    type: "object",
+                    properties: {
+                        state: {
+                            type: "object",
+                            properties: {
+                                lane: {
+                                    type: "string"
+                                }
+                            },
+                            required: ["lane"]
+                        },
+                        edge: {
+                            type: "string"
+                        }
+                    },
+                    required: ["state", "edge"]
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    state: {
+                        lane: state.key("lane")
+                    },
+                    edge: edge
+                }, ({ state, edge }) => `${state.lane}:${edge}`), edge)}
+            </small>);
+            }, {
                 type: "object",
                 properties: {
                     element: {
