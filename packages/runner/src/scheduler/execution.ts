@@ -358,8 +358,8 @@ export type SchedulerSettleResult = {
 };
 
 export interface SchedulerSettleLoopState {
-  readonly pullMode: boolean;
-  readonly collectSettleStats: boolean;
+  readonly getPullMode: () => boolean;
+  readonly getCollectSettleStats: () => boolean;
   readonly pendingDependencyCollection: Set<Action>;
   readonly populateDependenciesCallbacks: WeakMap<
     Action,
@@ -374,7 +374,7 @@ export interface SchedulerSettleLoopState {
   readonly dependents: WeakMap<Action, Set<Action>>;
   readonly conditionallyScheduledEffects: Map<Action, number>;
   readonly filterStats: { filtered: number; executed: number };
-  readonly loopCounter: WeakMap<Action, number>;
+  readonly getLoopCounter: () => WeakMap<Action, number>;
   readonly runsThisExecute: Map<Action, number>;
   readonly activePullDemandActions: WeakSet<Action>;
   readonly getSchedulingWrites: (
@@ -419,14 +419,16 @@ export async function runSchedulerSettleLoop(
   // First iteration processes initial seeds + their dirty deps.
   // Subsequent iterations process new subscriptions and re-collect dirty deps.
   logger.timeStart("scheduler", "execute", "settle");
-  const maxSettleIterations = state.pullMode ? 10 : 10;
+  const maxSettleIterations = state.getPullMode() ? 10 : 10;
   const EARLY_ITERATION_THRESHOLD = 5;
   const earlyIterationComputations = new Set<Action>(); // Track computations in first N iterations
   let lastWorkSet: Set<Action> = new Set();
   let settledEarly = false;
-  const settleIterStats: SettleIterationStats[] | undefined =
-    state.collectSettleStats ? [] : undefined;
-  const settleStartTime = state.collectSettleStats ? performance.now() : 0;
+  const collectSettleStats = state.getCollectSettleStats();
+  const settleIterStats: SettleIterationStats[] | undefined = collectSettleStats
+    ? []
+    : undefined;
+  const settleStartTime = collectSettleStats ? performance.now() : 0;
 
   for (let settleIter = 0; settleIter < maxSettleIterations; settleIter++) {
     const iterStart = settleIterStats ? performance.now() : 0;
@@ -485,7 +487,9 @@ function collectSettlePreRunDependencies(
 ): void {
   // Process any newly subscribed actions from previous iteration.
   // This sets up their dependencies so collectDirtyDependencies can find them.
-  if (!state.pullMode || state.pendingDependencyCollection.size === 0) return;
+  if (!state.getPullMode() || state.pendingDependencyCollection.size === 0) {
+    return;
+  }
 
   collectPendingDependencyActions({
     pendingDependencyCollection: state.pendingDependencyCollection,
@@ -514,10 +518,11 @@ function prepareSettleIteration(
   order: Action[];
 } {
   // Build the work set for this iteration
-  const buildPullWorkSetStart = state.pullMode ? performance.now() : 0;
+  const pullMode = state.getPullMode();
+  const buildPullWorkSetStart = pullMode ? performance.now() : 0;
   const { workSet, iterationSeeds, dirtyDependencyCount } =
     buildIterationWorkSet({
-      pullMode: state.pullMode,
+      pullMode,
       pending: state.pending,
       initialSeeds,
       settleIter,
@@ -525,7 +530,7 @@ function prepareSettleIteration(
       collectDirtyDependencies: state.collectDirtyDependencies,
     });
 
-  if (state.pullMode) {
+  if (pullMode) {
     if (settleIter === 0) {
       logger.debug("schedule-execute-pull", () => [
         `Pull mode: Seeds: ${iterationSeeds.size}, Dirty deps added: ${dirtyDependencyCount}`,
@@ -544,7 +549,7 @@ function prepareSettleIteration(
   }
 
   recordEarlyIterationComputations({
-    pullMode: state.pullMode,
+    pullMode,
     settleIter,
     threshold: earlyIterationThreshold,
     workSet,
@@ -558,7 +563,7 @@ function prepareSettleIteration(
     state.dependencies,
     state.getSchedulingWritesMap(),
     state.actionParent,
-    state.pullMode ? state.dependents : undefined,
+    pullMode ? state.dependents : undefined,
   );
   logger.time(
     topologicalSortStart,
@@ -574,7 +579,7 @@ function prepareSettleIteration(
   // Implicit cycle detection for effects:
   // Clear dirty flags for all effects upfront. If an effect becomes dirty again
   // by the time we run it, something in the execution re-dirtied it → cycle.
-  if (state.pullMode) {
+  if (pullMode) {
     for (const fn of order) {
       if (state.effects.has(fn)) {
         state.clearDirty(fn);
@@ -615,19 +620,18 @@ async function runSettleAction(
   if (state.computations.has(fn)) {
     state.clearComputationDebounceState(fn);
   }
-  if (state.pullMode && state.effects.has(fn)) {
+  if (state.getPullMode() && state.effects.has(fn)) {
     state.clearDirty(fn);
   }
 
   state.filterStats.executed++;
-  state.loopCounter.set(fn, (state.loopCounter.get(fn) || 0) + 1);
+  const loopCounter = state.getLoopCounter();
+  loopCounter.set(fn, (loopCounter.get(fn) || 0) + 1);
   // Track runs for cycle-aware debounce
   state.runsThisExecute.set(fn, (state.runsThisExecute.get(fn) ?? 0) + 1);
-  if (state.loopCounter.get(fn)! > MAX_ITERATIONS_PER_RUN) {
+  if (loopCounter.get(fn)! > MAX_ITERATIONS_PER_RUN) {
     const error = new Error(
-      `Too many iterations: ${state.loopCounter.get(fn)} ${
-        state.getActionId(fn)
-      }`,
+      `Too many iterations: ${loopCounter.get(fn)} ${state.getActionId(fn)}`,
     );
     // Attach the last frame from the action so handleError can
     // extract piece/spell metadata (CT-1316: fixes message:null).
@@ -639,7 +643,7 @@ async function runSettleAction(
     return 1;
   }
 
-  const activePullDemand = state.pullMode &&
+  const activePullDemand = state.getPullMode() &&
     (state.computations.has(fn) || state.isPullDemandRootEffect(fn));
   if (activePullDemand) {
     state.activePullDemandActions.add(fn);
@@ -663,7 +667,7 @@ function isSettleActionStillRunnable(
   const isInPending = state.pending.has(fn);
   const isInDirty = state.dirty.has(fn);
 
-  if (!state.pullMode) {
+  if (!state.getPullMode()) {
     // Push mode: action must be in pending
     return isInPending;
   }
@@ -712,7 +716,7 @@ function skipDelayedSettleAction(
     // but we remove from pending so it doesn't run this cycle
     state.pending.delete(fn);
     // Keep pull-mode effects dirty so they wake when the throttle expires.
-    if (state.pullMode && state.effects.has(fn)) {
+    if (state.getPullMode() && state.effects.has(fn)) {
       state.markDirectDirty(fn);
     }
     return true;
@@ -726,7 +730,7 @@ function skipUnchangedConditionalEffect(
   fn: Action,
 ): boolean {
   if (
-    !state.pullMode ||
+    !state.getPullMode() ||
     !state.effects.has(fn) ||
     !state.conditionallyScheduledEffects.has(fn) ||
     state.conditionalEffectHasChangedInputs(fn)

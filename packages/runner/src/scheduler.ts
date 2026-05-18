@@ -52,15 +52,16 @@ import {
   getSchedulingWrites as getSchedulingWritesFromState,
   getSchedulingWritesMap as getSchedulingWritesMapFromState,
   readsOverlapWrites,
-  replaceActionTriggerPaths,
   type SchedulingWriteState,
-  setCancelForTriggerEntities,
-  setSchedulerDependencies,
   type TriggerIndexState,
   type TriggerSubscriptionState,
   updateDependentEdgesForLog,
   type WriterIndexState,
 } from "./scheduler/dependency-index.ts";
+import {
+  collectDependenciesForAction as collectDependenciesForActionState,
+  type DependencyCollectionState,
+} from "./scheduler/dependency-collection.ts";
 import {
   collectDirtyDependencies as collectDirtyDependenciesState,
   collectDirtyDependenciesForLog as collectDirtyDependenciesForLogState,
@@ -68,6 +69,7 @@ import {
 import {
   type InFlightSourceState,
   runSchedulerAction,
+  type SchedulerActionRunState,
 } from "./scheduler/action-run.ts";
 import {
   buildPullInitialSeeds,
@@ -81,6 +83,7 @@ import {
   pushBoundedHistory,
   recordExecuteEnd,
   runSchedulerSettleLoop,
+  type SchedulerSettleLoopState,
   type SchedulerSettleResult,
   type SettlingTracker,
 } from "./scheduler/execution.ts";
@@ -109,7 +112,6 @@ import {
   type ActionTimingState,
   getActionStats as getActionStatsFromState,
 } from "./scheduler/timing.ts";
-import { txToReactivityLog } from "./scheduler/reactivity.ts";
 import {
   addSchedulerEventHandler,
   cancelEventQueueWake as cancelEventQueueWakeState,
@@ -450,6 +452,7 @@ export class Scheduler {
     hasDependentPath: (from: Action, to: Action) =>
       this.hasDependentPath(from, to),
   };
+  private dependencyCollectionState!: DependencyCollectionState;
   private subscribeActionState: SchedulerSubscribeActionState = {
     subscriptionState: this.subscriptionState,
     dependencyUpdateState: this.dependencyUpdateState,
@@ -497,6 +500,7 @@ export class Scheduler {
   private _running: Promise<unknown> | undefined = undefined;
   private scheduled = false;
   private disposed = false;
+  private actionRunState!: SchedulerActionRunState;
   private cycleBreakState: CycleBreakState = {
     getPullMode: () => this.pullMode,
     dirty: this.staleness.dirty,
@@ -511,6 +515,51 @@ export class Scheduler {
       this.filterStats.executed++;
     },
     getActionId: (action) => this.getActionId(action),
+    runAction: (action) => this.run(action),
+  };
+  private settleLoopState: SchedulerSettleLoopState = {
+    getPullMode: () => this.pullMode,
+    getCollectSettleStats: () => this.collectSettleStats,
+    pendingDependencyCollection: this.pendingDependencyCollection,
+    populateDependenciesCallbacks: this.populateDependenciesCallbacks,
+    effects: this.effects,
+    computations: this.computations,
+    pending: this.pending,
+    dirty: this.staleness.dirty,
+    dependencies: this.dependencies,
+    actionParent: this.actionParent,
+    dependents: this.dependents,
+    conditionallyScheduledEffects: this.conditionallyScheduledEffects,
+    filterStats: this.filterStats,
+    getLoopCounter: () => this.loopCounter,
+    runsThisExecute: this.runsThisExecute,
+    activePullDemandActions: this.activePullDemandActions,
+    getSchedulingWrites: (action) =>
+      getSchedulingWritesFromState(this.schedulingWriteState, action),
+    getSchedulingWritesMap: () =>
+      getSchedulingWritesMapFromState(this.schedulingWriteState),
+    collectDependenciesForAction: (action, populateDependencies, options) =>
+      this.collectDependenciesForAction(
+        action,
+        populateDependencies,
+        options,
+      ),
+    collectPullIterationSeeds: (seeds) => this.collectPullIterationSeeds(seeds),
+    collectDirtyDependencies: (seed, targetWorkSet, memo) =>
+      this.collectDirtyDependencies(seed, targetWorkSet, memo),
+    getActionId: (action) => this.getActionId(action),
+    clearDirty: (action) =>
+      clearSchedulerDirty(this.dirtySchedulingState, action),
+    markDirectDirty: (action) => this.staleness.markDirectDirty(action),
+    isThrottled: (action) => this.delays.isThrottled(action),
+    isDebouncedComputationWaiting: (action) =>
+      this.isDebouncedComputationWaiting(action),
+    clearComputationDebounceState: (action) =>
+      this.delays.clearComputationDebounceState(action),
+    conditionalEffectHasChangedInputs: (action) =>
+      this.conditionalEffectHasChangedInputs(action),
+    isPullDemandRootEffect: (action) => this.isPullDemandRootEffect(action),
+    handleError: (error, action) => this.handleError(error, action),
     runAction: (action) => this.run(action),
   };
   private executeContinuationState: ExecuteContinuationState = {
@@ -575,6 +624,60 @@ export class Scheduler {
     consoleHandler?: ConsoleHandler,
     errorHandlers?: ErrorHandler[],
   ) {
+    this.dependencyCollectionState = {
+      runtime: this.runtime,
+      dependencyUpdateState: this.dependencyUpdateState,
+      triggerSubscriptionState: this.triggerSubscriptionState,
+      updateDependents: (action, log) => this.updateDependents(action, log),
+    };
+
+    this.actionRunState = {
+      runtime: this.runtime,
+      actionChangeGroups: this.actionChangeGroups,
+      inFlightSourceState: this.inFlightSourceState,
+      actionTimingState: this.actionTimingState,
+      pullDemandedFirstRunComputations: this.pullDemandedFirstRunComputations,
+      retries: this.retries,
+      pending: this.pending,
+      actionRunTrace: this.actionRunTrace,
+      actionParent: this.actionParent,
+      isEffectAction: this.isEffectAction,
+      diagnosisHistory: this.diagnosisHistory,
+      diagnosisNonIdempotent: this.diagnosisNonIdempotent,
+      idempotencyViolations: this.idempotencyViolations,
+      writePropagationState: this.writePropagationState,
+      computations: this.computations,
+      getRunningPromise: () => this.runningPromise,
+      setRunningPromise: (promise) => {
+        this.runningPromise = promise;
+      },
+      getPullMode: () => this.pullMode,
+      getCollectActionRunTrace: () => this.collectActionRunTrace,
+      getDiagnosisEnabled: () => this.diagnosisEnabled,
+      getIdempotencyCheckMode: () => this.idempotencyCheckMode,
+      getActionId: (target) => this.getActionId(target),
+      getActionTelemetryInfo: (target) =>
+        getSchedulerActionTelemetryInfo(target),
+      getSchedulingWrites: (target) =>
+        getSchedulingWritesFromState(this.schedulingWriteState, target),
+      maybeAutoDebounce: (target) => this.maybeAutoDebounce(target),
+      markActionHasRun: (target) => this.delays.markActionHasRun(target),
+      handleError: (error, target) => this.handleError(error, target),
+      resubscribe: (target, log) => this.resubscribe(target, log),
+      markDirectDirty: (target) => this.staleness.markDirectDirty(target),
+      clearDirectDirty: (target) =>
+        clearSchedulerDirectDirty(this.dirtySchedulingState, target),
+      queueExecution: () => this.queueExecution(),
+      setExecutingAction: (target, targetActionId) => {
+        this.executingAction = target;
+        this.currentActionId = targetActionId;
+      },
+      clearExecutingAction: () => {
+        this.executingAction = null;
+        this.currentActionId = undefined;
+      },
+    };
+
     this.consoleHandler = consoleHandler ||
       function (data) {
         // Default console handler returns arguments unaffected.
@@ -612,7 +715,7 @@ export class Scheduler {
 
   enableIdempotencyCheck(): void {
     this.idempotencyCheckMode = true;
-    this.idempotencyViolations = [];
+    this.idempotencyViolations.length = 0;
     if (this.pullMode) {
       this.queueExecution();
     }
@@ -724,52 +827,7 @@ export class Scheduler {
   }
 
   async run(action: Action): Promise<any> {
-    return await runSchedulerAction({
-      runtime: this.runtime,
-      actionChangeGroups: this.actionChangeGroups,
-      inFlightSourceState: this.inFlightSourceState,
-      actionTimingState: this.actionTimingState,
-      pullDemandedFirstRunComputations: this.pullDemandedFirstRunComputations,
-      retries: this.retries,
-      pending: this.pending,
-      actionRunTrace: this.actionRunTrace,
-      actionParent: this.actionParent,
-      isEffectAction: this.isEffectAction,
-      diagnosisHistory: this.diagnosisHistory,
-      diagnosisNonIdempotent: this.diagnosisNonIdempotent,
-      idempotencyViolations: this.idempotencyViolations,
-      writePropagationState: this.writePropagationState,
-      computations: this.computations,
-      getRunningPromise: () => this.runningPromise,
-      setRunningPromise: (promise) => {
-        this.runningPromise = promise;
-      },
-      getPullMode: () => this.pullMode,
-      getCollectActionRunTrace: () => this.collectActionRunTrace,
-      getDiagnosisEnabled: () => this.diagnosisEnabled,
-      getIdempotencyCheckMode: () => this.idempotencyCheckMode,
-      getActionId: (target) => this.getActionId(target),
-      getActionTelemetryInfo: (target) =>
-        getSchedulerActionTelemetryInfo(target),
-      getSchedulingWrites: (target) =>
-        getSchedulingWritesFromState(this.schedulingWriteState, target),
-      maybeAutoDebounce: (target) => this.maybeAutoDebounce(target),
-      markActionHasRun: (target) => this.delays.markActionHasRun(target),
-      handleError: (error, target) => this.handleError(error, target),
-      resubscribe: (target, log) => this.resubscribe(target, log),
-      markDirectDirty: (target) => this.staleness.markDirectDirty(target),
-      clearDirectDirty: (target) =>
-        clearSchedulerDirectDirty(this.dirtySchedulingState, target),
-      queueExecution: () => this.queueExecution(),
-      setExecutingAction: (target, targetActionId) => {
-        this.executingAction = target;
-        this.currentActionId = targetActionId;
-      },
-      clearExecutingAction: () => {
-        this.executingAction = null;
-        this.currentActionId = undefined;
-      },
-    }, action);
+    return await runSchedulerAction(this.actionRunState, action);
   }
 
   idle(): Promise<void> {
@@ -939,50 +997,12 @@ export class Scheduler {
       useRawReadsForTriggers?: boolean;
     },
   ): { log: ReactivityLog; entities: Set<SpaceScopeAndURI> } {
-    let log: ReactivityLog;
-    if (typeof populateDependencies === "function") {
-      const depTx = this.runtime.edit();
-      try {
-        logger.timeStart("collectDependencies", "populate");
-        try {
-          populateDependencies(depTx);
-        } finally {
-          logger.timeEnd("collectDependencies", "populate");
-        }
-      } catch (error) {
-        logger.debug(options.errorLogLabel, () => [
-          options.errorMessage(action, error),
-        ]);
-      }
-      log = txToReactivityLog(depTx);
-      depTx.abort();
-    } else {
-      log = populateDependencies;
-    }
-
-    const { reads, shallowReads, log: schedulingLog } =
-      setSchedulerDependencies(this.dependencyUpdateState, action, log);
-    if (options.updateDependents ?? true) {
-      this.updateDependents(action, schedulingLog);
-    }
-
-    const readsForTriggers = options.useRawReadsForTriggers ? log.reads : reads;
-    const shallowReadsForTriggers = options.useRawReadsForTriggers
-      ? log.shallowReads
-      : shallowReads;
-    const { entities } = replaceActionTriggerPaths(
-      this.triggerSubscriptionState,
+    return collectDependenciesForActionState(
+      this.dependencyCollectionState,
       action,
-      readsForTriggers,
-      shallowReadsForTriggers,
+      populateDependencies,
+      options,
     );
-    setCancelForTriggerEntities(
-      this.triggerSubscriptionState,
-      action,
-      entities,
-    );
-
-    return { log, entities };
   }
 
   /**
@@ -1705,7 +1725,8 @@ export class Scheduler {
    * Resets filter statistics.
    */
   resetFilterStats(): void {
-    this.filterStats = { filtered: 0, executed: 0 };
+    this.filterStats.filtered = 0;
+    this.filterStats.executed = 0;
   }
 
   /**
@@ -1749,7 +1770,7 @@ export class Scheduler {
   setActionRunTraceEnabled(enabled: boolean): void {
     this.collectActionRunTrace = enabled;
     if (!enabled) {
-      this.actionRunTrace = [];
+      this.actionRunTrace.length = 0;
     }
   }
 
@@ -1814,7 +1835,7 @@ export class Scheduler {
     this.diagnosisStartTime = performance.now();
     this.diagnosisBusyTime = 0;
     this.diagnosisHistory.clear();
-    this.diagnosisNonIdempotent = [];
+    this.diagnosisNonIdempotent.length = 0;
     this.causalEdges = [];
 
     this.diagnosisTimeout = setTimeout(() => {
@@ -1879,7 +1900,7 @@ export class Scheduler {
    * automatically gets a second synchronous run for comparison.
    */
   async runIdempotencyCheck(): Promise<SchedulerDiagnosisResult> {
-    this.idempotencyViolations = [];
+    this.idempotencyViolations.length = 0;
     this.idempotencyCheckMode = true;
 
     try {
@@ -2048,52 +2069,10 @@ export class Scheduler {
   private async runSettleLoop(
     initialSeeds: ReadonlySet<Action>,
   ): Promise<SchedulerSettleResult> {
-    const settleResult = await runSchedulerSettleLoop({
-      pullMode: this.pullMode,
-      collectSettleStats: this.collectSettleStats,
-      pendingDependencyCollection: this.pendingDependencyCollection,
-      populateDependenciesCallbacks: this.populateDependenciesCallbacks,
-      effects: this.effects,
-      computations: this.computations,
-      pending: this.pending,
-      dirty: this.staleness.dirty,
-      dependencies: this.dependencies,
-      actionParent: this.actionParent,
-      dependents: this.dependents,
-      conditionallyScheduledEffects: this.conditionallyScheduledEffects,
-      filterStats: this.filterStats,
-      loopCounter: this.loopCounter,
-      runsThisExecute: this.runsThisExecute,
-      activePullDemandActions: this.activePullDemandActions,
-      getSchedulingWrites: (action) =>
-        getSchedulingWritesFromState(this.schedulingWriteState, action),
-      getSchedulingWritesMap: () =>
-        getSchedulingWritesMapFromState(this.schedulingWriteState),
-      collectDependenciesForAction: (action, populateDependencies, options) =>
-        this.collectDependenciesForAction(
-          action,
-          populateDependencies,
-          options,
-        ),
-      collectPullIterationSeeds: (seeds) =>
-        this.collectPullIterationSeeds(seeds),
-      collectDirtyDependencies: (seed, targetWorkSet, memo) =>
-        this.collectDirtyDependencies(seed, targetWorkSet, memo),
-      getActionId: (action) => this.getActionId(action),
-      clearDirty: (action) =>
-        clearSchedulerDirty(this.dirtySchedulingState, action),
-      markDirectDirty: (action) => this.staleness.markDirectDirty(action),
-      isThrottled: (action) => this.delays.isThrottled(action),
-      isDebouncedComputationWaiting: (action) =>
-        this.isDebouncedComputationWaiting(action),
-      clearComputationDebounceState: (action) =>
-        this.delays.clearComputationDebounceState(action),
-      conditionalEffectHasChangedInputs: (action) =>
-        this.conditionalEffectHasChangedInputs(action),
-      isPullDemandRootEffect: (action) => this.isPullDemandRootEffect(action),
-      handleError: (error, action) => this.handleError(error, action),
-      runAction: (action) => this.run(action),
-    }, initialSeeds);
+    const settleResult = await runSchedulerSettleLoop(
+      this.settleLoopState,
+      initialSeeds,
+    );
 
     if (settleResult.settleStats) {
       this.lastSettleStats = settleResult.settleStats;
