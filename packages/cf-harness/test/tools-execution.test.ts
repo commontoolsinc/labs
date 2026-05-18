@@ -687,6 +687,27 @@ Deno.test("read_file tool resolves relative paths from the session currentDir", 
   );
 });
 
+Deno.test("read_file tool preserves CFC result on success", async () => {
+  const cfcResult = observedCfcResult("released file");
+  const sandbox = new FakeSandboxRuntime([{
+    stdout: "raw file",
+    stderr: "",
+    exitCode: 0,
+    cfcResult,
+  }]);
+
+  const output = await readFileTool.invoke(createContext(sandbox), {
+    path: "notes/todo.txt",
+  });
+
+  assertEquals(output, {
+    outputId: "run-1:read_file:1",
+    path: "/workspace/notes/todo.txt",
+    content: "raw file",
+    cfcResult,
+  });
+});
+
 Deno.test("read_file tool rejects non-integer maxBytes", async () => {
   const sandbox = new FakeSandboxRuntime();
 

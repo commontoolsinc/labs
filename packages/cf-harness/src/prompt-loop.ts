@@ -85,6 +85,7 @@ import {
   cwdMarkerForOutput,
   extractFinalWorkingDirectory,
 } from "./tools/shell-cwd.ts";
+import { isReadFileToolSuccessOutput } from "./tools/read-file.ts";
 import { isViewImageToolSuccessOutput } from "./tools/view-image.ts";
 import type { HarnessFailureRecord } from "./diagnostics.ts";
 import { DEFAULT_PARENT_TOOL_IDS as DEFAULT_PROMPT_LOOP_TOOL_IDS } from "./contracts/tool-descriptor.ts";
@@ -954,8 +955,12 @@ const stripInternalCfcFields = (output: unknown): unknown => {
   return publicOutput;
 };
 
-const toolOutputNeedsSandboxMediation = (toolId: BuiltinToolId): boolean =>
-  toolId === "bash";
+const toolOutputNeedsSandboxMediation = (
+  toolId: BuiltinToolId,
+  output: unknown,
+): boolean =>
+  toolId === "bash" ||
+  (toolId === "read_file" && isReadFileToolSuccessOutput(output));
 
 const createOutputHandle = (
   resultRef: ToolResultRef,
@@ -1070,6 +1075,30 @@ const truncateModelFacingBashOutput = (
       ? {
         stderrTruncated: true,
         stderrOriginalLength: stderr.originalLength,
+      }
+      : {}),
+  };
+};
+
+const truncateModelFacingReadFileOutput = (
+  output: unknown,
+  resultRef: ToolResultRef,
+): unknown => {
+  if (!isObjectRecord(output)) {
+    return output;
+  }
+  const content = truncateModelFacingBashStream(
+    typeof output.content === "string" ? output.content : "",
+    "stdout",
+    resultRef,
+  );
+  return {
+    ...output,
+    content: content.value,
+    ...(content.truncated === true
+      ? {
+        contentTruncated: true,
+        contentOriginalLength: content.originalLength,
       }
       : {}),
   };
@@ -1263,6 +1292,42 @@ const renderMediatedBashOutput = (
     },
     ...(observations.length > 0
       ? { cfcModelContextObservations: observations }
+      : {}),
+  };
+};
+
+const renderMediatedReadFileOutput = (
+  output: Record<string, unknown>,
+  cfcResult: CfcSandboxResult,
+  resultRef: ToolResultRef,
+  toolCallId: string,
+): ModelFacingToolOutputResult => {
+  const content = truncateModelFacingBashStream(
+    renderStreamObservation(cfcResult.stdout, resultRef),
+    "stdout",
+    resultRef,
+  );
+  const observation = modelContextObservationForStream(
+    cfcResult.stdout,
+    resultRef,
+    toolCallId,
+    content.truncated,
+  );
+  return {
+    output: {
+      outputId: output.outputId,
+      path: output.path,
+      content: content.value,
+      cfc: summarizeCfcSandboxResult(cfcResult),
+      ...(content.truncated === true
+        ? {
+          contentTruncated: true,
+          contentOriginalLength: content.originalLength,
+        }
+        : {}),
+    },
+    ...(observation !== undefined
+      ? { cfcModelContextObservations: [observation] }
       : {}),
   };
 };
@@ -2099,7 +2164,7 @@ export class CfHarnessPromptLoop {
         },
       };
     }
-    if (!toolOutputNeedsSandboxMediation(toolId)) {
+    if (!toolOutputNeedsSandboxMediation(toolId, output)) {
       return { output: stripInternalCfcFields(output) };
     }
     if (cfcResult === undefined) {
@@ -2109,6 +2174,11 @@ export class CfHarnessPromptLoop {
         return {
           output: toolId === "bash"
             ? truncateModelFacingBashOutput(
+              stripInternalCfcFields(output),
+              resultRef,
+            )
+            : toolId === "read_file"
+            ? truncateModelFacingReadFileOutput(
               stripInternalCfcFields(output),
               resultRef,
             )
@@ -2127,6 +2197,11 @@ export class CfHarnessPromptLoop {
         return {
           output: toolId === "bash"
             ? truncateModelFacingBashOutput(
+              stripInternalCfcFields(output),
+              resultRef,
+            )
+            : toolId === "read_file"
+            ? truncateModelFacingReadFileOutput(
               stripInternalCfcFields(output),
               resultRef,
             )
@@ -2149,6 +2224,14 @@ export class CfHarnessPromptLoop {
     }
     if (toolId === "bash" && isObjectRecord(output)) {
       return renderMediatedBashOutput(output, cfcResult, resultRef, toolCallId);
+    }
+    if (toolId === "read_file" && isObjectRecord(output)) {
+      return renderMediatedReadFileOutput(
+        output,
+        cfcResult,
+        resultRef,
+        toolCallId,
+      );
     }
     return { output: stripInternalCfcFields(output) };
   }
