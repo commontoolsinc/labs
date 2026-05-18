@@ -65,14 +65,19 @@ function isQuoteSafe(v: JsonWireValue): boolean {
  * literal and must not be recursed into.
  */
 function unquote(v: JsonWireValue): JsonWireValue {
-  if (v === null || typeof v !== "object") return v;
-  if (Array.isArray(v)) return v.map(unquote) as JsonWireValue;
-  if (isEncodedInstance(v) && Object.keys(v)[0] === "/quote") {
+  if (v === null || typeof v !== "object") {
+    return v;
+  } else if (Array.isArray(v)) {
+    const result = v.map(unquote) as JsonWireValue;
+    return Object.freeze(result);
+  } else if (isEncodedInstance(v) && Object.keys(v)[0] === "/quote") {
     return (v as Record<string, JsonWireValue>)["/quote"];
+  } else {
+    const result = Object.fromEntries(
+      Object.entries(v).map(([k, val]) => [k, unquote(val as JsonWireValue)]),
+    ) as JsonWireValue;
+    return Object.freeze(result);
   }
-  return Object.fromEntries(
-    Object.entries(v).map(([k, val]) => [k, unquote(val as JsonWireValue)]),
-  ) as JsonWireValue;
 }
 
 /**
@@ -217,7 +222,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
    * tag to produce the JSON key. See Section 5.2 of the formal spec.
    */
   private wrapTag(tag: string, state: JsonWireValue): JsonWireValue {
-    return { [`/${tag}`]: state } as JsonWireValue;
+    return Object.freeze({ [`/${tag}`]: state } as JsonWireValue);
   }
 
   /**
@@ -255,7 +260,8 @@ export class JsonEncodingContext implements SerializationContext<string> {
 
   /** Parses UTF-8-encoded JSON bytes back into a wire-format tree. */
   private fromBytes(bytes: Uint8Array): JsonWireValue {
-    return JSON.parse(new TextDecoder().decode(bytes)) as JsonWireValue;
+    const result = JSON.parse(new TextDecoder().decode(bytes)) as JsonWireValue;
+    return deepFreeze(result);
   }
 
   // -------------------------------------------------------------------------
@@ -362,8 +368,10 @@ export class JsonEncodingContext implements SerializationContext<string> {
     const keys = Object.keys(result);
     if (keys.some((k) => k.startsWith("/"))) {
       if (Object.values(result).every((v) => isQuoteSafe(v))) {
-        const unquoted = Object.fromEntries(
-          Object.entries(result).map(([k, v]) => [k, unquote(v)]),
+        const unquoted = deepFreeze(
+          Object.fromEntries(
+            Object.entries(result).map(([k, v]) => [k, unquote(v)]),
+          ),
         );
         return this.wrapTag(TAGS.quote, unquoted) as JsonWireValue;
       }
