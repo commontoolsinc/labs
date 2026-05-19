@@ -136,8 +136,39 @@ function isDeepFrozenInProgress(
  * frozen. Primitives pass through unchanged. Records the result in the
  * deep-frozen cache so subsequent `isDeepFrozen()` checks return in O(1).
  * Returns the (now-frozen) value.
+ *
+ * Handles circular references: a shared `inProgress` set is threaded through
+ * all recursive calls -- including into participating `FabricInstance`s'
+ * `[DEEP_FREEZE]` impls via the `subFreeze` callback closure -- so a cycle
+ * back to a value currently being deep-frozen short-circuits rather than
+ * recursing infinitely.
  */
 export function deepFreeze<T>(value: T): T {
+  return deepFreezeInProgress(value);
+}
+
+/**
+ * Performs the recursive deep-freeze with shared cycle-detection state. When
+ * `inProgress` is omitted (the top-level entry) a fresh set is allocated;
+ * recursive calls (both arm 4 children and the arm 3 protocol callback)
+ * thread the same set through so a cycle back to a value already being
+ * deep-frozen by an outer call short-circuits.
+ *
+ * The arm 3 callback `(v) => deepFreezeInProgress(v, inProgress)` is the
+ * "threading into the `FabricInstance`s which are participating in the act
+ * of deep-freezing": the participating impl invokes `subFreeze` on nested
+ * `FabricValue`s, and that closure carries the shared `inProgress` so the
+ * impl's recursion is cycle-safe by construction. This mirrors the
+ * `subIsDeepFrozen`/`checkValue`-closure pattern already used by
+ * `isDeepFrozenFabricValue` for the `[IS_DEEP_FROZEN]` side.
+ *
+ * Unlike `isDeepFrozenInProgress` (which removes values from its
+ * `inProgress` set after sub-checks complete -- because the question
+ * "deep-frozen?" is local to each subtree), this function does NOT remove
+ * values from `inProgress`. A value being deep-frozen stays-the-course: the
+ * outer call owns the freeze, every cycle-arrival defers to it.
+ */
+function deepFreezeInProgress<T>(value: T, inProgress?: Set<object>): T {
   // Arm 1: necessarily- or already-known-deep-frozen.
   if (isNecessarilyOrKnownDeepFrozen(value)) {
     return value;
@@ -149,14 +180,34 @@ export function deepFreeze<T>(value: T): T {
     return value;
   }
 
+  const obj = value as object;
+
+  // Cycle check / set up the shared in-progress set. Done after the leaf
+  // short-circuits (arms 1 and 2) so primitives and FabricPrimitives don't
+  // incur set-membership overhead.
+  if (inProgress) {
+    if (inProgress.has(obj)) {
+      // A cycle back to a value the outer call is already deep-freezing.
+      // Short-circuit: the outer call owns the freeze; recursing here would
+      // either loop or pre-freeze before the outer call finishes its own
+      // children.
+      return value;
+    }
+  } else {
+    inProgress = new Set<object>();
+  }
+  inProgress.add(obj);
+
   // Arm 3: a `FabricInstance` freezes itself in place via its `[DEEP_FREEZE]`
-  // protocol member, recursing through the `deepFreeze` callback. Gating on
-  // `instanceof` against the abstract base keeps `deepFreeze()` generic --
-  // it dispatches on the base class, not an enumeration of concrete
-  // subclasses (the `[DEEP_FREEZE]` member is abstract on `FabricInstance`,
-  // so every instance is guaranteed to implement it).
+  // protocol member. The `subFreeze` callback closes over `inProgress` so the
+  // impl's recursion into nested `FabricValue`s shares cycle state with this
+  // call -- this is the threading Dan's design calls for: the participating
+  // `FabricInstance` doesn't need to be `inProgress`-aware in its own
+  // signature; the callback carries the shared state transparently.
   if (value instanceof FabricInstance) {
-    return value[DEEP_FREEZE]((v) => deepFreeze(v)) as T;
+    return value[DEEP_FREEZE](
+      (v) => deepFreezeInProgress(v, inProgress),
+    ) as T;
   }
 
   // Arm 4: plain object or array -- recurse into children, then freeze.
@@ -164,12 +215,12 @@ export function deepFreeze<T>(value: T): T {
 
   if (Array.isArray(value)) {
     for (let i = 0; i < value.length; i++) {
-      if (i in value) deepFreeze(value[i]);
+      if (i in value) deepFreezeInProgress(value[i], inProgress);
     }
   } else {
-    const obj = value as Record<string, unknown>;
-    for (const key of Object.keys(obj)) {
-      deepFreeze(obj[key]);
+    const o = value as Record<string, unknown>;
+    for (const key of Object.keys(o)) {
+      deepFreezeInProgress(o[key], inProgress);
     }
   }
 
