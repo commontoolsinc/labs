@@ -57,143 +57,43 @@ function referenceEncode(value: bigint): Uint8Array {
 // Fixtures
 // ============================================================================
 
-const rawFixtures: bigint[] = [
-  0x00n,
-  0x01n,
-  0x7fn,
-  0x80n,
-  0x81n,
-  0xffn,
-  0x0100n,
-  0x7fffn,
-  0x8000n,
-  0x8001n,
-  0xffffn,
-  0x01_0000n,
-  0x7f_ffffn,
-  0x80_0000n,
-  0x80_0001n,
-  0xff_ffffn,
-  0x0100_0000n,
-  0x7fff_ffffn,
-  0x8000_0000n,
-  0x8000_0001n,
-  0xffff_ffffn,
-  0x01_0000_0000n,
-  0x7f_ffff_ffffn,
-  0x80_0000_0000n,
-  0x80_0000_0001n,
-  0xff_ffff_ffffn,
-  0x0100_0000_0000n,
-  0x7fff_ffff_ffffn,
-  0x8000_0000_0000n,
-  0x8000_0000_0001n,
-  0xffff_ffff_ffffn,
-  0x01_0000_0000_0000n,
-  0x7f_ffff_ffff_ffffn,
-  0x80_0000_0000_0000n,
-  0x80_0000_0000_0001n,
-  0xff_ffff_ffff_ffffn,
-  0x0100_0000_0000_0000n,
-  0x7fff_ffff_ffff_ffffn,
-  0x8000_0000_0000_0000n,
-  0x8000_0000_0000_0001n,
-  0xffff_ffff_ffff_ffffn,
-  0x01_0000_0000_0000_0000n,
-  0x7f_ffff_ffff_ffff_ffffn,
-  0x80_0000_0000_0000_0000n,
-  0x80_0000_0000_0000_0001n,
-  0xff_ffff_ffff_ffff_ffffn,
-  0x0100_0000_0000_0000_0000n,
-  0x7fff_ffff_ffff_ffff_ffffn,
-  0x8000_0000_0000_0000_0000n,
-  0x8000_0000_0000_0000_0001n,
-  0xffff_ffff_ffff_ffff_ffffn,
-  -0x01n,
-  -0x7fn,
-  -0x80n,
-  -0x81n,
-  -0xffn,
-  -0x0100n,
-  -0x7fffn,
-  -0x8000n,
-  -0x8001n,
-  -0xffffn,
-  -0x01_0000n,
-  -0x7f_ffffn,
-  -0x80_0000n,
-  -0x80_0001n,
-  -0xff_ffffn,
-  -0x0100_0000n,
-  -0x7fff_ffffn,
-  -0x8000_0000n,
-  -0x8000_0001n,
-  -0xffff_ffffn,
-  -0x01_0000_0000n,
-  -0x7f_ffff_ffffn,
-  -0x80_0000_0000n,
-  -0x80_0000_0001n,
-  -0xff_ffff_ffffn,
-  -0x0100_0000_0000n,
-  -0x7fff_ffff_ffffn,
-  -0x8000_0000_0000n,
-  -0x8000_0000_0001n,
-  -0xffff_ffff_ffffn,
-  -0x01_0000_0000_0000n,
-  -0x7f_ffff_ffff_ffffn,
-  -0x80_0000_0000_0000n,
-  -0x80_0000_0000_0001n,
-  -0xff_ffff_ffff_ffffn,
-  -0x0100_0000_0000_0000n,
-  -0x7fff_ffff_ffff_ffffn,
-  -0x8000_0000_0000_0000n,
-  -0x8000_0000_0000_0001n,
-  -0xffff_ffff_ffff_ffffn,
-  -0x01_0000_0000_0000_0000n,
-  -0x7f_ffff_ffff_ffff_ffffn,
-  -0x80_0000_0000_0000_0000n,
-  -0x80_0000_0000_0000_0001n,
-  -0xff_ffff_ffff_ffff_ffffn,
-  -0x0100_0000_0000_0000_0000n,
-  -0x7fff_ffff_ffff_ffff_ffffn,
-  -0x8000_0000_0000_0000_0000n,
-  -0x8000_0000_0000_0000_0001n,
-  -0xffff_ffff_ffff_ffff_ffffn,
-  42n,
-  -42n,
-  -999n,
-  2n ** 32n,
-  -(2n ** 32n),
-  2n ** 64n,
-  -(2n ** 64n),
-  2n ** 128n,
-  -(2n ** 128n),
-  0x112233445566778899abcdefn,
-  -0x112233445566778899abcdefn,
-  // Negatives whose two's-complement remainder has leading-zero padding in
-  // its byte form -- a corner case that exercised a historical encoder bug
-  // (see PR #3527). The corresponding positive case (odd-hex-length with
-  // high nibble in 8..F) is reached via the recurrence below at iteration
-  // 2, where `n = 217129053n` (= `0xCF1205D`).
-  -241n,
-  -242n,
-  -243n,
-  -244n,
-  -245n,
-  -246n,
-  -247n,
-  -248n,
-];
+const rawFixtures: Set<bigint> = new Set();
 
-// Programmatic expansion via a deterministic recurrence. The multiplier `99`
-// adds ~6.63 bits per step, so 2000 iterations sweep magnitudes from a few
-// bits up to roughly 13_270 bits (~1659 bytes), with both signs at every step.
 {
+  // Full range of small numbers.
+  for (let i = -0x100n; i <= 0x100n; i++) {
+    rawFixtures.add(i);
+  }
+
+  // Many nines!
+  for (let i = 999n; i < (1n << 200n); i = (i * 10n) + 9n) {
+    rawFixtures.add(i);
+    rawFixtures.add(-i);
+  }
+
+  // Potential sign-bit confusion edge cases.
+  for (let i = 0n; i <= 256n; i++) {
+    rawFixtures.add(0x01n << i);
+    rawFixtures.add(0x7en << i);
+    rawFixtures.add(0x7fn << i);
+    rawFixtures.add(0x80n << i);
+    rawFixtures.add(0x81n << i);
+    rawFixtures.add(-0x01n << i);
+    rawFixtures.add(-0x7en << i);
+    rawFixtures.add(-0x7fn << i);
+    rawFixtures.add(-0x80n << i);
+    rawFixtures.add(-0x81n << i);
+  }
+
+  // Programmatic expansion via a deterministic recurrence. The multiplier `99`
+  // adds ~6.63 bits per step, so 2000 iterations sweep magnitudes from a few
+  // bits up to roughly 13_270 bits (~1659 bytes), with both signs at every
+  // step.
   let n = 123n;
   for (let i = 0; i < 2000; i++) {
     n = (n * 99n) + 9876n;
-    rawFixtures.push(n);
-    rawFixtures.push(-n);
+    rawFixtures.add(n);
+    rawFixtures.add(-n);
   }
 }
 
@@ -217,7 +117,7 @@ interface Fixture {
   label: string;
 }
 
-const fixtures: readonly Fixture[] = rawFixtures.map((value) => {
+const fixtures: readonly Fixture[] = [...rawFixtures].sort().map((value) => {
   const encoded = referenceEncode(value);
   return { value, encoded, label: fixtureLabel(value, encoded) };
 });
