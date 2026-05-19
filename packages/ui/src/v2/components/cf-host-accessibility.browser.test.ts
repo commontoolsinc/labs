@@ -1,6 +1,11 @@
 import { assertEquals, assertInstanceOf } from "@std/assert";
 import { CFButton } from "./cf-button/cf-button.ts";
 import { CFInput } from "./cf-input/cf-input.ts";
+import { CFSelect } from "./cf-select/cf-select.ts";
+import { CFTextarea } from "./cf-textarea/cf-textarea.ts";
+
+const nextFrame = () =>
+  new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
 Deno.test("cf-button and cf-input can be created by document.createElement", async () => {
   if (typeof document === "undefined") {
@@ -23,4 +28,49 @@ Deno.test("cf-button and cf-input can be created by document.createElement", asy
 
   button.remove();
   input.remove();
+});
+
+Deno.test("form control host focus forwards to native shadow controls", async () => {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  const input = document.createElement("cf-input") as CFInput;
+  const textarea = document.createElement("cf-textarea") as CFTextarea;
+  const select = document.createElement("cf-select") as CFSelect;
+  select.items = [{ label: "One", value: "one" }];
+
+  document.body.append(input, textarea, select);
+  assertInstanceOf(input, CFInput);
+  assertInstanceOf(textarea, CFTextarea);
+  assertInstanceOf(select, CFSelect);
+
+  await Promise.all([
+    input.updateComplete,
+    textarea.updateComplete,
+    select.updateComplete,
+  ]);
+
+  input.focus();
+  await nextFrame();
+  assertEquals(input.shadowRoot?.activeElement?.tagName, "INPUT");
+
+  textarea.focus();
+  await nextFrame();
+  assertEquals(textarea.shadowRoot?.activeElement?.tagName, "TEXTAREA");
+
+  select.focus();
+  await nextFrame();
+  assertEquals(select.shadowRoot?.activeElement?.tagName, "SELECT");
+
+  input.disabled = true;
+  await input.updateComplete;
+  input.blur();
+  input.focus();
+  await nextFrame();
+  assertEquals(input.shadowRoot?.activeElement, null);
+
+  input.remove();
+  textarea.remove();
+  select.remove();
 });

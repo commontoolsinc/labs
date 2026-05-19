@@ -658,6 +658,8 @@ export class CFInput extends BaseElement {
         // The host element carries the ARIA role and tabindex for accessibility.
         // The inner input is removed from the sequential tab order; when the host
         // receives focus, we forward focus here so typing and selection work.
+        // Avoid delegatesFocus: it can make the shadow control appear to be the
+        // active tab stop instead of the host that owns the ARIA surface.
         return html`
           <input
             type="${this.type}"
@@ -766,8 +768,8 @@ export class CFInput extends BaseElement {
         }
       }
 
-      private _forwardFocusToInput = (event: FocusEvent) => {
-        if (event.target !== this || this.disabled) return;
+      private _forwardFocusToInput = () => {
+        if (this.disabled) return;
         this.input?.focus();
       };
 
@@ -909,6 +911,7 @@ export class CFInput extends BaseElement {
       }
 
       override focus(options?: FocusOptions): void {
+        if (this.disabled) return;
         this.input?.focus(options);
       }
 

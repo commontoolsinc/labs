@@ -518,7 +518,9 @@ export class CFTextarea extends BaseElement {
 
           // The host carries the ARIA role and tabindex. The inner textarea is
           // removed from sequential tab order; host focus forwards here so
-          // typing and selection work.
+          // typing and selection work. Avoid delegatesFocus: it can make the
+          // shadow control appear to be the active tab stop instead of the host
+          // that owns the ARIA surface.
           return html`
             <textarea
               class="${this.error ? "error" : ""}"
@@ -613,8 +615,8 @@ export class CFTextarea extends BaseElement {
           }
         }
 
-        private _forwardFocusToTextarea = (event: FocusEvent) => {
-          if (event.target !== this || this.disabled) return;
+        private _forwardFocusToTextarea = () => {
+          if (this.disabled) return;
           this.textarea?.focus();
         };
 
@@ -696,6 +698,7 @@ export class CFTextarea extends BaseElement {
         }
 
         override focus(options?: FocusOptions): void {
+          if (this.disabled) return;
           this.textarea?.focus(options);
         }
 
