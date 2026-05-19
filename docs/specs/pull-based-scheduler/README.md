@@ -1,9 +1,12 @@
 # Pull-Based Scheduler
 
 > **Status**: Implemented and enabled by default
-> **Location**: `packages/runner/src/scheduler.ts`
+> **Location**: `packages/runner/src/scheduler.ts` plus helper modules under
+> `packages/runner/src/scheduler/`
 
-This document describes how the pull-based scheduler works in the Common Fabric runtime.
+This document describes the scheduler behavior in the Common Fabric runtime.
+Pull mode is the default, but the implementation still contains push mode as a
+compatibility path and exposes runtime APIs for switching between the two modes.
 
 ## Background: Why Pull-Based?
 
@@ -15,9 +18,9 @@ The original scheduler was **push-based**: when data changed, all dependent acti
 
 The **pull-based** approach inverts this:
 - When data changes, computations are marked *dirty* but don't run
-- Only *effects* (side-effectful actions like `sink()`) are scheduled
-- Effects *pull* their dependencies on demand
-- Computations only run if an effect actually needs them
+- Demand roots such as *effects* (side-effectful actions like `sink()`), event
+  preflight, and explicit `cell.pull()` calls pull dependencies on demand
+- Computations only run if one of those demand roots actually needs them
 
 ## Core Concepts
 
@@ -30,7 +33,7 @@ An **action** is a function `(tx: Transaction) => any` that the scheduler manage
 | `sink(cell, callback)` | Effect | Runs callback when cell changes |
 | `lift(fn, ...inputs)` | Computation | Transforms inputs, writes to output cell |
 | `derive(input, fn)` | Computation | Derives new value from input |
-| Event handlers | Effect (one-time) | Responds to user events |
+| Event handlers | Queued event action | Responds to user events |
 
 The scheduler doesn't know about patterns - it only sees actions with read/write dependencies.
 
@@ -38,21 +41,28 @@ The scheduler doesn't know about patterns - it only sees actions with read/write
 
 | Type | Description | Behavior |
 |------|-------------|----------|
-| **Effect** | Side-effectful action | Always runs when scheduled. These are "roots of demand" |
-| **Computation** | Pure transformation | Only runs when an effect needs its output |
+| **Effect** | Side-effectful action | Eligible to run when scheduled. These are "roots of demand" |
+| **Computation** | Pure transformation | Only runs when an effect, event preflight, or explicit pull needs its output |
 
-When you call `sink()`, the runtime registers the action with `isEffect: true`. Everything else is a computation.
+When you call `sink()`, the runtime registers the subscribed action with
+`isEffect: true`. Other subscribed reactive actions are computations. Event
+handlers are queued separately and run through the event path.
 
 ### Dirty vs Pending
 
 - **Pending**: Actions scheduled to run this cycle
-- **Dirty**: Computations whose inputs changed but haven't re-run yet
+- **Dirty**: Actions with direct changed inputs
+- **Stale**: Actions that are dirty, or whose upstream computations are dirty
 
-When a cell changes:
+In pull mode, when a cell changes:
 - Effects → added to `pending`
-- Computations → marked `dirty`, and downstream effects are scheduled
+- Computations → marked `dirty`/`stale`, and downstream effects are scheduled
 
-A computation stays dirty until an effect pulls it. If no effect ever needs it, it never runs.
+A computation stays dirty until an effect, event preflight, or explicit
+`cell.pull()` needs it. If nothing ever observes it, it never runs.
+
+In push mode, triggered effects and computations are both scheduled in
+`pending`.
 
 ### Current-Known Writes
 
@@ -80,14 +90,15 @@ Cell X changes (value: before → after)
     ↓
 Storage manager notifies scheduler
     ↓
-Find actions that read X (via triggers map)
+Find actions that read X (via trigger index)
     ↓
 For each triggered action:
     Effect → add to pending, queue execution
     Computation → mark dirty, propagate to dependents, schedule affected effects
 ```
 
-The `triggers` map indexes actions by the cells they read, so finding affected actions is O(1) per cell.
+The trigger index groups actions by the cells they read, so finding affected
+actions is O(1) per changed cell before path-overlap filtering.
 
 ### 2. Dependency Collection
 
@@ -105,17 +116,19 @@ This happens in `execute()` before building the work set.
 
 ### 3. Building the Work Set
 
-In pull mode, the work set is built by starting from effects and pulling their dirty dependencies:
+In pull mode, the work set starts from runnable demand roots and pulls their
+dirty or stale dependencies:
 
 ```typescript
 workSet = new Set<Action>();
 
-// Start with pending effects
+// Start with pending effects, event-blocking dependencies, and other
+// special pull seeds such as first-run demand roots.
 for (const effect of pending) {
   if (isEffect(effect)) workSet.add(effect);
 }
 
-// Recursively collect dirty computations each effect depends on
+// Recursively collect dirty/stale computations each seed depends on.
 for (const effect of workSet) {
   collectDirtyDependencies(effect, workSet);
 }
@@ -128,9 +141,10 @@ The `collectDirtyDependencies` function finds dirty computations that write to c
 Actions are sorted so dependencies run before dependents:
 
 ```typescript
-function topologicalSort(actions, dependencies, mightWrite, actionParent) {
+function topologicalSort(actions, dependencies, mightWrite, actionParent, dependents) {
   // Build graph: action A → action B if A writes something B reads
-  // Add edges: parent → child (for nested patterns)
+  // In pull mode, prefer the incrementally maintained dependents graph.
+  // Add parent → child edges only when they do not oppose data dependencies.
   // Kahn's algorithm with cycle handling
 }
 ```
@@ -139,7 +153,8 @@ When cycles exist, the sort prefers:
 1. Nodes whose parents are already visited
 2. Nodes with lowest in-degree
 
-This ensures parents run before children in nested patterns.
+This makes parents run before children in nested patterns when no opposing data
+dependency requires the child first.
 
 ### 5. Run Actions
 
@@ -148,20 +163,16 @@ for (const action of sortedOrder) {
   // Skip if unsubscribed during this tick
   if (!isStillScheduled(action)) continue;
 
-  // Skip if throttled
-  if (isThrottled(action)) continue;
+  // Skip if delayed, not demanded, or conditionally scheduled without
+  // changed inputs.
+  if (!isRunnable(action)) continue;
 
-  // Clear from pending/dirty
-  pending.delete(action);
-  dirty.delete(action);
+  // Clear scheduling state appropriate to the mode before running.
+  clearScheduledState(action);
 
-  // Run and record time for auto-debounce
-  const start = performance.now();
-  await action(tx);
-  recordActionTime(action, performance.now() - start);
-
-  // Resubscribe with new dependencies
-  resubscribe(action, txToReactivityLog(tx));
+  // Run in the runtime harness, commit the transaction, resubscribe from the
+  // resulting reactivity log, and update timing/diagnostics.
+  await runSchedulerAction(action);
 }
 ```
 
@@ -182,20 +193,13 @@ The settle loop handles this:
 
 ```typescript
 for (let iter = 0; iter < 10; iter++) {
-  // Re-collect dependencies from all effects
-  const moreWork = new Set<Action>();
-  for (const effect of effects) {
-    collectDirtyDependencies(effect, moreWork);
-  }
+  collectNewSubscriptionDependencies();
+  const workSet = buildCurrentWorkSet();
+  if (workSet.size === 0) break;  // Settled
 
-  // Remove already-run actions
-  for (const action of alreadyRan) moreWork.delete(action);
-
-  if (moreWork.size === 0) break;  // Settled
-
-  // Run newly discovered work
-  for (const action of topologicalSort(moreWork)) {
-    if (dirty.has(action)) await run(action);
+  const order = topologicalSort(workSet);
+  for (const action of order) {
+    await maybeRunScheduledAction(action);
   }
 }
 ```
@@ -216,13 +220,16 @@ The original plan included Tarjan's algorithm to find strongly connected compone
 
 ### What We Do Instead
 
-1. **Parent-child ordering in topological sort**: When breaking ties in cycles, prefer nodes without unvisited parents. This ensures parents run before children.
+1. **Parent-child ordering in topological sort**: When breaking ties in cycles,
+   prefer nodes without unvisited parents, while still letting semantic
+   read/write dependencies win over structural creation order.
 
 2. **Settle loop**: Re-collect dependencies after running. Handles conditional patterns (ifElse) correctly.
 
 3. **Iteration limits**: Max 10 settle iterations, max 100 runs per action. Prevents infinite loops.
 
-4. **Cycle-aware debounce**: Actions running 3+ times in cycles taking >100ms get adaptive debounce (2× cycle time).
+4. **Cycle-aware debounce**: Eligible effects running 3+ times in pull execute
+   cycles taking >100ms get adaptive debounce (2× cycle time).
 
 ### Example: Nested Lift Pattern
 
@@ -242,7 +249,9 @@ Both are triggered when input changes. Topological sort sees a cycle. By preferr
 
 ## Event Handlers
 
-Event handlers (button clicks, form submissions) are synchronous but may depend on computed values. The challenge: handlers can't `await` their dependencies.
+Event handlers (button clicks, form submissions) may depend on computed values.
+In pull mode, the scheduler preflights those dependencies before dispatching the
+queued handler action. In push mode, the handler dispatch path is direct.
 
 ### The traverseCells Flag
 
@@ -270,16 +279,470 @@ Check if any dependencies are dirty
     ↓
 If dirty:
     Schedule dirty computations
-    Re-queue event (will run after deps compute)
+    Keep event at queue head (will run after deps compute)
 Else:
-    Run handler synchronously
+    Run handler action and commit its transaction
 ```
 
 ### Global FIFO Ordering
 
 Events run in global arrival order. If event A arrives before event B, A runs first regardless of which component they target. This preserves causality from the user's perspective.
 
-Events are serialized globally, but their *dependencies* can compute in parallel.
+Events are serialized globally. If the head event is blocked by dirty
+dependencies, those dependencies are scheduled first and the same head event is
+retried after the scheduler settles enough for the handler to run.
+
+## Current Behavior Reference
+
+This section is the normative behavior reference for the current implementation.
+It covers both pull mode and the remaining push-mode compatibility path.
+
+### Mode Control
+
+The scheduler starts in pull mode (`pullMode = true`). `enablePullMode()`:
+
+- Sets pull mode on.
+- Clears stale bookkeeping, rebuilds the dependents graph from current
+  dependencies, and marks actions stale from any direct dirty state.
+- Emits `scheduler.mode.change` with `pullMode: true`.
+- Queues execution so runnable pull work can be reconsidered.
+
+`disablePullMode()`:
+
+- Sets pull mode off.
+- Clears dirty and stale state.
+- Emits `scheduler.mode.change` with `pullMode: false`.
+- Queues execution so pending push work can run.
+
+All mode-specific branches are isolated in scheduler helper modules:
+
+- `pull-subscriptions.ts` / `push-subscriptions.ts`
+- `pull-notifications.ts` / `push-notifications.ts`
+- `pull-events.ts` / `push-events.ts`
+- `pull-execution.ts` / `push-execution.ts`
+- `pull-continuation.ts` / `push-continuation.ts`
+
+### Subscription Lifecycle
+
+`subscribe(action, populateDependencies, options)` accepts either a dependency
+population callback or an already-built `ReactivityLog`. A direct log is a
+backwards-compatible path that installs dependencies immediately.
+
+Subscription always:
+
+- Applies optional `changeGroup`, `debounce`, `noDebounce`, and `throttle`
+  settings.
+- Classifies the action as an effect when `options.isEffect` is true; once an
+  action has been classified as an effect, `isEffectAction` preserves that
+  identity for later resubscriptions and diagnostics.
+- Registers a parent-child relationship when the action is created while another
+  action is executing.
+- Stores dependency population state or installs the immediate log.
+- Marks the action directly dirty, adds it to `pending`, records it in
+  `scheduledFirstTime`, emits `scheduler.subscribe`, and returns an unsubscribe
+  cancel function.
+
+Pull-mode subscription additionally:
+
+- Seeds declared writes for newly subscribed computations before the first run
+  when declared writes are available, so existing effects can discover the new
+  writer.
+- If a computation is created inside an active pull-demand context, records it
+  in `pullDemandedFirstRunComputations` and queues execution so it can run once
+  to materialize the demanded value.
+- If a computation already has a scheduling write set, schedules affected
+  downstream effects.
+
+Push-mode subscription keeps the older eager behavior: new computations and
+effects are both queued through `pending` and run by the push settle loop.
+
+`resubscribe(action, log, options)` is called after an action runs. It updates
+the dependency log, trigger index, writer index, change group, and parent-child
+metadata from the completed run. Pull-mode resubscribe also updates the
+dependents graph and marks an effect dirty if its new reads overlap an already
+stale non-throttled computation.
+
+`unsubscribe(action)` cancels storage triggers, removes dependencies, clears
+change-group mappings unless `preserveChangeGroup` is set, clears pending and
+dirty/stale state, removes reverse dependency edges, removes effect/computation
+membership, clears write-index entries, cancels debounce state, and removes
+pending dependency collection callbacks. Parent-child WeakMap edges are left in
+place intentionally; they are used for cycle diagnostics and disappear with the
+actions.
+
+### Dependency and Write Tracking
+
+Dependency collection runs `populateDependencies` in a scheduler-owned
+transaction, converts the transaction to a `ReactivityLog`, aborts the
+dependency transaction for reactive actions, and installs:
+
+- Recursive reads.
+- Shallow reads, which only invalidate on same-path, ancestor-path, or direct
+  child writes.
+- Actual writes from the transaction.
+- Potential writes, for APIs that read and may later write the same location.
+- Declared writes from action telemetry annotations.
+- Ignored scheduling writes from telemetry annotations.
+
+`setSchedulerDependencies()` sorts and compacts reads and writes, filters
+ignored scheduling writes, and prunes structural ancestor writes so unrelated
+shallow readers do not become dependents of overly broad ancestors.
+
+The active scheduling write set is current-known by default:
+
+- Use actual writes from the latest run when they exist.
+- Otherwise keep the existing current-known writes if present.
+- Otherwise seed from declared writes.
+- Add potential writes.
+- Add parent writes for dynamic collection items when an actual child write
+  falls under a declared collection write.
+
+The legacy cumulative `mightWrite` behavior is still kept in
+`historicalMightWrite` and selected only when the
+`schedulerHistoricalMightWrite` experimental option is enabled.
+
+The writer index maintains:
+
+- `writersByEntity`: entity -> actions that may write it.
+- `actionWriteEntities`: action -> entities it may write.
+- Current and historical write maps for scheduling and diagnostics.
+
+When an action gains writes, existing readers are backfilled into the dependents
+graph. When it loses writes, stale dependents edges are pruned.
+
+### Trigger Index and Storage Notifications
+
+The scheduler subscribes to the storage manager during construction. On storage
+notifications with `changes`, each change is recorded as a cell update for
+write-propagation history and diagnostics, then matched through
+`SchedulerTriggerIndex`.
+
+The trigger index stores recursive and non-recursive read paths separately by
+entity. It uses path/value overlap filtering to return only actions whose
+registered read paths are affected by the concrete storage change.
+
+Both modes skip a triggered action when:
+
+- The change came from one of the action's own in-flight transactions.
+- The commit source change group matches the action's current change group.
+
+Push mode schedules every remaining triggered action with debounce. Pull mode:
+
+- Schedules triggered effects with debounce.
+- Marks triggered computations dirty/stale.
+- Schedules downstream effects that transitively depend on the dirty
+  computation.
+
+When trigger tracing is enabled, each matched change records a bounded
+`TriggerTraceEntry` with the notification type, change index, before/after value
+summary, scheduler mode, optional writer action ID, and one decision record per
+triggered action. Decisions include `schedule-push`, `schedule-effect`,
+`mark-dirty`, `already-dirty`, `skip-own-commit-source`, and
+`skip-same-change-group`.
+
+### Pull Demand
+
+Pull mode distinguishes direct dirty and stale:
+
+- Direct dirty means the action itself was invalidated by a storage change or
+  explicit scheduling.
+- Stale means the action is direct dirty or has an upstream stale writer.
+
+`SchedulerStaleness` propagates stale transitions through the dependents graph.
+Clearing direct dirty recomputes whether the action is still stale because of
+upstream writers.
+
+Runnable pull seeds include:
+
+- Pending effects.
+- Dirty effects skipped by throttling or cycle handling.
+- Newly subscribed non-effect actions with no known writes.
+- Dirty dependencies that block the head event.
+- Computations whose debounce trailing flush has become ready.
+- Computations demanded through a live effect, a demanded parent context, or
+  `pullDemandedFirstRunComputations`.
+
+A computation is demanded when it has a transitive live-effect dependent or is
+inside a demanded parent context. An effect with no scheduling writes is a pull
+demand root while it runs; computations run under active pull demand are also
+temporarily treated as demand contexts.
+
+Dirty dependency collection first uses the maintained reverse dependency graph.
+If an action has no reverse-dependency entry, it falls back to writer-index
+lookup over the action's current read log. The collector memoizes traversal,
+guards recursive cycles with `collectStack`, and can collect detailed event
+preflight stats when tracing is active.
+
+### Settle Loops
+
+Both modes use up to 10 settle iterations per execute cycle.
+
+Pull mode:
+
+- Collects dependency logs for newly subscribed actions before each iteration.
+- Builds an iteration seed set, then recursively pulls dirty computations needed
+  by those seeds.
+- Topologically sorts the work set using dependencies, current scheduling
+  writes, parent-child edges, and the dependents graph.
+- Clears dirty flags for effects up front; if an effect is re-dirtied before it
+  runs, it is treated as part of a cycle and skipped until a future tick.
+- Skips unsubscribed actions, non-runnable pull actions, debounced computations,
+  throttled actions, and conditionally scheduled effects whose inputs did not
+  actually change.
+- Clears pending/dirty state before running, records filter stats, records loop
+  counts, and runs the action in an active pull-demand context when appropriate.
+
+Push mode:
+
+- Uses the mutable `pending` set as the work set.
+- Topologically sorts using dependencies, scheduling writes, and parent-child
+  edges, without the pull dependents graph.
+- Skips actions that are no longer pending, debounced computations, and
+  throttled actions.
+- Removes skipped delayed actions from `pending`, preserving the older eager
+  behavior.
+
+Every attempted settle action increments the per-execute loop counter. If an
+action is selected more than `MAX_ITERATIONS_PER_RUN` times in one execute
+cycle, the scheduler reports an error and stops running that action for the
+cycle.
+
+### Pull Cycle Break
+
+If pull mode reaches the 10-iteration settle limit with remaining work, the
+cycle breaker:
+
+1. Clears non-throttled computations that appeared in early iterations, remain
+   in the last work set, are still dirty, and ran more than once in the current
+   execute cycle.
+2. Runs remaining non-throttled dirty effects so they are not lost.
+
+Throttled computations and effects remain dirty so they can run later when
+eligible.
+
+### Action Run and Commit
+
+`run(action)` and settle-loop execution both call `runSchedulerAction()`.
+
+An action run:
+
+- Emits `scheduler.run` with the action ID and optional telemetry metadata.
+- Waits for any already-running action promise.
+- Creates a runtime edit transaction using the action change group, if present.
+- Marks the transaction with `debugActionId`.
+- Records the transaction as an in-flight source so the scheduler can ignore the
+  action's own commit notification.
+- Invokes the action inside the runtime harness while tracking
+  `executingAction` for parent-child registration.
+- Records elapsed time, action timing stats, auto-debounce eligibility, and
+  action-has-run state.
+- Starts commit immediately after the action returns.
+- Converts the transaction to a reactivity log, resubscribes the action from
+  that log, records changed computation writes, and marks readers dirty for
+  changed computation outputs.
+- Optionally appends action-run trace and diagnosis records.
+- Optionally performs an inline idempotency re-run for computations.
+
+Reactive action commits are optimistic. The scheduler continues after starting
+the commit, assuming success. If the commit resolves with an error, the action
+is resubscribed from the captured log and retried up to
+`MAX_RETRIES_FOR_REACTIVE` times by marking it dirty, adding it to `pending`,
+and queuing execution. Retry state is cleared after a successful commit. The
+in-flight source record is removed after the commit promise settles.
+
+If an action throws, the scheduler reports it through registered error handlers,
+still finalizes commit/resubscription state for the transaction, and resolves
+the running promise.
+
+### Changed Writes and Conditional Effects
+
+When computations write changed data, the scheduler records the changed write
+addresses in `changedWritesHistory`. After the run, the scheduler finds readers
+of those changed writes through the trigger index. Reader effects are scheduled
+directly. Reader computations are marked dirty and their affected downstream
+effects are scheduled.
+
+Pull-mode storage notification handling can also conditionally schedule
+downstream effects and remember the history index at which the effect was
+scheduled.
+
+Before a conditionally scheduled effect runs, the scheduler compares only the
+changed writes that happened after the effect was scheduled against the effect's
+current recursive and shallow reads. If none overlap, the effect is filtered out
+and the filter stat is incremented. This prevents downstream effects from
+running only because a computation somewhere in the transitive graph was marked
+dirty, when the effect's actual inputs did not change.
+
+`changedWritesHistory` is cleared when the scheduler reaches quiescence and no
+effects remain conditionally scheduled.
+
+### Event Queue and Handler Dispatch
+
+`queueEvent()` matches the event link against registered handlers. For every
+matching handler it pushes a `QueuedEvent`, queues execution, and preserves
+global FIFO ordering. If no handler is registered and
+`doNotLoadPieceIfNotRunning` is false, the scheduler starts a background
+`ensurePieceRunning()` task and requeues the event once if the piece starts.
+`idle()` waits for those background tasks before resolving.
+
+`addEventHandler()` registers a handler for a link and optionally attaches a
+`populateDependencies(tx, event)` callback. The cancel function removes the
+exact handler/ref pair.
+
+Pull mode preflights the head event before dispatch when the handler has a
+`populateDependencies` callback:
+
+- Runs `handler.populateDependencies` in a read-only runtime transaction.
+- Converts that transaction to a reactivity log.
+- Commits the read-only inspection transaction as a no-op so dependency
+  discovery does not participate in CFC prepare/commit gating.
+- Collects dirty computations needed by the handler's reads.
+- If runnable dirty dependencies exist, adds them to `pending` and
+  `eventBlockingDeps`, skips dispatch, and preserves the head event.
+- If dependencies are dirty but delayed by debounce/throttle, parks the head
+  event with `notBefore`, schedules the event wake timer, and preserves FIFO
+  ordering.
+- Optionally emits `scheduler.event.preflight` with timing and dirty-dependency
+  stats.
+
+Push mode dispatches the head event directly.
+
+Dispatching a queued event:
+
+- Emits `scheduler.invocation` for the handler.
+- Removes the head event from the queue.
+- Runs the handler in an immediate runtime transaction.
+- Records trusted event policy inputs from annotated writes and from actual
+  transaction write candidates.
+- Calls `runtime.prepareTxForCommit(tx)` and commits.
+- On commit error, retries by unshifting the event back to the head of the queue
+  while retries remain.
+- Runs the internal `onCommit` callback after the final commit result, including
+  exhausted failure. This callback must not perform external side effects.
+
+### Debounce, Throttle, and Timers
+
+Manual debounce is stored per action. Scheduling an action with debounce cancels
+any existing debounce timer and schedules a new one that adds the action to
+`pending` and queues execution.
+
+Pull computations are debounced differently after they have run at least once.
+When a dirty computation with manual debounce is demanded, the scheduler records
+its next ready time and schedules a trailing flush. When the timer fires, the
+computation is marked ready, added to `computationDebounceFlushSeeds`, added to
+`pending`, and execution is queued.
+
+Throttle uses action timing stats. An action is throttled while
+`lastRunTimestamp + throttleMs` is in the future. Pull-mode throttled actions
+stay dirty so they can be pulled later. Push-mode throttled actions are removed
+from `pending` in the compatibility path.
+
+Auto-debounce applies only to effects that are not pull demand roots and have
+not opted out with `noDebounce`. Once such an effect has at least
+`AUTO_DEBOUNCE_MIN_RUNS` timing samples and an average runtime at or above
+`AUTO_DEBOUNCE_THRESHOLD_MS`, the scheduler assigns
+`AUTO_DEBOUNCE_DELAY_MS` unless a manual debounce already exists. Computations
+are not auto-debounced.
+
+Cycle-aware debounce runs after pull settle. If an effect ran at least
+`CYCLE_DEBOUNCE_MIN_RUNS` times in an execute cycle that took at least
+`CYCLE_DEBOUNCE_THRESHOLD_MS`, the scheduler raises its debounce to
+`CYCLE_DEBOUNCE_MULTIPLIER * elapsedMs` when that is higher than its current
+debounce and the action is eligible for auto-debounce.
+
+`dispose()` cancels active debounce timers, the queued execute timer, the event
+wake timer, and diagnosis timeout state.
+
+### Execution Continuation and Idle
+
+`queueExecution()` coalesces work into a queued task. If an execute cycle is
+already scheduled and no queue task timer is pending, it sets
+`rerunAfterCurrentExecute` so continuation can schedule a follow-up tick.
+
+After each execute cycle, pull-mode continuation queues another tick when:
+
+- A rerun was requested during the cycle and no future dirty-work wake is known.
+- Runnable pending pull work exists.
+- Runnable dirty pull work exists.
+- The event queue has a head event ready now.
+
+If dirty pull work is only waiting for a future debounce/throttle time,
+continuation schedules the event wake timer for that time and marks the
+scheduler not scheduled. If the future wake is only for non-effect dirty
+computation work and no parked event is present, idle promises may resolve
+because no live demand root is waiting.
+
+Push-mode continuation queues another tick when `pending` is non-empty, a rerun
+was requested, or a head event is ready now.
+
+At quiescence, continuation resolves idle promises, marks the scheduler not
+scheduled, resets the non-settling tracker, clears `scheduledFirstTime`, and
+clears changed-write history when no conditional effects remain.
+
+`idle()` resolves only when:
+
+- No action is currently running.
+- No background event-start task is pending.
+- No scheduled execute cycle is pending.
+- No parked head event or deferred dirty effect is waiting on an event wake
+  timer.
+- In pull mode, no runnable pull work exists.
+
+Pending computations alone do not keep `idle()` open in pull mode unless they
+are demanded by an effect, event preflight, explicit first-run demand, or a
+trailing debounce flush.
+
+### Diagnostics, Telemetry, and Debugger State
+
+Action IDs are derived from scheduler telemetry annotations or generated
+anonymous IDs. They are used for logging, breakpoints, action stats, settle
+stats, trigger traces, graph snapshots, and diagnosis.
+
+The scheduler emits these telemetry markers directly:
+
+- `scheduler.mode.change`
+- `scheduler.subscribe`
+- `scheduler.dependencies.update`
+- `scheduler.run`
+- `scheduler.invocation`
+- `scheduler.event.preflight` when event preflight telemetry is enabled
+- `scheduler.non-settling`
+
+`scheduler.graph.snapshot` exists as a telemetry marker type for consumers, but
+the scheduler's own graph data is normally retrieved through
+`getGraphSnapshot()` / `RuntimeClient.getGraphSnapshot()`.
+
+`getGraphSnapshot()` returns:
+
+- Effect, computation, input, and inactive nodes.
+- Dirty, pending, demanded, live-effect, pull-demand-root, conditional schedule,
+  debounce, and throttle status.
+- Reads, shallow reads, scheduling writes, timing stats, debounce/throttle
+  values, parent IDs, child counts, previews, and pattern IDs.
+- Dependency edges, input edges, and parent-child edges.
+- Current `pullMode` and timestamp.
+
+Settle stats are opt-in. When enabled, each execute records per-iteration work
+set size, ordered action count, action run count, action IDs/types, duration,
+total settle duration, whether it settled early, and initial seed count.
+History is bounded by `MAX_SETTLE_STATS_HISTORY`.
+
+Action-run trace is opt-in and bounded by `MAX_ACTION_RUN_TRACE_HISTORY`.
+Entries include action ID, action type, parent action ID, duration, declared
+writes, and actual writes.
+
+Trigger trace is opt-in and bounded by `MAX_TRIGGER_TRACE_HISTORY`.
+
+Non-settling detection tracks scheduler busy time over a rolling window. When
+the window is longer than 5 seconds, busy ratio is above 0.3, and total busy
+time is above 1 second, the scheduler emits `scheduler.non-settling` once and
+can start diagnosis automatically when `setAutoTriggerDiagnosis(true)` is set.
+The window is rolled after 10 seconds without quiescence and reset on idle.
+
+Diagnosis can collect read/write records for non-idempotency, causal edges from
+writer change groups to triggered actions, and cycle reports. Inline
+idempotency check mode re-runs computations after normal execution and stores
+violations.
 
 ## Debounce and Throttle
 
@@ -295,7 +758,9 @@ Each trigger resets the timer. Good for search-as-you-type.
 
 ### Auto-Debounce
 
-Actions averaging >50ms (after 3 runs) automatically get 100ms debounce. Opt out with `{ noDebounce: true }` in subscription options.
+Eligible effects averaging >50ms (after 3 runs) automatically get 100ms
+debounce. Pull demand-root effects and computations are not auto-debounced. Opt
+out with `{ noDebounce: true }` in subscription options.
 
 ### Throttle: "Stale by T ms"
 
@@ -315,49 +780,45 @@ preserved while the head event is parked.
 
 ### Cycle-Aware Debounce
 
-Actions running 3+ times in execute cycles taking >100ms get adaptive debounce:
+Eligible effects running 3+ times in pull execute cycles taking >100ms get
+adaptive debounce:
 
 ```
 debounce = 2 × cycle_time
 ```
 
-This naturally slows down problematic cycles without manual intervention.
+This slows down problematic effect cycles without manually assigning a debounce.
 
 ## Key Data Structures
 
 ```typescript
 class Scheduler {
-  // Action classification
+  // Action classification and scheduling state
   private effects = new Set<Action>();
   private computations = new Set<Action>();
-
-  // Scheduling state
   private pending = new Set<Action>();
-  private dirty = new Set<Action>();
+  private staleness = new SchedulerStaleness(...);
 
   // Dependency tracking
   private dependencies = new WeakMap<Action, ReactivityLog>();
-  private dependents = new WeakMap<Action, Set<Action>>();  // Reverse graph
-  private currentKnownWrites = new WeakMap<Action, Address[]>();
-  private historicalMightWrite = new WeakMap<Action, Address[]>(); // Experimental
+  private dependents = new WeakMap<Action, Set<Action>>();
+  private reverseDependencies = new WeakMap<Action, Set<Action>>();
+  private triggerIndex = new SchedulerTriggerIndex();
+  private writeIndex = new SchedulerWriteIndex(...);
 
-  // Triggers: cell → actions that read it
-  private triggers = new Map<SpaceAndURI, Map<Action, Paths>>();
-
-  // Parent-child relationships (for nested patterns)
+  // Parent-child relationships for nested patterns
   private actionParent = new WeakMap<Action, Action>();
   private actionChildren = new WeakMap<Action, Set<Action>>();
 
-  // Performance tracking
-  private actionStats = new WeakMap<Action, ActionStats>();
-
-  // Debounce/throttle
-  private actionDebounce = new WeakMap<Action, number>();
-  private actionThrottle = new WeakMap<Action, number>();
+  // Timing, debounce, throttle, and diagnostics
+  private delays = new SchedulerDelays(...);
+  private actionStats = new Map<string, ActionStats>();
+  private filterStats = { filtered: 0, executed: 0 };
 }
 
 interface ReactivityLog {
   reads: Address[];
+  shallowReads: Address[];
   writes: Address[];
   potentialWrites?: Address[];  // For diffAndUpdate pattern
 }
@@ -371,10 +832,23 @@ interface ActionStats {
 }
 ```
 
+The scheduler class owns the long-lived state. Most work is factored into
+modules under `packages/runner/src/scheduler/`, including:
+
+- `pull-execution.ts` and `push-execution.ts` for mode-specific settle loops
+- `pull-scheduling.ts` for demand-root and affected-effect scheduling
+- `events.ts`, `pull-events.ts`, and `push-events.ts` for queued handlers
+- `scheduling-writes.ts`, `trigger-index.ts`, and `dependency-graph.ts` for
+  dependency indexes
+- `delays.ts` and `delay-control.ts` for debounce/throttle state
+
 ## Constants
 
 ```typescript
 MAX_ITERATIONS_PER_RUN = 100       // Max runs per action per execute cycle
+MAX_SETTLE_STATS_HISTORY = 20      // Max settle stats entries retained
+MAX_TRIGGER_TRACE_HISTORY = 400    // Max trigger trace entries retained
+MAX_ACTION_RUN_TRACE_HISTORY = 2000 // Max action-run trace entries retained
 AUTO_DEBOUNCE_THRESHOLD_MS = 50    // Avg time to trigger auto-debounce
 AUTO_DEBOUNCE_MIN_RUNS = 3         // Runs before auto-debounce kicks in
 AUTO_DEBOUNCE_DELAY_MS = 100       // Debounce delay for slow actions
@@ -390,11 +864,19 @@ MAX_RETRIES_FOR_REACTIVE = 10      // Retry count for reactive actions
 ### Enable Logging
 
 ```typescript
-// scheduler.ts line 38
+// packages/runner/src/scheduler.ts and scheduler helper modules
 const logger = getLogger("scheduler", {
   enabled: true,
-  level: "debug",
+  level: "warn",
 });
+```
+
+For browser-side debugging, prefer changing the worker logger through
+`RuntimeClient` instead of editing code:
+
+```javascript
+await commonfabric.rt.setLoggerEnabled(true, "scheduler")
+await commonfabric.rt.setLoggerLevel("debug", "scheduler")
 ```
 
 Logs show:
@@ -430,7 +912,8 @@ scheduler.getFilterStats()        // { filtered, executed }
 ### Common Issues
 
 **Computation not running:**
-- Verify an effect depends on it (check `getDependents`)
+- Verify an effect, event handler preflight, or explicit pull depends on it
+  (check `getDependents` for the effect case)
 - Check if it's dirty: `isDirty(action)`
 - If throttled, wait for period to expire
 
@@ -453,19 +936,66 @@ scheduler.getFilterStats()        // { filtered, executed }
 
 ## API Reference
 
-### Subscribe
+### Scheduling
 
 ```typescript
 scheduler.subscribe(
   action: Action,
-  populateDependencies: (tx: Transaction) => void,
+  populateDependencies: ((tx: Transaction) => void) | ReactivityLog,
   options?: {
-    isEffect?: boolean,     // Mark as effect (always runs)
+    isEffect?: boolean,     // Mark as effect / demand root
     debounce?: number,      // Delay in ms before running
     noDebounce?: boolean,   // Opt out of auto-debounce
     throttle?: number,      // Min ms between runs
+    changeGroup?: ChangeGroup,
   }
 ): Cancel
+
+scheduler.resubscribe(
+  action: Action,
+  log: ReactivityLog,
+  options?: {
+    isEffect?: boolean,
+    changeGroup?: ChangeGroup,
+  }
+): void
+
+scheduler.unsubscribe(
+  action: Action,
+  options?: { preserveChangeGroup?: boolean },
+): void
+
+scheduler.run(action: Action): Promise<any>
+scheduler.queueExecution(): void
+scheduler.idle(): Promise<void>
+```
+
+### Events
+
+```typescript
+scheduler.queueEvent(
+  eventLink: NormalizedFullLink,
+  event: any,
+  retries?: number,
+  onCommit?: (tx: IExtendedStorageTransaction) => void,
+  doNotLoadPieceIfNotRunning?: boolean,
+): void
+
+scheduler.addEventHandler(
+  handler: EventHandler,
+  ref: NormalizedFullLink,
+  populateDependencies?: (
+    tx: IExtendedStorageTransaction,
+    event: any,
+  ) => void,
+): Cancel
+```
+
+### Console and Error Hooks
+
+```typescript
+scheduler.onConsole(fn: ConsoleHandler): void
+scheduler.onError(fn: ErrorHandler): void
 ```
 
 ### Mode Control
@@ -476,15 +1006,107 @@ scheduler.disablePullMode()
 scheduler.isPullModeEnabled()
 ```
 
-### Waiting
+### Timing Controls
 
 ```typescript
-scheduler.idle(): Promise<void>  // Resolves when no pending work
+scheduler.setDebounce(action, ms)
+scheduler.getDebounce(action)
+scheduler.clearDebounce(action)
+scheduler.setNoDebounce(action, optOut)
+
+scheduler.setThrottle(action, ms)
+scheduler.getThrottle(action)
+scheduler.clearThrottle(action)
+```
+
+### Breakpoints and Basic Queries
+
+```typescript
+scheduler.setBreakpoints(actionIds)
+scheduler.getBreakpoints()
+scheduler.hasBreakpoint(actionId)
+
+scheduler.getStats()
+scheduler.isEffect(action)
+scheduler.isComputation(action)
+scheduler.isDirty(action)
+scheduler.getDependents(action)
+scheduler.getMightWrite(action)
+scheduler.getActionStats(actionOrId)
+scheduler.getFilterStats()
+scheduler.resetFilterStats()
+```
+
+### Graph and Trace Diagnostics
+
+```typescript
+scheduler.getGraphSnapshot()
+
+scheduler.enableSettleStats()
+scheduler.setSettleStatsEnabled(enabled)
+scheduler.getSettleStats()
+scheduler.getSettleStatsHistory()
+
+scheduler.setActionRunTraceEnabled(enabled)
+scheduler.getActionRunTrace()
+
+scheduler.setTriggerTraceEnabled(enabled)
+scheduler.getTriggerTrace()
+
+scheduler.setEventPreflightTelemetryEnabled(enabled)
+scheduler.isEventPreflightTelemetryEnabled()
+```
+
+### Non-Settling and Idempotency Diagnosis
+
+```typescript
+scheduler.isNonSettling()
+scheduler.setAutoTriggerDiagnosis(enabled)
+scheduler.runDiagnosis(durationMs)
+
+scheduler.enableIdempotencyCheck()
+scheduler.disableIdempotencyCheck()
+scheduler.getIdempotencyViolations()
+scheduler.runIdempotencyCheck()
+```
+
+### Lifecycle
+
+```typescript
+scheduler.dispose()
+```
+
+### Internal Orchestration Hooks
+
+These are public on the class for runtime integration, but are not general
+pattern APIs:
+
+```typescript
+scheduler.runningPromise
+scheduler.withExecutingAction(action, fn)
+```
+
+### Scheduler Module Re-exports
+
+The scheduler module also re-exports:
+
+```typescript
+txToReactivityLog
+allowMutableTransactionRead
+ignoreReadForScheduling
+markReadAsPotentialWrite
 ```
 
 ## Tests
 
-The scheduler has comprehensive test coverage in `packages/runner/test/scheduler.test.ts` covering:
+The scheduler has focused test coverage in `packages/runner/test/`, especially
+`scheduler-core.test.ts`, `scheduler-pull.test.ts`,
+`scheduler-pull-array.test.ts`, `scheduler-pull-references.test.ts`,
+`scheduler-pull-handlers.test.ts`, `scheduler-pull-idempotency.test.ts`,
+`scheduler-events.test.ts`, `scheduler-effects.test.ts`,
+`scheduler-ordering.test.ts`, `scheduler-convergence.test.ts`,
+`scheduler-retries.test.ts`, `scheduler-throttle.test.ts`, and
+`scheduler-timing.test.ts`, covering:
 - Effect vs computation classification
 - Dirty propagation and pull mechanics
 - Topological ordering
