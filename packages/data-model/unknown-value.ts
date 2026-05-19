@@ -63,8 +63,6 @@ export class UnknownValue extends ExplicitTagValue {
     const result = new UnknownValue(state.type, state.state);
     // Honor `shouldDeepFreeze`: produce the type's correct deep-frozen form
     // via its `[DEEP_FREEZE]` member (recursing through `deepFreeze`).
-    return context.shouldDeepFreeze
-      ? result[DEEP_FREEZE]((v) => deepFreeze(v)) as unknown as UnknownValue
-      : result;
+    return context.shouldDeepFreeze ? deepFreeze(result) : result;
   }
 }
