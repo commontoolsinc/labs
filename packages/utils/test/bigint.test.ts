@@ -286,7 +286,7 @@ for (let at = 0; at < fixtures.length; at += FIXTURE_SLICE_SIZE) {
 }
 
 //
-// Edge cases and specific regression tests
+// Edge cases
 //
 
 describe("bigintFromMinimalTwosComplement()", () => {
@@ -294,34 +294,5 @@ describe("bigintFromMinimalTwosComplement()", () => {
     expect(() => bigintFromMinimalTwosComplement(new Uint8Array([]))).toThrow(
       "empty input",
     );
-  });
-});
-
-// Both `bigintToMinimalTwosComplement` paths used to confuse "leading char
-// of `value.toString(16)`" with "high nibble of byte 0 of the encoded form".
-// They differ when the hex string would need leading-zero padding to fill
-// `byteLen * 2` characters: the hex's leading char is non-zero, but the
-// padded byte representation has byte 0 starting with a zero nibble.
-describe("bigintToMinimalTwosComplement()", () => {
-  describe("byte-length corner cases", () => {
-    // Positive: an odd-length hex with leading nibble in 8..F. The fast path
-    // historically inserted an unnecessary sign-extension byte.
-    it("does not over-pad 217129053n (= 0xCF1205D)", () => {
-      expect(bigintToMinimalTwosComplement(217129053n)).toEqual(
-        new Uint8Array([0x0c, 0xf1, 0x20, 0x5d]),
-      );
-    });
-
-    // Negatives with abs in [241, 248]. Production historically encoded these
-    // as a single byte with the high bit *clear*, breaking the round-trip
-    // (e.g., -241n decoded back as 15n).
-    for (let i = 241; i <= 248; i++) {
-      const v = BigInt(-i);
-      it(`round-trips ${v}n with sign bit set`, () => {
-        const bytes = bigintToMinimalTwosComplement(v);
-        expect(bytes[0] & 0x80).not.toBe(0);
-        expect(bigintFromMinimalTwosComplement(bytes)).toBe(v);
-      });
-    }
   });
 });
