@@ -186,11 +186,11 @@ export default pattern<Input, Output>(
     const auth = authResult as any;
 
     // State
-    const bases = Writable.of<BaseInfo[]>([]);
-    const tables = Writable.of<TableInfo[]>([]);
-    const records = Writable.of<AirtableRecordData[]>([]);
-    const loading = Writable.of(false);
-    const error = Writable.of("");
+    const bases = new Writable<BaseInfo[]>([]);
+    const tables = new Writable<TableInfo[]>([]);
+    const records = new Writable<AirtableRecordData[]>([]);
+    const loading = new Writable(false);
+    const error = new Writable("");
 
     const hasBases = computed(() => bases.get().length > 0);
     const hasTables = computed(() => tables.get().length > 0);

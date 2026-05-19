@@ -37,8 +37,8 @@ const decrement = handler<void, { count: Writable<number> }>(
 );
 
 export default pattern(() => {
-  const counterA = Writable.of(0);
-  const counterB = Writable.of(100);
+  const counterA = new Writable(0);
+  const counterB = new Writable(100);
 
   return {
     [UI]: (

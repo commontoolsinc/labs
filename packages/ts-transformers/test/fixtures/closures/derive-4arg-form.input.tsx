@@ -6,8 +6,8 @@ import "commonfabric/schema";
 //   derive(schema, schema, value, fn) → derive(mergedSchema, schema, { value, multiplier }, fn)
 // Context: `multiplier` is captured even though schemas are already provided
 export default pattern(() => {
-  const value = Writable.of(10);
-  const multiplier = Writable.of(2);
+  const value = new Writable(10);
+  const multiplier = new Writable(2);
 
   // Explicit 4-arg form with schemas - should still transform captures
   const result = derive(

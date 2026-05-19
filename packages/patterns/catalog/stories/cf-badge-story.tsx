@@ -16,12 +16,12 @@ interface BadgeStoryOutput {
 }
 
 export default pattern<BadgeStoryInput, BadgeStoryOutput>(() => {
-  const variant = Writable.of<"solid" | "outline">("solid");
-  const color = Writable.of<"neutral" | "primary" | "accent" | "danger">(
+  const variant = new Writable<"solid" | "outline">("solid");
+  const color = new Writable<"neutral" | "primary" | "accent" | "danger">(
     "primary",
   );
-  const removable = Writable.of(false);
-  const label = Writable.of("Badge");
+  const removable = new Writable(false);
+  const label = new Writable("Badge");
 
   return {
     [NAME]: "cf-badge Story",

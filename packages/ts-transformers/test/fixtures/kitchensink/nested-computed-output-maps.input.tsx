@@ -57,8 +57,8 @@ export default pattern<{
   lane: string;
   showFlagged: boolean;
 }>((state) => {
-  // [TRANSFORM] Writable.of: schema arg injected; undefined default added for optional type
-  const selectedCommentId = Writable.of<string | undefined>();
+  // [TRANSFORM] new Writable: schema arg injected; undefined default added for optional type
+  const selectedCommentId = new Writable<string | undefined>();
   const laneLabels = passthroughLabels(["lane", "detail", "summary"]);
 
   // [TRANSFORM] computed() → derive(): captures state.threads, state.showFlagged

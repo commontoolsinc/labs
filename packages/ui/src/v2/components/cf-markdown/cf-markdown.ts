@@ -524,9 +524,17 @@ export class CFMarkdown extends BaseElement {
 
       // Subscribe to new Cell if it's a Cell
       if (this.content && isCellHandle(this.content)) {
-        this._unsubscribe = this.content.subscribe(() => {
+        const contentCell = this.content;
+        this._unsubscribe = contentCell.subscribe(() => {
           this.requestUpdate();
         });
+        if (contentCell.get() === undefined) {
+          void contentCell.sync().then(() => {
+            if (this.content === contentCell) {
+              this.requestUpdate();
+            }
+          }).catch(() => {});
+        }
       }
     }
   }

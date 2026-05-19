@@ -11,7 +11,7 @@ to be updated to the current API.
 
 ## Deprecated APIs to Replace
 
-1. `cell()` → `Writable.of()`
+1. `cell()` → `new Writable()`
 2. `derive()` → `computed()`
 3. `lift()` → `computed()` or refactor
 4. `handler()` for simple operations → inline handlers
@@ -61,7 +61,7 @@ to be updated to the current API.
 **Priority**: High (core functionality) **Location**:
 `packages/patterns/default-app.tsx`
 
-- **Line 28**: `cell()` → `Writable.of()`
+- **Line 28**: `cell()` → `new Writable()`
   ```typescript
   const currentView = cell("home");
   ```
@@ -76,7 +76,7 @@ to be updated to the current API.
 **Priority**: High (core functionality) **Location**:
 `packages/patterns/omnibox-fab.tsx`
 
-- **Line 19**: `cell()` → `Writable.of()`
+- **Line 19**: `cell()` → `new Writable()`
   ```typescript
   const isOpen = cell(false);
   ```
@@ -111,7 +111,7 @@ to be updated to the current API.
 
 **Priority**: Medium **Location**: `packages/patterns/shopping-list.tsx`
 
-- **Line 18**: `cell()` → `Writable.of()`
+- **Line 18**: `cell()` → `new Writable()`
   ```typescript
   const items = cell([]);
   ```
@@ -163,7 +163,7 @@ to be updated to the current API.
 
 **Priority**: Medium **Location**: `packages/patterns/markdown-editor.tsx`
 
-- **Line 15**: `cell()` → `Writable.of()`
+- **Line 15**: `cell()` → `new Writable()`
   ```typescript
   const content = cell("");
   ```
@@ -196,7 +196,7 @@ to be updated to the current API.
 
 **Priority**: Medium **Location**: `packages/patterns/form-builder.tsx`
 
-- **Line 28**: `cell()` → `Writable.of()`
+- **Line 28**: `cell()` → `new Writable()`
   ```typescript
   const fields = cell([]);
   ```
@@ -229,7 +229,7 @@ to be updated to the current API.
 
 **Priority**: Medium **Location**: `packages/patterns/notification-center.tsx`
 
-- **Line 22**: `cell()` → `Writable.of()`
+- **Line 22**: `cell()` → `new Writable()`
   ```typescript
   const notifications = cell([]);
   ```
@@ -248,7 +248,7 @@ to be updated to the current API.
 
 **Priority**: Medium **Location**: `packages/patterns/search-filter.tsx`
 
-- **Line 17**: `cell()` → `Writable.of()`
+- **Line 17**: `cell()` → `new Writable()`
   ```typescript
   const query = cell("");
   ```
@@ -262,7 +262,7 @@ to be updated to the current API.
 
 **Priority**: Medium **Location**: `packages/patterns/settings-panel.tsx`
 
-- **Line 23**: `cell()` → `Writable.of()`
+- **Line 23**: `cell()` → `new Writable()`
   ```typescript
   const settings = cell({});
   ```
@@ -290,7 +290,7 @@ to be updated to the current API.
 
 **Priority**: Medium **Location**: `packages/patterns/file-browser.tsx`
 
-- **Line 28**: `cell()` → `Writable.of()`
+- **Line 28**: `cell()` → `new Writable()`
   ```typescript
   const currentPath = cell("/");
   ```
@@ -311,7 +311,7 @@ to be updated to the current API.
 
 **Priority**: Low (utility) **Location**: `packages/patterns/theme-switcher.tsx`
 
-- **Line 12**: `cell()` → `Writable.of()`
+- **Line 12**: `cell()` → `new Writable()`
   ```typescript
   const theme = cell("light");
   ```
@@ -381,7 +381,7 @@ Update utility components and less frequently used patterns.
 
 ## Update Checklist for Each File
 
-- [ ] Replace `cell()` with `Writable.of()`
+- [ ] Replace `cell()` with `new Writable()`
 - [ ] Replace `derive()` with `computed()`
 - [ ] Replace `lift()` with `computed()` or refactor
 - [ ] Convert simple `handler()` calls to inline handlers

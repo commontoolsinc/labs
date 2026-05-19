@@ -109,7 +109,7 @@ const toggleCalendar = handler<
 export default pattern<{
   events: Confidential<CalendarEvent[]> | Default<[]>;
 }>(({ events }) => {
-  const hiddenCalendars = Writable.of<string[]>([]);
+  const hiddenCalendars = new Writable<string[]>([]);
 
   const eventCount = derive(
     events,

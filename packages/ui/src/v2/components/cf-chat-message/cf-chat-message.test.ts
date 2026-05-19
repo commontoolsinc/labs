@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { CFChatMessage } from "./cf-chat-message.ts";
+import { createMockCellHandle } from "../../test-utils/mock-cell-handle.ts";
 
 describe("cf-chat-message", () => {
   it("should be defined", () => {
@@ -50,6 +51,15 @@ describe("cf-chat-message", () => {
     const text = (el as any)._extractTextContent();
 
     expect(text).toBe("");
+  });
+
+  it("should extract text content from a cell-backed string", () => {
+    const el = new CFChatMessage();
+    el.content = createMockCellHandle("Hello from cell") as any;
+
+    const text = (el as any)._extractTextContent();
+
+    expect(text).toBe("Hello from cell");
   });
 
   // Note: Markdown rendering is now tested in cf-markdown.test.ts

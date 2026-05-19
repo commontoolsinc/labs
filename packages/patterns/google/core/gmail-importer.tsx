@@ -1100,9 +1100,9 @@ export default pattern<
   },
   Output
 >(({ settings, overrideAuth }) => {
-  const emails = Writable.of<Confidential<Email[]>>([]).for("emails");
-  const historyId = Writable.of("").for("historyId");
-  const fetching = Writable.of(false).for("fetching");
+  const emails = new Writable<Confidential<Email[]>>([]).for("emails");
+  const historyId = new Writable("").for("historyId");
+  const fetching = new Writable(false).for("fetching");
 
   // Use full auth manager with required scopes
   const {
@@ -1155,7 +1155,7 @@ export default pattern<
 
   // Auto-fetch when auth becomes valid (opt-in feature)
   // Track whether we've already triggered auto-fetch to prevent loops
-  const hasAutoFetched = Writable.of(false).for("auto fetched");
+  const hasAutoFetched = new Writable(false).for("auto fetched");
 
   computed(() => {
     const ready = isReady;

@@ -38,7 +38,7 @@ function visibleEntries(
 }
 
 export default pattern<Input, Output>(({ entries }) => {
-  const path = Writable.of<string[]>([]);
+  const path = new Writable<string[]>([]);
   const pushPath = action(({ name }: { name: string }) => {
     path.push(name);
   });

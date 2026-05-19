@@ -42,7 +42,7 @@ const onWebhookEvent = handler<
 
 const WebhookTest = pattern<WebhookPatternInput, WebhookPatternOutput>(
   ({ webhookConfig }) => {
-    const lastEvent = Writable.of(null as unknown);
+    const lastEvent = new Writable(null as unknown);
     const webhookInbox = onWebhookEvent({ lastEvent });
 
     const inboxDisplay = computed(() => {

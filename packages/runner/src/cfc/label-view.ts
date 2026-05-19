@@ -1,6 +1,10 @@
 import { isRecord } from "@commonfabric/utils/types";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import type { NormalizedFullLink } from "../link-utils.ts";
+import {
+  isPrimitiveCellLink,
+  type NormalizedFullLink,
+  parseLink,
+} from "../link-utils.ts";
 import type { Runtime } from "../runtime.ts";
 import { readStoredCfcMetadata } from "./metadata.ts";
 import type { CfcMetadata } from "./types.ts";
@@ -29,6 +33,11 @@ type LabelQueryableCell = {
   tx?: IExtendedStorageTransaction;
 };
 
+type LinkedValueMetadata = {
+  metadata: CfcMetadata;
+  path: readonly string[];
+};
+
 const storedMetadataForCell = (
   cell: LabelQueryableCell,
   link: NormalizedFullLink,
@@ -44,6 +53,34 @@ const storedMetadataForCell = (
         id: link.id,
       },
     );
+  } catch {
+    return undefined;
+  }
+};
+
+const linkedValueMetadataForCell = (
+  cell: LabelQueryableCell,
+  link: NormalizedFullLink,
+): LinkedValueMetadata | undefined => {
+  if (!cell.runtime || link.path.length === 0) {
+    return undefined;
+  }
+  try {
+    const tx = cell.runtime.readTx(cell.tx);
+    const value = tx.readValueOrThrow(link);
+    if (!isPrimitiveCellLink(value)) {
+      return undefined;
+    }
+    const target = parseLink(value, link);
+    if (target?.id === undefined || target.space === undefined) {
+      return undefined;
+    }
+    const metadata = readStoredCfcMetadata(tx, {
+      space: target.space,
+      id: target.id,
+      scope: target.scope,
+    });
+    return metadata === undefined ? undefined : { metadata, path: target.path };
   } catch {
     return undefined;
   }
@@ -70,9 +107,18 @@ export const cfcLabelViewForCell = (
     storedMetadataForCell(cell as LabelQueryableCell, link),
     link.path,
   );
+  const linkedValue = linkedValueMetadataForCell(
+    cell as LabelQueryableCell,
+    link,
+  );
+  const linkedValueView = cfcLabelViewFromMetadata(
+    linkedValue?.metadata,
+    linkedValue?.path ?? [],
+  );
 
   return mergeCfcLabelViews([
     metadataView,
+    linkedValueView,
     getCarriedCfcLabelView(cell),
   ]);
 };

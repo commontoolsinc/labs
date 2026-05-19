@@ -30,7 +30,7 @@ const askQuestion = handler<
 });
 
 export default pattern<LLMTestInput>(({ title }) => {
-  const question = Writable.of("");
+  const question = new Writable("");
 
   const llmResponse = generateText({
     system:

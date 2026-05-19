@@ -15,9 +15,9 @@ interface SliderStoryOutput {
 }
 
 export default pattern<SliderStoryInput, SliderStoryOutput>(() => {
-  const value = Writable.of(40);
-  const orientation = Writable.of<"horizontal" | "vertical">("horizontal");
-  const disabled = Writable.of(false);
+  const value = new Writable(40);
+  const orientation = new Writable<"horizontal" | "vertical">("horizontal");
+  const disabled = new Writable(false);
 
   return {
     [NAME]: "cf-slider Story",

@@ -5,7 +5,7 @@ import { Writable, derive, pattern } from "commonfabric";
 //   derive(value, fn) → derive(schema, schema, value, fn) (no capture object created)
 // Context: negative test; only schema injection occurs, the 2-arg form remains structurally unchanged
 export default pattern(() => {
-  const value = Writable.of(10);
+  const value = new Writable(10);
 
   // No captures - should not be transformed
   const result = derive(value, (v) => v.get() * 2);

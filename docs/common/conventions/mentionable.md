@@ -24,7 +24,7 @@ export default pattern<Input, Output>(({ ... }) => {
 For dynamic collections, use a Writable:
 
 ```tsx
-const createdPieces = Writable.of<any[]>([]);
+const createdPieces = new Writable<any[]>([]);
 
 const create = handler((_, { createdPieces }) => {
   createdPieces.push(ChildPattern({ name: "New" }));
@@ -87,7 +87,7 @@ Pass mentionable and mentioned cells to `cf-code-editor`:
 
 ```tsx
 const mentionable = wish<MentionablePiece[]>({ query: "#mentionable" }).result;
-const mentioned = Writable.of<MentionablePiece[]>([]);
+const mentioned = new Writable<MentionablePiece[]>([]);
 
 <cf-code-editor
   $value={content}

@@ -15,10 +15,10 @@ const __cfAmdHooks = undefined;
 // Verifies: a single closed-over cell is extracted into the derive capture object
 //   derive(value, fn) → derive(schema, schema, { value, multiplier }, fn)
 export default pattern(() => {
-    const value = Writable.of(10, {
+    const value = new Writable(10, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("value", true);
-    const multiplier = Writable.of(2, {
+    const multiplier = new Writable(2, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("multiplier", true);
     const result = __cfHelpers.derive({

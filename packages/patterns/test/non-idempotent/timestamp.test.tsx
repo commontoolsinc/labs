@@ -7,8 +7,8 @@
 import { computed, pattern, safeDateNow, Writable } from "commonfabric";
 
 export default pattern(() => {
-  const items = Writable.of([{ title: "Task A" }, { title: "Task B" }]);
-  const processed = Writable.of<{ title: string; processedAt: number }[]>([]);
+  const items = new Writable([{ title: "Task A" }, { title: "Task B" }]);
+  const processed = new Writable<{ title: string; processedAt: number }[]>([]);
 
   // Non-idempotent: safeDateNow() produces different values each run
   computed(() => {

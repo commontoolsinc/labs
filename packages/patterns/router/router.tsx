@@ -67,7 +67,7 @@ function parseQuery(queryString: string): Record<string, string> {
 
 export const Router = pattern<RouterInput, RouterOutput>(
   ({ routes, routeContext }) => {
-    const path = Writable.of("/");
+    const path = new Writable("/");
     const navigate = action((to: string) => path.set(to));
 
     const Route = computed(() => {

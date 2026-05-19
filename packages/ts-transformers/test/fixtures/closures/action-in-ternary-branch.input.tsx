@@ -23,7 +23,7 @@ interface Input {
 //   nested hasDescription ternary → local ifElse(...) inside the JSX branch
 // Context: Regression coverage for JSX-local rewriting with action references in the same branch
 export default pattern<Input>(({ card }) => {
-  const isEditing = Cell.of(false);
+  const isEditing = new Cell(false);
 
   const startEditing = action(() => {
     isEditing.set(true);

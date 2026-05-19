@@ -30,7 +30,7 @@ export default pattern<{
   items: Writable<Item[] | Default<typeof preset>>;
 }>(({ items }) => {
   // Anti-pattern: Random sort before Set insertion changes iteration order
-  const uniqueTags = Writable.of<string[]>([]);
+  const uniqueTags = new Writable<string[]>([]);
   computed(() => {
     const tags = items.get().map((i) => i.tag);
     const shuffled = tags.sort(() => nonPrivateRandom() - 0.5);

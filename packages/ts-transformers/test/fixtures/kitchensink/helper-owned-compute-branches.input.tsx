@@ -30,8 +30,8 @@ export default pattern<{
   prefix: string;
   showArchived: boolean;
 }>((state) => {
-  // [TRANSFORM] Writable.of: schema arg injected
-  const fallbackMembers = Writable.of(["ops", "sales"]);
+  // [TRANSFORM] new Writable: schema arg injected
+  const fallbackMembers = new Writable(["ops", "sales"]);
   // [TRANSFORM] computed() → derive(): captures state.showArchived, state.projects
   const visibleProjects = computed(() =>
     state.showArchived

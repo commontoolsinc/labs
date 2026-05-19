@@ -45,7 +45,7 @@ interface ContactBookOutput {
 
 export default pattern<ContactBookInput, ContactBookOutput>(
   ({ contacts, relationships }) => {
-    const searchQuery = Writable.of("");
+    const searchQuery = new Writable("");
 
     const contactCount = computed(() => contacts.get().length);
 
@@ -75,9 +75,9 @@ export default pattern<ContactBookInput, ContactBookOutput>(
       });
     });
 
-    const newRelationFrom = Writable.of("");
-    const newRelationTo = Writable.of("");
-    const newRelationLabel = Writable.of("");
+    const newRelationFrom = new Writable("");
+    const newRelationTo = new Writable("");
+    const newRelationLabel = new Writable("");
     const onNewRelation = action(() => {
       const from = newRelationFrom.get();
       const to = newRelationTo.get();

@@ -10,8 +10,8 @@ interface Point {
 //   derive(point, fn) → derive(schema, schema, { point, multiplier }, fn)
 // Context: `const { x, y } = p.get()` destructures inside the body, not the parameter
 export default pattern(() => {
-  const point = Writable.of({ x: 10, y: 20 } as Point);
-  const multiplier = Writable.of(2);
+  const point = new Writable({ x: 10, y: 20 } as Point);
+  const multiplier = new Writable(2);
 
   // Destructuring requires .get() first since derive doesn't unwrap Cell
   const result = derive(point, (p) => {

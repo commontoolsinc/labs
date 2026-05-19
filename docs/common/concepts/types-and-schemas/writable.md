@@ -52,13 +52,13 @@ const counter2 = Counter({ count: 0 });
 **Cell references** share state across pattern instances:
 
 ```typescript
-const sharedCount = Writable.of(0);
+const sharedCount = new Writable(0);
 const counter1 = Counter({ count: sharedCount });
 const counter2 = Counter({ count: sharedCount });
 // counter1 and counter2 share state - incrementing one affects both
 ```
 
-For most cases, pass plain values. Use `Writable.of()` when you intentionally want multiple patterns to share the same underlying state.
+For most cases, pass plain values. Use `new Writable()` when you intentionally want multiple patterns to share the same underlying state.
 
 Note: The `Writable<T>` annotation in a pattern's type signature indicates write intent within that pattern, but doesn't affect how input values are coerced. Plain values always become owned state that the pattern can modify—the pattern can pass these to handlers with `Writable<>` inputs, making them effectively writable regardless of the signature.
 

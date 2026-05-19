@@ -6,10 +6,10 @@ import { Writable, pattern } from "commonfabric";
 //   cell({}) → cell({}, { type: "object", properties: {} })
 export default pattern(() => {
   // Empty array
-  const _emptyArray = Writable.of<string[]>([]);
+  const _emptyArray = new Writable<string[]>([]);
 
   // Empty object
-  const _emptyObject = Writable.of({});
+  const _emptyObject = new Writable({});
 
   return {
     emptyArray: _emptyArray,

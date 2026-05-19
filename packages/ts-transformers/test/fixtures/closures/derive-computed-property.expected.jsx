@@ -16,7 +16,7 @@ const __cfAmdHooks = undefined;
 //   derive(value, fn) → derive(schema, schema, { value, config, key }, fn)
 // Context: `config[key]` requires both `config` and `key` to be captured as plain values
 export default pattern(() => {
-    const value = Writable.of(10, {
+    const value = new Writable(10, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("value", true);
     const config = { multiplier: 2, divisor: 5 };

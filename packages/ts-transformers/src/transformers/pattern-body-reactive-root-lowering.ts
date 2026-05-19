@@ -1395,7 +1395,7 @@ function reportInlineReactiveRootAccesses(
 function findInlineOpaqueOriginCallReceiver(
   access: ts.PropertyAccessExpression | ts.ElementAccessExpression,
   context: TransformationContext,
-): ts.CallExpression | undefined {
+): ts.CallExpression | ts.NewExpression | undefined {
   let current: ts.Expression = access.expression;
   // Walk through any non-semantic wrappers (parens, casts) and chained
   // property/element accesses to find the receiver of the chain.
@@ -1412,7 +1412,7 @@ function findInlineOpaqueOriginCallReceiver(
     break;
   }
   if (
-    ts.isCallExpression(current) &&
+    (ts.isCallExpression(current) || ts.isNewExpression(current)) &&
     isOpaqueOriginCall(current, context)
   ) {
     return current;
@@ -1432,7 +1432,8 @@ function isDirectReactiveOriginCallReceiver(
   context: TransformationContext,
 ): boolean {
   const receiver = unwrapExpression(access.expression);
-  return ts.isCallExpression(receiver) && isOpaqueOriginCall(receiver, context);
+  return (ts.isCallExpression(receiver) || ts.isNewExpression(receiver)) &&
+    isOpaqueOriginCall(receiver, context);
 }
 
 function collectBindingNames(

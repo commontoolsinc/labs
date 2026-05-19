@@ -32,7 +32,7 @@ Then use the detailed references already maintained in the repo for:
 ```typescript
 // action() inside pattern body - closes over pattern variables
 export default pattern<MyInput, MyOutput>(({ items, title }) => {
-  const menuOpen = Writable.of(false);
+  const menuOpen = new Writable(false);
 
   // Action closes over menuOpen - no binding needed
   const toggleMenu = action(() => menuOpen.set(!menuOpen.get()));

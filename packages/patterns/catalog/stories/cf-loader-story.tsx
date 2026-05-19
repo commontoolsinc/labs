@@ -10,7 +10,7 @@ interface LoaderStoryOutput {
 }
 
 export default pattern<LoaderStoryInput, LoaderStoryOutput>(() => {
-  const showElapsed = Writable.of(false);
+  const showElapsed = new Writable(false);
 
   return {
     [NAME]: "cf-loader Story",

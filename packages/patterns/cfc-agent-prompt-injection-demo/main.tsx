@@ -462,12 +462,12 @@ const buildSendMailTool = (
   }) satisfies DemoTool;
 
 export default pattern<Record<string, never>>(() => {
-  const emails = Writable.of<SentEmail[]>([]);
-  const unsafeMessages = Writable.of<BuiltInLLMMessage[]>([]);
-  const safeMessages = Writable.of<BuiltInLLMMessage[]>([]);
-  const parentModel = Writable.of<string>(DEFAULT_PARENT_MODEL);
-  const subAgentModel = Writable.of<string>(DEFAULT_SUB_AGENT_MODEL);
-  const subAgentBriefingMessages = Cell.of(
+  const emails = new Writable<SentEmail[]>([]);
+  const unsafeMessages = new Writable<BuiltInLLMMessage[]>([]);
+  const safeMessages = new Writable<BuiltInLLMMessage[]>([]);
+  const parentModel = new Writable<string>(DEFAULT_PARENT_MODEL);
+  const subAgentModel = new Writable<string>(DEFAULT_SUB_AGENT_MODEL);
+  const subAgentBriefingMessages = new Cell(
     SUB_AGENT_BRIEFING_MESSAGES,
     SUB_AGENT_BRIEFING_MESSAGES_SCHEMA,
   );

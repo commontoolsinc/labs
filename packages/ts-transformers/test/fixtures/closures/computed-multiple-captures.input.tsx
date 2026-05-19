@@ -5,9 +5,9 @@ import { Writable, computed, pattern } from "commonfabric";
 //   computed(() => { const sum = a.get() + b.get(); return sum * c.get() }) → derive(captureSchema, resultSchema, { a, b, c }, ({ a, b, c }) => { ... })
 //   All three cells (a, b, c) are captured with asCell: true in the schema.
 export default pattern(() => {
-  const a = Writable.of(10);
-  const b = Writable.of(20);
-  const c = Writable.of(30);
+  const a = new Writable(10);
+  const b = new Writable(20);
+  const c = new Writable(30);
 
   const result = computed(() => {
     const sum = a.get() + b.get();

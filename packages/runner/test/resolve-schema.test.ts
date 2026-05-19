@@ -4,7 +4,7 @@
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { resolveSchema } from "../src/schema.ts";
+import { resolveSchema, resolveSchemaForValue } from "../src/schema.ts";
 import type { JSONSchema, JSONSchemaObj } from "../src/builder/types.ts";
 import {
   isNontrivialSchema,
@@ -141,6 +141,86 @@ describe("resolveSchema", () => {
         properties: { name: { type: "string" } },
       });
       expect(first).toBe(second);
+    });
+  });
+
+  describe("resolveSchemaForValue", () => {
+    it("does not select literal false compound branches", () => {
+      const schema: JSONSchema = {
+        anyOf: [
+          false,
+          {
+            type: "string",
+            ifc: { integrity: ["string-branch"] },
+          },
+        ],
+      };
+
+      const narrowed = expectNontrivial(resolveSchemaForValue(schema, "ok"));
+
+      expect(narrowed.anyOf).toBe(undefined);
+      expect(narrowed.type).toBe("string");
+      expect(narrowed.ifc).toEqual({ integrity: ["string-branch"] });
+    });
+
+    it("narrows union branches with nested refs to parent defs", () => {
+      const schema: JSONSchema = {
+        anyOf: [
+          {
+            type: "object",
+            properties: {
+              payload: { $ref: "#/$defs/MessageAlice" },
+            },
+            required: ["payload"],
+          },
+          {
+            type: "object",
+            properties: {
+              payload: { $ref: "#/$defs/MessageBob" },
+            },
+            required: ["payload"],
+          },
+        ],
+        $defs: {
+          MessageAlice: {
+            type: "object",
+            properties: {
+              author: {
+                type: "string",
+                enum: ["alice"],
+              },
+            },
+            required: ["author"],
+            ifc: {
+              integrity: [{ kind: "authored-by", subject: "alice" }],
+            },
+          },
+          MessageBob: {
+            type: "object",
+            properties: {
+              author: {
+                type: "string",
+                enum: ["bob"],
+              },
+            },
+            required: ["author"],
+            ifc: {
+              integrity: [{ kind: "authored-by", subject: "bob" }],
+            },
+          },
+        },
+      };
+
+      const narrowed = expectNontrivial(
+        resolveSchemaForValue(schema, { payload: { author: "alice" } }),
+      );
+
+      expect(narrowed.anyOf).toBe(undefined);
+      expect(narrowed.properties?.payload).toMatchObject({
+        ifc: {
+          integrity: [{ kind: "authored-by", subject: "alice" }],
+        },
+      });
     });
   });
 });

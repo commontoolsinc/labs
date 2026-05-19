@@ -45,7 +45,7 @@ interface Output {
 }
 export default pattern((__cf_pattern_input) => {
     const entries = __cf_pattern_input.key("entries");
-    const path = Writable.of<string[]>([], {
+    const path = new Writable<string[]>([], {
         type: "array",
         items: {
             type: "string"

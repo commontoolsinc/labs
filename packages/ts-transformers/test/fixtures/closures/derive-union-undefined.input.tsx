@@ -10,7 +10,7 @@ interface Config {
 //   derive(value, fn) → derive(schema, schema, { value, config: { required, unionUndefined } }, fn)
 // Context: `unionUndefined` schema is `type: ["number", "undefined"]`; `required` is plain `number`
 export default pattern((config: Config) => {
-  const value = Writable.of(10);
+  const value = new Writable(10);
 
   const result = derive(value, (v) => 
     v.get() + config.required + (config.unionUndefined ?? 0)

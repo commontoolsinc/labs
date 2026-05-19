@@ -28,7 +28,7 @@ export default pattern<Record<string, never>>((_) => {
   });
 
   const people = peopleResult.candidates;
-  const selectedPerson = Writable.of<Contact | null>(null);
+  const selectedPerson = new Writable<Contact | null>(null);
 
   return {
     [NAME]: computed(() => "Email list (" + emails.length + ")"),

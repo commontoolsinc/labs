@@ -103,7 +103,7 @@ const Book = pattern<BookInput, BookOutput>(({ route }) => {
 });
 
 export default pattern<MainInput, MainOutput>(() => {
-  const routeContext = Writable.of<RouteContext>({
+  const routeContext = new Writable<RouteContext>({
     path: "/",
     params: {},
     query: {},

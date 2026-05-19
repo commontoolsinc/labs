@@ -7,9 +7,9 @@ import { Writable, computed, pattern } from "commonfabric";
 //   asCell), pattern param (config with .key() rewriting), and plain local
 //   (offset as plain number). All coexist in a single capture object.
 export default pattern((config: { base: number; multiplier: number }) => {
-  const value = Writable.of(10);
+  const value = new Writable(10);
   const offset = 5; // non-cell local
-  const threshold = Writable.of(15); // cell local
+  const threshold = new Writable(15); // cell local
 
   const result = computed(() =>
     (value.get() + config.base + offset) * config.multiplier + threshold.get()

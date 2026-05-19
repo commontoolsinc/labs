@@ -208,7 +208,7 @@ const KnowledgeGraph = pattern<Input>(() => {
   >({ query: "#summaryIndex" }).result!;
 
   // LLM agent state
-  const messages = Writable.of<BuiltInLLMMessage[]>([]);
+  const messages = new Writable<BuiltInLLMMessage[]>([]);
   const hasBeenBuilt = computed(() => messages.get().length > 0);
 
   const agentSystemPrompt = computed(() => {

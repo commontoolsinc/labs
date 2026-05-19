@@ -31,7 +31,7 @@ OpaqueRef is a type representing reactive values in Common Fabric. It wraps:
   lift/handler/derive functions
 
 ```typescript
-const count = Writable.of(0); // count is OpaqueRef<number>
+const count = new Writable(0); // count is OpaqueRef<number>
 ```
 
 ### Important Scope Limitation
@@ -160,7 +160,7 @@ Each element/property is transformed independently when used in JSX:
 
 2. **Array Methods** - Not yet supported:
    ```typescript
-   const items = Writable.of([1, 2, 3]);
+   const items = new Writable([1, 2, 3]);
    const doubled = items.map((x) => x * 2); // ❌ Not transformed
    const filtered = items.filter((x) => x > 2); // ❌ Not transformed
    ```
@@ -169,7 +169,7 @@ Each element/property is transformed independently when used in JSX:
 
 3. **Async Operations** - Not yet supported:
    ```typescript
-   const url = Writable.of("https://api.example.com");
+   const url = new Writable("https://api.example.com");
    const data = await fetch(url); // ❌ Not transformed
    ```
    **Why:** Async operations with OpaqueRef require special handling for promise
@@ -177,7 +177,7 @@ Each element/property is transformed independently when used in JSX:
 
 4. **Destructuring** - Extracts values, losing reactivity:
    ```typescript
-   const user = Writable.of({ name: "John", age: 25 });
+   const user = new Writable({ name: "John", age: 25 });
    const { name, age } = user; // ❌ name and age are plain values, not OpaqueRef
    ```
    **Why:** Destructuring extracts the current value, breaking the reactive

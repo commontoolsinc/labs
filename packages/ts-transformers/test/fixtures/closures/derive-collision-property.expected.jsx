@@ -17,7 +17,7 @@ const __cfAmdHooks = undefined;
 //   callback: `multiplier.get()` (capture ref) → `multiplier_1.get()`
 // Context: returned object literal `{ multiplier: ... }` property name stays unchanged
 export default pattern(() => {
-    const multiplier = Writable.of(2, {
+    const multiplier = new Writable(2, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("multiplier", true);
     // Input name 'multiplier' collides with captured variable 'multiplier'

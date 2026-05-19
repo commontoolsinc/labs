@@ -1236,6 +1236,20 @@ export class CommonFabricFormatter implements TypeFormatter {
         return { integrity: readValue(1) };
       case "AddIntegrity":
         return { addIntegrity: readValue(1) };
+      case "RepresentsCurrentUser":
+        return {
+          addIntegrity: [{
+            kind: "represents-principal",
+            subject: { __ctCurrentPrincipal: true },
+          }],
+        };
+      case "AuthoredByCurrentUser":
+        return {
+          addIntegrity: [{
+            kind: "authored-by",
+            subject: { __ctCurrentPrincipal: true },
+          }],
+        };
       case "RequiresIntegrity":
         return { requiredIntegrity: readValue(1) };
       case "MaxConfidentiality":
@@ -1361,13 +1375,39 @@ export class CommonFabricFormatter implements TypeFormatter {
 
     return {
       writeAuthorizedBy: {
-        __ctWriterIdentityOf: {
-          file: normalizeWriterIdentityFile(
-            context.sourceFileName ?? bindingNode.getSourceFile().fileName,
-          ),
-          path: [bindingNode.exprName.text],
-        },
+        __ctWriterIdentityOf: this.writeAuthorizedByIdentityForBinding(
+          context,
+          bindingNode.exprName,
+        ),
       },
+    };
+  }
+
+  private writeAuthorizedByIdentityForBinding(
+    context: GenerationContext,
+    bindingName: ts.Identifier,
+  ): { file: string; path: string[] } {
+    const symbol = context.typeChecker.getSymbolAtLocation(bindingName);
+    const declarationSymbol = symbol && (symbol.flags & ts.SymbolFlags.Alias)
+      ? context.typeChecker.getAliasedSymbol(symbol)
+      : symbol;
+    const declaration = declarationSymbol?.valueDeclaration ??
+      declarationSymbol?.declarations?.[0];
+    const declaredName = declaration && ts.isVariableDeclaration(declaration) &&
+        ts.isIdentifier(declaration.name)
+      ? declaration.name.text
+      : declaration && ts.isFunctionDeclaration(declaration) &&
+          declaration.name
+      ? declaration.name.text
+      : bindingName.text;
+    const sourceFileName = declaration?.getSourceFile().fileName ??
+      bindingName.getSourceFile().fileName ??
+      context.sourceFileName ??
+      "unknown";
+
+    return {
+      file: normalizeWriterIdentityFile(sourceFileName),
+      path: [declaredName],
     };
   }
 

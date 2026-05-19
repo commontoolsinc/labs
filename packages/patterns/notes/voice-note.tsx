@@ -43,8 +43,8 @@ const handleDeleteNote = handler<
 });
 
 const VoiceNote = pattern<Input, Output>(({ title }) => {
-  const transcription = Writable.of<TranscriptionData | null>(null);
-  const notes = Writable.of<TranscriptionData[]>([]);
+  const transcription = new Writable<TranscriptionData | null>(null);
+  const notes = new Writable<TranscriptionData[]>([]);
 
   const handleTranscriptionComplete = action(
     ({ detail }: { detail: { transcription: TranscriptionData } }) => {

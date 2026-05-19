@@ -111,7 +111,7 @@ This is useful when:
 For simple tabbed UIs, `cf-tabs` handles string-based view switching as a built-in:
 
 ```tsx
-const activeTab = Writable.of("spaces").for("activeTab");
+const activeTab = new Writable("spaces").for("activeTab");
 
 <cf-tabs $value={activeTab}>
   <cf-tab-list>

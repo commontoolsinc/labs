@@ -30,9 +30,9 @@ type PiecesListInput = void;
 interface PiecesListOutput {
   [key: string]: unknown;
   backlinksIndex: {
-    mentionable: MentionablePiece[];
+    mentionable: MentionablePiece[] | undefined;
   };
-  sidebarUI: unknown;
+  sidebarUI?: unknown;
 }
 
 const _visit = handler<
@@ -145,11 +145,11 @@ const trackRecent = handler<
 
 export default pattern<PiecesListInput, PiecesListOutput>((_) => {
   // OWN the data cells (not from wish)
-  const allPieces = Writable.of<MentionablePiece[]>([]);
-  const recentPieces = Writable.of<MentionablePiece[]>([]);
+  const allPieces = new Writable<MentionablePiece[]>([]);
+  const recentPieces = new Writable<MentionablePiece[]>([]);
 
   // Dropdown menu state
-  const menuOpen = Writable.of(false);
+  const menuOpen = new Writable(false);
 
   // Filter out hidden pieces and pieces without resolved NAME
   // (prevents transient hash-only pills during reactive updates)
@@ -355,7 +355,6 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
         </cf-vscroll>
       </cf-screen>
     ),
-    sidebarUI: undefined,
     // Exported data
     allPieces,
     recentPieces,

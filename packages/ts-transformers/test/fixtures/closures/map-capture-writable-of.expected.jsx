@@ -17,11 +17,11 @@ interface State {
     }>;
 }
 // FIXTURE: map-capture-writable-of
-// Verifies: Writable.of() variable closed over in .map() is captured with asCell annotation
+// Verifies: new Writable() variable closed over in .map() is captured with asCell annotation
 //   .map(fn) → .mapWithPattern(pattern(...), { selected: selected })
-//   Writable.of<string | null>(null) → params.selected with { anyOf: [string, null], asCell: true }
+//   new Writable<string | null>(null) → params.selected with { anyOf: [string, null], asCell: true }
 export default pattern((state) => {
-    const selected = Writable.of<string | null>(null, {
+    const selected = new Writable<string | null>(null, {
         anyOf: [{
                 type: "string"
             }, {

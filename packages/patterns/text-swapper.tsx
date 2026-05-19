@@ -106,9 +106,9 @@ const closeModal = handler<
 
 export default pattern<Input, Output>(({ leftText, rightText }) => {
   // Modal state
-  const showModal = Writable.of<boolean>(false);
-  const editingSide = Writable.of<EditingSide>(null);
-  const editValue = Writable.of<string>("");
+  const showModal = new Writable<boolean>(false);
+  const editingSide = new Writable<EditingSide>(null);
+  const editValue = new Writable<string>("");
 
   const labelStyle = {
     padding: "12px 24px",

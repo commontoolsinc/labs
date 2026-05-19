@@ -7,6 +7,7 @@ import {
 } from "../link-utils.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { getJSONFromDataURI, toURI } from "../uri-utils.ts";
+import { ContextualFlowControl } from "../cfc.ts";
 import type { CfcAddress } from "./types.ts";
 
 type UiContractTrustRequirements = {
@@ -38,6 +39,22 @@ export type UiContract =
 export type UiContractEntry = {
   path: string[];
   contract: UiContract;
+  schema?: JSONSchema;
+};
+
+const uiContractEntry = (
+  path: string[],
+  contract: UiContract,
+  schema?: JSONSchema,
+): UiContractEntry => {
+  const entry: UiContractEntry = { path, contract };
+  if (schema !== undefined) {
+    Object.defineProperty(entry, "schema", {
+      value: schema,
+      enumerable: false,
+    });
+  }
+  return entry;
 };
 
 type SerializedTrustedEvent = {
@@ -126,15 +143,6 @@ const trustRequirementsFromContract = (
   };
 };
 
-const decodePointerSegment = (segment: string): string => {
-  const decoded = segment.replace(/~1/g, "/").replace(/~0/g, "~");
-  try {
-    return decodeURIComponent(decoded);
-  } catch {
-    return decoded;
-  }
-};
-
 const resolveLocalSchemaRef = (
   schema: JSONSchema | undefined,
   root: JSONSchema | undefined,
@@ -149,17 +157,11 @@ const resolveLocalSchemaRef = (
   }
   seenRefs.add(ref);
 
-  let current: unknown = root;
-  for (const segment of ref.slice(2).split("/")) {
-    if (!isRecord(current)) {
-      return schema;
-    }
-    current = current[decodePointerSegment(segment)];
+  if (!isRecord(root)) {
+    return schema;
   }
 
-  return isRecord(current) || typeof current === "boolean"
-    ? current as JSONSchema
-    : schema;
+  return ContextualFlowControl.resolveSchemaRefs(schema, root) ?? schema;
 };
 
 const uiContractFromSchemaInternal = (
@@ -227,14 +229,15 @@ const uiContractsFromSchemaInternal = (
     return [];
   }
 
+  const childRoot = isRecord(resolvedSchema.$defs) ? resolvedSchema : root;
   const entries: UiContractEntry[] = [];
   const contract = uiContractFromSchemaInternal(
     resolvedSchema,
-    root,
+    childRoot,
     new Set(),
   );
   if (contract !== undefined) {
-    entries.push({ path: [...path], contract });
+    entries.push(uiContractEntry([...path], contract, resolvedSchema));
   }
 
   const hasProperties = isRecord(resolvedSchema.properties);
@@ -262,7 +265,7 @@ const uiContractsFromSchemaInternal = (
       )
       .map((entry) => entry.contract);
     if (definitionContracts.length === 1) {
-      entries.push({ path: [...path], contract: definitionContracts[0] });
+      entries.push(uiContractEntry([...path], definitionContracts[0]));
     }
   }
 
@@ -271,7 +274,7 @@ const uiContractsFromSchemaInternal = (
       entries.push(
         ...uiContractsFromSchemaInternal(
           child as JSONSchema,
-          root,
+          childRoot,
           [...path, key],
           seenRefs,
         ),
@@ -288,7 +291,7 @@ const uiContractsFromSchemaInternal = (
     entries.push(
       ...uiContractsFromSchemaInternal(
         child as JSONSchema,
-        root,
+        childRoot,
         path,
         seenRefs,
       ),
@@ -301,7 +304,7 @@ const uiContractsFromSchemaInternal = (
     entries.push(
       ...uiContractsFromSchemaInternal(
         resolvedSchema.items as JSONSchema,
-        root,
+        childRoot,
         [...path, "*"],
         seenRefs,
       ),
@@ -442,6 +445,15 @@ const pathsEqual = (
   left.length === right.length &&
   left.every((segment, index) => String(segment) === String(right[index]));
 
+export const pathPatternMatches = (
+  pattern: readonly unknown[],
+  path: readonly unknown[],
+): boolean =>
+  pattern.length === path.length &&
+  pattern.every((segment, index) =>
+    String(segment) === "*" || String(segment) === String(path[index])
+  );
+
 const pathHasPrefix = (
   path: readonly unknown[],
   prefix: readonly unknown[],
@@ -473,7 +485,9 @@ const contractCandidatesForWrite = (
   const contracts: UiContract[] = [];
   if (write.schema !== undefined) {
     for (const entry of uiContractsFromSchema(write.schema)) {
-      if (pathsEqual(entry.path, []) || pathsEqual(entry.path, write.path)) {
+      if (
+        pathsEqual(entry.path, []) || pathPatternMatches(entry.path, write.path)
+      ) {
         contracts.push(entry.contract);
       }
     }
@@ -486,7 +500,9 @@ const contractCandidatesForWrite = (
       pathHasPrefix(write.path, input.target.path)
     ) {
       for (const entry of uiContractsFromSchema(input.schema)) {
-        if (pathsEqual([...input.target.path, ...entry.path], write.path)) {
+        if (
+          pathPatternMatches([...input.target.path, ...entry.path], write.path)
+        ) {
           contracts.push(entry.contract);
         }
       }
@@ -555,7 +571,7 @@ const contractCandidatesFromEventContext = (
       const alias = value.$alias;
       if (
         !Array.isArray(alias.path) ||
-        !pathsEqual(alias.path, write.path)
+        !pathHasPrefix(write.path, alias.path)
       ) {
         continue;
       }
@@ -570,7 +586,7 @@ const contractCandidatesFromEventContext = (
         continue;
       }
       for (const entry of uiContractsFromSchema(alias.schema as JSONSchema)) {
-        if (pathsEqual(entry.path, [])) {
+        if (pathPatternMatches([...alias.path, ...entry.path], write.path)) {
           contracts.push(entry.contract);
         }
       }

@@ -165,7 +165,7 @@ const joinChat = handler<
 export default pattern<LobbyInput, LobbyOutput>(
   ({ chatName, messages, users, sessionId }) => {
     // Name input for new users
-    const nameInput = Writable.of("");
+    const nameInput = new Writable("");
 
     const userCount = computed(() => users.get().length);
 

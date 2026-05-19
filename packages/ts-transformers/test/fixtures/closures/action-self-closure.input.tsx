@@ -18,7 +18,7 @@ interface TestOutput {
 // Context: SELF reference requires Default<> inputs so output schema is always satisfied
 export default pattern<{ title: Default<string, ""> }, TestOutput>(
   ({ title, [SELF]: self }) => {
-    const count = Writable.of(0);
+    const count = new Writable(0);
 
     // Action closing over `self` — works because all inputs use Default<>
     const showSelf = action((_: Record<string, never>) => {

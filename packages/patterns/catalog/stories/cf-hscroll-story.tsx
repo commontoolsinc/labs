@@ -11,8 +11,8 @@ interface HScrollStoryOutput {
 }
 
 export default pattern<HScrollStoryInput, HScrollStoryOutput>(() => {
-  const showScrollbar = Writable.of(true);
-  const fadeEdges = Writable.of(false);
+  const showScrollbar = new Writable(true);
+  const fadeEdges = new Writable(false);
 
   return {
     [NAME]: "cf-hscroll Story",

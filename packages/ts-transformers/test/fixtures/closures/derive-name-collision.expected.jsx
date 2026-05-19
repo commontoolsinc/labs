@@ -16,7 +16,7 @@ const __cfAmdHooks = undefined;
 //   derive(multiplier, fn) → derive(schema, schema, { multiplier, multiplier_1 }, fn)
 //   callback: `multiplier.get()` (capture) → `multiplier_1.get()`
 export default pattern(() => {
-    const multiplier = Writable.of(2, {
+    const multiplier = new Writable(2, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("multiplier", true);
     // Input name collides with capture name

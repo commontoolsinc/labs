@@ -97,13 +97,13 @@ export default pattern<Input>(({ expenses, budgets }) => {
   const todayDate = getTodayDate();
 
   // Local state for form inputs
-  const newDescription = Writable.of("");
-  const newAmount = Writable.of("");
-  const newCategory = Writable.of("Other");
+  const newDescription = new Writable("");
+  const newAmount = new Writable("");
+  const newCategory = new Writable("Other");
 
   // Budget form inputs
-  const budgetCategory = Writable.of("");
-  const budgetLimit = Writable.of("");
+  const budgetCategory = new Writable("");
+  const budgetLimit = new Writable("");
 
   // Counts for display
   const expenseCount = computed(() => expenses.get().length);

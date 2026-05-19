@@ -33,8 +33,8 @@ export default pattern<HabitTrackerInput, HabitTrackerOutput>(
   ({ habits, logs }) => {
     const todayTimestamp = safeDateNow();
     const todayDate = toDateString(todayTimestamp);
-    const newHabitName = Writable.of("");
-    const newHabitIcon = Writable.of("✓");
+    const newHabitName = new Writable("");
+    const newHabitIcon = new Writable("✓");
 
     const habitCount = computed(() => habits.get().length);
     const summary = computed(() => {
