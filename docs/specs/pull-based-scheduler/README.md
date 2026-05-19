@@ -115,6 +115,7 @@ Find actions that read X (via trigger index)
 For each triggered action:
     Effect → add to pending, queue execution
     Computation → mark dirty, propagate to dependents, schedule affected effects
+    Materializer computation → mark dirty and queue idle pull work
 ```
 
 The trigger index groups actions by the cells they read, so finding affected
@@ -154,16 +155,29 @@ for (const effect of workSet) {
 }
 ```
 
-The `collectDirtyDependencies` function finds dirty computations that write to cells the action reads.
+The `collectDirtyDependencies` function finds dirty computations that write to
+cells the action reads. It also consults the materializer envelope index even
+when the demand root is merely pending rather than stale, because a pending
+effect or event can read a materialized target before normal stale propagation
+has an exact edge.
 
 ### 4. Topological Sort
 
 Actions are sorted so dependencies run before dependents:
 
 ```typescript
-function topologicalSort(actions, dependencies, mightWrite, actionParent, dependents) {
+function topologicalSort(
+  actions,
+  dependencies,
+  mightWrite,
+  actionParent,
+  dependents,
+  getAdditionalWrites, // materializer envelopes in pull mode
+) {
   // Build graph: action A → action B if A writes something B reads
   // In pull mode, prefer the incrementally maintained dependents graph.
+  // Add materializer-envelope edges for this work set without mutating the
+  // normal writer/dependent indexes.
   // Add parent → child edges only when they do not oppose data dependencies.
   // Kahn's algorithm with cycle handling
 }
@@ -455,6 +469,8 @@ Push mode schedules every remaining triggered action with debounce. Pull mode:
 - Marks triggered computations dirty/stale.
 - Schedules downstream effects that transitively depend on the dirty
   computation.
+- For materializer computations, stops at the materializer and queues execution
+  instead of scheduling downstream effects from the broad envelope.
 
 When trigger tracing is enabled, each matched change records a bounded
 `TriggerTraceEntry` with the notification type, change index, before/after value
@@ -506,9 +522,13 @@ Pull mode:
 - Builds an iteration seed set, then recursively pulls dirty computations needed
   by those seeds.
 - Topologically sorts the work set using dependencies, current scheduling
-  writes, parent-child edges, and the dependents graph.
+  writes, parent-child edges, the dependents graph, and pull-only materializer
+  envelope edges for the current work set.
 - Clears dirty flags for effects up front; if an effect is re-dirtied before it
   runs, it is treated as part of a cycle and skipped until a future tick.
+- Before an effect runs, rechecks for dirty materializer dependencies that may
+  have appeared after the work set was built. If any overlap the effect reads,
+  the effect remains pending and the materializer is run first.
 - Skips unsubscribed actions, non-runnable pull actions, debounced computations,
   throttled actions, and conditionally scheduled effects whose inputs did not
   actually change.
@@ -583,7 +603,9 @@ When computations write changed data, the scheduler records the changed write
 addresses in `changedWritesHistory`. After the run, the scheduler finds readers
 of those changed writes through the trigger index. Reader effects are scheduled
 directly. Reader computations are marked dirty and their affected downstream
-effects are scheduled.
+effects are scheduled. If a reader computation is itself a materializer,
+dirtying stops there and it is queued/coalesced instead of scheduling
+downstream effects from its envelope.
 
 Pull-mode storage notification handling can also conditionally schedule
 downstream effects and remember the history index at which the effect was
