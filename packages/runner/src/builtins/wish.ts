@@ -882,7 +882,10 @@ function projectWishCellValue(
   schema: unknown,
 ): unknown {
   if (schema === undefined) return cell;
-  return cell.asSchema(schema as JSONSchema).getAsLink({ includeSchema: true });
+  return cell.asSchema(schema as JSONSchema).getAsLink({
+    includeSchema: true,
+    keepAsCell: true,
+  });
 }
 
 function createWishCandidatesCell(
@@ -898,20 +901,10 @@ function createWishCandidatesCell(
   return runtime.getImmutableCell(space, values, undefined, tx);
 }
 
-function schemaAsCell(schema: unknown): JSONSchema {
-  if (schema && typeof schema === "object") {
-    return {
-      ...(JSON.parse(JSON.stringify(schema)) as Record<string, unknown>),
-      asCell: ["cell"],
-    };
-  }
-  return { asCell: ["cell"] };
-}
-
 function wishStateSchemaForResult(schema: unknown): JSONSchema | undefined {
   if (schema === undefined) return undefined;
-  const resultSchema = schemaAsCell(schema);
-  const candidateSchema = schemaAsCell(schema);
+  const resultSchema = JSON.parse(JSON.stringify(schema)) as JSONSchema;
+  const candidateSchema = JSON.parse(JSON.stringify(schema)) as JSONSchema;
   return internSchema({
     type: "object",
     properties: {
@@ -982,7 +975,10 @@ function sharedWishCellValue(
 ): unknown {
   const wishStateSchema = wishStateSchemaForResult(schema);
   if (!wishStateSchema) return cell;
-  return cell.asSchema(wishStateSchema).getAsLink({ includeSchema: true });
+  return cell.asSchema(wishStateSchema).getAsLink({
+    includeSchema: true,
+    keepAsCell: true,
+  });
 }
 
 const TARGET_SCHEMA = internSchema(

@@ -240,6 +240,173 @@ describe("wish built-in", () => {
     expect(result.key("firstMentionable").get()?.result).toEqual("Alpha");
   });
 
+  it("preserves writable cells in typed #mentionable wish projections", async () => {
+    const spaceCell = runtime.getCell(space, space).withTx(tx);
+    const defaultPatternCell = runtime.getCell(space, "default-pattern").withTx(
+      tx,
+    );
+    defaultPatternCell.set({
+      backlinksIndex: {
+        mentionable: [
+          { [NAME]: "Alpha", summary: "First summary" },
+          { [NAME]: "Beta", summary: "Second summary" },
+        ],
+      },
+    });
+    (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
+
+    await tx.commit();
+    await runtime.idle();
+    tx = runtime.edit();
+
+    const program = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "import { computed, Default, NAME, pattern, wish, Writable } from 'commonfabric';",
+            "type Piece = { [NAME]?: string; summary?: string };",
+            "export default pattern<{}>(() => {",
+            "  const plain = wish<Piece[]>({ query: '#mentionable' }).result;",
+            "  const writableArray = wish<Writable<Piece>[]>({ query: '#mentionable' }).result;",
+            "  const writableDefault = wish<Writable<Piece>[] | Default<[]>>({ query: '#mentionable' }).result;",
+            "  const writableItem = wish<Writable<Piece>>({ query: '#mentionable/0' }).result;",
+            "  const checks = computed(() => {",
+            "    const firstPlain = Array.isArray(plain) ? plain[0] : undefined;",
+            "    const firstWritable = Array.isArray(writableArray) ? writableArray[0] : undefined;",
+            "    const firstDefault = Array.isArray(writableDefault) ? writableDefault[0] : undefined;",
+            "    return {",
+            "      plainIsArray: Array.isArray(plain),",
+            "      plainFirstHasGet: typeof (firstPlain as any)?.get === 'function',",
+            "      plainFirstName: firstPlain?.[NAME],",
+            "      writableArrayIsArray: Array.isArray(writableArray),",
+            "      writableFirstHasGet: typeof firstWritable?.get === 'function',",
+            "      writableFirstName: firstWritable?.get?.()?.[NAME],",
+            "      defaultUnionIsArray: Array.isArray(writableDefault),",
+            "      defaultUnionFirstHasGet: typeof firstDefault?.get === 'function',",
+            "      defaultUnionFirstName: firstDefault?.get?.()?.[NAME],",
+            "      itemHasGet: typeof writableItem?.get === 'function',",
+            "      itemName: writableItem?.get?.()?.[NAME],",
+            "    };",
+            "  });",
+            "  return { checks };",
+            "});",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const compiled = await runtime.patternManager.compilePattern(program);
+    const patternId = runtime.patternManager.registerPattern(compiled, program);
+    const loadedPattern = await runtime.patternManager.loadPattern(
+      patternId,
+      space,
+      tx,
+    );
+
+    const resultCell = runtime.getCell<{ checks?: Record<string, unknown> }>(
+      space,
+      "wish typed mentionable result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, loadedPattern, {}, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+
+    expect(result.key("checks").get()).toEqual({
+      plainIsArray: true,
+      plainFirstHasGet: false,
+      plainFirstName: "Alpha",
+      writableArrayIsArray: true,
+      writableFirstHasGet: true,
+      writableFirstName: "Alpha",
+      defaultUnionIsArray: true,
+      defaultUnionFirstHasGet: true,
+      defaultUnionFirstName: "Alpha",
+      itemHasGet: true,
+      itemName: "Alpha",
+    });
+  });
+
+  it("supports SummaryIndex-style iteration over writable mentionable wishes", async () => {
+    const spaceCell = runtime.getCell(space, space).withTx(tx);
+    const defaultPatternCell = runtime.getCell(space, "default-pattern").withTx(
+      tx,
+    );
+    defaultPatternCell.set({
+      backlinksIndex: {
+        mentionable: [
+          { [NAME]: "Alpha", summary: "First summary" },
+          { [NAME]: "Beta" },
+          { [NAME]: "Gamma", summary: "Third summary" },
+        ],
+      },
+    });
+    (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
+
+    await tx.commit();
+    await runtime.idle();
+    tx = runtime.edit();
+
+    const program = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            "import { computed, Default, NAME, pattern, wish, Writable } from 'commonfabric';",
+            "type Piece = { [NAME]?: string; summary?: string };",
+            "export default pattern<{}>(() => {",
+            "  const mentionable = wish<Writable<Piece>[] | Default<[]>>({ query: '#mentionable' }).result;",
+            "  const entries = computed(() => {",
+            "    const result: { name: string; summary: string }[] = [];",
+            "    for (const piece of (Array.isArray(mentionable) ? mentionable : [])) {",
+            "      if (!piece) continue;",
+            "      const value = piece.get();",
+            "      if (!value.summary) continue;",
+            "      result.push({ name: (value[NAME] ?? '').toString(), summary: value.summary });",
+            "    }",
+            "    return result;",
+            "  });",
+            "  return { entries };",
+            "});",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const compiled = await runtime.patternManager.compilePattern(program);
+    const patternId = runtime.patternManager.registerPattern(compiled, program);
+    const loadedPattern = await runtime.patternManager.loadPattern(
+      patternId,
+      space,
+      tx,
+    );
+
+    const resultCell = runtime.getCell<{
+      entries?: { name: string; summary: string }[];
+    }>(
+      space,
+      "wish summary-index iteration result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, loadedPattern, {}, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+
+    expect(result.key("entries").get()).toEqual([
+      { name: "Alpha", summary: "First summary" },
+      { name: "Gamma", summary: "Third summary" },
+    ]);
+  });
+
   it("resolves recent pieces via #recent", async () => {
     const spaceCell = runtime.getCell(space, space).withTx(tx);
     const recentPiecesCell = runtime.getCell(space, "recent-pieces", {
