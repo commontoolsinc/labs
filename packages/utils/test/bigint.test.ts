@@ -71,8 +71,14 @@ const rawFixtures: Set<bigint> = new Set();
     rawFixtures.add(i);
   }
 
-  // Many nines!
+  // Many nines, decimal edition!
   for (let i = 999n; i < (1n << 200n); i = (i * 10n) + 9n) {
+    rawFixtures.add(i);
+    rawFixtures.add(-i);
+  }
+
+  // Many nines, hex edition!
+  for (let i = 0x999n; i < (1n << 200n); i = (i << 4n) + 0x09n) {
     rawFixtures.add(i);
     rawFixtures.add(-i);
   }
