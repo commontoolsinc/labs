@@ -5,6 +5,14 @@ import {
   bigintToMinimalTwosComplement,
 } from "@commonfabric/utils/bigint";
 import {
+  bigintFromMtcDirect,
+  bigintToMtcDirect,
+} from "../src/bigint-uint8-direct.ts";
+import {
+  bigintFromMtcHex,
+  bigintToMtcHex,
+} from "../src/bigint-uint8-hex-string.ts";
+import {
   fromBase64url,
   toUnpaddedBase64url,
 } from "@commonfabric/utils/base64url";
@@ -237,62 +245,76 @@ describe("`referenceEncode()` (test oracle)", () => {
 // Per-function fixture loops
 //
 
-const FIXTURE_SLICE_SIZE = 1000;
-for (let at = 0; at < fixtures.length; at += FIXTURE_SLICE_SIZE) {
-  const slice = fixtures.slice(at, at + FIXTURE_SLICE_SIZE);
-  const sliceLabel = `fixtures ${at}..${at + slice.length - 1}`;
+for (
+  const { biToMtc, biFromMtc, full } of [
+    {
+      biToMtc: bigintToMinimalTwosComplement,
+      biFromMtc: bigintFromMinimalTwosComplement,
+      full: false,
+    },
+    { biToMtc: bigintToMtcDirect, biFromMtc: bigintFromMtcDirect, full: true },
+    { biToMtc: bigintToMtcHex, biFromMtc: bigintFromMtcHex, full: true },
+  ]
+) {
+  const FIXTURE_SLICE_SIZE = 1000;
+  for (let at = 0; at < fixtures.length; at += FIXTURE_SLICE_SIZE) {
+    const slice = full
+      ? fixtures.slice(at, at + FIXTURE_SLICE_SIZE)
+      : fixtures.slice(at, at + 5);
+    const sliceLabel = `fixtures ${at}..${at + slice.length - 1}`;
 
-  describe("bigintToMinimalTwosComplement()", () => {
-    it(`correctly encodes ${sliceLabel}`, () => {
-      for (let i = 0; i < slice.length; i++) {
-        const { value, encoded, label } = slice[i];
-        try {
-          expect(bigintToMinimalTwosComplement(value)).toEqual(encoded);
-        } catch (e) {
-          throw new Error(`Failed on ${label}.`, { cause: e });
+    describe(`${biToMtc.name}()`, () => {
+      it(`correctly encodes ${sliceLabel}`, () => {
+        for (let i = 0; i < slice.length; i++) {
+          const { value, encoded, label } = slice[i];
+          try {
+            expect(biToMtc(value)).toEqual(encoded);
+          } catch (e) {
+            throw new Error(`Failed on ${label}.`, { cause: e });
+          }
         }
-      }
+      });
     });
-  });
 
-  describe("bigintFromMinimalTwosComplement()", () => {
-    it(`correctly decodes ${sliceLabel}`, () => {
-      for (let i = 0; i < slice.length; i++) {
-        const { value, encoded, label } = slice[i];
-        try {
-          expect(bigintFromMinimalTwosComplement(encoded)).toBe(value);
-        } catch (e) {
-          throw new Error(`Failed on ${label}.`, { cause: e });
+    describe(`${biFromMtc.name}()`, () => {
+      it(`correctly decodes ${sliceLabel}`, () => {
+        for (let i = 0; i < slice.length; i++) {
+          const { value, encoded, label } = slice[i];
+          try {
+            expect(biFromMtc(encoded)).toBe(value);
+          } catch (e) {
+            throw new Error(`Failed on ${label}.`, { cause: e });
+          }
         }
-      }
+      });
     });
-  });
 
-  describe("round trip through base64url", () => {
-    it(`correctly round-trips ${sliceLabel}`, () => {
-      for (let i = 0; i < slice.length; i++) {
-        const { value, label } = slice[i];
-        const bytes = bigintToMinimalTwosComplement(value);
-        const b64 = toUnpaddedBase64url(bytes);
-        const decodedBytes = fromBase64url(b64);
-        try {
-          expect(bigintFromMinimalTwosComplement(decodedBytes)).toBe(value);
-        } catch (e) {
-          throw new Error(`Failed on ${label}.`, { cause: e });
+    describe(`${biToMtc.name}()->${biFromMtc.name}() round trip through base64url`, () => {
+      it(`correctly round-trips ${sliceLabel}`, () => {
+        for (let i = 0; i < slice.length; i++) {
+          const { value, label } = slice[i];
+          const bytes = biToMtc(value);
+          const b64 = toUnpaddedBase64url(bytes);
+          const decodedBytes = fromBase64url(b64);
+          try {
+            expect(biFromMtc(decodedBytes)).toBe(value);
+          } catch (e) {
+            throw new Error(`Failed on ${label}.`, { cause: e });
+          }
         }
-      }
+      });
+    });
+  }
+
+  //
+  // Edge cases
+  //
+
+  describe(`${biFromMtc.name}()`, () => {
+    it("throws on empty input", () => {
+      expect(() => biFromMtc(new Uint8Array([]))).toThrow(
+        "empty input",
+      );
     });
   });
 }
-
-//
-// Edge cases
-//
-
-describe("bigintFromMinimalTwosComplement()", () => {
-  it("throws on empty input", () => {
-    expect(() => bigintFromMinimalTwosComplement(new Uint8Array([]))).toThrow(
-      "empty input",
-    );
-  });
-});
