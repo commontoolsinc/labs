@@ -719,7 +719,6 @@ Deno.test("map updates when derived list is narrowed by session input", async ()
       lastNode: "writeRedirect",
     });
     const bodiesLink = parseLink(rawBodies, result);
-    // FIXME(@ubik2): this test fails because rawBodies is [] and link is scope space
     assertEquals(bodiesLink?.scope, "session");
     assertEquals(result.key("bodies").get() as unknown, []);
 
