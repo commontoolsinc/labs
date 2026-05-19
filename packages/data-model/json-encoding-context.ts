@@ -482,10 +482,10 @@ export class JsonEncodingContext implements SerializationContext<string> {
       if (cls) {
         if (this.lenient) {
           try {
-            return deepFreeze(cls[RECONSTRUCT](
+            return cls[RECONSTRUCT](
               deserializedState,
               runtime,
-            )) as unknown as FabricValue;
+            ) as unknown as FabricValue;
           } catch (e: unknown) {
             return new ProblematicValue(
               tag,
@@ -494,10 +494,10 @@ export class JsonEncodingContext implements SerializationContext<string> {
             ) as unknown as FabricValue;
           }
         }
-        return deepFreeze(cls[RECONSTRUCT](
+        return cls[RECONSTRUCT](
           deserializedState,
           runtime,
-        )) as unknown as FabricValue;
+        ) as unknown as FabricValue;
       }
 
       // Unknown type: preserve for round-tripping.

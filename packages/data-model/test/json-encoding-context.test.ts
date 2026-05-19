@@ -6,7 +6,7 @@ import type { JsonWireValue } from "../json-type-handlers.ts";
 import { UnknownValue } from "../unknown-value.ts";
 import { ProblematicValue } from "../problematic-value.ts";
 import { FabricEpochDays, FabricEpochNsec } from "../fabric-epoch.ts";
-import { FabricError, FabricRegExp } from "../fabric-native-instances.ts";
+import { FabricError } from "../fabric-native-instances.ts";
 import { isDeepFrozen } from "../deep-freeze.ts";
 import { BaseReconstructionContext } from "../base-reconstruction-context.ts";
 import {
@@ -1894,56 +1894,6 @@ describe("JsonEncodingContext", () => {
     it("lenient can be set to true", () => {
       const ctx = new JsonEncodingContext({ lenient: true });
       expect(ctx.lenient).toBe(true);
-    });
-  });
-
-  // --------------------------------------------------------------------------
-  // Deserialize-boundary deep-freeze (F1 R5)
-  // --------------------------------------------------------------------------
-
-  describe("deserialize boundary deep-freezes egress values", () => {
-    it("class-registry path: decoded FabricError is deep-frozen", () => {
-      const { context, runtime } = makeTestContext();
-      const encoded = context.encode(
-        new FabricError(new Error("boundary")) as FabricValue,
-      );
-      const decoded = context.decode(encoded, runtime);
-      expect(decoded).toBeInstanceOf(FabricError);
-      const fe = decoded as unknown as FabricError;
-      expect(Object.isFrozen(fe)).toBe(true);
-      expect(Object.isFrozen(fe.error)).toBe(true);
-    });
-
-    it("class-registry path: decoded FabricRegExp is deep-frozen", () => {
-      // Regression: FabricRegExp.[RECONSTRUCT] yields an unfrozen inner
-      // RegExp; the R5 deepFreeze wrap must freeze it in place, not throw.
-      const { context, runtime } = makeTestContext();
-      const encoded = context.encode(
-        new FabricRegExp(/abc/g) as unknown as FabricValue,
-      );
-      const decoded = context.decode(encoded, runtime);
-      expect(decoded).toBeInstanceOf(FabricRegExp);
-      const fr = decoded as unknown as FabricRegExp;
-      expect(Object.isFrozen(fr)).toBe(true);
-      expect(Object.isFrozen(fr.regex)).toBe(true);
-    });
-
-    it("lenient path: ProblematicValue from failed reconstruct is frozen", () => {
-      // The lenient catch produces a ProblematicValue; the R5 wrap must
-      // deep-freeze it (not crash on it -- it is the value lenient mode
-      // produces precisely to avoid crashing).
-      const ctx = new JsonEncodingContext({ lenient: true });
-      const runtime: ReconstructionContext = {
-        getCell(_ref) {
-          throw new Error("not implemented");
-        },
-      };
-      const decoded = ctx.decode(
-        ENCODING_PREFIX + JSON.stringify({ "/BigInt@1": { bad: true } }),
-        runtime,
-      );
-      expect(decoded).toBeInstanceOf(ProblematicValue);
-      expect(Object.isFrozen(decoded as object)).toBe(true);
     });
   });
 
