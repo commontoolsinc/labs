@@ -1862,6 +1862,9 @@ export class Runner {
     tx: IExtendedStorageTransaction,
     outputCells: readonly NormalizedFullLink[],
   ): NormalizedFullLink[] {
+    // Write redirects are the static writable-output form: resolving them here
+    // lets pull-mode indexing treat the resolved target like a normal declared
+    // write. Dynamic writable-input writes use materializer envelopes instead.
     if (!outputCells.some((link) => link.overwrite === "redirect")) {
       return [];
     }
@@ -1877,9 +1880,14 @@ export class Runner {
           "writeRedirect",
         );
         targets.push(target);
-      } catch {
-        // The populateDependencies fallback will collect runtime evidence after
-        // the process cell is fully materialized.
+      } catch (error) {
+        // Some setup paths have not fully materialized process-cell redirects
+        // yet. Leave those to runtime dependency collection after the action
+        // has run, but keep debug context for unexpected resolution failures.
+        logger.debug("static-redirect-write-target", () => [
+          "Unable to resolve static redirect write target",
+          { output, error },
+        ]);
       }
     }
     return dedupeNormalizedLinks(targets);

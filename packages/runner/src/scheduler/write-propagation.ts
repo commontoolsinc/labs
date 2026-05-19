@@ -73,6 +73,10 @@ export function markReadersDirtyForChangedWrites(
     } else if (state.computations.has(reader)) {
       state.markDirty(reader);
       if (isAncestorAction(state.actionParent, sourceAction, reader)) {
+        // Continuations are only for actions in the scheduler parent chain.
+        // Dependency edges already schedule ordinary downstream readers; this
+        // handles the narrower case where a child created during a pull writes
+        // something its already-run parent read.
         state.markPullDemandContinuation(reader);
         state.pending.add(reader);
         state.queueExecution();

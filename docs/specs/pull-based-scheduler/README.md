@@ -507,7 +507,11 @@ Runnable pull seeds include:
 - Computations demanded through a live effect, a demanded parent context, or
   `pullDemandedFirstRunComputations`.
 - Computations marked as pull-demand continuations after a child computation
-  writes data that an ancestor read earlier in the same pull.
+  writes data that a scheduler-parent ancestor read earlier in the same pull.
+  This is deliberately based on `actionParent`, not arbitrary dependency edges:
+  normal reader/writer edges already schedule downstream readers, while
+  continuations let an already-run parent converge when its dynamically created
+  child produces data the parent sampled.
 
 A computation is demanded when it has a transitive live-effect dependent or is
 inside a demanded parent context. An effect with no scheduling writes is a pull

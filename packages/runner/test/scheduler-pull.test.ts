@@ -846,6 +846,68 @@ describe("pull-based scheduling", () => {
     expect(effectResult.get()).toBe(11);
   });
 
+  it("should continue a parent pull when a child writes a parent read", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const source = runtime.getCell<number>(
+      space,
+      "pull-continuation-source",
+      undefined,
+      tx,
+    );
+    source.set(3);
+    const childResult = runtime.getCell<number>(
+      space,
+      "pull-continuation-child-result",
+      undefined,
+      tx,
+    );
+    childResult.set(0);
+    const parentResult = runtime.getCell<number>(
+      space,
+      "pull-continuation-parent-result",
+      undefined,
+      tx,
+    );
+    parentResult.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let childSubscribed = false;
+    let parentRuns = 0;
+    let childRuns = 0;
+
+    const child: Action = (actionTx) => {
+      childRuns++;
+      childResult.withTx(actionTx).send(source.withTx(actionTx).get() ?? 0);
+    };
+
+    const parent: Action = (actionTx) => {
+      parentRuns++;
+      if (!childSubscribed) {
+        childSubscribed = true;
+        runtime.scheduler.subscribe(child, {
+          reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+          shallowReads: [],
+          writes: [toMemorySpaceAddress(childResult.getAsNormalizedFullLink())],
+        });
+      }
+      parentResult.withTx(actionTx).send(
+        (childResult.withTx(actionTx).get() ?? 0) + 1,
+      );
+    };
+
+    runtime.scheduler.subscribe(parent, {
+      reads: [toMemorySpaceAddress(childResult.getAsNormalizedFullLink())],
+      shallowReads: [],
+      writes: [toMemorySpaceAddress(parentResult.getAsNormalizedFullLink())],
+    });
+
+    expect(await parentResult.pull()).toBe(4);
+    expect(parentRuns).toBe(2);
+    expect(childRuns).toBe(1);
+  });
+
   it("should first-run child computations created by demand-root effects", async () => {
     runtime.scheduler.enablePullMode();
 
