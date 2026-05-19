@@ -2,13 +2,14 @@
  * BigInt encoding/decoding performance benchmarks.
  *
  * Measures `bigintToMinimalTwosComplement()` and
- * `bigintFromMinimalTwosComplement()` across the full byte-length spectrum,
- * with separate positive/negative tracks. Sizes 1-127 sweep in single-byte
- * steps so several discontinuities are visible: the 8-byte fast-path boundary
- * (both directions switch from a `DataView.{set,get}BigUint64()` fast path to
- * a per-byte fallback) and the 32-byte large-negative-decoder crossover.
- * Sizes 128, 256, 512 sample the deep-fallback regime; 1008..1039 brackets
- * 1024 to expose `partials` cost (`bytes.length & 7`) at very large sizes.
+ * `bigintFromMinimalTwosComplement()` using both implementations and across the
+ * full byte-length spectrum, with separate positive/negative tracks. Sizes
+ * 1-127 sweep in single-byte steps so several discontinuities are visible: the
+ * 8-byte fast-path boundary (both directions switch from a
+ * `DataView.{set,get}BigUint64()` fast path to a per-byte fallback) and the
+ * 32-byte large-negative-decoder crossover. Sizes 128, 256, 512 sample the
+ * deep-fallback regime; 1008..1039 brackets 1024 to expose `partials` cost
+ * (`bytes.length & 7`) at very large sizes.
  *
  * Each iteration of a benchmark function processes a fixed BATCH of values
  * pre-generated with a deterministic xorshift RNG, so JIT specialization on
@@ -30,9 +31,13 @@
  */
 
 import {
-  bigintFromMinimalTwosComplement,
-  bigintToMinimalTwosComplement,
-} from "@commonfabric/utils/bigint";
+  bigintFromMtcDirect,
+  bigintToMtcDirect,
+} from "../src/bigint-uint8-direct.ts";
+import {
+  bigintFromMtcHex,
+  bigintToMtcHex,
+} from "../src/bigint-uint8-hex-string.ts";
 
 const BATCH = 64;
 
@@ -92,75 +97,82 @@ function makeBatch(bytes: number, sign: 1n | -1n, seed: number): bigint[] {
   return out;
 }
 
-function encodeBatch(values: bigint[]): Uint8Array[] {
-  return values.map((v) => bigintToMinimalTwosComplement(v));
-}
+for (
+  const { biToMtc, biFromMtc } of [
+    { biToMtc: bigintToMtcDirect, biFromMtc: bigintFromMtcDirect },
+    { biToMtc: bigintToMtcHex, biFromMtc: bigintFromMtcHex },
+  ]
+) {
+  const encodeBatch = (values: bigint[]): Uint8Array[] => {
+    return values.map((v) => biToMtc(v));
+  };
 
-// Warm up both directions to avoid measuring JIT compilation in the first
-// reported bucket.
-{
-  const warmSmallVals = makeBatch(8, 1n, 1);
-  const warmLargeVals = makeBatch(64, -1n, 2);
-  const warmSmallBytes = encodeBatch(warmSmallVals);
-  const warmLargeBytes = encodeBatch(warmLargeVals);
-  for (let i = 0; i < 200; i++) {
-    for (const v of warmSmallVals) bigintToMinimalTwosComplement(v);
-    for (const v of warmLargeVals) bigintToMinimalTwosComplement(v);
-    for (const b of warmSmallBytes) bigintFromMinimalTwosComplement(b);
-    for (const b of warmLargeBytes) bigintFromMinimalTwosComplement(b);
+  // Warm up both directions to avoid measuring JIT compilation in the first
+  // reported bucket.
+  {
+    const warmSmallVals = makeBatch(8, 1n, 1);
+    const warmLargeVals = makeBatch(64, -1n, 2);
+    const warmSmallBytes = encodeBatch(warmSmallVals);
+    const warmLargeBytes = encodeBatch(warmLargeVals);
+    for (let i = 0; i < 200; i++) {
+      for (const v of warmSmallVals) biToMtc(v);
+      for (const v of warmLargeVals) biToMtc(v);
+      for (const b of warmSmallBytes) biFromMtc(b);
+      for (const b of warmLargeBytes) biFromMtc(b);
+    }
   }
-}
 
-for (const bytes of BYTE_SIZES) {
-  const positives = makeBatch(bytes, 1n, bytes * 31 + 1);
-  const negatives = makeBatch(bytes, -1n, bytes * 31 + 2);
-  const positiveBytes = encodeBatch(positives);
-  const negativeBytes = encodeBatch(negatives);
-  // Pad the group key so Deno bench's grouped output sorts in size order.
-  const groupKey = String(bytes).padStart(4, "0");
-  const encodeGroup = `encode-${groupKey}B`;
-  const decodeGroup = `decode-${groupKey}B`;
-  const label = `${bytes}B`;
+  for (const bytes of BYTE_SIZES) {
+    const positives = makeBatch(bytes, 1n, bytes * 31 + 1);
+    const negatives = makeBatch(bytes, -1n, bytes * 31 + 2);
+    const positiveBytes = encodeBatch(positives);
+    const negativeBytes = encodeBatch(negatives);
+    // Pad the group key so Deno bench's grouped output sorts in size order.
+    const groupKey = String(bytes).padStart(4, "0");
+    const encodeGroup = `encode-${groupKey}B`;
+    const decodeGroup = `decode-${groupKey}B`;
+    const label = `${bytes}B`;
 
-  Deno.bench({
-    name: `encode positive ${label} (${BATCH} ops)`,
-    group: encodeGroup,
-    baseline: true,
-    fn() {
-      for (let i = 0; i < BATCH; i++) {
-        bigintToMinimalTwosComplement(positives[i]);
-      }
-    },
-  });
+    Deno.bench({
+      name: `encode positive ${label} (${BATCH} ops)`,
+      group: encodeGroup,
+      baseline: true,
+      fn() {
+        for (let i = 0; i < BATCH; i++) {
+          biToMtc(positives[i]);
+        }
+      },
+    });
 
-  Deno.bench({
-    name: `encode negative ${label} (${BATCH} ops)`,
-    group: encodeGroup,
-    fn() {
-      for (let i = 0; i < BATCH; i++) {
-        bigintToMinimalTwosComplement(negatives[i]);
-      }
-    },
-  });
+    Deno.bench({
+      name: `encode negative ${label} (${BATCH} ops)`,
+      group: encodeGroup,
+      fn() {
+        for (let i = 0; i < BATCH; i++) {
+          biToMtc(negatives[i]);
+        }
+      },
+    });
 
-  Deno.bench({
-    name: `decode positive ${label} (${BATCH} ops)`,
-    group: decodeGroup,
-    baseline: true,
-    fn() {
-      for (let i = 0; i < BATCH; i++) {
-        bigintFromMinimalTwosComplement(positiveBytes[i]);
-      }
-    },
-  });
+    Deno.bench({
+      name: `decode positive ${label} (${BATCH} ops)`,
+      group: decodeGroup,
+      baseline: true,
+      fn() {
+        for (let i = 0; i < BATCH; i++) {
+          biFromMtc(positiveBytes[i]);
+        }
+      },
+    });
 
-  Deno.bench({
-    name: `decode negative ${label} (${BATCH} ops)`,
-    group: decodeGroup,
-    fn() {
-      for (let i = 0; i < BATCH; i++) {
-        bigintFromMinimalTwosComplement(negativeBytes[i]);
-      }
-    },
-  });
+    Deno.bench({
+      name: `decode negative ${label} (${BATCH} ops)`,
+      group: decodeGroup,
+      fn() {
+        for (let i = 0; i < BATCH; i++) {
+          biFromMtc(negativeBytes[i]);
+        }
+      },
+    });
+  }
 }
