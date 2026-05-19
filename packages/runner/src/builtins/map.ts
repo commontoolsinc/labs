@@ -80,7 +80,7 @@ export function map(
 
   return (tx: IExtendedStorageTransaction) => {
     const mappedInputs = inputsCell.asSchema(MAP_INPUT_SCHEMA).withTx(tx);
-    const { op } = mappedInputs.get();
+    const op = mappedInputs.key("op").get();
     const sourceListCell = inputsCell.key("list");
     const listLink = parseLink(
       sourceListCell.withTx(tx).getRaw(),
