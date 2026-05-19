@@ -1801,11 +1801,7 @@ function detectCellConstructorExpressionName(
   const name = resolved.getName();
   if (
     CELL_LIKE_CLASSES.has(name) &&
-    (
-      isCommonFabricSymbol(resolved) ||
-      isImportedFromCommonFabric(resolved) ||
-      isAmbientSymbol(resolved)
-    )
+    (isCommonFabricSymbol(resolved) || isImportedFromCommonFabric(resolved))
   ) {
     return name;
   }
