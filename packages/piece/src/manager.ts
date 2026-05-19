@@ -167,14 +167,26 @@ export class PieceManager {
       "getDefaultPattern.spaceCell.sync",
       () => this.spaceCell.key("defaultPattern").sync(),
     );
-    if (!cell.get().get()) {
+    const defaultPattern = cell.get();
+    if (!defaultPattern) {
+      return undefined;
+    }
+
+    await timePiecePhase(
+      "getDefaultPattern.defaultPattern.sync",
+      () => defaultPattern.sync(),
+    );
+    if (
+      defaultPattern.getRaw() === undefined &&
+      defaultPattern.getSourceCell() === undefined
+    ) {
       return undefined;
     }
     return await timePiecePhase(
       `getDefaultPattern.get(runIt=${runIt})`,
       () =>
         this.get(
-          cell.get(),
+          defaultPattern,
           runIt,
           nameSchema,
         ),

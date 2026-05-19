@@ -1,5 +1,9 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { Identity } from "@commonfabric/identity";
+import type { MemorySpace } from "@commonfabric/memory/interface";
+import * as MemoryV2Client from "@commonfabric/memory/v2/client";
+import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import {
   runtimeOptionsFromInitializationData,
   RuntimeProcessor,
@@ -17,6 +21,9 @@ import {
   getDataModelConfig,
   setDataModelConfig,
 } from "@commonfabric/data-model/fabric-value";
+import { Runtime } from "@commonfabric/runner";
+import * as V2Storage from "../../runner/src/storage/v2.ts";
+import { parseLink } from "../../runner/src/link-utils.ts";
 
 const withModernDataModel = async <T>(
   fn: () => Promise<T> | T,
@@ -28,6 +35,41 @@ const withModernDataModel = async <T>(
   } finally {
     setDataModelConfig(previousDataModel);
   }
+};
+
+const cfcSigner = await Identity.fromPassphrase(
+  "runtime-processor-cfc-label-tests",
+);
+
+class SharedV2SessionFactory implements V2Storage.SessionFactory {
+  constructor(private readonly server: MemoryV2Server.Server) {}
+
+  async create(space: MemorySpace) {
+    const client = await MemoryV2Client.connect({
+      transport: MemoryV2Client.loopback(this.server),
+    });
+    const session = await client.mount(space);
+    return { client, session };
+  }
+}
+
+class SharedV2StorageManager extends V2Storage.StorageManager {
+  constructor(options: V2Storage.Options, server: MemoryV2Server.Server) {
+    super(options, new SharedV2SessionFactory(server));
+  }
+}
+
+const createRuntime = () => {
+  const server = new MemoryV2Server.Server();
+  const storageManager = new SharedV2StorageManager({
+    as: cfcSigner,
+    address: new URL("memory://"),
+  }, server);
+  const runtime = new Runtime({
+    apiUrl: new URL("http://localhost/"),
+    storageManager,
+  });
+  return { runtime, storageManager };
 };
 
 describe("sanitizeForPostMessage", () => {
@@ -643,6 +685,283 @@ describe("RuntimeProcessor CFC label IPC", () => {
     });
     expect(resultSynced).toBe(true);
     expect(sourceSynced).toBe(true);
+  });
+
+  it("ignores schema-bearing anyOf refs when reading nested stored labels", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const pieceSchema = {
+        $ref: "#/$defs/TrustedMessage",
+        $defs: {
+          TrustedMessage: {
+            anyOf: [
+              { $ref: "#/$defs/TrustedMessageAlice" },
+              { $ref: "#/$defs/TrustedMessageBob" },
+            ],
+          },
+          TrustedMessageAlice: {
+            type: "object",
+            properties: {
+              id: {
+                type: "string",
+                enum: ["alice"],
+              },
+              body: { type: "string" },
+            },
+            required: ["id", "body"],
+            ifc: {
+              integrity: [{
+                kind: "authored-by",
+                subject: "alice",
+              }],
+            },
+          },
+          TrustedMessageBob: {
+            type: "object",
+            properties: {
+              id: {
+                type: "string",
+                enum: ["bob"],
+              },
+              body: { type: "string" },
+            },
+            required: ["id", "body"],
+            ifc: {
+              integrity: [{
+                kind: "authored-by",
+                subject: "bob",
+              }],
+            },
+          },
+        },
+      } as const;
+      const rootSchema = {
+        type: "object",
+        properties: {
+          messages: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                piece: pieceSchema,
+              },
+              required: ["piece"],
+            },
+          },
+        },
+        required: ["messages"],
+      } as const;
+
+      const root = runtime.getCell(
+        cfcSigner.did(),
+        "cfc-label-repro",
+        rootSchema,
+      );
+      const tx = runtime.edit() as any;
+      tx.setCfcEnforcementMode("enforce-explicit");
+      (root.withTx(tx) as any).set({
+        messages: [{ piece: { id: "alice", body: "hello" } }],
+      });
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.ok).toBeDefined();
+
+      const replica = storageManager.open(cfcSigner.did())
+        .replica as unknown as {
+          getDocument(id: string): {
+            value?: { messages?: unknown[] };
+          } | undefined;
+        };
+      const rootId = parseLink(root.getAsLink()).id!;
+      const nestedId = parseLink(
+        replica.getDocument(rootId)?.value?.messages?.[0],
+      )!.id!;
+      const processor = { runtime } as unknown as RuntimeProcessor;
+
+      const response = await RuntimeProcessor.prototype.handleCellGetCfcLabel
+        .call(
+          processor,
+          {
+            type: RequestType.CellGetCfcLabel,
+            cell: {
+              id: nestedId as CellRef["id"],
+              space: cfcSigner.did() as CellRef["space"],
+              scope: "space",
+              path: ["piece"],
+              schema: pieceSchema,
+            },
+          },
+        );
+      expect(response.cfcLabel).toBeDefined();
+      expect(response.cfcLabel?.version).toBe(1);
+      expect(response.cfcLabel?.entries).toEqual([{
+        path: [],
+        label: {
+          integrity: [{
+            kind: "authored-by",
+            subject: "alice",
+          }],
+        },
+      }]);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("reads nested stored labels after push when child refs rely on parent defs", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const rootSchema = {
+        type: "object",
+        properties: {
+          messages: {
+            type: "array",
+            items: {
+              $ref: "#/$defs/SharedMessageEntry",
+            },
+          },
+        },
+        required: ["messages"],
+        $defs: {
+          SharedMessageEntry: {
+            type: "object",
+            properties: {
+              piece: {
+                $ref: "#/$defs/TrustedMessage",
+              },
+            },
+            required: ["piece"],
+          },
+          TrustedMessage: {
+            anyOf: [
+              { $ref: "#/$defs/TrustedMessageAlice" },
+              { $ref: "#/$defs/TrustedMessageBob" },
+            ],
+          },
+          TrustedMessageAlice: {
+            type: "object",
+            properties: {
+              id: {
+                type: "string",
+                enum: ["alice-message"],
+              },
+              author: {
+                type: "object",
+                properties: {
+                  id: {
+                    type: "string",
+                    enum: ["alice"],
+                  },
+                },
+                required: ["id"],
+              },
+              body: { type: "string" },
+            },
+            required: ["id", "author", "body"],
+            ifc: {
+              integrity: [{
+                kind: "authored-by",
+                subject: "alice",
+              }],
+            },
+          },
+          TrustedMessageBob: {
+            type: "object",
+            properties: {
+              id: {
+                type: "string",
+                enum: ["bob-message"],
+              },
+              author: {
+                type: "object",
+                properties: {
+                  id: {
+                    type: "string",
+                    enum: ["bob"],
+                  },
+                },
+                required: ["id"],
+              },
+              body: { type: "string" },
+            },
+            required: ["id", "author", "body"],
+            ifc: {
+              integrity: [{
+                kind: "authored-by",
+                subject: "bob",
+              }],
+            },
+          },
+        },
+      } as const;
+
+      const root = runtime.getCell(
+        cfcSigner.did(),
+        "cfc-label-parent-defs-push",
+        rootSchema,
+      );
+
+      const seed = runtime.edit();
+      seed.setCfcEnforcementMode("enforce-explicit");
+      root.withTx(seed).set({ messages: [] });
+      seed.prepareCfc();
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      root.withTx(tx).key("messages").push({
+        piece: {
+          id: "alice-message",
+          author: { id: "alice" },
+          body: "hello",
+        },
+      });
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+
+      const replica = storageManager.open(cfcSigner.did())
+        .replica as unknown as {
+          getDocument(id: string): {
+            value?: { messages?: unknown[] };
+          } | undefined;
+        };
+      const rootId = parseLink(root.getAsLink()).id!;
+      const nestedId = parseLink(
+        replica.getDocument(rootId)?.value?.messages?.[0],
+      )!.id!;
+      const processor = { runtime } as unknown as RuntimeProcessor;
+
+      const response = await RuntimeProcessor.prototype.handleCellGetCfcLabel
+        .call(
+          processor,
+          {
+            type: RequestType.CellGetCfcLabel,
+            cell: {
+              id: nestedId as CellRef["id"],
+              space: cfcSigner.did() as CellRef["space"],
+              scope: "space",
+              path: ["piece"],
+              schema: { $ref: "#/$defs/TrustedMessage" },
+            },
+          },
+        );
+      expect(response.cfcLabel).toEqual({
+        version: 1,
+        entries: [{
+          path: [],
+          label: {
+            integrity: [{
+              kind: "authored-by",
+              subject: "alice",
+            }],
+          },
+        }],
+      });
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
   });
 });
 

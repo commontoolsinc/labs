@@ -5,11 +5,13 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { EventHandler } from "../src/scheduler.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { ID } from "../src/builder/types.ts";
 import {
   markRendererTrustedEvent,
   recordTrustedEventPolicyInputs,
   trustedEventMatchesUiContract,
   uiContractFromSchema,
+  uiContractsFromSchema,
 } from "../src/cfc/ui-contract.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 
@@ -204,6 +206,69 @@ describe("CFC UI contract matching", () => {
         contract,
       ),
     ).toBe(true);
+  });
+
+  it("keeps sibling ifc metadata when resolving local $refs", () => {
+    const contracts = uiContractsFromSchema({
+      type: "array",
+      items: {
+        $ref: "#/$defs/Message",
+        ifc: trustedPatternUiActionSchema.ifc,
+      },
+      $defs: {
+        Message: {
+          type: "object",
+          properties: {
+            body: { type: "string" },
+          },
+          required: ["body"],
+        },
+      },
+    });
+
+    expect(contracts).toEqual([{
+      path: ["*"],
+      contract: {
+        helper: "UiAction",
+        action: "SubmitDirectCommand",
+        trustedPattern: "TrustedDirectCommandSurface",
+        requiredEventIntegrity: ["TrustedDirectCommandSurface"],
+      },
+    }]);
+  });
+
+  it("resolves contracts from nested property-local $defs", () => {
+    const contracts = uiContractsFromSchema({
+      type: "object",
+      properties: {
+        messages: {
+          type: "array",
+          items: {
+            $ref: "#/$defs/Message",
+          },
+          $defs: {
+            Message: {
+              type: "object",
+              properties: {
+                body: { type: "string" },
+              },
+              required: ["body"],
+              ifc: trustedPatternUiActionSchema.ifc,
+            },
+          },
+        },
+      },
+    });
+
+    expect(contracts).toEqual([{
+      path: ["messages", "*"],
+      contract: {
+        helper: "UiAction",
+        action: "SubmitDirectCommand",
+        trustedPattern: "TrustedDirectCommandSurface",
+        requiredEventIntegrity: ["TrustedDirectCommandSurface"],
+      },
+    }]);
   });
 });
 
@@ -437,6 +502,73 @@ describe("CFC trusted UI event enforcement", () => {
     ).toBe(true);
   });
 
+  it("records trusted event policy inputs for array item contract paths", () => {
+    const writePolicyInputs: Array<
+      ReturnType<
+        IExtendedStorageTransaction["getCfcState"]
+      >["writePolicyInputs"][number]
+    > = [{
+      kind: "schema",
+      target: {
+        space,
+        id: "of:cfc-ui-contract-array-document",
+        scope: "space",
+        path: [],
+      },
+      schema: {
+        type: "object",
+        properties: {
+          messages: {
+            type: "array",
+            items: trustedPatternUiActionSchema,
+          },
+        },
+      },
+    }];
+    const tx = {
+      getCfcState: () => ({ writePolicyInputs }),
+      recordCfcWritePolicyInput: (
+        input: typeof writePolicyInputs[number],
+      ) => {
+        writePolicyInputs.push(input);
+      },
+    };
+
+    recordTrustedEventPolicyInputs(
+      tx as unknown as IExtendedStorageTransaction,
+      [{
+        space,
+        id: "of:cfc-ui-contract-array-document",
+        scope: "space",
+        path: ["messages", "0"],
+      }],
+      rendererEvent({
+        type: "click",
+        provenance: {
+          origin: "dom",
+          trusted: true,
+          ui: {
+            pattern: "TrustedDirectCommandSurface",
+            eventIntegrity: ["TrustedDirectCommandSurface"],
+            uiContractDataset: {
+              uiAction: "SubmitDirectCommand",
+            },
+          },
+        },
+      }),
+    );
+
+    expect(
+      writePolicyInputs.some((input) =>
+        input.kind === "trusted-event" &&
+        input.target.space === space &&
+        input.target.id === "of:cfc-ui-contract-array-document" &&
+        input.target.scope === "space" &&
+        input.target.path.join("/") === "messages/0"
+      ),
+    ).toBe(true);
+  });
+
   it("records trusted event policy inputs from linked handler event envelopes", () => {
     const writePolicyInputs: Array<
       ReturnType<
@@ -599,6 +731,89 @@ describe("CFC trusted UI event enforcement", () => {
           "trusted-event:click:of:cfc-ui-contract-context-document:argument/savedTitle" &&
         input.target.id === "of:cfc-ui-contract-context-document" &&
         input.target.path.join("/") === "argument/savedTitle"
+      ),
+    ).toBe(true);
+  });
+
+  it("uses event context alias item schemas for array item writes", () => {
+    const writePolicyInputs: Array<
+      ReturnType<
+        IExtendedStorageTransaction["getCfcState"]
+      >["writePolicyInputs"][number]
+    > = [];
+    const tx = {
+      getCfcState: () => ({ writePolicyInputs }),
+      recordCfcWritePolicyInput: (
+        input: typeof writePolicyInputs[number],
+      ) => {
+        writePolicyInputs.push(input);
+      },
+    };
+    const rawTrustedEvent = {
+      type: "click",
+      provenance: {
+        origin: "dom",
+        trusted: true,
+        ui: {
+          pattern: "TrustedDirectCommandSurface",
+          eventIntegrity: ["TrustedDirectCommandSurface"],
+          uiContractDataset: {
+            uiAction: "SubmitDirectCommand",
+          },
+        },
+      },
+    };
+    const eventEnvelopeLink = {
+      "/": {
+        [LINK_V1_TAG]: {
+          id: `data:application/json,${
+            encodeURIComponent(JSON.stringify({
+              value: {
+                $ctx: {
+                  messages: {
+                    $alias: {
+                      cell: { "/": "cfc-ui-contract-context-array-document" },
+                      path: ["argument", "messages"],
+                      schema: {
+                        type: "array",
+                        items: {
+                          $ref: "#/$defs/TrustedAction",
+                        },
+                        $defs: {
+                          TrustedAction: trustedPatternUiActionSchema,
+                        },
+                      },
+                    },
+                  },
+                },
+                $event: rawTrustedEvent,
+              },
+            }))
+          }`,
+          path: ["$event"],
+          space,
+        },
+      },
+    };
+
+    recordTrustedEventPolicyInputs(
+      tx as unknown as IExtendedStorageTransaction,
+      [{
+        space,
+        id: "of:cfc-ui-contract-context-array-document",
+        scope: "space",
+        path: ["argument", "messages", "0"],
+      }],
+      rendererEvent(eventEnvelopeLink),
+    );
+
+    expect(
+      writePolicyInputs.some((input) =>
+        input.kind === "trusted-event" &&
+        input.eventId ===
+          "trusted-event:click:of:cfc-ui-contract-context-array-document:argument/messages/0" &&
+        input.target.id === "of:cfc-ui-contract-context-array-document" &&
+        input.target.path.join("/") === "argument/messages/0"
       ),
     ).toBe(true);
   });
@@ -887,6 +1102,767 @@ describe("CFC trusted UI event enforcement", () => {
     await runtime.idle();
 
     expect(output.get()).toBe("accepted");
+    cancel();
+  });
+
+  it("commits trusted event pushes for array item contracts", async () => {
+    storageManager = StorageManager.emulate({
+      as: signer,
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+
+    const stream = runtime.getCell(
+      space,
+      "cfc-ui-contract-stream-array-item-push",
+      { asStream: true },
+    );
+    const messages = runtime.getCell<Array<{ body: string }>>(
+      space,
+      "cfc-ui-contract-output-array-item-push",
+      {
+        type: "array",
+        items: {
+          $ref: "#/$defs/Message",
+          ifc: {
+            ...trustedPatternUiActionSchema.ifc,
+          },
+        },
+        $defs: {
+          Message: {
+            type: "object",
+            properties: {
+              body: { type: "string" },
+            },
+            required: ["body"],
+          },
+        },
+      },
+    );
+
+    await runtime.editWithRetry((tx) => {
+      messages.withTx(tx).set([]);
+    });
+
+    const handler = Object.assign(
+      ((tx: IExtendedStorageTransaction) => {
+        messages.withTx(tx).push({ body: "accepted" });
+      }) as EventHandler,
+      {
+        reads: [],
+        writes: [messages.getAsNormalizedFullLink()],
+        module: { type: "javascript" as const },
+        pattern: {} as never,
+      },
+    );
+
+    const cancel = runtime.scheduler.addEventHandler(
+      handler,
+      stream.getAsNormalizedFullLink(),
+    );
+    runtime.scheduler.queueEvent(
+      stream.getAsNormalizedFullLink(),
+      rendererEvent({
+        type: "click",
+        provenance: {
+          origin: "dom",
+          trusted: true,
+          ui: {
+            pattern: "TrustedDirectCommandSurface",
+            eventIntegrity: ["TrustedDirectCommandSurface"],
+            uiContractDataset: {
+              uiAction: "SubmitDirectCommand",
+            },
+          },
+        },
+      }),
+    );
+    await runtime.idle();
+
+    expect(messages.get()).toEqual([{ body: "accepted" }]);
+    cancel();
+  });
+
+  it("enforces branch-level writeAuthorizedBy on mixed array pushes", async () => {
+    storageManager = StorageManager.emulate({
+      as: signer,
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+      trustSnapshotProvider: () => ({
+        id: "trust-snapshot-1",
+        actingPrincipal: signer.did(),
+      }),
+    });
+
+    const trustedStream = runtime.getCell(
+      space,
+      "cfc-ui-contract-stream-mixed-array-trusted-write-auth",
+      { asStream: true },
+    );
+    const fakeSentStream = runtime.getCell(
+      space,
+      "cfc-ui-contract-stream-mixed-array-fake-sent-write-auth",
+      { asStream: true },
+    );
+    const importedStream = runtime.getCell(
+      space,
+      "cfc-ui-contract-stream-mixed-array-imported-write-auth",
+      { asStream: true },
+    );
+    const messages = runtime.getCell<Array<{ origin: string; body: string }>>(
+      space,
+      "cfc-ui-contract-output-mixed-array-write-auth",
+      {
+        type: "array",
+        items: {
+          anyOf: [{
+            type: "object",
+            properties: {
+              origin: { const: "sent" },
+              body: { type: "string" },
+            },
+            required: ["origin", "body"],
+            ifc: {
+              ...trustedPatternUiActionSchema.ifc,
+              writeAuthorizedBy: {
+                __ctWriterIdentityOf: {
+                  file: "/trusted.tsx",
+                  path: ["commitTrustedMessageSend"],
+                },
+              },
+            },
+          }, {
+            type: "object",
+            properties: {
+              origin: { const: "imported" },
+              body: { type: "string" },
+            },
+            required: ["origin", "body"],
+          }],
+        },
+      },
+    );
+
+    await runtime.editWithRetry((tx) => {
+      messages.withTx(tx).set([]);
+    });
+
+    const trustedHandler = Object.assign(
+      ((tx: IExtendedStorageTransaction) => {
+        tx.setCfcImplementationIdentity({
+          kind: "verified",
+          bundleId: "trusted-bundle",
+          sourceFile: "/trusted.tsx",
+          bindingPath: ["commitTrustedMessageSend"],
+        });
+        messages.withTx(tx).push({
+          [ID]: "trusted-sent-1",
+          origin: "sent",
+          body: "accepted",
+        } as any);
+      }) as EventHandler,
+      {
+        reads: [],
+        writes: [messages.getAsNormalizedFullLink()],
+        module: { type: "javascript" as const },
+        pattern: {} as never,
+      },
+    );
+    const fakeSentHandler = Object.assign(
+      ((tx: IExtendedStorageTransaction) => {
+        messages.withTx(tx).push({
+          [ID]: "fake-sent-1",
+          origin: "sent",
+          body: "rejected",
+        } as any);
+      }) as EventHandler,
+      {
+        reads: [],
+        writes: [messages.getAsNormalizedFullLink()],
+        module: { type: "javascript" as const },
+        pattern: {} as never,
+      },
+    );
+    const importedHandler = Object.assign(
+      ((tx: IExtendedStorageTransaction) => {
+        messages.withTx(tx).push({
+          [ID]: "imported-1",
+          origin: "imported",
+          body: "allowed",
+        } as any);
+      }) as EventHandler,
+      {
+        reads: [],
+        writes: [messages.getAsNormalizedFullLink()],
+        module: { type: "javascript" as const },
+        pattern: {} as never,
+      },
+    );
+
+    const cancelTrusted = runtime.scheduler.addEventHandler(
+      trustedHandler,
+      trustedStream.getAsNormalizedFullLink(),
+    );
+    const cancelFakeSent = runtime.scheduler.addEventHandler(
+      fakeSentHandler,
+      fakeSentStream.getAsNormalizedFullLink(),
+    );
+    const cancelImported = runtime.scheduler.addEventHandler(
+      importedHandler,
+      importedStream.getAsNormalizedFullLink(),
+    );
+
+    runtime.scheduler.queueEvent(
+      fakeSentStream.getAsNormalizedFullLink(),
+      rendererEvent({
+        type: "click",
+        provenance: {
+          origin: "dom",
+          trusted: true,
+          ui: {
+            pattern: "UntrustedLookalikeSurface",
+            eventIntegrity: ["UntrustedLookalikeSurface"],
+            uiContractDataset: {
+              uiAction: "SubmitDirectCommand",
+            },
+          },
+        },
+      }),
+    );
+    await runtime.idle();
+
+    expect(messages.get()).toEqual([]);
+
+    runtime.scheduler.queueEvent(
+      trustedStream.getAsNormalizedFullLink(),
+      rendererEvent({
+        type: "click",
+        provenance: {
+          origin: "dom",
+          trusted: true,
+          ui: {
+            pattern: "TrustedDirectCommandSurface",
+            eventIntegrity: ["TrustedDirectCommandSurface"],
+            uiContractDataset: {
+              uiAction: "SubmitDirectCommand",
+            },
+          },
+        },
+      }),
+    );
+    await runtime.idle();
+
+    expect(messages.get().map((message) => message.body)).toEqual([
+      "accepted",
+    ]);
+
+    runtime.scheduler.queueEvent(
+      fakeSentStream.getAsNormalizedFullLink(),
+      rendererEvent({
+        type: "click",
+        provenance: {
+          origin: "dom",
+          trusted: true,
+          ui: {
+            pattern: "UntrustedLookalikeSurface",
+            eventIntegrity: ["UntrustedLookalikeSurface"],
+            uiContractDataset: {
+              uiAction: "SubmitDirectCommand",
+            },
+          },
+        },
+      }),
+    );
+    await runtime.idle();
+
+    expect(messages.get().map((message) => message.body)).toEqual([
+      "accepted",
+    ]);
+
+    runtime.scheduler.queueEvent(importedStream.getAsNormalizedFullLink(), {
+      type: "click",
+    });
+    await runtime.idle();
+
+    expect(messages.get().map((message) => message.body)).toEqual([
+      "accepted",
+      "allowed",
+    ]);
+
+    cancelImported();
+    cancelFakeSent();
+    cancelTrusted();
+  });
+
+  it("enforces branch-level writeAuthorizedBy on nested mixed array pushes", async () => {
+    storageManager = StorageManager.emulate({
+      as: signer,
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+      trustSnapshotProvider: () => ({
+        id: "trust-snapshot-1",
+        actingPrincipal: signer.did(),
+      }),
+    });
+
+    const trustedStream = runtime.getCell(
+      space,
+      "cfc-ui-contract-stream-nested-mixed-array-trusted-write-auth",
+      { asStream: true },
+    );
+    const fakeSentStream = runtime.getCell(
+      space,
+      "cfc-ui-contract-stream-nested-mixed-array-fake-sent-write-auth",
+      { asStream: true },
+    );
+    const importedStream = runtime.getCell(
+      space,
+      "cfc-ui-contract-stream-nested-mixed-array-imported-write-auth",
+      { asStream: true },
+    );
+    const state = runtime.getCell<
+      { messages: Array<{ origin: string; body: string }> }
+    >(
+      space,
+      "cfc-ui-contract-output-nested-mixed-array-write-auth",
+      {
+        type: "object",
+        properties: {
+          messages: {
+            type: "array",
+            items: {
+              anyOf: [{
+                type: "object",
+                properties: {
+                  origin: { const: "sent" },
+                  body: { type: "string" },
+                },
+                required: ["origin", "body"],
+                ifc: {
+                  ...trustedPatternUiActionSchema.ifc,
+                  writeAuthorizedBy: {
+                    __ctWriterIdentityOf: {
+                      file: "/trusted.tsx",
+                      path: ["commitTrustedMessageSend"],
+                    },
+                  },
+                },
+              }, {
+                type: "object",
+                properties: {
+                  origin: { const: "imported" },
+                  body: { type: "string" },
+                },
+                required: ["origin", "body"],
+              }],
+            },
+          },
+        },
+        required: ["messages"],
+      },
+    );
+
+    await runtime.editWithRetry((tx) => {
+      state.withTx(tx).set({ messages: [] });
+    });
+
+    const trustedHandler = Object.assign(
+      ((tx: IExtendedStorageTransaction) => {
+        tx.setCfcImplementationIdentity({
+          kind: "verified",
+          bundleId: "trusted-bundle",
+          sourceFile: "/trusted.tsx",
+          bindingPath: ["commitTrustedMessageSend"],
+        });
+        state.withTx(tx).key("messages").push({
+          [ID]: "trusted-sent-1",
+          origin: "sent",
+          body: "accepted",
+        } as any);
+      }) as EventHandler,
+      {
+        reads: [],
+        writes: [state.getAsNormalizedFullLink()],
+        module: { type: "javascript" as const },
+        pattern: {} as never,
+      },
+    );
+    const fakeSentHandler = Object.assign(
+      ((tx: IExtendedStorageTransaction) => {
+        state.withTx(tx).key("messages").push({
+          [ID]: "fake-sent-1",
+          origin: "sent",
+          body: "rejected",
+        } as any);
+      }) as EventHandler,
+      {
+        reads: [],
+        writes: [state.getAsNormalizedFullLink()],
+        module: { type: "javascript" as const },
+        pattern: {} as never,
+      },
+    );
+    const importedHandler = Object.assign(
+      ((tx: IExtendedStorageTransaction) => {
+        state.withTx(tx).key("messages").push({
+          [ID]: "imported-1",
+          origin: "imported",
+          body: "allowed",
+        } as any);
+      }) as EventHandler,
+      {
+        reads: [],
+        writes: [state.getAsNormalizedFullLink()],
+        module: { type: "javascript" as const },
+        pattern: {} as never,
+      },
+    );
+
+    const cancelTrusted = runtime.scheduler.addEventHandler(
+      trustedHandler,
+      trustedStream.getAsNormalizedFullLink(),
+    );
+    const cancelFakeSent = runtime.scheduler.addEventHandler(
+      fakeSentHandler,
+      fakeSentStream.getAsNormalizedFullLink(),
+    );
+    const cancelImported = runtime.scheduler.addEventHandler(
+      importedHandler,
+      importedStream.getAsNormalizedFullLink(),
+    );
+
+    runtime.scheduler.queueEvent(
+      fakeSentStream.getAsNormalizedFullLink(),
+      rendererEvent({
+        type: "click",
+        provenance: {
+          origin: "dom",
+          trusted: true,
+          ui: {
+            pattern: "UntrustedLookalikeSurface",
+            eventIntegrity: ["UntrustedLookalikeSurface"],
+            uiContractDataset: {
+              uiAction: "SubmitDirectCommand",
+            },
+          },
+        },
+      }),
+    );
+    await runtime.idle();
+
+    expect(state.get().messages).toEqual([]);
+
+    runtime.scheduler.queueEvent(
+      trustedStream.getAsNormalizedFullLink(),
+      rendererEvent({
+        type: "click",
+        provenance: {
+          origin: "dom",
+          trusted: true,
+          ui: {
+            pattern: "TrustedDirectCommandSurface",
+            eventIntegrity: ["TrustedDirectCommandSurface"],
+            uiContractDataset: {
+              uiAction: "SubmitDirectCommand",
+            },
+          },
+        },
+      }),
+    );
+    await runtime.idle();
+
+    expect(state.get().messages.map((message) => message.body)).toEqual([
+      "accepted",
+    ]);
+
+    runtime.scheduler.queueEvent(
+      fakeSentStream.getAsNormalizedFullLink(),
+      rendererEvent({
+        type: "click",
+        provenance: {
+          origin: "dom",
+          trusted: true,
+          ui: {
+            pattern: "UntrustedLookalikeSurface",
+            eventIntegrity: ["UntrustedLookalikeSurface"],
+            uiContractDataset: {
+              uiAction: "SubmitDirectCommand",
+            },
+          },
+        },
+      }),
+    );
+    await runtime.idle();
+
+    expect(state.get().messages.map((message) => message.body)).toEqual([
+      "accepted",
+    ]);
+
+    runtime.scheduler.queueEvent(importedStream.getAsNormalizedFullLink(), {
+      type: "click",
+    });
+    await runtime.idle();
+
+    expect(state.get().messages.map((message) => message.body)).toEqual([
+      "accepted",
+      "allowed",
+    ]);
+
+    cancelImported();
+    cancelFakeSent();
+    cancelTrusted();
+  });
+
+  it("fails closed for untrusted array pushes guarded by a root uiContract", async () => {
+    storageManager = StorageManager.emulate({
+      as: signer,
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+
+    const stream = runtime.getCell(
+      space,
+      "cfc-ui-contract-stream-array-push-reject",
+      { asStream: true },
+    );
+    const messages = runtime.getCell<string[]>(
+      space,
+      "cfc-ui-contract-output-array-push-reject",
+      {
+        type: "array",
+        items: { type: "string" },
+        ifc: {
+          ...trustedPatternUiActionSchema.ifc,
+        },
+      },
+    );
+
+    const handler = Object.assign(
+      ((tx: IExtendedStorageTransaction) => {
+        messages.withTx(tx).push("rejected");
+      }) as EventHandler,
+      {
+        reads: [],
+        writes: [messages.getAsNormalizedFullLink()],
+        module: { type: "javascript" as const },
+        pattern: {} as never,
+      },
+    );
+
+    const cancel = runtime.scheduler.addEventHandler(
+      handler,
+      stream.getAsNormalizedFullLink(),
+    );
+    runtime.scheduler.queueEvent(
+      stream.getAsNormalizedFullLink(),
+      rendererEvent({
+        type: "click",
+        provenance: {
+          origin: "dom",
+          trusted: true,
+          ui: {
+            pattern: "UntrustedLookalikeSurface",
+            eventIntegrity: ["UntrustedLookalikeSurface"],
+            uiContractDataset: {
+              uiAction: "SubmitDirectCommand",
+            },
+          },
+        },
+      }),
+    );
+    await runtime.idle();
+
+    expect(messages.get()).toBeUndefined();
+    cancel();
+  });
+
+  it("fails closed for untrusted pushes into object arrays guarded by a root uiContract", async () => {
+    storageManager = StorageManager.emulate({
+      as: signer,
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+
+    const stream = runtime.getCell(
+      space,
+      "cfc-ui-contract-stream-object-array-push-reject",
+      { asStream: true },
+    );
+    const messages = runtime.getCell<
+      Array<{ id: string; body: string }>
+    >(
+      space,
+      "cfc-ui-contract-output-object-array-push-reject",
+      {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "string" },
+            body: { type: "string" },
+          },
+          required: ["id", "body"],
+        },
+        ifc: {
+          ...trustedPatternUiActionSchema.ifc,
+        },
+      },
+    );
+
+    const handler = Object.assign(
+      ((tx: IExtendedStorageTransaction) => {
+        messages.withTx(tx).push({
+          id: "message-1",
+          body: "rejected",
+        });
+      }) as EventHandler,
+      {
+        reads: [],
+        writes: [messages.getAsNormalizedFullLink()],
+        module: { type: "javascript" as const },
+        pattern: {} as never,
+      },
+    );
+
+    const cancel = runtime.scheduler.addEventHandler(
+      handler,
+      stream.getAsNormalizedFullLink(),
+    );
+    runtime.scheduler.queueEvent(
+      stream.getAsNormalizedFullLink(),
+      rendererEvent({
+        type: "click",
+        provenance: {
+          origin: "dom",
+          trusted: true,
+          ui: {
+            pattern: "UntrustedLookalikeSurface",
+            eventIntegrity: ["UntrustedLookalikeSurface"],
+            uiContractDataset: {
+              uiAction: "SubmitDirectCommand",
+            },
+          },
+        },
+      }),
+    );
+    await runtime.idle();
+
+    expect(messages.get()).toBeUndefined();
+    cancel();
+  });
+
+  it("preserves nested cell-link schemas so later untrusted writes still fail closed", async () => {
+    storageManager = StorageManager.emulate({
+      as: signer,
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+
+    const stream = runtime.getCell(
+      space,
+      "cfc-ui-contract-stream-nested-cell-link-schema",
+      { asStream: true },
+    );
+    const protectedMessagesSchema = {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          body: { type: "string" },
+        },
+        required: ["body"],
+      },
+      ifc: {
+        ...trustedPatternUiActionSchema.ifc,
+      },
+    } as const;
+    const protectedRoot = runtime.getCell(
+      space,
+      "cfc-ui-contract-protected-root-nested-cell-link-schema",
+      {
+        type: "object",
+        properties: {
+          messages: protectedMessagesSchema,
+        },
+      },
+    );
+    const holder = runtime.getCell(
+      space,
+      "cfc-ui-contract-holder-nested-cell-link-schema",
+      {
+        type: "object",
+        properties: {
+          messages: {},
+        },
+      },
+    );
+
+    await runtime.editWithRetry((tx) => {
+      holder.withTx(tx).set({
+        messages: protectedRoot.key("messages"),
+      } as { messages: unknown });
+    });
+
+    expect(
+      holder.key("messages").resolveAsCell().getAsNormalizedFullLink().schema,
+    ).toEqual(protectedMessagesSchema);
+
+    const handler = Object.assign(
+      ((tx: IExtendedStorageTransaction) => {
+        const messages = holder.withTx(tx).key("messages")
+          .resolveAsCell() as any;
+        messages.push({ body: "rejected" });
+      }) as EventHandler,
+      {
+        reads: [],
+        writes: [holder.getAsNormalizedFullLink()],
+        module: { type: "javascript" as const },
+        pattern: {} as never,
+      },
+    );
+
+    const cancel = runtime.scheduler.addEventHandler(
+      handler,
+      stream.getAsNormalizedFullLink(),
+    );
+    runtime.scheduler.queueEvent(
+      stream.getAsNormalizedFullLink(),
+      rendererEvent({
+        type: "click",
+        provenance: {
+          origin: "dom",
+          trusted: true,
+          ui: {
+            pattern: "UntrustedLookalikeSurface",
+            eventIntegrity: ["UntrustedLookalikeSurface"],
+            uiContractDataset: {
+              uiAction: "SubmitDirectCommand",
+            },
+          },
+        },
+      }),
+    );
+    await runtime.idle();
+
+    expect(protectedRoot.get()).toBeUndefined();
     cancel();
   });
 

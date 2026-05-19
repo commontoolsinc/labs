@@ -1,6 +1,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { CFMarkdown } from "./cf-markdown.ts";
+import {
+  createMockCellHandle,
+  pushUpdate,
+} from "../../test-utils/mock-cell-handle.ts";
 
 describe("cf-markdown", () => {
   it("should be defined", () => {
@@ -119,6 +123,30 @@ describe("cf-markdown", () => {
       expect(oldCleaned).toBe(true);
       // No new subscription for string content
       expect((el as any)._unsubscribe).toBeNull();
+    });
+
+    it("syncs uncached cell content on first bind", async () => {
+      const el = new CFMarkdown();
+      const cell = createMockCellHandle<string>(undefined as any);
+      let syncCalls = 0;
+      let requestUpdates = 0;
+
+      (cell as any).sync = () => {
+        syncCalls++;
+        pushUpdate(cell, "loaded from sync");
+        return Promise.resolve("loaded from sync");
+      };
+      el.requestUpdate = (() => {
+        requestUpdates++;
+      }) as typeof el.requestUpdate;
+
+      el.content = cell;
+      (el as any).willUpdate(new Map([["content", "old content"]]));
+      await Promise.resolve();
+
+      expect(syncCalls).toBe(1);
+      expect((el as any)._getContentValue()).toBe("loaded from sync");
+      expect(requestUpdates).toBeGreaterThan(0);
     });
   });
 

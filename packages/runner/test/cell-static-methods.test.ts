@@ -418,6 +418,7 @@ describe("Cell Static Methods", () => {
       );
       expect(Cell.equals(cell, null as any)).toBe(false);
       expect(Cell.equals(null as any, cell)).toBe(false);
+      expect(Cell.equals(undefined, undefined)).toBe(false);
     });
 
     it("should resolve links before comparing", () => {
@@ -593,6 +594,7 @@ describe("Cell Static Methods", () => {
       );
       expect(Cell.equalLinks(cell, null as any)).toBe(false);
       expect(Cell.equalLinks(null as any, cell)).toBe(false);
+      expect(Cell.equalLinks(undefined, undefined)).toBe(false);
     });
 
     it("should handle comparison with non-cell objects", () => {

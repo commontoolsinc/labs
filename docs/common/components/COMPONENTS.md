@@ -811,6 +811,22 @@ SVG charting components. Compose mark elements inside a `cf-chart` container.
 
 ---
 
+## CFC Authorship
+
+`cf-cfc-authorship` can enforce text-integrity policy for its children when
+`verifyTextIntegrity` is set. If `requiredTextIntegrity` or `requiredIntegrity`
+is provided, the renderer uses that explicit atom list.
+
+When no explicit requirement is provided and `$author`/`author` is a cell whose
+root CFC label contains `represents-principal`, the renderer infers a required
+`{ kind: "authored-by", subject }` atom from that author cell. This means a
+cell-backed author can make previously display-only text require matching
+authorship integrity. Use an explicit `requiredTextIntegrity` when a component
+needs a different policy, and avoid cell-backed `$author` for purely decorative
+author names.
+
+---
+
 ## Design Tokens
 
 The following CSS custom properties are defined globally (in `variables.ts`) and available throughout your patterns via `cf-theme` or direct `style` attributes.

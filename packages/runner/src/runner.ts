@@ -614,7 +614,16 @@ export class Runner {
     tx: IExtendedStorageTransaction,
     processCell: Cell<ProcessCellData<T>>,
     argument: T,
+    argumentSchema: JSONSchema | undefined,
   ): void {
+    recordSetupProjectionPolicyInputs(
+      tx,
+      this.runtime,
+      processCell,
+      processCell.key("argument"),
+      argumentSchema,
+      argument,
+    );
     diffAndUpdate(
       this.runtime,
       tx,
@@ -629,6 +638,7 @@ export class Runner {
     resultCell: Cell<R>,
     processCell: Cell<ProcessCellData<T>>,
     argument: T,
+    pattern: Pattern,
     patternId: string,
     previousPatternId: string | undefined,
   ): SetupResult<R> | undefined {
@@ -640,7 +650,12 @@ export class Runner {
     }
 
     if (previousPatternId === patternId) {
-      this.updateProcessArgument(tx, processCell, argument);
+      this.updateProcessArgument(
+        tx,
+        processCell,
+        argument,
+        pattern.argumentSchema,
+      );
       return { resultCell, needsStart: false };
     }
 
@@ -749,7 +764,12 @@ export class Runner {
       }, false));
 
     if (nextArgument) {
-      this.updateProcessArgument(tx, processCell, nextArgument);
+      this.updateProcessArgument(
+        tx,
+        processCell,
+        nextArgument,
+        pattern.argumentSchema,
+      );
     }
 
     this.updateResultProjection(tx, pattern, processCell, resultCell, {
@@ -823,6 +843,7 @@ export class Runner {
       resultCell,
       processCell,
       argument,
+      pattern,
       patternId,
       previousPatternId,
     );

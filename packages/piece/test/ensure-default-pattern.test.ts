@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Runtime } from "@commonfabric/runner";
+import { NAME, Runtime } from "@commonfabric/runner";
 import type { RuntimeProgram } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createSession, Identity } from "@commonfabric/identity";
@@ -105,6 +105,36 @@ describe("PiecesController.ensureDefaultPattern", () => {
     // The cell should have a reference linked
     const value = defaultPatternCell.get();
     expect(value).toBeDefined();
+  });
+
+  it("should find defaultPattern when its untyped schema view is undefined", async () => {
+    const schema = {
+      type: "object",
+      properties: {
+        [NAME]: { type: "string" },
+        missing: { type: "string" },
+      },
+      required: ["missing"],
+    } as const;
+    const mockPieceCell = runtime.getCell(
+      manager.getSpace(),
+      "schema-invalid-default-pattern",
+      schema,
+    );
+
+    await runtime.editWithRetry((tx) => {
+      mockPieceCell.withTx(tx).setRawUntyped({
+        [NAME]: "MockDefaultPattern",
+      });
+    });
+    await manager.linkDefaultPattern(mockPieceCell);
+
+    const linked = manager.getSpaceCellContents().key("defaultPattern").get();
+    expect(linked?.get()).toBeUndefined();
+
+    const defaultPattern = await manager.getDefaultPattern(false);
+    expect(defaultPattern).toBeDefined();
+    expect(defaultPattern?.get()?.[NAME]).toBe("MockDefaultPattern");
   });
 
   describe("initial state", () => {

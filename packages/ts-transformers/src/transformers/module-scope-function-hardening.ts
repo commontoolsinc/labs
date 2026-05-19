@@ -188,6 +188,7 @@ function transformVariableStatement(
 ): ts.Statement[] {
   let changed = false;
   const postStatements: ts.Statement[] = [];
+  const exported = hasExportModifier(statement.modifiers);
   const declarations = statement.declarationList.declarations.map(
     (declaration) => {
       if (
@@ -209,21 +210,32 @@ function transformVariableStatement(
       }
 
       changed = true;
+      const inlineBindingAnnotation = isTrustedCallable && exported;
+      let rewritten = declaration.initializer;
       if (isTrustedCallable) {
         state.useBindingHelper();
-        postStatements.push(
-          factory.createExpressionStatement(
-            annotateBindingIdentifier(
-              factory.createIdentifier(declaration.name.text),
-              declaration.name.text,
-              factory,
-              state,
+        if (inlineBindingAnnotation) {
+          rewritten = annotateBindingIdentifier(
+            rewritten,
+            declaration.name.text,
+            factory,
+            state,
+          );
+        } else {
+          postStatements.push(
+            factory.createExpressionStatement(
+              annotateBindingIdentifier(
+                factory.createIdentifier(declaration.name.text),
+                declaration.name.text,
+                factory,
+                state,
+              ),
             ),
-          ),
-        );
+          );
+        }
       }
 
-      if (isDirectFunction && isTrustedBinding) {
+      if (isDirectFunction && isTrustedBinding && !inlineBindingAnnotation) {
         state.useHelper();
         postStatements.push(
           factory.createExpressionStatement(
@@ -237,11 +249,10 @@ function transformVariableStatement(
         return declaration;
       }
 
-      let rewritten = declaration.initializer;
       if (isDirectFunction) {
         state.useHelper();
         rewritten = wrapWithFunctionHardener(
-          declaration.initializer,
+          rewritten,
           factory,
           state.helperName,
         );
@@ -287,7 +298,7 @@ function wrapWithFunctionHardener(
 }
 
 function annotateBindingIdentifier(
-  identifier: ts.Identifier,
+  identifier: ts.Expression,
   bindingName: string,
   factory: ts.NodeFactory,
   state: HardeningState,
@@ -402,6 +413,10 @@ function createBindingIdentityHelper(
   helperName: string,
 ): ts.FunctionDeclaration {
   const factory = ts.factory;
+  const value = factory.createIdentifier("value");
+  const metadata = factory.createIdentifier("metadata");
+  const implementation = factory.createIdentifier("implementation");
+
   return factory.createFunctionDeclaration(
     undefined,
     undefined,
@@ -411,14 +426,14 @@ function createBindingIdentityHelper(
       factory.createParameterDeclaration(
         undefined,
         undefined,
-        factory.createIdentifier("value"),
+        value,
         undefined,
         factory.createKeywordTypeNode(ts.SyntaxKind.AnyKeyword),
       ),
       factory.createParameterDeclaration(
         undefined,
         undefined,
-        factory.createIdentifier("metadata"),
+        metadata,
         undefined,
         factory.createKeywordTypeNode(ts.SyntaxKind.AnyKeyword),
       ),
@@ -426,95 +441,251 @@ function createBindingIdentityHelper(
     undefined,
     factory.createBlock([
       factory.createIfStatement(
-        factory.createBinaryExpression(
-          factory.createParenthesizedExpression(
-            factory.createBinaryExpression(
-              factory.createIdentifier("value"),
-              factory.createToken(ts.SyntaxKind.AmpersandAmpersandToken),
-              factory.createParenthesizedExpression(
-                factory.createBinaryExpression(
-                  factory.createBinaryExpression(
-                    factory.createTypeOfExpression(
-                      factory.createIdentifier("value"),
-                    ),
-                    factory.createToken(ts.SyntaxKind.EqualsEqualsEqualsToken),
-                    factory.createStringLiteral("object"),
-                  ),
-                  factory.createToken(ts.SyntaxKind.BarBarToken),
-                  factory.createBinaryExpression(
-                    factory.createTypeOfExpression(
-                      factory.createIdentifier("value"),
-                    ),
-                    factory.createToken(ts.SyntaxKind.EqualsEqualsEqualsToken),
-                    factory.createStringLiteral("function"),
-                  ),
-                ),
-              ),
-            ),
-          ),
-          factory.createToken(ts.SyntaxKind.AmpersandAmpersandToken),
-          factory.createCallExpression(
-            factory.createPropertyAccessExpression(
-              factory.createIdentifier("Object"),
-              "isExtensible",
-            ),
-            undefined,
-            [factory.createIdentifier("value")],
-          ),
-        ),
+        createExtensibleObjectOrFunctionCheck(value, factory),
         factory.createBlock([
           factory.createExpressionStatement(
-            factory.createCallExpression(
-              factory.createPropertyAccessExpression(
-                factory.createIdentifier("Object"),
-                "defineProperty",
-              ),
-              undefined,
-              [
-                factory.createIdentifier("value"),
-                factory.createStringLiteral(VERIFIED_BINDING_METADATA_FIELD),
-                factory.createObjectLiteralExpression([
-                  factory.createPropertyAssignment(
-                    factory.createIdentifier("value"),
-                    factory.createIdentifier("metadata"),
-                  ),
-                  factory.createPropertyAssignment(
-                    factory.createIdentifier("configurable"),
-                    factory.createTrue(),
-                  ),
-                ], true),
-              ],
-            ),
+            createDefineBindingMetadataCall(value, metadata, factory),
           ),
         ], true),
       ),
-      factory.createReturnStatement(factory.createIdentifier("value")),
+      factory.createIfStatement(
+        factory.createBinaryExpression(
+          createObjectOrFunctionCheck(value, factory),
+          factory.createToken(ts.SyntaxKind.AmpersandAmpersandToken),
+          factory.createBinaryExpression(
+            factory.createTypeOfExpression(
+              factory.createPropertyAccessExpression(value, "implementation"),
+            ),
+            factory.createToken(ts.SyntaxKind.EqualsEqualsEqualsToken),
+            factory.createStringLiteral("function"),
+          ),
+        ),
+        factory.createBlock([
+          factory.createVariableStatement(
+            undefined,
+            factory.createVariableDeclarationList([
+              factory.createVariableDeclaration(
+                implementation,
+                undefined,
+                undefined,
+                factory.createPropertyAccessExpression(value, "implementation"),
+              ),
+            ], ts.NodeFlags.None),
+          ),
+          factory.createIfStatement(
+            createExtensibleObjectOrFunctionCheck(implementation, factory),
+            factory.createBlock([
+              factory.createExpressionStatement(
+                createDefineBindingMetadataCall(
+                  implementation,
+                  metadata,
+                  factory,
+                ),
+              ),
+            ], true),
+          ),
+        ], true),
+      ),
+      factory.createReturnStatement(value),
     ], true),
+  );
+}
+
+function createDefineBindingMetadataCall(
+  target: ts.Expression,
+  metadata: ts.Expression,
+  factory: ts.NodeFactory,
+): ts.CallExpression {
+  return factory.createCallExpression(
+    factory.createPropertyAccessExpression(
+      factory.createIdentifier("Object"),
+      "defineProperty",
+    ),
+    undefined,
+    [
+      target,
+      factory.createStringLiteral(VERIFIED_BINDING_METADATA_FIELD),
+      factory.createObjectLiteralExpression([
+        factory.createPropertyAssignment(
+          factory.createIdentifier("value"),
+          metadata,
+        ),
+        factory.createPropertyAssignment(
+          factory.createIdentifier("configurable"),
+          factory.createTrue(),
+        ),
+      ], true),
+    ],
+  );
+}
+
+function createExtensibleObjectOrFunctionCheck(
+  value: ts.Expression,
+  factory: ts.NodeFactory,
+): ts.Expression {
+  return factory.createBinaryExpression(
+    createObjectOrFunctionCheck(value, factory),
+    factory.createToken(ts.SyntaxKind.AmpersandAmpersandToken),
+    factory.createCallExpression(
+      factory.createPropertyAccessExpression(
+        factory.createIdentifier("Object"),
+        "isExtensible",
+      ),
+      undefined,
+      [value],
+    ),
+  );
+}
+
+function createObjectOrFunctionCheck(
+  value: ts.Expression,
+  factory: ts.NodeFactory,
+): ts.Expression {
+  return factory.createBinaryExpression(
+    value,
+    factory.createToken(ts.SyntaxKind.AmpersandAmpersandToken),
+    factory.createParenthesizedExpression(
+      factory.createBinaryExpression(
+        factory.createBinaryExpression(
+          factory.createTypeOfExpression(value),
+          factory.createToken(ts.SyntaxKind.EqualsEqualsEqualsToken),
+          factory.createStringLiteral("object"),
+        ),
+        factory.createToken(ts.SyntaxKind.BarBarToken),
+        factory.createBinaryExpression(
+          factory.createTypeOfExpression(value),
+          factory.createToken(ts.SyntaxKind.EqualsEqualsEqualsToken),
+          factory.createStringLiteral("function"),
+        ),
+      ),
+    ),
   );
 }
 
 function collectWriteAuthorizedByBindingNames(
   sourceFile: ts.SourceFile,
 ): Set<string> {
+  const bindingPositions = discoverWriteAuthorizedByBindingPositions(
+    sourceFile,
+  );
   const names = new Set<string>();
   const visit = (node: ts.Node): void => {
-    if (
-      ts.isTypeReferenceNode(node) &&
-      ts.isIdentifier(node.typeName) &&
-      node.typeName.text === "WriteAuthorizedBy"
-    ) {
-      const bindingNode = node.typeArguments?.[1];
-      if (
-        bindingNode && ts.isTypeQueryNode(bindingNode) &&
-        ts.isIdentifier(bindingNode.exprName)
-      ) {
-        names.add(bindingNode.exprName.text);
+    if (ts.isTypeReferenceNode(node) && ts.isIdentifier(node.typeName)) {
+      const positions = bindingPositions.get(node.typeName.text);
+      if (positions) {
+        for (const position of positions) {
+          const bindingNode = node.typeArguments?.[position];
+          if (bindingNode) {
+            collectTypeQueryIdentifiers(bindingNode, names);
+          }
+        }
       }
     }
     ts.forEachChild(node, visit);
   };
   visit(sourceFile);
   return names;
+}
+
+function discoverWriteAuthorizedByBindingPositions(
+  sourceFile: ts.SourceFile,
+): Map<string, Set<number>> {
+  const positionsByName = new Map<string, Set<number>>([
+    ["WriteAuthorizedBy", new Set([1])],
+  ]);
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const statement of sourceFile.statements) {
+      if (
+        !ts.isTypeAliasDeclaration(statement) ||
+        !ts.isIdentifier(statement.name)
+      ) {
+        continue;
+      }
+
+      const positions = collectAliasBindingPositions(
+        statement,
+        positionsByName,
+      );
+      if (!positions.size) {
+        continue;
+      }
+
+      const existing = positionsByName.get(statement.name.text) ?? new Set();
+      for (const position of positions) {
+        if (!existing.has(position)) {
+          existing.add(position);
+          changed = true;
+        }
+      }
+      positionsByName.set(statement.name.text, existing);
+    }
+  }
+
+  return positionsByName;
+}
+
+function collectAliasBindingPositions(
+  declaration: ts.TypeAliasDeclaration,
+  positionsByName: ReadonlyMap<string, ReadonlySet<number>>,
+): Set<number> {
+  const typeParameterPositions = new Map<string, number>();
+  declaration.typeParameters?.forEach((parameter, index) => {
+    typeParameterPositions.set(parameter.name.text, index);
+  });
+
+  const positions = new Set<number>();
+  const visit = (node: ts.Node): void => {
+    if (ts.isTypeReferenceNode(node) && ts.isIdentifier(node.typeName)) {
+      const bindingPositions = positionsByName.get(node.typeName.text);
+      if (bindingPositions) {
+        for (const bindingPosition of bindingPositions) {
+          const bindingNode = node.typeArguments?.[bindingPosition];
+          if (bindingNode) {
+            collectTypeParameterPositions(
+              bindingNode,
+              typeParameterPositions,
+              positions,
+            );
+          }
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(declaration.type);
+
+  return positions;
+}
+
+function collectTypeParameterPositions(
+  node: ts.Node,
+  typeParameterPositions: ReadonlyMap<string, number>,
+  positions: Set<number>,
+): void {
+  if (ts.isTypeReferenceNode(node) && ts.isIdentifier(node.typeName)) {
+    const position = typeParameterPositions.get(node.typeName.text);
+    if (position !== undefined) {
+      positions.add(position);
+    }
+  }
+  ts.forEachChild(
+    node,
+    (child) =>
+      collectTypeParameterPositions(child, typeParameterPositions, positions),
+  );
+}
+
+function collectTypeQueryIdentifiers(
+  node: ts.Node,
+  names: Set<string>,
+): void {
+  if (ts.isTypeQueryNode(node) && ts.isIdentifier(node.exprName)) {
+    names.add(node.exprName.text);
+  }
+  ts.forEachChild(node, (child) => collectTypeQueryIdentifiers(child, names));
 }
 
 function normalizeWriterIdentityFile(fileName: string): string {
@@ -533,6 +704,14 @@ function hasDefaultExportModifier(
 ): boolean {
   return !!modifiers?.some((modifier) =>
     modifier.kind === ts.SyntaxKind.DefaultKeyword
+  );
+}
+
+function hasExportModifier(
+  modifiers: ts.NodeArray<ts.ModifierLike> | undefined,
+): boolean {
+  return !!modifiers?.some((modifier) =>
+    modifier.kind === ts.SyntaxKind.ExportKeyword
   );
 }
 

@@ -12,6 +12,7 @@ import type {
   BuiltInLLMToolCallPart,
   BuiltInLLMToolResultPart,
 } from "@commonfabric/api";
+import { type CellHandle, isCellHandle } from "@commonfabric/runtime-client";
 import {
   applyThemeToElement,
   type CFTheme,
@@ -238,7 +239,7 @@ export class CFChatMessage extends BaseElement {
   override accessor role: "user" | "assistant" = "user";
 
   @property({ type: Object })
-  accessor content: BuiltInLLMContent = "";
+  accessor content: BuiltInLLMContent | CellHandle<string> = "";
 
   @property({ type: Boolean, reflect: true })
   accessor streaming = false;
@@ -299,7 +300,9 @@ export class CFChatMessage extends BaseElement {
   }
 
   private _extractTextContent(): string {
-    if (typeof this.content === "string") {
+    if (isCellHandle<string>(this.content)) {
+      return this.content.get() ?? "";
+    } else if (typeof this.content === "string") {
       return this.content;
     } else if (Array.isArray(this.content)) {
       const textParts = this.content.filter(
@@ -383,6 +386,9 @@ export class CFChatMessage extends BaseElement {
   override render() {
     const messageClass = `message message-${this.role}`;
     const textContent = this._extractTextContent();
+    const markdownContent = isCellHandle<string>(this.content)
+      ? this.content
+      : textContent;
     const variant = this.role === "user" ? "inverse" : "default";
 
     return html`
@@ -391,7 +397,7 @@ export class CFChatMessage extends BaseElement {
         <div class="message-bubble">
           <div class="${messageClass}">
             <cf-markdown
-              .content="${textContent}"
+              .content="${markdownContent}"
               .variant="${variant}"
               ?streaming="${this.streaming}"
               ?compact="${this.compact}"

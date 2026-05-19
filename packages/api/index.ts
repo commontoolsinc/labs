@@ -791,8 +791,8 @@ export interface IResolvable<T, C extends AnyBrandedCell<T>> {
  * Available on comparable and readable cells.
  */
 export interface IEquatable {
-  equals(other: AnyCell<any> | object): boolean;
-  equalLinks(other: AnyCell<any> | object): boolean;
+  equals(other: AnyCell<any> | object | undefined): boolean;
+  equalLinks(other: AnyCell<any> | object | undefined): boolean;
 }
 
 /**
@@ -928,7 +928,10 @@ export interface CellTypeConstructor<
    * @param b - Second cell or value to compare
    * @returns true if the values are equal
    */
-  equals(a: AnyCell<any> | object, b: AnyCell<any> | object): boolean;
+  equals(
+    a: AnyCell<any> | object | undefined,
+    b: AnyCell<any> | object | undefined,
+  ): boolean;
 
   /**
    * Compare two cells or values for equality by comparing their underlying
@@ -938,7 +941,10 @@ export interface CellTypeConstructor<
    * @param b - Second cell or value to compare
    * @returns true if the values are equal
    */
-  equalLinks(a: AnyCell<any> | object, b: AnyCell<any> | object): boolean;
+  equalLinks(
+    a: AnyCell<any> | object | undefined,
+    b: AnyCell<any> | object | undefined,
+  ): boolean;
 }
 
 export interface ScopedCellTypeConstructor<
@@ -2265,8 +2271,8 @@ export type ToIndentedDebugStringFunction = (value: unknown) => string;
  * This is a standalone export of the equals function from Cell/Writable.
  */
 export type EqualsFunction = (
-  a: AnyCell<any> | object,
-  b: AnyCell<any> | object,
+  a: AnyCell<any> | object | undefined,
+  b: AnyCell<any> | object | undefined,
 ) => boolean;
 
 // Re-export all function types as values for destructuring imports

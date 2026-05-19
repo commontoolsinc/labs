@@ -498,7 +498,7 @@ describe("link-utils", () => {
 
     it("should handle null/undefined values", () => {
       expect(areLinksSame(null, null)).toBe(true);
-      expect(areLinksSame(undefined, undefined)).toBe(true);
+      expect(areLinksSame(undefined, undefined)).toBe(false);
       expect(areLinksSame(null, undefined)).toBe(false);
 
       const cell = runtime.getCell(space, "test");

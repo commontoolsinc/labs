@@ -30,9 +30,9 @@ type PiecesListInput = void;
 interface PiecesListOutput {
   [key: string]: unknown;
   backlinksIndex: {
-    mentionable: MentionablePiece[];
+    mentionable: MentionablePiece[] | undefined;
   };
-  sidebarUI: unknown;
+  sidebarUI?: unknown;
 }
 
 const _visit = handler<
@@ -355,7 +355,6 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
         </cf-vscroll>
       </cf-screen>
     ),
-    sidebarUI: undefined,
     // Exported data
     allPieces,
     recentPieces,
