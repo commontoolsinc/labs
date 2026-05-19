@@ -53,9 +53,15 @@ function referenceEncode(value: bigint): Uint8Array {
   return bytes;
 }
 
-// ============================================================================
-// Fixtures
-// ============================================================================
+//
+// Fixtures, both main and reference
+//
+
+interface Fixture {
+  value: bigint;
+  encoded: Uint8Array;
+  label: string;
+}
 
 const rawFixtures: Set<bigint> = new Set();
 
@@ -98,7 +104,7 @@ const rawFixtures: Set<bigint> = new Set();
 }
 
 /**
- * Format a bigint for use in a test name. Decimals up to 64 bits, hex up to
+ * Formats a `bigint` for use in a test name. Decimals up to 64 bits, hex up to
  * 128 bits, and beyond that just a hex prefix and the encoded byte count.
  */
 function fixtureLabel(v: bigint, encoded: Uint8Array): string {
@@ -111,19 +117,19 @@ function fixtureLabel(v: bigint, encoded: Uint8Array): string {
   return `${sign}0x${hex.slice(0, 12)}... (${encoded.length} bytes)`;
 }
 
-interface Fixture {
-  value: bigint;
-  encoded: Uint8Array;
-  label: string;
+/**
+ * Makes a fixture, optionally calculating the encoded form.
+ */
+function makeFixture(value: bigint, encoded?: Uint8Array): Fixture {
+  encoded ??= referenceEncode(value);
+  return { value, encoded, label: fixtureLabel(value, encoded) };
 }
 
-const fixtures: readonly Fixture[] = [...rawFixtures].sort().map((value) => {
-  const encoded = referenceEncode(value);
-  return { value, encoded, label: fixtureLabel(value, encoded) };
-});
+const fixtures: readonly Fixture[] =
+  [...rawFixtures].sort().map((value) => makeFixture(value));
 
 //
-// Reference encoder anchor
+// Tests to validate reference encoder
 //
 
 // A small set of explicit byte-level assertions that pin `referenceEncode`
