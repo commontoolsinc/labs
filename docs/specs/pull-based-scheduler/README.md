@@ -161,6 +161,12 @@ when the demand root is merely pending rather than stale, because a pending
 effect or event can read a materialized target before normal stale propagation
 has an exact edge.
 
+Initial demand roots are runnable only on the first settle iteration. On later
+iterations they remain traversal seeds so newly created or newly dirtied
+dependencies can be pulled through the same demand path before `pull()` returns,
+without rerunning the demand root unless normal scheduling also marks it
+pending.
+
 ### 4. Topological Sort
 
 Actions are sorted so dependencies run before dependents:
@@ -500,6 +506,8 @@ Runnable pull seeds include:
 - Computations whose debounce trailing flush has become ready.
 - Computations demanded through a live effect, a demanded parent context, or
   `pullDemandedFirstRunComputations`.
+- Computations marked as pull-demand continuations after a child computation
+  writes data that an ancestor read earlier in the same pull.
 
 A computation is demanded when it has a transitive live-effect dependent or is
 inside a demanded parent context. An effect with no scheduling writes is a pull
@@ -521,6 +529,9 @@ Pull mode:
 - Collects dependency logs for newly subscribed actions before each iteration.
 - Builds an iteration seed set, then recursively pulls dirty computations needed
   by those seeds.
+- Keeps initial demand roots as traversal-only seeds after the first iteration
+  so dynamic child computations can trigger ancestor continuations before the
+  original pull resolves.
 - Topologically sorts the work set using dependencies, current scheduling
   writes, parent-child edges, the dependents graph, and pull-only materializer
   envelope edges for the current work set.

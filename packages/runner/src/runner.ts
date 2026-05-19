@@ -40,6 +40,7 @@ import {
 } from "./pattern-binding.ts";
 import { resolveLink } from "./link-resolution.ts";
 import {
+  areNormalizedLinksSame,
   createSigilLinkFromParsedLink,
   isCellLink,
   isSigilLink,
@@ -441,6 +442,19 @@ type JavaScriptNodeContext = BoundNodeIO & {
 type JavaScriptActionResultCells = {
   byScope: Map<CellScope, Cell<any>>;
 };
+
+function dedupeNormalizedLinks(
+  links: readonly NormalizedFullLink[],
+): NormalizedFullLink[] {
+  const deduped: NormalizedFullLink[] = [];
+  for (const link of links) {
+    if (deduped.some((existing) => areNormalizedLinksSame(existing, link))) {
+      continue;
+    }
+    deduped.push(link);
+  }
+  return deduped;
+}
 
 export class Runner {
   readonly cancels = new Map<`${MemorySpace}/${URI}`, Cancel>();
@@ -1844,6 +1858,33 @@ export class Runner {
     };
   }
 
+  private collectStaticRedirectWriteTargets(
+    tx: IExtendedStorageTransaction,
+    outputCells: readonly NormalizedFullLink[],
+  ): NormalizedFullLink[] {
+    if (!outputCells.some((link) => link.overwrite === "redirect")) {
+      return [];
+    }
+
+    const targets: NormalizedFullLink[] = [];
+    for (const output of outputCells) {
+      if (output.overwrite !== "redirect") continue;
+      try {
+        const { overwrite: _overwrite, ...target } = resolveLink(
+          this.runtime,
+          tx,
+          output,
+          "writeRedirect",
+        );
+        targets.push(target);
+      } catch {
+        // The populateDependencies fallback will collect runtime evidence after
+        // the process cell is fully materialized.
+      }
+    }
+    return dedupeNormalizedLinks(targets);
+  }
+
   private resolveJavaScriptFunction(
     module: Module,
     pattern: Pattern,
@@ -2649,9 +2690,16 @@ export class Runner {
       setRunnableName(action, `action:${name}`, { setSrc: true });
     }
 
+    const staticRedirectWriteTargets = module.materializerWriteEnvelopes
+      ? []
+      : this.collectStaticRedirectWriteTargets(tx, writes);
+    const schedulingWrites = dedupeNormalizedLinks([
+      ...writes,
+      ...staticRedirectWriteTargets,
+    ]);
     const wrappedAction = Object.assign(action, {
       reads,
-      writes,
+      writes: schedulingWrites,
       ...(module.materializerWriteEnvelopes
         ? { materializerWriteEnvelopes: module.materializerWriteEnvelopes }
         : {}),
@@ -2953,9 +3001,16 @@ export class Runner {
 
     // Seed raw actions with their pattern/module/write metadata so pull-mode
     // scheduling can discover pending computations before their first run.
+    const staticRedirectWriteTargets = module.materializerWriteEnvelopes
+      ? []
+      : this.collectStaticRedirectWriteTargets(tx, outputCells);
+    const schedulingWrites = dedupeNormalizedLinks([
+      ...outputCells,
+      ...staticRedirectWriteTargets,
+    ]);
     Object.assign(action, builtinAction, {
       reads: inputCells,
-      writes: outputCells,
+      writes: schedulingWrites,
       ...(module.materializerWriteEnvelopes
         ? { materializerWriteEnvelopes: module.materializerWriteEnvelopes }
         : {}),

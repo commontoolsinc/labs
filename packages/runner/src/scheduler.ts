@@ -255,6 +255,7 @@ export class Scheduler {
   private reverseDependencies = new WeakMap<Action, Set<Action>>();
   private activePullDemandActions = new WeakSet<Action>();
   private pullDemandedFirstRunComputations = new WeakSet<Action>();
+  private pullDemandedContinuationComputations = new WeakSet<Action>();
   // Track which actions are effects persistently (survives unsubscribe/re-subscribe)
   private isEffectAction = new WeakMap<Action, boolean>();
   // In pull mode, `dirty` means direct dirty. `stale` additionally includes
@@ -1401,6 +1402,8 @@ export class Scheduler {
       actionParent: this.actionParent,
       isEffectAction: this.isEffectAction,
       pullDemandedFirstRunComputations: this.pullDemandedFirstRunComputations,
+      pullDemandedContinuationComputations: this
+        .pullDemandedContinuationComputations,
       hasActionRun: (action) => this.delays.hasActionRun(action),
       getSchedulingWrites: (action) =>
         this.writeIndex.getSchedulingWrites(action),
@@ -1609,6 +1612,10 @@ export class Scheduler {
       effects: this.effects,
       computations: this.computations,
       conditionallyScheduledEffects: this.conditionallyScheduledEffects,
+      actionParent: this.actionParent,
+      pending: this.pending,
+      markPullDemandContinuation: (action) =>
+        this.pullDemandedContinuationComputations.add(action),
       scheduleWithDebounce: (action) => this.scheduleWithDebounce(action),
       markDirty: (action) =>
         markSchedulerDirty(this.dirtySchedulingState, action),
@@ -1616,6 +1623,7 @@ export class Scheduler {
       scheduleAffectedEffects: (action) => {
         this.scheduleAffectedEffects(action);
       },
+      queueExecution: () => this.queueExecution(),
     };
   }
 
@@ -1762,8 +1770,8 @@ export class Scheduler {
         ),
       collectPullIterationSeeds: (seeds) =>
         this.collectPullIterationSeeds(seeds),
-      collectDirtyDependencies: (seed, targetWorkSet, memo) =>
-        this.collectDirtyDependencies(seed, targetWorkSet, memo),
+      collectDirtyDependencies: (seed, targetWorkSet, memo, options) =>
+        this.collectDirtyDependencies(seed, targetWorkSet, memo, options),
       getActionId: (action) => this.getActionId(action),
       clearDirty: (action) =>
         clearSchedulerDirty(this.dirtySchedulingState, action),
@@ -1906,6 +1914,8 @@ export class Scheduler {
       inFlightSourceState: this.inFlightSourceState,
       actionTimingState: this.actionTimingState,
       pullDemandedFirstRunComputations: this.pullDemandedFirstRunComputations,
+      pullDemandedContinuationComputations: this
+        .pullDemandedContinuationComputations,
       retries: this.retries,
       pending: this.pending,
       actionRunTrace: this.actionRunTrace,
@@ -2046,12 +2056,14 @@ export class Scheduler {
     action: Action,
     workSet: Set<Action>,
     memo = new Map<Action, boolean>(),
+    options: { forceTraverseCleanAction?: boolean } = {},
   ): boolean {
     return collectDirtyDependenciesState(
       this.dirtyDependencyCollectionState,
       action,
       workSet,
       memo,
+      options,
     );
   }
 

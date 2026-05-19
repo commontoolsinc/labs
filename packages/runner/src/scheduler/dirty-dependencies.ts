@@ -52,6 +52,7 @@ export function collectDirtyDependencies(
   action: Action,
   workSet: Set<Action>,
   memo = new Map<Action, boolean>(),
+  options: { forceTraverseCleanAction?: boolean } = {},
 ): boolean {
   const collectStart = performance.now();
   let addedToStack = false;
@@ -89,7 +90,10 @@ export function collectDirtyDependencies(
       return cached;
     }
 
-    if (!state.isStale(action) && !hasStaleMaterializerWriter) {
+    if (
+      !state.isStale(action) && !hasStaleMaterializerWriter &&
+      !options.forceTraverseCleanAction
+    ) {
       memo.set(action, false);
       return false;
     }

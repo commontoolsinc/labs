@@ -14,10 +14,14 @@ export interface WritePropagationState {
   readonly effects: ReadonlySet<Action>;
   readonly computations: ReadonlySet<Action>;
   readonly conditionallyScheduledEffects: Map<Action, number>;
+  readonly actionParent: WeakMap<Action, Action>;
+  readonly pending: Set<Action>;
+  readonly markPullDemandContinuation: (action: Action) => void;
   readonly scheduleWithDebounce: (action: Action) => void;
   readonly markDirty: (action: Action) => void;
   readonly isMaterializer: (action: Action) => boolean;
   readonly scheduleAffectedEffects: (action: Action) => void;
+  readonly queueExecution: () => void;
 }
 
 export function recordChangedComputationWrites(
@@ -68,9 +72,27 @@ export function markReadersDirtyForChangedWrites(
       state.scheduleWithDebounce(reader);
     } else if (state.computations.has(reader)) {
       state.markDirty(reader);
+      if (isAncestorAction(state.actionParent, sourceAction, reader)) {
+        state.markPullDemandContinuation(reader);
+        state.pending.add(reader);
+        state.queueExecution();
+      }
       if (!state.isMaterializer(reader)) {
         state.scheduleAffectedEffects(reader);
       }
     }
   }
+}
+
+function isAncestorAction(
+  actionParent: WeakMap<Action, Action>,
+  sourceAction: Action,
+  candidateAncestor: Action,
+): boolean {
+  let parent = actionParent.get(sourceAction);
+  while (parent) {
+    if (parent === candidateAncestor) return true;
+    parent = actionParent.get(parent);
+  }
+  return false;
 }

@@ -341,6 +341,7 @@ export interface SchedulerSettleLoopState {
     seed: Action,
     targetWorkSet: Set<Action>,
     memo: Map<Action, boolean>,
+    options?: { forceTraverseCleanAction?: boolean },
   ) => boolean;
   readonly getActionId: (action: Action) => string;
   readonly clearDirty: (action: Action) => void;

@@ -24,6 +24,7 @@ function buildPullIterationWorkSet(state: {
     seed: Action,
     workSet: Set<Action>,
     memo: Map<Action, boolean>,
+    options?: { forceTraverseCleanAction?: boolean },
   ) => boolean;
 }): {
   workSet: Set<Action>;
@@ -32,10 +33,14 @@ function buildPullIterationWorkSet(state: {
 } {
   const workSet = new Set<Action>();
   const iterationSeeds = new Set<Action>();
+  const traversalSeeds = new Set<Action>();
 
-  // On first iteration, add special-case seeds discovered before settle.
-  if (state.settleIter === 0) {
-    for (const seed of state.initialSeeds) {
+  for (const seed of state.initialSeeds) {
+    traversalSeeds.add(seed);
+    // On the first iteration, initial seeds are runnable work. On later
+    // iterations they remain demand roots for newly dirtied dependencies, but
+    // should not be rerun unless normal scheduling also marks them pending.
+    if (state.settleIter === 0) {
       iterationSeeds.add(seed);
     }
   }
@@ -47,12 +52,16 @@ function buildPullIterationWorkSet(state: {
 
   for (const seed of iterationSeeds) {
     workSet.add(seed);
+    traversalSeeds.add(seed);
   }
 
   // Pull in dirty computations that feed the currently runnable seeds.
   const dirtyDependencyMemo = new Map<Action, boolean>();
-  for (const seed of iterationSeeds) {
-    state.collectDirtyDependencies(seed, workSet, dirtyDependencyMemo);
+  for (const seed of traversalSeeds) {
+    state.collectDirtyDependencies(seed, workSet, dirtyDependencyMemo, {
+      forceTraverseCleanAction: state.settleIter > 0 &&
+        state.initialSeeds.has(seed),
+    });
   }
 
   return {
