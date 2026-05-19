@@ -154,13 +154,13 @@ export function deepFreeze<T>(value: T): T {
  * thread the same set through so a cycle back to a value already being
  * deep-frozen by an outer call short-circuits.
  *
- * The arm 3 callback `(v) => deepFreezeInProgress(v, inProgress)` is the
- * "threading into the `FabricInstance`s which are participating in the act
- * of deep-freezing": the participating impl invokes `subFreeze` on nested
- * `FabricValue`s, and that closure carries the shared `inProgress` so the
- * impl's recursion is cycle-safe by construction. This mirrors the
- * `subIsDeepFrozen`/`checkValue`-closure pattern already used by
- * `isDeepFrozenFabricValue` for the `[IS_DEEP_FROZEN]` side.
+ * The arm 3 callback `(v) => deepFreezeInProgress(v, inProgress)` threads
+ * the shared cycle state into participating `FabricInstance`s: each impl
+ * invokes `subFreeze` on its nested `FabricValue`s, and that closure
+ * carries the shared `inProgress` so the impl's recursion is cycle-safe by
+ * construction. This mirrors the `subIsDeepFrozen`/`checkValue`-closure
+ * pattern already used by `isDeepFrozenFabricValue` for the
+ * `[IS_DEEP_FROZEN]` side.
  *
  * Unlike `isDeepFrozenInProgress` (which removes values from its
  * `inProgress` set after sub-checks complete -- because the question
@@ -201,9 +201,9 @@ function deepFreezeInProgress<T>(value: T, inProgress?: Set<object>): T {
   // Arm 3: a `FabricInstance` freezes itself in place via its `[DEEP_FREEZE]`
   // protocol member. The `subFreeze` callback closes over `inProgress` so the
   // impl's recursion into nested `FabricValue`s shares cycle state with this
-  // call -- this is the threading Dan's design calls for: the participating
-  // `FabricInstance` doesn't need to be `inProgress`-aware in its own
-  // signature; the callback carries the shared state transparently.
+  // call: the participating `FabricInstance` doesn't need to be
+  // `inProgress`-aware in its own signature; the callback carries the shared
+  // state transparently.
   if (value instanceof FabricInstance) {
     const result = value[DEEP_FREEZE](
       (v) => deepFreezeInProgress(v, inProgress),

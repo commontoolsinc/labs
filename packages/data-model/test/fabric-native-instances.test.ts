@@ -1280,25 +1280,18 @@ describe("fabric-native-instances", () => {
   // --------------------------------------------------------------------------
   // Arm 3 cycle behavior via [DEEP_FREEZE] protocol
   //
-  // TDD RED -- expected to fail on the current `deep-freeze.ts` until
-  // shared-`seen`-threading is restored. The defect: the callback passed
-  // into `[DEEP_FREEZE]` impls at `deep-freeze.ts:159` is
-  // `(v) => deepFreeze(v)`, which restarts the outer `deepFreeze()` with
-  // no shared `seen` state -- so a cycle through any `FabricValue`-typed
-  // slot that recurses back through the protocol infinite-recurses.
+  // Cycle-capable wired impls: `FabricError` (recurses through
+  // `error.cause` + custom enumerable own properties), `ProblematicValue`
+  // (recurses through `state`), `UnknownValue` (recurses through
+  // `state`). `FabricRegExp.[DEEP_FREEZE]` ignores its `subFreeze`
+  // parameter (only freezes `this.regex` + `this`) and so is structurally
+  // cycle-free by construction at the protocol level -- omitted
+  // intentionally, not a gap.
   //
-  // Cycle-capable wired impls (at-source-verified): `FabricError`
-  // (recurses through `error.cause` + custom enumerable own properties),
-  // `ProblematicValue` (recurses through `state`), `UnknownValue`
-  // (recurses through `state`). `FabricRegExp.[DEEP_FREEZE]` ignores its
-  // `subFreeze` parameter (only freezes `this.regex` + `this`) and so is
-  // structurally cycle-free by construction at the protocol level --
-  // omitted intentionally, not a gap.
-  //
-  // Failure shape: pre-fix tests fail with `RangeError: Maximum call
-  // stack size exceeded` (clean throw, not a hang) caught by the
-  // `.not.toThrow()` assertion. Post-fix (Step 2 shared-`seen`-threading)
-  // tests pass.
+  // Termination assertion: a cycle without shared-`inProgress` threading
+  // would manifest as `RangeError: Maximum call stack size exceeded` (a
+  // clean fast throw, not a hang); `.not.toThrow()` is the discriminating
+  // assertion.
   // --------------------------------------------------------------------------
 
   describe("Arm 3 cycle behavior via [DEEP_FREEZE]", () => {

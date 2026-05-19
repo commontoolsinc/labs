@@ -200,18 +200,14 @@ describe("isDeepFrozen", () => {
     });
   });
 
-  // Dan-direct request (verbatim): "unit test cases for `isDeepFrozen()`
-  // which cover `FabricInstance` and `FabricPrimitive`, with at least one
-  // example of a `FabricInstance` that participates in a circular
-  // reference." Naming read: Dan named `isDeepFrozen()` literally (not
-  // `isDeepFrozenFabricValue` — a distinct function with its own existing
-  // `isDeepFrozenFabricValue with FabricInstance (R6)` describe below), so
-  // these tests target `isDeepFrozen` specifically. At-source, `isDeepFrozen`
-  // is the simpler primary check that delegates to `isDeepFrozenInProgress`
-  // (which threads `inProgress: Set<object>` for cycle-safety) and treats a
+  // Coverage for `isDeepFrozen` on `FabricInstance` and `FabricPrimitive`
+  // inputs, including a `FabricInstance` participating in a circular
+  // reference. `isDeepFrozen` delegates to `isDeepFrozenInProgress` (which
+  // threads `inProgress: Set<object>` for cycle-safety) and treats a
   // `FabricInstance` as a plain JS object whose enumerable values are
-  // recursively inspected — distinct from `isDeepFrozenFabricValue`'s
-  // protocol-aware type-guard semantics.
+  // recursively inspected; this is distinct from `isDeepFrozenFabricValue`'s
+  // protocol-aware type-guard semantics, which has its own coverage in the
+  // sibling `isDeepFrozenFabricValue with FabricInstance` describe below.
   describe("FabricInstance and FabricPrimitive", () => {
     it("FabricPrimitive returns true (self-frozen at construction)", () => {
       const epoch = new FabricEpochNsec(1234567890n);
@@ -323,32 +319,20 @@ describe("isDeepFrozenFabricValue with FabricInstance (R6)", () => {
 });
 
 // ===========================================================================
-// Circular-value cycle behavior (TDD RED -- expected to fail on the current
-// `deep-freeze.ts` until shared-`seen`-threading is restored).
+// Circular-value cycle behavior.
 //
-// Dan's directive (verbatim): "in TDD style, please add unit tests that
-// demonstrate that circular values work (across all arms, not just
-// `FabricInstance`), which we expect to initially fail. then address the
-// brokenness." -- "`deepFreeze()` per se needs to keep a `seen` set that is
-// shared by all recursive calls, and which therefore needs to be threaded
-// into the `FabricInstance`s which are participating in the act of
-// deep-freezing."
+// Scope: cycle coverage for `deepFreeze()`'s arms (per the function's
+// doc-comment 4-arm dispatch) and the analogous arms of `checkValue` inside
+// `isDeepFrozenFabricValue`. Arm 1 (necessarily-or-known-deep-frozen) and
+// Arm 2 (`FabricPrimitive`) are structurally cycle-free (leaf / no outbound
+// references), so cycle tests only apply to Arm 4 (plain-object / array
+// fallback) here. Arm 3 (`FabricInstance` via `[DEEP_FREEZE]`) cycles are
+// covered in `fabric-native-instances.test.ts`.
 //
-// Scope (R-A read, foreman-routed): the four arms of `deepFreeze()` itself
-// (per the function's own doc-comment at deep-freeze.ts:120-122) and the
-// analogous arms of `checkValue` inside `isDeepFrozenFabricValue`. Arm 1
-// (necessarily-or-known-deep-frozen) and Arm 2 (`FabricPrimitive`) are
-// structurally cycle-free (leaf / no outbound references), so cycle tests
-// only apply to Arm 4 (plain-object / array fallback) here. Arm 3
-// (`FabricInstance` via `[DEEP_FREEZE]`) cycles are covered in
-// `fabric-native-instances.test.ts`. The `cls[RECONSTRUCT]` deserialize-
-// boundary call-site in `json-encoding-context.ts` is not an arm of
-// `deepFreeze()` and is #22-fenced (out of scope).
-//
-// Failure shape (pre-fix): JavaScript runtime will throw `RangeError:
-// Maximum call stack size exceeded` once stack is exhausted -- a clean
-// fast throw, NOT a hang, so the test suite reports the RED signal
-// promptly. `.not.toThrow()` is the discriminating assertion.
+// Termination assertion: a cycle without shared-`inProgress` threading
+// would manifest as `RangeError: Maximum call stack size exceeded` (a
+// clean fast throw, not a hang). `.not.toThrow()` is the discriminating
+// assertion for "this call terminates."
 // ===========================================================================
 
 describe("deepFreeze cycle behavior (Arm 4: plain object / array)", () => {
