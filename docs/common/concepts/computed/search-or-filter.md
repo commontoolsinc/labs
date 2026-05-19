@@ -5,7 +5,7 @@ interface Item { title: string; }
 interface Input { items: Item[]; }
 
 export default pattern<Input>(({ items }) => {
-  const searchQuery = Writable.of("");
+  const searchQuery = new Writable("");
 
   // Reactive filtered list
   const filteredItems = computed(() => {

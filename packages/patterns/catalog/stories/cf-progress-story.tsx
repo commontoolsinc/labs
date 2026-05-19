@@ -11,7 +11,7 @@ interface ProgressStoryOutput {
 }
 
 export default pattern<ProgressStoryInput, ProgressStoryOutput>(() => {
-  const indeterminate = Writable.of(false);
+  const indeterminate = new Writable(false);
 
   return {
     [NAME]: "cf-progress Story",

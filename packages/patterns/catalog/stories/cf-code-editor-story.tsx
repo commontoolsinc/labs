@@ -15,8 +15,8 @@ interface CodeEditorStoryOutput {
 }
 
 export default pattern<CodeEditorStoryInput, CodeEditorStoryOutput>(() => {
-  const value = Writable.of("## Hello, world!");
-  const language = Writable.of<
+  const value = new Writable("## Hello, world!");
+  const language = new Writable<
     | "text/javascript"
     | "text/markdown"
     | "application/json"
@@ -25,33 +25,33 @@ export default pattern<CodeEditorStoryInput, CodeEditorStoryOutput>(() => {
     | "text/x.jsx"
     | "text/x.typescript"
   >("text/markdown");
-  const disabled = Writable.of(false);
-  const readonly = Writable.of(false);
-  const placeholder = Writable.of("Start writing...");
-  const timingStrategy = Writable.of<
+  const disabled = new Writable(false);
+  const readonly = new Writable(false);
+  const placeholder = new Writable("Start writing...");
+  const timingStrategy = new Writable<
     "immediate" | "debounce" | "throttle" | "blur"
   >("debounce");
-  const timingDelay = Writable.of(500);
-  const wordWrap = Writable.of(true);
-  const lineNumbers = Writable.of(false);
-  const maxLineWidth = Writable.of<number | string | undefined>(undefined);
-  const tabSize = Writable.of(2);
-  const tabIndent = Writable.of(true);
-  const theme = Writable.of<"light" | "dark">("light");
-  const mode = Writable.of<"code" | "prose">("prose");
-  const autofocus = Writable.of(false);
-  const cursorPosition = Writable.of<"start" | "end">("start");
-  const pattern = Writable.of("catalog");
+  const timingDelay = new Writable(500);
+  const wordWrap = new Writable(true);
+  const lineNumbers = new Writable(false);
+  const maxLineWidth = new Writable<number | string | undefined>(undefined);
+  const tabSize = new Writable(2);
+  const tabIndent = new Writable(true);
+  const theme = new Writable<"light" | "dark">("light");
+  const mode = new Writable<"code" | "prose">("prose");
+  const autofocus = new Writable(false);
+  const cursorPosition = new Writable<"start" | "end">("start");
+  const pattern = new Writable("catalog");
   const mentionableData = [
     { [NAME]: "Design System" },
     { [NAME]: "Runtime Docs" },
     { [NAME]: "Patterns Catalog" },
   ];
   const mentionedData = [{ [NAME]: "Design System" }];
-  const mentionable = Writable.of<typeof mentionableData | undefined>(
+  const mentionable = new Writable<typeof mentionableData | undefined>(
     mentionableData,
   );
-  const mentioned = Writable.of<typeof mentionedData | undefined>(undefined);
+  const mentioned = new Writable<typeof mentionedData | undefined>(undefined);
 
   return {
     [NAME]: "cf-code-editor Story",

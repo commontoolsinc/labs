@@ -11,10 +11,10 @@ interface CalendarStoryOutput {
 }
 
 export default pattern<CalendarStoryInput, CalendarStoryOutput>(() => {
-  const selectedDate = Writable.of("2026-03-13");
-  const disabled = Writable.of(false);
-  const minDate = Writable.of("");
-  const maxDate = Writable.of("");
+  const selectedDate = new Writable("2026-03-13");
+  const disabled = new Writable(false);
+  const minDate = new Writable("");
+  const maxDate = new Writable("");
 
   return {
     [NAME]: "cf-calendar Story",

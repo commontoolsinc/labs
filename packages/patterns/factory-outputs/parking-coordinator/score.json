@@ -43,7 +43,7 @@
           "suggested_fix": "Convert all <div style='...'> to <div style={{ cssProperty: 'value' }}>. For dynamic values: style={{ color, backgroundColor: bg }} rather than template literal strings."
         }
       ],
-      "justification": "Strong domain modeling, clean allocation algorithm isolated in pure function at module scope, correct use of computed() for all derived values, correct $value/$checked bindings throughout, no Map/Set in cell data, no Stream.of or async. Two violations: inline arrow functions in .map() callbacks where handler() should be used (-10), and 46 pervasive string-style-on-HTML violations (-5 for the systemic pattern). The handler-per-map violations are mitigated by inner computed() wrappers that limit re-creation frequency."
+      "justification": "Strong domain modeling, clean allocation algorithm isolated in pure function at module scope, correct use of computed() for all derived values, correct $value/$checked bindings throughout, no Map/Set in cell data, no local Stream construction or async. Two violations: inline arrow functions in .map() callbacks where handler() should be used (-10), and 46 pervasive string-style-on-HTML violations (-5 for the systemic pattern). The handler-per-map violations are mitigated by inner computed() wrappers that limit re-creation frequency."
     },
     "test_coverage": {
       "score": 80,

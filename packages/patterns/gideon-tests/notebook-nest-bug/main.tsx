@@ -22,7 +22,7 @@ export default pattern<
   }).result!;
 
   // "idle" | "creating" | "done"
-  const status = Writable.of<string>("idle");
+  const status = new Writable<string>("idle");
 
   const requestCreate = action(() => {
     console.log("requestCreate");

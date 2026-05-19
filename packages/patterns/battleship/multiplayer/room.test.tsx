@@ -57,21 +57,21 @@ function createTestPlayer(name: string, playerNum: 1 | 2): PlayerData {
 
 export default pattern(() => {
   // Setup shared state cells (simulating what lobby would create)
-  const player1Cell = Writable.of<PlayerData | null>(
+  const player1Cell = new Writable<PlayerData | null>(
     createTestPlayer("Alice", 1),
   );
-  const player2Cell = Writable.of<PlayerData | null>(
+  const player2Cell = new Writable<PlayerData | null>(
     createTestPlayer("Bob", 2),
   );
-  const shotsCell = Writable.of<ShotsState>(createInitialShots());
-  const gameStateCell = Writable.of<GameState>({
+  const shotsCell = new Writable<ShotsState>(createInitialShots());
+  const gameStateCell = new Writable<GameState>({
     phase: "playing",
     currentTurn: 1,
     winner: null,
     lastMessage: "Alice's turn - fire at the enemy fleet!",
   });
-  const myNameCell = Writable.of("Alice");
-  const myPlayerNumberCell = Writable.of<1 | 2 | null>(1);
+  const myNameCell = new Writable("Alice");
+  const myPlayerNumberCell = new Writable<1 | 2 | null>(1);
 
   // Create room as Player 1 (Alice)
   const room = BattleshipRoom({

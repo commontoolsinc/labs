@@ -7,8 +7,8 @@
 import { computed, nonPrivateRandom, pattern, Writable } from "commonfabric";
 
 export default pattern(() => {
-  const items = Writable.of(["alpha", "bravo", "charlie", "delta", "echo"]);
-  const shuffled = Writable.of<string[]>([]);
+  const items = new Writable(["alpha", "bravo", "charlie", "delta", "echo"]);
+  const shuffled = new Writable<string[]>([]);
 
   // Non-idempotent: nonPrivateRandom() produces different permutations each run
   computed(() => {

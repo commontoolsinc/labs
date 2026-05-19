@@ -209,6 +209,10 @@ export function isOpaqueSourceExpression(
     }
   }
 
+  if (ts.isNewExpression(current) && isOpaqueOriginCall(current, context)) {
+    return true;
+  }
+
   // Property/element access chains that bottom out on an opaque-origin
   // call (`wish(...).result`, `fetchData(...).result.items`, etc.) are
   // also opaque sources — the chain navigates through reactive cells
@@ -234,7 +238,10 @@ export function isOpaqueSourceExpression(
       inner = unwrapped;
       break;
     }
-    if (ts.isCallExpression(inner) && isOpaqueOriginCall(inner, context)) {
+    if (
+      (ts.isCallExpression(inner) || ts.isNewExpression(inner)) &&
+      isOpaqueOriginCall(inner, context)
+    ) {
       return true;
     }
   }

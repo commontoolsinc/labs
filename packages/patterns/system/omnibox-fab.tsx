@@ -120,7 +120,7 @@ export default pattern<OmniboxFABInput>(
     const { entries: summaryEntries } = wish<{
       entries: SummaryIndexEntry[];
     }>({ query: "#summaryIndex" }).result!;
-    const sandboxId = Writable.of(
+    const sandboxId = new Writable(
       `omnibot-${nonPrivateRandom().toString(36).slice(2, 10)}`,
     );
 
@@ -129,7 +129,7 @@ export default pattern<OmniboxFABInput>(
     const patternIndexUrl = wish<{ url: Writable<string> }>({
       query: "#pattern-index",
     });
-    const resolvedPatternUrl = Writable.of<string>("/api/patterns/index.md");
+    const resolvedPatternUrl = new Writable<string>("/api/patterns/index.md");
     computed(() => {
       const urlRef = patternIndexUrl?.result?.url;
       const urlValue = typeof urlRef?.get === "function"
@@ -203,9 +203,9 @@ Be matter-of-fact. Prefer action to explanation.`;
       tools: allTools,
     });
 
-    const fabExpanded = Writable.of(false);
-    const showHistory = Writable.of(false);
-    const peekDismissedIndex = Writable.of(-1);
+    const fabExpanded = new Writable(false);
+    const showHistory = new Writable(false);
+    const peekDismissedIndex = new Writable(-1);
 
     // Derive pin count for collapsed state dots
     const pinCount = computed(() => {

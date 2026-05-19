@@ -554,15 +554,15 @@ export default pattern<PatternInput, PatternOutput>(() => {
   // ==========================================================================
 
   // Persisted state
-  const threadMetadata = Writable.of<Record<string, ThreadMetadata>>(
+  const threadMetadata = new Writable<Record<string, ThreadMetadata>>(
     {},
   ).for("threadMetadata");
-  const hiddenThreads = Writable.of<string[]>([]).for("hiddenThreads");
+  const hiddenThreads = new Writable<string[]>([]).for("hiddenThreads");
 
   // UI state
-  const expandedThreads = Writable.of<string[]>([]).for("expandedThreads");
-  const drafts = Writable.of<Record<string, string>>({}).for("drafts");
-  const expectResponseLabelId = Writable.of("").for("expectResponseLabelId");
+  const expandedThreads = new Writable<string[]>([]).for("expandedThreads");
+  const drafts = new Writable<Record<string, string>>({}).for("drafts");
+  const expectResponseLabelId = new Writable("").for("expectResponseLabelId");
 
   // Gmail-sender integration state
   const emptyDraft: EmailDraft = {
@@ -574,15 +574,15 @@ export default pattern<PatternInput, PatternOutput>(() => {
     replyToMessageId: "",
     replyToThreadId: "",
   };
-  const senderDraft = Writable.of<EmailDraft>(emptyDraft).for("senderDraft");
-  const activeSendThread = Writable.of<string | null>(null).for(
+  const senderDraft = new Writable<EmailDraft>(emptyDraft).for("senderDraft");
+  const activeSendThread = new Writable<string | null>(null).for(
     "activeSendThread",
   );
-  const loadingLabels = Writable.of(false).for("loadingLabels");
-  const settingsOpenFor = Writable.of<string | null>(null).for(
+  const loadingLabels = new Writable(false).for("loadingLabels");
+  const settingsOpenFor = new Writable<string | null>(null).for(
     "settingsOpenFor",
   );
-  const sortOldestFirst = Writable.of(true).for("sortOldestFirst");
+  const sortOldestFirst = new Writable(true).for("sortOldestFirst");
 
   // ==========================================================================
   // AUTH
@@ -734,7 +734,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
   // ==========================================================================
 
   // Track which thread is currently generating a draft
-  const generatingDraftFor = Writable.of<string | null>(null).for(
+  const generatingDraftFor = new Writable<string | null>(null).for(
     "generatingDraftFor",
   );
 

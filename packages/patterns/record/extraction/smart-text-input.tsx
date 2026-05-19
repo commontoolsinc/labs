@@ -313,15 +313,15 @@ export const SmartTextInput = pattern<
   // ===== Internal State =====
 
   // Preview state (for file upload or OCR result)
-  const previewText = Writable.of<string | null>(null);
-  const previewSource = Writable.of<"file" | "image" | null>(null);
-  const previewFileName = Writable.of<string | null>(null);
+  const previewText = new Writable<string | null>(null);
+  const previewSource = new Writable<"file" | "image" | null>(null);
+  const previewFileName = new Writable<string | null>(null);
 
   // File error state (for user feedback)
-  const fileError = Writable.of<string | null>(null);
+  const fileError = new Writable<string | null>(null);
 
   // Image array for uploaded image links
-  const imageArray = Writable.of<ImageData[]>([]);
+  const imageArray = new Writable<ImageData[]>([]);
 
   // ===== OCR Processing =====
 

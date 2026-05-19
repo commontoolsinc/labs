@@ -336,10 +336,10 @@ function extractLocations(layout: string): string[] {
 
 export default pattern<Input, Output>(({ items, storeLayout }) => {
   // UI state for view mode
-  const viewMode = Writable.of<"quick" | "sorted">("quick");
+  const viewMode = new Writable<"quick" | "sorted">("quick");
   // Store both index and title when opening correction panel
-  const correctionIndex = Writable.of<number>(-1);
-  const correctionTitle = Writable.of<string>("");
+  const correctionIndex = new Writable<number>(-1);
+  const correctionTitle = new Writable<string>("");
 
   // Create search tool for omnibot
   const searchItems = patternTool(searchItemsPattern, { items });

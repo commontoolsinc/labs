@@ -613,8 +613,8 @@ interface Output {
 }
 
 export default pattern<Input, Output>(({ title, items, subLists }) => {
-  const data = items ?? Writable.of<ContainerItem<PersonLike>[]>([]);
-  const lists = subLists ?? Writable.of<ContainerProtocol<PersonLike>[]>([]);
+  const data = items ?? new Writable<ContainerItem<PersonLike>[]>([]);
+  const lists = subLists ?? new Writable<ContainerProtocol<PersonLike>[]>([]);
 
   const addItem = action(({ item }: { item: PersonLike }) => {
     data.push({ item, name: item.name });

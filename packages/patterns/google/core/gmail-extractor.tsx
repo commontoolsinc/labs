@@ -493,7 +493,7 @@ const GmailExtractor = pattern<GmailExtractorInput, GmailExtractorOutput>(
     });
 
     // Note: Handler operations removed - they were unused and the authForHandlers wrapper
-    // was an anti-pattern (Writable.of + computed side effect).
+    // was an anti-pattern (local Writable + computed side effect).
     // GmailImporter already handles auth via wish() when overrideAuth isn't provided.
     // If write operations are needed in the future, pass overrideAuth directly to handlers.
 

@@ -403,9 +403,9 @@ YOUR FINAL OUTPUT should summarize: which brands you searched, how many membersh
     // Create signal cell HERE and pass to base pattern - both share same cell
     // This follows the "share cells by making them inputs" pattern
     // See: community-docs/superstitions/2025-12-04-share-cells-between-composed-patterns.md
-    const itemFoundSignal = Writable.of<number>(0);
+    const itemFoundSignal = new Writable<number>(0);
     // Track last membership count in a Writable (closure vars don't persist in derive)
-    const lastMembershipCountCell = Writable.of<number>(0);
+    const lastMembershipCountCell = new Writable<number>(0);
 
     // ========================================================================
     // CREATE BASE SEARCHER

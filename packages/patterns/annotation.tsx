@@ -143,9 +143,9 @@ const toggleBlockerPicker = handler<
 export const Annotation = pattern<AnnotationInput, AnnotationOutput>(
   ({ content, kind, status, targetPiece, blockedBy, isAnnotation }) => {
     // Local UI state
-    const targetSearch = Writable.of<string>("");
-    const blockerSearch = Writable.of<string>("");
-    const showBlockerPicker = Writable.of<boolean>(false);
+    const targetSearch = new Writable<string>("");
+    const blockerSearch = new Writable<string>("");
+    const showBlockerPicker = new Writable<boolean>(false);
 
     // Discover all mentionable pieces for target picker
     const mentionable = wish<MentionablePiece[]>({

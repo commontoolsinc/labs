@@ -30,9 +30,9 @@ interface Output {
 }
 
 export default pattern<Record<string, never>, Output>(() => {
-  const textValue = Writable.of<string>("hello");
-  const textareaValue = Writable.of<string>("multi\nline");
-  const checkboxValue = Writable.of<boolean>(true);
+  const textValue = new Writable<string>("hello");
+  const textareaValue = new Writable<string>("multi\nline");
+  const checkboxValue = new Writable<boolean>(true);
 
   return {
     [NAME]: "Late Subscriber Repro",

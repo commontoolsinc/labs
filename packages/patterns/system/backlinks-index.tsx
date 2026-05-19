@@ -156,7 +156,7 @@ const BacklinksIndex = pattern<Input, Output>(({ allPieces }) => {
   // Compute mentionable list from allPieces reactively
   const mentionable = computeMentionable({ allPieces });
 
-  const query = Writable.of("");
+  const query = new Writable("");
 
   // Build resolved entries with backlinks materialized as plain arrays
   const entries = computed(() => {

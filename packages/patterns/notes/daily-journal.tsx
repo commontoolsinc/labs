@@ -189,8 +189,8 @@ export default pattern<DailyJournalInput, DailyJournalOutput>(
     }>({ query: "#default" }).result!;
 
     // UI state
-    const showSettings = Writable.of(false);
-    const selectedDate = Writable.of(getTodayDate());
+    const showSettings = new Writable(false);
+    const selectedDate = new Writable(getTodayDate());
 
     // Dates that already have a journal entry (for calendar markers)
     const datesWithNotes = computed(() => {
@@ -293,7 +293,7 @@ ${notesXml}
 </daily-notes>`;
     });
 
-    const rollupMessages = Writable.of<BuiltInLLMMessage[]>([]);
+    const rollupMessages = new Writable<BuiltInLLMMessage[]>([]);
 
     const rollupParams = {
       system: rollupSystemPrompt,

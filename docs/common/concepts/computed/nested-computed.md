@@ -5,7 +5,7 @@ There is never a reason to nest `computed()` calls. The inner `computed()` retur
 ```typescript
 import { computed, Writable } from 'commonfabric';
 
-const myCell = Writable.of(10);
+const myCell = new Writable(10);
 
 // ❌ WRONG - never nest computed()
 const badValue = computed(() => 123 + computed(() => myCell.get() * 2));

@@ -1575,20 +1575,20 @@ export default pattern<ClassifierInput, ClassifierOutput>(
     pendingClassifications,
     currentItem,
   }) => {
-    // Local state for new item input - use Writable.of for bidirectional binding with $value
-    const newItemFields = Writable.of<Record<string, string>>({});
-    const newFieldKey = Writable.of("");
-    const newFieldValue = Writable.of("");
+    // Local state for new item input - use Writable for bidirectional binding with $value
+    const newItemFields = new Writable<Record<string, string>>({});
+    const newFieldKey = new Writable("");
+    const newFieldValue = new Writable("");
 
     // Track recently auto-classified items for undo functionality
-    const recentAutoClassified = Writable.of<AutoClassifiedItem[]>([]);
+    const recentAutoClassified = new Writable<AutoClassifiedItem[]>([]);
 
     // Track undone auto-classified item awaiting manual review
     // When set, this takes priority over currentClassificationResult (shows rules-based result immediately)
-    const undoneAutoItem = Writable.of<AutoClassifiedItem | null>(null);
+    const undoneAutoItem = new Writable<AutoClassifiedItem | null>(null);
 
     // Track selected example for expanded details view (null when none selected)
-    const selectedExampleId = Writable.of<string | null>(null);
+    const selectedExampleId = new Writable<string | null>(null);
 
     // Compute common field names from existing examples
     // These are field names that appear in ALL examples
@@ -1891,9 +1891,9 @@ Respond with:
 
     // Track which suggestion indices have been acted on (accepted or dismissed)
     // This avoids side effects in computed - we derive visible suggestions from LLM result
-    const dismissedSuggestionIndices = Writable.of<number[]>([]);
+    const dismissedSuggestionIndices = new Writable<number[]>([]);
     // Counter to force refresh of rule generation prompt
-    const ruleGenCounter = Writable.of(0);
+    const ruleGenCounter = new Writable(0);
 
     // Build the rule generation prompt when conditions are met
     const ruleGenerationPrompt = computed(() => {

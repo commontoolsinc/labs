@@ -38,7 +38,7 @@ interface Output {
 }
 
 export default pattern<Record<string, never>, Output>(_ => {
-  const items = Writable.of([] as Array<Item>)
+  const items = new Writable([] as Array<Item>)
   
   // Binding returns Stream<Item>
   const addItem = addItemHandler({ items });

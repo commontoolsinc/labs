@@ -170,7 +170,7 @@ Guidelines:
 ${profileSection}`;
     });
 
-    const messages = Writable.of<BuiltInLLMMessage[]>([]);
+    const messages = new Writable<BuiltInLLMMessage[]>([]);
 
     const llmTools = {
       searchSpace: patternTool(summarySearchPattern, {

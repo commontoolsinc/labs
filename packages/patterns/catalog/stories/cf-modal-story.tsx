@@ -15,12 +15,12 @@ interface ModalStoryOutput {
 }
 
 export default pattern<ModalStoryInput, ModalStoryOutput>(() => {
-  const dialogOpen = Writable.of(false);
-  const sheetOpen = Writable.of(false);
-  const size = Writable.of<"sm" | "md" | "lg" | "full">("md");
-  const dismissible = Writable.of(true);
-  const grabber = Writable.of(true);
-  const detent = Writable.of<"auto" | "half" | "full">("auto");
+  const dialogOpen = new Writable(false);
+  const sheetOpen = new Writable(false);
+  const size = new Writable<"sm" | "md" | "lg" | "full">("md");
+  const dismissible = new Writable(true);
+  const grabber = new Writable(true);
+  const detent = new Writable<"auto" | "half" | "full">("auto");
 
   const openDialog = action(() => dialogOpen.set(true));
   const closeDialog = action(() => dialogOpen.set(false));

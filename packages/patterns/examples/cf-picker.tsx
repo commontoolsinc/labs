@@ -19,7 +19,7 @@ export default pattern<Input, Result>(
     });
     const counterC = Counter({ value: 30 });
 
-    const selectedIndex = Writable.of(0);
+    const selectedIndex = new Writable(0);
     const items = [counterA, counterB, counterC];
     const selection = computed(() => items[selectedIndex.get()]);
 

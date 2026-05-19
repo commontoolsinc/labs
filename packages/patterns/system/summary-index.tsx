@@ -65,7 +65,7 @@ const SummaryIndex = pattern<Input, Output>(() => {
     query: "#mentionable",
   }).result;
 
-  const query = Writable.of("");
+  const query = new Writable("");
 
   const entries = computed(() => {
     const result: SummaryIndexEntry[] = [];

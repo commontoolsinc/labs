@@ -532,7 +532,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
   const flightCount = computed(() => upcomingFlights?.length ?? 0);
 
   // State for expanded sections (reserved for future debug UI)
-  const _showDebug = Writable.of(false);
+  const _showDebug = new Writable(false);
 
   return {
     [NAME]: computed(() => `Flight Calendar (${flightCount} flights)`),

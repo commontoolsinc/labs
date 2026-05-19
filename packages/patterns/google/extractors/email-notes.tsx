@@ -204,11 +204,11 @@ interface PatternOutput {
 
 export default pattern<PatternInput, PatternOutput>(() => {
   // State for label operations
-  const taskCurrentLabelId = Writable.of("").for("taskCurrentLabelId");
-  const loadingLabels = Writable.of(false).for("loadingLabels");
-  const hiddenNotes = Writable.of<string[]>([]).for("hiddenNotes");
-  const processingNotes = Writable.of<string[]>([]).for("processingNotes");
-  const sortNewestFirst = Writable.of(true).for("sortNewestFirst");
+  const taskCurrentLabelId = new Writable("").for("taskCurrentLabelId");
+  const loadingLabels = new Writable(false).for("loadingLabels");
+  const hiddenNotes = new Writable<string[]>([]).for("hiddenNotes");
+  const processingNotes = new Writable<string[]>([]).for("processingNotes");
+  const sortNewestFirst = new Writable(true).for("sortNewestFirst");
 
   // Use createGoogleAuth for scopes that include gmailModify
   // Note: We use auth directly (not wrapped in ifElse) because GmailSendClient

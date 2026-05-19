@@ -69,7 +69,7 @@ const STATUS_STYLE: Record<AnnotationStatus, string> = {
 // ===== The Pattern =====
 
 export default pattern<Record<string, never>>((_) => {
-  const filter = Writable.of<string>("open");
+  const filter = new Writable<string>("open");
 
   const { candidates: annotations } = wish<AnnotationPiece>({
     query: "#annotation",

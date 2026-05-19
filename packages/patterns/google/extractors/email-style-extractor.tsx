@@ -159,11 +159,11 @@ export default pattern<Record<PropertyKey, never>, PatternOutput>(
     // STATE
     // ========================================================================
 
-    const workEmail = Writable.of("").for("workEmail");
-    const savedStyle = Writable.of<EmailStyle | null>(null).for("savedStyle");
-    const lastAnalyzedAt = Writable.of("").for("lastAnalyzedAt");
-    const emailsAnalyzedCount = Writable.of(0).for("emailsAnalyzedCount");
-    const reanalyzeFlag = Writable.of(0).for("reanalyzeFlag");
+    const workEmail = new Writable("").for("workEmail");
+    const savedStyle = new Writable<EmailStyle | null>(null).for("savedStyle");
+    const lastAnalyzedAt = new Writable("").for("lastAnalyzedAt");
+    const emailsAnalyzedCount = new Writable(0).for("emailsAnalyzedCount");
+    const reanalyzeFlag = new Writable(0).for("reanalyzeFlag");
 
     // ========================================================================
     // AUTH

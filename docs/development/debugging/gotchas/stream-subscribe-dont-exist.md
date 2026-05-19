@@ -1,12 +1,13 @@
-# Stream.of() / .subscribe() Don't Exist
+# Stream.subscribe() Doesn't Exist
 
 **Error:** `Property 'subscribe' does not exist on type 'Stream<...>'`
 
-**Symptom:** Trying to create streams with `Stream.of()` and subscribe to them.
+**Symptom:** Trying to create or receive handler events by subscribing to a
+`Stream`.
 
 ```typescript
-// WRONG: This API doesn't exist
-const addItem: Stream<{ title: string }> = Stream.of();
+// WRONG: Streams are not subscribed to directly
+const addItem: Stream<{ title: string }> = new Stream();
 addItem.subscribe(({ title }) => {
   items.push({ title });
 });

@@ -214,13 +214,13 @@ Knowledge graph:
 
 export default pattern<PiecesListInput, PiecesListOutput>((_) => {
   // OWN the data cells (not from wish)
-  const allPieces = Writable.of<MentionablePiece[]>([]);
-  const recentPieces = Writable.of<MentionablePiece[]>([]);
-  const suggestionHistory = Writable.of<SuggestionHistoryEntry[]>([]);
+  const allPieces = new Writable<MentionablePiece[]>([]);
+  const recentPieces = new Writable<MentionablePiece[]>([]);
+  const suggestionHistory = new Writable<SuggestionHistoryEntry[]>([]);
   const suggestionHistoryViewer = SuggestionHistory({});
 
   // Dropdown menu state
-  const menuOpen = Writable.of(false);
+  const menuOpen = new Writable(false);
 
   // Filter out hidden pieces and pieces without resolved NAME
   // (prevents transient hash-only pills during reactive updates)
@@ -234,7 +234,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
     })
   );
 
-  const doListItems = Writable.of<any[]>([]);
+  const doListItems = new Writable<any[]>([]);
   const doList = DoList({ items: doListItems });
 
   // Combine user-managed allPieces with system pieces (like doList) so

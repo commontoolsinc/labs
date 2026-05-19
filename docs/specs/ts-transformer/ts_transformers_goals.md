@@ -202,7 +202,7 @@ with independent acceptance criteria.
 ## G-015 Guard Against Common Type Inference Footguns
 
 The transformer should catch common authoring traps early when TypeScript
-inference creates unusable reactive types (for example `Cell.of([])` inferring
+inference creates unusable reactive types (for example `new Cell([])` inferring
 `never[]`), and emit diagnostics that provide a direct fix path.
 
 ## G-016 Validate Schema Shrink Coverage

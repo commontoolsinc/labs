@@ -148,7 +148,7 @@ const Note = pattern<NoteInput, NoteOutput>(
   }) => {
     // Ensure parentNotebook is always a Writable (input is optional)
     const parentNotebook = _parentNotebook ??
-      Writable.of(null as NotebookPiece | null);
+      new Writable(null as NotebookPiece | null);
 
     // Type-based discovery for notebooks and "All Notes" piece
     const notebookWish = wish<NotebookPiece>({
@@ -176,14 +176,14 @@ const Note = pattern<NoteInput, NoteOutput>(
     const _recentPieces = wish<MinimalPiece[]>(
       { query: "#recent", headless: true },
     ).result;
-    const mentioned = Writable.of<MentionablePiece[]>([]);
+    const mentioned = new Writable<MentionablePiece[]>([]);
 
     // UI state
-    const menuOpen = Writable.of(false);
-    const isEditingTitle = Writable.of(false);
+    const menuOpen = new Writable(false);
+    const isEditingTitle = new Writable(false);
 
     // Backlinks - populated by backlinks-index.tsx
-    const backlinks = Writable.of<MentionablePiece[]>([]);
+    const backlinks = new Writable<MentionablePiece[]>([]);
 
     // Summary - truncated content for search indexing
     const summary = computed(() => {

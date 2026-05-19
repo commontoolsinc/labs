@@ -10,8 +10,8 @@ interface GridStoryOutput {
 }
 
 export default pattern<GridStoryInput, GridStoryOutput>(() => {
-  const columns = Writable.of("3");
-  const gap = Writable.of<"2" | "4" | "6" | "8">("4");
+  const columns = new Writable("3");
+  const gap = new Writable<"2" | "4" | "6" | "8">("4");
 
   const cellStyle = {
     backgroundColor: "#e0e7ff",

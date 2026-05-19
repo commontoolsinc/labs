@@ -45,9 +45,9 @@ const setEmptyFirstName = handler<void, { firstName: Cell<string> }>(
 export default pattern(() => {
   // 1. Instantiate the pattern under test with initial state
   const subject = TestPattern({
-    firstName: Cell.of("John"),
-    lastName: Cell.of("Doe"),
-    age: Cell.of(30),
+    firstName: new Cell("John"),
+    lastName: new Cell("Doe"),
+    age: new Cell(30),
   });
 
   // Bind handlers to subject cells

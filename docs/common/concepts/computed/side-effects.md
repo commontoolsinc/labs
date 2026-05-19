@@ -9,8 +9,8 @@ import { computed, pattern, safeDateNow, Writable } from 'commonfabric';
 interface Props {}
 
 export default pattern<Props, Props>((_) => {
-  const logArray = Writable.of<Array<{ timestamp: number }>>([]);
-  const cacheMap = Writable.of<Record<string, number>>({});
+  const logArray = new Writable<Array<{ timestamp: number }>>([]);
+  const cacheMap = new Writable<Record<string, number>>({});
     
   // ❌ Non-idempotent - appends on every run
   const badComputed = computed(() => {

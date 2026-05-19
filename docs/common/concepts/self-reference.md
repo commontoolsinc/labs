@@ -20,7 +20,7 @@ interface TreeNodeOutput {
 
 const TreeNode = pattern<TreeNodeInput, TreeNodeOutput>(
   ({ name, parent, [SELF]: self }) => {
-    const children = Writable.of<TreeNodeOutput[]>([]);
+    const children = new Writable<TreeNodeOutput[]>([]);
 
     return {
       name,

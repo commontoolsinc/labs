@@ -99,7 +99,7 @@ Conventions:
 Be concise and insightful. Focus on patterns and connections, not just listing things. Reference actual piece names.${profileSection}`;
   });
 
-  const messages = Writable.of<BuiltInLLMMessage[]>([]);
+  const messages = new Writable<BuiltInLLMMessage[]>([]);
 
   const llmTools = {
     searchSpace: patternTool(summarySearchPattern, {

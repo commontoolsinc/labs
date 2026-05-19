@@ -353,16 +353,16 @@ const ChatNote = pattern<Input, Output>(
     const mentionable = wish<MentionablePiece[] | Default<[]>>({
       query: "#mentionable",
     }).result!;
-    const mentioned = Writable.of<MentionablePiece[]>([]);
-    const backlinks = Writable.of<MentionablePiece[]>([]);
+    const mentioned = new Writable<MentionablePiece[]>([]);
+    const backlinks = new Writable<MentionablePiece[]>([]);
 
     // State for inline title editing
-    const isEditingTitle = Writable.of<boolean>(false);
+    const isEditingTitle = new Writable<boolean>(false);
 
     // LLM state
-    const isGenerating = Writable.of<boolean>(false);
-    const llmSystem = Writable.of<string>("");
-    const llmMessages = Writable.of<LLMMessage[]>([]);
+    const isGenerating = new Writable<boolean>(false);
+    const llmSystem = new Writable<string>("");
+    const llmMessages = new Writable<LLMMessage[]>([]);
 
     // LLM call - reactive based on llmMessages
     const llmResponse = generateText({
@@ -372,7 +372,7 @@ const ChatNote = pattern<Input, Output>(
     });
 
     // Track content before AI insertion point for streaming display
-    const beforeAIInsert = Writable.of<string>("");
+    const beforeAIInsert = new Writable<string>("");
 
     // Watch for LLM streaming partial updates
     // Use explicit dependency array for proper reactive tracking

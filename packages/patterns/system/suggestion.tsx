@@ -92,8 +92,8 @@ export default pattern<
   WishState<Writable<any>> & { [UI]: VNode }
 >(({ situation, context, initialResults }) => {
   // --- Picker state (used when initialResults is non-empty) ---
-  const selectedIndex = Writable.of(0);
-  const userConfirmedIndex = Writable.of<number | null>(null);
+  const selectedIndex = new Writable(0);
+  const userConfirmedIndex = new Writable<number | null>(null);
 
   const confirmedIndex = computed(() => {
     if (initialResults.length === 1) return 0;
@@ -123,7 +123,7 @@ export default pattern<
   const patternIndexUrl = wish<{ url: Writable<string> }>({
     query: "#pattern-index",
   });
-  const resolvedPatternUrl = Writable.of<string>("/api/patterns/index.md");
+  const resolvedPatternUrl = new Writable<string>("/api/patterns/index.md");
   computed(() => {
     const urlRef = patternIndexUrl?.result?.url;
     const urlValue = typeof urlRef?.get === "function"
@@ -144,7 +144,7 @@ export default pattern<
     return profileText ? `\n\n--- User Context ---\n${profileText}\n---` : "";
   });
 
-  const sandboxId = Writable.of(
+  const sandboxId = new Writable(
     `suggestion-${nonPrivateRandom().toString(36).slice(2, 10)}`,
   );
 
@@ -169,9 +169,9 @@ The final result you present is almost always either an existing cell or a patte
 Use the user context above to personalize your suggestions when relevant.`;
   });
 
-  const messages = Writable.of<BuiltInLLMMessage[]>([]);
-  const showRefine = Writable.of(false);
-  const pendingQuestion = Writable.of<
+  const messages = new Writable<BuiltInLLMMessage[]>([]);
+  const showRefine = new Writable(false);
+  const pendingQuestion = new Writable<
     {
       question: string;
       options: string[];

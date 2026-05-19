@@ -64,8 +64,8 @@ const PickerCard = pattern<PickerCardInput, PickerCardOutput>(
 );
 
 export default pattern<PickerStoryInput, PickerStoryOutput>(() => {
-  const selectedIndex = Writable.of(0);
-  const disabled = Writable.of(false);
+  const selectedIndex = new Writable(0);
+  const disabled = new Writable(false);
 
   const sunrise = PickerCard({
     title: "Sunrise",

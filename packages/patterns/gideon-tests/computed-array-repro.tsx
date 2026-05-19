@@ -45,8 +45,8 @@ interface Output {
 }
 
 export default pattern<Input, Output>(({ items }) => {
-  const filter = Writable.of<Status | "all">("all");
-  const counter = Writable.of(1);
+  const filter = new Writable<Status | "all">("all");
+  const counter = new Writable(1);
 
   return {
     [NAME]: "Computed Array Bug",

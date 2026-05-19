@@ -27,7 +27,7 @@ const handleSend = handler<
 });
 
 export default pattern<Input>(({ title }) => {
-  const topic = Writable.of("");
+  const topic = new Writable("");
 
   const profile = wish<Cell<string>>({ query: "#profile" });
 

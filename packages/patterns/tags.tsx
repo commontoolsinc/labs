@@ -61,7 +61,7 @@ const removeTag = handler<
 // ===== The Pattern =====
 export const TagsModule = pattern<TagsModuleInput, TagsModuleInput>(
   ({ tags }) => {
-    const tagInput = Writable.of<string>("");
+    const tagInput = new Writable<string>("");
     const displayText = computed(() => {
       const count = (tags || []).length || 0;
       return count > 0 ? `${count} tag${count !== 1 ? "s" : ""}` : "No tags";

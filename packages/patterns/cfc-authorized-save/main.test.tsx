@@ -16,8 +16,8 @@ const triggerSave = handler<
 });
 
 export default pattern(() => {
-  const draftTitle = Writable.of("");
-  const savedTitle = Writable.of("");
+  const draftTitle = new Writable("");
+  const savedTitle = new Writable("");
   const instance = AuthorizedSave({
     draftTitle,
     savedTitle,
