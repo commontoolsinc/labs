@@ -912,7 +912,21 @@ export class CFInput extends BaseElement {
 
       override focus(options?: FocusOptions): void {
         if (this.disabled) return;
-        this.input?.focus(options);
+        const input = this.input;
+        if (input) {
+          input.focus(options);
+          return;
+        }
+
+        // If focus is requested before the first render, keep focus on the
+        // semantic host now, then forward it once the native input exists.
+        super.focus(options);
+        void this.updateComplete.then(() => {
+          if (this.disabled || this.ownerDocument.activeElement !== this) {
+            return;
+          }
+          this.input?.focus(options);
+        });
       }
 
       /**

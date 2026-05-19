@@ -74,3 +74,21 @@ Deno.test("form control host focus forwards to native shadow controls", async ()
   textarea.remove();
   select.remove();
 });
+
+Deno.test("cf-input preserves early programmatic focus before first render", async () => {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  const input = document.createElement("cf-input") as CFInput;
+  document.body.append(input);
+
+  input.focus();
+  assertEquals(document.activeElement, input);
+
+  await input.updateComplete;
+  await nextFrame();
+  assertEquals(input.shadowRoot?.activeElement?.tagName, "INPUT");
+
+  input.remove();
+});
