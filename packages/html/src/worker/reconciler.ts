@@ -1867,9 +1867,9 @@ export class WorkerReconciler {
 
   private resolveReactivePropTarget(value: Cell<unknown>): Cell<unknown> {
     try {
-      return value.resolveAsCell().asSchema(true).withTx(undefined);
+      return value.resolveAsCell().asSchema(true);
     } catch {
-      return value.asSchema(true).withTx(undefined);
+      return value.asSchema(true);
     }
   }
 

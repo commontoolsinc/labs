@@ -50,10 +50,10 @@ export const rendererVDOMSchema = internSchema(
                 type: "undefined",
               }, {
                 type: "unknown",
-                asCell: ["cell"],
+                asCell: ["stream"],
               }, {
                 type: "unknown",
-                asCell: ["stream"],
+                asCell: ["cell"],
               }, {
                 type: "object",
                 properties: {}, // stop query from descending
