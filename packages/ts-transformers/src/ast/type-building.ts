@@ -120,10 +120,7 @@ export function getDeclaredTypeNodeForBindingElement(
   checker: ts.TypeChecker,
 ): ts.TypeNode | undefined {
   const parentPattern = declaration.parent;
-  if (
-    !ts.isObjectBindingPattern(parentPattern) &&
-    !ts.isArrayBindingPattern(parentPattern)
-  ) {
+  if (!ts.isObjectBindingPattern(parentPattern)) {
     return undefined;
   }
 
@@ -163,6 +160,16 @@ function getBindingElementPropertyKey(
   }
   if (ts.isNumericLiteral(propertyName)) {
     return propertyName.text;
+  }
+  if (ts.isComputedPropertyName(propertyName)) {
+    const expression = propertyName.expression;
+    if (
+      ts.isStringLiteral(expression) ||
+      ts.isNoSubstitutionTemplateLiteral(expression) ||
+      ts.isNumericLiteral(expression)
+    ) {
+      return expression.text;
+    }
   }
   return undefined;
 }

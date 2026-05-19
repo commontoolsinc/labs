@@ -854,14 +854,14 @@ interface Input {
   myName?: PerUser<string | Default<"">>;
 }
 
-export default pattern<Input, { [NAME]: string; [UI]: VNode }>(({ question, myName }) => ({
+export default pattern<Input, { [NAME]: string; [UI]: VNode }>(({ question, ["myName"]: displayName }) => ({
   [NAME]: "ct-1606",
   [UI]: (
     <cf-screen>
       <div slot="header">
         <h2>{question}</h2>
         {computed(() => {
-          const value = trimmedName(myName);
+          const value = trimmedName(displayName);
           return <div>me is: "{value}"</div>;
         })}
       </div>
@@ -878,7 +878,7 @@ export default pattern<Input, { [NAME]: string; [UI]: VNode }>(({ question, myNa
     assert(deriveStart >= 0, "expected computed() to lower to derive()");
     const deriveWindow = output.slice(deriveStart, deriveStart + 700);
 
-    assertStringIncludes(deriveWindow, "myName: {");
+    assertStringIncludes(deriveWindow, "displayName: {");
     assertStringIncludes(deriveWindow, 'type: "string"');
     assertStringIncludes(deriveWindow, '"default": ""');
     assertStringIncludes(deriveWindow, 'scope: "user"');

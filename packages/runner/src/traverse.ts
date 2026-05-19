@@ -2886,8 +2886,8 @@ export class SchemaObjectTraverser<V extends FabricValue>
         // If we have a value instead of a link, create a link to the element
         // We don't traverse and validate, since this is an asCell boundary.
         // If the target is not written yet, still return a cell for it instead
-        // of invalidating the parent array; the child sink will render once the
-        // target materializes.
+        // of invalidating the parent array; downstream consumers can subscribe
+        // to the child cell and observe it when the target materializes.
         const isLink = isPrimitiveCellLink(curDoc.value);
         if (isLink) this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
         const cellLink = isLink

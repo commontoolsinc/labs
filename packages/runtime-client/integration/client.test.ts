@@ -742,23 +742,27 @@ interface Input {
 interface Output {
   [NAME]: string;
   [UI]: VNode;
+  myName: PerUser<string | Default<"">>;
 }
 
-export default pattern<Input, Output>(({ question, myName }) => ({
-  [NAME]: "ct-1606-scoped-header-slot",
-  [UI]: (
-    <cf-screen>
-      <div slot="header">
-        <h2>{question}</h2>
-        {computed(() => {
-          const value = trimmedName(myName);
-          return <div>me is: "{value}"</div>;
-        })}
-      </div>
-      <div>body renders</div>
-    </cf-screen>
-  ),
-}));`;
+export default pattern<Input, Output>(({ question, myName }) => {
+  return {
+    [NAME]: "ct-1606-scoped-header-slot",
+    myName,
+    [UI]: (
+      <cf-screen>
+        <div slot="header">
+          <h2>{question}</h2>
+          {computed(() => {
+            const value = trimmedName(myName);
+            return <div>me is: "{value}"</div>;
+          })}
+        </div>
+        <div>body renders</div>
+      </cf-screen>
+    ),
+  };
+});`;
 
       const scopedHeaderProgram: Program = {
         main: "/main.tsx",
@@ -775,6 +779,10 @@ export default pattern<Input, Output>(({ question, myName }) => ({
         run: true,
       });
       const cell = page.cell() as CellHandle<VNode>;
+      const nameCell = (page.cell() as any).key("myName").asSchema({
+        type: "string",
+        scope: "user",
+      });
       const mock = new MockDoc(
         `<!DOCTYPE html><html><body><div id="root"></div></body></html>`,
       );
@@ -794,6 +802,15 @@ export default pattern<Input, Output>(({ question, myName }) => ({
             );
           },
           { timeout: 15000 },
+        );
+
+        await nameCell.set("Alex");
+        await waitFor(
+          () =>
+            Promise.resolve(
+              root.innerHTML.includes("me is: &quot;Alex&quot;"),
+            ),
+          { timeout: 5000 },
         );
       } finally {
         cancel();
