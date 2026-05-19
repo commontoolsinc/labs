@@ -1,4 +1,4 @@
-import { css, html, LitElement, nothing } from "lit";
+import { css, html, nothing } from "lit";
 import { property } from "lit/decorators.js";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { BaseElement } from "../../core/base-element.ts";
@@ -61,11 +61,6 @@ export interface SelectItem {
 }
 
 export class CFSelect extends BaseElement {
-  static override shadowRootOptions = {
-    ...LitElement.shadowRootOptions,
-    delegatesFocus: true,
-  };
-
   /* ---------- Styles ---------- */
   static override styles = [
     BaseElement.baseStyles,
@@ -259,6 +254,7 @@ export class CFSelect extends BaseElement {
     this.placeholder = "";
     this.items = [];
     this.value = this.multiple ? [] : undefined;
+    this.addEventListener("focus", this._forwardFocusToSelect);
   }
 
   /* ---------- Lifecycle ---------- */
@@ -436,8 +432,8 @@ export class CFSelect extends BaseElement {
   }
 
   /* ---------- Public API ---------- */
-  override focus() {
-    this._select?.focus();
+  override focus(options?: FocusOptions) {
+    this._select?.focus(options);
   }
 
   override blur() {
@@ -453,6 +449,11 @@ export class CFSelect extends BaseElement {
   }
 
   private _lastGeneratedRole: string | null = null;
+
+  private _forwardFocusToSelect = (event: FocusEvent) => {
+    if (event.target !== this || this.disabled) return;
+    this._select?.focus();
+  };
 
   /* ---------- Accessibility ---------- */
   private _updateAccessibilityAttributes() {

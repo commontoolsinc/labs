@@ -252,7 +252,11 @@ export const DEFAULT_SPOTS: ParkingSpot[] = [
 // ============================================================
 
 export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
-  ({ spots, people, requests }) => {
+  ({ spots: inputSpots, people: inputPeople, requests: inputRequests }) => {
+    const spots = inputSpots ?? Writable.perSpace.of(DEFAULT_SPOTS);
+    const people = inputPeople ?? Writable.perSpace.of<Person[]>([]);
+    const requests = inputRequests ?? Writable.perSpace.of<SpotRequest[]>([]);
+
     const nowTimestamp = wish<number>({ query: "#now" });
     const todayStr = computed(() =>
       toLocalDateStr(nowTimestamp.result || safeDateNow())
@@ -1694,6 +1698,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                   <cf-input
                                     $value={newPersonName}
                                     placeholder="Full name"
+                                    timingStrategy="immediate"
                                     style="width: 100%;"
                                   />
                                 </cf-vstack>
@@ -1707,6 +1712,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                   <cf-input
                                     $value={newPersonEmail}
                                     placeholder="email@company.com"
+                                    timingStrategy="immediate"
                                     style="width: 100%;"
                                   />
                                 </cf-vstack>
@@ -1730,6 +1736,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                     $value={newPersonPriority}
                                     type="number"
                                     placeholder="1"
+                                    timingStrategy="immediate"
                                     style="width: 5rem;"
                                   />
                                 </cf-vstack>
@@ -1759,6 +1766,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                 <cf-input
                                   $value={newPersonPreferences}
                                   placeholder="e.g. 1, 5"
+                                  timingStrategy="immediate"
                                   style="width: 100%;"
                                 />
                               </cf-vstack>

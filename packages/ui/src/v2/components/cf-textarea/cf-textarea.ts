@@ -1,4 +1,4 @@
-import { css, html, LitElement } from "lit";
+import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { BaseElement } from "../../core/base-element.ts";
@@ -56,10 +56,6 @@ export type TimingStrategy = "immediate" | "debounce" | "throttle" | "blur";
 
 export class CFTextarea extends BaseElement {
   static formAssociated = true;
-  static override shadowRootOptions = {
-    ...LitElement.shadowRootOptions,
-    delegatesFocus: true,
-  };
 
   static override properties = {
     placeholder: { type: String },
@@ -378,6 +374,7 @@ export class CFTextarea extends BaseElement {
           this.timingStrategy = "debounce";
           this.timingDelay = 300;
           this.size = "md";
+          this.addEventListener("focus", this._forwardFocusToTextarea);
         }
 
         private getValue(): string {
@@ -519,10 +516,9 @@ export class CFTextarea extends BaseElement {
             ? "resize: none;"
             : `resize: ${this.resize};`;
 
-          // The host carries the ARIA role and tabindex. delegatesFocus: true
-          // routes focus to the inner <textarea>, so aria-hidden must NOT be set
-          // on it — browsers refuse to apply aria-hidden on focused elements.
-          // tabindex="-1" keeps it out of the tab sequence (the host is the tab stop).
+          // The host carries the ARIA role and tabindex. The inner textarea is
+          // removed from sequential tab order; host focus forwards here so
+          // typing and selection work.
           return html`
             <textarea
               class="${this.error ? "error" : ""}"
@@ -617,6 +613,11 @@ export class CFTextarea extends BaseElement {
           }
         }
 
+        private _forwardFocusToTextarea = (event: FocusEvent) => {
+          if (event.target !== this || this.disabled) return;
+          this.textarea?.focus();
+        };
+
         private _updateAccessibilityAttributes() {
           // Respect author-provided role; only set our generated role when none exists
           if (!this.hasAttribute("role")) {
@@ -694,7 +695,9 @@ export class CFTextarea extends BaseElement {
             `${newHeight}px`;
         }
 
-        // focus() is handled by delegatesFocus on the shadow root.
+        override focus(options?: FocusOptions): void {
+          this.textarea?.focus(options);
+        }
 
         /**
          * Blur the textarea programmatically
