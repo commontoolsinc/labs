@@ -3,7 +3,7 @@ import { expect } from "@std/expect";
 import {
   bigintFromMinimalTwosComplement,
   bigintToMinimalTwosComplement,
-} from "../bigint-encoding.ts";
+} from "@commonfabric/utils/bigint";
 import {
   fromBase64url,
   toUnpaddedBase64url,

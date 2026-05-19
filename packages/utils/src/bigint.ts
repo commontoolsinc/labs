@@ -1,7 +1,6 @@
 /**
- * Shared BigInt two's-complement big-endian encoding, and base64url helpers for
- * the JSON wire format. Used by both `value-hash.ts` (byte-level hashing)
- * and `json-type-handlers.ts` (JSON serialization).
+ * Shared `bigint` two's-complement big-endian encoding and decoding. Used for
+ * byte-level value hashing and JSON wire-format (de)serialization.
  *
  * The two's-complement encoding is minimal: no unnecessary leading 0x00 bytes
  * for positive values, no unnecessary leading 0xFF bytes for negative values,
