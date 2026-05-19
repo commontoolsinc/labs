@@ -832,6 +832,68 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
     );
 
     await t.step(
+      "renderer VDOM schema resolves linked object normal props",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+
+        const tx = runtime.edit();
+        const authorCell = runtime.getCell(
+          signer.did(),
+          "renderer-schema-reactive-author",
+          undefined,
+          tx,
+        );
+        authorCell.set({
+          id: "alice",
+          name: "Alice Nguyen",
+        });
+        const rootCell = runtime.getCell(
+          signer.did(),
+          "renderer-schema-reactive-author-root",
+          undefined,
+          tx,
+        );
+        rootCell.setRawUntyped({
+          type: "vnode",
+          name: "cf-cfc-authorship",
+          props: {
+            author: authorCell.getAsLink({
+              includeSchema: true,
+              keepAsCell: true,
+            }),
+          },
+          children: [],
+        });
+        const commitResult = await tx.commit();
+        assertEquals(commitResult.ok !== undefined, true);
+
+        const rootVDOMCell = runtime.getCell(
+          signer.did(),
+          "renderer-schema-reactive-author-root",
+        ).asSchema(rendererVDOMSchema);
+        const cancel = reconciler.mount(rootVDOMCell as never);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const initialAuthor = collector.getOpsOfType("set-prop").find((
+            op,
+          ) => (op as Extract<VDomOp, { op: "set-prop" }>).key === "author") as
+            | Extract<VDomOp, { op: "set-prop" }>
+            | undefined;
+          assertEquals(initialAuthor?.value, {
+            id: "alice",
+            name: "Alice Nguyen",
+          });
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
       "Cell<Props> linked normal prop can transition to undefined",
       async () => {
         const collector = createOpsCollector();

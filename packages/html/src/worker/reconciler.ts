@@ -1220,8 +1220,11 @@ export class WorkerReconciler {
         // Bindings - check if Cell is same
         this.updateBindingProp(state, key, value, existingState);
       } else if (isCell(value)) {
-        // Reactive prop - check if Cell is same
-        if (existingState?.cell && areLinksSame(existingState.cell, value)) {
+        // Reactive prop - follow prop-cell links before subscribing. VDOM
+        // schemas preserve linked props as cells, and the prop cell itself may
+        // contain the link to the real target.
+        const target = this.resolveReactivePropTarget(value as Cell<unknown>);
+        if (existingState?.cell && areLinksSame(existingState.cell, target)) {
           // Same Cell, leave subscription in place
           logger.debug("prop-same-cell", () => ({ nodeId: state.nodeId, key }));
           continue;
@@ -1230,7 +1233,7 @@ export class WorkerReconciler {
         if (existingState) {
           existingState.cancel();
         }
-        const cancel = (value as Cell<unknown>).sink((resolvedValue) => {
+        const cancel = target.sink((resolvedValue) => {
           logger.debug(
             "prop-update",
             () => ({ nodeId: state.nodeId, key, value: resolvedValue }),
@@ -1239,7 +1242,7 @@ export class WorkerReconciler {
             state,
             key,
             resolvedValue,
-            value as Cell<unknown>,
+            target,
           );
           this.queueOps([{
             op: "set-prop",
@@ -1252,7 +1255,7 @@ export class WorkerReconciler {
           }
         });
         state.propSubscriptions.set(key, {
-          cell: value as Cell<unknown>,
+          cell: target,
           cancel,
         });
       } else {
@@ -1642,7 +1645,9 @@ export class WorkerReconciler {
             cancel: () => {},
           });
         } else if (isCell(value)) {
-          const target = value as Cell<unknown>;
+          const target = this.resolveReactivePropTarget(
+            value as Cell<unknown>,
+          );
           const existingState = state.propSubscriptions.get(key);
           if (
             existingState?.cell &&
@@ -1758,6 +1763,14 @@ export class WorkerReconciler {
     });
 
     return cancel;
+  }
+
+  private resolveReactivePropTarget(value: Cell<unknown>): Cell<unknown> {
+    try {
+      return value.resolveAsCell().asSchema(true).withTx(undefined);
+    } catch {
+      return value.asSchema(true).withTx(undefined);
+    }
   }
 
   private refreshBoundaryPolicyFromProps(
