@@ -138,6 +138,11 @@ type SessionHandle = {
   sessionId: string;
 };
 
+type DirtyOrigin = {
+  sessionId: string;
+  seq: number;
+};
+
 class Connection {
   #ready = false;
   #closed = false;
@@ -365,6 +370,7 @@ class Connection {
   async refreshDirty(
     space: string,
     dirtyIds?: ReadonlySet<string>,
+    dirtyOrigins?: ReadonlyMap<string, DirtyOrigin>,
   ): Promise<void> {
     if (this.#closed) {
       return;
@@ -378,6 +384,7 @@ class Connection {
         space,
         sessionId,
         dirtyIds,
+        dirtyOrigins,
       );
       if (this.#closed) {
         return;
@@ -409,6 +416,7 @@ export class Server {
   #directLocalSeq = 0;
   #dirtySpaces = new Set<string>();
   #dirtyDocsBySpace = new Map<string, Set<string>>();
+  #dirtyOriginsBySpace = new Map<string, Map<string, DirtyOrigin>>();
   #refreshTimer: ReturnType<typeof setTimeout> | null = null;
   #refreshing: Promise<void> | null = null;
   #lastRefreshDurationMs = 0;
@@ -616,6 +624,10 @@ export class Server {
         message.commit.operations.map((operation) =>
           toDirtyKey(operation.id, declaredScope(operation.scope))
         ),
+        {
+          sessionId: message.sessionId,
+          seq: commit.seq,
+        },
       );
       return {
         type: "response",
@@ -980,6 +992,7 @@ export class Server {
     space: string,
     sessionId: string,
     dirtyIds?: ReadonlySet<string>,
+    dirtyOrigins?: ReadonlyMap<string, DirtyOrigin>,
   ): Promise<SessionEffectMessage | null> {
     const session = this.#sessions.get(space, sessionId);
     if (session === null || session.watches.length === 0) {
@@ -1037,7 +1050,15 @@ export class Server {
           toDirtyKey(entry.id, declaredScope(entry.scope)),
         );
         if (!sameSnapshot(previous, entry)) {
-          upserts.push(entry);
+          const dirtyKey = toDirtyKey(entry.id, declaredScope(entry.scope));
+          const origin = dirtyOrigins?.get(dirtyKey);
+          if (
+            origin === undefined ||
+            origin.sessionId !== sessionId ||
+            origin.seq !== entry.seq
+          ) {
+            upserts.push(entry);
+          }
         }
       }
       const toSeq = Engine.serverSeq(engine);
@@ -1095,15 +1116,32 @@ export class Server {
     };
   }
 
-  markSpaceDirty(space: string, dirtyIds?: Iterable<string>): void {
+  markSpaceDirty(
+    space: string,
+    dirtyIds?: Iterable<string>,
+    origin?: DirtyOrigin,
+  ): void {
     if (dirtyIds !== undefined) {
       let ids = this.#dirtyDocsBySpace.get(space);
       if (ids === undefined) {
         ids = new Set();
         this.#dirtyDocsBySpace.set(space, ids);
       }
+      let origins = this.#dirtyOriginsBySpace.get(space);
+      if (origin !== undefined && origins === undefined) {
+        origins = new Map();
+        this.#dirtyOriginsBySpace.set(space, origins);
+      }
       for (const id of dirtyIds) {
         ids.add(id);
+        if (origin === undefined) {
+          origins?.delete(id);
+        } else {
+          origins?.set(id, origin);
+        }
+      }
+      if (origins?.size === 0) {
+        this.#dirtyOriginsBySpace.delete(space);
       }
     }
     this.#dirtySpaces.add(space);
@@ -1214,6 +1252,7 @@ export class Server {
     if (this.#connections.size === 0) {
       this.#dirtySpaces.clear();
       this.#dirtyDocsBySpace.clear();
+      this.#dirtyOriginsBySpace.clear();
     }
   }
 
@@ -1243,8 +1282,12 @@ export class Server {
         if (dirtyIds !== undefined) {
           this.#dirtyDocsBySpace.delete(space);
         }
+        const dirtyOrigins = this.#dirtyOriginsBySpace.get(space);
+        if (dirtyOrigins !== undefined) {
+          this.#dirtyOriginsBySpace.delete(space);
+        }
         for (const connection of this.#connections.values()) {
-          await connection.refreshDirty(space, dirtyIds);
+          await connection.refreshDirty(space, dirtyIds, dirtyOrigins);
         }
       }
 

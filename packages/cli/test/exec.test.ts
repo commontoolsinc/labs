@@ -1445,6 +1445,139 @@ describe("mounted callable resolution and execution", () => {
     });
   });
 
+  it("idles before committing mounted tool results and syncs before waiting", async () => {
+    const mountpoint = join(tmpDir, "mount");
+    const filePath = await createMountedFile(mountpoint, {
+      relativePath: "home/pieces/notes-2/result/search.tool",
+      pieceId: "of:piece-123",
+    });
+    const harness = createExecHarness({
+      callableKind: "tool",
+      cellProp: "result",
+      cellKey: "search",
+      pieceId: "of:piece-123",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+        },
+        required: ["query"],
+      },
+      pattern: {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            query: { type: "string" },
+          },
+          required: ["query"],
+        },
+        resultSchema: {
+          type: "object",
+          properties: {
+            echoed: { type: "string" },
+          },
+        },
+      },
+    });
+    const timeouts: number[] = [];
+
+    await writeLiveMountState(stateDir, mountpoint);
+
+    const result = await executeMountedCallableFile(
+      filePath,
+      ["--query", "tea"],
+      {
+        stateDir,
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        uuid: () => "tool-result-id",
+        waitForResult: (_cell, timeoutMs) => {
+          harness.tracker.events.push("wait");
+          timeouts.push(timeoutMs);
+          return Promise.resolve({ echoed: "tea" });
+        },
+      },
+    );
+
+    expect(timeouts).toEqual([15_000, 15_000]);
+    expect(harness.tracker.events).toEqual([
+      "run",
+      "idle",
+      "commit",
+      "idle",
+      "manager.synced",
+      "storage.synced",
+      "wait",
+      "storage.synced",
+      "wait",
+    ]);
+    expect(JSON.parse(result.outputText!)).toEqual({ echoed: "tea" });
+  });
+
+  it("uses mounted tool sink output after a successful commit", async () => {
+    const mountpoint = join(tmpDir, "mount");
+    const filePath = await createMountedFile(mountpoint, {
+      relativePath: "home/pieces/notes-2/result/search.tool",
+      pieceId: "of:piece-123",
+    });
+    const harness = createExecHarness({
+      callableKind: "tool",
+      cellProp: "result",
+      cellKey: "search",
+      pieceId: "of:piece-123",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+        },
+        required: ["query"],
+      },
+      pattern: {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            query: { type: "string" },
+          },
+          required: ["query"],
+        },
+        resultSchema: {
+          type: "object",
+          properties: {
+            echoed: { type: "string" },
+          },
+        },
+      },
+      toolSinkValue: { echoed: "from-sink" },
+    });
+
+    await writeLiveMountState(stateDir, mountpoint);
+
+    const result = await executeMountedCallableFile(
+      filePath,
+      ["--query", "tea"],
+      {
+        stateDir,
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        uuid: () => "tool-result-id",
+        waitForResult: () => {
+          throw new Error("waitForResult should not be used");
+        },
+      },
+    );
+
+    expect(harness.tracker.events).toEqual([
+      "run",
+      "sink",
+      "idle",
+      "commit",
+      "idle",
+      "manager.synced",
+      "storage.synced",
+    ]);
+    expect(JSON.parse(result.outputText!)).toEqual({ echoed: "from-sink" });
+  });
+
   it("pulls mounted tool result cells before serializing output", async () => {
     const mountpoint = join(tmpDir, "mount");
     const filePath = await createMountedFile(mountpoint, {
@@ -1987,11 +2120,13 @@ function createExecHarness(options: {
   toolResult?: unknown;
   toolResultGetValue?: unknown;
   toolResultPullValue?: unknown;
+  toolSinkValue?: unknown;
   handlerFailureMessage?: string;
   handlerSendRequiresReceiver?: boolean;
   sparseHandlerCell?: boolean;
 }) {
   const tracker = {
+    events: [] as string[],
     asSchemaFromLinksCalls: 0,
     handlerWrites: [] as Array<{
       cellProp: "input" | "result";
@@ -2112,14 +2247,23 @@ function createExecHarness(options: {
 
   const manager = {
     getSpace: () => options.managerSpace ?? "home",
-    synced: async () => {},
+    synced: () => {
+      tracker.events.push("manager.synced");
+      return Promise.resolve();
+    },
     runtime: {
       [CF_RUNTIME_ERROR_LOG]: runtimeErrors,
       storageManager: {
-        synced: async () => {},
+        synced: () => {
+          tracker.events.push("storage.synced");
+          return Promise.resolve();
+        },
       },
       edit: () => ({
-        commit: async () => {},
+        commit: () => {
+          tracker.events.push("commit");
+          return Promise.resolve();
+        },
       }),
       getCell: (
         space: string,
@@ -2136,15 +2280,25 @@ function createExecHarness(options: {
         input: unknown,
         _result: unknown,
       ) => {
+        tracker.events.push("run");
         tracker.toolRunInput = input;
         state.value = options.toolResult;
         state.getValue = options.toolResultGetValue ?? options.toolResult;
         state.pullValue = options.toolResultPullValue ?? options.toolResult;
         return {
-          sink: () => () => {},
+          sink: (callback: (value: unknown) => void) => {
+            if (options.toolSinkValue !== undefined) {
+              tracker.events.push("sink");
+              callback(options.toolSinkValue);
+            }
+            return () => {};
+          },
         };
       },
-      idle: async () => {},
+      idle: () => {
+        tracker.events.push("idle");
+        return Promise.resolve();
+      },
     },
   };
 
