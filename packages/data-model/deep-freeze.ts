@@ -205,9 +205,13 @@ function deepFreezeInProgress<T>(value: T, inProgress?: Set<object>): T {
   // `FabricInstance` doesn't need to be `inProgress`-aware in its own
   // signature; the callback carries the shared state transparently.
   if (value instanceof FabricInstance) {
-    return value[DEEP_FREEZE](
+    const result = value[DEEP_FREEZE](
       (v) => deepFreezeInProgress(v, inProgress),
     ) as T;
+    // Cache the now-deep-frozen result so subsequent `isDeepFrozen()` checks
+    // short-circuit in O(1), mirroring arm 4's cache-write below.
+    addToDeepFrozenCache(result as object);
+    return result;
   }
 
   // Arm 4: plain object or array -- recurse into children, then freeze.
