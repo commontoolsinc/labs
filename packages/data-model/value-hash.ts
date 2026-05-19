@@ -19,7 +19,7 @@ import { DECONSTRUCT, type FabricInstance } from "./interface.ts";
 import { shallowFabricFromNativeValueModern } from "./fabric-value-modern.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { encodeULEB128 } from "@commonfabric/leb128";
-import { bigintToMinimalTwosComplement } from "./bigint-encoding.ts";
+import { bigintToMinimalTwosComplement } from "@commonfabric/utils/bigint";
 import { LRUCache } from "@commonfabric/utils/cache";
 import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 

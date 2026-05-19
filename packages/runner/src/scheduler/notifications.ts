@@ -2,9 +2,7 @@ import type { MemorySpace } from "@commonfabric/memory/interface";
 import type {
   ChangeGroup,
   IMemoryChange,
-  IStorageSubscription,
   IStorageTransaction,
-  StorageNotification,
 } from "../storage/interface.ts";
 import type { TriggerIndexState } from "./trigger-index.ts";
 import { summarizeTriggerTraceValue } from "./diagnostics.ts";
@@ -16,11 +14,7 @@ import type {
   TriggerTraceScheduledEffect,
 } from "./types.ts";
 
-type SchedulerMode = "pull" | "push";
-
-export function schedulerMode(pullMode: boolean): SchedulerMode {
-  return pullMode ? "pull" : "push";
-}
+export type SchedulerMode = "pull" | "push";
 
 export function hasRegisteredTriggers(
   state: TriggerIndexState,
@@ -44,7 +38,7 @@ export function createTriggerTraceEntry(state: {
   readonly notificationType: string;
   readonly changeIndex: number;
   readonly matchedActionCount: number;
-  readonly pullMode: boolean;
+  readonly mode: SchedulerMode;
   readonly writerActionId?: string;
   readonly space: MemorySpace;
   readonly change: IMemoryChange;
@@ -55,7 +49,7 @@ export function createTriggerTraceEntry(state: {
     notificationType: state.notificationType,
     changeIndex: state.changeIndex,
     matchedActionCount: state.matchedActionCount,
-    mode: schedulerMode(state.pullMode),
+    mode: state.mode,
     writerActionId: state.writerActionId,
     space: state.space,
     entityId: state.change.address.id,
@@ -71,15 +65,16 @@ export interface TriggeredActionPlan {
   operation: "none" | "schedule" | "mark-dirty";
 }
 
-export function planTriggeredAction(state: {
-  readonly pullMode: boolean;
-  readonly isEffect: boolean;
-  readonly dirtyBefore: boolean;
+interface TriggeredActionSkipState {
   readonly isOwnCommitSource: boolean;
   readonly hasSourceChangeGroup: boolean;
   readonly actionChangeGroup: ChangeGroup | undefined;
   readonly sourceChangeGroup: ChangeGroup | undefined;
-}): TriggeredActionPlan {
+}
+
+function planSkippedTriggeredAction(
+  state: TriggeredActionSkipState,
+): TriggeredActionPlan | undefined {
   if (state.isOwnCommitSource) {
     return { decision: "skip-own-commit-source", operation: "none" };
   }
@@ -92,9 +87,24 @@ export function planTriggeredAction(state: {
     return { decision: "skip-same-change-group", operation: "none" };
   }
 
-  if (!state.pullMode) {
-    return { decision: "schedule-push", operation: "schedule" };
-  }
+  return undefined;
+}
+
+export function planPushTriggeredAction(
+  state: TriggeredActionSkipState,
+): TriggeredActionPlan {
+  return planSkippedTriggeredAction(state) ??
+    { decision: "schedule-push", operation: "schedule" };
+}
+
+export function planPullTriggeredAction(
+  state: TriggeredActionSkipState & {
+    readonly isEffect: boolean;
+    readonly dirtyBefore: boolean;
+  },
+): TriggeredActionPlan {
+  const skipped = planSkippedTriggeredAction(state);
+  if (skipped) return skipped;
 
   if (state.isEffect) {
     return { decision: "schedule-effect", operation: "schedule" };
@@ -109,7 +119,7 @@ export function planTriggeredAction(state: {
 export function createTriggerTraceActionRecord(state: {
   readonly actionId: string;
   readonly actionType: "effect" | "computation";
-  readonly pullMode: boolean;
+  readonly mode: SchedulerMode;
   readonly decision: TriggerTraceActionRecord["decision"];
   readonly pendingBefore: boolean;
   readonly pendingAfter: boolean;
@@ -120,7 +130,7 @@ export function createTriggerTraceActionRecord(state: {
   return {
     actionId: state.actionId,
     actionType: state.actionType,
-    mode: schedulerMode(state.pullMode),
+    mode: state.mode,
     decision: state.decision,
     pendingBefore: state.pendingBefore,
     pendingAfter: state.pendingAfter,
@@ -136,6 +146,38 @@ export function shouldRecordTriggerTraceEntry(
   return entry.triggered.length > 0 || entry.matchedActionCount > 0;
 }
 
+export function applyPushTriggeredActionPlan(
+  state: StorageNotificationState,
+  action: Action,
+  plan: TriggeredActionPlan,
+): void {
+  if (plan.operation === "schedule") {
+    state.scheduleWithDebounce(action);
+  }
+}
+
+export function applyPullTriggeredActionPlan(
+  state: StorageNotificationState,
+  action: Action,
+  isEffect: boolean,
+  plan: TriggeredActionPlan,
+): TriggerTraceScheduledEffect[] {
+  if (plan.operation === "schedule") {
+    if (isEffect) {
+      state.conditionallyScheduledEffects.delete(action);
+    }
+    state.scheduleWithDebounce(action);
+    return [];
+  }
+
+  if (plan.operation === "mark-dirty") {
+    state.markDirty(action);
+    return state.scheduleAffectedEffects(action);
+  }
+
+  return [];
+}
+
 interface CausalEdge {
   writer: string;
   cell: string;
@@ -145,7 +187,6 @@ interface CausalEdge {
 
 export interface StorageNotificationState {
   readonly triggerIndex: TriggerIndexState;
-  readonly getPullMode: () => boolean;
   readonly getDiagnosisEnabled: () => boolean;
   readonly getCollectTriggerTrace: () => boolean;
   readonly changeGroupToActionId: Map<ChangeGroup, string>;
@@ -164,148 +205,4 @@ export interface StorageNotificationState {
   readonly scheduleAffectedEffects: (
     action: Action,
   ) => TriggerTraceScheduledEffect[];
-}
-
-export function createStorageSubscription(
-  state: StorageNotificationState,
-): IStorageSubscription {
-  return {
-    next: (notification) => {
-      processStorageNotification(state, notification);
-      return { done: false };
-    },
-  };
-}
-
-export function processStorageNotification(
-  state: StorageNotificationState,
-  notification: StorageNotification,
-): void {
-  const space = notification.space;
-
-  if (!("changes" in notification)) {
-    return;
-  }
-
-  const sourceChangeGroup = notification.type === "commit"
-    ? notification.source?.changeGroup
-    : undefined;
-  const hasSourceChangeGroup = notification.type === "commit" &&
-    sourceChangeGroup !== undefined;
-  const pullMode = state.getPullMode();
-  const collectTriggerTrace = state.getCollectTriggerTrace();
-  const diagnosisEnabled = state.getDiagnosisEnabled();
-
-  let changeIndex = 0;
-  for (const change of notification.changes) {
-    changeIndex++;
-    state.recordCellUpdate(change);
-
-    if (
-      !hasRegisteredTriggers(state.triggerIndex)
-    ) {
-      continue;
-    }
-
-    const {
-      entity: spaceAndURI,
-      hasMatchingTriggerPaths,
-      triggeredActions,
-    } = collectTriggeredActionsForChange(
-      state.triggerIndex,
-      space,
-      change,
-    );
-
-    if (!hasMatchingTriggerPaths) {
-      continue;
-    }
-
-    const writerActionId = hasSourceChangeGroup &&
-        sourceChangeGroup !== undefined
-      ? state.changeGroupToActionId.get(sourceChangeGroup)
-      : undefined;
-    const triggerTraceEntry: TriggerTraceEntry | null = collectTriggerTrace
-      ? createTriggerTraceEntry({
-        notificationType: notification.type,
-        changeIndex,
-        matchedActionCount: triggeredActions.length,
-        pullMode,
-        writerActionId,
-        space,
-        change,
-      })
-      : null;
-
-    for (const action of triggeredActions) {
-      // Causal edge tracking for diagnosis.
-      if (
-        diagnosisEnabled && hasSourceChangeGroup &&
-        sourceChangeGroup !== undefined
-      ) {
-        const writerActionId = state.changeGroupToActionId.get(
-          sourceChangeGroup,
-        );
-        if (writerActionId) {
-          state.recordCausalEdge({
-            writer: writerActionId,
-            cell: spaceAndURI,
-            triggered: state.getActionId(action),
-            timestamp: performance.now(),
-          });
-        }
-      }
-
-      const actionChangeGroup = state.actionChangeGroups.get(action);
-      const actionId = state.getActionId(action);
-      const actionIsEffect = state.effects.has(action);
-      const actionType = actionIsEffect ? "effect" : "computation";
-      const pendingBefore = state.pending.has(action);
-      const dirtyBefore = state.dirty.has(action);
-      const isOwnCommitSource = notification.type === "commit" &&
-        notification.source !== undefined &&
-        state.inFlightSources.get(action)?.has(notification.source) === true;
-      const plan = planTriggeredAction({
-        pullMode,
-        isEffect: actionIsEffect,
-        dirtyBefore,
-        isOwnCommitSource,
-        hasSourceChangeGroup,
-        actionChangeGroup,
-        sourceChangeGroup,
-      });
-      let scheduledEffects: TriggerTraceScheduledEffect[] = [];
-
-      if (plan.operation === "schedule") {
-        if (pullMode && actionIsEffect) {
-          state.conditionallyScheduledEffects.delete(action);
-        }
-        state.scheduleWithDebounce(action);
-      } else if (plan.operation === "mark-dirty") {
-        state.markDirty(action);
-        scheduledEffects = state.scheduleAffectedEffects(action);
-      }
-
-      triggerTraceEntry?.triggered.push(
-        createTriggerTraceActionRecord({
-          actionId,
-          actionType,
-          pullMode,
-          decision: plan.decision,
-          pendingBefore,
-          pendingAfter: state.pending.has(action),
-          dirtyBefore,
-          dirtyAfter: state.dirty.has(action),
-          scheduledEffects,
-        }),
-      );
-    }
-
-    if (
-      triggerTraceEntry &&
-      shouldRecordTriggerTraceEntry(triggerTraceEntry)
-    ) {
-      state.recordTriggerTrace(triggerTraceEntry);
-    }
-  }
 }
