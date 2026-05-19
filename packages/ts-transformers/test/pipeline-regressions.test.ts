@@ -840,3 +840,47 @@ export default pattern<{ options: Option[] }, { [UI]: any }>(({ options }) => {
     );
   },
 );
+
+Deno.test(
+  "Pipeline regression: computed captures preserve destructured PerUser defaults",
+  async () => {
+    const source =
+      `import { computed, Default, NAME, pattern, type PerSpace, type PerUser, UI, type VNode } from "commonfabric";
+
+const trimmedName = (name: string | undefined) => (name ?? "").trim();
+
+interface Input {
+  question?: PerSpace<string | Default<"Where should we eat?">>;
+  myName?: PerUser<string | Default<"">>;
+}
+
+export default pattern<Input, { [NAME]: string; [UI]: VNode }>(({ question, myName }) => ({
+  [NAME]: "ct-1606",
+  [UI]: (
+    <cf-screen>
+      <div slot="header">
+        <h2>{question}</h2>
+        {computed(() => {
+          const value = trimmedName(myName);
+          return <div>me is: "{value}"</div>;
+        })}
+      </div>
+      <div>body renders</div>
+    </cf-screen>
+  ),
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const deriveStart = output.indexOf("{__cfHelpers.derive({");
+    assert(deriveStart >= 0, "expected computed() to lower to derive()");
+    const deriveWindow = output.slice(deriveStart, deriveStart + 700);
+
+    assertStringIncludes(deriveWindow, "myName: {");
+    assertStringIncludes(deriveWindow, 'type: "string"');
+    assertStringIncludes(deriveWindow, '"default": ""');
+    assertStringIncludes(deriveWindow, 'scope: "user"');
+  },
+);

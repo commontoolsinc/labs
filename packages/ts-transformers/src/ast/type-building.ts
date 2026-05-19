@@ -73,6 +73,16 @@ export function expressionToTypeNode(
   expr: ts.Expression,
   context: TransformationContext,
 ): ts.TypeNode {
+  const declaredTypeNode = getDestructuredBindingDeclaredTypeNode(
+    expr,
+    context,
+  );
+  if (declaredTypeNode) {
+    const type = context.checker.getTypeAtLocation(expr);
+    context.options.typeRegistry?.set(declaredTypeNode, type);
+    return declaredTypeNode;
+  }
+
   // Use inferWidenedTypeFromExpression to widen literal types
   // This ensures `const x = 5` produces `number`, not `5`
   const type = inferWidenedTypeFromExpression(
@@ -85,6 +95,76 @@ export function expressionToTypeNode(
     context,
     context.options.typeRegistry,
   );
+}
+
+function getDestructuredBindingDeclaredTypeNode(
+  expr: ts.Expression,
+  context: TransformationContext,
+): ts.TypeNode | undefined {
+  if (!ts.isIdentifier(expr)) {
+    return undefined;
+  }
+
+  const symbol = context.checker.getSymbolAtLocation(expr);
+  const declaration = symbol?.valueDeclaration ??
+    (symbol?.declarations?.[0] as ts.Declaration | undefined);
+  if (!declaration || !ts.isBindingElement(declaration)) {
+    return undefined;
+  }
+
+  return getDeclaredTypeNodeForBindingElement(declaration, context.checker);
+}
+
+export function getDeclaredTypeNodeForBindingElement(
+  declaration: ts.BindingElement,
+  checker: ts.TypeChecker,
+): ts.TypeNode | undefined {
+  const parentPattern = declaration.parent;
+  if (
+    !ts.isObjectBindingPattern(parentPattern) &&
+    !ts.isArrayBindingPattern(parentPattern)
+  ) {
+    return undefined;
+  }
+
+  const key = getBindingElementPropertyKey(declaration);
+  if (key === undefined) {
+    return undefined;
+  }
+
+  const parentType = checker.getTypeAtLocation(parentPattern);
+  const prop = parentType.getProperty(key);
+  const propDeclaration = prop?.valueDeclaration ??
+    (prop?.declarations?.[0] as ts.Declaration | undefined);
+
+  if (
+    propDeclaration &&
+    (ts.isPropertySignature(propDeclaration) ||
+      ts.isPropertyDeclaration(propDeclaration)) &&
+    propDeclaration.type
+  ) {
+    return propDeclaration.type;
+  }
+
+  return undefined;
+}
+
+function getBindingElementPropertyKey(
+  declaration: ts.BindingElement,
+): string | undefined {
+  const propertyName = declaration.propertyName;
+  if (!propertyName) {
+    return ts.isIdentifier(declaration.name)
+      ? declaration.name.text
+      : undefined;
+  }
+  if (ts.isIdentifier(propertyName) || ts.isStringLiteral(propertyName)) {
+    return propertyName.text;
+  }
+  if (ts.isNumericLiteral(propertyName)) {
+    return propertyName.text;
+  }
+  return undefined;
 }
 
 /**
