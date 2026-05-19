@@ -404,6 +404,8 @@ export class WorkerReconciler {
       "requiredIntegrity",
       "data-cfc-required-text-integrity",
     ]);
+    // Without an explicit requirement, a cell-backed author that represents a
+    // principal makes the text boundary require authored-by for that principal.
     const requiredIntegrity = explicitRequiredIntegrity ??
       this.requiredAuthorshipIntegrityFromAuthor(node) ??
       [];

@@ -912,8 +912,18 @@ const currentPrincipalIntegrityReason = (
   }
 
   const trustSnapshot = tx.getCfcState().trustSnapshot;
-  if (!trustSnapshot?.id || !trustSnapshot?.actingPrincipal) {
+  if (trustSnapshot === undefined) {
     return `current-principal integrity requires a trust snapshot at /${
+      path.join("/")
+    }`;
+  }
+  if (!trustSnapshot.id) {
+    return `current-principal integrity requires a trust snapshot id at /${
+      path.join("/")
+    }`;
+  }
+  if (!trustSnapshot.actingPrincipal) {
+    return `current-principal integrity requires an acting principal at /${
       path.join("/")
     }`;
   }
@@ -1164,6 +1174,9 @@ const policySchemaMatchesValue = (
   schema: JSONSchema,
   value: unknown,
 ): boolean => {
+  // Keep this narrow matcher aligned with resolveSchemaForValue() in
+  // schema.ts. This copy is intentionally local because CFC policy checks must
+  // fail closed on unresolved refs and partial wildcard writes.
   if (typeof schema === "boolean") {
     return schema;
   }
@@ -1692,6 +1705,9 @@ const ensureSchemaDocument = (
   schema: JSONSchema,
 ): void => {
   const id = `cid:${schemaHash}`;
+  // Do not pre-read the content-addressed schema document here. A read-before-
+  // write can make otherwise idempotent schema persistence fail with stale-read
+  // conflicts when another transaction already installed the same CID.
   tx.writeOrThrow({
     space,
     id: id as URI,

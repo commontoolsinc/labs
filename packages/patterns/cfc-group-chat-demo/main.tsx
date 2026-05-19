@@ -105,6 +105,13 @@ const SharedTranscript = pattern<
     ),
   };
 });
+type SharedTranscriptInputArg = Parameters<typeof SharedTranscript>[0];
+type TrustedChatSendSurfaceInputArg = Parameters<
+  typeof TrustedChatSendSurface
+>[0];
+type TrustedMessageSendInputArg = Parameters<typeof commitTrustedMessageSend>[
+  0
+];
 
 export interface GroupChatDemoInput {
   myProfile?: PerUser<MyProfileCell>;
@@ -153,13 +160,13 @@ export const GroupChatDemo = pattern<GroupChatDemoInput, GroupChatDemoOutput>((
   const trustedSend = TrustedChatSendSurface({
     myProfile: myProfileCell,
     messageDraft: messageDraftCell,
-    messages: messagesCell as any,
-  });
+    messages: messagesCell,
+  } as TrustedChatSendSurfaceInputArg);
   const hostLookalikeSend = commitTrustedMessageSend({
     myProfile: myProfileCell,
     messageDraft: hostMessageDraftCell,
-    messages: messagesCell as any,
-  });
+    messages: messagesCell,
+  } as TrustedMessageSendInputArg);
   const setProfileDraft = writeDraftText({ value: profileDraftCell });
   const setMessageDraft = writeDraftText({ value: messageDraftCell });
   const setHostMessageDraft = writeDraftText({ value: hostMessageDraftCell });
@@ -226,9 +233,9 @@ export const GroupChatDemo = pattern<GroupChatDemoInput, GroupChatDemoOutput>((
             <cf-vstack slot="content" gap="3" style={{ minHeight: 0 }}>
               {SharedTranscript({
                 myProfile: myProfileCell,
-                messages: messagesCell as any,
+                messages: messagesCell,
                 id: "trusted-conversation-preview",
-              })}
+              } as SharedTranscriptInputArg)}
               {trustedSend}
             </cf-vstack>
           </cf-card>

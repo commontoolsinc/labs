@@ -548,6 +548,8 @@ export class RuntimeProcessor {
   async handleCellGetCfcLabel(
     request: CellGetCfcLabelRequest,
   ): Promise<CfcLabelViewResponse> {
+    // Label reads must use the runtime's stored cell identity. The request
+    // schema is client-supplied view context, not trusted label provenance.
     const { schema: _schema, ...cellRef } = request.cell;
     const cell = getCell(this.runtime, cellRef);
     const rootCell = this.runtime.getCellFromLink({

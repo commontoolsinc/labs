@@ -2623,6 +2623,86 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("does not apply wildcard policy entries when item value shape mismatches", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-wildcard-policy-shape-mismatch",
+        {
+          type: "object",
+          properties: {
+            items: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  title: { type: "string" },
+                },
+                ifc: { writeAuthorizedBy: ["trusted-handler"] },
+              },
+            },
+          },
+        },
+        tx,
+      );
+      cell.set({ items: ["not an object"] });
+
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("does not persist wildcard policy metadata for empty list writes", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-wildcard-policy-empty-list",
+        {
+          type: "object",
+          properties: {
+            items: {
+              type: "array",
+              items: {
+                type: "object",
+                ifc: { writeAuthorizedBy: ["trusted-handler"] },
+              },
+            },
+          },
+        },
+        tx,
+      );
+      cell.set({ items: [] });
+
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+
+      const verify = runtime.edit();
+      const stored = verify.readOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: cell.getAsNormalizedFullLink().id,
+        path: [],
+      }) as { cfc?: { labelMap?: { entries?: unknown[] } } };
+      expect(stored.cfc?.labelMap?.entries ?? []).not.toContainEqual({
+        path: ["items", "*"],
+        label: {},
+      });
+      verify.abort();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("preserves untouched wildcard policy entries during unrelated rewrites", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
@@ -4774,6 +4854,112 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       const result = await tx.commit();
       expect(result.error?.message).toContain(
         "current-principal integrity requires writeAuthorizedBy",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("explains when current-principal integrity is missing a trust snapshot id", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      tx.setCfcTrustSnapshot(
+        {
+          actingPrincipal: signer.did(),
+        } as unknown as Parameters<typeof tx.setCfcTrustSnapshot>[0],
+      );
+
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-current-principal-missing-trust-snapshot-id",
+        {
+          type: "object",
+          properties: {
+            value: {
+              type: "string",
+              ifc: {
+                addIntegrity: [{
+                  kind: "authored-by",
+                  subject: { __ctCurrentPrincipal: true },
+                }],
+                writeAuthorizedBy: {
+                  __ctWriterIdentityOf: {
+                    file: "/trusted.tsx",
+                    path: ["commitTrustedMessageSend"],
+                  },
+                },
+                uiContract: {
+                  helper: "UiAction",
+                  action: "SendMessage",
+                },
+              },
+            },
+          },
+          required: ["value"],
+        },
+        tx,
+      );
+      cell.set({ value: "hello" });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain(
+        "current-principal integrity requires a trust snapshot id",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("explains when current-principal integrity is missing an acting principal", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      tx.setCfcTrustSnapshot({
+        id: "trust-snapshot-current-missing-acting-principal",
+      });
+
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-current-principal-missing-acting-principal",
+        {
+          type: "object",
+          properties: {
+            value: {
+              type: "string",
+              ifc: {
+                addIntegrity: [{
+                  kind: "authored-by",
+                  subject: { __ctCurrentPrincipal: true },
+                }],
+                writeAuthorizedBy: {
+                  __ctWriterIdentityOf: {
+                    file: "/trusted.tsx",
+                    path: ["commitTrustedMessageSend"],
+                  },
+                },
+                uiContract: {
+                  helper: "UiAction",
+                  action: "SendMessage",
+                },
+              },
+            },
+          },
+          required: ["value"],
+        },
+        tx,
+      );
+      cell.set({ value: "hello" });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain(
+        "current-principal integrity requires an acting principal",
       );
     } finally {
       await runtime.dispose();

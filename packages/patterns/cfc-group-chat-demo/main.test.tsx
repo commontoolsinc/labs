@@ -4,10 +4,13 @@ import {
   type EmptyMyProfileValue,
   type MyProfileCellValue,
   type MyProfileValue,
+  participantClaimsValue,
   type SharedChatMessage,
   type SharedMessagesValue,
 } from "./trusted.tsx";
 import { GroupChatDemo } from "./main.tsx";
+
+type GroupChatDemoInputArg = Parameters<typeof GroupChatDemo>[0];
 
 export default pattern(() => {
   const myProfile = Writable.of<MyProfileCellValue>(
@@ -21,11 +24,11 @@ export default pattern(() => {
   const hostMessageDraft = Writable.of("");
   const chat = GroupChatDemo({
     myProfile,
-    messages: messages as any,
+    messages,
     profileDraft,
     messageDraft,
     hostMessageDraft,
-  });
+  } as GroupChatDemoInputArg);
 
   const action_set_profile_alice = action(() => {
     chat.setProfileDraft.send("Alice");
@@ -50,6 +53,25 @@ export default pattern(() => {
   });
   const action_add_random_imported = action(() => {
     chat.addRandomMessages.send();
+  });
+  const action_add_same_name_unverified_imports = action(() => {
+    messages.set([
+      ...(messages.get() as SharedChatMessage[]),
+      {
+        origin: "imported",
+        id: "same-name-imported-1",
+        authorName: "Sam",
+        body: "first Sam",
+        timestamp: 10_000,
+      },
+      {
+        origin: "imported",
+        id: "same-name-imported-2",
+        authorName: "Sam",
+        body: "second Sam",
+        timestamp: 10_001,
+      },
+    ]);
   });
 
   const assert_initially_empty = computed(() =>
@@ -97,6 +119,12 @@ export default pattern(() => {
         index === 0 || ordered[index - 1]!.timestamp <= message.timestamp
       );
   });
+  const assert_same_name_unverified_imports_are_distinct = computed(() => {
+    const participants = participantClaimsValue(myProfile, messages);
+    return participants.filter((participant) =>
+      participant.name === "Sam" && participant.profile === undefined
+    ).length === 2;
+  });
 
   return {
     tests: [
@@ -117,6 +145,8 @@ export default pattern(() => {
       { action: action_add_random_imported },
       { assertion: assert_imported_messages_injected },
       { assertion: assert_thread_order_sortable },
+      { action: action_add_same_name_unverified_imports },
+      { assertion: assert_same_name_unverified_imports_are_distinct },
     ],
   };
 });

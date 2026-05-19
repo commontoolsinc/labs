@@ -32,6 +32,8 @@ export class ContextualFlowControl {
     schema: JSONSchema,
     fallback: JSONSchema,
   ): JSONSchema {
+    // Once a subtree carries its own $defs, that subtree becomes the root for
+    // resolving deeper local $refs. Otherwise keep the inherited root schema.
     return isRecord(schema) && isRecord(schema.$defs) ? schema : fallback;
   }
 

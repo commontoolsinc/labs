@@ -91,9 +91,18 @@ export type ImportedClaimedChatMessage = PlainImportedClaimedChatMessage<
 export type SharedChatMessage =
   | TrustedSentChatMessage
   | ImportedClaimedChatMessage;
+export type SharedChatMessageCell =
+  & Writable<SharedChatMessage>
+  & SharedChatMessage;
 
 export type SharedMessagesValue = SharedChatMessage[] | Default<[]>;
 export type SharedMessagesCell = Writable<SharedMessagesValue>;
+type SchemaReadableCell<T> = {
+  asSchema(schema: unknown): { get(): T | undefined };
+};
+type TrustedProfileSchemaCell = ProfileCell & {
+  asSchema(schema: typeof TRUSTED_PROFILE_SCHEMA): TrustedProfileCell;
+};
 
 const draftText = (draft: Writable<string | Default<"">>): string =>
   (draft.get() as string | undefined) ?? "";
@@ -106,17 +115,17 @@ export const messagesValue = (
 export const myProfileValue = (
   myProfile: MyProfileCell,
 ): MyProfileValue =>
-  ((myProfile as any).asSchema(MY_PROFILE_VALUE_SCHEMA).get() as
-    | MyProfileValue
-    | undefined) ?? {};
+  (myProfile as MyProfileCell & SchemaReadableCell<MyProfileValue>)
+    .asSchema(MY_PROFILE_VALUE_SCHEMA)
+    .get() ?? {};
 
 export const currentProfileCell = (
   myProfile: MyProfileCell,
 ): TrustedProfileCell | undefined =>
   myProfileValue(myProfile).profile
-    ? (myProfileValue(myProfile).profile as any).asSchema(
+    ? (myProfileValue(myProfile).profile as TrustedProfileSchemaCell).asSchema(
       TRUSTED_PROFILE_SCHEMA,
-    ) as TrustedProfileCell
+    )
     : undefined;
 
 export const currentProfileSnapshot = (
@@ -159,7 +168,10 @@ export const participantClaimsValue = (
     if (!name) {
       return;
     }
-    const key = profileCellKey(profile) ?? name;
+    const profileKey = profileCellKey(profile);
+    const key = profileKey === undefined
+      ? `unverified:${participants.length}`
+      : `profile:${profileKey}`;
     if (seen.has(key)) {
       return;
     }
@@ -210,11 +222,12 @@ export const applyTrustedProfileSave = (
     return { trimmedName: null };
   }
 
-  if (currentProfileCell(myProfile)?.get()) {
+  const existingProfile = currentProfileSnapshot(myProfile);
+  if (existingProfile) {
     currentProfileCell(myProfile)?.set(
       makeProfileSnapshot(
         trimmedName,
-        currentProfileCell(myProfile)?.get(),
+        existingProfile,
       ) as TrustedProfile,
     );
     return { trimmedName, profile: currentProfileCell(myProfile) };
@@ -233,9 +246,9 @@ export const prepareTrustedMessageSend = (
   trimmedBody: string | null;
   message: TrustedSentChatMessage | null;
 } => {
-  const profileValue = currentProfileCell(myProfile)?.get();
+  const profileValue = currentProfileSnapshot(myProfile);
   const trimmedBody = rawBody.trim();
-  if (!currentProfileCell(myProfile) || !profileValue || !trimmedBody) {
+  if (!profileValue || !trimmedBody) {
     return {
       trimmedBody: null,
       message: null,
@@ -313,9 +326,10 @@ export const commitTrustedMessageSend = handler<
     return;
   }
 
-  messages.push(message as SharedChatMessage);
+  messages.push(message);
   messageDraft.set("");
 });
+type TrustedMessageSendInput = Parameters<typeof commitTrustedMessageSend>[0];
 
 interface TrustedParticipantsPanelInput {
   myProfile: MyProfileCell;
@@ -339,6 +353,9 @@ const TrustedParticipantsPanel = pattern<
     </cf-hstack>
   ),
 }));
+type TrustedParticipantsPanelInputArg = Parameters<
+  typeof TrustedParticipantsPanel
+>[0];
 
 export interface TrustedProfileSaveSurfaceInput {
   myProfile: MyProfileCell;
@@ -432,8 +449,8 @@ export const TrustedChatSendSurface = pattern<
   const sendMessage = commitTrustedMessageSend({
     myProfile,
     messageDraft,
-    messages: messages as any,
-  });
+    messages,
+  } as TrustedMessageSendInput);
 
   return {
     [NAME]: "send surface",
@@ -446,9 +463,9 @@ export const TrustedChatSendSurface = pattern<
         <cf-vstack slot="content" gap="2">
           {TrustedParticipantsPanel({
             myProfile,
-            messages: messages as any,
+            messages,
             id: "trusted-participants-panel",
-          })}
+          } as TrustedParticipantsPanelInputArg)}
           <cf-hstack align="center" wrap gap="2">
             <cf-vgroup
               gap="sm"
@@ -480,7 +497,7 @@ export const TrustedChatSendSurface = pattern<
 });
 
 interface VerifiedChatBubbleInput {
-  message: any;
+  message: SharedChatMessageCell;
   mine?: boolean;
 }
 
@@ -492,22 +509,50 @@ export const VerifiedChatBubble = pattern<
 ): { [NAME]: string; [UI]: any } => ({
   [NAME]: "verified message bubble",
   [UI]: (
-    <cf-cfc-authorship
-      data-authorship-surface={message.id}
-      $value={message}
-      $author={message.authorProfile}
-      authorName={message.authorName}
-      data-badge-placement={mine ? "end" : "start"}
-      verifyTextIntegrity
-      allowLiteralText={false}
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: mine ? "flex-end" : "flex-start",
+        gap: "4px",
+        width: "100%",
+      }}
     >
-      <cf-chat-message
-        compact
-        role={mine ? "user" : "assistant"}
-        name={message.authorName}
-        content={message.body}
-      />
-    </cf-cfc-authorship>
+      <span
+        style={{
+          fontSize: "12px",
+          color: "var(--cf-color-text-secondary)",
+        }}
+      >
+        {message.authorName}
+      </span>
+      <cf-cfc-authorship
+        data-authorship-surface={message.id}
+        $value={message.body}
+        $author={message.authorProfile}
+        authorName={message.authorName}
+        data-badge-placement={mine ? "end" : "start"}
+      >
+        <span
+          style={{
+            display: "inline-block",
+            maxWidth: "100%",
+            padding: "8px 10px",
+            borderRadius: mine ? "14px 14px 4px 14px" : "14px 14px 14px 4px",
+            background: mine
+              ? "var(--cf-color-primary, #2563eb)"
+              : "var(--cf-color-surface-raised, #f3f4f6)",
+            color: mine
+              ? "var(--cf-color-on-primary, #ffffff)"
+              : "var(--cf-color-text, #111827)",
+            overflowWrap: "anywhere",
+            whiteSpace: "pre-wrap",
+          }}
+        >
+          {message.body}
+        </span>
+      </cf-cfc-authorship>
+    </div>
   ),
 }));
 

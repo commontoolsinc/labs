@@ -374,7 +374,7 @@ async function waitForInvalidAuthorshipState(
     await waitFor(async () => {
       probe = await readAuthorshipProbe(page, containerSelector);
       return probe.hosts.some((host) =>
-        host.state === "unknown" &&
+        (host.state === "unknown" || host.state === "unverified") &&
         !host.hasTrustedAvatar &&
         IMPORTED_MESSAGE_MARKERS.some((marker) =>
           host.renderedText.includes(marker)

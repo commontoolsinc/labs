@@ -4,7 +4,8 @@ import { internSchema } from "@commonfabric/data-model/schema-hash";
 const MAP_INPUT_SCHEMA = internSchema({
   type: "object",
   properties: {
-    // type: "unknown" is ignored by the asCell code path (no type validation)
+    // `processDefaultValue()` treats `asCell` as an opaque cell boundary, so
+    // `type: "unknown"` only documents the inner value shape here.
     list: { type: "array", items: { asCell: ["cell"], type: "unknown" } },
     op: { asCell: ["cell"] },
   },
@@ -13,7 +14,8 @@ const MAP_INPUT_SCHEMA = internSchema({
 
 const MAP_LIST_SCHEMA = internSchema({
   type: "array",
-  // type: "unknown" is ignored by the asCell code path (no type validation)
+  // `processDefaultValue()` treats `asCell` as an opaque cell boundary, so
+  // `type: "unknown"` only documents the inner value shape here.
   items: { asCell: ["cell"], type: "unknown" },
 });
 
@@ -88,6 +90,8 @@ export function map(
     );
     const listScope = listLink?.scope ??
       sourceListCell.getAsNormalizedFullLink().scope;
+    // `array` callback arguments should observe the actual list entity, not the
+    // alias/boxed reference used to pass that list into the builtin.
     const listCell = sourceListCell.withTx(tx).resolveAsCell();
     const list = listCell.asSchema(MAP_LIST_SCHEMA).withTx(tx).get();
     // .getRaw() because we want the pattern itself and avoid following the
