@@ -1279,7 +1279,7 @@ const ifcEntryAppliesToAttemptedWrite = (
 
   const exactAttemptedPaths = [
     ...(tx.getReactivityLog?.().writes ?? []),
-    ...(tx.getReactivityLog?.().potentialWrites ?? []),
+    ...(tx.getReactivityLog?.().attemptedWrites ?? []),
   ].map((write) => ({
     write,
     path: canonicalizeLogicalPath(write.path),
