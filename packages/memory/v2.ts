@@ -5,7 +5,7 @@ import {
 } from "@commonfabric/data-model/json-encoding";
 import { internPathSelector } from "@commonfabric/data-model/schema-utils";
 import type { FabricValue, SchemaPathSelector } from "./interface.ts";
-import type { ReconstructionContext } from "@commonfabric/data-model/interface";
+import { EmptyReconstructionContext } from "@commonfabric/data-model/empty-reconstruction-context";
 import { isObject, isRecord } from "@commonfabric/utils/types";
 
 export const MEMORY_PROTOCOL = "memory" as const;
@@ -352,13 +352,10 @@ export type ServerMessage =
   | SessionEffectMessage
   | SessionRevokedMessage;
 
-const memoryReconstructionContext: ReconstructionContext = {
-  getCell() {
-    throw new Error(
-      "getCell is not available at the memory boundary",
-    );
-  },
-};
+const memoryReconstructionContext = new EmptyReconstructionContext(
+  true,
+  "no cell reconstruction at the memory boundary",
+);
 
 export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   modernDataModel: getDataModelConfig(),

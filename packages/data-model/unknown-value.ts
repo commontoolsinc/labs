@@ -7,6 +7,7 @@ import {
   type ReconstructionContext,
 } from "./interface.ts";
 import { ExplicitTagValue } from "./explicit-tag-value.ts";
+import { deepFreeze } from "./deep-freeze.ts";
 
 /**
  * Container for an unrecognized type's data, used for round-tripping. When
@@ -57,8 +58,13 @@ export class UnknownValue extends ExplicitTagValue {
 
   static [RECONSTRUCT](
     state: { type: string; state: FabricValue },
-    _context: ReconstructionContext,
+    context: ReconstructionContext,
   ): UnknownValue {
-    return new UnknownValue(state.type, state.state);
+    const result = new UnknownValue(state.type, state.state);
+    // Honor `shouldDeepFreeze`: produce the type's correct deep-frozen form
+    // via its `[DEEP_FREEZE]` member (recursing through `deepFreeze`).
+    return context.shouldDeepFreeze
+      ? result[DEEP_FREEZE]((v) => deepFreeze(v)) as unknown as UnknownValue
+      : result;
   }
 }

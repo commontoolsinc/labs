@@ -325,6 +325,29 @@ export interface ReconstructionContext {
   getCell(
     ref: { id: string; path: string[]; space: string },
   ): FabricInstance;
+
+  /**
+   * Signals whether a reconstruction call should produce a deep-frozen
+   * result: `true` means the reconstructed value should be deep-frozen,
+   * `false` means a mutable result is acceptable. Same contract as `frozen`
+   * passed to `cloneIfNecessary()` (see `value-clone.ts`):
+   * `shouldDeepFreeze === true` corresponds to
+   * `cloneIfNecessary(value, { frozen: true })`.
+   *
+   * Required (not optional): every context declares it. Contexts get it for
+   * free by extending `BaseReconstructionContext`, which centralizes the
+   * getter; the `cloneIfNecessary`-style `true` default lives there.
+   *
+   * Enforcement: the concrete `[RECONSTRUCT]` implementations query this and
+   * abide by it — they produce a deep-frozen result when it is `true`. The
+   * one place this is *not* applied is the class-registry fallback
+   * call-site wrap (`json-encoding-context.ts`'s `cls[RECONSTRUCT]` path);
+   * that call-site deep-freeze is a separate follow-on's responsibility and
+   * is intentionally NOT covered here. The per-implementation honoring is
+   * sufficient for correctness regardless: each impl freezes its own output
+   * when asked.
+   */
+  readonly shouldDeepFreeze: boolean;
 }
 
 /**
