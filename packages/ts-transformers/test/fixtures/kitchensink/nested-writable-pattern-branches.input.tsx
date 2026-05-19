@@ -43,10 +43,10 @@ export default pattern<{
   showCompleted: boolean;
   globalAccent: string;
 }>((state) => {
-  // [TRANSFORM] Writable.of: schema arg injected; undefined default added for optional type
-  const selectedTaskId = Writable.of<string | undefined>();
-  // [TRANSFORM] Writable.of: schema arg injected; undefined default added for optional type
-  const hoveredSectionId = Writable.of<string | undefined>();
+  // [TRANSFORM] new Writable: schema arg injected; undefined default added for optional type
+  const selectedTaskId = new Writable<string | undefined>();
+  // [TRANSFORM] new Writable: schema arg injected; undefined default added for optional type
+  const hoveredSectionId = new Writable<string | undefined>();
   // [TRANSFORM] computed() → derive(): captures state.sections (asCell — Writable<Section[]>)
   const hasSections = computed(() => state.sections.get().length > 0);
 

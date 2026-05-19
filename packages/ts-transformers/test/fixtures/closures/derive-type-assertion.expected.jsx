@@ -16,10 +16,10 @@ const __cfAmdHooks = undefined;
 //   derive(value, fn) → derive(schema, schema, { value, multiplier }, fn)
 // Context: the `as number` cast remains intact in the transformed callback expression
 export default pattern(() => {
-    const value = Writable.of(10, {
+    const value = new Writable(10, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("value", true);
-    const multiplier = Writable.of(2, {
+    const multiplier = new Writable(2, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("multiplier", true);
     const result = __cfHelpers.derive({

@@ -26,7 +26,7 @@ interface Message {
 //   selectMessage({ selectedId, msgId: msg.id }) → msg.id stays structural inside handler call branch
 export default pattern<{ entries: Entry[]; messages: Message[] }>(
   ({ entries, messages }) => {
-    const selectedId = Writable.of("");
+    const selectedId = new Writable("");
 
     return {
       [UI]: (

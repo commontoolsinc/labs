@@ -21,7 +21,7 @@ interface State {
 //   derive(value, fn) → derive(schema, schema, { value, state: { config: { multiplier: ... } } }, fn)
 // Context: `state.config.multiplier` is a two-level deep property access captured as a nested object
 export default pattern((state: State) => {
-    const value = Writable.of(10, {
+    const value = new Writable(10, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("value", true);
     const result = __cfHelpers.derive({

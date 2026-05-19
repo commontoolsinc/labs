@@ -7,7 +7,7 @@ import { Writable, computed, pattern } from "commonfabric";
 //   accessed on it (config.multiplier) are rewritten to config.key("multiplier")
 //   in the captures object.
 export default pattern((config: { multiplier: number }) => {
-  const value = Writable.of(10);
+  const value = new Writable(10);
   const result = computed(() => value.get() * config.multiplier);
   return result;
 });

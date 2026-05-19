@@ -21,7 +21,7 @@ interface State {
 //   derive(value, fn) → derive(schema, schema, { value, state: { counter: { value: state.counter.value } } }, fn)
 // Context: `state.counter.value` is captured as a nested object structure, not a flat binding
 export default pattern((state: State) => {
-    const value = Writable.of(10, {
+    const value = new Writable(10, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("value", true);
     // Capture property before method call

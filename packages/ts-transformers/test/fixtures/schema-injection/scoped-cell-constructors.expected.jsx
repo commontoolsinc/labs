@@ -17,7 +17,7 @@ interface Event {
 // FIXTURE: scoped-cell-constructors
 // Verifies: scoped cell constructor helpers inject top-level schema scopes.
 export default function TestScopedCellConstructors() {
-    const name = WritableConstructor.perUser.of("Ada", {
+    const name = new WritableConstructor.perUser("Ada", {
         type: "string",
         scope: "user"
     } as const satisfies __cfHelpers.JSONSchema).for("name", true);
@@ -25,7 +25,7 @@ export default function TestScopedCellConstructors() {
         type: "string",
         scope: "session"
     } as const satisfies __cfHelpers.JSONSchema);
-    const events = Stream.perSpace.of<Event>({ message: "ready" }, {
+    const events = new Stream.perSpace<Event>({ message: "ready" }, {
         type: "object",
         properties: {
             message: {
@@ -34,12 +34,12 @@ export default function TestScopedCellConstructors() {
         },
         required: ["message"],
         scope: "space"
-    } as const satisfies __cfHelpers.JSONSchema).for("events", true);
-    const contextual: PerUser<Writable<string>> = WritableConstructor.of("", {
+    } as const satisfies __cfHelpers.JSONSchema).for({ stream: "events" }, true);
+    const contextual: PerUser<Writable<string>> = new WritableConstructor("", {
         type: "string",
         scope: "user"
     } as const satisfies __cfHelpers.JSONSchema).for("contextual", true);
-    const inherited = WritableConstructor.of("", {
+    const inherited = new WritableConstructor("", {
         type: "string"
     } as const satisfies __cfHelpers.JSONSchema).for("inherited", true);
     return {

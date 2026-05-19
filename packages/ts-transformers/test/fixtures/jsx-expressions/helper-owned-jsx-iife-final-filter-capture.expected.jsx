@@ -33,13 +33,13 @@ function visibleEntries(entries: Writable<Default<Entry[], [
 __cfHardenFn(visibleEntries);
 export default pattern((__cf_pattern_input) => {
     const entries = __cf_pattern_input.key("entries");
-    const path = Writable.of<string[]>([], {
+    const path = new Writable<string[]>([], {
         type: "array",
         items: {
             type: "string"
         }
     } as const satisfies __cfHelpers.JSONSchema).for("path", true);
-    const labelPrefix = Writable.of("a", {
+    const labelPrefix = new Writable("a", {
         type: "string"
     } as const satisfies __cfHelpers.JSONSchema).for("labelPrefix", true);
     return {

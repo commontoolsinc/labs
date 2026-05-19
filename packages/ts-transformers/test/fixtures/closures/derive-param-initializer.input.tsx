@@ -6,7 +6,7 @@ import { Writable, derive, pattern } from "commonfabric";
 // Context: the default initializer `= 10` is carried over to the destructured parameter
 export default pattern(() => {
   const value = 5;
-  const multiplier = Writable.of(2);
+  const multiplier = new Writable(2);
 
   // Test parameter with default value
   const result = derive(value, (v = 10) => v * multiplier.get());

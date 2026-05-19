@@ -6,8 +6,8 @@ import { Writable, derive, pattern } from "commonfabric";
 //   inner nums.map(fn) → nums.mapWithPattern(pattern(...), { multiplier })
 // Context: `multiplier` is captured by both derive and the inner map; inner map receives it via params
 export default pattern(() => {
-  const numbers = Writable.of([1, 2, 3]);
-  const multiplier = Writable.of(2);
+  const numbers = new Writable([1, 2, 3]);
+  const multiplier = new Writable(2);
 
   // Nested callback - inner array map should not capture outer multiplier
   const result = derive(numbers, (nums) =>

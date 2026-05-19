@@ -18,7 +18,7 @@ interface PatternInput {
 //   inner `adminData.map(...)` is over compute-owned data but still lowered in
 //   pattern context when rendered from the ternary branch.
 export default pattern<PatternInput>(({ people }) => {
-  const showAdmin = Writable.of(false);
+  const showAdmin = new Writable(false);
 
   const adminData = computed(() =>
     [...people.get()]

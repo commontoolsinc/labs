@@ -15,13 +15,13 @@ const __cfAmdHooks = undefined;
 // Verifies: two captured cells are both extracted into the derive capture object
 //   derive(value, fn) → derive(schema, schema, { value, multiplier, offset }, fn)
 export default pattern(() => {
-    const value = Writable.of(10, {
+    const value = new Writable(10, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("value", true);
-    const multiplier = Writable.of(2, {
+    const multiplier = new Writable(2, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("multiplier", true);
-    const offset = Writable.of(5, {
+    const offset = new Writable(5, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("offset", true);
     const result = __cfHelpers.derive({

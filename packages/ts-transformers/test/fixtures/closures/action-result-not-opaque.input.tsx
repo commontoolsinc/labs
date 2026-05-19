@@ -14,7 +14,7 @@ interface State {
 //   action(() => count.set(...)) → handler(false, { count: { asCell } }, (_, { count }) => ...)({ count })
 // Context: action() is an opaque origin, but handler results are used directly (no property access)
 export default pattern<State>(({ label }) => {
-  const count = Writable.of(0);
+  const count = new Writable(0);
 
   const increment = action(() => {
     count.set(count.get() + 1);

@@ -5,8 +5,8 @@ import { Writable, derive, pattern } from "commonfabric";
 //   derive({}, () => ...) → derive(schema, schema, { a, b }, ({ a, b }) => ...)
 // Context: no explicit input param; captures become the sole parameters of the rewritten callback
 export default pattern(() => {
-  const a = Writable.of(10);
-  const b = Writable.of(20);
+  const a = new Writable(10);
+  const b = new Writable(20);
 
   // Zero-parameter callback that closes over a and b
   const result = derive({}, () => a.get() + b.get());

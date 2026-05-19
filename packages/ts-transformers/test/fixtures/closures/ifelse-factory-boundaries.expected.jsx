@@ -81,7 +81,7 @@ interface Message {
 export default pattern((__cf_pattern_input) => {
     const entries = __cf_pattern_input.key("entries");
     const messages = __cf_pattern_input.key("messages");
-    const selectedId = Writable.of("", {
+    const selectedId = new Writable("", {
         type: "string"
     } as const satisfies __cfHelpers.JSONSchema).for("selectedId", true);
     return {

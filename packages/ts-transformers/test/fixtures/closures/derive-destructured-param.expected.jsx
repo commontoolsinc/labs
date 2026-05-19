@@ -20,7 +20,7 @@ interface Point {
 //   derive(point, fn) → derive(schema, schema, { point, multiplier }, fn)
 // Context: `const { x, y } = p.get()` destructures inside the body, not the parameter
 export default pattern(() => {
-    const point = Writable.of({ x: 10, y: 20 } as Point, {
+    const point = new Writable({ x: 10, y: 20 } as Point, {
         type: "object",
         properties: {
             x: {
@@ -32,7 +32,7 @@ export default pattern(() => {
         },
         required: ["x", "y"]
     } as const satisfies __cfHelpers.JSONSchema).for("point", true);
-    const multiplier = Writable.of(2, {
+    const multiplier = new Writable(2, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("multiplier", true);
     // Destructuring requires .get() first since derive doesn't unwrap Cell

@@ -14,7 +14,7 @@ interface Event {
 }
 
 // FIXTURE: cell-constructors
-// Verifies: schema injection treats new CellLike(...) like CellLike.of(...)
+// Verifies: schema injection treats new CellLike(...) like cell constructor calls.
 //   new Cell<string>("hello") -> new Cell<string>("hello", { type: "string" })
 //   new WritableConstructor.perUser("Ada") -> schema includes scope: "user"
 //   const contextual: PerUser<Writable<string>> = new WritableConstructor("")

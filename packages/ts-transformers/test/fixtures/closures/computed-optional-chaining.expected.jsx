@@ -16,7 +16,7 @@ const __cfAmdHooks = undefined;
 //   computed(() => value.get() * (config.get()?.multiplier ?? 1)) → derive(..., { value, config }, ({ value, config }) => ...)
 //   The config cell has a nullable type (anyOf [object, null]) with asCell: true in the capture schema.
 export default pattern(() => {
-    const config = Writable.of<{
+    const config = new Writable<{
         multiplier?: number;
     } | null>({ multiplier: 2 }, {
         anyOf: [{
@@ -30,7 +30,7 @@ export default pattern(() => {
                 type: "null"
             }]
     } as const satisfies __cfHelpers.JSONSchema).for("config", true);
-    const value = Writable.of(10, {
+    const value = new Writable(10, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("value", true);
     const result = __cfHelpers.derive({

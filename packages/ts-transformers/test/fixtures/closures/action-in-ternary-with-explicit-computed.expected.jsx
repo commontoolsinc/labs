@@ -32,7 +32,7 @@ interface Input {
 // Context: Action referenced inside computed expression must appear in the derive's capture object
 export default pattern((__cf_pattern_input) => {
     const card = __cf_pattern_input.key("card");
-    const isEditing = Cell.of(false, {
+    const isEditing = new Cell(false, {
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema).for("isEditing", true);
     const startEditing = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {

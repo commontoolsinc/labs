@@ -7,8 +7,8 @@ import { Writable, computed, pattern } from "commonfabric";
 //   inside a derive callback. The .map() callback's closed-over `multiplier` cell
 //   is passed as a params object to mapWithPattern.
 export default pattern(() => {
-  const numbers = Writable.of([1, 2, 3]);
-  const multiplier = Writable.of(2);
+  const numbers = new Writable([1, 2, 3]);
+  const multiplier = new Writable(2);
 
   // Inside computed, we close over numbers (a Cell)
   // The computed gets transformed to derive({}, () => numbers.map(...))
