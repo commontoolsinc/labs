@@ -8,7 +8,7 @@ import { isDID } from "@commonfabric/identity";
 import { FabricBytes } from "@commonfabric/data-model/fabric-bytes";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { JsonEncodingContext } from "@commonfabric/data-model/json-encoding-context";
-import { BaseReconstructionContext } from "@commonfabric/data-model/base-reconstruction-context";
+import { EmptyReconstructionContext } from "@commonfabric/data-model/empty-reconstruction-context";
 import {
   decodeMemoryBoundary,
   encodeMemoryBoundary,
@@ -17,13 +17,10 @@ import type { Context } from "@hono/hono";
 
 const router = createRouter();
 const blobUploadEncoding = new JsonEncodingContext();
-class BlobReconstructionContext extends BaseReconstructionContext {
-  override getCell(): never {
-    throw new Error("Blob upload payloads cannot contain cell references");
-  }
-}
-
-const blobReconstructionContext = new BlobReconstructionContext();
+const blobReconstructionContext = new EmptyReconstructionContext(
+  true,
+  "blob upload payloads cannot contain cell references",
+);
 
 type BlobContents = {
   type: string;

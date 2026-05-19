@@ -24,6 +24,7 @@
     "./base-reconstruction-context": "./base-reconstruction-context.ts",
     "./bigint-encoding": "./bigint-encoding.ts",
     "./deep-freeze": "./deep-freeze.ts",
+    "./empty-reconstruction-context": "./empty-reconstruction-context.ts",
     "./explicit-tag-value": "./explicit-tag-value.ts",
     "./fabric-bytes": "./fabric-bytes.ts",
     "./fabric-epoch": "./fabric-epoch.ts",
