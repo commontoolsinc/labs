@@ -16,7 +16,7 @@ import {
 import {
   bigintFromMinimalTwosComplement,
   bigintToMinimalTwosComplement,
-} from "./bigint-encoding.ts";
+} from "@commonfabric/utils/bigint";
 
 /**
  * JSON-compatible wire format value. This is the intermediate tree

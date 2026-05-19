@@ -1,11 +1,16 @@
 {
   "name": "@commonfabric/utils",
   "tasks": {
-    "test": "deno test"
+    "test": "deno test",
+    "bench": {
+      "description": "Run benchmarks",
+      "command": "deno bench"
+    }
   },
   "exports": {
     ".": "./src/index.ts",
     "./base64url": "./src/base64url.ts",
+    "./bigint": "./src/bigint.ts",
     "./cache": "./src/cache.ts",
     "./deep-equal": "./src/deep-equal.ts",
     "./defer": "./src/defer.ts",
