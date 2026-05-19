@@ -11,6 +11,23 @@ import { handler, ifElse, lift, pattern, UI, Writable } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
+    const entry = __cf_pattern_input.key("element");
+    return ifElse({
+        type: "boolean"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        anyOf: [{}, {
+                type: "object",
+                properties: {}
+            }]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "null"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        anyOf: [{
+                type: "null"
+            }, {}]
+    } as const satisfies __cfHelpers.JSONSchema, moduleHasSettings({ piece: entry.key("piece") }), <span>settings</span>, null);
+});
 const moduleHasSettings = lift({
     type: "object",
     properties: {
@@ -69,23 +86,7 @@ export default pattern((__cf_pattern_input) => {
     } as const satisfies __cfHelpers.JSONSchema).for("selectedId", true);
     return {
         [UI]: (<div>
-          {entries.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const entry = __cf_pattern_input.key("element");
-                return ifElse({
-                    type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    anyOf: [{}, {
-                            type: "object",
-                            properties: {}
-                        }]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "null"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    anyOf: [{
-                            type: "null"
-                        }, {}]
-                } as const satisfies __cfHelpers.JSONSchema, moduleHasSettings({ piece: entry.key("piece") }), <span>settings</span>, null).for("__patternResult", true);
-            }, {
+          {entries.mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
                 type: "object",
                 properties: {
                     element: {

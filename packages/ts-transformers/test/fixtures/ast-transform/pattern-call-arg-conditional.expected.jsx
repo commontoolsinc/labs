@@ -11,6 +11,7 @@ import { pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn(({ state }) => identity(state.done ? "Done" : "Pending"));
 const identity = __cfHardenFn(<T,>(value: T) => value);
 // FIXTURE: pattern-call-arg-conditional
 // Verifies: top-level ordinary helper calls with reactive arguments are lifted
@@ -36,7 +37,7 @@ export default pattern((state) => {
         "enum": ["Done", "Pending"]
     } as const satisfies __cfHelpers.JSONSchema, { state: {
             done: state.key("done")
-        } }, ({ state }) => identity(state.done ? "Done" : "Pending")).for("label", true);
+        } }, __cfModuleCallback_1).for("label", true);
     return { label };
 }, {
     type: "object",

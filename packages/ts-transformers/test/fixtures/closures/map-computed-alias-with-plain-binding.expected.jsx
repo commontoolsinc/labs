@@ -11,9 +11,10 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(({ element, params: {} }) => {
+const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
+    const element = __cf_pattern_input.key("element");
     const __cf_val_key = dynamicKey();
-    const { foo } = element;
+    const foo = element.key("foo");
     const val = __cfHelpers.derive({
         type: "object",
         properties: {

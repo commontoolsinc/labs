@@ -106,6 +106,7 @@ Deno.test(
       "HelperOwnedExpressionSiteLoweringTransformer",
       "WriteAuthorizedByValidationTransformer",
       "PatternCallbackLoweringTransformer",
+      "BuilderCallbackHoistingTransformer",
       "SchemaInjectionTransformer",
       "SchemaGeneratorTransformer",
       "ReactiveVariableForTransformer",

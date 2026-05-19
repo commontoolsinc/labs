@@ -11,6 +11,7 @@ import { pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn(({ state }) => double(state.count + 1));
 const double = __cfHardenFn((x: number) => x * 2);
 // FIXTURE: pattern-local-helper-call-roots
 // Verifies: top-level ordinary local helper calls with reactive inputs are
@@ -37,7 +38,7 @@ export default pattern((state) => ({
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema, { state: {
             count: state.key("count")
-        } }, ({ state }) => double(state.count + 1)).for(["__patternResult", "doubled"], true)
+        } }, __cfModuleCallback_1).for(["__patternResult", "doubled"], true)
 }), {
     type: "object",
     properties: {

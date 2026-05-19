@@ -12,14 +12,14 @@ const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 const __cfModuleCallback_1 = __cfHardenFn(() => {
-    const __cf_destructure_1 = wish<Default<string[], [
+    const foo = wish<Default<string[], [
     ]>>({ query: "#items" }, {
         type: "array",
         items: {
             type: "string"
         },
         "default": []
-    } as const satisfies __cfHelpers.JSONSchema), foo = __cf_destructure_1.key("result").for("foo", true);
+    } as const satisfies __cfHelpers.JSONSchema).result!;
     return foo.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
         const item = __cf_pattern_input.key("element");
         return item + "!";
@@ -35,17 +35,6 @@ const __cfModuleCallback_1 = __cfHardenFn(() => {
         type: "string"
     } as const satisfies __cfHelpers.JSONSchema), {});
 });
-const __cfModuleCallback_2 = __cfHardenFn(({ element: item, params: {} }) => __cfHelpers.derive({
-    type: "object",
-    properties: {
-        item: {
-            type: "string"
-        }
-    },
-    required: ["item"]
-} as const satisfies __cfHelpers.JSONSchema, {
-    type: "string"
-} as const satisfies __cfHelpers.JSONSchema, { item: item }, ({ item }) => item.toUpperCase()));
 const passthrough = lift({
     type: "array",
     items: {
@@ -297,7 +286,20 @@ export default pattern((state) => {
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema), {}).for("filtered", true);
-        return filtered.mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_2, {
+        return filtered.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+            const item = __cf_pattern_input.key("element");
+            return __cfHelpers.derive({
+                type: "object",
+                properties: {
+                    item: {
+                        type: "string"
+                    }
+                },
+                required: ["item"]
+            } as const satisfies __cfHelpers.JSONSchema, {
+                type: "string"
+            } as const satisfies __cfHelpers.JSONSchema, { item: item }, ({ item }) => item.toUpperCase()).for("__patternResult", true);
+        }, {
             type: "object",
             properties: {
                 element: {

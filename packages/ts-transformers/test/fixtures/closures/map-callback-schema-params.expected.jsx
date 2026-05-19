@@ -11,39 +11,6 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(({ element: item, params: { state } }) => (<span>{__cfHelpers.derive({
-    type: "object",
-    properties: {
-        item: {
-            type: "object",
-            properties: {
-                price: {
-                    type: "number"
-                }
-            },
-            required: ["price"]
-        },
-        state: {
-            type: "object",
-            properties: {
-                discount: {
-                    type: "number"
-                }
-            },
-            required: ["discount"]
-        }
-    },
-    required: ["item", "state"]
-} as const satisfies __cfHelpers.JSONSchema, {
-    type: "number"
-} as const satisfies __cfHelpers.JSONSchema, {
-    item: {
-        price: item.price
-    },
-    state: {
-        discount: state.discount
-    }
-}, ({ item, state }) => item.price * state.discount)}</span>));
 interface Item {
     id: string;
     price: number;
@@ -111,17 +78,47 @@ export default pattern((state) => {
         } as const satisfies __cfHelpers.JSONSchema), {})}
         </section>
         <section data-kind="used">
-          {state.key("items").mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
+          {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const item = __cf_pattern_input.key("element");
+                const state = __cf_pattern_input.key("params", "state");
+                return (<span>{__cfHelpers.derive({
+                    type: "object",
+                    properties: {
+                        item: {
+                            type: "object",
+                            properties: {
+                                price: {
+                                    type: "number"
+                                }
+                            },
+                            required: ["price"]
+                        },
+                        state: {
+                            type: "object",
+                            properties: {
+                                discount: {
+                                    type: "number"
+                                }
+                            },
+                            required: ["discount"]
+                        }
+                    },
+                    required: ["item", "state"]
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "number"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    item: {
+                        price: item.key("price")
+                    },
+                    state: {
+                        discount: state.key("discount")
+                    }
+                }, ({ item, state }) => item.price * state.discount)}</span>);
+            }, {
                 type: "object",
                 properties: {
                     element: {
-                        type: "object",
-                        properties: {
-                            price: {
-                                type: "number"
-                            }
-                        },
-                        required: ["price"]
+                        $ref: "#/$defs/Item"
                     },
                     params: {
                         type: "object",
@@ -139,7 +136,21 @@ export default pattern((state) => {
                         required: ["state"]
                     }
                 },
-                required: ["element", "params"]
+                required: ["element", "params"],
+                $defs: {
+                    Item: {
+                        type: "object",
+                        properties: {
+                            id: {
+                                type: "string"
+                            },
+                            price: {
+                                type: "number"
+                            }
+                        },
+                        required: ["id", "price"]
+                    }
+                }
             } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"

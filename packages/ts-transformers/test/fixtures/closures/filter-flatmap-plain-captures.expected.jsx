@@ -11,31 +11,6 @@ import { pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(({ element: item, params: { suffix } }) => __cfHelpers.derive({
-    type: "object",
-    properties: {
-        item: {
-            type: "object",
-            properties: {
-                label: {
-                    type: "string"
-                }
-            },
-            required: ["label"]
-        },
-        suffix: {
-            type: "string"
-        }
-    },
-    required: ["item", "suffix"]
-} as const satisfies __cfHelpers.JSONSchema, {
-    type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, {
-    item: {
-        label: item.label
-    },
-    suffix: suffix
-}, ({ item, suffix }) => item.label.endsWith(suffix)));
 // FIXTURE: filter-flatmap-plain-captures
 // Verifies: plain lexical captures in reactive filter/flatMap chains become
 // params values, not reactive key(...) lookups
@@ -48,7 +23,35 @@ export default pattern((__cf_pattern_input) => {
     const suffix = "!";
     const prefix = "#";
     return {
-        labels: items.filterWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
+        labels: items.filterWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+            const item = __cf_pattern_input.key("element");
+            const suffix = __cf_pattern_input.params.suffix;
+            return __cfHelpers.derive({
+                type: "object",
+                properties: {
+                    item: {
+                        type: "object",
+                        properties: {
+                            label: {
+                                type: "string"
+                            }
+                        },
+                        required: ["label"]
+                    },
+                    suffix: {
+                        type: "string"
+                    }
+                },
+                required: ["item", "suffix"]
+            } as const satisfies __cfHelpers.JSONSchema, {
+                type: "boolean"
+            } as const satisfies __cfHelpers.JSONSchema, {
+                item: {
+                    label: item.key("label")
+                },
+                suffix: suffix
+            }, ({ item, suffix }) => item.label.endsWith(suffix));
+        }, {
             type: "object",
             properties: {
                 element: {
@@ -56,9 +59,15 @@ export default pattern((__cf_pattern_input) => {
                     properties: {
                         label: {
                             type: "string"
+                        },
+                        tags: {
+                            type: "array",
+                            items: {
+                                type: "string"
+                            }
                         }
                     },
-                    required: ["label"]
+                    required: ["label", "tags"]
                 },
                 params: {
                     type: "object",

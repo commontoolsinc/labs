@@ -11,39 +11,6 @@ import { cell, derive, pattern, patternTool, type PatternToolResult } from "comm
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(({ query, content }: {
-    query: string;
-    content: string;
-}) => {
-    return __cfHelpers.derive({
-        type: "object",
-        properties: {
-            input: {
-                type: "object",
-                properties: {
-                    query: {
-                        type: "string"
-                    }
-                },
-                required: ["query"]
-            },
-            content: {
-                type: "string"
-            }
-        },
-        required: ["input", "content"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "array",
-        items: {
-            type: "string"
-        }
-    } as const satisfies __cfHelpers.JSONSchema, {
-        input: { query },
-        content: content
-    }, ({ input: { query }, content }) => {
-        return content.split("\n").filter((c: string) => c.includes(query));
-    });
-});
 const content = __cfHelpers.__cf_data(cell("Hello world\nGoodbye world", {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema).for("content", true));
@@ -59,7 +26,39 @@ type Output = {
 // Context: Module-scoped `content` cell is referenced inside the patternTool
 //   callback. The transformer threads it through the existing extraParams object.
 export default pattern(() => {
-    const grepTool = patternTool(__cfModuleCallback_1, { content: content.for(["grepTool", 1, "content"], true) });
+    const grepTool = patternTool(({ query, content }: {
+        query: string;
+        content: string;
+    }) => {
+        return __cfHelpers.derive({
+            type: "object",
+            properties: {
+                input: {
+                    type: "object",
+                    properties: {
+                        query: {
+                            type: "string"
+                        }
+                    },
+                    required: ["query"]
+                },
+                content: {
+                    type: "string"
+                }
+            },
+            required: ["input", "content"]
+        } as const satisfies __cfHelpers.JSONSchema, {
+            type: "array",
+            items: {
+                type: "string"
+            }
+        } as const satisfies __cfHelpers.JSONSchema, {
+            input: { query },
+            content: content
+        }, ({ input: { query }, content }) => {
+            return content.split("\n").filter((c: string) => c.includes(query));
+        });
+    }, { content: content.for(["grepTool", 1, "content"], true) });
     return { grepTool };
 }, {
     type: "object",

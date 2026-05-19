@@ -11,57 +11,6 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(({ element: { x, y }, params: { state } }) => (<div>
-            Point: ({__cfHelpers.derive({
-    type: "object",
-    properties: {
-        x: {
-            type: "number"
-        },
-        state: {
-            type: "object",
-            properties: {
-                scale: {
-                    type: "number"
-                }
-            },
-            required: ["scale"]
-        }
-    },
-    required: ["x", "state"]
-} as const satisfies __cfHelpers.JSONSchema, {
-    type: "number"
-} as const satisfies __cfHelpers.JSONSchema, {
-    x: x,
-    state: {
-        scale: state.scale
-    }
-}, ({ x, state }) => x * state.scale)}, {__cfHelpers.derive({
-    type: "object",
-    properties: {
-        y: {
-            type: "number"
-        },
-        state: {
-            type: "object",
-            properties: {
-                scale: {
-                    type: "number"
-                }
-            },
-            required: ["scale"]
-        }
-    },
-    required: ["y", "state"]
-} as const satisfies __cfHelpers.JSONSchema, {
-    type: "number"
-} as const satisfies __cfHelpers.JSONSchema, {
-    y: y,
-    state: {
-        scale: state.scale
-    }
-}, ({ y, state }) => y * state.scale)})
-          </div>));
 interface Point {
     x: number;
     y: number;
@@ -79,7 +28,62 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Map with destructured parameter and capture */}
-        {state.key("points").mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
+        {state.key("points").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const x = __cf_pattern_input.key("element", "x");
+                const y = __cf_pattern_input.key("element", "y");
+                const state = __cf_pattern_input.key("params", "state");
+                return (<div>
+            Point: ({__cfHelpers.derive({
+                    type: "object",
+                    properties: {
+                        x: {
+                            type: "number"
+                        },
+                        state: {
+                            type: "object",
+                            properties: {
+                                scale: {
+                                    type: "number"
+                                }
+                            },
+                            required: ["scale"]
+                        }
+                    },
+                    required: ["x", "state"]
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "number"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    x: x,
+                    state: {
+                        scale: state.key("scale")
+                    }
+                }, ({ x, state }) => x * state.scale)}, {__cfHelpers.derive({
+                    type: "object",
+                    properties: {
+                        y: {
+                            type: "number"
+                        },
+                        state: {
+                            type: "object",
+                            properties: {
+                                scale: {
+                                    type: "number"
+                                }
+                            },
+                            required: ["scale"]
+                        }
+                    },
+                    required: ["y", "state"]
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "number"
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    y: y,
+                    state: {
+                        scale: state.key("scale")
+                    }
+                }, ({ y, state }) => y * state.scale)})
+          </div>);
+            }, {
                 type: "object",
                 properties: {
                     element: {
