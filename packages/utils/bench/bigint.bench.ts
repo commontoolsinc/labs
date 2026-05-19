@@ -97,12 +97,26 @@ function makeBatch(bytes: number, sign: 1n | -1n, seed: number): bigint[] {
   return out;
 }
 
-for (
-  const { biToMtc, biFromMtc } of [
-    { biToMtc: bigintToMtcDirect, biFromMtc: bigintFromMtcDirect },
-    { biToMtc: bigintToMtcHex, biFromMtc: bigintFromMtcHex },
-  ]
-) {
+const IMPLS: ReadonlyArray<{
+  readonly name: string;
+  readonly biToMtc: (value: bigint) => Uint8Array;
+  readonly biFromMtc: (bytes: Uint8Array) => bigint;
+}> = [
+  {
+    name: "direct",
+    biToMtc: bigintToMtcDirect,
+    biFromMtc: bigintFromMtcDirect,
+  },
+  {
+    name: "hex",
+    biToMtc: bigintToMtcHex,
+    biFromMtc: bigintFromMtcHex,
+  },
+];
+
+for (const { name: implName, biToMtc, biFromMtc } of IMPLS) {
+  const isBaselineImpl = implName === IMPLS[0].name;
+
   const encodeBatch = (values: bigint[]): Uint8Array[] => {
     return values.map((v) => biToMtc(v));
   };
@@ -134,9 +148,9 @@ for (
     const label = `${bytes}B`;
 
     Deno.bench({
-      name: `encode positive ${label} (${BATCH} ops)`,
+      name: `encode positive ${label} ${implName} (${BATCH} ops)`,
       group: encodeGroup,
-      baseline: true,
+      baseline: isBaselineImpl,
       fn() {
         for (let i = 0; i < BATCH; i++) {
           biToMtc(positives[i]);
@@ -145,7 +159,7 @@ for (
     });
 
     Deno.bench({
-      name: `encode negative ${label} (${BATCH} ops)`,
+      name: `encode negative ${label} ${implName} (${BATCH} ops)`,
       group: encodeGroup,
       fn() {
         for (let i = 0; i < BATCH; i++) {
@@ -155,9 +169,9 @@ for (
     });
 
     Deno.bench({
-      name: `decode positive ${label} (${BATCH} ops)`,
+      name: `decode positive ${label} ${implName} (${BATCH} ops)`,
       group: decodeGroup,
-      baseline: true,
+      baseline: isBaselineImpl,
       fn() {
         for (let i = 0; i < BATCH; i++) {
           biFromMtc(positiveBytes[i]);
@@ -166,7 +180,7 @@ for (
     });
 
     Deno.bench({
-      name: `decode negative ${label} (${BATCH} ops)`,
+      name: `decode negative ${label} ${implName} (${BATCH} ops)`,
       group: decodeGroup,
       fn() {
         for (let i = 0; i < BATCH; i++) {
