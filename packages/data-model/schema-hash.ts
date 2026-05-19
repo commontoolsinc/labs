@@ -64,8 +64,8 @@ const schemaFinalizer = new FinalizationRegistry<string>((hashStr) => {
 });
 
 // Seeds `hashToRef` with intern records for `boolean` schemas.
-hashToRef.set(booleanInterns.true.hashString, true);
-hashToRef.set(booleanInterns.false.hashString, false);
+hashToRef.set(booleanInterns.true.taggedHashString, true);
+hashToRef.set(booleanInterns.false.taggedHashString, false);
 
 /**
  * Helper for `internSchema()`, which always returns a `SchemaAndHash`.
@@ -248,10 +248,10 @@ export function isInternedSchema(schema: JSONSchema): boolean {
 
 /**
  * Interns (and thus deep-freezes) the given schema, returning its hash
- * string. Equivalent to `internSchema(schema, true).hashString`, but names
- * the operation and avoids the non-obvious `true` (`wantSchemaAndHash`)
+ * string. Equivalent to `internSchema(schema, true).taggedHashString`, but
+ * names the operation and avoids the non-obvious `true` (`wantSchemaAndHash`)
  * argument at call sites.
  */
-export function internSchemaAsHashString(schema: JSONSchema): string {
-  return internSchema(schema, true).hashString;
+export function internSchemaAsTaggedHashString(schema: JSONSchema): string {
+  return internSchema(schema, true).taggedHashString;
 }

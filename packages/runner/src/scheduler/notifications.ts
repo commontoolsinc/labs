@@ -1,14 +1,13 @@
 import type { MemorySpace } from "@commonfabric/memory/interface";
-import { determineTriggeredActions } from "../reactive-dependencies.ts";
 import type {
   ChangeGroup,
   IMemoryChange,
+  IStorageSubscription,
   IStorageTransaction,
   StorageNotification,
 } from "../storage/interface.ts";
-import type { TriggerIndexState } from "./dependency-index.ts";
+import type { TriggerIndexState } from "./trigger-index.ts";
 import { summarizeTriggerTraceValue } from "./diagnostics.ts";
-import { entityKey } from "./keys.ts";
 import type {
   Action,
   SpaceScopeAndURI,
@@ -26,7 +25,7 @@ export function schedulerMode(pullMode: boolean): SchedulerMode {
 export function hasRegisteredTriggers(
   state: TriggerIndexState,
 ): boolean {
-  return state.triggers.size > 0 || state.nonRecursiveTriggers.size > 0;
+  return state.hasRegisteredTriggers();
 }
 
 export function collectTriggeredActionsForChange(
@@ -38,50 +37,7 @@ export function collectTriggeredActionsForChange(
   hasMatchingTriggerPaths: boolean;
   triggeredActions: Action[];
 } {
-  const entity = entityKey({ ...change.address, space });
-  const paths = state.triggers.get(entity);
-  const nonRecursivePaths = state.nonRecursiveTriggers.get(entity);
-
-  if (!paths && !nonRecursivePaths) {
-    return {
-      entity,
-      hasMatchingTriggerPaths: false,
-      triggeredActions: [],
-    };
-  }
-
-  const triggeredActionSet = new Set<Action>();
-  if (paths) {
-    for (
-      const action of determineTriggeredActions(
-        paths,
-        change.before,
-        change.after,
-        change.address.path,
-      )
-    ) {
-      triggeredActionSet.add(action);
-    }
-  }
-  if (nonRecursivePaths) {
-    for (
-      const action of determineTriggeredActions(
-        nonRecursivePaths,
-        change.before,
-        change.after,
-        change.address.path,
-        { nonRecursive: true },
-      )
-    ) {
-      triggeredActionSet.add(action);
-    }
-  }
-
-  return {
-    entity,
-    hasMatchingTriggerPaths: true,
-    triggeredActions: [...triggeredActionSet],
-  };
+  return state.collectTriggeredActionsForChange(space, change);
 }
 
 export function createTriggerTraceEntry(state: {
@@ -180,19 +136,20 @@ export function shouldRecordTriggerTraceEntry(
   return entry.triggered.length > 0 || entry.matchedActionCount > 0;
 }
 
-export function processStorageNotification(state: {
-  readonly triggers: TriggerIndexState["triggers"];
-  readonly nonRecursiveTriggers: TriggerIndexState["nonRecursiveTriggers"];
-  readonly pullMode: boolean;
-  readonly diagnosisEnabled: boolean;
-  readonly collectTriggerTrace: boolean;
+interface CausalEdge {
+  writer: string;
+  cell: string;
+  triggered: string;
+  timestamp: number;
+}
+
+export interface StorageNotificationState {
+  readonly triggerIndex: TriggerIndexState;
+  readonly getPullMode: () => boolean;
+  readonly getDiagnosisEnabled: () => boolean;
+  readonly getCollectTriggerTrace: () => boolean;
   readonly changeGroupToActionId: Map<ChangeGroup, string>;
-  readonly causalEdges: {
-    writer: string;
-    cell: string;
-    triggered: string;
-    timestamp: number;
-  }[];
+  readonly recordCausalEdge: (edge: CausalEdge) => void;
   readonly actionChangeGroups: WeakMap<Action, ChangeGroup>;
   readonly effects: ReadonlySet<Action>;
   readonly pending: ReadonlySet<Action>;
@@ -207,7 +164,23 @@ export function processStorageNotification(state: {
   readonly scheduleAffectedEffects: (
     action: Action,
   ) => TriggerTraceScheduledEffect[];
-}, notification: StorageNotification): void {
+}
+
+export function createStorageSubscription(
+  state: StorageNotificationState,
+): IStorageSubscription {
+  return {
+    next: (notification) => {
+      processStorageNotification(state, notification);
+      return { done: false };
+    },
+  };
+}
+
+export function processStorageNotification(
+  state: StorageNotificationState,
+  notification: StorageNotification,
+): void {
   const space = notification.space;
 
   if (!("changes" in notification)) {
@@ -219,6 +192,9 @@ export function processStorageNotification(state: {
     : undefined;
   const hasSourceChangeGroup = notification.type === "commit" &&
     sourceChangeGroup !== undefined;
+  const pullMode = state.getPullMode();
+  const collectTriggerTrace = state.getCollectTriggerTrace();
+  const diagnosisEnabled = state.getDiagnosisEnabled();
 
   let changeIndex = 0;
   for (const change of notification.changes) {
@@ -226,10 +202,7 @@ export function processStorageNotification(state: {
     state.recordCellUpdate(change);
 
     if (
-      !hasRegisteredTriggers({
-        triggers: state.triggers,
-        nonRecursiveTriggers: state.nonRecursiveTriggers,
-      })
+      !hasRegisteredTriggers(state.triggerIndex)
     ) {
       continue;
     }
@@ -239,10 +212,7 @@ export function processStorageNotification(state: {
       hasMatchingTriggerPaths,
       triggeredActions,
     } = collectTriggeredActionsForChange(
-      {
-        triggers: state.triggers,
-        nonRecursiveTriggers: state.nonRecursiveTriggers,
-      },
+      state.triggerIndex,
       space,
       change,
     );
@@ -255,30 +225,29 @@ export function processStorageNotification(state: {
         sourceChangeGroup !== undefined
       ? state.changeGroupToActionId.get(sourceChangeGroup)
       : undefined;
-    const triggerTraceEntry: TriggerTraceEntry | null =
-      state.collectTriggerTrace
-        ? createTriggerTraceEntry({
-          notificationType: notification.type,
-          changeIndex,
-          matchedActionCount: triggeredActions.length,
-          pullMode: state.pullMode,
-          writerActionId,
-          space,
-          change,
-        })
-        : null;
+    const triggerTraceEntry: TriggerTraceEntry | null = collectTriggerTrace
+      ? createTriggerTraceEntry({
+        notificationType: notification.type,
+        changeIndex,
+        matchedActionCount: triggeredActions.length,
+        pullMode,
+        writerActionId,
+        space,
+        change,
+      })
+      : null;
 
     for (const action of triggeredActions) {
       // Causal edge tracking for diagnosis.
       if (
-        state.diagnosisEnabled && hasSourceChangeGroup &&
+        diagnosisEnabled && hasSourceChangeGroup &&
         sourceChangeGroup !== undefined
       ) {
         const writerActionId = state.changeGroupToActionId.get(
           sourceChangeGroup,
         );
         if (writerActionId) {
-          state.causalEdges.push({
+          state.recordCausalEdge({
             writer: writerActionId,
             cell: spaceAndURI,
             triggered: state.getActionId(action),
@@ -297,7 +266,7 @@ export function processStorageNotification(state: {
         notification.source !== undefined &&
         state.inFlightSources.get(action)?.has(notification.source) === true;
       const plan = planTriggeredAction({
-        pullMode: state.pullMode,
+        pullMode,
         isEffect: actionIsEffect,
         dirtyBefore,
         isOwnCommitSource,
@@ -308,7 +277,7 @@ export function processStorageNotification(state: {
       let scheduledEffects: TriggerTraceScheduledEffect[] = [];
 
       if (plan.operation === "schedule") {
-        if (state.pullMode && actionIsEffect) {
+        if (pullMode && actionIsEffect) {
           state.conditionallyScheduledEffects.delete(action);
         }
         state.scheduleWithDebounce(action);
@@ -321,7 +290,7 @@ export function processStorageNotification(state: {
         createTriggerTraceActionRecord({
           actionId,
           actionType,
-          pullMode: state.pullMode,
+          pullMode,
           decision: plan.decision,
           pendingBefore,
           pendingAfter: state.pending.has(action),

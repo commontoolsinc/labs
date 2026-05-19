@@ -196,6 +196,44 @@ Deno.test("applyShrinkAndWrap does not treat numeric index signatures as arrays"
   assertEquals(printTypeNode(result, sourceFile), "unknown");
 });
 
+Deno.test("applyShrinkAndWrap treats numeric index plus length as array-like", () => {
+  const { sourceFile, checker } = createProgram(`
+    type Option = {
+      id: string;
+      title: string;
+      addedByName: string;
+    };
+    type Input = {
+      length: number;
+      [index: number]: Option;
+    };
+  `);
+  const alias = findTypeAlias(sourceFile, "Input");
+  const baseType = checker.getTypeAtLocation(alias.type);
+  const syntheticBaseNode = ts.factory.createKeywordTypeNode(
+    ts.SyntaxKind.UnknownKeyword,
+  );
+
+  const result = applyShrinkAndWrap(
+    createParamSummary({
+      readPaths: [["length"], ["0", "title"]],
+    }),
+    syntheticBaseNode,
+    baseType,
+    false,
+    checker,
+    sourceFile,
+    ts.factory,
+  );
+
+  assertEquals(
+    printTypeNode(result, sourceFile),
+    `{
+    title: string;
+}[]`,
+  );
+});
+
 Deno.test("applyShrinkAndWrap preserves full array item shapes for direct array reads", () => {
   const { sourceFile, checker } = createProgram(`
     type Input = {
@@ -229,6 +267,132 @@ Deno.test("applyShrinkAndWrap preserves full array item shapes for direct array 
   assertStringIncludes(printed, "name");
   assertStringIncludes(printed, "priorityRank");
   assertEquals(printed.includes("other"), false);
+});
+
+Deno.test("applyShrinkAndWrap keeps numeric array access array-shaped", () => {
+  const { sourceFile, checker } = createProgram(`
+    type Option = {
+      id: string;
+      title: string;
+      addedByName: string;
+    };
+    type Input = Option[];
+  `);
+  const alias = findTypeAlias(sourceFile, "Input");
+  const baseType = checker.getTypeAtLocation(alias.type);
+
+  const result = applyShrinkAndWrap(
+    createParamSummary({
+      readPaths: [["length"], ["0", "title"]],
+    }),
+    alias.type,
+    baseType,
+    false,
+    checker,
+    sourceFile,
+    ts.factory,
+  );
+
+  assertEquals(
+    printTypeNode(result, sourceFile),
+    `{
+    title: string;
+}[]`,
+  );
+});
+
+Deno.test("applyShrinkAndWrap prefers array-shaped semantic shrink over synthetic numeric object", () => {
+  const { sourceFile, checker } = createProgram(`
+    type Option = {
+      id: string;
+      title: string;
+      addedByName: string;
+    };
+    type Input = Option[];
+  `);
+  const alias = findTypeAlias(sourceFile, "Input");
+  const baseType = checker.getTypeAtLocation(alias.type);
+  const syntheticBaseNode = ts.factory.createTypeLiteralNode([
+    ts.factory.createPropertySignature(
+      undefined,
+      ts.factory.createNumericLiteral("0"),
+      undefined,
+      ts.factory.createTypeLiteralNode([
+        ts.factory.createPropertySignature(
+          undefined,
+          "title",
+          undefined,
+          ts.factory.createKeywordTypeNode(ts.SyntaxKind.StringKeyword),
+        ),
+      ]),
+    ),
+    ts.factory.createPropertySignature(
+      undefined,
+      "length",
+      undefined,
+      ts.factory.createKeywordTypeNode(ts.SyntaxKind.NumberKeyword),
+    ),
+  ]);
+
+  const result = applyShrinkAndWrap(
+    createParamSummary({
+      readPaths: [["length"], ["0", "title"]],
+    }),
+    syntheticBaseNode,
+    baseType,
+    false,
+    checker,
+    sourceFile,
+    ts.factory,
+  );
+
+  assertEquals(
+    printTypeNode(result, sourceFile),
+    `{
+    title: string;
+}[]`,
+  );
+});
+
+Deno.test("applyShrinkAndWrap materializes item paths for synthetic unknown arrays", () => {
+  const { sourceFile, checker } = createProgram(`
+    type Input = unknown[];
+  `);
+  const alias = findTypeAlias(sourceFile, "Input");
+  const baseType = checker.getTypeAtLocation(alias.type);
+  const syntheticBaseNode = ts.factory.createTypeLiteralNode([
+    ts.factory.createPropertySignature(
+      undefined,
+      ts.factory.createNumericLiteral("0"),
+      undefined,
+      ts.factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword),
+    ),
+    ts.factory.createPropertySignature(
+      undefined,
+      "length",
+      undefined,
+      ts.factory.createKeywordTypeNode(ts.SyntaxKind.NumberKeyword),
+    ),
+  ]);
+
+  const result = applyShrinkAndWrap(
+    createParamSummary({
+      readPaths: [["length"], ["0", "title"]],
+    }),
+    syntheticBaseNode,
+    baseType,
+    false,
+    checker,
+    sourceFile,
+    ts.factory,
+  );
+
+  assertEquals(
+    printTypeNode(result, sourceFile),
+    `{
+    title: unknown;
+}[]`,
+  );
 });
 
 Deno.test("applyShrinkAndWrap defaults-only fallback expands repeated child leaves independently", () => {

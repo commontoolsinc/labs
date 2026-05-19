@@ -7,8 +7,8 @@ import {
   type FabricValue,
   IS_DEEP_FROZEN,
   RECONSTRUCT,
-  type ReconstructionContext,
 } from "../interface.ts";
+import { BaseReconstructionContext } from "../base-reconstruction-context.ts";
 import {
   FabricError,
   FabricMap,
@@ -34,11 +34,12 @@ import {
 } from "../deep-freeze.ts";
 
 /** Dummy reconstruction context for tests. */
-const dummyContext: ReconstructionContext = {
-  getCell(_ref) {
+class DummyReconstructionContext extends BaseReconstructionContext {
+  override getCell(): never {
     throw new Error("getCell not implemented in test");
-  },
-};
+  }
+}
+const dummyContext = new DummyReconstructionContext();
 
 // ============================================================================
 // Tests
@@ -1218,4 +1219,61 @@ describe("fabric-native-instances", () => {
       });
     },
   );
+
+  // --------------------------------------------------------------------------
+  // [RECONSTRUCT] honors ReconstructionContext.shouldDeepFreeze
+  // --------------------------------------------------------------------------
+
+  describe("[RECONSTRUCT] honors shouldDeepFreeze", () => {
+    const frozenCtx = new DummyReconstructionContext(true);
+    const mutableCtx = new DummyReconstructionContext(false);
+
+    it("FabricError: shouldDeepFreeze true => deep-frozen, false => mutable", () => {
+      const state = {
+        type: "Error",
+        name: null,
+        message: "boom",
+      } as unknown as FabricValue;
+      const frozen = FabricError[RECONSTRUCT](state, frozenCtx);
+      expect(isDeepFrozen(frozen)).toBe(true);
+      const mutable = FabricError[RECONSTRUCT](state, mutableCtx);
+      expect(Object.isFrozen(mutable)).toBe(false);
+    });
+
+    it("FabricRegExp: shouldDeepFreeze true => deep-frozen, false => mutable", () => {
+      const state = {
+        source: "abc",
+        flags: "g",
+        flavor: "es2025",
+      } as unknown as FabricValue;
+      const frozen = FabricRegExp[RECONSTRUCT](state, frozenCtx);
+      expect(isDeepFrozen(frozen)).toBe(true);
+      expect(Object.isFrozen(frozen.regex)).toBe(true);
+      const mutable = FabricRegExp[RECONSTRUCT](state, mutableCtx);
+      expect(Object.isFrozen(mutable)).toBe(false);
+    });
+
+    it("ProblematicValue: shouldDeepFreeze true => deep-frozen, false => mutable", () => {
+      const state = {
+        type: "Bad@1",
+        state: { x: 1 },
+        error: "oops",
+      } as unknown as { type: string; state: FabricValue; error: string };
+      const frozen = ProblematicValue[RECONSTRUCT](state, frozenCtx);
+      expect(isDeepFrozen(frozen)).toBe(true);
+      const mutable = ProblematicValue[RECONSTRUCT](state, mutableCtx);
+      expect(Object.isFrozen(mutable)).toBe(false);
+    });
+
+    it("UnknownValue: shouldDeepFreeze true => deep-frozen, false => mutable", () => {
+      const state = { type: "Fancy@3", state: { y: 2 } } as unknown as {
+        type: string;
+        state: FabricValue;
+      };
+      const frozen = UnknownValue[RECONSTRUCT](state, frozenCtx);
+      expect(isDeepFrozen(frozen)).toBe(true);
+      const mutable = UnknownValue[RECONSTRUCT](state, mutableCtx);
+      expect(Object.isFrozen(mutable)).toBe(false);
+    });
+  });
 });

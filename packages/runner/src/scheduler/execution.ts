@@ -1,8 +1,13 @@
+import { getLogger } from "@commonfabric/utils/logger";
+import { type Frame } from "../builder/types.ts";
+import type { IMemorySpaceAddress } from "../storage/interface.ts";
 import {
   CYCLE_DEBOUNCE_MIN_RUNS,
   CYCLE_DEBOUNCE_MULTIPLIER,
   CYCLE_DEBOUNCE_THRESHOLD_MS,
+  MAX_ITERATIONS_PER_RUN,
 } from "./constants.ts";
+import { topologicalSort } from "./topology.ts";
 import type {
   Action,
   PopulateDependenciesEntry,
@@ -11,6 +16,11 @@ import type {
   SettleStats,
   SpaceScopeAndURI,
 } from "./types.ts";
+
+const logger = getLogger("scheduler", {
+  enabled: true,
+  level: "warn",
+});
 
 export interface SettlingTracker {
   windowStart: number;
@@ -125,6 +135,100 @@ export function buildPullInitialSeeds(state: {
   }
 
   return initialSeeds;
+}
+
+export interface ExecuteDependencyCollectionState {
+  readonly pendingDependencyCollection: Set<Action>;
+  readonly populateDependenciesCallbacks: WeakMap<
+    Action,
+    PopulateDependenciesEntry
+  >;
+  readonly effects: ReadonlySet<Action>;
+  readonly getSchedulingWrites: (
+    action: Action,
+  ) => readonly unknown[] | undefined;
+  readonly collectDependenciesForAction: (
+    action: Action,
+    populateDependencies: PopulateDependenciesEntry,
+    options: {
+      readonly errorLogLabel: string;
+      readonly errorMessage: (target: Action, error: unknown) => string;
+      readonly useRawReadsForTriggers?: boolean;
+    },
+  ) => { log: ReactivityLog; entities: Set<SpaceScopeAndURI> };
+  readonly getActionId: (action: Action) => string;
+  readonly scheduleAffectedEffects?: (action: Action) => void;
+}
+
+export function collectInitialExecuteDependencies(
+  state: ExecuteDependencyCollectionState,
+): {
+  collectedActions: Action[];
+  newActionsWithoutDependencies: Action[];
+} {
+  logger.timeStart("scheduler", "execute", "depCollect");
+  try {
+    // Find computation actions whose writes are still unknown. We run them on
+    // the first cycle to capture writes that cannot be inferred from declared
+    // outputs or populateDependencies() potential writes.
+    //
+    // TODO(seefeld): Once we more reliably capture what they can write via
+    // WriteableCell or so, then we can treat this more deliberately via the
+    // dependency collection process above. We'll have to re-run it whenever
+    // inputs change, as they might change what they can write to. We hope that
+    // for now this will be sufficiently captured in mightWrite.
+    return collectPendingDependencyActions({
+      pendingDependencyCollection: state.pendingDependencyCollection,
+      populateDependenciesCallbacks: state.populateDependenciesCallbacks,
+      effects: state.effects,
+      getSchedulingWrites: state.getSchedulingWrites,
+      collectDependenciesForAction: (action, populateDependencies) =>
+        state.collectDependenciesForAction(action, populateDependencies, {
+          errorLogLabel: "schedule-dep-error",
+          errorMessage: (target, error) =>
+            `Error populating dependencies for ${
+              state.getActionId(target)
+            }: ${error}`,
+        }),
+      onCollected: (action, { log, entities }) =>
+        logger.debug("schedule-dep-collect", () => [
+          `Collected dependencies for ${
+            state.getActionId(action)
+          }: ${log.reads.length} reads, ${log.writes.length} writes, ${entities.size} entities`,
+        ]),
+      scheduleAffectedEffects: state.scheduleAffectedEffects,
+    });
+  } finally {
+    logger.timeEnd("scheduler", "execute", "depCollect");
+  }
+}
+
+export function collectPostEventDependencies(
+  state: ExecuteDependencyCollectionState,
+): void {
+  // Process any newly subscribed actions that were added during event handling.
+  // This handles cases like event handlers that create sub-patterns whose
+  // computations need their dependencies discovered before we build the workSet.
+  if (state.pendingDependencyCollection.size === 0) return;
+
+  collectPendingDependencyActions({
+    pendingDependencyCollection: state.pendingDependencyCollection,
+    populateDependenciesCallbacks: state.populateDependenciesCallbacks,
+    effects: state.effects,
+    getSchedulingWrites: state.getSchedulingWrites,
+    collectDependenciesForAction: (action, populateDependencies) =>
+      state.collectDependenciesForAction(action, populateDependencies, {
+        errorLogLabel: "schedule-dep-error-post-event",
+        errorMessage: (target, error) =>
+          `Error populating dependencies for ${
+            state.getActionId(target)
+          }: ${error}`,
+      }),
+    onCollected: (action) =>
+      logger.debug("schedule-dep-collect-post-event", () => [
+        `Collected dependencies for ${state.getActionId(action)}`,
+      ]),
+  });
 }
 
 export function collectPendingDependencyActions(state: {
@@ -243,6 +347,403 @@ export function buildIterationWorkSet(state: {
     iterationSeeds,
     dirtyDependencyCount: workSet.size - iterationSeeds.size,
   };
+}
+
+export type SchedulerSettleResult = {
+  settledEarly: boolean;
+  lastWorkSet: Set<Action>;
+  earlyIterationComputations: Set<Action>;
+  maxSettleIterations: number;
+  settleStats?: SettleStats;
+};
+
+export interface SchedulerSettleLoopState {
+  readonly getPullMode: () => boolean;
+  readonly getCollectSettleStats: () => boolean;
+  readonly pendingDependencyCollection: Set<Action>;
+  readonly populateDependenciesCallbacks: WeakMap<
+    Action,
+    PopulateDependenciesEntry
+  >;
+  readonly effects: ReadonlySet<Action>;
+  readonly computations: ReadonlySet<Action>;
+  readonly pending: Set<Action>;
+  readonly dirty: ReadonlySet<Action>;
+  readonly dependencies: WeakMap<Action, ReactivityLog>;
+  readonly actionParent: WeakMap<Action, Action>;
+  readonly dependents: WeakMap<Action, Set<Action>>;
+  readonly conditionallyScheduledEffects: Map<Action, number>;
+  readonly filterStats: { filtered: number; executed: number };
+  readonly getLoopCounter: () => WeakMap<Action, number>;
+  readonly runsThisExecute: Map<Action, number>;
+  readonly activePullDemandActions: WeakSet<Action>;
+  readonly getSchedulingWrites: (
+    action: Action,
+  ) => readonly IMemorySpaceAddress[] | undefined;
+  readonly getSchedulingWritesMap: () => WeakMap<
+    Action,
+    IMemorySpaceAddress[]
+  >;
+  readonly collectDependenciesForAction: (
+    action: Action,
+    populateDependencies: PopulateDependenciesEntry,
+    options: {
+      readonly errorLogLabel: string;
+      readonly errorMessage: (target: Action, error: unknown) => string;
+      readonly useRawReadsForTriggers?: boolean;
+    },
+  ) => { log: ReactivityLog; entities: Set<SpaceScopeAndURI> };
+  readonly collectPullIterationSeeds: (seeds: Set<Action>) => void;
+  readonly collectDirtyDependencies: (
+    seed: Action,
+    targetWorkSet: Set<Action>,
+    memo: Map<Action, boolean>,
+  ) => boolean;
+  readonly getActionId: (action: Action) => string;
+  readonly clearDirty: (action: Action) => void;
+  readonly markDirectDirty: (action: Action) => void;
+  readonly isThrottled: (action: Action) => boolean;
+  readonly isDebouncedComputationWaiting: (action: Action) => boolean;
+  readonly clearComputationDebounceState: (action: Action) => void;
+  readonly conditionalEffectHasChangedInputs: (action: Action) => boolean;
+  readonly isPullDemandRootEffect: (action: Action) => boolean;
+  readonly handleError: (error: Error, action: Action) => void;
+  readonly runAction: (action: Action) => Promise<unknown>;
+}
+
+export async function runSchedulerSettleLoop(
+  state: SchedulerSettleLoopState,
+  initialSeeds: ReadonlySet<Action>,
+): Promise<SchedulerSettleResult> {
+  // Settle loop: runs until no more dirty work is found.
+  // First iteration processes initial seeds + their dirty deps.
+  // Subsequent iterations process new subscriptions and re-collect dirty deps.
+  logger.timeStart("scheduler", "execute", "settle");
+  const maxSettleIterations = state.getPullMode() ? 10 : 10;
+  const EARLY_ITERATION_THRESHOLD = 5;
+  const earlyIterationComputations = new Set<Action>(); // Track computations in first N iterations
+  let lastWorkSet: Set<Action> = new Set();
+  let settledEarly = false;
+  const collectSettleStats = state.getCollectSettleStats();
+  const settleIterStats: SettleIterationStats[] | undefined = collectSettleStats
+    ? []
+    : undefined;
+  const settleStartTime = collectSettleStats ? performance.now() : 0;
+
+  for (let settleIter = 0; settleIter < maxSettleIterations; settleIter++) {
+    const iterStart = settleIterStats ? performance.now() : 0;
+
+    collectSettlePreRunDependencies(state);
+    const iteration = prepareSettleIteration(
+      state,
+      initialSeeds,
+      settleIter,
+      EARLY_ITERATION_THRESHOLD,
+      earlyIterationComputations,
+    );
+
+    if (iteration.settled) {
+      settledEarly = true;
+      break;
+    }
+
+    lastWorkSet = iteration.workSet;
+    const iterationWorkSetSize = iteration.workSet.size;
+    const iterActionsRun = await runSettleOrder(state, iteration.order);
+
+    if (settleIterStats) {
+      settleIterStats.push(summarizeSettleIteration({
+        workSetSize: iterationWorkSetSize,
+        order: iteration.order,
+        actionsRun: iterActionsRun,
+        durationMs: performance.now() - iterStart,
+        effects: state.effects,
+        getActionId: (action) => state.getActionId(action),
+      }));
+    }
+  }
+
+  const settleStats = settleIterStats
+    ? summarizeSettleRun({
+      iterations: settleIterStats,
+      totalDurationMs: performance.now() - settleStartTime,
+      settledEarly,
+      initialSeedCount: initialSeeds.size,
+    })
+    : undefined;
+
+  logger.timeEnd("scheduler", "execute", "settle");
+
+  return {
+    settledEarly,
+    lastWorkSet,
+    earlyIterationComputations,
+    maxSettleIterations,
+    ...(settleStats ? { settleStats } : {}),
+  };
+}
+
+function collectSettlePreRunDependencies(
+  state: SchedulerSettleLoopState,
+): void {
+  // Process any newly subscribed actions from previous iteration.
+  // This sets up their dependencies so collectDirtyDependencies can find them.
+  if (!state.getPullMode() || state.pendingDependencyCollection.size === 0) {
+    return;
+  }
+
+  collectPendingDependencyActions({
+    pendingDependencyCollection: state.pendingDependencyCollection,
+    populateDependenciesCallbacks: state.populateDependenciesCallbacks,
+    effects: state.effects,
+    getSchedulingWrites: state.getSchedulingWrites,
+    collectDependenciesForAction: (action, populateDependencies) =>
+      state.collectDependenciesForAction(action, populateDependencies, {
+        errorLogLabel: "schedule-dep-error-pre-run",
+        errorMessage: (target, error) =>
+          `Error collecting deps for ${state.getActionId(target)}: ${error}`,
+        useRawReadsForTriggers: true,
+      }),
+  });
+}
+
+function prepareSettleIteration(
+  state: SchedulerSettleLoopState,
+  initialSeeds: ReadonlySet<Action>,
+  settleIter: number,
+  earlyIterationThreshold: number,
+  earlyIterationComputations: Set<Action>,
+): { settled: true } | {
+  settled: false;
+  workSet: Set<Action>;
+  order: Action[];
+} {
+  // Build the work set for this iteration
+  const pullMode = state.getPullMode();
+  const buildPullWorkSetStart = pullMode ? performance.now() : 0;
+  const { workSet, iterationSeeds, dirtyDependencyCount } =
+    buildIterationWorkSet({
+      pullMode,
+      pending: state.pending,
+      initialSeeds,
+      settleIter,
+      collectPullIterationSeeds: state.collectPullIterationSeeds,
+      collectDirtyDependencies: state.collectDirtyDependencies,
+    });
+
+  if (pullMode) {
+    if (settleIter === 0) {
+      logger.debug("schedule-execute-pull", () => [
+        `Pull mode: Seeds: ${iterationSeeds.size}, Dirty deps added: ${dirtyDependencyCount}`,
+      ]);
+    }
+    logger.time(
+      buildPullWorkSetStart,
+      "scheduler",
+      "execute",
+      "buildPullWorkSet",
+    );
+  }
+
+  if (workSet.size === 0) {
+    return { settled: true };
+  }
+
+  recordEarlyIterationComputations({
+    pullMode,
+    settleIter,
+    threshold: earlyIterationThreshold,
+    workSet,
+    effects: state.effects,
+    earlyIterationComputations,
+  });
+
+  const topologicalSortStart = performance.now();
+  const order = topologicalSort(
+    workSet,
+    state.dependencies,
+    state.getSchedulingWritesMap(),
+    state.actionParent,
+    pullMode ? state.dependents : undefined,
+  );
+  logger.time(
+    topologicalSortStart,
+    "scheduler",
+    "execute",
+    "topologicalSort",
+  );
+
+  logger.debug("schedule-execute", () => [
+    `Running ${order.length} actions (settle iteration ${settleIter})`,
+  ]);
+
+  // Implicit cycle detection for effects:
+  // Clear dirty flags for all effects upfront. If an effect becomes dirty again
+  // by the time we run it, something in the execution re-dirtied it → cycle.
+  if (pullMode) {
+    for (const fn of order) {
+      if (state.effects.has(fn)) {
+        state.clearDirty(fn);
+      }
+    }
+  }
+
+  return { settled: false, workSet, order };
+}
+
+async function runSettleOrder(
+  state: SchedulerSettleLoopState,
+  order: readonly Action[],
+): Promise<number> {
+  let actionsRun = 0;
+  for (const fn of order) {
+    actionsRun += await runSettleAction(state, fn);
+  }
+  return actionsRun;
+}
+
+async function runSettleAction(
+  state: SchedulerSettleLoopState,
+  fn: Action,
+): Promise<number> {
+  // Check if action is still scheduled (not unsubscribed during this tick).
+  // Running an action might unsubscribe other actions in the workSet.
+  const isStillScheduled = state.computations.has(fn) || state.effects.has(fn);
+  if (!isStillScheduled) return 0;
+
+  if (!isSettleActionStillRunnable(state, fn)) return 0;
+  if (skipDelayedSettleAction(state, fn)) return 0;
+  if (skipUnchangedConditionalEffect(state, fn)) return 0;
+
+  // Clean up from pending/dirty before running
+  state.pending.delete(fn);
+  state.conditionallyScheduledEffects.delete(fn);
+  if (state.computations.has(fn)) {
+    state.clearComputationDebounceState(fn);
+  }
+  if (state.getPullMode() && state.effects.has(fn)) {
+    state.clearDirty(fn);
+  }
+
+  state.filterStats.executed++;
+  const loopCounter = state.getLoopCounter();
+  loopCounter.set(fn, (loopCounter.get(fn) || 0) + 1);
+  // Track runs for cycle-aware debounce
+  state.runsThisExecute.set(fn, (state.runsThisExecute.get(fn) ?? 0) + 1);
+  if (loopCounter.get(fn)! > MAX_ITERATIONS_PER_RUN) {
+    const error = new Error(
+      `Too many iterations: ${loopCounter.get(fn)} ${state.getActionId(fn)}`,
+    );
+    // Attach the last frame from the action so handleError can
+    // extract piece/spell metadata (CT-1316: fixes message:null).
+    const lastFrame = (fn as Action & { lastFrame?: Frame }).lastFrame;
+    if (lastFrame) {
+      (error as Error & { frame?: Frame }).frame = lastFrame;
+    }
+    state.handleError(error, fn);
+    return 1;
+  }
+
+  const activePullDemand = state.getPullMode() &&
+    (state.computations.has(fn) || state.isPullDemandRootEffect(fn));
+  if (activePullDemand) {
+    state.activePullDemandActions.add(fn);
+  }
+  try {
+    await state.runAction(fn);
+  } finally {
+    if (activePullDemand) {
+      state.activePullDemandActions.delete(fn);
+    }
+  }
+  return 1;
+}
+
+function isSettleActionStillRunnable(
+  state: SchedulerSettleLoopState,
+  fn: Action,
+): boolean {
+  // Check if action is still valid
+  // In pull mode, check both pending (effects) and dirty (computations)
+  const isInPending = state.pending.has(fn);
+  const isInDirty = state.dirty.has(fn);
+
+  if (!state.getPullMode()) {
+    // Push mode: action must be in pending
+    return isInPending;
+  }
+
+  // For effects: we cleared dirty upfront, so check if re-dirtied (cycle)
+  if (state.effects.has(fn)) {
+    if (state.dirty.has(fn)) {
+      // Effect was re-dirtied during this tick → cycle detected
+      logger.debug("schedule-cycle", () => [
+        `[CYCLE] Effect ${
+          state.getActionId(fn)
+        } re-dirtied, skipping (cycle detected)`,
+      ]);
+      // Skip this effect - it will run on a future tick after cycle settles
+      state.pending.delete(fn);
+      return false;
+    }
+    return isInPending;
+  }
+
+  // For computations: must be pending or dirty
+  return isInPending || isInDirty;
+}
+
+function skipDelayedSettleAction(
+  state: SchedulerSettleLoopState,
+  fn: Action,
+): boolean {
+  if (state.isDebouncedComputationWaiting(fn)) {
+    logger.debug("schedule-debounce", () => [
+      `[DEBOUNCE] Skipping debounced computation: ${state.getActionId(fn)}`,
+    ]);
+    state.filterStats.filtered++;
+    state.pending.delete(fn);
+    return true;
+  }
+
+  // Check throttle: skip recently-run actions but keep them dirty
+  // They'll be pulled next time an effect needs them (if throttle expired)
+  if (state.isThrottled(fn)) {
+    logger.debug("schedule-throttle", () => [
+      `[THROTTLE] Skipping throttled action: ${state.getActionId(fn)}`,
+    ]);
+    state.filterStats.filtered++;
+    // Don't clear from pending or dirty - action stays in its current state
+    // but we remove from pending so it doesn't run this cycle
+    state.pending.delete(fn);
+    // Keep pull-mode effects dirty so they wake when the throttle expires.
+    if (state.getPullMode() && state.effects.has(fn)) {
+      state.markDirectDirty(fn);
+    }
+    return true;
+  }
+
+  return false;
+}
+
+function skipUnchangedConditionalEffect(
+  state: SchedulerSettleLoopState,
+  fn: Action,
+): boolean {
+  if (
+    !state.getPullMode() ||
+    !state.effects.has(fn) ||
+    !state.conditionallyScheduledEffects.has(fn) ||
+    state.conditionalEffectHasChangedInputs(fn)
+  ) {
+    return false;
+  }
+
+  state.conditionallyScheduledEffects.delete(fn);
+  state.pending.delete(fn);
+  state.clearDirty(fn);
+  state.filterStats.filtered++;
+  return true;
 }
 
 export function recordEarlyIterationComputations(state: {

@@ -14,29 +14,139 @@ import type { Action, SpaceScopeAndURI } from "./types.ts";
 export interface WriterIndexState {
   readonly writersByEntity: Map<SpaceScopeAndURI, Set<Action>>;
   readonly actionWriteEntities: WeakMap<Action, Set<SpaceScopeAndURI>>;
+  updateWriterIndex(
+    action: Action,
+    nextSchedulingWrites: readonly IMemorySpaceAddress[],
+  ): {
+    nextEntities: Set<SpaceScopeAndURI>;
+    addedEntities: Set<SpaceScopeAndURI>;
+    removedEntities: Set<SpaceScopeAndURI>;
+  };
+  clearAction(action: Action): void;
 }
 
 export interface SchedulingWriteState {
   readonly currentKnownWrites: WeakMap<Action, IMemorySpaceAddress[]>;
   readonly historicalMightWrite: WeakMap<Action, IMemorySpaceAddress[]>;
   readonly useHistoricalMightWrite: () => boolean;
+  getSchedulingWrites(action: Action): IMemorySpaceAddress[] | undefined;
+  getSchedulingWritesMap(): WeakMap<Action, IMemorySpaceAddress[]>;
+}
+
+export class SchedulerWriteIndex
+  implements WriterIndexState, SchedulingWriteState {
+  // Current-known writes are rebuilt on each dependency update from actual
+  // writes plus declared/potential writes. This is the default scheduling view.
+  readonly currentKnownWrites = new WeakMap<Action, IMemorySpaceAddress[]>();
+  // Historical writes preserve the legacy cumulative union and are only used
+  // when the experimental historical-write mode is enabled.
+  readonly historicalMightWrite = new WeakMap<Action, IMemorySpaceAddress[]>();
+  // Index: entity -> actions that write to it (for fast dependency lookup).
+  // Updated from the active scheduling write set.
+  readonly writersByEntity = new Map<SpaceScopeAndURI, Set<Action>>();
+  // Reverse index: action -> entities it writes to (for cleanup).
+  readonly actionWriteEntities = new WeakMap<
+    Action,
+    Set<SpaceScopeAndURI>
+  >();
+
+  constructor(
+    private readonly state: {
+      readonly useHistoricalMightWrite: () => boolean;
+    },
+  ) {}
+
+  useHistoricalMightWrite(): boolean {
+    return this.state.useHistoricalMightWrite();
+  }
+
+  getSchedulingWrites(action: Action): IMemorySpaceAddress[] | undefined {
+    return this.useHistoricalMightWrite()
+      ? this.historicalMightWrite.get(action)
+      : this.currentKnownWrites.get(action);
+  }
+
+  getSchedulingWritesMap(): WeakMap<Action, IMemorySpaceAddress[]> {
+    return this.useHistoricalMightWrite()
+      ? this.historicalMightWrite
+      : this.currentKnownWrites;
+  }
+
+  updateWriterIndex(
+    action: Action,
+    nextSchedulingWrites: readonly IMemorySpaceAddress[],
+  ): {
+    nextEntities: Set<SpaceScopeAndURI>;
+    addedEntities: Set<SpaceScopeAndURI>;
+    removedEntities: Set<SpaceScopeAndURI>;
+  } {
+    const existingEntities = this.actionWriteEntities.get(action) ?? new Set();
+    const nextEntities = new Set<SpaceScopeAndURI>();
+    const addedEntities = new Set<SpaceScopeAndURI>();
+    const removedEntities = new Set<SpaceScopeAndURI>();
+
+    for (const write of nextSchedulingWrites) {
+      const entity = entityKey(write);
+      nextEntities.add(entity);
+      if (!existingEntities.has(entity)) {
+        addedEntities.add(entity);
+      }
+    }
+
+    for (const entity of existingEntities) {
+      if (!nextEntities.has(entity)) {
+        removedEntities.add(entity);
+      }
+    }
+
+    for (const entity of removedEntities) {
+      const writers = this.writersByEntity.get(entity);
+      writers?.delete(action);
+      if (writers && writers.size === 0) {
+        this.writersByEntity.delete(entity);
+      }
+    }
+
+    for (const entity of addedEntities) {
+      let writers = this.writersByEntity.get(entity);
+      if (!writers) {
+        writers = new Set();
+        this.writersByEntity.set(entity, writers);
+      }
+      writers.add(action);
+    }
+
+    this.actionWriteEntities.set(action, nextEntities);
+    return { nextEntities, addedEntities, removedEntities };
+  }
+
+  clearAction(action: Action): void {
+    const writeEntities = this.actionWriteEntities.get(action);
+    if (!writeEntities) return;
+
+    for (const entity of writeEntities) {
+      const writers = this.writersByEntity.get(entity);
+      writers?.delete(action);
+      if (writers && writers.size === 0) {
+        this.writersByEntity.delete(entity);
+      }
+    }
+    // Clear actionWriteEntities so resubscribe will re-register the action.
+    this.actionWriteEntities.delete(action);
+  }
 }
 
 export function getSchedulingWrites(
   state: SchedulingWriteState,
   action: Action,
 ): IMemorySpaceAddress[] | undefined {
-  return state.useHistoricalMightWrite()
-    ? state.historicalMightWrite.get(action)
-    : state.currentKnownWrites.get(action);
+  return state.getSchedulingWrites(action);
 }
 
 export function getSchedulingWritesMap(
   state: SchedulingWriteState,
 ): WeakMap<Action, IMemorySpaceAddress[]> {
-  return state.useHistoricalMightWrite()
-    ? state.historicalMightWrite
-    : state.currentKnownWrites;
+  return state.getSchedulingWritesMap();
 }
 
 export function updateWriterIndex(
@@ -48,44 +158,7 @@ export function updateWriterIndex(
   addedEntities: Set<SpaceScopeAndURI>;
   removedEntities: Set<SpaceScopeAndURI>;
 } {
-  const existingEntities = state.actionWriteEntities.get(action) ?? new Set();
-  const nextEntities = new Set<SpaceScopeAndURI>();
-  const addedEntities = new Set<SpaceScopeAndURI>();
-  const removedEntities = new Set<SpaceScopeAndURI>();
-
-  for (const write of nextSchedulingWrites) {
-    const entity = entityKey(write);
-    nextEntities.add(entity);
-    if (!existingEntities.has(entity)) {
-      addedEntities.add(entity);
-    }
-  }
-
-  for (const entity of existingEntities) {
-    if (!nextEntities.has(entity)) {
-      removedEntities.add(entity);
-    }
-  }
-
-  for (const entity of removedEntities) {
-    const writers = state.writersByEntity.get(entity);
-    writers?.delete(action);
-    if (writers && writers.size === 0) {
-      state.writersByEntity.delete(entity);
-    }
-  }
-
-  for (const entity of addedEntities) {
-    let writers = state.writersByEntity.get(entity);
-    if (!writers) {
-      writers = new Set();
-      state.writersByEntity.set(entity, writers);
-    }
-    writers.add(action);
-  }
-
-  state.actionWriteEntities.set(action, nextEntities);
-  return { nextEntities, addedEntities, removedEntities };
+  return state.updateWriterIndex(action, nextSchedulingWrites);
 }
 
 export function buildKnownSchedulingWrites(state: {

@@ -97,7 +97,7 @@ export interface EventDependencyPreflightResult {
   preflightStats: DirtyDependencyTraceContext;
 }
 
-export function queueSchedulerEvent(state: {
+export interface SchedulerEventQueueState {
   readonly runtime: Runtime;
   readonly eventHandlers: readonly [NormalizedFullLink, EventHandler][];
   readonly eventQueue: QueuedEvent[];
@@ -110,7 +110,9 @@ export function queueSchedulerEvent(state: {
     onCommit: QueuedEvent["onCommit"] | undefined,
     doNotLoadPieceIfNotRunning: boolean,
   ) => void;
-}, args: {
+}
+
+export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
   readonly eventLink: NormalizedFullLink;
   readonly event: unknown;
   readonly retries: number;
@@ -180,13 +182,12 @@ export function addSchedulerEventHandler(state: {
   };
 }
 
-export async function processQueuedEventDuringExecute(state: {
+export interface SchedulerEventExecutionState {
   readonly runtime: Runtime;
   readonly eventQueue: QueuedEvent[];
   readonly pullMode: boolean;
   readonly dirty: ReadonlySet<Action>;
   readonly pending: Set<Action>;
-  readonly eventBlockingDeps: Set<Action>;
   readonly eventPreflightTelemetryEnabled: boolean;
   readonly setRunningPromise: (promise: Promise<unknown>) => void;
   readonly getActionId: (action: Action | EventHandler) => string;
@@ -213,7 +214,12 @@ export async function processQueuedEventDuringExecute(state: {
   readonly snapshotDirtyDependencyTraceContext: (
     trace: DirtyDependencyTraceContext,
   ) => SchedulerEventPreflightStats;
-}): Promise<void> {
+}
+
+export async function processQueuedEventDuringExecute(
+  state: SchedulerEventExecutionState,
+  eventBlockingDeps: Set<Action>,
+): Promise<void> {
   // Process next event from the event queue.
   const queuedEvent = state.eventQueue[0];
   if (!queuedEvent) return;
@@ -240,7 +246,7 @@ export async function processQueuedEventDuringExecute(state: {
       dirty: state.dirty,
       pending: state.pending,
       pendingActions: state.pending,
-      eventBlockingDeps: state.eventBlockingDeps,
+      eventBlockingDeps,
       handleError: (error, target) => state.handleError(error, target),
       setDirtyDependencyTraceContext: (trace) => {
         state.setDirtyDependencyTraceContext(trace);

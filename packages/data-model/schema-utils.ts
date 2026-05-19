@@ -13,7 +13,7 @@ import { deepFreeze, isDeepFrozen } from "./deep-freeze.ts";
 import { cloneIfNecessary } from "./fabric-value.ts";
 import {
   internSchema,
-  internSchemaAsHashString,
+  internSchemaAsTaggedHashString,
   isInternedSchema,
 } from "./schema-hash.ts";
 import { type FabricValue } from "./interface.ts";
@@ -371,5 +371,7 @@ export const DEFAULT_SELECTOR: SchemaPathSelector = Object.freeze({
  * for the motivating regression.
  */
 export function internSchemaPairAsKey(a: JSONSchema, b: JSONSchema): string {
-  return `${internSchemaAsHashString(a)}|${internSchemaAsHashString(b)}`;
+  return `${internSchemaAsTaggedHashString(a)}|${
+    internSchemaAsTaggedHashString(b)
+  }`;
 }
