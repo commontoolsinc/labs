@@ -98,11 +98,7 @@ export async function waitForText(
   try {
     await waitFor(async () => {
       try {
-        const node = await page.waitForSelector(selector, {
-          strategy: "pierce",
-          timeout: 1_000,
-        });
-        return (await node.innerText())?.includes(text) === true;
+        return await textIsPresent(page, selector, text);
       } catch {
         probe = await readTextProbe(page, selector);
         return false;
@@ -129,11 +125,7 @@ export async function waitForTextAbsent(
   try {
     await waitFor(async () => {
       try {
-        const node = await page.waitForSelector(selector, {
-          strategy: "pierce",
-          timeout: 1_000,
-        });
-        return (await node.innerText())?.includes(text) !== true;
+        return !(await textIsPresent(page, selector, text));
       } catch {
         probe = await readTextProbe(page, selector);
         return false;
@@ -295,7 +287,9 @@ export async function waitForRuntimeIdle(
 ) {
   await waitFor(async () => {
     return await page.evaluate(async () => {
-      const rt = globalThis.commonfabric?.rt;
+      const rt = (globalThis as typeof globalThis & {
+        commonfabric?: { rt?: { idle?: () => Promise<void> } };
+      }).commonfabric?.rt;
       if (!rt?.idle) return false;
       await rt.idle();
       return true;
@@ -326,18 +320,41 @@ async function textIsPresent(
       }
 
       function deepText(root: ParentNode): string {
-        let content = "";
+        const parts: string[] = [];
         if (root instanceof HTMLElement) {
-          content = root.innerText ?? root.textContent ?? "";
-        } else if (root instanceof ShadowRoot) {
-          content = root.textContent ?? "";
+          const style = globalThis.getComputedStyle(root);
+          const hidden = root instanceof HTMLStyleElement ||
+            root instanceof HTMLScriptElement ||
+            root.hidden ||
+            style.visibility === "hidden" ||
+            style.display === "none";
+          if (!hidden) {
+            const innerText = root.innerText ?? "";
+            parts.push(
+              innerText.trim().length > 0 ? innerText : root.textContent ?? "",
+            );
+          }
+          if (root instanceof HTMLSlotElement) {
+            for (const assigned of root.assignedElements({ flatten: true })) {
+              parts.push(deepText(assigned));
+            }
+          }
+          if (root.shadowRoot) {
+            parts.push(deepText(root.shadowRoot));
+          }
+        } else if (root instanceof Document || root instanceof ShadowRoot) {
+          for (const child of root.children) {
+            if (child instanceof HTMLElement) {
+              parts.push(deepText(child));
+            }
+          }
         }
         for (const element of root.querySelectorAll("*")) {
           if (element.shadowRoot) {
-            content += ` ${deepText(element.shadowRoot)}`;
+            parts.push(deepText(element.shadowRoot));
           }
         }
-        return content;
+        return parts.join(" ");
       }
 
       const matches: Element[] = [];
@@ -627,18 +644,41 @@ async function readTextProbe(
     }
 
     function deepText(root: ParentNode): string {
-      let content = "";
+      const parts: string[] = [];
       if (root instanceof HTMLElement) {
-        content = root.innerText ?? root.textContent ?? "";
-      } else if (root instanceof ShadowRoot) {
-        content = root.textContent ?? "";
+        const style = globalThis.getComputedStyle(root);
+        const hidden = root instanceof HTMLStyleElement ||
+          root instanceof HTMLScriptElement ||
+          root.hidden ||
+          style.visibility === "hidden" ||
+          style.display === "none";
+        if (!hidden) {
+          const innerText = root.innerText ?? "";
+          parts.push(
+            innerText.trim().length > 0 ? innerText : root.textContent ?? "",
+          );
+        }
+        if (root instanceof HTMLSlotElement) {
+          for (const assigned of root.assignedElements({ flatten: true })) {
+            parts.push(deepText(assigned));
+          }
+        }
+        if (root.shadowRoot) {
+          parts.push(deepText(root.shadowRoot));
+        }
+      } else if (root instanceof Document || root instanceof ShadowRoot) {
+        for (const child of root.children) {
+          if (child instanceof HTMLElement) {
+            parts.push(deepText(child));
+          }
+        }
       }
       for (const element of root.querySelectorAll("*")) {
         if (element.shadowRoot) {
-          content += ` ${deepText(element.shadowRoot)}`;
+          parts.push(deepText(element.shadowRoot));
         }
       }
-      return content;
+      return parts.join(" ");
     }
 
     const matches: Element[] = [];
@@ -663,7 +703,9 @@ async function readTextProbe(
           visible: isVisible(target),
         };
       }),
-      bodyText: (document.body?.innerText ?? "").slice(0, 1_000),
+      bodyText: document.body === null
+        ? ""
+        : deepText(document.body).trim().slice(0, 1_000),
     };
   }, { args: [selector] });
 }

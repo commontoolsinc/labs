@@ -560,6 +560,46 @@ const schemasEqualIgnoringWriterBundleIds = (
     stripWriterIdentityBundleIds(right),
   );
 
+const storedSchemaCoversCandidateEnvelope = (
+  stored: JSONSchema | undefined,
+  candidate: JSONSchema | undefined,
+): boolean => {
+  if (stored === undefined || candidate === undefined) {
+    return false;
+  }
+  if (schemasEqualIgnoringWriterBundleIds(stored, candidate)) {
+    return true;
+  }
+  if (!isRecord(stored) || !isRecord(candidate)) {
+    return false;
+  }
+  if (candidate.ifc !== undefined) {
+    return false;
+  }
+
+  if (isRecord(candidate.properties)) {
+    if (!isRecord(stored.properties)) {
+      return false;
+    }
+    const storedProperties = stored.properties;
+    return Object.entries(candidate.properties).every(([key, child]) =>
+      storedSchemaCoversCandidateEnvelope(
+        storedProperties[key] as JSONSchema | undefined,
+        child as JSONSchema,
+      )
+    );
+  }
+
+  if (
+    typeof candidate.items === "object" && candidate.items !== null &&
+    typeof stored.items === "object" && stored.items !== null
+  ) {
+    return storedSchemaCoversCandidateEnvelope(stored.items, candidate.items);
+  }
+
+  return false;
+};
+
 const rebindWriteAuthorizedByClaims = (
   schema: JSONSchema,
   identity: ImplementationIdentity | undefined,
@@ -1129,9 +1169,12 @@ const policySchemaMatchesValue = (
   }
   if (typeof schema.$ref === "string") {
     const resolved = ContextualFlowControl.resolveSchemaRefs(schema, schema);
-    if (resolved !== undefined && resolved !== schema) {
-      return policySchemaMatchesValue(resolved, value);
+    if (resolved === undefined) {
+      return false;
     }
+    return resolved !== schema
+      ? policySchemaMatchesValue(resolved, value)
+      : false;
   }
   if (schema.const !== undefined && !deepEqual(schema.const, value)) {
     return false;
@@ -1224,12 +1267,16 @@ const ifcEntryAppliesToAttemptedWrite = (
   const exactAttemptedPaths = [
     ...(tx.getReactivityLog?.().writes ?? []),
     ...(tx.getReactivityLog?.().potentialWrites ?? []),
-  ].filter((write) =>
+  ].map((write) => ({
+    write,
+    path: canonicalizeLogicalPath(write.path),
+  })).filter(({ write, path: writePath }) =>
     write.space === target.space &&
     write.id === target.id &&
     normalizeCellScope(write.scope) === target.scope &&
-    pathPatternMatches(path, canonicalizeLogicalPath(write.path))
-  ).map((write) => canonicalizeLogicalPath(write.path));
+    pathPatternMatches(path, writePath) &&
+    !writePath.includes("*")
+  ).map(({ path }) => path);
   if (exactAttemptedPaths.length > 0) {
     return exactAttemptedPaths.some((writePath) =>
       wildcardPolicyMatchesValue(
@@ -1749,9 +1796,11 @@ export const prepareBoundaryCommit = (
     } else if (existing !== undefined) {
       try {
         storedSchema = loadSchemaDocument(tx, space, existing.schemaHash);
-        mergedSchema = schemasEqualIgnoringWriterBundleIds(storedSchema, schema)
-          ? storedSchema
-          : mergeCfcSchemaEnvelopes(storedSchema, schema);
+        mergedSchema =
+          schemasEqualIgnoringWriterBundleIds(storedSchema, schema) ||
+            storedSchemaCoversCandidateEnvelope(storedSchema, schema)
+            ? storedSchema
+            : mergeCfcSchemaEnvelopes(storedSchema, schema);
       } catch (error) {
         reasons.push(
           error instanceof Error
@@ -1810,6 +1859,12 @@ export const prepareBoundaryCommit = (
         entry.label,
       ]),
     );
+    const mergedSchemaEntrySchemas = new Map<string, JSONSchema>(
+      mergedSchemaEntries.map((entry) => [
+        pathKey(entry.path),
+        entry.schema,
+      ]),
+    );
     const persistedLabelEntries = mergedSchemaEntries.flatMap((entry) => {
       if (
         !ifcEntryAppliesToAttemptedWrite(tx, target, entry.path, entry.schema)
@@ -1829,16 +1884,23 @@ export const prepareBoundaryCommit = (
         }]
         : [];
     });
+    const persistedLabelEntryKeys = new Set(
+      persistedLabelEntries.map((entry) => pathKey(entry.path)),
+    );
     const currentLinkWritePaths = new Set(
       linkWriteInputs.map((input) => pathKey(input.target.path)),
     );
     for (const entry of existing?.labelMap.entries ?? []) {
       const entryPath = canonicalizeLogicalPath(entry.path);
       const key = pathKey(entryPath);
-      if (mergedSchemaEntryLabels.has(key) || currentLinkWritePaths.has(key)) {
+      if (persistedLabelEntryKeys.has(key) || currentLinkWritePaths.has(key)) {
         continue;
       }
-      if (hasLabelValues(entry.label)) {
+      const schemaEntry = mergedSchemaEntrySchemas.get(key);
+      if (
+        hasLabelValues(entry.label) ||
+        (schemaEntry !== undefined && hasPersistedPolicyClaim(schemaEntry))
+      ) {
         persistedLabelEntries.push({
           path: entryPath,
           label: cloneLabel(entry.label),

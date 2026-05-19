@@ -188,6 +188,103 @@ describe("CFC label view helpers", () => {
     }
   });
 
+  it("rebases nested linked value labels to the linked target path", async () => {
+    const signer = await Identity.fromPassphrase(
+      "cfc label view nested linked target path",
+    );
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "disabled",
+    });
+    try {
+      const tx = runtime.edit();
+      const source = runtime.getCell(
+        signer.did(),
+        "cfc-label-view-nested-source",
+        undefined,
+        tx,
+      );
+      const sourceLink = parseLink(source.getAsLink());
+      tx.writeOrThrow({
+        space: signer.did(),
+        id: sourceLink.id!,
+        type: "application/json",
+        path: [],
+      }, {
+        value: { title: "shared", details: "restricted" },
+        cfc: {
+          version: 1,
+          schemaHash: "source-schema",
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: [],
+              label: {
+                confidentiality: ["shared-space"],
+                integrity: ["authored-by-bob"],
+              },
+            }, {
+              path: ["details"],
+              label: { confidentiality: ["target-detail"] },
+            }],
+          },
+        },
+      });
+
+      const target = runtime.getCell(
+        signer.did(),
+        "cfc-label-view-nested-link",
+        undefined,
+        tx,
+      );
+      const targetLink = parseLink(target.getAsLink());
+      tx.writeOrThrow({
+        space: signer.did(),
+        id: targetLink.id!,
+        type: "application/json",
+        path: [],
+      }, {
+        value: {
+          detail: source.key("details").getAsLink(),
+        },
+        cfc: {
+          version: 1,
+          schemaHash: "target-schema",
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: ["detail"],
+              label: { integrity: ["selected-detail"] },
+            }],
+          },
+        },
+      });
+      await tx.commit();
+
+      expect(cfcLabelViewForCell(target.key("detail"))).toEqual({
+        version: 1,
+        entries: [{
+          path: [],
+          label: {
+            confidentiality: expect.arrayContaining([
+              "shared-space",
+              "target-detail",
+            ]),
+            integrity: expect.arrayContaining([
+              "authored-by-bob",
+              "selected-detail",
+            ]),
+          },
+        }],
+      });
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("preserves ref-carried label views when creating cells from sigil links", async () => {
     const signer = await Identity.fromPassphrase(
       "cfc label view sigil carried state",

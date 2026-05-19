@@ -88,7 +88,7 @@ export function map(
     );
     const listScope = listLink?.scope ??
       sourceListCell.getAsNormalizedFullLink().scope;
-    const listCell = sourceListCell.resolveAsCell();
+    const listCell = sourceListCell.withTx(tx).resolveAsCell();
     const list = listCell.asSchema(MAP_LIST_SCHEMA).withTx(tx).get();
     // .getRaw() because we want the pattern itself and avoid following the
     // aliases in the pattern.

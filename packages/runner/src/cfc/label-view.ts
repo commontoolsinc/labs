@@ -33,6 +33,11 @@ type LabelQueryableCell = {
   tx?: IExtendedStorageTransaction;
 };
 
+type LinkedValueMetadata = {
+  metadata: CfcMetadata;
+  path: readonly string[];
+};
+
 const storedMetadataForCell = (
   cell: LabelQueryableCell,
   link: NormalizedFullLink,
@@ -56,7 +61,7 @@ const storedMetadataForCell = (
 const linkedValueMetadataForCell = (
   cell: LabelQueryableCell,
   link: NormalizedFullLink,
-): CfcMetadata | undefined => {
+): LinkedValueMetadata | undefined => {
   if (!cell.runtime || link.path.length === 0) {
     return undefined;
   }
@@ -70,11 +75,12 @@ const linkedValueMetadataForCell = (
     if (target?.id === undefined || target.space === undefined) {
       return undefined;
     }
-    return readStoredCfcMetadata(tx, {
+    const metadata = readStoredCfcMetadata(tx, {
       space: target.space,
       id: target.id,
       scope: target.scope,
     });
+    return metadata === undefined ? undefined : { metadata, path: target.path };
   } catch {
     return undefined;
   }
@@ -101,9 +107,13 @@ export const cfcLabelViewForCell = (
     storedMetadataForCell(cell as LabelQueryableCell, link),
     link.path,
   );
+  const linkedValue = linkedValueMetadataForCell(
+    cell as LabelQueryableCell,
+    link,
+  );
   const linkedValueView = cfcLabelViewFromMetadata(
-    linkedValueMetadataForCell(cell as LabelQueryableCell, link),
-    [],
+    linkedValue?.metadata,
+    linkedValue?.path ?? [],
   );
 
   return mergeCfcLabelViews([

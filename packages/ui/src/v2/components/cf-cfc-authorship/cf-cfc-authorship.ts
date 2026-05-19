@@ -174,19 +174,19 @@ const readLabelView = async (
     direct = await value.getCfcLabel();
   }
 
+  if (
+    direct !== undefined && requiredRootIntegrityKind !== undefined &&
+    labelHasRootIntegrityKind(direct, requiredRootIntegrityKind)
+  ) {
+    return direct;
+  }
+
   let resolvedLabel: CfcLabelView | undefined;
   if (hasLabelResolution(value)) {
     const resolved = await value.resolveAsCell();
     if (hasLabelQuery(resolved)) {
       resolvedLabel = await resolved.getCfcLabel();
     }
-  }
-
-  if (
-    direct !== undefined && requiredRootIntegrityKind !== undefined &&
-    labelHasRootIntegrityKind(direct, requiredRootIntegrityKind)
-  ) {
-    return direct;
   }
 
   return mergeLabelViews(direct, resolvedLabel);

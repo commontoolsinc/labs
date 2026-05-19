@@ -178,6 +178,9 @@ const matchesConcreteValue = (
   schema: JSONSchema,
   value: unknown,
 ): boolean => {
+  if (schema === false) {
+    return false;
+  }
   const resolved = resolveSchema(schema);
   if (resolved === undefined) {
     return true;

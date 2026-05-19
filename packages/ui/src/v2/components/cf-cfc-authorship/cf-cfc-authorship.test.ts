@@ -162,6 +162,33 @@ describe("CFCFCAuthorship", () => {
     expect(element.authorshipState).toBe("verified");
   });
 
+  it("does not resolve when the direct root label already verifies authorship", async () => {
+    const directLabel = {
+      version: 1 as const,
+      entries: [{
+        path: [],
+        label: {
+          integrity: [{
+            kind: "authored-by",
+            subject: "alice",
+          }],
+        },
+      }],
+    };
+    const element = new CFCFCAuthorship();
+    element.author = "alice";
+    element.value = {
+      getCfcLabel: () => Promise.resolve(directLabel),
+      resolveAsCell: () => {
+        throw new Error("direct root label should avoid resolution");
+      },
+    };
+
+    await element.refreshLabel();
+
+    expect(element.authorshipState).toBe("verified");
+  });
+
   it("does not let resolved authorship override direct root authorship", async () => {
     const directLabel = {
       version: 1 as const,

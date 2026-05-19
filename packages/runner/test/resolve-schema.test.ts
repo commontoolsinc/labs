@@ -145,6 +145,24 @@ describe("resolveSchema", () => {
   });
 
   describe("resolveSchemaForValue", () => {
+    it("does not select literal false compound branches", () => {
+      const schema: JSONSchema = {
+        anyOf: [
+          false,
+          {
+            type: "string",
+            ifc: { integrity: ["string-branch"] },
+          },
+        ],
+      };
+
+      const narrowed = expectNontrivial(resolveSchemaForValue(schema, "ok"));
+
+      expect(narrowed.anyOf).toBe(undefined);
+      expect(narrowed.type).toBe("string");
+      expect(narrowed.ifc).toEqual({ integrity: ["string-branch"] });
+    });
+
     it("narrows union branches with nested refs to parent defs", () => {
       const schema: JSONSchema = {
         anyOf: [

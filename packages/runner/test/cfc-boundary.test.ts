@@ -2591,6 +2591,121 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("does not apply wildcard policy entries with unresolved refs", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-unresolved-ref-policy-match",
+        {
+          type: "object",
+          properties: {
+            items: {
+              type: "array",
+              items: {
+                $ref: "#/$defs/Missing",
+                ifc: { writeAuthorizedBy: ["trusted-handler"] },
+              },
+            },
+          },
+        },
+        tx,
+      );
+      cell.set({ items: [{ title: "unresolved" }] });
+      tx.prepareCfc();
+
+      expect((await tx.commit()).ok).toBeDefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("preserves untouched wildcard policy entries during unrelated rewrites", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const seed = runtime.edit();
+      const target = runtime.getCell(
+        signer.did(),
+        "cfc-wildcard-policy-preserve-target",
+        undefined,
+        seed,
+      );
+      const targetLink = target.getAsNormalizedFullLink();
+      const guardedSchema = internSchema(
+        {
+          type: "object",
+          properties: {
+            title: { type: "string" },
+            items: {
+              type: "array",
+              items: {
+                type: "object",
+                ifc: { writeAuthorizedBy: ["trusted-handler"] },
+              },
+            },
+          },
+        } satisfies JSONSchema,
+        true,
+      );
+      seed.writeOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: targetLink.id,
+        path: [],
+      }, {
+        value: { title: "draft", items: [{ title: "existing" }] },
+        cfc: {
+          version: 1,
+          schemaHash: guardedSchema.taggedHashString,
+          labelMap: {
+            version: 1,
+            entries: [{ path: ["items", "*"], label: {} }],
+          },
+        },
+      });
+      seed.writeOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: `cid:${guardedSchema.taggedHashString}`,
+        path: [],
+      }, {
+        value: guardedSchema.schema,
+      });
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const update = runtime.edit();
+      update.setCfcEnforcementMode("enforce-explicit");
+      const targetWithSchema = runtime.getCell(
+        signer.did(),
+        "cfc-wildcard-policy-preserve-target",
+        guardedSchema.schema,
+        update,
+      );
+      targetWithSchema.key("title").set("updated");
+      update.prepareCfc();
+      expect((await update.commit()).ok).toBeDefined();
+
+      const verify = runtime.edit();
+      const stored = verify.readOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: targetLink.id,
+        path: [],
+      }) as { cfc?: { labelMap?: { entries?: unknown[] } } };
+      expect(stored.cfc?.labelMap?.entries).toContainEqual({
+        path: ["items", "*"],
+        label: {},
+      });
+      verify.abort();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("preserves prior stored link-field labels across unrelated metadata rewrites", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
