@@ -1276,4 +1276,82 @@ describe("fabric-native-instances", () => {
       expect(Object.isFrozen(mutable)).toBe(false);
     });
   });
+
+  // --------------------------------------------------------------------------
+  // Arm 3 cycle behavior via [DEEP_FREEZE] protocol
+  //
+  // TDD RED -- expected to fail on the current `deep-freeze.ts` until
+  // shared-`seen`-threading is restored. The defect: the callback passed
+  // into `[DEEP_FREEZE]` impls at `deep-freeze.ts:159` is
+  // `(v) => deepFreeze(v)`, which restarts the outer `deepFreeze()` with
+  // no shared `seen` state -- so a cycle through any `FabricValue`-typed
+  // slot that recurses back through the protocol infinite-recurses.
+  //
+  // Cycle-capable wired impls (at-source-verified): `FabricError`
+  // (recurses through `error.cause` + custom enumerable own properties),
+  // `ProblematicValue` (recurses through `state`), `UnknownValue`
+  // (recurses through `state`). `FabricRegExp.[DEEP_FREEZE]` ignores its
+  // `subFreeze` parameter (only freezes `this.regex` + `this`) and so is
+  // structurally cycle-free by construction at the protocol level --
+  // omitted intentionally, not a gap.
+  //
+  // Failure shape: pre-fix tests fail with `RangeError: Maximum call
+  // stack size exceeded` (clean throw, not a hang) caught by the
+  // `.not.toThrow()` assertion. Post-fix (Step 2 shared-`seen`-threading)
+  // tests pass.
+  // --------------------------------------------------------------------------
+
+  describe("Arm 3 cycle behavior via [DEEP_FREEZE]", () => {
+    it("FabricError: cycle through `error.cause` terminates", () => {
+      // Build a cycle: a plain-object wrapper holds the FabricError, and the
+      // FabricError's `error.cause` points back at the wrapper. When
+      // `deepFreeze(wrapper)` runs Arm 4 it recurses into the FabricError
+      // (Arm 3), which subFreezes `error.cause` = wrapper, which re-enters
+      // `deepFreeze()` -> the FabricError again -> ...
+      const err = new Error("cycle-cause");
+      const fe = new FabricError(err);
+      const wrapper: Record<string, unknown> = { fe };
+      err.cause = wrapper;
+      expect(() => deepFreeze(wrapper)).not.toThrow();
+      expect(Object.isFrozen(wrapper)).toBe(true);
+      expect(Object.isFrozen(fe)).toBe(true);
+    });
+
+    it("ProblematicValue: cycle through `state` terminates", () => {
+      const cycle: Record<string, unknown> = { x: 1 };
+      const pv = new ProblematicValue("Cycle@1", cycle as FabricValue, "oops");
+      cycle.back = pv;
+      expect(() => deepFreeze(pv)).not.toThrow();
+      expect(Object.isFrozen(pv)).toBe(true);
+      expect(Object.isFrozen(cycle)).toBe(true);
+    });
+
+    it("UnknownValue: cycle through `state` terminates", () => {
+      const cycle: Record<string, unknown> = { y: 2 };
+      const uv = new UnknownValue("Cycle@1", cycle as FabricValue);
+      cycle.back = uv;
+      expect(() => deepFreeze(uv)).not.toThrow();
+      expect(Object.isFrozen(uv)).toBe(true);
+      expect(Object.isFrozen(cycle)).toBe(true);
+    });
+
+    it("cross-instance cycle (FabricError <-> ProblematicValue) terminates", () => {
+      // Two `FabricInstance` subclasses pointing into each other via their
+      // recursing slots. Both must terminate, both must end deep-frozen.
+      const peShared: Record<string, unknown> = { tag: "shared" };
+      const pv = new ProblematicValue(
+        "Cycle@1",
+        peShared as FabricValue,
+        "loop",
+      );
+      const err = new Error("cross-cycle");
+      const fe = new FabricError(err);
+      peShared.fe = fe;
+      err.cause = pv;
+      expect(() => deepFreeze(fe)).not.toThrow();
+      expect(Object.isFrozen(fe)).toBe(true);
+      expect(Object.isFrozen(pv)).toBe(true);
+      expect(Object.isFrozen(peShared)).toBe(true);
+    });
+  });
 });
