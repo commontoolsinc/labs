@@ -167,6 +167,11 @@ Deno.test("Empty Array .of() Validation", async (t) => {
       expression: "Writable.of([])",
     },
     {
+      name: "errors on new Writable([])",
+      imports: "Writable",
+      expression: "new Writable([])",
+    },
+    {
       name: "errors on OpaqueCell.of([])",
       imports: "OpaqueCell",
       expression: "OpaqueCell.of([])",
@@ -198,6 +203,11 @@ Deno.test("Empty Array .of() Validation", async (t) => {
       name: "no error on Cell.of<string[]>([])",
       imports: "Cell",
       expression: "Cell.of<string[]>([])",
+    },
+    {
+      name: "no error on new Cell<string[]>([])",
+      imports: "Cell",
+      expression: "new Cell<string[]>([])",
     },
     {
       name: "no error on Cell.of([1, 2, 3])",
@@ -3334,14 +3344,14 @@ Deno.test("Inline reactive-root access diagnostic", async (t) => {
   await t.step(
     "does not flag identity-preserving methods on reactive-origin calls",
     async () => {
-      // `Writable.of(...).for(...)` is the standard cell-naming idiom — the
+      // `new Writable(...).for(...)` is the standard cell-naming idiom — the
       // `.for(...)` call returns the same cell (identity-preserving), so this
       // shape is not the broken-reactivity pattern the diagnostic guards.
       const source = `
         import { pattern, Writable } from "commonfabric";
 
         export default pattern<Record<string, never>>(() => {
-          const flag = Writable.of(false).for("flag");
+          const flag = new Writable(false).for("flag");
           return { flag };
         });
       `;
@@ -3354,7 +3364,7 @@ Deno.test("Inline reactive-root access diagnostic", async (t) => {
       assertEquals(
         inlineErrors.length,
         0,
-        "Writable.of(...).for(...) should not trigger the inline-reactive-root diagnostic",
+        "new Writable(...).for(...) should not trigger the inline-reactive-root diagnostic",
       );
     },
   );
