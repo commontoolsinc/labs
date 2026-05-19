@@ -1,0 +1,344 @@
+import {
+  addressesToPathByEntity,
+  arraysOverlap,
+  determineTriggeredActions,
+  nonRecursiveReadMayOverlapWrite,
+  type SortedAndCompactPaths,
+} from "../reactive-dependencies.ts";
+import type { Cancel } from "../cancel.ts";
+import type { MemorySpace } from "@commonfabric/memory/interface";
+import type {
+  IMemoryChange,
+  IMemorySpaceAddress,
+} from "../storage/interface.ts";
+import { entityKey } from "./keys.ts";
+import type { Action, SpaceScopeAndURI } from "./types.ts";
+
+export interface TriggerIndexState {
+  readonly triggers: Map<
+    SpaceScopeAndURI,
+    Map<Action, SortedAndCompactPaths>
+  >;
+  readonly nonRecursiveTriggers: Map<
+    SpaceScopeAndURI,
+    Map<Action, SortedAndCompactPaths>
+  >;
+  addActionReads(
+    action: Action,
+    reads: IMemorySpaceAddress[],
+    shallowReads: IMemorySpaceAddress[],
+  ): {
+    entities: Set<SpaceScopeAndURI>;
+    triggerPathsByEntity: Map<SpaceScopeAndURI, SortedAndCompactPaths>;
+  };
+  removeActionFromEntities(
+    action: Action,
+    entities: Iterable<SpaceScopeAndURI>,
+  ): void;
+  collectReadersForWrite(write: IMemorySpaceAddress): Set<Action>;
+  hasRegisteredTriggers(): boolean;
+  collectTriggeredActionsForChange(
+    space: MemorySpace,
+    change: IMemoryChange,
+  ): {
+    entity: SpaceScopeAndURI;
+    hasMatchingTriggerPaths: boolean;
+    triggeredActions: Action[];
+  };
+}
+
+export interface TriggerSubscriptionState extends TriggerIndexState {
+  readonly cancels: WeakMap<Action, Cancel>;
+  readonly getActionId: (action: Action) => string;
+  readonly onTriggerUnsubscribe?: (
+    actionId: string,
+    entityCount: number,
+  ) => void;
+}
+
+export class SchedulerTriggerSubscriptions implements TriggerSubscriptionState {
+  constructor(
+    private readonly state: {
+      readonly triggerIndex: TriggerIndexState;
+      readonly cancels: WeakMap<Action, Cancel>;
+      readonly getActionId: (action: Action) => string;
+      readonly onTriggerUnsubscribe?: (
+        actionId: string,
+        entityCount: number,
+      ) => void;
+    },
+  ) {}
+
+  get triggers(): TriggerIndexState["triggers"] {
+    return this.state.triggerIndex.triggers;
+  }
+
+  get nonRecursiveTriggers(): TriggerIndexState["nonRecursiveTriggers"] {
+    return this.state.triggerIndex.nonRecursiveTriggers;
+  }
+
+  get cancels(): WeakMap<Action, Cancel> {
+    return this.state.cancels;
+  }
+
+  get getActionId(): (action: Action) => string {
+    return this.state.getActionId;
+  }
+
+  get onTriggerUnsubscribe():
+    | ((actionId: string, entityCount: number) => void)
+    | undefined {
+    return this.state.onTriggerUnsubscribe;
+  }
+
+  addActionReads(
+    action: Action,
+    reads: IMemorySpaceAddress[],
+    shallowReads: IMemorySpaceAddress[],
+  ): {
+    entities: Set<SpaceScopeAndURI>;
+    triggerPathsByEntity: Map<SpaceScopeAndURI, SortedAndCompactPaths>;
+  } {
+    return this.state.triggerIndex.addActionReads(action, reads, shallowReads);
+  }
+
+  removeActionFromEntities(
+    action: Action,
+    entities: Iterable<SpaceScopeAndURI>,
+  ): void {
+    this.state.triggerIndex.removeActionFromEntities(action, entities);
+  }
+
+  collectReadersForWrite(write: IMemorySpaceAddress): Set<Action> {
+    return this.state.triggerIndex.collectReadersForWrite(write);
+  }
+
+  hasRegisteredTriggers(): boolean {
+    return this.state.triggerIndex.hasRegisteredTriggers();
+  }
+
+  collectTriggeredActionsForChange(
+    space: MemorySpace,
+    change: IMemoryChange,
+  ): {
+    entity: SpaceScopeAndURI;
+    hasMatchingTriggerPaths: boolean;
+    triggeredActions: Action[];
+  } {
+    return this.state.triggerIndex.collectTriggeredActionsForChange(
+      space,
+      change,
+    );
+  }
+}
+
+export class SchedulerTriggerIndex implements TriggerIndexState {
+  readonly triggers = new Map<
+    SpaceScopeAndURI,
+    Map<Action, SortedAndCompactPaths>
+  >();
+  readonly nonRecursiveTriggers = new Map<
+    SpaceScopeAndURI,
+    Map<Action, SortedAndCompactPaths>
+  >();
+
+  addActionReads(
+    action: Action,
+    reads: IMemorySpaceAddress[],
+    shallowReads: IMemorySpaceAddress[],
+  ): {
+    entities: Set<SpaceScopeAndURI>;
+    triggerPathsByEntity: Map<SpaceScopeAndURI, SortedAndCompactPaths>;
+  } {
+    const pathsByEntity = addressesToPathByEntity(reads);
+    const nonRecursivePathsByEntity = addressesToPathByEntity(shallowReads);
+    const entities = new Set<SpaceScopeAndURI>();
+    const triggerPathsByEntity = new Map<
+      SpaceScopeAndURI,
+      SortedAndCompactPaths
+    >();
+
+    for (const [spaceAndURI, paths] of pathsByEntity) {
+      entities.add(spaceAndURI);
+      let pathsByAction = this.triggers.get(spaceAndURI);
+      if (!pathsByAction) {
+        pathsByAction = new Map();
+        this.triggers.set(spaceAndURI, pathsByAction);
+      }
+      pathsByAction.set(action, paths);
+      triggerPathsByEntity.set(spaceAndURI, paths);
+    }
+
+    for (const [spaceAndURI, paths] of nonRecursivePathsByEntity) {
+      entities.add(spaceAndURI);
+      let pathsByAction = this.nonRecursiveTriggers.get(spaceAndURI);
+      if (!pathsByAction) {
+        pathsByAction = new Map();
+        this.nonRecursiveTriggers.set(spaceAndURI, pathsByAction);
+      }
+      pathsByAction.set(action, paths);
+    }
+
+    return { entities, triggerPathsByEntity };
+  }
+
+  removeActionFromEntities(
+    action: Action,
+    entities: Iterable<SpaceScopeAndURI>,
+  ): void {
+    for (const spaceAndURI of entities) {
+      this.triggers.get(spaceAndURI)?.delete(action);
+      this.nonRecursiveTriggers.get(spaceAndURI)?.delete(action);
+    }
+  }
+
+  collectReadersForWrite(write: IMemorySpaceAddress): Set<Action> {
+    const entity = entityKey(write);
+    const readers = new Set<Action>();
+
+    const recursiveReaders = this.triggers.get(entity);
+    if (recursiveReaders) {
+      for (const [action, paths] of recursiveReaders) {
+        if (paths.some((path) => arraysOverlap(write.path, path))) {
+          readers.add(action);
+        }
+      }
+    }
+
+    const nonRecursiveReaders = this.nonRecursiveTriggers.get(entity);
+    if (nonRecursiveReaders) {
+      for (const [action, reads] of nonRecursiveReaders) {
+        if (
+          reads.some((read) =>
+            nonRecursiveReadMayOverlapWrite(read, write.path)
+          )
+        ) {
+          readers.add(action);
+        }
+      }
+    }
+
+    return readers;
+  }
+
+  hasRegisteredTriggers(): boolean {
+    return this.triggers.size > 0 || this.nonRecursiveTriggers.size > 0;
+  }
+
+  collectTriggeredActionsForChange(
+    space: MemorySpace,
+    change: IMemoryChange,
+  ): {
+    entity: SpaceScopeAndURI;
+    hasMatchingTriggerPaths: boolean;
+    triggeredActions: Action[];
+  } {
+    const entity = entityKey({ ...change.address, space });
+    const paths = this.triggers.get(entity);
+    const nonRecursivePaths = this.nonRecursiveTriggers.get(entity);
+
+    if (!paths && !nonRecursivePaths) {
+      return {
+        entity,
+        hasMatchingTriggerPaths: false,
+        triggeredActions: [],
+      };
+    }
+
+    const triggeredActionSet = new Set<Action>();
+    if (paths) {
+      for (
+        const action of determineTriggeredActions(
+          paths,
+          change.before,
+          change.after,
+          change.address.path,
+        )
+      ) {
+        triggeredActionSet.add(action);
+      }
+    }
+    if (nonRecursivePaths) {
+      for (
+        const action of determineTriggeredActions(
+          nonRecursivePaths,
+          change.before,
+          change.after,
+          change.address.path,
+          { nonRecursive: true },
+        )
+      ) {
+        triggeredActionSet.add(action);
+      }
+    }
+
+    return {
+      entity,
+      hasMatchingTriggerPaths: true,
+      triggeredActions: [...triggeredActionSet],
+    };
+  }
+}
+
+export function addTriggerPathsToIndex(
+  state: TriggerIndexState,
+  action: Action,
+  reads: IMemorySpaceAddress[],
+  shallowReads: IMemorySpaceAddress[],
+): {
+  entities: Set<SpaceScopeAndURI>;
+  triggerPathsByEntity: Map<SpaceScopeAndURI, SortedAndCompactPaths>;
+} {
+  return state.addActionReads(action, reads, shallowReads);
+}
+
+export function replaceActionTriggerPaths(
+  state: TriggerSubscriptionState,
+  action: Action,
+  reads: IMemorySpaceAddress[],
+  shallowReads: IMemorySpaceAddress[],
+): {
+  entities: Set<SpaceScopeAndURI>;
+  triggerPathsByEntity: Map<SpaceScopeAndURI, SortedAndCompactPaths>;
+} {
+  clearActionTriggers(state, action);
+  return addTriggerPathsToIndex(state, action, reads, shallowReads);
+}
+
+export function clearActionTriggers(
+  state: TriggerSubscriptionState,
+  action: Action,
+): void {
+  const cancel = state.cancels.get(action);
+  if (!cancel) return;
+
+  cancel();
+  state.cancels.delete(action);
+}
+
+export function setCancelForTriggerEntities(
+  state: TriggerSubscriptionState,
+  action: Action,
+  entities: Set<SpaceScopeAndURI>,
+): void {
+  const actionId = state.getActionId(action);
+  state.cancels.set(action, () => {
+    state.onTriggerUnsubscribe?.(actionId, entities.size);
+    state.removeActionFromEntities(action, entities);
+  });
+}
+
+export function removeActionFromTriggerIndex(
+  state: TriggerIndexState,
+  action: Action,
+  entities: Iterable<SpaceScopeAndURI>,
+): void {
+  state.removeActionFromEntities(action, entities);
+}
+
+export function collectReadersForWrite(
+  state: TriggerIndexState,
+  write: IMemorySpaceAddress,
+): Set<Action> {
+  return state.collectReadersForWrite(write);
+}

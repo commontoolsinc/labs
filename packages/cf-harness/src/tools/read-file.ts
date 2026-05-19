@@ -1,4 +1,5 @@
 import type { JSONSchema } from "@commonfabric/api";
+import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type { HarnessToolDefinition } from "./types.ts";
 import {
@@ -25,6 +26,7 @@ export interface ReadFileToolSuccessOutput {
   outputId: string;
   path: string;
   content: string;
+  cfcResult?: CfcSandboxResult;
 }
 
 export type ReadFileToolOutput =
@@ -54,6 +56,7 @@ export const readFileToolDescriptor: HarnessToolDescriptor = {
         outputId: { type: "string" },
         path: { type: "string" },
         content: { type: "string" },
+        cfcResult: { type: "object" },
       },
       required: ["outputId", "path", "content"],
       additionalProperties: false,
@@ -61,6 +64,18 @@ export const readFileToolDescriptor: HarnessToolDescriptor = {
   } satisfies JSONSchema,
   tags: ["file", "read", "vm"],
 };
+
+export const isReadFileToolSuccessOutput = (
+  output: unknown,
+): output is ReadFileToolSuccessOutput =>
+  typeof output === "object" &&
+  output !== null &&
+  "outputId" in output &&
+  typeof output.outputId === "string" &&
+  "path" in output &&
+  typeof output.path === "string" &&
+  "content" in output &&
+  typeof output.content === "string";
 
 export const readFileTool: HarnessToolDefinition<
   ReadFileToolInput,
@@ -120,6 +135,7 @@ export const readFileTool: HarnessToolDefinition<
         cwd: context.currentDir,
         command,
         args,
+        cfcInputLabelPaths: [["args"]],
       }),
     });
     if (result.exitCode !== 0) {
@@ -134,6 +150,9 @@ export const readFileTool: HarnessToolDefinition<
       outputId: context.nextOutputId("read_file"),
       path: resolvedPath,
       content: result.stdout,
+      ...(result.cfcResult !== undefined
+        ? { cfcResult: result.cfcResult }
+        : {}),
     };
   },
 };

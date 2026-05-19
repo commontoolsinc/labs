@@ -19,6 +19,7 @@ import { action, Default, pattern, UI, VNode, Writable, } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn(({ tree, p }) => findChildren(tree, p));
 interface Entry {
     id: string;
     name: string;
@@ -67,7 +68,7 @@ export default pattern((__cf_pattern_input) => {
                 items: {
                     type: "string"
                 },
-                asCell: ["cell"]
+                asCell: ["writeonly"]
             }
         },
         required: ["path"]
@@ -101,7 +102,7 @@ export default pattern((__cf_pattern_input) => {
                             items: {
                                 type: "string"
                             },
-                            asCell: ["cell"]
+                            asCell: ["readonly"]
                         }
                     },
                     required: ["path"]
@@ -115,8 +116,11 @@ export default pattern((__cf_pattern_input) => {
                     type: "object",
                     properties: {
                         tree: {
-                            $ref: "#/$defs/AnonymousType_1",
-                            asCell: ["cell"]
+                            type: "array",
+                            items: {
+                                $ref: "#/$defs/Entry"
+                            },
+                            asCell: ["readonly"]
                         },
                         p: {
                             type: "array",
@@ -127,12 +131,6 @@ export default pattern((__cf_pattern_input) => {
                     },
                     required: ["tree", "p"],
                     $defs: {
-                        AnonymousType_1: {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/Entry"
-                            }
-                        },
                         Entry: {
                             type: "object",
                             properties: {
@@ -146,7 +144,10 @@ export default pattern((__cf_pattern_input) => {
                                     "enum": ["file", "folder"]
                                 },
                                 children: {
-                                    $ref: "#/$defs/AnonymousType_1"
+                                    type: "array",
+                                    items: {
+                                        $ref: "#/$defs/Entry"
+                                    }
                                 }
                             },
                             required: ["id", "name", "type"]
@@ -171,22 +172,19 @@ export default pattern((__cf_pattern_input) => {
                                     "enum": ["file", "folder"]
                                 },
                                 children: {
-                                    $ref: "#/$defs/AnonymousType_1"
+                                    type: "array",
+                                    items: {
+                                        $ref: "#/$defs/Entry"
+                                    }
                                 }
                             },
                             required: ["id", "name", "type"]
-                        },
-                        AnonymousType_1: {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/Entry"
-                            }
                         }
                     }
                 } as const satisfies __cfHelpers.JSONSchema, {
                     tree: tree,
                     p: p
-                }, ({ tree, p }) => findChildren(tree, p)).for("unsorted", true);
+                }, __cfModuleCallback_1).for("unsorted", true);
                 const items = __cfHelpers.derive({
                     type: "object",
                     properties: {
@@ -212,16 +210,13 @@ export default pattern((__cf_pattern_input) => {
                                     "enum": ["file", "folder"]
                                 },
                                 children: {
-                                    $ref: "#/$defs/AnonymousType_1"
+                                    type: "array",
+                                    items: {
+                                        $ref: "#/$defs/Entry"
+                                    }
                                 }
                             },
                             required: ["id", "name", "type"]
-                        },
-                        AnonymousType_1: {
-                            type: "array",
-                            items: {
-                                $ref: "#/$defs/Entry"
-                            }
                         }
                     }
                 } as const satisfies __cfHelpers.JSONSchema, {

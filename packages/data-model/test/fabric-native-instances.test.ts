@@ -2,15 +2,18 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   DECONSTRUCT,
+  DEEP_FREEZE,
   FabricInstance,
   type FabricValue,
+  IS_DEEP_FROZEN,
   RECONSTRUCT,
-  type ReconstructionContext,
 } from "../interface.ts";
+import { BaseReconstructionContext } from "../base-reconstruction-context.ts";
 import {
   FabricError,
   FabricMap,
   FabricNativeWrapper,
+  FabricRegExp,
   FabricSet,
   isConvertibleNativeInstance,
 } from "../fabric-native-instances.ts";
@@ -24,13 +27,15 @@ import {
 import { UnknownValue } from "../unknown-value.ts";
 import { ProblematicValue } from "../problematic-value.ts";
 import { ExplicitTagValue } from "../explicit-tag-value.ts";
+import { deepFreeze, isDeepFrozen } from "../deep-freeze.ts";
 
 /** Dummy reconstruction context for tests. */
-const dummyContext: ReconstructionContext = {
-  getCell(_ref) {
+class DummyReconstructionContext extends BaseReconstructionContext {
+  override getCell(): never {
     throw new Error("getCell not implemented in test");
-  },
-};
+  }
+}
+const dummyContext = new DummyReconstructionContext();
 
 // ============================================================================
 // Tests
@@ -838,6 +843,19 @@ describe("fabric-native-instances", () => {
         [DECONSTRUCT](): FabricValue {
           return { value: 42 };
         }
+        [DEEP_FREEZE](
+          _subFreeze: (value: FabricValue) => FabricValue,
+        ): FabricValue {
+          return this as unknown as FabricValue;
+        }
+        [IS_DEEP_FROZEN](
+          _subIsDeepFrozen: (value: FabricValue) => boolean,
+        ): boolean {
+          return Object.isFrozen(this);
+        }
+        deepClone(_frozen: boolean): CustomFabInst {
+          return new CustomFabInst();
+        }
         protected shallowUnfrozenClone(): CustomFabInst {
           return new CustomFabInst();
         }
@@ -921,6 +939,202 @@ describe("fabric-native-instances", () => {
       );
       expect(ps.typeTag).toBe("Bad@1");
       expect(ps.state).toBe("data");
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // [DEEP_FREEZE] / [IS_DEEP_FROZEN] protocol (F1)
+  // --------------------------------------------------------------------------
+
+  // These exercise the `[DEEP_FREEZE]` / `[IS_DEEP_FROZEN]` protocol members
+  // DIRECTLY (invoking them on the instance with a recursion callback),
+  // rather than through `deepFreeze()` / `isDeepFrozenFabricValue()`. That
+  // dispatch layer (`deep-freeze.ts` arm-3 / type-guard) is a separate
+  // (follow-on) unit; this unit ships only the protocol defs/impls/stubs, so
+  // its coverage must not depend on the dispatcher. The callbacks below use
+  // the existing `deepFreeze` / `isDeepFrozen` only as recursion helpers on
+  // the nested (plain) sub-values -- never as the entry point for the
+  // instance itself.
+  describe("[DEEP_FREEZE] / [IS_DEEP_FROZEN] protocol", () => {
+    const subFreeze = (v: FabricValue): FabricValue => deepFreeze(v);
+    const subIsDeepFrozen = (v: FabricValue): boolean => isDeepFrozen(v);
+
+    describe("FabricError", () => {
+      it("[DEEP_FREEZE] freezes wrapper + Error + recurses cause", () => {
+        const inner = new Error("cause");
+        const fe = new FabricError(new Error("outer", { cause: inner }));
+        const result = fe[DEEP_FREEZE](subFreeze);
+        expect(result).toBe(fe); // freeze-in-place identity
+        expect(Object.isFrozen(fe)).toBe(true);
+        expect(Object.isFrozen(fe.error)).toBe(true);
+        expect(Object.isFrozen(inner)).toBe(true);
+      });
+
+      it("[DEEP_FREEZE] recurses enumerable custom props, no string-narrow", () => {
+        const err = new Error("e");
+        const childObj = { nested: 1 };
+        (err as unknown as Record<string, unknown>).custom = childObj;
+        const fe = new FabricError(err);
+        fe[DEEP_FREEZE](subFreeze);
+        // Non-string custom state is preserved AND deep-frozen (it must not
+        // be dropped -- that narrowing is a deepClone stop-gap, not this).
+        expect((fe.error as unknown as Record<string, unknown>).custom)
+          .toBe(childObj);
+        expect(Object.isFrozen(childObj)).toBe(true);
+      });
+
+      it("[IS_DEEP_FROZEN] true only when wrapper + Error frozen", () => {
+        const fe = new FabricError(new Error("test"));
+        expect(fe[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(false);
+        Object.freeze(fe); // wrapper only; inner Error still mutable
+        expect(fe[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(false);
+        fe[DEEP_FREEZE](subFreeze);
+        expect(fe[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(true);
+      });
+    });
+
+    // FabricMap/FabricSet deliberately keep throwing stubs for the protocol
+    // methods (per Dan's PR #3612 review: not yet used, reworked separately).
+    describe("FabricMap (throwing stub)", () => {
+      it("[DEEP_FREEZE] throws not-yet-implemented", () => {
+        const fm = new FabricMap(
+          new FrozenMap<FabricValue, FabricValue>([["a", 1]]),
+        );
+        expect(() => fm[DEEP_FREEZE](subFreeze)).toThrow(
+          "FabricMap: not yet implemented",
+        );
+      });
+
+      it("[IS_DEEP_FROZEN] throws not-yet-implemented", () => {
+        const fm = new FabricMap(
+          new FrozenMap<FabricValue, FabricValue>([["a", 1]]),
+        );
+        Object.freeze(fm);
+        expect(() => fm[IS_DEEP_FROZEN](subIsDeepFrozen)).toThrow(
+          "FabricMap: not yet implemented",
+        );
+      });
+    });
+
+    describe("FabricSet (throwing stub)", () => {
+      it("[DEEP_FREEZE] throws not-yet-implemented", () => {
+        const fs = new FabricSet(new FrozenSet<FabricValue>([1, 2]));
+        expect(() => fs[DEEP_FREEZE](subFreeze)).toThrow(
+          "FabricSet: not yet implemented",
+        );
+      });
+
+      it("[IS_DEEP_FROZEN] throws not-yet-implemented", () => {
+        const fs = new FabricSet(new FrozenSet<FabricValue>([1, 2]));
+        Object.freeze(fs);
+        expect(() => fs[IS_DEEP_FROZEN](subIsDeepFrozen)).toThrow(
+          "FabricSet: not yet implemented",
+        );
+      });
+    });
+
+    describe("FabricRegExp", () => {
+      it("[DEEP_FREEZE] freezes the wrapped RegExp in place", () => {
+        const fr = new FabricRegExp(/abc/g);
+        expect(Object.isFrozen(fr.regex)).toBe(false);
+        const result = fr[DEEP_FREEZE](subFreeze);
+        expect(result).toBe(fr);
+        expect(Object.isFrozen(fr)).toBe(true);
+        expect(Object.isFrozen(fr.regex)).toBe(true);
+      });
+
+      it("[IS_DEEP_FROZEN] true only when wrapper + RegExp frozen", () => {
+        const fr = new FabricRegExp(/abc/g);
+        expect(fr[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(false);
+        fr[DEEP_FREEZE](subFreeze);
+        expect(fr[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(true);
+      });
+    });
+
+    describe("ExplicitTagValue subclasses", () => {
+      it("ProblematicValue [DEEP_FREEZE] recurses state, freezes in place", () => {
+        const child = { x: 1 };
+        const pv = new ProblematicValue(
+          "Bad@1",
+          child as unknown as FabricValue,
+          "oops",
+        );
+        const result = pv[DEEP_FREEZE](subFreeze);
+        expect(result).toBe(pv);
+        expect(Object.isFrozen(pv)).toBe(true);
+        expect(Object.isFrozen(child)).toBe(true);
+        expect(pv[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(true);
+      });
+
+      it("UnknownValue [DEEP_FREEZE] recurses state, freezes in place", () => {
+        const child = { y: 2 };
+        const uv = new UnknownValue(
+          "Fancy@3",
+          child as unknown as FabricValue,
+        );
+        const result = uv[DEEP_FREEZE](subFreeze);
+        expect(result).toBe(uv);
+        expect(Object.isFrozen(uv)).toBe(true);
+        expect(Object.isFrozen(child)).toBe(true);
+        expect(uv[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(true);
+      });
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // [RECONSTRUCT] honors ReconstructionContext.shouldDeepFreeze
+  // --------------------------------------------------------------------------
+
+  describe("[RECONSTRUCT] honors shouldDeepFreeze", () => {
+    const frozenCtx = new DummyReconstructionContext(true);
+    const mutableCtx = new DummyReconstructionContext(false);
+
+    it("FabricError: shouldDeepFreeze true => deep-frozen, false => mutable", () => {
+      const state = {
+        type: "Error",
+        name: null,
+        message: "boom",
+      } as unknown as FabricValue;
+      const frozen = FabricError[RECONSTRUCT](state, frozenCtx);
+      expect(isDeepFrozen(frozen)).toBe(true);
+      const mutable = FabricError[RECONSTRUCT](state, mutableCtx);
+      expect(Object.isFrozen(mutable)).toBe(false);
+    });
+
+    it("FabricRegExp: shouldDeepFreeze true => deep-frozen, false => mutable", () => {
+      const state = {
+        source: "abc",
+        flags: "g",
+        flavor: "es2025",
+      } as unknown as FabricValue;
+      const frozen = FabricRegExp[RECONSTRUCT](state, frozenCtx);
+      expect(isDeepFrozen(frozen)).toBe(true);
+      expect(Object.isFrozen(frozen.regex)).toBe(true);
+      const mutable = FabricRegExp[RECONSTRUCT](state, mutableCtx);
+      expect(Object.isFrozen(mutable)).toBe(false);
+    });
+
+    it("ProblematicValue: shouldDeepFreeze true => deep-frozen, false => mutable", () => {
+      const state = {
+        type: "Bad@1",
+        state: { x: 1 },
+        error: "oops",
+      } as unknown as { type: string; state: FabricValue; error: string };
+      const frozen = ProblematicValue[RECONSTRUCT](state, frozenCtx);
+      expect(isDeepFrozen(frozen)).toBe(true);
+      const mutable = ProblematicValue[RECONSTRUCT](state, mutableCtx);
+      expect(Object.isFrozen(mutable)).toBe(false);
+    });
+
+    it("UnknownValue: shouldDeepFreeze true => deep-frozen, false => mutable", () => {
+      const state = { type: "Fancy@3", state: { y: 2 } } as unknown as {
+        type: string;
+        state: FabricValue;
+      };
+      const frozen = UnknownValue[RECONSTRUCT](state, frozenCtx);
+      expect(isDeepFrozen(frozen)).toBe(true);
+      const mutable = UnknownValue[RECONSTRUCT](state, mutableCtx);
+      expect(Object.isFrozen(mutable)).toBe(false);
     });
   });
 });

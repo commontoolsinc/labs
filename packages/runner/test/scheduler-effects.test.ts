@@ -1,37 +1,38 @@
 // Effect and computation tracking tests: verifying that effects are scheduled
 // correctly and computations are re-run when dependencies change.
 
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import { expect } from "@std/expect";
 import { getSigilLink } from "../src/runner-utils.ts";
-import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { Runtime } from "../src/runtime.ts";
-import { type Action } from "../src/scheduler.ts";
-import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { toMemorySpaceAddress } from "../src/link-utils.ts";
-
-const signer = await Identity.fromPassphrase("test operator");
-const space = signer.did();
+import {
+  afterEach,
+  beforeEach,
+  createSchedulerTestRuntime,
+  describe,
+  disposeSchedulerTestRuntime,
+  expect,
+  it,
+  Runtime,
+  space,
+  toMemorySpaceAddress,
+} from "./scheduler-test-utils.ts";
+import type {
+  Action,
+  IExtendedStorageTransaction,
+  SchedulerTestStorageManager,
+} from "./scheduler-test-utils.ts";
 
 describe("effect/computation tracking", () => {
-  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let storageManager: SchedulerTestStorageManager;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
 
   beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: signer });
-    runtime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager,
-    });
-    tx = runtime.edit();
+    ({ storageManager, runtime, tx } = createSchedulerTestRuntime(
+      import.meta.url,
+    ));
   });
 
   afterEach(async () => {
-    await tx.commit();
-    await runtime?.dispose();
-    await storageManager?.close();
+    await disposeSchedulerTestRuntime({ storageManager, runtime, tx });
   });
 
   it("should track actions as computations by default", async () => {

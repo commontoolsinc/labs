@@ -204,6 +204,14 @@ export type PerUser<T> = Scoped<T, "user">;
 export type PerSession<T> = Scoped<T, "session">;
 export type PerAny<T> = Scoped<T, "any">;
 
+type ScopedConstructorResult<
+  Scope extends CellScope,
+  T,
+> = Scope extends "space" ? PerSpace<T>
+  : Scope extends "user" ? PerUser<T>
+  : Scope extends "session" ? PerSession<T>
+  : never;
+
 // `string` acts as `any`, e.g. when wanting to match any kind of cell
 // The [CELL_INNER_TYPE] property is a phantom property that enables TypeScript
 // to infer T when using `AnyBrandedCell<infer U>`. Without it, T is a phantom
@@ -919,6 +927,21 @@ export interface CellTypeConstructor<
   of<T>(value?: T, schema?: JSONSchema): Apply<Wrap, T>;
 
   /**
+   * Scoped constructor view for space-shared cells.
+   */
+  perSpace: ScopedCellTypeConstructor<Wrap, "space">;
+
+  /**
+   * Scoped constructor view for per-user cells.
+   */
+  perUser: ScopedCellTypeConstructor<Wrap, "user">;
+
+  /**
+   * Scoped constructor view for per-session cells.
+   */
+  perSession: ScopedCellTypeConstructor<Wrap, "session">;
+
+  /**
    * Compare two cells or values for equality after resolving, i.e. after
    * following all links in case we have cells pointing to other cells.
    * @param a - First cell or value to compare
@@ -936,6 +959,24 @@ export interface CellTypeConstructor<
    * @returns true if the values are equal
    */
   equalLinks(a: AnyCell<any> | object, b: AnyCell<any> | object): boolean;
+}
+
+export interface ScopedCellTypeConstructor<
+  Wrap extends HKT,
+  Scope extends CellScope,
+> {
+  /**
+   * Create a scoped cell with an initial/default value.
+   */
+  of<T>(
+    value?: T,
+    schema?: JSONSchema,
+  ): ScopedConstructorResult<Scope, Apply<Wrap, T>>;
+
+  /**
+   * Create a scoped cell with a cause.
+   */
+  for<T>(cause: unknown): ScopedConstructorResult<Scope, Apply<Wrap, T>>;
 }
 
 // ============================================================================

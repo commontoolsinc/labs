@@ -21,6 +21,12 @@ describe("FabricHash", () => {
     expect(str.startsWith("fid1:")).toBe(true);
   });
 
+  it("`.taggedHashString` produces fid1:<base64> format", () => {
+    const cid = new FabricHash(SAMPLE_HASH, "fid1");
+    const str = cid.taggedHashString;
+    expect(str.startsWith("fid1:")).toBe(true);
+  });
+
   it("toJSON() produces { '/': 'fid1:<base64>' }", () => {
     const cid = new FabricHash(SAMPLE_HASH, "fid1");
     const json = cid.toJSON();
@@ -94,11 +100,7 @@ describe("FabricHash", () => {
   });
 });
 
-// -----------------------------------------------------------------
-// Tests of things in `value-hash.ts` that end up in `FabricHash`
-// -----------------------------------------------------------------
-
-describe("stuff from value-hash.ts", () => {
+describe("static methods", () => {
   it("FabricHash.fromJson() works on the result of instance method FabricHash.toJSON()", () => {
     const original = new FabricHash(SAMPLE_HASH, "fid1");
     const json = original.toJSON();

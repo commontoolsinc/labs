@@ -19,7 +19,7 @@ const adder = handler(false as const satisfies __cfHelpers.JSONSchema, {
             items: {
                 type: "string"
             },
-            asCell: ["cell"]
+            asCell: ["writeonly"]
         }
     },
     required: ["values"]

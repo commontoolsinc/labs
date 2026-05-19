@@ -40,8 +40,11 @@ export class SchemaAndHash {
     return this.#hash;
   }
 
-  /** The hash as a string (delegates to `FabricHash.toString()`). */
-  get hashString(): string {
-    return this.#hash.toString();
+  /**
+   * The hash as a string. This is just a convenient shorthand for
+   * `this.hash.taggedHashString`.
+   */
+  get taggedHashString(): string {
+    return this.#hash.taggedHashString;
   }
 }

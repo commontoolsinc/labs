@@ -79,9 +79,21 @@ export class FabricHash extends FabricPrimitive implements ApiFabricHash {
     return this.#tag;
   }
 
-  /** String form of the hash _without_ an algorithm tag. */
+  /**
+   * String form of the hash _without_ an algorithm tag. The hash is in unpadded
+   * base64url form.
+   */
   get hashString(): string {
     return this.#justHashString;
+  }
+
+  /**
+   * String form of the hash _with_ an algorithm tag. The form is
+   * `<tag>:<base64urlHash>`, where the hash portion is in an unpadded base64url
+   * string.
+   */
+  get taggedHashString(): string {
+    return this.#fullStringForm;
   }
 
   /** Copies the hash bytes into `target` starting at offset 0. Returns `target`. */
@@ -90,7 +102,7 @@ export class FabricHash extends FabricPrimitive implements ApiFabricHash {
     return target;
   }
 
-  /** Returns `<tag>:<base64urlHash>` (unpadded base64url). */
+  /** Returns the tagged hash string, same as `.taggedHashString`. */
   override toString(): string {
     return this.#fullStringForm;
   }

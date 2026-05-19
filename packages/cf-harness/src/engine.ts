@@ -9,6 +9,7 @@ import {
 } from "./artifacts.ts";
 import {
   appendHarnessCfcInvocationContext,
+  appendHarnessCfcModelContextObservations,
   appendHarnessFailureRecord,
   appendHarnessPolicyDecision,
   appendHarnessPolicyEvent,
@@ -30,6 +31,7 @@ import {
   setHarnessSkillResourceReads,
   setHarnessTranscriptPath,
 } from "./run-state.ts";
+import type { HarnessCfcModelContextObservationInput } from "./contracts/cfc-model-context.ts";
 import {
   classifyBuiltinToolFailure,
   classifyHarnessPolicyEventFailure,
@@ -46,6 +48,7 @@ import {
 import {
   createHarnessCfcInvocationContext,
   type HarnessCfcInvocationContext,
+  type HarnessCfcInvocationInputLabelPath,
   type HarnessCfcInvocationOperation,
   summarizeCfcInvocationRunManifest,
 } from "./contracts/cfc-invocation-context.ts";
@@ -419,6 +422,18 @@ export class CfHarnessEngine {
       this.#runState,
       policyDecision,
       now,
+    );
+    await this.persistRunState();
+    return this.getRunState();
+  }
+
+  async recordCfcModelContextObservations(
+    observations: readonly HarnessCfcModelContextObservationInput[],
+  ): Promise<HarnessRunState> {
+    this.#runState = appendHarnessCfcModelContextObservations(
+      this.#runState,
+      observations,
+      this.#now(),
     );
     await this.persistRunState();
     return this.getRunState();
@@ -970,6 +985,7 @@ export class CfHarnessEngine {
     stdinText?: string;
     env?: Record<string, string>;
     cfcInputLabels?: CfcLabelView;
+    cfcInputLabelPaths?: readonly HarnessCfcInvocationInputLabelPath[];
   }): Promise<HarnessCfcInvocationContext> {
     const now = this.#now();
     const invocation = await createHarnessCfcInvocationContext({
@@ -999,6 +1015,12 @@ export class CfHarnessEngine {
       ...(options.env !== undefined ? { env: options.env } : {}),
       ...(options.cfcInputLabels !== undefined
         ? { cfcInputLabels: options.cfcInputLabels }
+        : {}),
+      ...(options.cfcInputLabelPaths !== undefined
+        ? { cfcInputLabelPaths: options.cfcInputLabelPaths }
+        : {}),
+      ...(this.#runState.cfcModelContext !== undefined
+        ? { cfcModelContext: this.#runState.cfcModelContext }
         : {}),
     });
     this.#runState = appendHarnessCfcInvocationContext(
@@ -1065,6 +1087,7 @@ export class CfHarnessEngine {
         stdinText?: string;
         env?: Record<string, string>;
         cfcInputLabels?: CfcLabelView;
+        cfcInputLabelPaths?: readonly HarnessCfcInvocationInputLabelPath[];
       }) => this.#createCfcInvocationContext(options),
     };
   }

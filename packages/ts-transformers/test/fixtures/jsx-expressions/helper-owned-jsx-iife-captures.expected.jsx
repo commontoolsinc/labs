@@ -19,6 +19,7 @@ import { action, Default, pattern, UI, VNode, Writable, } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn(({ entries, p }) => visibleEntries(entries, p[0] || ""));
 interface Entry {
     name: string;
 }
@@ -59,7 +60,7 @@ export default pattern((__cf_pattern_input) => {
                 items: {
                     type: "string"
                 },
-                asCell: ["cell"]
+                asCell: ["writeonly"]
             }
         },
         required: ["path"]
@@ -92,7 +93,7 @@ export default pattern((__cf_pattern_input) => {
                             items: {
                                 type: "string"
                             },
-                            asCell: ["cell"]
+                            asCell: ["readonly"]
                         }
                     },
                     required: ["path"]
@@ -128,7 +129,7 @@ export default pattern((__cf_pattern_input) => {
                             items: {
                                 type: "string"
                             },
-                            asCell: ["cell"]
+                            asCell: ["readonly"]
                         }
                     },
                     required: ["path"]
@@ -146,7 +147,7 @@ export default pattern((__cf_pattern_input) => {
                             items: {
                                 $ref: "#/$defs/Entry"
                             },
-                            asCell: ["cell"]
+                            asCell: ["readonly"]
                         },
                         p: {
                             type: "array",
@@ -186,7 +187,7 @@ export default pattern((__cf_pattern_input) => {
                 } as const satisfies __cfHelpers.JSONSchema, {
                     entries: entries,
                     p: p
-                }, ({ entries, p }) => visibleEntries(entries, p[0] || "")).for("visible", true);
+                }, __cfModuleCallback_1).for("visible", true);
                 return visible.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                     const entry = __cf_pattern_input.key("element");
                     const pushPath = __cf_pattern_input.key("params", "pushPath");

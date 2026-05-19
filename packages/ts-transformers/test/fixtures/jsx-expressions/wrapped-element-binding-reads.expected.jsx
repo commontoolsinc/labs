@@ -24,6 +24,7 @@ import { pattern, UI, type VNode } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn(({ entry, prefix }) => (entry as Entry).name === prefix);
 type Entry = {
     name: string;
 };
@@ -119,7 +120,7 @@ export default pattern((__cf_pattern_input) => {
                         name: entry.key("name")
                     },
                     prefix: prefix
-                }, ({ entry, prefix }) => (entry as Entry).name === prefix).for("c", true);
+                }, __cfModuleCallback_1).for("c", true);
                 return (<span data-a={a} data-b={b} data-c={c}>{entry.key("name")}</span>);
             }, {
                 type: "object",

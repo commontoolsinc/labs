@@ -26,13 +26,13 @@
  * bigints, so the encode and decode benchmarks for a given (size, sign)
  * exercise inverse operations on matching data.
  *
- * Run with: deno bench --no-check test/bigint-encoding.bench.ts
+ * Run with: deno bench --no-check bench/bigint.bench.ts
  */
 
 import {
   bigintFromMinimalTwosComplement,
   bigintToMinimalTwosComplement,
-} from "../bigint-encoding.ts";
+} from "@commonfabric/utils/bigint";
 
 const BATCH = 64;
 

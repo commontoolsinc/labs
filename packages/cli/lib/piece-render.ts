@@ -32,7 +32,12 @@ export async function renderPiece(
   // 2. Get piece controller to access the Cell
   const manager = await loadManager(config);
   const pieces = new PiecesController(manager);
-  const piece = await pieces.get(config.piece, options.start ?? true);
+  const piece = await pieces.get(
+    config.piece,
+    options.start ?? true,
+    undefined,
+    config.pieceScope,
+  );
   const cell = piece.getCell().asSchema({
     type: "object",
     properties: {

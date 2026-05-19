@@ -1,38 +1,39 @@
 // Cycle-aware convergence tests: verifying that the scheduler correctly
 // detects and handles circular dependencies between reactive computations.
 
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import { expect } from "@std/expect";
-import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { Runtime } from "../src/runtime.ts";
-import { type Action } from "../src/scheduler.ts";
-import { Identity } from "@commonfabric/identity";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { toMemorySpaceAddress } from "../src/link-utils.ts";
-
-const signer = await Identity.fromPassphrase("test operator");
-const space = signer.did();
+import {
+  afterEach,
+  beforeEach,
+  createSchedulerTestRuntime,
+  describe,
+  disposeSchedulerTestRuntime,
+  expect,
+  getStaleSchedulerInternals,
+  it,
+  Runtime,
+  space,
+  toMemorySpaceAddress,
+} from "./scheduler-test-utils.ts";
+import type {
+  Action,
+  IExtendedStorageTransaction,
+  SchedulerTestStorageManager,
+} from "./scheduler-test-utils.ts";
 
 describe("cycle-aware convergence", () => {
-  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let storageManager: SchedulerTestStorageManager;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
 
   beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: signer });
-    runtime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager,
-    });
-    // Use push mode for cycle-aware convergence tests
-    runtime.scheduler.disablePullMode();
-    tx = runtime.edit();
+    ({ storageManager, runtime, tx } = createSchedulerTestRuntime(
+      import.meta.url,
+      { pullMode: "disabled" },
+    ));
   });
 
   afterEach(async () => {
-    await tx.commit();
-    await runtime?.dispose();
-    await storageManager?.close();
+    await disposeSchedulerTestRuntime({ storageManager, runtime, tx });
   });
 
   it("should track action execution time", async () => {
@@ -392,17 +393,19 @@ describe("cycle-aware convergence", () => {
 
     const schedulerInternal = runtime.scheduler as unknown as {
       execute: () => Promise<void>;
-      markDirectDirty: (action: Action) => boolean;
       pendingQueueTaskTimer: number | null;
       scheduled: boolean;
     };
+    const staleSchedulerInternal = getStaleSchedulerInternals(
+      runtime.scheduler,
+    );
     let effectRuns = 0;
     const reDirtyLimit = 25;
 
     const selfDirtyingEffect: Action = () => {
       effectRuns++;
       if (effectRuns <= reDirtyLimit) {
-        schedulerInternal.markDirectDirty(selfDirtyingEffect);
+        staleSchedulerInternal.markDirectDirty(selfDirtyingEffect);
       }
     };
 

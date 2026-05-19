@@ -21,8 +21,9 @@
   },
   "exports": {
     "./array-utils": "./array-utils.ts",
-    "./bigint-encoding": "./bigint-encoding.ts",
+    "./base-reconstruction-context": "./base-reconstruction-context.ts",
     "./deep-freeze": "./deep-freeze.ts",
+    "./empty-reconstruction-context": "./empty-reconstruction-context.ts",
     "./explicit-tag-value": "./explicit-tag-value.ts",
     "./fabric-bytes": "./fabric-bytes.ts",
     "./fabric-epoch": "./fabric-epoch.ts",
@@ -32,6 +33,7 @@
     "./fabric-value": "./fabric-value.ts",
     "./fabric-value-legacy": "./fabric-value-legacy.ts",
     "./fabric-value-modern": "./fabric-value-modern.ts",
+    "./value-clone": "./value-clone.ts",
     "./frozen-builtins": "./frozen-builtins.ts",
     "./interface": "./interface.ts",
     "./json-encoding": "./json-encoding.ts",

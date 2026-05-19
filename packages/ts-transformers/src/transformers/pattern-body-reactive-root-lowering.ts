@@ -310,13 +310,22 @@ function rewriteTrackedOpaquePatternBody(
   const isDynamicElementAccess = (
     expression: ts.Expression,
   ): expression is ts.ElementAccessExpression => {
-    return ts.isElementAccessExpression(expression) &&
-      !!expression.argumentExpression &&
-      ts.isExpression(expression.argumentExpression) &&
-      !(
-        ts.isLiteralExpression(expression.argumentExpression) ||
-        ts.isNoSubstitutionTemplateLiteral(expression.argumentExpression)
-      );
+    if (!ts.isElementAccessExpression(expression)) return false;
+    const arg = expression.argumentExpression;
+    if (!arg || !ts.isExpression(arg)) return false;
+    if (
+      ts.isLiteralExpression(arg) ||
+      ts.isNoSubstitutionTemplateLiteral(arg)
+    ) return false;
+    // Well-known CF computed keys (UI, NAME, SELF, FS) are statically known
+    // even though they appear as identifier references rather than literals.
+    // The late lowering substitutes the canonical `__cfHelpers.<NAME>`
+    // expression for them, so treating them as dynamic would force an
+    // unnecessary reactive wrapper around `obj[UI]` etc.
+    if (getCommonFabricKeyName(arg, context.checker) !== undefined) {
+      return false;
+    }
+    return true;
   };
 
   const hasJsxExpressionAncestor = (node: ts.Node): boolean => {
@@ -664,6 +673,16 @@ function rewriteTrackedOpaquePatternBody(
       callTargetParents.set(node.expression, node);
     }
 
+    // Pre-visit dynamic-wrap: wraps `obj[dynamicKey]` accesses where the
+    // root isn't tracked as opaque (so the post-visit branch's tracked-
+    // opaque path doesn't apply) but the access still appears in JSX and
+    // needs a reactive wrapper. CT-1586 audit confirmed this branch is
+    // still load-bearing — disabling it breaks "element access
+    // complex/simple", "jsx property access", and "reactive array element
+    // access schema" tests. The pre-visit timing matters because the
+    // visitor recurses into children after this point, and once the
+    // sub-tree has been rewritten the original access-shape detection
+    // may not match anymore.
     if (
       (ts.isPropertyAccessExpression(node) ||
         ts.isElementAccessExpression(node)) &&
@@ -713,7 +732,17 @@ function rewriteTrackedOpaquePatternBody(
         ts.isElementAccessExpression(visited)) &&
       isTopmostMemberAccess(visited)
     ) {
-      if (isDynamicElementAccess(visited)) {
+      const info = getTrackedOpaqueAccessInfo(visited);
+      // Tracked-opaque static-key access takes precedence over the JSX
+      // dynamic-wrap heuristic: when the root is a known opaque binding and
+      // the access argument resolves to a static path segment (including
+      // well-known CF computed keys like UI/NAME/SELF/FS), the canonical
+      // form is `root.key(...)` in-place, regardless of whether the
+      // expression lives inside a JSX slot. Falling into
+      // `maybeWrapDynamicJsxAccess` here would produce an unnecessary
+      // `derive(...)` wrapper around what is already a reactive expression.
+      const hasTrackedStaticAccess = !!info?.root && !info.dynamic;
+      if (!hasTrackedStaticAccess && isDynamicElementAccess(visited)) {
         const wrappedDynamicAccess = maybeWrapDynamicJsxAccess(visited);
         if (wrappedDynamicAccess) {
           registerReplacementType(wrappedDynamicAccess, visited, context);
@@ -721,7 +750,6 @@ function rewriteTrackedOpaquePatternBody(
         }
       }
 
-      const info = getTrackedOpaqueAccessInfo(visited);
       if (!info?.root) {
         return visited;
       }

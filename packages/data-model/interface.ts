@@ -43,19 +43,44 @@ export const DECONSTRUCT: unique symbol = Symbol.for("common.deconstruct");
 export const RECONSTRUCT: unique symbol = Symbol.for("common.reconstruct");
 
 /**
+ * Well-known symbol for deeply freezing a fabric instance in place. The method
+ * freezes the instance's own internal slot(s) and recurses into any nested
+ * `FabricValue`s via the provided `subFreeze` callback. This is an abstract
+ * member of `FabricInstance`, so the generic `deepFreeze()` operates on any
+ * `FabricInstance` by gating on `instanceof` against the abstract base and
+ * invoking this member -- it does not enumerate concrete subclasses.
+ * Distinct from `deepClone()`: `[DEEP_FREEZE]` freezes the existing instance
+ * in place; `deepClone()` constructs a new instance.
+ */
+export const DEEP_FREEZE: unique symbol = Symbol.for("common.deepFreeze");
+
+/**
+ * Well-known symbol for checking whether a fabric instance is already deeply
+ * frozen, without mutating it. The sibling-of-`[DEEP_FREEZE]` *check*: it
+ * verifies the instance's own internal slot(s) are in canonical deep-frozen
+ * form and recurses into any nested `FabricValue`s via the provided
+ * `subIsDeepFrozen` callback, returning the boolean conjunction. This is an
+ * abstract member of `FabricInstance`, so the generic deep-frozen type guard
+ * operates on any `FabricInstance` by gating on `instanceof` against the
+ * abstract base and invoking this member -- it does not enumerate concrete
+ * subclasses.
+ *
+ * Unlike `[DEEP_FREEZE]`, this method is side-effect-free and never throws:
+ * a not-in-canonical-deep-frozen-form instance answers `false`, it does not
+ * crash. (`[DEEP_FREEZE]` is a mutator and uses "death before confusion" on
+ * a malformed internal slot; a status check must not.)
+ */
+export const IS_DEEP_FROZEN: unique symbol = Symbol.for(
+  "common.isDeepFrozen",
+);
+
+/**
  * Abstract base class for values that participate in the fabric protocol.
  * See Section 2.3 of the formal spec.
  *
- * Subclasses must implement:
- * - `[DECONSTRUCT]()` -- returns essential state for serialization.
- * - `shallowUnfrozenClone()` -- returns a new unfrozen copy of this instance.
- *
- * `shallowClone(frozen)` is an effectively-final method that manages the
- * frozenness contract:
- * - `shallowClone(true)` on a frozen instance returns `this` (identity).
- * - `shallowClone(true)` on an unfrozen instance returns a frozen clone.
- * - `shallowClone(false)` always returns a new unfrozen clone -- even if the
- *   instance is already unfrozen. The caller gets a distinct, mutable object.
+ * Subclasses must implement `[DECONSTRUCT]()`, `[DEEP_FREEZE]()`,
+ * `[IS_DEEP_FROZEN]()`, `deepClone()`, and `shallowUnfrozenClone()`.
+ * Subclasses must also define a static member `[RECONSTRUCT]()`.
  */
 export abstract class FabricInstance extends FabricSpecialObject {
   /**
@@ -64,6 +89,50 @@ export abstract class FabricInstance extends FabricSpecialObject {
    * serialization system handles that.
    */
   abstract [DECONSTRUCT](): FabricValue;
+
+  /**
+   * Deeply freezes this instance in place: freezes this instance's own
+   * internal slot(s) and recurses into each nested `FabricValue` by calling
+   * the provided `subFreeze` callback on it. Implementations must NOT import
+   * or call `deepFreeze()` directly -- recursion is handed through the
+   * callback so that the freeze utility's caching / cycle-detection
+   * bookkeeping is preserved and no import cycle is introduced.
+   *
+   * Returns the (now deeply-frozen) value. Freeze-in-place implementations
+   * return `this`.
+   */
+  abstract [DEEP_FREEZE](
+    subFreeze: (value: FabricValue) => FabricValue,
+  ): FabricValue;
+
+  /**
+   * Indicates whether this instance is already deeply frozen, without
+   * mutating it. Checks this instance's own internal slot(s) are in
+   * canonical deep-frozen form and recurses into each nested `FabricValue`
+   * via the provided `subIsDeepFrozen` callback, returning the boolean
+   * conjunction. Implementations must NOT import or call the deep-frozen
+   * type guard directly -- recursion is handed through the callback,
+   * mirroring `[DEEP_FREEZE]`'s callback shape and avoiding an import cycle.
+   *
+   * Side-effect-free and must not throw: an instance that is not in
+   * canonical deep-frozen form returns `false`.
+   */
+  abstract [IS_DEEP_FROZEN](
+    subIsDeepFrozen: (value: FabricValue) => boolean,
+  ): boolean;
+
+  /**
+   * Returns a new deep clone of this instance with equivalent data but no
+   * shared structure for any unfrozen data in the original. When `frozen ===
+   * true`, produces a frozen instance with maximal structural sharing, including
+   * returning `this` if it is already deep-frozen. When `frozen === false`,
+   * produces a deeply-mutable instance with no visible shared reference
+   * structure with the original.
+   *
+   * TODO(danfuzz): This method should have a base implementation which defers
+   * to a _different_ `protected abstract` method.
+   */
+  abstract deepClone(frozen: boolean): FabricInstance;
 
   /**
    * Returns a new unfrozen copy of this instance with the same data. Called
@@ -256,6 +325,29 @@ export interface ReconstructionContext {
   getCell(
     ref: { id: string; path: string[]; space: string },
   ): FabricInstance;
+
+  /**
+   * Signals whether a reconstruction call should produce a deep-frozen
+   * result: `true` means the reconstructed value should be deep-frozen,
+   * `false` means a mutable result is acceptable. Same contract as `frozen`
+   * passed to `cloneIfNecessary()` (see `value-clone.ts`):
+   * `shouldDeepFreeze === true` corresponds to
+   * `cloneIfNecessary(value, { frozen: true })`.
+   *
+   * Required (not optional): every context declares it. Contexts get it for
+   * free by extending `BaseReconstructionContext`, which centralizes the
+   * getter; the `cloneIfNecessary`-style `true` default lives there.
+   *
+   * Enforcement: the concrete `[RECONSTRUCT]` implementations query this and
+   * abide by it — they produce a deep-frozen result when it is `true`. The
+   * one place this is *not* applied is the class-registry fallback
+   * call-site wrap (`json-encoding-context.ts`'s `cls[RECONSTRUCT]` path);
+   * that call-site deep-freeze is a separate follow-on's responsibility and
+   * is intentionally NOT covered here. The per-implementation honoring is
+   * sufficient for correctness regardless: each impl freezes its own output
+   * when asked.
+   */
+  readonly shouldDeepFreeze: boolean;
 }
 
 /**

@@ -111,7 +111,7 @@ const createSimplePattern = handler({
         cellRef: {
             type: "array",
             items: true,
-            asCell: ["cell"]
+            asCell: ["readonly"]
         }
     },
     required: ["cellRef"]

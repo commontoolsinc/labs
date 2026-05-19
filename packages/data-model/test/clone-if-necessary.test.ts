@@ -13,8 +13,7 @@ import { FabricError } from "../fabric-native-instances.ts";
 // Tests
 // ============================================================================
 //
-// Both legacy and modern flag states use modern clone semantics: the legacy
-// dispatch target delegates to `cloneIfNecessaryModern`. Test cases are
+// Both legacy and modern flag states use modern clone semantics. Test cases are
 // parameterized across both modes to ensure the contract is durable under
 // either flag setting.
 
@@ -246,14 +245,22 @@ describe("cloneIfNecessary", () => {
     describe(`FabricInstance (${label} path)`, () => {
       beforeEach(() => setDataModelConfig(modernMode));
 
-      it("frozen `FabricError` cannot yet be cloned", () => {
+      it("deep-clones a frozen `FabricError` (partial)", () => {
+        // Deep cloning of `FabricInstance` is now (partially) supported: the
+        // `FabricError` is rebuilt from its string-valued state, so the
+        // result is a fresh frozen `FabricError` preserving `message`.
         const error = new FabricError(new Error("test"));
         Object.freeze(error);
-        const func = () => cloneIfNecessary(error);
-        expect(func).toThrow(/Cannot yet handle/);
+        const result = cloneIfNecessary(error);
+        expect(result).toBeInstanceOf(FabricError);
+        expect(result).not.toBe(error); // rebuilt (inner Error was not frozen)
+        expect(Object.isFrozen(result)).toBe(true);
+        expect((result as FabricError).error.message).toBe("test");
       });
 
-      it("produces mutable FabricError clone when frozen=false", () => {
+      it("produces a mutable FabricError clone (deep, frozen=false)", () => {
+        // Deep clone with `frozen: false` yields a fresh *mutable*
+        // `FabricError` (rebuilt from string state, not frozen).
         const error = new FabricError(new Error("test"));
         Object.freeze(error);
         const result = cloneIfNecessary(
@@ -263,14 +270,35 @@ describe("cloneIfNecessary", () => {
         expect(result).toBeInstanceOf(FabricError);
         expect(result).not.toBe(error);
         expect(Object.isFrozen(result)).toBe(false);
+        expect((result as FabricError).error.message).toBe("test");
       });
 
-      it("handles FabricError nested in an object", () => {
+      it("deep-clones a FabricError nested in an object (partial)", () => {
+        // Nested `FabricInstance`s are deep-cloned too, not shared: each is
+        // rebuilt from its string state.
         const error = new FabricError(new Error("nested"));
         const value = { err: error, x: 42 } as FabricValue;
         const result = cloneIfNecessary(value) as Record<string, unknown>;
+        expect(result).not.toBe(value);
         expect(Object.isFrozen(result)).toBe(true);
         expect(result.err).toBeInstanceOf(FabricError);
+        expect(result.err).not.toBe(error); // deep-cloned, not shared
+        expect((result.err as FabricError).error.message).toBe("nested");
+        expect(result.x).toBe(42);
+      });
+
+      it("shallow-clones an object containing a FabricError (deep=false)", () => {
+        // Shallow clone of a container shares the nested instance by
+        // reference -- it is never traversed or rebuilt.
+        const error = new FabricError(new Error("nested"));
+        const value = { err: error, x: 42 } as FabricValue;
+        const result = cloneIfNecessary(value, { deep: false }) as Record<
+          string,
+          unknown
+        >;
+        expect(result).not.toBe(value);
+        expect(Object.isFrozen(result)).toBe(true);
+        expect(result.err).toBe(error);
         expect(result.x).toBe(42);
       });
     });

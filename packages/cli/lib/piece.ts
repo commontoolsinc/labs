@@ -10,6 +10,7 @@ import {
   UI,
   VNode,
 } from "@commonfabric/runner";
+import type { CellScope } from "@commonfabric/api";
 import { StorageManager } from "@commonfabric/runner/storage/cache";
 import { pieceId, PieceManager } from "@commonfabric/piece";
 import { PiecesController } from "@commonfabric/piece/ops";
@@ -51,6 +52,7 @@ export interface SpaceConfig {
 
 export interface PieceConfig extends SpaceConfig {
   piece: string;
+  pieceScope?: CellScope;
 }
 
 export interface ResolvedPieceCallable extends CallableResolution {
@@ -60,7 +62,11 @@ export interface ResolvedPieceCallable extends CallableResolution {
 export interface PieceCallableDependencies extends CallableExecutionDeps {
   helpCommandPrefix?: string;
   loadManager?: (config: SpaceConfig) => Promise<any>;
-  loadPiece?: (manager: any, pieceId: string) => Promise<any>;
+  loadPiece?: (
+    manager: any,
+    pieceId: string,
+    scope?: PieceConfig["pieceScope"],
+  ) => Promise<any>;
   readJsonInput?: () => Promise<unknown>;
   readTextInput?: () => Promise<string>;
   readTextFile?: (path: string) => Promise<string>;
@@ -306,7 +312,12 @@ export async function setPiecePattern(
 ): Promise<void> {
   const manager = await loadManager(config);
   const pieces = new PiecesController(manager);
-  const piece = await pieces.get(config.piece, false);
+  const piece = await pieces.get(
+    config.piece,
+    false,
+    undefined,
+    config.pieceScope,
+  );
   await piece.setPattern(await getProgramFromFile(manager, entry));
 }
 
@@ -317,7 +328,12 @@ export async function savePiecePattern(
   await ensureDir(outPath);
   const manager = await loadManager(config);
   const pieces = new PiecesController(manager);
-  const piece = await pieces.get(config.piece, false);
+  const piece = await pieces.get(
+    config.piece,
+    false,
+    undefined,
+    config.pieceScope,
+  );
   const meta = await piece.getPatternMeta();
 
   if (meta.program) {
@@ -339,7 +355,12 @@ export async function savePiecePattern(
 export async function applyPieceInput(config: PieceConfig, input: object) {
   const manager = await loadManager(config);
   const pieces = new PiecesController(manager);
-  const piece = await pieces.get(config.piece, false);
+  const piece = await pieces.get(
+    config.piece,
+    false,
+    undefined,
+    config.pieceScope,
+  );
   await piece.setInput(input);
 }
 
@@ -424,6 +445,7 @@ async function tryResolveLivePieceToolCallable(
   manager: any,
   space: string,
   callableName: string,
+  pieceScope?: PieceConfig["pieceScope"],
 ): Promise<any | null> {
   if (
     typeof piece.getPattern !== "function" ||
@@ -440,6 +462,7 @@ async function tryResolveLivePieceToolCallable(
     crypto.randomUUID(),
     pattern?.resultSchema,
     tx,
+    pieceScope,
   );
   manager.runtime.run(tx, pattern, input, liveResult);
   manager.runtime.prepareTxForCommit?.(tx);
@@ -476,8 +499,8 @@ async function resolvePieceCallable(
 
   const piece =
     await (deps.loadPiece
-      ? deps.loadPiece(manager, config.piece)
-      : pieces.get(config.piece, true));
+      ? deps.loadPiece(manager, config.piece, config.pieceScope)
+      : pieces.get(config.piece, true, undefined, config.pieceScope));
   const space = manager.getSpace?.() ?? config.space;
 
   const resolved = (await tryResolvePieceCallableAt(
@@ -507,6 +530,7 @@ async function resolvePieceCallable(
       manager,
       space,
       callableName,
+      config.pieceScope,
     );
     if (liveCallableCell) {
       return {
@@ -550,7 +574,12 @@ export async function linkPieces(
   sourcePath: (string | number)[],
   targetPieceId: string,
   targetPath: (string | number)[],
-  options?: { start?: boolean; allowNonExisting?: boolean },
+  options?: {
+    start?: boolean;
+    allowNonExisting?: boolean;
+    sourceScope?: PieceConfig["pieceScope"];
+    targetScope?: PieceConfig["pieceScope"];
+  },
 ): Promise<void> {
   const manager = await timeCliPhase(
     "linkPieces.loadManager",
@@ -566,7 +595,7 @@ export async function linkPieces(
     // (i.e., was created via cf piece new, not just written to with cf piece set)
     const sourcePiece = await timeCliPhase(
       "linkPieces.getSourcePiece",
-      () => pieces.get(sourcePieceId, false),
+      () => pieces.get(sourcePieceId, false, undefined, options?.sourceScope),
     );
     const sourcePatternLink = getMetaLink(sourcePiece.getCell(), "pattern");
     if (sourcePatternLink === undefined) {
@@ -601,7 +630,7 @@ export async function linkPieces(
     // Check target piece exists by verifying it has a pattern cell
     const targetPiece = await timeCliPhase(
       "linkPieces.getTargetPiece",
-      () => pieces.get(targetPieceId, false),
+      () => pieces.get(targetPieceId, false, undefined, options?.targetScope),
     );
     const targetPatternLink = getMetaLink(targetPiece.getCell(), "pattern");
     if (targetPatternLink === undefined) {
@@ -830,7 +859,12 @@ export async function inspectPiece(config: PieceConfig): Promise<{
 }> {
   const manager = await loadManager(config);
   const pieces = new PiecesController(manager);
-  const piece = await pieces.get(config.piece, false);
+  const piece = await pieces.get(
+    config.piece,
+    false,
+    undefined,
+    config.pieceScope,
+  );
 
   const id = piece.id;
   const name = piece.name();
@@ -890,7 +924,12 @@ export async function getCellValue(
 ): Promise<unknown> {
   const manager = await loadManager(config);
   const pieces = new PiecesController(manager);
-  const piece = await pieces.get(config.piece, false);
+  const piece = await pieces.get(
+    config.piece,
+    false,
+    undefined,
+    config.pieceScope,
+  );
   if (options?.input) {
     return await piece.input.get(path);
   } else {
@@ -906,7 +945,12 @@ export async function setCellValue(
 ): Promise<void> {
   const manager = await loadManager(config);
   const pieces = new PiecesController(manager);
-  const piece = await pieces.get(config.piece, false);
+  const piece = await pieces.get(
+    config.piece,
+    false,
+    undefined,
+    config.pieceScope,
+  );
   if (options?.input) {
     await piece.input.set(value, path);
   } else {
@@ -943,7 +987,7 @@ export async function stepPiece(config: PieceConfig): Promise<void> {
   const pieces = new PiecesController(manager);
   const piece = await timeCliPhase(
     "stepPiece.getPiece",
-    () => pieces.get(config.piece, true),
+    () => pieces.get(config.piece, true, undefined, config.pieceScope),
   );
   await timeCliPhase("stepPiece.pull", () => piece.getCell().pull());
   await timeCliPhase("stepPiece.manager.synced", () => manager.synced());

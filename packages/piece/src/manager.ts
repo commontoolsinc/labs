@@ -18,6 +18,7 @@ import {
   type SpaceCellContents,
   URI,
 } from "@commonfabric/runner";
+import type { CellScope } from "@commonfabric/api";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { type Session } from "@commonfabric/identity";
 import { isRecord } from "@commonfabric/utils/types";
@@ -269,21 +270,31 @@ export class PieceManager {
     id: string | Cell<unknown>,
     runIt: boolean,
     asSchema: S,
+    scope?: CellScope,
   ): Promise<Cell<Schema<S>>>;
   async get<T = unknown>(
     id: string | Cell<unknown>,
     runIt?: boolean,
     asSchema?: JSONSchema,
+    scope?: CellScope,
   ): Promise<Cell<T>>;
   async get<T = unknown>(
     id: string | Cell<unknown>,
     runIt: boolean = false,
     asSchema?: JSONSchema,
+    scope?: CellScope,
   ): Promise<Cell<T>> {
     // Get the piece cell
     const piece: Cell<unknown> = isCell(id)
       ? id
-      : this.runtime.getCellFromEntityId(this.space, { "/": id });
+      : this.runtime.getCellFromEntityId(
+        this.space,
+        { "/": id },
+        [],
+        undefined,
+        undefined,
+        scope,
+      );
 
     if (runIt) {
       // start() handles sync, pattern loading, and running
@@ -627,12 +638,15 @@ export class PieceManager {
     id: EntityId | string,
     path: string[] = [],
     schema?: JSONSchema,
+    scope?: CellScope,
   ): Promise<Cell<T>> {
     const cell = this.runtime.getCellFromEntityId<T>(
       this.space,
       id,
       path,
       schema,
+      undefined,
+      scope,
     );
     await cell.sync();
     return cell;
@@ -865,12 +879,21 @@ export class PieceManager {
     linkPath: (string | number)[],
     targetPieceId: string,
     targetPath: (string | number)[],
-    options?: { start?: boolean },
+    options?: {
+      start?: boolean;
+      sourceScope?: CellScope;
+      targetScope?: CellScope;
+    },
   ): Promise<void> {
     const start = options?.start ?? true;
-    let linkCell = this.runtime.getCellFromEntityId(this.space, {
-      "/": linkPieceId,
-    });
+    let linkCell = this.runtime.getCellFromEntityId(
+      this.space,
+      { "/": linkPieceId },
+      [],
+      undefined,
+      undefined,
+      options?.sourceScope,
+    );
     await linkCell.sync();
     linkCell = linkCell.asSchemaFromLinks(); // Make sure we have the full schema
     linkCell = linkCell.key(...linkPath);
@@ -925,20 +948,38 @@ async function getCellByIdOrPiece(
   manager: PieceManager,
   cellId: string,
   label: string,
-  options?: { start?: boolean },
+  options?: { start?: boolean; targetScope?: CellScope },
 ): Promise<{ cell: Cell<unknown>; isPiece: boolean }> {
   const start = options?.start ?? true;
   try {
     // Try to get as a piece first
-    const piece = await manager.get(cellId, start);
+    const piece = await manager.get(
+      cellId,
+      start,
+      undefined,
+      options?.targetScope,
+    );
     if (!piece) {
       throw new Error(`Piece ${cellId} not found`);
+    }
+    if (
+      getMetaLink(piece, "result") === undefined &&
+      getMetaLink(piece, "pattern") === undefined
+    ) {
+      throw new Error(
+        `Piece ${cellId} has neither a parent result nor a pattern`,
+      );
     }
     return { cell: piece, isPiece: true };
   } catch (_) {
     // If manager.get() fails (e.g., "patternId is required"), try as arbitrary cell ID
     try {
-      const cell = await manager.getCellById({ "/": cellId });
+      const cell = await manager.getCellById(
+        { "/": cellId },
+        [],
+        undefined,
+        options?.targetScope,
+      );
 
       // Check if this cell is actually a piece by looking at the pieces list
       const piecesCell = await manager.getPieces();

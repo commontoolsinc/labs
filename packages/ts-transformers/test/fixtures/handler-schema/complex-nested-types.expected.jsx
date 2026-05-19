@@ -74,11 +74,11 @@ const userHandler = handler({
                 },
                 required: ["id", "name", "email"]
             },
-            asCell: ["cell"]
+            asCell: ["writeonly"]
         },
         lastAction: {
             type: "string",
-            asCell: ["cell"]
+            asCell: ["writeonly"]
         }
     },
     required: ["count", "users", "lastAction"]
@@ -118,7 +118,7 @@ const _updateTags = handler({
             items: {
                 type: "string"
             },
-            asCell: ["cell"]
+            asCell: ["writeonly"]
         }
     },
     required: ["tags"]

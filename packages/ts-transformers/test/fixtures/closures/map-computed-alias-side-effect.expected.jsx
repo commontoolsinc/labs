@@ -11,6 +11,24 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
+    const element = __cf_pattern_input.key("element");
+    const __cf_amount_key = nextKey();
+    const amount = __cfHelpers.derive({
+        type: "object",
+        properties: {
+            element: true,
+            __cf_amount_key: true
+        },
+        required: ["element", "__cf_amount_key"]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: ["number", "undefined"]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        element: element,
+        __cf_amount_key: __cf_amount_key
+    }, ({ element, __cf_amount_key }) => element[__cf_amount_key]).for("amount", true);
+    return (<span>{amount}</span>);
+});
 let keyCounter = 0;
 function nextKey() {
     return `value-${keyCounter++}`;
@@ -27,24 +45,7 @@ interface State {
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const element = __cf_pattern_input.key("element");
-                const __cf_amount_key = nextKey();
-                const amount = __cfHelpers.derive({
-                    type: "object",
-                    properties: {
-                        element: true,
-                        __cf_amount_key: true
-                    },
-                    required: ["element", "__cf_amount_key"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: ["number", "undefined"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    element: element,
-                    __cf_amount_key: __cf_amount_key
-                }, ({ element, __cf_amount_key }) => element[__cf_amount_key]).for("amount", true);
-                return (<span>{amount}</span>);
-            }, {
+        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
                 type: "object",
                 properties: {
                     element: {
@@ -77,7 +78,7 @@ export default pattern((state) => {
                     }
                 }
             } as const satisfies __cfHelpers.JSONSchema), {})}
-      </div>)
+      </div>),
     };
 }, {
     type: "object",

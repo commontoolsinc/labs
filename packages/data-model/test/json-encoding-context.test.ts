@@ -1,26 +1,35 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { JsonEncodingContext } from "../json-encoding-context.ts";
-import type { FabricValue, ReconstructionContext } from "../interface.ts";
+import type { FabricValue } from "../interface.ts";
 import type { JsonWireValue } from "../json-type-handlers.ts";
 import { UnknownValue } from "../unknown-value.ts";
 import { ProblematicValue } from "../problematic-value.ts";
 import { FabricEpochDays, FabricEpochNsec } from "../fabric-epoch.ts";
 import { FabricError } from "../fabric-native-instances.ts";
+import { isDeepFrozen } from "../deep-freeze.ts";
+import { BaseReconstructionContext } from "../base-reconstruction-context.ts";
 import {
   resetDataModelConfig,
   setDataModelConfig,
   shallowFabricFromNativeValue,
 } from "../fabric-value.ts";
 
+/**
+ * Shared test `ReconstructionContext`: `getCell()` always throws (no test
+ * here reaches it); `shouldDeepFreeze` is inherited from
+ * `BaseReconstructionContext` (defaults to `true`).
+ */
+class TestReconstructionContext extends BaseReconstructionContext {
+  override getCell(): never {
+    throw new Error("getCell not implemented in test runtime");
+  }
+}
+
 /** Creates a standard test context (non-lenient) and a mock runtime. */
 function makeTestContext() {
   const context = new JsonEncodingContext();
-  const runtime: ReconstructionContext = {
-    getCell(_ref) {
-      throw new Error("getCell not implemented in test runtime");
-    },
-  };
+  const runtime = new TestReconstructionContext();
   return { context, runtime };
 }
 
@@ -490,11 +499,7 @@ describe("JsonEncodingContext", () => {
 
     it("non-string state -> ProblematicValue (lenient)", () => {
       const ctx = new JsonEncodingContext({ lenient: true });
-      const runtime: ReconstructionContext = {
-        getCell(_ref) {
-          throw new Error("getCell not implemented in test runtime");
-        },
-      };
+      const runtime = new TestReconstructionContext();
       const encoded = ENCODING_PREFIX +
         JSON.stringify({ "/SpecialNumber@1": 0 });
       const result = ctx.decode(encoded, runtime);
@@ -506,11 +511,7 @@ describe("JsonEncodingContext", () => {
 
     it("unknown literal -> ProblematicValue (lenient)", () => {
       const ctx = new JsonEncodingContext({ lenient: true });
-      const runtime: ReconstructionContext = {
-        getCell(_ref) {
-          throw new Error("getCell not implemented in test runtime");
-        },
-      };
+      const runtime = new TestReconstructionContext();
       const encoded = ENCODING_PREFIX +
         JSON.stringify({ "/SpecialNumber@1": "Infinity" }); // missing leading +
       const result = ctx.decode(encoded, runtime);
@@ -588,11 +589,7 @@ describe("JsonEncodingContext", () => {
 
     it("non-string state -> ProblematicValue (lenient)", () => {
       const ctx = new JsonEncodingContext({ lenient: true });
-      const runtime: ReconstructionContext = {
-        getCell(_ref) {
-          throw new Error("getCell not implemented in test runtime");
-        },
-      };
+      const runtime = new TestReconstructionContext();
       const encodedJson = ENCODING_PREFIX +
         JSON.stringify({ "/Symbol@1": 42 });
       const result = ctx.decode(encodedJson, runtime);
@@ -1559,11 +1556,7 @@ describe("JsonEncodingContext", () => {
 
     it("lenient mode wraps failed handler reconstruction", () => {
       const context = new JsonEncodingContext({ lenient: true });
-      const runtime: ReconstructionContext = {
-        getCell(_ref) {
-          throw new Error("not available");
-        },
-      };
+      const runtime = new TestReconstructionContext();
 
       // BigInt@1 with a non-string state produces ProblematicValue
       // in lenient mode because the handler validates the state type.
@@ -1579,11 +1572,7 @@ describe("JsonEncodingContext", () => {
 
     it("lenient mode wraps failed class-registry reconstruction", () => {
       const context = new JsonEncodingContext({ lenient: true });
-      const runtime: ReconstructionContext = {
-        getCell(_ref) {
-          throw new Error("not available");
-        },
-      };
+      const runtime = new TestReconstructionContext();
 
       // Map@1 always throws on RECONSTRUCT ("not yet implemented"),
       // triggering lenient wrapping.
@@ -1656,6 +1645,201 @@ describe("JsonEncodingContext", () => {
   });
 
   // --------------------------------------------------------------------------
+  // TypeHandler.deserialize() deep-frozen contract (arm-1 only)
+  // --------------------------------------------------------------------------
+
+  describe("TypeHandler.deserialize() deep-frozen contract", () => {
+    // The contract is scoped to the type-handler dispatch arm only: anything
+    // returned via a registered `TypeHandler` is guaranteed deep-frozen at
+    // the `deserialize()` boundary, so callers do not each have to freeze.
+    // The class-registry fallback arm is a separate sibling branch and is
+    // intentionally NOT covered by this contract.
+
+    it("handler-produced value is deep-frozen at the boundary", () => {
+      // `/EpochNsec@1` dispatches through a registered TypeHandler (arm-1);
+      // the reconstructed FabricEpochNsec must be deep-frozen on return.
+      const result = fromWireFormat(
+        { "/EpochNsec@1": "AA" } as JsonWireValue,
+      );
+      expect(result).toBeInstanceOf(FabricEpochNsec);
+      expect(isDeepFrozen(result)).toBe(true);
+    });
+
+    it("lenient-mode ProblematicValue from a handler is deep-frozen", () => {
+      // `/BigInt@1` with non-string state fails handler validation; the
+      // lenient catch produces a ProblematicValue -- still an arm-1 return,
+      // so the contract deep-freezes it (not a crash: it is the value
+      // lenient mode produces precisely to avoid crashing).
+      const ctx = new JsonEncodingContext({ lenient: true });
+      const runtime = new TestReconstructionContext();
+      const result = ctx.decode(
+        ENCODING_PREFIX + JSON.stringify({ "/BigInt@1": 42 }),
+        runtime,
+      );
+      expect(result).toBeInstanceOf(ProblematicValue);
+      expect(isDeepFrozen(result)).toBe(true);
+    });
+
+    it("handler round-trip yields a deep-frozen result", () => {
+      const result = roundTrip(
+        new FabricEpochNsec(1704067200000000000n) as FabricValue,
+      );
+      expect(result).toBeInstanceOf(FabricEpochNsec);
+      expect(isDeepFrozen(result)).toBe(true);
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Deep-frozen wire invariant: decode() / decodeFromBytes() symmetry
+  // --------------------------------------------------------------------------
+
+  describe("deep-frozen wire invariant (decode/decodeFromBytes symmetry)", () => {
+    // Every `JsonWireValue` handed to `deserialize()` must be deep-frozen, so
+    // both `deserialize()` entry points must produce equally deep-frozen
+    // results: `decode()` (string path) and `decodeFromBytes()` (bytes path
+    // via `fromBytes()`).
+    //
+    // Regression guard: the `/quote` arm does `return state`, handing back a
+    // node lifted straight out of the parsed wire tree (see `unwrapTag`'s
+    // contract). That shortcut is only sound because the parsed tree is
+    // deep-frozen at construction. `fromBytes()` has always done this;
+    // `decode()` once did NOT (it parsed inline without `deepFreeze()`), so a
+    // tweak that removed the `/quote` arm's own `deepFreeze()` made
+    // string-path `/quote` results come back mutable. These tests pin the
+    // symmetry so neither construction site can silently drop the guarantee.
+
+    /**
+     * Decodes the same wire tree both ways. The string path needs the
+     * encoding prefix; the bytes path does not (it does not strip one).
+     */
+    function decodeBothPaths(
+      data: JsonWireValue,
+    ): { viaString: FabricValue; viaBytes: FabricValue } {
+      const { context, runtime } = makeTestContext();
+      const json = JSON.stringify(data);
+      const viaString = context.decode(ENCODING_PREFIX + json, runtime);
+      const viaBytes = context.decodeFromBytes(
+        new TextEncoder().encode(json),
+        runtime,
+      );
+      return { viaString, viaBytes };
+    }
+
+    const cases: Array<[string, JsonWireValue]> = [
+      ["plain nested object + array", { a: { b: [1, 2, { c: 3 }] } }],
+      ["/quote literal with nested object and array", {
+        "/quote": { x: [1, { y: 2 }], z: { w: [3, 4] } },
+      }],
+      ["/quote literal whose top value is an array", {
+        "/quote": [[1, 2], { a: 1 }, [{ b: 2 }]],
+      }],
+      ["/object-wrapped object with a /-prefixed key", {
+        "/object": { "/k": { nested: [1, 2] } },
+      }],
+      ["tagged handler value (EpochNsec, arm-1 contract)", {
+        "/EpochNsec@1": "AA",
+      }],
+      ["mixed: a /quote value beside a normal array", {
+        meta: [1, 2],
+        lit: { "/quote": { deep: { deeper: [9] } } },
+      }],
+    ];
+
+    for (const [name, wire] of cases) {
+      it(`both paths yield a deep-frozen, equal result: ${name}`, () => {
+        const { viaString, viaBytes } = decodeBothPaths(wire);
+        expect(isDeepFrozen(viaString)).toBe(true);
+        expect(isDeepFrozen(viaBytes)).toBe(true);
+        expect(viaString).toEqual(viaBytes);
+      });
+    }
+
+    it("string path deep-freezes /quote content at every depth (regression for decode() vs fromBytes())", () => {
+      const wire = {
+        "/quote": { outer: { inner: [1, 2] } },
+      } as JsonWireValue;
+      const { context, runtime } = makeTestContext();
+      const result = context.decode(
+        ENCODING_PREFIX + JSON.stringify(wire),
+        runtime,
+      ) as Record<string, Record<string, FabricValue[]>>;
+
+      expect(isDeepFrozen(result)).toBe(true);
+      expect(Object.isFrozen(result.outer)).toBe(true);
+      expect(Object.isFrozen(result.outer.inner)).toBe(true);
+      expect(() => {
+        (result.outer.inner as unknown as number[])[0] = 99;
+      }).toThrow();
+      expect(() => {
+        (result.outer as Record<string, unknown>).added = true;
+      }).toThrow();
+    });
+
+    it("bytes path deep-freezes /quote content at every depth", () => {
+      const wire = {
+        "/quote": { outer: { inner: [{ deep: 1 }] } },
+      } as JsonWireValue;
+      const { context, runtime } = makeTestContext();
+      const result = context.decodeFromBytes(
+        new TextEncoder().encode(JSON.stringify(wire)),
+        runtime,
+      ) as Record<string, Record<string, Array<Record<string, FabricValue>>>>;
+
+      expect(isDeepFrozen(result)).toBe(true);
+      expect(Object.isFrozen(result.outer.inner[0])).toBe(true);
+      expect(() => {
+        (result.outer.inner[0] as Record<string, unknown>).deep = 2;
+      }).toThrow();
+    });
+
+    it("serialize() output for /quote-routed values is itself deep-frozen (flat and nested)", () => {
+      // White-box: the serialized /quote tree is transient -- encode() and
+      // encodeToBytes() immediately JSON.stringify it and discard it -- so
+      // its frozen-ness is not observable via the public API. Reach into the
+      // private serializer to pin the guarantee directly.
+      //
+      // It holds because `unquote()` rebuilds + recursively freezes every
+      // array/object, so each member handed to the container's shallow
+      // `Object.freeze` is itself already deep-frozen. A future change to
+      // `unquote()` that stopped rebuilding (or stopped freezing) would
+      // silently break this; this test is the guard. NOTE: the non-/quote
+      // serialize outputs (bare objects/arrays, /object-wrapped, handler
+      // state) are intentionally NOT asserted here -- that throwaway tree is
+      // out of scope and is not deep-frozen.
+      const { context } = makeTestContext();
+      const serialize = (context as unknown as {
+        serialize(v: FabricValue): JsonWireValue;
+      }).serialize.bind(context);
+
+      const flat = serialize(
+        { "/a": 1, "/b": { plain: [1, 2] } } as unknown as FabricValue,
+      );
+      const nested = serialize(
+        { "/a": { "/b": { c: [1, { d: 2 }] } } } as unknown as FabricValue,
+      );
+
+      expect(flat).toEqual({
+        "/quote": { "/a": 1, "/b": { plain: [1, 2] } },
+      });
+      expect(isDeepFrozen(flat)).toBe(true);
+      expect(isDeepFrozen(nested)).toBe(true);
+    });
+
+    it("serialize→/quote→decode round-trip is deep-frozen end-to-end", () => {
+      // An object whose keys are all /-prefixed but whose values are all
+      // quote-safe routes through the serialize-side /quote path, then back
+      // through the deserialize /quote `return state` arm.
+      const value = {
+        "/a": 1,
+        "/b": { plain: [1, 2] },
+      } as unknown as FabricValue;
+      const result = roundTrip(value);
+      expect(isDeepFrozen(result)).toBe(true);
+      expect(result).toEqual({ "/a": 1, "/b": { plain: [1, 2] } });
+    });
+  });
+
+  // --------------------------------------------------------------------------
   // JsonEncodingContext public API
   // --------------------------------------------------------------------------
 
@@ -1670,22 +1854,14 @@ describe("JsonEncodingContext", () => {
 
     it("decode parses a prefixed JSON string back to a value", () => {
       const ctx = new JsonEncodingContext();
-      const runtime: ReconstructionContext = {
-        getCell(_ref) {
-          throw new Error("not implemented");
-        },
-      };
+      const runtime = new TestReconstructionContext();
       const result = ctx.decode(ENCODING_PREFIX + "42", runtime);
       expect(result).toBe(42);
     });
 
     it("encode/decode round-trip for tagged types", () => {
       const ctx = new JsonEncodingContext();
-      const runtime: ReconstructionContext = {
-        getCell(_ref) {
-          throw new Error("not implemented");
-        },
-      };
+      const runtime = new TestReconstructionContext();
       const se = new FabricError(new Error("test"));
       const encoded = ctx.encode(se as FabricValue);
       const decoded = ctx.decode(encoded, runtime);
@@ -1695,11 +1871,7 @@ describe("JsonEncodingContext", () => {
 
     it("encodeToBytes/decodeFromBytes round-trip", () => {
       const ctx = new JsonEncodingContext();
-      const runtime: ReconstructionContext = {
-        getCell(_ref) {
-          throw new Error("not implemented");
-        },
-      };
+      const runtime = new TestReconstructionContext();
       const data = {
         name: "test",
         error: new FabricError(new Error("fail")),

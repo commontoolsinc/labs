@@ -26,6 +26,7 @@ import {
 import { getValueAtPath } from "../path-utils.ts";
 import { encodePointer } from "../../../memory/v2/path.ts";
 import { canonicalizeLogicalPath } from "./canonical.ts";
+import { uniqueCfcAtoms } from "./observation.ts";
 import { mergeCfcSchemaEnvelopes } from "./schema-merge.ts";
 import {
   CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
@@ -80,11 +81,13 @@ const labelAtPath = (
 const mergeLabelValues = (
   ...sources: Array<readonly unknown[] | undefined>
 ) => {
-  const merged = [
-    ...new Set(
-      sources.flatMap((source) => source ? [...source] : []),
-    ),
-  ];
+  // Structural dedup via `uniqueCfcAtoms()` rather than reference dedup
+  // via `new Set()`. Atoms can be fabric-converted clones (each
+  // `cloneIfNecessary()` produces a fresh frozen object), so two
+  // logically-identical caveats may not share a JS reference.
+  const merged = uniqueCfcAtoms(
+    sources.flatMap((source) => source ? [...source] : []),
+  );
   return merged.length > 0 ? merged : undefined;
 };
 
@@ -1272,12 +1275,12 @@ export const prepareBoundaryCommit = (
     ensureSchemaDocument(
       tx,
       space,
-      schemaAndHash.hashString,
+      schemaAndHash.taggedHashString,
       schemaAndHash.schema,
     );
     const metadata: CfcMetadata = {
       version: 1,
-      schemaHash: schemaAndHash.hashString,
+      schemaHash: schemaAndHash.taggedHashString,
       labelMap: {
         version: 1,
         entries: coalescedLabelEntries,

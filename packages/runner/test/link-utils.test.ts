@@ -211,6 +211,24 @@ describe("link-utils", () => {
   });
 
   describe("parseLink", () => {
+    it("runtime getCellFromEntityId should accept an explicit scope", () => {
+      const cell = runtime.getCellFromEntityId(
+        space,
+        { "/": "scoped-entity" },
+        [],
+        undefined,
+        undefined,
+        "user",
+      );
+
+      expect(cell.getAsNormalizedFullLink()).toMatchObject({
+        id: "of:scoped-entity",
+        path: [],
+        space,
+        scope: "user",
+      });
+    });
+
     it("should parse cells to normalized links", () => {
       const cell = runtime.getCell(space, "test", undefined, tx);
       cell.set({ value: 42 });
@@ -1290,6 +1308,42 @@ describe("link-utils", () => {
       });
     });
 
+    it("should parse scope suffixes on the handle segment", () => {
+      const link = `/${longId}@user/path/to/cell`;
+      const result = parseLLMFriendlyLink(link, space);
+
+      expect(result).toEqual({
+        id: longId,
+        path: ["path", "to", "cell"],
+        space: space,
+        scope: "user",
+      });
+    });
+
+    it("should parse scope suffixes on cross-space handles", () => {
+      const otherSpace = "did:key:z6MkrX123abc";
+      const link = `/@${otherSpace}/${longId}@session/path`;
+      const result = parseLLMFriendlyLink(link, space);
+
+      expect(result).toEqual({
+        id: longId,
+        path: ["path"],
+        space: otherSpace,
+        scope: "session",
+      });
+    });
+
+    it("should reject invalid scope suffixes on the handle segment", () => {
+      expect(() => parseLLMFriendlyLink(`/${longId}@any/path`, space)).toThrow(
+        /Invalid scope suffix/,
+      );
+      expect(() => parseLLMFriendlyLink(`/${longId}@inherit/path`, space))
+        .toThrow(/Invalid scope suffix/);
+      expect(() => parseLLMFriendlyLink(`/${longId}@/path`, space)).toThrow(
+        /Invalid scope suffix/,
+      );
+    });
+
     it("should parse link without space if optional", () => {
       const link = `/${longId}/path`;
       const result = parseLLMFriendlyLink(link);
@@ -1310,6 +1364,13 @@ describe("link-utils", () => {
       expect(() => parseLLMFriendlyLink("/path/only", space)).toThrow(
         'Target must include a piece handle, e.g. "/of:bafyabc123/path".',
       );
+    });
+
+    it("should throw a controlled error if cross-space target omits handle", () => {
+      expect(() => parseLLMFriendlyLink("/@did:key:z6MkrX123abc", space))
+        .toThrow(
+          'Target must include a piece handle, e.g. "/of:bafyabc123/path".',
+        );
     });
 
     it("should throw if handle is too short (human name)", () => {
@@ -1333,6 +1394,30 @@ describe("link-utils", () => {
       const result = createLLMFriendlyLink(link as any);
 
       expect(result).toBe(`/${longId}/path/to/cell`);
+    });
+
+    it("should create LLM friendly links with non-space scope suffixes", () => {
+      const link: NormalizedLink = {
+        id: longId,
+        path: ["path"],
+        space: space,
+        scope: "user",
+      };
+      const result = createLLMFriendlyLink(link as any);
+
+      expect(result).toBe(`/${longId}@user/path`);
+    });
+
+    it("should omit explicit space scope when creating LLM friendly links", () => {
+      const link: NormalizedLink = {
+        id: longId,
+        path: ["path"],
+        space: space,
+        scope: "space",
+      };
+      const result = createLLMFriendlyLink(link as any);
+
+      expect(result).toBe(`/${longId}/path`);
     });
 
     it("should handle empty path", () => {

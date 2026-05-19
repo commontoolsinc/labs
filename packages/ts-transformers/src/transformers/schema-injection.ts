@@ -19,7 +19,6 @@ import {
   registerSyntheticCallType,
   typeToSchemaTypeNode,
   unwrapCellLikeType,
-  unwrapOpaqueLikeType,
   widenLiteralType,
 } from "../ast/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
@@ -37,9 +36,11 @@ import {
   type CapabilitySummaryApplicationMode,
   containsAnyOrUnknownTypeNode,
   isCellLikeTypeNode,
+  isStreamTypeNode,
   printTypeNode,
 } from "./type-shrinking.ts";
 import { isPatternFactoryCalleeExpression } from "./structural-reactive-factory.ts";
+import { getCellKind } from "./opaque-ref/opaque-ref.ts";
 
 type UiContractHint = NonNullable<SchemaHint["cfcUiContract"]>;
 type CellScope = "space" | "user" | "session";
@@ -132,6 +133,13 @@ function extractCellLikeInnerTypeNode(
   return node.typeArguments[0];
 }
 
+function isStreamCellType(
+  type: ts.Type | undefined,
+  checker: ts.TypeChecker,
+): boolean {
+  return !!type && getCellKind(type, checker) === "stream";
+}
+
 function parameterUsesCellLikeMethods(
   fn: ts.ArrowFunction | ts.FunctionExpression,
   index: number,
@@ -202,7 +210,9 @@ function findCapabilitySummaryForParameter(
     })
     : capabilityRegistry
     ? (capabilityRegistry.get(fn) ?? analyzeFunctionCapabilities(fn))
-    : undefined;
+    : analyzeFunctionCapabilities(fn, {
+      checker: options?.checker,
+    });
   if (!summary) return undefined;
   const parameter = fn.parameters[index];
   if (!parameter) return undefined;
@@ -241,9 +251,17 @@ function applyCapabilitySummaryToArgument(
   if (!paramSummary) {
     return argumentNode;
   }
-
-  const innerTypeNode = extractCellLikeInnerTypeNode(argumentNode);
+  const innerTypeNode = extractCellLikeInnerTypeNode(argumentNode) ??
+    typeToSchemaTypeNode(
+      argumentType && isCellLikeType(argumentType, checker)
+        ? unwrapCellLikeType(argumentType, checker)
+        : undefined,
+      checker,
+      sourceFile,
+    );
   const shouldWrap = !!innerTypeNode;
+  const preserveStreamWrapper = shouldWrap &&
+    (isStreamTypeNode(argumentNode) || isStreamCellType(argumentType, checker));
   const baseTypeNode = innerTypeNode ?? argumentNode;
   let baseType = shouldWrap && argumentType
     ? (unwrapCellLikeType(argumentType, checker) ?? argumentType)
@@ -269,6 +287,7 @@ function applyCapabilitySummaryToArgument(
     mode === "defaults_only" ? "opaque" : paramSummary.capability,
     context,
     fnNode ?? fn,
+    preserveStreamWrapper,
   );
 }
 
@@ -301,6 +320,9 @@ function applyCapabilitySummaryToParameter(
 
   const innerTypeNode = extractCellLikeInnerTypeNode(parameterNode);
   const shouldWrap = !!innerTypeNode;
+  const preserveStreamWrapper = shouldWrap &&
+    (isStreamTypeNode(parameterNode) ||
+      isStreamCellType(parameterType, checker));
   const baseTypeNode = innerTypeNode ?? parameterNode;
   let baseType = shouldWrap && parameterType
     ? (unwrapCellLikeType(parameterType, checker) ?? parameterType)
@@ -326,6 +348,7 @@ function applyCapabilitySummaryToParameter(
     paramSummary.capability,
     context,
     fnNode ?? fn,
+    preserveStreamWrapper,
   );
 }
 
@@ -631,21 +654,32 @@ function createToSchemaCall(
     "cfHelpers" | "factory"
   >,
   typeNode: ts.TypeNode,
-  options?: { widenLiterals?: boolean },
+  options?: SchemaCallOptions,
 ): ts.CallExpression {
   const expr = cfHelpers.getHelperExpr("toSchema");
 
-  // Build arguments array if options are provided
   const args: ts.Expression[] = [];
-  if (options?.widenLiterals) {
-    args.push(
-      factory.createObjectLiteralExpression([
+  if (isSchemaCallOptionExpressions(options)) {
+    args.push(...options);
+  } else if (options?.widenLiterals || options?.scope) {
+    const properties: ts.ObjectLiteralElementLike[] = [];
+    if (options.widenLiterals) {
+      properties.push(
         factory.createPropertyAssignment(
           "widenLiterals",
           factory.createTrue(),
         ),
-      ]),
-    );
+      );
+    }
+    if (options.scope) {
+      properties.push(
+        factory.createPropertyAssignment(
+          "scope",
+          factory.createStringLiteral(options.scope),
+        ),
+      );
+    }
+    args.push(factory.createObjectLiteralExpression(properties));
   }
 
   return factory.createCallExpression(
@@ -653,6 +687,28 @@ function createToSchemaCall(
     [typeNode],
     args,
   );
+}
+
+type SchemaCallOptions =
+  | { widenLiterals?: boolean; scope?: CellScope }
+  | readonly ts.Expression[];
+
+function isSchemaCallOptionExpressions(
+  options: SchemaCallOptions | undefined,
+): options is readonly ts.Expression[] {
+  return Array.isArray(options);
+}
+
+function isToSchemaCall(node: ts.Expression): node is ts.CallExpression {
+  if (!ts.isCallExpression(node)) return false;
+  if (!node.typeArguments || node.typeArguments.length !== 1) return false;
+
+  if (ts.isIdentifier(node.expression)) {
+    return node.expression.text === "toSchema";
+  }
+
+  return ts.isPropertyAccessExpression(node.expression) &&
+    node.expression.name.text === "toSchema";
 }
 
 function createUnknownSchemaTypeNode(factory: ts.NodeFactory): ts.TypeNode {
@@ -779,6 +835,35 @@ function isCellScopeValue(value: string): value is CellScope {
   return value === "space" || value === "user" || value === "session";
 }
 
+function scopedConstructorAccessorScope(
+  node: ts.CallExpression,
+): CellScope | undefined {
+  const callee = unwrapExpression(node.expression);
+  if (!ts.isPropertyAccessExpression(callee)) return undefined;
+
+  const constructorView = unwrapExpression(callee.expression);
+  if (!ts.isPropertyAccessExpression(constructorView)) return undefined;
+
+  switch (constructorView.name.text) {
+    case "perSpace":
+      return "space";
+    case "perUser":
+      return "user";
+    case "perSession":
+      return "session";
+    default:
+      return undefined;
+  }
+}
+
+function cellConstructorCallScope(
+  node: ts.CallExpression,
+  checker: ts.TypeChecker,
+): CellScope | undefined {
+  return scopedConstructorAccessorScope(node) ??
+    scopedFactoryContextualScope(node, checker);
+}
+
 function isAlreadyScopedFactoryCall(node: ts.CallExpression): boolean {
   const callee = unwrapExpression(node.expression);
   return ts.isCallExpression(callee) &&
@@ -877,7 +962,7 @@ function createSchemaCallWithRegistryTransfer(
   typeNode: ts.TypeNode,
   checker: ts.TypeChecker,
   typeRegistry?: TypeRegistry,
-  options?: { widenLiterals?: boolean },
+  options?: SchemaCallOptions,
   schemaHints?: TransformationContext["options"]["schemaHints"],
 ): ts.CallExpression {
   const emittedTypeNode = normalizeSchemaInjectionTypeNode(
@@ -946,7 +1031,7 @@ function createRegisteredSchemaCallFromResolvedType(
   resolved: ResolvedInjectableSchemaType,
   checker: ts.TypeChecker,
   typeRegistry?: TypeRegistry,
-  options?: { widenLiterals?: boolean },
+  options?: SchemaCallOptions,
 ): ts.CallExpression | undefined {
   if (!resolved.typeNode) {
     return undefined;
@@ -1141,12 +1226,28 @@ function resolveDualSchemaBuilderTypes(
     isCellLikeType(options.fallbackArgumentType, checker) &&
     parameterUsesCellLikeMethods(callback, 0)
   ) {
-    argumentTypeValue = options.fallbackArgumentType;
-    argumentTypeNode = typeToSchemaTypeNode(
+    const fallbackArgumentNode = typeToSchemaTypeNode(
       options.fallbackArgumentType,
       checker,
       sourceFile,
-    ) ?? argumentTypeNode;
+    );
+    if (fallbackArgumentNode) {
+      ({
+        argumentTypeNode,
+        argumentTypeValue,
+      } = applyCallbackBuilderArgumentCapabilitySummary(
+        callback,
+        fallbackArgumentNode,
+        options.fallbackArgumentType,
+        checker,
+        sourceFile,
+        factory,
+        capabilityRegistry,
+        context,
+      ));
+    } else {
+      argumentTypeValue = options.fallbackArgumentType;
+    }
   }
 
   if (
@@ -3036,6 +3137,52 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
       if (callKind?.kind === "builder" && callKind.builderName === "lift") {
         const factory = transformation.factory;
 
+        const firstArgument = node.arguments[0];
+        if (firstArgument && isToSchemaCall(firstArgument)) {
+          const argumentType = firstArgument.typeArguments?.[0];
+          const liftCallback = resolveFunctionLikeExpression(
+            node.arguments[2],
+            checker,
+            sourceFile,
+          );
+          if (argumentType && liftCallback) {
+            const argumentTypeValue = getTypeFromTypeNodeWithFallback(
+              argumentType,
+              checker,
+              typeRegistry,
+            );
+            const {
+              argumentTypeNode: narrowedArgumentType,
+              argumentTypeValue: narrowedArgumentTypeValue,
+            } = applyCallbackBuilderArgumentCapabilitySummary(
+              liftCallback,
+              argumentType,
+              argumentTypeValue,
+              checker,
+              sourceFile,
+              factory,
+              capabilityRegistry,
+              context,
+            );
+            const inputSchema = createSchemaCallWithRegistryTransfer(
+              context,
+              narrowedArgumentType,
+              checker,
+              typeRegistry,
+              firstArgument.arguments,
+            );
+            if (narrowedArgumentTypeValue && typeRegistry) {
+              typeRegistry.set(inputSchema, narrowedArgumentTypeValue);
+            }
+            const updated = factory.createCallExpression(
+              node.expression,
+              node.typeArguments,
+              [inputSchema, ...node.arguments.slice(1)],
+            );
+            return ts.visitEachChild(updated, visit, transformation);
+          }
+        }
+
         if (node.typeArguments && node.typeArguments.length >= 2) {
           const [argumentType, resultType] = node.typeArguments;
           if (!argumentType || !resultType) {
@@ -3181,6 +3328,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
         const factory = transformation.factory;
         const typeArgs = node.typeArguments;
         const args = node.arguments;
+        const scope = cellConstructorCallScope(node, checker);
 
         // If already has 2 arguments, assume schema is already present
         if (args.length >= 2) {
@@ -3195,21 +3343,27 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           typeRegistry,
           () => {
             const valueArg = args[0];
-            if (!valueArg) {
+            if (valueArg) {
+              const valueType = inferExpressionTypeWithInitializerFallback(
+                valueArg,
+                checker,
+                sourceFile,
+                factory,
+                typeRegistry,
+                capabilityRegistry,
+                context,
+              );
+              return valueType && !isUnresolvedSchemaType(valueType)
+                ? widenLiteralType(valueType, checker)
+                : valueType;
+            }
+            if (!scope) {
               return undefined;
             }
-            const valueType = inferExpressionTypeWithInitializerFallback(
-              valueArg,
-              checker,
-              sourceFile,
-              factory,
-              typeRegistry,
-              capabilityRegistry,
-              context,
-            );
-            return valueType && !isUnresolvedSchemaType(valueType)
-              ? widenLiteralType(valueType, checker)
-              : valueType;
+            const contextualType = inferSchemaContextualType(node, checker);
+            return contextualType
+              ? unwrapCellLikeType(contextualType, checker)
+              : undefined;
           },
         );
 
@@ -3218,7 +3372,9 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           resolved,
           checker,
           typeRegistry,
-          resolved.inferred ? { widenLiterals: true } : undefined,
+          resolved.inferred || scope
+            ? { ...(resolved.inferred && { widenLiterals: true }), scope }
+            : undefined,
         );
 
         if (schemaCall) {
@@ -3240,6 +3396,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
       if (callKind?.kind === "cell-for") {
         const factory = transformation.factory;
         const typeArgs = node.typeArguments;
+        const scope = cellConstructorCallScope(node, checker);
 
         // Check if already wrapped in asSchema
         if (
@@ -3258,7 +3415,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           () => {
             const contextualType = inferSchemaContextualType(node, checker);
             return contextualType
-              ? unwrapOpaqueLikeType(contextualType, checker)
+              ? unwrapCellLikeType(contextualType, checker)
               : undefined;
           },
         );
@@ -3268,6 +3425,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           resolved,
           checker,
           typeRegistry,
+          scope ? { scope } : undefined,
         );
 
         if (schemaCall) {

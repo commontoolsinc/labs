@@ -137,6 +137,7 @@ export const writeFileTool: HarnessToolDefinition<
         command,
         args,
         stdinText: input.content,
+        cfcInputLabelPaths: [["args"], ["stdin"]],
       }),
     });
     if (result.exitCode !== 0) {

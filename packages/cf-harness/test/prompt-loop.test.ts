@@ -207,34 +207,40 @@ const observedCfcResult = (
     stderrPolicy?: "observed" | "denied";
     stderr?: string;
     exitCode?: number;
+    stdoutLabel?: CfcSandboxResult["stdout"]["label"];
+    stderrLabel?: CfcSandboxResult["stderr"]["label"];
+    exitCodeLabel?: CfcSandboxResult["exitCode"]["label"];
   } = {},
 ): CfcSandboxResult => ({
   version: 1,
   stdout: {
     channel: "stdout",
     policy: "observed",
-    label: { confidentiality: ["public"] },
-    segments: [{ text: stdout, label: { confidentiality: ["public"] } }],
+    label: options.stdoutLabel ?? { confidentiality: ["public"] },
+    segments: [{
+      text: stdout,
+      label: options.stdoutLabel ?? { confidentiality: ["public"] },
+    }],
   },
   stderr: options.stderrPolicy === "denied"
     ? {
       channel: "stderr",
       policy: "denied",
-      label: { confidentiality: ["secret"] },
+      label: options.stderrLabel ?? { confidentiality: ["secret"] },
       reason: "stderr release denied",
     }
     : {
       channel: "stderr",
       policy: "observed",
-      label: { confidentiality: ["public"] },
+      label: options.stderrLabel ?? { confidentiality: ["public"] },
       segments: [{
         text: options.stderr ?? "",
-        label: { confidentiality: ["public"] },
+        label: options.stderrLabel ?? { confidentiality: ["public"] },
       }],
     },
   exitCode: {
     policy: "observed",
-    label: { confidentiality: ["public"] },
+    label: options.exitCodeLabel ?? { confidentiality: ["public"] },
     value: options.exitCode ?? 0,
   },
 });
@@ -249,6 +255,7 @@ Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant 
       ]),
       runId: "run-loop",
       model: "gpt-5.4",
+      cfcEnforcementMode: "disabled",
       now: (() => {
         const timestamps = [
           "2026-04-15T20:00:00.000Z",
@@ -2178,7 +2185,12 @@ Deno.test("CfHarnessPromptLoop reports child run failures through delegate_task 
     apiKey: "test-key",
     engine: new CfHarnessEngine({
       sandboxRuntime: new FakeSandboxRuntime([
-        { stdout: "child file", stderr: "", exitCode: 0 },
+        {
+          stdout: "child file",
+          stderr: "",
+          exitCode: 0,
+          cfcResult: observedCfcResult("child file"),
+        },
       ]),
       runId: "run-delegate-child-failure",
       model: "gpt-5.4",
@@ -2818,6 +2830,7 @@ Deno.test("CfHarnessPromptLoop fails when the model exceeds the configured turn 
       ]),
       runId: "run-max-turns",
       model: "gpt-5.4",
+      cfcEnforcementMode: "disabled",
     }),
     maxModelTurns: 1,
     fetchFn: () =>
@@ -3292,6 +3305,542 @@ Deno.test("CfHarnessPromptLoop exposes mediated bash output instead of raw stdou
   assertEquals(content.exitCode, 0);
   assertEquals(content.cfc.stdout.policy, "observed");
   assertEquals(content.cfc.stderr.policy, "denied");
+});
+
+const labelHasConfidentialityValue = (
+  label: unknown,
+  value: unknown,
+): boolean =>
+  typeof label === "object" &&
+  label !== null &&
+  "confidentiality" in label &&
+  Array.isArray(label.confidentiality) &&
+  label.confidentiality.some((entry) =>
+    JSON.stringify(entry) === JSON.stringify(value)
+  );
+
+const invocationInputLabelContains = (
+  runState: HarnessRunState,
+  invocationIndex: number,
+  pathRoot: string,
+  value: unknown,
+): boolean => {
+  const labels = runState.cfcInvocationContexts?.[invocationIndex]
+    ?.cfcInputLabels;
+  const entry = labels?.entries.find((entry) =>
+    entry.path.length === 1 && entry.path[0] === pathRoot
+  );
+  return labelHasConfidentialityValue(entry?.label, value);
+};
+
+Deno.test("CfHarnessPromptLoop denies read_file content without CFC metadata in enforce mode", async () => {
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime([
+        { stdout: "secret from file\n", stderr: "", exitCode: 0 },
+      ]),
+      runId: "run-read-file-missing-cfc-result",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "enforce-explicit",
+    }),
+    fetchFn: (() => {
+      let callCount = 0;
+      return () => {
+        callCount += 1;
+        const payload = callCount === 1
+          ? {
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "",
+                tool_calls: [{
+                  id: "call-read-missing-cfc-result",
+                  type: "function",
+                  function: {
+                    name: "read_file",
+                    arguments: JSON.stringify({ path: "secret.txt" }),
+                  },
+                }],
+              },
+            }],
+          }
+          : {
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "Handled denied file output.",
+              },
+            }],
+          };
+        return Promise.resolve(
+          new Response(JSON.stringify(payload), { status: 200 }),
+        );
+      };
+    })(),
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Read a file.",
+  });
+
+  const toolMessage = result.transcript.at(-2);
+  assert(toolMessage !== undefined && toolMessage.role === "tool");
+  assert(!toolMessage.content.includes("secret from file"));
+  assertEquals(JSON.parse(toolMessage.content), {
+    type: "cf-harness.observation-denied",
+    reason: "not-observable",
+    detail: "read_file output did not include trusted CFC mediation metadata",
+    handle: {
+      type: "cf-harness.opaque-handle",
+      handleId: "run-read-file-missing-cfc-result:read_file:1:output",
+      scope: "run",
+      createdAt: JSON.parse(toolMessage.content).handle.createdAt,
+    },
+  });
+  assertEquals(result.runState.policyEvents.at(-1)?.severity, "denied");
+});
+
+Deno.test("CfHarnessPromptLoop exposes mediated read_file content and tracks model context", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const secretLabel = "did:key:read-file-secret";
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime([
+        {
+          stdout: "raw file secret\n",
+          stderr: "",
+          exitCode: 0,
+          cfcResult: observedCfcResult("released file secret\n", {
+            stdoutLabel: { confidentiality: [secretLabel] },
+          }),
+        },
+        {
+          stdout: "second\n",
+          stderr: "",
+          exitCode: 0,
+          cfcResult: observedCfcResult("second released\n"),
+        },
+      ]),
+      runId: "run-read-file-cfc-model-context",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "enforce-explicit",
+    }),
+    fetchFn: (_input, init) => {
+      fetchCalls.push(init ?? {});
+      const payload = fetchCalls.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-read-secret-file",
+                type: "function",
+                function: {
+                  name: "read_file",
+                  arguments: JSON.stringify({ path: "secret.txt" }),
+                },
+              }],
+            },
+          }],
+        }
+        : fetchCalls.length === 2
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-use-file-secret",
+                type: "function",
+                function: {
+                  name: "bash",
+                  arguments: JSON.stringify({ command: "printf done" }),
+                },
+              }],
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Done.",
+            },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Read a file, then run a direct command.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+
+  const readFileToolMessage = result.transcript.find((message) =>
+    message.role === "tool" && message.toolName === "read_file"
+  );
+  assert(readFileToolMessage !== undefined);
+  assert(!readFileToolMessage.content.includes("raw file secret"));
+  const content = JSON.parse(readFileToolMessage.content);
+  assertEquals(content.outputId, "run-read-file-cfc-model-context:read_file:1");
+  assertEquals(content.path, "/workspace/secret.txt");
+  assertEquals(content.content, "released file secret\n");
+  assertEquals(content.cfc.stdout.policy, "observed");
+  assertEquals(
+    result.runState.cfcModelContext?.observations.some((observation) =>
+      observation.toolCallId === "call-read-secret-file" &&
+      observation.toolId === "read_file" &&
+      observation.channels.includes("stdout") &&
+      labelHasConfidentialityValue(observation.label, secretLabel)
+    ),
+    true,
+  );
+  assertEquals(
+    invocationInputLabelContains(result.runState, 1, "command", secretLabel),
+    true,
+  );
+});
+
+Deno.test("CfHarnessPromptLoop accumulates observed CFC labels for the next model turn", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const secretLabel = "did:key:alice";
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime([
+        {
+          stdout: "raw secret\n",
+          stderr: "",
+          exitCode: 0,
+          cfcResult: observedCfcResult("released secret\n", {
+            stderrPolicy: "denied",
+            stdoutLabel: { confidentiality: [secretLabel] },
+            exitCodeLabel: { confidentiality: [secretLabel] },
+          }),
+        },
+        {
+          stdout: "second\n",
+          stderr: "",
+          exitCode: 0,
+          cfcResult: observedCfcResult("second released\n"),
+        },
+      ]),
+      runId: "run-cfc-model-context",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "enforce-explicit",
+    }),
+    fetchFn: (_input, init) => {
+      fetchCalls.push(init ?? {});
+      const payload = fetchCalls.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-read-secret",
+                type: "function",
+                function: {
+                  name: "bash",
+                  arguments: JSON.stringify({ command: "cat secret.txt" }),
+                },
+              }],
+            },
+          }],
+        }
+        : fetchCalls.length === 2
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-use-secret",
+                type: "function",
+                function: {
+                  name: "bash",
+                  arguments: JSON.stringify({ command: "printf done" }),
+                },
+              }],
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Done.",
+            },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Run a direct command.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+
+  assertEquals(
+    labelHasConfidentialityValue(
+      result.runState.cfcModelContext?.label,
+      secretLabel,
+    ),
+    true,
+  );
+  assertEquals(
+    result.runState.cfcModelContext?.observations.some((observation) =>
+      observation.toolCallId === "call-read-secret" &&
+      observation.channels.includes("stdout") &&
+      labelHasConfidentialityValue(observation.label, secretLabel)
+    ),
+    true,
+  );
+  assertEquals(
+    invocationInputLabelContains(result.runState, 1, "command", secretLabel),
+    true,
+  );
+});
+
+Deno.test("CfHarnessPromptLoop does not taint sibling tool calls from one assistant message", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const siblingLabel = "did:key:sibling";
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime([
+        {
+          stdout: "first raw\n",
+          stderr: "",
+          exitCode: 0,
+          cfcResult: observedCfcResult("first released\n", {
+            stderrPolicy: "denied",
+            stdoutLabel: { confidentiality: [siblingLabel] },
+            exitCodeLabel: { confidentiality: [siblingLabel] },
+          }),
+        },
+        {
+          stdout: "second raw\n",
+          stderr: "",
+          exitCode: 0,
+          cfcResult: observedCfcResult("second released\n"),
+        },
+        {
+          stdout: "third raw\n",
+          stderr: "",
+          exitCode: 0,
+          cfcResult: observedCfcResult("third released\n"),
+        },
+      ]),
+      runId: "run-cfc-model-context-siblings",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "enforce-explicit",
+    }),
+    fetchFn: (_input, init) => {
+      fetchCalls.push(init ?? {});
+      const payload = fetchCalls.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-sibling-first",
+                type: "function",
+                function: {
+                  name: "bash",
+                  arguments: JSON.stringify({ command: "cat secret.txt" }),
+                },
+              }, {
+                id: "call-sibling-second",
+                type: "function",
+                function: {
+                  name: "bash",
+                  arguments: JSON.stringify({ command: "printf sibling" }),
+                },
+              }],
+            },
+          }],
+        }
+        : fetchCalls.length === 2
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-after-siblings",
+                type: "function",
+                function: {
+                  name: "bash",
+                  arguments: JSON.stringify({ command: "printf later" }),
+                },
+              }],
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Done.",
+            },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Run direct commands.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+
+  assertEquals(
+    invocationInputLabelContains(result.runState, 1, "command", siblingLabel),
+    false,
+  );
+  assertEquals(
+    invocationInputLabelContains(result.runState, 2, "command", siblingLabel),
+    true,
+  );
+});
+
+Deno.test("CfHarnessPromptLoop ignores opaque and denied CFC observations for model context", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const opaqueLabel = "did:key:opaque";
+  const opaqueResult: CfcSandboxResult = {
+    version: 1,
+    stdout: {
+      channel: "stdout",
+      policy: "opaque",
+      label: { confidentiality: [opaqueLabel] },
+      byteLength: 32,
+    },
+    stderr: {
+      channel: "stderr",
+      policy: "denied",
+      label: { confidentiality: [opaqueLabel] },
+      reason: "stderr denied",
+    },
+    exitCode: {
+      policy: "denied",
+      label: { confidentiality: [opaqueLabel] },
+      reason: "exit denied",
+    },
+  };
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime([
+        {
+          stdout: "hidden\n",
+          stderr: "hidden stderr\n",
+          exitCode: 1,
+          cfcResult: opaqueResult,
+        },
+        {
+          stdout: "second raw\n",
+          stderr: "",
+          exitCode: 0,
+          cfcResult: observedCfcResult("second released\n"),
+        },
+      ]),
+      runId: "run-cfc-model-context-opaque",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "enforce-explicit",
+    }),
+    fetchFn: (_input, init) => {
+      fetchCalls.push(init ?? {});
+      const payload = fetchCalls.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-opaque",
+                type: "function",
+                function: {
+                  name: "bash",
+                  arguments: JSON.stringify({ command: "cat opaque.txt" }),
+                },
+              }],
+            },
+          }],
+        }
+        : fetchCalls.length === 2
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-after-opaque",
+                type: "function",
+                function: {
+                  name: "bash",
+                  arguments: JSON.stringify({ command: "printf done" }),
+                },
+              }],
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Done.",
+            },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Run a direct command.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+
+  assertEquals(
+    invocationInputLabelContains(result.runState, 1, "command", opaqueLabel),
+    false,
+  );
+  assertEquals(
+    labelHasConfidentialityValue(
+      result.runState.cfcModelContext?.label,
+      opaqueLabel,
+    ),
+    false,
+  );
 });
 
 Deno.test("CfHarnessPromptLoop returns observation-denied tool content in enforce-explicit mode", async () => {

@@ -1,10 +1,13 @@
 import {
   DECONSTRUCT,
+  DEEP_FREEZE,
   type FabricValue,
+  IS_DEEP_FROZEN,
   RECONSTRUCT,
   type ReconstructionContext,
 } from "./interface.ts";
 import { ExplicitTagValue } from "./explicit-tag-value.ts";
+import { deepFreeze } from "./deep-freeze.ts";
 
 /**
  * Container for an unrecognized type's data, used for round-tripping. When
@@ -22,14 +25,46 @@ export class UnknownValue extends ExplicitTagValue {
     return { type: this.typeTag, state: this.state };
   }
 
+  /**
+   * Deep-freezes in place. `typeTag` is an immutable string; the only
+   * `FabricValue`-typed slot is `state`, which is recursed via `subFreeze`
+   * before the wrapper itself is frozen.
+   */
+  [DEEP_FREEZE](
+    subFreeze: (value: FabricValue) => FabricValue,
+  ): FabricValue {
+    subFreeze(this.state);
+    return Object.freeze(this) as unknown as FabricValue;
+  }
+
+  /**
+   * Side-effect-free check mirroring `[DEEP_FREEZE]`'s canonical form: this
+   * wrapper is frozen and `state` is recursively deep-frozen. Never throws.
+   */
+  [IS_DEEP_FROZEN](
+    subIsDeepFrozen: (value: FabricValue) => boolean,
+  ): boolean {
+    return Object.isFrozen(this) && subIsDeepFrozen(this.state);
+  }
+
+  /** @inheritDoc */
+  deepClone(_frozen: boolean): UnknownValue {
+    throw new Error("Cannot yet handle deep cloning of `UnknownValue`.");
+  }
+
   protected shallowUnfrozenClone(): UnknownValue {
     return new UnknownValue(this.typeTag, this.state);
   }
 
   static [RECONSTRUCT](
     state: { type: string; state: FabricValue },
-    _context: ReconstructionContext,
+    context: ReconstructionContext,
   ): UnknownValue {
-    return new UnknownValue(state.type, state.state);
+    const result = new UnknownValue(state.type, state.state);
+    // Honor `shouldDeepFreeze`: produce the type's correct deep-frozen form
+    // via its `[DEEP_FREEZE]` member (recursing through `deepFreeze`).
+    return context.shouldDeepFreeze
+      ? result[DEEP_FREEZE]((v) => deepFreeze(v)) as unknown as UnknownValue
+      : result;
   }
 }

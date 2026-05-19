@@ -82,6 +82,10 @@ export default pattern(() => {
     s1.removePerson.send({ name: "Bob" });
   });
 
+  const action_edit_person_no_payload = action(() => {
+    s1.editPerson.send(undefined as never);
+  });
+
   // Initial state
   const assert_s1_no_people = computed(() => len(s1.people) === 0);
   const assert_s1_three_spots = computed(() => len(s1.spots) === 3);
@@ -100,6 +104,10 @@ export default pattern(() => {
       alice?.spotPreferences.some((s) => s === "1");
   });
   const assert_s1_one_person = computed(() => len(s1.people) === 1);
+  const assert_s1_alice_unchanged = computed(() => {
+    const alice = s1.people.find((p: Person) => p.name === "Alice");
+    return len(s1.people) === 1 && alice?.email === "alice@co.com";
+  });
 
   // After adding Bob
   const assert_s1_two_people = computed(() => len(s1.people) === 2);
@@ -198,12 +206,19 @@ export default pattern(() => {
   const action_remove_spot5 = action(() =>
     s3.removeSpot.send({ spotNumber: "5" })
   );
+  const action_edit_spot_no_payload = action(() => {
+    s3.editSpot.send(undefined as never);
+  });
 
   const assert_s3_three_spots = computed(() => len(s3.spots) === 3);
   const assert_s3_four_spots = computed(() => len(s3.spots) === 4);
   const assert_s3_spot7_label = computed(() => {
     const s = s3.spots.find((sp: ParkingSpot) => sp.spotNumber === "7");
     return s?.label === "Level 2" && s?.active === true;
+  });
+  const assert_s3_spot7_unchanged = computed(() => {
+    const s = s3.spots.find((sp: ParkingSpot) => sp.spotNumber === "7");
+    return len(s3.spots) === 4 && s?.label === "Level 2" && s?.active === true;
   });
   const assert_s3_still_four = computed(() => len(s3.spots) === 4); // dup rejected
   const assert_s3_three_after_remove = computed(() => len(s3.spots) === 3);
@@ -480,6 +495,8 @@ export default pattern(() => {
       { assertion: assert_s1_alice_default_spot },
       { assertion: assert_s1_alice_preferences },
       { assertion: assert_s1_one_person },
+      { action: action_edit_person_no_payload },
+      { assertion: assert_s1_alice_unchanged },
       { action: action_add_bob },
       { assertion: assert_s1_two_people },
       { assertion: assert_s1_bob_preferences },
@@ -503,6 +520,8 @@ export default pattern(() => {
       { action: action_add_spot7 },
       { assertion: assert_s3_four_spots },
       { assertion: assert_s3_spot7_label },
+      { action: action_edit_spot_no_payload },
+      { assertion: assert_s3_spot7_unchanged },
       { action: action_add_spot1_dup },
       { assertion: assert_s3_still_four },
       { action: action_remove_spot5 },

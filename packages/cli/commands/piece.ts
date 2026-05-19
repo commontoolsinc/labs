@@ -29,6 +29,7 @@ import { render, safeStringify } from "../lib/render.ts";
 import { decode } from "@commonfabric/utils/encoding";
 import { cliText } from "../lib/cli-name.ts";
 import { absPath } from "../lib/utils.ts";
+import type { CellScope } from "@commonfabric/api";
 import { parseCellPath } from "@commonfabric/runner";
 import { UI } from "@commonfabric/runner";
 import ports from "@commonfabric/ports" with { type: "json" };
@@ -551,6 +552,12 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
   )
   .example(
     cliText(
+      `cf piece link ${EX_ID} ${EX_COMP} bafypiece1@user/profile bafypiece2@session/currentProfile`,
+    ),
+    `Link scoped cell instances using @user or @session on the piece ID.`,
+  )
+  .example(
+    cliText(
       `cf piece link ${EX_ID} ${EX_COMP} baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye bafypiece1/allPieces`,
     ),
     `Link well-known "allPieces" list to a piece field.`,
@@ -591,6 +598,8 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
         {
           start: options.start,
           allowNonExisting: !!(options as any).allowNonExisting,
+          sourceScope: source.scope,
+          targetScope: target.scope,
         },
       );
     } catch (error) {
@@ -623,6 +632,13 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
       `cf piece get ${EX_ID} ${EX_COMP_PIECE} data/users/0/email --input`,
     ),
     `Get a nested field value from piece input "${RAW_EX_COMP.piece!}".`,
+  )
+  .example(
+    cliText(
+      `cf piece get ${EX_ID} ${EX_COMP} --piece ${RAW_EX_COMP
+        .piece!}@session draft`,
+    ),
+    `Get a value from a session-scoped piece instance.`,
   )
   .example(
     cliText(`cf piece get ${EX_ID} ${EX_COMP_PIECE}`),
@@ -874,6 +890,27 @@ interface PieceCLIOptions {
   url?: string;
 }
 
+const CELL_SCOPE_VALUES = new Set(["space", "user", "session"]);
+
+function parseScopedIdSegment(id: string): {
+  id: string;
+  scope?: CellScope;
+} {
+  const scopeSeparator = id.lastIndexOf("@");
+  if (scopeSeparator === -1) return { id };
+
+  const scope = id.slice(scopeSeparator + 1);
+  const scopedId = id.slice(0, scopeSeparator);
+  if (!scopedId || !CELL_SCOPE_VALUES.has(scope)) {
+    throw new ValidationError(
+      `Invalid scope suffix "@${scope}". Expected @space, @user, or @session.`,
+      { exitCode: 1 },
+    );
+  }
+
+  return { id: scopedId, scope: scope as CellScope };
+}
+
 function parseSetHomeOptions(
   input: PieceCLIOptions,
 ): Omit<SpaceConfig, "space"> {
@@ -930,10 +967,11 @@ export function parseSpaceOptions(
   };
 
   if (input.url) {
-    const { apiUrl, space, piece } = parseUrl(input.url);
+    const { apiUrl, space, piece, pieceScope } = parseUrl(input.url);
     output.apiUrl = apiUrl;
     output.space = space;
     output.piece = piece;
+    if (pieceScope) output.pieceScope = pieceScope;
     return output as PieceConfig;
   }
 
@@ -953,7 +991,9 @@ export function parseSpaceOptions(
   if (input.piece) {
     // Do not validate here -- piece is only
     // required via `parsePieceOptions`
-    output.piece = input.piece;
+    const parsedPiece = parseScopedIdSegment(input.piece);
+    output.piece = parsedPiece.id;
+    if (parsedPiece.scope) output.pieceScope = parsedPiece.scope;
   }
 
   output.apiUrl = input.apiUrl;
@@ -971,7 +1011,7 @@ export function parseSpaceOptions(
 export function parseLink(
   ref: string,
   _options?: { allowWellKnown?: boolean },
-): { pieceId: string; path?: (string | number)[] } {
+): { pieceId: string; scope?: CellScope; path?: (string | number)[] } {
   const parts = ref.split("/");
   if (parts.length < 1) {
     throw new ValidationError(
@@ -980,21 +1020,26 @@ export function parseLink(
     );
   }
 
-  const pieceId = parts[0];
+  const parsedPiece = parseScopedIdSegment(parts[0]);
+  const pieceId = parsedPiece.id;
 
   if (parts.length === 1) {
     // If this is a well-known ID (no path) and allowWellKnown is not explicitly true,
     // we might want to handle it differently in the future
-    return { pieceId };
+    return { pieceId, ...(parsedPiece.scope && { scope: parsedPiece.scope }) };
   }
 
   const path = parseCellPath(parts.slice(1).join("/"));
-  return { pieceId, path };
+  return {
+    pieceId,
+    ...(parsedPiece.scope && { scope: parsedPiece.scope }),
+    path,
+  };
 }
 
 function parseUrl(
   input: string,
-): { apiUrl: string; space: string; piece?: string } {
+): { apiUrl: string; space: string; piece?: string; pieceScope?: CellScope } {
   let url;
   try {
     url = new URL(input);
@@ -1012,7 +1057,14 @@ function parseUrl(
       { exitCode: 1 },
     );
   }
-  return { apiUrl, space, piece };
+  if (!piece) return { apiUrl, space };
+  const parsedPiece = parseScopedIdSegment(piece);
+  return {
+    apiUrl,
+    space,
+    piece: parsedPiece.id,
+    ...(parsedPiece.scope && { pieceScope: parsedPiece.scope }),
+  };
 }
 
 // We use stdin for piece input which must be an `Object`

@@ -1,5 +1,6 @@
 import { assertEquals } from "@std/assert";
 import {
+  CF_HARNESS_PROMPT_SLOT_INFLUENCE_ATOM_TYPE,
   createHarnessCfcInvocationContext,
   summarizeCfcInvocationSequence,
   summarizeCfcInvocationText,
@@ -33,18 +34,18 @@ Deno.test("createHarnessCfcInvocationContext summarizes measured invocation inpu
         },
       },
       {
-        path: ["env", "SECRET_TOKEN"],
-        label: {
-          confidentiality: [
-            { type: "test.cfc/User", subject: "did:key:env-reader" },
-          ],
-        },
-      },
-      {
         path: ["cwd"],
         label: {
           confidentiality: [
             { type: "test.cfc/Workspace", subject: "workspace-secret" },
+          ],
+        },
+      },
+      {
+        path: ["env", "SECRET_TOKEN"],
+        label: {
+          confidentiality: [
+            { type: "test.cfc/User", subject: "did:key:env-reader" },
           ],
         },
       },
@@ -115,4 +116,131 @@ Deno.test("createHarnessCfcInvocationContext summarizes measured invocation inpu
       `sidecar leaked raw invocation input ${rawValue}`,
     );
   }
+});
+
+Deno.test("createHarnessCfcInvocationContext derives prompt-slot influence labels for selected invocation inputs", async () => {
+  const promptSlot = {
+    type: CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
+    source: { type: "cf-harness.test-input", surface: "cli" },
+    role: "direct-command",
+    kernelName: "cf-harness",
+    surface: "cli",
+    subject: "did:key:user",
+    eventId: "evt-1",
+    valueDigest: "sha256:value",
+    slotDigest: "sha256:slot",
+    snapshotDigest: "sha256:snapshot",
+    targetPath: "/workspace/request.md",
+  } as const;
+
+  const context = await createHarnessCfcInvocationContext({
+    sequence: 1,
+    runId: "run-labels",
+    createdAt: "2026-05-14T17:00:00.000Z",
+    toolId: "bash",
+    operation: "shell",
+    cfcEnforcementMode: "enforce-explicit",
+    cwd: "/workspace",
+    promptSlot,
+    runManifest: {
+      present: true,
+      source: "loom",
+      wishId: "W-534",
+      dispatchClass: "gtd-ops",
+      promptSlotPresent: true,
+    },
+    command: "printf hello",
+    stdinText: "model-authored stdin",
+    cfcInputLabelPaths: [["command"], ["stdin"]],
+  });
+
+  const expectedAtom = {
+    type: CF_HARNESS_PROMPT_SLOT_INFLUENCE_ATOM_TYPE,
+    version: 1,
+    role: "direct-command",
+    kernelName: "cf-harness",
+    surface: "cli",
+    subject: "did:key:user",
+    eventId: "evt-1",
+    valueDigest: "sha256:value",
+    slotDigest: "sha256:slot",
+    snapshotDigest: "sha256:snapshot",
+    targetPath: "/workspace/request.md",
+    runManifest: {
+      source: "loom",
+      wishId: "W-534",
+      dispatchClass: "gtd-ops",
+    },
+  };
+
+  assertEquals(context.cfcInputLabels, {
+    version: 1,
+    entries: [
+      {
+        path: ["command"],
+        label: { confidentiality: [expectedAtom] },
+      },
+      {
+        path: ["stdin"],
+        label: { confidentiality: [expectedAtom] },
+      },
+    ],
+  });
+  for (const entry of context.cfcInputLabels?.entries ?? []) {
+    assertEquals(entry.label.integrity, undefined);
+  }
+});
+
+Deno.test("createHarnessCfcInvocationContext merges explicit trusted labels with derived prompt-slot labels", async () => {
+  const explicitAtom = {
+    type: "test.cfc/ExplicitTrustedInput",
+    subject: "trusted-sidecar",
+  };
+  const promptSlot = {
+    type: CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
+    source: { type: "cf-harness.test-input", surface: "cli" },
+    role: "context",
+    kernelName: "cf-harness",
+    surface: "cli",
+  } as const;
+
+  const context = await createHarnessCfcInvocationContext({
+    sequence: 2,
+    runId: "run-merged-labels",
+    createdAt: "2026-05-14T17:01:00.000Z",
+    toolId: "read_file",
+    operation: "shell",
+    cfcEnforcementMode: "observe",
+    cwd: "/workspace",
+    promptSlot,
+    runManifest: { present: false },
+    args: ["/workspace/notes.md"],
+    cfcInputLabels: {
+      version: 1,
+      entries: [{
+        path: ["args"],
+        label: { confidentiality: [explicitAtom] },
+      }],
+    },
+    cfcInputLabelPaths: [["args"]],
+  });
+
+  assertEquals(context.cfcInputLabels, {
+    version: 1,
+    entries: [{
+      path: ["args"],
+      label: {
+        confidentiality: [
+          explicitAtom,
+          {
+            type: CF_HARNESS_PROMPT_SLOT_INFLUENCE_ATOM_TYPE,
+            version: 1,
+            role: "context",
+            kernelName: "cf-harness",
+            surface: "cli",
+          },
+        ],
+      },
+    }],
+  });
 });

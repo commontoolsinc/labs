@@ -11,6 +11,7 @@ import { ifElse, pattern, Writable } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn(({ name }) => identity(name.trim()));
 const identity = __cfHardenFn(<T,>(value: T) => value);
 // FIXTURE: authored-ifelse-reactive-roots
 // Verifies: authored ifElse outside JSX and top-level receiver-method roots lower reactively
@@ -34,7 +35,7 @@ export default pattern((__cf_pattern_input) => {
         required: ["name"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, { name: name }, ({ name }) => identity(name.trim())).for("upper", true);
+    } as const satisfies __cfHelpers.JSONSchema, { name: name }, __cfModuleCallback_1).for("upper", true);
     return {
         value: ifElse({
             type: "boolean"
@@ -68,7 +69,7 @@ export default pattern((__cf_pattern_input) => {
             properties: {
                 cell: {
                     type: "number",
-                    asCell: ["cell"]
+                    asCell: ["readonly"]
                 }
             },
             required: ["cell"]

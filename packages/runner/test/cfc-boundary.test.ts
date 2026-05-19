@@ -2177,7 +2177,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         value: { linked: null },
         cfc: {
           version: 1,
-          schemaHash: guardedSchema.hashString,
+          schemaHash: guardedSchema.taggedHashString,
           labelMap: {
             version: 1,
             entries: [{ path: ["linked"], label: {} }],
@@ -2187,7 +2187,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       targetSeed.writeOrThrow({
         space: signer.did(),
         scope: "space",
-        id: `cid:${guardedSchema.hashString}`,
+        id: `cid:${guardedSchema.taggedHashString}`,
         path: [],
       }, {
         value: guardedSchema.schema,
@@ -2277,7 +2277,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         value: { items: [null] },
         cfc: {
           version: 1,
-          schemaHash: guardedSchema.hashString,
+          schemaHash: guardedSchema.taggedHashString,
           labelMap: {
             version: 1,
             entries: [{ path: ["items", "*"], label: {} }],
@@ -2287,7 +2287,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       targetSeed.writeOrThrow({
         space: signer.did(),
         scope: "space",
-        id: `cid:${guardedSchema.hashString}`,
+        id: `cid:${guardedSchema.taggedHashString}`,
         path: [],
       }, {
         value: guardedSchema.schema,
@@ -2705,7 +2705,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         },
         cfc: {
           version: 1,
-          schemaHash: existingSchemaAndHash.hashString,
+          schemaHash: existingSchemaAndHash.taggedHashString,
           labelMap: {
             version: 1,
             entries: [
@@ -2718,7 +2718,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       seed.writeOrThrow({
         space: signer.did(),
         scope: "space",
-        id: `cid:${existingSchemaAndHash.hashString}`,
+        id: `cid:${existingSchemaAndHash.taggedHashString}`,
         type,
         path: [],
       }, {
@@ -2749,7 +2749,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           id: documentId,
           path: ["internal", "stage"],
         },
-        schemaHash: stageSchemaAndHash.hashString,
+        schemaHash: stageSchemaAndHash.taggedHashString,
         schema: stageSchemaAndHash.schema,
       });
 

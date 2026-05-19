@@ -41,11 +41,11 @@ export default pattern((__cf_pattern_input) => {
         properties: {
             counter: {
                 type: "number",
-                asCell: ["cell"]
+                asCell: ["writeonly"]
             },
             label: {
                 type: "string",
-                asCell: ["cell"]
+                asCell: ["writeonly"]
             }
         },
         required: ["counter", "label"]

@@ -74,6 +74,17 @@ export function isFiniteNumber(value: unknown): boolean {
 }
 
 /**
+ * Check whether a value is a plain object.
+ * @param value - The value to check
+ * @returns True if the value is a plain object
+ */
+export function isPlainObject(value: unknown): boolean {
+  if (value === null || typeof value !== "object") return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+/**
  * Predicate for narrowing a `string` type.
  * @param value - The value to check
  * @returns True if the value is a string

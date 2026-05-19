@@ -41,11 +41,11 @@ export default pattern(() => {
         properties: {
             point: {
                 $ref: "#/$defs/Point",
-                asCell: ["cell"]
+                asCell: ["readonly"]
             },
             multiplier: {
                 type: "number",
-                asCell: ["cell"]
+                asCell: ["readonly"]
             }
         },
         required: ["point", "multiplier"],

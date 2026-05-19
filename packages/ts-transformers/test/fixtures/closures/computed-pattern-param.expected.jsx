@@ -28,7 +28,7 @@ export default pattern((config: {
         properties: {
             value: {
                 type: "number",
-                asCell: ["cell"]
+                asCell: ["readonly"]
             },
             config: {
                 type: "object",

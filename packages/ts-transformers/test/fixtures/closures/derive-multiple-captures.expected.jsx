@@ -29,15 +29,15 @@ export default pattern(() => {
         properties: {
             value: {
                 type: "number",
-                asCell: ["cell"]
+                asCell: ["readonly"]
             },
             multiplier: {
                 type: "number",
-                asCell: ["cell"]
+                asCell: ["readonly"]
             },
             offset: {
                 type: "number",
-                asCell: ["cell"]
+                asCell: ["readonly"]
             }
         },
         required: ["value", "multiplier", "offset"]

@@ -1,5 +1,6 @@
 import type { FabricValue } from "../interface.ts";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
+import { cloneIfNecessary } from "@commonfabric/data-model/fabric-value";
 import { isInstance, isObject } from "@commonfabric/utils/types";
 import type { PatchOp } from "../v2.ts";
 import { encodePointer, parsePointer } from "./path.ts";
@@ -7,6 +8,36 @@ import { encodePointer, parsePointer } from "./path.ts";
 type PatchObject = Record<string, FabricValue>;
 type PatchContainer = PatchObject | FabricValue[];
 const MAX_ARRAY_INDEX = 2 ** 32 - 2;
+
+/**
+ * Deep-clones an incoming patch value for isolation, preserving
+ * `FabricInstance` wrappers (e.g. `FabricError`, `FabricMap`).
+ *
+ * `structuredClone()` MUST NOT be used here: it silently demotes class
+ * instances to plain objects. A demoted `FabricError` then fails the
+ * `value instanceof FabricInstance` check in the wire/persistence codec
+ * (`jsonFromValue`/`FabricInstanceHandler`), so it is serialized
+ * generically and its wrapped native `Error` -- whose `message`/`stack`
+ * are non-enumerable -- collapses to `{}`, losing the error entirely.
+ *
+ * `cloneIfNecessary()` deep-clones via the fabric value machinery
+ * (`FabricInstance.deepClone()` for wrappers), preserving the class.
+ *
+ * `{ frozen: false }` (which implies `force: true`) is required, NOT the
+ * `{ frozen: true }` default: with the default, `cloneIfNecessary`'s
+ * identity check calls `isDeepFrozenFabricValue()`, whose `checkValue()`
+ * currently THROWS on a `FabricInstance` ("Cannot yet handle instance of
+ * class ..."). That path is hit whenever the engine replays a stored
+ * patch sequence over an already-deep-frozen tree (e.g. a `move`/`add`
+ * that re-clones a frozen subtree holding a `FabricError`). `force`
+ * short-circuits the identity check before that throw. The result is
+ * still deep-frozen: `applyPatch` deep-freezes the assembled tree at its
+ * boundary regardless. (TODO(@danfuzz): once `checkValue()`/`isDeepFrozenFabricValue`
+ * handle `FabricInstance`, the default could be used and would also reuse
+ * already-frozen inputs identity-preservingly.)
+ */
+const cloneValue = (value: FabricValue): FabricValue =>
+  cloneIfNecessary(value, { frozen: false });
 
 /**
  * Applies a sequence of RFC 6902 JSON Patch operations (`replace`, `add`,
@@ -68,14 +99,14 @@ const replaceAtPath = (
   fullPath: string[] = path,
 ): FabricValue => {
   if (path.length === 0) {
-    return structuredClone(value);
+    return cloneValue(value);
   }
 
   if (Array.isArray(root)) {
     const index = requireExistingArrayIndex(root, path[0]!, fullPath);
     const next = shallowCloneContainer(root) as FabricValue[];
     if (path.length === 1) {
-      next[index] = structuredClone(value);
+      next[index] = cloneValue(value);
       return next;
     }
 
@@ -94,7 +125,7 @@ const replaceAtPath = (
   const next = shallowCloneContainer(root) as PatchObject;
   const key = path[0]!;
   if (path.length === 1) {
-    next[key] = structuredClone(value);
+    next[key] = cloneValue(value);
     return next;
   }
 
@@ -117,7 +148,7 @@ const addAtPath = (
   fullPath: string[] = path,
 ): FabricValue => {
   if (path.length === 0) {
-    return structuredClone(value);
+    return cloneValue(value);
   }
 
   if (Array.isArray(root)) {
@@ -125,10 +156,10 @@ const addAtPath = (
     const segment = path[0]!;
     if (path.length === 1) {
       if (segment === "-") {
-        next.push(structuredClone(value));
+        next.push(cloneValue(value));
       } else {
         const index = parseArrayInsertIndex(segment, root.length);
-        next.splice(index, 0, structuredClone(value));
+        next.splice(index, 0, cloneValue(value));
       }
       return next;
     }
@@ -149,7 +180,7 @@ const addAtPath = (
   const next = shallowCloneContainer(root) as PatchObject;
   const key = path[0]!;
   if (path.length === 1) {
-    next[key] = structuredClone(value);
+    next[key] = cloneValue(value);
     return next;
   }
 
@@ -249,7 +280,7 @@ const spliceAtPath = (
       throw new Error(`invalid splice at ${encodePointer(fullPath)}`);
     }
     const next = shallowCloneContainer(root) as FabricValue[];
-    next.splice(index, remove, ...add.map((value) => structuredClone(value)));
+    next.splice(index, remove, ...add.map((value) => cloneValue(value)));
     return next;
   }
 

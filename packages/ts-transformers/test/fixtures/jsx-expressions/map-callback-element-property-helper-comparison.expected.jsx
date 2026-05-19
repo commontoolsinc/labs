@@ -18,6 +18,7 @@ import { Default, pattern, UI, VNode, Writable, } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn(({ message, name }) => message.author === senderName(name.get()));
 interface Message {
     author: string;
     body: string;
@@ -54,7 +55,7 @@ export default pattern((__cf_pattern_input) => {
                         }
                     },
                     required: ["messages"],
-                    asCell: ["cell"]
+                    asCell: ["readonly"]
                 }
             },
             required: ["selectedRoom"],
@@ -108,7 +109,7 @@ export default pattern((__cf_pattern_input) => {
                     },
                     name: {
                         type: "string",
-                        asCell: ["cell"]
+                        asCell: ["readonly"]
                     }
                 },
                 required: ["message", "name"]
@@ -119,7 +120,7 @@ export default pattern((__cf_pattern_input) => {
                     author: message.key("author")
                 },
                 name: name
-            }, ({ message, name }) => message.author === senderName(name.get())).for("isMine", true);
+            }, __cfModuleCallback_1).for("isMine", true);
             const isKnownAuthor = __cfHelpers.derive({
                 type: "object",
                 properties: {
@@ -170,7 +171,7 @@ export default pattern((__cf_pattern_input) => {
                     properties: {
                         name: {
                             type: "string",
-                            asCell: ["cell"]
+                            asCell: ["readonly"]
                         }
                     },
                     required: ["name"]

@@ -1616,7 +1616,13 @@ The context's private `deserialize()` method walks the `JsonWireValue` tree:
    (Section 6 of `3-json-encoding.md`).
 3. **Type handler dispatch** — looks up the tag in the registry; if found,
    delegates to the handler's `deserialize()`. When the context is in lenient
-   mode, handler exceptions produce `ProblematicValue` (Section 3.5).
+   mode, handler exceptions produce `ProblematicValue` (Section 3.5). Values
+   returned from this arm are guaranteed deep-frozen at the `deserialize()`
+   boundary (the contract holds for both the handler-produced value and the
+   lenient-mode `ProblematicValue`), so callers need not each freeze. This
+   contract is scoped to this arm only; the class-registry fallback (step 4)
+   is intentionally not covered. (A more complete spec treatment of egress
+   freezing is deferred.)
 4. **Class registry fallback** — for tags not handled by type handlers (e.g.,
    `Error@1`, `Map@1`, `Set@1`, `RegExp@1`), the context looks up
    the `FabricClass` in its class registry, recursively deserializes the

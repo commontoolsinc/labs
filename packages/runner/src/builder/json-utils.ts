@@ -348,11 +348,23 @@ function itemsSchemaFromArray(
 
 export function moduleToJSON(module: Module) {
   const frame = getTopFrame();
+  // Destructure-and-drop the runtime-only methods that handler modules
+  // attach for the in-builder ergonomics (`mod.with(...)`/`mod.bind(...)`).
+  // They are not part of the serialized contract — under the legacy
+  // data-model layer they were silently omitted by `JSON.stringify`-style
+  // semantics; under modern they would surface as
+  // `Cannot store function per se`.
   const {
     implementation: _implementation,
-    toJSON: _,
+    toJSON: _toJSON,
+    with: _with,
+    bind: _bind,
     ...rest
-  } = module as Module & { toJSON: () => any };
+  } = module as Module & {
+    toJSON: () => any;
+    with?: unknown;
+    bind?: unknown;
+  };
   let implementation = module.implementation;
 
   // CT-1230 WORKAROUND: Preserve pattern structure when serializing pattern modules.

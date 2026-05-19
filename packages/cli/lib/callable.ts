@@ -1,4 +1,4 @@
-import type { JSONSchema } from "@commonfabric/api";
+import type { CellScope, JSONSchema } from "@commonfabric/api";
 import {
   type CallableKind,
   classifyCallableEntry,
@@ -33,6 +33,7 @@ export interface CallableCellLike {
   asSchemaFromLinks?: () => CallableCellLike;
   key: (segment: string) => CallableCellLike;
   pull?: () => Promise<unknown>;
+  getAsNormalizedFullLink?: () => { scope?: CellScope };
   send?: (
     value: unknown,
     onCommit?: (tx: CallableTransactionLike) => void,
@@ -54,6 +55,7 @@ export interface CallableRuntimeLike {
     id: string,
     schema: JSONSchema | undefined,
     tx: CallableTransactionLike,
+    scope?: CellScope,
   ) => CallableCellLike;
   run: (
     tx: CallableTransactionLike,
@@ -334,11 +336,13 @@ export async function executeResolvedCallable(
     resolved.callableCell.key("extraParams").get?.(),
   );
   const tx = resolved.manager.runtime.edit();
+  const resultScope = resolved.callableCell.getAsNormalizedFullLink?.().scope;
   const resultCell = resolved.manager.runtime.getCell(
     resolved.space,
     deps.uuid?.() ?? crypto.randomUUID(),
     pattern?.resultSchema,
     tx,
+    resultScope,
   );
   const running = resolved.manager.runtime.run(
     tx,
