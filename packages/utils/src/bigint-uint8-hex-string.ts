@@ -2,13 +2,15 @@
  * Implementation of `bigint.ts` which uses the hex conversion methods of
  * `Uint8Array`. These only became part of the EcmaScript standard in 2025 and
  * so (as of this writing) cannot be relied on to exist in arbitrary JS
- * environments.
+ * environments. This implementation also ends up using the "direct" tactics /
+ * code for small lengths, where it has been measured to be a win.
  */
 
 import {
   encode5To8Bytes,
   hexStringFromPositiveValue,
 } from "./bigint-shared-impl.ts";
+import { bigintFromMtcDirect } from "./bigint-uint8-direct.ts";
 
 /**
  * Version of `bigintToMinimalTwosComplement()` which uses the `Uint8Array`
@@ -107,8 +109,8 @@ export function bigintToMtcHex(value: bigint): Uint8Array {
  * hex-string methods.
  */
 export function bigintFromMtcHex(bytes: Uint8Array): bigint {
-  if (bytes.length === 0) {
-    throw new Error("bigintFromMinimalTwosComplement: empty input");
+  if (bytes.length <= 32) {
+    return bigintFromMtcDirect(bytes);
   }
 
   const hexString = bytes.toHex();
