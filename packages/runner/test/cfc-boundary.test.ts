@@ -1811,6 +1811,56 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("persists IFC labels for each path that reuses the same schema ref", async () => {
+    const { runtime, storageManager } = createRuntime();
+    const guardedRef: JSONSchema = { $ref: "#/$defs/Guarded" };
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-persisted-reused-ref-labels",
+        {
+          type: "object",
+          properties: {
+            first: guardedRef,
+            second: guardedRef,
+          },
+          $defs: {
+            Guarded: {
+              type: "string",
+              ifc: { integrity: ["shared-ref-integrity"] },
+            },
+          },
+        },
+        tx,
+      );
+      cell.set({ first: "one", second: "two" });
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.ok).toBeDefined();
+
+      const persistedId = parseLink(cell.getAsLink()).id!;
+      const replica = storageManager.open(signer.did()).replica as unknown as {
+        getDocument(id: string): {
+          cfc?: { labelMap?: { entries: unknown[] } };
+        } | undefined;
+      };
+      const entries = replica.getDocument(persistedId)?.cfc?.labelMap?.entries;
+      expect(entries).toContainEqual({
+        path: ["first"],
+        label: { integrity: ["shared-ref-integrity"] },
+      });
+      expect(entries).toContainEqual({
+        path: ["second"],
+        label: { integrity: ["shared-ref-integrity"] },
+      });
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("does not conflict when another transaction already wrote the same schema document", async () => {
     const server = new MemoryV2Server.Server();
     const storageManagerA = new SharedV2StorageManager({

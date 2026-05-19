@@ -712,57 +712,61 @@ const walkIfcSchema = (
     { path: readonly string[]; label: IFCLabel; schema: JSONSchema }
   > = [],
   root: JSONSchema = schema,
-  seen: Set<JSONSchema> = new Set(),
+  active: Set<JSONSchema> = new Set(),
 ): typeof entries => {
   if (typeof schema === "boolean") {
     return entries;
   }
-  if (seen.has(schema)) {
+  if (active.has(schema)) {
     return entries;
   }
-  seen.add(schema);
+  active.add(schema);
 
-  const schemaRoot = schema.$defs !== undefined ? schema : root;
-  const resolved = typeof schema.$ref === "string"
-    ? ContextualFlowControl.resolveSchemaRefs(schema, schemaRoot) ?? schema
-    : schema;
-  if (typeof resolved === "boolean") {
-    return entries;
-  }
-
-  const childRoot = resolved.$defs !== undefined ? resolved : schemaRoot;
-  if (resolved.ifc !== undefined) {
-    entries.push({
-      path,
-      label: {
-        integrity: resolved.ifc.integrity
-          ? [...resolved.ifc.integrity]
-          : undefined,
-        confidentiality: resolved.ifc.confidentiality
-          ? [...resolved.ifc.confidentiality]
-          : undefined,
-      },
-      schema: resolved,
-    });
-  }
-
-  if (resolved.properties) {
-    for (const [key, child] of Object.entries(resolved.properties)) {
-      walkIfcSchema(child, [...path, key], entries, childRoot, seen);
+  try {
+    const schemaRoot = schema.$defs !== undefined ? schema : root;
+    const resolved = typeof schema.$ref === "string"
+      ? ContextualFlowControl.resolveSchemaRefs(schema, schemaRoot) ?? schema
+      : schema;
+    if (typeof resolved === "boolean") {
+      return entries;
     }
+
+    const childRoot = resolved.$defs !== undefined ? resolved : schemaRoot;
+    if (resolved.ifc !== undefined) {
+      entries.push({
+        path,
+        label: {
+          integrity: resolved.ifc.integrity
+            ? [...resolved.ifc.integrity]
+            : undefined,
+          confidentiality: resolved.ifc.confidentiality
+            ? [...resolved.ifc.confidentiality]
+            : undefined,
+        },
+        schema: resolved,
+      });
+    }
+
+    if (resolved.properties) {
+      for (const [key, child] of Object.entries(resolved.properties)) {
+        walkIfcSchema(child, [...path, key], entries, childRoot, active);
+      }
+    }
+    const compound = [
+      ...(resolved.anyOf ?? []),
+      ...(resolved.oneOf ?? []),
+      ...(resolved.allOf ?? []),
+    ];
+    for (const child of compound) {
+      walkIfcSchema(child, path, entries, childRoot, active);
+    }
+    if (typeof resolved.items === "object" && resolved.items !== null) {
+      walkIfcSchema(resolved.items, [...path, "*"], entries, childRoot, active);
+    }
+    return entries;
+  } finally {
+    active.delete(schema);
   }
-  const compound = [
-    ...(resolved.anyOf ?? []),
-    ...(resolved.oneOf ?? []),
-    ...(resolved.allOf ?? []),
-  ];
-  for (const child of compound) {
-    walkIfcSchema(child, path, entries, childRoot, seen);
-  }
-  if (typeof resolved.items === "object" && resolved.items !== null) {
-    walkIfcSchema(resolved.items, [...path, "*"], entries, childRoot, seen);
-  }
-  return entries;
 };
 
 const policyOnlySchema = (schema: JSONSchema): JSONSchema => {
