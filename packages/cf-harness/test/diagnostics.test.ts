@@ -386,6 +386,32 @@ Deno.test("classifyBuiltinToolFailure records denied browser host commands", () 
   });
 });
 
+Deno.test("classifyBuiltinToolFailure records blocked web_fetch URLs", () => {
+  const failure = classifyBuiltinToolFailure(
+    "web_fetch",
+    { url: "http://localhost:8000/private" },
+    {
+      type: "cf-harness.web-fetch-error",
+      outputId: createToolOutputId("run-web", "web_fetch", 1),
+      url: "http://localhost:8000/private",
+      code: "blocked_url",
+      message: "web_fetch host localhost is local and is not allowed",
+      fetchedAt: "2026-05-19T20:00:00.000Z",
+    },
+    "2026-05-19T20:00:01.000Z",
+  );
+
+  assertEquals(failure, {
+    type: "cf-harness.failure-record",
+    kind: "tool_not_allowed",
+    source: "tool_output",
+    detail: "web_fetch host localhost is local and is not allowed",
+    at: "2026-05-19T20:00:01.000Z",
+    toolId: "web_fetch",
+    outputId: createToolOutputId("run-web", "web_fetch", 1),
+  });
+});
+
 Deno.test("classifyBuiltinToolFailure handles delegate_task outputs defensively", () => {
   assertEquals(
     classifyBuiltinToolFailure(

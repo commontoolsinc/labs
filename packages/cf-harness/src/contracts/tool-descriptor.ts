@@ -5,6 +5,7 @@ export type BuiltinToolId =
   | "bash-no-sandbox"
   | "read_file"
   | "view_image"
+  | "web_fetch"
   | "read_skill_resource"
   | "edit_file"
   | "write_file"

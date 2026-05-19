@@ -112,6 +112,10 @@ import {
   type ViewImageToolOutput,
 } from "./tools/view-image.ts";
 import {
+  type WebFetchToolInput,
+  type WebFetchToolOutput,
+} from "./tools/web-fetch.ts";
+import {
   type ReadSkillResourceToolInput,
   type ReadSkillResourceToolOutput,
 } from "./tools/read-skill-resource.ts";
@@ -126,6 +130,7 @@ export interface BuiltinToolInputMap {
   "bash-no-sandbox": BashToolInput;
   read_file: ReadFileToolInput;
   view_image: ViewImageToolInput;
+  web_fetch: WebFetchToolInput;
   read_skill_resource: ReadSkillResourceToolInput;
   edit_file: EditFileToolInput;
   write_file: WriteFileToolInput;
@@ -137,6 +142,7 @@ export interface BuiltinToolOutputMap {
   "bash-no-sandbox": BashToolOutput;
   read_file: ReadFileToolOutput;
   view_image: ViewImageToolOutput;
+  web_fetch: WebFetchToolOutput;
   read_skill_resource: ReadSkillResourceToolOutput;
   edit_file: EditFileToolOutput;
   write_file: WriteFileToolOutput;

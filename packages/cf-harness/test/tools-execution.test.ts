@@ -16,6 +16,10 @@ import { editFileTool } from "../src/tools/edit-file.ts";
 import { readFileTool } from "../src/tools/read-file.ts";
 import { RESERVED_ARTIFACT_PATH_DETAIL } from "../src/tools/reserved-artifacts.ts";
 import { readSkillResourceTool } from "../src/tools/read-skill-resource.ts";
+import {
+  createWebFetchTool,
+  toModelFacingWebFetchOutput,
+} from "../src/tools/web-fetch.ts";
 import { viewImageTool } from "../src/tools/view-image.ts";
 import { writeFileTool } from "../src/tools/write-file.ts";
 import type { HarnessToolContext } from "../src/tools/types.ts";
@@ -34,6 +38,8 @@ import type {
 const ONE_PIXEL_PNG = decodeBase64(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p94AAAAASUVORK5CYII=",
 );
+
+const resolvePublicTestHost = () => Promise.resolve(["93.184.216.34"]);
 
 class FakeSandboxRuntime implements SandboxRuntime {
   readonly kind = "docker-runsc-cfc" as const;
@@ -365,6 +371,222 @@ Deno.test("bash tool denies curl to non-localhost targets before sandbox executi
   });
   assertEquals(sandbox.calls, []);
   assertEquals(context.currentDir, "/workspace/new");
+});
+
+Deno.test("web_fetch fetches public HTML, extracts text and links, and strips raw content from model output", async () => {
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const html = [
+    "<!doctype html>",
+    "<title>Example &amp; Test</title>",
+    "<style>.hidden{display:none}</style>",
+    "<script>ignoreMe()</script>",
+    "<h1>Hello <em>world</em></h1>",
+    '<p>Read <a href="/next">next page</a>.</p>',
+  ].join("");
+  const tool = createWebFetchTool({
+    resolveHostAddresses: resolvePublicTestHost,
+    fetchFn: (input, init) => {
+      calls.push({ url: String(input), init });
+      return Promise.resolve(
+        new Response(html, {
+          status: 200,
+          headers: { "content-type": "text/html; charset=utf-8" },
+        }),
+      );
+    },
+  });
+  const context = createContext(new FakeSandboxRuntime());
+
+  const output = await tool.invoke(context, {
+    url: "https://example.com/start",
+  });
+
+  if (output.type !== "cf-harness.web-fetch-result") {
+    throw new Error("expected web_fetch success");
+  }
+  assertEquals(calls.length, 1);
+  assertEquals(calls[0]?.url, "https://example.com/start");
+  assertEquals(calls[0]?.init?.redirect, "manual");
+  assertEquals(output.outputId, "run-1:web_fetch:1");
+  assertEquals(output.finalUrl, "https://example.com/start");
+  assertEquals(output.title, "Example & Test");
+  assertStringIncludes(output.text, "Hello world");
+  assertStringIncludes(output.text, "Read next page .");
+  assertEquals(output.links, [{
+    text: "next page",
+    href: "https://example.com/next",
+  }]);
+  assertStringIncludes(output.rawContent, "<script>ignoreMe()</script>");
+  assertEquals(output.rawContentDigest, await digestText(html));
+  assertEquals("rawContent" in toModelFacingWebFetchOutput(output), false);
+});
+
+Deno.test("web_fetch blocks localhost targets before fetching", async () => {
+  const calls: string[] = [];
+  const tool = createWebFetchTool({
+    fetchFn: (input) => {
+      calls.push(String(input));
+      return Promise.resolve(new Response("should not fetch"));
+    },
+  });
+  const context = createContext(new FakeSandboxRuntime());
+
+  const output = await tool.invoke(context, {
+    url: "http://localhost:8000/private",
+  });
+
+  assertEquals(calls, []);
+  assertEquals(output, {
+    type: "cf-harness.web-fetch-error",
+    outputId: "run-1:web_fetch:1",
+    url: "http://localhost:8000/private",
+    code: "blocked_url",
+    message: "web_fetch host localhost is local and is not allowed",
+    fetchedAt: "2026-05-01T17:54:00.000Z",
+  });
+});
+
+Deno.test("web_fetch validates redirect targets before following them", async () => {
+  const tool = createWebFetchTool({
+    resolveHostAddresses: resolvePublicTestHost,
+    fetchFn: () =>
+      Promise.resolve(
+        new Response("", {
+          status: 302,
+          headers: { location: "http://127.0.0.1/admin" },
+        }),
+      ),
+  });
+  const context = createContext(new FakeSandboxRuntime());
+
+  const output = await tool.invoke(context, {
+    url: "https://example.com/login",
+  });
+
+  assertEquals(output, {
+    type: "cf-harness.web-fetch-error",
+    outputId: "run-1:web_fetch:1",
+    url: "https://example.com/login",
+    code: "blocked_url",
+    message:
+      "web_fetch redirect target denied: web_fetch host 127.0.0.1 is private and is not allowed",
+    finalUrl: "https://example.com/login",
+    fetchedAt: "2026-05-01T17:54:00.000Z",
+  });
+});
+
+Deno.test("web_fetch rejects DNS targets that resolve to private addresses before fetching", async () => {
+  const calls: string[] = [];
+  const tool = createWebFetchTool({
+    resolveHostAddresses: () => Promise.resolve(["10.0.0.7"]),
+    fetchFn: (input) => {
+      calls.push(String(input));
+      return Promise.resolve(new Response("should not fetch"));
+    },
+  });
+  const context = createContext(new FakeSandboxRuntime());
+
+  const output = await tool.invoke(context, {
+    url: "https://public.example/private",
+  });
+
+  assertEquals(calls, []);
+  assertEquals(output, {
+    type: "cf-harness.web-fetch-error",
+    outputId: "run-1:web_fetch:1",
+    url: "https://public.example/private",
+    code: "blocked_url",
+    message:
+      "web_fetch host public.example resolved to private address 10.0.0.7 and is not allowed",
+    fetchedAt: "2026-05-01T17:54:00.000Z",
+  });
+});
+
+Deno.test("web_fetch rejects unsupported content types without returning the body", async () => {
+  const tool = createWebFetchTool({
+    resolveHostAddresses: resolvePublicTestHost,
+    fetchFn: () =>
+      Promise.resolve(
+        new Response("png bytes", {
+          status: 200,
+          headers: { "content-type": "image/png" },
+        }),
+      ),
+  });
+  const context = createContext(new FakeSandboxRuntime());
+
+  const output = await tool.invoke(context, {
+    url: "https://example.com/image.png",
+  });
+
+  assertEquals(output, {
+    type: "cf-harness.web-fetch-error",
+    outputId: "run-1:web_fetch:1",
+    url: "https://example.com/image.png",
+    code: "unsupported_content_type",
+    message: "web_fetch content-type image/png is not supported",
+    finalUrl: "https://example.com/image.png",
+    status: 200,
+    contentType: "image/png",
+    fetchedAt: "2026-05-01T17:54:00.000Z",
+  });
+});
+
+Deno.test("web_fetch rejects responses without a supported content-type", async () => {
+  const tool = createWebFetchTool({
+    resolveHostAddresses: resolvePublicTestHost,
+    fetchFn: () =>
+      Promise.resolve(
+        new Response(new TextEncoder().encode("headerless text"), {
+          status: 200,
+        }),
+      ),
+  });
+  const context = createContext(new FakeSandboxRuntime());
+
+  const output = await tool.invoke(context, {
+    url: "https://example.com/headerless",
+  });
+
+  assertEquals(output, {
+    type: "cf-harness.web-fetch-error",
+    outputId: "run-1:web_fetch:1",
+    url: "https://example.com/headerless",
+    code: "unsupported_content_type",
+    message: "web_fetch response did not include a supported text content-type",
+    finalUrl: "https://example.com/headerless",
+    status: 200,
+    fetchedAt: "2026-05-01T17:54:00.000Z",
+  });
+});
+
+Deno.test("web_fetch caps raw bytes and model text independently", async () => {
+  const tool = createWebFetchTool({
+    resolveHostAddresses: resolvePublicTestHost,
+    fetchFn: () =>
+      Promise.resolve(
+        new Response("abcdef", {
+          status: 200,
+          headers: { "content-type": "text/plain" },
+        }),
+      ),
+  });
+  const context = createContext(new FakeSandboxRuntime());
+
+  const output = await tool.invoke(context, {
+    url: "https://example.com/large.txt",
+    maxBytes: 3,
+    maxTextChars: 2,
+  });
+
+  if (output.type !== "cf-harness.web-fetch-result") {
+    throw new Error("expected web_fetch success");
+  }
+  assertEquals(output.bytes, 3);
+  assertEquals(output.rawContent, "abc");
+  assertEquals(output.rawContentTruncated, true);
+  assertEquals(output.text, "ab");
+  assertEquals(output.textTruncated, true);
 });
 
 Deno.test("bash tool updates currentDir in enforce mode from observed CFC stdout", async () => {

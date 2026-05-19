@@ -31,10 +31,7 @@ import {
   HARNESS_SUBAGENT_PROFILES,
   type HarnessSubagentProfile,
 } from "./contracts/subagent.ts";
-import {
-  type BuiltinToolId,
-  DEFAULT_PARENT_TOOL_IDS,
-} from "./contracts/tool-descriptor.ts";
+import { type BuiltinToolId } from "./contracts/tool-descriptor.ts";
 import type {
   HarnessTranscriptEvent,
   HarnessTranscriptMessage,
@@ -206,8 +203,8 @@ Options:
   --workspace <path>            Workspace host path (defaults to current directory)
   --cwd <path>                  Initial working directory inside the workspace
   --focus-root <path>           Narrow exploration to a workspace subpath when possible
-  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | view_image | read_skill_resource | edit_file | write_file | delegate_task)
-  --allow-subagent-profile <p>  Authorize delegate_task to spawn a profile (repeatable: default | browser)
+  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | view_image | web_fetch | read_skill_resource | edit_file | write_file | delegate_task)
+  --allow-subagent-profile <p>  Authorize delegate_task to spawn a profile (repeatable: default | browser | web_fetch)
   --output-mode <mode>          operator | batch (default: operator)
   --stream-events               Print transcript events as they happen
   --prompt-slot-role <role>     direct-command | context | quote (default: direct-command)
@@ -260,7 +257,16 @@ const parsePositiveInteger = (
 };
 
 const PROMPT_SLOT_ROLES = ["direct-command", "context", "quote"] as const;
-const CLI_PARENT_TOOL_IDS = DEFAULT_PARENT_TOOL_IDS;
+const CLI_PARENT_TOOL_IDS = [
+  "bash",
+  "read_file",
+  "view_image",
+  "web_fetch",
+  "read_skill_resource",
+  "edit_file",
+  "write_file",
+  "delegate_task",
+] as const satisfies readonly BuiltinToolId[];
 
 const parsePromptSlotRole = (
   input: string | undefined,
@@ -1092,6 +1098,10 @@ const summarizeToolCallArguments = (
       case "read_file":
         return typeof parsed.path === "string"
           ? `path=${JSON.stringify(parsed.path)}`
+          : undefined;
+      case "web_fetch":
+        return typeof parsed.url === "string"
+          ? `url=${JSON.stringify(parsed.url)}`
           : undefined;
       case "edit_file": {
         const path = typeof parsed.path === "string"

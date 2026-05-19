@@ -5,6 +5,7 @@ import type { BuiltinToolId } from "./tool-descriptor.ts";
 
 export const DEFAULT_SUBAGENT_PROFILE = "default" as const;
 export const BROWSER_SUBAGENT_PROFILE = "browser" as const;
+export const WEB_FETCH_SUBAGENT_PROFILE = "web_fetch" as const;
 export const DEFAULT_SUBAGENT_MAX_MODEL_TURNS = 8;
 export const MAX_SUBAGENT_MAX_MODEL_TURNS = 16;
 export const DEFAULT_SUBAGENT_RETURN_CHANNEL =
@@ -21,6 +22,9 @@ export const BROWSER_SUBAGENT_ALLOWED_TOOL_IDS = [
   "read_file",
   "view_image",
 ] as const satisfies readonly BuiltinToolId[];
+export const WEB_FETCH_SUBAGENT_ALLOWED_TOOL_IDS = [
+  "web_fetch",
+] as const satisfies readonly BuiltinToolId[];
 export const NO_HOST_TOOL_IDS = [] as const satisfies readonly BuiltinToolId[];
 export const BROWSER_SUBAGENT_HOST_TOOL_IDS = [
   "bash-no-sandbox",
@@ -29,6 +33,7 @@ export const BROWSER_SUBAGENT_HOST_TOOL_IDS = [
 export const HARNESS_SUBAGENT_PROFILES = [
   DEFAULT_SUBAGENT_PROFILE,
   BROWSER_SUBAGENT_PROFILE,
+  WEB_FETCH_SUBAGENT_PROFILE,
 ] as const;
 
 export type HarnessSubagentProfile = typeof HARNESS_SUBAGENT_PROFILES[number];
@@ -83,6 +88,15 @@ export const BROWSER_SUBAGENT_PROFILE_CONFIG: HarnessSubagentProfileConfig = {
   returnPolicy: DEFAULT_SUBAGENT_RETURN_POLICY,
 };
 
+export const WEB_FETCH_SUBAGENT_PROFILE_CONFIG: HarnessSubagentProfileConfig = {
+  type: "cf-harness.subagent-profile-config",
+  profile: WEB_FETCH_SUBAGENT_PROFILE,
+  allowedToolIds: WEB_FETCH_SUBAGENT_ALLOWED_TOOL_IDS,
+  hostToolIds: NO_HOST_TOOL_IDS,
+  maxModelTurns: DEFAULT_SUBAGENT_MAX_MODEL_TURNS,
+  returnPolicy: DEFAULT_SUBAGENT_RETURN_POLICY,
+};
+
 export const isHarnessSubagentProfile = (
   input: string,
 ): input is HarnessSubagentProfile =>
@@ -96,6 +110,8 @@ export const getHarnessSubagentProfileConfig = (
       return DEFAULT_SUBAGENT_PROFILE_CONFIG;
     case BROWSER_SUBAGENT_PROFILE:
       return BROWSER_SUBAGENT_PROFILE_CONFIG;
+    case WEB_FETCH_SUBAGENT_PROFILE:
+      return WEB_FETCH_SUBAGENT_PROFILE_CONFIG;
   }
 };
 
