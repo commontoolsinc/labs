@@ -112,7 +112,13 @@ function getDestructuredBindingDeclaredTypeNode(
     return undefined;
   }
 
-  return getDeclaredTypeNodeForBindingElement(declaration, context.checker);
+  const typeNode = getDeclaredTypeNodeForBindingElement(
+    declaration,
+    context.checker,
+  );
+  return typeNode && shouldPreserveBindingDeclaredTypeNode(typeNode)
+    ? typeNode
+    : undefined;
 }
 
 export function getDeclaredTypeNodeForBindingElement(
@@ -172,6 +178,46 @@ function getBindingElementPropertyKey(
     }
   }
   return undefined;
+}
+
+export function shouldPreserveBindingDeclaredTypeNode(
+  typeNode: ts.TypeNode,
+): boolean {
+  const unwrapped = ts.isParenthesizedTypeNode(typeNode)
+    ? typeNode.type
+    : typeNode;
+
+  if (ts.isTypeReferenceNode(unwrapped)) {
+    const name = ts.isIdentifier(unwrapped.typeName)
+      ? unwrapped.typeName.text
+      : unwrapped.typeName.right.text;
+    return (
+      name === "PerSpace" ||
+      name === "PerUser" ||
+      name === "PerSession" ||
+      name === "PerAny" ||
+      name === "Default" ||
+      (unwrapped.typeArguments?.some(shouldPreserveBindingDeclaredTypeNode) ??
+        false)
+    );
+  }
+
+  if (ts.isUnionTypeNode(unwrapped) || ts.isIntersectionTypeNode(unwrapped)) {
+    return unwrapped.types.some(shouldPreserveBindingDeclaredTypeNode);
+  }
+
+  if (ts.isArrayTypeNode(unwrapped)) {
+    return shouldPreserveBindingDeclaredTypeNode(unwrapped.elementType);
+  }
+
+  if (ts.isTypeLiteralNode(unwrapped)) {
+    return unwrapped.members.some((member) =>
+      ts.isPropertySignature(member) && !!member.type &&
+      shouldPreserveBindingDeclaredTypeNode(member.type)
+    );
+  }
+
+  return false;
 }
 
 /**

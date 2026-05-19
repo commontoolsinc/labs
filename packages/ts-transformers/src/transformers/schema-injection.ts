@@ -2,6 +2,7 @@ import ts from "typescript";
 import {
   createRegisteredTypeLiteral,
   getDeclaredTypeNodeForBindingElement,
+  shouldPreserveBindingDeclaredTypeNode,
 } from "../ast/type-building.ts";
 import { FUNCTION_HARDENING_HELPER_NAME } from "@commonfabric/utils/sandbox-contract";
 
@@ -1807,7 +1808,13 @@ function getExplicitValueTypeNode(
     return declaration.type;
   }
   if (declaration && ts.isBindingElement(declaration)) {
-    return getDeclaredTypeNodeForBindingElement(declaration, checker);
+    const typeNode = getDeclaredTypeNodeForBindingElement(
+      declaration,
+      checker,
+    );
+    return typeNode && shouldPreserveBindingDeclaredTypeNode(typeNode)
+      ? typeNode
+      : undefined;
   }
   return undefined;
 }

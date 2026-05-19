@@ -39,6 +39,7 @@ export default pattern((__cf_pattern_input) => {
                 items: {
                     $ref: "#/$defs/Person"
                 },
+                "default": [],
                 asCell: ["readonly"]
             }
         },

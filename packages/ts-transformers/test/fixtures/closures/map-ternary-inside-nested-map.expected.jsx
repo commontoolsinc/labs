@@ -50,12 +50,42 @@ export default pattern((__cf_pattern_input) => {
             items: {
                 type: "array",
                 items: {
-                    type: "unknown"
+                    $ref: "#/$defs/Item"
                 },
+                "default": [],
                 asCell: ["readonly"]
             }
         },
-        required: ["items"]
+        required: ["items"],
+        $defs: {
+            Item: {
+                type: "object",
+                properties: {
+                    label: {
+                        type: "string"
+                    },
+                    tags: {
+                        type: "array",
+                        items: {
+                            $ref: "#/$defs/Tag"
+                        }
+                    }
+                },
+                required: ["label", "tags"]
+            },
+            Tag: {
+                type: "object",
+                properties: {
+                    name: {
+                        type: "string"
+                    },
+                    active: {
+                        type: "boolean"
+                    }
+                },
+                required: ["name", "active"]
+            }
+        }
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema, { items: items }, ({ items }) => items.get().length > 0).for("hasItems", true);
@@ -153,7 +183,8 @@ export default pattern((__cf_pattern_input) => {
                             type: "object",
                             properties: {
                                 showInactive: {
-                                    type: "boolean"
+                                    type: "boolean",
+                                    "default": false
                                 }
                             },
                             required: ["showInactive"]
@@ -209,7 +240,8 @@ export default pattern((__cf_pattern_input) => {
                     type: "object",
                     properties: {
                         showInactive: {
-                            type: "boolean"
+                            type: "boolean",
+                            "default": false
                         }
                     },
                     required: ["showInactive"]

@@ -126,7 +126,8 @@ export default pattern((__cf_pattern_input) => {
     type: "object",
     properties: {
         state: {
-            $ref: "#/$defs/NestedOptionalState"
+            $ref: "#/$defs/NestedOptionalState",
+            "default": {}
         },
         increment: {
             type: "unknown",
