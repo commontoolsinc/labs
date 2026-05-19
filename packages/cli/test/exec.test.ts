@@ -1445,7 +1445,7 @@ describe("mounted callable resolution and execution", () => {
     });
   });
 
-  it("syncs storage before waiting for mounted tool results with a longer default timeout", async () => {
+  it("idles before committing mounted tool results and syncs before waiting", async () => {
     const mountpoint = join(tmpDir, "mount");
     const filePath = await createMountedFile(mountpoint, {
       relativePath: "home/pieces/notes-2/result/search.tool",
@@ -1491,10 +1491,10 @@ describe("mounted callable resolution and execution", () => {
         loadManager: () => Promise.resolve(harness.manager),
         loadPiece: () => Promise.resolve(harness.piece),
         uuid: () => "tool-result-id",
-        waitForResult: async (_cell, timeoutMs) => {
+        waitForResult: (_cell, timeoutMs) => {
           harness.tracker.events.push("wait");
           timeouts.push(timeoutMs);
-          return { echoed: "tea" };
+          return Promise.resolve({ echoed: "tea" });
         },
       },
     );
@@ -1502,6 +1502,7 @@ describe("mounted callable resolution and execution", () => {
     expect(timeouts).toEqual([15_000, 15_000]);
     expect(harness.tracker.events).toEqual([
       "run",
+      "idle",
       "commit",
       "idle",
       "manager.synced",
@@ -2181,19 +2182,22 @@ function createExecHarness(options: {
 
   const manager = {
     getSpace: () => options.managerSpace ?? "home",
-    synced: async () => {
+    synced: () => {
       tracker.events.push("manager.synced");
+      return Promise.resolve();
     },
     runtime: {
       [CF_RUNTIME_ERROR_LOG]: runtimeErrors,
       storageManager: {
-        synced: async () => {
+        synced: () => {
           tracker.events.push("storage.synced");
+          return Promise.resolve();
         },
       },
       edit: () => ({
-        commit: async () => {
+        commit: () => {
           tracker.events.push("commit");
+          return Promise.resolve();
         },
       }),
       getCell: (
@@ -2220,8 +2224,9 @@ function createExecHarness(options: {
           sink: () => () => {},
         };
       },
-      idle: async () => {
+      idle: () => {
         tracker.events.push("idle");
+        return Promise.resolve();
       },
     },
   };

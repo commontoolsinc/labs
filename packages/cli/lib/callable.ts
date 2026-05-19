@@ -357,6 +357,7 @@ export async function executeResolvedCallable(
 
   let outputValue: unknown;
   try {
+    await resolved.manager.runtime.idle();
     resolved.manager.runtime.prepareTxForCommit?.(tx);
     if (typeof tx.commit !== "function") {
       throw new Error("Callable runtime transaction is not committable");
