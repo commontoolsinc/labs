@@ -184,9 +184,7 @@ function getBindingElementPropertyKey(
 export function shouldPreserveBindingDeclaredTypeNode(
   typeNode: ts.TypeNode,
 ): boolean {
-  const unwrapped = ts.isParenthesizedTypeNode(typeNode)
-    ? typeNode.type
-    : typeNode;
+  const unwrapped = unwrapParenthesizedTypeNode(typeNode);
 
   if (ts.isTypeReferenceNode(unwrapped)) {
     const name = ts.isIdentifier(unwrapped.typeName)
@@ -206,6 +204,14 @@ export function shouldPreserveBindingDeclaredTypeNode(
   }
 
   return false;
+}
+
+function unwrapParenthesizedTypeNode(typeNode: ts.TypeNode): ts.TypeNode {
+  let current = typeNode;
+  while (ts.isParenthesizedTypeNode(current)) {
+    current = current.type;
+  }
+  return current;
 }
 
 export function cloneTypeNode<T extends ts.TypeNode>(typeNode: T): T {
