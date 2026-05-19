@@ -233,6 +233,7 @@ export function detectNewExpressionKind(
   const factoryName = detectCellConstructorExpressionName(
     node.expression,
     checker,
+    new Set(),
   );
   if (!factoryName) return undefined;
   return { kind: "cell-factory", factoryName };
@@ -1770,6 +1771,7 @@ function detectCellMethodFromDeclaration(
 function detectCellConstructorExpressionName(
   expression: ts.Expression,
   checker: ts.TypeChecker,
+  seen: Set<ts.Symbol>,
 ): string | undefined {
   const target = stripWrappers(expression);
 
@@ -1777,7 +1779,11 @@ function detectCellConstructorExpressionName(
     ts.isPropertyAccessExpression(target) &&
     CELL_SCOPED_CONSTRUCTOR_NAMES.has(target.name.text)
   ) {
-    return detectCellConstructorExpressionName(target.expression, checker);
+    return detectCellConstructorExpressionName(
+      target.expression,
+      checker,
+      seen,
+    );
   }
 
   if (!ts.isIdentifier(target) && !ts.isPropertyAccessExpression(target)) {
@@ -1788,6 +1794,8 @@ function detectCellConstructorExpressionName(
     ts.isIdentifier(target) ? target : target.name,
   );
   if (!symbol) return undefined;
+  if (seen.has(symbol)) return undefined;
+  seen.add(symbol);
 
   const importedName = getImportedCommonFabricNamedExport(
     symbol,
@@ -1806,7 +1814,32 @@ function detectCellConstructorExpressionName(
     return name;
   }
 
+  for (const declaration of resolved.declarations ?? []) {
+    if (
+      ts.isVariableDeclaration(declaration) &&
+      isConstVariableDeclaration(declaration) &&
+      declaration.initializer &&
+      shouldFollowConstructorInitializer(declaration.initializer)
+    ) {
+      const nested = detectCellConstructorExpressionName(
+        declaration.initializer,
+        checker,
+        seen,
+      );
+      if (nested) return nested;
+    }
+  }
+
   return undefined;
+}
+
+function shouldFollowConstructorInitializer(
+  initializer: ts.Expression,
+): boolean {
+  const target = stripWrappers(initializer);
+  return ts.isIdentifier(target) ||
+    ts.isPropertyAccessExpression(target) ||
+    ts.isElementAccessExpression(target);
 }
 
 function isArrayMethodDeclaration(declaration: ts.Declaration): boolean {

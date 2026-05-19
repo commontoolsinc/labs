@@ -29,6 +29,8 @@ export default function TestCellConstructors() {
   const comparable = new ComparableCell(200);
   const readonly = new ReadonlyCell(300);
   const writeonly = new WriteonlyCell(400);
+  const LocalWritable = WritableConstructor;
+  const aliased = new LocalWritable("aliased");
 
   return {
     explicitString,
@@ -40,5 +42,6 @@ export default function TestCellConstructors() {
     comparable,
     readonly,
     writeonly,
+    aliased,
   };
 }

@@ -29,7 +29,7 @@ daemon process.
 | -------------------------------- | -------------------------------------------------- |
 | `src/todo-list-pattern.tsx`      | UI pattern with handlers and optimistic updates    |
 | `src/todo-list-pattern.test.tsx` | Pattern tests (run with `deno task cf test`)       |
-| `src/daemon.ts`                  | Sync loop: CAS retries, edit watermark, new Cell() |
+| `src/daemon.ts`                  | Sync loop: CAS retries, edit watermark, Cell.for() |
 | `src/run-daemon.ts`              | CLI launcher for the daemon                        |
 | `src/types.ts`                   | Shared types (Todo, Edit, FailedEdit)              |
 | `src/markdown.ts`                | Markdown parser/serializer for the todo file       |
@@ -72,5 +72,5 @@ deno test packages/fs-sync-example/src/markdown.test.ts
 
 This example implements the patterns described in
 [docs/development/importers/bidirectional_sync.md](../../docs/development/importers/bidirectional_sync.md),
-covering CAS retry loops, edit watermarks, new Cell() for stable identity, and
+covering CAS retry loops, edit watermarks, Cell.for() for stable identity, and
 error classification.
