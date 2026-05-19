@@ -351,8 +351,15 @@ export async function executeResolvedCallable(
     mergeToolInput(input, extraParams),
     resultCell,
   );
+  let sinkValue: unknown;
+  let hasSinkValue = false;
   const cancelSink = typeof running?.sink === "function"
-    ? running.sink(() => {})
+    ? running.sink((value) => {
+      if (value !== undefined) {
+        sinkValue = value;
+        hasSinkValue = true;
+      }
+    })
     : undefined;
 
   let outputValue: unknown;
@@ -369,9 +376,13 @@ export async function executeResolvedCallable(
     await resolved.manager.runtime.idle();
     await resolved.manager.synced();
     await resolved.manager.runtime.storageManager?.synced();
-    await waitForResult(resultCell, timeoutMs);
-    await resolved.manager.runtime.storageManager?.synced();
-    outputValue = await waitForResult(resultCell, timeoutMs);
+    if (hasSinkValue) {
+      outputValue = sinkValue;
+    } else {
+      await waitForResult(resultCell, timeoutMs);
+      await resolved.manager.runtime.storageManager?.synced();
+      outputValue = await waitForResult(resultCell, timeoutMs);
+    }
   } finally {
     cancelSink?.();
   }

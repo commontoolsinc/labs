@@ -1514,6 +1514,70 @@ describe("mounted callable resolution and execution", () => {
     expect(JSON.parse(result.outputText!)).toEqual({ echoed: "tea" });
   });
 
+  it("uses mounted tool sink output after a successful commit", async () => {
+    const mountpoint = join(tmpDir, "mount");
+    const filePath = await createMountedFile(mountpoint, {
+      relativePath: "home/pieces/notes-2/result/search.tool",
+      pieceId: "of:piece-123",
+    });
+    const harness = createExecHarness({
+      callableKind: "tool",
+      cellProp: "result",
+      cellKey: "search",
+      pieceId: "of:piece-123",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+        },
+        required: ["query"],
+      },
+      pattern: {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            query: { type: "string" },
+          },
+          required: ["query"],
+        },
+        resultSchema: {
+          type: "object",
+          properties: {
+            echoed: { type: "string" },
+          },
+        },
+      },
+      toolSinkValue: { echoed: "from-sink" },
+    });
+
+    await writeLiveMountState(stateDir, mountpoint);
+
+    const result = await executeMountedCallableFile(
+      filePath,
+      ["--query", "tea"],
+      {
+        stateDir,
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        uuid: () => "tool-result-id",
+        waitForResult: () => {
+          throw new Error("waitForResult should not be used");
+        },
+      },
+    );
+
+    expect(harness.tracker.events).toEqual([
+      "run",
+      "sink",
+      "idle",
+      "commit",
+      "idle",
+      "manager.synced",
+      "storage.synced",
+    ]);
+    expect(JSON.parse(result.outputText!)).toEqual({ echoed: "from-sink" });
+  });
+
   it("pulls mounted tool result cells before serializing output", async () => {
     const mountpoint = join(tmpDir, "mount");
     const filePath = await createMountedFile(mountpoint, {
@@ -2056,6 +2120,7 @@ function createExecHarness(options: {
   toolResult?: unknown;
   toolResultGetValue?: unknown;
   toolResultPullValue?: unknown;
+  toolSinkValue?: unknown;
   handlerFailureMessage?: string;
   handlerSendRequiresReceiver?: boolean;
   sparseHandlerCell?: boolean;
@@ -2221,7 +2286,13 @@ function createExecHarness(options: {
         state.getValue = options.toolResultGetValue ?? options.toolResult;
         state.pullValue = options.toolResultPullValue ?? options.toolResult;
         return {
-          sink: () => () => {},
+          sink: (callback: (value: unknown) => void) => {
+            if (options.toolSinkValue !== undefined) {
+              tracker.events.push("sink");
+              callback(options.toolSinkValue);
+            }
+            return () => {};
+          },
         };
       },
       idle: () => {
