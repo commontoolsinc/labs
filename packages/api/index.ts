@@ -877,12 +877,25 @@ export interface CellTypeConstructor<
   Wrap extends HKT,
 > {
   /**
+   * Create a cell with an initial/default value. In a reactive context, this
+   * value will only be set on first call.
+   *
+   * AST transformation adds `.for("foo")` in `const foo = new Cell(value)`.
+   *
+   * Internally it just merges the value into the schema as a default value.
+   *
+   * @param value - The initial/default value to set on the cell
+   * @param schema - Optional JSON schema for the cell
+   * @returns A new cell
+   */
+  new <T>(value?: T, schema?: JSONSchema): Apply<Wrap, T>;
+
+  /**
    * Create a cell with a cause.
    *
-   * Can be chained with .of() or .set():
+   * Can be chained with `new ...(...)` or .set():
    *
    * const foo = Cell.for(cause).set(value); // sets cell to latest value
-   * const bar = Cell.for(cause).of(value); // sets cell to initial value
    *
    * @param cause - The cause to associate with this cell
    * @returns A new cell
@@ -945,6 +958,14 @@ export interface ScopedCellTypeConstructor<
   Wrap extends HKT,
   Scope extends CellScope,
 > {
+  /**
+   * Create a scoped cell with an initial/default value.
+   */
+  new <T>(
+    value?: T,
+    schema?: JSONSchema,
+  ): ScopedConstructorResult<Scope, Apply<Wrap, T>>;
+
   /**
    * Create a scoped cell with an initial/default value.
    */
