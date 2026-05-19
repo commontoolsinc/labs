@@ -28,7 +28,6 @@ import {
   type SharedMessagesValue,
   TrustedChatSendSurface,
   TrustedProfileSaveSurface,
-  VerifiedChatBubble,
 } from "./trusted.tsx";
 
 type DraftCell = Writable<string | Default<"">>;
@@ -74,10 +73,52 @@ const SharedTranscript = pattern<
         }}
       >
         <div style={{ width: "min(34rem, 100%)" }}>
-          {VerifiedChatBubble({
-            message: messageCell,
-            mine: isMine,
-          })}
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: isMine ? "flex-end" : "flex-start",
+              gap: "4px",
+              width: "100%",
+            }}
+          >
+            <span
+              style={{
+                fontSize: "12px",
+                color: "var(--cf-color-text-secondary)",
+              }}
+            >
+              {messageCell.authorName}
+            </span>
+            <cf-cfc-authorship
+              data-authorship-surface={messageCell.id}
+              $value={messageCell.body}
+              $author={messageCell.authorProfile}
+              authorName={messageCell.authorName}
+              data-badge-placement={isMine ? "end" : "start"}
+            >
+              <span
+                style={{
+                  display: "inline-block",
+                  maxWidth: "100%",
+                  padding: "8px 10px",
+                  borderRadius: isMine
+                    ? "14px 14px 4px 14px"
+                    : "14px 14px 14px 4px",
+                  background: isMine
+                    ? "var(--cf-color-primary, #2563eb)"
+                    : "var(--cf-color-surface-raised, #f3f4f6)",
+                  color: isMine
+                    ? "var(--cf-color-on-primary, #ffffff)"
+                    : "var(--cf-color-text, #111827)",
+                  overflowWrap: "anywhere",
+                  whiteSpace: "pre-wrap",
+                }}
+              >
+                {messageCell.body}
+              </span>
+            </cf-cfc-authorship>
+          </div>
         </div>
       </div>
     );

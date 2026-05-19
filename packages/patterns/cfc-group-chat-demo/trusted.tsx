@@ -8,7 +8,6 @@ import {
   pattern,
   RepresentsCurrentUser,
   Stream,
-  toSchema,
   UI,
   Writable,
   WriteAuthorizedBy,
@@ -56,7 +55,7 @@ export type TrustedProfile = RepresentsCurrentUser<
   >
 >;
 
-export type ProfileCell = Writable<ChatProfile>;
+export type ProfileCell = Writable<ChatProfile | undefined>;
 export type TrustedProfileCell = Writable<TrustedProfile>;
 
 export interface MyProfileValue {
@@ -72,8 +71,7 @@ export type MyProfileCellValue =
   | MyProfileStoredValue
   | Default<EmptyMyProfileValue>;
 export type MyProfileCell = Writable<MyProfileCellValue>;
-const MY_PROFILE_VALUE_SCHEMA = toSchema<MyProfileValue>();
-const TRUSTED_PROFILE_SCHEMA = toSchema<TrustedProfile>();
+export type AuthorProfileCell = ProfileCell;
 
 export type TrustedSentChatMessage = AuthoredByCurrentUser<
   TrustedActionWrite<
@@ -85,24 +83,15 @@ export type TrustedSentChatMessage = AuthoredByCurrentUser<
 >;
 
 export type ImportedClaimedChatMessage = PlainImportedClaimedChatMessage<
-  ProfileCell
+  AuthorProfileCell
 >;
 
 export type SharedChatMessage =
   | TrustedSentChatMessage
   | ImportedClaimedChatMessage;
-export type SharedChatMessageCell =
-  & Writable<SharedChatMessage>
-  & SharedChatMessage;
 
 export type SharedMessagesValue = SharedChatMessage[] | Default<[]>;
 export type SharedMessagesCell = Writable<SharedMessagesValue>;
-type SchemaReadableCell<T> = {
-  asSchema(schema: unknown): { get(): T | undefined };
-};
-type TrustedProfileSchemaCell = ProfileCell & {
-  asSchema(schema: typeof TRUSTED_PROFILE_SCHEMA): TrustedProfileCell;
-};
 
 const draftText = (draft: Writable<string | Default<"">>): string =>
   (draft.get() as string | undefined) ?? "";
@@ -114,23 +103,18 @@ export const messagesValue = (
 
 export const myProfileValue = (
   myProfile: MyProfileCell,
-): MyProfileValue =>
-  (myProfile as MyProfileCell & SchemaReadableCell<MyProfileValue>)
-    .asSchema(MY_PROFILE_VALUE_SCHEMA)
-    .get() ?? {};
+): MyProfileStoredValue => myProfile.get() ?? {};
 
 export const currentProfileCell = (
   myProfile: MyProfileCell,
-): TrustedProfileCell | undefined =>
-  myProfileValue(myProfile).profile
-    ? (myProfileValue(myProfile).profile as TrustedProfileSchemaCell).asSchema(
-      TRUSTED_PROFILE_SCHEMA,
-    )
-    : undefined;
+): ProfileCell | undefined =>
+  myProfileValue(myProfile).profile === undefined
+    ? undefined
+    : myProfile.key("profile").resolveAsCell();
 
 export const currentProfileSnapshot = (
   myProfile: MyProfileCell,
-): TrustedProfile | undefined => currentProfileCell(myProfile)?.get();
+): ChatProfile | undefined => currentProfileCell(myProfile)?.get();
 
 export const profileCellKey = (cell: unknown): string | undefined => {
   try {
@@ -157,13 +141,13 @@ export const sameProfileCell = (left: unknown, right: unknown): boolean => {
 export const participantClaimsValue = (
   myProfile: MyProfileCell,
   messages: SharedMessagesCell,
-): ParticipantClaim<ProfileCell>[] => {
+): ParticipantClaim<AuthorProfileCell>[] => {
   const seen = new Set<string>();
-  const participants: ParticipantClaim<ProfileCell>[] = [];
+  const participants: ParticipantClaim<AuthorProfileCell>[] = [];
   const addParticipant = (
     name: string | undefined,
     accentColor: string | undefined,
-    profile: ProfileCell | undefined,
+    profile: AuthorProfileCell | undefined,
   ) => {
     if (!name) {
       return;
@@ -191,7 +175,7 @@ export const participantClaimsValue = (
   );
 
   messagesValue(messages).forEach((message) => {
-    const profile = message.authorProfile as ProfileCell | undefined;
+    const profile = message.authorProfile;
     const profileValue = profile?.get();
     addParticipant(
       profileValue?.name ?? message.authorName,
@@ -216,7 +200,7 @@ export const participantSummary = (
 export const applyTrustedProfileSave = (
   myProfile: MyProfileCell,
   rawName: string,
-): { trimmedName: string | null; profile?: TrustedProfileCell } => {
+): { trimmedName: string | null; profile?: ProfileCell } => {
   const trimmedName = rawName.trim();
   if (!trimmedName) {
     return { trimmedName: null };
@@ -225,15 +209,12 @@ export const applyTrustedProfileSave = (
   const existingProfile = currentProfileSnapshot(myProfile);
   if (existingProfile) {
     currentProfileCell(myProfile)?.set(
-      makeProfileSnapshot(
-        trimmedName,
-        existingProfile,
-      ) as TrustedProfile,
+      makeProfileSnapshot(trimmedName, existingProfile) as TrustedProfile,
     );
     return { trimmedName, profile: currentProfileCell(myProfile) };
   }
 
-  const profile = Writable.for<TrustedProfile>("profile") as TrustedProfileCell;
+  const profile = Writable.for<TrustedProfile>("profile");
   profile.set(makeProfileSnapshot(trimmedName) as TrustedProfile);
   myProfile.set({ profile });
   return { trimmedName, profile };
@@ -254,11 +235,18 @@ export const prepareTrustedMessageSend = (
       message: null,
     };
   }
+  const profileCell = currentProfileCell(myProfile);
+  if (!profileCell) {
+    return {
+      trimmedBody: null,
+      message: null,
+    };
+  }
 
   return {
     trimmedBody,
     message: createSentMessageSnapshot(
-      currentProfileCell(myProfile) as TrustedProfileCell,
+      profileCell,
       profileValue,
       trimmedBody,
     ) as TrustedSentChatMessage,
@@ -496,65 +484,5 @@ export const TrustedChatSendSurface = pattern<
   };
 });
 
-interface VerifiedChatBubbleInput {
-  message: SharedChatMessageCell;
-  mine?: boolean;
-}
-
-export const VerifiedChatBubble = pattern<
-  VerifiedChatBubbleInput,
-  { [NAME]: string; [UI]: any }
->((
-  { message, mine }: VerifiedChatBubbleInput,
-): { [NAME]: string; [UI]: any } => ({
-  [NAME]: "verified message bubble",
-  [UI]: (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: mine ? "flex-end" : "flex-start",
-        gap: "4px",
-        width: "100%",
-      }}
-    >
-      <span
-        style={{
-          fontSize: "12px",
-          color: "var(--cf-color-text-secondary)",
-        }}
-      >
-        {message.authorName}
-      </span>
-      <cf-cfc-authorship
-        data-authorship-surface={message.id}
-        $value={message.body}
-        $author={message.authorProfile}
-        authorName={message.authorName}
-        data-badge-placement={mine ? "end" : "start"}
-      >
-        <span
-          style={{
-            display: "inline-block",
-            maxWidth: "100%",
-            padding: "8px 10px",
-            borderRadius: mine ? "14px 14px 4px 14px" : "14px 14px 14px 4px",
-            background: mine
-              ? "var(--cf-color-primary, #2563eb)"
-              : "var(--cf-color-surface-raised, #f3f4f6)",
-            color: mine
-              ? "var(--cf-color-on-primary, #ffffff)"
-              : "var(--cf-color-text, #111827)",
-            overflowWrap: "anywhere",
-            whiteSpace: "pre-wrap",
-          }}
-        >
-          {message.body}
-        </span>
-      </cf-cfc-authorship>
-    </div>
-  ),
-}));
-
-export type ParticipantClaimValue = ParticipantClaim<ProfileCell>;
-export type AnyPlainChatMessage = PlainChatMessage<ProfileCell>;
+export type ParticipantClaimValue = ParticipantClaim<AuthorProfileCell>;
+export type AnyPlainChatMessage = PlainChatMessage<AuthorProfileCell>;
