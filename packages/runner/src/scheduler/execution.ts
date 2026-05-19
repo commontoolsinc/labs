@@ -316,6 +316,7 @@ export interface SchedulerSettleLoopState {
   readonly getLoopCounter: () => WeakMap<Action, number>;
   readonly runsThisExecute: Map<Action, number>;
   readonly activePullDemandActions: WeakSet<Action>;
+  readonly isMaterializer: (action: Action) => boolean;
   readonly getSchedulingWrites: (
     action: Action,
   ) => readonly IMemorySpaceAddress[] | undefined;

@@ -256,6 +256,7 @@ async function runPullSettleAction(
   if (!isStillScheduled) return 0;
 
   if (!isPullSettleActionStillRunnable(state, fn)) return 0;
+  if (deferEffectForLateMaterializerDependency(state, fn)) return 0;
   if (skipPullDelayedSettleAction(state, fn)) return 0;
   if (skipUnchangedConditionalEffect(state, fn)) return 0;
 
@@ -312,6 +313,26 @@ function isPullSettleActionStillRunnable(
 
   // For computations: must be pending or dirty
   return isInPending || isInDirty;
+}
+
+function deferEffectForLateMaterializerDependency(
+  state: SchedulerSettleLoopState,
+  fn: Action,
+): boolean {
+  if (!state.effects.has(fn)) return false;
+
+  const dirtyDeps = new Set<Action>();
+  state.collectDirtyDependencies(fn, dirtyDeps, new Map());
+  const materializers = [...dirtyDeps].filter((dep) =>
+    state.isMaterializer(dep) && state.dirty.has(dep)
+  );
+  if (materializers.length === 0) return false;
+
+  for (const materializer of materializers) {
+    state.pending.add(materializer);
+  }
+  state.pending.add(fn);
+  return true;
 }
 
 function skipPullDelayedSettleAction(

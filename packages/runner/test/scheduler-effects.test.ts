@@ -16,6 +16,7 @@ import {
 } from "./scheduler-test-utils.ts";
 import type {
   Action,
+  EventHandler,
   IExtendedStorageTransaction,
   ReactivityLog,
   SchedulerTestStorageManager,
@@ -659,5 +660,351 @@ describe("effect/computation tracking", () => {
       .toBe(true);
     expect(runtime.scheduler.getDependents(materializer).has(stableEffect))
       .toBe(false);
+  });
+
+  it("should coalesce dirty materializer runs behind manual debounce", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const source = runtime.getCell<number>(
+      space,
+      "materializer-debounce-source",
+      undefined,
+      tx,
+    );
+    const target = runtime.getCell<{ value: number }>(
+      space,
+      "materializer-debounce-target",
+      undefined,
+      tx,
+    );
+    source.set(0);
+    target.set({ value: 0 });
+    await tx.commit();
+    tx = runtime.edit();
+
+    let materializerRuns = 0;
+    const materializer = Object.assign(
+      (actionTx: IExtendedStorageTransaction) => {
+        materializerRuns++;
+        target.withTx(actionTx).set({ value: source.withTx(actionTx).get() });
+      },
+      {
+        materializerWriteEnvelopes: [target.getAsNormalizedFullLink()],
+      },
+    ) as Action & {
+      materializerWriteEnvelopes: ReturnType<
+        typeof target.getAsNormalizedFullLink
+      >[];
+    };
+
+    runtime.scheduler.subscribe(materializer, {
+      reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+      shallowReads: [],
+      writes: [],
+    }, { debounce: 20 });
+    await runtime.idle();
+    expect(materializerRuns).toBe(1);
+
+    for (const value of [1, 2, 3]) {
+      const updateTx = runtime.edit();
+      source.withTx(updateTx).set(value);
+      await updateTx.commit();
+    }
+    await runtime.idle();
+
+    expect(materializerRuns).toBe(2);
+    expect(target.get()).toEqual({ value: 3 });
+  });
+
+  it("should fan out materializer changes only to actual changed readers", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const source = runtime.getCell<number>(
+      space,
+      "materializer-precise-source",
+      undefined,
+      tx,
+    );
+    const target = runtime.getCell<Record<string, number>>(
+      space,
+      "materializer-precise-target",
+      undefined,
+      tx,
+    );
+    source.set(0);
+    target.set(Object.fromEntries(
+      Array.from({ length: 12 }, (_, index) => [`k${index}`, 0]),
+    ));
+    await tx.commit();
+    tx = runtime.edit();
+
+    let materializerRuns = 0;
+    const effectRuns = Array.from({ length: 12 }, () => 0);
+    const materializer = Object.assign(
+      (actionTx: IExtendedStorageTransaction) => {
+        materializerRuns++;
+        const next = { ...target.withTx(actionTx).get() };
+        next.k7 = source.withTx(actionTx).get();
+        target.withTx(actionTx).set(next);
+      },
+      {
+        materializerWriteEnvelopes: [target.getAsNormalizedFullLink()],
+      },
+    ) as Action & {
+      materializerWriteEnvelopes: ReturnType<
+        typeof target.getAsNormalizedFullLink
+      >[];
+    };
+
+    runtime.scheduler.subscribe(materializer, {
+      reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+      shallowReads: [],
+      writes: [],
+    });
+    for (let index = 0; index < effectRuns.length; index++) {
+      const key = `k${index}`;
+      const effect: Action = (actionTx) => {
+        effectRuns[index]++;
+        target.withTx(actionTx).key(key).get();
+      };
+      runtime.scheduler.subscribe(effect, effect, { isEffect: true });
+    }
+    await runtime.idle();
+    materializerRuns = 0;
+    effectRuns.fill(0);
+
+    const updateTx = runtime.edit();
+    source.withTx(updateTx).set(7);
+    await updateTx.commit();
+    await runtime.idle();
+
+    expect(materializerRuns).toBe(1);
+    expect(effectRuns[7]).toBe(1);
+    expect(effectRuns.reduce((sum, count) => sum + count, 0)).toBe(1);
+  });
+
+  it("should promote dirty materializers before demand-root effects", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const source = runtime.getCell<number>(
+      space,
+      "materializer-demand-source",
+      undefined,
+      tx,
+    );
+    const trigger = runtime.getCell<number>(
+      space,
+      "materializer-demand-trigger",
+      undefined,
+      tx,
+    );
+    const target = runtime.getCell<{ value: number }>(
+      space,
+      "materializer-demand-target",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    trigger.set(0);
+    target.set({ value: 1 });
+    await tx.commit();
+    tx = runtime.edit();
+
+    const observed: number[] = [];
+    const materializer = Object.assign(
+      (actionTx: IExtendedStorageTransaction) => {
+        target.withTx(actionTx).set({ value: source.withTx(actionTx).get() });
+      },
+      {
+        materializerWriteEnvelopes: [target.getAsNormalizedFullLink()],
+      },
+    ) as Action & {
+      materializerWriteEnvelopes: ReturnType<
+        typeof target.getAsNormalizedFullLink
+      >[];
+    };
+    const effect: Action = (actionTx) => {
+      trigger.withTx(actionTx).get();
+      observed.push(target.withTx(actionTx).key("value").get());
+    };
+
+    runtime.scheduler.subscribe(materializer, {
+      reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+      shallowReads: [],
+      writes: [],
+    });
+    runtime.scheduler.subscribe(effect, effect, { isEffect: true });
+    await runtime.idle();
+    observed.length = 0;
+
+    const sourceUpdateTx = runtime.edit();
+    source.withTx(sourceUpdateTx).set(2);
+    await sourceUpdateTx.commit();
+
+    const triggerUpdateTx = runtime.edit();
+    trigger.withTx(triggerUpdateTx).set(1);
+    await triggerUpdateTx.commit();
+    await runtime.idle();
+
+    expect(observed).toEqual([2]);
+  });
+
+  it("should promote dirty materializers before event preflight handlers", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const eventStream = runtime.getCell<unknown>(
+      space,
+      "materializer-event-stream",
+      undefined,
+      tx,
+    );
+    const source = runtime.getCell<number>(
+      space,
+      "materializer-event-source",
+      undefined,
+      tx,
+    );
+    const target = runtime.getCell<{ value: number }>(
+      space,
+      "materializer-event-target",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    target.set({ value: 1 });
+    await tx.commit();
+    tx = runtime.edit();
+
+    const observed: number[] = [];
+    const materializer = Object.assign(
+      (actionTx: IExtendedStorageTransaction) => {
+        target.withTx(actionTx).set({ value: source.withTx(actionTx).get() });
+      },
+      {
+        materializerWriteEnvelopes: [target.getAsNormalizedFullLink()],
+      },
+    ) as Action & {
+      materializerWriteEnvelopes: ReturnType<
+        typeof target.getAsNormalizedFullLink
+      >[];
+    };
+    const handler: EventHandler = (actionTx) => {
+      observed.push(target.withTx(actionTx).key("value").get());
+    };
+    handler.populateDependencies = (depTx) => {
+      target.withTx(depTx).key("value").get();
+    };
+
+    runtime.scheduler.subscribe(materializer, {
+      reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+      shallowReads: [],
+      writes: [],
+    });
+    runtime.scheduler.addEventHandler(
+      handler,
+      eventStream.getAsNormalizedFullLink(),
+    );
+    await runtime.idle();
+
+    const updateTx = runtime.edit();
+    source.withTx(updateTx).set(2);
+    await updateTx.commit();
+    runtime.scheduler.queueEvent(eventStream.getAsNormalizedFullLink(), {});
+    await runtime.idle();
+
+    expect(observed).toEqual([2]);
+  });
+
+  it("should keep static declared writes demand-driven in pull mode", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const source = runtime.getCell<number>(
+      space,
+      "static-declared-source",
+      undefined,
+      tx,
+    );
+    const target = runtime.getCell<number>(
+      space,
+      "static-declared-target",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    target.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let computationRuns = 0;
+    const computation: Action = (actionTx) => {
+      computationRuns++;
+      target.withTx(actionTx).set(source.withTx(actionTx).get());
+    };
+    runtime.scheduler.subscribe(computation, {
+      reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+      shallowReads: [],
+      writes: [toMemorySpaceAddress(target.getAsNormalizedFullLink())],
+    });
+    await runtime.idle();
+    expect(computationRuns).toBe(0);
+
+    const effect: Action = (actionTx) => {
+      target.withTx(actionTx).get();
+    };
+    runtime.scheduler.subscribe(effect, effect, { isEffect: true });
+    await runtime.idle();
+    expect(computationRuns).toBe(1);
+  });
+
+  it("should keep push mode eager for materializer-annotated computations", async () => {
+    runtime.scheduler.disablePullMode();
+
+    const source = runtime.getCell<number>(
+      space,
+      "materializer-push-source",
+      undefined,
+      tx,
+    );
+    const target = runtime.getCell<{ value: number }>(
+      space,
+      "materializer-push-target",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    target.set({ value: 0 });
+    await tx.commit();
+    tx = runtime.edit();
+
+    let runs = 0;
+    const materializer = Object.assign(
+      (actionTx: IExtendedStorageTransaction) => {
+        runs++;
+        target.withTx(actionTx).set({ value: source.withTx(actionTx).get() });
+      },
+      {
+        materializerWriteEnvelopes: [target.getAsNormalizedFullLink()],
+      },
+    ) as Action & {
+      materializerWriteEnvelopes: ReturnType<
+        typeof target.getAsNormalizedFullLink
+      >[];
+    };
+
+    runtime.scheduler.subscribe(materializer, {
+      reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+      shallowReads: [],
+      writes: [],
+    });
+    await runtime.idle();
+    expect(runs).toBe(1);
+
+    const updateTx = runtime.edit();
+    source.withTx(updateTx).set(2);
+    await updateTx.commit();
+    await runtime.idle();
+
+    expect(runs).toBe(2);
+    expect(target.get()).toEqual({ value: 2 });
   });
 });

@@ -1748,6 +1748,7 @@ export class Scheduler {
       getLoopCounter: () => this.loopCounter,
       runsThisExecute: this.runsThisExecute,
       activePullDemandActions: this.activePullDemandActions,
+      isMaterializer: (action) => this.materializers.isMaterializer(action),
       getSchedulingWrites: (action) =>
         this.writeIndex.getSchedulingWrites(action),
       getSchedulingWritesMap: () => this.writeIndex.getSchedulingWritesMap(),

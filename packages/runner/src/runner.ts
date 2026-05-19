@@ -2652,6 +2652,9 @@ export class Runner {
     const wrappedAction = Object.assign(action, {
       reads,
       writes,
+      ...(module.materializerWriteEnvelopes
+        ? { materializerWriteEnvelopes: module.materializerWriteEnvelopes }
+        : {}),
       module,
       pattern,
     });
@@ -2953,6 +2956,9 @@ export class Runner {
     Object.assign(action, builtinAction, {
       reads: inputCells,
       writes: outputCells,
+      ...(module.materializerWriteEnvelopes
+        ? { materializerWriteEnvelopes: module.materializerWriteEnvelopes }
+        : {}),
       module,
       pattern,
     });

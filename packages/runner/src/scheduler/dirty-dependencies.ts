@@ -69,6 +69,13 @@ export function collectDirtyDependencies(
       }
     }
 
+    const directWriters = collectDirectWritersForAction(state, action);
+    const hasStaleMaterializerWriter = [...directWriters.writers].some(
+      (writer) =>
+        state.materializerIndex.isMaterializer(writer) &&
+        state.isStale(writer),
+    );
+
     const cached = memo.get(action);
     if (cached !== undefined) {
       if (trace) {
@@ -82,7 +89,7 @@ export function collectDirtyDependencies(
       return cached;
     }
 
-    if (!state.isStale(action)) {
+    if (!state.isStale(action) && !hasStaleMaterializerWriter) {
       memo.set(action, false);
       return false;
     }
@@ -97,8 +104,7 @@ export function collectDirtyDependencies(
     state.collectStack.add(action);
     addedToStack = true;
 
-    let actionNeedsRun = state.isStale(action);
-    const directWriters = collectDirectWritersForAction(state, action);
+    let actionNeedsRun = state.isStale(action) || hasStaleMaterializerWriter;
     if (directWriters.usedLogFallback && trace) trace.logFallbackCount++;
     if (directWriters.writers.size > 0) {
       recordReverseDependencyTrace(state, action, directWriters.writers);

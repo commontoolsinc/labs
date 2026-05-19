@@ -12,6 +12,7 @@ export interface MaterializerIndexState {
   getMaterializerWriteEnvelopes(
     action: Action,
   ): readonly IMemorySpaceAddress[] | undefined;
+  isMaterializer(action: Action): boolean;
 }
 
 export class SchedulerMaterializers implements MaterializerIndexState {
