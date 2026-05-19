@@ -120,13 +120,55 @@ function fixtureLabel(v: bigint, encoded: Uint8Array): string {
 /**
  * Makes a fixture, optionally calculating the encoded form.
  */
-function makeFixture(value: bigint, encoded?: Uint8Array): Fixture {
-  encoded ??= referenceEncode(value);
+function makeFixture(value: bigint, preEncoded?: number[]): Fixture {
+  let encoded: Uint8Array;
+
+  if (preEncoded) {
+    encoded = new Uint8Array(preEncoded);
+  } else {
+    encoded = referenceEncode(value);
+  }
+
   return { value, encoded, label: fixtureLabel(value, encoded) };
 }
 
 const fixtures: readonly Fixture[] =
   [...rawFixtures].sort().map((value) => makeFixture(value));
+
+// These don't use `referenceEncode()` because these are what's used to test the
+// _integrity_ of `referenceEncode()`.
+const referenceFixtures: readonly Fixture[] = [
+  makeFixture(-129n, [0xff, 0x7f]),
+  makeFixture(-128n, [0x80]),
+  makeFixture(-1n, [0xff]),
+  makeFixture(0n, [0x00]),
+  makeFixture(1n, [0x01]),
+  makeFixture(127n, [0x7f]),
+  makeFixture(255n, [0x00, 0xff]),
+  makeFixture(1n << 1n, [0x02]),
+  makeFixture(1n << 2n, [0x04]),
+  makeFixture(1n << 3n, [0x08]),
+  makeFixture(1n << 4n, [0x10]),
+  makeFixture(1n << 5n, [0x20]),
+  makeFixture(1n << 6n, [0x40]),
+  makeFixture(1n << 7n, [0x00, 0x80]),
+  makeFixture(1n << 8n, [0x01, 0x00]),
+  makeFixture(1n << 9n, [0x02, 0x00]),
+  makeFixture(1n << 10n, [0x04, 0x00]),
+  makeFixture(1n << 11n, [0x08, 0x00]),
+  makeFixture(1n << 12n, [0x10, 0x00]),
+  makeFixture(1n << 13n, [0x20, 0x00]),
+  makeFixture(1n << 14n, [0x40, 0x00]),
+  makeFixture(1n << 15n, [0x00, 0x80, 0x00]),
+  makeFixture(1n << 16n, [0x01, 0x00, 0x00]),
+  makeFixture(1n << 17n, [0x02, 0x00, 0x00]),
+  makeFixture(1n << 63n, [0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
+  makeFixture(1n << 64n, [0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
+  makeFixture(
+    0x0123_4567_89ab_cdef_0987_6543_21fe_dcban,
+    [0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x09, 0x87, 0x65, 0x43, 0x21, 0xfe, 0xdc, 0xba],
+  ),
+];
 
 //
 // Tests to validate reference encoder
@@ -135,48 +177,15 @@ const fixtures: readonly Fixture[] =
 // A small set of explicit byte-level assertions that pin `referenceEncode`
 // against the spec. The rest of the suite trusts it as an oracle, so it
 // matters that these can't both be wrong in the same way.
-describe("referenceEncode (test oracle)", () => {
-  it("encodes 0n", () => {
-    expect(referenceEncode(0n)).toEqual(new Uint8Array([0x00]));
-  });
-
-  it("encodes 1n", () => {
-    expect(referenceEncode(1n)).toEqual(new Uint8Array([0x01]));
-  });
-
-  it("encodes 127n", () => {
-    expect(referenceEncode(127n)).toEqual(new Uint8Array([0x7f]));
-  });
-
-  it("encodes 128n (sign extension)", () => {
-    expect(referenceEncode(128n)).toEqual(new Uint8Array([0x00, 0x80]));
-  });
-
-  it("encodes 255n", () => {
-    expect(referenceEncode(255n)).toEqual(new Uint8Array([0x00, 0xff]));
-  });
-
-  it("encodes 256n", () => {
-    expect(referenceEncode(256n)).toEqual(new Uint8Array([0x01, 0x00]));
-  });
-
-  it("encodes -1n", () => {
-    expect(referenceEncode(-1n)).toEqual(new Uint8Array([0xff]));
-  });
-
-  it("encodes -128n", () => {
-    expect(referenceEncode(-128n)).toEqual(new Uint8Array([0x80]));
-  });
-
-  it("encodes -129n (sign extension)", () => {
-    expect(referenceEncode(-129n)).toEqual(new Uint8Array([0xff, 0x7f]));
-  });
-
-  it("encodes 2^64 as 9 bytes", () => {
-    const bytes = referenceEncode(2n ** 64n);
-    expect(bytes.length).toBe(9);
-    expect(bytes[0]).toBe(0x01);
-    for (let i = 1; i < 9; i++) expect(bytes[i]).toBe(0x00);
+describe("`referenceEncode()` (test oracle)", () => {
+  it("encodes all reference fixtures as expected", () => {
+    for (const { value, encoded, label } of referenceFixtures) {
+      try {
+        expect(referenceEncode(value)).toEqual(new Uint8Array(encoded));
+      } catch (e) {
+        throw new Error(`Failed on ${label}.`, { cause: e });
+      }
+    }
   });
 });
 
@@ -195,8 +204,8 @@ for (let at = 0; at < fixtures.length; at += FIXTURE_SLICE_SIZE) {
         const { value, encoded, label } = slice[i];
         try {
           expect(bigintToMinimalTwosComplement(value)).toEqual(encoded);
-        } catch {
-          throw new Error(`Failed on ${label}.`);
+        } catch (e) {
+          throw new Error(`Failed on ${label}.`, { cause: e });
         }
       }
     });
@@ -208,8 +217,8 @@ for (let at = 0; at < fixtures.length; at += FIXTURE_SLICE_SIZE) {
         const { value, encoded, label } = slice[i];
         try {
           expect(bigintFromMinimalTwosComplement(encoded)).toBe(value);
-        } catch {
-          throw new Error(`Failed on ${label}.`);
+        } catch (e) {
+          throw new Error(`Failed on ${label}.`, { cause: e });
         }
       }
     });
@@ -224,8 +233,8 @@ for (let at = 0; at < fixtures.length; at += FIXTURE_SLICE_SIZE) {
         const decodedBytes = fromBase64url(b64);
         try {
           expect(bigintFromMinimalTwosComplement(decodedBytes)).toBe(value);
-        } catch {
-          throw new Error(`Failed on ${label}.`);
+        } catch (e) {
+          throw new Error(`Failed on ${label}.`, { cause: e });
         }
       }
     });
