@@ -6,24 +6,9 @@
  */
 
 /**
- * Shared 8-byte scratch buffer.
- */
-const dv64Buf = new ArrayBuffer(8);
-
-/**
- * `DataView` of `dv64buf`.
- */
-const dv64View = new DataView(dv64Buf);
-
-/**
- * `Uint8Array` view of `dv64buf`.
- */
-const dv64Bytes = new Uint8Array(dv64Buf);
-
-/**
- * Helper for `bigintToMinimalTwosComplement()`, which converts a hex digit at a
- * particular index in a string to its 4-bit (nibble-sized) numeric value.
- * Handles '0'-'9' (0x30-0x39) and 'a'-'f' (0x61-0x66).
+ * Helper for `biToMtcHex()`, which converts a hex digit at a particular index
+ * in a string to its 4-bit (nibble-sized) numeric value. Handles '0'-'9'
+ * (0x30-0x39) and 'a'-'f' (0x61-0x66).
  */
 function nibbleValueAt(hex: string, at: number): number {
   const c = hex.charCodeAt(at);
@@ -33,19 +18,9 @@ function nibbleValueAt(hex: string, at: number): number {
 }
 
 /**
- * Helper for `bigintToMinimalTwosComplement()`, which converts a pair of hex
- * digits at a particular index in a string to its 8-bit (byte-sized) numeric
- * value. Handles '0'-'9' (0x30-0x39) and 'a'-'f' (0x61-0x66).
- */
-function byteValueAt(hex: string, at: number): number {
-  return (nibbleValueAt(hex, at) << 4) | nibbleValueAt(hex, at + 1);
-}
-
-/**
- * Helper for `bigintToMinimalTwosComplement()`, which converts a positive
- * `bigint` to a hex string with an even number of digits, _and_ a leading
- * `00` if it would otherwise be interpreted as a negative number in
- * twos-complement.
+ * Helper for `biToMtcHex()`, which converts a positive `bigint` to a hex string
+ * with an even number of digits, _and_ a leading `00` if it would otherwise be
+ * interpreted as a negative number in twos-complement.
  */
 function hexStringFromPositiveValue(value: bigint): string {
   const hex = value.toString(16);
@@ -63,137 +38,22 @@ function hexStringFromPositiveValue(value: bigint): string {
 }
 
 /**
- * Helper for `bigintToMinimalTwosComplement()`, which converts a value that
- * fits into 64 bits and requires `length >= 5`.
- */
-function encode5To8Bytes(value: bigint, negative: boolean): Uint8Array {
-  const skipByte = negative ? 0xff : 0x00;
-  const signBit = skipByte & 0x80;
-
-  dv64View.setBigInt64(0, value, false); // `false` means big-endian.
-
-  // Note: Loop necessarily ends before running off the end of the array
-  // because by virtue of the caller's up-front check, there's definitely a
-  // non-skipped byte).
-  for (let i = 0; true; i++) {
-    const byte = dv64Bytes[i];
-    if (byte !== skipByte) {
-      // Adjust starting index backwards if the non-skipped byte would flip
-      // the sign of the result.
-      return ((byte & 0x80) === signBit)
-        ? dv64Bytes.slice(i)
-        : dv64Bytes.slice(i - 1);
-    }
-  }
-}
-
-/**
  * Version of `bigintToMinimalTwosComplement()` which uses the `Uint8Array`
  * hex-string methods.
  */
 export function bigintToMtcHex(value: bigint): Uint8Array {
-  if (value >= 0n) {
-    if (value <= 0x7fff_ffffn) {
-      const num = Number(value);
-      if (num <= 0x7fff) {
-        if (num <= 0x7f) {
-          const result = new Uint8Array(1);
-          result[0] = num;
-          return result;
-        } else {
-          const result = new Uint8Array(2);
-          result[0] = num >> 8;
-          result[1] = num;
-          return result;
-        }
-      } else {
-        if (num <= 0x7f_ffff) {
-          const result = new Uint8Array(3);
-          result[0] = num >> 16;
-          result[1] = num >> 8;
-          result[2] = num;
-          return result;
-        } else {
-          const result = new Uint8Array(4);
-          result[0] = num >> 24;
-          result[1] = num >> 16;
-          result[2] = num >> 8;
-          result[3] = num;
-          return result;
-        }
-      }
-    } else if (value <= 0x7fff_ffff_ffff_ffffn) {
-      return encode5To8Bytes(value, false);
-    }
-
-    // Slow path for positive numbers: This stringifies and then parses back the
-    // `value`, to work around JS's very limited set of `bigint` functionality.
-    // If and when the TC39 BigInt Math proposal lands, this code could be
-    // reworked to be much more performant. See:
-    // <https://github.com/tc39/proposal-bigint-math>.
-
-    const hex = hexStringFromPositiveValue(value);
-
-    // Note: When it is widely-enough available, we will be able to say `return
-    // Uint8Array.fromHex(hex)` here and probably see a major performance
-    // improvement.
-
-    const bytes = new Uint8Array(hex.length >> 1);
-
-    for (let i = 0; i < bytes.length; i++) {
-      bytes[i] = byteValueAt(hex, i * 2);
-    }
-
-    return bytes;
+  if (value >= 0) {
+    const hexString = hexStringFromPositiveValue(value);
+    return Uint8Array.fromHex(hexString);
   } else {
-    if (value >= -0x8000_0000n) {
-      const num = Number(value);
-      if (num >= -0x8000) {
-        if (num >= -0x80) {
-          const result = new Uint8Array(1);
-          result[0] = num;
-          return result;
-        } else {
-          const result = new Uint8Array(2);
-          result[0] = num >> 8;
-          result[1] = num;
-          return result;
-        }
-      } else {
-        if (num >= -0x80_0000) {
-          const result = new Uint8Array(3);
-          result[0] = num >> 16;
-          result[1] = num >> 8;
-          result[2] = num;
-          return result;
-        } else {
-          const result = new Uint8Array(4);
-          result[0] = num >> 24;
-          result[1] = num >> 16;
-          result[2] = num >> 8;
-          result[3] = num;
-          return result;
-        }
-      }
-    } else if (value >= -0x8000_0000_0000_0000n) {
-      return encode5To8Bytes(value, true);
+    // Negative value. We ones-complement it before conversion to string, then
+    // undo the conversion in the array result.
+    const hexString = hexStringFromPositiveValue(~value);
+    const result = Uint8Array.fromHex(hexString);
+    for (let i = 0; i < result.length; i++) {
+      result[i] = ~result[i];
     }
-
-    // Slow path for negative numbers. See above for details. The extra twist
-    // here is that we need to end up with a string that correctly represents
-    // `value` as a twos-complement negative value. The trick we do here is
-    // convert the _ones_-complement of `value` to a string, and then undo it
-    // byte-by-byte when storing the result.
-
-    const hex = hexStringFromPositiveValue(~value);
-    const bytes = new Uint8Array(hex.length >> 1);
-
-    for (let i = 0; i < bytes.length; i++) {
-      // `0xff ^ value` to undo the ones-complement in `~value` above.
-      bytes[i] = 0xff ^ byteValueAt(hex, i * 2);
-    }
-
-    return bytes;
+    return result;
   }
 }
 
