@@ -2673,7 +2673,9 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
     perUser: createCellConstructor("user") as unknown as CellTypeConstructor<
       Wrap
     >["perUser"],
-    perSession: createCellConstructor("session") as unknown as CellTypeConstructor<
+    perSession: createCellConstructor(
+      "session",
+    ) as unknown as CellTypeConstructor<
       Wrap
     >["perSession"],
 

@@ -1,6 +1,6 @@
 import ts from "typescript";
 
-import { detectCallKind, isReactiveOriginCall } from "../ast/mod.ts";
+import { detectCallKind, isReactiveOriginExpression } from "../ast/mod.ts";
 import type { TransformationContext } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 import { getKnownComputedKeyExpression } from "../utils/reactive-keys.ts";
@@ -135,10 +135,11 @@ export function isTopmostMemberAccess(node: ts.Node): boolean {
 }
 
 export function isOpaqueOriginCall(
-  expression: ts.CallExpression,
+  expression: ts.CallExpression | ts.NewExpression,
   context: TransformationContext,
 ): boolean {
-  if (isReactiveOriginCall(expression, context.checker)) return true;
+  if (isReactiveOriginExpression(expression, context.checker)) return true;
+  if (ts.isNewExpression(expression)) return false;
   if (detectCallKind(expression, context.checker)?.kind === "pattern-tool") {
     return true;
   }

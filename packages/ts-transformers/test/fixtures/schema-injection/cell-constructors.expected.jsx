@@ -47,7 +47,7 @@ export default function TestCellConstructors() {
         },
         required: ["message"],
         scope: "space"
-    } as const satisfies __cfHelpers.JSONSchema).for("event", true);
+    } as const satisfies __cfHelpers.JSONSchema).for({ stream: "event" }, true);
     const comparable = new ComparableCell(200, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("comparable", true);
