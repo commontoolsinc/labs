@@ -254,6 +254,23 @@ describe("json-encoding", () => {
     it("explicit `undefined` runtime is equivalent to omission", () => {
       expect(valueFromJson('fvj1:{"a":1}', undefined)).toEqual({ a: 1 });
     });
+
+    // (B) fold-in: the no-runtime fallback is a decode-framed empty context
+    // (`JSON_DECODE_EMPTY_CONTEXT`) instead of the bare singleton. This is
+    // message-only and behavior-preserving: every no-cell-ref decode above
+    // must still succeed unchanged (covered by the cases in this describe),
+    // and the round-trip with a runtime is unaffected. The decode-framed
+    // throw message itself is asserted on the exported class (see
+    // `EmptyReconstructionContext (exported class)` below) since a cell-ref
+    // decode requires runner-owned wire machinery not available here.
+    it("(B) no-runtime decode behavior is unchanged (round-trips, no cell ref)", () => {
+      // Same payloads as above, asserted as a single behavior-preservation
+      // checkpoint tied to the (B) fold-in.
+      expect(valueFromJson("fvj1:42")).toBe(42);
+      expect(valueFromJson('fvj1:{"a":1}')).toEqual({ a: 1 });
+      expect(valueFromJson('fvj1:{"\/Undefined@1":null}')).toBe(undefined);
+      expect(roundTrip(7 as FabricValue)).toBe(7);
+    });
   });
 
   describe("plainObjectFromJson", () => {
