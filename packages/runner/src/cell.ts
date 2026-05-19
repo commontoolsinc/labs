@@ -2662,7 +2662,10 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
      * @param b - Second cell or value to compare
      * @returns true if the values are equal
      */
-    equals(a: AnyCell<any> | object, b: AnyCell<any> | object): boolean {
+    equals(
+      a: AnyCell<any> | object | undefined,
+      b: AnyCell<any> | object | undefined,
+    ): boolean {
       const frame = getTopFrame();
       return areLinksSame(
         a,
@@ -2680,7 +2683,10 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
      * @param b - Second cell or value to compare
      * @returns true if the values are equal
      */
-    equalLinks(a: AnyCell<any> | object, b: AnyCell<any> | object): boolean {
+    equalLinks(
+      a: AnyCell<any> | object | undefined,
+      b: AnyCell<any> | object | undefined,
+    ): boolean {
       return areLinksSame(a, b);
     },
   } satisfies CellTypeConstructor<Wrap>;

@@ -117,11 +117,6 @@ export const currentProfileSnapshot = (
   myProfile: MyProfileCell,
 ): ChatProfile | undefined => currentProfileCell(myProfile)?.get();
 
-export const sameProfileCell = (
-  left: AuthorProfileCell | undefined,
-  right: AuthorProfileCell | undefined,
-): boolean => left !== undefined && right !== undefined && equals(left, right);
-
 export const participantClaimsValue = (
   myProfile: MyProfileCell,
   messages: SharedMessagesCell,
@@ -137,10 +132,7 @@ export const participantClaimsValue = (
     }
     if (
       profile !== undefined &&
-      participants.some((participant) =>
-        participant.profile !== undefined &&
-        equals(profile, participant.profile)
-      )
+      participants.some((participant) => equals(profile, participant.profile))
     ) {
       return;
     }

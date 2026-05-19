@@ -2,6 +2,7 @@ import {
   action,
   computed,
   Default,
+  equals,
   handler,
   NAME,
   pattern,
@@ -22,7 +23,6 @@ import {
   messagesValue,
   type MyProfileCell,
   participantClaimsValue,
-  sameProfileCell,
   type SharedChatMessage,
   type SharedMessagesCell,
   type SharedMessagesValue,
@@ -62,7 +62,7 @@ const SharedTranscript = pattern<
   const transcriptRows = messages.map((messageCell) => {
     const authorProfile = messageCell.authorProfile;
     const isMine = computed(() =>
-      sameProfileCell(currentProfileCell(myProfile), authorProfile)
+      equals(currentProfileCell(myProfile), authorProfile)
     );
     return (
       <div
