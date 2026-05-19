@@ -17,7 +17,7 @@ import { bigintFromMtcHex, bigintToMtcHex } from "./bigint-uint8-hex-string.ts";
  * Whether to use the version that relies on `Uint8Array.{from,to}Hex()`,
  * methods which are new enough to JS to not be ubiquitously available.
  */
-const useUint8ArrayToFromHex: boolean = false;
+const useUint8ArrayToFromHex: boolean = !!Uint8Array.fromHex;
 
 /**
  * Converts a bigint to its minimal two's-complement big-endian byte
