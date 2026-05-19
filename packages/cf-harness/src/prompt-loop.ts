@@ -86,6 +86,7 @@ import {
   extractFinalWorkingDirectory,
 } from "./tools/shell-cwd.ts";
 import { isReadFileToolSuccessOutput } from "./tools/read-file.ts";
+import { isStructuredFileToolErrorOutput } from "./tools/file-errors.ts";
 import { isViewImageToolSuccessOutput } from "./tools/view-image.ts";
 import type { HarnessFailureRecord } from "./diagnostics.ts";
 import { DEFAULT_PARENT_TOOL_IDS as DEFAULT_PROMPT_LOOP_TOOL_IDS } from "./contracts/tool-descriptor.ts";
@@ -914,6 +915,13 @@ const MODEL_FACING_BASH_STREAM_HEAD_CHARS = 60_000;
 const MODEL_FACING_BASH_STREAM_TAIL_CHARS = 20_000;
 const MODEL_FACING_BASH_STREAM_MAX_CHARS = MODEL_FACING_BASH_STREAM_HEAD_CHARS +
   MODEL_FACING_BASH_STREAM_TAIL_CHARS;
+const REDACTED_READ_FILE_ERROR_PATH = "[redacted]";
+const REDACTED_READ_FILE_ERROR_MESSAGE =
+  "read_file failed: filesystem status not observable under CFC policy";
+const REDACTED_READ_FILE_ERROR_DETAIL =
+  "Filesystem status details were redacted by CFC policy.";
+const READ_FILE_STATUS_OBSERVATION_DETAIL =
+  "read_file failure may reveal filesystem path/status observations";
 
 interface InvokedToolCallMessages {
   toolMessage: HarnessToolTranscriptMessage;
@@ -961,6 +969,40 @@ const toolOutputNeedsSandboxMediation = (
 ): boolean =>
   toolId === "bash" ||
   (toolId === "read_file" && isReadFileToolSuccessOutput(output));
+
+const isReadFileStatusObservationError = (output: unknown): boolean =>
+  isStructuredFileToolErrorOutput(output) &&
+  output.error.exitCode !== undefined &&
+  (
+    output.error.code === "file_not_found" ||
+    output.error.code === "not_a_file" ||
+    output.error.code === "permission_denied" ||
+    output.error.code === "unknown"
+  );
+
+const redactReadFileStatusObservationError = (
+  output: unknown,
+  resultRef: ToolResultRef,
+): unknown => {
+  if (!isStructuredFileToolErrorOutput(output)) {
+    return output;
+  }
+  const outputId = typeof output.outputId === "string"
+    ? output.outputId
+    : resultRef.outputId;
+  return {
+    outputId,
+    path: REDACTED_READ_FILE_ERROR_PATH,
+    ok: false,
+    error: {
+      type: "cf-harness.structured-file-tool-error",
+      code: "unknown",
+      message: REDACTED_READ_FILE_ERROR_MESSAGE,
+      path: REDACTED_READ_FILE_ERROR_PATH,
+      detail: REDACTED_READ_FILE_ERROR_DETAIL,
+    },
+  };
+};
 
 const createOutputHandle = (
   resultRef: ToolResultRef,
@@ -2162,6 +2204,38 @@ export class CfHarnessPromptLoop {
           digest: output.digest,
           imageAttached: true,
         },
+      };
+    }
+    if (toolId === "read_file" && isReadFileStatusObservationError(output)) {
+      if (mode === "disabled") {
+        return { output: stripInternalCfcFields(output) };
+      }
+      if (mode === "observe") {
+        await writePolicyEvent({
+          severity: "warning",
+          mode,
+          toolId,
+          toolCallId,
+          detail:
+            `${READ_FILE_STATUS_OBSERVATION_DETAIL}; raw error was exposed because CFC is in observe mode`,
+        });
+        return { output: stripInternalCfcFields(output) };
+      }
+      const denial = makeObservationDenied("not-observable", {
+        detail: READ_FILE_STATUS_OBSERVATION_DETAIL,
+        handle: createOutputHandle(resultRef, "error"),
+      });
+      await writePolicyEvent({
+        severity: "denied",
+        mode,
+        toolId,
+        toolCallId,
+        detail:
+          `${READ_FILE_STATUS_OBSERVATION_DETAIL}; raw error details were redacted`,
+        observationDenied: denial,
+      });
+      return {
+        output: redactReadFileStatusObservationError(output, resultRef),
       };
     }
     if (!toolOutputNeedsSandboxMediation(toolId, output)) {
