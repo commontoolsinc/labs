@@ -115,7 +115,7 @@ describe("CFC canonicalization helpers", () => {
         id: "of:doc",
         path: ["value", "a"],
       }],
-      potentialWrites: [],
+      attemptedWrites: [],
       writes: [],
       dereferenceTraces: [],
       writePolicyInputs: [{

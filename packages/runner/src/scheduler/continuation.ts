@@ -18,6 +18,7 @@ export interface ExecuteContinuationState {
   readonly changedWritesHistory: unknown[];
   readonly consumeRerunAfterCurrentExecute: () => boolean;
   readonly isDemandedPullComputation: (action: Action) => boolean;
+  readonly isMaterializer: (action: Action) => boolean;
   readonly shouldRunFirstPullComputationInDemandContext: (
     action: Action,
   ) => boolean;

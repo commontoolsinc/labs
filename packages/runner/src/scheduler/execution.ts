@@ -167,7 +167,7 @@ export function collectInitialExecuteDependencies(
   try {
     // Find computation actions whose writes are still unknown. We run them on
     // the first cycle to capture writes that cannot be inferred from declared
-    // outputs or populateDependencies() potential writes.
+    // outputs.
     //
     // TODO(seefeld): Once we more reliably capture what they can write via
     // WriteableCell or so, then we can treat this more deliberately via the
@@ -323,6 +323,9 @@ export interface SchedulerSettleLoopState {
     Action,
     IMemorySpaceAddress[]
   >;
+  readonly getMaterializerWriteEnvelopes: (
+    action: Action,
+  ) => readonly IMemorySpaceAddress[] | undefined;
   readonly collectDependenciesForAction: (
     action: Action,
     populateDependencies: PopulateDependenciesEntry,
@@ -603,6 +606,7 @@ export function planPullExecuteContinuation(state: {
   readonly pending: ReadonlySet<Action>;
   readonly dirty: ReadonlySet<Action>;
   readonly effects: ReadonlySet<Action>;
+  readonly isMaterializer: (action: Action) => boolean;
   readonly shouldRerunAfterCurrentExecute: boolean;
   readonly hasQueuedEventReadyNow: boolean;
   readonly hasParkedHeadEvent: boolean;
@@ -618,6 +622,7 @@ export function planPullExecuteContinuation(state: {
   const now = state.now ?? performance.now();
   const hasPendingPullWork = [...state.pending].some((action) =>
     state.effects.has(action) ||
+    state.isMaterializer(action) ||
     state.isDemandedPullComputation(action) ||
     state.shouldRunFirstPullComputationInDemandContext(action)
   );
@@ -627,7 +632,8 @@ export function planPullExecuteContinuation(state: {
   const hasDirtyPullWork = [...state.dirty].some((action) => {
     if (
       !state.effects.has(action) &&
-      !state.isDemandedPullComputation(action)
+      !state.isDemandedPullComputation(action) &&
+      !state.isMaterializer(action)
     ) {
       return false;
     }
@@ -639,7 +645,8 @@ export function planPullExecuteContinuation(state: {
           nextDirtyPullRunAt,
           nextDebounceAt,
         );
-        nextDirtyPullRunWaitsForIdle ||= state.effects.has(action);
+        nextDirtyPullRunWaitsForIdle ||= state.effects.has(action) ||
+          state.isMaterializer(action);
       }
       return false;
     }
@@ -647,7 +654,8 @@ export function planPullExecuteContinuation(state: {
     const nextEligibleAt = state.getNextEligibleRunTime(action);
     if (nextEligibleAt !== undefined && nextEligibleAt > now) {
       nextDirtyPullRunAt = minDefined(nextDirtyPullRunAt, nextEligibleAt);
-      nextDirtyPullRunWaitsForIdle ||= state.effects.has(action);
+      nextDirtyPullRunWaitsForIdle ||= state.effects.has(action) ||
+        state.isMaterializer(action);
       return false;
     }
 

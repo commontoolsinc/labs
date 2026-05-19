@@ -120,6 +120,7 @@ export interface DirtySchedulingState {
   readonly scheduleComputationDebounce: (action: Action) => void;
   readonly clearComputationDebounceState: (action: Action) => void;
   readonly isDemandedPullComputation: (action: Action) => boolean;
+  readonly isIdleRunnableComputation?: (action: Action) => boolean;
   readonly queueExecution: () => void;
 }
 
@@ -150,7 +151,10 @@ export function markSchedulerDirty(
 ): void {
   state.staleness.markDirectDirty(action);
   state.scheduleComputationDebounce(action);
-  if (state.isDemandedPullComputation(action)) {
+  if (
+    state.isDemandedPullComputation(action) ||
+    state.isIdleRunnableComputation?.(action) === true
+  ) {
     state.queueExecution();
   }
 }

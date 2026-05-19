@@ -172,6 +172,10 @@ export function applyPullTriggeredActionPlan(
 
   if (plan.operation === "mark-dirty") {
     state.markDirty(action);
+    if (state.isMaterializer(action)) {
+      state.queueExecution();
+      return [];
+    }
     return state.scheduleAffectedEffects(action);
   }
 
@@ -202,6 +206,8 @@ export interface StorageNotificationState {
   readonly recordTriggerTrace: (entry: TriggerTraceEntry) => void;
   readonly scheduleWithDebounce: (action: Action) => void;
   readonly markDirty: (action: Action) => void;
+  readonly isMaterializer: (action: Action) => boolean;
+  readonly queueExecution: () => void;
   readonly scheduleAffectedEffects: (
     action: Action,
   ) => TriggerTraceScheduledEffect[];

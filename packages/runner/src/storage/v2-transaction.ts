@@ -63,7 +63,7 @@ import {
 import {
   isMutableTransactionReadAllowed,
   isReadIgnoredForScheduling,
-  isReadMarkedAsPotentialWrite,
+  isReadMarkedAsAttemptedWrite,
 } from "./reactivity-log.ts";
 import {
   createPathContainer,
@@ -1668,7 +1668,7 @@ export class V2StorageTransaction implements IStorageTransaction {
   private buildReactivityLog(): TransactionReactivityLog {
     const reads: IMemorySpaceAddress[] = [];
     const shallowReads: IMemorySpaceAddress[] = [];
-    let potentialWrites: IMemorySpaceAddress[] | undefined;
+    let attemptedWrites: IMemorySpaceAddress[] | undefined;
 
     for (const read of this.#readActivities) {
       const meta = read.meta ?? EMPTY_META;
@@ -1689,9 +1689,9 @@ export class V2StorageTransaction implements IStorageTransaction {
         reads.push(address);
       }
 
-      if (isReadMarkedAsPotentialWrite(meta)) {
-        potentialWrites ??= [];
-        potentialWrites.push(address);
+      if (isReadMarkedAsAttemptedWrite(meta)) {
+        attemptedWrites ??= [];
+        attemptedWrites.push(address);
       }
     }
 
@@ -1733,8 +1733,8 @@ export class V2StorageTransaction implements IStorageTransaction {
       reads,
       shallowReads,
       writes,
-      ...(potentialWrites && potentialWrites.length > 0
-        ? { potentialWrites }
+      ...(attemptedWrites && attemptedWrites.length > 0
+        ? { attemptedWrites }
         : {}),
     };
   }

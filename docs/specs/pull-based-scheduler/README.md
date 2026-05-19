@@ -57,9 +57,13 @@ handlers are queued separately and run through the event path.
 In pull mode, when a cell changes:
 - Effects → added to `pending`
 - Computations → marked `dirty`/`stale`, and downstream effects are scheduled
+  unless the computation is a materializer
 
 A computation stays dirty until an effect, event preflight, or explicit
 `cell.pull()` needs it. If nothing ever observes it, it never runs.
+Materializers are the exception: broad or dynamic writable-input computations
+are dirty-coalesced and run from the idle pull loop so their actual changed
+writes can drive precise downstream propagation.
 
 In push mode, triggered effects and computations are both scheduled in
 `pending`.
@@ -67,7 +71,7 @@ In push mode, triggered effects and computations are both scheduled in
 ### Current-Known Writes
 
 Each action tracks its current known write set from the latest run plus
-declared/potential writes. This keeps the dependency graph precise while still
+declared writes. This keeps the dependency graph precise while still
 handling no-op runs and declared outputs:
 
 ```typescript
@@ -80,6 +84,22 @@ By default the scheduler uses the latest known writes rather than cumulative
 history, so stale branches can disappear when an action changes what it writes.
 The old cumulative `mightWrite` behavior is retained behind the experimental
 `schedulerHistoricalMightWrite` flag.
+
+### Materializer Write Envelopes
+
+Computations that write through writable inputs are not indexed from transaction
+`attemptedWrites`. If the write target is statically simple and safely
+resolvable, it is represented as a normal declared write. Broad or dynamic
+writable-input targets are represented as `materializerWriteEnvelopes`, a
+separate pull-mode index.
+
+When a materializer's inputs change, dirtying stops at the materializer. It is
+queued for the idle pull loop, coalescing repeated source changes and honoring
+manual debounce/throttle settings. If an effect, event preflight, or explicit
+demand reads a path overlapping a dirty materializer envelope before idle runs,
+that materializer is promoted into the same settle pass and ordered before the
+reader. After it runs, only actual changed writes are propagated to downstream
+readers.
 
 ## Execution Flow
 
@@ -380,9 +400,13 @@ dependency transaction for reactive actions, and installs:
 - Shallow reads, which only invalidate on same-path, ancestor-path, or direct
   child writes.
 - Actual writes from the transaction.
-- Potential writes, for APIs that read and may later write the same location.
 - Declared writes from action telemetry annotations.
+- Materializer write envelopes from action telemetry annotations.
 - Ignored scheduling writes from telemetry annotations.
+
+Transaction `attemptedWrites` remain a storage/CFC concept for APIs that read a
+path while deciding whether to write it. They are included in CFC target-side
+prepare/digest inputs, but are explicitly not scheduler dependency evidence.
 
 `setSchedulerDependencies()` sorts and compacts reads and writes, filters
 ignored scheduling writes, and prunes structural ancestor writes so unrelated
@@ -393,7 +417,6 @@ The active scheduling write set is current-known by default:
 - Use actual writes from the latest run when they exist.
 - Otherwise keep the existing current-known writes if present.
 - Otherwise seed from declared writes.
-- Add potential writes.
 - Add parent writes for dynamic collection items when an actual child write
   falls under a declared collection write.
 
@@ -820,7 +843,10 @@ interface ReactivityLog {
   reads: Address[];
   shallowReads: Address[];
   writes: Address[];
-  potentialWrites?: Address[];  // For diffAndUpdate pattern
+}
+
+interface TransactionReactivityLog extends ReactivityLog {
+  attemptedWrites?: Address[];  // CFC/security target evidence, not scheduling evidence
 }
 
 interface ActionStats {
@@ -1094,7 +1120,7 @@ The scheduler module also re-exports:
 txToReactivityLog
 allowMutableTransactionRead
 ignoreReadForScheduling
-markReadAsPotentialWrite
+markReadAsAttemptedWrite
 ```
 
 ## Tests

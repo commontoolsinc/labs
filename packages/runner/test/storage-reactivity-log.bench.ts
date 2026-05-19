@@ -3,7 +3,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import {
   ignoreReadForScheduling,
-  markReadAsPotentialWrite,
+  markReadAsAttemptedWrite,
 } from "../src/storage/reactivity-log.ts";
 import { txToReactivityLog } from "../src/scheduler.ts";
 
@@ -70,7 +70,7 @@ Deno.bench(
           scope: "space",
           id: "of:reactivity-log-bench",
           path: ["list"],
-        }, { meta: markReadAsPotentialWrite });
+        }, { meta: markReadAsAttemptedWrite });
         tx.writeValueOrThrow({
           space,
           scope: "space",

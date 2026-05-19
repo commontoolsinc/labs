@@ -17,6 +17,7 @@ import {
 import type {
   Action,
   IExtendedStorageTransaction,
+  ReactivityLog,
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
 
@@ -510,12 +511,12 @@ describe("effect/computation tracking", () => {
     );
   });
 
-  it("should keep dependents for potential writes without relying on historical writes", async () => {
+  it("should ignore attemptedWrites as scheduler dependency evidence", async () => {
     runtime.scheduler.enablePullMode();
 
     const output = runtime.getCell<number>(
       space,
-      "potential-write-output",
+      "attempted-write-output",
       undefined,
       tx,
     );
@@ -535,19 +536,18 @@ describe("effect/computation tracking", () => {
       {
         reads: [],
         shallowReads: [],
-        writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
+        writes: [],
+        attemptedWrites: [
+          toMemorySpaceAddress(output.getAsNormalizedFullLink()),
+        ],
+      } as ReactivityLog & {
+        attemptedWrites: ReturnType<typeof toMemorySpaceAddress>[];
       },
-      {},
     );
 
-    runtime.scheduler.resubscribe(computation, {
-      reads: [],
-      shallowReads: [],
-      writes: [],
-      potentialWrites: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
-    });
-
-    expect(runtime.scheduler.getDependents(computation).has(effect)).toBe(true);
+    expect(runtime.scheduler.getDependents(computation).has(effect)).toBe(
+      false,
+    );
   });
 
   it("should run dirty materializer computations without downstream demand", async () => {

@@ -61,7 +61,7 @@ import type {
 import { TransactionWrapper } from "./storage/extended-storage-transaction.ts";
 import {
   ignoreReadForScheduling,
-  markReadAsPotentialWrite,
+  markReadAsAttemptedWrite,
 } from "./scheduler.ts";
 import { internalVerifierRead } from "./storage/reactivity-log.ts";
 import { FunctionCache } from "./function-cache.ts";
@@ -2677,7 +2677,7 @@ export class Runner {
 
         for (const output of writes) {
           this.runtime.getCellFromLink(output, undefined, depTx)?.getRaw({
-            meta: markReadAsPotentialWrite,
+            meta: markReadAsAttemptedWrite,
           });
         }
       } finally {
@@ -2980,11 +2980,11 @@ export class Runner {
             this.runtime.getCellFromLink(input, undefined, depTx)?.get();
           }
         }
-        // Always capture write dependencies by marking outputs as potential writes
+        // Always capture write dependencies by marking outputs as attempted writes
         for (const output of outputCells) {
-          // Reading with markReadAsPotentialWrite registers this as a write dependency
+          // Reading with markReadAsAttemptedWrite registers this as a write dependency
           this.runtime.getCellFromLink(output, undefined, depTx)?.getRaw({
-            meta: markReadAsPotentialWrite,
+            meta: markReadAsAttemptedWrite,
           });
         }
       } finally {

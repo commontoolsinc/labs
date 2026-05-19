@@ -37,6 +37,7 @@ export interface PullSchedulingState extends ConditionalEffectState {
   readonly pending: Set<Action>;
   readonly dirty: ReadonlySet<Action>;
   readonly effects: ReadonlySet<Action>;
+  readonly isMaterializer: (action: Action) => boolean;
   readonly dependents: WeakMap<Action, Set<Action>>;
   readonly pendingPullRunnableState: PendingPullRunnableState;
   readonly dirtyPullRunnableState: DirtyPullRunnableState;
@@ -86,6 +87,7 @@ export function collectPullIterationSeeds(
   state: PullSchedulingState,
   workSet: Set<Action>,
 ): void {
+  const initialSize = workSet.size;
   for (const action of state.pending) {
     if (isPendingPullActionRunnable(state.pendingPullRunnableState, action)) {
       workSet.add(action);
@@ -98,11 +100,37 @@ export function collectPullIterationSeeds(
       workSet.add(action);
     }
   }
+
+  if (workSet.size > initialSize || initialSize > 0) {
+    return;
+  }
+
+  for (const action of state.pending) {
+    if (
+      state.isMaterializer(action) &&
+      isMaterializerRunnable(state, action)
+    ) {
+      workSet.add(action);
+    }
+  }
+
+  for (const action of state.dirty) {
+    if (
+      state.isMaterializer(action) &&
+      isMaterializerRunnable(state, action)
+    ) {
+      state.pending.add(action);
+      workSet.add(action);
+    }
+  }
 }
 
 export function hasRunnablePullWork(state: PullSchedulingState): boolean {
   for (const action of state.pending) {
-    if (isPendingPullActionRunnable(state.pendingPullRunnableState, action)) {
+    if (
+      isPendingPullActionRunnable(state.pendingPullRunnableState, action) ||
+      (state.isMaterializer(action) && isMaterializerRunnable(state, action))
+    ) {
       return true;
     }
   }
@@ -112,13 +140,24 @@ export function hasRunnablePullWork(state: PullSchedulingState): boolean {
       isDirtyPullActionRunnable(
         state.dirtyPullRunnableStateWithDebounce,
         action,
-      )
+      ) ||
+      (state.isMaterializer(action) && isMaterializerRunnable(state, action))
     ) {
       return true;
     }
   }
 
   return false;
+}
+
+function isMaterializerRunnable(
+  state: PullSchedulingState,
+  action: Action,
+): boolean {
+  return !state.effects.has(action) &&
+    !state.dirtyPullRunnableStateWithDebounce.isThrottled(action) &&
+    state.dirtyPullRunnableStateWithDebounce
+        .isDebouncedComputationWaiting(action) !== true;
 }
 
 export function hasDeferredDirtyEffectWork(

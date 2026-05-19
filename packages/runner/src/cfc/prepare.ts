@@ -709,7 +709,7 @@ const valueWriteTargets = (
   >();
   const log = tx.getReactivityLog?.();
   const seenWriteSpaces = new Set<MemorySpace>(
-    [...(log?.writes ?? []), ...(log?.potentialWrites ?? [])].map((write) =>
+    [...(log?.writes ?? []), ...(log?.attemptedWrites ?? [])].map((write) =>
       write.space
     ),
   );

@@ -36,7 +36,7 @@ export interface SchedulingWriteState {
 export class SchedulerWriteIndex
   implements WriterIndexState, SchedulingWriteState {
   // Current-known writes are rebuilt on each dependency update from actual
-  // writes plus declared/potential writes. This is the default scheduling view.
+  // writes plus declared writes. This is the default scheduling view.
   readonly currentKnownWrites = new WeakMap<Action, IMemorySpaceAddress[]>();
   // Historical writes preserve the legacy cumulative union and are only used
   // when the experimental historical-write mode is enabled.
@@ -163,7 +163,6 @@ export function updateWriterIndex(
 
 export function buildKnownSchedulingWrites(state: {
   readonly writes: readonly IMemorySpaceAddress[];
-  readonly potentialWrites: readonly IMemorySpaceAddress[];
   readonly declaredWrites: readonly IMemorySpaceAddress[];
   readonly existingCurrentWrites: readonly IMemorySpaceAddress[];
   readonly existingHistoricalWrites: readonly IMemorySpaceAddress[];
@@ -183,7 +182,6 @@ export function buildKnownSchedulingWrites(state: {
   const newCurrentKnownWrites = sortAndCompactPaths([
     ...currentSeedWrites,
     ...dynamicParentWrites,
-    ...state.potentialWrites,
   ]);
   const newHistoricalMightWrite = sortAndCompactPaths([
     ...state.existingHistoricalWrites,

@@ -33,17 +33,17 @@ function buildPullIterationWorkSet(state: {
   const workSet = new Set<Action>();
   const iterationSeeds = new Set<Action>();
 
-  // Every iteration needs to consider newly created pending effects.
-  // Without this, nested/recursive patterns can stall after creating
-  // new demand-root effects in an earlier iteration.
-  state.collectPullIterationSeeds(iterationSeeds);
-
   // On first iteration, add special-case seeds discovered before settle.
   if (state.settleIter === 0) {
     for (const seed of state.initialSeeds) {
       iterationSeeds.add(seed);
     }
   }
+
+  // Every iteration needs to consider newly created pending effects.
+  // Without this, nested/recursive patterns can stall after creating
+  // new demand-root effects in an earlier iteration.
+  state.collectPullIterationSeeds(iterationSeeds);
 
   for (const seed of iterationSeeds) {
     workSet.add(seed);
@@ -210,6 +210,7 @@ function preparePullSettleIteration(
     state.getSchedulingWritesMap(),
     state.actionParent,
     state.dependents,
+    state.getMaterializerWriteEnvelopes,
   );
   logger.time(
     topologicalSortStart,

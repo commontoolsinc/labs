@@ -19,7 +19,7 @@ import type {
 import {
   allowMutableTransactionRead,
   ignoreReadForScheduling,
-  markReadAsPotentialWrite,
+  markReadAsAttemptedWrite,
 } from "./storage/reactivity-log.ts";
 import type {
   ActionStats,
@@ -53,6 +53,7 @@ import {
   type DependencyGraphState,
   updateDependentEdgesForLog,
 } from "./scheduler/dependency-graph.ts";
+import { SchedulerMaterializers } from "./scheduler/materializers.ts";
 import { type DependencyUpdateState } from "./scheduler/dependency-updates.ts";
 import { SchedulerWriteIndex } from "./scheduler/scheduling-writes.ts";
 import {
@@ -233,7 +234,7 @@ export { txToReactivityLog } from "./scheduler/reactivity.ts";
 export {
   allowMutableTransactionRead,
   ignoreReadForScheduling,
-  markReadAsPotentialWrite,
+  markReadAsAttemptedWrite,
 };
 
 export class Scheduler {
@@ -331,6 +332,7 @@ export class Scheduler {
   };
 
   private writeIndex!: SchedulerWriteIndex;
+  private materializers = new SchedulerMaterializers(this.effects);
   private dirtyDependencyCollectionState!: DirtyDependencyCollectionState;
   // Track actions scheduled for first time (bypass filter)
   private scheduledFirstTime = new Set<Action>();
@@ -490,6 +492,7 @@ export class Scheduler {
       changeGroup?: ChangeGroup;
     } = {},
   ): Cancel {
+    this.updateMaterializerRegistration(action);
     if (this.pullMode) {
       return subscribePullSchedulerAction(
         this.subscribeActionState,
@@ -527,6 +530,7 @@ export class Scheduler {
       changeGroup?: ChangeGroup;
     } = {},
   ): void {
+    this.updateMaterializerRegistration(action);
     if (this.pullMode) {
       resubscribePullSchedulerAction(
         this.subscribeActionState,
@@ -548,6 +552,7 @@ export class Scheduler {
     action: Action,
     options: { preserveChangeGroup?: boolean } = {},
   ): void {
+    this.materializers.clearAction(action);
     unsubscribeSchedulerAction(this.unsubscribeState, action, options);
   }
 
@@ -1427,6 +1432,7 @@ export class Scheduler {
       dependencies: this.dependencies,
       writersByEntity: this.writeIndex.writersByEntity,
       effects: this.effects,
+      materializerIndex: this.materializers,
       isStale: (target) => this.staleness.isStale(target),
       getSchedulingWrites: (target) =>
         this.writeIndex.getSchedulingWrites(target),
@@ -1491,6 +1497,8 @@ export class Scheduler {
         this.delays.clearComputationDebounceState(action),
       isDemandedPullComputation: (action) =>
         this.isDemandedPullComputation(action),
+      isIdleRunnableComputation: (action) =>
+        this.materializers.isMaterializer(action),
       queueExecution: () => this.queueExecution(),
     };
   }
@@ -1521,6 +1529,8 @@ export class Scheduler {
       scheduleWithDebounce: (target) => this.scheduleWithDebounce(target),
       markDirty: (target) =>
         markSchedulerDirty(this.dirtySchedulingState, target),
+      isMaterializer: (target) => this.materializers.isMaterializer(target),
+      queueExecution: () => this.queueExecution(),
       scheduleAffectedEffects: (target) => this.scheduleAffectedEffects(target),
     };
   }
@@ -1580,6 +1590,7 @@ export class Scheduler {
       pending: this.pending,
       dirty: this.staleness.dirty,
       effects: this.effects,
+      isMaterializer: (action) => this.materializers.isMaterializer(action),
       dependents: this.dependents,
       pendingPullRunnableState: this.pendingPullRunnableState,
       dirtyPullRunnableState: this.dirtyPullRunnableState,
@@ -1601,6 +1612,7 @@ export class Scheduler {
       scheduleWithDebounce: (action) => this.scheduleWithDebounce(action),
       markDirty: (action) =>
         markSchedulerDirty(this.dirtySchedulingState, action),
+      isMaterializer: (action) => this.materializers.isMaterializer(action),
       scheduleAffectedEffects: (action) => {
         this.scheduleAffectedEffects(action);
       },
@@ -1739,6 +1751,8 @@ export class Scheduler {
       getSchedulingWrites: (action) =>
         this.writeIndex.getSchedulingWrites(action),
       getSchedulingWritesMap: () => this.writeIndex.getSchedulingWritesMap(),
+      getMaterializerWriteEnvelopes: (action) =>
+        this.materializers.getMaterializerWriteEnvelopes(action),
       collectDependenciesForAction: (action, populateDependencies, options) =>
         this.collectDependenciesForAction(
           action,
@@ -1784,6 +1798,7 @@ export class Scheduler {
       },
       isDemandedPullComputation: (action) =>
         this.isDemandedPullComputation(action),
+      isMaterializer: (action) => this.materializers.isMaterializer(action),
       shouldRunFirstPullComputationInDemandContext: (action) =>
         this.shouldRunFirstPullComputationInDemandContext(action),
       isDebouncedComputationWaiting: (action) =>
@@ -2083,6 +2098,13 @@ export class Scheduler {
     computation: Action,
   ): TriggerTraceScheduledEffect[] {
     return scheduleAffectedEffectsState(this.pullSchedulingState, computation);
+  }
+
+  private updateMaterializerRegistration(action: Action): void {
+    this.materializers.register(
+      action,
+      (action as Partial<TelemetryAnnotations>).materializerWriteEnvelopes,
+    );
   }
 
   private getNextDebounceRunTime(action: Action): number | undefined {

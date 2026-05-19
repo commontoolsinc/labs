@@ -5,6 +5,10 @@ import type {
   SchedulerEventPreflightStats,
 } from "../telemetry.ts";
 import { collectDirectWritersForLog } from "./dependency-graph.ts";
+import {
+  collectMaterializerWritersForLog,
+  type MaterializerIndexState,
+} from "./materializers.ts";
 import type {
   Action,
   DirtyDependencyTraceContext,
@@ -27,6 +31,7 @@ export interface DirtyDependencyCollectionState {
   readonly dependencies: WeakMap<Action, ReactivityLog>;
   readonly writersByEntity: Map<SpaceScopeAndURI, Set<Action>>;
   readonly effects: ReadonlySet<Action>;
+  readonly materializerIndex: MaterializerIndexState;
   readonly isStale: (action: Action) => boolean;
   readonly getSchedulingWrites: (
     action: Action,
@@ -93,37 +98,30 @@ export function collectDirtyDependencies(
     addedToStack = true;
 
     let actionNeedsRun = state.isStale(action);
-    const directWriters = state.reverseDependencies.get(action);
-    if (directWriters) {
-      recordReverseDependencyTrace(state, action, directWriters);
-      for (const writer of directWriters) {
-        if (!state.isStale(writer)) {
-          memo.set(writer, false);
-          continue;
-        }
-        if (trace) trace.depth++;
-        let writerNeedsRun: boolean;
-        try {
-          writerNeedsRun = collectDirtyDependencies(
-            state,
-            writer,
-            workSet,
-            memo,
-          );
-        } finally {
-          if (trace) trace.depth--;
-        }
-        if (writerNeedsRun) {
-          actionNeedsRun = true;
-        }
+    const directWriters = collectDirectWritersForAction(state, action);
+    if (directWriters.usedLogFallback && trace) trace.logFallbackCount++;
+    if (directWriters.writers.size > 0) {
+      recordReverseDependencyTrace(state, action, directWriters.writers);
+    }
+    for (const writer of directWriters.writers) {
+      if (!state.isStale(writer)) {
+        memo.set(writer, false);
+        continue;
       }
-    } else {
-      if (trace) trace.logFallbackCount++;
-      const log = state.dependencies.get(action);
-      if (log) {
-        if (collectDirtyDependenciesForLog(state, log, workSet, memo)) {
-          actionNeedsRun = true;
-        }
+      if (trace) trace.depth++;
+      let writerNeedsRun: boolean;
+      try {
+        writerNeedsRun = collectDirtyDependencies(
+          state,
+          writer,
+          workSet,
+          memo,
+        );
+      } finally {
+        if (trace) trace.depth--;
+      }
+      if (writerNeedsRun) {
+        actionNeedsRun = true;
       }
     }
 
@@ -149,6 +147,43 @@ export function collectDirtyDependencies(
       "collectDirtyDependencies",
     );
   }
+}
+
+function collectDirectWritersForAction(
+  state: DirtyDependencyCollectionState,
+  action: Action,
+): { writers: Set<Action>; usedLogFallback: boolean } {
+  const writers = new Set(state.reverseDependencies.get(action) ?? []);
+  const log = state.dependencies.get(action);
+  let usedLogFallback = false;
+
+  if (writers.size === 0 && log) {
+    usedLogFallback = true;
+    for (
+      const writer of collectDirectWritersForLog({
+        writersByEntity: state.writersByEntity,
+        effects: state.effects,
+        getSchedulingWrites: state.getSchedulingWrites,
+        trace: state.getTrace(),
+      }, log)
+    ) {
+      writers.add(writer);
+    }
+  }
+
+  if (log) {
+    for (
+      const materializer of collectMaterializerWritersForLog(
+        state.materializerIndex,
+        log,
+        { exclude: action },
+      )
+    ) {
+      writers.add(materializer);
+    }
+  }
+
+  return { writers, usedLogFallback };
 }
 
 function recordReverseDependencyTrace(
@@ -185,6 +220,14 @@ export function collectDirtyDependenciesForLog(
       getSchedulingWrites: state.getSchedulingWrites,
       trace,
     }, log);
+    for (
+      const materializer of collectMaterializerWritersForLog(
+        state.materializerIndex,
+        log,
+      )
+    ) {
+      directWriters.add(materializer);
+    }
   } finally {
     logger.time(
       lookupStart,

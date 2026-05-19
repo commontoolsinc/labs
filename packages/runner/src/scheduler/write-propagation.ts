@@ -16,6 +16,7 @@ export interface WritePropagationState {
   readonly conditionallyScheduledEffects: Map<Action, number>;
   readonly scheduleWithDebounce: (action: Action) => void;
   readonly markDirty: (action: Action) => void;
+  readonly isMaterializer: (action: Action) => boolean;
   readonly scheduleAffectedEffects: (action: Action) => void;
 }
 
@@ -67,7 +68,9 @@ export function markReadersDirtyForChangedWrites(
       state.scheduleWithDebounce(reader);
     } else if (state.computations.has(reader)) {
       state.markDirty(reader);
-      state.scheduleAffectedEffects(reader);
+      if (!state.isMaterializer(reader)) {
+        state.scheduleAffectedEffects(reader);
+      }
     }
   }
 }
