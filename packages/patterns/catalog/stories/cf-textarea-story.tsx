@@ -10,7 +10,7 @@ interface TextareaStoryOutput {
 }
 
 export default pattern<TextareaStoryInput, TextareaStoryOutput>(() => {
-  const disabled = Writable.of(false);
+  const disabled = new Writable(false);
 
   return {
     [NAME]: "cf-textarea Story",

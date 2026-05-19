@@ -399,7 +399,7 @@ export default pattern<Input, Output>(
       return false;
     });
 
-    const now = Writable.of(safeDateNow());
+    const now = new Writable(safeDateNow());
     startReactiveClock(now);
 
     const isTokenExpired = computed(() => {
@@ -413,8 +413,8 @@ export default pattern<Input, Output>(
 
     const checkboxesDisabled = computed(() => !!auth?.accessToken);
 
-    const refreshing = Writable.of(false);
-    const refreshFailed = Writable.of(false);
+    const refreshing = new Writable(false);
+    const refreshFailed = new Writable(false);
 
     const scopesDisplay = computed(() => scopes.join(", "));
 
@@ -1032,25 +1032,25 @@ export const AirtableAuthManager = pattern<
       AirtableAuth(
         {
           selectedScopes: {
-            "data.records:read": Writable.of(
+            "data.records:read": new Writable(
               required.includes("data.records:read"),
             ),
-            "data.records:write": Writable.of(
+            "data.records:write": new Writable(
               required.includes("data.records:write"),
             ),
-            "data.recordComments:read": Writable.of(
+            "data.recordComments:read": new Writable(
               required.includes("data.recordComments:read"),
             ),
-            "data.recordComments:write": Writable.of(
+            "data.recordComments:write": new Writable(
               required.includes("data.recordComments:write"),
             ),
-            "schema.bases:read": Writable.of(
+            "schema.bases:read": new Writable(
               required.includes("schema.bases:read"),
             ),
-            "schema.bases:write": Writable.of(
+            "schema.bases:write": new Writable(
               required.includes("schema.bases:write"),
             ),
-            "webhook:manage": Writable.of(required.includes("webhook:manage")),
+            "webhook:manage": new Writable(required.includes("webhook:manage")),
           },
           auth: emptyAuth,
         } as Parameters<typeof AirtableAuth>[0],
@@ -1591,11 +1591,11 @@ export default pattern<Input, Output>(
     const auth = authResult as any;
 
     // State
-    const bases = Writable.of<BaseInfo[]>([]);
-    const tables = Writable.of<TableInfo[]>([]);
-    const records = Writable.of<AirtableRecordData[]>([]);
-    const loading = Writable.of(false);
-    const error = Writable.of("");
+    const bases = new Writable<BaseInfo[]>([]);
+    const tables = new Writable<TableInfo[]>([]);
+    const records = new Writable<AirtableRecordData[]>([]);
+    const loading = new Writable(false);
+    const error = new Writable("");
 
     const hasBases = computed(() => bases.get().length > 0);
     const hasTables = computed(() => tables.get().length > 0);
@@ -2117,7 +2117,7 @@ Import only what you need from the above list. Define \`type Secret<T> = T;\` lo
   and returns an object with output cells.
 - **\`computed(() => expr)\`** — Derived reactive value. Re-evaluates when
   dependencies change. NEVER access \`wishResult[UI]\` inside a computed.
-- **\`Writable.of(initialValue)\`** — Mutable reactive cell. Use \`.get()\` to read,
+- **\`new Writable(initialValue)\`** — Mutable reactive cell. Use \`.get()\` to read,
   \`.set(value)\` to write, \`.update(partial)\` for partial updates.
 - **\`handler<EventType, ContextType>(async (event, context) => { ... })\`** —
   Async event handler. Declare at module scope, bind inside the pattern by
@@ -2370,7 +2370,7 @@ Auth manager utility pattern. Wraps the shared \`AuthManagerBase\` pattern — f
 - Define a descriptor object with: name, displayName, brandColor (\`${brandColor}\`), wishTag (\`"${hashTag}"\`), tokenField, scopes, hasAvatarSupport
 - Define \`${pascalName}AuthManager\` as a module-scope \`pattern(...)\`
 - Inside that pattern, define \`createAuth = action(() => navigateTo(${pascalName}Auth(...)))\`; do not put pattern construction inside a standalone factory function
-- Build \`selectedScopes\` explicitly with one \`Writable.of(required.includes("<scope>"))\` property per provider scope
+- Build \`selectedScopes\` explicitly with one \`new Writable(required.includes("<scope>"))\` property per provider scope
 - Call \`AuthManagerBase({ requiredScopes, accountType, debugMode, descriptor, createAuth })\` and export the wrapper pattern as both named and default
 - This file should be ~90-130 lines total
 
@@ -2435,7 +2435,7 @@ Main importer pattern. Follow the Airtable importer reference:
 1. **wish() for auth discovery** — Always use \`wish({ query: "${hashTag}", scope: [".", "~"] })\`
 2. **handler() for async ops** — Define at module scope, bind inside pattern
 3. **ifElse() for conditional rendering** — condition must be computed/cell, not raw boolean
-4. **Writable.of() for mutable state** — Use \`.get()\` in handlers, \`.set()\` to update
+4. **new Writable() for mutable state** — Use \`.get()\` in handlers, \`.set()\` to update
 5. **computed() for derived values** — Pure computations only, no side effects
 6. **Token refresh on 401** — Client auto-refreshes via server endpoint
 7. **No React patterns** — No useState, useEffect, hooks, or re-rendering

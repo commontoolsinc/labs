@@ -36,7 +36,7 @@ type State = {
 //   showList ? (() => { const itemCount = count + " items"; return <div>{sorted.map(...)}</div>; })() : ...
 //     -> whole branch compute-wrapped, so sorted.map(...) stays plain JS
 export default pattern((state) => {
-    const showList = Writable.of(true, {
+    const showList = new Writable(true, {
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema).for("showList", true);
     const sorted = __cfHelpers.derive({

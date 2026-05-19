@@ -6,7 +6,7 @@ import { Writable, derive, pattern } from "commonfabric";
 //   shorthand `{ multiplier }` → `{ multiplier: multiplier_1 }`
 // Context: shorthand must expand to keep the property name while using the renamed capture binding
 export default pattern(() => {
-  const multiplier = Writable.of(2);
+  const multiplier = new Writable(2);
 
   // Input name 'multiplier' collides with captured variable 'multiplier'
   // The callback uses shorthand property { multiplier }

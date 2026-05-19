@@ -34,7 +34,7 @@ const identity = await Identity.fromPassphrase("test operator", keyConfig);
 
 const TEST_PROGRAM = `import { Cell, NAME, pattern, UI } from "commonfabric";
 export default pattern((_) => {
-  const cell = Cell.of("hello");
+  const cell = new Cell("hello");
   return {
     [NAME]: "Home",
     [UI]: (
@@ -971,7 +971,7 @@ const go = handler<void, { menuOpen: Writable<boolean> }>((_, { menuOpen }) => {
 });
 
 export default pattern<Record<string, never>>(() => {
-  const menuOpen = Writable.of(true);
+  const menuOpen = new Writable(true);
   return {
     [NAME]: "Navigate Handler State Test",
     menuOpen,

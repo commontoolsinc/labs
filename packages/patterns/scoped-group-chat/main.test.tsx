@@ -5,17 +5,17 @@ import ScopedGroupChat, {
 } from "./main-with-writable-inputs.tsx";
 
 export default pattern(() => {
-  const selectedRoom = Writable.of<SelectedRoom>({});
-  const conversation = Writable.of<Conversation>({
+  const selectedRoom = new Writable<SelectedRoom>({});
+  const conversation = new Writable<Conversation>({
     rooms: [],
   });
-  const draft = Writable.of("Hello Library");
+  const draft = new Writable("Hello Library");
   const chat = ScopedGroupChat({
-    name: Writable.of(""),
+    name: new Writable(""),
     selectedRoom,
     conversation,
     draft,
-    newRoomName: Writable.of(""),
+    newRoomName: new Writable(""),
   });
 
   const action_add_new_room = action(() => {

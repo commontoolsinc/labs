@@ -15,8 +15,8 @@ interface VStackStoryOutput {
 }
 
 export default pattern<VStackStoryInput, VStackStoryOutput>(() => {
-  const gap = Writable.of<"0" | "1" | "2" | "3" | "4" | "6" | "8">("2");
-  const reverse = Writable.of(false);
+  const gap = new Writable<"0" | "1" | "2" | "3" | "4" | "6" | "8">("2");
+  const reverse = new Writable(false);
 
   return {
     [NAME]: "cf-vstack Story",

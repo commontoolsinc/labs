@@ -17,11 +17,11 @@ interface State {
     }>;
 }
 // FIXTURE: map-capture-cell-of
-// Verifies: Cell.of() variable closed over in .map() is captured with asCell schema annotation
+// Verifies: new Cell() variable closed over in .map() is captured with asCell schema annotation
 //   .map(fn) → .mapWithPattern(pattern(...), { counter: counter })
-//   Cell.of(0) capture → params.counter with { type: "number", asCell: true }
+//   new Cell(0) capture → params.counter with { type: "number", asCell: true }
 export default pattern((state) => {
-    const counter = Cell.of(0, {
+    const counter = new Cell(0, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("counter", true);
     return {

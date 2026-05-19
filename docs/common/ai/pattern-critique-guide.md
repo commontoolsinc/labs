@@ -42,7 +42,7 @@ Allowed inside patterns:
 |-----------|-----|
 | `[NAME]: someProp` | `[NAME]: computed(() => someProp)` |
 | `[NAME]: \`text ${someProp}\`` | `[NAME]: computed(() => \`text ${someProp}\`)` |
-| `Writable.of(reactiveValue)` | Initialize empty, set in handler or action |
+| `new Writable(reactiveValue)` | Initialize empty, set in handler or action |
 | `.get()` on computed or lift result | Access directly; only `Writable` uses `.get()` |
 | `items.filter(...)` inline in JSX | Wrap in `computed()` outside JSX |
 | `items.sort(...)` inline in JSX | Wrap in `computed()` outside JSX |
@@ -104,7 +104,7 @@ than guessing at unsupported internals.
 
 | Violation | Fix |
 |-----------|-----|
-| `Stream.of()` | It does not exist; the bound handler is the stream |
+| `new Stream()` | It does not exist; the bound handler is the stream |
 | `.subscribe()` on a stream | Return the stream from the pattern instead |
 | `async/await` in handlers | Use reactive APIs such as `fetchData()` instead |
 | `await generateText(...)` | Use `.result` |
@@ -193,7 +193,7 @@ calls, for example:
 
 ### 2. Reactivity
 - [PASS] [NAME] properly wrapped
-- [FAIL] Writable.of(deck.name) uses reactive value (line 15)
+- [FAIL] new Writable(deck.name) uses reactive value (line 15)
   Fix: Initialize empty, set in action()
 
 ...
@@ -205,7 +205,7 @@ calls, for example:
 - N/A: 2
 
 ## Priority Fixes
-1. [Line 15] Writable.of() with reactive value
+1. [Line 15] new Writable() with reactive value
 2. [Line 23] lift() inside pattern
 3. [Line 45] Missing $ prefix on binding
 ```

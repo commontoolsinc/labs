@@ -63,14 +63,14 @@ For local cells that should not become public pattern inputs, use scoped cell
 constructors:
 
 ```ts
-const sharedBoard = Writable.perSpace.of(DEFAULT_BOARD);
-const displayName = Writable.perUser.of("");
-const selectedItem = Writable.perSession.of<string | null>(null);
+const sharedBoard = new Writable.perSpace(DEFAULT_BOARD);
+const displayName = new Writable.perUser("");
+const selectedItem = new Writable.perSession<string | null>(null);
 ```
 
-Plain `Writable.of(...)` inherits the containing pattern or factory scope. Use
-`Writable.perUser.of(...)` or `Writable.perSession.of(...)` when the local cell
-must have a specific sharing boundary independent of that context.
+Plain `new Writable(...)` inherits the containing pattern or factory scope. Use
+`new Writable.perUser(...)` or `new Writable.perSession(...)` when the local
+cell must have a specific sharing boundary independent of that context.
 
 `PerAny<T>` is rare. Use it only when an inner value must override an outer
 scope declaration and may validly come from any concrete scope:

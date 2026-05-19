@@ -13,7 +13,7 @@ interface Output {
 
 const Node = pattern<Input, Output>(
   ({ label, parent, registry, [SELF]: self }) => {
-    const children = Writable.of<Output[]>([]);
+    const children = new Writable<Output[]>([]);
 
     return {
       label,

@@ -11,8 +11,8 @@ interface SelectStoryOutput {
 }
 
 export default pattern<SelectStoryInput, SelectStoryOutput>(() => {
-  const value = Writable.of("apple");
-  const disabled = Writable.of(false);
+  const value = new Writable("apple");
+  const disabled = new Writable(false);
 
   return {
     [NAME]: "cf-select Story",

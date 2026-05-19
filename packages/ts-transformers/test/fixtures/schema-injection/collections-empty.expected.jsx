@@ -17,14 +17,14 @@ const __cfAmdHooks = undefined;
 //   cell({}) → cell({}, { type: "object", properties: {} })
 export default pattern(() => {
     // Empty array
-    const _emptyArray = Writable.of<string[]>([], {
+    const _emptyArray = new Writable<string[]>([], {
         type: "array",
         items: {
             type: "string"
         }
     } as const satisfies __cfHelpers.JSONSchema).for("_emptyArray", true);
     // Empty object
-    const _emptyObject = Writable.of({}, {
+    const _emptyObject = new Writable({}, {
         type: "object",
         properties: {}
     } as const satisfies __cfHelpers.JSONSchema).for("_emptyObject", true);

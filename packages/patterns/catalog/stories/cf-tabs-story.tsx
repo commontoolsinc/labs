@@ -9,7 +9,7 @@ interface TabsStoryOutput {
 }
 
 export default pattern<TabsStoryInput, TabsStoryOutput>(() => {
-  const activeTab = Writable.of("one");
+  const activeTab = new Writable("one");
 
   return {
     [NAME]: "cf-tabs Story",

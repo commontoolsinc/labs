@@ -63,17 +63,17 @@ produces a top-level pattern whose inputs and outputs are the pattern contract.
 Those input fields are already reactive at runtime.
 
 Do not mirror reactive pattern inputs into new local cells during pattern
-initialization. In particular, do not write `Writable.of(input.field)`,
-`Writable.of(input.field || fallback)`, `Cell.of(input.field)`, or helper calls
-around `input.field` inside `Writable.of(...)`. `Writable.of()` and `Cell.of()`
+initialization. In particular, do not write `new Writable(input.field)`,
+`new Writable(input.field || fallback)`, `new Cell(input.field)`, or helper calls
+around `input.field` inside `new Writable(...)`. `new Writable()` and `new Cell()`
 are only for new pattern-owned cells initialized from static values.
 
 Wrong:
 
 ```tsx
 export default pattern<DeviceInput>((input) => {
-  const name = Writable.of(input.name || ""); // input.name is reactive
-  const capabilities = Writable.of(input.capabilities || []);
+  const name = new Writable(input.name || ""); // input.name is reactive
+  const capabilities = new Writable(input.capabilities || []);
   // ...
 });
 ```
@@ -84,7 +84,7 @@ Prefer one of these designs instead:
   contract with `Default<>` and `Writable<>` as needed, then use that reactive
   input cell directly.
 - If the field is independent local UI state, initialize it from a static value:
-  `Writable.of("")`, `Writable.of(false)`, or `Writable.of<Item[]>([])`.
+  `new Writable("")`, `new Writable(false)`, or `new Writable<Item[]>([])`.
 - If the field is draft/editing state seeded from input state, initialize the
   draft from a static value and copy the current input value inside an `action()`
   or another valid event/reactive context.
@@ -97,7 +97,7 @@ interface DeviceInput {
 }
 
 export default pattern<DeviceInput, DeviceOutput>(({ name }) => {
-  const draftName = Writable.of("");
+  const draftName = new Writable("");
 
   const startEditing = action(() => {
     draftName.set(name.get());
@@ -143,7 +143,7 @@ After any failed `cf check`, `cf test`, CLI runtime check, or browser smoke:
 2. Read `docs/development/debugging/README.md`.
 3. Match the exact error text or symptom to the matrix and read the linked
    gotcha, workflow, or topic page before making the next repair.
-4. If the failure mentions Cell, Writable, `Cell.of()`, `Writable.of()`,
+4. If the failure mentions Cell, Writable, `new Cell()`, `new Writable()`,
    reactive references, `.get()`, or a plain JavaScript string/array method
    failing on a field, reread:
    - `docs/common/concepts/reactivity.md`

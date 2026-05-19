@@ -32,18 +32,18 @@ export default pattern<Input>(({ deck }) => {
 
 ## Scenario 2: Initializing Writable with reactive values
 
-You cannot pass a reactive value to `Writable.of()` because initialization happens outside a reactive context.
+You cannot pass a reactive value to `new Writable()` because initialization happens outside a reactive context.
 
 ```tsx
 // WRONG - deck.name is reactive
 export default pattern<Input>(({ deck }) => {
-  const editedName = Writable.of(deck.name);  // ERROR
+  const editedName = new Writable(deck.name);  // ERROR
   ...
 });
 
 // CORRECT - initialize empty, set in event handler
 export default pattern<Input>(({ deck }) => {
-  const editedName = Writable.of("");
+  const editedName = new Writable("");
 
   // Event handlers run at click time, not init time
   const startEditing = action(() => {

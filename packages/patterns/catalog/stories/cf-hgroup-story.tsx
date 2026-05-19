@@ -15,8 +15,8 @@ interface HGroupStoryOutput {
 }
 
 export default pattern<HGroupStoryInput, HGroupStoryOutput>(() => {
-  const gap = Writable.of<"sm" | "md" | "lg">("md");
-  const wrap = Writable.of(false);
+  const gap = new Writable<"sm" | "md" | "lg">("md");
+  const wrap = new Writable(false);
 
   return {
     [NAME]: "cf-hgroup Story",

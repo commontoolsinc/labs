@@ -7,8 +7,8 @@
 import { computed, pattern, Writable } from "commonfabric";
 
 export default pattern(() => {
-  const value = Writable.of("hello");
-  const log = Writable.of<string[]>([]);
+  const value = new Writable("hello");
+  const log = new Writable<string[]>([]);
 
   // Non-idempotent: appends to log on every re-execution
   computed(() => {

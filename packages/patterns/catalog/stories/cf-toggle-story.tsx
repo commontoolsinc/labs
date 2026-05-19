@@ -22,10 +22,10 @@ interface ToggleStoryOutput {
 }
 
 export default pattern<ToggleStoryInput, ToggleStoryOutput>(() => {
-  const pressed = Writable.of(false);
-  const disabled = Writable.of(false);
-  const variant = Writable.of<"default" | "outline">("default");
-  const size = Writable.of<"default" | "sm" | "lg">("default");
+  const pressed = new Writable(false);
+  const disabled = new Writable(false);
+  const variant = new Writable<"default" | "outline">("default");
+  const size = new Writable<"default" | "sm" | "lg">("default");
   const status = computed(() => (pressed.get() ? "Pressed" : "Not pressed"));
 
   return {

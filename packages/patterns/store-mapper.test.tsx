@@ -155,11 +155,11 @@ const mergeExtractedAisle = handler<
 
 export default pattern(() => {
   // Create writable cells that we control
-  const storeNameCell = Writable.of("Test Store");
-  const aislesCell = Writable.of<Aisle[]>([]);
-  const departmentsCell = Writable.of<Department[]>([]);
-  const entrancesCell = Writable.of<{ position: WallPosition }[]>([]);
-  const itemLocationsCell = Writable.of<ItemLocation[]>([]);
+  const storeNameCell = new Writable("Test Store");
+  const aislesCell = new Writable<Aisle[]>([]);
+  const departmentsCell = new Writable<Department[]>([]);
+  const entrancesCell = new Writable<{ position: WallPosition }[]>([]);
+  const itemLocationsCell = new Writable<ItemLocation[]>([]);
 
   // Instantiate the store mapper pattern
   const store = StoreMapper({

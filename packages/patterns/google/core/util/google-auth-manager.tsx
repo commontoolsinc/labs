@@ -117,14 +117,14 @@ export const GoogleAuthManager = pattern<
       GoogleAuth(
         {
           selectedScopes: {
-            gmail: Writable.of(required.includes("gmail")),
-            gmailSend: Writable.of(required.includes("gmailSend")),
-            gmailModify: Writable.of(required.includes("gmailModify")),
-            calendar: Writable.of(required.includes("calendar")),
-            calendarWrite: Writable.of(required.includes("calendarWrite")),
-            drive: Writable.of(required.includes("drive")),
-            docs: Writable.of(required.includes("docs")),
-            contacts: Writable.of(required.includes("contacts")),
+            gmail: new Writable(required.includes("gmail")),
+            gmailSend: new Writable(required.includes("gmailSend")),
+            gmailModify: new Writable(required.includes("gmailModify")),
+            calendar: new Writable(required.includes("calendar")),
+            calendarWrite: new Writable(required.includes("calendarWrite")),
+            drive: new Writable(required.includes("drive")),
+            docs: new Writable(required.includes("docs")),
+            contacts: new Writable(required.includes("contacts")),
           },
           auth: emptyAuth,
         } as Parameters<typeof GoogleAuth>[0],

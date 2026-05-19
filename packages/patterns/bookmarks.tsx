@@ -39,7 +39,7 @@ interface BookmarksOutput {
 // ===== The Pattern =====
 export const Bookmarks = pattern<BookmarksInput, BookmarksOutput>(
   ({ bookmarks }) => {
-    const searchQuery = Writable.of("");
+    const searchQuery = new Writable("");
 
     const filteredBookmarks = computed(() => {
       const query = searchQuery.get().toLowerCase();

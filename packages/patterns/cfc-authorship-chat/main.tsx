@@ -37,7 +37,7 @@ type AuthorshipChatOutput = {
 export default pattern<unknown, AuthorshipChatOutput>(() => {
   const verifiedMessage: Writable<
     AuthoredMessageWithIntegrity<"alice", "alice">
-  > = Writable.of<AuthoredMessageWithIntegrity<"alice", "alice">>(
+  > = new Writable<AuthoredMessageWithIntegrity<"alice", "alice">>(
     {
       id: "msg-verified",
       channel: "Project chat",
@@ -54,7 +54,7 @@ export default pattern<unknown, AuthorshipChatOutput>(() => {
 
   const forgedMessage: Writable<
     AuthoredMessageWithIntegrity<"alice", "bob">
-  > = Writable.of<AuthoredMessageWithIntegrity<"alice", "bob">>(
+  > = new Writable<AuthoredMessageWithIntegrity<"alice", "bob">>(
     {
       id: "msg-forged",
       channel: "Project chat",
@@ -69,7 +69,7 @@ export default pattern<unknown, AuthorshipChatOutput>(() => {
     } as AuthoredMessageWithIntegrity<"alice", "bob">,
   );
 
-  const unsignedMessage = Writable.of<AuthoredMessage<"casey">>(
+  const unsignedMessage = new Writable<AuthoredMessage<"casey">>(
     {
       id: "msg-unsigned",
       channel: "Imported ticket thread",

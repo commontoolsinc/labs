@@ -48,8 +48,8 @@ const syncUploadedImages = handler<
 
 export default pattern<ImageChatInput, ImageChatOutput>(
   ({ systemPrompt }) => {
-    const images = Writable.of<ImageData[]>([]);
-    const prompt = Writable.of<string>("");
+    const images = new Writable<ImageData[]>([]);
+    const prompt = new Writable<string>("");
 
     // Build content parts array with text and images
     const contentParts = computed(() => {

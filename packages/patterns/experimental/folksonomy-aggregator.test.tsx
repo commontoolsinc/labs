@@ -314,7 +314,7 @@ const postEventHandler = handler<
 
 export default pattern(() => {
   // Instantiate aggregator with a writable events cell
-  const eventsCell = Cell.of<TagEvent[]>([]);
+  const eventsCell = new Cell<TagEvent[]>([]);
   const aggregator = AggregatorPattern({ events: eventsCell });
 
   // ========================================================================

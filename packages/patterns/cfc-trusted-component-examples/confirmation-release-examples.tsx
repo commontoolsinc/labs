@@ -38,10 +38,10 @@ export const FinanceRecipientConfirmExample = pattern<
   Record<PropertyKey, never>,
   ConfirmationReleaseExampleOutput
 >(() => {
-  const recipientLabel = Writable.of("finance@example.com");
-  const payloadPreview = Writable.of("Quarterly budget packet");
-  const confirmedRecipientRelease = Writable.of("");
-  const decoyStatus = Writable.of("Host finance shortcut is idle.");
+  const recipientLabel = new Writable("finance@example.com");
+  const payloadPreview = new Writable("Quarterly budget packet");
+  const confirmedRecipientRelease = new Writable("");
+  const decoyStatus = new Writable("Host finance shortcut is idle.");
   const triggerDecoy = setDecoyStatus({
     decoyStatus,
     message: "Host finance send shortcut is untrusted.",
@@ -87,10 +87,10 @@ export const CustomerSupportRecipientConfirmExample = pattern<
   Record<PropertyKey, never>,
   ConfirmationReleaseExampleOutput
 >(() => {
-  const recipientLabel = Writable.of("support lead");
-  const payloadPreview = Writable.of("case transcript excerpt");
-  const confirmedRecipientRelease = Writable.of("");
-  const decoyStatus = Writable.of("Host support shortcut is idle.");
+  const recipientLabel = new Writable("support lead");
+  const payloadPreview = new Writable("case transcript excerpt");
+  const confirmedRecipientRelease = new Writable("");
+  const decoyStatus = new Writable("Host support shortcut is idle.");
   const triggerDecoy = setDecoyStatus({
     decoyStatus,
     message: "Host support reply shortcut is untrusted.",
@@ -136,12 +136,12 @@ export const PatientCaseRedactedReleaseExample = pattern<
   Record<PropertyKey, never>,
   ConfirmationReleaseExampleOutput
 >(() => {
-  const redactionLabel = Writable.of("patient case");
-  const sourceText = Writable.of(
+  const redactionLabel = new Writable("patient case");
+  const sourceText = new Writable(
     "Patient secret code 123-45-6789 can be released only after redaction.",
   );
-  const releasedRedactedContent = Writable.of("");
-  const decoyStatus = Writable.of("Host patient export is idle.");
+  const releasedRedactedContent = new Writable("");
+  const decoyStatus = new Writable("Host patient export is idle.");
   const triggerDecoy = setDecoyStatus({
     decoyStatus,
     message: "Host patient export did not release content.",
@@ -187,12 +187,12 @@ export const SecurityIncidentRedactedReleaseExample = pattern<
   Record<PropertyKey, never>,
   ConfirmationReleaseExampleOutput
 >(() => {
-  const redactionLabel = Writable.of("incident");
-  const sourceText = Writable.of(
+  const redactionLabel = new Writable("incident");
+  const sourceText = new Writable(
     "Incident note contains secret escalation details for responders.",
   );
-  const releasedRedactedContent = Writable.of("");
-  const decoyStatus = Writable.of("Host incident export is idle.");
+  const releasedRedactedContent = new Writable("");
+  const decoyStatus = new Writable("Host incident export is idle.");
   const triggerDecoy = setDecoyStatus({
     decoyStatus,
     message: "Host incident export did not release content.",

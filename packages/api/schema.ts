@@ -440,6 +440,11 @@ declare module "commonfabric" {
 
   // Augment CellTypeConstructor with schema-based of() overload
   interface CellTypeConstructor<Wrap> {
+    new <S extends JSONSchema>(
+      value: Schema<S>,
+      schema: S,
+    ): Apply<Wrap, Schema<S>>;
+
     of<S extends JSONSchema>(
       value: Schema<S>,
       schema: S,

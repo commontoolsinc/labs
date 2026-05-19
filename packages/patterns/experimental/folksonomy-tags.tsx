@@ -12,7 +12,7 @@
  *
  * USAGE:
  * ```tsx
- * const tags = Writable.of<string[]>([]);
+ * const tags = new Writable<string[]>([]);
  * <cf-render $cell={FolksonomyTags({
  *   scope: "https://github.com/example/recipe-tracker",
  *   tags,
@@ -308,7 +308,7 @@ export const FolksonomyTags = pattern<
     );
 
     // Track previous tags for change detection
-    const previousTags = Writable.of<string[]>([]).for("previousTags");
+    const previousTags = new Writable<string[]>([]).for("previousTags");
 
     // Get community suggestions for this scope
     const communitySuggestions = derive(

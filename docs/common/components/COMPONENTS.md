@@ -387,7 +387,7 @@ Both modes share the same slots (header, default, footer, close-button), events,
 Fixed-position navigation bar for app-like UIs. Distinct from `cf-tabs` — fires selection events instead of managing ARIA tab panels.
 
 ```tsx
-const activeTab = Writable.of("home");
+const activeTab = new Writable("home");
 
 <cf-tab-bar $value={activeTab} variant="inset">
   <cf-tab-bar-item value="home" label="Home">

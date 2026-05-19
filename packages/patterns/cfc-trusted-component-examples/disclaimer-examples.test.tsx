@@ -37,69 +37,71 @@ const runLookalikeOnly = handler<void, { suite: AckSuite }>((
 });
 
 export default pattern(() => {
-  const influenceAcknowledged = Writable.of("");
-  const influenceFakeStatus = Writable.of("Lookalike control is idle.");
+  const influenceAcknowledged = new Writable("");
+  const influenceFakeStatus = new Writable("Lookalike control is idle.");
   const influence = TrustedDisclaimerAckHost({
-    title: Writable.of("Influence disclosure ack"),
-    summary: Writable.of("Influence disclosure demo"),
-    content: Writable.of("Recommendation copy"),
-    disclaimerText: Writable.of(
+    title: new Writable("Influence disclosure ack"),
+    summary: new Writable("Influence disclosure demo"),
+    content: new Writable("Recommendation copy"),
+    disclaimerText: new Writable(
       "This recommendation may be influenced by campaign goals.",
     ),
     acknowledgedDisclaimer: influenceAcknowledged,
-    fakeButton: Writable.of("Fake influence ack"),
-    fakeMessage: Writable.of(
+    fakeButton: new Writable("Fake influence ack"),
+    fakeMessage: new Writable(
       "The lookalike influence notice did not update trusted state.",
     ),
     fakeStatus: influenceFakeStatus,
   });
 
-  const reviewedProvenance = Writable.of("");
-  const provenanceFakeStatus = Writable.of(
+  const reviewedProvenance = new Writable("");
+  const provenanceFakeStatus = new Writable(
     "Lookalike provenance control is idle.",
   );
   const provenance = TrustedProvenanceReviewHost({
-    title: Writable.of("Source provenance review"),
-    summary: Writable.of("Provenance disclosure demo"),
-    content: Writable.of("Shared source excerpt"),
-    provenanceText: Writable.of(
+    title: new Writable("Source provenance review"),
+    summary: new Writable("Provenance disclosure demo"),
+    content: new Writable("Shared source excerpt"),
+    provenanceText: new Writable(
       "Source provenance: shared by the project owner.",
     ),
     reviewedProvenance,
-    fakeButton: Writable.of("Fake provenance review"),
-    fakeMessage: Writable.of(
+    fakeButton: new Writable("Fake provenance review"),
+    fakeMessage: new Writable(
       "The lookalike provenance card did not update the reviewed text.",
     ),
     fakeStatus: provenanceFakeStatus,
   });
 
-  const factCheckResult = Writable.of("");
-  const factCheckFakeStatus = Writable.of("Lookalike fact-check gate is idle.");
+  const factCheckResult = new Writable("");
+  const factCheckFakeStatus = new Writable(
+    "Lookalike fact-check gate is idle.",
+  );
   const factCheck = TrustedFactCheckGateHost({
-    title: Writable.of("Fact-check brief gate"),
-    summary: Writable.of("Fact-check gate demo"),
-    content: Writable.of("External brief about launch performance."),
-    factCheckClaim: Writable.of("External brief about launch performance."),
+    title: new Writable("Fact-check brief gate"),
+    summary: new Writable("Fact-check gate demo"),
+    content: new Writable("External brief about launch performance."),
+    factCheckClaim: new Writable("External brief about launch performance."),
     factCheckResult,
-    fakeButton: Writable.of("Fake fact-check"),
-    fakeMessage: Writable.of(
+    fakeButton: new Writable("Fake fact-check"),
+    fakeMessage: new Writable(
       "The lookalike fact-check gate did not approve the brief.",
     ),
     fakeStatus: factCheckFakeStatus,
   });
 
-  const lookalikeAcknowledged = Writable.of("");
-  const lookalikeFakeStatus = Writable.of("Lookalike control is idle.");
+  const lookalikeAcknowledged = new Writable("");
+  const lookalikeFakeStatus = new Writable("Lookalike control is idle.");
   const lookalike = TrustedDisclaimerAckHost({
-    title: Writable.of("Lookalike disclaimer host"),
-    summary: Writable.of("Lookalike-only negative path"),
-    content: Writable.of("Host-controlled disclaimer demo."),
-    disclaimerText: Writable.of(
+    title: new Writable("Lookalike disclaimer host"),
+    summary: new Writable("Lookalike-only negative path"),
+    content: new Writable("Host-controlled disclaimer demo."),
+    disclaimerText: new Writable(
       "Trusted output only changes when the reviewed button is used.",
     ),
     acknowledgedDisclaimer: lookalikeAcknowledged,
-    fakeButton: Writable.of("Fake trusted button"),
-    fakeMessage: Writable.of(
+    fakeButton: new Writable("Fake trusted button"),
+    fakeMessage: new Writable(
       "The host lookalike never changed the trusted output.",
     ),
     fakeStatus: lookalikeFakeStatus,

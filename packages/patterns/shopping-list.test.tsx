@@ -43,8 +43,8 @@ const setLayout = handler<
 
 export default pattern(() => {
   // Create writable cells that we control
-  const itemsCell = Writable.of<ShoppingItem[]>([]);
-  const layoutCell = Writable.of("");
+  const itemsCell = new Writable<ShoppingItem[]>([]);
+  const layoutCell = new Writable("");
 
   // Instantiate the shopping list pattern
   const list = ShoppingList({

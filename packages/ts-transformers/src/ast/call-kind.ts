@@ -74,6 +74,11 @@ const CELL_LIKE_CLASSES = new Set([
 
 const CELL_FACTORY_NAMES = new Set(["of"]);
 const CELL_FOR_NAMES = new Set(["for"]);
+const CELL_SCOPED_CONSTRUCTOR_NAMES = new Set([
+  "perSpace",
+  "perUser",
+  "perSession",
+]);
 const COMMONFABRIC_CALL_NAMES = COMMONFABRIC_CALL_EXPORT_NAMES;
 const WILDCARD_OBJECT_METHOD_NAMES = new Set(["keys", "values", "entries"]);
 export const SYNTHETIC_MODULE_CALLBACK_PREFIX = "__cfModuleCallback";
@@ -221,6 +226,18 @@ export function detectCallKind(
   return resolveExpressionKind(call.expression, checker, new Set());
 }
 
+export function detectNewExpressionKind(
+  node: ts.NewExpression,
+  checker: ts.TypeChecker,
+): Extract<CallKind, { kind: "cell-factory" }> | undefined {
+  const factoryName = detectCellConstructorExpressionName(
+    node.expression,
+    checker,
+  );
+  if (!factoryName) return undefined;
+  return { kind: "cell-factory", factoryName };
+}
+
 export function detectDirectBuilderCall(
   call: ts.CallExpression,
   checker: ts.TypeChecker,
@@ -345,6 +362,20 @@ export function isReactiveOriginCall(
 ): boolean {
   const callKind = detectCallKind(call, checker);
   return !!callKind && isReactiveOriginKind(callKind);
+}
+
+export function isReactiveOriginExpression(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+): boolean {
+  if (ts.isCallExpression(expression)) {
+    return isReactiveOriginCall(expression, checker);
+  }
+  if (ts.isNewExpression(expression)) {
+    const callKind = detectNewExpressionKind(expression, checker);
+    return !!callKind && isReactiveOriginKind(callKind);
+  }
+  return false;
 }
 
 export function classifyWildcardTraversalCall(
@@ -780,6 +811,10 @@ export function isReactiveValueExpression(
           return true;
         }
         return isLoweredReactiveArrayMethodCall(target, checker);
+      }
+
+      if (ts.isNewExpression(target)) {
+        return !!detectNewExpressionKind(target, checker);
       }
 
       return false;
@@ -1727,6 +1762,48 @@ function detectCellMethodFromDeclaration(
     if (CELL_FOR_NAMES.has(name)) {
       return { kind: "cell-for", symbol };
     }
+  }
+
+  return undefined;
+}
+
+function detectCellConstructorExpressionName(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+): string | undefined {
+  const target = stripWrappers(expression);
+
+  if (
+    ts.isPropertyAccessExpression(target) &&
+    CELL_SCOPED_CONSTRUCTOR_NAMES.has(target.name.text)
+  ) {
+    return detectCellConstructorExpressionName(target.expression, checker);
+  }
+
+  if (!ts.isIdentifier(target) && !ts.isPropertyAccessExpression(target)) {
+    return undefined;
+  }
+
+  const symbol = checker.getSymbolAtLocation(
+    ts.isIdentifier(target) ? target : target.name,
+  );
+  if (!symbol) return undefined;
+
+  const importedName = getImportedCommonFabricNamedExport(
+    symbol,
+    CELL_LIKE_CLASSES,
+  );
+  if (importedName) return importedName;
+
+  const resolved = resolveAlias(symbol, checker, new Set());
+  if (!resolved) return undefined;
+
+  const name = resolved.getName();
+  if (
+    CELL_LIKE_CLASSES.has(name) &&
+    (isCommonFabricSymbol(resolved) || isImportedFromCommonFabric(resolved))
+  ) {
+    return name;
   }
 
   return undefined;

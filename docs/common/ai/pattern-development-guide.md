@@ -112,7 +112,7 @@ Decision rule:
 
 ```tsx
 const Note = pattern<NoteInput, NoteOutput>(({ title, content }) => {
-  const menuOpen = Writable.of(false);
+  const menuOpen = new Writable(false);
 
   const toggleMenu = action(() => menuOpen.set(!menuOpen.get()));
   const clearContent = action(() => content.set(""));

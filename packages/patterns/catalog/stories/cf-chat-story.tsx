@@ -87,8 +87,8 @@ const sendMessage = handler<
 });
 
 export default pattern<ChatStoryInput, ChatStoryOutput>(() => {
-  const pending = Writable.of(false);
-  const messages = Writable.of(sampleMessages);
+  const pending = new Writable(false);
+  const messages = new Writable(sampleMessages);
 
   return {
     [NAME]: "cf-chat Story",

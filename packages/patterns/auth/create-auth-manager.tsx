@@ -323,7 +323,7 @@ export const AuthManagerBase = pattern<AuthManagerBaseInput, AuthManagerOutput>(
       scope: [".", "~"],
     });
 
-    const now = Writable.of(safeDateNow());
+    const now = new Writable(safeDateNow());
     startReactiveClock(now);
 
     // Normalize the wish-provided UI into a local render-node contract so
@@ -346,11 +346,11 @@ export const AuthManagerBase = pattern<AuthManagerBaseInput, AuthManagerOutput>(
     const tokenExpiryDisplay = authState.tokenExpiryDisplay;
 
     // Refresh state
-    const refreshing = Writable.of(false);
+    const refreshing = new Writable(false);
     const refreshStream = authState.refreshStream;
     const isRefreshing = computed(() => refreshing.get());
-    const refreshFailed = Writable.of(false);
-    const refreshStartedAt = Writable.of(0);
+    const refreshFailed = new Writable(false);
+    const refreshStartedAt = new Writable(0);
 
     // Reactive watcher: detect when a refresh succeeds
     computed(() => {

@@ -4,9 +4,9 @@ import { Writable, derive, pattern } from "commonfabric";
 // Verifies: two captured cells are both extracted into the derive capture object
 //   derive(value, fn) → derive(schema, schema, { value, multiplier, offset }, fn)
 export default pattern(() => {
-  const value = Writable.of(10);
-  const multiplier = Writable.of(2);
-  const offset = Writable.of(5);
+  const value = new Writable(10);
+  const multiplier = new Writable(2);
+  const offset = new Writable(5);
 
   const result = derive(value, (v) => (v.get() * multiplier.get()) + offset.get());
 

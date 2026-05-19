@@ -6,7 +6,7 @@ import { Writable, derive, pattern } from "commonfabric";
 //   callback: `multiplier.get()` (capture ref) → `multiplier_1.get()`
 // Context: returned object literal `{ multiplier: ... }` property name stays unchanged
 export default pattern(() => {
-  const multiplier = Writable.of(2);
+  const multiplier = new Writable(2);
 
   // Input name 'multiplier' collides with captured variable 'multiplier'
   // The callback returns an object with a property named 'multiplier'

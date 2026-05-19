@@ -357,7 +357,7 @@ export default pattern<Input, Output>(
       return false;
     });
 
-    const now = Writable.of(safeDateNow());
+    const now = new Writable(safeDateNow());
     startReactiveClock(now);
 
     const isTokenExpired = computed(() => {
@@ -371,9 +371,9 @@ export default pattern<Input, Output>(
 
     const checkboxesDisabled = computed(() => !!auth?.accessToken);
 
-    const refreshInProgress = Writable.of(false);
-    const refreshing = Writable.of(false);
-    const refreshFailed = Writable.of(false);
+    const refreshInProgress = new Writable(false);
+    const refreshing = new Writable(false);
+    const refreshFailed = new Writable(false);
 
     const scopesDisplay = computed(() => scopes.join(", "));
 

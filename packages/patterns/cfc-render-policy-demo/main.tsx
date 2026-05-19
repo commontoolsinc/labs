@@ -214,7 +214,7 @@ export default pattern<unknown, RenderPolicyDemoOutput>(() => {
   const healthContentRender: Writable<
     Confidential<string, readonly [typeof HEALTH_RECORD_CONFIDENTIALITY]>
   > = healthContent as never;
-  const revealSensitive = Writable.of(false);
+  const revealSensitive = new Writable(false);
   const trustedDisclosure = TrustedHealthDisclosureSurface({
     content: healthContentRender,
     revealSensitive,

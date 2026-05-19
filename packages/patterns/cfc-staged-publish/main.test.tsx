@@ -19,14 +19,14 @@ const trigger = handler<void, { stream: Stream<void> }>((_, { stream }) => {
 });
 
 export default pattern(() => {
-  const draftTitle = Writable.of("");
-  const draftBody = Writable.of("");
-  const savedTitle = Writable.of("");
-  const savedBody = Writable.of("");
-  const reviewedTitle = Writable.of("");
-  const reviewedBody = Writable.of("");
-  const publishedTitle = Writable.of("");
-  const publishedBody = Writable.of("");
+  const draftTitle = new Writable("");
+  const draftBody = new Writable("");
+  const savedTitle = new Writable("");
+  const savedBody = new Writable("");
+  const reviewedTitle = new Writable("");
+  const reviewedBody = new Writable("");
+  const publishedTitle = new Writable("");
+  const publishedBody = new Writable("");
 
   const instance = StagedPublish({
     draftTitle,

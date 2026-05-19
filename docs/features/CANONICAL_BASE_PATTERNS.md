@@ -592,13 +592,19 @@ export interface UpgradeOption {
 ## Example: Contacts Container (with Lists of Lists)
 
 ```typescript
-import { pattern, NAME, UI, Writable, action, computed } from "commonfabric";
-import type { PersonLike, ContainerItem, ContainerProtocol } from "commonfabric";
+import { pattern, NAME, UI, action, computed } from "commonfabric";
+import type {
+  ContainerItem,
+  ContainerProtocol,
+  Default,
+  PersonLike,
+  Writable,
+} from "commonfabric";
 
 interface Input {
   title?: string;
-  items?: Writable<ContainerItem<PersonLike>[]>;
-  subLists?: Writable<ContainerProtocol<PersonLike>[]>;
+  items?: Writable<ContainerItem<PersonLike>[] | Default<[]>>;
+  subLists?: Writable<ContainerProtocol<PersonLike>[] | Default<[]>>;
 }
 
 interface Output {
@@ -613,8 +619,8 @@ interface Output {
 }
 
 export default pattern<Input, Output>(({ title, items, subLists }) => {
-  const data = items ?? Writable.of<ContainerItem<PersonLike>[]>([]);
-  const lists = subLists ?? Writable.of<ContainerProtocol<PersonLike>[]>([]);
+  const data = items;
+  const lists = subLists;
 
   const addItem = action(({ item }: { item: PersonLike }) => {
     data.push({ item, name: item.name });

@@ -16,7 +16,7 @@ const __cfAmdHooks = undefined;
 //   derive(value, fn) → derive(schema, schema, value, fn) (no capture object created)
 // Context: negative test; only schema injection occurs, the 2-arg form remains structurally unchanged
 export default pattern(() => {
-    const value = Writable.of(10, {
+    const value = new Writable(10, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("value", true);
     // No captures - should not be transformed

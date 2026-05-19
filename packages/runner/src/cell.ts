@@ -2524,6 +2524,12 @@ const scopedConstructorNames = {
   session: "perSession",
 } as const satisfies Record<CellScope, string>;
 
+type ConstructableCellFactory<Wrap extends HKT> = {
+  new <T>(value?: T, providedSchema?: JSONSchema): Apply<Wrap, T>;
+  of<T>(value?: T, providedSchema?: JSONSchema): Apply<Wrap, T>;
+  for<T>(cause: unknown): Apply<Wrap, T>;
+};
+
 function mergeSchemaScope(
   providedSchema: JSONSchema | undefined,
   scope: CellScope | undefined,
@@ -2568,8 +2574,11 @@ function schemaCellScope(
  * Factory function to create Cell constructor with static methods for a specific cell kind
  */
 export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
-  const createCellConstructor = (scope?: CellScope) => ({
-    of<T>(value?: T, providedSchema?: JSONSchema): Apply<Wrap, T> {
+  const createCellConstructor = (scope?: CellScope) => {
+    const createWithDefault = <T>(
+      value?: T,
+      providedSchema?: JSONSchema,
+    ): Apply<Wrap, T> => {
       const frame = getTopFrame();
       if (!frame || !frame.runtime) {
         throw new Error(
@@ -2609,9 +2618,9 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
       }
 
       return cell;
-    },
+    };
 
-    for<T>(cause: unknown): Apply<Wrap, T> {
+    const createWithCause = <T>(cause: unknown): Apply<Wrap, T> => {
       const frame = getTopFrame();
       if (!frame || !frame.runtime) {
         throw new Error(
@@ -2640,19 +2649,33 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
       cell.for(cause);
 
       return cell;
-    },
-  });
+    };
+
+    const constructor = function <T>(
+      this: unknown,
+      value?: T,
+      providedSchema?: JSONSchema,
+    ): Apply<Wrap, T> {
+      return createWithDefault(value, providedSchema);
+    };
+
+    return Object.assign(constructor, {
+      of: createWithDefault,
+      for: createWithCause,
+    }) as unknown as ConstructableCellFactory<Wrap>;
+  };
 
   const baseConstructor = createCellConstructor();
-  return {
-    ...baseConstructor,
-    perSpace: createCellConstructor("space") as CellTypeConstructor<
+  return Object.assign(baseConstructor, {
+    perSpace: createCellConstructor("space") as unknown as CellTypeConstructor<
       Wrap
     >["perSpace"],
-    perUser: createCellConstructor("user") as CellTypeConstructor<
+    perUser: createCellConstructor("user") as unknown as CellTypeConstructor<
       Wrap
     >["perUser"],
-    perSession: createCellConstructor("session") as CellTypeConstructor<
+    perSession: createCellConstructor(
+      "session",
+    ) as unknown as CellTypeConstructor<
       Wrap
     >["perSession"],
 
@@ -2689,5 +2712,5 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
     ): boolean {
       return areLinksSame(a, b);
     },
-  } satisfies CellTypeConstructor<Wrap>;
+  }) as unknown as CellTypeConstructor<Wrap>;
 }

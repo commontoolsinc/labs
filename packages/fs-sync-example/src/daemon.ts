@@ -5,7 +5,7 @@
  * - CAS retry loop with editWatermark
  * - editIdMap surviving retries
  * - Single-transaction commit (apply edits + update state + clear queue)
- * - Cell.of() for stable identity
+ * - new Cell() for stable identity
  * - Write redirect links for in-flight creates
  * - Lockfile for process safety
  * - System vs conflict error handling
@@ -150,7 +150,7 @@ function applyEdit(
 }
 
 // ---------------------------------------------------------------------------
-// Build cell state from filesystem using Cell.of() for stable identity
+// Build cell state from filesystem using new Cell() for stable identity
 // ---------------------------------------------------------------------------
 
 function buildStateFromFs(
@@ -161,7 +161,7 @@ function buildStateFromFs(
   const parsed = parseMarkdown(text);
 
   return {
-    // Cell.of() ensures stable cell identity derived from the canonical ID.
+    // new Cell() ensures stable cell identity derived from the canonical ID.
     // Links to this todo survive across syncs.
     todos: parsed.todos.map((todo) =>
       CellOf(todo.id).set({
@@ -326,14 +326,14 @@ export function runSyncLoop(
         editWatermark = edits.length;
 
         // 2. Read full filesystem state, build cell structure.
-        //    Cell.of() is used inside buildStateFromFs for each todo.
+        //    new Cell() is used inside buildStateFromFs for each todo.
         const fsState = buildStateFromFs(todoFilePath, CellConstructor.of);
         txTodos.set(fsState.todos);
 
         // 3. Write redirect links for newly created items.
         //    tempRefs maps edit indices to the temp cells allocated by the
         //    pattern's optimistic create. Once we know the canonical ID,
-        //    we redirect the temp cell to the canonical Cell.of() cell.
+        //    we redirect the temp cell to the canonical new Cell() cell.
         if (tempRefs) {
           for (const [editIdx, tempCell] of tempRefs) {
             const edit = edits[editIdx];

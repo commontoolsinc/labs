@@ -68,10 +68,10 @@ const asArray = <T,>(v: readonly T[] | T[]): T[] =>
   Array.isArray(v) ? v as T[] : [];
 
 export default pattern<ReadingListInput, ReadingListOutput>(({ items }) => {
-  const filterStatus = Writable.of<ItemStatus | "all">("all");
-  const newTitle = Writable.of("");
-  const newAuthor = Writable.of("");
-  const newType = Writable.of<ItemType>("article");
+  const filterStatus = new Writable<ItemStatus | "all">("all");
+  const newTitle = new Writable("");
+  const newAuthor = new Writable("");
+  const newType = new Writable<ItemType>("article");
 
   // Pattern-body actions - preferred for single-use handlers
   const addItem = action(

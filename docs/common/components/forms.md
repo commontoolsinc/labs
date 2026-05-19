@@ -73,7 +73,7 @@ the same behavior:
 Bind fields to a staging cell, then copy to collection on submit:
 
 ```tsx
-const formData = Writable.of({ name: "", email: "" });
+const formData = new Writable({ name: "", email: "" });
 
 <cf-form
   oncf-submit={handler((_, { formData, collection }) => {
@@ -113,7 +113,7 @@ When choosing which item to edit from a list, store the pointer and use
 `equals()` for identity-based updates:
 
 ```tsx
-const editing = Writable.of<{ editing: Person | null }>({ editing: null });
+const editing = new Writable<{ editing: Person | null }>({ editing: null });
 
 const startEdit = handler((_, { person, editing }) => {
   editing.set({ editing: person });
@@ -138,9 +138,9 @@ const handleSubmit = handler((_, { formData, people, editing }) => {
 Common pattern combining create/edit in a modal:
 
 ```tsx
-const showModal = Writable.of(false);
-const editing = Writable.of<{ editing: Person | null }>({ editing: null });
-const formData = Writable.of<Person>({ name: "", email: "", role: "user" });
+const showModal = new Writable(false);
+const editing = new Writable<{ editing: Person | null }>({ editing: null });
+const formData = new Writable<Person>({ name: "", email: "", role: "user" });
 
 // Open for create
 const startCreate = action(() => {

@@ -29,7 +29,7 @@ export default pattern<{
   items: Writable<Item[] | Default<typeof preset>>;
 }>(({ items }) => {
   // Anti-pattern: safeDateNow() in computed() — every run produces different timestamps
-  const processed = Writable.of<ProcessedItem[]>([]);
+  const processed = new Writable<ProcessedItem[]>([]);
   computed(() => {
     processed.set(
       items.get().map((i) => ({

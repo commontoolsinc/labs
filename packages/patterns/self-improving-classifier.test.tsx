@@ -90,7 +90,7 @@ const submitItem = handler<
 export default pattern(() => {
   // 1. Instantiate the classifier with empty initial state
   const subject = SelfImprovingClassifier({
-    config: Cell.of({
+    config: new Cell({
       question: "",
       minExamplesForRules: 5,
       autoClassifyThreshold: 0.85,
@@ -99,10 +99,10 @@ export default pattern(() => {
       harmAsymmetry: "equal" as const,
       enableLLMFallback: true,
     }),
-    examples: Cell.of<LabeledExample[]>([]),
-    rules: Cell.of<ClassificationRule[]>([]),
-    pendingClassifications: Cell.of<PendingClassification[]>([]),
-    currentItem: Cell.of(null),
+    examples: new Cell<LabeledExample[]>([]),
+    rules: new Cell<ClassificationRule[]>([]),
+    pendingClassifications: new Cell<PendingClassification[]>([]),
+    currentItem: new Cell(null),
   });
 
   // Bind setup handlers

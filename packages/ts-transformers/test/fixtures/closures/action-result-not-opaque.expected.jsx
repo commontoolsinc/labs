@@ -25,7 +25,7 @@ interface State {
 // Context: action() is an opaque origin, but handler results are used directly (no property access)
 export default pattern((__cf_pattern_input) => {
     const label = __cf_pattern_input.key("label");
-    const count = Writable.of(0, {
+    const count = new Writable(0, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("count", true);
     const increment = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {

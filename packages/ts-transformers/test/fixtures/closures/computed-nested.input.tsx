@@ -7,8 +7,8 @@ import { Writable, computed, pattern } from "commonfabric";
 // Context: The first derive captures cells (asCell: true), the second captures
 //   the computed result (asOpaque: true) since it is an OpaqueRef.
 export default pattern(() => {
-  const a = Writable.of(10);
-  const b = Writable.of(20);
+  const a = new Writable(10);
+  const b = new Writable(20);
 
   const sum = computed(() => a.get() + b.get());
   const doubled = computed(() => sum * 2);

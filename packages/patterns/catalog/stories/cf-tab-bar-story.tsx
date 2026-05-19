@@ -9,9 +9,9 @@ interface TabBarStoryOutput {
 }
 
 export default pattern<TabBarStoryInput, TabBarStoryOutput>(() => {
-  const activeTab1 = Writable.of("home");
-  const activeTab2 = Writable.of("home");
-  const activeTab3 = Writable.of("home");
+  const activeTab1 = new Writable("home");
+  const activeTab2 = new Writable("home");
+  const activeTab3 = new Writable("home");
 
   const items = (
     <>

@@ -11,8 +11,8 @@ interface VScrollStoryOutput {
 }
 
 export default pattern<VScrollStoryInput, VScrollStoryOutput>(() => {
-  const showScrollbar = Writable.of(true);
-  const fadeEdges = Writable.of(false);
+  const showScrollbar = new Writable(true);
+  const fadeEdges = new Writable(false);
 
   return {
     [NAME]: "cf-vscroll Story",

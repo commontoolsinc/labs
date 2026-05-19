@@ -28,7 +28,7 @@ interface PatternInput {
 //   available for the hoisted `peopleCount` initializer.
 export default pattern((__cf_pattern_input) => {
     const people = __cf_pattern_input.key("people");
-    const showAdmin = Writable.of(false, {
+    const showAdmin = new Writable(false, {
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema).for("showAdmin", true);
     const adminData = __cfHelpers.derive({

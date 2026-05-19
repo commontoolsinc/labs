@@ -17,7 +17,7 @@ const __cfAmdHooks = undefined;
 // Context: the default initializer `= 10` is carried over to the destructured parameter
 export default pattern(() => {
     const value = 5;
-    const multiplier = Writable.of(2, {
+    const multiplier = new Writable(2, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("multiplier", true);
     // Test parameter with default value

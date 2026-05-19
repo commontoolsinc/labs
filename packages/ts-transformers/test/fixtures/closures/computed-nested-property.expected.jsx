@@ -16,7 +16,7 @@ const __cfAmdHooks = undefined;
 //   computed(() => { const current = counter.get(); return current.count * 2 }) → derive(..., { counter }, ({ counter }) => { ... })
 //   The cell schema preserves the nested object shape { count: number } with asCell: true.
 export default pattern(() => {
-    const counter = Writable.of({ count: 0 }, {
+    const counter = new Writable({ count: 0 }, {
         type: "object",
         properties: {
             count: {

@@ -16,10 +16,10 @@ const __cfAmdHooks = undefined;
 //   computed(() => value.get() * multiplier.get()) → derive(captureSchema, resultSchema, { value, multiplier }, ({ value, multiplier }) => value.get() * multiplier.get())
 //   Captured cells are annotated with asCell: true in the capture schema.
 export default pattern(() => {
-    const value = Writable.of(10, {
+    const value = new Writable(10, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("value", true);
-    const multiplier = Writable.of(2, {
+    const multiplier = new Writable(2, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("multiplier", true);
     const result = __cfHelpers.derive({

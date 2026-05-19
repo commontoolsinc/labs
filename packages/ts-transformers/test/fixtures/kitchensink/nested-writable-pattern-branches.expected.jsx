@@ -65,12 +65,12 @@ const selectTask = handler({
 } as const satisfies __cfHelpers.JSONSchema, (_event, state) => state);
 // [TRANSFORM] pattern: type param stripped; input+output schemas appended after callback
 export default pattern((state) => {
-    // [TRANSFORM] Writable.of: schema arg injected; undefined default added for optional type
-    const selectedTaskId = Writable.of<string | undefined>(undefined, {
+    // [TRANSFORM] new Writable: schema arg injected; undefined default added for optional type
+    const selectedTaskId = new Writable<string | undefined>(undefined, {
         type: ["string", "undefined"]
     } as const satisfies __cfHelpers.JSONSchema).for("selectedTaskId", true);
-    // [TRANSFORM] Writable.of: schema arg injected; undefined default added for optional type
-    const hoveredSectionId = Writable.of<string | undefined>(undefined, {
+    // [TRANSFORM] new Writable: schema arg injected; undefined default added for optional type
+    const hoveredSectionId = new Writable<string | undefined>(undefined, {
         type: ["string", "undefined"]
     } as const satisfies __cfHelpers.JSONSchema).for("hoveredSectionId", true);
     // [TRANSFORM] computed() → derive(): captures state.sections (asCell — Writable<Section[]>)

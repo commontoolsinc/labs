@@ -17,7 +17,7 @@ interface PatternInput {
 // Context: opposite of computed-map-in-ternary-branch; no JSX-local rewrite is
 //   available for the hoisted `peopleCount` initializer.
 export default pattern<PatternInput>(({ people }) => {
-  const showAdmin = Writable.of(false);
+  const showAdmin = new Writable(false);
 
   const adminData = computed(() =>
     [...people.get()]

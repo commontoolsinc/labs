@@ -99,7 +99,7 @@ When done, call presentResult with your structured findings.`,
   });
 
   const result = computed(() => dialogResult as ResearchResult | undefined);
-  const showRefine = Writable.of(false);
+  const showRefine = new Writable(false);
 
   return {
     [NAME]: str`Research: ${situation}`,

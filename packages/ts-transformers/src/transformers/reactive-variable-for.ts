@@ -5,6 +5,7 @@ import {
   classifyArrayMethodCallSite,
   detectCallKind,
   detectDirectBuilderCall,
+  detectNewExpressionKind,
   getEnclosingFunctionLikeDeclaration,
   getPatternBuilderCallbackArgument,
   getTypeAtLocationWithFallback,
@@ -593,6 +594,11 @@ function shouldAddReactiveFor(
   }
 
   const expression = unwrapExpression(initializer);
+  if (ts.isNewExpression(expression)) {
+    return detectNewExpressionKind(expression, context.checker)?.kind ===
+      "cell-factory";
+  }
+
   if (!ts.isCallExpression(expression)) {
     return false;
   }

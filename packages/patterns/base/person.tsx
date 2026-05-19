@@ -273,14 +273,14 @@ export default pattern<Input, Output>(({ person, sameAs }) => {
   });
 
   // State: whether the sameAs picker is expanded
-  const showPicker = Writable.of(false);
+  const showPicker = new Writable(false);
 
   // Section expansion state
-  const showNameDetails = Writable.of(false);
-  const showContactInfo = Writable.of(true);
-  const showAddresses = Writable.of(false);
-  const showSocial = Writable.of(false);
-  const showNotes = Writable.of(false);
+  const showNameDetails = new Writable(false);
+  const showContactInfo = new Writable(true);
+  const showAddresses = new Writable(false);
+  const showSocial = new Writable(false);
+  const showNotes = new Writable(false);
 
   const nameDetailsHeader = computed(() =>
     buildSectionHeaderLabel("Name Details", showNameDetails.get())

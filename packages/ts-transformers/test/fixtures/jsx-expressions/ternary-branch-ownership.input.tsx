@@ -28,7 +28,7 @@ type State = {
 //   showList ? (() => { const itemCount = count + " items"; return <div>{sorted.map(...)}</div>; })() : ...
 //     -> whole branch compute-wrapped, so sorted.map(...) stays plain JS
 export default pattern<State>((state) => {
-  const showList = Writable.of(true);
+  const showList = new Writable(true);
   const sorted = computed(() =>
     [...state.items].sort((a, b) => a.value - b.value)
   );
