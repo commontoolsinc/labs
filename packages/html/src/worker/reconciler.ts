@@ -1641,23 +1641,97 @@ export class WorkerReconciler {
             cell: resolvedTarget,
             cancel: () => {},
           });
-        } else if (
-          value !== null && value !== undefined && typeof value === "object"
-        ) {
-          // Object/array value - needs per-prop sink for deep resolution
+        } else if (isCell(value)) {
+          const target = value as Cell<unknown>;
           const existingState = state.propSubscriptions.get(key);
-          if (existingState?.cell) continue; // Already has active per-prop sink
-
-          // Cancel any existing primitive subscription for this key
+          if (
+            existingState?.cell &&
+            areLinksSame(existingState.cell, target)
+          ) {
+            continue;
+          }
           if (existingState) existingState.cancel();
 
-          // Schema `true` = accept everything → enables deep traversal of this prop
-          const propKeyCell = propsCell.key(key).asSchema(true);
-          const propSinkCancel = propKeyCell.sink((deepValue: unknown) => {
+          const propSinkCancel = target.sink((resolvedValue) => {
             const propValue = this.transformPropValueForState(
               state,
               key,
-              deepValue,
+              resolvedValue,
+              target,
+            );
+            this.queueOps([{
+              op: "set-prop",
+              nodeId: state.nodeId,
+              key,
+              value: propValue,
+            }]);
+            if (this.isTextIntegrityPolicyProp(key)) {
+              this.refreshTextIntegrityBoundary(ctx, state);
+            }
+          });
+          addCancel(propSinkCancel);
+          state.propSubscriptions.set(key, {
+            cell: target,
+            cancel: propSinkCancel,
+          });
+        } else {
+          if (
+            value !== null && value !== undefined && typeof value === "object"
+          ) {
+            // Object/array value - needs per-prop sink for deep resolution
+            const existingState = state.propSubscriptions.get(key);
+            const propKeyCell = propsCell.key(key).asSchema(true);
+            if (
+              existingState?.cell &&
+              areLinksSame(existingState.cell, propKeyCell)
+            ) {
+              continue;
+            }
+
+            // Cancel any existing primitive subscription for this key
+            if (existingState) existingState.cancel();
+
+            // Schema `true` = accept everything → enables deep traversal of this prop
+            const propSinkCancel = propKeyCell.sink((deepValue: unknown) => {
+              const propValue = this.transformPropValueForState(
+                state,
+                key,
+                deepValue,
+                this.resolveTextPropSourceCell(state, propsCell, key, value),
+              );
+              this.queueOps([{
+                op: "set-prop",
+                nodeId: state.nodeId,
+                key,
+                value: propValue,
+              }]);
+            });
+            addCancel(propSinkCancel);
+            state.propSubscriptions.set(key, {
+              cell: propKeyCell as Cell<unknown>,
+              cancel: propSinkCancel,
+            });
+          } else {
+            // Primitive value - set directly
+            const existingState = state.propSubscriptions.get(key);
+
+            // Cancel per-prop sink if value transitioned from object to primitive
+            if (existingState?.cell) {
+              existingState.cancel();
+            }
+
+            // Skip if value hasn't changed
+            if (
+              existingState && !existingState.cell &&
+              existingState.currentValue === value
+            ) {
+              continue;
+            }
+
+            const propValue = this.transformPropValueForState(
+              state,
+              key,
+              value,
               this.resolveTextPropSourceCell(state, propsCell, key, value),
             );
             this.queueOps([{
@@ -1666,41 +1740,12 @@ export class WorkerReconciler {
               key,
               value: propValue,
             }]);
-          });
-          addCancel(propSinkCancel);
-          state.propSubscriptions.set(key, {
-            cell: propKeyCell as Cell<unknown>,
-            cancel: propSinkCancel,
-          });
-        } else {
-          // Primitive value - set directly
-          const existingState = state.propSubscriptions.get(key);
-
-          // Cancel per-prop sink if value transitioned from object to primitive
-          if (existingState?.cell) {
-            existingState.cancel();
+            state.propSubscriptions.set(key, {
+              cell: undefined,
+              cancel: () => {},
+              currentValue: value,
+            });
           }
-
-          // Skip if value hasn't changed
-          if (existingState && existingState.currentValue === value) continue;
-
-          const propValue = this.transformPropValueForState(
-            state,
-            key,
-            value,
-            this.resolveTextPropSourceCell(state, propsCell, key, value),
-          );
-          this.queueOps([{
-            op: "set-prop",
-            nodeId: state.nodeId,
-            key,
-            value: propValue,
-          }]);
-          state.propSubscriptions.set(key, {
-            cell: undefined,
-            cancel: () => {},
-            currentValue: value,
-          });
         }
       }
       refreshPolicyAfterPropsUpdate();
@@ -1827,18 +1872,7 @@ export class WorkerReconciler {
     value: unknown,
   ): Cell<unknown> {
     const propCell = propsCell.key(key).asSchema(true);
-    const rawValue = this.readRawBindingPropValue(propsCell, propCell, key);
-    let base:
-      | ReturnType<Cell<WorkerProps>["getAsNormalizedFullLink"]>
-      | undefined;
-    try {
-      base = propsCell.getAsNormalizedFullLink();
-    } catch {
-      base = undefined;
-    }
-    const link = base
-      ? parseLink(rawValue, base) ?? parseLink(value, base)
-      : parseLink(rawValue) ?? parseLink(value);
+    const link = this.parseCellPropsPropLink(propsCell, propCell, key, value);
     if (link?.id && link.space) {
       return propsCell.runtime.getCellFromLink(link);
     }
@@ -1848,7 +1882,27 @@ export class WorkerReconciler {
     return propCell.resolveAsCell();
   }
 
-  private readRawBindingPropValue(
+  private parseCellPropsPropLink(
+    propsCell: Cell<WorkerProps>,
+    propCell: Cell<unknown>,
+    key: string,
+    value: unknown,
+  ): ReturnType<typeof parseLink> {
+    const rawValue = this.readRawCellPropsPropValue(propsCell, propCell, key);
+    let base:
+      | ReturnType<Cell<WorkerProps>["getAsNormalizedFullLink"]>
+      | undefined;
+    try {
+      base = propsCell.getAsNormalizedFullLink();
+    } catch {
+      base = undefined;
+    }
+    return base
+      ? parseLink(rawValue, base) ?? parseLink(value, base)
+      : parseLink(rawValue) ?? parseLink(value);
+  }
+
+  private readRawCellPropsPropValue(
     propsCell: Cell<WorkerProps>,
     propCell: Cell<unknown>,
     key: string,

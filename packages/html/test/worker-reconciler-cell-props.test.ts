@@ -103,8 +103,8 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
       }
 
       override set(newValue: any) {
-        super.set(newValue);
         this.rawValue = newValue;
+        super.set(newValue);
         // Propagate updates to existing child prop cells
         for (const [k, propCell] of this.propCells) {
           propCell.set(newValue?.[k]);
@@ -707,6 +707,187 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
               }],
             },
           );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "renderer VDOM schema resolves linked normal reactive props",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+
+        const tx = runtime.edit();
+        const draftCell = runtime.getCell(
+          signer.did(),
+          "renderer-schema-reactive-disabled-draft",
+          undefined,
+          tx,
+        );
+        draftCell.set("");
+        const disabledCell = runtime.getCell(
+          signer.did(),
+          "renderer-schema-reactive-disabled",
+          undefined,
+          tx,
+        );
+        disabledCell.set(true);
+        const rootCell = runtime.getCell(
+          signer.did(),
+          "renderer-schema-reactive-disabled-root",
+          undefined,
+          tx,
+        );
+        rootCell.setRawUntyped({
+          type: "vnode",
+          name: "cf-vstack",
+          props: { gap: "2" },
+          children: [
+            {
+              type: "vnode",
+              name: "cf-input",
+              props: {
+                $value: draftCell.getAsLink({
+                  includeSchema: true,
+                  keepAsCell: true,
+                }),
+                placeholder: "Type anything",
+                "timing-strategy": "immediate",
+              },
+              children: [],
+            },
+            {
+              type: "vnode",
+              name: "cf-button",
+              props: {
+                disabled: disabledCell.getAsLink({
+                  includeSchema: true,
+                  keepAsCell: true,
+                }),
+              },
+              children: ["Submit"],
+            },
+          ],
+        });
+        const commitResult = await tx.commit();
+        assertEquals(commitResult.ok !== undefined, true);
+
+        const rootVDOMCell = runtime.getCell(
+          signer.did(),
+          "renderer-schema-reactive-disabled-root",
+        ).asSchema(rendererVDOMSchema);
+        const cancel = reconciler.mount(rootVDOMCell as never);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const setBindingOps = collector.getOpsOfType("set-binding");
+          assertEquals(
+            setBindingOps.some((op) =>
+              (op as Extract<VDomOp, { op: "set-binding" }>).propName ===
+                "value"
+            ),
+            true,
+            "Should preserve cf-input $value binding",
+          );
+          const initialDisabled = collector.getOpsOfType("set-prop").find((
+            op,
+          ) =>
+            (op as Extract<VDomOp, { op: "set-prop" }>).key === "disabled"
+          ) as Extract<VDomOp, { op: "set-prop" }> | undefined;
+          assertEquals(initialDisabled?.value, true);
+
+          collector.clear();
+
+          const inputTx = runtime.edit();
+          runtime.getCell(
+            signer.did(),
+            "renderer-schema-reactive-disabled-draft",
+            undefined,
+            inputTx,
+          ).set("typed");
+          runtime.getCell(
+            signer.did(),
+            "renderer-schema-reactive-disabled",
+            undefined,
+            inputTx,
+          ).set(false);
+          const inputCommitResult = await inputTx.commit();
+          assertEquals(inputCommitResult.ok !== undefined, true);
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const updatedDisabled = collector.getOpsOfType("set-prop").find((
+            op,
+          ) =>
+            (op as Extract<VDomOp, { op: "set-prop" }>).key === "disabled"
+          ) as Extract<VDomOp, { op: "set-prop" }> | undefined;
+          assertEquals(updatedDisabled?.value, false);
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "Cell<Props> linked normal prop can transition to undefined",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+
+        const tx = runtime.edit();
+        const disabledCell = runtime.getCell(
+          signer.did(),
+          "linked-disabled-to-undefined",
+          undefined,
+          tx,
+        );
+        disabledCell.set(true);
+        const commitResult = await tx.commit();
+        assertEquals(commitResult.ok !== undefined, true);
+
+        const propsCell = new MockPropsCell({
+          disabled: true,
+        }, {
+          disabled: disabledCell.getAsLink({ keepAsCell: true }),
+        });
+        const rootCell = new MockCell({
+          type: "vnode",
+          name: "cf-button",
+          props: propsCell,
+          children: ["Submit"],
+        });
+
+        const cancel = mountReconciler(reconciler, rootCell);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const initialDisabled = collector.getOpsOfType("set-prop").find((
+            op,
+          ) =>
+            (op as Extract<VDomOp, { op: "set-prop" }>).key === "disabled"
+          ) as Extract<VDomOp, { op: "set-prop" }> | undefined;
+          assertEquals(initialDisabled?.value, true);
+
+          collector.clear();
+          propsCell.set({ disabled: undefined });
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const updatedDisabled = collector.getOpsOfType("set-prop").find((
+            op,
+          ) =>
+            (op as Extract<VDomOp, { op: "set-prop" }>).key === "disabled"
+          ) as Extract<VDomOp, { op: "set-prop" }> | undefined;
+          assertEquals(
+            updatedDisabled !== undefined,
+            true,
+            "Should emit set-prop for disabled",
+          );
+          assertEquals(updatedDisabled?.value, undefined);
         } finally {
           cancel();
         }

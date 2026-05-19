@@ -49,14 +49,17 @@ export const rendererVDOMSchema = internSchema(
               }, {
                 type: "undefined",
               }, {
+                type: "unknown",
+                asCell: ["cell"],
+              }, {
+                type: "unknown",
+                asCell: ["stream"],
+              }, {
                 type: "object",
                 properties: {}, // stop query from descending
               }, {
                 type: "array",
                 items: { type: "null" }, // stop query from descending
-              }, {
-                asCell: ["stream"],
-                type: "unknown",
               }],
             },
             asCell: ["cell"],
