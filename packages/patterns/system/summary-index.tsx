@@ -12,9 +12,10 @@ import {
 import { type MentionablePiece } from "./backlinks-index.tsx";
 
 export type SummarizablePiece = MentionablePiece & { summary?: string };
+type MaybeWritable<T> = T | { get: () => T };
 
 export type SummaryIndexEntry = {
-  piece: Writable<SummarizablePiece>;
+  piece: MaybeWritable<SummarizablePiece>;
   summary: string;
   name: string;
 };
@@ -26,11 +27,20 @@ type Output = {
   search: PatternToolResult<{ entries: SummaryIndexEntry[] }>;
 };
 
+function isCellLike<T>(value: unknown): value is { get: () => T } {
+  return !!value && typeof value === "object" &&
+    typeof (value as { get?: unknown }).get === "function";
+}
+
+function getCellValue<T>(value: MaybeWritable<T>): T {
+  return isCellLike<T>(value) ? value.get() : value;
+}
+
 function extractSummary(piece: any): string | undefined {
   const summary = piece?.summary;
   if (!summary) return undefined;
 
-  if (typeof summary === "object" && "get" in summary) {
+  if (isCellLike<string>(summary)) {
     const value = summary.get();
     return typeof value === "string" && value.trim() ? value : undefined;
   }
@@ -61,7 +71,7 @@ export const searchPattern = pattern<
 });
 
 const SummaryIndex = pattern<Input, Output>(() => {
-  const mentionable = wish<Writable<SummarizablePiece>[] | Default<[]>>({
+  const mentionable = wish<MaybeWritable<SummarizablePiece>[] | Default<[]>>({
     query: "#mentionable",
   }).result;
 
@@ -71,7 +81,7 @@ const SummaryIndex = pattern<Input, Output>(() => {
     const result: SummaryIndexEntry[] = [];
     for (const piece of (Array.isArray(mentionable) ? mentionable : [])) {
       if (!piece) continue;
-      const value = piece.get();
+      const value = getCellValue(piece);
       const summary = extractSummary(value);
       if (!summary) continue;
       const name = (value[NAME] ?? "").toString();
