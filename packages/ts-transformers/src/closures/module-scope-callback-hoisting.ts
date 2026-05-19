@@ -1,5 +1,6 @@
 import ts from "typescript";
 import { FUNCTION_HARDENING_HELPER_NAME } from "@commonfabric/utils/sandbox-contract";
+import { SYNTHETIC_MODULE_CALLBACK_PREFIX } from "../ast/call-kind.ts";
 import {
   isDeclaredWithinFunction,
   isModuleScopedDeclaration,
@@ -18,23 +19,33 @@ const HOISTABLE_BUILDER_NAMES = new Set([
 
 /**
  * Identifiers that the pipeline itself injects into transformed source
- * (`__cfHelpers.*` for the helper module, `__cfHardenFn` for module-scope
- * function hardening) and that consequently appear in many lowered
- * callback bodies as transformer scaffolding rather than user-authored
- * references. Treat references to these as not contributing to the
- * "uses module-scoped references" signal that gates hoisting — a
- * callback whose only module-level references are synthesized helpers
- * isn't materially benefiting from being moved to module scope.
+ * and that consequently appear in lowered callback bodies as transformer
+ * scaffolding rather than user-authored references. Treat references to
+ * these as not contributing to the "uses module-scoped references"
+ * signal that gates hoisting — a callback whose only module-level
+ * references are synthesized helpers isn't materially benefiting from
+ * being moved to module scope.
  *
- * `FUNCTION_HARDENING_HELPER_NAME` is matched as a prefix because
- * `module-scope-function-hardening` uses `createUniqueName` (which
- * defers numeric suffixing to emit; see CT-1585 commit 3 for context),
- * so a single source file can carry references like `__cfHardenFn` and
- * `__cfHardenFn_1` for the same conceptual helper.
+ * Covers:
+ *   - `__cfHelpers`: the helper-module import injected by every transform.
+ *   - `__cfHardenFn` (prefix): module-scope function hardening helper.
+ *     Matched as a prefix because `module-scope-function-hardening` uses
+ *     `createUniqueName`, which defers numeric suffixing to emit, so a
+ *     single source file can carry `__cfHardenFn` and `__cfHardenFn_1`
+ *     for the same conceptual helper.
+ *   - `__cfModuleCallback` (prefix): the hoister's own output. When
+ *     hoisting an inner builder callback (e.g. a synthetic derive inside
+ *     a map callback) before its outer callback is analyzed, the outer
+ *     callback's body suddenly contains a `__cfModuleCallback_N`
+ *     reference. Without this exclusion, that reference would itself
+ *     count as "uses module-scoped references" and incorrectly promote
+ *     the outer callback to hoistable. The exclusion keeps the inner
+ *     and outer hoist decisions independent.
  */
 function isTransformerInjectedIdentifier(text: string): boolean {
   return text === CF_HELPERS_IDENTIFIER ||
-    text.startsWith(FUNCTION_HARDENING_HELPER_NAME);
+    text.startsWith(FUNCTION_HARDENING_HELPER_NAME) ||
+    text.startsWith(SYNTHETIC_MODULE_CALLBACK_PREFIX);
 }
 
 export function hoistModuleScopedBuilderCallbacks(
@@ -64,7 +75,7 @@ export function hoistModuleScopedBuilderCallbacks(
       return visited;
     }
 
-    const callbackIndices = getBuilderCallbackIndices(visited);
+    const callbackIndices = getBuilderCallbackIndices(visited, context);
     if (callbackIndices.length === 0) {
       return visited;
     }
@@ -173,6 +184,7 @@ export function hoistModuleScopedBuilderCallbacks(
 
 function getBuilderCallbackIndices(
   call: ts.CallExpression,
+  context: TransformationContext,
 ): readonly number[] {
   const callee = unwrapExpression(call.expression);
   const builderName = ts.isIdentifier(callee)
@@ -187,12 +199,32 @@ function getBuilderCallbackIndices(
 
   switch (builderName) {
     case "derive": {
+      // Schema-injected (4+ arg) derive calls: callback at index 3. This
+      // branch is dead at the hoist's current pipeline position (we run
+      // before SchemaInjectionTransformer) but keeps the function
+      // tolerant of future reordering.
+      if (call.arguments.length >= 4) return [3];
+      if (call.arguments.length < 2) return [];
       const deriveCallback = call.arguments[1];
-      return call.arguments.length >= 4 ? [3] : call.arguments.length >= 2 &&
-          isFunctionLikeExpression(deriveCallback) &&
-          hasSelfDescribingFunctionTypes(deriveCallback)
-        ? [1]
-        : [];
+      if (!isFunctionLikeExpression(deriveCallback)) return [];
+      // Two shapes of 2-arg derive reach the hoister:
+      //   (a) Synthetic compute callbacks produced by the closure
+      //       transformer's reactive-wrapping (e.g. `__cfHelpers.derive(
+      //       captures, ({ item }) => formatPrice(item.price * TAX_RATE))`).
+      //       These have destructured params with no explicit type
+      //       annotations because the transformer synthesizes them, and
+      //       the closure pipeline tags them via
+      //       `context.markAsSyntheticComputeCallback`.
+      //   (b) User-authored `derive(inputs, callback)` calls written
+      //       directly in source — usually with a destructured-and-typed
+      //       parameter like `({ x }: { x: T }) => …`. The type
+      //       annotation is what makes them safe to relocate to module
+      //       scope: it carries the structural contract the runtime
+      //       relies on. Untyped user-authored 2-arg derives are
+      //       skipped (better to leave them inline than guess).
+      if (context.isSyntheticComputeCallback?.(deriveCallback)) return [1];
+      if (hasSelfDescribingFunctionTypes(deriveCallback)) return [1];
+      return [];
     }
     case "handler":
     case "lift":

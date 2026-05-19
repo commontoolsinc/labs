@@ -11,6 +11,9 @@ import { computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn(({ row }) => identity(row.done ? "Done" : "Pending"));
+const __cfModuleCallback_2 = __cfHardenFn(({ row }) => identity(row.done ? "Done" : "Pending"));
+const __cfModuleCallback_3 = __cfHardenFn(({ row }) => identity(row.done ? "Done" : "Pending"));
 const identity = __cfHardenFn((value: string) => value);
 interface Item {
     done: boolean;
@@ -97,7 +100,7 @@ export default pattern((state) => {
                 type: "string"
             } as const satisfies __cfHelpers.JSONSchema, { row: {
                     done: row.key("done")
-                } }, ({ row }) => identity(row.done ? "Done" : "Pending")),
+                } }, __cfModuleCallback_1),
             list: [__cfHelpers.derive({
                     type: "object",
                     properties: {
@@ -116,7 +119,7 @@ export default pattern((state) => {
                     type: "string"
                 } as const satisfies __cfHelpers.JSONSchema, { row: {
                         done: row.key("done")
-                    } }, ({ row }) => identity(row.done ? "Done" : "Pending"))],
+                    } }, __cfModuleCallback_2)],
         });
     }, {
         type: "object",
@@ -172,7 +175,7 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, { row: {
                 done: row.key("done")
-            } }, ({ row }) => identity(row.done ? "Done" : "Pending"));
+            } }, __cfModuleCallback_3);
     }, {
         type: "object",
         properties: {

@@ -15,6 +15,7 @@ import { pattern, UI, VNode } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn(({ entries, prefix }) => visibleEntries(entries, prefix));
 interface Entry {
     name: string;
 }
@@ -113,7 +114,7 @@ export default pattern((__cf_pattern_input) => {
                 } as const satisfies __cfHelpers.JSONSchema, {
                     entries: entries,
                     prefix: prefix
-                }, ({ entries, prefix }) => visibleEntries(entries, prefix)).for(["visible", 3], true), []).for("visible", true);
+                }, __cfModuleCallback_1).for(["visible", 3], true), []).for("visible", true);
                 const labels = visible.flatMapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                     const entry = __cf_pattern_input.key("element");
                     const labelPrefix = __cf_pattern_input.key("params", "labelPrefix");

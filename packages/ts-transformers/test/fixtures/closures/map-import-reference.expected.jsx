@@ -11,6 +11,7 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn(({ item }) => formatPrice(item.price * (1 + TAX_RATE)));
 // Module-level constant - should NOT be captured
 const TAX_RATE = 0.08;
 // Module-level function - should NOT be captured
@@ -55,7 +56,7 @@ export default pattern((state) => {
                     type: "string"
                 } as const satisfies __cfHelpers.JSONSchema, { item: {
                         price: item.key("price")
-                    } }, ({ item }) => formatPrice(item.price * (1 + TAX_RATE)))}
+                    } }, __cfModuleCallback_1)}
           </div>);
             }, {
                 type: "object",

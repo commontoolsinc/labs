@@ -11,6 +11,7 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn(({ item, state, multiplier }) => item.price * item.quantity * state.discount * state.taxRate * multiplier + shippingCost);
 interface Item {
     price: number;
     quantity: number;
@@ -84,7 +85,7 @@ export default pattern((state) => {
                         taxRate: state.key("taxRate")
                     },
                     multiplier: multiplier
-                }, ({ item, state, multiplier }) => item.price * item.quantity * state.discount * state.taxRate * multiplier + shippingCost)}
+                }, __cfModuleCallback_1)}
           </span>);
             }, {
                 type: "object",

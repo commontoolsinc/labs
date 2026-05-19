@@ -11,6 +11,9 @@ import { pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn(({ state }) => identity(state.done ? "Done" : "Pending"));
+const __cfModuleCallback_2 = __cfHardenFn(({ state }) => identity(state.done ? "Done" : "Pending"));
+const __cfModuleCallback_3 = __cfHardenFn(({ state }) => identity(state.done ? "Done" : "Pending"));
 const identity = __cfHardenFn(<T,>(value: T) => value);
 // FIXTURE: pattern-call-root-containers
 // Verifies: top-level ordinary call roots whole-wrap consistently across
@@ -42,7 +45,7 @@ export const objectAndArray = pattern((state) => {
             "enum": ["Done", "Pending"]
         } as const satisfies __cfHelpers.JSONSchema, { state: {
                 done: state.key("done")
-            } }, ({ state }) => identity(state.done ? "Done" : "Pending")).for(["view", "value"], true),
+            } }, __cfModuleCallback_1).for(["view", "value"], true),
         list: [__cfHelpers.derive({
                 type: "object",
                 properties: {
@@ -61,7 +64,7 @@ export const objectAndArray = pattern((state) => {
                 "enum": ["Done", "Pending"]
             } as const satisfies __cfHelpers.JSONSchema, { state: {
                     done: state.key("done")
-                } }, ({ state }) => identity(state.done ? "Done" : "Pending")).for(["view", "list", 0], true)]
+                } }, __cfModuleCallback_2).for(["view", "list", 0], true)]
     };
     return view;
 }, {
@@ -105,7 +108,7 @@ export default pattern((state) => __cfHelpers.derive({
     "enum": ["Done", "Pending"]
 } as const satisfies __cfHelpers.JSONSchema, { state: {
         done: state.key("done")
-    } }, ({ state }) => identity(state.done ? "Done" : "Pending")).for("__patternResult", true), {
+    } }, __cfModuleCallback_3).for("__patternResult", true), {
     type: "object",
     properties: {
         done: {

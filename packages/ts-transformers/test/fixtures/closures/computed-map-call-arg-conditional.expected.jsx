@@ -11,6 +11,7 @@ import { computed, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn(({ row }) => identity(row.done ? "Done" : "Pending"));
 const identity = __cfHardenFn((x: string) => x);
 interface Item {
     done: boolean;
@@ -94,7 +95,7 @@ export default pattern((state) => {
                     type: "string"
                 } as const satisfies __cfHelpers.JSONSchema, { row: {
                         done: row.key("done")
-                    } }, ({ row }) => identity(row.done ? "Done" : "Pending")).for("label", true);
+                    } }, __cfModuleCallback_1).for("label", true);
                 return <span>{label}</span>;
             }, {
                 type: "object",

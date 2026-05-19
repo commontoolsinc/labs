@@ -11,6 +11,7 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn(({ item }) => identity(item.toUpperCase()));
 const identity = __cfHardenFn(<T,>(value: T) => value);
 // FIXTURE: map-receiver-method-roots
 // Verifies: receiver-method roots inside pattern-owned map callbacks lower reactively
@@ -74,7 +75,7 @@ export default pattern((__cf_pattern_input) => {
                 required: ["item"]
             } as const satisfies __cfHelpers.JSONSchema, {
                 type: "string"
-            } as const satisfies __cfHelpers.JSONSchema, { item: item }, ({ item }) => identity(item.toUpperCase()))}</span>;
+            } as const satisfies __cfHelpers.JSONSchema, { item: item }, __cfModuleCallback_1)}</span>;
         }, {
             type: "object",
             properties: {
