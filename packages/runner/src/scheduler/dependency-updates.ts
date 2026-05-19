@@ -2,7 +2,6 @@ import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import { toMemorySpaceAddress } from "../link-utils.ts";
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
 import {
-  backfillDependentsForNewWrites,
   type DependencyGraphState,
   pruneDependentsForCurrentWrites,
 } from "./dependency-graph.ts";
@@ -19,7 +18,10 @@ export interface DependencyUpdateState {
   readonly writeIndex: SchedulerWriteIndex;
   readonly dependencies: WeakMap<Action, ReactivityLog>;
   readonly dependencyGraph: DependencyGraphState;
-  readonly isPullMode: () => boolean;
+  readonly backfillDependentsForNewWrites: (
+    action: Action,
+    addedWrites: readonly IMemorySpaceAddress[],
+  ) => void;
 }
 
 export function setSchedulerDependencies(
@@ -106,13 +108,9 @@ export function setSchedulerDependencies(
     );
   }
 
-  if (state.isPullMode() && addedWrites.length > 0) {
+  if (addedWrites.length > 0) {
     // Backfill reverse edges when new writers appear after readers are already subscribed.
-    backfillDependentsForNewWrites(
-      state.dependencyGraph,
-      action,
-      addedWrites,
-    );
+    state.backfillDependentsForNewWrites(action, addedWrites);
   }
 
   return { reads, shallowReads, log: schedulingLog };

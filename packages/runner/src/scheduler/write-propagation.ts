@@ -14,7 +14,6 @@ export interface WritePropagationState {
   readonly effects: ReadonlySet<Action>;
   readonly computations: ReadonlySet<Action>;
   readonly conditionallyScheduledEffects: Map<Action, number>;
-  readonly isPullMode: () => boolean;
   readonly scheduleWithDebounce: (action: Action) => void;
   readonly markDirty: (action: Action) => void;
   readonly scheduleAffectedEffects: (action: Action) => void;
@@ -26,7 +25,7 @@ export function recordChangedComputationWrites(
   tx: IExtendedStorageTransaction,
   log: ReactivityLog,
 ): IMemorySpaceAddress[] {
-  if (!state.isPullMode() || !state.computations.has(action)) return [];
+  if (!state.computations.has(action)) return [];
   if (log.writes.length === 0) return [];
 
   const spaces = new Set(log.writes.map((write) => write.space));
@@ -51,7 +50,7 @@ export function markReadersDirtyForChangedWrites(
   sourceAction: Action,
   changedWrites: readonly IMemorySpaceAddress[],
 ): void {
-  if (!state.isPullMode() || changedWrites.length === 0) return;
+  if (changedWrites.length === 0) return;
 
   const readers = new Set<Action>();
   for (const write of sortAndCompactPaths([...changedWrites])) {

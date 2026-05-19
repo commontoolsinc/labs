@@ -7,7 +7,6 @@ export interface SchedulerDelayControlState {
   readonly effects: ReadonlySet<Action>;
   readonly dirty: ReadonlySet<Action>;
   readonly pending: Set<Action>;
-  readonly getPullMode: () => boolean;
   readonly isPullDemandRootEffect: (action: Action) => boolean;
   readonly queueExecution: () => void;
   readonly logDebounce: (message: string) => void;
@@ -30,7 +29,6 @@ export function getNextDebounceRunTime(
   return state.delays.getNextDebounceRunTime(
     action,
     {
-      pullMode: state.getPullMode(),
       computations: state.computations,
       effects: state.effects,
       dirty: state.dirty,
@@ -91,7 +89,6 @@ export function maybeAutoDebounce(
 
 function debouncedComputationContext(state: SchedulerDelayControlState) {
   return {
-    pullMode: state.getPullMode(),
     computations: state.computations,
     effects: state.effects,
     dirty: state.dirty,
