@@ -1706,6 +1706,156 @@ describe("JsonEncodingContext", () => {
   });
 
   // --------------------------------------------------------------------------
+  // Deep-frozen wire invariant: decode() / decodeFromBytes() symmetry
+  // --------------------------------------------------------------------------
+
+  describe("deep-frozen wire invariant (decode/decodeFromBytes symmetry)", () => {
+    // Every `JsonWireValue` handed to `deserialize()` must be deep-frozen, so
+    // both `deserialize()` entry points must produce equally deep-frozen
+    // results: `decode()` (string path) and `decodeFromBytes()` (bytes path
+    // via `fromBytes()`).
+    //
+    // Regression guard: the `/quote` arm does `return state`, handing back a
+    // node lifted straight out of the parsed wire tree (see `unwrapTag`'s
+    // contract). That shortcut is only sound because the parsed tree is
+    // deep-frozen at construction. `fromBytes()` has always done this;
+    // `decode()` once did NOT (it parsed inline without `deepFreeze()`), so a
+    // tweak that removed the `/quote` arm's own `deepFreeze()` made
+    // string-path `/quote` results come back mutable. These tests pin the
+    // symmetry so neither construction site can silently drop the guarantee.
+
+    /**
+     * Decodes the same wire tree both ways. The string path needs the
+     * encoding prefix; the bytes path does not (it does not strip one).
+     */
+    function decodeBothPaths(
+      data: JsonWireValue,
+    ): { viaString: FabricValue; viaBytes: FabricValue } {
+      const { context, runtime } = makeTestContext();
+      const json = JSON.stringify(data);
+      const viaString = context.decode(ENCODING_PREFIX + json, runtime);
+      const viaBytes = context.decodeFromBytes(
+        new TextEncoder().encode(json),
+        runtime,
+      );
+      return { viaString, viaBytes };
+    }
+
+    const cases: Array<[string, JsonWireValue]> = [
+      ["plain nested object + array", { a: { b: [1, 2, { c: 3 }] } }],
+      ["/quote literal with nested object and array", {
+        "/quote": { x: [1, { y: 2 }], z: { w: [3, 4] } },
+      }],
+      ["/quote literal whose top value is an array", {
+        "/quote": [[1, 2], { a: 1 }, [{ b: 2 }]],
+      }],
+      ["/object-wrapped object with a /-prefixed key", {
+        "/object": { "/k": { nested: [1, 2] } },
+      }],
+      ["tagged handler value (EpochNsec, arm-1 contract)", {
+        "/EpochNsec@1": "AA",
+      }],
+      ["mixed: a /quote value beside a normal array", {
+        meta: [1, 2],
+        lit: { "/quote": { deep: { deeper: [9] } } },
+      }],
+    ];
+
+    for (const [name, wire] of cases) {
+      it(`both paths yield a deep-frozen, equal result: ${name}`, () => {
+        const { viaString, viaBytes } = decodeBothPaths(wire);
+        expect(isDeepFrozen(viaString)).toBe(true);
+        expect(isDeepFrozen(viaBytes)).toBe(true);
+        expect(viaString).toEqual(viaBytes);
+      });
+    }
+
+    it("string path deep-freezes /quote content at every depth (regression for decode() vs fromBytes())", () => {
+      const wire = {
+        "/quote": { outer: { inner: [1, 2] } },
+      } as JsonWireValue;
+      const { context, runtime } = makeTestContext();
+      const result = context.decode(
+        ENCODING_PREFIX + JSON.stringify(wire),
+        runtime,
+      ) as Record<string, Record<string, FabricValue[]>>;
+
+      expect(isDeepFrozen(result)).toBe(true);
+      expect(Object.isFrozen(result.outer)).toBe(true);
+      expect(Object.isFrozen(result.outer.inner)).toBe(true);
+      expect(() => {
+        (result.outer.inner as unknown as number[])[0] = 99;
+      }).toThrow();
+      expect(() => {
+        (result.outer as Record<string, unknown>).added = true;
+      }).toThrow();
+    });
+
+    it("bytes path deep-freezes /quote content at every depth", () => {
+      const wire = {
+        "/quote": { outer: { inner: [{ deep: 1 }] } },
+      } as JsonWireValue;
+      const { context, runtime } = makeTestContext();
+      const result = context.decodeFromBytes(
+        new TextEncoder().encode(JSON.stringify(wire)),
+        runtime,
+      ) as Record<string, Record<string, Array<Record<string, FabricValue>>>>;
+
+      expect(isDeepFrozen(result)).toBe(true);
+      expect(Object.isFrozen(result.outer.inner[0])).toBe(true);
+      expect(() => {
+        (result.outer.inner[0] as Record<string, unknown>).deep = 2;
+      }).toThrow();
+    });
+
+    it("serialize() output for /quote-routed values is itself deep-frozen (flat and nested)", () => {
+      // White-box: the serialized /quote tree is transient -- encode() and
+      // encodeToBytes() immediately JSON.stringify it and discard it -- so
+      // its frozen-ness is not observable via the public API. Reach into the
+      // private serializer to pin the guarantee directly.
+      //
+      // It holds because `unquote()` rebuilds + recursively freezes every
+      // array/object, so each member handed to the container's shallow
+      // `Object.freeze` is itself already deep-frozen. A future change to
+      // `unquote()` that stopped rebuilding (or stopped freezing) would
+      // silently break this; this test is the guard. NOTE: the non-/quote
+      // serialize outputs (bare objects/arrays, /object-wrapped, handler
+      // state) are intentionally NOT asserted here -- that throwaway tree is
+      // out of scope and is not deep-frozen.
+      const { context } = makeTestContext();
+      const serialize = (context as unknown as {
+        serialize(v: FabricValue): JsonWireValue;
+      }).serialize.bind(context);
+
+      const flat = serialize(
+        { "/a": 1, "/b": { plain: [1, 2] } } as unknown as FabricValue,
+      );
+      const nested = serialize(
+        { "/a": { "/b": { c: [1, { d: 2 }] } } } as unknown as FabricValue,
+      );
+
+      expect(flat).toEqual({
+        "/quote": { "/a": 1, "/b": { plain: [1, 2] } },
+      });
+      expect(isDeepFrozen(flat)).toBe(true);
+      expect(isDeepFrozen(nested)).toBe(true);
+    });
+
+    it("serialize→/quote→decode round-trip is deep-frozen end-to-end", () => {
+      // An object whose keys are all /-prefixed but whose values are all
+      // quote-safe routes through the serialize-side /quote path, then back
+      // through the deserialize /quote `return state` arm.
+      const value = {
+        "/a": 1,
+        "/b": { plain: [1, 2] },
+      } as unknown as FabricValue;
+      const result = roundTrip(value);
+      expect(isDeepFrozen(result)).toBe(true);
+      expect(result).toEqual({ "/a": 1, "/b": { plain: [1, 2] } });
+    });
+  });
+
+  // --------------------------------------------------------------------------
   // JsonEncodingContext public API
   // --------------------------------------------------------------------------
 
