@@ -12,10 +12,9 @@ import {
 import { type MentionablePiece } from "./backlinks-index.tsx";
 
 export type SummarizablePiece = MentionablePiece & { summary?: string };
-type MaybeWritable<T> = T | { get: () => T };
 
 export type SummaryIndexEntry = {
-  piece: MaybeWritable<SummarizablePiece>;
+  piece: Writable<SummarizablePiece>;
   summary: string;
   name: string;
 };
@@ -30,10 +29,6 @@ type Output = {
 function isCellLike<T>(value: unknown): value is { get: () => T } {
   return !!value && typeof value === "object" &&
     typeof (value as { get?: unknown }).get === "function";
-}
-
-function getCellValue<T>(value: MaybeWritable<T>): T {
-  return isCellLike<T>(value) ? value.get() : value;
 }
 
 function extractSummary(piece: any): string | undefined {
@@ -71,7 +66,7 @@ export const searchPattern = pattern<
 });
 
 const SummaryIndex = pattern<Input, Output>(() => {
-  const mentionable = wish<MaybeWritable<SummarizablePiece>[] | Default<[]>>({
+  const mentionable = wish<Default<Writable<SummarizablePiece>[], []>>({
     query: "#mentionable",
   }).result;
 
@@ -81,7 +76,7 @@ const SummaryIndex = pattern<Input, Output>(() => {
     const result: SummaryIndexEntry[] = [];
     for (const piece of (Array.isArray(mentionable) ? mentionable : [])) {
       if (!piece) continue;
-      const value = getCellValue(piece);
+      const value = piece.get();
       const summary = extractSummary(value);
       if (!summary) continue;
       const name = (value[NAME] ?? "").toString();
