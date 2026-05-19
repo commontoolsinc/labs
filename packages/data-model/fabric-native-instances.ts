@@ -11,9 +11,7 @@ import { deepFreeze, isDeepFrozen } from "./deep-freeze.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { TAGS } from "./fabric-type-tags.ts";
 import { FrozenMap, FrozenSet } from "./frozen-builtins.ts";
-import {
-  EMPTY_RECONSTRUCTION_CONTEXT,
-} from "./empty-reconstruction-context.ts";
+import { EmptyReconstructionContext } from "./empty-reconstruction-context.ts";
 
 // ---------------------------------------------------------------------------
 // Utility: native-instance type guard
@@ -316,11 +314,13 @@ export class FabricError extends FabricNativeWrapper<Error> {
     // `[RECONSTRUCT]` now honors `context.shouldDeepFreeze`. This clone path
     // owns its own frozenness decision (the `frozen ? deepFreeze : result`
     // below), so it must NOT have `[RECONSTRUCT]` pre-freeze: pass a context
-    // whose `shouldDeepFreeze` matches this clone's `frozen` intent.
-    const reconstructContext: ReconstructionContext = {
-      getCell: EMPTY_RECONSTRUCTION_CONTEXT.getCell,
-      shouldDeepFreeze: frozen,
-    };
+    // whose `shouldDeepFreeze` matches this clone's `frozen` intent. The first
+    // ctor arg MUST be `frozen` (not defaulted) so the context's frozenness
+    // tracks this clone's intent rather than defaulting to `true`.
+    const reconstructContext = new EmptyReconstructionContext(
+      frozen,
+      "no runtime context (FabricError deep-clone path).",
+    );
     const result = FabricError[RECONSTRUCT](state, reconstructContext);
 
     return frozen ? deepFreeze(result) : result;
