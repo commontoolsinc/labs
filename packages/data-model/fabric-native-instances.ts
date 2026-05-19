@@ -369,9 +369,7 @@ export class FabricError extends FabricNativeWrapper<Error> {
     const result = new FabricError(error);
     // Honor `shouldDeepFreeze`: produce the type's correct deep-frozen form
     // via its `[DEEP_FREEZE]` member (recursing through `deepFreeze`).
-    return context.shouldDeepFreeze
-      ? result[DEEP_FREEZE]((v) => deepFreeze(v)) as unknown as FabricError
-      : result;
+    return context.shouldDeepFreeze ? deepFreeze(result) : result;
   }
 }
 
@@ -613,9 +611,7 @@ export class FabricRegExp extends FabricNativeWrapper<RegExp> {
     const result = new FabricRegExp(new RegExp(source, flags), flavor);
     // Honor `shouldDeepFreeze`: produce the type's correct deep-frozen form
     // via its `[DEEP_FREEZE]` member (recursing through `deepFreeze`).
-    return context.shouldDeepFreeze
-      ? result[DEEP_FREEZE]((v) => deepFreeze(v)) as unknown as FabricRegExp
-      : result;
+    return context.shouldDeepFreeze ? deepFreeze(result) : result;
   }
 }
 
