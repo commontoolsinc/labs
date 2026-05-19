@@ -22,7 +22,11 @@ import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getPatternEnvironment } from "../env.ts";
 import { getLogger } from "@commonfabric/utils/logger";
-import { getMetaLink, toMemorySpaceAddress } from "../link-utils.ts";
+import {
+  createSigilLinkFromParsedLink,
+  getMetaLink,
+  toMemorySpaceAddress,
+} from "../link-utils.ts";
 import { setRunnableName } from "../runner-utils.ts";
 import { isCellScope, narrowestScope } from "../scope.ts";
 import { scopedCell } from "./scope-policy.ts";
@@ -1073,7 +1077,13 @@ export function wish(
       // Copy the meta result link from the base cell into our new scoped cell
       const resultLink = getMetaLink(baseCell.withTx(tx), "result");
       if (resultLink !== undefined) {
-        scoped.setMetaRaw("result", resultLink);
+        scoped.setMetaRaw(
+          "result",
+          createSigilLinkFromParsedLink(resultLink, {
+            base: scoped,
+            includeSchema: true,
+          }),
+        );
       }
     }
     scoped.set(value);

@@ -16,10 +16,10 @@ import { type Action } from "../scheduler.ts";
 import { type AddCancel } from "../cancel.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import { resolveLink } from "../link-resolution.ts";
 import { trustedFlowPrecisionSchemaForBuiltin } from "../cfc/flow-precision.ts";
 import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
-import { parseLink } from "../link-utils.ts";
 import {
   cellIdentityKey,
   exposedResultCell,
@@ -77,9 +77,13 @@ export function map(
     const { list, op } = inputsCell.asSchema(MAP_INPUT_SCHEMA)
       .withTx(tx).get();
     const listCell = inputsCell.key("list");
-    const listLink = parseLink(listCell.withTx(tx).getRaw(), listCell);
-    const listScope = listLink?.scope ??
-      listCell.getAsNormalizedFullLink().scope;
+    const listTarget = resolveLink(
+      runtime,
+      tx,
+      listCell.getAsNormalizedFullLink(),
+      "writeRedirect",
+    );
+    const listScope = listTarget.scope;
     // .getRaw() because we want the pattern itself and avoid following the
     // aliases in the pattern.
     const opPattern = op.getRaw();

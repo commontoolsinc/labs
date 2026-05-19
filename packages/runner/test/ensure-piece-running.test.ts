@@ -147,14 +147,6 @@ describe("ensurePieceRunning", () => {
       tx,
     );
 
-    // Set up the structure
-    // FIXME: Because this is a regular link, we aren't doing that special alias parsing we do for bindings,
-    // so I don't really expect this to work.
-    resultCell.set({
-      doubled: {
-        $alias: { path: ["internal", "doubled"] },
-      },
-    });
     const argumentCell = getMetaCell(
       resultCell,
       "argument",
@@ -163,6 +155,10 @@ describe("ensurePieceRunning", () => {
     );
     const internalCell = getMetaCell(resultCell, "internal", tx);
 
+    // Set up the structure
+    resultCell.setRaw({
+      doubled: internalCell.key("doubled").getAsWriteRedirectLink(),
+    });
     resultCell.setMetaRaw("pattern", getSigilLink(patternId));
     resultCell.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
     resultCell.setMetaRaw("internal", internalCell.getAsWriteRedirectLink());

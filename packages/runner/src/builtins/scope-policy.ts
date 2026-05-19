@@ -5,7 +5,11 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { CellScope } from "../builder/types.ts";
 import { resolveLink } from "../link-resolution.ts";
 import { narrowestScope, scopeRank } from "../scope.ts";
-import { getMetaLink, parseLink } from "../link-utils.ts";
+import {
+  createSigilLinkFromParsedLink,
+  getMetaLink,
+  parseLink,
+} from "../link-utils.ts";
 
 export function resolvedCellScope(
   runtime: Runtime,
@@ -65,8 +69,19 @@ export function exposedResultCell<T>(
   tx: IExtendedStorageTransaction,
   cell: Cell<T>,
 ): Cell<T> {
-  const raw = cell.withTx(tx).getRaw();
-  const link = parseLink(raw, cell);
+  // Ideally, we'd just call getRaw on the cell, but since that may be a link,
+  // we need to know the base to use to parse that link.
+  const target = resolveLink(
+    runtime,
+    tx,
+    cell.getAsNormalizedFullLink(),
+    "writeRedirect",
+  );
+  const initialCell = cell.withTx(tx);
+  const raw = initialCell.getRaw({ lastNode: "writeRedirect" });
+  // If the last writeRedirect target is a link, use that, but otherwise use
+  // the last writeRedirect target.
+  const link = parseLink(raw, target) ?? target;
   if (
     link === undefined ||
     scopeRank(link.scope) <= scopeRank(cell.getAsNormalizedFullLink().scope)
@@ -76,12 +91,17 @@ export function exposedResultCell<T>(
 
   const exposed = scopedCell(runtime, tx, cell, link.scope);
   // Copy the value and result linkage into the new exposed cell
-  const txCell = cell.withTx(tx);
-  const resultLink = getMetaLink(txCell, "result");
+  const resultLink = getMetaLink(initialCell, "result");
   if (resultLink !== undefined) {
-    exposed.setMetaRaw("result", resultLink);
+    exposed.setMetaRaw(
+      "result",
+      createSigilLinkFromParsedLink(resultLink, {
+        base: exposed,
+        includeSchema: true,
+      }),
+    );
   }
-  const value = txCell.get();
+  const value = initialCell.get();
   if (value !== undefined) {
     exposed.withTx(tx).set(value);
   }

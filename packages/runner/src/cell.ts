@@ -55,7 +55,7 @@ import {
   isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
 import { diffAndUpdate } from "./data-updating.ts";
-import { resolveLink } from "./link-resolution.ts";
+import { type LastNode, resolveLink } from "./link-resolution.ts";
 import {
   type Action,
   ignoreReadForScheduling,
@@ -128,6 +128,16 @@ const logger = getLogger("cell", { level: "warn" });
 
 type SinkOptions = {
   changeGroup?: ChangeGroup;
+};
+
+export type RawCellReadOptions = IReadOptions & {
+  /**
+   * Controls whether `getRaw()` follows a final link at the cell's target.
+   *
+   * Defaults to `"top"`, which preserves the historical raw-read behavior:
+   * resolve links on the way to the target, but return a final link as data.
+   */
+  lastNode?: LastNode;
 };
 
 // Shared factory instances for all cells
@@ -283,7 +293,7 @@ declare module "@commonfabric/api" {
         includeSchema?: boolean;
       },
     ): SigilWriteRedirectLink;
-    getRaw(options?: IReadOptions): Immutable<T> | undefined;
+    getRaw(options?: RawCellReadOptions): Immutable<T> | undefined;
     /**
      * Reads the cell's raw fabric value as `FabricValue`, bypassing the
      * cell's type parameter `T`. Use this when the stored data may not
@@ -296,12 +306,12 @@ declare module "@commonfabric/api" {
      * Prefer `getRaw()` when the value is expected to match `T`.
      */
     getRawUntyped(
-      options?: IReadOptions & { frozen?: true },
+      options?: RawCellReadOptions & { frozen?: true },
     ): Immutable<FabricValue>;
     getRawUntyped(
-      options: IReadOptions & { frozen: false },
+      options: RawCellReadOptions & { frozen: false },
     ): FabricValue;
-    getRawUntyped(options?: IReadOptions): FabricValue;
+    getRawUntyped(options?: RawCellReadOptions): FabricValue;
     setRaw(value: (NoInfer<T> & FabricValue) | undefined): void;
     /**
      * Sets the raw cell value to any `FabricValue`, bypassing the cell's
@@ -1408,7 +1418,7 @@ export class CellImpl<T extends FabricValue>
    * variant returns a fresh mutable deep copy and never aliases storage
    * state.
    */
-  getRaw(options?: IReadOptions): Immutable<T> | undefined {
+  getRaw(options?: RawCellReadOptions): Immutable<T> | undefined {
     return this.getRawUntyped(options) as Immutable<T> | undefined;
   }
 
@@ -1416,22 +1426,22 @@ export class CellImpl<T extends FabricValue>
    * Untyped variant of `getRaw()`; same frozenness contract.
    */
   getRawUntyped(
-    options?: IReadOptions & { frozen?: true },
+    options?: RawCellReadOptions & { frozen?: true },
   ): Immutable<FabricValue>;
   getRawUntyped(
-    options: IReadOptions & { frozen: false },
+    options: RawCellReadOptions & { frozen: false },
   ): FabricValue;
   getRawUntyped(
-    options?: IReadOptions & { frozen?: boolean },
+    options?: RawCellReadOptions & { frozen?: boolean },
   ): FabricValue {
-    const frozen = options?.frozen ?? true;
+    const { frozen = true, lastNode = "top", ...readOptions } = options ?? {};
     if (!this.synced) this.sync(); // No await, just kicking this off
     const tx = this.runtime.readTx(this.tx);
     // Resolve all links ON THE WAY to the target, but don't resolve the final
     // link.
     const value = tx.readValueOrThrow(
-      resolveLink(this.runtime, tx, this.link, "top"),
-      options,
+      resolveLink(this.runtime, tx, this.link, lastNode),
+      readOptions,
     );
     // Deep-copy with desired frozenness, without native unwrapping — getRaw()
     // and getRawUntyped() return fabric-layer values, not native ("wild

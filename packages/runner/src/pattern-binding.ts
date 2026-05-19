@@ -73,11 +73,11 @@ export function sendValueToBinding<T>(
       if (link === undefined) {
         throw new Error("Invalid pseudo-alias path: " + alias.path);
       }
+      // we don't include the alias scope, since these don't have enough information
       binding = createSigilLinkFromParsedLink({
-        ...link,
-        path: alias.path.map((p) => p.toString()),
-        ...(alias.scope !== undefined) && { scope: alias.scope },
         ...(alias.schema !== undefined && { schema: alias.schema }),
+        ...link, // link scope/schema take priority
+        path: alias.path.map((p) => p.toString()),
       }, { includeSchema: true, overwrite: "redirect" });
     }
 
@@ -86,6 +86,7 @@ export function sendValueToBinding<T>(
       tx,
       parseLink(binding, cell)!,
       "writeRedirect",
+      { preserveOverwrite: true },
     );
     const outputScope = options.narrowestReadScope;
     if (

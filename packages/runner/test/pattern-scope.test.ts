@@ -2,9 +2,13 @@ import { assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
-import { parseLink, toMemorySpaceAddress } from "../src/link-utils.ts";
+import {
+  getMetaLink,
+  parseLink,
+  toMemorySpaceAddress,
+} from "../src/link-utils.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { type Cell, createCell } from "../src/cell.ts";
+import { Cell, createCell } from "../src/cell.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -217,11 +221,13 @@ Deno.test("pattern factory .asScope() sets child pattern result scope", async ()
     await runtime.storageManager.synced();
     await result.pull();
 
-    const childLink = parseLink(result.key("child").getRaw(), result);
+    const childLink = parseLink(
+      result.key("child").getRaw({ lastNode: "writeRedirect" }),
+      result,
+    );
     assertEquals(childLink?.scope, "user");
     assertEquals(
-      runtime.getCellFromLink(childLink!).getSourceCell()
-        ?.getAsNormalizedFullLink().scope,
+      runtime.getCellFromLink(childLink!)?.getAsNormalizedFullLink().scope,
       "user",
     );
   } finally {
@@ -266,7 +272,10 @@ Deno.test("pattern result schema scope overrides factory .asScope()", async () =
     await runtime.idle();
     await result.pull();
 
-    const childLink = parseLink(result.key("child").getRaw(), result);
+    const childLink = parseLink(
+      result.key("child").getRaw({ lastNode: "writeRedirect" }),
+      result,
+    );
     assertEquals(childLink?.scope, "session");
   } finally {
     await runtime.dispose();
@@ -399,9 +408,12 @@ Deno.test("broad computed output links to narrower scoped result", async () => {
     await runtime.storageManager.synced();
     await result.pull();
 
-    const sourceCell = result.getSourceCell();
-    const rawValue = sourceCell?.key("internal").key("value").getRaw();
-    const valueLink = parseLink(rawValue, sourceCell!);
+    const internalLink = getMetaLink(result, "internal");
+    const internalCell = runtime.getCellFromLink(internalLink!);
+    // in this case, don't follow links before the getRaw, because the links
+    // take us all the way to the value, and then we can't see the scope
+    const rawValue = internalCell?.key("value").getRaw();
+    const valueLink = parseLink(rawValue, internalCell!);
     assertEquals(valueLink?.scope, "user");
     assertEquals(result.key("value").get() as unknown, 42);
   } finally {
@@ -461,9 +473,10 @@ Deno.test("opaque JS action result uses narrowest effective output scope", async
     await runtime.storageManager.synced();
     await result.pull();
 
-    const sourceCell = result.getSourceCell();
-    const rawValue = sourceCell?.key("internal").key("value").getRaw();
-    const outputLink = parseLink(rawValue, sourceCell!);
+    const internalLink = getMetaLink(result, "internal");
+    const internalCell = runtime.getCellFromLink(internalLink!);
+    const rawValue = internalCell.key("value").getRaw();
+    const outputLink = parseLink(rawValue, internalCell!);
     assertEquals(outputLink?.scope, "user");
 
     const scopedOutputCell = runtime.getCellFromLink(outputLink!);
@@ -518,14 +531,15 @@ Deno.test("opaque JS action result schema scope participates in effective output
     await runtime.storageManager.synced();
     await result.pull();
 
-    const sourceCell = result.getSourceCell();
-    const rawValue = sourceCell?.key("internal").key("value").getRaw();
-    const outputLink = parseLink(rawValue, sourceCell!);
+    const internalLink = getMetaLink(result, "internal");
+    const internalCell = runtime.getCellFromLink(internalLink!);
+    const rawValue = internalCell?.key("value").getRaw();
+    const outputLink = parseLink(rawValue, internalCell!);
     assertEquals(outputLink?.scope, "session");
 
     const scopedOutputCell = runtime.getCellFromLink(outputLink!);
     const auxiliaryLink = parseLink(
-      scopedOutputCell.getRaw(),
+      scopedOutputCell.key("nested").getRaw(),
       scopedOutputCell,
     );
     assertEquals(auxiliaryLink?.scope, "session");
@@ -587,7 +601,11 @@ Deno.test("map keeps outer list scope and narrows per-element result cells", asy
     assertEquals(mappedLink?.scope, "space");
 
     const mappedResultCell = runtime.getCellFromLink(mappedLink!);
-    const mappedRaw = mappedResultCell.getRaw();
+    // For this, follow all the way through to the value
+    // We have a non-redirect link in that chain, and we need the value anyhow
+    const mappedRaw = mappedResultCell.getRaw({
+      lastNode: "value",
+    });
     const itemLink = Array.isArray(mappedRaw)
       ? parseLink(mappedRaw[0], mappedResultCell)
       : undefined;
@@ -697,8 +715,11 @@ Deno.test("map updates when derived list is narrowed by session input", async ()
     await runtime.storageManager.synced();
     await result.pull();
 
-    const rawBodies = result.key("bodies").getRaw();
+    const rawBodies = result.key("bodies").getRaw({
+      lastNode: "writeRedirect",
+    });
     const bodiesLink = parseLink(rawBodies, result);
+    // FIXME(@ubik2): this test fails because rawBodies is [] and link is scope space
     assertEquals(bodiesLink?.scope, "session");
     assertEquals(result.key("bodies").get() as unknown, []);
 
@@ -971,7 +992,10 @@ Deno.test("ifElse selected VNode branch materializes map over session-derived li
     await runtime.storageManager.synced();
     await result.pull();
 
-    const uiLink = parseLink(result.key("ui").getRaw(), result.key("ui"));
+    const uiLink = parseLink(
+      result.key("ui").getRaw({ lastNode: "writeRedirect" }),
+      result.key("ui"),
+    );
     const rendered = uiLink && runtime.getCellFromLink(uiLink).getRaw() as any;
     const childRaw = Array.isArray(rendered?.children)
       ? rendered.children[0]
@@ -1196,7 +1220,9 @@ Deno.test("filter narrows output list when scoped element controls cardinality",
     await runtime.storageManager.synced();
     await result.pull();
 
-    const rawFiltered = result.key("filtered").getRaw();
+    const rawFiltered = result.key("filtered").getRaw({
+      lastNode: "writeRedirect",
+    });
     const filteredLink = parseLink(rawFiltered, result);
     assertEquals(filteredLink?.scope, "user");
     assertEquals(result.key("filtered").get() as unknown, [20]);
@@ -1252,7 +1278,9 @@ Deno.test("flatMap narrows output list when scoped element controls cardinality"
     await runtime.storageManager.synced();
     await result.pull();
 
-    const rawExpanded = result.key("expanded").getRaw();
+    const rawExpanded = result.key("expanded").getRaw({
+      lastNode: "writeRedirect",
+    });
     const expandedLink = parseLink(rawExpanded, result);
     assertEquals(expandedLink?.scope, "user");
     assertEquals(result.key("expanded").get() as unknown, [20, 21]);
@@ -1303,7 +1331,9 @@ Deno.test("ifElse output follows condition scope", async () => {
     await runtime.storageManager.synced();
     await result.pull();
 
-    const rawValue = result.key("value").getRaw();
+    const rawValue = result.key("value").getRaw({
+      lastNode: "writeRedirect",
+    });
     const valueLink = parseLink(rawValue, result);
     assertEquals(valueLink?.scope, "user");
     assertEquals(result.key("value").get() as unknown, "yes");
@@ -1521,7 +1551,9 @@ Deno.test("when keeps condition scope while selecting narrower value link", asyn
     assertEquals(whenLink?.scope, "space");
 
     const whenCell = runtime.getCellFromLink(whenLink!);
-    const selectedLink = parseLink(whenCell.getRaw(), whenCell);
+    // In this case, whenCell has a non-redirect link, so follow that
+    const nextCell = runtime.getCellFromLink(parseLink(whenCell.getRaw())!);
+    const selectedLink = parseLink(nextCell.getRaw());
     assertEquals(selectedLink?.scope, "user");
     assertEquals(result.key("value").get() as unknown, "selected");
   } finally {
@@ -1624,7 +1656,7 @@ Deno.test("generateText result cell uses narrowest input scope", async () => {
     await runtime.storageManager.synced();
     await result.pull();
 
-    const rawText = result.key("text").getRaw();
+    const rawText = result.key("text").getRaw({ lastNode: "writeRedirect" });
     const textLink = parseLink(rawText, result);
     assertEquals(textLink?.scope, "user");
     assertEquals(result.key("text").key("pending").get() as unknown, false);
@@ -1676,7 +1708,9 @@ Deno.test("llmDialog result cell uses narrowest input scope", async () => {
     await runtime.storageManager.synced();
     await result.pull();
 
-    const rawDialog = result.key("dialog").getRaw();
+    const rawDialog = result.key("dialog").getRaw({
+      lastNode: "writeRedirect",
+    });
     const dialogLink = parseLink(rawDialog, result);
     assertEquals(dialogLink?.scope, "user");
   } finally {
@@ -1730,7 +1764,10 @@ Deno.test("wish current-space output follows query input scope", async () => {
     await runtime.storageManager.synced();
     await result.pull();
 
-    const foundLink = parseLink(result.key("found").getRaw(), result);
+    const foundLink = parseLink(
+      result.key("found").getRaw({ lastNode: "writeRedirect" }),
+      result,
+    );
     assertEquals(foundLink?.scope, "user");
     assertEquals(result.key("found").key("result").get() as unknown, {
       value: "scoped",
@@ -1789,7 +1826,10 @@ Deno.test("wish home-space output is at least user scoped", async () => {
     await runtime.storageManager.synced();
     await result.pull();
 
-    const favoritesLink = parseLink(result.key("favorites").getRaw(), result);
+    const favoritesLink = parseLink(
+      result.key("favorites").getRaw({ lastNode: "writeRedirect" }),
+      result,
+    );
     assertEquals(favoritesLink?.scope, "user");
     assertEquals(
       result.key("favorites").key("result").get() as unknown,
@@ -1853,7 +1893,10 @@ Deno.test("wish result schema scope overrides query-derived scope", async () => 
     await runtime.storageManager.synced();
     await result.pull();
 
-    const foundLink = parseLink(result.key("found").getRaw(), result);
+    const foundLink = parseLink(
+      result.key("found").getRaw({ lastNode: "writeRedirect" }),
+      result,
+    );
     assertEquals(foundLink?.scope, "session");
     assertEquals(result.key("found").key("result").get() as unknown, {
       value: "scoped",

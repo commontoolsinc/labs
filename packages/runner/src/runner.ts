@@ -670,9 +670,13 @@ export class Runner {
     internalCell.setRawUntyped(fabricFromNativeValue(internal, false));
     if (internalLink === undefined) {
       setResultCell(internalCell, resultCell.asSchema(pattern.resultSchema));
+      const newInternalCellLink = internalCell.getAsWriteRedirectLink({
+        base: resultCell,
+        includeSchema: true,
+      });
       resultCell.withTx(tx).setMetaRaw(
         "internal",
-        internalCell.getAsLink({ includeSchema: true }),
+        newInternalCellLink,
       );
     }
 
@@ -691,7 +695,7 @@ export class Runner {
       newArgumentCell.set(nextArgument);
       const newArgumentCellLink = newArgumentCell.asSchema(
         pattern.argumentSchema,
-      ).getAsLink({ includeSchema: true });
+      ).getAsWriteRedirectLink({ base: resultCell, includeSchema: true });
       resultCell.withTx(tx).setMetaRaw("argument", newArgumentCellLink);
     }
     if (nextArgument !== undefined) {
@@ -2087,20 +2091,26 @@ export class Runner {
       effectiveOutputScope,
     );
     if (previousScopedResultCell === undefined) {
-      // If our effective output scope is "space", we can use the existing result cell.
-      // TODO(@ubik2): I'm not sure the logic is right here if our existing is "user", and effective is "space".
+      const baseResultCell = this.runtime.getCell(
+        resultCell.space,
+        _resultFor,
+        undefined,
+        tx,
+      );
       const newResultCell = effectiveOutputScope === "space"
-        ? resultCell
+        ? baseResultCell
         : createCell(
           this.runtime,
           {
-            ...resultCell.getAsNormalizedFullLink(),
+            ...baseResultCell.getAsNormalizedFullLink(),
             scope: effectiveOutputScope,
           },
           tx,
         );
       previousResultCellRef.byScope.set(effectiveOutputScope, newResultCell);
       resultCell = newResultCell;
+    } else {
+      resultCell = previousScopedResultCell;
     }
 
     const resultPatternAsString = JSON.stringify(resultPattern);
@@ -2990,16 +3000,14 @@ export class Runner {
       );
       const resultScope = patternDefaultScope(patternImpl) ??
         module.defaultScope;
-      resultCell = resultScope === undefined || resultScope === "space"
-        ? baseResultCell
-        : createCell(
-          this.runtime,
-          {
-            ...baseResultCell.getAsNormalizedFullLink(),
-            scope: resultScope,
-          },
-          tx,
-        );
+      resultCell = baseResultCell;
+      if (resultScope !== undefined && resultScope !== "space") {
+        let resultCellLink = baseResultCell.getAsNormalizedFullLink();
+        resultCellLink = { ...resultCellLink, scope: resultScope };
+        // The result cell's scope isn't "space", so we may have just created
+        // this cell. If so, create the corresponding argument/internal cells.
+        resultCell = createCell(this.runtime, resultCellLink, tx);
+      }
       sendToBindings = true;
     }
 

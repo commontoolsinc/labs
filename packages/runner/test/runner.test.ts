@@ -112,7 +112,10 @@ describe("runPattern", () => {
 
     await resultCell.pull();
     const argumentCellValue = resultCell.getArgumentCell()?.get();
-    const internalLink = parseLink(resultCell.getMetaRaw("internal"));
+    const internalLink = parseLink(
+      resultCell.getMetaRaw("internal"),
+      resultCell,
+    );
     expect(internalLink).toBeDefined();
     const internalCell = runtime.getCellFromLink(internalLink!);
     const internalCellValue = await internalCell.get();
