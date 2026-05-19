@@ -3,6 +3,7 @@ import {
   Cfc,
   computed,
   Default,
+  equals,
   handler,
   NAME,
   pattern,
@@ -116,33 +117,15 @@ export const currentProfileSnapshot = (
   myProfile: MyProfileCell,
 ): ChatProfile | undefined => currentProfileCell(myProfile)?.get();
 
-export const profileCellKey = (cell: unknown): string | undefined => {
-  try {
-    const resolved = (cell as { resolveAsCell?: () => unknown })
-      ?.resolveAsCell?.() ?? cell;
-    const link = (resolved as {
-      getAsNormalizedFullLink?: () => { id?: string; scope?: string };
-      getAsLink?: () => string;
-    }).getAsNormalizedFullLink?.();
-    if (link?.id) {
-      return `${link.scope ?? "space"}:${link.id}`;
-    }
-    return (resolved as { getAsLink?: () => string }).getAsLink?.();
-  } catch {
-    return undefined;
-  }
-};
-
-export const sameProfileCell = (left: unknown, right: unknown): boolean => {
-  const leftKey = profileCellKey(left);
-  return leftKey !== undefined && leftKey === profileCellKey(right);
-};
+export const sameProfileCell = (
+  left: AuthorProfileCell | undefined,
+  right: AuthorProfileCell | undefined,
+): boolean => left !== undefined && right !== undefined && equals(left, right);
 
 export const participantClaimsValue = (
   myProfile: MyProfileCell,
   messages: SharedMessagesCell,
 ): ParticipantClaim<AuthorProfileCell>[] => {
-  const seen = new Set<string>();
   const participants: ParticipantClaim<AuthorProfileCell>[] = [];
   const addParticipant = (
     name: string | undefined,
@@ -152,14 +135,15 @@ export const participantClaimsValue = (
     if (!name) {
       return;
     }
-    const profileKey = profileCellKey(profile);
-    const key = profileKey === undefined
-      ? `unverified:${participants.length}`
-      : `profile:${profileKey}`;
-    if (seen.has(key)) {
+    if (
+      profile !== undefined &&
+      participants.some((participant) =>
+        participant.profile !== undefined &&
+        equals(profile, participant.profile)
+      )
+    ) {
       return;
     }
-    seen.add(key);
     participants.push({
       name,
       accentColor: accentColor ?? "#64748b",
