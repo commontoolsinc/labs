@@ -199,6 +199,63 @@ describe("isDeepFrozen", () => {
       expect(firstCallAccesses).toBeGreaterThan(0);
     });
   });
+
+  // Dan-direct request (verbatim): "unit test cases for `isDeepFrozen()`
+  // which cover `FabricInstance` and `FabricPrimitive`, with at least one
+  // example of a `FabricInstance` that participates in a circular
+  // reference." Naming read: Dan named `isDeepFrozen()` literally (not
+  // `isDeepFrozenFabricValue` — a distinct function with its own existing
+  // `isDeepFrozenFabricValue with FabricInstance (R6)` describe below), so
+  // these tests target `isDeepFrozen` specifically. At-source, `isDeepFrozen`
+  // is the simpler primary check that delegates to `isDeepFrozenInProgress`
+  // (which threads `inProgress: Set<object>` for cycle-safety) and treats a
+  // `FabricInstance` as a plain JS object whose enumerable values are
+  // recursively inspected — distinct from `isDeepFrozenFabricValue`'s
+  // protocol-aware type-guard semantics.
+  describe("FabricInstance and FabricPrimitive", () => {
+    it("FabricPrimitive returns true (self-frozen at construction)", () => {
+      const epoch = new FabricEpochNsec(1234567890n);
+      expect(isDeepFrozen(epoch)).toBe(true);
+    });
+
+    it("FabricInstance pre-freeze returns false (wrapper unfrozen)", () => {
+      const fe = new FabricError(new Error("not-yet-frozen"));
+      expect(isDeepFrozen(fe)).toBe(false);
+    });
+
+    it("FabricInstance post-deepFreeze returns true (wrapper + wrapped recursively frozen)", () => {
+      const inner = new Error("cause");
+      const outer = new Error("outer", { cause: inner });
+      const fe = new FabricError(outer);
+      deepFreeze(fe);
+      expect(isDeepFrozen(fe)).toBe(true);
+    });
+
+    it("partially-frozen FabricInstance returns false (wrapper frozen but inner Error not)", () => {
+      const fe = new FabricError(new Error("partial"));
+      Object.freeze(fe);
+      // Inner Error not frozen -> recursive walk discovers an unfrozen child.
+      expect(isDeepFrozen(fe)).toBe(false);
+    });
+
+    it("FabricInstance participating in a circular reference terminates and returns true post-deepFreeze", () => {
+      // Build a cycle: a plain-object wrapper holds the FabricError, and
+      // the FabricError's `error.cause` points back at the wrapper. After
+      // `deepFreeze(wrapper)` (which threads `inProgress` cycle-state
+      // through arm 3 and arm 4), every reachable value is frozen and the
+      // graph is cycle-safe for read-side traversal too.
+      const err = new Error("cycle-cause");
+      const fe = new FabricError(err);
+      const wrapper: Record<string, unknown> = { fe };
+      err.cause = wrapper;
+      deepFreeze(wrapper);
+      // `isDeepFrozen` must terminate (its own `inProgress`-threading in
+      // `isDeepFrozenInProgress` handles the cycle) and report true.
+      expect(() => isDeepFrozen(wrapper)).not.toThrow();
+      expect(isDeepFrozen(wrapper)).toBe(true);
+      expect(isDeepFrozen(fe)).toBe(true);
+    });
+  });
 });
 
 describe("deepFreeze [DEEP_FREEZE] protocol dispatch", () => {
