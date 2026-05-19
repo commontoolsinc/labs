@@ -6,6 +6,7 @@ import {
 import type { ExecCommandSpec } from "./exec-schema.ts";
 
 export const CF_RUNTIME_ERROR_LOG = Symbol.for("cf.cli.runtimeErrorLog");
+const DEFAULT_TOOL_RESULT_TIMEOUT_MS = 15_000;
 
 export interface CliRuntimeErrorRecord {
   message: string;
@@ -361,11 +362,12 @@ export async function executeResolvedCallable(
       throw new Error("Callable runtime transaction is not committable");
     }
     await tx.commit();
+    const waitForResult = deps.waitForResult ?? defaultWaitForResult;
+    const timeoutMs = deps.timeoutMs ?? DEFAULT_TOOL_RESULT_TIMEOUT_MS;
+
     await resolved.manager.runtime.idle();
     await resolved.manager.synced();
-    const waitForResult = deps.waitForResult ?? defaultWaitForResult;
-    const timeoutMs = deps.timeoutMs ?? 5000;
-
+    await resolved.manager.runtime.storageManager?.synced();
     await waitForResult(resultCell, timeoutMs);
     await resolved.manager.runtime.storageManager?.synced();
     outputValue = await waitForResult(resultCell, timeoutMs);

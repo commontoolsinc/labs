@@ -1445,6 +1445,74 @@ describe("mounted callable resolution and execution", () => {
     });
   });
 
+  it("syncs storage before waiting for mounted tool results with a longer default timeout", async () => {
+    const mountpoint = join(tmpDir, "mount");
+    const filePath = await createMountedFile(mountpoint, {
+      relativePath: "home/pieces/notes-2/result/search.tool",
+      pieceId: "of:piece-123",
+    });
+    const harness = createExecHarness({
+      callableKind: "tool",
+      cellProp: "result",
+      cellKey: "search",
+      pieceId: "of:piece-123",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+        },
+        required: ["query"],
+      },
+      pattern: {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            query: { type: "string" },
+          },
+          required: ["query"],
+        },
+        resultSchema: {
+          type: "object",
+          properties: {
+            echoed: { type: "string" },
+          },
+        },
+      },
+    });
+    const timeouts: number[] = [];
+
+    await writeLiveMountState(stateDir, mountpoint);
+
+    const result = await executeMountedCallableFile(
+      filePath,
+      ["--query", "tea"],
+      {
+        stateDir,
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        uuid: () => "tool-result-id",
+        waitForResult: async (_cell, timeoutMs) => {
+          harness.tracker.events.push("wait");
+          timeouts.push(timeoutMs);
+          return { echoed: "tea" };
+        },
+      },
+    );
+
+    expect(timeouts).toEqual([15_000, 15_000]);
+    expect(harness.tracker.events).toEqual([
+      "run",
+      "commit",
+      "idle",
+      "manager.synced",
+      "storage.synced",
+      "wait",
+      "storage.synced",
+      "wait",
+    ]);
+    expect(JSON.parse(result.outputText!)).toEqual({ echoed: "tea" });
+  });
+
   it("pulls mounted tool result cells before serializing output", async () => {
     const mountpoint = join(tmpDir, "mount");
     const filePath = await createMountedFile(mountpoint, {
@@ -1992,6 +2060,7 @@ function createExecHarness(options: {
   sparseHandlerCell?: boolean;
 }) {
   const tracker = {
+    events: [] as string[],
     asSchemaFromLinksCalls: 0,
     handlerWrites: [] as Array<{
       cellProp: "input" | "result";
@@ -2112,14 +2181,20 @@ function createExecHarness(options: {
 
   const manager = {
     getSpace: () => options.managerSpace ?? "home",
-    synced: async () => {},
+    synced: async () => {
+      tracker.events.push("manager.synced");
+    },
     runtime: {
       [CF_RUNTIME_ERROR_LOG]: runtimeErrors,
       storageManager: {
-        synced: async () => {},
+        synced: async () => {
+          tracker.events.push("storage.synced");
+        },
       },
       edit: () => ({
-        commit: async () => {},
+        commit: async () => {
+          tracker.events.push("commit");
+        },
       }),
       getCell: (
         space: string,
@@ -2136,6 +2211,7 @@ function createExecHarness(options: {
         input: unknown,
         _result: unknown,
       ) => {
+        tracker.events.push("run");
         tracker.toolRunInput = input;
         state.value = options.toolResult;
         state.getValue = options.toolResultGetValue ?? options.toolResult;
@@ -2144,7 +2220,9 @@ function createExecHarness(options: {
           sink: () => () => {},
         };
       },
-      idle: async () => {},
+      idle: async () => {
+        tracker.events.push("idle");
+      },
     },
   };
 
