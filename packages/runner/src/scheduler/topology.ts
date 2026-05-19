@@ -3,6 +3,7 @@ import {
   arraysOverlap,
   nonRecursiveReadMayOverlapWrite,
 } from "../reactive-dependencies.ts";
+import { normalizeCellScope } from "../scope.ts";
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
 import type { Action, ReactivityLog } from "./types.ts";
 
@@ -91,14 +92,12 @@ export function topologicalSort(
             if (
               logB.reads.some(
                 (addr) =>
-                  addr.space === write.space &&
-                  addr.id === write.id &&
+                  addressesShareEntity(addr, write) &&
                   arraysOverlap(write.path, addr.path),
               ) ||
               logB.shallowReads.some(
                 (addr) =>
-                  addr.space === write.space &&
-                  addr.id === write.id &&
+                  addressesShareEntity(addr, write) &&
                   nonRecursiveReadMayOverlapWrite(addr.path, write.path),
               )
             ) {
@@ -217,16 +216,14 @@ function addAdditionalWriteEdges(state: {
         logB.reads.some(
           (addr) =>
             writes.some((write) =>
-              addr.space === write.space &&
-              addr.id === write.id &&
+              addressesShareEntity(addr, write) &&
               arraysOverlap(write.path, addr.path)
             ),
         ) ||
         logB.shallowReads.some(
           (addr) =>
             writes.some((write) =>
-              addr.space === write.space &&
-              addr.id === write.id &&
+              addressesShareEntity(addr, write) &&
               nonRecursiveReadMayOverlapWrite(addr.path, write.path)
             ),
         )
@@ -236,4 +233,13 @@ function addAdditionalWriteEdges(state: {
       }
     }
   }
+}
+
+function addressesShareEntity(
+  a: IMemorySpaceAddress,
+  b: IMemorySpaceAddress,
+): boolean {
+  return a.space === b.space &&
+    a.id === b.id &&
+    normalizeCellScope(a.scope) === normalizeCellScope(b.scope);
 }

@@ -292,6 +292,8 @@ export function deriveDynamicCollectionParentWrites(
         declaredWrite.space !== write.space ||
         declaredWrite.id !== write.id ||
         declaredWrite.type !== write.type ||
+        normalizeCellScope(declaredWrite.scope) !==
+          normalizeCellScope(write.scope) ||
         declaredWrite.path.length >= write.path.length ||
         !arraysOverlap(declaredWrite.path, write.path)
       ) {
@@ -318,6 +320,8 @@ export function deriveDeclaredAncestorWrites(
         declaredWrite.space === write.space &&
         declaredWrite.id === write.id &&
         declaredWrite.type === write.type &&
+        normalizeCellScope(declaredWrite.scope) ===
+          normalizeCellScope(write.scope) &&
         declaredWrite.path.length < write.path.length &&
         arraysOverlap(declaredWrite.path, write.path)
       ) {

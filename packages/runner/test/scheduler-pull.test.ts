@@ -908,6 +908,54 @@ describe("pull-based scheduling", () => {
     expect(childRuns).toBe(1);
   });
 
+  it("should clear pull continuation demand when unsubscribing", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const source = runtime.getCell<number>(
+      space,
+      "pull-continuation-unsubscribe-source",
+      undefined,
+      tx,
+    );
+    source.set(2);
+    const result = runtime.getCell<number>(
+      space,
+      "pull-continuation-unsubscribe-result",
+      undefined,
+      tx,
+    );
+    result.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let runs = 0;
+    const action: Action = (actionTx) => {
+      runs++;
+      result.withTx(actionTx).send(source.withTx(actionTx).get() ?? 0);
+    };
+    const log = {
+      reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+      shallowReads: [],
+      writes: [toMemorySpaceAddress(result.getAsNormalizedFullLink())],
+    };
+
+    runtime.scheduler.subscribe(action, log);
+    await runtime.scheduler.idle();
+    expect(runs).toBe(0);
+
+    const schedulerInternals = runtime.scheduler as unknown as {
+      pullDemandedContinuationComputations: WeakSet<Action>;
+    };
+    schedulerInternals.pullDemandedContinuationComputations.add(action);
+
+    runtime.scheduler.unsubscribe(action);
+    runtime.scheduler.subscribe(action, log);
+    await runtime.scheduler.idle();
+
+    expect(runs).toBe(0);
+    expect(result.get()).toBe(0);
+  });
+
   it("should first-run child computations created by demand-root effects", async () => {
     runtime.scheduler.enablePullMode();
 

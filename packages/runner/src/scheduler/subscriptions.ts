@@ -269,6 +269,7 @@ export interface SchedulerUnsubscribeActionState {
   readonly effects: Set<Action>;
   readonly computations: Set<Action>;
   readonly pullDemandedFirstRunComputations: WeakSet<Action>;
+  readonly pullDemandedContinuationComputations: WeakSet<Action>;
   readonly writeIndex: WriterIndexState;
   readonly populateDependenciesCallbacks: WeakMap<
     Action,
@@ -371,6 +372,7 @@ function clearActionTypeTracking(
   state.effects.delete(action);
   state.computations.delete(action);
   state.pullDemandedFirstRunComputations.delete(action);
+  state.pullDemandedContinuationComputations.delete(action);
 }
 
 function removeActionWriteIndexes(

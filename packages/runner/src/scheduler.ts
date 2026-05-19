@@ -1708,6 +1708,8 @@ export class Scheduler {
       effects: this.effects,
       computations: this.computations,
       pullDemandedFirstRunComputations: this.pullDemandedFirstRunComputations,
+      pullDemandedContinuationComputations: this
+        .pullDemandedContinuationComputations,
       writeIndex: this.writeIndex,
       populateDependenciesCallbacks: this.populateDependenciesCallbacks,
       pendingDependencyCollection: this.pendingDependencyCollection,
