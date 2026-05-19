@@ -179,9 +179,14 @@ export function buildKnownSchedulingWrites(state: {
     state.writes,
     state.declaredWrites,
   );
+  const declaredAncestorWrites = deriveDeclaredAncestorWrites(
+    state.writes,
+    state.declaredWrites,
+  );
   const newCurrentKnownWrites = sortAndCompactPaths([
     ...currentSeedWrites,
     ...dynamicParentWrites,
+    ...declaredAncestorWrites,
   ]);
   const newHistoricalMightWrite = sortAndCompactPaths([
     ...state.existingHistoricalWrites,
@@ -300,6 +305,28 @@ export function deriveDynamicCollectionParentWrites(
     }
   }
   return parentWrites;
+}
+
+export function deriveDeclaredAncestorWrites(
+  writes: readonly IMemorySpaceAddress[],
+  declaredWrites: readonly IMemorySpaceAddress[],
+): IMemorySpaceAddress[] {
+  const ancestorWrites: IMemorySpaceAddress[] = [];
+  for (const declaredWrite of declaredWrites) {
+    for (const write of writes) {
+      if (
+        declaredWrite.space === write.space &&
+        declaredWrite.id === write.id &&
+        declaredWrite.type === write.type &&
+        declaredWrite.path.length < write.path.length &&
+        arraysOverlap(declaredWrite.path, write.path)
+      ) {
+        ancestorWrites.push(declaredWrite);
+        break;
+      }
+    }
+  }
+  return ancestorWrites;
 }
 
 function isDynamicCollectionSegment(
