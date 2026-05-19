@@ -44,10 +44,10 @@ important work can happen off the main thread.
    enable trigger tracing and inspect `commonfabric.rt.getTriggerTrace()`.
 6. If you need to know which actions actually ran during one interaction,
    enable exact action-run tracing and compare repeated runs in the same space.
-7. If the wave is still unclear, temporarily raise the
-   `scheduler.trigger-flow` logger to `debug` and look for repeated
-   `schedule-trigger`, `schedule-change-trigger`, and
-   `schedule-resubscribe-path` patterns.
+7. If the wave is still unclear, temporarily raise the `scheduler` logger to
+   `debug` and look for repeated `schedule-execute`, `schedule-run-start`,
+   `schedule-resubscribe`, `schedule-debounce`, or `schedule-throttle`
+   patterns.
 8. If nested piece setup or view-materialization looks suspicious, raise
    `runner.trigger-flow` to see which source action id is driving
    `Runner.run()`, `setupInternal()`, and `instantiatePatternNode()`.
@@ -396,8 +396,9 @@ Use the deltas to narrow the problem:
 
 - Large `scheduler/execute/settle` with multiple `execute()` passes usually
   means repeated convergence work after the initial event.
-- Large `schedule-resubscribe-path` plus `schedule-trigger` usually means a
-  write is matching many existing subscriptions and rebuilding too many paths.
+- A large trigger trace fan-out plus repeated `schedule-resubscribe` usually
+  means a write is matching many existing subscriptions and rebuilding too much
+  scheduling state.
 - Large `schedule-run-start` relative to one user interaction means one write
   is fanning out into many action runs.
 - High `storage.cache` volume can be important, but it is not automatically the
@@ -407,22 +408,23 @@ Use the deltas to narrow the problem:
 
 ## Selective Debug Logging
 
-Use `scheduler.trigger-flow` first when you only need change-trigger causality.
-Use `runner.trigger-flow` when the problem looks like repeated nested piece
-setup or view-materialization. Keep full `scheduler` debug logging for deeper
+Use trigger trace first when you only need change-trigger causality. Use
+`runner.trigger-flow` when the problem looks like repeated nested piece setup
+or view-materialization. Keep full `scheduler` debug logging for deeper
 settle-loop work.
 
-Enable the focused trigger logger briefly:
+Enable the structured trigger trace briefly:
 
 ```js
-await commonfabric.rt.setLoggerEnabled(true, "scheduler.trigger-flow")
-await commonfabric.rt.setLoggerLevel("debug", "scheduler.trigger-flow")
+await commonfabric.rt.setTriggerTraceEnabled(false)
+await commonfabric.rt.setTriggerTraceEnabled(true)
 ```
 
-After you capture enough detail, return it to a quieter level:
+After you capture enough detail, read it and then disable it:
 
 ```js
-await commonfabric.rt.setLoggerLevel("warn", "scheduler.trigger-flow")
+const trace = await commonfabric.rt.getTriggerTrace()
+await commonfabric.rt.setTriggerTraceEnabled(false)
 ```
 
 Enable the focused runner logger when you need to know which source action is
@@ -520,9 +522,9 @@ Typical producer-side surfaces to inspect include:
 The useful patterns are:
 
 - one commit matching dozens of registered actions
-- the same action ids or source locations appearing repeatedly in
-  `schedule-trigger`
-- repeated `schedule-resubscribe-path` bursts after each run
+- the same action ids or source locations appearing repeatedly in trigger trace
+  entries
+- repeated `schedule-resubscribe` bursts after each run
 - alternating change, trigger, run, commit, and resubscribe waves that keep
   repeating
 
@@ -534,17 +536,26 @@ the number of affected actions and the number of times they are revisited.
 Start with these locations when traces or logs point to worker churn:
 
 - `packages/runner/src/scheduler.ts`
-  - settle loop: `3112-3343`
-  - queue path: `1314-1319`
-  - requeue path: `3476-3480`
-  - task scheduling helper: `3718-3719`
-  - settle stats helpers: `2477-2485`
-  - timed diagnosis: `2573-2582`
-  - idempotency check: `2590-2605`
+  - high-level execute orchestration, mode switch, queueing, public diagnosis
+    API
+- `packages/runner/src/scheduler/pull-execution.ts` and
+  `packages/runner/src/scheduler/push-execution.ts`
+  - mode-specific settle loops
+- `packages/runner/src/scheduler/events.ts`,
+  `packages/runner/src/scheduler/pull-events.ts`, and
+  `packages/runner/src/scheduler/push-events.ts`
+  - queued event preflight, dispatch, retry, and parking
+- `packages/runner/src/scheduler/action-run.ts`
+  - action execution, commit, retry, trace, and resubscribe timing
+- `packages/runner/src/scheduler/trigger-index.ts`,
+  `packages/runner/src/scheduler/scheduling-writes.ts`, and
+  `packages/runner/src/scheduler/dependency-graph.ts`
+  - trigger matching, writer indexes, and dependency edges
 - `packages/runtime-client/backends/web-worker/index.ts`
   - worker message entrypoint: `20-50`
 - `packages/runtime-client/backends/runtime-processor.ts`
-  - console-facing diagnosis IPC: `752-756`
+  - console-facing scheduler IPC such as diagnosis, settle stats, action-run
+    trace, and trigger trace
 - `packages/runner/src/storage/cache.ts`
   - socket event dispatch: `1564-1572`
 - `packages/html/src/worker/reconciler.ts`
@@ -642,10 +653,13 @@ Create note:
 
 ### Worker Hot Paths
 
-The hottest worker bundle locations mapped back to:
+The hottest worker bundle locations mapped back to the then-current scheduler
+and worker paths. In the current tree, start from these equivalent surfaces:
 
-- `packages/runner/src/scheduler.ts:1314-1319`
-- `packages/runner/src/scheduler.ts:3476-3480`
+- `packages/runner/src/scheduler.ts`
+- `packages/runner/src/scheduler/pull-execution.ts`
+- `packages/runner/src/scheduler/push-execution.ts`
+- `packages/runner/src/scheduler/events.ts`
 - `packages/runtime-client/backends/web-worker/index.ts:20-50`
 - `packages/runner/src/storage/cache.ts:1564-1572`
 - `packages/html/src/worker/reconciler.ts:248-262`
@@ -661,10 +675,8 @@ One sampled `Notes -> New Note` wave produced:
 | Logger / Metric | Delta |
 | --- | ---: |
 | `scheduler.total` | 2589 calls |
-| `scheduler.schedule-resubscribe-path` | 744 |
-| `scheduler.schedule-notification` | 459 |
+| `scheduler.schedule-resubscribe` | 744 |
 | `scheduler.schedule-unsubscribe` | 296 |
-| `scheduler.schedule-trigger` | 225 |
 | `scheduler.schedule-run-start` | 125 |
 | `storage.cache.total` | 1242 calls |
 | `traverse.total` | 1542 calls |
@@ -1090,7 +1102,7 @@ The most useful observations from temporary `scheduler` debug logging were:
   `15` actions
 - a space-home change matched `61` registered actions
 - the note computation from `api/patterns/notes/note.tsx:1:23` appeared
-  repeatedly in `schedule-trigger`
+  repeatedly in trigger trace entries
 - the generic worker entry action
   `raw:async http://localhost:8000/scripts/worker-runtime.js:287823:16`
   repeatedly re-ran and re-subscribed
