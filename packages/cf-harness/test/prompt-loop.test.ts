@@ -3673,6 +3673,110 @@ Deno.test("CfHarnessPromptLoop exposes mediated read_file content and tracks mod
   );
 });
 
+Deno.test("CfHarnessPromptLoop carries observed CFC labels into later write_file inputs", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const secretLabel = "did:key:write-file-secret";
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime([
+        {
+          stdout: "raw file secret\n",
+          stderr: "",
+          exitCode: 0,
+          cfcResult: observedCfcResult("released file secret\n", {
+            stdoutLabel: { confidentiality: [secretLabel] },
+          }),
+        },
+        {
+          stdout: "",
+          stderr: "",
+          exitCode: 0,
+        },
+      ]),
+      runId: "run-write-file-cfc-model-context",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "enforce-explicit",
+    }),
+    fetchFn: (_input, init) => {
+      fetchCalls.push(init ?? {});
+      const payload = fetchCalls.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-read-write-secret",
+                type: "function",
+                function: {
+                  name: "read_file",
+                  arguments: JSON.stringify({ path: "secret.txt" }),
+                },
+              }],
+            },
+          }],
+        }
+        : fetchCalls.length === 2
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-write-secret-derived-output",
+                type: "function",
+                function: {
+                  name: "write_file",
+                  arguments: JSON.stringify({
+                    path: "derived.txt",
+                    content: "derived from released file secret\n",
+                  }),
+                },
+              }],
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Done.",
+            },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Read a file, then write derived output.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+
+  assertEquals(
+    result.runState.cfcInvocationContexts?.map((context) => context.toolId),
+    ["read_file", "write_file"],
+  );
+  assertEquals(
+    invocationInputLabelContains(result.runState, 1, "args", secretLabel),
+    true,
+  );
+  assertEquals(
+    invocationInputLabelContains(result.runState, 1, "stdin", secretLabel),
+    true,
+  );
+  assertEquals(
+    result.runState.cfcInvocationContexts?.[1]?.toolOutputId,
+    createToolOutputId("run-write-file-cfc-model-context", "write_file", 2),
+  );
+});
+
 Deno.test("CfHarnessPromptLoop accumulates observed CFC labels for the next model turn", async () => {
   const fetchCalls: RequestInit[] = [];
   const secretLabel = "did:key:alice";
