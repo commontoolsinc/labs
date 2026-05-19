@@ -19,6 +19,7 @@ import { action, Default, pattern, UI, VNode, Writable, } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn(({ tree, p }) => findChildren(tree, p));
 interface Entry {
     id: string;
     name: string;
@@ -183,7 +184,7 @@ export default pattern((__cf_pattern_input) => {
                 } as const satisfies __cfHelpers.JSONSchema, {
                     tree: tree,
                     p: p
-                }, ({ tree, p }) => findChildren(tree, p)).for("unsorted", true);
+                }, __cfModuleCallback_1).for("unsorted", true);
                 const items = __cfHelpers.derive({
                     type: "object",
                     properties: {

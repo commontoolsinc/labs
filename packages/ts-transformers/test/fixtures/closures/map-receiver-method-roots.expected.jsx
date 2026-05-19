@@ -11,28 +11,7 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(({ element: item, params: {} }) => <span>{__cfHelpers.derive({
-    type: "object",
-    properties: {
-        item: {
-            type: "string"
-        }
-    },
-    required: ["item"]
-} as const satisfies __cfHelpers.JSONSchema, {
-    type: "string"
-} as const satisfies __cfHelpers.JSONSchema, { item: item }, ({ item }) => item.toUpperCase())}</span>);
-const __cfModuleCallback_2 = __cfHardenFn(({ element: item, params: {} }) => <span>{__cfHelpers.derive({
-    type: "object",
-    properties: {
-        item: {
-            type: "string"
-        }
-    },
-    required: ["item"]
-} as const satisfies __cfHelpers.JSONSchema, {
-    type: "string"
-} as const satisfies __cfHelpers.JSONSchema, { item: item }, ({ item }) => identity(item.toUpperCase()))}</span>);
+const __cfModuleCallback_1 = __cfHardenFn(({ item }) => identity(item.toUpperCase()));
 const identity = __cfHardenFn(<T,>(value: T) => value);
 // FIXTURE: map-receiver-method-roots
 // Verifies: receiver-method roots inside pattern-owned map callbacks lower reactively
@@ -42,7 +21,20 @@ export default pattern((__cf_pattern_input) => {
     const items = __cf_pattern_input.key("items");
     return ({
         [UI]: (<div>
-      {items.mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
+      {items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+            const item = __cf_pattern_input.key("element");
+            return <span>{__cfHelpers.derive({
+                type: "object",
+                properties: {
+                    item: {
+                        type: "string"
+                    }
+                },
+                required: ["item"]
+            } as const satisfies __cfHelpers.JSONSchema, {
+                type: "string"
+            } as const satisfies __cfHelpers.JSONSchema, { item: item }, ({ item }) => item.toUpperCase())}</span>;
+        }, {
             type: "object",
             properties: {
                 element: {
@@ -71,7 +63,20 @@ export default pattern((__cf_pattern_input) => {
                 }
             }
         } as const satisfies __cfHelpers.JSONSchema), {})}
-      {items.mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_2, {
+      {items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+            const item = __cf_pattern_input.key("element");
+            return <span>{__cfHelpers.derive({
+                type: "object",
+                properties: {
+                    item: {
+                        type: "string"
+                    }
+                },
+                required: ["item"]
+            } as const satisfies __cfHelpers.JSONSchema, {
+                type: "string"
+            } as const satisfies __cfHelpers.JSONSchema, { item: item }, __cfModuleCallback_1)}</span>;
+        }, {
             type: "object",
             properties: {
                 element: {

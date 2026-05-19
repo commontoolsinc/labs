@@ -11,6 +11,25 @@ import { derive, pattern, patternTool, type PatternToolResult, Writable } from "
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn(({ value, prefix, multiplier }: {
+    value: number;
+    prefix: import("commonfabric").Cell<string>;
+    multiplier: import("commonfabric").Cell<number>;
+}) => {
+    return derive({
+        type: "object",
+        properties: {
+            value: {
+                type: "number"
+            }
+        },
+        required: ["value"]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, { value }, ({ value }) => {
+        return prefix.get() + String(value * multiplier.get());
+    });
+});
 const multiplier = __cfHelpers.__cf_data(Writable.of(2, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema).for("multiplier", true));
@@ -28,25 +47,7 @@ type Output = {
 //   referenced via .get() inside the callback. The transformer detects both and
 //   injects them into the extraParams object and the callback's destructured input.
 export default pattern(() => {
-    const tool = patternTool(({ value, prefix, multiplier }: {
-        value: number;
-        prefix: import("commonfabric").Cell<string>;
-        multiplier: import("commonfabric").Cell<number>;
-    }) => {
-        return derive({
-            type: "object",
-            properties: {
-                value: {
-                    type: "number"
-                }
-            },
-            required: ["value"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { value }, ({ value }) => {
-            return prefix.get() + String(value * multiplier.get());
-        });
-    }, {
+    const tool = patternTool(__cfModuleCallback_1, {
         prefix: prefix,
         multiplier: multiplier
     });

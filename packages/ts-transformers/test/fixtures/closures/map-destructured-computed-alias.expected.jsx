@@ -11,6 +11,24 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
+    const element = __cf_pattern_input.key("element");
+    const __cf_val_key = dynamicKey;
+    const val = __cfHelpers.derive({
+        type: "object",
+        properties: {
+            element: true,
+            __cf_val_key: true
+        },
+        required: ["element", "__cf_val_key"]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "number"
+    } as const satisfies __cfHelpers.JSONSchema, {
+        element: element,
+        __cf_val_key: __cf_val_key
+    }, ({ element, __cf_val_key }) => element[__cf_val_key]).for("val", true);
+    return (<span>{val}</span>);
+});
 const dynamicKey = "value" as const;
 interface Item {
     value: number;
@@ -27,24 +45,7 @@ interface State {
 export default pattern((state) => {
     return {
         [UI]: (<div>
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
-                const element = __cf_pattern_input.key("element");
-                const __cf_val_key = dynamicKey;
-                const val = __cfHelpers.derive({
-                    type: "object",
-                    properties: {
-                        element: true,
-                        __cf_val_key: true
-                    },
-                    required: ["element", "__cf_val_key"]
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    type: "number"
-                } as const satisfies __cfHelpers.JSONSchema, {
-                    element: element,
-                    __cf_val_key: __cf_val_key
-                }, ({ element, __cf_val_key }) => element[__cf_val_key]).for("val", true);
-                return (<span>{val}</span>);
-            }, {
+        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
                 type: "object",
                 properties: {
                     element: {
@@ -87,7 +88,7 @@ export default pattern((state) => {
                     }
                 }
             } as const satisfies __cfHelpers.JSONSchema), {})}
-      </div>)
+      </div>),
     };
 }, {
     type: "object",
