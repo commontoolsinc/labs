@@ -1585,14 +1585,14 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
-  it("keeps no-op attempted targets in potentialWrites for labeled paths", async () => {
+  it("keeps no-op attempted targets in attemptedWrites for labeled paths", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const seed = runtime.edit();
       seed.setCfcEnforcementMode("enforce-explicit");
       const seededCell = runtime.getCell(
         signer.did(),
-        "cfc-noop-potential-write",
+        "cfc-noop-attempted-write",
         {
           type: "object",
           properties: {
@@ -1615,7 +1615,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       tx.setCfcEnforcementMode("enforce-explicit");
       const cell = runtime.getCell(
         signer.did(),
-        "cfc-noop-potential-write",
+        "cfc-noop-attempted-write",
         {
           type: "object",
           properties: {
@@ -1634,7 +1634,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       const digestInput = (
         tx as unknown as {
           buildPreparedDigestInput(): {
-            potentialWrites: Array<{
+            attemptedWrites: Array<{
               space: string;
               scope: "space";
               id: string;
@@ -1645,7 +1645,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           };
         }
       ).buildPreparedDigestInput();
-      expect(digestInput.potentialWrites).toContainEqual({
+      expect(digestInput.attemptedWrites).toContainEqual({
         space: signer.did(),
         scope: "space",
         id: seededId,

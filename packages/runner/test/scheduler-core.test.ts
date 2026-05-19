@@ -1072,11 +1072,11 @@ describe("scheduler", () => {
     expect(resultCell.get()).toEqual({ count: 2, version: 1 });
   });
 
-  it("should track potentialWrites via Cell.set on nested path", async () => {
+  it("should track attemptedWrites via Cell.set on nested path", async () => {
     // Create a cell with nested structure
     const testCell = runtime.getCell<{ nested: { a: number; b: string } }>(
       space,
-      "potential-writes-cell-set-test",
+      "attempted-writes-cell-set-test",
       undefined,
       tx,
     );
@@ -1090,11 +1090,17 @@ describe("scheduler", () => {
 
     const log = txToReactivityLog(setTx);
 
-    // key("nested").set() reads the nested object to compare
-    // The "nested" path should appear in potentialWrites
-    expect(log.potentialWrites).toBeDefined();
+    // key("nested").set() reads the nested object to compare.
+    // The "nested" path should appear in attemptedWrites for CFC/security,
+    // but scheduler-facing potentialWrites should no longer exist.
+    const logWithAttemptedWrites = log as typeof log & {
+      attemptedWrites?: typeof log.writes;
+      potentialWrites?: typeof log.writes;
+    };
+    expect(logWithAttemptedWrites.attemptedWrites).toBeDefined();
+    expect(logWithAttemptedWrites.potentialWrites).toBeUndefined();
     expect(
-      log.potentialWrites!.some((addr) =>
+      logWithAttemptedWrites.attemptedWrites!.some((addr) =>
         addr.path[0] === "value" && addr.path[1] === "nested"
       ),
     ).toBe(true);
@@ -1115,13 +1121,13 @@ describe("scheduler", () => {
     await setTx.commit();
   });
 
-  it("should include nested path in potentialWrites when using key().set()", async () => {
+  it("should include nested path in attemptedWrites when using key().set()", async () => {
     // Create a cell with nested structure
     const testCell = runtime.getCell<{
       data: { unchanged: number; changed: number };
     }>(
       space,
-      "diff-update-potential-writes-cell",
+      "diff-update-attempted-writes-cell",
       undefined,
       tx,
     );
@@ -1135,11 +1141,16 @@ describe("scheduler", () => {
 
     const log = txToReactivityLog(setTx);
 
-    // The "data" path should be in potentialWrites because diffAndUpdate
-    // reads the nested object to compare
-    expect(log.potentialWrites).toBeDefined();
+    // The "data" path should be in attemptedWrites because diffAndUpdate
+    // reads the nested object to compare.
+    const logWithAttemptedWrites = log as typeof log & {
+      attemptedWrites?: typeof log.writes;
+      potentialWrites?: typeof log.writes;
+    };
+    expect(logWithAttemptedWrites.attemptedWrites).toBeDefined();
+    expect(logWithAttemptedWrites.potentialWrites).toBeUndefined();
     expect(
-      log.potentialWrites!.some((addr) =>
+      logWithAttemptedWrites.attemptedWrites!.some((addr) =>
         addr.path[0] === "value" && addr.path[1] === "data"
       ),
     ).toBe(true);
@@ -1162,10 +1173,10 @@ describe("scheduler", () => {
     await setTx.commit();
   });
 
-  it("should not have potentialWrites when using getRaw without metadata", async () => {
+  it("should not have attemptedWrites when using getRaw without metadata", async () => {
     const testCell = runtime.getCell<{ value: number }>(
       space,
-      "no-potential-writes-cell",
+      "no-attempted-writes-cell",
       undefined,
       tx,
     );
@@ -1173,15 +1184,20 @@ describe("scheduler", () => {
     tx.commit();
     tx = runtime.edit();
 
-    // getRaw without metadata should not create potentialWrites
+    // getRaw without metadata should not create attemptedWrites
     const readTx = runtime.edit();
     testCell.withTx(readTx).key("value").getRaw();
 
     const log = txToReactivityLog(readTx);
 
-    // Should have reads but no potentialWrites
+    // Should have reads but no attemptedWrites
+    const logWithAttemptedWrites = log as typeof log & {
+      attemptedWrites?: typeof log.writes;
+      potentialWrites?: typeof log.writes;
+    };
     expect(log.reads.length).toBeGreaterThanOrEqual(1);
-    expect(log.potentialWrites).toBeUndefined();
+    expect(logWithAttemptedWrites.attemptedWrites).toBeUndefined();
+    expect(logWithAttemptedWrites.potentialWrites).toBeUndefined();
 
     await readTx.commit();
   });
