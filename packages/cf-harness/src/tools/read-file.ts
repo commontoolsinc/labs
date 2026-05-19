@@ -135,7 +135,11 @@ export const readFileTool: HarnessToolDefinition<
         cwd: context.currentDir,
         command,
         args,
-        cfcInputLabelPaths: [["args"]],
+        // read_file is a trusted selector: successful file bytes are mediated
+        // by their own CFC result, not by direct prompt influence on the path.
+        // If prior observed output influenced the model's selected path, carry
+        // that accumulated model-context label onto the invocation args.
+        cfcModelContextInputLabelPaths: [["args"]],
       }),
     });
     if (result.exitCode !== 0) {
