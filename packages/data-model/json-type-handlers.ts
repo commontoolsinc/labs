@@ -6,19 +6,6 @@ import {
 } from "./interface.ts";
 import { ExplicitTagValue } from "./explicit-tag-value.ts";
 import { ProblematicValue } from "./problematic-value.ts";
-
-/**
- * JSON-compatible wire format value. This is the intermediate tree
- * representation used during serialization tree walking -- NOT the final
- * serialized form (which is `string`). Internal to the JSON implementation.
- */
-export type JsonWireValue =
-  | null
-  | boolean
-  | number
-  | string
-  | JsonWireValue[]
-  | { [key: string]: JsonWireValue };
 import { FabricEpochDays, FabricEpochNsec } from "./fabric-epoch.ts";
 import { FabricBytes } from "./fabric-bytes.ts";
 import { TAGS } from "./fabric-type-tags.ts";
@@ -30,6 +17,30 @@ import {
   bigintFromMinimalTwosComplement,
   bigintToMinimalTwosComplement,
 } from "./bigint-encoding.ts";
+
+/**
+ * JSON-compatible wire format value. This is the intermediate tree
+ * representation used during serialization tree walking -- NOT the final
+ * serialized form (which is `string`). Internal to the JSON implementation.
+ *
+ * Deep-frozen invariant: every wire tree that *enters deserialization* is
+ * deep-frozen. This is enforced at the two construction sites that feed
+ * `deserialize()` -- `decode()` and `fromBytes()`, unified in
+ * `#parseWireText()` -- and is what lets `unwrapTag()` / the `/quote` arm
+ * hand back extracted sub-trees directly (see their contracts). The transient
+ * trees built on the *serialize* side are not covered by this invariant: they
+ * are `JSON.stringify`-ed and discarded by `encode()` / `encodeToBytes()` and
+ * never reach a caller. (The serialize-side `/quote` form happens to be
+ * deep-frozen as a side effect of `unquote()`'s recursive rebuild, but no
+ * other serialize output is, and none needs to be.)
+ */
+export type JsonWireValue =
+  | null
+  | boolean
+  | number
+  | string
+  | readonly JsonWireValue[]
+  | { [key: string]: JsonWireValue };
 
 /**
  * Narrow interface for what type handlers need from the encoding context

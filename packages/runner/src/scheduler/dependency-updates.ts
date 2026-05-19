@@ -11,14 +11,12 @@ import {
   buildKnownSchedulingWrites,
   diffSchedulingWrites,
   pruneStructuralAncestorWrites,
-  type SchedulingWriteState,
-  updateWriterIndex,
-  type WriterIndexState,
+  type SchedulerWriteIndex,
 } from "./scheduling-writes.ts";
 import type { Action, ReactivityLog, TelemetryAnnotations } from "./types.ts";
 
-export interface DependencyUpdateState
-  extends WriterIndexState, SchedulingWriteState {
+export interface DependencyUpdateState {
+  readonly writeIndex: SchedulerWriteIndex;
   readonly dependencies: WeakMap<Action, ReactivityLog>;
   readonly dependencyGraph: DependencyGraphState;
   readonly isPullMode: () => boolean;
@@ -65,13 +63,14 @@ export function setSchedulerDependencies(
   // Rebuild the current scheduling view from the latest writes plus
   // declared/potential writes. Keep the cumulative legacy union separately
   // so it can be enabled behind an experimental flag.
-  const rawExistingCurrentWrites = state.currentKnownWrites.get(action) ?? [];
+  const rawExistingCurrentWrites =
+    state.writeIndex.currentKnownWrites.get(action) ?? [];
   const existingCurrentWrites = filterIgnoredAddresses(
     rawExistingCurrentWrites,
     ignoredSchedulingWrites,
   );
   const existingHistoricalWrites = filterIgnoredAddresses(
-    state.historicalMightWrite.get(action) ?? [],
+    state.writeIndex.historicalMightWrite.get(action) ?? [],
     ignoredSchedulingWrites,
   );
   const { newCurrentKnownWrites, newHistoricalMightWrite } =
@@ -82,13 +81,13 @@ export function setSchedulerDependencies(
       existingCurrentWrites,
       existingHistoricalWrites,
     });
-  state.currentKnownWrites.set(action, newCurrentKnownWrites);
-  state.historicalMightWrite.set(action, newHistoricalMightWrite);
+  state.writeIndex.currentKnownWrites.set(action, newCurrentKnownWrites);
+  state.writeIndex.historicalMightWrite.set(action, newHistoricalMightWrite);
 
-  const previousSchedulingWrites = state.useHistoricalMightWrite()
+  const previousSchedulingWrites = state.writeIndex.useHistoricalMightWrite()
     ? existingHistoricalWrites
     : existingCurrentWrites;
-  const nextSchedulingWrites = state.useHistoricalMightWrite()
+  const nextSchedulingWrites = state.writeIndex.useHistoricalMightWrite()
     ? newHistoricalMightWrite
     : newCurrentKnownWrites;
 
@@ -97,7 +96,7 @@ export function setSchedulerDependencies(
     nextSchedulingWrites,
   );
 
-  updateWriterIndex(state, action, nextSchedulingWrites);
+  state.writeIndex.updateWriterIndex(action, nextSchedulingWrites);
 
   if (removedWrites.length > 0) {
     pruneDependentsForCurrentWrites(

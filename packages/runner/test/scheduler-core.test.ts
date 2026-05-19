@@ -136,6 +136,56 @@ describe("scheduler", () => {
     expect(c.get()).toBe(4);
   });
 
+  it("records push-mode settle work-set size before actions mutate pending", async () => {
+    runtime.scheduler.enableSettleStats();
+
+    let runCount = 0;
+    const actionA: Action = () => {
+      runCount++;
+    };
+    const actionB: Action = () => {
+      runCount++;
+    };
+
+    const emptyLog = {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    };
+    runtime.scheduler.subscribe(actionA, emptyLog);
+    runtime.scheduler.subscribe(actionB, emptyLog);
+
+    await runtime.scheduler.idle();
+
+    const stats = runtime.scheduler.getSettleStats();
+    expect(runCount).toBe(2);
+    expect(stats?.iterations[0]?.workSetSize).toBe(2);
+    expect(stats?.iterations[0]?.actionsRun).toBe(2);
+  });
+
+  it("normalizes non-Error action throws before error handlers", async () => {
+    const errors: Error[] = [];
+    runtime.scheduler.onError((error) => {
+      errors.push(error);
+    });
+
+    const throwingAction: Action = () => {
+      throw "boom";
+    };
+
+    runtime.scheduler.subscribe(throwingAction, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    });
+
+    await runtime.scheduler.idle();
+
+    expect(errors.length).toBe(1);
+    expect(errors[0]).toBeInstanceOf(Error);
+    expect(errors[0].message).toBe("boom");
+  });
+
   it("should re-run an async read-only effect when invalidated while paused", async () => {
     const source = runtime.getCell<number>(
       space,
