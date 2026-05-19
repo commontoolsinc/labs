@@ -55,9 +55,6 @@ export default pattern((__cf_pattern_input) => {
                         }
                     },
                     required: ["messages"],
-                    "default": {
-                        messages: []
-                    },
                     asCell: ["readonly"]
                 }
             },
@@ -112,7 +109,6 @@ export default pattern((__cf_pattern_input) => {
                     },
                     name: {
                         type: "string",
-                        "default": "",
                         asCell: ["readonly"]
                     }
                 },
@@ -175,7 +171,6 @@ export default pattern((__cf_pattern_input) => {
                     properties: {
                         name: {
                             type: "string",
-                            "default": "",
                             asCell: ["readonly"]
                         }
                     },

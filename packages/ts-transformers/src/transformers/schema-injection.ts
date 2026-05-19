@@ -1,5 +1,6 @@
 import ts from "typescript";
 import {
+  cloneTypeNode,
   createRegisteredTypeLiteral,
   getDeclaredTypeNodeForBindingElement,
   shouldPreserveBindingDeclaredTypeNode,
@@ -1813,7 +1814,7 @@ function getExplicitValueTypeNode(
       checker,
     );
     return typeNode && shouldPreserveBindingDeclaredTypeNode(typeNode)
-      ? typeNode
+      ? cloneTypeNode(typeNode)
       : undefined;
   }
   return undefined;

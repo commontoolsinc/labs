@@ -147,7 +147,6 @@ export default pattern((__cf_pattern_input) => {
                             items: {
                                 $ref: "#/$defs/Entry"
                             },
-                            "default": [],
                             asCell: ["readonly"]
                         },
                         p: {

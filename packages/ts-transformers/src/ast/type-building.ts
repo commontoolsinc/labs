@@ -79,8 +79,9 @@ export function expressionToTypeNode(
   );
   if (declaredTypeNode) {
     const type = context.checker.getTypeAtLocation(expr);
-    context.options.typeRegistry?.set(declaredTypeNode, type);
-    return declaredTypeNode;
+    const clonedTypeNode = cloneTypeNode(declaredTypeNode);
+    context.options.typeRegistry?.set(clonedTypeNode, type);
+    return clonedTypeNode;
   }
 
   // Use inferWidenedTypeFromExpression to widen literal types
@@ -196,9 +197,7 @@ export function shouldPreserveBindingDeclaredTypeNode(
       name === "PerUser" ||
       name === "PerSession" ||
       name === "PerAny" ||
-      name === "Default" ||
-      (unwrapped.typeArguments?.some(shouldPreserveBindingDeclaredTypeNode) ??
-        false)
+      name === "Default"
     );
   }
 
@@ -206,18 +205,13 @@ export function shouldPreserveBindingDeclaredTypeNode(
     return unwrapped.types.some(shouldPreserveBindingDeclaredTypeNode);
   }
 
-  if (ts.isArrayTypeNode(unwrapped)) {
-    return shouldPreserveBindingDeclaredTypeNode(unwrapped.elementType);
-  }
-
-  if (ts.isTypeLiteralNode(unwrapped)) {
-    return unwrapped.members.some((member) =>
-      ts.isPropertySignature(member) && !!member.type &&
-      shouldPreserveBindingDeclaredTypeNode(member.type)
-    );
-  }
-
   return false;
+}
+
+export function cloneTypeNode<T extends ts.TypeNode>(typeNode: T): T {
+  return (ts.factory as typeof ts.factory & {
+    cloneNode<TNode extends ts.Node>(node: TNode): TNode;
+  }).cloneNode(typeNode);
 }
 
 /**
