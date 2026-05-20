@@ -1737,7 +1737,7 @@ const loadSchemaDocument = (
   if (!isRecord(existing) || existing.value === undefined) {
     throw new Error(`stored schemaHash ${schemaHash} is missing or unreadable`);
   }
-  return existing.value as JSONSchema;
+  return internSchema(existing.value as JSONSchema);
 };
 
 export const prepareBoundaryCommit = (
