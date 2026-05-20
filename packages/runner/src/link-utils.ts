@@ -261,7 +261,12 @@ export function createSigilLinkFromParsedLink(
   // Include schema if requested. Empty `{}` and JSON Schema `true` are
   // permissive and should not turn links into schema-bearing links.
   if (options.includeSchema && link.schema !== undefined) {
-    const schema = sanitizeSchemaForLinks(link.schema, options);
+    // If they didn't opt-out of keepStreams, set it to true
+    const extendedOptions = {
+      ...options,
+      keepStreams: options.keepStreams ?? true,
+    };
+    const schema = sanitizeSchemaForLinks(link.schema, extendedOptions);
     if (isNontrivialSchema(schema)) reference.schema = schema;
   }
 
@@ -620,7 +625,11 @@ function recursiveStripAsCellFromSchema(
     }
   }
 
-  removeStrippedStreamPropertiesFromRequired(schema, result, context);
+  // Stream properties will be removed if didn't keep streams, so we need to
+  // remove them from required if present.
+  if (context.options.keepStreams !== true) {
+    removeStrippedStreamPropertiesFromRequired(schema, result, context);
+  }
 
   // Check if this schema was marked as circular while processing
   const existingRef = context.seen.get(schema);
