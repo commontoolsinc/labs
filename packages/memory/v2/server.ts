@@ -114,6 +114,24 @@ export const getSlowQueries = (): readonly SlowQuery[] => slowQueries;
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
+const schedulerObservationFromCommit = (
+  commit: ClientCommit,
+): Engine.SchedulerActionObservation | undefined => {
+  const observation = commit.schedulerObservation;
+  if (
+    !isRecord(observation) ||
+    observation.version !== 1 ||
+    typeof observation.pieceId !== "string" ||
+    typeof observation.actionId !== "string" ||
+    typeof observation.processGeneration !== "number" ||
+    !Array.isArray(observation.reads) ||
+    !Array.isArray(observation.shallowReads)
+  ) {
+    return undefined;
+  }
+  return observation as unknown as Engine.SchedulerActionObservation;
+};
+
 const toError = (name: string, message: string): V2Error => ({
   name,
   message,
@@ -615,12 +633,33 @@ export class Server {
 
     try {
       const engine = await this.openEngine(message.space);
+      const schedulerObservation = schedulerObservationFromCommit(
+        message.commit,
+      );
+      const previousReadSpaces = schedulerObservation
+        ? this.schedulerObservationReadSpaces(
+          Engine.getLatestSchedulerActionSnapshot(engine, {
+            branch: message.commit.branch ?? "",
+            pieceId: schedulerObservation.pieceId,
+            processGeneration: schedulerObservation.processGeneration,
+            actionId: schedulerObservation.actionId,
+          })?.observation,
+        )
+        : new Set<string>();
       const commit = Engine.applyCommit(engine, {
         sessionId: message.sessionId,
         space: message.space,
         principal: session.principal,
         commit: message.commit,
       });
+      if (schedulerObservation) {
+        await this.mirrorSchedulerObservation(
+          message.space,
+          schedulerObservation,
+          commit,
+          previousReadSpaces,
+        );
+      }
       this.markSpaceDirty(
         message.space,
         message.commit.operations.map((operation) =>
@@ -1305,6 +1344,41 @@ export class Server {
       return Promise.resolve(encodeMemoryBoundary(respondToHello(parsed)));
     }
     return Promise.resolve(null);
+  }
+
+  private async mirrorSchedulerObservation(
+    ownerSpace: string,
+    observation: Engine.SchedulerActionObservation,
+    commit: Engine.AppliedCommit,
+    previousReadSpaces: ReadonlySet<string>,
+  ): Promise<void> {
+    const mirrorSpaces = this.schedulerObservationReadSpaces(observation);
+    for (const space of previousReadSpaces) {
+      mirrorSpaces.add(space);
+    }
+    mirrorSpaces.delete(ownerSpace);
+
+    for (const space of mirrorSpaces) {
+      const engine = await this.openEngine(space);
+      Engine.upsertSchedulerObservation(engine, {
+        branch: commit.branch,
+        observedAtSeq: commit.seq,
+        observation,
+      });
+    }
+  }
+
+  private schedulerObservationReadSpaces(
+    observation: Engine.SchedulerActionObservation | undefined,
+  ): Set<string> {
+    const spaces = new Set<string>();
+    if (!observation) {
+      return spaces;
+    }
+    for (const read of [...observation.reads, ...observation.shallowReads]) {
+      spaces.add(read.space);
+    }
+    return spaces;
   }
 
   private openEngine(space: string): Promise<Engine.Engine> {

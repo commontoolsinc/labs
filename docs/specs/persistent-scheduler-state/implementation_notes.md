@@ -100,3 +100,21 @@
   spaces being read and cleans them up on observation replacement.
 - Validation:
   - `deno test -A packages/memory/test/v2-scheduler-state-test.ts`
+
+## 2026-05-20 - Cross-Space Read Index Mirrors
+
+- Added a server-side mirror pass for action observations. After the owner-space
+  commit succeeds, the server writes a scheduler observation into every space
+  read by the action, excluding the owner space that already stored it.
+- Cleanup uses the previous owner-space snapshot's read spaces plus the new read
+  spaces. Mirroring the new observation into old spaces removes stale read-index
+  rows for that action through the normal observation replacement path.
+- Decision: mirrors currently store full observation snapshots with
+  `commit_seq = NULL` rather than introducing a read-index-only table path. This
+  is heavier but keeps replacement semantics centralized in the engine API.
+- Known limitation: mirror writes are not atomically committed with the owner
+  semantic commit across multiple SQLite databases. A mirror failure currently
+  fails the transaction response after the owner commit has been applied; a
+  production version should mark the action unknown or retry mirror repair.
+- Validation:
+  - `deno test -A packages/memory/test/v2-scheduler-state-test.ts`
