@@ -1,5 +1,5 @@
 import {
-  AddIntegrity,
+  type AddIntegrity,
   AuthoredByCurrentUser,
   Cfc,
   computed,
@@ -15,6 +15,14 @@ import {
   Writable,
   WriteAuthorizedBy,
 } from "commonfabric";
+import {
+  activeAdminRoleForSubject,
+  type AdminManagerCredential,
+  adminManagerCredentialIsActive,
+  adminRegistryEntries,
+  type EmptyAdminRegistryValue,
+  subjectHasAdminRole,
+} from "../admin.ts";
 import {
   type ChatProfile,
   type ChatRoom,
@@ -48,11 +56,15 @@ export const TRUSTED_GROUP_CHAT_PROFILE_SURFACE =
   "TrustedGroupChatProfileSurface";
 export const TRUSTED_GROUP_CHAT_SEND_SURFACE = "TrustedGroupChatSendSurface";
 export const TRUSTED_GROUP_CHAT_ROOM_SURFACE = "TrustedGroupChatRoomSurface";
+export const TRUSTED_GROUP_CHAT_ADMIN_SURFACE = "TrustedGroupChatAdminSurface";
 export const TRUSTED_GROUP_CHAT_SAVE_PROFILE_ACTION =
   "TrustedGroupChatSaveProfile";
 export const TRUSTED_GROUP_CHAT_SEND_ACTION = "TrustedGroupChatSendMessage";
 export const TRUSTED_GROUP_CHAT_ADD_ROOM_ACTION = "TrustedGroupChatAddRoom";
+export const TRUSTED_GROUP_CHAT_SET_ADMIN_ACTION = "TrustedGroupChatSetAdmin";
 export const GROUP_CHAT_ADMIN_INTEGRITY = "group-chat-admin" as const;
+export const GROUP_CHAT_ADMIN_MANAGER_INTEGRITY =
+  "group-chat-admin-manager" as const;
 
 export type TrustedProfile = RepresentsCurrentUser<
   TrustedActionWrite<
@@ -63,15 +75,23 @@ export type TrustedProfile = RepresentsCurrentUser<
   >
 >;
 
-export type AdminCredential = AddIntegrity<
-  { readonly isAdmin: true },
-  readonly [typeof GROUP_CHAT_ADMIN_INTEGRITY]
->;
-
 export type ProfileCell = Writable<ChatProfile | undefined>;
 export type TrustedProfileCell = Writable<TrustedProfile>;
-export type AdminCredentialCell = Writable<AdminCredential | null>;
-export type AdminDraftCell = Writable<boolean | Default<false>>;
+export interface ChatAdminRoleAssignment {
+  readonly subject: ProfileCell;
+  readonly displayName: string;
+}
+export type ChatAdminRole = AddIntegrity<
+  ChatAdminRoleAssignment,
+  readonly [typeof GROUP_CHAT_ADMIN_INTEGRITY]
+>;
+export type ChatAdminManagerCredential = AdminManagerCredential<
+  typeof GROUP_CHAT_ADMIN_MANAGER_INTEGRITY
+>;
+export type AdminManagerCredentialCell = Writable<
+  ChatAdminManagerCredential | null
+>;
+export type AdminManagerDraftCell = Writable<boolean | Default<true>>;
 
 export interface MyProfileValue {
   readonly profile?: ProfileCell;
@@ -109,6 +129,25 @@ export type SharedMessagesValue = SharedChatMessage[] | Default<[]>;
 export type SharedMessagesCell = Writable<SharedMessagesValue>;
 
 export type TrustedChatRoom = ChatRoom<SharedChatMessage>;
+
+export type ChatAdminList = RequiresIntegrity<
+  TrustedActionWrite<
+    ChatAdminRole[],
+    typeof commitTrustedAdminToggle,
+    typeof TRUSTED_GROUP_CHAT_SET_ADMIN_ACTION,
+    typeof TRUSTED_GROUP_CHAT_ADMIN_SURFACE
+  >,
+  readonly [typeof GROUP_CHAT_ADMIN_MANAGER_INTEGRITY]
+>;
+
+export interface ChatAdminRegistryStoredValue {
+  readonly admins?: ChatAdminList;
+}
+
+export type ChatAdminRegistryValue =
+  | ChatAdminRegistryStoredValue
+  | Default<EmptyAdminRegistryValue>;
+export type ChatAdminRegistryCell = Writable<ChatAdminRegistryValue>;
 
 export type SharedRoomList = RequiresIntegrity<
   TrustedActionWrite<
@@ -159,13 +198,27 @@ export const currentProfileSnapshot = (
   myProfile: MyProfileCell,
 ): ChatProfile | undefined => currentProfileCell(myProfile)?.get();
 
-export const currentUserIsAdmin = (
-  adminCredential: AdminCredentialCell,
-): boolean => adminCredentialValueIsAdmin(adminCredential.get());
+export const chatAdminRolesValue = (
+  adminRegistry: ChatAdminRegistryCell,
+): ChatAdminRole[] => adminRegistryEntries<ChatAdminRole>(adminRegistry);
 
-const adminCredentialValueIsAdmin = (
-  adminCredential: AdminCredential | null | undefined,
-): boolean => adminCredential?.isAdmin === true;
+export const currentUserAdminRole = (
+  myProfile: MyProfileCell,
+  adminRegistry: ChatAdminRegistryCell,
+): ChatAdminRole | undefined =>
+  activeAdminRoleForSubject(
+    chatAdminRolesValue(adminRegistry),
+    currentProfileCell(myProfile),
+  );
+
+export const currentUserIsAdmin = (
+  myProfile: MyProfileCell,
+  adminRegistry: ChatAdminRegistryCell,
+): boolean => currentUserAdminRole(myProfile, adminRegistry) !== undefined;
+
+export const currentUserCanManageAdmins = (
+  adminManagerCredential: AdminManagerCredentialCell,
+): boolean => adminManagerCredentialIsActive(adminManagerCredential.get());
 
 export const participantClaimsValue = (
   myProfile: MyProfileCell,
@@ -223,15 +276,49 @@ export const participantSummary = (
     : participants.map((participant) => participant.name).join(" · ");
 };
 
+export interface AdminParticipantRow {
+  readonly name: string;
+  readonly accentColor: string;
+  readonly profile?: AuthorProfileCell;
+  readonly isAdmin: boolean;
+  readonly canManageAdmins: boolean;
+}
+
+export const adminParticipantRowsValue = (
+  myProfile: MyProfileCell,
+  messages: SharedMessagesCell,
+  adminRegistry: ChatAdminRegistryCell,
+  adminManagerCredential: AdminManagerCredentialCell,
+): AdminParticipantRow[] => {
+  const adminRoles = chatAdminRolesValue(adminRegistry);
+  const canManageAdmins = currentUserCanManageAdmins(adminManagerCredential);
+  return participantClaimsValue(myProfile, messages).map((participant) => ({
+    name: participant.name,
+    accentColor: participant.accentColor,
+    ...(participant.profile !== undefined
+      ? { profile: participant.profile }
+      : {}),
+    isAdmin: subjectHasAdminRole(adminRoles, participant.profile),
+    canManageAdmins: canManageAdmins && participant.profile !== undefined,
+  }));
+};
+
 export const applyTrustedProfileSave = (
   myProfile: MyProfileCell,
-  adminCredential: AdminCredentialCell,
+  adminManagerCredential: AdminManagerCredentialCell,
   rawName: string,
-  wantsAdmin: boolean,
-): { trimmedName: string | null; profile?: ProfileCell; isAdmin: boolean } => {
+  canManageAdmins: boolean,
+): {
+  trimmedName: string | null;
+  profile?: ProfileCell;
+  canManageAdmins: boolean;
+} => {
   const trimmedName = rawName.trim();
   if (!trimmedName) {
-    return { trimmedName: null, isAdmin: currentUserIsAdmin(adminCredential) };
+    return {
+      trimmedName: null,
+      canManageAdmins: currentUserCanManageAdmins(adminManagerCredential),
+    };
   }
 
   const existingProfile = currentProfileSnapshot(myProfile);
@@ -241,12 +328,14 @@ export const applyTrustedProfileSave = (
     makeProfileSnapshot(trimmedName, existingProfile) as TrustedProfile,
   );
   myProfile.set({ profile });
-  if (wantsAdmin) {
-    adminCredential.set({ isAdmin: true } as AdminCredential);
-    return { trimmedName, profile, isAdmin: true };
+  if (canManageAdmins) {
+    adminManagerCredential.set({
+      canManageAdmins: true,
+    } as ChatAdminManagerCredential);
+    return { trimmedName, profile, canManageAdmins: true };
   }
-  adminCredential.set(null);
-  return { trimmedName, profile, isAdmin: false };
+  adminManagerCredential.set(null);
+  return { trimmedName, profile, canManageAdmins: false };
 };
 
 export const prepareTrustedMessageSend = (
@@ -312,7 +401,7 @@ export const applyTrustedMessageSend = (
 };
 
 export const prepareTrustedRoomAdd = (
-  adminCredential: AdminCredential | null | undefined,
+  currentAdminRole: ChatAdminRole | undefined,
   rawName: string,
 ): {
   trimmedName: string | null;
@@ -320,7 +409,7 @@ export const prepareTrustedRoomAdd = (
 } => {
   const trimmedName = rawName.trim();
   // This read supplies the admin integrity required by the shared rooms write.
-  if (!adminCredentialValueIsAdmin(adminCredential) || !trimmedName) {
+  if (currentAdminRole === undefined || !trimmedName) {
     return {
       trimmedName: null,
       room: null,
@@ -339,16 +428,16 @@ export const commitTrustedProfileSave = handler<
   void,
   {
     myProfile: MyProfileCell;
-    adminCredential: AdminCredentialCell;
+    adminManagerCredential: AdminManagerCredentialCell;
     nameDraft: Writable<string | Default<"">>;
-    adminDraft: AdminDraftCell;
+    adminManagerDraft: AdminManagerDraftCell;
   }
->((_, { myProfile, adminCredential, nameDraft, adminDraft }) => {
+>((_, { myProfile, adminManagerCredential, nameDraft, adminManagerDraft }) => {
   const { trimmedName } = applyTrustedProfileSave(
     myProfile,
-    adminCredential,
+    adminManagerCredential,
     draftText(nameDraft),
-    adminDraft.get() === true,
+    adminManagerDraft.get() !== false,
   );
   if (trimmedName) {
     nameDraft.set(trimmedName);
@@ -376,16 +465,77 @@ export const commitTrustedMessageSend = handler<
 });
 type TrustedMessageSendInput = Parameters<typeof commitTrustedMessageSend>[0];
 
+export const prepareTrustedAdminToggle = (
+  adminManagerCredential: ChatAdminManagerCredential | null | undefined,
+  adminRegistry: ChatAdminRegistryCell,
+  participant: AdminParticipantRow | undefined,
+  myProfile?: MyProfileCell,
+): ChatAdminRole[] | null => {
+  const targetProfile = participant?.profile ?? (
+    myProfile === undefined ? undefined : currentProfileCell(myProfile)
+  );
+  const targetName = participant?.name ??
+    (myProfile === undefined ? undefined : currentProfileSnapshot(myProfile)
+      ?.name);
+  if (
+    !adminManagerCredentialIsActive(adminManagerCredential) ||
+    targetProfile === undefined ||
+    !targetName
+  ) {
+    return null;
+  }
+
+  const adminRoles = chatAdminRolesValue(adminRegistry);
+  const withoutParticipant = adminRoles.filter((role) =>
+    !equals(role.subject, targetProfile)
+  );
+  if (withoutParticipant.length !== adminRoles.length) {
+    return withoutParticipant;
+  }
+
+  return [
+    ...withoutParticipant,
+    {
+      subject: targetProfile,
+      displayName: targetName,
+    } as ChatAdminRole,
+  ];
+};
+
+export const commitTrustedAdminToggle = handler<
+  void,
+  {
+    adminManagerCredential: AdminManagerCredentialCell;
+    adminRegistry: ChatAdminRegistryCell;
+    participant: AdminParticipantRow | undefined;
+    myProfile?: MyProfileCell;
+  }
+>((_, { adminManagerCredential, adminRegistry, participant, myProfile }) => {
+  const nextAdmins = prepareTrustedAdminToggle(
+    adminManagerCredential.get(),
+    adminRegistry,
+    participant,
+    myProfile,
+  );
+  if (nextAdmins === null) {
+    return;
+  }
+
+  adminRegistry.set({ admins: nextAdmins as ChatAdminList });
+});
+type TrustedAdminToggleInput = Parameters<typeof commitTrustedAdminToggle>[0];
+
 export const commitTrustedRoomAdd = handler<
   void,
   {
-    adminCredential: AdminCredential | null;
+    myProfile: MyProfileCell;
+    adminRegistry: ChatAdminRegistryCell;
     roomDraft: RoomDraftCell;
     rooms: SharedRoomsCell;
   }
->((_, { adminCredential, roomDraft, rooms }) => {
+>((_, { myProfile, adminRegistry, roomDraft, rooms }) => {
   const { trimmedName, room } = prepareTrustedRoomAdd(
-    adminCredential,
+    currentUserAdminRole(myProfile, adminRegistry),
     draftText(roomDraft),
   );
   if (!trimmedName || !room) {
@@ -426,18 +576,18 @@ type TrustedParticipantsPanelInputArg = Parameters<
 
 export interface TrustedProfileSaveSurfaceInput {
   myProfile: MyProfileCell;
-  adminCredential: AdminCredentialCell;
+  adminManagerCredential: AdminManagerCredentialCell;
   nameDraft: Writable<string | Default<"">>;
-  adminDraft: AdminDraftCell;
+  adminManagerDraft: AdminManagerDraftCell;
 }
 
 export interface TrustedProfileSaveSurfaceOutput {
   [NAME]: string;
   [UI]: any;
   myProfile: MyProfileCell;
-  adminCredential: AdminCredentialCell;
+  adminManagerCredential: AdminManagerCredentialCell;
   currentProfileName: string;
-  currentUserIsAdmin: boolean;
+  currentUserCanManageAdmins: boolean;
   saveProfile: Stream<void>;
 }
 
@@ -447,22 +597,24 @@ export const TrustedProfileSaveSurface = pattern<
 >((
   {
     myProfile,
-    adminCredential,
+    adminManagerCredential,
     nameDraft,
-    adminDraft,
+    adminManagerDraft,
   }: TrustedProfileSaveSurfaceInput,
 ): TrustedProfileSaveSurfaceOutput => {
   const saveProfile = commitTrustedProfileSave({
     myProfile,
-    adminCredential,
+    adminManagerCredential,
     nameDraft,
-    adminDraft,
+    adminManagerDraft,
   });
   const currentSavedName = computed(() =>
     currentProfileSnapshot(myProfile)?.name ?? "Name not set"
   );
-  const adminStatus = computed(() =>
-    currentUserIsAdmin(adminCredential) ? "Admin" : "Not admin"
+  const managerStatus = computed(() =>
+    currentUserCanManageAdmins(adminManagerCredential)
+      ? "Can manage admins"
+      : "Cannot manage admins"
   );
   const saveDisabled = computed(() => draftText(nameDraft).trim().length === 0);
 
@@ -483,8 +635,11 @@ export const TrustedProfileSaveSurface = pattern<
               placeholder="Set your name"
             />
           </cf-vgroup>
-          <cf-checkbox id="trusted-admin-checkbox" $checked={adminDraft}>
-            Trusted admin
+          <cf-checkbox
+            id="trusted-admin-manager-checkbox"
+            $checked={adminManagerDraft}
+          >
+            Can manage admins (demo)
           </cf-checkbox>
           <cf-button
             id="trusted-profile-save"
@@ -498,15 +653,138 @@ export const TrustedProfileSaveSurface = pattern<
           <cf-label id="trusted-profile-status">
             {currentSavedName}
           </cf-label>
-          <cf-chip id="trusted-admin-status" label={adminStatus} />
+          <cf-chip id="trusted-admin-manager-status" label={managerStatus} />
         </cf-hstack>
       </cf-card>
     ),
     myProfile,
-    adminCredential,
+    adminManagerCredential,
     currentProfileName: currentSavedName,
-    currentUserIsAdmin: computed(() => currentUserIsAdmin(adminCredential)),
+    currentUserCanManageAdmins: computed(() =>
+      currentUserCanManageAdmins(adminManagerCredential)
+    ),
     saveProfile,
+  };
+});
+
+export interface TrustedAdminPanelInput {
+  myProfile: MyProfileCell;
+  messages: SharedMessagesCell;
+  adminRegistry: ChatAdminRegistryCell;
+  adminManagerCredential: AdminManagerCredentialCell;
+}
+
+export interface TrustedAdminPanelOutput {
+  [NAME]: string;
+  [UI]: any;
+  adminRegistry: ChatAdminRegistryCell;
+  toggleCurrentUserAdmin: Stream<void>;
+}
+
+export const TrustedAdminPanel = pattern<
+  TrustedAdminPanelInput,
+  TrustedAdminPanelOutput
+>((
+  {
+    myProfile,
+    messages,
+    adminRegistry,
+    adminManagerCredential,
+  }: TrustedAdminPanelInput,
+): TrustedAdminPanelOutput => {
+  const adminRows = computed(() =>
+    adminParticipantRowsValue(
+      myProfile,
+      messages,
+      adminRegistry,
+      adminManagerCredential,
+    )
+  );
+  const toggleCurrentUserAdmin = commitTrustedAdminToggle({
+    adminManagerCredential,
+    adminRegistry,
+    participant: undefined,
+    myProfile,
+  } as TrustedAdminToggleInput);
+  const managerStatus = computed(() =>
+    currentUserCanManageAdmins(adminManagerCredential)
+      ? "Admin registry editing enabled"
+      : "Save profile with admin-manager enabled to edit"
+  );
+
+  return {
+    [NAME]: "admin registry",
+    [UI]: (
+      <cf-card
+        id="trusted-admin-panel"
+        data-ui-pattern={TRUSTED_GROUP_CHAT_ADMIN_SURFACE}
+        data-ui-event-integrity={TRUSTED_GROUP_CHAT_ADMIN_SURFACE}
+      >
+        <cf-vstack slot="content" gap="3">
+          <cf-hstack justify="between" align="center" wrap gap="2">
+            <cf-vstack gap="1">
+              <cf-heading level={3}>Users</cf-heading>
+              <cf-label>
+                Admin registry. Managers can change who may add rooms.
+              </cf-label>
+            </cf-vstack>
+            <cf-chip
+              id="trusted-admin-manager-panel-status"
+              label={managerStatus}
+            />
+          </cf-hstack>
+
+          <cf-vstack id="trusted-admin-user-list" gap="2">
+            {adminRows.map((participant) => {
+              const toggleAdmin = commitTrustedAdminToggle({
+                adminManagerCredential,
+                adminRegistry,
+                participant,
+              } as TrustedAdminToggleInput);
+              return (
+                <cf-hstack
+                  align="center"
+                  justify="between"
+                  gap="2"
+                  wrap
+                  style={{
+                    padding: "0.5rem 0.75rem",
+                    border: "1px solid var(--cf-color-border, #e5e7eb)",
+                    borderRadius: "0.75rem",
+                  }}
+                >
+                  <cf-hstack align="center" gap="2">
+                    <span
+                      style={{
+                        width: "0.75rem",
+                        height: "0.75rem",
+                        borderRadius: "9999px",
+                        background: participant.accentColor,
+                      }}
+                    />
+                    <cf-label>{participant.name}</cf-label>
+                    <cf-chip
+                      label={participant.isAdmin ? "Admin" : "Member"}
+                      variant={participant.isAdmin ? "accent" : "default"}
+                    />
+                  </cf-hstack>
+                  <cf-button
+                    data-ui-action={TRUSTED_GROUP_CHAT_SET_ADMIN_ACTION}
+                    size="sm"
+                    disabled={!participant.canManageAdmins}
+                    onClick={toggleAdmin}
+                  >
+                    {participant.isAdmin ? "Remove admin" : "Make admin"}
+                  </cf-button>
+                </cf-hstack>
+              );
+            })}
+          </cf-vstack>
+        </cf-vstack>
+      </cf-card>
+    ),
+    adminRegistry,
+    toggleCurrentUserAdmin,
   };
 });
 
@@ -584,7 +862,8 @@ export const TrustedChatSendSurface = pattern<
 });
 
 export interface TrustedRoomAddSurfaceInput {
-  adminCredential: AdminCredentialCell;
+  myProfile: MyProfileCell;
+  adminRegistry: ChatAdminRegistryCell;
   roomDraft: RoomDraftCell;
   rooms: SharedRoomsCell;
 }
@@ -601,18 +880,20 @@ export const TrustedRoomAddSurface = pattern<
   TrustedRoomAddSurfaceOutput
 >((
   {
-    adminCredential,
+    myProfile,
+    adminRegistry,
     roomDraft,
     rooms,
   }: TrustedRoomAddSurfaceInput,
 ): TrustedRoomAddSurfaceOutput => {
   const addRoom = commitTrustedRoomAdd({
-    adminCredential,
+    myProfile,
+    adminRegistry,
     roomDraft,
     rooms,
   } as TrustedRoomAddInput);
   const addDisabled = computed(() =>
-    !currentUserIsAdmin(adminCredential) ||
+    !currentUserIsAdmin(myProfile, adminRegistry) ||
     draftText(roomDraft).trim().length === 0
   );
 
@@ -644,9 +925,9 @@ export const TrustedRoomAddSurface = pattern<
           </cf-button>
           <cf-label id="trusted-room-admin-hint">
             {computed(() =>
-              currentUserIsAdmin(adminCredential)
+              currentUserIsAdmin(myProfile, adminRegistry)
                 ? "Admins can add rooms"
-                : "Save as trusted admin to add rooms"
+                : "Ask an admin manager to make you an admin"
             )}
           </cf-label>
         </cf-hstack>
