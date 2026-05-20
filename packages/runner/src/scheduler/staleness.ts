@@ -1,4 +1,5 @@
 import type { Action } from "./types.ts";
+import type { MaterializerIndexState } from "./materializers.ts";
 
 export class SchedulerStaleness {
   readonly dirty = new Set<Action>();
@@ -120,7 +121,7 @@ export interface DirtySchedulingState {
   readonly scheduleComputationDebounce: (action: Action) => void;
   readonly clearComputationDebounceState: (action: Action) => void;
   readonly isDemandedPullComputation: (action: Action) => boolean;
-  readonly isIdleRunnableComputation?: (action: Action) => boolean;
+  readonly materializerIndex: MaterializerIndexState;
   readonly queueExecution: () => void;
 }
 
@@ -153,7 +154,7 @@ export function markSchedulerDirty(
   state.scheduleComputationDebounce(action);
   if (
     state.isDemandedPullComputation(action) ||
-    state.isIdleRunnableComputation?.(action) === true
+    state.materializerIndex.isMaterializer(action)
   ) {
     state.queueExecution();
   }

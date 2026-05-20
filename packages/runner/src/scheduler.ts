@@ -68,6 +68,8 @@ import {
 import {
   collectDirtyDependencies as collectDirtyDependenciesState,
   collectDirtyDependenciesForLog as collectDirtyDependenciesForLogState,
+  collectDirtyDependenciesFromTraversalRoot
+    as collectDirtyDependenciesFromTraversalRootState,
   type DirtyDependencyCollectionState,
   snapshotDirtyDependencyTraceContext,
 } from "./scheduler/dirty-dependencies.ts";
@@ -1500,8 +1502,7 @@ export class Scheduler {
         this.delays.clearComputationDebounceState(action),
       isDemandedPullComputation: (action) =>
         this.isDemandedPullComputation(action),
-      isIdleRunnableComputation: (action) =>
-        this.materializers.isMaterializer(action),
+      materializerIndex: this.materializers,
       queueExecution: () => this.queueExecution(),
     };
   }
@@ -1532,7 +1533,7 @@ export class Scheduler {
       scheduleWithDebounce: (target) => this.scheduleWithDebounce(target),
       markDirty: (target) =>
         markSchedulerDirty(this.dirtySchedulingState, target),
-      isMaterializer: (target) => this.materializers.isMaterializer(target),
+      materializerIndex: this.materializers,
       queueExecution: () => this.queueExecution(),
       scheduleAffectedEffects: (target) => this.scheduleAffectedEffects(target),
     };
@@ -1593,7 +1594,7 @@ export class Scheduler {
       pending: this.pending,
       dirty: this.staleness.dirty,
       effects: this.effects,
-      isMaterializer: (action) => this.materializers.isMaterializer(action),
+      materializerIndex: this.materializers,
       dependents: this.dependents,
       pendingPullRunnableState: this.pendingPullRunnableState,
       dirtyPullRunnableState: this.dirtyPullRunnableState,
@@ -1619,7 +1620,7 @@ export class Scheduler {
       scheduleWithDebounce: (action) => this.scheduleWithDebounce(action),
       markDirty: (action) =>
         markSchedulerDirty(this.dirtySchedulingState, action),
-      isMaterializer: (action) => this.materializers.isMaterializer(action),
+      materializerIndex: this.materializers,
       scheduleAffectedEffects: (action) => {
         this.scheduleAffectedEffects(action);
       },
@@ -1758,12 +1759,10 @@ export class Scheduler {
       getLoopCounter: () => this.loopCounter,
       runsThisExecute: this.runsThisExecute,
       activePullDemandActions: this.activePullDemandActions,
-      isMaterializer: (action) => this.materializers.isMaterializer(action),
+      materializerIndex: this.materializers,
       getSchedulingWrites: (action) =>
         this.writeIndex.getSchedulingWrites(action),
       getSchedulingWritesMap: () => this.writeIndex.getSchedulingWritesMap(),
-      getMaterializerWriteEnvelopes: (action) =>
-        this.materializers.getMaterializerWriteEnvelopes(action),
       collectDependenciesForAction: (action, populateDependencies, options) =>
         this.collectDependenciesForAction(
           action,
@@ -1772,8 +1771,18 @@ export class Scheduler {
         ),
       collectPullIterationSeeds: (seeds) =>
         this.collectPullIterationSeeds(seeds),
-      collectDirtyDependencies: (seed, targetWorkSet, memo, options) =>
-        this.collectDirtyDependencies(seed, targetWorkSet, memo, options),
+      collectDirtyDependencies: (seed, targetWorkSet, memo) =>
+        this.collectDirtyDependencies(seed, targetWorkSet, memo),
+      collectDirtyDependenciesFromTraversalRoot: (
+        seed,
+        targetWorkSet,
+        memo,
+      ) =>
+        this.collectDirtyDependenciesFromTraversalRoot(
+          seed,
+          targetWorkSet,
+          memo,
+        ),
       getActionId: (action) => this.getActionId(action),
       clearDirty: (action) =>
         clearSchedulerDirty(this.dirtySchedulingState, action),
@@ -1809,7 +1818,7 @@ export class Scheduler {
       },
       isDemandedPullComputation: (action) =>
         this.isDemandedPullComputation(action),
-      isMaterializer: (action) => this.materializers.isMaterializer(action),
+      materializerIndex: this.materializers,
       shouldRunFirstPullComputationInDemandContext: (action) =>
         this.shouldRunFirstPullComputationInDemandContext(action),
       isDebouncedComputationWaiting: (action) =>
@@ -2058,14 +2067,25 @@ export class Scheduler {
     action: Action,
     workSet: Set<Action>,
     memo = new Map<Action, boolean>(),
-    options: { forceTraverseCleanAction?: boolean } = {},
   ): boolean {
     return collectDirtyDependenciesState(
       this.dirtyDependencyCollectionState,
       action,
       workSet,
       memo,
-      options,
+    );
+  }
+
+  private collectDirtyDependenciesFromTraversalRoot(
+    action: Action,
+    workSet: Set<Action>,
+    memo = new Map<Action, boolean>(),
+  ): boolean {
+    return collectDirtyDependenciesFromTraversalRootState(
+      this.dirtyDependencyCollectionState,
+      action,
+      workSet,
+      memo,
     );
   }
 

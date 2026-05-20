@@ -285,45 +285,39 @@ export function deriveDynamicCollectionParentWrites(
   writes: readonly IMemorySpaceAddress[],
   declaredWrites: readonly IMemorySpaceAddress[],
 ): IMemorySpaceAddress[] {
-  const parentWrites: IMemorySpaceAddress[] = [];
-  for (const declaredWrite of declaredWrites) {
-    for (const write of writes) {
-      if (
-        declaredWrite.space !== write.space ||
-        declaredWrite.id !== write.id ||
-        declaredWrite.type !== write.type ||
-        normalizeCellScope(declaredWrite.scope) !==
-          normalizeCellScope(write.scope) ||
-        declaredWrite.path.length >= write.path.length ||
-        !arraysOverlap(declaredWrite.path, write.path)
-      ) {
-        continue;
-      }
-
-      const dynamicSegment = write.path[declaredWrite.path.length];
-      if (isDynamicCollectionSegment(dynamicSegment)) {
-        parentWrites.push(declaredWrite);
-      }
-    }
-  }
-  return parentWrites;
+  return deriveDeclaredAncestorWritesMatching(
+    writes,
+    declaredWrites,
+    (declaredWrite, write) =>
+      isDynamicCollectionSegment(write.path[declaredWrite.path.length]),
+  );
 }
 
 export function deriveDeclaredAncestorWrites(
   writes: readonly IMemorySpaceAddress[],
   declaredWrites: readonly IMemorySpaceAddress[],
 ): IMemorySpaceAddress[] {
+  return deriveDeclaredAncestorWritesMatching(
+    writes,
+    declaredWrites,
+    () => true,
+  );
+}
+
+function deriveDeclaredAncestorWritesMatching(
+  writes: readonly IMemorySpaceAddress[],
+  declaredWrites: readonly IMemorySpaceAddress[],
+  predicate: (
+    declaredWrite: IMemorySpaceAddress,
+    write: IMemorySpaceAddress,
+  ) => boolean,
+): IMemorySpaceAddress[] {
   const ancestorWrites: IMemorySpaceAddress[] = [];
   for (const declaredWrite of declaredWrites) {
     for (const write of writes) {
       if (
-        declaredWrite.space === write.space &&
-        declaredWrite.id === write.id &&
-        declaredWrite.type === write.type &&
-        normalizeCellScope(declaredWrite.scope) ===
-          normalizeCellScope(write.scope) &&
-        declaredWrite.path.length < write.path.length &&
-        arraysOverlap(declaredWrite.path, write.path)
+        declaredWriteIsAncestorOfWrite(declaredWrite, write) &&
+        predicate(declaredWrite, write)
       ) {
         ancestorWrites.push(declaredWrite);
         break;
@@ -331,6 +325,19 @@ export function deriveDeclaredAncestorWrites(
     }
   }
   return ancestorWrites;
+}
+
+function declaredWriteIsAncestorOfWrite(
+  declaredWrite: IMemorySpaceAddress,
+  write: IMemorySpaceAddress,
+): boolean {
+  return declaredWrite.space === write.space &&
+    declaredWrite.id === write.id &&
+    declaredWrite.type === write.type &&
+    normalizeCellScope(declaredWrite.scope) ===
+      normalizeCellScope(write.scope) &&
+    declaredWrite.path.length < write.path.length &&
+    arraysOverlap(declaredWrite.path, write.path);
 }
 
 function isDynamicCollectionSegment(

@@ -52,7 +52,25 @@ export function collectDirtyDependencies(
   action: Action,
   workSet: Set<Action>,
   memo = new Map<Action, boolean>(),
-  options: { forceTraverseCleanAction?: boolean } = {},
+): boolean {
+  return collectDirtyDependenciesInternal(state, action, workSet, memo, false);
+}
+
+export function collectDirtyDependenciesFromTraversalRoot(
+  state: DirtyDependencyCollectionState,
+  action: Action,
+  workSet: Set<Action>,
+  memo = new Map<Action, boolean>(),
+): boolean {
+  return collectDirtyDependenciesInternal(state, action, workSet, memo, true);
+}
+
+function collectDirtyDependenciesInternal(
+  state: DirtyDependencyCollectionState,
+  action: Action,
+  workSet: Set<Action>,
+  memo: Map<Action, boolean>,
+  traverseCleanRoot: boolean,
 ): boolean {
   const collectStart = performance.now();
   let addedToStack = false;
@@ -92,7 +110,7 @@ export function collectDirtyDependencies(
 
     if (
       !state.isStale(action) && !hasStaleMaterializerWriter &&
-      !options.forceTraverseCleanAction
+      !traverseCleanRoot
     ) {
       memo.set(action, false);
       return false;

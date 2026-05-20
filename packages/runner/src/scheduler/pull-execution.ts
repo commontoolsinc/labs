@@ -24,7 +24,11 @@ function buildPullIterationWorkSet(state: {
     seed: Action,
     workSet: Set<Action>,
     memo: Map<Action, boolean>,
-    options?: { forceTraverseCleanAction?: boolean },
+  ) => boolean;
+  readonly collectDirtyDependenciesFromTraversalRoot: (
+    seed: Action,
+    workSet: Set<Action>,
+    memo: Map<Action, boolean>,
   ) => boolean;
 }): {
   workSet: Set<Action>;
@@ -58,10 +62,15 @@ function buildPullIterationWorkSet(state: {
   // Pull in dirty computations that feed the currently runnable seeds.
   const dirtyDependencyMemo = new Map<Action, boolean>();
   for (const seed of traversalSeeds) {
-    state.collectDirtyDependencies(seed, workSet, dirtyDependencyMemo, {
-      forceTraverseCleanAction: state.settleIter > 0 &&
-        state.initialSeeds.has(seed),
-    });
+    if (state.settleIter > 0 && state.initialSeeds.has(seed)) {
+      state.collectDirtyDependenciesFromTraversalRoot(
+        seed,
+        workSet,
+        dirtyDependencyMemo,
+      );
+      continue;
+    }
+    state.collectDirtyDependencies(seed, workSet, dirtyDependencyMemo);
   }
 
   return {
@@ -186,6 +195,8 @@ function preparePullSettleIteration(
       settleIter,
       collectPullIterationSeeds: state.collectPullIterationSeeds,
       collectDirtyDependencies: state.collectDirtyDependencies,
+      collectDirtyDependenciesFromTraversalRoot:
+        state.collectDirtyDependenciesFromTraversalRoot,
     });
 
   if (settleIter === 0) {
@@ -219,7 +230,7 @@ function preparePullSettleIteration(
     state.getSchedulingWritesMap(),
     state.actionParent,
     state.dependents,
-    state.getMaterializerWriteEnvelopes,
+    (action) => state.materializerIndex.getMaterializerWriteEnvelopes(action),
   );
   logger.time(
     topologicalSortStart,
@@ -333,7 +344,7 @@ function deferEffectForLateMaterializerDependency(
   const dirtyDeps = new Set<Action>();
   state.collectDirtyDependencies(fn, dirtyDeps, new Map());
   const materializers = [...dirtyDeps].filter((dep) =>
-    state.isMaterializer(dep) && state.dirty.has(dep)
+    state.materializerIndex.isMaterializer(dep) && state.dirty.has(dep)
   );
   if (materializers.length === 0) return false;
 

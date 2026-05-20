@@ -5,6 +5,7 @@ import type {
   IMemorySpaceAddress,
 } from "../storage/interface.ts";
 import { getTransactionWriteDetails } from "../storage/transaction-inspection.ts";
+import type { MaterializerIndexState } from "./materializers.ts";
 import type { TriggerIndexState } from "./trigger-index.ts";
 import type { Action, ReactivityLog } from "./types.ts";
 
@@ -19,7 +20,7 @@ export interface WritePropagationState {
   readonly markPullDemandContinuation: (action: Action) => void;
   readonly scheduleWithDebounce: (action: Action) => void;
   readonly markDirty: (action: Action) => void;
-  readonly isMaterializer: (action: Action) => boolean;
+  readonly materializerIndex: MaterializerIndexState;
   readonly scheduleAffectedEffects: (action: Action) => void;
   readonly queueExecution: () => void;
 }
@@ -81,7 +82,7 @@ export function markReadersDirtyForChangedWrites(
         state.pending.add(reader);
         state.queueExecution();
       }
-      if (!state.isMaterializer(reader)) {
+      if (!state.materializerIndex.isMaterializer(reader)) {
         state.scheduleAffectedEffects(reader);
       }
     }

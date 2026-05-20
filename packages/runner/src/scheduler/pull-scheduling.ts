@@ -6,6 +6,7 @@ import {
 } from "./execution.ts";
 import { readsOverlapWrites } from "./scheduling-writes.ts";
 import { collectTransitiveEffects } from "./topology.ts";
+import type { MaterializerIndexState } from "./materializers.ts";
 import type {
   Action,
   ReactivityLog,
@@ -37,7 +38,7 @@ export interface PullSchedulingState extends ConditionalEffectState {
   readonly pending: Set<Action>;
   readonly dirty: ReadonlySet<Action>;
   readonly effects: ReadonlySet<Action>;
-  readonly isMaterializer: (action: Action) => boolean;
+  readonly materializerIndex: MaterializerIndexState;
   readonly dependents: WeakMap<Action, Set<Action>>;
   readonly pendingPullRunnableState: PendingPullRunnableState;
   readonly dirtyPullRunnableState: DirtyPullRunnableState;
@@ -107,7 +108,7 @@ export function collectPullIterationSeeds(
 
   for (const action of state.pending) {
     if (
-      state.isMaterializer(action) &&
+      state.materializerIndex.isMaterializer(action) &&
       isMaterializerRunnable(state, action)
     ) {
       workSet.add(action);
@@ -116,7 +117,7 @@ export function collectPullIterationSeeds(
 
   for (const action of state.dirty) {
     if (
-      state.isMaterializer(action) &&
+      state.materializerIndex.isMaterializer(action) &&
       isMaterializerRunnable(state, action)
     ) {
       state.pending.add(action);
@@ -129,7 +130,8 @@ export function hasRunnablePullWork(state: PullSchedulingState): boolean {
   for (const action of state.pending) {
     if (
       isPendingPullActionRunnable(state.pendingPullRunnableState, action) ||
-      (state.isMaterializer(action) && isMaterializerRunnable(state, action))
+      (state.materializerIndex.isMaterializer(action) &&
+        isMaterializerRunnable(state, action))
     ) {
       return true;
     }
@@ -141,7 +143,8 @@ export function hasRunnablePullWork(state: PullSchedulingState): boolean {
         state.dirtyPullRunnableStateWithDebounce,
         action,
       ) ||
-      (state.isMaterializer(action) && isMaterializerRunnable(state, action))
+      (state.materializerIndex.isMaterializer(action) &&
+        isMaterializerRunnable(state, action))
     ) {
       return true;
     }

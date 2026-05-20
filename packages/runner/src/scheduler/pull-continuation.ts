@@ -26,7 +26,7 @@ export function applyPullExecuteContinuation(
     hasQueuedEventReadyNow,
     hasParkedHeadEvent,
     isDemandedPullComputation: state.isDemandedPullComputation,
-    isMaterializer: state.isMaterializer,
+    materializerIndex: state.materializerIndex,
     shouldRunFirstPullComputationInDemandContext:
       state.shouldRunFirstPullComputationInDemandContext,
     isDebouncedComputationWaiting: state.isDebouncedComputationWaiting,
