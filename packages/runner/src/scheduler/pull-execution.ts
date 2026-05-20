@@ -16,6 +16,12 @@ const logger = getLogger("scheduler", {
   level: "warn",
 });
 
+type PullSettleIteration = { settled: true } | {
+  settled: false;
+  workSet: Set<Action>;
+  order: Action[];
+};
+
 function buildPullIterationWorkSet(state: {
   readonly initialSeeds: ReadonlySet<Action>;
   readonly settleIter: number;
@@ -182,33 +188,11 @@ function preparePullSettleIteration(
   settleIter: number,
   earlyIterationThreshold: number,
   earlyIterationComputations: Set<Action>,
-): { settled: true } | {
-  settled: false;
-  workSet: Set<Action>;
-  order: Action[];
-} {
-  // Build the work set for this iteration
-  const buildPullWorkSetStart = performance.now();
-  const { workSet, iterationSeeds, dirtyDependencyCount } =
-    buildPullIterationWorkSet({
-      initialSeeds,
-      settleIter,
-      collectPullIterationSeeds: state.collectPullIterationSeeds,
-      collectDirtyDependencies: state.collectDirtyDependencies,
-      collectDirtyDependenciesFromTraversalRoot:
-        state.collectDirtyDependenciesFromTraversalRoot,
-    });
-
-  if (settleIter === 0) {
-    logger.debug("schedule-execute-pull", () => [
-      `Pull mode: Seeds: ${iterationSeeds.size}, Dirty deps added: ${dirtyDependencyCount}`,
-    ]);
-  }
-  logger.time(
-    buildPullWorkSetStart,
-    "scheduler",
-    "execute",
-    "buildPullWorkSet",
+): PullSettleIteration {
+  const { workSet } = buildAndLogPullIterationWorkSet(
+    state,
+    initialSeeds,
+    settleIter,
   );
 
   if (workSet.size === 0) {
@@ -223,6 +207,51 @@ function preparePullSettleIteration(
     earlyIterationComputations,
   });
 
+  const order = orderPullWorkSet(state, workSet, settleIter);
+  clearPullEffectsBeforeRun(state, order);
+
+  return { settled: false, workSet, order };
+}
+
+function buildAndLogPullIterationWorkSet(
+  state: SchedulerSettleLoopState,
+  initialSeeds: ReadonlySet<Action>,
+  settleIter: number,
+): {
+  workSet: Set<Action>;
+  iterationSeeds: Set<Action>;
+  dirtyDependencyCount: number;
+} {
+  const buildPullWorkSetStart = performance.now();
+  const result = buildPullIterationWorkSet({
+    initialSeeds,
+    settleIter,
+    collectPullIterationSeeds: state.collectPullIterationSeeds,
+    collectDirtyDependencies: state.collectDirtyDependencies,
+    collectDirtyDependenciesFromTraversalRoot:
+      state.collectDirtyDependenciesFromTraversalRoot,
+  });
+
+  if (settleIter === 0) {
+    logger.debug("schedule-execute-pull", () => [
+      `Pull mode: Seeds: ${result.iterationSeeds.size}, Dirty deps added: ${result.dirtyDependencyCount}`,
+    ]);
+  }
+  logger.time(
+    buildPullWorkSetStart,
+    "scheduler",
+    "execute",
+    "buildPullWorkSet",
+  );
+
+  return result;
+}
+
+function orderPullWorkSet(
+  state: SchedulerSettleLoopState,
+  workSet: Set<Action>,
+  settleIter: number,
+): Action[] {
   const topologicalSortStart = performance.now();
   const order = topologicalSort(
     workSet,
@@ -243,6 +272,13 @@ function preparePullSettleIteration(
     `Running ${order.length} actions (settle iteration ${settleIter})`,
   ]);
 
+  return order;
+}
+
+function clearPullEffectsBeforeRun(
+  state: SchedulerSettleLoopState,
+  order: readonly Action[],
+): void {
   // Implicit cycle detection for effects:
   // Clear dirty flags for all effects upfront. If an effect becomes dirty again
   // by the time we run it, something in the execution re-dirtied it -> cycle.
@@ -251,8 +287,6 @@ function preparePullSettleIteration(
       state.clearDirty(fn);
     }
   }
-
-  return { settled: false, workSet, order };
 }
 
 async function runPullSettleOrder(

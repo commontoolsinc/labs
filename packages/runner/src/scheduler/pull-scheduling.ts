@@ -78,7 +78,9 @@ export function conditionalEffectHasChangedInputs(
 }
 
 /**
- * In pull mode, only effects are runnable seeds by default.
+ * In pull mode, effects and demanded computations are primary runnable seeds.
+ * Materializers are idle work and only become seeds once the primary work set
+ * for this iteration is empty.
  *
  * Inline idempotency mode intentionally does not widen this to computations:
  * it rechecks computations that already run due to explicit demand or an
@@ -89,6 +91,19 @@ export function collectPullIterationSeeds(
   workSet: Set<Action>,
 ): void {
   const initialSize = workSet.size;
+  collectPrimaryPullIterationSeeds(state, workSet);
+
+  if (workSet.size > initialSize || initialSize > 0) {
+    return;
+  }
+
+  collectIdleMaterializerSeeds(state, workSet);
+}
+
+function collectPrimaryPullIterationSeeds(
+  state: PullSchedulingState,
+  workSet: Set<Action>,
+): void {
   for (const action of state.pending) {
     if (isPendingPullActionRunnable(state.pendingPullRunnableState, action)) {
       workSet.add(action);
@@ -101,25 +116,20 @@ export function collectPullIterationSeeds(
       workSet.add(action);
     }
   }
+}
 
-  if (workSet.size > initialSize || initialSize > 0) {
-    return;
-  }
-
+function collectIdleMaterializerSeeds(
+  state: PullSchedulingState,
+  workSet: Set<Action>,
+): void {
   for (const action of state.pending) {
-    if (
-      state.materializerIndex.isMaterializer(action) &&
-      isMaterializerRunnable(state, action)
-    ) {
+    if (isIdleMaterializerRunnable(state, action)) {
       workSet.add(action);
     }
   }
 
   for (const action of state.dirty) {
-    if (
-      state.materializerIndex.isMaterializer(action) &&
-      isMaterializerRunnable(state, action)
-    ) {
+    if (isIdleMaterializerRunnable(state, action)) {
       state.pending.add(action);
       workSet.add(action);
     }
@@ -127,12 +137,13 @@ export function collectPullIterationSeeds(
 }
 
 export function hasRunnablePullWork(state: PullSchedulingState): boolean {
+  return hasRunnablePrimaryPullWork(state) ||
+    hasRunnableIdleMaterializerWork(state);
+}
+
+function hasRunnablePrimaryPullWork(state: PullSchedulingState): boolean {
   for (const action of state.pending) {
-    if (
-      isPendingPullActionRunnable(state.pendingPullRunnableState, action) ||
-      (state.materializerIndex.isMaterializer(action) &&
-        isMaterializerRunnable(state, action))
-    ) {
+    if (isPendingPullActionRunnable(state.pendingPullRunnableState, action)) {
       return true;
     }
   }
@@ -142,15 +153,39 @@ export function hasRunnablePullWork(state: PullSchedulingState): boolean {
       isDirtyPullActionRunnable(
         state.dirtyPullRunnableStateWithDebounce,
         action,
-      ) ||
-      (state.materializerIndex.isMaterializer(action) &&
-        isMaterializerRunnable(state, action))
+      )
     ) {
       return true;
     }
   }
 
   return false;
+}
+
+function hasRunnableIdleMaterializerWork(
+  state: PullSchedulingState,
+): boolean {
+  for (const action of state.pending) {
+    if (isIdleMaterializerRunnable(state, action)) {
+      return true;
+    }
+  }
+
+  for (const action of state.dirty) {
+    if (isIdleMaterializerRunnable(state, action)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function isIdleMaterializerRunnable(
+  state: PullSchedulingState,
+  action: Action,
+): boolean {
+  return state.materializerIndex.isMaterializer(action) &&
+    isMaterializerRunnable(state, action);
 }
 
 function isMaterializerRunnable(
