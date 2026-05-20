@@ -5,8 +5,10 @@ import {
   type MyProfileCellValue,
   type MyProfileValue,
   participantClaimsValue,
+  roomsValue,
   type SharedChatMessage,
   type SharedMessagesValue,
+  type SharedRoomsValue,
 } from "./trusted.tsx";
 import { GroupChatDemo } from "./main.tsx";
 
@@ -19,15 +21,23 @@ export default pattern(() => {
   const messages = Writable.of<SharedMessagesValue>(
     [] as SharedMessagesValue,
   );
+  const rooms = Writable.of<SharedRoomsValue>(
+    {} as SharedRoomsValue,
+  );
   const profileDraft = Writable.of("");
+  const adminDraft = Writable.of(false);
   const messageDraft = Writable.of("");
   const hostMessageDraft = Writable.of("");
+  const roomDraft = Writable.of("");
   const chat = GroupChatDemo({
     myProfile,
     messages,
+    rooms,
     profileDraft,
+    adminDraft,
     messageDraft,
     hostMessageDraft,
+    roomDraft,
   } as GroupChatDemoInputArg);
 
   const action_set_profile_alice = action(() => {
@@ -35,6 +45,18 @@ export default pattern(() => {
   });
   const action_save_profile = action(() => {
     chat.saveProfile.send();
+  });
+  const action_set_room_ops = action(() => {
+    chat.setRoomDraft.send("Ops");
+  });
+  const action_try_add_room_without_admin = action(() => {
+    chat.addTrustedRoom.send();
+  });
+  const action_enable_admin_draft = action(() => {
+    chat.setAdminDraft.send(true);
+  });
+  const action_add_room = action(() => {
+    chat.addTrustedRoom.send();
   });
   const action_set_message_alice = action(() => {
     chat.setMessageDraft.send("Hello from Alice");
@@ -81,6 +103,19 @@ export default pattern(() => {
   const assert_profile_created = computed(() =>
     chat.currentProfileName === "Alice"
   );
+  const assert_profile_starts_non_admin = computed(() =>
+    chat.currentUserIsAdmin !== true
+  );
+  const assert_non_admin_cannot_add_room = computed(() =>
+    roomsValue(rooms).length === 0
+  );
+  const assert_admin_enabled = computed(() => chat.currentUserIsAdmin === true);
+  const assert_admin_can_add_room = computed(() => {
+    const roomList = roomsValue(rooms);
+    return roomList.length === 1 &&
+      roomList[0]?.name === "Ops" &&
+      roomDraft.get() === "";
+  });
   const assert_message_sent_and_draft_cleared = computed(() =>
     messages.get().length === 1 &&
     messages.get()[0]?.origin === "sent" &&
@@ -134,6 +169,15 @@ export default pattern(() => {
       { action: action_set_profile_alice },
       { action: action_save_profile },
       { assertion: assert_profile_created },
+      { assertion: assert_profile_starts_non_admin },
+      { action: action_set_room_ops },
+      { action: action_try_add_room_without_admin },
+      { assertion: assert_non_admin_cannot_add_room },
+      { action: action_enable_admin_draft },
+      { action: action_save_profile },
+      { assertion: assert_admin_enabled },
+      { action: action_add_room },
+      { assertion: assert_admin_can_add_room },
       { action: action_set_message_alice },
       { action: action_send_message },
       { assertion: assert_message_sent_and_draft_cleared },

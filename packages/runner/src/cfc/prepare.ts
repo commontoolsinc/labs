@@ -1337,7 +1337,56 @@ const ifcEntryAppliesToAttemptedWrite = (
 ): boolean => {
   const wildcardIndex = path.indexOf("*");
   if (wildcardIndex === -1) {
-    return true;
+    const writes = [...(tx.getWriteDetails?.(target.space) ?? [])];
+    let touched = false;
+    for (const write of writes) {
+      if (write.address.id !== target.id) continue;
+      if (normalizeCellScope(write.address.scope) !== target.scope) continue;
+      if (write.address.path[0] !== "value") continue;
+      const writePath = write.address.path.slice(1).map((entry) =>
+        String(entry)
+      );
+      if (
+        concretePathHasPrefix(path, writePath) ||
+        concretePathHasPrefix(writePath, path)
+      ) {
+        touched = true;
+        break;
+      }
+    }
+    if (!touched) {
+      const reactiveWrites = [
+        ...(tx.getReactivityLog?.().writes ?? []),
+        ...(tx.getReactivityLog?.().attemptedWrites ?? []),
+      ];
+      touched = reactiveWrites.some((write) => {
+        if (write.space !== target.space) return false;
+        if (write.id !== target.id) return false;
+        if (normalizeCellScope(write.scope) !== target.scope) return false;
+        const writePath = canonicalizeLogicalPath(write.path);
+        return concretePathHasPrefix(path, writePath) ||
+          concretePathHasPrefix(writePath, path);
+      });
+    }
+    if (!touched) {
+      return false;
+    }
+    const value = writeValueForTarget(tx, { ...target, path }) ??
+      (() => {
+        try {
+          return tx.readValueOrThrow({ ...target, path }, {
+            meta: INTERNAL_VERIFIER_META,
+          });
+        } catch {
+          return undefined;
+        }
+      })();
+    if (path.length === 0) {
+      return value === undefined ||
+        wildcardPolicyMatchesValue(tx, target, schema, value);
+    }
+    return value !== undefined &&
+      wildcardPolicyMatchesValue(tx, target, schema, value);
   }
 
   const exactAttemptedPaths = [

@@ -18,16 +18,24 @@ import {
   sortDisplayMessages,
 } from "./logic.ts";
 import {
+  type AdminCredential,
+  type AdminCredentialCell,
+  type AdminDraftCell,
   commitTrustedMessageSend,
   currentProfileCell,
   messagesValue,
   type MyProfileCell,
   participantClaimsValue,
+  type RoomDraftCell,
+  roomsValue,
   type SharedChatMessage,
   type SharedMessagesCell,
   type SharedMessagesValue,
+  type SharedRoomsCell,
+  type SharedRoomsValue,
   TrustedChatSendSurface,
   TrustedProfileSaveSurface,
+  TrustedRoomAddSurface,
 } from "./trusted.tsx";
 
 type DraftCell = Writable<string | Default<"">>;
@@ -35,10 +43,19 @@ type DraftCell = Writable<string | Default<"">>;
 const messageCountText = (count: number): string =>
   count === 0 ? "No messages yet" : `${count} message${count === 1 ? "" : "s"}`;
 
+const roomCountText = (count: number): string =>
+  count === 0 ? "No rooms yet" : `${count} room${count === 1 ? "" : "s"}`;
+
 const draftText = (draft: DraftCell): string =>
   (draft.get() as string | undefined) ?? "";
 
 const writeDraftText = handler<string, { value: DraftCell }>(
+  (nextValue, { value }) => {
+    value.set(nextValue);
+  },
+);
+
+const writeBooleanDraft = handler<boolean, { value: AdminDraftCell }>(
   (nextValue, { value }) => {
     value.set(nextValue);
   },
@@ -147,8 +164,39 @@ const SharedTranscript = pattern<
   };
 });
 type SharedTranscriptInputArg = Parameters<typeof SharedTranscript>[0];
+
+interface RoomsListInput {
+  rooms: SharedRoomsCell;
+  id: string;
+}
+
+const RoomsList = pattern<RoomsListInput, { [NAME]: string; [UI]: any }>((
+  { rooms, id }: RoomsListInput,
+): { [NAME]: string; [UI]: any } => {
+  const roomListText = computed(() => {
+    const names = roomsValue(rooms).map((room) => room.name);
+    return names.length === 0 ? "No rooms yet" : names.join(" · ");
+  });
+
+  return {
+    [NAME]: computed(() => `${id} rooms`),
+    [UI]: (
+      <cf-hstack id={id} gap="2" wrap>
+        <cf-chip
+          label={roomListText}
+          variant="accent"
+        />
+      </cf-hstack>
+    ),
+  };
+});
+type RoomsListInputArg = Parameters<typeof RoomsList>[0];
+
 type TrustedChatSendSurfaceInputArg = Parameters<
   typeof TrustedChatSendSurface
+>[0];
+type TrustedRoomAddSurfaceInputArg = Parameters<
+  typeof TrustedRoomAddSurface
 >[0];
 type TrustedMessageSendInputArg = Parameters<typeof commitTrustedMessageSend>[
   0
@@ -157,9 +205,12 @@ type TrustedMessageSendInputArg = Parameters<typeof commitTrustedMessageSend>[
 export interface GroupChatDemoInput {
   myProfile?: PerUser<MyProfileCell>;
   messages?: PerSpace<SharedMessagesCell>;
+  rooms?: PerSpace<SharedRoomsCell>;
   profileDraft?: PerUser<DraftCell>;
+  adminDraft?: PerUser<AdminDraftCell>;
   messageDraft?: PerUser<DraftCell>;
   hostMessageDraft?: PerSession<DraftCell>;
+  roomDraft?: PerSession<RoomDraftCell>;
 }
 
 export interface GroupChatDemoOutput {
@@ -167,15 +218,22 @@ export interface GroupChatDemoOutput {
   [UI]: any;
   myProfile: PerUser<MyProfileCell>;
   messages: PerSpace<SharedMessagesCell>;
+  rooms: PerSpace<SharedRoomsCell>;
   profileDraft: PerUser<DraftCell>;
+  adminDraft: PerUser<AdminDraftCell>;
   messageDraft: PerUser<DraftCell>;
   hostMessageDraft: PerSession<DraftCell>;
+  roomDraft: PerSession<RoomDraftCell>;
   setProfileDraft: Stream<string>;
+  setAdminDraft: Stream<boolean>;
   setMessageDraft: Stream<string>;
   setHostMessageDraft: Stream<string>;
+  setRoomDraft: Stream<string>;
   currentProfileName: string;
+  currentUserIsAdmin: boolean;
   saveProfile: Stream<void>;
   sendTrustedMessage: Stream<void>;
+  addTrustedRoom: Stream<void>;
   hostLookalikeSend: Stream<void>;
   addRandomMessages: Stream<void>;
 }
@@ -184,37 +242,58 @@ export const GroupChatDemo = pattern<GroupChatDemoInput, GroupChatDemoOutput>((
   {
     myProfile,
     messages,
+    rooms,
     profileDraft,
+    adminDraft,
     messageDraft,
     hostMessageDraft,
+    roomDraft,
   }: GroupChatDemoInput,
 ): GroupChatDemoOutput => {
   const myProfileCell = myProfile as MyProfileCell;
+  const adminCredentialCell = new Writable.perUser<AdminCredential | null>(
+    null,
+  ) as AdminCredentialCell;
   const messagesCell = messages as SharedMessagesCell;
+  const roomsCell = rooms as SharedRoomsCell;
   const profileDraftCell = profileDraft as DraftCell;
+  const adminDraftCell = adminDraft as AdminDraftCell;
   const messageDraftCell = messageDraft as DraftCell;
   const hostMessageDraftCell = hostMessageDraft as DraftCell;
+  const roomDraftCell = roomDraft as RoomDraftCell;
   const trustedProfileSave = TrustedProfileSaveSurface({
     myProfile: myProfileCell,
+    adminCredential: adminCredentialCell,
     nameDraft: profileDraftCell,
+    adminDraft: adminDraftCell,
   });
   const trustedSend = TrustedChatSendSurface({
     myProfile: myProfileCell,
     messageDraft: messageDraftCell,
     messages: messagesCell,
   } as TrustedChatSendSurfaceInputArg);
+  const trustedRoomAdd = TrustedRoomAddSurface({
+    adminCredential: adminCredentialCell,
+    roomDraft: roomDraftCell,
+    rooms: roomsCell,
+  } as TrustedRoomAddSurfaceInputArg);
   const hostLookalikeSend = commitTrustedMessageSend({
     myProfile: myProfileCell,
     messageDraft: hostMessageDraftCell,
     messages: messagesCell,
   } as TrustedMessageSendInputArg);
   const setProfileDraft = writeDraftText({ value: profileDraftCell });
+  const setAdminDraft = writeBooleanDraft({ value: adminDraftCell });
   const setMessageDraft = writeDraftText({ value: messageDraftCell });
   const setHostMessageDraft = writeDraftText({ value: hostMessageDraftCell });
+  const setRoomDraft = writeDraftText({ value: roomDraftCell });
   const participantCountLabel = computed(() => {
     const count = participantClaimsValue(myProfileCell, messagesCell).length;
     return `${count} participant${count === 1 ? "" : "s"}`;
   });
+  const roomCountLabel = computed(() =>
+    roomCountText(roomsValue(roomsCell).length)
+  );
   const hostSendDisabled = computed(() =>
     draftText(hostMessageDraftCell).trim().length === 0
   );
@@ -263,12 +342,38 @@ export const GroupChatDemo = pattern<GroupChatDemoInput, GroupChatDemoOutput>((
                       messageCountText(messagesValue(messagesCell).length)
                     )}
                   />
+                  <cf-chip
+                    label={roomCountLabel}
+                  />
+                  <cf-chip
+                    label={computed(() =>
+                      trustedProfileSave.currentUserIsAdmin
+                        ? "Admin enabled"
+                        : "Admin off"
+                    )}
+                  />
                 </cf-hstack>
               </cf-hstack>
             </cf-vstack>
           </cf-card>
 
           {trustedProfileSave}
+
+          <cf-card id="rooms-panel">
+            <cf-vstack slot="content" gap="3">
+              <cf-hstack justify="between" align="center" wrap gap="2">
+                <cf-vstack gap="1">
+                  <cf-heading level={3}>Rooms</cf-heading>
+                  <cf-label>{roomCountLabel}</cf-label>
+                </cf-vstack>
+              </cf-hstack>
+              {RoomsList({
+                rooms: roomsCell,
+                id: "trusted-room-list",
+              } as RoomsListInputArg)}
+              {trustedRoomAdd}
+            </cf-vstack>
+          </cf-card>
 
           <cf-card id="chat-panel">
             <cf-vstack slot="content" gap="3" style={{ minHeight: 0 }}>
@@ -318,15 +423,22 @@ export const GroupChatDemo = pattern<GroupChatDemoInput, GroupChatDemoOutput>((
     ),
     myProfile: myProfileCell as PerUser<MyProfileCell>,
     messages: messagesCell as PerSpace<SharedMessagesCell>,
+    rooms: roomsCell as PerSpace<SharedRoomsCell>,
     profileDraft: profileDraftCell as PerUser<DraftCell>,
+    adminDraft: adminDraftCell as PerUser<AdminDraftCell>,
     messageDraft: messageDraftCell as PerUser<DraftCell>,
     hostMessageDraft: hostMessageDraftCell as PerSession<DraftCell>,
+    roomDraft: roomDraftCell as PerSession<RoomDraftCell>,
     setProfileDraft,
+    setAdminDraft,
     setMessageDraft,
     setHostMessageDraft,
+    setRoomDraft,
     currentProfileName: trustedProfileSave.currentProfileName,
+    currentUserIsAdmin: trustedProfileSave.currentUserIsAdmin,
     saveProfile: trustedProfileSave.saveProfile,
     sendTrustedMessage: trustedSend.sendMessage,
+    addTrustedRoom: trustedRoomAdd.addRoom,
     hostLookalikeSend,
     addRandomMessages,
   };
@@ -334,4 +446,4 @@ export const GroupChatDemo = pattern<GroupChatDemoInput, GroupChatDemoOutput>((
 
 export default GroupChatDemo;
 
-export type { SharedMessagesValue };
+export type { SharedMessagesValue, SharedRoomsValue };
