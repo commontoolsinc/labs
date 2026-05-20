@@ -884,3 +884,64 @@ export default pattern<Input, { [NAME]: string; [UI]: VNode }>(({ question, ["my
     assertStringIncludes(deriveWindow, 'scope: "user"');
   },
 );
+
+Deno.test(
+  "Pipeline regression: computed captures preserve destructured Writable defaults",
+  async () => {
+    const source =
+      `import { computed, Default, NAME, pattern, UI, type VNode, type Writable } from "commonfabric";
+
+interface Input {
+  draftTitle: Writable<string | Default<"">>;
+}
+
+export default pattern<Input, { [NAME]: string; [UI]: VNode }>(({ draftTitle }) => ({
+  [NAME]: "writable-default-capture",
+  [UI]: <div>{computed(() => <span>{draftTitle}</span>)}</div>,
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const deriveStart = output.indexOf("{__cfHelpers.derive({");
+    assert(deriveStart >= 0, "expected computed() to lower to derive()");
+    const deriveWindow = output.slice(deriveStart, deriveStart + 700);
+
+    assertStringIncludes(deriveWindow, "draftTitle: {");
+    assertStringIncludes(deriveWindow, 'type: "string"');
+    assertStringIncludes(deriveWindow, '"default": ""');
+    assertStringIncludes(deriveWindow, "asCell:");
+  },
+);
+
+Deno.test(
+  "Pipeline regression: computed captures preserve Writable Record defaults without orphan refs",
+  async () => {
+    const source =
+      `import { computed, Default, NAME, pattern, UI, type VNode, type Writable } from "commonfabric";
+
+interface Input {
+  selections: Writable<Record<string, boolean> | Default<Record<string, never>>>;
+}
+
+export default pattern<Input, { [NAME]: string; [UI]: VNode }>(({ selections }) => ({
+  [NAME]: "writable-record-default-capture",
+  [UI]: <div>{computed(() => selections.foo ? "yes" : "no")}</div>,
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const deriveStart = output.indexOf("{__cfHelpers.derive({");
+    assert(deriveStart >= 0, "expected computed() to lower to derive()");
+    const deriveWindow = output.slice(deriveStart, deriveStart + 900);
+
+    assertStringIncludes(deriveWindow, "selections:");
+    assert(
+      !deriveWindow.includes("AnonymousType_"),
+      "expected Writable<Record<...Default...>> capture not to emit orphan anonymous refs",
+    );
+  },
+);

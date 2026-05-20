@@ -78,7 +78,7 @@ export function expressionToTypeNode(
     context,
   );
   if (declaredTypeNode) {
-    const type = context.checker.getTypeAtLocation(expr);
+    const type = context.checker.getTypeFromTypeNode(declaredTypeNode);
     const clonedTypeNode = cloneTypeNode(declaredTypeNode);
     context.options.typeRegistry?.set(clonedTypeNode, type);
     return clonedTypeNode;
@@ -190,6 +190,10 @@ export function shouldPreserveBindingDeclaredTypeNode(
     const name = ts.isIdentifier(unwrapped.typeName)
       ? unwrapped.typeName.text
       : unwrapped.typeName.right.text;
+    if (name === "Writable") {
+      return unwrapped.typeArguments?.some(shouldPreserveBindingDeclaredTypeNode)
+        ?? false;
+    }
     return (
       name === "PerSpace" ||
       name === "PerUser" ||
