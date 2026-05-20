@@ -191,8 +191,10 @@ export function shouldPreserveBindingDeclaredTypeNode(
       ? unwrapped.typeName.text
       : unwrapped.typeName.right.text;
     if (name === "Writable") {
-      return unwrapped.typeArguments?.some(shouldPreserveBindingDeclaredTypeNode)
-        ?? false;
+      return unwrapped.typeArguments?.some(
+        shouldPreserveBindingDeclaredTypeNode,
+      ) ??
+        false;
     }
     return (
       name === "PerSpace" ||
