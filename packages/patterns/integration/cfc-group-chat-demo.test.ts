@@ -88,6 +88,29 @@ describe("cfc group chat demo integration test", () => {
     await waitForText(page, "#trusted-profile-status", "Alice");
     await waitForRuntimeIdle(page);
 
+    await scrollIntoView(page, "#trusted-room-name");
+    await fillCfInput(
+      page,
+      "#trusted-room-name",
+      "Ops",
+    );
+    await waitForDisabled(page, "#trusted-room-add-button", true);
+    await clickCfButton(page, "#trusted-admin-checkbox");
+    await clickCfButton(page, "#trusted-profile-save");
+    await waitForText(page, "#trusted-admin-status", "Admin");
+    await waitForRuntimeIdle(page);
+    await fillCfInput(
+      page,
+      "#trusted-room-name",
+      "Ops",
+    );
+    await waitForDisabled(page, "#trusted-room-add-button", false);
+    await waitForRuntimeIdle(page);
+    await clickCfButton(page, "#trusted-room-add-button");
+    await waitForRuntimeIdle(page);
+    await waitForText(page, "#rooms-panel", "1 room");
+    await waitForText(page, "#rooms-panel", "Ops");
+
     await scrollIntoView(page, "#host-message-draft");
     await fillCfInput(
       page,

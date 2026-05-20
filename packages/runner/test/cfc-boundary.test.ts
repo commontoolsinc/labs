@@ -4021,6 +4021,37 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("does not apply exact-path policies for omitted optional fields", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const output = runtime.getCell(
+        signer.did(),
+        "cfc-optional-exact-path-policy",
+        {
+          type: "object",
+          properties: {
+            public: { type: "string" },
+            guarded: {
+              type: "string",
+              ifc: { requiredIntegrity: ["trusted"] },
+            },
+          },
+        },
+        tx,
+      );
+      output.set({ public: "ok" });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.ok).toBeDefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("treats unrelated consumed reads as influencing every target path in phase 1", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
