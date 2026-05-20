@@ -176,33 +176,28 @@ export class ShellIntegration {
 
   #beforeAll = async () => {
     this.#browser = await Browser.launch({ headless: env.HEADLESS });
-  };
-
-  #beforeEach = async () => {
-    this.#exceptions.length = 0;
-    this.#errorLogs.length = 0;
-    this.#page = await this.#browser!.newPage();
+    this.#page = await this.#browser.newPage();
     this.#attachPage(this.#page);
   };
 
-  #afterEach = async () => {
-    try {
-      if (this.#exceptions.length > 0) {
-        throw new Error(
-          `Exceptions recorded: \n${this.#exceptions.join("\n")}`,
-        );
-      }
-      if (this.#config.failOnConsoleError && this.#errorLogs.length > 0) {
-        throw new Error(`Errors logged: \n${this.#errorLogs.join("\n")}`);
-      }
-    } finally {
-      await this.#disposePageRuntime();
-      await this.#page?.close();
-      this.#page = undefined;
+  #beforeEach = () => {
+    this.#exceptions.length = 0;
+    this.#errorLogs.length = 0;
+  };
+
+  #afterEach = () => {
+    if (this.#exceptions.length > 0) {
+      throw new Error(
+        `Exceptions recorded: \n${this.#exceptions.join("\n")}`,
+      );
+    }
+    if (this.#config.failOnConsoleError && this.#errorLogs.length > 0) {
+      throw new Error(`Errors logged: \n${this.#errorLogs.join("\n")}`);
     }
   };
 
   #afterAll = async () => {
+    await this.#disposePageRuntime();
     await this.#page?.close();
     await this.#browser?.close();
   };
