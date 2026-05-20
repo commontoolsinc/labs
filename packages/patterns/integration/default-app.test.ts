@@ -29,6 +29,7 @@ type BrowserActionRunTraceAddress = {
 };
 
 const { FRONTEND_URL, SPACE_NAME } = env;
+const HOME_RELOAD_ACTION_RUN_LIMIT = 20;
 
 export function parseCaptureSeriesCount(raw: string | undefined): number {
   if (!raw) return 0;
@@ -529,6 +530,48 @@ describe("default-app flow test", () => {
     assert(
       noteFound,
       "List should contain '📝 New Note #<hash>' after creating a note",
+    );
+
+    // The first reload can fill observations for actions the creation path did
+    // not demand. Measure the next reload as the steady-state rehydrate path.
+    const warmReloadSummary = await collectHomeReloadSummary(shell, {
+      spaceName,
+      identity,
+      expectNoteInList: true,
+    });
+    assert(
+      warmReloadSummary && typeof warmReloadSummary === "object",
+      "Expected warm home reload summary to be available",
+    );
+    console.log(
+      "Home warm reload rehydration summary:",
+      JSON.stringify(warmReloadSummary, null, 2),
+    );
+
+    const reloadSummary = await collectHomeReloadSummary(shell, {
+      spaceName,
+      identity,
+      expectNoteInList: true,
+    });
+    assert(
+      reloadSummary && typeof reloadSummary === "object",
+      "Expected home reload summary to be available",
+    );
+    console.log(
+      "Home reload rehydration summary:",
+      JSON.stringify(reloadSummary, null, 2),
+    );
+
+    const reloadActionRunCount = actionRunCountFromHomeLoadSummary(
+      reloadSummary,
+    );
+    assert(
+      reloadActionRunCount !== undefined,
+      "Expected reload summary to include action run count",
+    );
+    assert(
+      reloadActionRunCount <= HOME_RELOAD_ACTION_RUN_LIMIT,
+      `Expected second reload to reuse persisted scheduler state with <= ${HOME_RELOAD_ACTION_RUN_LIMIT} action runs, saw ${reloadActionRunCount}`,
     );
 
     if (actionRunSeries.length > 0) {
@@ -1462,6 +1505,39 @@ async function waitForHomePageReady(
   });
 }
 
+async function collectHomeReloadSummary(
+  shell: ShellIntegration,
+  options: {
+    spaceName: string;
+    identity: Identity;
+    expectNoteInList: boolean;
+  },
+): Promise<unknown> {
+  const page = shell.page();
+  const startedAt = performance.now();
+  await page.reload({ waitUntil: "load" });
+  await page.applyConsoleFormatter();
+  await shell.login(options.identity);
+  await waitForHomePageReady(page, options);
+
+  const homeLoadSummary = await collectHomeLoadSummary(page);
+  if (!homeLoadSummary || typeof homeLoadSummary !== "object") {
+    return homeLoadSummary;
+  }
+  return {
+    reloadToRenderedMs: Number((performance.now() - startedAt).toFixed(3)),
+    ...(homeLoadSummary as Record<string, unknown>),
+  };
+}
+
+function actionRunCountFromHomeLoadSummary(
+  summary: unknown,
+): number | undefined {
+  if (!summary || typeof summary !== "object") return undefined;
+  const graph = (summary as { graph?: { actionRuns?: unknown } }).graph;
+  return typeof graph?.actionRuns === "number" ? graph.actionRuns : undefined;
+}
+
 async function collectHomeLoadSummaryFromFreshPage(
   shell: ShellIntegration,
   options: {
@@ -1891,6 +1967,9 @@ async function collectHomeLoadSummary(page: Page): Promise<unknown> {
       string,
       TimingRow
     >;
+    const schedulerRunCount = schedulerTiming["scheduler/run"]?.count ?? 0;
+    const schedulerRunActionCount =
+      schedulerTiming["scheduler/run/action"]?.count ?? 0;
     const topSchedulerTiming = Object.entries(schedulerTiming)
       .sort((a, b) => (b[1].totalTime ?? 0) - (a[1].totalTime ?? 0))
       .slice(0, 16)
@@ -1967,6 +2046,19 @@ async function collectHomeLoadSummary(page: Page): Promise<unknown> {
         effects: typedNodes.filter((node) => node.type === "effect").length,
         inputs: typedNodes.filter((node) => node.type === "input").length,
         inactive: typedNodes.filter((node) => node.type === "inactive").length,
+        actionsWithStats: actionNodes.length,
+        actionRuns: schedulerRunCount,
+        actionRunsThroughActionBody: schedulerRunActionCount,
+        actionRunsFromStats: [...byActionId.values()].reduce(
+          (sum, row) => sum + row.runCount,
+          0,
+        ),
+        computationRunsFromStats: [...byActionId.values()]
+          .filter((row) => row.actionType === "computation")
+          .reduce((sum, row) => sum + row.runCount, 0),
+        effectRunsFromStats: [...byActionId.values()]
+          .filter((row) => row.actionType === "effect")
+          .reduce((sum, row) => sum + row.runCount, 0),
       },
       topSchedulerTiming,
       topActions,
