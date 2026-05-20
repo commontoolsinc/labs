@@ -421,9 +421,9 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                     const admin = trimmedName(adminName);
                     const me = trimmedName(myName);
                     const amAdmin = me !== "" && me === admin;
-                    const hostNote = amAdmin
-                      ? " · you are the host"
-                      : me !== "" && admin !== ""
+                    // "you are the host" is handled by the HOST chip in the
+                    // top right; only call out the host's name to non-admins.
+                    const hostNote = !amAdmin && me !== "" && admin !== ""
                       ? ` · hosted by ${admin}`
                       : "";
                     return (
@@ -442,28 +442,59 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                 {computed(() => {
                   const me = trimmedName(myName);
                   if (me === "") return null;
+                  const admin = trimmedName(adminName);
+                  const amAdmin = me !== "" && me === admin;
                   return (
-                    <span
-                      title={me}
+                    <div
                       style={{
-                        display: "inline-flex",
-                        alignItems: "center",
+                        display: "flex",
                         gap: "6px",
-                        padding: "4px 10px",
-                        borderRadius: "9999px",
-                        background: "#f3f4f6",
-                        border: "1px solid #e5e7eb",
-                        fontSize: "12px",
-                        fontWeight: 600,
-                        color: "#374151",
-                        whiteSpace: "nowrap",
+                        alignItems: "center",
                       }}
                     >
-                      <span style={{ fontSize: "10px", color: "#10b981" }}>
-                        ●
+                      {amAdmin
+                        ? (
+                          <span
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              padding: "4px 10px",
+                              borderRadius: "9999px",
+                              background: "#dbeafe",
+                              border: "1px solid #93c5fd",
+                              fontSize: "11px",
+                              fontWeight: 700,
+                              letterSpacing: "0.05em",
+                              color: "#1e40af",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            HOST
+                          </span>
+                        )
+                        : null}
+                      <span
+                        title={me}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "6px",
+                          padding: "4px 10px",
+                          borderRadius: "9999px",
+                          background: "#f3f4f6",
+                          border: "1px solid #e5e7eb",
+                          fontSize: "12px",
+                          fontWeight: 600,
+                          color: "#374151",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        <span style={{ fontSize: "10px", color: "#10b981" }}>
+                          ●
+                        </span>
+                        {me}
                       </span>
-                      {me}
-                    </span>
+                    </div>
                   );
                 })}
               </div>
@@ -672,53 +703,6 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                   );
                 })}
 
-                {/* Host controls — only the admin sees this card. */}
-                {isAdmin
-                  ? (
-                    <div
-                      style={{
-                        marginBottom: "16px",
-                        padding: "12px 16px",
-                        backgroundColor: "#eff6ff",
-                        border: "1px solid #bfdbfe",
-                        borderRadius: "8px",
-                      }}
-                    >
-                      <div
-                        style={{
-                          fontSize: "11px",
-                          fontWeight: 700,
-                          letterSpacing: "0.05em",
-                          textTransform: "uppercase",
-                          color: "#1e40af",
-                          marginBottom: "8px",
-                        }}
-                      >
-                        Host controls
-                      </div>
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: "8px",
-                          alignItems: "center",
-                        }}
-                      >
-                        <cf-input
-                          $value={optionDraft}
-                          placeholder="Add an option (e.g. Sushi place)…"
-                          aria-label="Option title"
-                          timing-strategy="immediate"
-                          style="flex:1"
-                        />
-                        <cf-button onClick={boundAddOption}>Add</cf-button>
-                        <cf-button onClick={boundResetVotes}>
-                          Reset votes
-                        </cf-button>
-                      </div>
-                    </div>
-                  )
-                  : null}
-
                 {/* Empty state */}
                 {computed(() => {
                   if (options && options.length > 0) return null;
@@ -776,6 +760,32 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                       return idx >= 0 ? idx + 1 : 0;
                     },
                   );
+                  // Vote buttons toggle: clicking your active color clears
+                  // it; clicking a different color updates. Keeps the button
+                  // row a stable 3-chip group regardless of state. Use
+                  // statement bodies (not value-returning ternaries) so the
+                  // transformer treats these as event handlers, not derives.
+                  const onVoteGreen = () => {
+                    if (myVote === "green") {
+                      boundClearMyVote.send({ optionId: oid });
+                    } else {
+                      boundCastVote.send({ optionId: oid, voteType: "green" });
+                    }
+                  };
+                  const onVoteYellow = () => {
+                    if (myVote === "yellow") {
+                      boundClearMyVote.send({ optionId: oid });
+                    } else {
+                      boundCastVote.send({ optionId: oid, voteType: "yellow" });
+                    }
+                  };
+                  const onVoteRed = () => {
+                    if (myVote === "red") {
+                      boundClearMyVote.send({ optionId: oid });
+                    } else {
+                      boundCastVote.send({ optionId: oid, voteType: "red" });
+                    }
+                  };
                   return (
                     <div
                       style={{
@@ -819,9 +829,37 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                           style={{
                             fontSize: "11px",
                             color: "#6b7280",
+                            display: "flex",
+                            gap: "6px",
+                            alignItems: "baseline",
                           }}
                         >
-                          added by {option.addedByName}
+                          <span>added by {option.addedByName}</span>
+                          {
+                            /* Admin-only Remove — inline with the "added by"
+                              metadata, muted, far from the vote chips. */
+                          }
+                          {isAdmin
+                            ? (
+                              <button
+                                type="button"
+                                aria-label="Remove option (host)"
+                                style={{
+                                  background: "none",
+                                  border: "none",
+                                  padding: 0,
+                                  color: "#9ca3af",
+                                  fontSize: "11px",
+                                  textDecoration: "underline",
+                                  cursor: "pointer",
+                                }}
+                                onClick={() =>
+                                  boundRemoveOption.send({ optionId: oid })}
+                              >
+                                · remove
+                              </button>
+                            )
+                            : null}
                         </div>
                       </div>
                       {isJoined
@@ -834,80 +872,97 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                             }}
                           >
                             <cf-button
-                              aria-label="Love it"
+                              aria-label={myVote === "green"
+                                ? "Clear my green vote"
+                                : "Love it"}
                               style={myVote === "green"
                                 ? "background-color: #22c55e; color: white; font-weight: bold; border: 2px solid #16a34a;"
                                 : myVote
                                 ? "opacity: 0.4;"
                                 : ""}
-                              onClick={() =>
-                                boundCastVote.send({
-                                  optionId: oid,
-                                  voteType: "green",
-                                })}
+                              onClick={onVoteGreen}
                             >
                               🟢
                             </cf-button>
                             <cf-button
-                              aria-label="Okay with it"
+                              aria-label={myVote === "yellow"
+                                ? "Clear my yellow vote"
+                                : "Okay with it"}
                               style={myVote === "yellow"
                                 ? "background-color: #eab308; color: white; font-weight: bold; border: 2px solid #ca8a04;"
                                 : myVote
                                 ? "opacity: 0.4;"
                                 : ""}
-                              onClick={() =>
-                                boundCastVote.send({
-                                  optionId: oid,
-                                  voteType: "yellow",
-                                })}
+                              onClick={onVoteYellow}
                             >
                               🟡
                             </cf-button>
                             <cf-button
-                              aria-label="Veto"
+                              aria-label={myVote === "red"
+                                ? "Clear my red vote"
+                                : "Veto"}
                               style={myVote === "red"
                                 ? "background-color: #ef4444; color: white; font-weight: bold; border: 2px solid #dc2626;"
                                 : myVote
                                 ? "opacity: 0.4;"
                                 : ""}
-                              onClick={() =>
-                                boundCastVote.send({
-                                  optionId: oid,
-                                  voteType: "red",
-                                })}
+                              onClick={onVoteRed}
                             >
                               🔴
                             </cf-button>
-                            {myVote
-                              ? (
-                                <cf-button
-                                  aria-label="Clear my vote"
-                                  onClick={() =>
-                                    boundClearMyVote.send({
-                                      optionId: oid,
-                                    })}
-                                >
-                                  Clear
-                                </cf-button>
-                              )
-                              : null}
-                            {isAdmin
-                              ? (
-                                <cf-button
-                                  aria-label="Remove option"
-                                  onClick={() =>
-                                    boundRemoveOption.send({ optionId: oid })}
-                                >
-                                  ✕
-                                </cf-button>
-                              )
-                              : null}
                           </div>
                         )
                         : null}
                     </div>
                   );
                 })}
+
+                {/* Host controls — only the admin sees this card. */}
+                {isAdmin
+                  ? (
+                    <div
+                      style={{
+                        marginBottom: "16px",
+                        padding: "12px 16px",
+                        backgroundColor: "#eff6ff",
+                        border: "1px solid #bfdbfe",
+                        borderRadius: "8px",
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: "11px",
+                          fontWeight: 700,
+                          letterSpacing: "0.05em",
+                          textTransform: "uppercase",
+                          color: "#1e40af",
+                          marginBottom: "8px",
+                        }}
+                      >
+                        Host controls
+                      </div>
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "8px",
+                          alignItems: "center",
+                        }}
+                      >
+                        <cf-input
+                          $value={optionDraft}
+                          placeholder="Add an option (e.g. Sushi place)…"
+                          aria-label="Option title"
+                          timing-strategy="immediate"
+                          style="flex:1"
+                        />
+                        <cf-button onClick={boundAddOption}>Add</cf-button>
+                        <cf-button onClick={boundResetVotes}>
+                          Reset votes
+                        </cf-button>
+                      </div>
+                    </div>
+                  )
+                  : null}
               </div>
             </cf-vscroll>
           </cf-screen>
