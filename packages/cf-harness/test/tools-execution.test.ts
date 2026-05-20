@@ -2,7 +2,7 @@ import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
 import { decodeBase64 } from "@std/encoding/base64";
 import { join } from "@std/path";
 import { normalize } from "@std/path/posix";
-import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
+import type { CfcLabelView, CfcSandboxResult } from "@commonfabric/runner/cfc";
 import { createHarnessCfcInvocationContext } from "../src/contracts/cfc-invocation-context.ts";
 import type {
   HarnessSkillRegistry,
@@ -1336,6 +1336,38 @@ Deno.test("write_file tool supports append mode and passes content over stdin", 
   assertEquals(
     sandbox.calls[0]?.request.cfcInvocationContext?.cwd,
     "/workspace",
+  );
+  assertEquals(
+    sandbox.calls[0]?.request.cfcInvocationContext?.toolOutputId,
+    output.outputId,
+  );
+});
+
+Deno.test("write_file tool merges explicit trusted CFC labels with write inputs", async () => {
+  const sandbox = new FakeSandboxRuntime();
+  const trustedLabels: CfcLabelView = {
+    version: 1,
+    entries: [{
+      path: ["stdin"],
+      label: {
+        confidentiality: [{
+          type: "test.cfc/TrustedInput",
+          source: "unit-test",
+        }],
+      },
+    }],
+  };
+
+  await writeFileTool.invoke(createContext(sandbox), {
+    path: "notes/secret.txt",
+    content: "secret\n",
+    cfcInputLabels: trustedLabels,
+  });
+
+  assertEquals(
+    sandbox.calls[0]?.request.cfcInvocationContext?.cfcInputLabels
+      ?.entries[0],
+    trustedLabels.entries[0],
   );
 });
 
