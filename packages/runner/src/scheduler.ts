@@ -79,6 +79,8 @@ import {
   type InFlightSourceState,
   runSchedulerAction,
   type SchedulerActionRunState,
+  schedulerImplementationFingerprint,
+  schedulerRuntimeFingerprint,
 } from "./scheduler/action-run.ts";
 import {
   buildPullInitialSeeds,
@@ -98,6 +100,7 @@ import { runPushSchedulerSettleLoop } from "./scheduler/push-execution.ts";
 import {
   isSchedulerActionObservation,
   type PersistedSchedulerObservationSnapshot,
+  type SchedulerActionObservation,
 } from "./scheduler/persistent-observation.ts";
 import {
   collectPullIterationSeeds as collectPullIterationSeedsState,
@@ -663,6 +666,9 @@ export class Scheduler {
     if (!snapshot || !isSchedulerActionObservation(snapshot.observation)) {
       return false;
     }
+    if (!this.observationMatchesCurrentAction(action, snapshot.observation)) {
+      return false;
+    }
 
     return this.rehydrateActionFromObservation(action, {
       observation: snapshot.observation,
@@ -676,6 +682,22 @@ export class Scheduler {
         ? { unknownReason: snapshot.unknownReason }
         : {}),
     });
+  }
+
+  private observationMatchesCurrentAction(
+    action: Action,
+    observation: SchedulerActionObservation,
+  ): boolean {
+    const actionId = this.getActionId(action);
+    if (observation.actionId !== actionId) {
+      return false;
+    }
+
+    const telemetry = getSchedulerActionTelemetryInfo(action);
+    return observation.implementationFingerprint ===
+        schedulerImplementationFingerprint(action, actionId, telemetry) &&
+      observation.runtimeFingerprint ===
+        schedulerRuntimeFingerprint(this.pullMode ? "pull" : "push");
   }
 
   private setActionObservationIdentity(

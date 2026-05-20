@@ -238,3 +238,16 @@
   stronger fingerprints still called out as version-1 limitations.
 - Validation:
   - `HEADLESS=1 deno test -A packages/runner/test/scheduler-observations.test.ts`
+
+## 2026-05-20 - Rehydration Fingerprint Guard
+
+- Tightened storage-backed rehydration so a persisted snapshot must match the
+  recreated action's implementation fingerprint and the active scheduler runtime
+  mode before it can restore indexes or skip execution.
+- Decision: `rehydrateActionFromObservation()` remains the low-level primitive
+  for already-validated snapshots. The storage-backed entrypoint performs the
+  trust boundary check because it consumes unknown memory-boundary payloads.
+- Added coverage that a matching action id with a stale implementation
+  fingerprint falls back to the normal first run.
+- Validation:
+  - `HEADLESS=1 deno test -A packages/runner/test/scheduler-observations.test.ts`
