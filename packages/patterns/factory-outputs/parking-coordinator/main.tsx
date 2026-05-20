@@ -1,11 +1,13 @@
 import {
   action,
+  type AddIntegrity,
   computed,
   Default,
   NAME,
   nonPrivateRandom,
   pattern,
   type PerSpace,
+  type RequiresIntegrity,
   safeDateNow,
   Stream,
   UI,
@@ -13,6 +15,12 @@ import {
   wish,
   Writable,
 } from "commonfabric";
+import {
+  type AdminManagerCredential,
+  adminManagerCredentialIsActive,
+  adminRegistryEntries,
+  type EmptyAdminRegistryValue,
+} from "../../admin.ts";
 
 // ============================================================
 // Domain Types
@@ -47,8 +55,51 @@ export interface SpotRequest {
   autoAllocated: boolean;
 }
 
+export const PARKING_ADMIN_INTEGRITY = "parking-admin" as const;
+export const PARKING_ADMIN_MANAGER_INTEGRITY = "parking-admin-manager" as const;
+
+export interface ParkingAdminSubject {
+  personName: string;
+}
+
+export interface ParkingAdminRoleAssignment {
+  subject: ParkingAdminSubject;
+  displayName: string;
+}
+
+export type ParkingAdminRole = AddIntegrity<
+  ParkingAdminRoleAssignment,
+  readonly [typeof PARKING_ADMIN_INTEGRITY]
+>;
+
+export type ParkingAdminManagerCredential = AdminManagerCredential<
+  typeof PARKING_ADMIN_MANAGER_INTEGRITY
+>;
+
+export type ParkingAdminList = RequiresIntegrity<
+  ParkingAdminRole[],
+  readonly [typeof PARKING_ADMIN_MANAGER_INTEGRITY]
+>;
+
+export interface ParkingAdminRegistryStoredValue {
+  admins?: ParkingAdminList;
+}
+
+export type ParkingAdminRegistryValue =
+  | ParkingAdminRegistryStoredValue
+  | Default<EmptyAdminRegistryValue>;
+export type ParkingAdminRegistryCell = Writable<ParkingAdminRegistryValue>;
+export type ParkingAdminManagerCredentialCell = Writable<
+  ParkingAdminManagerCredential | null
+>;
+
+export type ParkingSpotList = RequiresIntegrity<
+  ParkingSpot[],
+  readonly [typeof PARKING_ADMIN_INTEGRITY]
+>;
+
 type SpotsCell = Writable<
-  | ParkingSpot[]
+  | ParkingSpotList
   | Default<[
     { spotNumber: "1"; label: "Near entrance"; notes: ""; active: true },
     { spotNumber: "5"; label: ""; notes: ""; active: true },
@@ -71,6 +122,7 @@ export interface ParkingCoordinatorInput {
   spots?: PerSpace<SpotsCell>;
   people?: PerSpace<PeopleCell>;
   requests?: PerSpace<RequestsCell>;
+  adminRegistry?: PerSpace<ParkingAdminRegistryCell>;
 }
 
 export interface ParkingCoordinatorOutput {
@@ -83,6 +135,11 @@ export interface ParkingCoordinatorOutput {
   selectedPersonName: string;
   requestDate: string;
   requestResult: string;
+  adminRegistry: PerSpace<ParkingAdminRegistryCell>;
+  currentPersonIsAdmin: boolean;
+  currentUserCanManageAdmins: boolean;
+  enableAdminManager: Stream<void>;
+  togglePersonAdmin: Stream<{ name: string }>;
   toggleAdminMode: Stream<void>;
   submitRequest: Stream<{ personName: string; date: string }>;
   cancelRequest: Stream<{ requestId: string }>;
@@ -181,6 +238,77 @@ const genId = (): string =>
 const parsePreferences = (s: string | null | undefined): string[] =>
   (s ?? "").split(",").map((x) => x.trim()).filter(Boolean);
 
+const parkingAdminSubject = (personName: string): ParkingAdminSubject => ({
+  personName,
+});
+
+const parkingAdminRolesValue = (
+  registry: ParkingAdminRegistryCell,
+): ParkingAdminRole[] => adminRegistryEntries<ParkingAdminRole>(registry);
+
+const parkingAdminRoleForPerson = (
+  registry: ParkingAdminRegistryCell,
+  personName: string | undefined,
+): ParkingAdminRole | undefined => {
+  const trimmedName = (personName ?? "").trim();
+  return trimmedName === ""
+    ? undefined
+    : parkingAdminRolesValue(registry).find((role) =>
+      role.subject.personName === trimmedName
+    );
+};
+
+const personIsParkingAdmin = (
+  registry: ParkingAdminRegistryCell,
+  personName: string | undefined,
+): boolean => parkingAdminRoleForPerson(registry, personName) !== undefined;
+
+const currentActorName = (
+  selectedPersonName: Writable<string>,
+  people: PeopleCell,
+): string => selectedPersonName.get() || people.get()[0]?.name || "";
+
+const currentParkingAdminRole = (
+  registry: ParkingAdminRegistryCell,
+  selectedPersonName: Writable<string>,
+  people: PeopleCell,
+): ParkingAdminRole | undefined =>
+  parkingAdminRoleForPerson(
+    registry,
+    currentActorName(selectedPersonName, people),
+  );
+
+const currentUserCanManageParkingAdmins = (
+  credential: ParkingAdminManagerCredentialCell,
+): boolean => adminManagerCredentialIsActive(credential.get());
+
+const prepareParkingAdminToggle = (
+  credential: ParkingAdminManagerCredential | null | undefined,
+  registry: ParkingAdminRegistryCell,
+  rawName: string,
+): ParkingAdminRole[] | null => {
+  const personName = rawName.trim();
+  if (!adminManagerCredentialIsActive(credential) || personName === "") {
+    return null;
+  }
+
+  const adminRoles = parkingAdminRolesValue(registry);
+  const nextRoles = adminRoles.filter((role) =>
+    role.subject.personName !== personName
+  );
+  if (nextRoles.length !== adminRoles.length) {
+    return nextRoles;
+  }
+
+  return [
+    ...nextRoles,
+    {
+      subject: parkingAdminSubject(personName),
+      displayName: personName,
+    } as ParkingAdminRole,
+  ];
+};
+
 const commuteIcon = (mode: CommuteMode): string => {
   const icons: Record<CommuteMode, string> = {
     drive: "🚗",
@@ -252,10 +380,27 @@ export const DEFAULT_SPOTS: ParkingSpot[] = [
 // ============================================================
 
 export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
-  ({ spots: inputSpots, people: inputPeople, requests: inputRequests }) => {
+  (
+    {
+      spots: inputSpots,
+      people: inputPeople,
+      requests: inputRequests,
+      adminRegistry: inputAdminRegistry,
+    },
+  ) => {
     const spots = inputSpots ?? Writable.perSpace.of(DEFAULT_SPOTS);
     const people = inputPeople ?? Writable.perSpace.of<Person[]>([]);
     const requests = inputRequests ?? Writable.perSpace.of<SpotRequest[]>([]);
+    const defaultAdminRegistry = new Writable.perSpace<
+      ParkingAdminRegistryValue
+    >(
+      {} as ParkingAdminRegistryValue,
+    );
+    const adminRegistry =
+      (inputAdminRegistry ?? defaultAdminRegistry) as ParkingAdminRegistryCell;
+    const adminManagerCredential = new Writable.perUser<
+      ParkingAdminManagerCredential | null
+    >(null);
 
     const nowTimestamp = wish<number>({ query: "#now" });
     const todayStr = computed(() =>
@@ -320,7 +465,31 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     // Actions
     // --------------------------------------------------------
 
+    const enableAdminManager = action(() => {
+      adminManagerCredential.set({
+        canManageAdmins: true,
+      } as ParkingAdminManagerCredential);
+    });
+
+    const togglePersonAdmin = action<{ name: string }>(({ name }) => {
+      const nextAdmins = prepareParkingAdminToggle(
+        adminManagerCredential.get(),
+        adminRegistry,
+        name,
+      );
+      if (nextAdmins === null) {
+        return;
+      }
+      adminRegistry.set({ admins: nextAdmins as ParkingAdminList });
+    });
+
     const toggleAdminMode = action(() => {
+      if (
+        !currentParkingAdminRole(adminRegistry, selectedPersonName, people)
+      ) {
+        adminMode.set(false);
+        return;
+      }
       adminMode.set(!adminMode.get());
     });
 
@@ -514,6 +683,18 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
             r.personName === originalName ? { ...r, personName: trimName } : r
           ),
         );
+        if (adminManagerCredentialIsActive(adminManagerCredential.get())) {
+          adminRegistry.set({
+            admins: parkingAdminRolesValue(adminRegistry).map((role) =>
+              role.subject.personName === originalName
+                ? {
+                  subject: parkingAdminSubject(trimName),
+                  displayName: trimName,
+                } as ParkingAdminRole
+                : role
+            ) as ParkingAdminList,
+          });
+        }
       }
 
       editingPersonName.set(null);
@@ -521,6 +702,13 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
 
     const removePerson = action<{ name: string }>(({ name }) => {
       people.set(people.get().filter((p) => p.name !== name));
+      if (adminManagerCredentialIsActive(adminManagerCredential.get())) {
+        adminRegistry.set({
+          admins: parkingAdminRolesValue(adminRegistry).filter((role) =>
+            role.subject.personName !== name
+          ) as ParkingAdminList,
+        });
+      }
       if (selectedPersonName.get() === name) {
         const remaining = people.get();
         selectedPersonName.set(remaining[0]?.name ?? "");
@@ -569,6 +757,11 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     const addSpot = action<
       { spotNumber: string; label: string; notes: string }
     >((event) => {
+      if (
+        !currentParkingAdminRole(adminRegistry, selectedPersonName, people)
+      ) {
+        return;
+      }
       const {
         spotNumber: spotNumArg = newSpotNumber.get() ?? "",
         label = newSpotLabel.get() ?? "",
@@ -582,12 +775,15 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
         return;
       }
       addSpotError.set("");
-      spots.set([...current, {
-        spotNumber: trimNum,
-        label: label.trim(),
-        notes: notes.trim(),
-        active: true,
-      }]);
+      spots.set([
+        ...current,
+        {
+          spotNumber: trimNum,
+          label: label.trim(),
+          notes: notes.trim(),
+          active: true,
+        },
+      ] as ParkingSpotList);
       newSpotNumber.set("");
       newSpotLabel.set("");
       newSpotNotes.set("");
@@ -603,6 +799,11 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
         active: boolean;
       }
     >((event) => {
+      if (
+        !currentParkingAdminRole(adminRegistry, selectedPersonName, people)
+      ) {
+        return;
+      }
       const {
         originalNumber = editingSpotNumber.get() ?? "",
         spotNumber: spotNumArg2 = editSpotNum.get() ?? "",
@@ -629,7 +830,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
               active: editSpotActiveArg,
             }
             : s
-        ),
+        ) as ParkingSpotList,
       );
 
       if (trimNum !== originalNumber) {
@@ -646,7 +847,16 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
 
     const removeSpot = action<{ spotNumber: string }>(
       ({ spotNumber: spotNumArg3 }) => {
-        spots.set(spots.get().filter((s) => s.spotNumber !== spotNumArg3));
+        if (
+          !currentParkingAdminRole(adminRegistry, selectedPersonName, people)
+        ) {
+          return;
+        }
+        spots.set(
+          spots.get().filter((s) =>
+            s.spotNumber !== spotNumArg3
+          ) as ParkingSpotList,
+        );
         removeSpotConfirmTarget.set(null);
       },
     );
@@ -654,6 +864,11 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     const adminOverride = action<
       { spotNumber: string; date: string; personName: string }
     >(({ spotNumber, date, personName }) => {
+      if (
+        !currentParkingAdminRole(adminRegistry, selectedPersonName, people)
+      ) {
+        return;
+      }
       if (!personName || !spotNumber || !date) return;
 
       const existingReqs = requests.get();
@@ -849,6 +1064,28 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       activeRequestDate < todayStr || people.get().length === 0
     );
 
+    const currentPersonIsAdmin = computed(() =>
+      currentParkingAdminRole(adminRegistry, selectedPersonName, people) !==
+        undefined
+    );
+
+    const adminModeEnabled = computed(() =>
+      Boolean(adminMode.get() && currentPersonIsAdmin)
+    );
+
+    const currentUserCanManageAdmins = computed(() =>
+      currentUserCanManageParkingAdmins(adminManagerCredential)
+    );
+
+    const adminAccessRows = computed(() =>
+      people.get().map((person) => ({
+        name: person.name,
+        email: person.email,
+        isAdmin: personIsParkingAdmin(adminRegistry, person.name),
+        canManageAdmins: currentUserCanManageAdmins,
+      }))
+    );
+
     const commuteModeOptions = [
       { label: "🚗 Drive", value: "drive" },
       { label: "🚌 Transit", value: "transit" },
@@ -880,7 +1117,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       const overrideSpot = gridOverrideSpot.get();
       const overrideDate = gridOverrideDate.get();
       const overridePerson = overridePersonName.get();
-      const weekGridShowAdmin = adminMode.get();
+      const weekGridShowAdmin = adminModeEnabled;
 
       return allSpots.map((spot) => {
         const spotNum = spot.spotNumber;
@@ -926,7 +1163,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       const allSpots = spots.get().filter((s) => s != null && s.active);
       const allRequests = requests.get();
       const currentPerson = selectedPersonName.get();
-      const todayStripShowAdmin = adminMode.get();
+      const todayStripShowAdmin = adminModeEnabled;
 
       return allSpots.map((spot) => {
         const req = allRequests.find(
@@ -992,13 +1229,19 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
               </span>
               <cf-button
                 variant={computed(() =>
-                  adminMode.get() ? "primary" : "secondary"
+                  adminModeEnabled ? "primary" : "secondary"
                 )}
                 size="sm"
+                disabled={computed(() => !currentPersonIsAdmin)}
                 onClick={() => toggleAdminMode.send()}
               >
-                {computed(() => `Admin: ${adminMode.get() ? "ON" : "OFF"}`)}
+                {computed(() => `Admin: ${adminModeEnabled ? "ON" : "OFF"}`)}
               </cf-button>
+              <cf-chip
+                label={computed(() =>
+                  currentPersonIsAdmin ? "Current person is admin" : "Member"
+                )}
+              />
             </div>
           </div>
 
@@ -1169,6 +1412,84 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                       >
                         {result}
                       </span>
+                    );
+                  })}
+                </cf-vstack>
+              </cf-card>
+
+              {/* === Section C: Admin Access === */}
+              <cf-card id="parking-admin-access">
+                <cf-vstack gap="2">
+                  <cf-hstack justify="between" align="center" wrap gap="2">
+                    <cf-vstack gap="1">
+                      <cf-heading level={6}>Admin Access</cf-heading>
+                      <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
+                        Demo manager access lets any user change who can manage
+                        parking spots.
+                      </span>
+                    </cf-vstack>
+                    <cf-chip
+                      label={computed(() =>
+                        currentUserCanManageAdmins
+                          ? "Can manage admins"
+                          : "Cannot manage admins"
+                      )}
+                    />
+                    <cf-button
+                      size="sm"
+                      disabled={computed(() =>
+                        Boolean(currentUserCanManageAdmins)
+                      )}
+                      onClick={() => enableAdminManager.send()}
+                    >
+                      Enable manager demo
+                    </cf-button>
+                  </cf-hstack>
+
+                  {noPeople
+                    ? (
+                      <span style="font-size: 0.875rem; color: var(--cf-color-gray-500);">
+                        Add people before assigning admins.
+                      </span>
+                    )
+                    : null}
+
+                  {adminAccessRows.map((row) => {
+                    const rowName = row.name;
+                    const rowEmail = row.email;
+                    const rowIsAdmin = row.isAdmin;
+                    const rowCanManageAdmins = row.canManageAdmins;
+                    return (
+                      <cf-hstack
+                        justify="between"
+                        align="center"
+                        gap="2"
+                        wrap
+                        style="padding: 0.5rem 0.75rem; border: 1px solid var(--cf-color-gray-200); border-radius: 0.75rem;"
+                      >
+                        <cf-vstack gap="0">
+                          <cf-hstack gap="2" align="center" wrap>
+                            <span style="font-weight: 600;">{rowName}</span>
+                            <cf-chip
+                              label={rowIsAdmin ? "Admin" : "Member"}
+                              variant={rowIsAdmin ? "accent" : "default"}
+                            />
+                          </cf-hstack>
+                          <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
+                            {rowEmail}
+                          </span>
+                        </cf-vstack>
+                        <cf-button
+                          size="sm"
+                          disabled={!rowCanManageAdmins}
+                          onClick={() =>
+                            togglePersonAdmin.send({
+                              name: rowName,
+                            })}
+                        >
+                          {rowIsAdmin ? "Remove admin" : "Make admin"}
+                        </cf-button>
+                      </cf-hstack>
                     );
                   })}
                 </cf-vstack>
@@ -1386,7 +1707,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
               </cf-vstack>
 
               {/* === Section D: Admin (admin mode only) === */}
-              {adminMode.get()
+              {adminModeEnabled
                 ? (
                   <>
                     {/* People */}
@@ -2088,12 +2409,17 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       spots,
       people,
       requests,
-      adminMode: computed(() => Boolean(adminMode.get())),
+      adminRegistry: adminRegistry as PerSpace<ParkingAdminRegistryCell>,
+      adminMode: computed(() => Boolean(adminModeEnabled)),
+      currentPersonIsAdmin,
+      currentUserCanManageAdmins,
       selectedPersonName: computed(() => selectedPersonName.get() ?? ""),
       requestDate: activeRequestDate,
       requestResult: computed(() => requestResult.get() ?? ""),
 
       // Exposed actions
+      enableAdminManager,
+      togglePersonAdmin,
       toggleAdminMode,
       submitRequest,
       cancelRequest,
