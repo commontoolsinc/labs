@@ -2,8 +2,11 @@
 
 ## Status
 
-Research proposal. This document describes a possible direction; it is not an
-implemented contract.
+Initial implementation in progress. The branch currently implements internal
+memory-v2 scheduler observation tables, no-op observation commits, same-space
+durable dirty marking, cross-space read-index mirrors, a snapshot query API,
+and runner-side rehydration primitives. Full automatic startup rehydration
+still depends on durable process graph action identity.
 
 ## Summary
 
@@ -200,7 +203,7 @@ There are four record classes:
 
 - `scheduler_action_snapshot`: latest durable observation for one action in one
   piece generation.
-- `scheduler_observation_commit`: ordered observation events, including no-op
+- `scheduler_observation`: ordered observation events, including no-op
   observations, tied to the memory sequence that was current when the
   observation became visible.
 - `scheduler_read_index` and `scheduler_write_index`: server-side path indexes
@@ -460,6 +463,13 @@ space with per-space read watermarks in `payload`, or store mirror rows in every
 read space. The primary-space form is simpler, but it requires read validation
 APIs that can open the other space databases during rehydration.
 
+The current implementation uses mirror rows in read spaces. The owner space
+keeps the authoritative observation; after the owner-space commit succeeds, the
+server upserts a full scheduler observation snapshot into every read space and
+into any previous read spaces that need stale index cleanup. These mirror rows
+have `commit_seq = NULL` because the semantic commit belongs to another SQLite
+database.
+
 For inactive-piece dirtying, the write owner must be able to find readers even
 when the reader's piece is not running. With one SQLite database per space, that
 means either:
@@ -494,12 +504,18 @@ to a scheduler action:
 When an action run commits:
 
 1. Persist the memory commit/revisions if there are effective operations.
-2. Persist the scheduler observation.
-3. Replace that action's read index rows, write index rows, materializer rows,
+2. Apply dirty propagation for actual changed writes against the existing read
+   index.
+3. Persist the scheduler observation.
+4. Replace that action's read index rows, write index rows, materializer rows,
    and latest action snapshot.
-4. Clear the action's direct dirty bit if its new read watermarks are current.
-5. Apply dirty propagation for any actual changed writes produced by the action.
+5. Clear the action's direct dirty bit if its new read watermarks are current.
 6. Recompute stale propagation if the action's current-known writes changed.
+
+Dirty propagation intentionally runs before the current action observation is
+upserted. That lets an action's own successful observation clear any self-dirty
+state caused by its changed writes while preserving dirty marks for other
+inactive readers.
 
 When an action run is a no-op:
 
@@ -542,6 +558,14 @@ latest observations.
    stale state.
 9. Queue live effects, demanded computations, or idle materializers according
    to the normal pull-mode rules.
+
+The current runner implementation exposes this as two primitives rather than an
+automatic startup path: `Scheduler.rehydrateActionFromObservation()` rebuilds
+in-memory scheduler indexes from a validated observation, and
+`Scheduler.rehydrateActionFromStorage()` loads one action's persisted snapshot
+from the storage provider before applying that primitive. Automatic startup
+rehydration still needs a process graph loader that can map durable action keys
+back to recreated action objects.
 
 `unknown` is stricter than dirty. Dirty means the scheduler has a valid previous
 dependency view and knows what can make the action fresh again. Unknown means
