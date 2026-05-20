@@ -310,3 +310,82 @@ Deno.test("memory v2 server mirrors scheduler read indexes into read spaces", as
     await Deno.remove(storePath, { recursive: true });
   }
 });
+
+Deno.test("memory v2 server propagates cross-space dirty state back to the owner space", async () => {
+  const storePath = await Deno.makeTempDir();
+  const store = toFileUrl(`${storePath}/`);
+  const server = new Server({ store });
+  const client = await connect({ transport: loopback(server) });
+  const ownerSpace = "did:key:scheduler-owner-dirty-space";
+  const readSpace = "did:key:scheduler-owner-read-space";
+  const owner = await client.mount(ownerSpace);
+  const reader = await client.mount(readSpace);
+  const mirroredRead = {
+    ...sourceRead,
+    space: readSpace,
+  };
+  const ownerWrite = {
+    ...targetWrite,
+    space: ownerSpace,
+    id: "of:owner-output",
+  };
+  const ownerObservation = {
+    ...observation,
+    ownerSpace,
+    reads: [mirroredRead],
+    currentKnownWrites: [ownerWrite],
+  } as SchedulerActionObservation & { ownerSpace: string };
+  const downstreamObservation = {
+    ...observation,
+    ownerSpace,
+    actionId: "pattern.tsx:downstream:1",
+    reads: [ownerWrite],
+    currentKnownWrites: [],
+  } as SchedulerActionObservation & { ownerSpace: string };
+
+  try {
+    await owner.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservation: ownerObservation,
+    });
+    await owner.transact({
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservation: downstreamObservation,
+    });
+
+    await reader.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: mirroredRead.id,
+        scope: mirroredRead.scope,
+        value: { value: { count: 1 } },
+      }],
+    });
+
+    const ownerSnapshots = await owner.listSchedulerActionSnapshots({
+      pieceId: observation.pieceId,
+      processGeneration: observation.processGeneration,
+    });
+    const ownerAction = ownerSnapshots.snapshots.find((snapshot) =>
+      (snapshot.observation as SchedulerActionObservation).actionId ===
+        ownerObservation.actionId
+    );
+    const downstreamAction = ownerSnapshots.snapshots.find((snapshot) =>
+      (snapshot.observation as SchedulerActionObservation).actionId ===
+        downstreamObservation.actionId
+    );
+
+    assertEquals(ownerAction?.directDirtySeq, 1);
+    assertEquals(downstreamAction?.staleSeq, 1);
+  } finally {
+    await client.close().catch(() => {});
+    await server.close().catch(() => {});
+    await Deno.remove(storePath, { recursive: true });
+  }
+});

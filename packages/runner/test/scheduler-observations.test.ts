@@ -404,6 +404,293 @@ describe("persistent scheduler observations", () => {
     }
   });
 
+  it("persists no-op cross-space observations in the owner space", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {
+      pullMode: "enabled",
+    });
+    try {
+      const { runtime, tx } = testRuntime;
+      const ownerSpace = space;
+      const readSpace = `${space}:scheduler-cross-space-read` as typeof space;
+      const readCell = runtime.getCell<number>(
+        readSpace,
+        "scheduler-cross-space-read-cell",
+        undefined,
+        tx,
+      );
+      readCell.set(1);
+      await tx.commit();
+
+      let runs = 0;
+      function ownerNoopReader(actionTx: IExtendedStorageTransaction) {
+        runs++;
+        readCell.withTx(actionTx).get();
+      }
+
+      runtime.scheduler.subscribe(ownerNoopReader, {
+        reads: [],
+        shallowReads: [],
+        writes: [],
+      }, {
+        isEffect: true,
+        rehydrateFromStorage: {
+          space: ownerSpace,
+          pieceId: "space:owner-noop-process",
+          processGeneration: 1,
+        },
+      });
+
+      await runtime.idle();
+      await runtime.storageManager.synced();
+      expect(runs).toBe(1);
+
+      const ownerProvider = runtime.storageManager.open(ownerSpace);
+      const readProvider = runtime.storageManager.open(readSpace);
+      const ownerSnapshots = await ownerProvider.listSchedulerActionSnapshots?.(
+        {
+          pieceId: "space:owner-noop-process",
+          processGeneration: 1,
+          actionId: "ownerNoopReader",
+        },
+      );
+      const readSnapshots = await readProvider.listSchedulerActionSnapshots?.({
+        pieceId: "space:owner-noop-process",
+        processGeneration: 1,
+        actionId: "ownerNoopReader",
+      });
+
+      expect(ownerSnapshots?.snapshots.length).toBe(1);
+      expect(readSnapshots?.snapshots.length).toBe(1);
+      expect(
+        (ownerSnapshots?.snapshots[0]?.observation as
+          & SchedulerActionObservation
+          & { ownerSpace?: string }).ownerSpace,
+      ).toBe(ownerSpace);
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
+  it("reruns an inactive cross-space reader dirtied through its read-space mirror", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {
+      pullMode: "enabled",
+    });
+    try {
+      const { runtime, tx } = testRuntime;
+      const ownerSpace = space;
+      const readSpace =
+        `${space}:scheduler-cross-space-dirty-read` as typeof space;
+      const readCell = runtime.getCell<number>(
+        readSpace,
+        "scheduler-cross-space-dirty-cell",
+        undefined,
+        tx,
+      );
+      readCell.set(1);
+      await tx.commit();
+
+      let runs = 0;
+      function inactiveCrossSpaceReader(
+        actionTx: IExtendedStorageTransaction,
+      ) {
+        runs++;
+        readCell.withTx(actionTx).get();
+      }
+
+      const subscribe = () =>
+        runtime.scheduler.subscribe(
+          inactiveCrossSpaceReader,
+          {
+            reads: [],
+            shallowReads: [],
+            writes: [],
+          },
+          {
+            isEffect: true,
+            rehydrateFromStorage: {
+              space: ownerSpace,
+              pieceId: "space:inactive-cross-space-process",
+              processGeneration: 1,
+            },
+          },
+        );
+
+      const cancel = subscribe();
+      await runtime.idle();
+      expect(runs).toBe(1);
+      cancel();
+
+      const writeTx = runtime.edit();
+      readCell.withTx(writeTx).set(2);
+      await writeTx.commit();
+
+      subscribe();
+      await runtime.idle();
+
+      expect(runs).toBe(2);
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
+  it("backfills dependents when rehydrated currentKnownWrites restore a no-op writer", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {
+      pullMode: "enabled",
+    });
+    try {
+      const { runtime } = testRuntime;
+      function persistedReader() {}
+      function persistedWriter() {}
+
+      runtime.scheduler.subscribe(persistedReader, {
+        reads: [writeAddress],
+        shallowReads: [],
+        writes: [],
+      }, { isEffect: true });
+      expect(
+        runtime.scheduler.rehydrateActionFromObservation(persistedReader, {
+          observation: buildSchedulerActionObservation({
+            actionId: "persistedReader",
+            actionKind: "effect",
+            branch: "",
+            pieceId: "space:reader-process",
+            processGeneration: 1,
+            implementationFingerprint: schedulerImplementationFingerprint(
+              persistedReader,
+              "persistedReader",
+              undefined,
+            ),
+            runtimeFingerprint: schedulerRuntimeFingerprint("pull"),
+            observedAtSeq: 1,
+            transactionKind: "action-run",
+            transactionLog: {
+              reads: [writeAddress],
+              shallowReads: [],
+              writes: [],
+            },
+          }),
+        }),
+      ).toBe(true);
+
+      runtime.scheduler.subscribe(persistedWriter, {
+        reads: [],
+        shallowReads: [],
+        writes: [],
+      });
+      expect(
+        runtime.scheduler.rehydrateActionFromObservation(persistedWriter, {
+          observation: buildSchedulerActionObservation({
+            actionId: "persistedWriter",
+            actionKind: "computation",
+            branch: "",
+            pieceId: "space:writer-process",
+            processGeneration: 1,
+            implementationFingerprint: schedulerImplementationFingerprint(
+              persistedWriter,
+              "persistedWriter",
+              undefined,
+            ),
+            runtimeFingerprint: schedulerRuntimeFingerprint("pull"),
+            observedAtSeq: 1,
+            transactionKind: "action-run",
+            transactionLog: {
+              reads: [],
+              shallowReads: [],
+              writes: [],
+            },
+            currentKnownWrites: [writeAddress],
+          }),
+        }),
+      ).toBe(true);
+
+      expect(
+        runtime.scheduler.getDependents(persistedWriter).has(
+          persistedReader,
+        ),
+      ).toBe(true);
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
+  it("does not reattach an action when async initial rehydration resolves after unsubscribe", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {
+      pullMode: "enabled",
+    });
+    try {
+      const { runtime } = testRuntime;
+      const provider = runtime.storageManager.open(space) as {
+        listSchedulerActionSnapshots?: () => Promise<{
+          serverSeq: number;
+          snapshots: unknown[];
+        }>;
+      };
+      let resolveSnapshots:
+        | ((result: { serverSeq: number; snapshots: unknown[] }) => void)
+        | undefined;
+      provider.listSchedulerActionSnapshots = () =>
+        new Promise((resolve) => {
+          resolveSnapshots = resolve;
+        });
+
+      function canceledBeforeRehydrate() {}
+      const cancel = runtime.scheduler.subscribe(canceledBeforeRehydrate, {
+        reads: [],
+        shallowReads: [],
+        writes: [],
+      }, {
+        rehydrateFromStorage: {
+          space,
+          pieceId: "space:canceled-process",
+          processGeneration: 1,
+        },
+      });
+      cancel();
+
+      resolveSnapshots?.({
+        serverSeq: 5,
+        snapshots: [{
+          observationId: 1,
+          commitSeq: null,
+          observedAtSeq: 5,
+          observation: buildSchedulerActionObservation({
+            actionId: "canceledBeforeRehydrate",
+            actionKind: "computation",
+            branch: "",
+            pieceId: "space:canceled-process",
+            processGeneration: 1,
+            implementationFingerprint: schedulerImplementationFingerprint(
+              canceledBeforeRehydrate,
+              "canceledBeforeRehydrate",
+              undefined,
+            ),
+            runtimeFingerprint: schedulerRuntimeFingerprint("pull"),
+            observedAtSeq: 5,
+            transactionKind: "action-run",
+            transactionLog: {
+              reads: [readAddress],
+              shallowReads: [],
+              writes: [],
+            },
+            currentKnownWrites: [writeAddress],
+          }),
+        }],
+      });
+      await runtime.idle();
+
+      expect(runtime.scheduler.getMightWrite(canceledBeforeRehydrate)).toEqual(
+        [],
+      );
+      expect(
+        runtime.scheduler.getGraphSnapshot().nodes.some((node) =>
+          node.id === "canceledBeforeRehydrate"
+        ),
+      ).toBe(false);
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
   it("falls back to the normal first run when fingerprints mismatch", async () => {
     const testRuntime = createSchedulerTestRuntime("https://example.test", {
       pullMode: "enabled",

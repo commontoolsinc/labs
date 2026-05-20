@@ -543,6 +543,7 @@ export class Server {
         }],
       },
     });
+    await this.propagateSchedulerDirtyToOwnerSpaces(space, commit);
     this.markSpaceDirty(space, [toDirtyKey(id)]);
     return commit;
   }
@@ -666,6 +667,7 @@ export class Server {
         principal: session.principal,
         commit: message.commit,
       });
+      await this.propagateSchedulerDirtyToOwnerSpaces(message.space, commit);
       if (schedulerObservation) {
         await this.mirrorSchedulerObservation(
           message.space,
@@ -1426,8 +1428,40 @@ export class Server {
       const engine = await this.openEngine(space);
       Engine.upsertSchedulerObservation(engine, {
         branch: commit.branch,
+        ownerSpace,
         observedAtSeq: commit.seq,
         observation,
+      });
+    }
+  }
+
+  private async propagateSchedulerDirtyToOwnerSpaces(
+    writeSpace: string,
+    commit: Engine.AppliedCommit,
+  ): Promise<void> {
+    const readersByOwner = new Map<
+      string,
+      Engine.SchedulerReaderIndexEntry[]
+    >();
+    for (const reader of commit.schedulerDirtiedReaders ?? []) {
+      if (!reader.ownerSpace || reader.ownerSpace === writeSpace) {
+        continue;
+      }
+      let readers = readersByOwner.get(reader.ownerSpace);
+      if (!readers) {
+        readers = [];
+        readersByOwner.set(reader.ownerSpace, readers);
+      }
+      readers.push(reader);
+    }
+
+    for (const [ownerSpace, readers] of readersByOwner) {
+      const engine = await this.openEngine(ownerSpace);
+      Engine.markSchedulerActionsDirectDirty(engine, {
+        branch: commit.branch,
+        ownerSpace,
+        dirtySeq: commit.seq,
+        actions: readers,
       });
     }
   }

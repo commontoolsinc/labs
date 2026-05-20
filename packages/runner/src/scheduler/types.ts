@@ -22,6 +22,7 @@ export interface TelemetryAnnotations {
 }
 
 export interface SchedulerObservationIdentity {
+  ownerSpace?: MemorySpace;
   branch?: string;
   pieceId: string;
   processGeneration?: number;

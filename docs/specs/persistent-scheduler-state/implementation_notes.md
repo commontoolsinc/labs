@@ -11,6 +11,23 @@
   path changes between runs, then rehydrates from the second observation to
   confirm the writer index restores the new write path.
 
+## 2026-05-20 - Cross-Space Dirtying and Rehydration Review Fixes
+
+- Accepted the version-1 non-atomic cross-space mirror behavior in the spec, but
+  tightened the happy path: read-space writes now use mirror rows to mark the
+  owner-space action direct-dirty, then propagate stale state only within that
+  owner-space scheduler graph.
+- Deliberately stopped stale propagation from recursively chasing cross-space
+  mirrors. Cross-space fanout remains driven by actual committed writes, not by
+  possible writes from dirty/stale actions.
+- Added `ownerSpace` to scheduler observations so no-op and read-only action runs
+  commit their authoritative observation into the process owner space instead of
+  whichever read/write address appears first.
+- Rehydration now rebuilds dependencies from `currentKnownWrites`, which restores
+  no-op writers through the same backfill path as live resubscribe.
+- Added an initial-rehydration liveness token so a storage lookup that resolves
+  after unsubscribe cannot reattach the canceled action.
+
 ## 2026-05-20 - Plan Checkpoint
 
 - Branch: `codex/persistent-scheduler-state-spec`.

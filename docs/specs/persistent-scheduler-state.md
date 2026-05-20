@@ -258,7 +258,7 @@ observation similar to:
 ```ts
 interface SchedulerActionObservationV1 {
   version: 1;
-  space: string;
+  ownerSpace: string;
   branch: string;
   pieceId: string;
   processGeneration: number;
@@ -329,6 +329,12 @@ queries and snapshots should not interpret observation rows as user data. If the
 observation accompanies a real memory commit, it should be written atomically
 with that commit. If it accompanies a no-op, it should still be durable and
 ordered relative to the branch head it observed.
+
+Observation-only commits must use the action owner space, not whichever space
+happens to appear first in the observation's reads or writes. Read-only and
+same-value action runs can have no semantic write space; without an explicit
+owner-space field they can otherwise persist their authoritative observation into
+a cross-space read database and miss later owner-space rehydration.
 
 ## Storage Design Options
 
@@ -438,6 +444,7 @@ CREATE TABLE scheduler_action_snapshot (
 
 CREATE TABLE scheduler_read_index (
   branch             TEXT    NOT NULL DEFAULT '',
+  owner_space        TEXT,
   read_space         TEXT    NOT NULL,
   read_id            TEXT    NOT NULL,
   read_scope         TEXT    NOT NULL,
@@ -502,6 +509,15 @@ server upserts a full scheduler observation snapshot into every read space and
 into any previous read spaces that need stale index cleanup. These mirror rows
 have `commit_seq = NULL` because the semantic commit belongs to another SQLite
 database.
+
+The owner space remains the source of truth for rehydration state. A write in a
+read space can use mirrored rows to discover inactive readers, but it must push
+the resulting direct-dirty marker back to each reader's owner space. The owner
+space then propagates stale state through its own persisted scheduler graph. This
+owner-space propagation may mark downstream actions stale, but it must not chase
+cross-space mirrors recursively from stale state. Cross-space mirror lookup is
+driven only by actual committed writes; possible writes from dirty/stale actions
+wait until those actions run and commit real changed writes.
 
 Version 1 accepts that owner-space commits and cross-space mirror writes are not
 atomic across SQLite databases. If the owner commit succeeds and a later mirror
@@ -609,6 +625,13 @@ from the storage provider before applying that primitive. `Scheduler.subscribe`
 can defer the normal first-run scheduling while the storage-backed lookup runs;
 a clean snapshot restores indexes and skips first execution, while a missing or
 invalid snapshot falls back to the normal initial dirty/pending path.
+
+Rehydration must rebuild dependency edges from the restored active scheduling
+write view, not only from the transaction's actual changed writes. A no-op action
+observation can have `actualChangedWrites = []` while `currentKnownWrites`
+contains the action's output. Restoring that writer must use the same dependency
+update path as a live resubscribe so already-restored readers are backfilled as
+dependents.
 
 Storage-backed rehydration is asynchronous scheduler work. Scheduler `idle()`
 and runtime disposal must wait for this work before storage sessions or memory
