@@ -5,8 +5,9 @@
 Initial implementation in progress. The branch currently implements internal
 memory-v2 scheduler observation tables, no-op observation commits, same-space
 durable dirty marking, cross-space read-index mirrors, a snapshot query API,
-and runner-side rehydration primitives. Full automatic startup rehydration
-still depends on durable process graph action identity.
+runner-side rehydration primitives, and subscription-time rehydration for
+actions recreated during piece startup. Durable process graph generations and
+implementation/runtime fingerprints remain conservative version-1 placeholders.
 
 ## Summary
 
@@ -566,13 +567,21 @@ latest observations.
 9. Queue live effects, demanded computations, or idle materializers according
    to the normal pull-mode rules.
 
-The current runner implementation exposes this as two primitives rather than an
-automatic startup path: `Scheduler.rehydrateActionFromObservation()` rebuilds
-in-memory scheduler indexes from a validated observation, and
+The current runner implementation uses these steps opportunistically during
+subscription. `Scheduler.rehydrateActionFromObservation()` rebuilds in-memory
+scheduler indexes from a validated observation, and
 `Scheduler.rehydrateActionFromStorage()` loads one action's persisted snapshot
-from the storage provider before applying that primitive. Automatic startup
-rehydration still needs a process graph loader that can map durable action keys
-back to recreated action objects.
+from the storage provider before applying that primitive. `Scheduler.subscribe`
+can defer the normal first-run scheduling while the storage-backed lookup runs;
+a clean snapshot restores indexes and skips first execution, while a missing or
+invalid snapshot falls back to the normal initial dirty/pending path.
+
+Runner startup passes this subscription option for pattern result, JavaScript,
+and raw actions using the process cell's stable space/scope/id identity. The
+version-1 process generation is currently `0`, so any future durable process
+graph generation or stronger implementation fingerprinting should invalidate or
+migrate these observations rather than treating them as fully versioned process
+snapshots.
 
 `unknown` is stricter than dirty. Dirty means the scheduler has a valid previous
 dependency view and knows what can make the action fresh again. Unknown means
@@ -756,6 +765,8 @@ invalidate a whole collection subtree. The API must not miss real overlaps.
 - Ensure live effects can subscribe without firing stale callbacks.
 - Preserve current behavior for actions with missing observations, invalid
   fingerprints, or dirty reads.
+- Implemented version 1: subscriptions can defer the initial run for a
+  storage-backed snapshot lookup and fall back to the normal first run on miss.
 
 ### Phase 6: Demand-targeted Dirty Recovery
 

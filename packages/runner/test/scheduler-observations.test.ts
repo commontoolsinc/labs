@@ -12,6 +12,7 @@ import {
   isSchedulerActionObservation,
   type SchedulerActionObservation,
 } from "../src/scheduler/persistent-observation.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const readAddress = {
   space: "did:key:space" as const,
@@ -335,6 +336,51 @@ describe("persistent scheduler observations", () => {
       expect(runs).toBe(1);
       expect(testRuntime.runtime.scheduler.isDirty(missingPersistedAction))
         .toBe(false);
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
+  it("uses persisted observations when a runner restarts a clean piece", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {
+      pullMode: "enabled",
+    });
+    try {
+      const { runtime, tx } = testRuntime;
+      const { commonfabric } = createTrustedBuilder(runtime);
+      const { lift, pattern } = commonfabric;
+      let runs = 0;
+      const cleanRestartPattern = pattern<{ value: number }>(
+        ({ value }) => {
+          const doubled = lift((input: number) => {
+            runs++;
+            return input * 2;
+          })(value);
+          return { doubled };
+        },
+      );
+
+      const resultCell = runtime.getCell<{ doubled: number }>(
+        space,
+        "persistent scheduler clean restart",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, cleanRestartPattern, {
+        value: 5,
+      }, resultCell);
+      runtime.prepareTxForCommit(tx);
+      await tx.commit();
+
+      expect(await result.pull()).toEqual({ doubled: 10 });
+      expect(runs).toBe(1);
+
+      runtime.runner.stop(resultCell);
+      await runtime.start(resultCell);
+      await runtime.idle();
+
+      expect(resultCell.get()).toEqual({ doubled: 10 });
+      expect(runs).toBe(1);
     } finally {
       await disposeSchedulerTestRuntime(testRuntime);
     }

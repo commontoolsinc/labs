@@ -230,5 +230,11 @@
   normalized scope/id plus process generation 0. This is still conservative, but
   it distinguishes colocated pieces of the same pattern better than the earlier
   pattern/module-name fallback.
+- Added runner-level restart coverage that creates a piece, persists a clean
+  computation observation, stops the runner, starts the same result cell again,
+  and verifies the computation is not rerun.
+- Spec sync: updated the status and full-piece rehydration sections to describe
+  subscription-time rehydration as implemented, with process generation and
+  stronger fingerprints still called out as version-1 limitations.
 - Validation:
   - `HEADLESS=1 deno test -A packages/runner/test/scheduler-observations.test.ts`
