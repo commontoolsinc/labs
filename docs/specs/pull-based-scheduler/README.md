@@ -82,7 +82,9 @@ else cellB.set(x);
 
 By default the scheduler uses the latest known writes rather than cumulative
 history, so stale branches can disappear when an action changes what it writes.
-The old cumulative `mightWrite` behavior is retained behind the experimental
+The public diagnostic API still uses the older name `getMightWrite()`, but it
+returns this active scheduling write set by default. The old cumulative
+write-history behavior is retained behind the experimental
 `schedulerHistoricalMightWrite` flag.
 
 ### Materializer Write Envelopes
@@ -92,6 +94,11 @@ Computations that write through writable inputs are not indexed from transaction
 resolvable, it is represented as a normal declared write. Broad or dynamic
 writable-input targets are represented as `materializerWriteEnvelopes`, a
 separate pull-mode index.
+
+The materializer index is owned by `SchedulerMaterializers` and exposed to
+scheduler helper modules through the `MaterializerIndexState` interface. That
+index owns both membership checks and write-envelope lookup; consumers do not
+thread separate `isMaterializer` callbacks through scheduler state.
 
 When a materializer's inputs change, dirtying stops at the materializer. It is
 queued for the idle pull loop, coalescing repeated source changes and honoring
@@ -175,10 +182,10 @@ Actions are sorted so dependencies run before dependents:
 function topologicalSort(
   actions,
   dependencies,
-  mightWrite,
+  schedulingWrites,
   actionParent,
   dependents,
-  getAdditionalWrites, // materializer envelopes in pull mode
+  getAdditionalWrites, // materializer-index envelopes in pull mode
 ) {
   // Build graph: action A → action B if A writes something B reads
   // In pull mode, prefer the incrementally maintained dependents graph.
@@ -440,7 +447,7 @@ The active scheduling write set is current-known by default:
 - Add parent writes for dynamic collection items when an actual child write
   falls under a declared collection write.
 
-The legacy cumulative `mightWrite` behavior is still kept in
+The legacy cumulative write-history behavior is still kept in
 `historicalMightWrite` and selected only when the
 `schedulerHistoricalMightWrite` experimental option is enabled.
 
@@ -452,6 +459,16 @@ The writer index maintains:
 
 When an action gains writes, existing readers are backfilled into the dependents
 graph. When it loses writes, stale dependents edges are pruned.
+
+The materializer index is separate from the writer index. It maintains:
+
+- `materializersByEntity`: entity -> materializer computations whose envelopes
+  may write it.
+- Action-local compacted materializer write envelopes.
+
+Materializer envelopes are used for pull-mode dirty dependency discovery and
+work-set ordering. They are not inserted into the normal writer index and do
+not create broad dependents edges by themselves.
 
 ### Trigger Index and Storage Notifications
 
@@ -865,6 +882,7 @@ class Scheduler {
   private reverseDependencies = new WeakMap<Action, Set<Action>>();
   private triggerIndex = new SchedulerTriggerIndex();
   private writeIndex = new SchedulerWriteIndex(...);
+  private materializers = new SchedulerMaterializers(...);
 
   // Parent-child relationships for nested patterns
   private actionParent = new WeakMap<Action, Action>();
@@ -901,6 +919,8 @@ modules under `packages/runner/src/scheduler/`, including:
 - `pull-execution.ts` and `push-execution.ts` for mode-specific settle loops
 - `pull-scheduling.ts` for demand-root and affected-effect scheduling
 - `events.ts`, `pull-events.ts`, and `push-events.ts` for queued handlers
+- `materializers.ts` for the pull-mode materializer index and write-envelope
+  lookup
 - `scheduling-writes.ts`, `trigger-index.ts`, and `dependency-graph.ts` for
   dependency indexes
 - `delays.ts` and `delay-control.ts` for debounce/throttle state
@@ -1094,7 +1114,7 @@ scheduler.isEffect(action)
 scheduler.isComputation(action)
 scheduler.isDirty(action)
 scheduler.getDependents(action)
-scheduler.getMightWrite(action)
+scheduler.getMightWrite(action)    // Active scheduling writes despite legacy name
 scheduler.getActionStats(actionOrId)
 scheduler.getFilterStats()
 scheduler.resetFilterStats()
