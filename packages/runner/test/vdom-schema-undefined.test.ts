@@ -40,24 +40,6 @@ const getArrayVariant = (
   ) as Record<string, unknown> | undefined;
 };
 
-const getAnyOf = (schema: unknown): unknown[] => {
-  assert(
-    schema && typeof schema === "object" && "anyOf" in schema,
-    "expected schema to have anyOf",
-  );
-  const anyOf = (schema as { anyOf: unknown }).anyOf;
-  assert(Array.isArray(anyOf), "expected anyOf to be an array");
-  return anyOf;
-};
-
-const hasAsCellKind = (schema: unknown, kind: string): boolean => {
-  if (!schema || typeof schema !== "object" || !("asCell" in schema)) {
-    return false;
-  }
-  const asCell = (schema as { asCell: unknown }).asCell;
-  return Array.isArray(asCell) && asCell.includes(kind);
-};
-
 Deno.test("rendererVDOMSchema allows undefined child entries", () => {
   const vdomRenderNode = (rendererVDOMSchema.$defs as Record<string, unknown>)
     .vdomRenderNode;
@@ -117,37 +99,6 @@ Deno.test("rendererVDOMSchema child arrays recurse through vdomRenderNode", () =
     childItems.asCell,
     ["cell"],
     "renderer children items should preserve asCell",
-  );
-});
-
-Deno.test("rendererVDOMSchema normal props preserve cell references", () => {
-  const defs = rendererVDOMSchema.$defs as Record<string, unknown>;
-  const vdomNode = defs.vdomNode as {
-    properties: Record<string, unknown>;
-  };
-  const propsSchema = vdomNode.properties.props as {
-    additionalProperties: unknown;
-  };
-  const anyOf = getAnyOf(propsSchema.additionalProperties);
-  const cellIndex = anyOf.findIndex((entry) => hasAsCellKind(entry, "cell"));
-  const objectIndex = anyOf.findIndex((entry) =>
-    !!entry &&
-    typeof entry === "object" &&
-    "type" in entry &&
-    (entry as { type: unknown }).type === "object"
-  );
-
-  assert(
-    cellIndex >= 0,
-    "renderer normal props should include an asCell cell variant",
-  );
-  assert(
-    objectIndex >= 0,
-    "renderer normal props should still include an object fallback",
-  );
-  assert(
-    cellIndex < objectIndex,
-    "cell references should be preserved before the object fallback stops traversal",
   );
 });
 

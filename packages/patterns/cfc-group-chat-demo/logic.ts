@@ -93,6 +93,7 @@ const createImportedClaimedMessage = <ProfileRef>(
   origin: "imported",
   id: createId("imported"),
   authorName: author.name,
+  ...(author.profile !== undefined ? { authorProfile: author.profile } : {}),
   body,
   timestamp,
 });
