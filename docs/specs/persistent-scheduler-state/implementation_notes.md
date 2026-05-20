@@ -280,3 +280,16 @@
 - Validation:
   - `HEADLESS=1 deno task integration shell`
   - `HEADLESS=1 deno task integration patterns`
+
+## 2026-05-20 - Full Validation Pass
+
+- Full repo package tests and integration tests are green after the
+  subscription-time rehydration and teardown fixes.
+- The first full integration rerun exposed that the per-test ShellIntegration
+  page cleanup broke pattern tests that intentionally share one page across
+  ordered steps. Restoring the suite-owned page and disposing its runtime during
+  suite teardown fixed the pattern failures while keeping the shell leak fix.
+- Validation:
+  - `HEADLESS=1 deno task test`
+  - `HEADLESS=1 deno task integration`
+  - `deno task check`
