@@ -93,6 +93,7 @@ import {
 } from "./scheduler/execution.ts";
 import { runPullSchedulerSettleLoop } from "./scheduler/pull-execution.ts";
 import { runPushSchedulerSettleLoop } from "./scheduler/push-execution.ts";
+import type { PersistedSchedulerObservationSnapshot } from "./scheduler/persistent-observation.ts";
 import {
   collectPullIterationSeeds as collectPullIterationSeedsState,
   conditionalEffectHasChangedInputs as conditionalEffectHasChangedInputsState,
@@ -549,6 +550,71 @@ export class Scheduler {
       log,
       options,
     );
+  }
+
+  rehydrateActionFromObservation(
+    action: Action,
+    snapshot: PersistedSchedulerObservationSnapshot,
+  ): boolean {
+    const actionId = this.getActionId(action);
+    const { observation } = snapshot;
+    if (observation.actionId !== actionId) {
+      return false;
+    }
+
+    this.resubscribe(action, {
+      reads: observation.reads,
+      shallowReads: observation.shallowReads,
+      writes: observation.actualChangedWrites,
+    }, {
+      isEffect: observation.actionKind === "effect",
+    });
+    if (observation.currentKnownWrites.length > 0) {
+      this.writeIndex.currentKnownWrites.set(
+        action,
+        observation.currentKnownWrites,
+      );
+      this.writeIndex.historicalMightWrite.set(
+        action,
+        observation.currentKnownWrites,
+      );
+      this.writeIndex.updateWriterIndex(action, observation.currentKnownWrites);
+    }
+    if (observation.materializerWriteEnvelopes.length > 0) {
+      this.materializers.registerAddresses(
+        action,
+        observation.materializerWriteEnvelopes,
+      );
+    }
+
+    const { actionOptions } = observation;
+    if (actionOptions?.debounceMs !== undefined) {
+      this.delays.setDebounce(action, actionOptions.debounceMs);
+    }
+    if (actionOptions?.noDebounce !== undefined) {
+      this.delays.setNoDebounce(action, actionOptions.noDebounce);
+    }
+    if (actionOptions?.throttleMs !== undefined) {
+      this.delays.setThrottle(action, actionOptions.throttleMs);
+    }
+
+    if (
+      snapshot.directDirtySeq !== undefined ||
+      snapshot.staleSeq !== undefined ||
+      snapshot.unknownReason !== undefined
+    ) {
+      this.staleness.markDirectDirty(action);
+      this.pending.add(action);
+      this.queueExecution();
+      return true;
+    }
+
+    clearSchedulerDirectDirty(this.dirtySchedulingState, action);
+    this.staleness.forceClearStale(action);
+    this.pending.delete(action);
+    this.pendingDependencyCollection.delete(action);
+    this.scheduledFirstTime.delete(action);
+    return true;
   }
 
   unsubscribe(

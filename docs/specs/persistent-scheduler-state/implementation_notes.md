@@ -142,3 +142,19 @@
   graph resolution is available.
 - Validation:
   - `deno test -A packages/runner/test/scheduler-observations.test.ts`
+
+## 2026-05-20 - In-Memory Rehydration Primitive
+
+- Added `Scheduler.rehydrateActionFromObservation()` as the first runner-side
+  consumer primitive. It rebuilds subscriptions/dependency indexes from a
+  persisted observation and clears first-run dirty/pending pressure when the
+  durable snapshot is clean.
+- Dirty, stale, or unknown snapshots are deliberately kept dirty/pending so the
+  existing execution path recomputes them on demand.
+- Added address-based materializer registration so persisted materializer
+  envelopes can be restored without converting them back to source annotations.
+- Known limitation: this is not yet automatically called during pattern/process
+  startup. The next step is resolving stable process graph action identities to
+  actions and invoking this primitive during subscription.
+- Validation:
+  - `deno test -A packages/runner/test/scheduler-observations.test.ts`
