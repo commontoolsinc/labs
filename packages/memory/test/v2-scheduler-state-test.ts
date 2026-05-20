@@ -9,17 +9,20 @@ import {
   getSchedulerActionState,
   headSeq,
   markSchedulerReadersDirtyForWrites,
-  open,
+  open as openEngine,
   type SchedulerActionObservation,
   upsertSchedulerObservation,
 } from "../v2/engine.ts";
+import { connect, loopback } from "../v2/client.ts";
+import { Server } from "../v2/server.ts";
+import { resolveSpaceStoreUrl } from "../v2/storage-path.ts";
 
 const createEngine = async (): Promise<{
   engine: Engine;
   path: string;
 }> => {
   const path = await Deno.makeTempFile({ suffix: ".sqlite" });
-  const engine = await open({ url: toFileUrl(path) });
+  const engine = await openEngine({ url: toFileUrl(path) });
   return { engine, path };
 };
 
@@ -231,5 +234,72 @@ Deno.test("memory v2 marks persisted readers dirty during semantic commits", asy
   } finally {
     close(engine);
     await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 server mirrors scheduler read indexes into read spaces", async () => {
+  const storePath = await Deno.makeTempDir();
+  const store = toFileUrl(`${storePath}/`);
+  const server = new Server({ store });
+  const client = await connect({ transport: loopback(server) });
+  const ownerSpace = "did:key:scheduler-owner-space";
+  const readSpace = "did:key:scheduler-read-space";
+  const owner = await client.mount(ownerSpace);
+  const reader = await client.mount(readSpace);
+  const mirroredRead = {
+    ...sourceRead,
+    space: readSpace,
+  };
+  const mirroredObservation = {
+    ...observation,
+    reads: [mirroredRead],
+  } satisfies SchedulerActionObservation;
+
+  try {
+    await owner.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservation: mirroredObservation,
+    });
+    await reader.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: mirroredRead.id,
+        scope: mirroredRead.scope,
+        value: { value: { count: 1 } },
+      }],
+    });
+
+    await client.close();
+    await server.close();
+
+    const readEngine = await openEngine({
+      url: resolveSpaceStoreUrl(store, readSpace),
+    });
+    try {
+      const readers = findSchedulerReadersForWrite(readEngine, {
+        branch: "",
+        write: mirroredRead,
+      });
+      assertEquals(readers.map((reader) => reader.actionId), [
+        observation.actionId,
+      ]);
+      const state = getSchedulerActionState(readEngine, {
+        branch: "",
+        pieceId: observation.pieceId,
+        processGeneration: observation.processGeneration,
+        actionId: observation.actionId,
+      });
+      assertEquals(state?.directDirtySeq, 1);
+    } finally {
+      close(readEngine);
+    }
+  } finally {
+    await client.close().catch(() => {});
+    await server.close().catch(() => {});
+    await Deno.remove(storePath, { recursive: true });
   }
 });
