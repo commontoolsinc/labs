@@ -186,3 +186,13 @@
   latency, or full pattern startup.
 - Validation:
   - `deno bench -A packages/runner/test/scheduler-persistent-state.bench.ts`
+
+## 2026-05-20 - Spec Sync
+
+- Updated `docs/specs/persistent-scheduler-state.md` from research-only
+  language to initial-implementation language.
+- Corrected the action-commit ordering to match the implementation: dirty
+  existing readers first, then upsert the current action observation so the
+  successful action can become clean.
+- Documented the current cross-space mirror strategy and the explicit runner
+  rehydration primitives.
