@@ -262,3 +262,18 @@
   memory-v2 engine bootstrap.
 - Validation:
   - `HEADLESS=1 deno task test` in `packages/memory`
+
+## 2026-05-20 - Integration Teardown Follow-up
+
+- Full repo `HEADLESS=1 deno task integration` initially failed only in
+  `packages/shell/integration/piece.test.ts` with a leaked memory WebSocket.
+- Root cause: the new subscription-time rehydration path added async scheduler
+  storage lookups, which made teardown ordering more visible. Runtime disposal
+  now waits for scheduler background work before closing storage sessions.
+- Also hardened the remote memory WebSocket transport so `close()` owns and can
+  close a socket while it is still connecting. Previously, closing during the
+  connection-opening window could leave a server-side WebSocket resource alive.
+- Shell integration now creates and closes a fresh page per test so page-owned
+  runtime resources do not survive Deno's per-test leak boundary.
+- Validation:
+  - `HEADLESS=1 deno task integration shell`

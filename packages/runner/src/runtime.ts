@@ -475,6 +475,11 @@ export class Runtime {
     // Stop all running docs
     this.runner.stopAll();
 
+    // Scheduler background work can still be using storage, for example the
+    // subscription-time persistent-state rehydration lookup. Let that finish
+    // before tearing down storage sessions.
+    await this.scheduler.idle();
+
     // Clear module registry
     this.moduleRegistry.clear();
 
