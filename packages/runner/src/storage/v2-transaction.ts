@@ -309,6 +309,9 @@ const schedulerObservationCommitSpace = (
   if (!isRecord(observation)) {
     return undefined;
   }
+  if (typeof observation.ownerSpace === "string") {
+    return observation.ownerSpace as MemorySpace;
+  }
 
   for (const key of SCHEDULER_OBSERVATION_ADDRESS_LISTS) {
     const addresses = observation[key];

@@ -21,6 +21,7 @@ export interface SchedulerActionOptions {
 
 export interface SchedulerActionObservation {
   version: 1;
+  ownerSpace?: string;
   branch: string;
   pieceId: string;
   processGeneration: number;
@@ -51,6 +52,7 @@ export interface PersistedSchedulerObservationSnapshot {
 }
 
 export interface BuildSchedulerActionObservationOptions {
+  ownerSpace?: string;
   branch: string;
   pieceId: string;
   processGeneration: number;
@@ -76,6 +78,9 @@ export function buildSchedulerActionObservation(
 ): SchedulerActionObservation {
   return {
     version: 1,
+    ...(options.ownerSpace !== undefined
+      ? { ownerSpace: options.ownerSpace }
+      : {}),
     branch: options.branch,
     pieceId: options.pieceId,
     processGeneration: options.processGeneration,
@@ -120,6 +125,8 @@ export function isSchedulerActionObservation(
   }
   const candidate = value as Partial<SchedulerActionObservation>;
   return candidate.version === 1 &&
+    (candidate.ownerSpace === undefined ||
+      typeof candidate.ownerSpace === "string") &&
     typeof candidate.branch === "string" &&
     typeof candidate.pieceId === "string" &&
     typeof candidate.processGeneration === "number" &&

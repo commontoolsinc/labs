@@ -847,6 +847,12 @@ class Provider implements IStorageProviderWithReplica {
     return this.replica.synced();
   }
 
+  listSchedulerActionSnapshots(
+    query: SchedulerActionSnapshotQuery = {},
+  ): Promise<SchedulerSnapshotListResult> {
+    return this.replica.listSchedulerActionSnapshots(query);
+  }
+
   get(uri: URI, scope?: CellScope): EntityDocument | undefined {
     return this.replica.getDocument(uri, scope);
   }

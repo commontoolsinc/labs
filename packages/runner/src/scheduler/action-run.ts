@@ -513,6 +513,9 @@ function attachSchedulerActionObservation(
   const actionOptions = schedulerActionOptions(state, args.action);
   const observationIdentity = annotated.schedulerObservationIdentity;
   const observation = buildSchedulerActionObservation({
+    ...(observationIdentity?.ownerSpace !== undefined
+      ? { ownerSpace: observationIdentity.ownerSpace }
+      : {}),
     branch: observationIdentity?.branch ?? "",
     pieceId: observationIdentity?.pieceId ??
       schedulerObservationPieceId(args.actionId, telemetry),

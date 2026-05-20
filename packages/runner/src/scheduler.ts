@@ -404,6 +404,7 @@ export class Scheduler {
 
   private idlePromises: (() => void)[] = [];
   private backgroundTasks = new Set<Promise<unknown>>();
+  private initialRehydrationTokens = new WeakMap<Action, symbol>();
   private loopCounter = new WeakMap<Action, number>();
   private errorHandlers = new Set<ErrorHandler>();
   private consoleHandler: ConsoleHandler;
@@ -595,21 +596,10 @@ export class Scheduler {
     this.resubscribe(action, {
       reads: observation.reads,
       shallowReads: observation.shallowReads,
-      writes: observation.actualChangedWrites,
+      writes: observation.currentKnownWrites,
     }, {
       isEffect: observation.actionKind === "effect",
     });
-    if (observation.currentKnownWrites.length > 0) {
-      this.writeIndex.currentKnownWrites.set(
-        action,
-        observation.currentKnownWrites,
-      );
-      this.writeIndex.historicalMightWrite.set(
-        action,
-        observation.currentKnownWrites,
-      );
-      this.writeIndex.updateWriterIndex(action, observation.currentKnownWrites);
-    }
     if (observation.materializerWriteEnvelopes.length > 0) {
       this.materializers.registerAddresses(
         action,
@@ -651,6 +641,9 @@ export class Scheduler {
     action: Action,
     space: MemorySpace,
     query: Omit<SchedulerActionSnapshotQuery, "actionId"> = {},
+    options: {
+      shouldApply?: () => boolean;
+    } = {},
   ): Promise<boolean> {
     const provider = this.runtime.storageManager.open(space);
     const listSnapshots = provider.listSchedulerActionSnapshots;
@@ -667,6 +660,9 @@ export class Scheduler {
       return false;
     }
     if (!this.observationMatchesCurrentAction(action, snapshot.observation)) {
+      return false;
+    }
+    if (options.shouldApply && !options.shouldApply()) {
       return false;
     }
 
@@ -702,9 +698,10 @@ export class Scheduler {
 
   private setActionObservationIdentity(
     action: Action,
-    identity: SchedulerObservationIdentity,
+    identity: SchedulerObservationIdentity & { space?: MemorySpace },
   ): void {
     (action as Partial<TelemetryAnnotations>).schedulerObservationIdentity = {
+      ownerSpace: identity.ownerSpace ?? identity.space,
       pieceId: identity.pieceId,
       ...(identity.branch !== undefined ? { branch: identity.branch } : {}),
       ...(identity.processGeneration !== undefined
@@ -717,6 +714,8 @@ export class Scheduler {
     action: Action,
     options: SchedulerStorageRehydrationOptions,
   ): void {
+    const token = Symbol("scheduler-initial-rehydration");
+    this.initialRehydrationTokens.set(action, token);
     const task = (async () => {
       const rehydrated = await this.rehydrateActionFromStorage(
         action,
@@ -728,7 +727,14 @@ export class Scheduler {
             ? { processGeneration: options.processGeneration }
             : {}),
         },
+        {
+          shouldApply: () =>
+            this.canApplyInitialActionRehydration(action, token),
+        },
       );
+      if (!this.canApplyInitialActionRehydration(action, token)) {
+        return;
+      }
       if (!rehydrated) {
         this.scheduleInitialActionRun(action);
       }
@@ -738,13 +744,27 @@ export class Scheduler {
         this.getActionId(action),
         error,
       ]);
+      if (!this.canApplyInitialActionRehydration(action, token)) {
+        return;
+      }
       this.scheduleInitialActionRun(action);
     });
 
     this.backgroundTasks.add(task);
     task.finally(() => {
       this.backgroundTasks.delete(task);
+      if (this.initialRehydrationTokens.get(action) === token) {
+        this.initialRehydrationTokens.delete(action);
+      }
     });
+  }
+
+  private canApplyInitialActionRehydration(
+    action: Action,
+    token: symbol,
+  ): boolean {
+    return this.initialRehydrationTokens.get(action) === token &&
+      (this.effects.has(action) || this.computations.has(action));
   }
 
   private scheduleInitialActionRun(action: Action): void {
