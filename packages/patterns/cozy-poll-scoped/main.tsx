@@ -477,49 +477,47 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                   margin: "0 auto",
                 }}
               >
-                {
-                  /* Join card — always rendered (cf-input $value bindings
-                    must stay at static JSX level). Visually fine because
-                    once joined the user largely interacts elsewhere. */
-                }
-                <div
-                  style={{
-                    padding: "16px",
-                    marginBottom: "16px",
-                    border: "1px solid #fde68a",
-                    backgroundColor: "#fef3c7",
-                    borderRadius: "8px",
-                  }}
-                >
+                {/* Join card — hidden after the viewer joins. */}
+                {isJoined ? null : (
                   <div
                     style={{
-                      fontSize: "12px",
-                      fontWeight: 700,
-                      letterSpacing: "0.05em",
-                      textTransform: "uppercase",
-                      color: "#92400e",
-                      marginBottom: "8px",
+                      padding: "16px",
+                      marginBottom: "16px",
+                      border: "1px solid #fde68a",
+                      backgroundColor: "#fef3c7",
+                      borderRadius: "8px",
                     }}
                   >
-                    Join the poll
+                    <div
+                      style={{
+                        fontSize: "12px",
+                        fontWeight: 700,
+                        letterSpacing: "0.05em",
+                        textTransform: "uppercase",
+                        color: "#92400e",
+                        marginBottom: "8px",
+                      }}
+                    >
+                      Join the poll
+                    </div>
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: "8px",
+                        alignItems: "center",
+                      }}
+                    >
+                      <cf-input
+                        $value={joinName}
+                        placeholder="Your name"
+                        aria-label="Your name"
+                        timing-strategy="immediate"
+                        style="flex:1"
+                      />
+                      <cf-button onClick={boundJoin}>Join</cf-button>
+                    </div>
                   </div>
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: "8px",
-                      alignItems: "center",
-                    }}
-                  >
-                    <cf-input
-                      $value={joinName}
-                      placeholder="Your name"
-                      aria-label="Your name"
-                      timing-strategy="immediate"
-                      style="flex:1"
-                    />
-                    <cf-button onClick={boundJoin}>Join</cf-button>
-                  </div>
-                </div>
+                )}
 
                 {/* Top choice — only when there are votes */}
                 {computed(() => {
@@ -674,53 +672,52 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                   );
                 })}
 
-                {
-                  /* Host controls — always rendered; the handlers themselves
-                    enforce admin via myName === adminName checks. Non-admins
-                    can see the controls but their Add will no-op. (UX wart
-                    to fix once cf-input binding inside conditionals works.) */
-                }
-                <div
-                  style={{
-                    marginBottom: "16px",
-                    padding: "12px 16px",
-                    backgroundColor: "#eff6ff",
-                    border: "1px solid #bfdbfe",
-                    borderRadius: "8px",
-                  }}
-                >
-                  <div
-                    style={{
-                      fontSize: "11px",
-                      fontWeight: 700,
-                      letterSpacing: "0.05em",
-                      textTransform: "uppercase",
-                      color: "#1e40af",
-                      marginBottom: "8px",
-                    }}
-                  >
-                    Host controls
-                  </div>
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: "8px",
-                      alignItems: "center",
-                    }}
-                  >
-                    <cf-input
-                      $value={optionDraft}
-                      placeholder="Add an option (e.g. Sushi place)…"
-                      aria-label="Option title"
-                      timing-strategy="immediate"
-                      style="flex:1"
-                    />
-                    <cf-button onClick={boundAddOption}>Add</cf-button>
-                    <cf-button onClick={boundResetVotes}>
-                      Reset votes
-                    </cf-button>
-                  </div>
-                </div>
+                {/* Host controls — only the admin sees this card. */}
+                {isAdmin
+                  ? (
+                    <div
+                      style={{
+                        marginBottom: "16px",
+                        padding: "12px 16px",
+                        backgroundColor: "#eff6ff",
+                        border: "1px solid #bfdbfe",
+                        borderRadius: "8px",
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: "11px",
+                          fontWeight: 700,
+                          letterSpacing: "0.05em",
+                          textTransform: "uppercase",
+                          color: "#1e40af",
+                          marginBottom: "8px",
+                        }}
+                      >
+                        Host controls
+                      </div>
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "8px",
+                          alignItems: "center",
+                        }}
+                      >
+                        <cf-input
+                          $value={optionDraft}
+                          placeholder="Add an option (e.g. Sushi place)…"
+                          aria-label="Option title"
+                          timing-strategy="immediate"
+                          style="flex:1"
+                        />
+                        <cf-button onClick={boundAddOption}>Add</cf-button>
+                        <cf-button onClick={boundResetVotes}>
+                          Reset votes
+                        </cf-button>
+                      </div>
+                    </div>
+                  )
+                  : null}
 
                 {/* Empty state */}
                 {computed(() => {
