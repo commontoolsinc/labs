@@ -158,3 +158,16 @@
   actions and invoking this primitive during subscription.
 - Validation:
   - `deno test -A packages/runner/test/scheduler-observations.test.ts`
+
+## 2026-05-20 - Storage-Backed Rehydration Helper
+
+- Added `Scheduler.rehydrateActionFromStorage()`, an explicit async helper that
+  queries the action's mounted space for persisted scheduler snapshots, validates
+  the observation payload, and applies the in-memory rehydration primitive.
+- Decision: this remains explicit rather than automatic because subscription is
+  currently synchronous. Automatic startup rehydration needs a process graph
+  loader or an async subscription phase.
+- Added a version-1 observation type guard so the runner does not trust raw
+  memory-boundary `unknown` payloads.
+- Validation:
+  - `deno test -A packages/runner/test/scheduler-observations.test.ts`
