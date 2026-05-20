@@ -131,8 +131,8 @@ describe("CFInput", () => {
     expect(CFInput.formAssociated).toBe(true);
   });
 
-  it("should delegate focus into the shadow input", () => {
-    expect(CFInput.shadowRootOptions.delegatesFocus).toBe(true);
+  it("should not rely on delegatesFocus for keyboard navigation", () => {
+    expect(CFInput.shadowRootOptions?.delegatesFocus).not.toBe(true);
   });
 
   it("should accept a CellHandle as value property", () => {

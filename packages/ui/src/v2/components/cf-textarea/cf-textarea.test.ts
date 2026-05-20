@@ -105,8 +105,8 @@ describe("CFTextarea", () => {
     expect(CFTextarea.formAssociated).toBe(true);
   });
 
-  it("should delegate focus into the shadow textarea", () => {
-    expect(CFTextarea.shadowRootOptions.delegatesFocus).toBe(true);
+  it("should not rely on delegatesFocus for keyboard navigation", () => {
+    expect(CFTextarea.shadowRootOptions?.delegatesFocus).not.toBe(true);
   });
 
   it("should not set attributes in constructor (custom element spec)", () => {

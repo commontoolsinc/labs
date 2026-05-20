@@ -1,4 +1,4 @@
-import { css, html, LitElement } from "lit";
+import { css, html } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { property } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
@@ -126,10 +126,6 @@ export const INPUT_PATTERNS = {
 
 export class CFInput extends BaseElement {
   static formAssociated = true;
-  static override shadowRootOptions = {
-    ...LitElement.shadowRootOptions,
-    delegatesFocus: true,
-  };
 
   static override styles = css`
     :host {
@@ -483,6 +479,7 @@ export class CFInput extends BaseElement {
         this.showValidation = false;
         this.timingStrategy = "debounce";
         this.timingDelay = 300;
+        this.addEventListener("focus", this._forwardFocusToInput);
       }
 
       // Theme consumption
@@ -659,10 +656,10 @@ export class CFInput extends BaseElement {
         const inputValue = this.type === "file" ? undefined : this.getValue();
 
         // The host element carries the ARIA role and tabindex for accessibility.
-        // delegatesFocus: true routes focus to the inner <input>, so aria-hidden
-        // must NOT be set on it — browsers refuse to apply aria-hidden on focused
-        // elements. The tabindex="-1" keeps it out of the tab sequence (the host
-        // is the tab stop); the host ARIA attributes are the a11y surface.
+        // The inner input is removed from the sequential tab order; when the host
+        // receives focus, we forward focus here so typing and selection work.
+        // Avoid delegatesFocus: it can make the shadow control appear to be the
+        // active tab stop instead of the host that owns the ARIA surface.
         return html`
           <input
             type="${this.type}"
@@ -770,6 +767,11 @@ export class CFInput extends BaseElement {
           });
         }
       }
+
+      private _forwardFocusToInput = () => {
+        if (this.disabled) return;
+        this.input?.focus();
+      };
 
       private _handleInvalid(event: Event) {
         event.preventDefault(); // Prevent browser's default validation UI
@@ -908,7 +910,24 @@ export class CFInput extends BaseElement {
         }
       }
 
-      // focus() is handled by delegatesFocus on the shadow root.
+      override focus(options?: FocusOptions): void {
+        if (this.disabled) return;
+        const input = this.input;
+        if (input) {
+          input.focus(options);
+          return;
+        }
+
+        // If focus is requested before the first render, keep focus on the
+        // semantic host now, then forward it once the native input exists.
+        super.focus(options);
+        void this.updateComplete.then(() => {
+          if (this.disabled || this.ownerDocument.activeElement !== this) {
+            return;
+          }
+          this.input?.focus(options);
+        });
+      }
 
       /**
        * Blur the input programmatically
