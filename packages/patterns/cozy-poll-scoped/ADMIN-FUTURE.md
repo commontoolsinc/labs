@@ -13,10 +13,10 @@ unforgeable.
 ## Target direction
 
 Authority should be modeled via **CFC integrity claims** rather than runtime
-equality checks. The reference implementation arrived in **PR
-[#3358](https://github.com/commontoolsinc/labs/pull/3358) "[codex] Add CFC group
-chat demo and authorship fixes"** by Berni (open at time of writing), which
-introduces the missing primitives:
+equality checks. The reference implementation landed in **PR
+[#3358](https://github.com/commontoolsinc/labs/pull/3358) "Add CFC group chat
+demo and authorship fixes"** by Berni (merged 2026-05-19), which introduces the
+primitives:
 
 ```ts
 // New in @commonfabric/api/cfc.ts (PR #3358):
@@ -35,10 +35,10 @@ type AuthoredByCurrentUser<T> = Cfc<T, {
 The PR also fixes the runner so nested CFC labels survive array-item persistence
 — required for "every item in a per-space list carries its own integrity claim."
 
-## Canonical reference once PR #3358 lands
+## Canonical reference
 
-`packages/patterns/cfc-group-chat-demo/` (added in #3358) is the worked example.
-The shape that translates to cozy-poll:
+`packages/patterns/cfc-group-chat-demo/` is the worked example. The shape that
+translates to cozy-poll:
 
 ```ts
 // Per-user pointer to my profile in the space-scoped directory.
@@ -82,20 +82,11 @@ When the wiring lands, the cozy-poll equivalents would be roughly:
   admin UI when the viewer doesn't carry the claim, but the security boundary
   moves to the kernel.
 
-## Why we deferred
+## Path forward
 
-PR #3358 is the first end-to-end demonstration of nested CFC labels through
-per-space arrays _and_ the `RepresentsCurrentUser` / `AuthoredByCurrentUser`
-primitives. Until it merges, building cozy-poll against this would mean either:
-
-- Vendoring the PR's branch locally (fragile; API may still shift).
-- Reimplementing the runner-side CFC label propagation ourselves (out of scope
-  for a pattern).
-
-Once #3358 lands, the path forward is straightforward: the pattern-level
-`adminName` equality check stays for compatibility, but the actual security
-boundary moves to CFC labels on the write paths, with the `cfc-group-chat-demo`
-as the reference for the exact API shape.
+The pattern-level `adminName` equality check stays for compatibility, but the
+actual security boundary moves to CFC labels on the write paths, with the
+`cfc-group-chat-demo` as the reference for the exact API shape.
 
 ## Cross-references
 
