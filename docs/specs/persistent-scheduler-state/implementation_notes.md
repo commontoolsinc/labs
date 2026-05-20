@@ -23,3 +23,15 @@
 - Validation so far: spec-only work, `git diff --check` passed before this
   implementation pass.
 
+## 2026-05-20 - Red Test Checkpoint
+
+- Added red tests for the first implementation seams:
+  - scheduler observation construction excludes `attemptedWrites`
+  - memory v2 persists no-op scheduler observations without semantic commits
+  - memory v2 indexes scheduler readers and can mark them dirty from writes
+- Expected failures before implementation:
+  - missing `scheduler/persistent-observation.ts`
+  - missing memory v2 scheduler-state engine APIs
+- Decision: start with engine-level internal persistence and observation
+  construction before trying full runner restart semantics. This keeps the
+  first green slice independent of process graph snapshot work.
