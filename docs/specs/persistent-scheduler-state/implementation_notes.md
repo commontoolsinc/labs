@@ -171,3 +171,18 @@
   memory-boundary `unknown` payloads.
 - Validation:
   - `deno test -A packages/runner/test/scheduler-observations.test.ts`
+
+## 2026-05-20 - Persistent State Benchmarks
+
+- Added `packages/runner/test/scheduler-persistent-state.bench.ts` for clean
+  and targeted-dirty in-memory rehydration at 100 and 1000 actions.
+- Benchmark results on this machine:
+  - clean rehydrate 100 actions: 4.4 ms/iter
+  - targeted dirty rehydrate 100 actions: 4.3 ms/iter
+  - clean rehydrate 1000 actions: 10.2 ms/iter
+  - targeted dirty rehydrate 1000 actions: 8.4 ms/iter
+- Interpretation: this benchmark measures the new scheduler-index rehydration
+  primitive only. It does not yet include process graph loading, storage query
+  latency, or full pattern startup.
+- Validation:
+  - `deno bench -A packages/runner/test/scheduler-persistent-state.bench.ts`
