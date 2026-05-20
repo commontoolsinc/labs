@@ -14,6 +14,8 @@ import {
   type HelloMessage,
   parseMemoryProtocolFlags,
   type ResponseMessage,
+  type SchedulerSnapshotListRequest,
+  type SchedulerSnapshotListResult,
   type ServerMessage,
   type SessionAckRequest,
   type SessionAckResult,
@@ -369,6 +371,18 @@ class Connection {
           return;
         }
         this.send(await this.server.watchAdd(parsed));
+        return;
+      case "scheduler.snapshot.list":
+        if (
+          !this.requireSession(
+            parsed.requestId,
+            parsed.space,
+            parsed.sessionId,
+          )
+        ) {
+          return;
+        }
+        this.send(await this.server.listSchedulerActionSnapshots(parsed));
         return;
       case "session.ack":
         if (
@@ -731,6 +745,56 @@ export class Server {
       };
     } catch (error) {
       return respondTypedError<GraphQueryResult>(
+        message.requestId,
+        toError(
+          "QueryError",
+          error instanceof Error ? error.message : String(error),
+        ),
+      );
+    }
+  }
+
+  async listSchedulerActionSnapshots(
+    message: SchedulerSnapshotListRequest,
+  ): Promise<ResponseMessage<SchedulerSnapshotListResult>> {
+    const session = this.#sessions.get(message.space, message.sessionId);
+    if (session === null) {
+      return respondTypedError<SchedulerSnapshotListResult>(
+        message.requestId,
+        toError("SessionError", "Unknown session for space"),
+      );
+    }
+
+    try {
+      const engine = await this.openEngine(message.space);
+      const snapshots = Engine.listSchedulerActionSnapshots(
+        engine,
+        message.query,
+      ).map((snapshot) => ({
+        observationId: snapshot.observationId,
+        commitSeq: snapshot.commitSeq,
+        observedAtSeq: snapshot.observedAtSeq,
+        observation: snapshot.observation,
+        ...(snapshot.directDirtySeq !== undefined
+          ? { directDirtySeq: snapshot.directDirtySeq }
+          : {}),
+        ...(snapshot.staleSeq !== undefined
+          ? { staleSeq: snapshot.staleSeq }
+          : {}),
+        ...(snapshot.unknownReason !== undefined
+          ? { unknownReason: snapshot.unknownReason }
+          : {}),
+      }));
+      return {
+        type: "response",
+        requestId: message.requestId,
+        ok: {
+          serverSeq: Engine.serverSeq(engine),
+          snapshots,
+        },
+      };
+    } catch (error) {
+      return respondTypedError<SchedulerSnapshotListResult>(
         message.requestId,
         toError(
           "QueryError",
@@ -1526,6 +1590,22 @@ export const parseClientMessage = (
       space: parsed.space,
       sessionId: parsed.sessionId,
       watches: parsed.watches as WatchSpec[],
+    };
+  }
+
+  if (
+    parsed.type === "scheduler.snapshot.list" &&
+    typeof parsed.requestId === "string" &&
+    typeof parsed.space === "string" &&
+    typeof parsed.sessionId === "string" &&
+    isRecord(parsed.query)
+  ) {
+    return {
+      type: "scheduler.snapshot.list",
+      requestId: parsed.requestId,
+      space: parsed.space,
+      sessionId: parsed.sessionId,
+      query: parsed.query as SchedulerSnapshotListRequest["query"],
     };
   }
 

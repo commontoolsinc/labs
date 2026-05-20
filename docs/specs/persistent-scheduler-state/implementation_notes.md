@@ -118,3 +118,16 @@
   production version should mark the action unknown or retry mirror repair.
 - Validation:
   - `deno test -A packages/memory/test/v2-scheduler-state-test.ts`
+
+## 2026-05-20 - Scheduler Snapshot Query Surface
+
+- Added an internal `scheduler.snapshot.list` memory-v2 request and client
+  method. Runners can now ask a mounted space for latest persisted scheduler
+  observations plus durable dirty/stale/unknown state.
+- Added `Engine.listSchedulerActionSnapshots()` so the query can filter by
+  branch, piece id, process generation, and action id.
+- Decision: the wire result keeps `observation` typed as `unknown` at the
+  generic memory protocol boundary. The runner side can validate/cast to its
+  scheduler observation version when it starts consuming rehydration data.
+- Validation:
+  - `deno test -A packages/memory/test/v2-scheduler-state-test.ts`
