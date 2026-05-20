@@ -73,6 +73,17 @@ export function expressionToTypeNode(
   expr: ts.Expression,
   context: TransformationContext,
 ): ts.TypeNode {
+  const declaredTypeNode = getDestructuredBindingDeclaredTypeNode(
+    expr,
+    context,
+  );
+  if (declaredTypeNode) {
+    const type = context.checker.getTypeFromTypeNode(declaredTypeNode);
+    const clonedTypeNode = cloneTypeNode(declaredTypeNode);
+    context.options.typeRegistry?.set(clonedTypeNode, type);
+    return clonedTypeNode;
+  }
+
   // Use inferWidenedTypeFromExpression to widen literal types
   // This ensures `const x = 5` produces `number`, not `5`
   const type = inferWidenedTypeFromExpression(
@@ -85,6 +96,134 @@ export function expressionToTypeNode(
     context,
     context.options.typeRegistry,
   );
+}
+
+function getDestructuredBindingDeclaredTypeNode(
+  expr: ts.Expression,
+  context: TransformationContext,
+): ts.TypeNode | undefined {
+  if (!ts.isIdentifier(expr)) {
+    return undefined;
+  }
+
+  const symbol = context.checker.getSymbolAtLocation(expr);
+  const declaration = symbol?.valueDeclaration ??
+    (symbol?.declarations?.[0] as ts.Declaration | undefined);
+  if (!declaration || !ts.isBindingElement(declaration)) {
+    return undefined;
+  }
+
+  const typeNode = getDeclaredTypeNodeForBindingElement(
+    declaration,
+    context.checker,
+  );
+  return typeNode && shouldPreserveBindingDeclaredTypeNode(typeNode)
+    ? typeNode
+    : undefined;
+}
+
+export function getDeclaredTypeNodeForBindingElement(
+  declaration: ts.BindingElement,
+  checker: ts.TypeChecker,
+): ts.TypeNode | undefined {
+  const parentPattern = declaration.parent;
+  if (!ts.isObjectBindingPattern(parentPattern)) {
+    return undefined;
+  }
+
+  const key = getBindingElementPropertyKey(declaration);
+  if (key === undefined) {
+    return undefined;
+  }
+
+  const parentType = checker.getTypeAtLocation(parentPattern);
+  const prop = parentType.getProperty(key);
+  const propDeclaration = prop?.valueDeclaration ??
+    (prop?.declarations?.[0] as ts.Declaration | undefined);
+
+  if (
+    propDeclaration &&
+    (ts.isPropertySignature(propDeclaration) ||
+      ts.isPropertyDeclaration(propDeclaration)) &&
+    propDeclaration.type
+  ) {
+    return propDeclaration.type;
+  }
+
+  return undefined;
+}
+
+function getBindingElementPropertyKey(
+  declaration: ts.BindingElement,
+): string | undefined {
+  const propertyName = declaration.propertyName;
+  if (!propertyName) {
+    return ts.isIdentifier(declaration.name)
+      ? declaration.name.text
+      : undefined;
+  }
+  if (ts.isIdentifier(propertyName) || ts.isStringLiteral(propertyName)) {
+    return propertyName.text;
+  }
+  if (ts.isNumericLiteral(propertyName)) {
+    return propertyName.text;
+  }
+  if (ts.isComputedPropertyName(propertyName)) {
+    const expression = propertyName.expression;
+    if (
+      ts.isStringLiteral(expression) ||
+      ts.isNoSubstitutionTemplateLiteral(expression) ||
+      ts.isNumericLiteral(expression)
+    ) {
+      return expression.text;
+    }
+  }
+  return undefined;
+}
+
+export function shouldPreserveBindingDeclaredTypeNode(
+  typeNode: ts.TypeNode,
+): boolean {
+  const unwrapped = unwrapParenthesizedTypeNode(typeNode);
+
+  if (ts.isTypeReferenceNode(unwrapped)) {
+    const name = ts.isIdentifier(unwrapped.typeName)
+      ? unwrapped.typeName.text
+      : unwrapped.typeName.right.text;
+    if (name === "Writable") {
+      return unwrapped.typeArguments?.some(
+        shouldPreserveBindingDeclaredTypeNode,
+      ) ??
+        false;
+    }
+    return (
+      name === "PerSpace" ||
+      name === "PerUser" ||
+      name === "PerSession" ||
+      name === "PerAny" ||
+      name === "Default"
+    );
+  }
+
+  if (ts.isUnionTypeNode(unwrapped) || ts.isIntersectionTypeNode(unwrapped)) {
+    return unwrapped.types.some(shouldPreserveBindingDeclaredTypeNode);
+  }
+
+  return false;
+}
+
+function unwrapParenthesizedTypeNode(typeNode: ts.TypeNode): ts.TypeNode {
+  let current = typeNode;
+  while (ts.isParenthesizedTypeNode(current)) {
+    current = current.type;
+  }
+  return current;
+}
+
+export function cloneTypeNode<T extends ts.TypeNode>(typeNode: T): T {
+  return (ts.factory as typeof ts.factory & {
+    cloneNode<TNode extends ts.Node>(node: TNode): TNode;
+  }).cloneNode(typeNode);
 }
 
 /**

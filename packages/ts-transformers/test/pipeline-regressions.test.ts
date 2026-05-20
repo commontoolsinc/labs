@@ -840,3 +840,108 @@ export default pattern<{ options: Option[] }, { [UI]: any }>(({ options }) => {
     );
   },
 );
+
+Deno.test(
+  "Pipeline regression: computed captures preserve destructured PerUser defaults",
+  async () => {
+    const source =
+      `import { computed, Default, NAME, pattern, type PerSpace, type PerUser, UI, type VNode } from "commonfabric";
+
+const trimmedName = (name: string | undefined) => (name ?? "").trim();
+
+interface Input {
+  question?: PerSpace<string | Default<"Where should we eat?">>;
+  myName?: PerUser<string | Default<"">>;
+}
+
+export default pattern<Input, { [NAME]: string; [UI]: VNode }>(({ question, ["myName"]: displayName }) => ({
+  [NAME]: "ct-1606",
+  [UI]: (
+    <cf-screen>
+      <div slot="header">
+        <h2>{question}</h2>
+        {computed(() => {
+          const value = trimmedName(displayName);
+          return <div>me is: "{value}"</div>;
+        })}
+      </div>
+      <div>body renders</div>
+    </cf-screen>
+  ),
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const deriveStart = output.indexOf("{__cfHelpers.derive({");
+    assert(deriveStart >= 0, "expected computed() to lower to derive()");
+    const deriveWindow = output.slice(deriveStart, deriveStart + 700);
+
+    assertStringIncludes(deriveWindow, "displayName: {");
+    assertStringIncludes(deriveWindow, 'type: "string"');
+    assertStringIncludes(deriveWindow, '"default": ""');
+    assertStringIncludes(deriveWindow, 'scope: "user"');
+  },
+);
+
+Deno.test(
+  "Pipeline regression: computed captures preserve destructured Writable defaults",
+  async () => {
+    const source =
+      `import { computed, Default, NAME, pattern, UI, type VNode, type Writable } from "commonfabric";
+
+interface Input {
+  draftTitle: Writable<string | Default<"">>;
+}
+
+export default pattern<Input, { [NAME]: string; [UI]: VNode }>(({ draftTitle }) => ({
+  [NAME]: "writable-default-capture",
+  [UI]: <div>{computed(() => <span>{draftTitle}</span>)}</div>,
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const deriveStart = output.indexOf("{__cfHelpers.derive({");
+    assert(deriveStart >= 0, "expected computed() to lower to derive()");
+    const deriveWindow = output.slice(deriveStart, deriveStart + 700);
+
+    assertStringIncludes(deriveWindow, "draftTitle: {");
+    assertStringIncludes(deriveWindow, 'type: "string"');
+    assertStringIncludes(deriveWindow, '"default": ""');
+    assertStringIncludes(deriveWindow, "asCell:");
+  },
+);
+
+Deno.test(
+  "Pipeline regression: computed captures preserve Writable Record defaults without orphan refs",
+  async () => {
+    const source =
+      `import { computed, Default, NAME, pattern, UI, type VNode, type Writable } from "commonfabric";
+
+interface Input {
+  selections: Writable<Record<string, boolean> | Default<Record<string, never>>>;
+}
+
+export default pattern<Input, { [NAME]: string; [UI]: VNode }>(({ selections }) => ({
+  [NAME]: "writable-record-default-capture",
+  [UI]: <div>{computed(() => selections.foo ? "yes" : "no")}</div>,
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const deriveStart = output.indexOf("{__cfHelpers.derive({");
+    assert(deriveStart >= 0, "expected computed() to lower to derive()");
+    const deriveWindow = output.slice(deriveStart, deriveStart + 900);
+
+    assertStringIncludes(deriveWindow, "selections:");
+    assert(
+      !deriveWindow.includes("AnonymousType_"),
+      "expected Writable<Record<...Default...>> capture not to emit orphan anonymous refs",
+    );
+  },
+);
