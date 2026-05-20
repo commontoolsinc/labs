@@ -45,3 +45,18 @@
   `packages/runner`.
 - Validation:
   - `deno test -A packages/runner/test/scheduler-observations.test.ts`
+
+## 2026-05-20 - Memory V2 Internal Scheduler Tables
+
+- Added initial memory-v2 internal tables and engine APIs for scheduler
+  observations, latest action snapshots, read/write indexes, and action state.
+- Decision: keep the first API engine-local. Cross-space mirroring will compose
+  this API from storage/server code once the transaction integration exists.
+- Decision: store paths through the memory boundary codec instead of ad hoc JSON
+  so future rich path components remain on the normal persistence path.
+- Known limitation: shallow read overlap is conservative and implemented in the
+  engine helper for now; it may need to delegate to the runner's exact
+  dependency overlap helper later.
+- Validation:
+  - `deno test -A packages/memory/test/v2-scheduler-state-test.ts`
+  - `deno test -A packages/runner/test/scheduler-observations.test.ts`
