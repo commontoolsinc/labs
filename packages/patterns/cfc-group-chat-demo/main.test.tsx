@@ -1,6 +1,8 @@
 import { action, computed, Default, pattern, Writable } from "commonfabric";
 import { sortDisplayMessages } from "./logic.ts";
 import {
+  type ChatAdminRegistryValue,
+  chatAdminRolesValue,
   type EmptyMyProfileValue,
   type MyProfileCellValue,
   type MyProfileValue,
@@ -24,8 +26,11 @@ export default pattern(() => {
   const rooms = Writable.of<SharedRoomsValue>(
     {} as SharedRoomsValue,
   );
+  const adminRegistry = Writable.of<ChatAdminRegistryValue>(
+    {} as ChatAdminRegistryValue,
+  );
   const profileDraft = Writable.of("");
-  const adminDraft = Writable.of(false);
+  const adminDraft = Writable.of(true);
   const messageDraft = Writable.of("");
   const hostMessageDraft = Writable.of("");
   const roomDraft = Writable.of("");
@@ -33,6 +38,7 @@ export default pattern(() => {
     myProfile,
     messages,
     rooms,
+    adminRegistry,
     profileDraft,
     adminDraft,
     messageDraft,
@@ -54,6 +60,9 @@ export default pattern(() => {
   });
   const action_enable_admin_draft = action(() => {
     chat.setAdminDraft.send(true);
+  });
+  const action_toggle_alice_admin = action(() => {
+    chat.toggleCurrentUserAdmin.send();
   });
   const action_add_room = action(() => {
     chat.addTrustedRoom.send();
@@ -106,10 +115,16 @@ export default pattern(() => {
   const assert_profile_starts_non_admin = computed(() =>
     chat.currentUserIsAdmin !== true
   );
+  const assert_profile_can_manage_admins = computed(() =>
+    chat.currentUserCanManageAdmins === true
+  );
   const assert_non_admin_cannot_add_room = computed(() =>
     roomsValue(rooms).length === 0
   );
-  const assert_admin_enabled = computed(() => chat.currentUserIsAdmin === true);
+  const assert_admin_enabled = computed(() =>
+    chat.currentUserIsAdmin === true &&
+    chatAdminRolesValue(adminRegistry).length === 1
+  );
   const assert_admin_can_add_room = computed(() => {
     const roomList = roomsValue(rooms);
     return roomList.length === 1 &&
@@ -170,11 +185,14 @@ export default pattern(() => {
       { action: action_save_profile },
       { assertion: assert_profile_created },
       { assertion: assert_profile_starts_non_admin },
+      { assertion: assert_profile_can_manage_admins },
       { action: action_set_room_ops },
       { action: action_try_add_room_without_admin },
       { assertion: assert_non_admin_cannot_add_room },
       { action: action_enable_admin_draft },
       { action: action_save_profile },
+      { assertion: assert_profile_can_manage_admins },
+      { action: action_toggle_alice_admin },
       { assertion: assert_admin_enabled },
       { action: action_add_room },
       { assertion: assert_admin_can_add_room },

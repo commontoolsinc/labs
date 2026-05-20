@@ -86,6 +86,11 @@ describe("cfc group chat demo integration test", () => {
     await waitForDisabled(page, "#trusted-profile-save", false);
     await clickCfButton(page, "#trusted-profile-save");
     await waitForText(page, "#trusted-profile-status", "Alice");
+    await waitForText(
+      page,
+      "#trusted-admin-manager-status",
+      "Can manage admins",
+    );
     await waitForRuntimeIdle(page);
 
     await scrollIntoView(page, "#trusted-room-name");
@@ -95,9 +100,12 @@ describe("cfc group chat demo integration test", () => {
       "Ops",
     );
     await waitForDisabled(page, "#trusted-room-add-button", true);
-    await clickCfButton(page, "#trusted-admin-checkbox");
-    await clickCfButton(page, "#trusted-profile-save");
-    await waitForText(page, "#trusted-admin-status", "Admin");
+    await scrollIntoView(page, "#trusted-admin-panel");
+    await clickCfButton(
+      page,
+      '[data-ui-action="TrustedGroupChatSetAdmin"]',
+    );
+    await waitForText(page, "#trusted-admin-user-list", "Admin");
     await waitForRuntimeIdle(page);
     await fillCfInput(
       page,
