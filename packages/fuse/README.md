@@ -300,6 +300,11 @@ Writes are fire-and-forget: the FUSE reply is sent before the cell write
 completes, so subscription rebuilds don't block the callback chain (required to
 avoid FUSE-T crashes from `notify_inval_entry` during callbacks).
 
+See [RELIABILITY_DESIGN.md](./RELIABILITY_DESIGN.md) for the package-local plan
+to move default mutating operations toward commit-confirmed replies, bounded
+deadlines, explicit backpressure, and watchdog/degraded-mode behavior while
+preserving normal filesystem semantics.
+
 ## Troubleshooting
 
 ### FUSE not found / `Could not open libfuse`
