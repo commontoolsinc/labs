@@ -18,6 +18,8 @@ import {
   type DocumentPath,
   type EntityDocument,
   type PatchOp,
+  type SchedulerActionSnapshotQuery,
+  type SchedulerSnapshotListResult,
   type SessionSync,
   toDocumentPath,
 } from "@commonfabric/memory/v2";
@@ -984,6 +986,13 @@ class SpaceReplica implements ISpaceReplica {
 
   async synced(): Promise<void> {
     await Promise.all([...this.#syncPromises, ...this.#commitPromises]);
+  }
+
+  async listSchedulerActionSnapshots(
+    query: SchedulerActionSnapshotQuery = {},
+  ): Promise<SchedulerSnapshotListResult> {
+    const { session } = await this.sessionHandle();
+    return await session.listSchedulerActionSnapshots(query);
   }
 
   getDocument(uri: URI, scope?: CellScope): EntityDocument | undefined {

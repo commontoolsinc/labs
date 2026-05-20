@@ -1,6 +1,11 @@
 import type { Immutable } from "@commonfabric/utils/types";
 import type { CellScope, ImmutableJSONValue } from "@commonfabric/api";
-import type { EntityDocument, PatchOp } from "@commonfabric/memory/v2";
+import type {
+  EntityDocument,
+  PatchOp,
+  SchedulerActionSnapshotQuery,
+  SchedulerSnapshotListResult,
+} from "@commonfabric/memory/v2";
 import type { EntityId } from "../create-ref.ts";
 import {
   type Assertion,
@@ -219,6 +224,14 @@ export interface IStorageProvider {
 
 export interface IStorageProviderWithReplica extends IStorageProvider {
   replica: ISpaceReplica;
+
+  /**
+   * Internal scheduler persistence query. Memory v2 providers implement this
+   * so the runner can rebuild scheduler indexes from persisted observations.
+   */
+  listSchedulerActionSnapshots?(
+    query?: SchedulerActionSnapshotQuery,
+  ): Promise<SchedulerSnapshotListResult>;
 }
 
 /**
