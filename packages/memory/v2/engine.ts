@@ -215,6 +215,9 @@ CREATE INDEX IF NOT EXISTS idx_scheduler_observation_action
     action_id,
     observation_id
   );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_scheduler_observation_session_local
+  ON scheduler_observation (branch, session_id, local_seq)
+  WHERE session_id IS NOT NULL AND local_seq IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS scheduler_action_snapshot (
   branch              TEXT    NOT NULL DEFAULT '',
@@ -685,6 +688,7 @@ export interface AppliedCommit {
   seq: number;
   branch: BranchName;
   revisions: AppliedRevision[];
+  schedulerObservationId?: number;
 }
 
 export type SchedulerActionKind =
@@ -1180,6 +1184,7 @@ const upsertSchedulerObservationTransaction = (
   const observation = normalizeSchedulerObservation(
     options.observation,
     branch,
+    options.observedAtSeq,
   );
   const payload = encodeMemoryBoundary(observation);
   engine.database.prepare(`
@@ -1478,10 +1483,12 @@ type SchedulerActionStateRow = {
 function normalizeSchedulerObservation(
   observation: SchedulerActionObservation,
   branch: BranchName,
+  observedAtSeq = observation.observedAtSeq,
 ): SchedulerActionObservation {
   return {
     ...observation,
     branch,
+    observedAtSeq,
     reads: observation.reads.map(normalizeSchedulerAddress),
     shallowReads: observation.shallowReads.map(normalizeSchedulerAddress),
     actualChangedWrites: observation.actualChangedWrites.map(
@@ -1817,12 +1824,50 @@ const applyCommitTransaction = (
   }: ApplyCommitOptions,
 ): AppliedCommit => {
   const sessionKey = resolveCommitSessionKey(sessionId, principal);
-  if (commit.operations.length === 0) {
+  const schedulerObservation = commit
+    .schedulerObservation as SchedulerActionObservation | undefined;
+  if (commit.operations.length === 0 && !schedulerObservation) {
     throw new Error("memory v2 commit requires at least one operation");
   }
 
   const branch = commit.branch ?? DEFAULT_BRANCH;
   ensureActiveBranch(engine, branch);
+
+  if (commit.operations.length === 0 && schedulerObservation) {
+    const existingObservation = engine.database.prepare(`
+      SELECT observation_id, observed_at_seq, payload
+      FROM scheduler_observation
+      WHERE branch = :branch
+        AND session_id = :session_id
+        AND local_seq = :local_seq
+    `).get({
+      branch,
+      session_id: sessionKey,
+      local_seq: commit.localSeq,
+    }) as {
+      observation_id: number;
+      observed_at_seq: number;
+      payload: string;
+    } | undefined;
+    if (existingObservation) {
+      const payload = encodeMemoryBoundary(normalizeSchedulerObservation(
+        schedulerObservation,
+        branch,
+        existingObservation.observed_at_seq,
+      ));
+      if (existingObservation.payload !== payload) {
+        throw new ProtocolError(
+          `scheduler observation replay mismatch for session ${sessionId} localSeq ${commit.localSeq}`,
+        );
+      }
+      return {
+        seq: existingObservation.observed_at_seq,
+        branch,
+        revisions: [],
+        schedulerObservationId: existingObservation.observation_id,
+      };
+    }
+  }
 
   const existing = engine.statements.selectExistingCommit.get({
     session_id: sessionKey,
@@ -1850,6 +1895,23 @@ const applyCommitTransaction = (
     branch,
     commit,
   );
+
+  if (commit.operations.length === 0 && schedulerObservation) {
+    const observedAtSeq = headSeq(engine, branch);
+    const observationResult = upsertSchedulerObservationTransaction(engine, {
+      branch,
+      observedAtSeq,
+      sessionId: sessionKey,
+      localSeq: commit.localSeq,
+      observation: schedulerObservation,
+    });
+    return {
+      seq: observedAtSeq,
+      branch,
+      revisions: [],
+      schedulerObservationId: observationResult.observationId,
+    };
+  }
 
   const seq = (engine.statements.selectNextSeq.get() as { seq: number }).seq;
   const invocationRef = engine.legacyCommitMetadataRefsRequired
@@ -1903,6 +1965,17 @@ const applyCommitTransaction = (
 
   engine.statements.updateBranchHead.run({ branch, seq });
   materializeSnapshots(engine, branch, revisions);
+
+  if (schedulerObservation) {
+    upsertSchedulerObservationTransaction(engine, {
+      branch,
+      commitSeq: seq,
+      observedAtSeq: seq,
+      sessionId: sessionKey,
+      localSeq: commit.localSeq,
+      observation: schedulerObservation,
+    });
+  }
 
   return { seq, branch, revisions };
 };

@@ -60,3 +60,26 @@
 - Validation:
   - `deno test -A packages/memory/test/v2-scheduler-state-test.ts`
   - `deno test -A packages/runner/test/scheduler-observations.test.ts`
+
+## 2026-05-20 - Transaction Integration
+
+- Added `schedulerObservation` to memory-v2 `ClientCommit` and runner native
+  storage commits.
+- Observation-only commits now persist scheduler rows without inserting a
+  semantic commit or revisions. Replays by session/local sequence reuse the
+  existing observation row and reject mismatched payloads.
+- Runner storage transactions can carry a scheduler observation through
+  `setSchedulerObservation()` / `getSchedulerObservation()`. V2 transactions
+  use the write space when there is a semantic write and otherwise choose the
+  first observation address space as the internal commit target.
+- Scheduler action runs now attach an observation after runtime commit
+  preparation and before the storage commit starts. The memory engine replaces
+  the placeholder `observedAtSeq` with the accepting head/commit sequence.
+- Known limitation: durable `pieceId`, process generation, and implementation
+  fingerprints are conservative placeholders until process graph snapshots are
+  persisted. Current-known writes are captured from the pre-resubscribe
+  scheduler index in this slice; later rehydration work should persist the
+  post-resubscribe scheduling view.
+- Validation:
+  - `deno test -A packages/memory/test/v2-scheduler-state-test.ts`
+  - `deno test -A packages/runner/test/scheduler-observations.test.ts`

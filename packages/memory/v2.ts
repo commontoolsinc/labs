@@ -110,6 +110,7 @@ export interface ClientCommit {
     pending: PendingRead[];
   };
   operations: Operation[];
+  schedulerObservation?: unknown;
   codeCID?: Reference;
   branch?: BranchName;
   merge?: {
