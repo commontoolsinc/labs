@@ -83,3 +83,20 @@
 - Validation:
   - `deno test -A packages/memory/test/v2-scheduler-state-test.ts`
   - `deno test -A packages/runner/test/scheduler-observations.test.ts`
+
+## 2026-05-20 - Durable Dirty Marking On Commits
+
+- Added a memory-server `space` hint to engine commit application so semantic
+  revisions can be translated into scheduler write addresses.
+- Semantic commits now mark overlapping persisted scheduler readers
+  direct-dirty inside the same engine transaction. Observation upsert still
+  happens after dirty marking, so the action that just produced the observation
+  is left clean while older/inactive readers remain dirty.
+- Direct server writes and normal session transactions both pass their space
+  into the engine. This covers non-action transactions for same-space persisted
+  readers.
+- Known limitation: this is same-engine dirty marking only. Mirrored cross-space
+  read indexes still need a storage/server layer that writes read rows into the
+  spaces being read and cleans them up on observation replacement.
+- Validation:
+  - `deno test -A packages/memory/test/v2-scheduler-state-test.ts`
