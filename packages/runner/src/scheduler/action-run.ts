@@ -517,7 +517,26 @@ function attachSchedulerActionObservation(
       : {}),
   });
 
-  observationTarget.setSchedulerObservation(observation);
+  try {
+    observationTarget.setSchedulerObservation(observation);
+  } catch (error) {
+    if (isInactiveObservationTargetError(error)) {
+      logger.debug("scheduler-observation-skipped", () => [
+        `Action observation skipped for inactive transaction: ${args.actionId}`,
+      ]);
+      return;
+    }
+    throw error;
+  }
+}
+
+function isInactiveObservationTargetError(error: unknown): boolean {
+  return typeof error === "object" && error !== null &&
+    "name" in error &&
+    (
+      error.name === "StorageTransactionAborted" ||
+      error.name === "StorageTransactionCompleteError"
+    );
 }
 
 function schedulerObservationPieceId(

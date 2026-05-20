@@ -60,7 +60,10 @@ current behavior: run dependency collection or run the action when demanded.
 
 ## Non-goals
 
-- Do not make scheduler observations user-visible semantic data.
+- Do not make scheduler observations part of ordinary user data snapshots or
+  semantic revisions. This is not an architectural secrecy boundary: runner is
+  the memory client's primary caller, so memory can expose scheduler-specific
+  internal APIs where that keeps the implementation direct.
 - Do not replace the memory v2 commit/revision/head/snapshot model.
 - Do not replay event queues across process restart in this proposal.
 - Do not make the memory server execute JavaScript actions. The server records
@@ -292,12 +295,14 @@ No-op observations are required. They should be persisted when:
 - an action run changes dependency paths but writes the same output value
 - a materializer runs and proves that no materialized target changed
 
-This does not mean every no-op must become a user-visible semantic commit.
-Scheduler observations can be stored in an internal table with their own row id
-and an `observedAtSeq` watermark. If the observation accompanies a real memory
-commit, it should be written atomically with that commit. If it accompanies a
-no-op, it should still be durable and ordered relative to the branch head it
-observed.
+This does not mean every no-op must become a semantic revision. Scheduler
+observations can be stored in an internal table with their own row id and an
+`observedAtSeq` watermark. It is fine for memory to expose scheduler-specific
+protocol calls to the runner; the important boundary is that ordinary data
+queries and snapshots should not interpret observation rows as user data. If the
+observation accompanies a real memory commit, it should be written atomically
+with that commit. If it accompanies a no-op, it should still be durable and
+ordered relative to the branch head it observed.
 
 ## Storage Design Options
 
@@ -316,8 +321,9 @@ Cons:
 
 - Changes the memory v2 semantic contract that a transaction has at least one
   operation.
-- Pollutes the user-visible write log with scheduler-only records unless every
-  query and sync path learns to hide them.
+- Mixes scheduler-only records into the semantic commit stream, so every query
+  and sync path would need to preserve the difference between user revisions and
+  observation-only rows.
 - Requires care to avoid triggering normal storage notifications for pure
   observations.
 
@@ -330,7 +336,8 @@ Pros:
 
 - Keeps semantic memory commits unchanged.
 - Lets observations use scheduler-specific indexes and retention policy.
-- Avoids exposing scheduler internals through normal memory APIs.
+- Keeps ordinary memory APIs focused on user data while still allowing explicit
+  runner-facing scheduler APIs.
 
 Cons:
 
