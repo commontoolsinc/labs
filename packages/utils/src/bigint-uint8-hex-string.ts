@@ -95,8 +95,14 @@ export function bigintToMtcHex(value: bigint): Uint8Array {
 
     const hexString = hexStringFromPositiveValue(~value);
     const result = Uint8Array.fromHex(hexString);
+    const byteRemainder = result.length & 0x03;
+    const resultUint32 = new Uint32Array(result.buffer, 0, result.length >> 2);
 
-    for (let i = 0; i < result.length; i++) {
+    for (let i = 0; i < resultUint32.length; i++) {
+      resultUint32[i] = ~resultUint32[i];
+    }
+
+    for (let i = result.length - byteRemainder; i < result.length; i++) {
       result[i] = ~result[i];
     }
 
