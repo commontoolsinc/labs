@@ -744,6 +744,13 @@ export interface SchedulerObservationSnapshot {
   observation: SchedulerActionObservation;
 }
 
+export interface SchedulerObservationSnapshotWithState
+  extends SchedulerObservationSnapshot {
+  directDirtySeq?: number;
+  staleSeq?: number;
+  unknownReason?: string;
+}
+
 export interface SchedulerReaderIndexEntry {
   branch: BranchName;
   pieceId: string;
@@ -1297,6 +1304,70 @@ export const getLatestSchedulerActionSnapshot = (
     observedAtSeq: row.observed_at_seq,
     observation: decodeSchedulerObservation(row.payload),
   };
+};
+
+export const listSchedulerActionSnapshots = (
+  engine: Engine,
+  options: {
+    branch?: BranchName;
+    pieceId?: string;
+    processGeneration?: number;
+    actionId?: string;
+  } = {},
+): SchedulerObservationSnapshotWithState[] => {
+  const rows = engine.database.prepare(`
+    SELECT
+      s.observation_id,
+      o.commit_seq,
+      o.observed_at_seq,
+      s.payload,
+      a.direct_dirty_seq,
+      a.stale_seq,
+      a.unknown_reason
+    FROM scheduler_action_snapshot s
+    JOIN scheduler_observation o
+      ON o.observation_id = s.observation_id
+    LEFT JOIN scheduler_action_state a
+      ON a.branch = s.branch
+      AND a.piece_id = s.piece_id
+      AND a.process_generation = s.process_generation
+      AND a.action_id = s.action_id
+    WHERE s.branch = :branch
+      AND (:piece_id IS NULL OR s.piece_id = :piece_id)
+      AND (
+        :process_generation IS NULL OR
+        s.process_generation = :process_generation
+      )
+      AND (:action_id IS NULL OR s.action_id = :action_id)
+    ORDER BY s.piece_id, s.process_generation, s.action_id
+  `).all({
+    branch: options.branch ?? DEFAULT_BRANCH,
+    piece_id: options.pieceId ?? null,
+    process_generation: options.processGeneration ?? null,
+    action_id: options.actionId ?? null,
+  }) as {
+    observation_id: number;
+    commit_seq: number | null;
+    observed_at_seq: number;
+    payload: string;
+    direct_dirty_seq: number | null;
+    stale_seq: number | null;
+    unknown_reason: string | null;
+  }[];
+
+  return rows.map((row) => ({
+    observationId: row.observation_id,
+    commitSeq: row.commit_seq,
+    observedAtSeq: row.observed_at_seq,
+    observation: decodeSchedulerObservation(row.payload),
+    ...(row.direct_dirty_seq !== null
+      ? { directDirtySeq: row.direct_dirty_seq }
+      : {}),
+    ...(row.stale_seq !== null ? { staleSeq: row.stale_seq } : {}),
+    ...(row.unknown_reason !== null
+      ? { unknownReason: row.unknown_reason }
+      : {}),
+  }));
 };
 
 export const findSchedulerReadersForWrite = (

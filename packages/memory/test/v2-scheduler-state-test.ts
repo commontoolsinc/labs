@@ -272,6 +272,13 @@ Deno.test("memory v2 server mirrors scheduler read indexes into read spaces", as
         value: { value: { count: 1 } },
       }],
     });
+    const listed = await reader.listSchedulerActionSnapshots({
+      pieceId: observation.pieceId,
+      processGeneration: observation.processGeneration,
+      actionId: observation.actionId,
+    });
+    assertEquals(listed.snapshots.length, 1);
+    assertEquals(listed.snapshots[0]?.directDirtySeq, 1);
 
     await client.close();
     await server.close();

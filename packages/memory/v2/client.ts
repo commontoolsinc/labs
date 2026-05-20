@@ -11,6 +11,8 @@ import {
   parseMemoryProtocolFlags,
   type ResponseMessage,
   sameMemoryProtocolFlags,
+  type SchedulerActionSnapshotQuery,
+  type SchedulerSnapshotListResult,
   type SessionEffectMessage,
   type SessionOpenResult,
   type SessionRevokedMessage,
@@ -442,6 +444,22 @@ export class SpaceSession {
     this.#assertOpen();
     const result = await this.client.request<GraphQueryResult>({
       type: "graph.query",
+      requestId: crypto.randomUUID(),
+      space: this.space,
+      sessionId: this.#sessionId,
+      query,
+    });
+
+    this.noteResult(result.serverSeq);
+    return result;
+  }
+
+  async listSchedulerActionSnapshots(
+    query: SchedulerActionSnapshotQuery = {},
+  ): Promise<SchedulerSnapshotListResult> {
+    this.#assertOpen();
+    const result = await this.client.request<SchedulerSnapshotListResult>({
+      type: "scheduler.snapshot.list",
       requestId: crypto.randomUUID(),
       space: this.space,
       sessionId: this.#sessionId,
