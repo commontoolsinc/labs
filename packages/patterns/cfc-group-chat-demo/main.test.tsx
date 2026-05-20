@@ -109,7 +109,9 @@ export default pattern(() => {
     return messageList.length === 4 &&
       importedMessages.length === 2 &&
       importedMessages.every((message) =>
-        message.authorName.length > 0 && message.body.length > 0
+        message.authorName.length > 0 &&
+        message.body.length > 0 &&
+        message.authorProfile === undefined
       );
   });
   const assert_thread_order_sortable = computed(() => {
