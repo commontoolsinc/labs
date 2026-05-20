@@ -30,6 +30,7 @@ type BrowserActionRunTraceAddress = {
 
 const { FRONTEND_URL, SPACE_NAME } = env;
 const HOME_RELOAD_ACTION_RUN_LIMIT = 20;
+const NOTEBOOK_RELOAD_ACTION_RUN_LIMIT = 30;
 
 export function parseCaptureSeriesCount(raw: string | undefined): number {
   if (!raw) return 0;
@@ -696,6 +697,31 @@ describe("default-app flow test", () => {
 
     assertEquals(summary.noteCount, noteCreates);
     assertEquals(summary.renderedNoteChips, noteCreates);
+
+    const notebookReloadSummary = await collectNotebookReloadSummary(shell, {
+      identity,
+      expectedNoteCount: noteCreates,
+    });
+    assert(
+      notebookReloadSummary && typeof notebookReloadSummary === "object",
+      "Expected notebook reload summary to be available",
+    );
+    console.log(
+      "Notebook reload rehydration summary:",
+      JSON.stringify(notebookReloadSummary, null, 2),
+    );
+
+    const reloadActionRunCount = actionRunCountFromHomeLoadSummary(
+      notebookReloadSummary,
+    );
+    assert(
+      reloadActionRunCount !== undefined,
+      "Expected notebook reload summary to include action run count",
+    );
+    assert(
+      reloadActionRunCount <= NOTEBOOK_RELOAD_ACTION_RUN_LIMIT,
+      `Expected notebook reload to reuse persisted scheduler state with <= ${NOTEBOOK_RELOAD_ACTION_RUN_LIMIT} action runs, saw ${reloadActionRunCount}`,
+    );
   });
 });
 
@@ -1519,6 +1545,37 @@ async function collectHomeReloadSummary(
   await page.applyConsoleFormatter();
   await shell.login(options.identity);
   await waitForHomePageReady(page, options);
+
+  const homeLoadSummary = await collectHomeLoadSummary(page);
+  if (!homeLoadSummary || typeof homeLoadSummary !== "object") {
+    return homeLoadSummary;
+  }
+  return {
+    reloadToRenderedMs: Number((performance.now() - startedAt).toFixed(3)),
+    ...(homeLoadSummary as Record<string, unknown>),
+  };
+}
+
+async function collectNotebookReloadSummary(
+  shell: ShellIntegration,
+  options: {
+    identity: Identity;
+    expectedNoteCount: number;
+  },
+): Promise<unknown> {
+  const page = shell.page();
+  const startedAt = performance.now();
+  await page.reload({ waitUntil: "load" });
+  await page.applyConsoleFormatter();
+  await shell.login(options.identity);
+
+  await waitFor(async () => {
+    const state = await collectNotebookRenderState(page);
+    return state.isNotebook &&
+      state.noteCount === options.expectedNoteCount &&
+      state.renderedNoteChips === options.expectedNoteCount;
+  });
+  await waitFor(async () => await waitForRuntimeIdle(page));
 
   const homeLoadSummary = await collectHomeLoadSummary(page);
   if (!homeLoadSummary || typeof homeLoadSummary !== "object") {
