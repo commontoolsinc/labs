@@ -3,15 +3,15 @@ import { toFileUrl } from "@std/path";
 import {
   applyCommit,
   close,
+  type Engine,
   findSchedulerReadersForWrite,
   getLatestSchedulerActionSnapshot,
   getSchedulerActionState,
   headSeq,
   markSchedulerReadersDirtyForWrites,
   open,
-  upsertSchedulerObservation,
-  type Engine,
   type SchedulerActionObservation,
+  upsertSchedulerObservation,
 } from "../v2/engine.ts";
 
 const createEngine = async (): Promise<{
@@ -142,4 +142,3 @@ Deno.test("memory v2 indexes scheduler readers and marks them dirty from writes"
     await Deno.remove(path);
   }
 });
-
