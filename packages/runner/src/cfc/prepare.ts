@@ -1371,19 +1371,23 @@ const ifcEntryAppliesToAttemptedWrite = (
     if (!touched) {
       return false;
     }
-    const value = writeValueForTarget(tx, { ...target, path }) ??
-      (() => {
-        try {
-          return tx.readValueOrThrow({ ...target, path }, {
-            meta: INTERNAL_VERIFIER_META,
-          });
-        } catch {
-          return undefined;
-        }
-      })();
+    const pathTarget = { ...target, path };
+    const written = writeValueForTarget(tx, pathTarget);
+    const value = written !== undefined ? written : (() => {
+      try {
+        return tx.readValueOrThrow(pathTarget, {
+          meta: INTERNAL_VERIFIER_META,
+        });
+      } catch {
+        return undefined;
+      }
+    })();
     if (path.length === 0) {
       return value === undefined ||
         wildcardPolicyMatchesValue(tx, target, schema, value);
+    }
+    if (value === undefined) {
+      return previousWriteValueForTarget(tx, pathTarget) !== undefined;
     }
     return value !== undefined &&
       wildcardPolicyMatchesValue(tx, target, schema, value);

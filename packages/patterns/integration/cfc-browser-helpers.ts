@@ -178,6 +178,10 @@ export async function fillCfInput(
               };
             }
 
+            input.scrollIntoView({ block: "center", inline: "center" });
+            await new Promise((resolve) =>
+              requestAnimationFrame(() => requestAnimationFrame(resolve))
+            );
             const rect = input.getBoundingClientRect();
             const style = globalThis.getComputedStyle(input);
             const visible = rect.width > 0 && rect.height > 0 &&
@@ -214,10 +218,6 @@ export async function fillCfInput(
               };
             }
 
-            input.scrollIntoView({ block: "center", inline: "center" });
-            await new Promise((resolve) =>
-              requestAnimationFrame(() => requestAnimationFrame(resolve))
-            );
             input.focus();
             const valueSetter = Object.getOwnPropertyDescriptor(
               HTMLInputElement.prototype,
