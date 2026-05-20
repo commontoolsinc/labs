@@ -293,3 +293,17 @@
   - `HEADLESS=1 deno task test`
   - `HEADLESS=1 deno task integration`
   - `deno task check`
+
+## 2026-05-20 - Spec Follow-up From Implementation Notes
+
+- Promoted implementation-note decisions into the main spec: version-1 action
+  identity, async subscription rehydration teardown, storage-backed observation
+  validation, no-op versus aborted transaction behavior, snapshot query surface,
+  path encoding, and validation evidence.
+- Decision: accept non-atomic cross-space mirror writes for version 1 and
+  document the consequence rather than requiring distributed atomicity or
+  immediate unknown-state repair.
+- Decision: `currentKnownWrites` should mean the post-observation scheduling
+  write view computed with the same rules as resubscription. Persisting the
+  pre-run writer-index value can stale rehydrated writer indexes by one run, so
+  the code should be aligned to the spec in the next implementation slice.
