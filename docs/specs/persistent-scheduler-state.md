@@ -7,7 +7,7 @@ memory-v2 scheduler observation tables, no-op observation commits, same-space
 durable dirty marking, cross-space read-index mirrors, a snapshot query API,
 runner-side rehydration primitives, and subscription-time rehydration for
 actions recreated during piece startup. Durable process graph generations and
-implementation/runtime fingerprints remain conservative version-1 placeholders.
+stronger implementation/runtime fingerprints remain version-1 placeholders.
 
 ## Summary
 
@@ -127,6 +127,12 @@ resubscribe the action with that log. The storage transaction can expose a
 The scheduler-facing log deliberately drops `attemptedWrites`; attempted writes
 are CFC/security evidence, not dependency evidence.
 
+Observation attachment is best-effort over the action's active transaction. It
+must not change the semantics of a transaction that the action intentionally
+aborted or that has already completed. In those cases the scheduler skips
+observation attachment and lets the existing action retry/error path handle the
+transaction result.
+
 No-op transactions are currently short-circuited. If a transaction has no write
 space, or its native commit has no effective operations, the runner transaction
 returns success without opening the replica or calling memory v2. This is good
@@ -233,6 +239,17 @@ object identity. A durable action key should include:
 The current scheduler action id (`src`, function name, or generated anonymous
 id) is useful for diagnostics, but it is not sufficient as the durable key.
 
+#### Version 1 Action Identity
+
+Until durable process graph snapshots are available, the implemented version-1
+identity is intentionally conservative. Runner startup annotates actions with
+the process cell's normalized space/scope/id, branch, and process generation
+`0`. This is stronger than a pattern/module-name fallback because colocated
+pieces of the same pattern get distinct identities, but it is not a full graph
+generation. Future durable graph generations, stronger implementation
+fingerprints, or schema/process migrations should invalidate or migrate these
+rows instead of treating them as fully versioned graph observations.
+
 ### Scheduler Observation Shape
 
 Each successful dependency collection or action run should produce an
@@ -279,10 +296,13 @@ read was recursive or shallow. Cross-space reads require a per-space seq
 watermark, because each space has an independent SQLite database.
 
 `actualChangedWrites` is the transaction's changed write set. `currentKnownWrites`
-is the scheduler's active scheduling write set after merging actual writes,
-declared writes, and the previous current-known writes. Persisting both is
-important: if a later run writes the same value, `actualChangedWrites` can be
-empty while the action still owns a current output path.
+is the scheduler's post-observation active scheduling write set after applying
+the same rule used by resubscription: merge the new actual writes, declared
+writes, and the previous current-known writes into the next scheduling-write
+view. It must not be a stale pre-run snapshot of the action's old writer index.
+Persisting both is important: if a later run writes the same value,
+`actualChangedWrites` can be empty while the action still owns a current output
+path.
 
 `attemptedWrites` should remain in the transaction/CFC record only. It should
 not be copied into scheduler dependency fields.
@@ -295,6 +315,11 @@ No-op observations are required. They should be persisted when:
 - an action run succeeds and its effective native commit is empty
 - an action run changes dependency paths but writes the same output value
 - a materializer runs and proves that no materialized target changed
+
+Aborted or inactive transactions are not no-op observations. If an action
+intentionally aborts its transaction, or observation attachment discovers that
+the target transaction is already complete, persistence should skip the
+observation rather than converting the abort into a scheduler failure.
 
 This does not mean every no-op must become a semantic revision. Scheduler
 observations can be stored in an internal table with their own row id and an
@@ -478,6 +503,15 @@ into any previous read spaces that need stale index cleanup. These mirror rows
 have `commit_seq = NULL` because the semantic commit belongs to another SQLite
 database.
 
+Version 1 accepts that owner-space commits and cross-space mirror writes are not
+atomic across SQLite databases. If the owner commit succeeds and a later mirror
+write fails, semantic data remains committed and the transaction may report a
+failure after the fact. The known consequence is temporarily degraded
+cross-space dirty propagation for inactive readers until a future run rewrites
+or repairs the mirror rows. A later production hardening pass should add
+explicit repair or `unknown` marking for mirror failures, but this spec does not
+require distributed atomicity.
+
 For inactive-piece dirtying, the write owner must be able to find readers even
 when the reader's piece is not running. With one SQLite database per space, that
 means either:
@@ -576,6 +610,13 @@ can defer the normal first-run scheduling while the storage-backed lookup runs;
 a clean snapshot restores indexes and skips first execution, while a missing or
 invalid snapshot falls back to the normal initial dirty/pending path.
 
+Storage-backed rehydration is asynchronous scheduler work. Scheduler `idle()`
+and runtime disposal must wait for this work before storage sessions or memory
+transports close. Browser/integration harnesses that own a page runtime should
+dispose that runtime before closing the page, while preserving existing
+suite-owned page lifetimes for tests that intentionally run ordered steps
+against one page.
+
 Runner startup passes this subscription option for pattern result, JavaScript,
 and raw actions using the process cell's stable space/scope/id identity. The
 version-1 process generation is currently `0`, so any future durable process
@@ -587,6 +628,12 @@ snapshots.
 dependency view and knows what can make the action fresh again. Unknown means
 the dependency view itself is missing or untrusted; the action must run
 dependency collection or execute before dependents can rely on it.
+
+`Scheduler.rehydrateActionFromObservation()` is the low-level primitive for
+already-validated observations. Storage-backed rehydration is a trust boundary:
+the memory protocol returns observation payloads as `unknown`, so the runner
+must type-check the payload and verify action identity, implementation
+fingerprint, runtime fingerprint, and scheduler mode before skipping execution.
 
 ### Demand-targeted Rehydration
 
@@ -659,6 +706,8 @@ Server-side dirty propagation for materializers follows the same split:
 
 - A persisted observation may be used only when its action identity and
   implementation fingerprint match the recreated action.
+- Storage-backed observations may skip execution only when their runtime
+  fingerprint, including scheduler mode, also matches the active scheduler.
 - A clean action observation is valid only if no later committed write overlaps
   any of its recursive or shallow reads under the appropriate overlap rule.
 - Missing or invalid observations must never be treated as clean.
@@ -666,6 +715,8 @@ Server-side dirty propagation for materializers follows the same split:
   acceptable; missed work is not.
 - Observation persistence must be atomic with the memory commit whose writes it
   describes.
+- Cross-space read-index mirrors are version-1 best-effort rows written after
+  the owner-space commit; they are not distributed-transaction participants.
 - No-op observations must record the branch head sequence and read watermarks
   they observed.
 - Every committed actual write must be reflected into the durable scheduler
@@ -715,8 +766,37 @@ findSchedulerReadersForWrite({
 
 The implementation may over-approximate. For example, structural array edits can
 invalidate a whole collection subtree. The API must not miss real overlaps.
+Scheduler paths persisted in indexes and observation payloads should use the
+memory boundary codec rather than ad hoc JSON, so future path component shapes
+stay on the normal persistence path. The memory-side shallow-overlap helper may
+be conservative, but it should have parity tests against the runner dependency
+overlap logic so scheduler and memory dirtying do not drift.
+
+The implemented snapshot lookup surface is:
+
+- memory protocol request `scheduler.snapshot.list`
+- engine API `Engine.listSchedulerActionSnapshots()`
+- runner storage-provider method `listSchedulerActionSnapshots()`
+
+The query filters by branch, piece id, process generation, and optionally action
+id. The protocol result intentionally carries `observation` as `unknown`; the
+runner owns validation and casting to `SchedulerActionObservationV1`.
 
 ## Phased Plan
+
+Current branch status:
+
+| Area | Version 1 status |
+| --- | --- |
+| Observation construction and no-op persistence | Implemented. |
+| Memory scheduler tables and same-space dirty marking | Implemented. |
+| Cross-space read-index mirrors | Implemented with accepted non-atomic mirror writes. |
+| Snapshot query surface | Implemented. |
+| Runner rehydration primitive and storage-backed lookup | Implemented. |
+| Subscription-time clean startup skip | Implemented for recreated actions with valid snapshots. |
+| Durable process graph generations | Future work; version 1 uses process cell identity plus generation `0`. |
+| Demand-targeted dirty recovery beyond subscription startup | Future work. |
+| Replication, retention, and mirror repair | Future work. |
 
 ### Phase 1: Observe Without Rehydrating
 
@@ -815,6 +895,17 @@ invalidate a whole collection subtree. The API must not miss real overlaps.
 - Add cross-space read tests where only one observed space changes.
 - Add benchmarks for large clean cold start, targeted dirty rehydration, and
   broad materializer fanout after restart.
+
+Validation evidence for the current branch:
+
+- targeted runner and memory scheduler-state tests
+- `HEADLESS=1 deno task test`
+- `HEADLESS=1 deno task integration`
+- `deno task check`
+
+The current persistent-state benchmark measures in-memory scheduler-index
+rehydration only. It does not include process graph loading, storage query
+latency, cross-space mirror repair, or full pattern startup.
 
 ## Open Questions
 
