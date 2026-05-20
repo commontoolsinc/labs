@@ -35,3 +35,13 @@
 - Decision: start with engine-level internal persistence and observation
   construction before trying full runner restart semantics. This keeps the
   first green slice independent of process graph snapshot work.
+
+## 2026-05-20 - Observation Builder
+
+- Implemented a pure scheduler observation builder in
+  `packages/runner/src/scheduler/persistent-observation.ts`.
+- Decision: keep this builder runner-local for now. Memory v2 gets its own
+  structurally compatible type because `packages/memory` must not depend on
+  `packages/runner`.
+- Validation:
+  - `deno test -A packages/runner/test/scheduler-observations.test.ts`

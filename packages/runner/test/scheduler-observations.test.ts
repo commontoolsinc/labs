@@ -73,19 +73,21 @@ describe("persistent scheduler observations", () => {
       },
     });
 
-    expect(observation).toMatchObject({
-      version: 1,
-      actionId: "pattern.tsx:computed:1",
-      actionKind: "computation",
-      observedAtSeq: 42,
-      reads: [readAddress],
-      shallowReads: [shallowReadAddress],
-      actualChangedWrites: [writeAddress],
-      currentKnownWrites: [writeAddress],
-      declaredWrites: [declaredWrite],
-      materializerWriteEnvelopes: [materializerEnvelope],
-      actionOptions: { debounceMs: 25 },
-    } satisfies Partial<SchedulerActionObservation>);
+    expect(observation).toMatchObject(
+      {
+        version: 1,
+        actionId: "pattern.tsx:computed:1",
+        actionKind: "computation",
+        observedAtSeq: 42,
+        reads: [readAddress],
+        shallowReads: [shallowReadAddress],
+        actualChangedWrites: [writeAddress],
+        currentKnownWrites: [writeAddress],
+        declaredWrites: [declaredWrite],
+        materializerWriteEnvelopes: [materializerEnvelope],
+        actionOptions: { debounceMs: 25 },
+      } satisfies Partial<SchedulerActionObservation>,
+    );
     expect("attemptedWrites" in observation).toBe(false);
   });
 });
