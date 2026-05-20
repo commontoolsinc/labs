@@ -211,3 +211,11 @@
   revisions, not hiding scheduler concepts from runner-owned memory calls.
 - Validation:
   - `HEADLESS=1 deno test -A packages/runner/test/scheduler-retries.test.ts`
+
+## 2026-05-20 - Final Local Validation
+
+- Runner package test is green after the aborted-transaction observation fix.
+- Repo type/check task is green.
+- Validation:
+  - `HEADLESS=1 deno task test` in `packages/runner`
+  - `deno task check`
