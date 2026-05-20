@@ -500,6 +500,7 @@ export class Server {
     const engine = await this.openEngine(space);
     const commit = Engine.applyCommit(engine, {
       sessionId: this.#directSessionId,
+      space,
       commit: {
         localSeq: ++this.#directLocalSeq,
         reads: { confirmed: [], pending: [] },
@@ -616,6 +617,7 @@ export class Server {
       const engine = await this.openEngine(message.space);
       const commit = Engine.applyCommit(engine, {
         sessionId: message.sessionId,
+        space: message.space,
         principal: session.principal,
         commit: message.commit,
       });

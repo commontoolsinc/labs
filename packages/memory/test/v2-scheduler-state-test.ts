@@ -195,3 +195,41 @@ Deno.test("memory v2 indexes scheduler readers and marks them dirty from writes"
     await Deno.remove(path);
   }
 });
+
+Deno.test("memory v2 marks persisted readers dirty during semantic commits", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    upsertSchedulerObservation(engine, {
+      branch: "",
+      observedAtSeq: headSeq(engine),
+      observation,
+    });
+
+    const commit = applyCommit(engine, {
+      sessionId: "session:direct-writer",
+      space: sourceRead.space,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: sourceRead.id,
+          scope: sourceRead.scope,
+          value: { value: { count: 1 } },
+        }],
+      },
+    });
+
+    const state = getSchedulerActionState(engine, {
+      branch: "",
+      pieceId: "of:piece",
+      processGeneration: 1,
+      actionId: "pattern.tsx:computed:1",
+    });
+    assertEquals(state?.directDirtySeq, commit.seq);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});

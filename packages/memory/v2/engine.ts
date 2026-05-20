@@ -664,6 +664,7 @@ export type AuthorizationRecord = FabricValue;
 
 export interface ApplyCommitOptions {
   sessionId: SessionId;
+  space?: string;
   principal?: string;
   invocation?: InvocationRecord;
   invocationPayload?: FabricValue;
@@ -1819,6 +1820,7 @@ const applyCommitTransaction = (
   engine: Engine,
   {
     sessionId,
+    space,
     principal,
     commit,
   }: ApplyCommitOptions,
@@ -1965,6 +1967,17 @@ const applyCommitTransaction = (
 
   engine.statements.updateBranchHead.run({ branch, seq });
   materializeSnapshots(engine, branch, revisions);
+
+  const changedSchedulerWrites = space
+    ? schedulerWriteAddressesForRevisions(space, revisions)
+    : [];
+  if (changedSchedulerWrites.length > 0) {
+    markSchedulerReadersDirtyForWrites(engine, {
+      branch,
+      dirtySeq: seq,
+      writes: changedSchedulerWrites,
+    });
+  }
 
   if (schedulerObservation) {
     upsertSchedulerObservationTransaction(engine, {
@@ -2237,6 +2250,33 @@ const touchedPathsForPatch = (patch: PatchOp): string[][] => {
     case "splice":
       return [parsePointer(patch.path)];
   }
+};
+
+const schedulerWriteAddressesForRevisions = (
+  space: string,
+  revisions: readonly AppliedRevision[],
+): SchedulerObservationAddress[] => {
+  const writes = new Map<string, SchedulerObservationAddress>();
+  for (const revision of revisions) {
+    const paths = revision.op === "patch" && revision.patches
+      ? revision.patches.flatMap(touchedPathsForPatch)
+      : [[]];
+    for (const path of paths) {
+      const write = normalizeSchedulerAddress({
+        space,
+        id: revision.id,
+        scope: revision.scope,
+        path,
+      });
+      writes.set(
+        `${write.space}\0${write.scope ?? DEFAULT_SCOPE}\0${write.id}\0${
+          encodeSchedulerPath(write.path)
+        }`,
+        write,
+      );
+    }
+  }
+  return [...writes.values()];
 };
 
 const selectCommitRevisions = (
