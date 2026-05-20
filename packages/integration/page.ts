@@ -10,6 +10,7 @@ import {
   PageEventMap,
   ScreenshotOptions,
   SelectorOptions,
+  WaitForOptions,
   WaitForSelectorOptions,
 } from "@astral/astral";
 import { sleep } from "@commonfabric/utils/sleep";
@@ -197,6 +198,12 @@ export class Page extends EventTarget {
   async goto(url: string, options?: GoToOptions): Promise<void> {
     this.checkIsOk();
     await this.page!.goto(url, options);
+  }
+
+  // Passthru of `@astral/astral`'s `Page#reload`
+  async reload(options?: WaitForOptions): Promise<void> {
+    this.checkIsOk();
+    await this.page!.reload(options);
   }
 
   // Passthru of `@astral/astral`'s `Page#waitForSelector`
