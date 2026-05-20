@@ -219,3 +219,16 @@
 - Validation:
   - `HEADLESS=1 deno task test` in `packages/runner`
   - `deno task check`
+
+## 2026-05-20 - Automatic Subscription Rehydration
+
+- Added a scheduler subscription path that can defer first-run scheduling while
+  it queries storage for a persisted action snapshot. Clean snapshots now
+  restore dependency/write/materializer indexes without executing the action;
+  missing or failed snapshots fall back to the existing first-run behavior.
+- Decision: runner-provided persistent identity uses the process cell's
+  normalized scope/id plus process generation 0. This is still conservative, but
+  it distinguishes colocated pieces of the same pattern better than the earlier
+  pattern/module-name fallback.
+- Validation:
+  - `HEADLESS=1 deno test -A packages/runner/test/scheduler-observations.test.ts`

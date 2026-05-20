@@ -217,4 +217,126 @@ describe("persistent scheduler observations", () => {
       await disposeSchedulerTestRuntime(testRuntime);
     }
   });
+
+  it("auto-rehydrates subscribed actions before first execution", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {
+      pullMode: "enabled",
+    });
+    try {
+      const provider = testRuntime.runtime.storageManager.open(space) as {
+        listSchedulerActionSnapshots?: (
+          query?: unknown,
+        ) => Promise<{
+          serverSeq: number;
+          snapshots: unknown[];
+        }>;
+      };
+      let querySeen: unknown;
+      provider.listSchedulerActionSnapshots = async (query) => {
+        querySeen = query;
+        return {
+          serverSeq: 5,
+          snapshots: [{
+            observationId: 1,
+            commitSeq: null,
+            observedAtSeq: 5,
+            observation: buildSchedulerActionObservation({
+              actionId: "autoPersistedAction",
+              actionKind: "computation",
+              branch: "",
+              pieceId: "space:process",
+              processGeneration: 1,
+              implementationFingerprint: "impl:v1",
+              runtimeFingerprint: "runtime:test",
+              observedAtSeq: 5,
+              transactionKind: "action-run",
+              transactionLog: {
+                reads: [readAddress],
+                shallowReads: [],
+                writes: [],
+              },
+              currentKnownWrites: [writeAddress],
+            }),
+          }],
+        };
+      };
+
+      let runs = 0;
+      function autoPersistedAction() {
+        runs++;
+      }
+
+      testRuntime.runtime.scheduler.subscribe(autoPersistedAction, {
+        reads: [],
+        shallowReads: [],
+        writes: [],
+      }, {
+        rehydrateFromStorage: {
+          space,
+          pieceId: "space:process",
+          processGeneration: 1,
+        },
+      });
+
+      await testRuntime.runtime.idle();
+
+      expect(runs).toBe(0);
+      expect(querySeen).toMatchObject({
+        actionId: "autoPersistedAction",
+        pieceId: "space:process",
+        processGeneration: 1,
+      });
+      expect(testRuntime.runtime.scheduler.isDirty(autoPersistedAction)).toBe(
+        false,
+      );
+      expect(testRuntime.runtime.scheduler.getMightWrite(autoPersistedAction))
+        .toEqual([writeAddress]);
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
+  it("falls back to the normal first run when auto-rehydration misses", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {
+      pullMode: "enabled",
+    });
+    try {
+      const provider = testRuntime.runtime.storageManager.open(space) as {
+        listSchedulerActionSnapshots?: () => Promise<{
+          serverSeq: number;
+          snapshots: unknown[];
+        }>;
+      };
+      provider.listSchedulerActionSnapshots = async () => ({
+        serverSeq: 5,
+        snapshots: [],
+      });
+
+      let runs = 0;
+      function missingPersistedAction() {
+        runs++;
+      }
+
+      testRuntime.runtime.scheduler.subscribe(missingPersistedAction, {
+        reads: [],
+        shallowReads: [],
+        writes: [writeAddress],
+      }, {
+        isEffect: true,
+        rehydrateFromStorage: {
+          space,
+          pieceId: "space:missing-process",
+          processGeneration: 1,
+        },
+      });
+
+      await testRuntime.runtime.idle();
+
+      expect(runs).toBe(1);
+      expect(testRuntime.runtime.scheduler.isDirty(missingPersistedAction))
+        .toBe(false);
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
 });

@@ -50,6 +50,7 @@ export function subscribePullSchedulerAction(
     debounce,
     noDebounce,
     throttle,
+    deferInitialExecution = false,
   } = options;
 
   updateSchedulerActionChangeGroup(
@@ -75,7 +76,7 @@ export function subscribePullSchedulerAction(
     action,
     isEffect,
     {
-      queueExecution: true,
+      queueExecution: !deferInitialExecution,
       queueComputation: state.subscriptionState.getIdempotencyCheckMode(),
     },
   );
@@ -89,7 +90,9 @@ export function subscribePullSchedulerAction(
     state.activePullDemandActions.has(parent)
   ) {
     state.pullDemandedFirstRunComputations.add(action);
-    state.queueExecution();
+    if (!deferInitialExecution) {
+      state.queueExecution();
+    }
   }
 
   logger.debug(
@@ -151,13 +154,16 @@ export function subscribePullSchedulerAction(
     state.pendingDependencyCollection.add(action);
   }
 
-  // First-time pull subscription makes the action dirty and pending, but
-  // computations still need a live effect or demand context to run.
-  state.markDirectDirty(action);
-  state.pending.add(action);
-  state.scheduledFirstTime.add(action);
+  if (!deferInitialExecution) {
+    // First-time pull subscription makes the action dirty and pending, but
+    // computations still need a live effect or demand context to run.
+    state.markDirectDirty(action);
+    state.pending.add(action);
+    state.scheduledFirstTime.add(action);
+  }
 
   if (
+    !deferInitialExecution &&
     !actionIsEffect &&
     state.getSchedulingWrites(action)?.length
   ) {
