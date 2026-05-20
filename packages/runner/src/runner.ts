@@ -40,6 +40,7 @@ import {
 } from "./pattern-binding.ts";
 import { resolveLink } from "./link-resolution.ts";
 import {
+  areNormalizedLinksSame,
   createSigilLinkFromParsedLink,
   isCellLink,
   isSigilLink,
@@ -61,7 +62,7 @@ import type {
 import { TransactionWrapper } from "./storage/extended-storage-transaction.ts";
 import {
   ignoreReadForScheduling,
-  markReadAsPotentialWrite,
+  markReadAsAttemptedWrite,
 } from "./scheduler.ts";
 import { internalVerifierRead } from "./storage/reactivity-log.ts";
 import { FunctionCache } from "./function-cache.ts";
@@ -441,6 +442,19 @@ type JavaScriptNodeContext = BoundNodeIO & {
 type JavaScriptActionResultCells = {
   byScope: Map<CellScope, Cell<any>>;
 };
+
+function dedupeNormalizedLinks(
+  links: readonly NormalizedFullLink[],
+): NormalizedFullLink[] {
+  const deduped: NormalizedFullLink[] = [];
+  for (const link of links) {
+    if (deduped.some((existing) => areNormalizedLinksSame(existing, link))) {
+      continue;
+    }
+    deduped.push(link);
+  }
+  return deduped;
+}
 
 export class Runner {
   readonly cancels = new Map<`${MemorySpace}/${URI}`, Cancel>();
@@ -1844,6 +1858,41 @@ export class Runner {
     };
   }
 
+  private collectStaticRedirectWriteTargets(
+    tx: IExtendedStorageTransaction,
+    outputCells: readonly NormalizedFullLink[],
+  ): NormalizedFullLink[] {
+    // Write redirects are the static writable-output form: resolving them here
+    // lets pull-mode indexing treat the resolved target like a normal declared
+    // write. Dynamic writable-input writes use materializer envelopes instead.
+    if (!outputCells.some((link) => link.overwrite === "redirect")) {
+      return [];
+    }
+
+    const targets: NormalizedFullLink[] = [];
+    for (const output of outputCells) {
+      if (output.overwrite !== "redirect") continue;
+      try {
+        const { overwrite: _overwrite, ...target } = resolveLink(
+          this.runtime,
+          tx,
+          output,
+          "writeRedirect",
+        );
+        targets.push(target);
+      } catch (error) {
+        // Some setup paths have not fully materialized process-cell redirects
+        // yet. Leave those to runtime dependency collection after the action
+        // has run, but keep debug context for unexpected resolution failures.
+        logger.debug("static-redirect-write-target", () => [
+          "Unable to resolve static redirect write target",
+          { output, error },
+        ]);
+      }
+    }
+    return dedupeNormalizedLinks(targets);
+  }
+
   private resolveJavaScriptFunction(
     module: Module,
     pattern: Pattern,
@@ -2649,9 +2698,19 @@ export class Runner {
       setRunnableName(action, `action:${name}`, { setSrc: true });
     }
 
+    const staticRedirectWriteTargets = module.materializerWriteEnvelopes
+      ? []
+      : this.collectStaticRedirectWriteTargets(tx, writes);
+    const schedulingWrites = dedupeNormalizedLinks([
+      ...writes,
+      ...staticRedirectWriteTargets,
+    ]);
     const wrappedAction = Object.assign(action, {
       reads,
-      writes,
+      writes: schedulingWrites,
+      ...(module.materializerWriteEnvelopes
+        ? { materializerWriteEnvelopes: module.materializerWriteEnvelopes }
+        : {}),
       module,
       pattern,
     });
@@ -2677,7 +2736,7 @@ export class Runner {
 
         for (const output of writes) {
           this.runtime.getCellFromLink(output, undefined, depTx)?.getRaw({
-            meta: markReadAsPotentialWrite,
+            meta: markReadAsAttemptedWrite,
           });
         }
       } finally {
@@ -2950,9 +3009,19 @@ export class Runner {
 
     // Seed raw actions with their pattern/module/write metadata so pull-mode
     // scheduling can discover pending computations before their first run.
+    const staticRedirectWriteTargets = module.materializerWriteEnvelopes
+      ? []
+      : this.collectStaticRedirectWriteTargets(tx, outputCells);
+    const schedulingWrites = dedupeNormalizedLinks([
+      ...outputCells,
+      ...staticRedirectWriteTargets,
+    ]);
     Object.assign(action, builtinAction, {
       reads: inputCells,
-      writes: outputCells,
+      writes: schedulingWrites,
+      ...(module.materializerWriteEnvelopes
+        ? { materializerWriteEnvelopes: module.materializerWriteEnvelopes }
+        : {}),
       module,
       pattern,
     });
@@ -2980,11 +3049,11 @@ export class Runner {
             this.runtime.getCellFromLink(input, undefined, depTx)?.get();
           }
         }
-        // Always capture write dependencies by marking outputs as potential writes
+        // Always capture write dependencies by marking outputs as attempted writes
         for (const output of outputCells) {
-          // Reading with markReadAsPotentialWrite registers this as a write dependency
+          // Reading with markReadAsAttemptedWrite registers this as a write dependency
           this.runtime.getCellFromLink(output, undefined, depTx)?.getRaw({
-            meta: markReadAsPotentialWrite,
+            meta: markReadAsAttemptedWrite,
           });
         }
       } finally {

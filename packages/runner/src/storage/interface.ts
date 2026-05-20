@@ -745,7 +745,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * Internal runner API. Phase-1 CFC no-op attempted-target coverage is not
    * derived from blind direct `write*()` calls. Callers that need attempted
    * target coverage before same-value short-circuiting must first establish it
-   * through a higher-level diff path such as `markReadAsPotentialWrite`.
+   * through a higher-level diff path such as `markReadAsAttemptedWrite`.
    * Runner-owned system metadata writes may also use this directly when they
    * are intentionally out of phase-1 value-surface CFC scope.
    *
@@ -767,7 +767,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * Internal runner API with the same phase-1 CFC caveat as `writeOrThrow()`:
    * blind same-value direct writes do not by themselves establish attempted
    * target coverage. Use higher-level diff paths when no-op attempted writes
-   * need to appear in `potentialWrites`.
+   * need to appear in `attemptedWrites`.
    *
    * @param address - Memory address to write to.
    * @param value - Value to write.
@@ -1074,7 +1074,7 @@ export interface TransactionReactivityLog {
   reads: IMemorySpaceAddress[];
   shallowReads: IMemorySpaceAddress[];
   writes: IMemorySpaceAddress[];
-  potentialWrites?: IMemorySpaceAddress[];
+  attemptedWrites?: IMemorySpaceAddress[];
 }
 
 export interface TransactionWriteDetail {

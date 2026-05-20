@@ -43,9 +43,6 @@ export function setSchedulerDependencies(
       false,
     ),
   );
-  const potentialWrites = sortAndCompactPaths(
-    filterIgnoredAddresses(log.potentialWrites, ignoredSchedulingWrites),
-  );
   const declaredWrites = sortAndCompactPaths(
     filterIgnoredAddresses(
       ((action as Partial<TelemetryAnnotations>).writes ?? []).map(
@@ -58,12 +55,11 @@ export function setSchedulerDependencies(
     reads,
     shallowReads,
     writes,
-    ...(potentialWrites.length > 0 ? { potentialWrites } : {}),
   };
   state.dependencies.set(action, schedulingLog);
 
   // Rebuild the current scheduling view from the latest writes plus
-  // declared/potential writes. Keep the cumulative legacy union separately
+  // declared writes. Keep the cumulative legacy union separately
   // so it can be enabled behind an experimental flag.
   const rawExistingCurrentWrites =
     state.writeIndex.currentKnownWrites.get(action) ?? [];
@@ -78,7 +74,6 @@ export function setSchedulerDependencies(
   const { newCurrentKnownWrites, newHistoricalMightWrite } =
     buildKnownSchedulingWrites({
       writes,
-      potentialWrites,
       declaredWrites,
       existingCurrentWrites,
       existingHistoricalWrites,

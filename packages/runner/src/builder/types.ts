@@ -1,5 +1,6 @@
 import { isRecord } from "@commonfabric/utils/types";
 import type { PatternBuilder } from "./pattern.ts";
+import type { NormalizedFullLink } from "../link-types.ts";
 
 import type {
   ActionFunction,
@@ -194,6 +195,8 @@ declare module "@commonfabric/api" {
     noDebounce?: boolean;
     /** Optional scheduler throttle period in milliseconds */
     throttle?: number;
+    /** Pull-mode write envelopes for broad/dynamic writable-input materializers */
+    materializerWriteEnvelopes?: readonly NormalizedFullLink[];
   }
 }
 

@@ -4,6 +4,7 @@ import {
   hasEventQueueWakeTimer,
   scheduleEventQueueWake,
 } from "./events.ts";
+import type { MaterializerIndexState } from "./materializers.ts";
 import type { Action, QueuedEvent } from "./types.ts";
 
 export interface ExecuteContinuationState {
@@ -18,6 +19,7 @@ export interface ExecuteContinuationState {
   readonly changedWritesHistory: unknown[];
   readonly consumeRerunAfterCurrentExecute: () => boolean;
   readonly isDemandedPullComputation: (action: Action) => boolean;
+  readonly materializerIndex: MaterializerIndexState;
   readonly shouldRunFirstPullComputationInDemandContext: (
     action: Action,
   ) => boolean;

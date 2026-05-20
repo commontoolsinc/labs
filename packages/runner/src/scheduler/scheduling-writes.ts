@@ -36,7 +36,7 @@ export interface SchedulingWriteState {
 export class SchedulerWriteIndex
   implements WriterIndexState, SchedulingWriteState {
   // Current-known writes are rebuilt on each dependency update from actual
-  // writes plus declared/potential writes. This is the default scheduling view.
+  // writes plus declared writes. This is the default scheduling view.
   readonly currentKnownWrites = new WeakMap<Action, IMemorySpaceAddress[]>();
   // Historical writes preserve the legacy cumulative union and are only used
   // when the experimental historical-write mode is enabled.
@@ -163,7 +163,6 @@ export function updateWriterIndex(
 
 export function buildKnownSchedulingWrites(state: {
   readonly writes: readonly IMemorySpaceAddress[];
-  readonly potentialWrites: readonly IMemorySpaceAddress[];
   readonly declaredWrites: readonly IMemorySpaceAddress[];
   readonly existingCurrentWrites: readonly IMemorySpaceAddress[];
   readonly existingHistoricalWrites: readonly IMemorySpaceAddress[];
@@ -180,10 +179,14 @@ export function buildKnownSchedulingWrites(state: {
     state.writes,
     state.declaredWrites,
   );
+  const declaredAncestorWrites = deriveDeclaredAncestorWrites(
+    state.writes,
+    state.declaredWrites,
+  );
   const newCurrentKnownWrites = sortAndCompactPaths([
     ...currentSeedWrites,
     ...dynamicParentWrites,
-    ...state.potentialWrites,
+    ...declaredAncestorWrites,
   ]);
   const newHistoricalMightWrite = sortAndCompactPaths([
     ...state.existingHistoricalWrites,
@@ -282,26 +285,59 @@ export function deriveDynamicCollectionParentWrites(
   writes: readonly IMemorySpaceAddress[],
   declaredWrites: readonly IMemorySpaceAddress[],
 ): IMemorySpaceAddress[] {
-  const parentWrites: IMemorySpaceAddress[] = [];
+  return deriveDeclaredAncestorWritesMatching(
+    writes,
+    declaredWrites,
+    (declaredWrite, write) =>
+      isDynamicCollectionSegment(write.path[declaredWrite.path.length]),
+  );
+}
+
+export function deriveDeclaredAncestorWrites(
+  writes: readonly IMemorySpaceAddress[],
+  declaredWrites: readonly IMemorySpaceAddress[],
+): IMemorySpaceAddress[] {
+  return deriveDeclaredAncestorWritesMatching(
+    writes,
+    declaredWrites,
+    () => true,
+  );
+}
+
+function deriveDeclaredAncestorWritesMatching(
+  writes: readonly IMemorySpaceAddress[],
+  declaredWrites: readonly IMemorySpaceAddress[],
+  predicate: (
+    declaredWrite: IMemorySpaceAddress,
+    write: IMemorySpaceAddress,
+  ) => boolean,
+): IMemorySpaceAddress[] {
+  const ancestorWrites: IMemorySpaceAddress[] = [];
   for (const declaredWrite of declaredWrites) {
     for (const write of writes) {
       if (
-        declaredWrite.space !== write.space ||
-        declaredWrite.id !== write.id ||
-        declaredWrite.type !== write.type ||
-        declaredWrite.path.length >= write.path.length ||
-        !arraysOverlap(declaredWrite.path, write.path)
+        declaredWriteIsAncestorOfWrite(declaredWrite, write) &&
+        predicate(declaredWrite, write)
       ) {
-        continue;
-      }
-
-      const dynamicSegment = write.path[declaredWrite.path.length];
-      if (isDynamicCollectionSegment(dynamicSegment)) {
-        parentWrites.push(declaredWrite);
+        ancestorWrites.push(declaredWrite);
+        break;
       }
     }
   }
-  return parentWrites;
+  return ancestorWrites;
+}
+
+function declaredWriteIsAncestorOfWrite(
+  declaredWrite: IMemorySpaceAddress,
+  write: IMemorySpaceAddress,
+): boolean {
+  return declaredWrite.space === write.space &&
+    declaredWrite.id === write.id &&
+    declaredWrite.type === write.type &&
+    normalizeCellScope(declaredWrite.scope) ===
+      normalizeCellScope(write.scope) &&
+    declaredWrite.path.length < write.path.length &&
+    arraysOverlap(declaredWrite.path, write.path);
 }
 
 function isDynamicCollectionSegment(

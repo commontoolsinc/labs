@@ -232,7 +232,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     }
 
     const log = this.getReactivityLog();
-    const potentialWrites: AttemptedWrite[] = (log.potentialWrites ?? []).map(
+    const attemptedWrites: AttemptedWrite[] = (log.attemptedWrites ?? []).map(
       (address) =>
         deepFreeze({
           ...address,
@@ -257,7 +257,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
     return {
       consumedReads,
-      potentialWrites,
+      attemptedWrites,
       writes,
       dereferenceTraces: [...this.cfcState.dereferenceTraces],
       writePolicyInputs: [...this.cfcState.writePolicyInputs],

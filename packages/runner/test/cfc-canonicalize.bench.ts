@@ -56,7 +56,7 @@ const warm = (input: PreparedDigestInput): PreparedDigestInput => {
     deepFreeze({ ...a, path: canonicalizeLogicalPath(a.path) });
   return deepFreeze({
     consumedReads: input.consumedReads.map(warmAddr),
-    potentialWrites: input.potentialWrites.map(warmAddr),
+    attemptedWrites: input.attemptedWrites.map(warmAddr),
     writes: input.writes.map(warmAddr),
     dereferenceTraces: input.dereferenceTraces.map((t) =>
       deepFreeze({
@@ -79,7 +79,7 @@ const SMALL_INPUT: PreparedDigestInput = {
     makeAddress("a", "items"),
     makeAddress("b", "title"),
   ],
-  potentialWrites: [
+  attemptedWrites: [
     makeAddress("a", "items", 0),
   ],
   writes: [
@@ -105,7 +105,7 @@ const LARGE_INPUT: PreparedDigestInput = {
     { length: 12 },
     (_, i) => makeAddress(`r${i}`, "field", i),
   ),
-  potentialWrites: Array.from(
+  attemptedWrites: Array.from(
     { length: 4 },
     (_, i) => makeAddress(`w${i}`, "out", i),
   ),
@@ -160,7 +160,7 @@ const LARGE_INPUT: PreparedDigestInput = {
 // any future regression in the cache-eligibility pathway.
 const TIEBREAK_HEAVY_INPUT: PreparedDigestInput = {
   consumedReads: [],
-  potentialWrites: [],
+  attemptedWrites: [],
   writes: [],
   dereferenceTraces: [],
   writePolicyInputs: freezePolicies(
@@ -190,7 +190,7 @@ const PATH_HEAVY_INPUT: PreparedDigestInput = {
     scope: "space" as const,
     path: ["value", "items", String(i), "field", String(i)],
   })),
-  potentialWrites: Array.from({ length: 4 }, (_, i) => ({
+  attemptedWrites: Array.from({ length: 4 }, (_, i) => ({
     space: SPACE,
     id: "of:doc-shared",
     scope: "space" as const,

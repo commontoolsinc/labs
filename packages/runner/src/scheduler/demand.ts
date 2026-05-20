@@ -9,6 +9,7 @@ export interface PullDemandState {
   readonly actionParent: WeakMap<Action, Action>;
   readonly isEffectAction: WeakMap<Action, boolean>;
   readonly pullDemandedFirstRunComputations: WeakSet<Action>;
+  readonly pullDemandedContinuationComputations: WeakSet<Action>;
   readonly hasActionRun: (action: Action) => boolean;
   readonly getSchedulingWrites: (
     action: Action,
@@ -88,16 +89,16 @@ export function shouldRunFirstPullComputationInDemandContext(
     | "effects"
     | "hasActionRun"
     | "pullDemandedFirstRunComputations"
+    | "pullDemandedContinuationComputations"
   >,
   action: Action,
 ): boolean {
-  if (
-    !state.computations.has(action) ||
-    state.effects.has(action) ||
-    state.hasActionRun(action)
-  ) {
+  if (!state.computations.has(action) || state.effects.has(action)) {
     return false;
   }
+
+  if (state.pullDemandedContinuationComputations.has(action)) return true;
+  if (state.hasActionRun(action)) return false;
 
   return state.pullDemandedFirstRunComputations.has(action);
 }

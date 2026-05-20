@@ -16,11 +16,22 @@ const logger = getLogger("scheduler", {
   level: "warn",
 });
 
+type PullSettleIteration = { settled: true } | {
+  settled: false;
+  workSet: Set<Action>;
+  order: Action[];
+};
+
 function buildPullIterationWorkSet(state: {
   readonly initialSeeds: ReadonlySet<Action>;
   readonly settleIter: number;
   readonly collectPullIterationSeeds: (iterationSeeds: Set<Action>) => void;
   readonly collectDirtyDependencies: (
+    seed: Action,
+    workSet: Set<Action>,
+    memo: Map<Action, boolean>,
+  ) => boolean;
+  readonly collectDirtyDependenciesFromTraversalRoot: (
     seed: Action,
     workSet: Set<Action>,
     memo: Map<Action, boolean>,
@@ -32,26 +43,39 @@ function buildPullIterationWorkSet(state: {
 } {
   const workSet = new Set<Action>();
   const iterationSeeds = new Set<Action>();
+  const traversalSeeds = new Set<Action>();
+
+  for (const seed of state.initialSeeds) {
+    traversalSeeds.add(seed);
+    // On the first iteration, initial seeds are runnable work. On later
+    // iterations they remain demand roots for newly dirtied dependencies, but
+    // should not be rerun unless normal scheduling also marks them pending.
+    if (state.settleIter === 0) {
+      iterationSeeds.add(seed);
+    }
+  }
 
   // Every iteration needs to consider newly created pending effects.
   // Without this, nested/recursive patterns can stall after creating
   // new demand-root effects in an earlier iteration.
   state.collectPullIterationSeeds(iterationSeeds);
 
-  // On first iteration, add special-case seeds discovered before settle.
-  if (state.settleIter === 0) {
-    for (const seed of state.initialSeeds) {
-      iterationSeeds.add(seed);
-    }
-  }
-
   for (const seed of iterationSeeds) {
     workSet.add(seed);
+    traversalSeeds.add(seed);
   }
 
   // Pull in dirty computations that feed the currently runnable seeds.
   const dirtyDependencyMemo = new Map<Action, boolean>();
-  for (const seed of iterationSeeds) {
+  for (const seed of traversalSeeds) {
+    if (state.settleIter > 0 && state.initialSeeds.has(seed)) {
+      state.collectDirtyDependenciesFromTraversalRoot(
+        seed,
+        workSet,
+        dirtyDependencyMemo,
+      );
+      continue;
+    }
     state.collectDirtyDependencies(seed, workSet, dirtyDependencyMemo);
   }
 
@@ -164,31 +188,11 @@ function preparePullSettleIteration(
   settleIter: number,
   earlyIterationThreshold: number,
   earlyIterationComputations: Set<Action>,
-): { settled: true } | {
-  settled: false;
-  workSet: Set<Action>;
-  order: Action[];
-} {
-  // Build the work set for this iteration
-  const buildPullWorkSetStart = performance.now();
-  const { workSet, iterationSeeds, dirtyDependencyCount } =
-    buildPullIterationWorkSet({
-      initialSeeds,
-      settleIter,
-      collectPullIterationSeeds: state.collectPullIterationSeeds,
-      collectDirtyDependencies: state.collectDirtyDependencies,
-    });
-
-  if (settleIter === 0) {
-    logger.debug("schedule-execute-pull", () => [
-      `Pull mode: Seeds: ${iterationSeeds.size}, Dirty deps added: ${dirtyDependencyCount}`,
-    ]);
-  }
-  logger.time(
-    buildPullWorkSetStart,
-    "scheduler",
-    "execute",
-    "buildPullWorkSet",
+): PullSettleIteration {
+  const { workSet } = buildAndLogPullIterationWorkSet(
+    state,
+    initialSeeds,
+    settleIter,
   );
 
   if (workSet.size === 0) {
@@ -203,6 +207,51 @@ function preparePullSettleIteration(
     earlyIterationComputations,
   });
 
+  const order = orderPullWorkSet(state, workSet, settleIter);
+  clearPullEffectsBeforeRun(state, order);
+
+  return { settled: false, workSet, order };
+}
+
+function buildAndLogPullIterationWorkSet(
+  state: SchedulerSettleLoopState,
+  initialSeeds: ReadonlySet<Action>,
+  settleIter: number,
+): {
+  workSet: Set<Action>;
+  iterationSeeds: Set<Action>;
+  dirtyDependencyCount: number;
+} {
+  const buildPullWorkSetStart = performance.now();
+  const result = buildPullIterationWorkSet({
+    initialSeeds,
+    settleIter,
+    collectPullIterationSeeds: state.collectPullIterationSeeds,
+    collectDirtyDependencies: state.collectDirtyDependencies,
+    collectDirtyDependenciesFromTraversalRoot:
+      state.collectDirtyDependenciesFromTraversalRoot,
+  });
+
+  if (settleIter === 0) {
+    logger.debug("schedule-execute-pull", () => [
+      `Pull mode: Seeds: ${result.iterationSeeds.size}, Dirty deps added: ${result.dirtyDependencyCount}`,
+    ]);
+  }
+  logger.time(
+    buildPullWorkSetStart,
+    "scheduler",
+    "execute",
+    "buildPullWorkSet",
+  );
+
+  return result;
+}
+
+function orderPullWorkSet(
+  state: SchedulerSettleLoopState,
+  workSet: Set<Action>,
+  settleIter: number,
+): Action[] {
   const topologicalSortStart = performance.now();
   const order = topologicalSort(
     workSet,
@@ -210,6 +259,7 @@ function preparePullSettleIteration(
     state.getSchedulingWritesMap(),
     state.actionParent,
     state.dependents,
+    (action) => state.materializerIndex.getMaterializerWriteEnvelopes(action),
   );
   logger.time(
     topologicalSortStart,
@@ -222,6 +272,13 @@ function preparePullSettleIteration(
     `Running ${order.length} actions (settle iteration ${settleIter})`,
   ]);
 
+  return order;
+}
+
+function clearPullEffectsBeforeRun(
+  state: SchedulerSettleLoopState,
+  order: readonly Action[],
+): void {
   // Implicit cycle detection for effects:
   // Clear dirty flags for all effects upfront. If an effect becomes dirty again
   // by the time we run it, something in the execution re-dirtied it -> cycle.
@@ -230,8 +287,6 @@ function preparePullSettleIteration(
       state.clearDirty(fn);
     }
   }
-
-  return { settled: false, workSet, order };
 }
 
 async function runPullSettleOrder(
@@ -255,6 +310,7 @@ async function runPullSettleAction(
   if (!isStillScheduled) return 0;
 
   if (!isPullSettleActionStillRunnable(state, fn)) return 0;
+  if (deferEffectForLateMaterializerDependency(state, fn)) return 0;
   if (skipPullDelayedSettleAction(state, fn)) return 0;
   if (skipUnchangedConditionalEffect(state, fn)) return 0;
 
@@ -311,6 +367,26 @@ function isPullSettleActionStillRunnable(
 
   // For computations: must be pending or dirty
   return isInPending || isInDirty;
+}
+
+function deferEffectForLateMaterializerDependency(
+  state: SchedulerSettleLoopState,
+  fn: Action,
+): boolean {
+  if (!state.effects.has(fn)) return false;
+
+  const dirtyDeps = new Set<Action>();
+  state.collectDirtyDependencies(fn, dirtyDeps, new Map());
+  const materializers = [...dirtyDeps].filter((dep) =>
+    state.materializerIndex.isMaterializer(dep) && state.dirty.has(dep)
+  );
+  if (materializers.length === 0) return false;
+
+  for (const materializer of materializers) {
+    state.pending.add(materializer);
+  }
+  state.pending.add(fn);
+  return true;
 }
 
 function skipPullDelayedSettleAction(
