@@ -131,3 +131,14 @@
   scheduler observation version when it starts consuming rehydration data.
 - Validation:
   - `deno test -A packages/memory/test/v2-scheduler-state-test.ts`
+  - `deno test -A packages/memory/test/v2-client-test.ts`
+
+## 2026-05-20 - Runner Storage Query Hook
+
+- Added `listSchedulerActionSnapshots()` to memory-v2-backed runner storage
+  providers, behind an optional storage-provider method.
+- Decision: keep this at the provider boundary for now. Scheduler rehydration
+  can ask the provider for persisted observations once action identity/process
+  graph resolution is available.
+- Validation:
+  - `deno test -A packages/runner/test/scheduler-observations.test.ts`
