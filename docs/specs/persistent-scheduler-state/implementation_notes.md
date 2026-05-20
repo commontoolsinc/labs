@@ -273,7 +273,10 @@
 - Also hardened the remote memory WebSocket transport so `close()` owns and can
   close a socket while it is still connecting. Previously, closing during the
   connection-opening window could leave a server-side WebSocket resource alive.
-- Shell integration now creates and closes a fresh page per test so page-owned
-  runtime resources do not survive Deno's per-test leak boundary.
+- Shell integration now explicitly disposes the page-owned runtime before
+  closing the suite-owned page. A brief per-test page cleanup attempt exposed
+  that several pattern integration tests intentionally keep one page across
+  ordered test steps, so the final fix preserves that existing contract.
 - Validation:
   - `HEADLESS=1 deno task integration shell`
+  - `HEADLESS=1 deno task integration patterns`
