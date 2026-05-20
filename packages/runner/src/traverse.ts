@@ -33,6 +33,7 @@ import {
   DEFAULT_SELECTOR,
   internPathSelector,
   internSchemaPairAsKey,
+  REJECTING_SELECTOR,
   schemaWithProperties,
 } from "@commonfabric/data-model/schema-utils";
 import type { CellScope, JSONObject, JSONSchema } from "./builder/types.ts";
@@ -1504,10 +1505,9 @@ export function loadMetaLinkedDoc(
   if (result.error) {
     return undefined;
   }
-  const selector = selectorForMetaLink(link);
   const docKey = getTrackerKey(address);
-  schemaTracker.add(docKey, selector);
-  return { address, value: result.ok.value, selector };
+  schemaTracker.add(docKey, REJECTING_SELECTOR);
+  return { address, value: result.ok.value, selector: REJECTING_SELECTOR };
 }
 
 function cfcMetaToSigilLink(obj: unknown): SigilLink | undefined {
@@ -1523,13 +1523,6 @@ function cfcMetaToSigilLink(obj: unknown): SigilLink | undefined {
 type MetaLinkedDoc = IMemorySpaceAttestation & {
   selector: SchemaPathSelector;
 };
-
-function selectorForMetaLink(link: NormalizedFullLink): SchemaPathSelector {
-  return internPathSelector({
-    path: ["value", ...link.path.map((part) => part.toString())],
-    schema: link.schema ?? false,
-  });
-}
 
 function traverseMetaLinkedDoc(
   tx: IExtendedStorageTransaction,

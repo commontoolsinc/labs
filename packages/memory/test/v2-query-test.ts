@@ -440,7 +440,7 @@ Deno.test("memory v2 query does not walk nested links inside inline opaque cells
   }
 });
 
-Deno.test("memory v2 query traverses metadata links using their link schema", async () => {
+Deno.test("memory v2 query includes metadata links without traversing their values", async () => {
   const { engine, path } = await createEngine();
   const space = "did:key:z6Mk-memory-v2-query-meta-link-schema";
   const rootPiece = "of:root-piece";
@@ -528,8 +528,6 @@ Deno.test("memory v2 query traverses metadata links using their link schema", as
 
     assertEquals(result.entities.map((entity) => entity.id), [
       argument,
-      childPiece,
-      childResult,
       rootPiece,
     ]);
   } finally {
