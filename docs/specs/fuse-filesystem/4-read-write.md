@@ -121,8 +121,12 @@ target path parsing rules and examples.
    handler writes elsewhere in FUSE.
 4. Deduplicate `flush`/`release` so one buffered write triggers one handler
    invocation.
-5. Return success after the write has been handed to the runtime, subject to
-   immediate local/CFC validation failures.
+5. Return success only after the runtime has accepted the invocation and the
+   configured sync/idle boundary has completed. Handler rejection, runtime
+   timeout, transport failure, or CFC denial is returned as a normal filesystem
+   error. Because handler invocations are non-idempotent, the filesystem must
+   not auto-retry a timed-out handler write unless a future idempotency-key
+   contract exists.
 
 Handlers remain writable so legacy flows like
 `echo '{"message":"hi"}' > result/addItem.handler` keep working.

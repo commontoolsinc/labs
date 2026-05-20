@@ -106,7 +106,14 @@ A `getattr` call should complete in <1ms (from in-memory tree).
 A `readdir` call should complete in <5ms.
 A `read` of a cached value should complete in <1ms.
 A `read` requiring a cell fetch should complete in <100ms.
-A `write` + `flush` should complete in <200ms (network round-trip).
+
+Commit-confirmed mutations have a different budget than cached reads and
+metadata. The package-local reliability design currently proposes a 30s soft
+deadline for cell content `write`/`flush`, because success now means local
+validation, CFC authorization, backend mutation or runtime acceptance, and safe
+projection invalidation/reconciliation. A future implementation may tune that
+deadline downward, but the old <200ms network-round-trip target is no longer the
+default correctness contract for mutating operations.
 
 If the Deno IPC round-trip adds too much latency for `getattr`/`readdir`,
 the Rust layer must be fully self-sufficient for these operations (serving
