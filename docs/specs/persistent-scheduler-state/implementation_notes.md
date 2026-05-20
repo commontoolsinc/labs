@@ -251,3 +251,14 @@
   fingerprint falls back to the normal first run.
 - Validation:
   - `HEADLESS=1 deno test -A packages/runner/test/scheduler-observations.test.ts`
+
+## 2026-05-20 - Memory Package Validation
+
+- Full repo `HEADLESS=1 deno task test` initially failed only in
+  `packages/memory`: the revision-schema bootstrap test still expected the
+  pre-scheduler table list.
+- Updated the test fixture to include the internal scheduler observation,
+  snapshot, read index, write index, and action state tables created by the
+  memory-v2 engine bootstrap.
+- Validation:
+  - `HEADLESS=1 deno task test` in `packages/memory`
