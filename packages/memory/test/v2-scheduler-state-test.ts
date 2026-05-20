@@ -92,6 +92,59 @@ Deno.test("memory v2 stores no-op scheduler observations without semantic commit
   }
 });
 
+Deno.test("memory v2 accepts observation-only commits without semantic revisions", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    const beforeHead = headSeq(engine);
+    const beforeCommits = engine.database.prepare(
+      `SELECT count(*) AS count FROM "commit"`,
+    ).get() as { count: number };
+
+    const commit = {
+      localSeq: 7,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservation: observation,
+    };
+    const result = applyCommit(engine, {
+      sessionId: "session:scheduler-observation",
+      commit,
+    });
+
+    assertEquals(result.seq, beforeHead);
+    assertEquals(result.revisions, []);
+    assertExists(result.schedulerObservationId);
+    assertEquals(headSeq(engine), beforeHead);
+    const afterCommits = engine.database.prepare(
+      `SELECT count(*) AS count FROM "commit"`,
+    ).get() as { count: number };
+    assertEquals(afterCommits.count, beforeCommits.count);
+
+    const snapshot = getLatestSchedulerActionSnapshot(engine, {
+      branch: "",
+      pieceId: "of:piece",
+      processGeneration: 1,
+      actionId: "pattern.tsx:computed:1",
+    });
+    assertEquals(snapshot?.observedAtSeq, beforeHead);
+    assertEquals(snapshot?.observation.observedAtSeq, beforeHead);
+
+    const replay = applyCommit(engine, {
+      sessionId: "session:scheduler-observation",
+      commit,
+    });
+    assertEquals(replay.schedulerObservationId, result.schedulerObservationId);
+    const observationRows = engine.database.prepare(
+      `SELECT count(*) AS count FROM scheduler_observation`,
+    ).get() as { count: number };
+    assertEquals(observationRows.count, 1);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 indexes scheduler readers and marks them dirty from writes", async () => {
   const { engine, path } = await createEngine();
 

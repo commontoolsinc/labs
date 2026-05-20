@@ -323,6 +323,14 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       reactivityLogFromActivities(this.tx.journal.activity());
   }
 
+  setSchedulerObservation(observation: unknown): void {
+    this.tx.setSchedulerObservation?.(observation);
+  }
+
+  getSchedulerObservation(): unknown {
+    return this.tx.getSchedulerObservation?.();
+  }
+
   getReadActivities(): Iterable<IReadActivity> {
     return getTransactionReadActivities(this.tx);
   }
@@ -786,6 +794,14 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
   getReactivityLog(): TransactionReactivityLog {
     return this.wrapped.getReactivityLog?.() ??
       reactivityLogFromActivities(this.wrapped.journal.activity());
+  }
+
+  setSchedulerObservation(observation: unknown): void {
+    this.wrapped.setSchedulerObservation?.(observation);
+  }
+
+  getSchedulerObservation(): unknown {
+    return this.wrapped.getSchedulerObservation?.();
   }
 
   getReadActivities(): Iterable<IReadActivity> {

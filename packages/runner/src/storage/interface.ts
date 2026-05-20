@@ -483,6 +483,14 @@ export interface IStorageTransaction {
   getReactivityLog?(): TransactionReactivityLog;
 
   /**
+   * Optional scheduler observation payload to persist alongside the native
+   * memory transaction. When there are no semantic writes, storage backends may
+   * still commit this metadata as an internal no-op observation.
+   */
+  setSchedulerObservation?(observation: unknown): void;
+  getSchedulerObservation?(): unknown;
+
+  /**
    * Optional raw read observations recorded by this transaction.
    *
    * V2 transactions can provide these directly instead of requiring callers to
@@ -1108,6 +1116,7 @@ export type NativeStorageCommitOperation =
 
 export interface NativeStorageCommit {
   operations: readonly NativeStorageCommitOperation[];
+  schedulerObservation?: unknown;
 }
 
 export interface ITransaction {

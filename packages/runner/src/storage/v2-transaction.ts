@@ -263,6 +263,14 @@ const collapseEmptyJsonDocumentEnvelope = (
 };
 
 const EMPTY_META = Object.freeze({});
+const SCHEDULER_OBSERVATION_ADDRESS_LISTS = [
+  "actualChangedWrites",
+  "currentKnownWrites",
+  "declaredWrites",
+  "materializerWriteEnvelopes",
+  "reads",
+  "shallowReads",
+] as const;
 
 type PathInspection =
   | {
@@ -330,6 +338,27 @@ const inspectPath = (
     kind: "ok",
     value: current as FabricValue | undefined,
   };
+};
+
+const schedulerObservationCommitSpace = (
+  observation: unknown,
+): MemorySpace | undefined => {
+  if (!isRecord(observation)) {
+    return undefined;
+  }
+
+  for (const key of SCHEDULER_OBSERVATION_ADDRESS_LISTS) {
+    const addresses = observation[key];
+    if (!Array.isArray(addresses)) {
+      continue;
+    }
+    for (const address of addresses) {
+      if (!isRecord(address) || typeof address.space !== "string") {
+        continue;
+      }
+      return address.space as MemorySpace;
+    }
+  }
 };
 
 const isContainerValue = (
@@ -928,6 +957,7 @@ export class V2StorageTransaction implements IStorageTransaction {
   #branches = new Map<MemorySpace, SpaceBranch>();
   #readActivities: IReadActivity[] = [];
   #reactivityLogCache?: TransactionReactivityLog;
+  #schedulerObservation?: unknown;
   #writeSpace?: MemorySpace;
   #readOnlySource?: string;
   #lastDocument?: {
@@ -982,14 +1012,30 @@ export class V2StorageTransaction implements IStorageTransaction {
     return this.#reactivityLogCache;
   }
 
+  setSchedulerObservation(observation: unknown): void {
+    this.assertWritable("setSchedulerObservation()");
+    const ready = this.editable();
+    if (ready.error) {
+      throw ready.error;
+    }
+    this.#schedulerObservation = observation;
+  }
+
+  getSchedulerObservation(): unknown {
+    return this.#schedulerObservation;
+  }
+
   getNativeCommit(space: MemorySpace): NativeStorageCommit | undefined {
     const branch = this.#branches.get(space);
-    if (!branch) {
+    const schedulerObservation = this.schedulerObservationForNativeCommit(
+      space,
+    );
+    if (!branch && schedulerObservation === undefined) {
       return undefined;
     }
 
     const operations: NativeStorageCommitOperation[] = [];
-    for (const [key, doc] of branch.docs.entries()) {
+    for (const [key, doc] of branch?.docs.entries() ?? []) {
       if (!isWritableDocument(doc)) {
         continue;
       }
@@ -1014,7 +1060,10 @@ export class V2StorageTransaction implements IStorageTransaction {
       );
     }
 
-    return { operations };
+    return {
+      operations,
+      ...(schedulerObservation !== undefined ? { schedulerObservation } : {}),
+    };
   }
 
   *getWriteDetails(space: MemorySpace): Iterable<TransactionWriteDetail> {
@@ -1625,7 +1674,8 @@ export class V2StorageTransaction implements IStorageTransaction {
       return { error: ready.error };
     }
 
-    const writeSpace = this.#writeSpace;
+    const writeSpace = this.#writeSpace ??
+      schedulerObservationCommitSpace(this.#schedulerObservation);
     if (!writeSpace) {
       const result = { ok: {} } satisfies Result<Unit, CommitError>;
       this.#state = { status: "done", result };
@@ -1637,7 +1687,8 @@ export class V2StorageTransaction implements IStorageTransaction {
       () => this.getNativeCommit(writeSpace),
     );
     const operations = native?.operations ?? [];
-    if (operations.length === 0) {
+    const hasSchedulerObservation = native?.schedulerObservation !== undefined;
+    if (operations.length === 0 && !hasSchedulerObservation) {
       const result = { ok: {} } satisfies Result<Unit, CommitError>;
       this.#state = { status: "done", result };
       return result;
@@ -1684,6 +1735,24 @@ export class V2StorageTransaction implements IStorageTransaction {
       this.#state = { status: "done", result };
       return result;
     }
+  }
+
+  private schedulerObservationForNativeCommit(
+    space: MemorySpace,
+  ): unknown | undefined {
+    if (this.#schedulerObservation === undefined) {
+      return undefined;
+    }
+    if (this.#writeSpace === space) {
+      return this.#schedulerObservation;
+    }
+    if (
+      this.#writeSpace === undefined &&
+      schedulerObservationCommitSpace(this.#schedulerObservation) === space
+    ) {
+      return this.#schedulerObservation;
+    }
+    return undefined;
   }
 
   private editable(): Result<Unit, InactiveTransactionError> {

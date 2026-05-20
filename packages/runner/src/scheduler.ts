@@ -1948,6 +1948,11 @@ export class Scheduler {
         getSchedulerActionTelemetryInfo(target),
       getSchedulingWrites: (target) =>
         this.writeIndex.getSchedulingWrites(target),
+      getMaterializerWriteEnvelopes: (target) =>
+        this.materializers.getMaterializerWriteEnvelopes(target),
+      getDebounce: (target) => this.delays.getDebounce(target),
+      getNoDebounce: (target) => this.delays.getNoDebounce(target),
+      getThrottle: (target) => this.delays.getThrottle(target),
       maybeAutoDebounce: (target) => this.maybeAutoDebounce(target),
       markActionHasRun: (target) => this.delays.markActionHasRun(target),
       handleError: (error, target) => this.handleError(error, target),
