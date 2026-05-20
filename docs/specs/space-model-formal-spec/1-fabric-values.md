@@ -291,6 +291,9 @@ Each wrapper class above:
   pattern) that returns an instance of the wrapper class — **not** the raw
   native type. Callers who need the underlying native object use
   `nativeFromFabricValue()` (Section 8) to unwrap it.
+- **Has `[DEEP_FREEZE]` and `[IS_DEEP_FROZEN]` methods plus a `deepClone(frozen)`
+  method** per the `FabricInstance` protocol (Section 2.3); the deep-freeze
+  pair participates in the generic `deepFreeze()` dispatch (Section 8.6).
 - **Carries a `typeTag` property** (e.g., `"Error@1"`) used by the
   serialization context for tag resolution, following the pattern established
   by `UnknownValue` and `ProblematicValue`.
@@ -984,6 +987,24 @@ export const DECONSTRUCT = Symbol.for('common.deconstruct');
  */
 export const RECONSTRUCT = Symbol.for('common.reconstruct');
 
+/**
+ * Well-known symbol for deeply freezing a fabric instance in place. The
+ * implementation freezes the instance's own internal slot(s) and recurses
+ * into any nested `FabricValue`s via a `subFreeze` callback supplied by the
+ * generic `deepFreeze()` utility. See Section 8.6.
+ */
+export const DEEP_FREEZE = Symbol.for('common.deepFreeze');
+
+/**
+ * Well-known symbol for checking whether a fabric instance is already
+ * deeply frozen, without mutating it. The side-effect-free sibling of
+ * `[DEEP_FREEZE]`: verifies the instance's own internal slot(s) are in
+ * canonical deep-frozen form and recurses into any nested `FabricValue`s
+ * via a `subIsDeepFrozen` callback, returning the boolean conjunction.
+ * See Section 8.6.
+ */
+export const IS_DEEP_FROZEN = Symbol.for('common.isDeepFrozen');
+
 // Protocol evolution: Symbol.for('common.deconstruct@2'), etc.
 ```
 
@@ -999,7 +1020,15 @@ export const RECONSTRUCT = Symbol.for('common.reconstruct');
  *
  * Subclasses must implement:
  * - `[DECONSTRUCT]()` -- returns essential state for serialization.
+ * - `[DEEP_FREEZE](subFreeze)` -- deeply freezes this instance in place.
+ * - `[IS_DEEP_FROZEN](subIsDeepFrozen)` -- side-effect-free deep-frozen
+ *   check, mirroring `[DEEP_FREEZE]`.
+ * - `deepClone(frozen)` -- returns a new deep clone with the requested
+ *   frozenness.
  * - `shallowUnfrozenClone()` -- returns a new unfrozen copy of this instance.
+ *
+ * Subclasses must also define a static `[RECONSTRUCT]()` (the class-protocol
+ * member; see Section 2.4).
  *
  * `shallowClone(frozen)` is an effectively-final method that manages the
  * frozenness contract:
@@ -1027,6 +1056,42 @@ export abstract class FabricInstance extends FabricSpecialObject {
    * the serialization system handles that.
    */
   abstract [DECONSTRUCT](): FabricValue;
+
+  /**
+   * Deeply freezes this instance in place: freezes this instance's own
+   * internal slot(s) and recurses into each nested `FabricValue` by calling
+   * the provided `subFreeze` callback on it. Implementations must NOT call
+   * `deepFreeze()` directly -- recursion is handed through the callback so
+   * that the freeze utility's caching and cycle-detection bookkeeping is
+   * preserved and no import cycle is introduced. Returns the (now
+   * deeply-frozen) value; freeze-in-place implementations return `this`.
+   * See Section 8.6.
+   */
+  abstract [DEEP_FREEZE](
+    subFreeze: (value: FabricValue) => FabricValue,
+  ): FabricValue;
+
+  /**
+   * Indicates whether this instance is already deeply frozen, without
+   * mutating it. Checks this instance's own internal slot(s) are in
+   * canonical deep-frozen form and recurses into each nested `FabricValue`
+   * via the provided `subIsDeepFrozen` callback, returning the boolean
+   * conjunction. Side-effect-free and must not throw: an instance that is
+   * not in canonical deep-frozen form returns `false`. See Section 8.6.
+   */
+  abstract [IS_DEEP_FROZEN](
+    subIsDeepFrozen: (value: FabricValue) => boolean,
+  ): boolean;
+
+  /**
+   * Returns a new deep clone of this instance with equivalent data but no
+   * shared structure for any unfrozen data in the original. When `frozen`
+   * is `true`, produces a frozen instance with maximal structural sharing,
+   * including returning `this` if it is already deep-frozen. When `frozen`
+   * is `false`, produces a deeply-mutable instance with no visible shared
+   * reference structure with the original.
+   */
+  abstract deepClone(frozen: boolean): FabricInstance;
 
   /**
    * Returns a new unfrozen copy of this instance with the same data. Called
@@ -1112,6 +1177,21 @@ export interface ReconstructionContext {
    * that need to intern or look up existing instances.
    */
   getCell(ref: { id: string; path: string[]; space: string }): FabricInstance;
+
+  /**
+   * Output-contract directive: when `true`, every `[RECONSTRUCT]`
+   * implementation that consults this context must produce a deep-frozen
+   * result; when `false`, a mutable result is acceptable. Same contract as
+   * the `frozen` argument to `cloneIfNecessary()` (see
+   * `packages/data-model/value-clone.ts`): `shouldDeepFreeze === true`
+   * corresponds to `cloneIfNecessary(value, { frozen: true })`.
+   *
+   * Required (not optional): every context declares it. A shared
+   * `BaseReconstructionContext` (`packages/data-model/base-reconstruction-context.ts`)
+   * centralizes the getter with a `true` default, mirroring
+   * `cloneIfNecessary()`'s default; contexts opt out by overriding.
+   */
+  readonly shouldDeepFreeze: boolean;
 }
 ```
 
@@ -1122,7 +1202,7 @@ export interface ReconstructionContext {
 > `ReconstructionContext` interface captures the minimal surface needed for
 > reconstruction. The `Runtime` class satisfies this interface. Future
 > fabric types may extend `ReconstructionContext` if they need additional
-> capabilities beyond `getCell`.
+> capabilities beyond `getCell` and `shouldDeepFreeze`.
 
 ### 2.6 Brand Detection
 
@@ -1168,6 +1248,10 @@ import {
 type TemperatureUnit = "C" | "F" | "K";
 
 class Temperature extends FabricInstance {
+  // (deepFreeze protocol members
+  //  omitted for brevity; see §2.3
+  //  and §8 for the full pattern.)
+
   constructor(
     readonly value: number,
     readonly unit: TemperatureUnit,
@@ -1446,8 +1530,24 @@ implementation — it is not part of the public boundary interface.
  * JSON-compatible wire format value. This is the intermediate tree
  * representation used during serialization tree walking -- NOT the final
  * serialized form (which is `string`). Internal to the JSON implementation.
+ *
+ * Deep-frozen invariant on the deserialize side: every wire tree that
+ * enters `deserialize()` is deep-frozen, enforced at the two construction
+ * sites that feed it (`decode()` and `fromBytes()`, unified in
+ * `#parseWireText()`). This is what lets the tag-unwrap and `/quote` arms
+ * hand back extracted sub-trees directly without further copying. The
+ * serialize-side wire trees are transient (`JSON.stringify`-ed and
+ * discarded) and are not covered by this invariant. The `readonly` on the
+ * array arm of the union expresses the deserialize-side contract at the
+ * type level. See Section 8.6.
  */
-type JsonWireValue = null | boolean | number | string | JsonWireValue[] | { [key: string]: JsonWireValue };
+type JsonWireValue =
+  | null
+  | boolean
+  | number
+  | string
+  | readonly JsonWireValue[]
+  | { [key: string]: JsonWireValue };
 ```
 
 ### 4.3 Public Boundary Interface
@@ -1621,8 +1721,8 @@ The context's private `deserialize()` method walks the `JsonWireValue` tree:
    boundary (the contract holds for both the handler-produced value and the
    lenient-mode `ProblematicValue`), so callers need not each freeze. This
    contract is scoped to this arm only; the class-registry fallback (step 4)
-   is intentionally not covered. (A more complete spec treatment of egress
-   freezing is deferred.)
+   is intentionally not covered. See Section 8.6 for the full deep-freeze
+   protocol and the egress-freezing call sites.
 4. **Class registry fallback** — for tags not handled by type handlers (e.g.,
    `Error@1`, `Map@1`, `Set@1`, `RegExp@1`), the context looks up
    the `FabricClass` in its class registry, recursively deserializes the
@@ -2310,14 +2410,16 @@ caller state.)
 
 **`deepFreeze` at schema merge/combine sites.** The `deepFreeze()` utility
 (in `packages/data-model/deep-freeze.ts`) recursively freezes an object tree in
-place. At sites where schema objects are merged or combined (e.g., schema
-`merge()` and `combine()` functions), pass-through paths — where the input is
-returned as the result without structural modification — must copy the value
-before freezing to avoid mutating caller-owned schema objects. The general
-principle: `deepFreeze()` freezes in place, so if the caller retains a
-reference to a mutable object, the function must not freeze that object as a
-side effect. Callers at these sites should copy before freezing rather than
-relying on the input being "safe to freeze."
+place; see Section 8.6 for its full protocol, dispatch shape, and the
+boundary-crossing egress contracts. At sites where schema objects are
+merged or combined (e.g., schema `merge()` and `combine()` functions),
+pass-through paths — where the input is returned as the result without
+structural modification — must copy the value before freezing to avoid
+mutating caller-owned schema objects. The general principle: `deepFreeze()`
+freezes in place, so if the caller retains a reference to a mutable
+object, the function must not freeze that object as a side effect. Callers
+at these sites should copy before freezing rather than relying on the
+input being "safe to freeze."
 
 **Always-frozen types bypass the `freeze` option.** JS primitives (`null`,
 `boolean`, `number`, `string`, `undefined`, `bigint`) are inherently immutable
@@ -2565,6 +2667,124 @@ fabricFromNativeValue(nativeFromFabricValue(sv))
 ```
 
 produces a `FabricValue` that is structurally equivalent to `sv`.
+
+### 8.6 Deep-Freeze Protocol and Egress Contracts
+
+`FabricValue` trees produced by reconstruction at boundary-crossings are
+deep-frozen by default. This is enforced via a small protocol on
+`FabricInstance` together with a generic top-level utility that dispatches
+across the four kinds of values that can appear in a `FabricValue` tree.
+
+#### Protocol members on `FabricInstance`
+
+Every `FabricInstance` subclass implements three protocol members beyond
+the `[DECONSTRUCT]` / `[RECONSTRUCT]` pair (Section 2.3):
+
+- **`[DEEP_FREEZE](subFreeze)`** — Deeply freezes this instance in place
+  and returns it. The implementation freezes the instance's own internal
+  slot(s) and calls the provided `subFreeze` callback on each nested
+  `FabricValue`. Implementations must NOT call `deepFreeze()` directly:
+  recursion is handed through the callback so that the freeze utility's
+  caching and cycle-detection bookkeeping is preserved and no import cycle
+  is introduced.
+
+- **`[IS_DEEP_FROZEN](subIsDeepFrozen)`** — Side-effect-free sibling of
+  `[DEEP_FREEZE]`: returns `true` if this instance's own internal slot(s)
+  are in canonical deep-frozen form and every nested `FabricValue`
+  (visited via the `subIsDeepFrozen` callback) is also deep-frozen.
+  An instance that is not in canonical deep-frozen form returns `false`;
+  the check must not throw.
+
+- **`deepClone(frozen)`** — Returns a new deep clone of this instance with
+  equivalent data but no shared structure for any unfrozen data in the
+  original. When `frozen === true`, produces a frozen instance with
+  maximal structural sharing (including returning `this` if already
+  deep-frozen). When `frozen === false`, produces a deeply-mutable
+  instance with no visible shared reference structure with the original.
+
+The `subFreeze` / `subIsDeepFrozen` callbacks (rather than direct utility
+imports) keep the protocol layering clean and let the outer utility thread
+its shared cycle-detection state through implementations transparently.
+
+#### `deepFreeze()` and the 4-arm dispatch
+
+The generic top-level utility (`packages/data-model/deep-freeze.ts`)
+recursively freezes a `FabricValue` in place. It dispatches on four arms
+in order:
+
+1. **Necessarily- or already-known-deep-frozen value** — primitives
+   (`null` and `typeof !== "object"`) and objects already recorded in the
+   internal deep-frozen cache. Short-circuits unchanged.
+
+2. **`FabricPrimitive` instance** — `FabricPrimitive` subclasses
+   (`FabricEpochNsec`, `FabricEpochDays`, `FabricHash`, `FabricBytes`;
+   Section 1.4.6) self-freeze at construction and have no outbound
+   references. Short-circuits unchanged.
+
+3. **`FabricInstance`** — Delegates to the instance's `[DEEP_FREEZE]`
+   member with a `subFreeze` callback that recurses back through the same
+   utility, threading the shared cycle-detection state. The dispatch
+   gates on `instanceof` against the abstract base; it does not enumerate
+   concrete subclasses. The (now deep-frozen) result is recorded in the
+   deep-frozen cache so subsequent `isDeepFrozen()` checks short-circuit
+   in O(1).
+
+4. **Plain object or array** — Recurses into children, then freezes the
+   container with `Object.freeze()`. Arrays preserve sparse holes. The
+   container is recorded in the deep-frozen cache.
+
+A shared `inProgress` set, threaded through all recursive calls (including
+into participating `FabricInstance`s' `[DEEP_FREEZE]` impls via the
+`subFreeze` callback closure), makes the utility cycle-safe: a cycle back
+to a value the outer call is already deep-freezing short-circuits rather
+than recursing.
+
+#### `isDeepFrozenFabricValue()` and the 4-arm type guard
+
+The type guard (`isDeepFrozenFabricValue`) is the side-effect-free sibling
+of `deepFreeze()`. It mirrors the same arm shape:
+
+1. Primitives are accepted directly.
+2. `FabricPrimitive` instances are accepted directly.
+3. `FabricInstance` instances delegate to their `[IS_DEEP_FROZEN]` member
+   with a `subIsDeepFrozen` callback that recurses back through the same
+   guard.
+4. Plain objects and arrays must be `Object.isFrozen` and have every
+   child accepted by the guard.
+
+Visited objects are tracked in a per-call `Set` for cycle safety.
+
+#### Egress-freezing call sites
+
+The deep-freeze contract is enforced at the points where reconstructed
+values cross from internal serialization machinery to callers:
+
+- **`JsonEncodingContext.deserialize()` — type handler dispatch arm.**
+  Every value returned from this arm passes through `deepFreeze()` before
+  returning. This covers the handler-produced value (typically a
+  `FabricPrimitive` subclass, already frozen — the cache hit makes this
+  O(1)) and the lenient-mode `ProblematicValue` fallback. The
+  class-registry fallback arm is a separate sibling branch and is
+  intentionally NOT covered by this contract — that path is reached only
+  when no handler exists, and broadening the contract there is a separate
+  follow-on. See Section 4.5 step 3.
+
+- **`JsonWireValue` parse boundary.** The `#parseWireText()` helper
+  (invoked by `decode()` and `fromBytes()`) deep-freezes the parsed wire
+  tree before handing it to `deserialize()`. This is what makes the
+  deserialize-side `JsonWireValue` invariant load-bearing: tag-unwrap and
+  the `/quote` arm can hand back extracted sub-trees directly without
+  further copying because the input tree is already deep-frozen.
+
+- **`[RECONSTRUCT]` implementations honoring `shouldDeepFreeze`.** When a
+  reconstruction call's `ReconstructionContext.shouldDeepFreeze` is
+  `true` (Section 2.5; the safe default), each `[RECONSTRUCT]`
+  implementation produces a deep-frozen result. The class-registry
+  fallback call site does not separately wrap with `deepFreeze()`: the
+  per-implementation honoring is sufficient for correctness because each
+  impl freezes its own output when asked.
+
+- **`deepFreeze()` at schema merge/combine sites.** See Section 8.2.
 
 ---
 
