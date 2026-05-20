@@ -253,6 +253,25 @@ Deno.test("constructor classification ignores non-Common-Fabric ambient classes"
   assertEquals(detectNewExpressionKind(expression, checker), undefined);
 });
 
+Deno.test("constructor classification follows local Common-Fabric constructor aliases", () => {
+  const { sourceFile, checker } = createProgram(`
+    import { Writable } from "commonfabric";
+
+    const LocalWritable = Writable;
+    const value = new LocalWritable("aliased");
+  `);
+
+  const expression = findInitializer(sourceFile, "value");
+  if (!ts.isNewExpression(expression)) {
+    throw new Error("Expected new expression initializer");
+  }
+
+  assertEquals(detectNewExpressionKind(expression, checker), {
+    kind: "cell-factory",
+    factoryName: "Writable",
+  });
+});
+
 Deno.test("classifyArrayCallbackContainerCall recognizes plain value-returning non-map array callbacks", () => {
   const { sourceFile, checker } = createProgram(`
     interface Array<T> {
