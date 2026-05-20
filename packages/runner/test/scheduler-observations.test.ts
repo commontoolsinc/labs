@@ -1,4 +1,10 @@
-import { describe, expect, it } from "./scheduler-test-utils.ts";
+import {
+  createSchedulerTestRuntime,
+  describe,
+  disposeSchedulerTestRuntime,
+  expect,
+  it,
+} from "./scheduler-test-utils.ts";
 import type { TransactionReactivityLog } from "../src/storage/interface.ts";
 import {
   buildSchedulerActionObservation,
@@ -89,5 +95,97 @@ describe("persistent scheduler observations", () => {
       } satisfies Partial<SchedulerActionObservation>,
     );
     expect("attemptedWrites" in observation).toBe(false);
+  });
+
+  it("rehydrates clean scheduler observations without rerun pressure", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {
+      pullMode: "enabled",
+    });
+    try {
+      function persistedAction() {}
+      testRuntime.runtime.scheduler.subscribe(persistedAction, {
+        reads: [],
+        shallowReads: [],
+        writes: [],
+      });
+      expect(testRuntime.runtime.scheduler.isDirty(persistedAction)).toBe(true);
+
+      const rehydrated = testRuntime.runtime.scheduler
+        .rehydrateActionFromObservation(persistedAction, {
+          observation: buildSchedulerActionObservation({
+            actionId: "persistedAction",
+            actionKind: "computation",
+            branch: "",
+            pieceId: "of:piece",
+            processGeneration: 1,
+            implementationFingerprint: "impl:v1",
+            runtimeFingerprint: "runtime:test",
+            observedAtSeq: 5,
+            transactionKind: "action-run",
+            transactionLog: {
+              reads: [readAddress],
+              shallowReads: [],
+              writes: [],
+            },
+            currentKnownWrites: [writeAddress],
+          }),
+        });
+
+      expect(rehydrated).toBe(true);
+      expect(testRuntime.runtime.scheduler.isDirty(persistedAction)).toBe(
+        false,
+      );
+      expect(testRuntime.runtime.scheduler.getStats().pending).toBe(0);
+      expect(testRuntime.runtime.scheduler.getMightWrite(persistedAction))
+        .toEqual(
+          [writeAddress],
+        );
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
+  it("rehydrates dirty scheduler observations as runnable work", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {
+      pullMode: "enabled",
+    });
+    try {
+      function dirtyPersistedAction() {}
+      testRuntime.runtime.scheduler.subscribe(dirtyPersistedAction, {
+        reads: [],
+        shallowReads: [],
+        writes: [],
+      });
+
+      const rehydrated = testRuntime.runtime.scheduler
+        .rehydrateActionFromObservation(dirtyPersistedAction, {
+          directDirtySeq: 7,
+          observation: buildSchedulerActionObservation({
+            actionId: "dirtyPersistedAction",
+            actionKind: "computation",
+            branch: "",
+            pieceId: "of:piece",
+            processGeneration: 1,
+            implementationFingerprint: "impl:v1",
+            runtimeFingerprint: "runtime:test",
+            observedAtSeq: 5,
+            transactionKind: "action-run",
+            transactionLog: {
+              reads: [readAddress],
+              shallowReads: [],
+              writes: [],
+            },
+            currentKnownWrites: [writeAddress],
+          }),
+        });
+
+      expect(rehydrated).toBe(true);
+      expect(testRuntime.runtime.scheduler.isDirty(dirtyPersistedAction)).toBe(
+        true,
+      );
+      expect(testRuntime.runtime.scheduler.getStats().pending).toBe(1);
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
   });
 });

@@ -43,6 +43,13 @@ export interface SchedulerActionObservation {
   errorFingerprint?: string;
 }
 
+export interface PersistedSchedulerObservationSnapshot {
+  observation: SchedulerActionObservation;
+  directDirtySeq?: number;
+  staleSeq?: number;
+  unknownReason?: string;
+}
+
 export interface BuildSchedulerActionObservationOptions {
   branch: string;
   pieceId: string;
