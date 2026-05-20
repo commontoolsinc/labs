@@ -618,6 +618,8 @@ function recursiveStripAsCellFromSchema(
     }
   }
 
+  removeStrippedStreamPropertiesFromRequired(schema, result, context);
+
   // Check if this schema was marked as circular while processing
   const existingRef = context.seen.get(schema);
   if (existingRef && existingRef.$ref) {
@@ -631,6 +633,49 @@ function recursiveStripAsCellFromSchema(
   context.seen.set(schema, result);
 
   return result;
+}
+
+function schemaLosesStreamCellMarker(
+  schema: unknown,
+  context: SanitizeContext,
+): boolean {
+  if (context.options.keepAsCell || !isRecord(schema)) return false;
+
+  const asCellValues = ContextualFlowControl.getAsCellValues(schema);
+  const hasStreamMarker = asCellValues.some((entry) =>
+    ContextualFlowControl.getAsCellKind(entry) === "stream"
+  );
+  if (!hasStreamMarker) return false;
+
+  return !(
+    context.options.keepStreams &&
+    ContextualFlowControl.getAsCellKind(asCellValues.at(0)) === "stream"
+  );
+}
+
+function removeStrippedStreamPropertiesFromRequired(
+  originalSchema: unknown,
+  result: unknown,
+  context: SanitizeContext,
+): void {
+  if (!isRecord(originalSchema) || !isRecord(result)) return;
+  const properties = originalSchema.properties;
+  if (!isRecord(properties)) return;
+  if (!Array.isArray(result.required)) return;
+
+  const required = result.required.filter((property) =>
+    typeof property !== "string" ||
+    !schemaLosesStreamCellMarker(
+      properties[property],
+      context,
+    )
+  );
+
+  if (required.length === 0) {
+    delete result.required;
+  } else {
+    result.required = required;
+  }
 }
 
 /** Get or create a cell using the resultCell as the cause. */
