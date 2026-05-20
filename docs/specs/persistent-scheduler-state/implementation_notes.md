@@ -196,3 +196,18 @@
   successful action can become clean.
 - Documented the current cross-space mirror strategy and the explicit runner
   rehydration primitives.
+
+## 2026-05-20 - Runner Package Validation Follow-up
+
+- `HEADLESS=1 deno task test` in `packages/runner` exposed an uncaught
+  `StorageTransactionAborted` rejection in `scheduler-retries.test.ts`.
+- Decision: attaching a scheduler observation must not change the behavior of a
+  transaction that the action already intentionally aborted. Observation
+  attachment now skips inactive/aborted transaction targets and lets the
+  existing retry path consume the commit result.
+- Spec adjustment: softened the "not user-visible" language. Memory and runner
+  are part of one runtime stack, so explicit scheduler-facing memory APIs are
+  acceptable; the boundary is ordinary user data snapshots and semantic
+  revisions, not hiding scheduler concepts from runner-owned memory calls.
+- Validation:
+  - `HEADLESS=1 deno test -A packages/runner/test/scheduler-retries.test.ts`
