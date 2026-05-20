@@ -1,6 +1,6 @@
 import { type Cell, isCell } from "./cell.ts";
 import type { MemorySpace } from "./storage/interface.ts";
-import type { Pattern } from "./builder/types.ts";
+import type { JSONSchema, Pattern } from "./builder/types.ts";
 import type { Runtime } from "./runtime.ts";
 import type { RuntimeProgram } from "./harness/types.ts";
 import type { PatternMeta } from "./pattern-manager.ts";
@@ -69,6 +69,20 @@ export function cellEntityIdString(cell: Cell<unknown>): string | undefined {
   if (!id) return undefined;
   const idValue = id["/"];
   return typeof idValue === "string" ? idValue : undefined;
+}
+
+export function getResultCellWithSourceSchema<T = unknown>(
+  cell: Cell<T>,
+): Cell<T> {
+  const link = cell.getAsNormalizedFullLink();
+  if (link.schema === undefined) {
+    const resultSchema = cell.getMetaRaw("schema") as JSONSchema | undefined;
+    if (resultSchema !== undefined) {
+      const schema = cell.runtime.cfc.schemaAtPath(resultSchema, link.path);
+      return cell.asSchema<T>(schema);
+    }
+  }
+  return cell;
 }
 
 export async function compileAndSavePattern(

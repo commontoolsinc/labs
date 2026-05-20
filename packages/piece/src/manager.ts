@@ -28,6 +28,7 @@ import {
   nameSchema,
   pieceListSchema,
 } from "@commonfabric/runner/schemas";
+import { getResultCellWithSourceSchema } from "../../runner/src/piece-helpers.ts";
 ensureNotRenderThread();
 
 const PRIVILEGED_PIECE_LIST_SCHEMA = internSchema({
@@ -325,8 +326,8 @@ export class PieceManager {
       return piece.asSchema<T>(asSchema);
     }
 
-    // Otherwise, just return the piece as the result cell.
-    return piece as Cell<T>;
+    // Otherwise, recover the result schema from the cell's metadata if present.
+    return getResultCellWithSourceSchema(piece as Cell<T>);
   }
 
   /**

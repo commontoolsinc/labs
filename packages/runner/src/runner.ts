@@ -585,6 +585,21 @@ export class Runner {
     );
   }
 
+  private updateResultSchemaMeta<R>(
+    tx: IExtendedStorageTransaction,
+    resultCell: Cell<R>,
+    resultSchema: JSONSchema | undefined,
+  ): void {
+    if (resultSchema === undefined) return;
+    const cell = resultCell.withTx(tx);
+    const previous = cell.getMetaRaw("schema", {
+      meta: ignoreReadForScheduling,
+    });
+    if (!deepEqual(previous, resultSchema)) {
+      cell.setMetaRaw("schema", resultSchema as FabricValue);
+    }
+  }
+
   private maybeReuseRunningSetup<T, R>(
     tx: IExtendedStorageTransaction,
     resultCell: Cell<R>,
@@ -804,6 +819,8 @@ export class Runner {
         },
       ) as T;
     }
+
+    this.updateResultSchemaMeta(tx, resultCell, pattern.resultSchema);
 
     const runningSetup = this.maybeReuseRunningSetup(
       tx,
