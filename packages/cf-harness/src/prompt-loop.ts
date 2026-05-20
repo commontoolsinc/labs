@@ -85,6 +85,7 @@ import {
   cwdMarkerForOutput,
   extractFinalWorkingDirectory,
 } from "./tools/shell-cwd.ts";
+import { isEditFileToolSuccessOutput } from "./tools/edit-file.ts";
 import { isReadFileToolSuccessOutput } from "./tools/read-file.ts";
 import { isStructuredFileToolErrorOutput } from "./tools/file-errors.ts";
 import { isViewImageToolSuccessOutput } from "./tools/view-image.ts";
@@ -922,6 +923,13 @@ const REDACTED_READ_FILE_ERROR_DETAIL =
   "Filesystem status details were redacted by CFC policy.";
 const READ_FILE_STATUS_OBSERVATION_DETAIL =
   "read_file failure may reveal filesystem path/status observations";
+const REDACTED_EDIT_FILE_ERROR_PATH = "[redacted]";
+const REDACTED_EDIT_FILE_ERROR_MESSAGE =
+  "edit_file failed: edit status not observable under CFC policy";
+const REDACTED_EDIT_FILE_ERROR_DETAIL =
+  "Edit failure details were redacted by CFC policy.";
+const EDIT_FILE_STATUS_OBSERVATION_DETAIL =
+  "edit_file failure may reveal file content, digest, path, or status observations";
 
 interface InvokedToolCallMessages {
   toolMessage: HarnessToolTranscriptMessage;
@@ -968,7 +976,8 @@ const toolOutputNeedsSandboxMediation = (
   output: unknown,
 ): boolean =>
   toolId === "bash" ||
-  (toolId === "read_file" && isReadFileToolSuccessOutput(output));
+  (toolId === "read_file" && isReadFileToolSuccessOutput(output)) ||
+  (toolId === "edit_file" && isEditFileToolSuccessOutput(output));
 
 const isReadFileStatusObservationError = (output: unknown): boolean =>
   isStructuredFileToolErrorOutput(output) &&
@@ -1000,6 +1009,30 @@ const redactReadFileStatusObservationError = (
       message: REDACTED_READ_FILE_ERROR_MESSAGE,
       path: REDACTED_READ_FILE_ERROR_PATH,
       detail: REDACTED_READ_FILE_ERROR_DETAIL,
+    },
+  };
+};
+
+const redactEditFileStatusObservationError = (
+  output: unknown,
+  resultRef: ToolResultRef,
+): unknown => {
+  if (!isStructuredFileToolErrorOutput(output)) {
+    return output;
+  }
+  const outputId = typeof output.outputId === "string"
+    ? output.outputId
+    : resultRef.outputId;
+  return {
+    outputId,
+    path: REDACTED_EDIT_FILE_ERROR_PATH,
+    ok: false,
+    error: {
+      type: "cf-harness.structured-file-tool-error",
+      code: "unknown",
+      message: REDACTED_EDIT_FILE_ERROR_MESSAGE,
+      path: REDACTED_EDIT_FILE_ERROR_PATH,
+      detail: REDACTED_EDIT_FILE_ERROR_DETAIL,
     },
   };
 };
@@ -1367,6 +1400,34 @@ const renderMediatedReadFileOutput = (
           contentOriginalLength: content.originalLength,
         }
         : {}),
+    },
+    ...(observation !== undefined
+      ? { cfcModelContextObservations: [observation] }
+      : {}),
+  };
+};
+
+const renderMediatedEditFileOutput = (
+  output: Record<string, unknown>,
+  cfcResult: CfcSandboxResult,
+  resultRef: ToolResultRef,
+  toolCallId: string,
+): ModelFacingToolOutputResult => {
+  const renderedDiff = renderStreamObservation(cfcResult.stdout, resultRef);
+  const observation = modelContextObservationForStream(
+    cfcResult.stdout,
+    resultRef,
+    toolCallId,
+  );
+  const publicOutput = stripInternalCfcFields(output) as Record<
+    string,
+    unknown
+  >;
+  return {
+    output: {
+      ...publicOutput,
+      diff: renderedDiff,
+      cfc: summarizeCfcSandboxResult(cfcResult),
     },
     ...(observation !== undefined
       ? { cfcModelContextObservations: [observation] }
@@ -2238,6 +2299,38 @@ export class CfHarnessPromptLoop {
         output: redactReadFileStatusObservationError(output, resultRef),
       };
     }
+    if (toolId === "edit_file" && isStructuredFileToolErrorOutput(output)) {
+      if (mode === "disabled") {
+        return { output: stripInternalCfcFields(output) };
+      }
+      if (mode === "observe") {
+        await writePolicyEvent({
+          severity: "warning",
+          mode,
+          toolId,
+          toolCallId,
+          detail:
+            `${EDIT_FILE_STATUS_OBSERVATION_DETAIL}; raw error was exposed because CFC is in observe mode`,
+        });
+        return { output: stripInternalCfcFields(output) };
+      }
+      const denial = makeObservationDenied("not-observable", {
+        detail: EDIT_FILE_STATUS_OBSERVATION_DETAIL,
+        handle: createOutputHandle(resultRef, "error"),
+      });
+      await writePolicyEvent({
+        severity: "denied",
+        mode,
+        toolId,
+        toolCallId,
+        detail:
+          `${EDIT_FILE_STATUS_OBSERVATION_DETAIL}; raw error details were redacted`,
+        observationDenied: denial,
+      });
+      return {
+        output: redactEditFileStatusObservationError(output, resultRef),
+      };
+    }
     if (!toolOutputNeedsSandboxMediation(toolId, output)) {
       return { output: stripInternalCfcFields(output) };
     }
@@ -2301,6 +2394,14 @@ export class CfHarnessPromptLoop {
     }
     if (toolId === "read_file" && isObjectRecord(output)) {
       return renderMediatedReadFileOutput(
+        output,
+        cfcResult,
+        resultRef,
+        toolCallId,
+      );
+    }
+    if (toolId === "edit_file" && isObjectRecord(output)) {
+      return renderMediatedEditFileOutput(
         output,
         cfcResult,
         resultRef,
