@@ -499,7 +499,7 @@ function attachSchedulerActionObservation(
       args.actionId,
       telemetry,
     ),
-    runtimeFingerprint: `runner:scheduler:${state.modeLabel()}`,
+    runtimeFingerprint: schedulerRuntimeFingerprint(state.modeLabel()),
     // The memory engine overwrites this with the accepting head/commit seq.
     observedAtSeq: 0,
     transactionKind: "action-run",
@@ -551,7 +551,7 @@ function schedulerObservationPieceId(
   ].filter((part): part is string => !!part).join(":") || `action:${actionId}`;
 }
 
-function schedulerImplementationFingerprint(
+export function schedulerImplementationFingerprint(
   action: Action,
   actionId: string,
   telemetry: SchedulerActionInfo | undefined,
@@ -562,6 +562,10 @@ function schedulerImplementationFingerprint(
   }
   const telemetryId = schedulerObservationPieceId(actionId, telemetry);
   return `action:${telemetryId}:${actionId}`;
+}
+
+export function schedulerRuntimeFingerprint(mode: "pull" | "push"): string {
+  return `runner:scheduler:${mode}`;
 }
 
 function schedulerActionOptions(

@@ -12,6 +12,10 @@ import {
   isSchedulerActionObservation,
   type SchedulerActionObservation,
 } from "../src/scheduler/persistent-observation.ts";
+import {
+  schedulerImplementationFingerprint,
+  schedulerRuntimeFingerprint,
+} from "../src/scheduler/action-run.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const readAddress = {
@@ -224,6 +228,11 @@ describe("persistent scheduler observations", () => {
       pullMode: "enabled",
     });
     try {
+      let runs = 0;
+      function autoPersistedAction() {
+        runs++;
+      }
+      const actionId = "autoPersistedAction";
       const provider = testRuntime.runtime.storageManager.open(space) as {
         listSchedulerActionSnapshots?: (
           query?: unknown,
@@ -242,13 +251,17 @@ describe("persistent scheduler observations", () => {
             commitSeq: null,
             observedAtSeq: 5,
             observation: buildSchedulerActionObservation({
-              actionId: "autoPersistedAction",
+              actionId,
               actionKind: "computation",
               branch: "",
               pieceId: "space:process",
               processGeneration: 1,
-              implementationFingerprint: "impl:v1",
-              runtimeFingerprint: "runtime:test",
+              implementationFingerprint: schedulerImplementationFingerprint(
+                autoPersistedAction,
+                actionId,
+                undefined,
+              ),
+              runtimeFingerprint: schedulerRuntimeFingerprint("pull"),
               observedAtSeq: 5,
               transactionKind: "action-run",
               transactionLog: {
@@ -261,11 +274,6 @@ describe("persistent scheduler observations", () => {
           }],
         };
       };
-
-      let runs = 0;
-      function autoPersistedAction() {
-        runs++;
-      }
 
       testRuntime.runtime.scheduler.subscribe(autoPersistedAction, {
         reads: [],
@@ -291,6 +299,71 @@ describe("persistent scheduler observations", () => {
         false,
       );
       expect(testRuntime.runtime.scheduler.getMightWrite(autoPersistedAction))
+        .toEqual([writeAddress]);
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
+  it("falls back to the normal first run when fingerprints mismatch", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {
+      pullMode: "enabled",
+    });
+    try {
+      const provider = testRuntime.runtime.storageManager.open(space) as {
+        listSchedulerActionSnapshots?: () => Promise<{
+          serverSeq: number;
+          snapshots: unknown[];
+        }>;
+      };
+      provider.listSchedulerActionSnapshots = async () => ({
+        serverSeq: 5,
+        snapshots: [{
+          observationId: 1,
+          commitSeq: null,
+          observedAtSeq: 5,
+          observation: buildSchedulerActionObservation({
+            actionId: "stalePersistedAction",
+            actionKind: "effect",
+            branch: "",
+            pieceId: "space:stale-process",
+            processGeneration: 1,
+            implementationFingerprint: "impl:old",
+            runtimeFingerprint: schedulerRuntimeFingerprint("pull"),
+            observedAtSeq: 5,
+            transactionKind: "action-run",
+            transactionLog: {
+              reads: [readAddress],
+              shallowReads: [],
+              writes: [],
+            },
+            currentKnownWrites: [writeAddress],
+          }),
+        }],
+      });
+
+      let runs = 0;
+      function stalePersistedAction() {
+        runs++;
+      }
+
+      testRuntime.runtime.scheduler.subscribe(stalePersistedAction, {
+        reads: [],
+        shallowReads: [],
+        writes: [writeAddress],
+      }, {
+        isEffect: true,
+        rehydrateFromStorage: {
+          space,
+          pieceId: "space:stale-process",
+          processGeneration: 1,
+        },
+      });
+
+      await testRuntime.runtime.idle();
+
+      expect(runs).toBe(1);
+      expect(testRuntime.runtime.scheduler.getMightWrite(stalePersistedAction))
         .toEqual([writeAddress]);
     } finally {
       await disposeSchedulerTestRuntime(testRuntime);
