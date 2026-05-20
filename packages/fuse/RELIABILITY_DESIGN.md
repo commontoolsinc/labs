@@ -238,6 +238,43 @@ operation has an idempotency key.
 | create/mkdir/unlink/rmdir/rename/symlink | parent/common cell mutation resolved and the shared `FsTree` is updated from confirmed state or safely invalidated for rebuild.                                  |
 | CFC writeback                            | trusted prepare was valid when required; mutation succeeded; finalize/reconcile was recorded, or incomplete/fail-closed state was persisted.                     |
 
+`create`/`mkdir` must not depend on the sandboxed program calling `setxattr`
+afterward. Normal programs should run unchanged against `/fabric`; any required
+CFC write intent must be supplied by gVisor's kernel-space policy path before
+FUSE commits the mutation. In the current gVisor FUSE prototype, gVisor blocks
+unprivileged sandbox writes to protected CFC xattr names at the syscall layer,
+then its kernel CFC hooks update internal label state and emit ordinary
+`FUSE_SETXATTR` requests for `trusted.cfc.*` names. FUSE should therefore treat
+protected CFC xattrs as trusted only under that gVisor mediation assumption; a
+non-xattr side channel or explicit discriminator would be a future transport
+change, not current behavior. The local `user.commonfabric.cfc.*` compatibility
+bridge remains only for testing/integration and is not a sandbox trust boundary.
+In observe or explicit compatibility mode, a create without complete trusted
+intent may proceed only with incomplete/fail-closed annotations and diagnostics.
+Enforcing-mode create is app-visible only after the entry is fully labeled and
+committed, or it fails with a normal errno.
+
+Implementation bridge: the current code has mediated prepare/finalize xattrs and
+persisted `CfcWritebackStore` records; it does not yet have hidden quarantine
+dentries or a separate quarantine namespace. The quarantine step must add a
+private `QuarantineStore` beside the confirmed `FsTree`. Quarantine records must
+not be inserted into parent child maps, readdir indexes, or kernel-visible
+inode/dentry state, and normal `lookup`, `readdir`, `readdirplus`, `getattr`,
+`access`, `open`, and `opendir` must never consult the store. Records should be
+keyed at least by `{ operationId, parentRef, name, expectedGeneration }`, with
+operation type, prepared/finalized label state, timestamps, and diagnostics as
+record data.
+
+Only trusted completion/finalize handling, trusted abort handling, startup
+recovery, and TTL garbage collection may read `QuarantineStore`. Completion must
+match by operation ID and validate parent ref, target name, operation type,
+generation, and prepared/finalized labels before publishing anything into the
+normal projection. FUSE should scan quarantine records on startup and
+periodically at runtime, aborting records older than the configured TTL; one hour
+is the initial target unless active trusted completion is in progress.
+Post-create xattrs are separate modeled metadata operations; they may not
+retroactively authorize a usable entry or lower confidentiality/integrity labels.
+
 ## Backpressure Policy
 
 Add bounded queues before backend work:
