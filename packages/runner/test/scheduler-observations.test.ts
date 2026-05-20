@@ -5,6 +5,7 @@ import {
   expect,
   it,
   space,
+  toMemorySpaceAddress,
 } from "./scheduler-test-utils.ts";
 import type { TransactionReactivityLog } from "../src/storage/interface.ts";
 import {
@@ -17,6 +18,10 @@ import {
   schedulerRuntimeFingerprint,
 } from "../src/scheduler/action-run.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import type {
+  Action,
+  IExtendedStorageTransaction,
+} from "./scheduler-test-utils.ts";
 
 const readAddress = {
   space: "did:key:space" as const,
@@ -148,6 +153,100 @@ describe("persistent scheduler observations", () => {
         .toEqual(
           [writeAddress],
         );
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
+  it("persists the post-run scheduling writes when an action write path changes", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {
+      pullMode: "enabled",
+    });
+    try {
+      const { runtime, tx } = testRuntime;
+      const selector = runtime.getCell<boolean>(
+        space,
+        "scheduler-observation-write-selector",
+        undefined,
+        tx,
+      );
+      const firstTarget = runtime.getCell<number>(
+        space,
+        "scheduler-observation-first-write",
+        undefined,
+        tx,
+      );
+      const secondTarget = runtime.getCell<number>(
+        space,
+        "scheduler-observation-second-write",
+        undefined,
+        tx,
+      );
+      selector.set(false);
+      firstTarget.set(0);
+      secondTarget.set(0);
+      await tx.commit();
+
+      const observations: SchedulerActionObservation[] = [];
+      const originalEdit = runtime.edit.bind(runtime);
+      runtime.edit = ((...args: Parameters<typeof originalEdit>) => {
+        const actionTx = originalEdit(...args);
+        const originalSetSchedulerObservation = actionTx
+          .setSchedulerObservation?.bind(actionTx);
+        actionTx.setSchedulerObservation = (observation: unknown) => {
+          if (isSchedulerActionObservation(observation)) {
+            observations.push(observation);
+          }
+          originalSetSchedulerObservation?.(observation);
+        };
+        return actionTx;
+      }) as typeof runtime.edit;
+
+      let runs = 0;
+      const changingWriter: Action = (
+        actionTx: IExtendedStorageTransaction,
+      ) => {
+        runs++;
+        const writeSecondTarget = selector.withTx(actionTx).get();
+        const target = writeSecondTarget ? secondTarget : firstTarget;
+        target.withTx(actionTx).set(runs);
+      };
+
+      runtime.scheduler.subscribe(changingWriter, {
+        reads: [toMemorySpaceAddress(selector.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [],
+      });
+
+      await runtime.scheduler.run(changingWriter);
+      expect(observations.at(-1)?.currentKnownWrites).toEqual([
+        toMemorySpaceAddress(firstTarget.getAsNormalizedFullLink()),
+      ]);
+
+      const triggerTx = runtime.edit();
+      selector.withTx(triggerTx).set(true);
+      await triggerTx.commit();
+
+      await runtime.scheduler.run(changingWriter);
+      const changedObservation = observations.at(-1);
+      expect(changedObservation?.actualChangedWrites).toEqual([
+        toMemorySpaceAddress(secondTarget.getAsNormalizedFullLink()),
+      ]);
+      expect(changedObservation?.currentKnownWrites).toEqual([
+        toMemorySpaceAddress(secondTarget.getAsNormalizedFullLink()),
+      ]);
+
+      const restoredChangingWriter: Action = () => {};
+      (restoredChangingWriter as { src?: string }).src = "changingWriter";
+      expect(
+        runtime.scheduler.rehydrateActionFromObservation(
+          restoredChangingWriter,
+          { observation: changedObservation! },
+        ),
+      ).toBe(true);
+      expect(runtime.scheduler.getMightWrite(restoredChangingWriter)).toEqual([
+        toMemorySpaceAddress(secondTarget.getAsNormalizedFullLink()),
+      ]);
     } finally {
       await disposeSchedulerTestRuntime(testRuntime);
     }

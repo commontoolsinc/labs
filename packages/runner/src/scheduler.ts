@@ -2163,6 +2163,10 @@ export class Scheduler {
         getSchedulerActionTelemetryInfo(target),
       getSchedulingWrites: (target) =>
         this.writeIndex.getSchedulingWrites(target),
+      getCurrentKnownSchedulingWrites: (target) =>
+        this.writeIndex.currentKnownWrites.get(target),
+      getHistoricalMightWrite: (target) =>
+        this.writeIndex.historicalMightWrite.get(target),
       getMaterializerWriteEnvelopes: (target) =>
         this.materializers.getMaterializerWriteEnvelopes(target),
       getDebounce: (target) => this.delays.getDebounce(target),

@@ -1,5 +1,16 @@
 # Persistent Scheduler State Implementation Notes
 
+## 2026-05-20 - Post-Observation Current Writes Alignment
+
+- Scheduler action observations now persist `currentKnownWrites` as the
+  post-observation active scheduling-write view, computed with
+  `buildKnownSchedulingWrites()` from the new transaction writes, declared
+  writes, ignored scheduling writes, and existing current/historical write
+  state before the commit is attached.
+- Added a focused scheduler-observation regression for an action whose write
+  path changes between runs, then rehydrates from the second observation to
+  confirm the writer index restores the new write path.
+
 ## 2026-05-20 - Plan Checkpoint
 
 - Branch: `codex/persistent-scheduler-state-spec`.
