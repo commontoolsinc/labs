@@ -54,7 +54,7 @@ export default pattern((__cf_pattern_input) => {
     const content = __cf_pattern_input.key("content");
     const savedContent = __cf_pattern_input.key("savedContent");
     const onSaveFile = __cf_pattern_input.key("onSaveFile");
-    const timer = Writable.of<ReturnType<typeof setTimeout> | null>(null, {
+    const timer = new Writable<ReturnType<typeof setTimeout> | null>(null, {
         anyOf: [{
                 type: "number"
             }, {

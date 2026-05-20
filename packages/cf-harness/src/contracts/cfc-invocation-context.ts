@@ -119,6 +119,9 @@ export interface CreateHarnessCfcInvocationContextOptions {
   env?: Record<string, string>;
   cfcInputLabels?: CfcLabelView;
   cfcInputLabelPaths?: readonly HarnessCfcInvocationInputLabelPath[];
+  cfcPromptSlotInputLabelPaths?: readonly HarnessCfcInvocationInputLabelPath[];
+  cfcModelContextInputLabelPaths?:
+    readonly HarnessCfcInvocationInputLabelPath[];
   cfcModelContext?: HarnessCfcModelContext;
 }
 
@@ -281,16 +284,20 @@ export const createHarnessCfcInvocationContext = async (
     ? undefined
     : await summarizeCfcInvocationText(options.stdinText);
   const env = summarizeCfcInvocationEnv(options.env);
+  const promptSlotInputLabelPaths = options.cfcPromptSlotInputLabelPaths ??
+    options.cfcInputLabelPaths;
+  const modelContextInputLabelPaths = options.cfcModelContextInputLabelPaths ??
+    options.cfcInputLabelPaths;
   const cfcInputLabels = mergeCfcLabelViews([
     options.cfcInputLabels,
     createHarnessPromptSlotInfluenceLabels({
       promptSlot: options.promptSlot,
       runManifest: options.runManifest,
-      paths: options.cfcInputLabelPaths,
+      paths: promptSlotInputLabelPaths,
     }),
     createHarnessCfcModelContextInputLabels({
       modelContext: options.cfcModelContext,
-      paths: options.cfcInputLabelPaths,
+      paths: modelContextInputLabelPaths,
     }),
   ]);
 

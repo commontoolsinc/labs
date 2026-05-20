@@ -64,7 +64,7 @@ const addPerson = handler<
     selectedIndex: Writable<number>;
   }
 >((_event, { contacts, selectedIndex }) => {
-  const personData = Writable.of<Person>({
+  const personData = new Writable<Person>({
     firstName: "",
     lastName: "",
     middleName: "",
@@ -97,7 +97,7 @@ const addFamilyMember = handler<
     selectedIndex: Writable<number>;
   }
 >((_event, { contacts, selectedIndex }) => {
-  const memberData = Writable.of<FamilyMember>({
+  const memberData = new Writable<FamilyMember>({
     firstName: "",
     lastName: "",
     relationship: "",
@@ -169,7 +169,7 @@ const addGroup = handler<
 
 export default pattern<Input, Output>(({ contacts, groups }) => {
   const count = computed(() => (contacts.get() || []).length);
-  const selectedIndex = Writable.of<number>(-1);
+  const selectedIndex = new Writable<number>(-1);
 
   const openInNewView = action(() => {
     const idx = selectedIndex.get();

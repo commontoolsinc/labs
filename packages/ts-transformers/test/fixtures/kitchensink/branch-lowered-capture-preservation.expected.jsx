@@ -110,16 +110,16 @@ export default pattern((__cf_pattern_input) => {
     const items = __cf_pattern_input.key("items");
     const subPieces = __cf_pattern_input.key("subPieces");
     const trashedSubPieces = __cf_pattern_input.key("trashedSubPieces");
-    const editingNoteIndex = Writable.of<number | undefined>(undefined, {
+    const editingNoteIndex = new Writable<number | undefined>(undefined, {
         type: ["number", "undefined"]
     } as const satisfies __cfHelpers.JSONSchema).for("editingNoteIndex", true);
-    const editingNoteText = Writable.of("", {
+    const editingNoteText = new Writable("", {
         type: "string"
     } as const satisfies __cfHelpers.JSONSchema).for("editingNoteText", true);
-    const expandedIndex = Writable.of<number | undefined>(undefined, {
+    const expandedIndex = new Writable<number | undefined>(undefined, {
         type: ["number", "undefined"]
     } as const satisfies __cfHelpers.JSONSchema).for("expandedIndex", true);
-    const settingsModuleIndex = Writable.of<number | undefined>(undefined, {
+    const settingsModuleIndex = new Writable<number | undefined>(undefined, {
         type: ["number", "undefined"]
     } as const satisfies __cfHelpers.JSONSchema).for("settingsModuleIndex", true);
     const allEntries = __cfHelpers.derive({

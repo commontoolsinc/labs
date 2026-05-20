@@ -16,7 +16,7 @@ export default pattern<{
   >;
 }>(({ items }) => {
   // Anti-pattern: nonPrivateRandom() inside computed() produces different output each run
-  const shuffled = Writable.of<string[]>([]);
+  const shuffled = new Writable<string[]>([]);
   computed(() => {
     const arr = [...items.get()];
     for (let i = arr.length - 1; i > 0; i--) {

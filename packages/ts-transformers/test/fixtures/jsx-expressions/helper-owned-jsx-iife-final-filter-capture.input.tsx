@@ -32,8 +32,8 @@ function visibleEntries(
 }
 
 export default pattern<Input, Output>(({ entries }) => {
-  const path = Writable.of<string[]>([]);
-  const labelPrefix = Writable.of("a");
+  const path = new Writable<string[]>([]);
+  const labelPrefix = new Writable("a");
 
   return {
     [UI]: (

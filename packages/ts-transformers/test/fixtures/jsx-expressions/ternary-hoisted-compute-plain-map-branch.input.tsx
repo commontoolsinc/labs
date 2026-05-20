@@ -13,7 +13,7 @@ interface Item {
 // Context: the branch contains both a local compute-only alias and a map over
 //   a computed array result, so the whole branch should be handled as compute-owned.
 export default pattern<{ items: Item[] }>((state) => {
-  const showList = Writable.of(true);
+  const showList = new Writable(true);
 
   const sorted = computed(() =>
     [...state.items].sort((a, b) => a.value - b.value)

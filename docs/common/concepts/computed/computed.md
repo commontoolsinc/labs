@@ -133,7 +133,7 @@ Example of correct usage:
 import { computed, UI, Writable } from 'commonfabric';
 
 interface Item { title: string; }
-const searchQuery = Writable.of("");
+const searchQuery = new Writable("");
 declare const items: Item[];
 declare const groupedItems: Record<string, Item[]>;
 
@@ -170,8 +170,8 @@ import { computed, safeDateNow, Writable } from 'commonfabric';
 
 interface Item {}
 declare const items: Item[];
-const logArray = Writable.of<{ timestamp: number }[]>([]);
-const cacheMap = Writable.of<Record<string, number>>({});
+const logArray = new Writable<{ timestamp: number }[]>([]);
+const cacheMap = new Writable<Record<string, number>>({});
 
 // ❌ Non-idempotent - appends on every run
 const badComputed = computed(() => {

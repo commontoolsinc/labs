@@ -35,9 +35,12 @@ The system supports two fundamental patterns of data flow:
 
 This is **pull-based / demand-driven** reactivity:
 - Pattern declares dependencies on input cells
-- When any input changes, the pattern re-executes
+- When any input changes, dependent computations are marked dirty/stale
+- Dirty computations re-execute when an effect, handler preflight, or explicit
+  `pull()` needs their output
 - Result cell receives the new computed value
-- Like a spreadsheet: change a cell, dependent formulas update
+- Like a lazy spreadsheet: change a cell, and dependent formulas update when
+  their values are observed
 
 The scheduler tracks dependencies and ensures consistent propagation.
 

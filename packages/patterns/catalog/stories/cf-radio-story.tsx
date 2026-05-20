@@ -14,9 +14,9 @@ interface RadioStoryOutput {
 }
 
 export default pattern<RadioStoryInput, RadioStoryOutput>(() => {
-  const orientation = Writable.of<"vertical" | "horizontal">("vertical");
-  const disabled = Writable.of(false);
-  const selected = Writable.of("banana");
+  const orientation = new Writable<"vertical" | "horizontal">("vertical");
+  const disabled = new Writable(false);
+  const selected = new Writable("banana");
 
   const fruitItems = [
     { label: "Apple", value: "apple" },

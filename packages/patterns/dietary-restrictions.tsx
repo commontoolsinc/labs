@@ -1395,7 +1395,7 @@ export const DietaryRestrictionsModule = pattern<
   DietaryRestrictionsInput
 >(({ restrictions }) => {
   const autocompleteItems = buildAutocompleteItems();
-  const selectedLevel = Writable.of<RestrictionLevel>("prefer");
+  const selectedLevel = new Writable<RestrictionLevel>("prefer");
 
   // Normalize raw restrictions to RestrictionEntry[] format
   // Handles both string[] (from LLM extraction) and RestrictionEntry[] (from UI)

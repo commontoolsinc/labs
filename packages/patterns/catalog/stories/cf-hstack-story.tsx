@@ -15,9 +15,9 @@ interface HStackStoryOutput {
 }
 
 export default pattern<HStackStoryInput, HStackStoryOutput>(() => {
-  const gap = Writable.of<"0" | "1" | "2" | "3" | "4" | "6" | "8">("2");
-  const wrap = Writable.of(false);
-  const reverse = Writable.of(false);
+  const gap = new Writable<"0" | "1" | "2" | "3" | "4" | "6" | "8">("2");
+  const wrap = new Writable(false);
+  const reverse = new Writable(false);
 
   return {
     [NAME]: "cf-hstack Story",

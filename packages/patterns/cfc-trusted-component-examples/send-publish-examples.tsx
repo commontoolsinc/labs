@@ -72,13 +72,13 @@ export const ChatThreadSendExample = pattern<
   Record<PropertyKey, never>,
   SendExampleOutput
 >(() => {
-  const conversationTitle = Writable.of("Chat thread: project sync");
-  const audienceInput = Writable.of("team thread");
-  const messageDraft = Writable.of(
+  const conversationTitle = new Writable("Chat thread: project sync");
+  const audienceInput = new Writable("team thread");
+  const messageDraft = new Writable(
     "Please forward the short thread excerpt to the next owner.",
   );
-  const sentMessage = Writable.of("");
-  const decoyResult = Writable.of("");
+  const sentMessage = new Writable("");
+  const decoyResult = new Writable("");
   const triggerDecoy = runDecoy({
     result: decoyResult,
     message: "Host shortcut ignored; only the trusted send surface counts.",
@@ -124,13 +124,13 @@ export const IncidentChannelSendExample = pattern<
   Record<PropertyKey, never>,
   SendExampleOutput
 >(() => {
-  const conversationTitle = Writable.of("Incident channel: pager alert");
-  const audienceInput = Writable.of("incident room");
-  const messageDraft = Writable.of(
+  const conversationTitle = new Writable("Incident channel: pager alert");
+  const audienceInput = new Writable("incident room");
+  const messageDraft = new Writable(
     "Pager fired, we only forward the bounded incident excerpt.",
   );
-  const sentMessage = Writable.of("");
-  const decoyResult = Writable.of("");
+  const sentMessage = new Writable("");
+  const decoyResult = new Writable("");
   const triggerDecoy = runDecoy({
     result: decoyResult,
     message: "Host incident button is not trusted.",
@@ -176,13 +176,13 @@ export const DirectMessageSendExample = pattern<
   Record<PropertyKey, never>,
   SendExampleOutput
 >(() => {
-  const commandInput = Writable.of(
+  const commandInput = new Writable(
     "Send the short summary to the client contact.",
   );
-  const capturedCommand = Writable.of("");
-  const preparedBrief = Writable.of("");
-  const authorizedSend = Writable.of("");
-  const decoyResult = Writable.of("");
+  const capturedCommand = new Writable("");
+  const preparedBrief = new Writable("");
+  const authorizedSend = new Writable("");
+  const decoyResult = new Writable("");
   const triggerDecoy = runDecoy({
     result: decoyResult,
     message: "Untrusted DM button does not authorize sending.",
@@ -227,13 +227,13 @@ export const SupportCaseReplyExample = pattern<
   Record<PropertyKey, never>,
   SendExampleOutput
 >(() => {
-  const conversationTitle = Writable.of("Support case: ticket reply");
-  const audienceInput = Writable.of("support queue");
-  const messageDraft = Writable.of(
+  const conversationTitle = new Writable("Support case: ticket reply");
+  const audienceInput = new Writable("support queue");
+  const messageDraft = new Writable(
     "Reply with the ticket-safe excerpt and next step.",
   );
-  const sentMessage = Writable.of("");
-  const decoyResult = Writable.of("");
+  const sentMessage = new Writable("");
+  const decoyResult = new Writable("");
   const triggerDecoy = runDecoy({
     result: decoyResult,
     message: "The case toolbar shortcut is only a lookalike.",
@@ -279,14 +279,14 @@ export const ClassroomAnnouncementExample = pattern<
   Record<PropertyKey, never>,
   PublishExampleOutput
 >(() => {
-  const targetAudience = Writable.of("classroom");
-  const publishSubject = Writable.of("Exam schedule update");
-  const publishBody = Writable.of(
+  const targetAudience = new Writable("classroom");
+  const publishSubject = new Writable("Exam schedule update");
+  const publishBody = new Writable(
     "The next review session is moved to Thursday afternoon.",
   );
-  const preparedAudiencePublish = Writable.of("");
-  const publishedAudiencePost = Writable.of("");
-  const decoyResult = Writable.of("");
+  const preparedAudiencePublish = new Writable("");
+  const publishedAudiencePost = new Writable("");
+  const decoyResult = new Writable("");
   const triggerDecoy = runDecoy({
     result: decoyResult,
     message: "Classroom publish shortcut is not trusted.",
@@ -334,14 +334,14 @@ export const ProjectUpdatePublishExample = pattern<
   Record<PropertyKey, never>,
   PublishExampleOutput
 >(() => {
-  const targetAudience = Writable.of("project board");
-  const publishSubject = Writable.of("Milestone delta");
-  const publishBody = Writable.of(
+  const targetAudience = new Writable("project board");
+  const publishSubject = new Writable("Milestone delta");
+  const publishBody = new Writable(
     "The ship target moved by two days; release scope stayed fixed.",
   );
-  const preparedAudiencePublish = Writable.of("");
-  const publishedAudiencePost = Writable.of("");
-  const decoyResult = Writable.of("");
+  const preparedAudiencePublish = new Writable("");
+  const publishedAudiencePost = new Writable("");
+  const decoyResult = new Writable("");
   const triggerDecoy = runDecoy({
     result: decoyResult,
     message: "Project publish banner is only decorative.",
@@ -389,17 +389,17 @@ export const ReleaseNotesPublishExample = pattern<
   Record<PropertyKey, never>,
   PublishExampleOutput
 >(() => {
-  const draftTitle = Writable.of("v2.8 release notes");
-  const draftBody = Writable.of(
+  const draftTitle = new Writable("v2.8 release notes");
+  const draftBody = new Writable(
     "This release includes a rollback-safe migration and UI polish.",
   );
-  const savedTitle = Writable.of("");
-  const savedBody = Writable.of("");
-  const reviewedTitle = Writable.of("");
-  const reviewedBody = Writable.of("");
-  const publishedTitle = Writable.of("");
-  const publishedBody = Writable.of("");
-  const decoyResult = Writable.of("");
+  const savedTitle = new Writable("");
+  const savedBody = new Writable("");
+  const reviewedTitle = new Writable("");
+  const reviewedBody = new Writable("");
+  const publishedTitle = new Writable("");
+  const publishedBody = new Writable("");
+  const decoyResult = new Writable("");
   const triggerDecoy = runDecoy({
     result: decoyResult,
     message: "Release notes quick-publish button is untrusted.",
@@ -464,14 +464,14 @@ export const PublicStatusPublishExample = pattern<
   Record<PropertyKey, never>,
   PublishExampleOutput
 >(() => {
-  const targetAudience = Writable.of("public status");
-  const publishSubject = Writable.of("Service status update");
-  const publishBody = Writable.of(
+  const targetAudience = new Writable("public status");
+  const publishSubject = new Writable("Service status update");
+  const publishBody = new Writable(
     "All systems are operational after the maintenance window.",
   );
-  const preparedAudiencePublish = Writable.of("");
-  const publishedAudiencePost = Writable.of("");
-  const decoyResult = Writable.of("");
+  const preparedAudiencePublish = new Writable("");
+  const publishedAudiencePost = new Writable("");
+  const decoyResult = new Writable("");
   const triggerDecoy = runDecoy({
     result: decoyResult,
     message: "Status-page publish link is not the trusted path.",
@@ -519,17 +519,17 @@ export const InternalRepostExample = pattern<
   Record<PropertyKey, never>,
   PublishExampleOutput
 >(() => {
-  const draftTitle = Writable.of("Internal recap");
-  const draftBody = Writable.of(
+  const draftTitle = new Writable("Internal recap");
+  const draftBody = new Writable(
     "This stays inside the team channel and never becomes public.",
   );
-  const savedTitle = Writable.of("");
-  const savedBody = Writable.of("");
-  const reviewedTitle = Writable.of("");
-  const reviewedBody = Writable.of("");
-  const publishedTitle = Writable.of("");
-  const publishedBody = Writable.of("");
-  const decoyResult = Writable.of("");
+  const savedTitle = new Writable("");
+  const savedBody = new Writable("");
+  const reviewedTitle = new Writable("");
+  const reviewedBody = new Writable("");
+  const publishedTitle = new Writable("");
+  const publishedBody = new Writable("");
+  const decoyResult = new Writable("");
   const triggerDecoy = runDecoy({
     result: decoyResult,
     message: "Repost button in the host shell is not blessed.",
@@ -596,14 +596,14 @@ export const TeamDigestPublishExample = pattern<
   Record<PropertyKey, never>,
   PublishExampleOutput
 >(() => {
-  const targetAudience = Writable.of("team digest");
-  const publishSubject = Writable.of("Weekly digest");
-  const publishBody = Writable.of(
+  const targetAudience = new Writable("team digest");
+  const publishSubject = new Writable("Weekly digest");
+  const publishBody = new Writable(
     "Top issues, resolved items, and a short owner list.",
   );
-  const preparedAudiencePublish = Writable.of("");
-  const publishedAudiencePost = Writable.of("");
-  const decoyResult = Writable.of("");
+  const preparedAudiencePublish = new Writable("");
+  const publishedAudiencePost = new Writable("");
+  const decoyResult = new Writable("");
   const triggerDecoy = runDecoy({
     result: decoyResult,
     message: "Digest shortcut is just a lookalike control.",
@@ -651,14 +651,14 @@ export const RoadmapUpdatePublishExample = pattern<
   Record<PropertyKey, never>,
   PublishExampleOutput
 >(() => {
-  const targetAudience = Writable.of("roadmap viewers");
-  const publishSubject = Writable.of("Roadmap checkpoint");
-  const publishBody = Writable.of(
+  const targetAudience = new Writable("roadmap viewers");
+  const publishSubject = new Writable("Roadmap checkpoint");
+  const publishBody = new Writable(
     "We only release the approved milestone slice here.",
   );
-  const preparedAudiencePublish = Writable.of("");
-  const publishedAudiencePost = Writable.of("");
-  const decoyResult = Writable.of("");
+  const preparedAudiencePublish = new Writable("");
+  const publishedAudiencePost = new Writable("");
+  const decoyResult = new Writable("");
   const triggerDecoy = runDecoy({
     result: decoyResult,
     message: "Roadmap release shortcut is untrusted.",
@@ -706,14 +706,14 @@ export const IncidentSummaryPublishExample = pattern<
   Record<PropertyKey, never>,
   PublishExampleOutput
 >(() => {
-  const targetAudience = Writable.of("incident review board");
-  const publishSubject = Writable.of("Incident summary");
-  const publishBody = Writable.of(
+  const targetAudience = new Writable("incident review board");
+  const publishSubject = new Writable("Incident summary");
+  const publishBody = new Writable(
     "Root cause and mitigation were confirmed by on-call.",
   );
-  const preparedAudiencePublish = Writable.of("");
-  const publishedAudiencePost = Writable.of("");
-  const decoyResult = Writable.of("");
+  const preparedAudiencePublish = new Writable("");
+  const publishedAudiencePost = new Writable("");
+  const decoyResult = new Writable("");
   const triggerDecoy = runDecoy({
     result: decoyResult,
     message: "Incident publish shortcut is a decoy.",
@@ -763,17 +763,17 @@ export const PolicyPublishExample = pattern<
   Record<PropertyKey, never>,
   PublishExampleOutput
 >(() => {
-  const draftTitle = Writable.of("Policy revision");
-  const draftBody = Writable.of(
+  const draftTitle = new Writable("Policy revision");
+  const draftBody = new Writable(
     "The policy wording changed, but the meaning stayed bounded.",
   );
-  const savedTitle = Writable.of("");
-  const savedBody = Writable.of("");
-  const reviewedTitle = Writable.of("");
-  const reviewedBody = Writable.of("");
-  const publishedTitle = Writable.of("");
-  const publishedBody = Writable.of("");
-  const decoyResult = Writable.of("");
+  const savedTitle = new Writable("");
+  const savedBody = new Writable("");
+  const reviewedTitle = new Writable("");
+  const reviewedBody = new Writable("");
+  const publishedTitle = new Writable("");
+  const publishedBody = new Writable("");
+  const decoyResult = new Writable("");
   const triggerDecoy = runDecoy({
     result: decoyResult,
     message: "Policy publish control is not trusted.",
@@ -838,14 +838,14 @@ export const ChangelogPublishExample = pattern<
   Record<PropertyKey, never>,
   PublishExampleOutput
 >(() => {
-  const targetAudience = Writable.of("product changelog");
-  const publishSubject = Writable.of("Changelog entry");
-  const publishBody = Writable.of(
+  const targetAudience = new Writable("product changelog");
+  const publishSubject = new Writable("Changelog entry");
+  const publishBody = new Writable(
     "Two fixes and one behavior clarification are ready.",
   );
-  const preparedAudiencePublish = Writable.of("");
-  const publishedAudiencePost = Writable.of("");
-  const decoyResult = Writable.of("");
+  const preparedAudiencePublish = new Writable("");
+  const publishedAudiencePost = new Writable("");
+  const decoyResult = new Writable("");
   const triggerDecoy = runDecoy({
     result: decoyResult,
     message: "Changelog host button is not authoritative.",
@@ -895,14 +895,14 @@ export const LaunchReadinessPublishExample = pattern<
   Record<PropertyKey, never>,
   PublishExampleOutput
 >(() => {
-  const targetAudience = Writable.of("launch review");
-  const publishSubject = Writable.of("Launch readiness");
-  const publishBody = Writable.of(
+  const targetAudience = new Writable("launch review");
+  const publishSubject = new Writable("Launch readiness");
+  const publishBody = new Writable(
     "Beta checklist is complete and the release gate stayed closed.",
   );
-  const preparedAudiencePublish = Writable.of("");
-  const publishedAudiencePost = Writable.of("");
-  const decoyResult = Writable.of("");
+  const preparedAudiencePublish = new Writable("");
+  const publishedAudiencePost = new Writable("");
+  const decoyResult = new Writable("");
   const triggerDecoy = runDecoy({
     result: decoyResult,
     message: "Launch-ready button is a lookalike.",
@@ -950,13 +950,13 @@ export const EmbeddedComposerSendExample = pattern<
   Record<PropertyKey, never>,
   SendExampleOutput
 >(() => {
-  const conversationTitle = Writable.of("Nested composer");
-  const audienceInput = Writable.of("embedded composer");
-  const messageDraft = Writable.of(
+  const conversationTitle = new Writable("Nested composer");
+  const audienceInput = new Writable("embedded composer");
+  const messageDraft = new Writable(
     "Send only the bounded excerpt from the nested composer.",
   );
-  const sentMessage = Writable.of("");
-  const decoyResult = Writable.of("");
+  const sentMessage = new Writable("");
+  const decoyResult = new Writable("");
   const triggerDecoy = runDecoy({
     result: decoyResult,
     message: "Embedded composer shortcut does not count.",
@@ -1001,13 +1001,13 @@ export const TeamDigestContextSendExample = pattern<
   Record<PropertyKey, never>,
   SendExampleOutput
 >(() => {
-  const conversationTitle = Writable.of("Team digest context");
-  const audienceInput = Writable.of("digest recipients");
-  const messageDraft = Writable.of(
+  const conversationTitle = new Writable("Team digest context");
+  const audienceInput = new Writable("digest recipients");
+  const messageDraft = new Writable(
     "Forward just the digest summary and not the raw notes.",
   );
-  const sentMessage = Writable.of("");
-  const decoyResult = Writable.of("");
+  const sentMessage = new Writable("");
+  const decoyResult = new Writable("");
   const triggerDecoy = runDecoy({
     result: decoyResult,
     message: "Context send is only a fake affordance.",
@@ -1050,13 +1050,13 @@ export const ExecutiveBriefSendExample = pattern<
   Record<PropertyKey, never>,
   SendExampleOutput
 >(() => {
-  const commandInput = Writable.of(
+  const commandInput = new Writable(
     "Prepare and send the executive-safe brief.",
   );
-  const capturedCommand = Writable.of("");
-  const preparedBrief = Writable.of("");
-  const authorizedSend = Writable.of("");
-  const decoyResult = Writable.of("");
+  const capturedCommand = new Writable("");
+  const preparedBrief = new Writable("");
+  const authorizedSend = new Writable("");
+  const decoyResult = new Writable("");
   const triggerDecoy = runDecoy({
     result: decoyResult,
     message: "Executive brief button is not trusted.",
@@ -1103,13 +1103,13 @@ export const SupportEscalationSendExample = pattern<
   Record<PropertyKey, never>,
   SendExampleOutput
 >(() => {
-  const commandInput = Writable.of(
+  const commandInput = new Writable(
     "Escalate the issue and keep the response concise.",
   );
-  const capturedCommand = Writable.of("");
-  const preparedBrief = Writable.of("");
-  const authorizedSend = Writable.of("");
-  const decoyResult = Writable.of("");
+  const capturedCommand = new Writable("");
+  const preparedBrief = new Writable("");
+  const authorizedSend = new Writable("");
+  const decoyResult = new Writable("");
   const triggerDecoy = runDecoy({
     result: decoyResult,
     message: "Support escalation shortcut is a decoy.",
@@ -1156,11 +1156,11 @@ export const CustomerReplySendExample = pattern<
   Record<PropertyKey, never>,
   SendExampleOutput
 >(() => {
-  const conversationTitle = Writable.of("Customer reply");
-  const audienceInput = Writable.of("customer support");
-  const messageDraft = Writable.of("Reply with the safe account status only.");
-  const sentMessage = Writable.of("");
-  const decoyResult = Writable.of("");
+  const conversationTitle = new Writable("Customer reply");
+  const audienceInput = new Writable("customer support");
+  const messageDraft = new Writable("Reply with the safe account status only.");
+  const sentMessage = new Writable("");
+  const decoyResult = new Writable("");
   const triggerDecoy = runDecoy({
     result: decoyResult,
     message: "Customer reply control is not the trusted path.",
@@ -1203,13 +1203,13 @@ export const ClassroomDigestSendExample = pattern<
   Record<PropertyKey, never>,
   SendExampleOutput
 >(() => {
-  const conversationTitle = Writable.of("Classroom digest");
-  const audienceInput = Writable.of("students");
-  const messageDraft = Writable.of(
+  const conversationTitle = new Writable("Classroom digest");
+  const audienceInput = new Writable("students");
+  const messageDraft = new Writable(
     "Send the class digest and omit the raw teacher notes.",
   );
-  const sentMessage = Writable.of("");
-  const decoyResult = Writable.of("");
+  const sentMessage = new Writable("");
+  const decoyResult = new Writable("");
   const triggerDecoy = runDecoy({
     result: decoyResult,
     message: "Classroom send button is untrusted.",
@@ -1254,17 +1254,17 @@ export const InternalOnlyRepostExample = pattern<
   Record<PropertyKey, never>,
   PublishExampleOutput
 >(() => {
-  const draftTitle = Writable.of("Internal repost");
-  const draftBody = Writable.of(
+  const draftTitle = new Writable("Internal repost");
+  const draftBody = new Writable(
     "This stays in the internal channel and never widens.",
   );
-  const savedTitle = Writable.of("");
-  const savedBody = Writable.of("");
-  const reviewedTitle = Writable.of("");
-  const reviewedBody = Writable.of("");
-  const publishedTitle = Writable.of("");
-  const publishedBody = Writable.of("");
-  const decoyResult = Writable.of("");
+  const savedTitle = new Writable("");
+  const savedBody = new Writable("");
+  const reviewedTitle = new Writable("");
+  const reviewedBody = new Writable("");
+  const publishedTitle = new Writable("");
+  const publishedBody = new Writable("");
+  const decoyResult = new Writable("");
   const triggerDecoy = runDecoy({
     result: decoyResult,
     message: "Internal repost shortcut is not trusted.",
@@ -1329,14 +1329,14 @@ export const PublicBulletinExample = pattern<
   Record<PropertyKey, never>,
   PublishExampleOutput
 >(() => {
-  const targetAudience = Writable.of("public bulletin");
-  const publishSubject = Writable.of("Public bulletin");
-  const publishBody = Writable.of(
+  const targetAudience = new Writable("public bulletin");
+  const publishSubject = new Writable("Public bulletin");
+  const publishBody = new Writable(
     "This version is ready for the public-facing board.",
   );
-  const preparedAudiencePublish = Writable.of("");
-  const publishedAudiencePost = Writable.of("");
-  const decoyResult = Writable.of("");
+  const preparedAudiencePublish = new Writable("");
+  const publishedAudiencePost = new Writable("");
+  const decoyResult = new Writable("");
   const triggerDecoy = runDecoy({
     result: decoyResult,
     message: "Public bulletin shortcut is only a lookalike.",
@@ -1384,17 +1384,17 @@ export const StagedAnnouncementExample = pattern<
   Record<PropertyKey, never>,
   PublishExampleOutput
 >(() => {
-  const draftTitle = Writable.of("Announcement draft");
-  const draftBody = Writable.of(
+  const draftTitle = new Writable("Announcement draft");
+  const draftBody = new Writable(
     "The final announcement is only published after review.",
   );
-  const savedTitle = Writable.of("");
-  const savedBody = Writable.of("");
-  const reviewedTitle = Writable.of("");
-  const reviewedBody = Writable.of("");
-  const publishedTitle = Writable.of("");
-  const publishedBody = Writable.of("");
-  const decoyResult = Writable.of("");
+  const savedTitle = new Writable("");
+  const savedBody = new Writable("");
+  const reviewedTitle = new Writable("");
+  const reviewedBody = new Writable("");
+  const publishedTitle = new Writable("");
+  const publishedBody = new Writable("");
+  const decoyResult = new Writable("");
   const triggerDecoy = runDecoy({
     result: decoyResult,
     message: "Announcement quick-post is not blessed.",
@@ -1459,14 +1459,14 @@ export const AnnouncementQueueExample = pattern<
   Record<PropertyKey, never>,
   PublishExampleOutput
 >(() => {
-  const targetAudience = Writable.of("announcement queue");
-  const publishSubject = Writable.of("Queued announcement");
-  const publishBody = Writable.of(
+  const targetAudience = new Writable("announcement queue");
+  const publishSubject = new Writable("Queued announcement");
+  const publishBody = new Writable(
     "Wait for the review step before exposing this update.",
   );
-  const preparedAudiencePublish = Writable.of("");
-  const publishedAudiencePost = Writable.of("");
-  const decoyResult = Writable.of("");
+  const preparedAudiencePublish = new Writable("");
+  const publishedAudiencePost = new Writable("");
+  const decoyResult = new Writable("");
   const triggerDecoy = runDecoy({
     result: decoyResult,
     message: "Queue publish button is a fake control.",
@@ -1514,14 +1514,14 @@ export const VisibleQueueExample = pattern<
   Record<PropertyKey, never>,
   PublishExampleOutput
 >(() => {
-  const targetAudience = Writable.of("visible queue");
-  const publishSubject = Writable.of("Queue entry");
-  const publishBody = Writable.of(
+  const targetAudience = new Writable("visible queue");
+  const publishSubject = new Writable("Queue entry");
+  const publishBody = new Writable(
     "The publish queue is visible, but only the trusted flow works.",
   );
-  const preparedAudiencePublish = Writable.of("");
-  const publishedAudiencePost = Writable.of("");
-  const decoyResult = Writable.of("");
+  const preparedAudiencePublish = new Writable("");
+  const publishedAudiencePost = new Writable("");
+  const decoyResult = new Writable("");
   const triggerDecoy = runDecoy({
     result: decoyResult,
     message: "Visible queue shortcut is not trusted.",
@@ -1569,11 +1569,11 @@ export const ConversationTargetSendExample = pattern<
   Record<PropertyKey, never>,
   SendExampleOutput
 >(() => {
-  const conversationTitle = Writable.of("Conversation target");
-  const audienceInput = Writable.of("current conversation");
-  const messageDraft = Writable.of("Target the current conversation only.");
-  const sentMessage = Writable.of("");
-  const decoyResult = Writable.of("");
+  const conversationTitle = new Writable("Conversation target");
+  const audienceInput = new Writable("current conversation");
+  const messageDraft = new Writable("Target the current conversation only.");
+  const sentMessage = new Writable("");
+  const decoyResult = new Writable("");
   const triggerDecoy = runDecoy({
     result: decoyResult,
     message: "Conversation target shortcut is a decoy.",
@@ -1618,13 +1618,13 @@ export const HostLookalikeControlExample = pattern<
   Record<PropertyKey, never>,
   SendExampleOutput
 >(() => {
-  const conversationTitle = Writable.of("Lookalike host control");
-  const audienceInput = Writable.of("trusted send");
-  const messageDraft = Writable.of(
+  const conversationTitle = new Writable("Lookalike host control");
+  const audienceInput = new Writable("trusted send");
+  const messageDraft = new Writable(
     "The host's own control must not authorize the send.",
   );
-  const sentMessage = Writable.of("");
-  const decoyResult = Writable.of("");
+  const sentMessage = new Writable("");
+  const decoyResult = new Writable("");
   const triggerDecoy = runDecoy({
     result: decoyResult,
     message: "Lookalike host control updated, not the protected output.",
@@ -1669,17 +1669,17 @@ export const InternalNoteRepostExample = pattern<
   Record<PropertyKey, never>,
   PublishExampleOutput
 >(() => {
-  const draftTitle = Writable.of("Internal note");
-  const draftBody = Writable.of(
+  const draftTitle = new Writable("Internal note");
+  const draftBody = new Writable(
     "The note remains bounded to the approved audience.",
   );
-  const savedTitle = Writable.of("");
-  const savedBody = Writable.of("");
-  const reviewedTitle = Writable.of("");
-  const reviewedBody = Writable.of("");
-  const publishedTitle = Writable.of("");
-  const publishedBody = Writable.of("");
-  const decoyResult = Writable.of("");
+  const savedTitle = new Writable("");
+  const savedBody = new Writable("");
+  const reviewedTitle = new Writable("");
+  const reviewedBody = new Writable("");
+  const publishedTitle = new Writable("");
+  const publishedBody = new Writable("");
+  const decoyResult = new Writable("");
   const triggerDecoy = runDecoy({
     result: decoyResult,
     message: "Internal note repost button is not trusted.",
@@ -1746,14 +1746,14 @@ export const MeetingRecapPublishExample = pattern<
   Record<PropertyKey, never>,
   PublishExampleOutput
 >(() => {
-  const targetAudience = Writable.of("meeting recap");
-  const publishSubject = Writable.of("Meeting recap");
-  const publishBody = Writable.of(
+  const targetAudience = new Writable("meeting recap");
+  const publishSubject = new Writable("Meeting recap");
+  const publishBody = new Writable(
     "Only the approved summary is released here.",
   );
-  const preparedAudiencePublish = Writable.of("");
-  const publishedAudiencePost = Writable.of("");
-  const decoyResult = Writable.of("");
+  const preparedAudiencePublish = new Writable("");
+  const publishedAudiencePost = new Writable("");
+  const decoyResult = new Writable("");
   const triggerDecoy = runDecoy({
     result: decoyResult,
     message: "Meeting recap quick-post is only decorative.",

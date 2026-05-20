@@ -433,9 +433,9 @@ export default pattern<Input, Output>(({ draft, existingEvent }) => {
   const hasAuth = isReady;
 
   // UI state
-  const pendingOp = Writable.of<PendingOperation>(null);
-  const processing = Writable.of(false);
-  const result = Writable.of<OperationResult>(null);
+  const pendingOp = new Writable<PendingOperation>(null);
+  const processing = new Writable(false);
+  const result = new Writable<OperationResult>(null);
 
   // Computed helpers
   const hasExistingEvent = derive(existingEvent, (e) => !!e?.id);

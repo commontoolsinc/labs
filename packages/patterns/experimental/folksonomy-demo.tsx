@@ -72,7 +72,7 @@ export default pattern<Input, Output>(
     );
 
     // Isolated scope for C
-    const isolatedScope = Writable.of(
+    const isolatedScope = new Writable(
       "https://github.com/commontools/folksonomy-demo/demo-isolated",
     );
 

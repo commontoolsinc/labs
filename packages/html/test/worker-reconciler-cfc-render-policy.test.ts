@@ -53,6 +53,14 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     kind: "signed-release",
     subject: "other-release",
   };
+  const representedProfileAtom = {
+    kind: "represents-principal",
+    subject: signer.did(),
+  };
+  const authoredByProfileAtom = {
+    kind: "authored-by",
+    subject: signer.did(),
+  };
 
   try {
     const tx = runtime.edit();
@@ -143,6 +151,63 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       tx,
     );
     unsignedText.set("Unsigned release note");
+    const representedProfile = runtime.getCell<{ name: string }>(
+      signer.did(),
+      "cfc-render-policy-represented-profile",
+      undefined,
+      tx,
+    );
+    const representedProfileLink = representedProfile.getAsNormalizedFullLink();
+    tx.writeOrThrow({
+      space: signer.did(),
+      id: representedProfileLink.id!,
+      type: "application/json",
+      path: [],
+    }, {
+      value: { name: "Alice" },
+      cfc: {
+        version: 1,
+        schemaHash: "test-represented-profile-schema",
+        labelMap: {
+          version: 1,
+          entries: [{
+            path: [],
+            label: {
+              integrity: [representedProfileAtom],
+            },
+          }],
+        },
+      },
+    });
+    const authoredByProfileText = runtime.getCell<string>(
+      signer.did(),
+      "cfc-render-policy-authored-by-profile-text",
+      undefined,
+      tx,
+    );
+    const authoredByProfileTextLink = authoredByProfileText
+      .getAsNormalizedFullLink();
+    tx.writeOrThrow({
+      space: signer.did(),
+      id: authoredByProfileTextLink.id!,
+      type: "application/json",
+      path: [],
+    }, {
+      value: "Profile-authored note",
+      cfc: {
+        version: 1,
+        schemaHash: "test-authored-by-profile-text-schema",
+        labelMap: {
+          version: 1,
+          entries: [{
+            path: [],
+            label: {
+              integrity: [authoredByProfileAtom],
+            },
+          }],
+        },
+      },
+    });
     const commitResult = await tx.commit();
     assertEquals(commitResult.ok !== undefined, true);
 
@@ -161,6 +226,14 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     const unsignedReleaseText = runtime.getCell<string>(
       signer.did(),
       "cfc-render-policy-unsigned-text",
+    );
+    const representedProfileCell = runtime.getCell<{ name: string }>(
+      signer.did(),
+      "cfc-render-policy-represented-profile",
+    );
+    const authoredByProfileTextCell = runtime.getCell<string>(
+      signer.did(),
+      "cfc-render-policy-authored-by-profile-text",
     );
     const dummyTx = runtime.edit();
     const dummyCell = runtime.getCell(
@@ -877,6 +950,100 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     );
 
     await t.step(
+      "strict text integrity derives authorship from a represented profile",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+        const root: WorkerVNode = {
+          type: "vnode",
+          name: "cf-cfc-authorship",
+          props: {
+            verifyTextIntegrity: true,
+            author: representedProfileCell as never,
+          },
+          children: [authoredByProfileTextCell as never],
+        };
+
+        const cancel = reconciler.mount(root);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(renderedText.includes("Profile-authored note"), true);
+          assertEquals(
+            renderedText.includes("Content hidden by integrity policy"),
+            false,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "strict text integrity derives authorship from a bound represented profile",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+        const root: WorkerVNode = {
+          type: "vnode",
+          name: "cf-cfc-authorship",
+          props: {
+            verifyTextIntegrity: true,
+            $author: representedProfileCell as never,
+            authorName: "Alice",
+          },
+          children: [authoredByProfileTextCell as never],
+        };
+
+        const cancel = reconciler.mount(root);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const renderedText = collector.getOpsOfType("create-text")
+            .map((op) => op.text);
+          assertEquals(renderedText.includes("Profile-authored note"), true);
+          assertEquals(
+            renderedText.includes("Content hidden by integrity policy"),
+            false,
+          );
+          assertEquals(
+            collector.getOpsOfType("set-binding").some((op) =>
+              op.propName === "author"
+            ),
+            true,
+          );
+          const authorBinding = collector.getOpsOfType("set-binding").find(
+            (op) => op.propName === "author",
+          );
+          assertEquals(authorBinding?.cellRef.schema, true);
+          assertEquals(
+            authorBinding?.cellRef.cfcLabelView?.entries.some((entry) =>
+              entry.path.length === 0 &&
+              (entry.label.integrity ?? []).some((atom) =>
+                JSON.stringify(atom) === JSON.stringify(representedProfileAtom)
+              )
+            ),
+            true,
+          );
+          assertEquals(
+            collector.getOpsOfType("set-prop").some((op) =>
+              op.key === "author"
+            ),
+            false,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
       "strict text integrity blocks unsigned child text",
       async () => {
         const collector = createOpsCollector();
@@ -1236,6 +1403,243 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           assertEquals(renderedText.includes("Verified linked child"), true);
           assertEquals(
             renderedText.includes("Content hidden by integrity policy"),
+            false,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "strict text integrity follows pattern argument aliases for visible props",
+      async () => {
+        const tx = runtime.edit();
+        const message = runtime.getCell(
+          signer.did(),
+          "cfc-render-policy-aliased-message",
+          undefined,
+          tx,
+        );
+        const messageLink = message.getAsNormalizedFullLink();
+        tx.writeOrThrow({
+          space: signer.did(),
+          id: messageLink.id!,
+          type: "application/json",
+          path: [],
+        }, {
+          value: {
+            body: "Verified aliased child",
+          },
+          cfc: {
+            version: 1,
+            schemaHash: "test-aliased-message-schema",
+            labelMap: {
+              version: 1,
+              entries: [{
+                path: [],
+                label: {
+                  integrity: [signedReleaseAtom],
+                },
+              }],
+            },
+          },
+        });
+        const messages = runtime.getCell(
+          signer.did(),
+          "cfc-render-policy-aliased-messages",
+          { type: "array", items: true },
+          tx,
+        );
+        messages.setRawUntyped([message.getAsLink({ includeSchema: true })]);
+        const argument = runtime.getCell(
+          signer.did(),
+          "cfc-render-policy-aliased-argument",
+          undefined,
+          tx,
+        );
+        argument.setRawUntyped({
+          message: messages.key(0).getAsWriteRedirectLink({
+            includeSchema: true,
+          }),
+        });
+        const requiredIntegrity = runtime.getCell(
+          signer.did(),
+          "cfc-render-policy-aliased-required-integrity",
+          undefined,
+          tx,
+        );
+        requiredIntegrity.set(signedReleaseAtom);
+        const root = runtime.getCell(
+          signer.did(),
+          "cfc-render-policy-aliased-vdom-root",
+          undefined,
+          tx,
+        );
+        root.setRawUntyped({
+          type: "vnode",
+          name: "cf-cfc-authorship",
+          props: {
+            $value: argument.key("message").getAsWriteRedirectLink({
+              includeSchema: true,
+            }),
+            verifyTextIntegrity: true,
+            requiredTextIntegrity: requiredIntegrity.getAsLink({
+              includeSchema: true,
+              keepAsCell: true,
+            }),
+          },
+          children: [{
+            type: "vnode",
+            name: "cf-chat-message",
+            props: {
+              role: "assistant",
+              content: argument.key("message").key("body")
+                .getAsWriteRedirectLink({
+                  includeSchema: true,
+                }),
+            },
+            children: [],
+          }],
+        });
+        const commitResult = await tx.commit();
+        assertEquals(commitResult.ok !== undefined, true);
+
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+        const rootVDOMCell = runtime.getCell(
+          signer.did(),
+          "cfc-render-policy-aliased-vdom-root",
+        ).asSchema(rendererVDOMSchema);
+
+        const cancel = reconciler.mount(rootVDOMCell as never);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const setPropOps = collector.getOpsOfType("set-prop");
+          assertEquals(
+            setPropOps.some((op) =>
+              op.key === "content" && op.value === "Verified aliased child"
+            ),
+            true,
+          );
+          assertEquals(
+            setPropOps.some((op) =>
+              op.key === "content" &&
+              op.value === "Content hidden by integrity policy"
+            ),
+            false,
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "strict text integrity ignores sibling labels for visible props",
+      async () => {
+        const tx = runtime.edit();
+        const messages = runtime.getCell(
+          signer.did(),
+          "cfc-render-policy-sibling-label-messages",
+          { type: "array", items: true },
+          tx,
+        );
+        const messagesLink = messages.getAsNormalizedFullLink();
+        tx.writeOrThrow({
+          space: signer.did(),
+          id: messagesLink.id!,
+          type: "application/json",
+          path: [],
+        }, {
+          value: [
+            { body: "Signed sibling" },
+            { body: "Unsigned visible child" },
+          ],
+          cfc: {
+            version: 1,
+            schemaHash: "test-sibling-label-message-schema",
+            labelMap: {
+              version: 1,
+              entries: [{
+                path: ["0"],
+                label: {
+                  integrity: [signedReleaseAtom],
+                },
+              }],
+            },
+          },
+        });
+        const requiredIntegrity = runtime.getCell(
+          signer.did(),
+          "cfc-render-policy-sibling-required-integrity",
+          undefined,
+          tx,
+        );
+        requiredIntegrity.set(signedReleaseAtom);
+        const root = runtime.getCell(
+          signer.did(),
+          "cfc-render-policy-sibling-vdom-root",
+          undefined,
+          tx,
+        );
+        root.setRawUntyped({
+          type: "vnode",
+          name: "cf-cfc-authorship",
+          props: {
+            $value: messages.key(1).getAsLink({
+              includeSchema: true,
+              keepAsCell: true,
+            }),
+            verifyTextIntegrity: true,
+            requiredTextIntegrity: requiredIntegrity.getAsLink({
+              includeSchema: true,
+              keepAsCell: true,
+            }),
+          },
+          children: [{
+            type: "vnode",
+            name: "cf-chat-message",
+            props: {
+              role: "assistant",
+              content: messages.key(1).key("body").getAsLink({
+                includeSchema: true,
+              }),
+            },
+            children: [],
+          }],
+        });
+        const commitResult = await tx.commit();
+        assertEquals(commitResult.ok !== undefined, true);
+
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+        const rootVDOMCell = runtime.getCell(
+          signer.did(),
+          "cfc-render-policy-sibling-vdom-root",
+        ).asSchema(rendererVDOMSchema);
+
+        const cancel = reconciler.mount(rootVDOMCell as never);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const setPropOps = collector.getOpsOfType("set-prop");
+          assertEquals(
+            setPropOps.some((op) =>
+              op.key === "content" &&
+              op.value === "Content hidden by integrity policy"
+            ),
+            true,
+          );
+          assertEquals(
+            setPropOps.some((op) =>
+              op.key === "content" && op.value === "Unsigned visible child"
+            ),
             false,
           );
         } finally {

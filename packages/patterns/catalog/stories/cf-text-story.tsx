@@ -35,10 +35,10 @@ interface TextStoryOutput {
 }
 
 export default pattern<TextStoryInput, TextStoryOutput>(() => {
-  const variant = Writable.of<TextVariant>("body");
-  const tone = Writable.of<TextTone>("default");
-  const block = Writable.of(true);
-  const content = Writable.of("Text content");
+  const variant = new Writable<TextVariant>("body");
+  const tone = new Writable<TextTone>("default");
+  const block = new Writable(true);
+  const content = new Writable("Text content");
 
   return {
     [NAME]: "cf-text Story",

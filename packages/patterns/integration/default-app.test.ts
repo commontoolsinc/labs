@@ -189,7 +189,7 @@ type NoteCreateProfileEntry = {
 };
 
 describe("default-app flow test", () => {
-  const shell = new ShellIntegration();
+  const shell = new ShellIntegration({ failOnConsoleError: true });
   shell.bindLifecycle();
 
   let identity: Identity;
@@ -2646,7 +2646,15 @@ async function collectNotebookRenderState(page: Page): Promise<{
 }> {
   return await page.evaluate(async () => {
     const commonfabric = globalThis.commonfabric as any;
-    const current = await commonfabric?.readCell?.();
+    const appState = globalThis.app?.serialize?.();
+    const view = appState?.view;
+    const pieceId = view && typeof view === "object" && "pieceId" in view &&
+        typeof view.pieceId === "string"
+      ? view.pieceId
+      : undefined;
+    const current = pieceId
+      ? await commonfabric?.readCell?.({ id: pieceId })
+      : undefined;
     const notes = Array.isArray(current?.notes) ? current.notes : [];
     const collectRenderedNoteLabels = (root: Document | ShadowRoot) => {
       const labels: string[] = [];
@@ -2797,8 +2805,15 @@ async function collectNotebookDiagnostics(
 async function collectNavigationDiagnostics(page: Page): Promise<unknown> {
   return await page.evaluate(async () => {
     const commonfabric = globalThis.commonfabric as any;
-    const current = await commonfabric?.readCell?.();
     const appState = globalThis.app?.serialize?.();
+    const view = appState?.view;
+    const pieceId = view && typeof view === "object" && "pieceId" in view &&
+        typeof view.pieceId === "string"
+      ? view.pieceId
+      : undefined;
+    const current = pieceId
+      ? await commonfabric?.readCell?.({ id: pieceId })
+      : undefined;
     const buttonTexts: string[] = [];
 
     function collectButtonTexts(root: Document | ShadowRoot): void {

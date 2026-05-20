@@ -78,7 +78,7 @@ export default pattern<ActivityLogInput, ActivityLogOutput>(
     const clearLog = clearLogHandler({ events });
 
     // Filter state — local, use action not handler
-    const filterAgent = Writable.of<string | null>(null);
+    const filterAgent = new Writable<string | null>(null);
     const setFilter = action(({ agent }: { agent: string | null }) =>
       filterAgent.set(agent)
     );

@@ -59,7 +59,7 @@ interface Output {
 }
 
 export default pattern<Input, Output>((_input) => {
-  const game = Writable.of<GameState>(createInitialState());
+  const game = new Writable<GameState>(createInitialState());
 
   // ---------------------------------------------------------------------------
   // Actions

@@ -44,9 +44,9 @@ export const SongIdentificationRecordingExample = pattern<
   Record<PropertyKey, never>,
   ProcessExampleOutput
 >(() => {
-  const songHint = Writable.of("Hum from captured microphone buffer");
-  const identifiedSongId = Writable.of("");
-  const decoyStatus = Writable.of("Raw-audio host shortcut is idle.");
+  const songHint = new Writable("Hum from captured microphone buffer");
+  const identifiedSongId = new Writable("");
+  const decoyStatus = new Writable("Raw-audio host shortcut is idle.");
   const triggerDecoy = setDecoyStatus({
     decoyStatus,
     message:
@@ -89,10 +89,10 @@ export const CalendarAvailabilityPolicyExample = pattern<
   Record<PropertyKey, never>,
   ProcessExampleOutput
 >(() => {
-  const policyAudience = Writable.of("calendar:project-sync participants");
-  const policyScope = Writable.of("free/busy windows only");
-  const savedSharePolicy = Writable.of("");
-  const decoyStatus = Writable.of("Full-calendar host shortcut is idle.");
+  const policyAudience = new Writable("calendar:project-sync participants");
+  const policyScope = new Writable("free/busy windows only");
+  const savedSharePolicy = new Writable("");
+  const decoyStatus = new Writable("Full-calendar host shortcut is idle.");
   const triggerDecoy = setDecoyStatus({
     decoyStatus,
     message:
@@ -140,11 +140,11 @@ export const BatchPhotoUploadJobExample = pattern<
   Record<PropertyKey, never>,
   ProcessExampleOutput
 >(() => {
-  const jobName = Writable.of("Batch photo upload: selected album");
-  const jobStatus = Writable.of("Idle");
-  const jobAuthorization = Writable.of("");
-  const jobCancellation = Writable.of("");
-  const decoyStatus = Writable.of("All-photo upload host shortcut is idle.");
+  const jobName = new Writable("Batch photo upload: selected album");
+  const jobStatus = new Writable("Idle");
+  const jobAuthorization = new Writable("");
+  const jobCancellation = new Writable("");
+  const decoyStatus = new Writable("All-photo upload host shortcut is idle.");
   const triggerDecoy = setDecoyStatus({
     decoyStatus,
     message:
@@ -192,11 +192,11 @@ export const DocumentExportJobExample = pattern<
   Record<PropertyKey, never>,
   ProcessExampleOutput
 >(() => {
-  const jobName = Writable.of("Document export: redacted bundle");
-  const jobStatus = Writable.of("Idle");
-  const jobAuthorization = Writable.of("");
-  const jobCancellation = Writable.of("");
-  const decoyStatus = Writable.of("One-click export host shortcut is idle.");
+  const jobName = new Writable("Document export: redacted bundle");
+  const jobStatus = new Writable("Idle");
+  const jobAuthorization = new Writable("");
+  const jobCancellation = new Writable("");
+  const decoyStatus = new Writable("One-click export host shortcut is idle.");
   const triggerDecoy = setDecoyStatus({
     decoyStatus,
     message:

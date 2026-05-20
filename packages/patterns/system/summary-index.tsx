@@ -26,11 +26,16 @@ type Output = {
   search: PatternToolResult<{ entries: SummaryIndexEntry[] }>;
 };
 
+function isCellLike<T>(value: unknown): value is { get: () => T } {
+  return !!value && typeof value === "object" &&
+    typeof (value as { get?: unknown }).get === "function";
+}
+
 function extractSummary(piece: any): string | undefined {
   const summary = piece?.summary;
   if (!summary) return undefined;
 
-  if (typeof summary === "object" && "get" in summary) {
+  if (isCellLike<string>(summary)) {
     const value = summary.get();
     return typeof value === "string" && value.trim() ? value : undefined;
   }
@@ -61,11 +66,11 @@ export const searchPattern = pattern<
 });
 
 const SummaryIndex = pattern<Input, Output>(() => {
-  const mentionable = wish<Writable<SummarizablePiece>[] | Default<[]>>({
+  const mentionable = wish<Default<Writable<SummarizablePiece>[], []>>({
     query: "#mentionable",
   }).result;
 
-  const query = Writable.of("");
+  const query = new Writable("");
 
   const entries = computed(() => {
     const result: SummaryIndexEntry[] = [];

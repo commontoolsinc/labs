@@ -170,7 +170,7 @@ export const LocationTrackModule = pattern<
   LocationTrackModuleInput
 >(({ locations, label }) => {
   // Local writable cell for cf-location binding (not stored)
-  const currentCapture = Writable.of<LocationPoint | null>(null);
+  const currentCapture = new Writable<LocationPoint | null>(null);
 
   // Computed display text
   const displayText = computed(() => {

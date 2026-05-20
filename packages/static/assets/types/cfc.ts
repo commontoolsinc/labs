@@ -12,6 +12,8 @@ export declare const CFC_CANONICAL_ALIAS_NAMES: readonly [
   "Confidential",
   "Integrity",
   "AddIntegrity",
+  "RepresentsCurrentUser",
+  "AuthoredByCurrentUser",
   "RequiresIntegrity",
   "MaxConfidentiality",
   "OpaqueInput",
@@ -64,6 +66,20 @@ export type Integrity<T, X extends readonly unknown[]> = Cfc<T, {
 
 export type AddIntegrity<T, X extends readonly unknown[]> = Cfc<T, {
   addIntegrity: X;
+}>;
+
+export type RepresentsCurrentUser<T> = Cfc<T, {
+  addIntegrity: readonly [{
+    readonly kind: "represents-principal";
+    readonly subject: { readonly __ctCurrentPrincipal: true };
+  }];
+}>;
+
+export type AuthoredByCurrentUser<T> = Cfc<T, {
+  addIntegrity: readonly [{
+    readonly kind: "authored-by";
+    readonly subject: { readonly __ctCurrentPrincipal: true };
+  }];
 }>;
 
 export type RequiresIntegrity<T, X extends readonly unknown[]> = Cfc<T, {

@@ -19,8 +19,8 @@ import { computed, ifElse, pattern, UI, Writable } from "commonfabric";
 //   an ifElse branch must NOT get an extra derive wrapper, since computed is
 //   already a safe reactive context.
 export default pattern<Record<PropertyKey, never>>(() => {
-  const showOuter = Writable.of(false);
-  const secondToggle = Writable.of(false);
+  const showOuter = new Writable(false);
+  const secondToggle = new Writable(false);
 
   return {
     [UI]: (

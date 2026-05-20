@@ -20,7 +20,7 @@ const __cfAmdHooks = undefined;
 export default pattern((config: {
     multiplier: number;
 }) => {
-    const value = Writable.of(10, {
+    const value = new Writable(10, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("value", true);
     const result = __cfHelpers.derive({

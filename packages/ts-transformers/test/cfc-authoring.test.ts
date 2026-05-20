@@ -182,6 +182,8 @@ Deno.test("ts-transformers re-exports the canonical CFC alias set", () => {
     "Confidential",
     "Integrity",
     "AddIntegrity",
+    "RepresentsCurrentUser",
+    "AuthoredByCurrentUser",
     "RequiresIntegrity",
     "MaxConfidentiality",
     "OpaqueInput",
@@ -283,6 +285,84 @@ Deno.test(
     assertEquals(
       output.includes("__cfBindVerifiedBinding(saveTitle, {"),
       true,
+    );
+  },
+);
+
+Deno.test(
+  "WriteAuthorizedBy lowers alias-referenced trusted builder bindings",
+  async () => {
+    const source = `/// <cts-enable />
+      import { handler, pattern, WriteAuthorizedBy } from "commonfabric";
+
+      type TrustedWrite<T, Binding> = WriteAuthorizedBy<T, Binding>;
+
+      const saveTitle = handler<void, { title: { get(): string; set(value: string): void }; savedTitle: { set(value: string): void } }>(
+        (_event, { title, savedTitle }) => {
+          savedTitle.set(title.get());
+        },
+      );
+
+      interface Input {
+        title: string;
+      }
+
+      interface Output {
+        savedTitle: TrustedWrite<string, typeof saveTitle>;
+      }
+
+      export default pattern<Input, Output>(({ title }) => ({
+        savedTitle: title,
+      }));
+    `;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+
+    assertEquals(
+      output.includes("__cfBindVerifiedBinding(saveTitle, {"),
+      true,
+    );
+  },
+);
+
+Deno.test(
+  "WriteAuthorizedBy lowers exported trusted builder bindings inline",
+  async () => {
+    const source = `/// <cts-enable />
+      import { handler, pattern, WriteAuthorizedBy } from "commonfabric";
+
+      export const saveTitle = handler<void, { title: { get(): string; set(value: string): void }; savedTitle: { set(value: string): void } }>(
+        (_event, { title, savedTitle }) => {
+          savedTitle.set(title.get());
+        },
+      );
+
+      interface Input {
+        title: string;
+      }
+
+      interface Output {
+        savedTitle: WriteAuthorizedBy<string, typeof saveTitle>;
+      }
+
+      export default pattern<Input, Output>(({ title }) => ({
+        savedTitle: title,
+      }));
+    `;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+
+    assertEquals(
+      output.includes("export const saveTitle = __cfBindVerifiedBinding("),
+      true,
+    );
+    assertEquals(
+      output.includes("__cfBindVerifiedBinding(saveTitle, {"),
+      false,
     );
   },
 );

@@ -88,8 +88,8 @@ const button = await page.$("[data-cf-button]", {
 
 Playwright's `fill()` requires a native `<input>` or `<textarea>`. Since
 `cf-input` and `cf-textarea` are custom elements, use
-`pressSequentially()` on the locator instead — `delegatesFocus` forwards
-focus to the inner native input automatically:
+`pressSequentially()` on the locator instead. The custom element host is the
+semantic tab stop and forwards focus to the inner native input automatically:
 
 ```typescript
 const input = page.getByRole("textbox", { name: "Email" });

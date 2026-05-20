@@ -29,7 +29,7 @@ interface TestOutput {
 export default pattern((__cf_pattern_input) => {
     const title = __cf_pattern_input.key("title");
     const self = __cf_pattern_input[__cfHelpers.SELF];
-    const count = Writable.of(0, {
+    const count = new Writable(0, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("count", true);
     // Action closing over `self` — works because all inputs use Default<>

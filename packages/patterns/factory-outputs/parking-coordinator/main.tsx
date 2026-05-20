@@ -252,7 +252,11 @@ export const DEFAULT_SPOTS: ParkingSpot[] = [
 // ============================================================
 
 export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
-  ({ spots, people, requests }) => {
+  ({ spots: inputSpots, people: inputPeople, requests: inputRequests }) => {
+    const spots = inputSpots ?? Writable.perSpace.of(DEFAULT_SPOTS);
+    const people = inputPeople ?? Writable.perSpace.of<Person[]>([]);
+    const requests = inputRequests ?? Writable.perSpace.of<SpotRequest[]>([]);
+
     const nowTimestamp = wish<number>({ query: "#now" });
     const todayStr = computed(() =>
       toLocalDateStr(nowTimestamp.result || safeDateNow())
@@ -260,54 +264,56 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     const weekDatesArr = computed(() => getWeekDates(todayStr));
 
     // User/session UI state
-    const selectedPersonName = Writable.perUser.of("");
-    const adminMode = Writable.perSession.of(false);
-    const requestDate = Writable.perSession.of(toLocalDateStr(safeDateNow()));
-    const requestResult = Writable.perSession.of("");
+    const selectedPersonName = new Writable.perUser("");
+    const adminMode = new Writable.perSession(false);
+    const requestDate = new Writable.perSession(toLocalDateStr(safeDateNow()));
+    const requestResult = new Writable.perSession("");
 
     // Admin form state
-    const addPersonFormOpen = Writable.perSession.of(false);
-    const addSpotFormOpen = Writable.perSession.of(false);
-    const editingPersonName = Writable.perSession.of<string | null>(null);
-    const editingSpotNumber = Writable.perSession.of<string | null>(null);
-    const removePersonConfirmTarget = Writable.perSession.of<string | null>(
+    const addPersonFormOpen = new Writable.perSession(false);
+    const addSpotFormOpen = new Writable.perSession(false);
+    const editingPersonName = new Writable.perSession<string | null>(null);
+    const editingSpotNumber = new Writable.perSession<string | null>(null);
+    const removePersonConfirmTarget = new Writable.perSession<string | null>(
       null,
     );
-    const removeSpotConfirmTarget = Writable.perSession.of<string | null>(null);
+    const removeSpotConfirmTarget = new Writable.perSession<string | null>(
+      null,
+    );
 
     // Add person form fields
-    const newPersonName = Writable.perSession.of("");
-    const newPersonEmail = Writable.perSession.of("");
-    const newPersonCommuteMode = Writable.perSession.of<CommuteMode>("drive");
-    const newPersonPriority = Writable.perSession.of("1");
-    const newPersonDefaultSpot = Writable.perSession.of("");
-    const newPersonPreferences = Writable.perSession.of("");
-    const addPersonError = Writable.perSession.of("");
+    const newPersonName = new Writable.perSession("");
+    const newPersonEmail = new Writable.perSession("");
+    const newPersonCommuteMode = new Writable.perSession<CommuteMode>("drive");
+    const newPersonPriority = new Writable.perSession("1");
+    const newPersonDefaultSpot = new Writable.perSession("");
+    const newPersonPreferences = new Writable.perSession("");
+    const addPersonError = new Writable.perSession("");
 
     // Add spot form fields
-    const newSpotNumber = Writable.perSession.of("");
-    const newSpotLabel = Writable.perSession.of("");
-    const newSpotNotes = Writable.perSession.of("");
-    const addSpotError = Writable.perSession.of("");
+    const newSpotNumber = new Writable.perSession("");
+    const newSpotLabel = new Writable.perSession("");
+    const newSpotNotes = new Writable.perSession("");
+    const addSpotError = new Writable.perSession("");
 
     // Edit person form fields
-    const editName = Writable.perSession.of("");
-    const editEmail = Writable.perSession.of("");
-    const editCommuteMode = Writable.perSession.of<CommuteMode>("drive");
-    const editPriorityRank = Writable.perSession.of("1");
-    const editDefaultSpot = Writable.perSession.of("");
-    const editPreferences = Writable.perSession.of("");
+    const editName = new Writable.perSession("");
+    const editEmail = new Writable.perSession("");
+    const editCommuteMode = new Writable.perSession<CommuteMode>("drive");
+    const editPriorityRank = new Writable.perSession("1");
+    const editDefaultSpot = new Writable.perSession("");
+    const editPreferences = new Writable.perSession("");
 
     // Edit spot form fields
-    const editSpotNum = Writable.perSession.of("");
-    const editSpotLabel = Writable.perSession.of("");
-    const editSpotNotes = Writable.perSession.of("");
-    const editSpotActive = Writable.perSession.of(true);
+    const editSpotNum = new Writable.perSession("");
+    const editSpotLabel = new Writable.perSession("");
+    const editSpotNotes = new Writable.perSession("");
+    const editSpotActive = new Writable.perSession(true);
 
     // Override state
-    const gridOverrideSpot = Writable.perSession.of("");
-    const gridOverrideDate = Writable.perSession.of("");
-    const overridePersonName = Writable.perSession.of("");
+    const gridOverrideSpot = new Writable.perSession("");
+    const gridOverrideDate = new Writable.perSession("");
+    const overridePersonName = new Writable.perSession("");
     const activeRequestDate = computed(() => requestDate.get() || todayStr);
 
     // --------------------------------------------------------
@@ -1694,6 +1700,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                   <cf-input
                                     $value={newPersonName}
                                     placeholder="Full name"
+                                    timingStrategy="immediate"
                                     style="width: 100%;"
                                   />
                                 </cf-vstack>
@@ -1707,6 +1714,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                   <cf-input
                                     $value={newPersonEmail}
                                     placeholder="email@company.com"
+                                    timingStrategy="immediate"
                                     style="width: 100%;"
                                   />
                                 </cf-vstack>
@@ -1730,6 +1738,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                     $value={newPersonPriority}
                                     type="number"
                                     placeholder="1"
+                                    timingStrategy="immediate"
                                     style="width: 5rem;"
                                   />
                                 </cf-vstack>
@@ -1759,6 +1768,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                 <cf-input
                                   $value={newPersonPreferences}
                                   placeholder="e.g. 1, 5"
+                                  timingStrategy="immediate"
                                   style="width: 100%;"
                                 />
                               </cf-vstack>

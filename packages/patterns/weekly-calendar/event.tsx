@@ -257,10 +257,10 @@ const colorHandlers = [
 const Event = pattern<Input, Output>(
   ({ title, date, startTime, endTime, color, notes, isHidden, eventId }) => {
     // State for inline title editing
-    const isEditingTitle = Writable.of<boolean>(false);
+    const isEditingTitle = new Writable<boolean>(false);
 
     // Backlinks - populated by backlinks-index.tsx
-    const backlinks = Writable.of<MentionablePiece[]>([]);
+    const backlinks = new Writable<MentionablePiece[]>([]);
 
     // Computed display values
     const dateDisplay = computed(() => formatDateDisplay(date.get()));

@@ -192,6 +192,232 @@ Deno.test("handler bindings preserve scoped cells selected from pattern input sc
   }
 });
 
+Deno.test("per-user pointer can create and update a space-scoped profile cell", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const tx = runtime.edit();
+
+  try {
+    const { handler, pattern, Writable } =
+      createTrustedBuilder(runtime).commonfabric;
+
+    interface Profile {
+      name: string;
+    }
+
+    interface MyProfile {
+      profile?: Cell<Profile>;
+    }
+
+    interface Message {
+      authorName: string;
+      authorProfile: Cell<Profile>;
+      body: string;
+    }
+
+    const profileSchema = {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+      },
+      required: ["name"],
+    } as const;
+    const myProfileSchema = {
+      type: "object",
+      properties: {
+        profile: {
+          ...profileSchema,
+          asCell: [{ kind: "cell", scope: "space" }],
+        },
+      },
+      default: {},
+    } as const;
+    const messagesSchema = {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          authorName: { type: "string" },
+          authorProfile: {
+            ...profileSchema,
+            asCell: [{ kind: "cell", scope: "space" }],
+          },
+          body: { type: "string" },
+        },
+        required: ["authorName", "authorProfile", "body"],
+      },
+      default: [],
+    } as const;
+
+    const saveName = handler<
+      { name: string },
+      { myProfile: Cell<MyProfile> }
+    >({
+      type: "object",
+      properties: { name: { type: "string" } },
+      required: ["name"],
+    }, {
+      type: "object",
+      properties: {
+        myProfile: {
+          ...myProfileSchema,
+          asCell: [{ kind: "cell", scope: "user" }],
+        },
+      },
+      required: ["myProfile"],
+    }, ({ name }, { myProfile }) => {
+      const existing = myProfile.get()?.profile;
+      if (existing?.get()) {
+        existing.key("name").set(name);
+        return;
+      }
+
+      const profile = Writable.for<Profile>("profile");
+      profile.set({ name });
+      myProfile.set({ profile });
+    });
+
+    const sendMessage = handler<
+      { body: string },
+      { myProfile: Cell<MyProfile>; messages: Cell<Message[]> }
+    >({
+      type: "object",
+      properties: { body: { type: "string" } },
+      required: ["body"],
+    }, {
+      type: "object",
+      properties: {
+        myProfile: {
+          ...myProfileSchema,
+          asCell: [{ kind: "cell", scope: "user" }],
+        },
+        messages: {
+          ...messagesSchema,
+          asCell: [{ kind: "cell", scope: "space" }],
+        },
+      },
+      required: ["myProfile", "messages"],
+    }, ({ body }, { myProfile, messages }) => {
+      const profile = myProfile.get()?.profile;
+      if (!profile?.get()) {
+        return;
+      }
+
+      messages.push({
+        authorName: profile.key("name").get(),
+        authorProfile: profile,
+        body,
+      });
+    });
+
+    const Root = pattern<{
+      myProfile: MyProfile;
+      messages: Message[];
+    }>(({ myProfile, messages }) => ({
+      myProfile,
+      messages,
+      saveName: saveName(
+        ({
+          myProfile: myProfile as unknown as Cell<MyProfile>,
+        }) as any,
+      ),
+      sendMessage: sendMessage(
+        ({
+          myProfile: myProfile as unknown as Cell<MyProfile>,
+          messages: messages as unknown as Cell<Message[]>,
+        }) as any,
+      ),
+    }), {
+      type: "object",
+      properties: {
+        myProfile: {
+          ...myProfileSchema,
+          scope: "user",
+        },
+        messages: {
+          ...messagesSchema,
+          scope: "space",
+        },
+      },
+      required: ["myProfile", "messages"],
+    });
+
+    const resultCell = runtime.getCell(
+      space,
+      "scoped profile pointer creation",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, Root, {
+      myProfile: {},
+      messages: [],
+    }, resultCell);
+    runtime.prepareTxForCommit(tx);
+    await tx.commit();
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+
+    result.key("saveName").send({ name: "Ada" });
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+
+    const myProfileCell = result.key("myProfile").resolveAsCell();
+    assertEquals(myProfileCell.getAsNormalizedFullLink().scope, "user");
+    const profileCell = myProfileCell.asSchema<MyProfile>(myProfileSchema)
+      .get().profile;
+    if (!profileCell) {
+      throw new Error("expected profile cell");
+    }
+    assertEquals(profileCell.getAsNormalizedFullLink().scope, "space");
+    assertEquals(profileCell.get(), { name: "Ada" });
+    const firstProfileRef = profileCell.getAsNormalizedFullLink();
+
+    result.key("saveName").send({ name: "Ada Byron" });
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+
+    const updatedProfileCell = myProfileCell.asSchema<MyProfile>(
+      myProfileSchema,
+    ).get().profile;
+    if (!updatedProfileCell) {
+      throw new Error("expected updated profile cell");
+    }
+    assertEquals(
+      updatedProfileCell.getAsNormalizedFullLink().id,
+      firstProfileRef.id,
+    );
+    assertEquals(updatedProfileCell.getAsNormalizedFullLink().scope, "space");
+    assertEquals(updatedProfileCell.get(), { name: "Ada Byron" });
+
+    result.key("sendMessage").send({ body: "hello" });
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    await result.pull();
+
+    const messagesCell = result.key("messages").resolveAsCell();
+    const message = messagesCell.asSchema<Message[]>(messagesSchema).get()[0];
+    assertEquals(message.authorName, "Ada Byron");
+    assertEquals(message.body, "hello");
+    assertEquals(
+      message.authorProfile.getAsNormalizedFullLink().id,
+      firstProfileRef.id,
+    );
+    assertEquals(
+      message.authorProfile.getAsNormalizedFullLink().scope,
+      "space",
+    );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
 Deno.test("pattern factory .asScope() sets child pattern result scope", async () => {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({

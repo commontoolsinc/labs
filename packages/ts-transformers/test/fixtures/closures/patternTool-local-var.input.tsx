@@ -1,6 +1,6 @@
 import { computed, generateText, pattern, patternTool, type PatternToolResult, Writable } from "commonfabric";
 
-const content = Writable.of("Hello world");
+const content = new Writable("Hello world");
 
 type Output = {
   tool: PatternToolResult<{ content: string }>;
@@ -15,7 +15,7 @@ type Output = {
 //   genResult (local) is NOT added to extraParams despite having a reactive type
 // Context: Regression test — local variables like `genResult` (from generateText)
 //   must not be hoisted into extraParams. Only module-scoped reactive bindings
-//   (here, `content` from Writable.of) should be captured.
+//   (here, `content` from new Writable) should be captured.
 export default pattern<Record<string, never>, Output>(() => {
   const tool = patternTool(
     ({ language, content }: { language: string; content: string }) => {

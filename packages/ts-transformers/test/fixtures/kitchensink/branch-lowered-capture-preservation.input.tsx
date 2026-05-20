@@ -43,10 +43,10 @@ export default pattern<{
   subPieces: string[];
   trashedSubPieces: string[];
 }>(({ items, subPieces, trashedSubPieces }) => {
-  const editingNoteIndex = Writable.of<number | undefined>();
-  const editingNoteText = Writable.of("");
-  const expandedIndex = Writable.of<number | undefined>();
-  const settingsModuleIndex = Writable.of<number | undefined>();
+  const editingNoteIndex = new Writable<number | undefined>();
+  const editingNoteText = new Writable("");
+  const expandedIndex = new Writable<number | undefined>();
+  const settingsModuleIndex = new Writable<number | undefined>();
 
   const allEntries = computed(() =>
     items.map((entry, index) => ({

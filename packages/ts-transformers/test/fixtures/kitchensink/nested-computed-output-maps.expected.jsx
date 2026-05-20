@@ -80,8 +80,8 @@ const passthroughLabels = lift({
 } as const satisfies __cfHelpers.JSONSchema, (labels: string[]) => labels);
 // [TRANSFORM] pattern: type param stripped; input+output schemas appended after callback
 export default pattern((state) => {
-    // [TRANSFORM] Writable.of: schema arg injected; undefined default added for optional type
-    const selectedCommentId = Writable.of<string | undefined>(undefined, {
+    // [TRANSFORM] new Writable: schema arg injected; undefined default added for optional type
+    const selectedCommentId = new Writable<string | undefined>(undefined, {
         type: ["string", "undefined"]
     } as const satisfies __cfHelpers.JSONSchema).for("selectedCommentId", true);
     const laneLabels = passthroughLabels(["lane", "detail", "summary"]).for("laneLabels", true);

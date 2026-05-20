@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
-import { fromFileUrl } from "@std/path";
+import { fromFileUrl, join } from "@std/path";
 import type {
   CfcEnforcementMode,
   CfcLabelView,
@@ -7,6 +7,10 @@ import type {
 } from "@commonfabric/runner/cfc";
 import { CfHarnessEngine } from "../src/engine.ts";
 import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
+import {
+  readHarnessRunState,
+  readHarnessTranscript,
+} from "../src/artifacts.ts";
 import {
   CFC_INVOCATION_CONTEXT_DIR_ENV,
   CFC_RESULT_DIR_ENV,
@@ -86,6 +90,8 @@ const labsRootPath = (): Promise<string> =>
 
 interface WithHarnessOptions {
   cfcEnforcementMode?: CfcEnforcementMode;
+  artifactRoot?: string;
+  model?: string;
   configureSandbox?: (
     workspaceHostPath: string,
   ) => Partial<Parameters<typeof resolveDockerRunscSandboxConfig>[0]>;
@@ -231,9 +237,13 @@ const withHarness = async (
     await assertRunscRuntimeAvailable();
     const engine = new CfHarnessEngine({
       runId,
+      ...(options.artifactRoot !== undefined
+        ? { artifactRoot: options.artifactRoot }
+        : {}),
       ...(options.cfcEnforcementMode !== undefined
         ? { cfcEnforcementMode: options.cfcEnforcementMode }
         : {}),
+      ...(options.model !== undefined ? { model: options.model } : {}),
       sandbox: resolveDockerRunscSandboxConfig({
         workspaceHostPath,
         runtimeName: DOCKER_RUNTIME,
@@ -612,6 +622,213 @@ Deno.test({
       );
     } finally {
       await Deno.remove(secretsHostPath, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name:
+    "cf-harness integration: prompt loop mediates read_file output through runsc-cfc",
+  ignore: !INTEGRATION || !CFC_RESULT_DIR_CONFIGURED ||
+    !CFC_INVOCATION_CONTEXT_DIR_CONFIGURED,
+  permissions: { env: true, read: true, run: true, write: true },
+  async fn() {
+    const artifactRoot = await makeIntegrationTempDir(
+      "cf-harness-read-file-cfc-artifacts-",
+    );
+    const fileContent = "workspace read through runsc CFC\n";
+    try {
+      await withHarness(
+        "integration-read-file-cfc-prompt-loop",
+        async (engine, hostPath) => {
+          assertEquals(
+            engine.sandbox.describe?.().cfc?.invocationContextTransport,
+            "sidecar",
+          );
+          await Deno.mkdir(`${hostPath}/notes`, { recursive: true });
+          await Deno.writeTextFile(`${hostPath}/notes/public.txt`, fileContent);
+
+          const requests: Array<{
+            messages: Array<{
+              role: string;
+              tool_call_id?: string;
+              content?: string;
+            }>;
+          }> = [];
+          const loop = new CfHarnessPromptLoop({
+            apiKey: "test-key",
+            engine,
+            maxModelTurns: 3,
+            fetchFn: (_input, init) => {
+              const request = JSON.parse(String(init?.body ?? "{}")) as {
+                messages: Array<{
+                  role: string;
+                  tool_call_id?: string;
+                  content?: string;
+                }>;
+              };
+              requests.push(request);
+              const toolResponseCount = request.messages.filter((message) =>
+                message.role === "tool"
+              ).length;
+              const payload = toolResponseCount === 0
+                ? {
+                  choices: [{
+                    index: 0,
+                    message: {
+                      role: "assistant",
+                      content: "",
+                      tool_calls: [{
+                        id: "call-read-file",
+                        type: "function",
+                        function: {
+                          name: "read_file",
+                          arguments: JSON.stringify({
+                            path: "notes/public.txt",
+                          }),
+                        },
+                      }],
+                    },
+                  }],
+                }
+                : toolResponseCount === 1
+                ? {
+                  choices: [{
+                    index: 0,
+                    message: {
+                      role: "assistant",
+                      content: "",
+                      tool_calls: [{
+                        id: "call-followup-bash",
+                        type: "function",
+                        function: {
+                          name: "bash",
+                          arguments: JSON.stringify({
+                            command: "printf followup",
+                          }),
+                        },
+                      }],
+                    },
+                  }],
+                }
+                : {
+                  choices: [{
+                    index: 0,
+                    message: {
+                      role: "assistant",
+                      content: "read_file runtime CFC smoke complete.",
+                    },
+                  }],
+                };
+              return Promise.resolve(
+                new Response(JSON.stringify(payload), { status: 200 }),
+              );
+            },
+          });
+
+          const promptSlotBinding = {
+            type: CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
+            source: {
+              type: "cf-harness.integration.prompt-slot",
+              subject: "read-file-cfc",
+            },
+            role: "direct-command",
+            kernelName: "integration",
+            surface: "cli",
+          } as const;
+          const result = await loop.runPrompt({
+            model: "gpt-5.4",
+            prompt: "Read the workspace file, then run a followup command.",
+            promptSlotBinding,
+          });
+
+          assertEquals(
+            result.finalAssistantText,
+            "read_file runtime CFC smoke complete.",
+          );
+          assertEquals(requests.length, 3);
+          const readToolMessage = requests[1].messages.at(-1);
+          assertEquals(readToolMessage?.role, "tool");
+          assertEquals(readToolMessage?.tool_call_id, "call-read-file");
+          const readToolContent = JSON.parse(
+            readToolMessage?.content ?? "{}",
+          ) as {
+            content?: unknown;
+            cfc?: {
+              stdout?: { policy?: string };
+              stderr?: { policy?: string };
+              exitCode?: { policy?: string; value?: number };
+              diagnostics?: unknown[];
+            };
+          };
+          assertEquals(readToolContent.content, fileContent);
+          assertEquals(readToolContent.cfc?.stdout?.policy, "observed");
+          assertEquals(readToolContent.cfc?.stderr?.policy, "observed");
+          assertEquals(readToolContent.cfc?.exitCode?.policy, "observed");
+          assertEquals(readToolContent.cfc?.exitCode?.value, 0);
+          assertStringIncludes(
+            JSON.stringify(readToolContent.cfc?.diagnostics ?? []),
+            "runsc_cfc_result",
+          );
+
+          const runRoot = join(
+            artifactRoot,
+            "integration-read-file-cfc-prompt-loop",
+          );
+          const persistedState = await readHarnessRunState(
+            join(runRoot, "run-state.json"),
+          );
+          const persistedTranscript = await readHarnessTranscript(
+            join(runRoot, "transcript.json"),
+          );
+          assertEquals(persistedTranscript, result.transcript);
+          assertEquals(
+            persistedState.toolOutputs.map((ref) => ref.toolId),
+            ["read_file", "bash"],
+          );
+          assertEquals(
+            persistedState.cfcInvocationContexts?.map((context) =>
+              context.toolId
+            ),
+            ["read_file", "bash"],
+          );
+          assertEquals(
+            persistedState.cfcInvocationContexts?.[0].runManifest.present,
+            false,
+          );
+          const readOutputArtifactPath = persistedState.toolOutputs[0]
+            ?.artifactPath;
+          assert(
+            readOutputArtifactPath !== undefined,
+            "read_file output artifact path was not retained",
+          );
+          const readOutputArtifact = JSON.parse(
+            await Deno.readTextFile(readOutputArtifactPath),
+          ) as {
+            content?: unknown;
+            cfcResult?: {
+              stdout?: { policy?: string };
+              diagnostics?: unknown[];
+            };
+          };
+          assertEquals(readOutputArtifact.content, fileContent);
+          assertEquals(
+            readOutputArtifact.cfcResult?.stdout?.policy,
+            "observed",
+          );
+          assertStringIncludes(
+            JSON.stringify(readOutputArtifact.cfcResult?.diagnostics ?? []),
+            "runsc_cfc_result",
+          );
+        },
+        {
+          artifactRoot,
+          cfcEnforcementMode: "enforce-explicit",
+          model: "gpt-5.4",
+        },
+      );
+    } finally {
+      await Deno.remove(artifactRoot, { recursive: true });
     }
   },
 });

@@ -7,9 +7,9 @@ const trigger = handler<void, { stream: Stream<unknown> }>((_, { stream }) => {
 
 export default pattern(() => {
   const demo = RenderPolicyDemo({});
-  const revealSensitive = Writable.of(false);
+  const revealSensitive = new Writable(false);
   const trustedDisclosure = TrustedHealthDisclosureSurface({
-    content: Writable.of("Sensitive health data") as never,
+    content: new Writable("Sensitive health data") as never,
     revealSensitive,
   });
 

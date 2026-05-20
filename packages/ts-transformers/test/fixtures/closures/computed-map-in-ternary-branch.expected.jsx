@@ -29,7 +29,7 @@ interface PatternInput {
 //   pattern context when rendered from the ternary branch.
 export default pattern((__cf_pattern_input) => {
     const people = __cf_pattern_input.key("people");
-    const showAdmin = Writable.of(false, {
+    const showAdmin = new Writable(false, {
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema).for("showAdmin", true);
     const adminData = __cfHelpers.derive({

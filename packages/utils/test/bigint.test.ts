@@ -5,6 +5,14 @@ import {
   bigintToMinimalTwosComplement,
 } from "@commonfabric/utils/bigint";
 import {
+  bigintFromMtcDirect,
+  bigintToMtcDirect,
+} from "../src/bigint-uint8-direct.ts";
+import {
+  bigintFromMtcHex,
+  bigintToMtcHex,
+} from "../src/bigint-uint8-hex-string.ts";
+import {
   fromBase64url,
   toUnpaddedBase64url,
 } from "@commonfabric/utils/base64url";
@@ -53,152 +61,64 @@ function referenceEncode(value: bigint): Uint8Array {
   return bytes;
 }
 
-// ============================================================================
-// Fixtures
-// ============================================================================
+//
+// Fixtures, both main and reference
+//
 
-const rawFixtures: bigint[] = [
-  0x00n,
-  0x01n,
-  0x7fn,
-  0x80n,
-  0x81n,
-  0xffn,
-  0x0100n,
-  0x7fffn,
-  0x8000n,
-  0x8001n,
-  0xffffn,
-  0x01_0000n,
-  0x7f_ffffn,
-  0x80_0000n,
-  0x80_0001n,
-  0xff_ffffn,
-  0x0100_0000n,
-  0x7fff_ffffn,
-  0x8000_0000n,
-  0x8000_0001n,
-  0xffff_ffffn,
-  0x01_0000_0000n,
-  0x7f_ffff_ffffn,
-  0x80_0000_0000n,
-  0x80_0000_0001n,
-  0xff_ffff_ffffn,
-  0x0100_0000_0000n,
-  0x7fff_ffff_ffffn,
-  0x8000_0000_0000n,
-  0x8000_0000_0001n,
-  0xffff_ffff_ffffn,
-  0x01_0000_0000_0000n,
-  0x7f_ffff_ffff_ffffn,
-  0x80_0000_0000_0000n,
-  0x80_0000_0000_0001n,
-  0xff_ffff_ffff_ffffn,
-  0x0100_0000_0000_0000n,
-  0x7fff_ffff_ffff_ffffn,
-  0x8000_0000_0000_0000n,
-  0x8000_0000_0000_0001n,
-  0xffff_ffff_ffff_ffffn,
-  0x01_0000_0000_0000_0000n,
-  0x7f_ffff_ffff_ffff_ffffn,
-  0x80_0000_0000_0000_0000n,
-  0x80_0000_0000_0000_0001n,
-  0xff_ffff_ffff_ffff_ffffn,
-  0x0100_0000_0000_0000_0000n,
-  0x7fff_ffff_ffff_ffff_ffffn,
-  0x8000_0000_0000_0000_0000n,
-  0x8000_0000_0000_0000_0001n,
-  0xffff_ffff_ffff_ffff_ffffn,
-  -0x01n,
-  -0x7fn,
-  -0x80n,
-  -0x81n,
-  -0xffn,
-  -0x0100n,
-  -0x7fffn,
-  -0x8000n,
-  -0x8001n,
-  -0xffffn,
-  -0x01_0000n,
-  -0x7f_ffffn,
-  -0x80_0000n,
-  -0x80_0001n,
-  -0xff_ffffn,
-  -0x0100_0000n,
-  -0x7fff_ffffn,
-  -0x8000_0000n,
-  -0x8000_0001n,
-  -0xffff_ffffn,
-  -0x01_0000_0000n,
-  -0x7f_ffff_ffffn,
-  -0x80_0000_0000n,
-  -0x80_0000_0001n,
-  -0xff_ffff_ffffn,
-  -0x0100_0000_0000n,
-  -0x7fff_ffff_ffffn,
-  -0x8000_0000_0000n,
-  -0x8000_0000_0001n,
-  -0xffff_ffff_ffffn,
-  -0x01_0000_0000_0000n,
-  -0x7f_ffff_ffff_ffffn,
-  -0x80_0000_0000_0000n,
-  -0x80_0000_0000_0001n,
-  -0xff_ffff_ffff_ffffn,
-  -0x0100_0000_0000_0000n,
-  -0x7fff_ffff_ffff_ffffn,
-  -0x8000_0000_0000_0000n,
-  -0x8000_0000_0000_0001n,
-  -0xffff_ffff_ffff_ffffn,
-  -0x01_0000_0000_0000_0000n,
-  -0x7f_ffff_ffff_ffff_ffffn,
-  -0x80_0000_0000_0000_0000n,
-  -0x80_0000_0000_0000_0001n,
-  -0xff_ffff_ffff_ffff_ffffn,
-  -0x0100_0000_0000_0000_0000n,
-  -0x7fff_ffff_ffff_ffff_ffffn,
-  -0x8000_0000_0000_0000_0000n,
-  -0x8000_0000_0000_0000_0001n,
-  -0xffff_ffff_ffff_ffff_ffffn,
-  42n,
-  -42n,
-  -999n,
-  2n ** 32n,
-  -(2n ** 32n),
-  2n ** 64n,
-  -(2n ** 64n),
-  2n ** 128n,
-  -(2n ** 128n),
-  0x112233445566778899abcdefn,
-  -0x112233445566778899abcdefn,
-  // Negatives whose two's-complement remainder has leading-zero padding in
-  // its byte form -- a corner case that exercised a historical encoder bug
-  // (see PR #3527). The corresponding positive case (odd-hex-length with
-  // high nibble in 8..F) is reached via the recurrence below at iteration
-  // 2, where `n = 217129053n` (= `0xCF1205D`).
-  -241n,
-  -242n,
-  -243n,
-  -244n,
-  -245n,
-  -246n,
-  -247n,
-  -248n,
-];
+interface Fixture {
+  value: bigint;
+  encoded: Uint8Array;
+  label: string;
+}
 
-// Programmatic expansion via a deterministic recurrence. The multiplier `99`
-// adds ~6.63 bits per step, so 2000 iterations sweep magnitudes from a few
-// bits up to roughly 13_270 bits (~1659 bytes), with both signs at every step.
+const rawFixtures: Set<bigint> = new Set();
+
 {
+  // Full range of small numbers.
+  for (let i = -0x100n; i <= 0x100n; i++) {
+    rawFixtures.add(i);
+  }
+
+  // Many nines, decimal edition!
+  for (let i = 999n; i < (1n << 200n); i = (i * 10n) + 9n) {
+    rawFixtures.add(i);
+    rawFixtures.add(-i);
+  }
+
+  // Many nines, hex edition!
+  for (let i = 0x999n; i < (1n << 200n); i = (i << 4n) + 0x09n) {
+    rawFixtures.add(i);
+    rawFixtures.add(-i);
+  }
+
+  // Potential sign-bit confusion edge cases.
+  for (let i = 0n; i <= 256n; i++) {
+    rawFixtures.add(0x01n << i);
+    rawFixtures.add(0x7en << i);
+    rawFixtures.add(0x7fn << i);
+    rawFixtures.add(0x80n << i);
+    rawFixtures.add(0x81n << i);
+    rawFixtures.add(-0x01n << i);
+    rawFixtures.add(-0x7en << i);
+    rawFixtures.add(-0x7fn << i);
+    rawFixtures.add(-0x80n << i);
+    rawFixtures.add(-0x81n << i);
+  }
+
+  // Programmatic expansion via a deterministic recurrence. The multiplier `99`
+  // adds ~6.63 bits per step, so 2000 iterations sweep magnitudes from a few
+  // bits up to roughly 13_270 bits (~1659 bytes), with both signs at every
+  // step.
   let n = 123n;
   for (let i = 0; i < 2000; i++) {
     n = (n * 99n) + 9876n;
-    rawFixtures.push(n);
-    rawFixtures.push(-n);
+    rawFixtures.add(n);
+    rawFixtures.add(-n);
   }
 }
 
 /**
- * Format a bigint for use in a test name. Decimals up to 64 bits, hex up to
+ * Formats a `bigint` for use in a test name. Decimals up to 64 bits, hex up to
  * 128 bits, and beyond that just a hex prefix and the encoded byte count.
  */
 function fixtureLabel(v: bigint, encoded: Uint8Array): string {
@@ -211,66 +131,113 @@ function fixtureLabel(v: bigint, encoded: Uint8Array): string {
   return `${sign}0x${hex.slice(0, 12)}... (${encoded.length} bytes)`;
 }
 
-interface Fixture {
-  value: bigint;
-  encoded: Uint8Array;
-  label: string;
+/**
+ * Makes a fixture, optionally calculating the encoded form.
+ */
+function makeFixture(value: bigint, preEncoded?: number[]): Fixture {
+  let encoded: Uint8Array;
+
+  if (preEncoded) {
+    encoded = new Uint8Array(preEncoded);
+  } else {
+    encoded = referenceEncode(value);
+  }
+
+  return { value, encoded, label: fixtureLabel(value, encoded) };
 }
 
-const fixtures: readonly Fixture[] = rawFixtures.map((value) => {
-  const encoded = referenceEncode(value);
-  return { value, encoded, label: fixtureLabel(value, encoded) };
-});
+const fixtures: readonly Fixture[] = [...rawFixtures].sort().map((value) =>
+  makeFixture(value)
+);
+
+// These don't use `referenceEncode()` because these are what's used to test the
+// _integrity_ of `referenceEncode()`.
+const referenceFixtures: readonly Fixture[] = [
+  makeFixture(-129n, [0xff, 0x7f]),
+  makeFixture(-128n, [0x80]),
+  makeFixture(-1n, [0xff]),
+  makeFixture(0n, [0x00]),
+  makeFixture(1n, [0x01]),
+  makeFixture(127n, [0x7f]),
+  makeFixture(255n, [0x00, 0xff]),
+  makeFixture(1n << 1n, [0x02]),
+  makeFixture(1n << 2n, [0x04]),
+  makeFixture(1n << 3n, [0x08]),
+  makeFixture(1n << 4n, [0x10]),
+  makeFixture(1n << 5n, [0x20]),
+  makeFixture(1n << 6n, [0x40]),
+  makeFixture(1n << 7n, [0x00, 0x80]),
+  makeFixture(1n << 8n, [0x01, 0x00]),
+  makeFixture(1n << 9n, [0x02, 0x00]),
+  makeFixture(1n << 10n, [0x04, 0x00]),
+  makeFixture(1n << 11n, [0x08, 0x00]),
+  makeFixture(1n << 12n, [0x10, 0x00]),
+  makeFixture(1n << 13n, [0x20, 0x00]),
+  makeFixture(1n << 14n, [0x40, 0x00]),
+  makeFixture(1n << 15n, [0x00, 0x80, 0x00]),
+  makeFixture(1n << 16n, [0x01, 0x00, 0x00]),
+  makeFixture(1n << 17n, [0x02, 0x00, 0x00]),
+  makeFixture(1n << 63n, [
+    0x00,
+    0x80,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+  ]),
+  makeFixture(1n << 64n, [
+    0x01,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+  ]),
+  makeFixture(
+    0x0123_4567_89ab_cdef_0987_6543_21fe_dcban,
+    [
+      0x01,
+      0x23,
+      0x45,
+      0x67,
+      0x89,
+      0xab,
+      0xcd,
+      0xef,
+      0x09,
+      0x87,
+      0x65,
+      0x43,
+      0x21,
+      0xfe,
+      0xdc,
+      0xba,
+    ],
+  ),
+];
 
 //
-// Reference encoder anchor
+// Tests to validate reference encoder
 //
 
 // A small set of explicit byte-level assertions that pin `referenceEncode`
 // against the spec. The rest of the suite trusts it as an oracle, so it
 // matters that these can't both be wrong in the same way.
-describe("referenceEncode (test oracle)", () => {
-  it("encodes 0n", () => {
-    expect(referenceEncode(0n)).toEqual(new Uint8Array([0x00]));
-  });
-
-  it("encodes 1n", () => {
-    expect(referenceEncode(1n)).toEqual(new Uint8Array([0x01]));
-  });
-
-  it("encodes 127n", () => {
-    expect(referenceEncode(127n)).toEqual(new Uint8Array([0x7f]));
-  });
-
-  it("encodes 128n (sign extension)", () => {
-    expect(referenceEncode(128n)).toEqual(new Uint8Array([0x00, 0x80]));
-  });
-
-  it("encodes 255n", () => {
-    expect(referenceEncode(255n)).toEqual(new Uint8Array([0x00, 0xff]));
-  });
-
-  it("encodes 256n", () => {
-    expect(referenceEncode(256n)).toEqual(new Uint8Array([0x01, 0x00]));
-  });
-
-  it("encodes -1n", () => {
-    expect(referenceEncode(-1n)).toEqual(new Uint8Array([0xff]));
-  });
-
-  it("encodes -128n", () => {
-    expect(referenceEncode(-128n)).toEqual(new Uint8Array([0x80]));
-  });
-
-  it("encodes -129n (sign extension)", () => {
-    expect(referenceEncode(-129n)).toEqual(new Uint8Array([0xff, 0x7f]));
-  });
-
-  it("encodes 2^64 as 9 bytes", () => {
-    const bytes = referenceEncode(2n ** 64n);
-    expect(bytes.length).toBe(9);
-    expect(bytes[0]).toBe(0x01);
-    for (let i = 1; i < 9; i++) expect(bytes[i]).toBe(0x00);
+describe("`referenceEncode()` (test oracle)", () => {
+  it("encodes all reference fixtures as expected", () => {
+    for (const { value, encoded, label } of referenceFixtures) {
+      try {
+        expect(referenceEncode(value)).toEqual(new Uint8Array(encoded));
+      } catch (e) {
+        throw new Error(`Failed on ${label}.`, { cause: e });
+      }
+    }
   });
 });
 
@@ -278,91 +245,76 @@ describe("referenceEncode (test oracle)", () => {
 // Per-function fixture loops
 //
 
-const FIXTURE_SLICE_SIZE = 1000;
-for (let at = 0; at < fixtures.length; at += FIXTURE_SLICE_SIZE) {
-  const slice = fixtures.slice(at, at + FIXTURE_SLICE_SIZE);
-  const sliceLabel = `fixtures ${at}..${at + slice.length - 1}`;
+for (
+  const { biToMtc, biFromMtc, full } of [
+    {
+      biToMtc: bigintToMinimalTwosComplement,
+      biFromMtc: bigintFromMinimalTwosComplement,
+      full: false,
+    },
+    { biToMtc: bigintToMtcDirect, biFromMtc: bigintFromMtcDirect, full: true },
+    { biToMtc: bigintToMtcHex, biFromMtc: bigintFromMtcHex, full: true },
+  ]
+) {
+  const FIXTURE_SLICE_SIZE = 1000;
+  for (let at = 0; at < fixtures.length; at += FIXTURE_SLICE_SIZE) {
+    const slice = full
+      ? fixtures.slice(at, at + FIXTURE_SLICE_SIZE)
+      : fixtures.slice(at, at + 5);
+    const sliceLabel = `fixtures ${at}..${at + slice.length - 1}`;
 
-  describe("bigintToMinimalTwosComplement()", () => {
-    it(`correctly encodes ${sliceLabel}`, () => {
-      for (let i = 0; i < slice.length; i++) {
-        const { value, encoded, label } = slice[i];
-        try {
-          expect(bigintToMinimalTwosComplement(value)).toEqual(encoded);
-        } catch {
-          throw new Error(`Failed on ${label}.`);
+    describe(`${biToMtc.name}()`, () => {
+      it(`correctly encodes ${sliceLabel}`, () => {
+        for (let i = 0; i < slice.length; i++) {
+          const { value, encoded, label } = slice[i];
+          try {
+            expect(biToMtc(value)).toEqual(encoded);
+          } catch (e) {
+            throw new Error(`Failed on ${label}.`, { cause: e });
+          }
         }
-      }
+      });
     });
-  });
 
-  describe("bigintFromMinimalTwosComplement()", () => {
-    it(`correctly decodes ${sliceLabel}`, () => {
-      for (let i = 0; i < slice.length; i++) {
-        const { value, encoded, label } = slice[i];
-        try {
-          expect(bigintFromMinimalTwosComplement(encoded)).toBe(value);
-        } catch {
-          throw new Error(`Failed on ${label}.`);
+    describe(`${biFromMtc.name}()`, () => {
+      it(`correctly decodes ${sliceLabel}`, () => {
+        for (let i = 0; i < slice.length; i++) {
+          const { value, encoded, label } = slice[i];
+          try {
+            expect(biFromMtc(encoded)).toBe(value);
+          } catch (e) {
+            throw new Error(`Failed on ${label}.`, { cause: e });
+          }
         }
-      }
+      });
     });
-  });
 
-  describe("round trip through base64url", () => {
-    it(`correctly round-trips ${sliceLabel}`, () => {
-      for (let i = 0; i < slice.length; i++) {
-        const { value, label } = slice[i];
-        const bytes = bigintToMinimalTwosComplement(value);
-        const b64 = toUnpaddedBase64url(bytes);
-        const decodedBytes = fromBase64url(b64);
-        try {
-          expect(bigintFromMinimalTwosComplement(decodedBytes)).toBe(value);
-        } catch {
-          throw new Error(`Failed on ${label}.`);
+    describe(`${biToMtc.name}()->${biFromMtc.name}() round trip through base64url`, () => {
+      it(`correctly round-trips ${sliceLabel}`, () => {
+        for (let i = 0; i < slice.length; i++) {
+          const { value, label } = slice[i];
+          const bytes = biToMtc(value);
+          const b64 = toUnpaddedBase64url(bytes);
+          const decodedBytes = fromBase64url(b64);
+          try {
+            expect(biFromMtc(decodedBytes)).toBe(value);
+          } catch (e) {
+            throw new Error(`Failed on ${label}.`, { cause: e });
+          }
         }
-      }
+      });
+    });
+  }
+
+  //
+  // Edge cases
+  //
+
+  describe(`${biFromMtc.name}()`, () => {
+    it("throws on empty input", () => {
+      expect(() => biFromMtc(new Uint8Array([]))).toThrow(
+        "empty input",
+      );
     });
   });
 }
-
-//
-// Edge cases and specific regression tests
-//
-
-describe("bigintFromMinimalTwosComplement()", () => {
-  it("throws on empty input", () => {
-    expect(() => bigintFromMinimalTwosComplement(new Uint8Array([]))).toThrow(
-      "empty input",
-    );
-  });
-});
-
-// Both `bigintToMinimalTwosComplement` paths used to confuse "leading char
-// of `value.toString(16)`" with "high nibble of byte 0 of the encoded form".
-// They differ when the hex string would need leading-zero padding to fill
-// `byteLen * 2` characters: the hex's leading char is non-zero, but the
-// padded byte representation has byte 0 starting with a zero nibble.
-describe("bigintToMinimalTwosComplement()", () => {
-  describe("byte-length corner cases", () => {
-    // Positive: an odd-length hex with leading nibble in 8..F. The fast path
-    // historically inserted an unnecessary sign-extension byte.
-    it("does not over-pad 217129053n (= 0xCF1205D)", () => {
-      expect(bigintToMinimalTwosComplement(217129053n)).toEqual(
-        new Uint8Array([0x0c, 0xf1, 0x20, 0x5d]),
-      );
-    });
-
-    // Negatives with abs in [241, 248]. Production historically encoded these
-    // as a single byte with the high bit *clear*, breaking the round-trip
-    // (e.g., -241n decoded back as 15n).
-    for (let i = 241; i <= 248; i++) {
-      const v = BigInt(-i);
-      it(`round-trips ${v}n with sign bit set`, () => {
-        const bytes = bigintToMinimalTwosComplement(v);
-        expect(bytes[0] & 0x80).not.toBe(0);
-        expect(bigintFromMinimalTwosComplement(bytes)).toBe(v);
-      });
-    }
-  });
-});

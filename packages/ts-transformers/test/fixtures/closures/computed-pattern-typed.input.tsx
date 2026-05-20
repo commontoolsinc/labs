@@ -7,7 +7,7 @@ import { Writable, computed, pattern } from "commonfabric";
 //   Destructured `multiplier` is captured with asOpaque: true (it is an OpaqueRef
 //   from the pattern input), while `value` is captured with asCell: true.
 export default pattern<{ multiplier: number }, number>(({ multiplier }) => {
-  const value = Writable.of(10);
+  const value = new Writable(10);
   const result = computed(() => value.get() * multiplier);
   return result;
 });

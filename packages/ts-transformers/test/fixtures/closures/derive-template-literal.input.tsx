@@ -4,8 +4,8 @@ import { Writable, derive, pattern } from "commonfabric";
 // Verifies: a captured cell used inside a template literal expression is extracted
 //   derive(value, fn) → derive(schema, schema, { value, prefix }, fn)
 export default pattern(() => {
-  const value = Writable.of(10);
-  const prefix = Writable.of("Value: ");
+  const value = new Writable(10);
+  const prefix = new Writable("Value: ");
 
   const result = derive(value, (v) => `${prefix.get()}${v}`);
 

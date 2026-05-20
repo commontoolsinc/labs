@@ -7,7 +7,7 @@ type SummaryIndexResult = {
 };
 
 export default pattern<Record<string, never>>((_) => {
-  const query = Writable.of("");
+  const query = new Writable("");
 
   const { entries } = wish<SummaryIndexResult>({
     query: "#summaryIndex",

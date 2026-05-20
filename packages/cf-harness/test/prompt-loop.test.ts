@@ -684,6 +684,7 @@ Deno.test("CfHarnessPromptLoop surfaces recoverable file-tool failures to the mo
       ]),
       runId: "run-recoverable-file-error",
       model: "gpt-5.4",
+      cfcEnforcementMode: "disabled",
       now: (() => {
         const timestamps = [
           "2026-04-15T20:05:00.000Z",
@@ -3403,6 +3404,162 @@ Deno.test("CfHarnessPromptLoop denies read_file content without CFC metadata in 
   assertEquals(result.runState.policyEvents.at(-1)?.severity, "denied");
 });
 
+Deno.test("CfHarnessPromptLoop redacts read_file filesystem-status failures in enforce mode", async () => {
+  const sensitivePath = "/workspace/personal/health/condition-7.md";
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime([
+        {
+          stdout: "",
+          stderr: `file not found: ${sensitivePath}`,
+          exitCode: 10,
+        },
+      ]),
+      runId: "run-read-file-status-redacted",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "enforce-explicit",
+    }),
+    fetchFn: (() => {
+      let callCount = 0;
+      return () => {
+        callCount += 1;
+        const payload = callCount === 1
+          ? {
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "",
+                tool_calls: [{
+                  id: "call-read-file-status-redacted",
+                  type: "function",
+                  function: {
+                    name: "read_file",
+                    arguments: JSON.stringify({ path: sensitivePath }),
+                  },
+                }],
+              },
+            }],
+          }
+          : {
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "Handled redacted file status.",
+              },
+            }],
+          };
+        return Promise.resolve(
+          new Response(JSON.stringify(payload), { status: 200 }),
+        );
+      };
+    })(),
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Read a possible private file.",
+  });
+
+  const toolMessage = result.transcript.find((message) =>
+    message.role === "tool" && message.toolName === "read_file"
+  );
+  assert(toolMessage !== undefined);
+  assert(!toolMessage.content.includes("condition-7"));
+  assert(!toolMessage.content.includes("file_not_found"));
+  assert(!toolMessage.content.includes("file not found"));
+  assertEquals(JSON.parse(toolMessage.content), {
+    outputId: createToolOutputId(
+      "run-read-file-status-redacted",
+      "read_file",
+      1,
+    ),
+    path: "[redacted]",
+    ok: false,
+    error: {
+      type: "cf-harness.structured-file-tool-error",
+      code: "unknown",
+      message:
+        "read_file failed: filesystem status not observable under CFC policy",
+      path: "[redacted]",
+      detail: "Filesystem status details were redacted by CFC policy.",
+    },
+  });
+
+  const policyEvent = result.runState.policyEvents.at(-1);
+  assertEquals(policyEvent?.severity, "denied");
+  assertEquals(policyEvent?.observationDenied?.reason, "not-observable");
+});
+
+Deno.test("CfHarnessPromptLoop warns but exposes read_file filesystem-status failures in observe mode", async () => {
+  const path = "/workspace/personal/health/condition-8.md";
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime([
+        {
+          stdout: "",
+          stderr: `file not found: ${path}`,
+          exitCode: 10,
+        },
+      ]),
+      runId: "run-read-file-status-observe",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "observe",
+    }),
+    fetchFn: (() => {
+      let callCount = 0;
+      return () => {
+        callCount += 1;
+        const payload = callCount === 1
+          ? {
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "",
+                tool_calls: [{
+                  id: "call-read-file-status-observe",
+                  type: "function",
+                  function: {
+                    name: "read_file",
+                    arguments: JSON.stringify({ path }),
+                  },
+                }],
+              },
+            }],
+          }
+          : {
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "Handled observed file status.",
+              },
+            }],
+          };
+        return Promise.resolve(
+          new Response(JSON.stringify(payload), { status: 200 }),
+        );
+      };
+    })(),
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Read a possible private file.",
+  });
+
+  const toolMessage = result.transcript.find((message) =>
+    message.role === "tool" && message.toolName === "read_file"
+  );
+  assert(toolMessage !== undefined);
+  assert(toolMessage.content.includes("condition-8"));
+  assert(toolMessage.content.includes("file_not_found"));
+  assert(toolMessage.content.includes("file not found"));
+  assertEquals(result.runState.policyEvents.at(-1)?.severity, "warning");
+});
+
 Deno.test("CfHarnessPromptLoop exposes mediated read_file content and tracks model context", async () => {
   const fetchCalls: RequestInit[] = [];
   const secretLabel = "did:key:read-file-secret";
@@ -3497,6 +3654,10 @@ Deno.test("CfHarnessPromptLoop exposes mediated read_file content and tracks mod
   assertEquals(content.path, "/workspace/secret.txt");
   assertEquals(content.content, "released file secret\n");
   assertEquals(content.cfc.stdout.policy, "observed");
+  assertEquals(
+    result.runState.cfcInvocationContexts?.[0]?.cfcInputLabels,
+    undefined,
+  );
   assertEquals(
     result.runState.cfcModelContext?.observations.some((observation) =>
       observation.toolCallId === "call-read-secret-file" &&

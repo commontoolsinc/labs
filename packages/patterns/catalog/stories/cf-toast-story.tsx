@@ -9,11 +9,11 @@ interface ToastStoryOutput {
 }
 
 export default pattern<ToastStoryInput, ToastStoryOutput>(() => {
-  const showDefault = Writable.of(false);
-  const showSuccess = Writable.of(false);
-  const showError = Writable.of(false);
-  const showWarning = Writable.of(false);
-  const showAction = Writable.of(false);
+  const showDefault = new Writable(false);
+  const showSuccess = new Writable(false);
+  const showError = new Writable(false);
+  const showWarning = new Writable(false);
+  const showAction = new Writable(false);
 
   return {
     [NAME]: "cf-toast Story",

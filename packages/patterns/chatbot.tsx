@@ -149,7 +149,7 @@ export const TitleGenerator = pattern<
 
 export default pattern<ChatInput, ChatOutput>(
   ({ messages, tools, theme, system }) => {
-    const model = Writable.of<string>("anthropic:claude-sonnet-4-5");
+    const model = new Writable<string>("anthropic:claude-sonnet-4-5");
     const mentionable =
       wish<MentionablePiece[]>({ query: "#mentionable" }).result;
     const recentPieces =

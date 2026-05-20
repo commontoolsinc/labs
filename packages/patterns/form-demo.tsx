@@ -211,9 +211,9 @@ const deletePerson = handler<
 // ===== Pattern =====
 
 export default pattern<FormDemoInput, FormDemoOutput>(({ people }) => {
-  const editing = Writable.of<{ editing: Person | null }>({ editing: null });
-  const formData = Writable.of<Person>(createEmptyPerson());
-  const modalOpen = Writable.of(false);
+  const editing = new Writable<{ editing: Person | null }>({ editing: null });
+  const formData = new Writable<Person>(createEmptyPerson());
+  const modalOpen = new Writable(false);
 
   // Computed values
   const peopleCount = computed(() => people.get().length);

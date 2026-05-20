@@ -557,10 +557,39 @@ export class Runner {
     return { pattern, patternId, resolvedPatternOrModule };
   }
 
+  private updateArgument<T>(
+    tx: IExtendedStorageTransaction,
+    argumentLink: NormalizedFullLink,
+    argument: T,
+    argumentSchema: JSONSchema | undefined,
+  ): void {
+    const argumentCell = this.runtime.getCellFromLink(
+      argumentLink,
+      undefined,
+      tx,
+    );
+    argumentCell.set(argument);
+    recordSetupProjectionPolicyInputs(
+      tx,
+      this.runtime,
+      argumentCell,
+      argumentSchema,
+      argument,
+    );
+    diffAndUpdate(
+      this.runtime,
+      tx,
+      argumentLink,
+      argument,
+      argumentLink,
+    );
+  }
+
   private maybeReuseRunningSetup<T, R>(
     tx: IExtendedStorageTransaction,
     resultCell: Cell<R>,
     argument: T,
+    pattern: Pattern,
     patternId: string,
     previousPatternId: string | undefined,
   ): SetupResult<R> | undefined {
@@ -572,15 +601,13 @@ export class Runner {
     }
 
     if (previousPatternId === patternId) {
-      const argumentLink = getMetaLink(resultCell, "argument");
-      if (argumentLink !== undefined) {
-        const argumentCell = this.runtime.getCellFromLink(
-          argumentLink,
-          undefined,
-          tx,
-        );
-        argumentCell.set(argument);
-      }
+      const argumentLink = getMetaLink(resultCell, "argument")!;
+      this.updateArgument(
+        tx,
+        argumentLink,
+        argument,
+        pattern.argumentSchema,
+      );
       return { resultCell, needsStart: false };
     }
 
@@ -644,7 +671,7 @@ export class Runner {
   ): void {
     const defaults = extractDefaultValues(pattern.argumentSchema) as Partial<T>;
     const internalLink = getMetaLink(resultCell, "internal");
-    const argumentLink = getMetaLink(resultCell, "argument");
+    let argumentLink = getMetaLink(resultCell, "argument");
     const internalCell = getMetaCell(
       resultCell,
       "internal",
@@ -685,26 +712,33 @@ export class Runner {
     // argument cell. If it doesn't exist, we need to apply the defaults
     // I don't include the schema here, since I don't want cfc enforcement yet
     if (argumentLink === undefined) {
-      const newArgumentCell = getMetaCell(
+      let newArgumentCell = getMetaCell(
         resultCell,
         "argument",
         tx,
       );
       setResultCell(newArgumentCell, resultCell.asSchema(pattern.resultSchema));
       nextArgument = mergeObjects<T>(argument, defaults);
-      newArgumentCell.set(nextArgument);
-      const newArgumentCellLink = newArgumentCell.asSchema(
-        pattern.argumentSchema,
-      ).getAsWriteRedirectLink({ base: resultCell, includeSchema: true });
-      resultCell.withTx(tx).setMetaRaw("argument", newArgumentCellLink);
+      //newArgumentCell.set(nextArgument);
+
+      newArgumentCell = newArgumentCell.asSchema(pattern.argumentSchema);
+      const newArgumentSigilLink = newArgumentCell.getAsWriteRedirectLink({
+        base: resultCell,
+        includeSchema: true,
+      });
+      resultCell.withTx(tx).setMetaRaw("argument", newArgumentSigilLink);
+
+      argumentLink = newArgumentCell.getAsNormalizedFullLink();
+      if (argumentLink === undefined) {
+        throw new Error("Invalid argument link in updateArgument");
+      }
     }
     if (nextArgument !== undefined) {
-      diffAndUpdate(
-        this.runtime,
+      this.updateArgument(
         tx,
-        getMetaLink(resultCell.withTx(tx), "argument")!,
+        argumentLink,
         nextArgument,
-        resultCell.getAsNormalizedFullLink(),
+        pattern.argumentSchema,
       );
     }
 
@@ -775,6 +809,7 @@ export class Runner {
       tx,
       resultCell,
       argument,
+      pattern,
       patternId,
       previousPatternId,
     );

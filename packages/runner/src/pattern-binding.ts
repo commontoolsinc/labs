@@ -2,6 +2,7 @@ import { isRecord } from "@commonfabric/utils/types";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
   isPattern,
+  type JSONSchema,
   type Pattern,
   unsafe_originalPattern,
   unsafe_parentPattern,
@@ -21,12 +22,50 @@ import {
 } from "./link-utils.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import { ignoreReadForScheduling } from "./scheduler.ts";
-import { ContextualFlowControl } from "@commonfabric/runner";
+import { ContextualFlowControl } from "./cfc.ts";
 import type { CellScope } from "./builder/types.ts";
-import { scopeRank } from "./scope.ts";
+import { isCellScope, scopeRank } from "./scope.ts";
 
 type SendValueToBindingOptions = {
   narrowestReadScope?: CellScope;
+};
+
+const scopedLinkForPath = (
+  cfc: ContextualFlowControl,
+  link: NormalizedFullLink,
+  path: readonly string[],
+  schemaOverride?: JSONSchema,
+): NormalizedFullLink => {
+  let scope = link.scope;
+  let schema = link.schema;
+  let childSchema: JSONSchema | undefined;
+
+  for (const key of path) {
+    childSchema = cfc.getSchemaAtPath(schema, [key]);
+    if (isRecord(childSchema) && isCellScope(childSchema.scope)) {
+      scope = childSchema.scope;
+    }
+    schema = childSchema;
+  }
+
+  const finalSchema = schemaOverride ?? childSchema;
+  if (isRecord(finalSchema)) {
+    if (isCellScope(finalSchema.scope)) {
+      scope = finalSchema.scope;
+    }
+    const asCellEntry = ContextualFlowControl.getAsCellValues(finalSchema)[0];
+    const asCellScope = ContextualFlowControl.getAsCellScope(asCellEntry);
+    if (isCellScope(asCellScope)) {
+      scope = asCellScope;
+    }
+  }
+
+  return {
+    ...link,
+    path: [...path],
+    scope,
+    ...(finalSchema !== undefined && { schema: finalSchema }),
+  };
 };
 
 /**
@@ -57,7 +96,6 @@ export function sendValueToBinding<T>(
     if (isLegacyAlias(binding)) {
       const alias = binding.$alias;
       if (typeof alias.cell !== "string") {
-        console.log("Binding:", binding);
         throw new Error(
           "Invalid pseudo-alias cell: " + JSON.stringify(binding),
         );
@@ -68,17 +106,16 @@ export function sendValueToBinding<T>(
         : alias.cell === "internal"
         ? internalCellLink
         : alias.cell === "result"
-        ? cell.getAsWriteRedirectLink()
+        ? parseLink(cell.getAsWriteRedirectLink(), cell)
         : undefined;
       if (link === undefined) {
         throw new Error("Invalid pseudo-alias path: " + alias.path);
       }
-      // we don't include the alias scope, since these don't have enough information
-      binding = createSigilLinkFromParsedLink({
-        ...(alias.schema !== undefined && { schema: alias.schema }),
-        ...link, // link scope/schema take priority
-        path: alias.path.map((p) => p.toString()),
-      }, { includeSchema: true, overwrite: "redirect" });
+      const path = alias.path.map((p) => p.toString());
+      binding = createSigilLinkFromParsedLink(
+        scopedLinkForPath(cell.runtime.cfc, link, path, alias.schema),
+        { includeSchema: true, overwrite: "redirect" },
+      );
     }
 
     const ref = resolveLink(
@@ -224,11 +261,10 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
           : link.schema !== undefined
           ? cfc.schemaAtPath(link.schema, path)
           : undefined;
-        return createSigilLinkFromParsedLink({
-          ...link,
-          path,
-          ...(schema !== undefined && { schema }),
-        }, { includeSchema: true, overwrite: "redirect" });
+        return createSigilLinkFromParsedLink(
+          scopedLinkForPath(cfc, link, path, schema),
+          { includeSchema: true, overwrite: "redirect" },
+        );
       } else if (Array.isArray(alias.cell)) {
         const { cell, ...rest } = alias;
         if (cell.length < 2) {

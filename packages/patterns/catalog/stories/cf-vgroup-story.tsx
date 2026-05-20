@@ -11,7 +11,7 @@ interface VGroupStoryOutput {
 }
 
 export default pattern<VGroupStoryInput, VGroupStoryOutput>(() => {
-  const gap = Writable.of<"sm" | "md" | "lg">("md");
+  const gap = new Writable<"sm" | "md" | "lg">("md");
 
   return {
     [NAME]: "cf-vgroup Story",

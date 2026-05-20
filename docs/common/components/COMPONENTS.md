@@ -387,7 +387,7 @@ Both modes share the same slots (header, default, footer, close-button), events,
 Fixed-position navigation bar for app-like UIs. Distinct from `cf-tabs` — fires selection events instead of managing ARIA tab panels.
 
 ```tsx
-const activeTab = Writable.of("home");
+const activeTab = new Writable("home");
 
 <cf-tab-bar $value={activeTab} variant="inset">
   <cf-tab-bar-item value="home" label="Home">
@@ -808,6 +808,22 @@ SVG charting components. Compose mark elements inside a `cf-chart` container.
 - **Data auto-detection:** Number arrays auto-index. String x-values use band scale. Date/ISO strings use time scale.
 - **Responsive width:** Chart fills its container width. Use CSS to control.
 - **Crosshair:** Enabled by default. Shows nearest data point on hover.
+
+---
+
+## CFC Authorship
+
+`cf-cfc-authorship` can enforce text-integrity policy for its children when
+`verifyTextIntegrity` is set. If `requiredTextIntegrity` or `requiredIntegrity`
+is provided, the renderer uses that explicit atom list.
+
+When no explicit requirement is provided and `$author`/`author` is a cell whose
+root CFC label contains `represents-principal`, the renderer infers a required
+`{ kind: "authored-by", subject }` atom from that author cell. This means a
+cell-backed author can make previously display-only text require matching
+authorship integrity. Use an explicit `requiredTextIntegrity` when a component
+needs a different policy, and avoid cell-backed `$author` for purely decorative
+author names.
 
 ---
 

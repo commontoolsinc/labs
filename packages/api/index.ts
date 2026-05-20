@@ -811,8 +811,8 @@ export interface IResolvable<T, C extends AnyBrandedCell<T>> {
  * Available on comparable and readable cells.
  */
 export interface IEquatable {
-  equals(other: AnyCell<any> | object): boolean;
-  equalLinks(other: AnyCell<any> | object): boolean;
+  equals(other: AnyCell<any> | object | undefined): boolean;
+  equalLinks(other: AnyCell<any> | object | undefined): boolean;
 }
 
 /**
@@ -897,12 +897,25 @@ export interface CellTypeConstructor<
   Wrap extends HKT,
 > {
   /**
+   * Create a cell with an initial/default value. In a reactive context, this
+   * value will only be set on first call.
+   *
+   * AST transformation adds `.for("foo")` in `const foo = new Cell(value)`.
+   *
+   * Internally it just merges the value into the schema as a default value.
+   *
+   * @param value - The initial/default value to set on the cell
+   * @param schema - Optional JSON schema for the cell
+   * @returns A new cell
+   */
+  new <T>(value?: T, schema?: JSONSchema): Apply<Wrap, T>;
+
+  /**
    * Create a cell with a cause.
    *
-   * Can be chained with .of() or .set():
+   * Can be chained with `new ...(...)` or .set():
    *
    * const foo = Cell.for(cause).set(value); // sets cell to latest value
-   * const bar = Cell.for(cause).of(value); // sets cell to initial value
    *
    * @param cause - The cause to associate with this cell
    * @returns A new cell
@@ -948,7 +961,10 @@ export interface CellTypeConstructor<
    * @param b - Second cell or value to compare
    * @returns true if the values are equal
    */
-  equals(a: AnyCell<any> | object, b: AnyCell<any> | object): boolean;
+  equals(
+    a: AnyCell<any> | object | undefined,
+    b: AnyCell<any> | object | undefined,
+  ): boolean;
 
   /**
    * Compare two cells or values for equality by comparing their underlying
@@ -958,13 +974,24 @@ export interface CellTypeConstructor<
    * @param b - Second cell or value to compare
    * @returns true if the values are equal
    */
-  equalLinks(a: AnyCell<any> | object, b: AnyCell<any> | object): boolean;
+  equalLinks(
+    a: AnyCell<any> | object | undefined,
+    b: AnyCell<any> | object | undefined,
+  ): boolean;
 }
 
 export interface ScopedCellTypeConstructor<
   Wrap extends HKT,
   Scope extends CellScope,
 > {
+  /**
+   * Create a scoped cell with an initial/default value.
+   */
+  new <T>(
+    value?: T,
+    schema?: JSONSchema,
+  ): ScopedConstructorResult<Scope, Apply<Wrap, T>>;
+
   /**
    * Create a scoped cell with an initial/default value.
    */
@@ -2286,8 +2313,8 @@ export type ToIndentedDebugStringFunction = (value: unknown) => string;
  * This is a standalone export of the equals function from Cell/Writable.
  */
 export type EqualsFunction = (
-  a: AnyCell<any> | object,
-  b: AnyCell<any> | object,
+  a: AnyCell<any> | object | undefined,
+  b: AnyCell<any> | object | undefined,
 ) => boolean;
 
 // Re-export all function types as values for destructuring imports

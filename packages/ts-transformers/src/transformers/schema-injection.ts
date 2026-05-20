@@ -5,6 +5,7 @@ import { FUNCTION_HARDENING_HELPER_NAME } from "@commonfabric/utils/sandbox-cont
 import {
   classifyArrayMethodCall,
   detectCallKind,
+  detectNewExpressionKind,
   ensureTypeNodeRegistered,
   getTypeAtLocationWithFallback,
   getTypeFromTypeNodeWithFallback,
@@ -836,10 +837,23 @@ function isCellScopeValue(value: string): value is CellScope {
 }
 
 function scopedConstructorAccessorScope(
-  node: ts.CallExpression,
+  node: ts.CallExpression | ts.NewExpression,
 ): CellScope | undefined {
   const callee = unwrapExpression(node.expression);
   if (!ts.isPropertyAccessExpression(callee)) return undefined;
+
+  if (ts.isNewExpression(node)) {
+    switch (callee.name.text) {
+      case "perSpace":
+        return "space";
+      case "perUser":
+        return "user";
+      case "perSession":
+        return "session";
+      default:
+        return undefined;
+    }
+  }
 
   const constructorView = unwrapExpression(callee.expression);
   if (!ts.isPropertyAccessExpression(constructorView)) return undefined;
@@ -857,7 +871,7 @@ function scopedConstructorAccessorScope(
 }
 
 function cellConstructorCallScope(
-  node: ts.CallExpression,
+  node: ts.CallExpression | ts.NewExpression,
   checker: ts.TypeChecker,
 ): CellScope | undefined {
   return scopedConstructorAccessorScope(node) ??
@@ -2787,6 +2801,81 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
     const capabilityRegistry = context.options.capabilitySummaryRegistry;
 
     const visit = (node: ts.Node): ts.Node => {
+      if (ts.isNewExpression(node)) {
+        const callKind = detectNewExpressionKind(node, checker);
+        if (callKind?.kind === "cell-factory") {
+          const factory = transformation.factory;
+          const typeArgs = node.typeArguments;
+          const args = node.arguments ?? [];
+          const scope = cellConstructorCallScope(node, checker);
+
+          // If already has 2 arguments, assume schema is already present.
+          if (args.length >= 2) {
+            return ts.visitEachChild(node, visit, transformation);
+          }
+
+          const resolved = resolveInjectableSchemaType(
+            typeArgs?.[0],
+            checker,
+            sourceFile,
+            factory,
+            typeRegistry,
+            () => {
+              const valueArg = args[0];
+              if (valueArg) {
+                const valueType = inferExpressionTypeWithInitializerFallback(
+                  valueArg,
+                  checker,
+                  sourceFile,
+                  factory,
+                  typeRegistry,
+                  capabilityRegistry,
+                  context,
+                );
+                return valueType && !isUnresolvedSchemaType(valueType)
+                  ? widenLiteralType(valueType, checker)
+                  : valueType;
+              }
+              if (!scope) {
+                return undefined;
+              }
+              const contextualType = inferSchemaContextualType(node, checker);
+              return contextualType
+                ? unwrapCellLikeType(contextualType, checker)
+                : undefined;
+            },
+          );
+
+          const schemaCall = createRegisteredSchemaCallFromResolvedType(
+            context,
+            resolved,
+            checker,
+            typeRegistry,
+            resolved.inferred || scope
+              ? { ...(resolved.inferred && { widenLiterals: true }), scope }
+              : undefined,
+          );
+
+          if (schemaCall) {
+            // Schema must always be the second argument. If no value was
+            // provided, add undefined as the first argument.
+            const newArgs = args.length === 0
+              ? [factory.createIdentifier("undefined"), schemaCall]
+              : [...args, schemaCall];
+
+            const updated = factory.updateNewExpression(
+              node,
+              node.expression,
+              node.typeArguments,
+              newArgs,
+            );
+            return ts.visitEachChild(updated, visit, transformation);
+          }
+        }
+
+        return ts.visitEachChild(node, visit, transformation);
+      }
+
       if (!ts.isCallExpression(node)) {
         return ts.visitEachChild(node, visit, transformation);
       }

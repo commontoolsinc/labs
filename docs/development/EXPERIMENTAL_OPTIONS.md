@@ -8,12 +8,17 @@ various major features.
 | Flag | Env Var | Description |
 |------|---------|-------------|
 | `modernDataModel` | `EXPERIMENTAL_MODERN_DATA_MODEL` | Enables the new fabric value type system (`bigint`, `Map`, `Set`, `Uint8Array`, `Date`, `FabricInstance`). |
+| `schedulerHistoricalMightWrite` | n/a (`RuntimeOptions` only) | Preserves the scheduler's legacy cumulative write history for dependency scheduling instead of the default current-known write set. |
 
 All flags default to `undefined` which means they take on the default value
 defined for the flag. The default is generally `false` unless the flag is in the
 process of being "graduated." Setting any flag to `true` activates the
 corresponding experimental behavior, and setting it to `false` suppresses the
 experimental behavior (if it happened to be on by default).
+
+Most flags are controlled by environment variables. Flags marked `n/a` in the
+table are internal runtime options and currently have to be passed through
+`new Runtime({ experimental: { ... } })`.
 
 ## Defining a new flag
 
@@ -104,8 +109,9 @@ Browser Web Worker
 
 Key points:
 
-1. The **env vars** are the single source of truth. They must be set at build
-   time (for the shell) and at server start time (for toolshed).
+1. For env-backed flags, the **env vars** are the single source of truth. They
+   must be set at build time (for the shell) and at server start time (for
+   toolshed).
 2. The **shell build** bakes the flags into the JS bundle via esbuild defines.
 3. The **IPC protocol** carries the flags from the main thread to the Web Worker
    via `InitializationData`.
@@ -134,11 +140,11 @@ service.
 
 ### Check the logs
 
-When any experimental flags are enabled, the `Runtime` constructor logs them on
-startup. Look for a line like:
+When any experimental flags are explicitly overridden, the `Runtime`
+constructor logs them on startup. Look for a line like:
 
 ```
-Experimental flags enabled: someFlag, someOtherFlag
+Experimental flag overrides: someFlag=true, someOtherFlag=false
 ```
 
 - **Server-side (toolshed):** Check `packages/toolshed/local-dev-toolshed.log`.

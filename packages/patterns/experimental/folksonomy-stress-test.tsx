@@ -455,16 +455,18 @@ const clearAll = handler<
 
 export default pattern(() => {
   // Core state
-  const eventsCell = Cell.of<TagEvent[]>([]);
+  const eventsCell = new Cell<TagEvent[]>([]);
   const aggregator = AggregatorPattern({ events: eventsCell });
 
   // Timing state
-  const statusText = Writable.of("Ready - click a scale button to load events");
-  const genMs = Writable.of(0);
-  const loadMs = Writable.of(0);
-  const loadedCount = Writable.of(0);
-  const loadedScopes = Writable.of(0);
-  const loadedTags = Writable.of(0);
+  const statusText = new Writable(
+    "Ready - click a scale button to load events",
+  );
+  const genMs = new Writable(0);
+  const loadMs = new Writable(0);
+  const loadedCount = new Writable(0);
+  const loadedScopes = new Writable(0);
+  const loadedTags = new Writable(0);
 
   // Suggestion statistics derived from aggregator output
   const scopesWithSuggestions = computed(() => {
@@ -526,8 +528,8 @@ export default pattern(() => {
   });
 
   // Interactive typing test - uses first scope which gets events in all scales
-  const testScope = Writable.of("recipe-tracker");
-  const testTags = Writable.of<string[]>([]);
+  const testScope = new Writable("recipe-tracker");
+  const testTags = new Writable<string[]>([]);
   const tagsInstance = FolksonomyTags({
     scope: testScope,
     tags: testTags,

@@ -357,17 +357,17 @@ const Profile = pattern<ProfileInput, Output>(
     learned,
   }) => {
     // Section expanded states
-    const selfExpanded = Writable.of(true);
-    const partnerExpanded = Writable.of(false);
-    const childrenExpanded = Writable.of(false);
-    const parentsExpanded = Writable.of(false);
-    const inlawsExpanded = Writable.of(false);
-    const addressesExpanded = Writable.of(false);
-    const vehiclesExpanded = Writable.of(false);
-    const membershipsExpanded = Writable.of(false);
-    const banksExpanded = Writable.of(false);
-    const employmentExpanded = Writable.of(false);
-    const learnedExpanded = Writable.of(false);
+    const selfExpanded = new Writable(true);
+    const partnerExpanded = new Writable(false);
+    const childrenExpanded = new Writable(false);
+    const parentsExpanded = new Writable(false);
+    const inlawsExpanded = new Writable(false);
+    const addressesExpanded = new Writable(false);
+    const vehiclesExpanded = new Writable(false);
+    const membershipsExpanded = new Writable(false);
+    const banksExpanded = new Writable(false);
+    const employmentExpanded = new Writable(false);
+    const learnedExpanded = new Writable(false);
 
     // Actions for adding items
     const addChild = action(() => children.push(newPerson()));

@@ -227,7 +227,7 @@ export interface GmailAgenticSearchInput {
 
   // Optional signal cell for consuming patterns to indicate "found an item"
   // When this value increases, marks the most recent query as having found items
-  // Create with Writable.of<number>(0) and pass in - both patterns share the same cell
+  // Create with new Writable<number>(0) and pass in - both patterns share the same cell
   itemFoundSignal?: number | Default<0>;
 }
 
@@ -1019,7 +1019,7 @@ const GmailAgenticSearch = pattern<
     // Input `accountType` may be read-only (Default cells are read-only when using default value)
     // See: community-docs/superstitions/2025-12-03-derive-creates-readonly-cells-use-property-access.md
     // See: community-docs/folk_wisdom/thinking-reactively-vs-events.md ("Local Cells for Component Output")
-    const selectedAccountType = Writable.of<"default" | "personal" | "work">(
+    const selectedAccountType = new Writable<"default" | "personal" | "work">(
       "default",
     );
 
@@ -1042,13 +1042,13 @@ const GmailAgenticSearch = pattern<
     // See: community-docs/superstitions/2025-12-04-share-cells-between-composed-patterns.md
     const itemFoundSignal = itemFoundSignalInput;
     // Track last signal value in a Cell (closure vars don't persist in derive)
-    const lastSignalValueCell = Writable.of<number>(0);
+    const lastSignalValueCell = new Writable<number>(0);
     // Track last executed query ID in a Cell (so derive can access it)
-    const lastExecutedQueryIdCell = Writable.of<string | null>(null);
+    const lastExecutedQueryIdCell = new Writable<string | null>(null);
     // Track foundItems counts separately from localQueries
     // Local cells work correctly in derives (no closure issues with input cells)
     // See: community-docs/superstitions/2025-12-08-locally-created-cells-not-unwrapped-in-derive.md
-    const foundItemsTracker = Writable.of<Record<string, number>>({});
+    const foundItemsTracker = new Writable<Record<string, number>>({});
 
     // Watch the signal and update foundItemsTracker when it increases
     derive(
@@ -1489,7 +1489,7 @@ When you're done searching, STOP calling tools and produce your final structured
     const boundCompleteScan = completeScanHandler({ lastScanAt, isScanning });
 
     // Track if debug log is expanded (local UI state)
-    const debugExpanded = Writable.of(false);
+    const debugExpanded = new Writable(false);
 
     // ========================================================================
     // UI PIECES (extracted for flexible composition)
@@ -2474,7 +2474,7 @@ Be conservative: when in doubt, recommend "do_not_share".`,
     // are defined at module scope
 
     // Track if pending submissions UI is expanded
-    const pendingSubmissionsExpanded = Writable.of(false);
+    const pendingSubmissionsExpanded = new Writable(false);
 
     // Pending Submissions UI
     const pendingSubmissionsUI = (

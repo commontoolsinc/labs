@@ -98,7 +98,8 @@ Current mode-sensitive behavior:
 - `ifElse`, `when`, `unless`
 - reactive array calls (`map`, `mapWithPattern`, `filter`, `filterWithPattern`,
   `flatMap`, `flatMapWithPattern`)
-- cell factories (`cell`, `Cell.of`, `OpaqueCell.of`, `Stream.of`, etc.)
+- cell factories (`cell`, `new Cell`, `new OpaqueCell`, `new Stream`, etc.),
+  with legacy `.of(...)` still accepted
 - `Cell.for`-style calls
 - `wish`
 - `generateObject`
@@ -144,11 +145,11 @@ Validates `as` and angle-bracket assertions:
 
 On cell-factory calls with an empty array literal and no explicit type argument:
 
-- `Cell.of([])`, `Writable.of([])`, `OpaqueCell.of([])`, `Stream.of([])`,
+- `new Cell([])`, `new Writable([])`, `new OpaqueCell([])`, `new Stream([])`,
   deprecated `cell([])`, and other recognized cell factories
 - **Error** `cell-factory:empty-array`
   - explains that `[]` infers to `never[]` and suggests
-    `Cell.of<MyType[]>([])`-style explicit type arguments.
+    `new Cell<MyType[]>([])`-style explicit type arguments.
 
 No error when:
 
@@ -663,7 +664,7 @@ If schemas are not already present via type args:
 
 Injected behaviors:
 
-- `cell(...)`, `Cell.of(...)`, `OpaqueCell.of(...)`, `Stream.of(...)`, etc.:
+- `cell(...)`, `new Cell(...)`, `new OpaqueCell(...)`, `new Stream(...)`, etc.:
   - inject schema as second argument if missing
   - if no value arg, inject `undefined` then schema
   - value inference first uses registry/initializer recovery for transformed

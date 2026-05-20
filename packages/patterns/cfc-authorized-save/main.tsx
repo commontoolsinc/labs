@@ -5,6 +5,7 @@ import {
   pattern,
   Stream,
   UI,
+  type VNode,
   Writable,
 } from "commonfabric";
 import {
@@ -19,7 +20,7 @@ interface AuthorizedSaveInput {
 
 interface AuthorizedSaveOutput {
   [NAME]: string;
-  [UI]: unknown;
+  [UI]: VNode;
   draftTitle: string;
   savedTitle: TrustedSaveTitleUiContract;
   save: Stream<void>;

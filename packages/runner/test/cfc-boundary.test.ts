@@ -536,6 +536,178 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("allows setup to install alias-backed CFC pattern arguments", async () => {
+    const storageManager = StorageManager.emulate({
+      as: signer,
+    });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+      trustSnapshotProvider: () => ({
+        id: "trust-snapshot-argument-setup",
+        actingPrincipal: signer.did(),
+      }),
+    });
+    try {
+      const sourceCell = runtime.getCell(
+        signer.did(),
+        "cfc-setup-argument-source",
+        {
+          type: "object",
+          properties: {
+            savedTitle: { type: "string", default: "" },
+          },
+          required: ["savedTitle"],
+        } as const satisfies JSONSchema,
+      );
+      await runtime.editWithRetry((tx) =>
+        sourceCell.withTx(tx).set({ savedTitle: "" })
+      );
+
+      const trustedTitleSchema = {
+        type: "string",
+        default: "",
+        ifc: {
+          uiContract: {
+            helper: "UiAction",
+            action: "TrustedSave",
+            trustedPattern: "TrustedSaveSurface",
+          },
+        },
+      } as const satisfies JSONSchema;
+      const argumentSchema = {
+        type: "object",
+        properties: {
+          savedTitle: trustedTitleSchema,
+        },
+        required: ["savedTitle"],
+      } as const satisfies JSONSchema;
+      const pattern = {
+        argumentSchema,
+        resultSchema: {
+          type: "object",
+          properties: {},
+        } as const satisfies JSONSchema,
+        result: {},
+        nodes: [],
+      } satisfies Pattern;
+      const resultCell = runtime.getCell(
+        signer.did(),
+        "cfc-setup-argument-target",
+        undefined,
+      );
+
+      await runtime.setup(undefined, pattern, {
+        savedTitle: sourceCell.key("savedTitle").getAsWriteRedirectLink({
+          includeSchema: true,
+        }),
+      }, resultCell);
+
+      expect(resultCell.getArgumentCell()).toBeDefined();
+      expect(
+        (resultCell.getArgumentCell()?.getRaw() as any)?.savedTitle?.[
+          "/"
+        ]?.["link@1"]?.id,
+      ).toBe(sourceCell.getAsNormalizedFullLink().id);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("allows first-time uiContract fields to install their schema default", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const schema = {
+        type: "object",
+        properties: {
+          argument: {
+            type: "object",
+            properties: {
+              savedTitle: {
+                type: "string",
+                default: "",
+                ifc: {
+                  uiContract: {
+                    helper: "UiAction",
+                    action: "TrustedSave",
+                    trustedPattern: "TrustedSaveSurface",
+                  },
+                },
+              },
+            },
+            required: ["savedTitle"],
+          },
+        },
+      } as const satisfies JSONSchema;
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-ui-contract-default-setup",
+        schema,
+        tx,
+      );
+      cell.set({ argument: { savedTitle: "" } });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.ok).toBeDefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("rejects first-time uiContract fields initialized away from their default", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const schema = {
+        type: "object",
+        properties: {
+          argument: {
+            type: "object",
+            properties: {
+              savedTitle: {
+                type: "string",
+                default: "",
+                ifc: {
+                  uiContract: {
+                    helper: "UiAction",
+                    action: "TrustedSave",
+                    trustedPattern: "TrustedSaveSurface",
+                  },
+                },
+              },
+            },
+            required: ["savedTitle"],
+          },
+        },
+      } as const satisfies JSONSchema;
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-ui-contract-non-default-setup",
+        schema,
+        tx,
+      );
+      cell.set({ argument: { savedTitle: "not default" } });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain(
+        "missing trusted-event policy input",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("rejects relevant unprepared commits in enforcing modes", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
@@ -1655,6 +1827,120 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("persists IFC labels for each path that reuses the same schema ref", async () => {
+    const { runtime, storageManager } = createRuntime();
+    const guardedRef: JSONSchema = { $ref: "#/$defs/Guarded" };
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-persisted-reused-ref-labels",
+        {
+          type: "object",
+          properties: {
+            first: guardedRef,
+            second: guardedRef,
+          },
+          $defs: {
+            Guarded: {
+              type: "string",
+              ifc: { integrity: ["shared-ref-integrity"] },
+            },
+          },
+        },
+        tx,
+      );
+      cell.set({ first: "one", second: "two" });
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.ok).toBeDefined();
+
+      const persistedId = parseLink(cell.getAsLink()).id!;
+      const replica = storageManager.open(signer.did()).replica as unknown as {
+        getDocument(id: string): {
+          cfc?: { labelMap?: { entries: unknown[] } };
+        } | undefined;
+      };
+      const entries = replica.getDocument(persistedId)?.cfc?.labelMap?.entries;
+      expect(entries).toContainEqual({
+        path: ["first"],
+        label: { integrity: ["shared-ref-integrity"] },
+      });
+      expect(entries).toContainEqual({
+        path: ["second"],
+        label: { integrity: ["shared-ref-integrity"] },
+      });
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("does not conflict when another transaction already wrote the same schema document", async () => {
+    const server = new MemoryV2Server.Server();
+    const storageManagerA = new SharedV2StorageManager({
+      as: signer,
+      address: new URL("memory://"),
+    }, server);
+    const storageManagerB = new SharedV2StorageManager({
+      as: signer,
+      address: new URL("memory://"),
+    }, server);
+    const runtimeA = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager: storageManagerA,
+    });
+    const runtimeB = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager: storageManagerB,
+    });
+    const schema = {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          ifc: { integrity: ["trusted-profile"] },
+        },
+      },
+      required: ["name"],
+    } as const satisfies JSONSchema;
+
+    try {
+      const txA = runtimeA.edit();
+      txA.setCfcEnforcementMode("enforce-explicit");
+      const cellA = runtimeA.getCell(
+        signer.did(),
+        "cfc-schema-doc-race-a",
+        schema,
+        txA,
+      );
+      cellA.set({ name: "Alice" });
+      txA.prepareCfc();
+
+      const txB = runtimeB.edit();
+      txB.setCfcEnforcementMode("enforce-explicit");
+      const cellB = runtimeB.getCell(
+        signer.did(),
+        "cfc-schema-doc-race-b",
+        schema,
+        txB,
+      );
+      cellB.set({ name: "Bob" });
+      txB.prepareCfc();
+      expect((await txB.commit()).ok).toBeDefined();
+
+      const resultA = await txA.commit();
+      expect(resultA.ok).toBeDefined();
+    } finally {
+      await runtimeA.dispose();
+      await runtimeB.dispose();
+      await storageManagerA.close();
+      await storageManagerB.close();
+      await server.close();
+    }
+  });
+
   it("persists CFC metadata on the scoped document instance", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
@@ -2321,6 +2607,201 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("does not apply wildcard policy entries with unresolved refs", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-unresolved-ref-policy-match",
+        {
+          type: "object",
+          properties: {
+            items: {
+              type: "array",
+              items: {
+                $ref: "#/$defs/Missing",
+                ifc: { writeAuthorizedBy: ["trusted-handler"] },
+              },
+            },
+          },
+        },
+        tx,
+      );
+      cell.set({ items: [{ title: "unresolved" }] });
+      tx.prepareCfc();
+
+      expect((await tx.commit()).ok).toBeDefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("does not apply wildcard policy entries when item value shape mismatches", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-wildcard-policy-shape-mismatch",
+        {
+          type: "object",
+          properties: {
+            items: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  title: { type: "string" },
+                },
+                ifc: { writeAuthorizedBy: ["trusted-handler"] },
+              },
+            },
+          },
+        },
+        tx,
+      );
+      cell.set({ items: ["not an object"] });
+
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("does not persist wildcard policy metadata for empty list writes", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-wildcard-policy-empty-list",
+        {
+          type: "object",
+          properties: {
+            items: {
+              type: "array",
+              items: {
+                type: "object",
+                ifc: { writeAuthorizedBy: ["trusted-handler"] },
+              },
+            },
+          },
+        },
+        tx,
+      );
+      cell.set({ items: [] });
+
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+
+      const verify = runtime.edit();
+      const stored = verify.readOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: cell.getAsNormalizedFullLink().id,
+        path: [],
+      }) as { cfc?: { labelMap?: { entries?: unknown[] } } };
+      expect(stored.cfc?.labelMap?.entries ?? []).not.toContainEqual({
+        path: ["items", "*"],
+        label: {},
+      });
+      verify.abort();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("preserves untouched wildcard policy entries during unrelated rewrites", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const seed = runtime.edit();
+      const target = runtime.getCell(
+        signer.did(),
+        "cfc-wildcard-policy-preserve-target",
+        undefined,
+        seed,
+      );
+      const targetLink = target.getAsNormalizedFullLink();
+      const guardedSchema = internSchema(
+        {
+          type: "object",
+          properties: {
+            title: { type: "string" },
+            items: {
+              type: "array",
+              items: {
+                type: "object",
+                ifc: { writeAuthorizedBy: ["trusted-handler"] },
+              },
+            },
+          },
+        } satisfies JSONSchema,
+        true,
+      );
+      seed.writeOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: targetLink.id,
+        path: [],
+      }, {
+        value: { title: "draft", items: [{ title: "existing" }] },
+        cfc: {
+          version: 1,
+          schemaHash: guardedSchema.taggedHashString,
+          labelMap: {
+            version: 1,
+            entries: [{ path: ["items", "*"], label: {} }],
+          },
+        },
+      });
+      seed.writeOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: `cid:${guardedSchema.taggedHashString}`,
+        path: [],
+      }, {
+        value: guardedSchema.schema,
+      });
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const update = runtime.edit();
+      update.setCfcEnforcementMode("enforce-explicit");
+      const targetWithSchema = runtime.getCell(
+        signer.did(),
+        "cfc-wildcard-policy-preserve-target",
+        guardedSchema.schema,
+        update,
+      );
+      targetWithSchema.key("title").set("updated");
+      update.prepareCfc();
+      expect((await update.commit()).ok).toBeDefined();
+
+      const verify = runtime.edit();
+      const stored = verify.readOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: targetLink.id,
+        path: [],
+      }) as { cfc?: { labelMap?: { entries?: unknown[] } } };
+      expect(stored.cfc?.labelMap?.entries).toContainEqual({
+        path: ["items", "*"],
+        label: {},
+      });
+      verify.abort();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("preserves prior stored link-field labels across unrelated metadata rewrites", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
@@ -2461,6 +2942,355 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         expect.objectContaining({ kind: "link-write" }),
       );
       tx.abort();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("persists cfc metadata for nested entity documents created from labelled collection items", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-nested-entity-metadata",
+        {
+          type: "object",
+          properties: {
+            messages: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  piece: {
+                    type: "object",
+                    properties: {
+                      body: { type: "string" },
+                    },
+                    required: ["body"],
+                    ifc: {
+                      integrity: [{
+                        kind: "authored-by",
+                        subject: "alice",
+                      }],
+                    },
+                  },
+                },
+                required: ["piece"],
+              },
+            },
+          },
+          required: ["messages"],
+        },
+        tx,
+      );
+      cell.set({
+        messages: [{
+          piece: { body: "hello" },
+        }],
+      });
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.ok).toBeDefined();
+
+      const rootId = parseLink(cell.getAsLink()).id!;
+      const replica = storageManager.open(signer.did()).replica as unknown as {
+        getDocument(id: string): {
+          value?: unknown;
+          cfc?: {
+            schemaHash: string;
+            labelMap?: {
+              entries: Array<{
+                path: string[];
+                label: {
+                  confidentiality?: unknown[];
+                  integrity?: unknown[];
+                };
+              }>;
+            };
+          };
+        } | undefined;
+      };
+      const rootDoc = replica.getDocument(rootId);
+      const nestedLink = parseLink(
+        (rootDoc?.value as { messages?: unknown[] } | undefined)?.messages?.[0],
+      );
+      expect(nestedLink?.id).toBeDefined();
+
+      const nestedDoc = replica.getDocument(nestedLink!.id!);
+      expect(nestedDoc?.cfc?.labelMap?.entries).toContainEqual({
+        path: ["piece"],
+        label: {
+          integrity: [{
+            kind: "authored-by",
+            subject: "alice",
+          }],
+        },
+      });
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("persists matched anyOf branch cfc metadata for nested entity documents", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-nested-anyof-entity-metadata",
+        {
+          type: "object",
+          properties: {
+            messages: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  piece: {
+                    anyOf: [
+                      {
+                        type: "object",
+                        properties: {
+                          id: {
+                            type: "string",
+                            enum: ["alice"],
+                          },
+                          body: { type: "string" },
+                        },
+                        required: ["id", "body"],
+                        ifc: {
+                          integrity: [{
+                            kind: "authored-by",
+                            subject: "alice",
+                          }],
+                        },
+                      },
+                      {
+                        type: "object",
+                        properties: {
+                          id: {
+                            type: "string",
+                            enum: ["bob"],
+                          },
+                          body: { type: "string" },
+                        },
+                        required: ["id", "body"],
+                        ifc: {
+                          integrity: [{
+                            kind: "authored-by",
+                            subject: "bob",
+                          }],
+                        },
+                      },
+                    ],
+                  },
+                },
+                required: ["piece"],
+              },
+            },
+          },
+          required: ["messages"],
+        },
+        tx,
+      );
+      cell.set({
+        messages: [{
+          piece: { id: "alice", body: "hello" },
+        }],
+      });
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.ok).toBeDefined();
+
+      const rootId = parseLink(cell.getAsLink()).id!;
+      const replica = storageManager.open(signer.did()).replica as unknown as {
+        getDocument(id: string): {
+          value?: unknown;
+          cfc?: {
+            schemaHash: string;
+            labelMap?: {
+              entries: Array<{
+                path: string[];
+                label: {
+                  confidentiality?: unknown[];
+                  integrity?: unknown[];
+                };
+              }>;
+            };
+          };
+        } | undefined;
+      };
+      const rootDoc = replica.getDocument(rootId);
+      const nestedLink = parseLink(
+        (rootDoc?.value as { messages?: unknown[] } | undefined)?.messages?.[0],
+      );
+      expect(nestedLink?.id).toBeDefined();
+
+      const nestedDoc = replica.getDocument(nestedLink!.id!);
+      expect(nestedDoc?.cfc?.labelMap?.entries).toContainEqual({
+        path: ["piece"],
+        label: {
+          integrity: [{
+            kind: "authored-by",
+            subject: "alice",
+          }],
+        },
+      });
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("persists nested item labels when child refs rely on parent defs during push", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-parent-defs-push-metadata",
+        {
+          type: "object",
+          properties: {
+            messages: {
+              type: "array",
+              items: {
+                $ref: "#/$defs/SharedMessageEntry",
+              },
+            },
+          },
+          required: ["messages"],
+          $defs: {
+            SharedMessageEntry: {
+              type: "object",
+              properties: {
+                piece: {
+                  $ref: "#/$defs/TrustedMessage",
+                },
+              },
+              required: ["piece"],
+            },
+            TrustedMessage: {
+              anyOf: [
+                { $ref: "#/$defs/TrustedMessageAlice" },
+                { $ref: "#/$defs/TrustedMessageBob" },
+              ],
+            },
+            TrustedMessageAlice: {
+              type: "object",
+              properties: {
+                id: {
+                  type: "string",
+                  enum: ["alice-message"],
+                },
+                author: {
+                  type: "object",
+                  properties: {
+                    id: {
+                      type: "string",
+                      enum: ["alice"],
+                    },
+                  },
+                  required: ["id"],
+                },
+                body: { type: "string" },
+              },
+              required: ["id", "author", "body"],
+              ifc: {
+                integrity: [{
+                  kind: "authored-by",
+                  subject: "alice",
+                }],
+              },
+            },
+            TrustedMessageBob: {
+              type: "object",
+              properties: {
+                id: {
+                  type: "string",
+                  enum: ["bob-message"],
+                },
+                author: {
+                  type: "object",
+                  properties: {
+                    id: {
+                      type: "string",
+                      enum: ["bob"],
+                    },
+                  },
+                  required: ["id"],
+                },
+                body: { type: "string" },
+              },
+              required: ["id", "author", "body"],
+              ifc: {
+                integrity: [{
+                  kind: "authored-by",
+                  subject: "bob",
+                }],
+              },
+            },
+          },
+        },
+      );
+
+      const seed = runtime.edit();
+      seed.setCfcEnforcementMode("enforce-explicit");
+      cell.withTx(seed).set({ messages: [] });
+      seed.prepareCfc();
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      cell.withTx(tx).key("messages").push({
+        piece: {
+          id: "alice-message",
+          author: { id: "alice" },
+          body: "hello",
+        },
+      });
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.ok).toBeDefined();
+
+      const rootId = parseLink(cell.getAsLink()).id!;
+      const replica = storageManager.open(signer.did()).replica as unknown as {
+        getDocument(id: string): {
+          value?: { messages?: unknown[] };
+          cfc?: {
+            schemaHash: string;
+            labelMap?: {
+              entries: Array<{
+                path: string[];
+                label: {
+                  confidentiality?: unknown[];
+                  integrity?: unknown[];
+                };
+              }>;
+            };
+          };
+        } | undefined;
+      };
+      const rootDoc = replica.getDocument(rootId);
+      const nestedLink = parseLink(
+        (rootDoc?.value as { messages?: unknown[] } | undefined)?.messages?.[0],
+      );
+      expect(nestedLink?.id).toBeDefined();
+
+      const nestedDoc = replica.getDocument(nestedLink!.id!);
+      expect(nestedDoc?.cfc?.labelMap?.entries).toContainEqual({
+        path: ["piece"],
+        label: {
+          integrity: [{
+            kind: "authored-by",
+            subject: "alice",
+          }],
+        },
+      });
     } finally {
       await runtime.dispose();
       await storageManager.close();
@@ -3799,6 +4629,493 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       tx.prepareCfc();
       const result = await tx.commit();
       expect(result.ok).toBeDefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("resolves represents-principal(current user) from the trust snapshot", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      tx.setCfcTrustSnapshot({
+        id: "trust-snapshot-current-profile",
+        actingPrincipal: signer.did(),
+      });
+      tx.setCfcImplementationIdentity({
+        kind: "verified",
+        bundleId: "bundle-hash-1",
+        sourceFile: "/trusted.tsx",
+        bindingPath: ["commitTrustedProfileSave"],
+      });
+
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-current-principal-profile",
+        {
+          type: "object",
+          properties: {
+            profile: {
+              type: "object",
+              properties: { name: { type: "string" } },
+              required: ["name"],
+              ifc: {
+                addIntegrity: [{
+                  kind: "represents-principal",
+                  subject: { __ctCurrentPrincipal: true },
+                }],
+                writeAuthorizedBy: {
+                  __ctWriterIdentityOf: {
+                    file: "/trusted.tsx",
+                    path: ["commitTrustedProfileSave"],
+                  },
+                },
+                uiContract: {
+                  helper: "UiAction",
+                  action: "SaveProfile",
+                  trustedPattern: "ProfileSurface",
+                  requiredEventIntegrity: ["ProfileSurface"],
+                },
+              },
+            },
+          },
+          required: ["profile"],
+        },
+        tx,
+      );
+      cell.set({ profile: { name: "Ada" } });
+      const target = cell.getAsNormalizedFullLink();
+      tx.recordCfcWritePolicyInput({
+        kind: "trusted-event",
+        target: {
+          space: target.space,
+          scope: target.scope,
+          id: target.id,
+          path: ["profile"],
+        },
+        eventId: "trusted-save-profile",
+        provenance: {
+          origin: "dom",
+          trusted: true,
+          ui: {
+            pattern: "ProfileSurface",
+            eventIntegrity: ["ProfileSurface"],
+            uiContractDataset: { uiAction: "SaveProfile" },
+          },
+        },
+      });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.ok).toBeDefined();
+
+      const verify = runtime.edit();
+      const stored = verify.readOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: target.id,
+        path: [],
+      }) as { cfc?: { labelMap?: { entries?: unknown[] } } };
+      expect(stored.cfc?.labelMap?.entries).toContainEqual({
+        path: ["profile"],
+        label: {
+          integrity: [{
+            kind: "represents-principal",
+            subject: signer.did(),
+          }],
+        },
+      });
+      verify.abort();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("resolves authored-by(current user) from the trust snapshot", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      tx.setCfcTrustSnapshot({
+        id: "trust-snapshot-current-message",
+        actingPrincipal: signer.did(),
+      });
+      tx.setCfcImplementationIdentity({
+        kind: "verified",
+        bundleId: "bundle-hash-1",
+        sourceFile: "/trusted.tsx",
+        bindingPath: ["commitTrustedMessageSend"],
+      });
+
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-current-principal-message",
+        {
+          type: "object",
+          properties: {
+            message: {
+              type: "object",
+              properties: { body: { type: "string" } },
+              required: ["body"],
+              ifc: {
+                addIntegrity: [{
+                  kind: "authored-by",
+                  subject: { __ctCurrentPrincipal: true },
+                }],
+                writeAuthorizedBy: {
+                  __ctWriterIdentityOf: {
+                    file: "/trusted.tsx",
+                    path: ["commitTrustedMessageSend"],
+                  },
+                },
+                uiContract: {
+                  helper: "UiAction",
+                  action: "SendMessage",
+                  trustedPattern: "SendSurface",
+                  requiredEventIntegrity: ["SendSurface"],
+                },
+              },
+            },
+          },
+          required: ["message"],
+        },
+        tx,
+      );
+      cell.set({ message: { body: "hello" } });
+      const target = cell.getAsNormalizedFullLink();
+      tx.recordCfcWritePolicyInput({
+        kind: "trusted-event",
+        target: {
+          space: target.space,
+          scope: target.scope,
+          id: target.id,
+          path: ["message"],
+        },
+        eventId: "trusted-send-message",
+        provenance: {
+          origin: "dom",
+          trusted: true,
+          ui: {
+            pattern: "SendSurface",
+            eventIntegrity: ["SendSurface"],
+            uiContractDataset: { uiAction: "SendMessage" },
+          },
+        },
+      });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.ok).toBeDefined();
+
+      const verify = runtime.edit();
+      const stored = verify.readOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: target.id,
+        path: [],
+      }) as { cfc?: { labelMap?: { entries?: unknown[] } } };
+      expect(stored.cfc?.labelMap?.entries).toContainEqual({
+        path: ["message"],
+        label: {
+          integrity: [{
+            kind: "authored-by",
+            subject: signer.did(),
+          }],
+        },
+      });
+      verify.abort();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("rejects current-principal integrity without trusted write provenance", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      tx.setCfcTrustSnapshot({
+        id: "trust-snapshot-current-missing-write",
+        actingPrincipal: signer.did(),
+      });
+
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-current-principal-missing-write",
+        {
+          type: "object",
+          properties: {
+            value: {
+              type: "string",
+              ifc: {
+                addIntegrity: [{
+                  kind: "authored-by",
+                  subject: { __ctCurrentPrincipal: true },
+                }],
+                uiContract: {
+                  helper: "UiAction",
+                  action: "SendMessage",
+                },
+              },
+            },
+          },
+          required: ["value"],
+        },
+        tx,
+      );
+      cell.set({ value: "hello" });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain(
+        "current-principal integrity requires writeAuthorizedBy",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("explains when current-principal integrity is missing a trust snapshot id", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      tx.setCfcTrustSnapshot(
+        {
+          actingPrincipal: signer.did(),
+        } as unknown as Parameters<typeof tx.setCfcTrustSnapshot>[0],
+      );
+
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-current-principal-missing-trust-snapshot-id",
+        {
+          type: "object",
+          properties: {
+            value: {
+              type: "string",
+              ifc: {
+                addIntegrity: [{
+                  kind: "authored-by",
+                  subject: { __ctCurrentPrincipal: true },
+                }],
+                writeAuthorizedBy: {
+                  __ctWriterIdentityOf: {
+                    file: "/trusted.tsx",
+                    path: ["commitTrustedMessageSend"],
+                  },
+                },
+                uiContract: {
+                  helper: "UiAction",
+                  action: "SendMessage",
+                },
+              },
+            },
+          },
+          required: ["value"],
+        },
+        tx,
+      );
+      cell.set({ value: "hello" });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain(
+        "current-principal integrity requires a trust snapshot id",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("explains when current-principal integrity is missing an acting principal", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      tx.setCfcTrustSnapshot({
+        id: "trust-snapshot-current-missing-acting-principal",
+      });
+
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-current-principal-missing-acting-principal",
+        {
+          type: "object",
+          properties: {
+            value: {
+              type: "string",
+              ifc: {
+                addIntegrity: [{
+                  kind: "authored-by",
+                  subject: { __ctCurrentPrincipal: true },
+                }],
+                writeAuthorizedBy: {
+                  __ctWriterIdentityOf: {
+                    file: "/trusted.tsx",
+                    path: ["commitTrustedMessageSend"],
+                  },
+                },
+                uiContract: {
+                  helper: "UiAction",
+                  action: "SendMessage",
+                },
+              },
+            },
+          },
+          required: ["value"],
+        },
+        tx,
+      );
+      cell.set({ value: "hello" });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain(
+        "current-principal integrity requires an acting principal",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("rejects current-principal integrity without trusted UI provenance", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      tx.setCfcTrustSnapshot({
+        id: "trust-snapshot-current-missing-ui",
+        actingPrincipal: signer.did(),
+      });
+      tx.setCfcImplementationIdentity({
+        kind: "verified",
+        bundleId: "bundle-hash-1",
+        sourceFile: "/trusted.tsx",
+        bindingPath: ["commitTrustedMessageSend"],
+      });
+
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-current-principal-missing-ui",
+        {
+          type: "object",
+          properties: {
+            value: {
+              type: "string",
+              ifc: {
+                addIntegrity: [{
+                  kind: "authored-by",
+                  subject: { __ctCurrentPrincipal: true },
+                }],
+                writeAuthorizedBy: {
+                  __ctWriterIdentityOf: {
+                    file: "/trusted.tsx",
+                    path: ["commitTrustedMessageSend"],
+                  },
+                },
+              },
+            },
+          },
+          required: ["value"],
+        },
+        tx,
+      );
+      cell.set({ value: "hello" });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain(
+        "current-principal integrity requires uiContract",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("rejects pattern-authored literal DID subjects for current-user claims", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      tx.setCfcTrustSnapshot({
+        id: "trust-snapshot-current-literal-did",
+        actingPrincipal: signer.did(),
+      });
+      tx.setCfcImplementationIdentity({
+        kind: "verified",
+        bundleId: "bundle-hash-1",
+        sourceFile: "/trusted.tsx",
+        bindingPath: ["commitTrustedMessageSend"],
+      });
+
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-current-principal-literal-did",
+        {
+          type: "object",
+          properties: {
+            value: {
+              type: "string",
+              ifc: {
+                addIntegrity: [{
+                  kind: "authored-by",
+                  subject: "did:example:mallory",
+                }],
+                writeAuthorizedBy: {
+                  __ctWriterIdentityOf: {
+                    file: "/trusted.tsx",
+                    path: ["commitTrustedMessageSend"],
+                  },
+                },
+                uiContract: {
+                  helper: "UiAction",
+                  action: "SendMessage",
+                  trustedPattern: "SendSurface",
+                  requiredEventIntegrity: ["SendSurface"],
+                },
+              },
+            },
+          },
+          required: ["value"],
+        },
+        tx,
+      );
+      cell.set({ value: "hello" });
+      const target = cell.getAsNormalizedFullLink();
+      tx.recordCfcWritePolicyInput({
+        kind: "trusted-event",
+        target: {
+          space: target.space,
+          scope: target.scope,
+          id: target.id,
+          path: ["value"],
+        },
+        eventId: "trusted-send-literal-did",
+        provenance: {
+          origin: "dom",
+          trusted: true,
+          ui: {
+            pattern: "SendSurface",
+            eventIntegrity: ["SendSurface"],
+            uiContractDataset: { uiAction: "SendMessage" },
+          },
+        },
+      });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain(
+        "current-principal integrity subject must be runtime resolved",
+      );
     } finally {
       await runtime.dispose();
       await storageManager.close();

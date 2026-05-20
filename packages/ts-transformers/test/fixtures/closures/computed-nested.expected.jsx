@@ -18,10 +18,10 @@ const __cfAmdHooks = undefined;
 // Context: The first derive captures cells (asCell: true), the second captures
 //   the computed result (asOpaque: true) since it is an OpaqueRef.
 export default pattern(() => {
-    const a = Writable.of(10, {
+    const a = new Writable(10, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("a", true);
-    const b = Writable.of(20, {
+    const b = new Writable(20, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("b", true);
     const sum = __cfHelpers.derive({

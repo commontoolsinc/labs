@@ -11,8 +11,8 @@ interface CheckboxStoryOutput {
 }
 
 export default pattern<CheckboxStoryInput, CheckboxStoryOutput>(() => {
-  const checked = Writable.of(false);
-  const disabled = Writable.of(false);
+  const checked = new Writable(false);
+  const disabled = new Writable(false);
 
   return {
     [NAME]: "cf-checkbox Story",

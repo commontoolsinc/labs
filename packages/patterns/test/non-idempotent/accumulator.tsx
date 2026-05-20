@@ -7,7 +7,7 @@ export default pattern<{
   value: Writable<string | Default<"hello">>;
 }>(({ value }) => {
   // Anti-pattern: Appending to an array instead of replacing — grows infinitely
-  const log = Writable.of<string[]>([]);
+  const log = new Writable<string[]>([]);
   computed(() => {
     const current = log.get();
     log.set([...current, `${value.get()} at run #${current.length + 1}`]);

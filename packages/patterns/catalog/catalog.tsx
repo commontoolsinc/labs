@@ -169,7 +169,7 @@ export default pattern<CatalogInput, CatalogOutput>(
   ({ selectedStory, categories }) => {
     const selected = computed(() => selectedStory.get());
     const story = StoryRenderer({ selected });
-    const sidebarOpen = Writable.of(true);
+    const sidebarOpen = new Writable(true);
 
     const handleSelect = action(({ id }: { id: string }) => {
       selectedStory.set(id);

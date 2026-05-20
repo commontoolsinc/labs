@@ -16,13 +16,13 @@ const __cfAmdHooks = undefined;
 //   computed(() => { const sum = a.get() + b.get(); return sum * c.get() }) → derive(captureSchema, resultSchema, { a, b, c }, ({ a, b, c }) => { ... })
 //   All three cells (a, b, c) are captured with asCell: true in the schema.
 export default pattern(() => {
-    const a = Writable.of(10, {
+    const a = new Writable(10, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("a", true);
-    const b = Writable.of(20, {
+    const b = new Writable(20, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("b", true);
-    const c = Writable.of(30, {
+    const c = new Writable(30, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("c", true);
     const result = __cfHelpers.derive({

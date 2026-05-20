@@ -21,11 +21,11 @@ export default pattern((config: {
     base: number;
     multiplier: number;
 }) => {
-    const value = Writable.of(10, {
+    const value = new Writable(10, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("value", true);
     const offset = 5; // non-cell local
-    const threshold = Writable.of(15, {
+    const threshold = new Writable(15, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("threshold", true); // cell local
     const result = __cfHelpers.derive({

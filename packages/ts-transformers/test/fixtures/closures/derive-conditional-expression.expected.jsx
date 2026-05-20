@@ -15,13 +15,13 @@ const __cfAmdHooks = undefined;
 // Verifies: captures used in both branches of a ternary are extracted
 //   derive(value, fn) → derive(schema, schema, { value, threshold, multiplier }, fn)
 export default pattern(() => {
-    const value = Writable.of(10, {
+    const value = new Writable(10, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("value", true);
-    const threshold = Writable.of(5, {
+    const threshold = new Writable(5, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("threshold", true);
-    const multiplier = Writable.of(2, {
+    const multiplier = new Writable(2, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("multiplier", true);
     const result = __cfHelpers.derive({

@@ -67,8 +67,6 @@ export class ProblematicValue extends ExplicitTagValue {
     const result = new ProblematicValue(state.type, state.state, state.error);
     // Honor `shouldDeepFreeze`: produce the type's correct deep-frozen form
     // via its `[DEEP_FREEZE]` member (recursing through `deepFreeze`).
-    return context.shouldDeepFreeze
-      ? result[DEEP_FREEZE]((v) => deepFreeze(v)) as unknown as ProblematicValue
-      : result;
+    return context.shouldDeepFreeze ? deepFreeze(result) : result;
   }
 }
