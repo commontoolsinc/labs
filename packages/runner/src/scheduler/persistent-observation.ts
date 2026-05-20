@@ -112,6 +112,29 @@ export function buildSchedulerActionObservation(
   };
 }
 
+export function isSchedulerActionObservation(
+  value: unknown,
+): value is SchedulerActionObservation {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as Partial<SchedulerActionObservation>;
+  return candidate.version === 1 &&
+    typeof candidate.branch === "string" &&
+    typeof candidate.pieceId === "string" &&
+    typeof candidate.processGeneration === "number" &&
+    typeof candidate.actionId === "string" &&
+    typeof candidate.implementationFingerprint === "string" &&
+    typeof candidate.runtimeFingerprint === "string" &&
+    typeof candidate.observedAtSeq === "number" &&
+    Array.isArray(candidate.reads) &&
+    Array.isArray(candidate.shallowReads) &&
+    Array.isArray(candidate.actualChangedWrites) &&
+    Array.isArray(candidate.currentKnownWrites) &&
+    Array.isArray(candidate.declaredWrites) &&
+    Array.isArray(candidate.materializerWriteEnvelopes);
+}
+
 function cloneAddresses(
   addresses: readonly IMemorySpaceAddress[],
 ): IMemorySpaceAddress[] {

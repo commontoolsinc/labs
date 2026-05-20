@@ -1,4 +1,5 @@
 import { getLogger } from "@commonfabric/utils/logger";
+import type { SchedulerActionSnapshotQuery } from "@commonfabric/memory/v2";
 import type { Cancel } from "./cancel.ts";
 import { ConsoleEvent } from "./harness/console.ts";
 import type {
@@ -14,6 +15,7 @@ import type {
   IMemorySpaceAddress,
   IStorageSubscription,
   IStorageTransaction,
+  MemorySpace,
   StorageNotification,
 } from "./storage/interface.ts";
 import {
@@ -93,7 +95,10 @@ import {
 } from "./scheduler/execution.ts";
 import { runPullSchedulerSettleLoop } from "./scheduler/pull-execution.ts";
 import { runPushSchedulerSettleLoop } from "./scheduler/push-execution.ts";
-import type { PersistedSchedulerObservationSnapshot } from "./scheduler/persistent-observation.ts";
+import {
+  isSchedulerActionObservation,
+  type PersistedSchedulerObservationSnapshot,
+} from "./scheduler/persistent-observation.ts";
 import {
   collectPullIterationSeeds as collectPullIterationSeedsState,
   conditionalEffectHasChangedInputs as conditionalEffectHasChangedInputsState,
@@ -615,6 +620,40 @@ export class Scheduler {
     this.pendingDependencyCollection.delete(action);
     this.scheduledFirstTime.delete(action);
     return true;
+  }
+
+  async rehydrateActionFromStorage(
+    action: Action,
+    space: MemorySpace,
+    query: Omit<SchedulerActionSnapshotQuery, "actionId"> = {},
+  ): Promise<boolean> {
+    const provider = this.runtime.storageManager.open(space);
+    const listSnapshots = provider.listSchedulerActionSnapshots;
+    if (!listSnapshots) {
+      return false;
+    }
+
+    const result = await listSnapshots.call(provider, {
+      ...query,
+      actionId: this.getActionId(action),
+    });
+    const snapshot = result.snapshots[0];
+    if (!snapshot || !isSchedulerActionObservation(snapshot.observation)) {
+      return false;
+    }
+
+    return this.rehydrateActionFromObservation(action, {
+      observation: snapshot.observation,
+      ...(snapshot.directDirtySeq !== undefined
+        ? { directDirtySeq: snapshot.directDirtySeq }
+        : {}),
+      ...(snapshot.staleSeq !== undefined
+        ? { staleSeq: snapshot.staleSeq }
+        : {}),
+      ...(snapshot.unknownReason !== undefined
+        ? { unknownReason: snapshot.unknownReason }
+        : {}),
+    });
   }
 
   unsubscribe(

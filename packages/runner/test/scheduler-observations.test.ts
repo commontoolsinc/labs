@@ -4,10 +4,12 @@ import {
   disposeSchedulerTestRuntime,
   expect,
   it,
+  space,
 } from "./scheduler-test-utils.ts";
 import type { TransactionReactivityLog } from "../src/storage/interface.ts";
 import {
   buildSchedulerActionObservation,
+  isSchedulerActionObservation,
   type SchedulerActionObservation,
 } from "../src/scheduler/persistent-observation.ts";
 
@@ -95,6 +97,7 @@ describe("persistent scheduler observations", () => {
       } satisfies Partial<SchedulerActionObservation>,
     );
     expect("attemptedWrites" in observation).toBe(false);
+    expect(isSchedulerActionObservation(observation)).toBe(true);
   });
 
   it("rehydrates clean scheduler observations without rerun pressure", async () => {
@@ -184,6 +187,32 @@ describe("persistent scheduler observations", () => {
         true,
       );
       expect(testRuntime.runtime.scheduler.getStats().pending).toBe(1);
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
+  it("reports unavailable storage-backed rehydration without mutating", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {
+      pullMode: "enabled",
+    });
+    try {
+      function storageBackedAction() {}
+      testRuntime.runtime.scheduler.subscribe(storageBackedAction, {
+        reads: [],
+        shallowReads: [],
+        writes: [],
+      });
+
+      await expect(
+        testRuntime.runtime.scheduler.rehydrateActionFromStorage(
+          storageBackedAction,
+          space,
+        ),
+      ).resolves.toBe(false);
+      expect(testRuntime.runtime.scheduler.isDirty(storageBackedAction)).toBe(
+        true,
+      );
     } finally {
       await disposeSchedulerTestRuntime(testRuntime);
     }
