@@ -484,10 +484,12 @@ function attachSchedulerActionObservation(
   );
   const telemetry = state.getActionTelemetryInfo(args.action);
   const actionOptions = schedulerActionOptions(state, args.action);
+  const observationIdentity = annotated.schedulerObservationIdentity;
   const observation = buildSchedulerActionObservation({
-    branch: "",
-    pieceId: schedulerObservationPieceId(args.actionId, telemetry),
-    processGeneration: 0,
+    branch: observationIdentity?.branch ?? "",
+    pieceId: observationIdentity?.pieceId ??
+      schedulerObservationPieceId(args.actionId, telemetry),
+    processGeneration: observationIdentity?.processGeneration ?? 0,
     actionId: args.actionId,
     actionKind: state.isEffectAction.get(args.action)
       ? "effect"

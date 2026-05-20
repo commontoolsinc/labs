@@ -1508,6 +1508,23 @@ export class Runner {
     return `${space}/${scope}/${id}`;
   }
 
+  private schedulerRehydrationOptions(processCell: Cell<any>): {
+    rehydrateFromStorage: {
+      space: MemorySpace;
+      pieceId: string;
+      processGeneration: number;
+    };
+  } {
+    const { space, id, scope } = processCell.getAsNormalizedFullLink();
+    return {
+      rehydrateFromStorage: {
+        space,
+        pieceId: `${scope}:${id}`,
+        processGeneration: 0,
+      },
+    };
+  }
+
   private async syncCellsForRunningPattern(
     resultCell: Cell<any>,
     pattern: Module | Pattern,
@@ -2121,7 +2138,7 @@ export class Runner {
       const cancel = this.runtime.scheduler.subscribe(
         readResultAction,
         readResultAction,
-        { isEffect: true },
+        { isEffect: true, ...this.schedulerRehydrationOptions(processCell) },
       );
       tx.addCommitCallback((_committedTx, result) => {
         if (result.error) {
@@ -2745,7 +2762,9 @@ export class Runner {
     };
 
     addCancel(
-      this.runtime.scheduler.subscribe(wrappedAction, populateDependencies),
+      this.runtime.scheduler.subscribe(wrappedAction, populateDependencies, {
+        ...this.schedulerRehydrationOptions(processCell),
+      }),
     );
   }
 
@@ -3073,6 +3092,7 @@ export class Runner {
         debounce,
         noDebounce,
         throttle,
+        ...this.schedulerRehydrationOptions(processCell),
       }),
     );
   }

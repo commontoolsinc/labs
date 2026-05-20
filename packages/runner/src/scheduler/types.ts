@@ -18,6 +18,13 @@ export interface TelemetryAnnotations {
   writes: NormalizedFullLink[];
   materializerWriteEnvelopes?: NormalizedFullLink[];
   ignoredSchedulingWrites?: NormalizedFullLink[];
+  schedulerObservationIdentity?: SchedulerObservationIdentity;
+}
+
+export interface SchedulerObservationIdentity {
+  branch?: string;
+  pieceId: string;
+  processGeneration?: number;
 }
 
 export type Action = (tx: IExtendedStorageTransaction) => any;

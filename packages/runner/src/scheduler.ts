@@ -195,6 +195,7 @@ import type {
   PopulateDependenciesEntry,
   QueuedEvent,
   ReactivityLog,
+  SchedulerObservationIdentity,
   SettleStats,
   SettleStatsHistoryEntry,
   SpaceScopeAndURI,
@@ -213,6 +214,11 @@ const logger = getLogger("scheduler", {
 type PendingDependencyCollectionState =
   SchedulerSubscribeActionState["pendingDependencyCollectionState"];
 type FilterStatsState = { filtered: number; executed: number };
+type SchedulerStorageRehydrationOptions =
+  & SchedulerObservationIdentity
+  & {
+    space: MemorySpace;
+  };
 
 // Re-export types that tests expect from scheduler
 export type { ErrorWithContext };
@@ -499,23 +505,39 @@ export class Scheduler {
       noDebounce?: boolean;
       throttle?: number;
       changeGroup?: ChangeGroup;
+      rehydrateFromStorage?: SchedulerStorageRehydrationOptions;
     } = {},
   ): Cancel {
+    const { rehydrateFromStorage } = options;
+    if (rehydrateFromStorage) {
+      this.setActionObservationIdentity(action, rehydrateFromStorage);
+    }
+    const subscribeOptions = {
+      isEffect: options.isEffect,
+      debounce: options.debounce,
+      noDebounce: options.noDebounce,
+      throttle: options.throttle,
+      changeGroup: options.changeGroup,
+      deferInitialExecution: rehydrateFromStorage !== undefined,
+    };
     this.updateMaterializerRegistration(action);
-    if (this.pullMode) {
-      return subscribePullSchedulerAction(
+    const cancel = this.pullMode
+      ? subscribePullSchedulerAction(
         this.subscribeActionState,
         action,
         populateDependencies,
-        options,
+        subscribeOptions,
+      )
+      : subscribePushSchedulerAction(
+        this.subscribeActionState,
+        action,
+        populateDependencies,
+        subscribeOptions,
       );
+    if (rehydrateFromStorage) {
+      this.queueInitialActionRehydration(action, rehydrateFromStorage);
     }
-    return subscribePushSchedulerAction(
-      this.subscribeActionState,
-      action,
-      populateDependencies,
-      options,
-    );
+    return cancel;
   }
 
   /**
@@ -654,6 +676,72 @@ export class Scheduler {
         ? { unknownReason: snapshot.unknownReason }
         : {}),
     });
+  }
+
+  private setActionObservationIdentity(
+    action: Action,
+    identity: SchedulerObservationIdentity,
+  ): void {
+    (action as Partial<TelemetryAnnotations>).schedulerObservationIdentity = {
+      pieceId: identity.pieceId,
+      ...(identity.branch !== undefined ? { branch: identity.branch } : {}),
+      ...(identity.processGeneration !== undefined
+        ? { processGeneration: identity.processGeneration }
+        : {}),
+    };
+  }
+
+  private queueInitialActionRehydration(
+    action: Action,
+    options: SchedulerStorageRehydrationOptions,
+  ): void {
+    const task = (async () => {
+      const rehydrated = await this.rehydrateActionFromStorage(
+        action,
+        options.space,
+        {
+          ...(options.branch !== undefined ? { branch: options.branch } : {}),
+          pieceId: options.pieceId,
+          ...(options.processGeneration !== undefined
+            ? { processGeneration: options.processGeneration }
+            : {}),
+        },
+      );
+      if (!rehydrated) {
+        this.scheduleInitialActionRun(action);
+      }
+    })().catch((error) => {
+      logger.warn("scheduler-rehydrate", () => [
+        "Failed to rehydrate scheduler action; falling back to initial run",
+        this.getActionId(action),
+        error,
+      ]);
+      this.scheduleInitialActionRun(action);
+    });
+
+    this.backgroundTasks.add(task);
+    task.finally(() => {
+      this.backgroundTasks.delete(task);
+    });
+  }
+
+  private scheduleInitialActionRun(action: Action): void {
+    if (!this.effects.has(action) && !this.computations.has(action)) {
+      return;
+    }
+
+    this.staleness.markDirectDirty(action);
+    this.pending.add(action);
+    this.scheduledFirstTime.add(action);
+
+    if (
+      !this.isEffectAction.get(action) &&
+      this.writeIndex.getSchedulingWrites(action)?.length
+    ) {
+      this.scheduleAffectedEffects(action);
+    }
+
+    this.queueExecution();
   }
 
   unsubscribe(
