@@ -1995,7 +1995,10 @@ export class Runner {
             read,
             "writeRedirect",
           );
-          target = resolved;
+          target = {
+            ...resolved,
+            schema: resolved.schema ?? read.schema,
+          };
         } catch (error) {
           logger.debug("scheduler-read-redirect", () => [
             "Unable to resolve scheduler read redirect",
@@ -2071,6 +2074,84 @@ export class Runner {
       for (const key of ["items", "additionalProperties"] as const) {
         if (schema[key] !== undefined) {
           visit(schema[key], currentValue);
+        }
+      }
+      for (const key of ["anyOf", "oneOf", "allOf"] as const) {
+        const branches = schema[key];
+        if (Array.isArray(branches)) {
+          for (const branch of branches) visit(branch, currentValue);
+        }
+      }
+    };
+
+    visit(argumentSchema, value);
+    return dedupeNormalizedLinks(links);
+  }
+
+  private collectArgumentSchedulerReadLinks(
+    argumentSchema: JSONSchema | undefined,
+    value: unknown,
+    processCell: Cell<any>,
+  ): NormalizedFullLink[] {
+    const links: NormalizedFullLink[] = [];
+    const seen = new WeakMap<object, Set<unknown>>();
+    const rootSchema = argumentSchema;
+
+    const schemaWithRootDefinitions = (
+      schema: JSONSchema | undefined,
+    ): JSONSchema | undefined => {
+      if (!isRecord(schema) || !isRecord(rootSchema)) {
+        return schema;
+      }
+      return {
+        ...schema,
+        ...(schema.$defs === undefined && rootSchema.$defs !== undefined &&
+          { $defs: rootSchema.$defs }),
+        ...(schema.definitions === undefined &&
+          rootSchema.definitions !== undefined &&
+          { definitions: rootSchema.definitions }),
+      };
+    };
+
+    const visit = (schema: unknown, currentValue: unknown): void => {
+      if (isWriteRedirectLink(currentValue)) {
+        const link = parseLink(currentValue, processCell);
+        links.push({
+          ...link,
+          schema: link.schema ?? schemaWithRootDefinitions(
+            schema as JSONSchema | undefined,
+          ),
+        });
+        return;
+      }
+      if (isCellLink(currentValue)) {
+        return;
+      }
+      if (!isRecord(schema)) return;
+      const seenValues = seen.get(schema) ?? new Set<unknown>();
+      if (seenValues.has(currentValue)) return;
+      seenValues.add(currentValue);
+      seen.set(schema, seenValues);
+
+      if (isRecord(schema.properties) && isRecord(currentValue)) {
+        for (const [key, propertySchema] of Object.entries(schema.properties)) {
+          visit(propertySchema, currentValue[key]);
+        }
+      }
+
+      if (Array.isArray(currentValue) && schema.items !== undefined) {
+        for (const item of currentValue) visit(schema.items, item);
+      }
+      if (
+        schema.additionalProperties !== undefined &&
+        isRecord(currentValue)
+      ) {
+        const declaredKeys = isRecord(schema.properties)
+          ? new Set(Object.keys(schema.properties))
+          : undefined;
+        for (const [key, propertyValue] of Object.entries(currentValue)) {
+          if (declaredKeys?.has(key)) continue;
+          visit(schema.additionalProperties, propertyValue);
         }
       }
       for (const key of ["anyOf", "oneOf", "allOf"] as const) {
@@ -2682,9 +2763,17 @@ export class Runner {
       pattern,
     });
 
+    const schedulerReads = this.collectArgumentSchedulerReadLinks(
+      module.argumentSchema,
+      inputs,
+      processCell,
+    );
+    const declaredSchedulerReads = schedulerReads.length > 0
+      ? schedulerReads
+      : reads;
     const populateDependencies = reads.length > 0
       ? (depTx: IExtendedStorageTransaction, event: any) => {
-        this.populateDeclaredSchedulerReads(reads, depTx);
+        this.populateDeclaredSchedulerReads(declaredSchedulerReads, depTx);
         this.populateHandlerEventSchedulerReads(
           module.argumentSchema,
           processCell,
