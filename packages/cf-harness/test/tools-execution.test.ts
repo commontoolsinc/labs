@@ -589,6 +589,63 @@ Deno.test("web_fetch caps raw bytes and model text independently", async () => {
   assertEquals(output.textTruncated, true);
 });
 
+Deno.test("web_fetch applies timeout while reading response body", async () => {
+  const encoder = new TextEncoder();
+  const tool = createWebFetchTool({
+    resolveHostAddresses: resolvePublicTestHost,
+    fetchFn: (_input, init) => {
+      const signal = init?.signal;
+      if (!(signal instanceof AbortSignal)) {
+        throw new Error("expected fetch signal");
+      }
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode("partial"));
+        },
+        pull() {
+          return new Promise<void>((resolve) => {
+            signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+        },
+      });
+      return Promise.resolve(
+        new Response(body, {
+          status: 200,
+          headers: { "content-type": "text/plain" },
+        }),
+      );
+    },
+  });
+  const context = createContext(new FakeSandboxRuntime());
+
+  let watchdog: ReturnType<typeof setTimeout> | undefined;
+  const output = await Promise.race([
+    tool.invoke(context, {
+      url: "https://example.com/slow.txt",
+      timeoutMs: 20,
+    }),
+    new Promise<never>((_, reject) => {
+      watchdog = setTimeout(
+        () => reject(new Error("web_fetch did not time out body read")),
+        1_000,
+      );
+    }),
+  ]).finally(() => {
+    if (watchdog !== undefined) {
+      clearTimeout(watchdog);
+    }
+  });
+
+  assertEquals(output, {
+    type: "cf-harness.web-fetch-error",
+    outputId: "run-1:web_fetch:1",
+    url: "https://example.com/slow.txt",
+    code: "timeout",
+    message: "web_fetch timed out",
+    fetchedAt: "2026-05-01T17:54:00.000Z",
+  });
+});
+
 Deno.test("bash tool updates currentDir in enforce mode from observed CFC stdout", async () => {
   const outputId = createToolOutputId("run-1", "bash", 1);
   const cwdMarker = `__CF_HARNESS_CWD__${outputId}__`;

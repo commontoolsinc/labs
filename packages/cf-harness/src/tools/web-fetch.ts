@@ -251,14 +251,83 @@ export const createWebFetchTool = (
         });
       }
 
-      let fetchResult: FetchWithRedirectsResult;
+      const controller = new AbortController();
+      const timer = setTimeout(() => {
+        controller.abort(createWebFetchAbortError());
+      }, timeoutMs);
       try {
-        fetchResult = await fetchWithRedirects({
+        const fetchResult = await fetchWithRedirects({
           url: initialUrl.url,
-          timeoutMs,
           fetchFn,
           resolveHostAddresses,
+          signal: controller.signal,
         });
+
+        if (!fetchResult.ok) {
+          return webFetchError({
+            outputId,
+            url: initialUrl.url,
+            code: fetchResult.code,
+            message: fetchResult.message,
+            finalUrl: fetchResult.finalUrl,
+            fetchedAt,
+          });
+        }
+
+        const response = fetchResult.response;
+        const contentType = response.headers.get("content-type") ?? undefined;
+        if (!isSupportedContentType(contentType)) {
+          return webFetchError({
+            outputId,
+            url: initialUrl.url,
+            code: "unsupported_content_type",
+            message: contentType === undefined
+              ? "web_fetch response did not include a supported text content-type"
+              : `web_fetch content-type ${contentType} is not supported`,
+            finalUrl: fetchResult.finalUrl,
+            status: response.status,
+            contentType,
+            fetchedAt,
+          });
+        }
+
+        const body = await readResponseBody(
+          response,
+          maxBytes,
+          controller.signal,
+        );
+        const rawContent = new TextDecoder().decode(body.bytes);
+        const extraction = extractText(
+          rawContent,
+          fetchResult.finalUrl,
+          contentType,
+        );
+        const text = truncateString(extraction.text, maxTextChars);
+        return {
+          type: "cf-harness.web-fetch-result",
+          outputId,
+          url: initialUrl.url,
+          finalUrl: fetchResult.finalUrl,
+          status: response.status,
+          ok: response.ok,
+          ...(contentType !== undefined ? { contentType } : {}),
+          bytes: body.bytes.byteLength,
+          rawContentDigest: await digestBytes(body.bytes),
+          rawContentTruncated: body.truncated,
+          rawContent,
+          text: text.value,
+          textTruncated: text.truncated,
+          ...(extraction.title !== undefined
+            ? { title: extraction.title }
+            : {}),
+          ...(extraction.links.length > 0
+            ? { links: extraction.links.slice(0, MAX_LINKS) }
+            : {}),
+          ...(fetchResult.redirects.length > 0
+            ? { redirects: fetchResult.redirects }
+            : {}),
+          fetchedAt,
+        };
       } catch (error) {
         return webFetchError({
           outputId,
@@ -267,67 +336,9 @@ export const createWebFetchTool = (
           message: error instanceof Error ? error.message : String(error),
           fetchedAt,
         });
+      } finally {
+        clearTimeout(timer);
       }
-
-      if (!fetchResult.ok) {
-        return webFetchError({
-          outputId,
-          url: initialUrl.url,
-          code: fetchResult.code,
-          message: fetchResult.message,
-          finalUrl: fetchResult.finalUrl,
-          fetchedAt,
-        });
-      }
-
-      const response = fetchResult.response;
-      const contentType = response.headers.get("content-type") ?? undefined;
-      if (!isSupportedContentType(contentType)) {
-        return webFetchError({
-          outputId,
-          url: initialUrl.url,
-          code: "unsupported_content_type",
-          message: contentType === undefined
-            ? "web_fetch response did not include a supported text content-type"
-            : `web_fetch content-type ${contentType} is not supported`,
-          finalUrl: fetchResult.finalUrl,
-          status: response.status,
-          contentType,
-          fetchedAt,
-        });
-      }
-
-      const body = await readResponseBody(response, maxBytes);
-      const rawContent = new TextDecoder().decode(body.bytes);
-      const extraction = extractText(
-        rawContent,
-        fetchResult.finalUrl,
-        contentType,
-      );
-      const text = truncateString(extraction.text, maxTextChars);
-      return {
-        type: "cf-harness.web-fetch-result",
-        outputId,
-        url: initialUrl.url,
-        finalUrl: fetchResult.finalUrl,
-        status: response.status,
-        ok: response.ok,
-        ...(contentType !== undefined ? { contentType } : {}),
-        bytes: body.bytes.byteLength,
-        rawContentDigest: await digestBytes(body.bytes),
-        rawContentTruncated: body.truncated,
-        rawContent,
-        text: text.value,
-        textTruncated: text.truncated,
-        ...(extraction.title !== undefined ? { title: extraction.title } : {}),
-        ...(extraction.links.length > 0
-          ? { links: extraction.links.slice(0, MAX_LINKS) }
-          : {}),
-        ...(fetchResult.redirects.length > 0
-          ? { redirects: fetchResult.redirects }
-          : {}),
-        fetchedAt,
-      };
     },
   };
 };
@@ -601,9 +612,9 @@ const isBlockedIpv6Address = (value: string): boolean => {
 
 interface FetchWithRedirectsOptions {
   url: string;
-  timeoutMs: number;
   fetchFn: typeof fetch;
   resolveHostAddresses: ResolveHostAddresses;
+  signal: AbortSignal;
 }
 
 type FetchWithRedirectsResult =
@@ -623,77 +634,125 @@ type FetchWithRedirectsResult =
 const fetchWithRedirects = async (
   options: FetchWithRedirectsOptions,
 ): Promise<FetchWithRedirectsResult> => {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), options.timeoutMs);
-  try {
-    let currentUrl = options.url;
-    const redirects: WebFetchRedirect[] = [];
-    for (
-      let redirectCount = 0;
-      redirectCount <= MAX_REDIRECTS;
-      redirectCount += 1
+  let currentUrl = options.url;
+  const redirects: WebFetchRedirect[] = [];
+  for (
+    let redirectCount = 0;
+    redirectCount <= MAX_REDIRECTS;
+    redirectCount += 1
+  ) {
+    throwIfWebFetchAborted(options.signal);
+    const response = await options.fetchFn(currentUrl, {
+      method: "GET",
+      redirect: "manual",
+      signal: options.signal,
+      headers: {
+        Accept:
+          "text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.1",
+        "User-Agent": USER_AGENT,
+      },
+    });
+    const location = response.headers.get("location");
+    if (
+      response.status < 300 ||
+      response.status >= 400 ||
+      location === null
     ) {
-      const response = await options.fetchFn(currentUrl, {
-        method: "GET",
-        redirect: "manual",
-        signal: controller.signal,
-        headers: {
-          Accept:
-            "text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.1",
-          "User-Agent": USER_AGENT,
-        },
-      });
-      const location = response.headers.get("location");
-      if (
-        response.status < 300 ||
-        response.status >= 400 ||
-        location === null
-      ) {
-        return {
-          ok: true,
-          response,
-          finalUrl: currentUrl,
-          redirects,
-        };
-      }
-      if (redirectCount === MAX_REDIRECTS) {
-        return {
-          ok: false,
-          code: "too_many_redirects",
-          message: `web_fetch exceeded ${MAX_REDIRECTS} redirects`,
-          finalUrl: currentUrl,
-        };
-      }
-      const nextUrl = new URL(location, currentUrl).toString();
-      const validation = await validatePublicHttpUrl(
-        nextUrl,
-        options.resolveHostAddresses,
-      );
-      if (!validation.ok) {
-        return {
-          ok: false,
-          code: validation.code === "invalid_url"
-            ? "blocked_url"
-            : validation.code,
-          message: `web_fetch redirect target denied: ${validation.message}`,
-          finalUrl: currentUrl,
-        };
-      }
-      redirects.push({
-        status: response.status,
-        url: currentUrl,
-        location: validation.url,
-      });
-      currentUrl = validation.url;
+      return {
+        ok: true,
+        response,
+        finalUrl: currentUrl,
+        redirects,
+      };
     }
-    return {
-      ok: false,
-      code: "too_many_redirects",
-      message: `web_fetch exceeded ${MAX_REDIRECTS} redirects`,
-      finalUrl: currentUrl,
+    if (redirectCount === MAX_REDIRECTS) {
+      return {
+        ok: false,
+        code: "too_many_redirects",
+        message: `web_fetch exceeded ${MAX_REDIRECTS} redirects`,
+        finalUrl: currentUrl,
+      };
+    }
+    const nextUrl = new URL(location, currentUrl).toString();
+    const validation = await validatePublicHttpUrl(
+      nextUrl,
+      options.resolveHostAddresses,
+    );
+    if (!validation.ok) {
+      return {
+        ok: false,
+        code: validation.code === "invalid_url"
+          ? "blocked_url"
+          : validation.code,
+        message: `web_fetch redirect target denied: ${validation.message}`,
+        finalUrl: currentUrl,
+      };
+    }
+    redirects.push({
+      status: response.status,
+      url: currentUrl,
+      location: validation.url,
+    });
+    currentUrl = validation.url;
+  }
+  return {
+    ok: false,
+    code: "too_many_redirects",
+    message: `web_fetch exceeded ${MAX_REDIRECTS} redirects`,
+    finalUrl: currentUrl,
+  };
+};
+
+const createWebFetchAbortError = (): DOMException =>
+  new DOMException("web_fetch timed out", "AbortError");
+
+const webFetchAbortReason = (signal: AbortSignal): unknown =>
+  signal.reason ?? createWebFetchAbortError();
+
+const throwIfWebFetchAborted = (signal: AbortSignal): void => {
+  if (signal.aborted) {
+    throw webFetchAbortReason(signal);
+  }
+};
+
+const readChunkWithAbort = async (
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  signal: AbortSignal,
+): Promise<ReadableStreamReadResult<Uint8Array>> => {
+  throwIfWebFetchAborted(signal);
+  return await new Promise((resolve, reject) => {
+    const onAbort = () => {
+      cleanup();
+      reject(webFetchAbortReason(signal));
     };
-  } finally {
-    clearTimeout(timer);
+    const cleanup = () => {
+      signal.removeEventListener("abort", onAbort);
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    reader.read().then(
+      (value) => {
+        cleanup();
+        resolve(value);
+      },
+      (error) => {
+        cleanup();
+        reject(error);
+      },
+    );
+  });
+};
+
+const cancelReaderAfterAbort = async (
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  signal: AbortSignal,
+): Promise<void> => {
+  if (!signal.aborted) {
+    return;
+  }
+  try {
+    await reader.cancel(webFetchAbortReason(signal));
+  } catch {
+    // Ignore cancellation cleanup failures; the timeout itself is the result.
   }
 };
 
@@ -722,6 +781,7 @@ interface ReadBodyResult {
 const readResponseBody = async (
   response: Response,
   maxBytes: number,
+  signal: AbortSignal,
 ): Promise<ReadBodyResult> => {
   if (response.body === null) {
     return { bytes: new Uint8Array(), truncated: false };
@@ -732,7 +792,7 @@ const readResponseBody = async (
   let truncated = false;
   try {
     while (true) {
-      const { done, value } = await reader.read();
+      const { done, value } = await readChunkWithAbort(reader, signal);
       if (done) {
         break;
       }
@@ -753,6 +813,7 @@ const readResponseBody = async (
       total += value.byteLength;
     }
   } finally {
+    await cancelReaderAfterAbort(reader, signal);
     reader.releaseLock();
   }
   const bytes = new Uint8Array(total);
