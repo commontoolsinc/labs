@@ -355,7 +355,7 @@ Deno.test("memory v2 updates scheduler index rows by diff instead of rewriting u
       },
     });
 
-    assertEquals(second.observationId > first.observationId, true);
+    assertEquals(second.observationId, first.observationId);
     assertEquals(countRows(engine, "scheduler_read_index"), 2);
     const stableRowAfter = engine.database.prepare(`
       SELECT observation_id
@@ -376,6 +376,51 @@ Deno.test("memory v2 updates scheduler index rows by diff instead of rewriting u
       findSchedulerReadersForWrite(engine, {
         branch: "",
         write: addedRead,
+      }).length,
+      1,
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 keeps one canonical scheduler observation row per action", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    const first = upsertSchedulerObservation(engine, {
+      branch: "",
+      observedAtSeq: 1,
+      observation,
+    });
+    const changedRead = {
+      ...sourceRead,
+      path: ["value", "changed"],
+    };
+    const second = upsertSchedulerObservation(engine, {
+      branch: "",
+      observedAtSeq: 2,
+      observation: {
+        ...observation,
+        observedAtSeq: 2,
+        reads: [changedRead],
+      },
+    });
+
+    assertEquals(second.observationId, first.observationId);
+    assertEquals(countRows(engine, "scheduler_observation"), 1);
+    assertEquals(
+      findSchedulerReadersForWrite(engine, {
+        branch: "",
+        write: sourceRead,
+      }).length,
+      0,
+    );
+    assertEquals(
+      findSchedulerReadersForWrite(engine, {
+        branch: "",
+        write: changedRead,
       }).length,
       1,
     );
