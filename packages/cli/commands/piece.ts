@@ -239,6 +239,7 @@ export const piece = new Command()
     "--root <path:string>",
     "Root directory for resolving imports. Allows imports from parent directories within this root.",
   )
+  .option("--slug <slug:string>", "Slug URL/address for this piece.")
   .action(async (options, main) => {
     setQuietMode(!!options.quiet);
     const spaceConfig = parseSpaceOptions(options);
@@ -249,11 +250,12 @@ export const piece = new Command()
         mainExport: options.mainExport,
         rootPath: options.root ? absPath(options.root) : undefined,
       },
-      { start: options.start },
+      { start: options.start, slug: options.slug },
     );
     render(pieceId);
+    const browserPieceRef = options.slug ?? pieceId;
     hint(cliText(`NEXT STEPS:
-  → Open in browser: ${spaceConfig.apiUrl}/${spaceConfig.space}/${pieceId}
+  → Open in browser: ${spaceConfig.apiUrl}/${spaceConfig.space}/${browserPieceRef}
   → Update code:     cf piece setsrc --piece ${pieceId} ${main} ...
   → Test a callable: cf piece call --piece ${pieceId} <callableName> ...
   → Inspect state:   cf piece inspect --piece ${pieceId} ...`));

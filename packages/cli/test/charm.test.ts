@@ -1,7 +1,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { cf, checkStderr, stripAnsi } from "./utils.ts";
-import { recreateSpaceRootPattern, type SpaceConfig } from "../lib/piece.ts";
+import {
+  recreateSpaceRootPattern,
+  resolvePieceConfig,
+  type SpaceConfig,
+} from "../lib/piece.ts";
 import {
   parseLink,
   parsePieceOptions,
@@ -294,5 +298,34 @@ describe("cli piece parsing", () => {
       expect(result.pieceId).toBe("piece");
       expect(result.path).toEqual(["field", ""]);
     });
+  });
+
+  it("shows slug option for piece new", async () => {
+    const { code, stdout, stderr } = await cf("piece new --help");
+    checkStderr(stderr);
+    expect(code).toBe(0);
+    expect(stripAnsi(stdout.join("\n"))).toContain("--slug");
+  });
+
+  it("resolves slug piece config through storage", async () => {
+    const manager = {};
+    const resolved = await resolvePieceConfig({
+      apiUrl: API_URL,
+      space: SPACE,
+      identity: ID,
+      piece: "demo",
+    }, {
+      loadManager: (config: SpaceConfig) => {
+        expect(config.space).toBe(SPACE);
+        return Promise.resolve(manager as any);
+      },
+      resolvePieceAddress: (seenManager: unknown, token: string) => {
+        expect(seenManager).toBe(manager);
+        expect(token).toBe("demo");
+        return Promise.resolve(PIECE);
+      },
+    });
+
+    expect(resolved.piece).toBe(PIECE);
   });
 });
