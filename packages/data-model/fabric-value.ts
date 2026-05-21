@@ -19,6 +19,8 @@ export {
 
 export {
   cloneForMutation,
+  CloneForMutationError,
+  type CloneForMutationErrorKind,
   type CloneForMutationOptions,
   type CloneForMutationResult,
   cloneIfNecessary,

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   cloneForMutation,
+  CloneForMutationError,
   resetDataModelConfig,
   setDataModelConfig,
 } from "../fabric-value.ts";
@@ -369,7 +370,254 @@ describe("cloneForMutation", () => {
       });
 
       // ----------------------------------------------------------------------
-      // Error cases
+      // createMissing
+      // ----------------------------------------------------------------------
+
+      describe("createMissing", () => {
+        it("creates a missing intermediate object", () => {
+          const root = Object.freeze({ a: { existing: 1 } }) as FabricValue;
+          const { value, pathValue } = cloneForMutation(
+            root,
+            ["a", "new"],
+            { createMissing: true, nextKeyAfterPath: "key" },
+          );
+          const newA = (value as unknown as Record<string, unknown>)
+            .a as Record<
+              string,
+              unknown
+            >;
+          // The original `a.existing` is preserved by identity (off-spine).
+          expect(newA.existing).toBe(1);
+          // `a.new` is freshly created and is what `pathValue` points at.
+          expect(newA.new).toBe(pathValue);
+          // `nextKeyAfterPath: "key"` selects an object.
+          expect(pathValue).toEqual({});
+          expect(Array.isArray(pathValue)).toBe(false);
+        });
+
+        it("creates a missing intermediate array (numeric next key)", () => {
+          const root = Object.freeze({ a: {} }) as FabricValue;
+          const { value, pathValue } = cloneForMutation(
+            root,
+            ["a", "items"],
+            { createMissing: true, nextKeyAfterPath: "0" },
+          );
+          const newA = (value as unknown as Record<string, unknown>)
+            .a as Record<
+              string,
+              unknown
+            >;
+          expect(newA.items).toBe(pathValue);
+          expect(Array.isArray(pathValue)).toBe(true);
+          expect(pathValue).toEqual([]);
+        });
+
+        it("treats `-` as the JSON-Pointer array append marker", () => {
+          const root = Object.freeze({}) as FabricValue;
+          const { value: _v, pathValue } = cloneForMutation(
+            root,
+            ["items"],
+            { createMissing: true, nextKeyAfterPath: "-" },
+          );
+          expect(Array.isArray(pathValue)).toBe(true);
+        });
+
+        it("defaults to an object when nextKeyAfterPath is omitted", () => {
+          const root = Object.freeze({}) as FabricValue;
+          const { pathValue } = cloneForMutation(
+            root,
+            ["new"],
+            { createMissing: true },
+          );
+          expect(Array.isArray(pathValue)).toBe(false);
+          expect(pathValue).toEqual({});
+        });
+
+        it("chains multiple missing intermediates with correct shapes", () => {
+          // path: ["a", "0", "items", "0", "name"]
+          //   a -> object (next segment is "0" -- wait, this is the
+          //   array-index test below; for THIS test let's mix object
+          //   and array).
+          //
+          // Try: root.notes[0].title where notes doesn't exist.
+          // - path[0]="notes" -> needs container at root.notes. Next is
+          //   "0" -> array.
+          // - path[1]="0" -> needs container at root.notes[0]. Next is
+          //   "title" -> object.
+          // - path[2]="title" -> the leaf, nextKeyAfterPath="" -> object
+          //   if missing.
+          const root = Object.freeze({}) as FabricValue;
+          const { value, pathValue } = cloneForMutation(
+            root,
+            ["notes", "0", "title"],
+            { createMissing: true },
+          );
+          const newRoot = value as unknown as Record<string, unknown>;
+          expect(Array.isArray(newRoot.notes)).toBe(true);
+          const notes = newRoot.notes as unknown[];
+          expect(notes.length).toBe(1);
+          expect(typeof notes[0]).toBe("object");
+          expect(Array.isArray(notes[0])).toBe(false);
+          // The leaf was created with default `nextKeyAfterPath: ""` -> object.
+          expect(pathValue).toBe(
+            (notes[0] as Record<string, unknown>).title,
+          );
+          expect(pathValue).toEqual({});
+        });
+
+        it("preserves existing intermediates while creating missing ones", () => {
+          const existingNotes = Object.freeze([{ kept: 1 }]);
+          const root = Object.freeze({
+            notes: existingNotes,
+          }) as FabricValue;
+          const { value, pathValue } = cloneForMutation(
+            root,
+            ["notes", "0", "newKey"],
+            { createMissing: true, nextKeyAfterPath: "leaf" },
+          );
+          const newRoot = value as unknown as Record<string, unknown>;
+          const newNotes = newRoot.notes as unknown[];
+          // The existing element was thawed (spine touches it) but the
+          // sibling identity of `existingNotes[0].kept` is preserved.
+          const note0 = newNotes[0] as Record<string, unknown>;
+          expect(note0.kept).toBe(1);
+          // The newly-created leaf-parent slot.
+          expect(note0.newKey).toBe(pathValue);
+          expect(pathValue).toEqual({});
+        });
+
+        it("does not interfere with normal (non-missing) descent", () => {
+          // If everything exists, `createMissing: true` should behave the
+          // same as the default.
+          const root = Object.freeze({
+            a: Object.freeze({ b: Object.freeze({ c: 42 }) }),
+          }) as FabricValue;
+          const { pathValue } = cloneForMutation(
+            root,
+            ["a", "b"],
+            { createMissing: true },
+          );
+          expect(pathValue).toEqual({ c: 42 });
+        });
+
+        it("interacts correctly with force=false (identity on existing path)", () => {
+          // If `createMissing: true` but every step exists AND `force:
+          // false` AND input is already mutable, identity is preserved.
+          const inner = { existing: 1 };
+          const root = { a: inner } as FabricValue;
+          const { value, pathValue } = cloneForMutation(
+            root,
+            ["a"],
+            { createMissing: true, force: false },
+          );
+          expect(value).toBe(root);
+          expect(pathValue).toBe(inner);
+        });
+
+        it("respects force=true on the spine-thaw even when creating", () => {
+          // When force=true (default), already-mutable spine containers
+          // are still copied. `createMissing` doesn't change that.
+          const root = { existing: 1 } as FabricValue;
+          const { value, pathValue } = cloneForMutation(
+            root,
+            ["new"],
+            { createMissing: true },
+          );
+          expect(value).not.toBe(root); // root was force-copied
+          expect((value as unknown as Record<string, unknown>).existing).toBe(
+            1,
+          );
+          expect((value as unknown as Record<string, unknown>).new).toBe(
+            pathValue,
+          );
+        });
+      });
+
+      // ----------------------------------------------------------------------
+      // Structured error
+      // ----------------------------------------------------------------------
+
+      describe("CloneForMutationError", () => {
+        it("uses kind `missing-segment` for a missing intermediate", () => {
+          const root = Object.freeze({ a: { b: 1 } }) as FabricValue;
+          try {
+            cloneForMutation(root, ["a", "nonesuch", "more"]);
+            throw new Error("expected throw");
+          } catch (e) {
+            expect(e).toBeInstanceOf(CloneForMutationError);
+            const err = e as CloneForMutationError;
+            expect(err.kind).toBe("missing-segment");
+            expect(err.pathIndex).toBe(1);
+            expect(err.valueKind).toBe("undefined");
+          }
+        });
+
+        it("uses kind `non-container-descent` for primitive in path", () => {
+          const root = Object.freeze({ x: 42 }) as FabricValue;
+          try {
+            cloneForMutation(root, ["x", "anything"]);
+            throw new Error("expected throw");
+          } catch (e) {
+            expect(e).toBeInstanceOf(CloneForMutationError);
+            const err = e as CloneForMutationError;
+            expect(err.kind).toBe("non-container-descent");
+            expect(err.pathIndex).toBe(0);
+            expect(err.valueKind).toBe("number");
+          }
+        });
+
+        it("uses kind `non-mutable-leaf` for a primitive leaf", () => {
+          const root = Object.freeze({ x: 42 }) as FabricValue;
+          try {
+            cloneForMutation(root, ["x"]);
+            throw new Error("expected throw");
+          } catch (e) {
+            expect(e).toBeInstanceOf(CloneForMutationError);
+            const err = e as CloneForMutationError;
+            expect(err.kind).toBe("non-mutable-leaf");
+            expect(err.pathIndex).toBe(0);
+            expect(err.valueKind).toBe("number");
+          }
+        });
+
+        it("uses kind `non-mutable-root` for empty path with bad root", () => {
+          try {
+            cloneForMutation(42 as FabricValue, []);
+            throw new Error("expected throw");
+          } catch (e) {
+            expect(e).toBeInstanceOf(CloneForMutationError);
+            const err = e as CloneForMutationError;
+            expect(err.kind).toBe("non-mutable-root");
+            expect(err.pathIndex).toBe(-1);
+            expect(err.valueKind).toBe("number");
+          }
+        });
+
+        it("uses kind `non-container-root` for non-empty path with bad root", () => {
+          try {
+            cloneForMutation(42 as FabricValue, ["x"]);
+            throw new Error("expected throw");
+          } catch (e) {
+            expect(e).toBeInstanceOf(CloneForMutationError);
+            const err = e as CloneForMutationError;
+            expect(err.kind).toBe("non-container-root");
+            expect(err.pathIndex).toBe(-1);
+            expect(err.valueKind).toBe("number");
+          }
+        });
+
+        it("error.name is `CloneForMutationError`", () => {
+          try {
+            cloneForMutation(42 as FabricValue, []);
+            throw new Error("expected throw");
+          } catch (e) {
+            expect((e as Error).name).toBe("CloneForMutationError");
+          }
+        });
+      });
+
+      // ----------------------------------------------------------------------
+      // Error cases (message-level coverage; structured-error checks above)
       // ----------------------------------------------------------------------
 
       describe("errors", () => {
