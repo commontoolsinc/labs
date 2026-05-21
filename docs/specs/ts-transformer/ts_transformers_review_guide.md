@@ -90,6 +90,12 @@ does **not** make foreign callback containers themselves part of the language.
 
 ## Files To Review
 
+First diagnostic command when a transformer behavior is surprising:
+
+```bash
+deno task cf check <pattern-or-fixture>.tsx --show-transformed --no-run
+```
+
 - [expression-site-policy.ts](../../../packages/ts-transformers/src/transformers/expression-site-policy.ts)
   - shared expression-site handling decision
 - [call-kind.ts](../../../packages/ts-transformers/src/ast/call-kind.ts)
