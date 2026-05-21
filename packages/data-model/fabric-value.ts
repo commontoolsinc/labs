@@ -17,7 +17,13 @@ export {
   type SerializationContext,
 } from "./interface.ts";
 
-export { cloneIfNecessary, type CloneOptions } from "./value-clone.ts";
+export {
+  cloneForMutation,
+  type CloneForMutationOptions,
+  type CloneForMutationResult,
+  cloneIfNecessary,
+  type CloneOptions,
+} from "./value-clone.ts";
 
 import type {
   FabricNativeObject,
