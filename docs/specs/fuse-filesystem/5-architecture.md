@@ -11,7 +11,7 @@
                     /dev/fuse fd
                          |
               +---------------------------+
-              |      Deno Process          |   packages/fuse/
+              |  Deno FUSE Child Process   |   packages/fuse/
               |                            |
               |  libfuse (via Deno.dlopen) |
               |   - single-threaded mode   |
@@ -27,7 +27,7 @@
               |   - Cell read/write        |
               |   - Subscriptions          |
               +---------------------------+
-                         |
+                          |
                     HTTP / WebSocket
                          |
               +---------------------------+
@@ -35,21 +35,28 @@
               +---------------------------+
 ```
 
-## Single-Process FFI Approach
+## Deno FFI Approach
 
-The filesystem runs as a single Deno process that calls libfuse via
-`Deno.dlopen()`. All logic — FUSE operations, cell access, caching, inode
-management — lives in TypeScript.
+The FUSE child process calls libfuse via `Deno.dlopen()`. All filesystem logic —
+FUSE operations, cell access, caching, inode management — lives in TypeScript.
+`cf fuse mount` foreground mode starts one FFI-owning child process and waits for
+it without adding a supervisor; direct `deno run packages/fuse/mod.ts` is a
+single-process invocation of the same child entrypoint. Background mounts add a
+small Deno supervisor process outside libfuse; the supervisor starts the FUSE
+child, records the child PID in mount state, forwards termination, and waits for
+the child to publish explicit readiness before `cf fuse mount --background`
+reports success.
 
-### Why Single-Process?
+### Why keep FUSE logic in Deno?
 
 - **One language, one build system.** No Rust toolchain, no Cargo, no
   cross-language data duplication. Everything stays in the Deno monorepo.
-- **No IPC overhead.** The in-memory tree is directly accessible from FUSE
-  callbacks. No serialization, no Unix sockets, no JSON-RPC protocol to
-  design and debug.
-- **Simpler deployment.** `cf fuse mount` runs one process. No coordinating
-  startup/shutdown of two daemons.
+- **No data-plane IPC overhead.** The in-memory tree is directly accessible from
+  FUSE callbacks. No serialization, no Unix sockets, no JSON-RPC protocol is on
+  the request path.
+- **Contained lifecycle split.** `cf fuse mount --background` uses a supervisor
+  only for process lifecycle/readiness, while foreground CLI mounts remain a
+  direct parent/child wait without a supervisor.
 - **Easier debugging.** Single stack trace, single log stream, standard Deno
   debugging tools.
 
@@ -222,12 +229,16 @@ cf fuse unmount <mountpoint>
 cf fuse status
 ```
 
+`cf fuse status` reports `MOUNTPOINT`, `SUPERVISOR_PID`, `CHILD_PID`, `STATUS`,
+`STARTED`, and `LOG` for active background mounts. `STATUS` is read from the
+FUSE child's readiness/heartbeat sidecar when available.
+
 Options:
 - `--api-url <url>` — toolshed API URL
 - `--identity <keyfile>` — identity for authentication
-- `--foreground` — run in foreground (don't daemonize)
+- `--background` — run under a non-FFI supervisor and return after child
+  readiness
 - `--debug` — enable FUSE debug logging
-- `--read-only` — mount as read-only
 
 All accessible spaces are exposed under the single mountpoint. The home space
 is always listed; other spaces are accessible by name or DID on demand (see
@@ -235,11 +246,15 @@ is always listed; other spaces are accessible by name or DID on demand (see
 
 The `mount` command:
 1. Connects to toolshed, loads identity
-2. Loads libfuse via `Deno.dlopen()`
-3. Registers FUSE callbacks
-4. Mounts the filesystem
-5. Enters the FUSE event loop (integrated with Deno's event loop)
-6. Daemonizes (unless `--foreground`)
+2. For foreground mounts, starts the FUSE child directly
+3. For background mounts, starts a non-FFI supervisor process
+4. The supervisor starts the FFI-owning FUSE child, records `childPid`, and
+   forwards cleanup signals
+5. The child loads libfuse via `Deno.dlopen()`, registers FUSE callbacks, mounts
+   the filesystem, and writes `starting`/`mounted`/`failed`/`exiting`/`exited`
+   readiness states plus a heartbeat
+6. The CLI reports background startup success only after the matching child
+   readiness sidecar reaches `mounted`
 
 Sessions for individual spaces are created lazily on first access.
 
