@@ -19,7 +19,7 @@ import {
 } from "../fabric-native-instances.ts";
 import { ProblematicValue } from "../problematic-value.ts";
 import { UnknownValue } from "../unknown-value.ts";
-import { FabricSpecialObject } from "../interface.ts";
+import { FabricPrimitive, FabricSpecialObject } from "../interface.ts";
 
 // ============================================================================
 // Tests
@@ -532,67 +532,49 @@ type ExpectedOutcome =
   | { kind: "throws" };
 
 /**
- * Per-subclass metadata that drives the matrix below. The booleans are not
- * arbitrary -- they correspond to which protocol members the subclass
- * implements (vs. inheriting a throwing stub):
+ * Per-subclass metadata that drives the matrix below.
  *
- *   - `isPrimitive`: subclass extends `FabricPrimitive`. Handled by
- *     `cloneHelper` as a separate `NATIVE_TAGS` case and returned by identity
- *     unconditionally; the `FabricInstance` clone methods are never invoked.
+ * `deepCloneImplemented` indicates whether `deepClone(frozen)` is a real
+ * implementation (not a stub or the inherited `FabricNativeWrapper.deepClone`
+ * that throws). When false, `cloneIfNecessary` paths that fall through to
+ * `deepClone()` will throw.
  *
- *   - `deepFreezeProtocolImplemented`: `[DEEP_FREEZE]` / `[IS_DEEP_FROZEN]`
- *     are real implementations (not stubs that throw). When false,
- *     `cloneIfNecessary` paths that probe deep-frozenness (`canReturnAsIs`
- *     with `deep: true, force: false`) will throw.
- *
- *   - `deepCloneImplemented`: `deepClone(frozen)` is implemented (not a stub
- *     or the inherited `FabricNativeWrapper.deepClone` that throws). When
- *     false, `cloneIfNecessary` paths that fall through to `deepClone()`
- *     will throw.
+ * Other distinctions (whether the subclass is a `FabricPrimitive`, whether
+ * the deep-freeze protocol is implemented as a real impl vs. a stub) are
+ * detected at test time -- the former via `instanceof FabricPrimitive` on the
+ * factory output, the latter via `try/catch` around `isDeepFrozenFabricValue`
+ * in the predicate.
  */
 type SubclassCase = {
   readonly name: string;
   // Returns either a `FabricInstance` (non-primitive cases) or a
   // `FabricPrimitive` (primitive cases). Both extend `FabricSpecialObject`.
   readonly factory: () => FabricSpecialObject;
-  readonly isPrimitive: boolean;
-  readonly deepFreezeProtocolImplemented: boolean;
   readonly deepCloneImplemented: boolean;
 };
 
-// `FabricPrimitive` subclasses are typed as `FabricInstance` here only because
-// our factory return type is uniform; in cloneHelper they're dispatched via
-// their own `NATIVE_TAGS` tag, never as `FabricInstance`.
 const subclassCases: readonly SubclassCase[] = [
   // ---------- `FabricInstance` with full protocol coverage ----------
   {
     name: "FabricError",
     factory: () => new FabricError(new Error("test")),
-    isPrimitive: false,
-    deepFreezeProtocolImplemented: true,
     deepCloneImplemented: true,
   },
   // ---------- `FabricInstance` with `deepClone` stub ----------
   {
     name: "FabricRegExp",
     factory: () => new FabricRegExp(/abc/g, "es2025"),
-    isPrimitive: false,
-    deepFreezeProtocolImplemented: true,
     deepCloneImplemented: false,
   },
   {
     name: "ProblematicValue",
     factory: () =>
       new ProblematicValue("Foo@1", "state-data" as FabricValue, "boom"),
-    isPrimitive: false,
-    deepFreezeProtocolImplemented: true,
     deepCloneImplemented: false,
   },
   {
     name: "UnknownValue",
     factory: () => new UnknownValue("Foo@1", "state-data" as FabricValue),
-    isPrimitive: false,
-    deepFreezeProtocolImplemented: true,
     deepCloneImplemented: false,
   },
   // ---------- `FabricInstance` with all-protocol stubs (only shallow works) ----------
@@ -605,44 +587,32 @@ const subclassCases: readonly SubclassCase[] = [
           1 as FabricValue,
         ]]),
       ),
-    isPrimitive: false,
-    deepFreezeProtocolImplemented: false,
     deepCloneImplemented: false,
   },
   {
     name: "FabricSet",
     factory: () => new FabricSet(new Set<FabricValue>([1 as FabricValue])),
-    isPrimitive: false,
-    deepFreezeProtocolImplemented: false,
     deepCloneImplemented: false,
   },
   // ---------- `FabricPrimitive` subclasses (intrinsically immutable) ----------
   {
     name: "FabricBytes",
     factory: () => new FabricBytes(new Uint8Array([1, 2, 3])),
-    isPrimitive: true,
-    deepFreezeProtocolImplemented: false,
     deepCloneImplemented: false,
   },
   {
     name: "FabricEpochNsec",
     factory: () => new FabricEpochNsec(1234567890n),
-    isPrimitive: true,
-    deepFreezeProtocolImplemented: false,
     deepCloneImplemented: false,
   },
   {
     name: "FabricEpochDays",
     factory: () => new FabricEpochDays(42n),
-    isPrimitive: true,
-    deepFreezeProtocolImplemented: false,
     deepCloneImplemented: false,
   },
   {
     name: "FabricHash",
     factory: () => new FabricHash(new Uint8Array([1, 2, 3, 4]), "fid1"),
-    isPrimitive: true,
-    deepFreezeProtocolImplemented: false,
     deepCloneImplemented: false,
   },
 ];
@@ -674,7 +644,7 @@ function expectedOutcome(
   opts: Required<CloneOptions>,
 ): ExpectedOutcome {
   // (1) `FabricPrimitive`: cloneHelper returns the value as-is.
-  if (c.isPrimitive) return { kind: "ok" };
+  if (value instanceof FabricPrimitive) return { kind: "ok" };
 
   const { frozen, deep, force } = opts;
 
@@ -814,7 +784,7 @@ describe("cloneIfNecessary: subclass coverage matrix", () => {
 
                   // (2) `FabricPrimitive`: always returns the source by
                   // identity; result is always frozen (constructor invariant).
-                  if (c.isPrimitive) {
+                  if (value instanceof FabricPrimitive) {
                     expect(result).toBe(value);
                     expect(Object.isFrozen(result)).toBe(true);
                     return;
