@@ -1,0 +1,93 @@
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { createSession, Identity } from "@commonfabric/identity";
+import { Runtime, type URI } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { createBuilder } from "../../runner/src/builder/factory.ts";
+import { slugIdForSpace } from "../../runner/src/slugs.ts";
+import { pieceId, PieceManager } from "../src/manager.ts";
+import { assignSlug, resolvePieceAddress } from "../src/slugs.ts";
+
+const signer = await Identity.fromPassphrase("piece slug tests");
+
+describe("piece slugs", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+  let manager: PieceManager;
+
+  beforeEach(async () => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    const session = await createSession({
+      identity: signer,
+      spaceName: "piece-slugs-" + crypto.randomUUID(),
+    });
+    manager = new PieceManager(session, runtime);
+    await manager.synced();
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  async function createPiece(cause: string) {
+    const { commonfabric } = createBuilder();
+    const piecePattern = commonfabric.pattern<{ value: number }>((
+      { value },
+    ) => ({ value }));
+    return await manager.runPersistent(piecePattern, { value: 1 }, cause);
+  }
+
+  function readRootMeta(id: string, key: string): unknown {
+    return runtime.readTx().readOrThrow({
+      space: manager.getSpace(),
+      id: `of:${id}` as URI,
+      scope: "space",
+      path: [key],
+    });
+  }
+
+  it("stores slug metadata and resolves through the slug document redirect", async () => {
+    const piece = await createPiece("slug-target");
+    const id = pieceId(piece)!;
+
+    await assignSlug(manager, piece, "demo");
+
+    const slugId = slugIdForSpace(manager.getSpace(), "demo");
+    expect(readRootMeta(id, "slug")).toBe("demo");
+    expect(readRootMeta(slugId, "slug")).toBe("demo");
+    expect(await resolvePieceAddress(manager, "demo")).toBe(id);
+  });
+
+  it("overwrites an existing slug redirect", async () => {
+    const first = await createPiece("slug-first");
+    const second = await createPiece("slug-second");
+
+    await assignSlug(manager, first, "demo");
+    await assignSlug(manager, second, "demo");
+
+    expect(await resolvePieceAddress(manager, "demo")).toBe(pieceId(second));
+  });
+
+  it("reports missing and malformed slug documents", async () => {
+    await expect(resolvePieceAddress(manager, "missing")).rejects.toThrow(
+      /Slug "missing" not found/,
+    );
+
+    const slugId = slugIdForSpace(manager.getSpace(), "malformed");
+    const slugCell = runtime.getCellFromEntityId(manager.getSpace(), {
+      "/": slugId,
+    });
+    await runtime.editWithRetry((tx) => {
+      slugCell.withTx(tx).setRawUntyped("not a redirect");
+    });
+
+    await expect(resolvePieceAddress(manager, "malformed")).rejects.toThrow(
+      /does not contain a valid redirect/,
+    );
+  });
+});
