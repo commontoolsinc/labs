@@ -69,30 +69,6 @@ function assertUsable() {
 }
 
 /**
- * Performs module-level setup if (a) possible and (b) not already done. Returns
- * (a promise to) `true` if initialization was successful, `false` if not.
- */
-export function initWasm() {
-  if (!initResult) {
-    initResult = (async () => {
-      try {
-        theOneShotHasher.push(await createSHA256());
-        for (let i = 0; i < HASHER_POOL_SIZE; i++) {
-          hasherPool.add(await createSHA256());
-        }
-        moduleIsUsable = true;
-      } catch {
-        // `hash-wasm` not available, or couldn't be fully initialized.
-      }
-
-      return moduleIsUsable;
-    })();
-  }
-
-  return initResult;
-}
-
-/**
  * WASM-specific incremental hasher which collects chunks and performs a
  * one-shot digest at the end of processing.
  */
@@ -129,6 +105,31 @@ class WasmUpdatingHasher extends BaseSmallChunkUpdatingHasher {
     hasherPool.release(hasher);
     return result;
   }
+}
+
+/**
+ * Performs module-level setup if (a) possible and (b) not already done.
+ * Returns (a promise to) `true` if initialization was successful, `false`
+ * if not.
+ */
+export function initWasm() {
+  if (!initResult) {
+    initResult = (async () => {
+      try {
+        theOneShotHasher.push(await createSHA256());
+        for (let i = 0; i < HASHER_POOL_SIZE; i++) {
+          hasherPool.add(await createSHA256());
+        }
+        moduleIsUsable = true;
+      } catch {
+        // `hash-wasm` not available, or couldn't be fully initialized.
+      }
+
+      return moduleIsUsable;
+    })();
+  }
+
+  return initResult;
 }
 
 /**

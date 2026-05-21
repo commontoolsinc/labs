@@ -3,6 +3,13 @@ import { expect } from "@std/expect";
 import type { DID } from "@commonfabric/identity";
 import { EventEmitter } from "../../runtime-client/client/emitter.ts";
 
+const env = globalThis as typeof globalThis & {
+  $API_URL?: string;
+  $ENVIRONMENT?: string;
+};
+env.$API_URL ??= "http://shell.test/";
+env.$ENVIRONMENT ??= "development";
+
 type MockRuntimeClientEvents = {
   console: [unknown];
   navigaterequest: [{ cell: { id(): string; space(): DID } }];
@@ -13,6 +20,7 @@ type MockRuntimeClientEvents = {
 class MockRuntimeClient extends EventEmitter<MockRuntimeClientEvents> {
   idleCalls = 0;
   syncedCalls = 0;
+  slugByPageId = new Map<string, string | undefined>();
 
   idle(): Promise<void> {
     this.idleCalls += 1;
@@ -22,6 +30,10 @@ class MockRuntimeClient extends EventEmitter<MockRuntimeClientEvents> {
   synced(): Promise<void> {
     this.syncedCalls += 1;
     return Promise.resolve();
+  }
+
+  getPageSlug(pageId: string): Promise<string | undefined> {
+    return Promise.resolve(this.slugByPageId.get(pageId));
   }
 
   dispose(): Promise<void> {
@@ -51,6 +63,26 @@ type NavigationDetail = {
 };
 
 describe("RuntimeInternals navigation", () => {
+  it("exposes page slug metadata", async () => {
+    const { RuntimeInternals } = await import("../src/lib/runtime.ts");
+    const spaceDid = "did:key:z6Mk-shell-runtime-did-nav" as DID;
+    const client = new MockRuntimeClient();
+    client.slugByPageId.set("piece-789", "demo");
+    const runtime = new (RuntimeInternals as any)(
+      client,
+      spaceDid,
+      undefined,
+      false,
+      spaceDid,
+    );
+
+    try {
+      await expect(runtime.getSlug("piece-789")).resolves.toBe("demo");
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
   it("waits for same-space registration and convergence before navigating", async () => {
     const env = globalThis as typeof globalThis & {
       $API_URL?: string;

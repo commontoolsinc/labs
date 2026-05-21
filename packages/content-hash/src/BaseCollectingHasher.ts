@@ -59,8 +59,8 @@ export abstract class BaseCollectingHasher extends BaseIncrementalHasher {
   }
 
   /**
-   * Arranges for there to be a `currentChunk` with enough room for the
-   * indicated amount of data.
+   * Helper for `_rawUpdate()`, which arranges for there to be a
+   * `currentChunk` with enough room for the indicated amount of data.
    */
   #prepChunk(length: number) {
     const current = this.#currentChunk;
