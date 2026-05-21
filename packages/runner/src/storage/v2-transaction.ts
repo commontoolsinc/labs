@@ -1,5 +1,6 @@
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
+import { deepFreeze, isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
+  cloneIfNecessary,
   getDataModelConfig,
   isArrayIndexPropertyName,
 } from "@commonfabric/data-model/fabric-value";
@@ -140,11 +141,33 @@ function withCommitTiming<T>(
   }
 }
 
+/**
+ * Produces a value that is isolated from later mutations to the source. For
+ * a deep-frozen input the source can't be mutated, so the input is returned
+ * unchanged; otherwise plain objects and arrays are deep-cloned (with cycle
+ * detection) and non-plain-prototype objects are passed through. Sub-trees
+ * that are themselves deep-frozen short-circuit by identity during the
+ * recursion, so partially-frozen trees only copy their unfrozen portions.
+ *
+ * The result is NOT guaranteed to be mutable, since deep-frozen inputs are
+ * returned as-is. Callers that need a mutable copy (e.g. before in-place
+ * write helpers like `ensureParentContainers` or `applyMutablePathWrite`)
+ * must use `cloneIfNecessary(value, { frozen: false })` from
+ * `@commonfabric/data-model` instead.
+ */
 const isolateTransactionValue = <T>(
   value: T,
   seen: Map<object, unknown> = new Map(),
 ): T => {
   if (value === null || typeof value !== "object") {
+    return value;
+  }
+
+  // A deep-frozen value is already isolated: nothing can mutate it, so the
+  // returned reference is safe to share with the caller. `isDeepFrozen()` is
+  // O(1) on values previously cached as deep-frozen (the common case for
+  // values that came back out of storage in modern data model).
+  if (isDeepFrozen(value)) {
     return value;
   }
 
@@ -218,6 +241,10 @@ const freezeReadValue = <T extends FabricValue | undefined>(value: T): T => {
   ) {
     return value;
   }
+  // `isolateTransactionValue()` short-circuits on already-deep-frozen input
+  // (returns the source by identity) and `deepFreeze()` is O(1) on values
+  // already in its cache, so the steady-state cost on repeated reads of the
+  // same stored value collapses to two cache lookups.
   return deepFreeze(isolateTransactionValue(value)) as T;
 };
 
@@ -1309,7 +1336,11 @@ export class V2StorageTransaction implements IStorageTransaction {
       if (!isRecord(existingParent) && !Array.isArray(existingParent)) {
         return direct;
       }
-      parentValue = isolateTransactionValue(existingParent) as FabricValue;
+      // Use `cloneIfNecessary({ frozen: false })` (not
+      // `isolateTransactionValue()`): the parent is about to be mutated in
+      // place by `ensureParentContainers`, so we need a guaranteed-mutable
+      // copy even when the stored value is deep-frozen.
+      parentValue = cloneIfNecessary(existingParent, { frozen: false });
     }
 
     const seededParent = ensureParentContainers(
@@ -1435,7 +1466,12 @@ export class V2StorageTransaction implements IStorageTransaction {
       if (
         !hasMutableRoot && address.path.length > 0 && nextRoot !== undefined
       ) {
-        nextRoot = isolateTransactionValue(nextRoot) as FabricValue;
+        // Use `cloneIfNecessary({ frozen: false })` (not
+        // `isolateTransactionValue()`): the next line passes `nextRoot` to
+        // `applyMutablePathWrite`, which mutates in place along the write
+        // path, so we need a guaranteed-mutable root even when the stored
+        // value is deep-frozen.
+        nextRoot = cloneIfNecessary(nextRoot, { frozen: false });
         hasMutableRoot = true;
       }
       const result = applyMutablePathWrite(nextRoot, address, isolatedValue);
