@@ -3,6 +3,7 @@ import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { isDeepFrozenFabricValue } from "./deep-freeze.ts";
 import { type Immutable, isPlainContainer } from "@commonfabric/utils/types";
 import { toDebugKindString } from "./value-debug.ts";
+import { isArrayIndexPropertyName } from "./array-utils.ts";
 
 /**
  * Options for `cloneIfNecessary()`.
@@ -207,6 +208,52 @@ export function cloneHelper(
 // =============================================================================
 
 /**
+ * Categorical kinds of error that `cloneForMutation()` can fail with.
+ *
+ * - `"non-mutable-root"` — empty `path` and the root value isn't a kind
+ *   for which a mutable handle exists (a primitive, a `FabricPrimitive`,
+ *   etc.).
+ * - `"non-container-root"` — non-empty `path` and the root isn't a plain
+ *   object or array, so there's nothing to descend into.
+ * - `"missing-segment"` — a `path` segment names a slot that doesn't
+ *   exist on its container, and `createMissing` is `false`.
+ * - `"non-container-descent"` — an intermediate segment lands on a value
+ *   that isn't a plain object or array, so descent can't continue.
+ * - `"non-mutable-leaf"` — the final segment lands on a value for which
+ *   no mutable handle exists (a primitive or `FabricPrimitive`).
+ */
+export type CloneForMutationErrorKind =
+  | "non-mutable-root"
+  | "non-container-root"
+  | "missing-segment"
+  | "non-container-descent"
+  | "non-mutable-leaf";
+
+/**
+ * Error thrown by `cloneForMutation()` when the input value or path is
+ * unsuitable for producing a mutable handle. Carries structured fields so
+ * the caller can preserve typed error info rather than parsing the
+ * message.
+ *
+ * - `kind` — categorical reason (see {@link CloneForMutationErrorKind}).
+ * - `pathIndex` — the path index at which the error occurred, or `-1`
+ *   for root-level errors.
+ * - `valueKind` — debug-string kind of the offending value (matches
+ *   `toDebugKindString()`).
+ */
+export class CloneForMutationError extends Error {
+  constructor(
+    readonly kind: CloneForMutationErrorKind,
+    readonly pathIndex: number,
+    readonly valueKind: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "CloneForMutationError";
+  }
+}
+
+/**
  * Options for `cloneForMutation()`.
  */
 export interface CloneForMutationOptions {
@@ -229,6 +276,43 @@ export interface CloneForMutationOptions {
    * deep: false, force })` calls that perform the actual shallow thaws.
    */
   force?: boolean;
+
+  /**
+   * Create missing intermediate containers along `path` as the helper
+   * descends. Default: `false` (throws `CloneForMutationError` with kind
+   * `"missing-segment"` on the first missing slot).
+   *
+   * When `createMissing: true`, at each path step where the container at
+   * that key is absent, the helper allocates a fresh container and
+   * splices it into its parent before descending. The new container's
+   * shape (array vs. plain object) is chosen from the NEXT segment that
+   * will be used as a key against it:
+   *
+   * - For intermediate path steps, the next segment is `path[i+1]`.
+   * - For the final path step, the next segment is `nextKeyAfterPath` if
+   *   supplied; otherwise the empty string (which selects a plain object).
+   *
+   * Array-index-shaped keys (`isArrayIndexPropertyName(key)`) and the
+   * JSON-Pointer append marker `"-"` select an array; everything else
+   * selects a plain object.
+   */
+  createMissing?: boolean;
+
+  /**
+   * Hint for the container shape to create at the final path step when
+   * it's missing and `createMissing: true`. Should be the next key the
+   * caller intends to access against the value-at-path. Ignored when
+   * `createMissing: false` or when the final path step already exists.
+   * Default: `""` (selects a plain object).
+   *
+   * Same shape-selection rule as for intermediate steps: array-index-
+   * shaped values (per `isArrayIndexPropertyName`) and the JSON-Pointer
+   * append marker `"-"` select an array; everything else selects a
+   * plain object.
+   *
+   * Mirrors `v2-path.ensureParentContainers`'s `lastKey` parameter.
+   */
+  nextKeyAfterPath?: string;
 }
 
 /**
@@ -287,16 +371,20 @@ export interface CloneForMutationResult<T extends FabricValue> {
  * A `FabricInstance` is permitted as the final value at `path`, in which
  * case it's shallow-thawed via its own `shallowClone(false)` interface.
  *
+ * ### Missing path segments
+ *
+ * By default (`createMissing: false`), missing segments throw a
+ * `CloneForMutationError` with kind `"missing-segment"`. With
+ * `createMissing: true`, the helper allocates fresh containers as it
+ * descends through missing slots; see {@link CloneForMutationOptions} for
+ * the shape-selection rules (in particular the `nextKeyAfterPath` hint).
+ *
  * ### Errors
  *
- * Throws if:
- * - A path segment names a missing slot on a plain container.
- * - An intermediate segment lands on something other than a plain object
- *   or array (a primitive, a `FabricInstance`, a `FabricPrimitive`, ...).
- * - The final segment lands on a value that isn't mutable-handle-able
- *   (a primitive or a `FabricPrimitive`).
- * - The root itself isn't mutable-handle-able and `path` is empty.
- * - The root isn't a plain container and `path` is non-empty.
+ * Throws a `CloneForMutationError` (see {@link CloneForMutationErrorKind})
+ * for unsuitable inputs or paths. Other unexpected errors (e.g. cycles in
+ * the spine surfaced by the underlying `cloneIfNecessary` machinery)
+ * propagate as plain `Error`s.
  *
  * @param value - The input value tree.
  * @param path - Path to the container (or `FabricInstance`) to expose as
@@ -309,6 +397,8 @@ export function cloneForMutation<T extends FabricValue>(
   options?: CloneForMutationOptions,
 ): CloneForMutationResult<T> {
   const force = options?.force ?? true;
+  const createMissing = options?.createMissing ?? false;
+  const nextKeyAfterPath = options?.nextKeyAfterPath ?? "";
   // Used for every per-container shallow thaw along the spine, and for the
   // final value-at-`path` thaw if it's a plain container or `FabricInstance`.
   const cloneOpts = { frozen: false as const, deep: false as const, force };
@@ -316,7 +406,10 @@ export function cloneForMutation<T extends FabricValue>(
   // --- Empty-path fast path ---------------------------------------------
   if (path.length === 0) {
     if (!isMutableHandle(value)) {
-      throw new Error(
+      throw new CloneForMutationError(
+        "non-mutable-root",
+        -1,
+        toDebugKindString(value),
         `cloneForMutation: cannot mutate ${toDebugKindString(value)} at root ` +
           `(empty path)`,
       );
@@ -330,7 +423,10 @@ export function cloneForMutation<T extends FabricValue>(
   // root would have nowhere to go (path-style access into FabricInstance
   // internals isn't supported).
   if (!isPlainContainer(value)) {
-    throw new Error(
+    throw new CloneForMutationError(
+      "non-container-root",
+      -1,
+      toDebugKindString(value),
       `cloneForMutation: cannot descend into ${toDebugKindString(value)} at ` +
         `root (path has ${path.length} segment${path.length === 1 ? "" : "s"})`,
     );
@@ -348,18 +444,37 @@ export function cloneForMutation<T extends FabricValue>(
     const key = path[i]!;
     const isLast = i === path.length - 1;
 
-    if (!Object.hasOwn(current, key)) {
-      throw new Error(
+    let next: FabricValue;
+    if (Object.hasOwn(current, key)) {
+      next = (current as Record<string, FabricValue>)[key];
+    } else if (createMissing) {
+      // Allocate a fresh container at this slot. Its shape comes from the
+      // next key that will be used against it: `path[i+1]` for
+      // intermediate steps, `nextKeyAfterPath` for the final step.
+      const nextKey = isLast ? nextKeyAfterPath : path[i + 1]!;
+      next = createMissingContainer(nextKey);
+      (current as Record<string, FabricValue>)[key] = next;
+      // `next` is freshly allocated and already mutable; skip the
+      // shallow-thaw step below.
+      if (isLast) return { value: newRoot, pathValue: next };
+      current = next as Record<string, FabricValue> | FabricValue[];
+      continue;
+    } else {
+      throw new CloneForMutationError(
+        "missing-segment",
+        i,
+        "undefined",
         `cloneForMutation: missing path segment ${JSON.stringify(key)} at ` +
           `index ${i}`,
       );
     }
 
-    const next = (current as Record<string, FabricValue>)[key];
-
     if (isLast) {
       if (!isMutableHandle(next)) {
-        throw new Error(
+        throw new CloneForMutationError(
+          "non-mutable-leaf",
+          i,
+          toDebugKindString(next),
           `cloneForMutation: cannot mutate ${
             toDebugKindString(next)
           } at path ` +
@@ -368,7 +483,10 @@ export function cloneForMutation<T extends FabricValue>(
       }
     } else {
       if (!isPlainContainer(next)) {
-        throw new Error(
+        throw new CloneForMutationError(
+          "non-container-descent",
+          i,
+          toDebugKindString(next),
           `cloneForMutation: cannot descend into ${
             toDebugKindString(next)
           } at ` +
@@ -400,6 +518,18 @@ export function cloneForMutation<T extends FabricValue>(
   // `path.length > 0` (handled above for `path.length === 0`).
   /* c8 ignore next 3 */
   throw new Error("cloneForMutation: unreachable");
+}
+
+/**
+ * Allocates a fresh, mutable container of the right shape for `nextKey`.
+ * Array-index-shaped keys (per `isArrayIndexPropertyName`) and the
+ * JSON-Pointer append marker `"-"` produce an array; everything else
+ * produces a plain object.
+ */
+function createMissingContainer(
+  nextKey: string,
+): Record<string, FabricValue> | FabricValue[] {
+  return isArrayIndexPropertyName(nextKey) || nextKey === "-" ? [] : {};
 }
 
 /**
