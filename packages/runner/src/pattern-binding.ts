@@ -30,6 +30,11 @@ type SendValueToBindingOptions = {
   narrowestReadScope?: CellScope;
 };
 
+type UnwrapOneLevelOptions = {
+  bindPatterns?: boolean;
+  targetSchema?: JSONSchema;
+};
+
 const scopedLinkForPath = (
   cfc: ContextualFlowControl,
   link: NormalizedFullLink,
@@ -217,6 +222,9 @@ export function sendValueToBinding<T>(
  * @param options - Optional configuration.
  * @param options.bindPatterns - If false, skip binding aliases inside pattern values.
  *   This is used by raw/map nodes to prevent premature alias binding. Default: true.
+ * @param options.targetSchema - Schema for the binding being produced. Source
+ *   links still resolve through the argument/internal/result links above, but
+ *   emitted links are annotated with the corresponding target schema.
  * @returns The unwrapped binding.
  */
 export function unwrapOneLevelAndBindtoDoc<T, U>(
@@ -225,11 +233,15 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
   argumentCellLink: NormalizedFullLink,
   internalCellLink: NormalizedFullLink,
   resultCellLink: NormalizedFullLink,
-  options?: { bindPatterns?: boolean },
+  options?: UnwrapOneLevelOptions,
 ): T {
   const bindPatterns = options?.bindPatterns !== false;
 
-  function convert(binding: unknown, bindToDoc: boolean): unknown {
+  function convert(
+    binding: unknown,
+    bindToDoc: boolean,
+    targetSchema: JSONSchema | undefined,
+  ): unknown {
     if (isLegacyAlias(binding)) {
       const alias = { ...binding.$alias };
       if (typeof alias.cell === "number") {
@@ -256,13 +268,13 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
         const path = alias.path.map((p) => p.toString());
         // we might have a schema in the alias, but if not, we may have one
         // in the link (from the pattern)
-        const schema = alias.schema !== undefined
+        const sourceSchema = alias.schema !== undefined
           ? alias.schema
           : link.schema !== undefined
           ? cfc.schemaAtPath(link.schema, path)
           : undefined;
         return createSigilLinkFromParsedLink(
-          scopedLinkForPath(cfc, link, path, schema),
+          scopedLinkForPath(cfc, link, path, targetSchema ?? sourceSchema),
           { includeSchema: true, overwrite: "redirect" },
         );
       } else if (Array.isArray(alias.cell)) {
@@ -292,7 +304,13 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
       // TODO(@ubik2) - we may never get here -- see if this can be removed
       return { $alias: alias };
     } else if (Array.isArray(binding)) {
-      return binding.map((value) => convert(value, bindToDoc));
+      return binding.map((value, index) =>
+        convert(
+          value,
+          bindToDoc,
+          cfc.getSchemaAtPath(targetSchema, [String(index)]),
+        )
+      );
     } else if (isRecord(binding)) {
       // CT-1230 WORKAROUND: Don't bind aliases inside pattern values when bindPatterns=false.
       //
@@ -306,7 +324,7 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
       const result: Record<string | symbol, unknown> = Object.fromEntries(
         Object.entries(binding).map(([key, value]) => [
           key,
-          convert(value, shouldBind),
+          convert(value, shouldBind, cfc.getSchemaAtPath(targetSchema, [key])),
         ]),
       );
       if (binding[unsafe_originalPattern]) {
@@ -318,7 +336,7 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
       return result;
     } else return binding;
   }
-  return convert(binding, true) as T;
+  return convert(binding, true, options?.targetSchema) as T;
 }
 
 export function unsafe_noteParentOnPatterns(
