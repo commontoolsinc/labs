@@ -262,7 +262,9 @@ describe("shell piece tests", () => {
       throw error;
     } finally {
       pieceSinkCancel?.();
+      await shell.disposeRuntime();
       await cc.dispose();
+      await new Promise((resolve) => setTimeout(resolve, 100));
     }
   });
 

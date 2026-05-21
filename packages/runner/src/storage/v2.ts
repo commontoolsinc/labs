@@ -15,9 +15,12 @@ import { assert, unclaimed } from "@commonfabric/memory/fact";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import {
   type CellScope,
+  type ClientCommit,
   type DocumentPath,
   type EntityDocument,
   type PatchOp,
+  type SchedulerActionSnapshotQuery,
+  type SchedulerSnapshotListResult,
   type SessionSync,
   toDocumentPath,
 } from "@commonfabric/memory/v2";
@@ -837,6 +840,12 @@ class Provider implements IStorageProviderWithReplica {
     return this.replica.synced();
   }
 
+  listSchedulerActionSnapshots(
+    query: SchedulerActionSnapshotQuery = {},
+  ): Promise<SchedulerSnapshotListResult> {
+    return this.replica.listSchedulerActionSnapshots(query);
+  }
+
   get(uri: URI, scope?: CellScope): EntityDocument | undefined {
     return this.replica.getDocument(uri, scope);
   }
@@ -969,6 +978,13 @@ class SpaceReplica implements ISpaceReplica {
 
   async synced(): Promise<void> {
     await Promise.all([...this.#syncPromises, ...this.#commitPromises]);
+  }
+
+  async listSchedulerActionSnapshots(
+    query: SchedulerActionSnapshotQuery = {},
+  ): Promise<SchedulerSnapshotListResult> {
+    const { session } = await this.sessionHandle();
+    return await session.listSchedulerActionSnapshots(query);
   }
 
   getDocument(uri: URI, scope?: CellScope): EntityDocument | undefined {
@@ -1105,6 +1121,7 @@ class SpaceReplica implements ISpaceReplica {
     transaction: NativeStorageCommit,
     source?: IStorageTransaction,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
+    const schedulerObservation = transaction.schedulerObservation;
     const operations = withCommitTiming(
       ["commitNative", "normalize"],
       () =>
@@ -1134,13 +1151,13 @@ class SpaceReplica implements ISpaceReplica {
           ),
     );
 
-    if (operations.length === 0) {
+    if (operations.length === 0 && schedulerObservation === undefined) {
       return { ok: {} };
     }
 
     return await withCommitTiming(
       ["commitNative", "commitOperations"],
-      () => this.commitOperations(operations, source),
+      () => this.commitOperations(operations, source, schedulerObservation),
     );
   }
 
@@ -1281,11 +1298,12 @@ class SpaceReplica implements ISpaceReplica {
       | { op: "delete"; id: URI; scope?: CellScope }
     >,
     source?: IStorageTransaction,
+    schedulerObservation?: unknown,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     const localSeq = this.#nextLocalSeq++;
     const commit = withCommitTiming(
       ["commitOperations", "buildCommit"],
-      () => ({
+      (): ClientCommit => ({
         localSeq,
         reads: this.buildReads(source, localSeq),
         operations: operations.map((operation) => {
@@ -1308,14 +1326,18 @@ class SpaceReplica implements ISpaceReplica {
               };
           }
         }),
+        ...(schedulerObservation !== undefined ? { schedulerObservation } : {}),
       }),
     );
     const touched = operations.map((operation) => ({
       id: operation.id,
       scope: operation.scope,
     }));
-    const shouldNotifySubscribers = this.hasNotificationSubscribers();
-    const shouldNotifySinks = this.hasSinkSubscribers(touched);
+    const hasSemanticOperations = operations.length > 0;
+    const shouldNotifySubscribers = hasSemanticOperations &&
+      this.hasNotificationSubscribers();
+    const shouldNotifySinks = hasSemanticOperations &&
+      this.hasSinkSubscribers(touched);
     const before = withCommitTiming(
       ["commitOperations", "snapshotBefore"],
       () =>
@@ -1356,7 +1378,7 @@ class SpaceReplica implements ISpaceReplica {
         this.pushCommit(
           localSeq,
           operations,
-          commit as any,
+          commit,
           source,
         ),
     );
@@ -1379,7 +1401,7 @@ class SpaceReplica implements ISpaceReplica {
       }
       | { op: "delete"; id: URI; scope?: CellScope }
     >,
-    commit: any,
+    commit: ClientCommit,
     source?: IStorageTransaction,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     try {
@@ -1393,8 +1415,11 @@ class SpaceReplica implements ISpaceReplica {
         id: operation.id,
         scope: operation.scope,
       }));
-      const shouldNotifySubscribers = this.hasNotificationSubscribers();
-      const shouldNotifySinks = this.hasSinkSubscribers(touched);
+      const hasSemanticOperations = operations.length > 0;
+      const shouldNotifySubscribers = hasSemanticOperations &&
+        this.hasNotificationSubscribers();
+      const shouldNotifySinks = hasSemanticOperations &&
+        this.hasSinkSubscribers(touched);
       const before = shouldNotifySubscribers
         ? Differential.checkout(
           this,

@@ -14,6 +14,8 @@ import {
   type HelloMessage,
   parseMemoryProtocolFlags,
   type ResponseMessage,
+  type SchedulerSnapshotListRequest,
+  type SchedulerSnapshotListResult,
   type ServerMessage,
   type SessionAckRequest,
   type SessionAckResult,
@@ -56,7 +58,7 @@ import {
   toCacheEntry,
   trackedIdsFromEntries,
 } from "./server-sync.ts";
-import { SessionRegistry } from "./session-registry.ts";
+import { SessionRegistry, type SessionState } from "./session-registry.ts";
 
 export { SessionRegistry } from "./session-registry.ts";
 
@@ -113,6 +115,24 @@ export const getSlowQueries = (): readonly SlowQuery[] => slowQueries;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
+
+const schedulerObservationFromCommit = (
+  commit: ClientCommit,
+): Engine.SchedulerActionObservation | undefined => {
+  const observation = commit.schedulerObservation;
+  if (
+    !isRecord(observation) ||
+    observation.version !== 1 ||
+    typeof observation.pieceId !== "string" ||
+    typeof observation.actionId !== "string" ||
+    typeof observation.processGeneration !== "number" ||
+    !Array.isArray(observation.reads) ||
+    !Array.isArray(observation.shallowReads)
+  ) {
+    return undefined;
+  }
+  return observation as unknown as Engine.SchedulerActionObservation;
+};
 
 const toError = (name: string, message: string): V2Error => ({
   name,
@@ -352,6 +372,18 @@ class Connection {
         }
         this.send(await this.server.watchAdd(parsed));
         return;
+      case "scheduler.snapshot.list":
+        if (
+          !this.requireSession(
+            parsed.requestId,
+            parsed.space,
+            parsed.sessionId,
+          )
+        ) {
+          return;
+        }
+        this.send(await this.server.listSchedulerActionSnapshots(parsed));
+        return;
       case "session.ack":
         if (
           !this.requireSession(
@@ -500,6 +532,7 @@ export class Server {
     const engine = await this.openEngine(space);
     const commit = Engine.applyCommit(engine, {
       sessionId: this.#directSessionId,
+      space,
       commit: {
         localSeq: ++this.#directLocalSeq,
         reads: { confirmed: [], pending: [] },
@@ -510,6 +543,13 @@ export class Server {
         }],
       },
     });
+    await this.runPostCommitSchedulerSideEffects(
+      space,
+      commit,
+      undefined,
+      new Set(),
+      undefined,
+    );
     this.markSpaceDirty(space, [toDirtyKey(id)]);
     return commit;
   }
@@ -614,11 +654,32 @@ export class Server {
 
     try {
       const engine = await this.openEngine(message.space);
+      const schedulerObservation = schedulerObservationFromCommit(
+        message.commit,
+      );
+      const previousReadSpaces = schedulerObservation
+        ? this.schedulerObservationReadSpaces(
+          Engine.getLatestSchedulerActionSnapshot(engine, {
+            branch: message.commit.branch ?? "",
+            pieceId: schedulerObservation.pieceId,
+            processGeneration: schedulerObservation.processGeneration,
+            actionId: schedulerObservation.actionId,
+          })?.observation,
+        )
+        : new Set<string>();
       const commit = Engine.applyCommit(engine, {
         sessionId: message.sessionId,
+        space: message.space,
         principal: session.principal,
         commit: message.commit,
       });
+      await this.runPostCommitSchedulerSideEffects(
+        message.space,
+        commit,
+        schedulerObservation,
+        previousReadSpaces,
+        session,
+      );
       this.markSpaceDirty(
         message.space,
         message.commit.operations.map((operation) =>
@@ -690,6 +751,56 @@ export class Server {
       };
     } catch (error) {
       return respondTypedError<GraphQueryResult>(
+        message.requestId,
+        toError(
+          "QueryError",
+          error instanceof Error ? error.message : String(error),
+        ),
+      );
+    }
+  }
+
+  async listSchedulerActionSnapshots(
+    message: SchedulerSnapshotListRequest,
+  ): Promise<ResponseMessage<SchedulerSnapshotListResult>> {
+    const session = this.#sessions.get(message.space, message.sessionId);
+    if (session === null) {
+      return respondTypedError<SchedulerSnapshotListResult>(
+        message.requestId,
+        toError("SessionError", "Unknown session for space"),
+      );
+    }
+
+    try {
+      const engine = await this.openEngine(message.space);
+      const snapshots = Engine.listSchedulerActionSnapshots(
+        engine,
+        message.query,
+      ).map((snapshot) => ({
+        observationId: snapshot.observationId,
+        commitSeq: snapshot.commitSeq,
+        observedAtSeq: snapshot.observedAtSeq,
+        observation: snapshot.observation,
+        ...(snapshot.directDirtySeq !== undefined
+          ? { directDirtySeq: snapshot.directDirtySeq }
+          : {}),
+        ...(snapshot.staleSeq !== undefined
+          ? { staleSeq: snapshot.staleSeq }
+          : {}),
+        ...(snapshot.unknownReason !== undefined
+          ? { unknownReason: snapshot.unknownReason }
+          : {}),
+      }));
+      return {
+        type: "response",
+        requestId: message.requestId,
+        ok: {
+          serverSeq: Engine.serverSeq(engine),
+          snapshots,
+        },
+      };
+    } catch (error) {
+      return respondTypedError<SchedulerSnapshotListResult>(
         message.requestId,
         toError(
           "QueryError",
@@ -1305,6 +1416,122 @@ export class Server {
     return Promise.resolve(null);
   }
 
+  private async mirrorSchedulerObservation(
+    ownerSpace: string,
+    observation: Engine.SchedulerActionObservation,
+    commit: Engine.AppliedCommit,
+    previousReadSpaces: ReadonlySet<string>,
+    session: SessionState | undefined,
+  ): Promise<void> {
+    const mirrorSpaces = this.schedulerObservationReadSpaces(observation);
+    for (const space of previousReadSpaces) {
+      mirrorSpaces.add(space);
+    }
+    mirrorSpaces.delete(ownerSpace);
+
+    for (const space of mirrorSpaces) {
+      if (
+        !previousReadSpaces.has(space) &&
+        !this.canMirrorSchedulerObservationToSpace(space, session)
+      ) {
+        continue;
+      }
+      const engine = await this.openEngine(space);
+      Engine.upsertSchedulerObservation(engine, {
+        branch: commit.branch,
+        ownerSpace,
+        observedAtSeq: commit.seq,
+        observation,
+      });
+    }
+  }
+
+  private async runPostCommitSchedulerSideEffects(
+    ownerSpace: string,
+    commit: Engine.AppliedCommit,
+    observation: Engine.SchedulerActionObservation | undefined,
+    previousReadSpaces: ReadonlySet<string>,
+    session: SessionState | undefined,
+  ): Promise<void> {
+    try {
+      await this.propagateSchedulerDirtyToOwnerSpaces(ownerSpace, commit);
+      if (observation) {
+        await this.mirrorSchedulerObservation(
+          ownerSpace,
+          observation,
+          commit,
+          previousReadSpaces,
+          session,
+        );
+      }
+    } catch (error) {
+      console.warn(
+        "Post-commit scheduler state update failed after semantic commit:",
+        error,
+      );
+    }
+  }
+
+  private canMirrorSchedulerObservationToSpace(
+    readSpace: string,
+    session: SessionState | undefined,
+  ): boolean {
+    if (!this.options.authorizeSessionOpen) {
+      return true;
+    }
+    if (!session) {
+      return false;
+    }
+    return this.#sessions.hasOpenSessionForPrincipal(
+      readSpace,
+      session.principal,
+    );
+  }
+
+  private async propagateSchedulerDirtyToOwnerSpaces(
+    writeSpace: string,
+    commit: Engine.AppliedCommit,
+  ): Promise<void> {
+    const readersByOwner = new Map<
+      string,
+      Engine.SchedulerReaderIndexEntry[]
+    >();
+    for (const reader of commit.schedulerDirtiedReaders ?? []) {
+      if (!reader.ownerSpace || reader.ownerSpace === writeSpace) {
+        continue;
+      }
+      let readers = readersByOwner.get(reader.ownerSpace);
+      if (!readers) {
+        readers = [];
+        readersByOwner.set(reader.ownerSpace, readers);
+      }
+      readers.push(reader);
+    }
+
+    for (const [ownerSpace, readers] of readersByOwner) {
+      const engine = await this.openEngine(ownerSpace);
+      Engine.markSchedulerActionsDirectDirty(engine, {
+        branch: commit.branch,
+        ownerSpace,
+        dirtySeq: commit.seq,
+        actions: readers,
+      });
+    }
+  }
+
+  private schedulerObservationReadSpaces(
+    observation: Engine.SchedulerActionObservation | undefined,
+  ): Set<string> {
+    const spaces = new Set<string>();
+    if (!observation) {
+      return spaces;
+    }
+    for (const read of [...observation.reads, ...observation.shallowReads]) {
+      spaces.add(read.space);
+    }
+    return spaces;
+  }
+
   private openEngine(space: string): Promise<Engine.Engine> {
     const existing = this.#engines.get(space);
     if (existing !== undefined) {
@@ -1450,6 +1677,22 @@ export const parseClientMessage = (
       space: parsed.space,
       sessionId: parsed.sessionId,
       watches: parsed.watches as WatchSpec[],
+    };
+  }
+
+  if (
+    parsed.type === "scheduler.snapshot.list" &&
+    typeof parsed.requestId === "string" &&
+    typeof parsed.space === "string" &&
+    typeof parsed.sessionId === "string" &&
+    isRecord(parsed.query)
+  ) {
+    return {
+      type: "scheduler.snapshot.list",
+      requestId: parsed.requestId,
+      space: parsed.space,
+      sessionId: parsed.sessionId,
+      query: parsed.query as SchedulerSnapshotListRequest["query"],
     };
   }
 

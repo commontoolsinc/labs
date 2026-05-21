@@ -110,6 +110,7 @@ export interface ClientCommit {
     pending: PendingRead[];
   };
   operations: Operation[];
+  schedulerObservation?: unknown;
   codeCID?: Reference;
   branch?: BranchName;
   merge?: {
@@ -301,6 +302,36 @@ export interface SessionAckRequest {
   seenSeq: number;
 }
 
+export interface SchedulerActionSnapshotQuery {
+  branch?: BranchName;
+  pieceId?: string;
+  processGeneration?: number;
+  actionId?: string;
+}
+
+export interface SchedulerActionSnapshotResult {
+  observationId: number;
+  commitSeq: number | null;
+  observedAtSeq: number;
+  observation: unknown;
+  directDirtySeq?: number;
+  staleSeq?: number;
+  unknownReason?: string;
+}
+
+export interface SchedulerSnapshotListResult {
+  serverSeq: number;
+  snapshots: SchedulerActionSnapshotResult[];
+}
+
+export interface SchedulerSnapshotListRequest {
+  type: "scheduler.snapshot.list";
+  requestId: string;
+  space: string;
+  sessionId: SessionId;
+  query: SchedulerActionSnapshotQuery;
+}
+
 export interface ResponseMessage<Result> {
   type: "response";
   requestId: string;
@@ -345,6 +376,7 @@ export type ClientMessage =
   | GraphQueryRequest
   | WatchSetRequest
   | WatchAddRequest
+  | SchedulerSnapshotListRequest
   | SessionAckRequest;
 export type ServerMessage =
   | HelloOkMessage

@@ -10,6 +10,7 @@ import {
   it,
   Runtime,
   space,
+  toMemorySpaceAddress,
 } from "./scheduler-test-utils.ts";
 import type {
   Entity,
@@ -26,6 +27,20 @@ async function waitForSchedulerCondition(
   while (!condition() && performance.now() < deadline) {
     await runtime.idle();
     await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
+
+async function waitForSignal(signal: Promise<void>, message: string) {
+  let timeoutId: number | undefined;
+  try {
+    await Promise.race([
+      signal,
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error(message)), 1_000);
+      }),
+    ]);
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
   }
 }
 
@@ -179,6 +194,304 @@ describe("event handling", () => {
     await runtime.idle();
 
     expect(events).toEqual([1, 2, 3]);
+  });
+
+  it("should dispatch queued event commits without waiting for server confirmation", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const eventCell = runtime.getCell<number>(
+      space,
+      "should dispatch queued event commits without waiting for server confirmation 1",
+      undefined,
+      tx,
+    );
+    eventCell.set(0);
+    const listCell = runtime.getCell<number[]>(
+      space,
+      "should dispatch queued event commits without waiting for server confirmation 2",
+      {
+        type: "array",
+        items: { type: "number" },
+        default: [],
+      },
+      tx,
+    );
+    listCell.set([]);
+    await tx.commit();
+
+    let eventCount = 0;
+    let commitWasStarted = false;
+    let resolveCommitStarted!: () => void;
+    const commitStarted = new Promise<void>((resolve) => {
+      resolveCommitStarted = resolve;
+    });
+    let releaseCommit!: () => void;
+    const commitRelease = new Promise<void>((resolve) => {
+      releaseCommit = resolve;
+    });
+    let resolveCommitFinished!: () => void;
+    const commitFinished = new Promise<void>((resolve) => {
+      resolveCommitFinished = resolve;
+    });
+
+    const eventHandler: EventHandler = (handlerTx, event) => {
+      eventCount++;
+      listCell.withTx(handlerTx).push(event);
+      const originalCommit = handlerTx.commit.bind(handlerTx);
+      handlerTx.commit = () => {
+        commitWasStarted = true;
+        resolveCommitStarted();
+        return originalCommit().then(async (result) => {
+          await commitRelease;
+          return result;
+        }).finally(resolveCommitFinished);
+      };
+    };
+
+    runtime.scheduler.addEventHandler(
+      eventHandler,
+      eventCell.getAsNormalizedFullLink(),
+    );
+
+    runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), 1);
+
+    const idlePromise = runtime.idle();
+    let idleTimeoutId: number | undefined;
+    try {
+      await waitForSignal(commitStarted, "queued event commit did not start");
+      const idleResult = await Promise.race([
+        idlePromise.then(() => "resolved" as const),
+        new Promise<"blocked">((resolve) => {
+          idleTimeoutId = setTimeout(() => resolve("blocked"), 500);
+        }),
+      ]);
+
+      expect(idleResult).toBe("resolved");
+      expect(eventCount).toBe(1);
+    } finally {
+      if (idleTimeoutId !== undefined) clearTimeout(idleTimeoutId);
+      releaseCommit();
+      await idlePromise.catch(() => {});
+      if (commitWasStarted) {
+        await waitForSignal(
+          commitFinished,
+          "queued event commit did not finish after release",
+        );
+      }
+    }
+
+    await listCell.pull();
+
+    expect(listCell.get()).toEqual([1]);
+  });
+
+  it("should preserve queued event appends to multiple arrays", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const eventCell = runtime.getCell<number>(
+      space,
+      "should preserve queued event appends to multiple arrays 1",
+      undefined,
+      tx,
+    );
+    eventCell.set(0);
+    const firstList = runtime.getCell<number[]>(
+      space,
+      "should preserve queued event appends to multiple arrays 2",
+      { type: "array", items: { type: "number" }, default: [] },
+      tx,
+    );
+    firstList.set([]);
+    const secondList = runtime.getCell<number[]>(
+      space,
+      "should preserve queued event appends to multiple arrays 3",
+      { type: "array", items: { type: "number" }, default: [] },
+      tx,
+    );
+    secondList.set([]);
+    await tx.commit();
+
+    let eventCount = 0;
+    const eventHandler: EventHandler = (handlerTx, event) => {
+      eventCount++;
+      firstList.withTx(handlerTx).push(event);
+      secondList.withTx(handlerTx).push(event);
+    };
+
+    runtime.scheduler.addEventHandler(
+      eventHandler,
+      eventCell.getAsNormalizedFullLink(),
+    );
+
+    for (let i = 1; i <= 7; i++) {
+      runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), i);
+    }
+
+    await runtime.idle();
+    await firstList.pull();
+    await secondList.pull();
+
+    expect(eventCount).toBe(7);
+    expect(firstList.get()).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(secondList.get()).toEqual([1, 2, 3, 4, 5, 6, 7]);
+  });
+
+  it("should recompute array length after rapid queued event appends", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const eventCell = runtime.getCell<number>(
+      space,
+      "should recompute array length after rapid queued event appends 1",
+      undefined,
+      tx,
+    );
+    eventCell.set(0);
+    const listCell = runtime.getCell<number[]>(
+      space,
+      "should recompute array length after rapid queued event appends 2",
+      { type: "array", items: { type: "number" }, default: [] },
+      tx,
+    );
+    listCell.set([]);
+    const countCell = runtime.getCell<number>(
+      space,
+      "should recompute array length after rapid queued event appends 3",
+      { type: "number", default: 0 },
+      tx,
+    );
+    countCell.set(0);
+    await tx.commit();
+
+    const countRuns: number[] = [];
+    const countItems = (actionTx: IExtendedStorageTransaction) => {
+      const itemCount = listCell.withTx(actionTx).get().length;
+      countRuns.push(itemCount);
+      countCell.withTx(actionTx).send(itemCount);
+    };
+
+    runtime.scheduler.subscribe(
+      countItems,
+      {
+        reads: [toMemorySpaceAddress(listCell.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(countCell.getAsNormalizedFullLink())],
+      },
+      {},
+    );
+    await countCell.pull();
+
+    const renderedCounts: number[] = [];
+    const cancelCountSink = countCell.withTx(runtime.edit()).sink((value) => {
+      if (value !== undefined) {
+        renderedCounts.push(value);
+      }
+    });
+
+    const eventHandler: EventHandler = (handlerTx, event) => {
+      listCell.withTx(handlerTx).push(event);
+    };
+
+    runtime.scheduler.addEventHandler(
+      eventHandler,
+      eventCell.getAsNormalizedFullLink(),
+    );
+
+    for (let i = 1; i <= 7; i++) {
+      runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), i);
+    }
+
+    await runtime.idle();
+
+    expect(countRuns.at(-1)).toBe(7);
+    expect(countCell.get()).toBe(7);
+    expect(renderedCounts.at(-1)).toBe(7);
+
+    cancelCountSink();
+    runtime.scheduler.unsubscribe(countItems);
+  });
+
+  it("should rerun demanded computation dirtied during an in-flight run", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const listCell = runtime.getCell<number[]>(
+      space,
+      "should rerun demanded computation dirtied during an in-flight run 1",
+      { type: "array", items: { type: "number" }, default: [] },
+      tx,
+    );
+    listCell.set([1, 2, 3, 4, 5]);
+    const countCell = runtime.getCell<number>(
+      space,
+      "should rerun demanded computation dirtied during an in-flight run 2",
+      { type: "number", default: 0 },
+      tx,
+    );
+    countCell.set(0);
+    await tx.commit();
+
+    let blockAtSix = false;
+    let releaseSix: (() => void) | undefined;
+    const releasedSix = new Promise<void>((resolve) => {
+      releaseSix = resolve;
+    });
+    let observedSix: (() => void) | undefined;
+    const observedSixRun = new Promise<void>((resolve) => {
+      observedSix = resolve;
+    });
+    const countRuns: number[] = [];
+    const countItems = async (actionTx: IExtendedStorageTransaction) => {
+      const itemCount = listCell.withTx(actionTx).get().length;
+      countRuns.push(itemCount);
+      if (blockAtSix && itemCount === 6) {
+        observedSix?.();
+        await releasedSix;
+      }
+      countCell.withTx(actionTx).send(itemCount);
+    };
+
+    runtime.scheduler.subscribe(
+      countItems,
+      {
+        reads: [toMemorySpaceAddress(listCell.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(countCell.getAsNormalizedFullLink())],
+      },
+      {},
+    );
+
+    let demandedPull: Promise<unknown> | undefined;
+    try {
+      await countCell.pull();
+      expect(countCell.get()).toBe(5);
+
+      blockAtSix = true;
+      const appendSixTx = runtime.edit();
+      listCell.withTx(appendSixTx).push(6);
+      await appendSixTx.commit();
+
+      demandedPull = countCell.pull();
+      await waitForSignal(
+        observedSixRun,
+        "timed out waiting for blocked six-item computation run",
+      );
+
+      const appendSevenTx = runtime.edit();
+      listCell.withTx(appendSevenTx).push(7);
+      await appendSevenTx.commit();
+
+      releaseSix?.();
+      await demandedPull;
+      await runtime.idle();
+      await countCell.pull();
+
+      expect(countRuns).toContain(6);
+      expect(countRuns.at(-1)).toBe(7);
+      expect(countCell.get()).toBe(7);
+    } finally {
+      releaseSix?.();
+      await demandedPull?.catch(() => undefined);
+      runtime.scheduler.unsubscribe(countItems);
+    }
   });
 
   it("does not commit or flush outbox effects when event handler throws", async () => {
