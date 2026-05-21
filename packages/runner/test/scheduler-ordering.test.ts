@@ -17,6 +17,27 @@ import type {
   IExtendedStorageTransaction,
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
+import {
+  deriveDeclaredAncestorWrites,
+  deriveDynamicCollectionParentWrites,
+} from "../src/scheduler/scheduling-writes.ts";
+import { topologicalSort } from "../src/scheduler/topology.ts";
+import type { IMemorySpaceAddress } from "../src/storage/interface.ts";
+
+type SchedulerTestScope = "space" | "user" | "session";
+
+function scopedAddress(
+  scope: SchedulerTestScope | undefined,
+  path: readonly string[],
+): IMemorySpaceAddress {
+  return {
+    space,
+    id: "of:scheduler-scope-shared",
+    type: "application/json",
+    scope,
+    path,
+  };
+}
 
 describe("push-triggered filtering", () => {
   let storageManager: SchedulerTestStorageManager;
@@ -279,6 +300,53 @@ describe("push-triggered filtering", () => {
     expect(runtime.scheduler.getMightWrite(action)).not.toEqual([
       toMemorySpaceAddress(firstChild),
     ]);
+  });
+
+  it("should not derive declared ancestor writes across scopes", () => {
+    const spaceAncestor = scopedAddress("space", ["items"]);
+    const sessionChild = scopedAddress("session", ["items", "details"]);
+
+    expect(
+      deriveDeclaredAncestorWrites([sessionChild], [spaceAncestor]),
+    ).toEqual([]);
+  });
+
+  it("should not derive dynamic collection parent writes across scopes", () => {
+    const spaceCollection = scopedAddress("space", ["items"]);
+    const sessionItem = scopedAddress("session", ["items", "0"]);
+
+    expect(
+      deriveDynamicCollectionParentWrites([sessionItem], [spaceCollection]),
+    ).toEqual([]);
+  });
+
+  it("should not order materializer writes before readers in other scopes", () => {
+    const materializer: Action = () => {};
+    const reader: Action = () => {};
+    const order = topologicalSort(
+      new Set([reader, materializer]),
+      new WeakMap<Action, {
+        reads: IMemorySpaceAddress[];
+        shallowReads: IMemorySpaceAddress[];
+        writes: IMemorySpaceAddress[];
+      }>([
+        [reader, {
+          reads: [scopedAddress("space", ["value"])],
+          shallowReads: [],
+          writes: [],
+        }],
+        [materializer, { reads: [], shallowReads: [], writes: [] }],
+      ]),
+      new WeakMap<Action, IMemorySpaceAddress[]>(),
+      undefined,
+      undefined,
+      (action) =>
+        action === materializer
+          ? [scopedAddress("session", ["value"])]
+          : undefined,
+    );
+
+    expect(order).toEqual([reader, materializer]);
   });
 
   it("should track filter stats", async () => {

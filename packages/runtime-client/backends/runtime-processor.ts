@@ -72,6 +72,7 @@ import {
   NotificationType,
   type PageCreateRequest,
   type PageGetRequest,
+  type PageGetSlugRequest,
   PageGetSpaceDefault as PatternGetSpaceRoot,
   type PageRemoveRequest,
   PageResponse,
@@ -91,6 +92,7 @@ import {
   type SettleStatsResponse,
   type SetTriggerTraceEnabledRequest,
   type SetWriteStackTraceMatchersRequest,
+  type SlugResponse,
   type TriggerTraceResponse,
   type UploadBlobRequest,
   type UploadBlobResponse,
@@ -685,6 +687,24 @@ export class RuntimeProcessor {
     };
   }
 
+  async handlePageGetSlug(
+    request: PageGetSlugRequest,
+  ): Promise<SlugResponse> {
+    const cell = this.runtime.getCellFromEntityId(
+      this.pieceManager.getSpace(),
+      { "/": request.pageId },
+    );
+    await cell.sync();
+    const link = cell.getAsNormalizedFullLink();
+    const slug = this.runtime.readTx().readOrThrow({
+      space: link.space,
+      id: link.id,
+      scope: link.scope,
+      path: ["slug"],
+    });
+    return { slug: typeof slug === "string" ? slug : undefined };
+  }
+
   async handlePageRemove(
     request: PageRemoveRequest,
   ): Promise<BooleanResponse> {
@@ -991,6 +1011,8 @@ export class RuntimeProcessor {
         );
       case RequestType.PageGet:
         return await this.handlePageGet(request);
+      case RequestType.PageGetSlug:
+        return await this.handlePageGetSlug(request);
       case RequestType.PageRemove:
         return await this.handlePageRemove(request);
       case RequestType.PageStart:

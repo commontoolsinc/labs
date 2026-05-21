@@ -153,7 +153,8 @@ export default pattern((__cf_pattern_input) => {
                             type: "object",
                             properties: {
                                 showInactive: {
-                                    type: "boolean"
+                                    type: "boolean",
+                                    "default": false
                                 }
                             },
                             required: ["showInactive"]
@@ -209,7 +210,8 @@ export default pattern((__cf_pattern_input) => {
                     type: "object",
                     properties: {
                         showInactive: {
-                            type: "boolean"
+                            type: "boolean",
+                            "default": false
                         }
                     },
                     required: ["showInactive"]

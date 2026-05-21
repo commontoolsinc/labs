@@ -1,4 +1,5 @@
 import type { JSONSchema } from "@commonfabric/api";
+import type { CfcLabelView } from "@commonfabric/runner/cfc";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type { HarnessToolDefinition } from "./types.ts";
 import {
@@ -22,6 +23,9 @@ export interface WriteFileToolInput {
   content: string;
   mode?: WriteFileMode;
   createParents?: boolean;
+  // Trusted harness/test plumbing for invocation input labels. This is omitted
+  // from the public tool schema so model-authored tool calls do not mint labels.
+  cfcInputLabels?: CfcLabelView;
 }
 
 export interface WriteFileToolSuccessOutput {
@@ -95,6 +99,7 @@ export const writeFileTool: HarnessToolDefinition<
       });
     }
     const mode = input.mode ?? "replace";
+    const outputId = context.nextOutputId("write_file");
     const command = [
       "set -eu",
       'path="$1"',
@@ -132,16 +137,23 @@ export const writeFileTool: HarnessToolDefinition<
       stdinText: input.content,
       cfcInvocationContext: await context.createCfcInvocationContext({
         toolId: "write_file",
+        toolOutputId: outputId,
         operation: "shell",
         cwd: context.currentDir,
         command,
         args,
         stdinText: input.content,
+        ...(input.cfcInputLabels !== undefined
+          ? { cfcInputLabels: input.cfcInputLabels }
+          : {}),
+        // write_file is a CFC sink: both the selected destination/mode args and
+        // the bytes written on stdin are model-authored invocation inputs.
         cfcInputLabelPaths: [["args"], ["stdin"]],
       }),
     });
     if (result.exitCode !== 0) {
       return createStructuredFileToolErrorOutput(context, "write_file", {
+        outputId,
         path: resolvedPath,
         code: classifyFileToolShellFailure(result),
         detail: detailFromShellFailure(result),
@@ -149,7 +161,7 @@ export const writeFileTool: HarnessToolDefinition<
       });
     }
     return {
-      outputId: context.nextOutputId("write_file"),
+      outputId,
       path: resolvedPath,
       mode,
     };

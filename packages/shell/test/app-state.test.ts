@@ -3,8 +3,11 @@ import {
   applyCommand,
   AppState,
   AppStateSerialized,
+  appViewToUrlPath,
   deserialize,
+  isViewingDefaultPatternView,
   serialize,
+  urlToAppView,
 } from "@commonfabric/shell/shared";
 import { Identity, serializeKeyPairRaw } from "@commonfabric/identity";
 import { assert } from "@std/assert";
@@ -93,5 +96,41 @@ describe("AppState", () => {
     });
 
     assert(next.config.showShellPieceListView === false);
+  });
+
+  it("parses and serializes slug piece routes", () => {
+    assert(
+      JSON.stringify(urlToAppView(new URL("http://common.test/space/demo"))) ===
+        JSON.stringify({ spaceName: "space", pieceSlug: "demo" }),
+    );
+    assert(
+      JSON.stringify(
+        urlToAppView(new URL("http://common.test/space/fid1:abc")),
+      ) === JSON.stringify({ spaceName: "space", pieceId: "fid1:abc" }),
+    );
+    assert(
+      JSON.stringify(
+        urlToAppView(new URL("http://common.test/space/of:fid1:abc")),
+      ) === JSON.stringify({ spaceName: "space", pieceId: "of:fid1:abc" }),
+    );
+    assert(
+      appViewToUrlPath({ spaceName: "space", pieceSlug: "demo" }) ===
+        "/space/demo",
+    );
+  });
+
+  it("treats slug piece routes as non-default pattern views", () => {
+    assert(isViewingDefaultPatternView({ spaceName: "space" }) === true);
+    assert(
+      isViewingDefaultPatternView({
+        spaceName: "space",
+        pieceId: "fid1:abc",
+      }) ===
+        false,
+    );
+    assert(
+      isViewingDefaultPatternView({ spaceName: "space", pieceSlug: "demo" }) ===
+        false,
+    );
   });
 });

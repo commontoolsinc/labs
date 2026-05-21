@@ -97,10 +97,12 @@ target path parsing rules and examples.
    key/index to the new value.
 4. Validate deterministic local policy first. Invalid sizes, invalid JSON, and
    CFC/writeback denials fail immediately.
-5. Return success from `flush` after the mutation has been accepted into the
-   local write pipeline. The backend cell write is optimistic and may complete
-   after the syscall returns; later conflicts or transport failures are exposed
-   through mount status, logs, and CFC writeback reconciliation.
+5. Return success from `flush` only after the Common Fabric mutation has reached
+   the operation's configured commit/acceptance boundary. For the default
+   POSIX-like contract, backend rejection, transport failure, timeout, or CFC
+   denial is returned to the caller as a normal filesystem error. Local-ack or
+   queued-offline behavior is a non-default compatibility mode and must be
+   surfaced through mount status and operation diagnostics.
 
 ### `write` to `.json` File
 
@@ -108,7 +110,7 @@ target path parsing rules and examples.
 2. On flush: parse the buffer as JSON.
 3. If the path is `result.json`, replace the entire result cell.
 4. If the path is `result/items/0.json`, replace just that subtree.
-5. Queue `cell.set()` at the appropriate path using the same optimistic
+5. Apply `cell.set()` at the appropriate path using the same commit-confirmed
    acknowledgement contract as scalar writes.
 
 ### `write` to `.handler` File
@@ -119,8 +121,17 @@ target path parsing rules and examples.
    handler writes elsewhere in FUSE.
 4. Deduplicate `flush`/`release` so one buffered write triggers one handler
    invocation.
-5. Return success after the write has been handed to the runtime, subject to
-   immediate local/CFC validation failures.
+5. Return success only after the runtime has accepted the invocation and the
+   configured sync/idle boundary has completed. Handler rejection, runtime
+   timeout, transport failure, or CFC denial is returned as a normal filesystem
+   error. Because handler invocations are non-idempotent, the filesystem must
+   not auto-retry a timed-out handler write unless a future idempotency-key
+   contract exists.
+
+Runtime handoff alone is not a success boundary for mounted handler writes.
+Downstream reactive effects may continue after the write returns successfully,
+but known handler rejection, sync/idle timeout, and timed-out-unknown outcomes
+must be visible as errno plus `.status`/diagnostic state.
 
 Handlers remain writable so legacy flows like
 `echo '{"message":"hi"}' > result/addItem.handler` keep working.
@@ -237,7 +248,9 @@ updates, write to the appropriate `.json` file instead.
 | Invalid offset/size | `EINVAL` |
 | Exceeds virtual file size limit | `EFBIG` |
 | Cross-cell rename | `EXDEV` |
-| Immediate network/timeout before local acceptance | `EIO` |
+| Backend/transport failure | `EIO` |
+| Backend timeout | `ETIMEDOUT` |
+| Stale projection or CFC generation | `ESTALE` |
 | Space not available | `ENOENT` |
 
 ---

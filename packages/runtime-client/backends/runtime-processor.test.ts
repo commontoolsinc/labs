@@ -72,6 +72,78 @@ const createRuntime = () => {
   return { runtime, storageManager };
 };
 
+describe("page slug metadata", () => {
+  it("reads slug metadata from the page document root", async () => {
+    const reads: unknown[] = [];
+    const processor = {
+      runtime: {
+        getCellFromEntityId: () => ({
+          sync: () => Promise.resolve(),
+          getAsNormalizedFullLink: () => ({
+            space: "did:key:z6Mk-runtime-processor-slug",
+            id: "of:fid1-slugged-piece",
+            scope: "space",
+            path: [],
+          }),
+        }),
+        readTx: () => ({
+          readOrThrow: (address: unknown) => {
+            reads.push(address);
+            return "demo";
+          },
+        }),
+      },
+      pieceManager: {
+        getSpace: () => "did:key:z6Mk-runtime-processor-slug",
+      },
+    };
+
+    const result = await (RuntimeProcessor.prototype as any).handlePageGetSlug
+      .call(processor, {
+        type: RequestType.PageGetSlug,
+        pageId: "fid1-slugged-piece",
+      });
+
+    expect(result).toEqual({ slug: "demo" });
+    expect(reads).toEqual([{
+      space: "did:key:z6Mk-runtime-processor-slug",
+      id: "of:fid1-slugged-piece",
+      scope: "space",
+      path: ["slug"],
+    }]);
+  });
+
+  it("ignores non-string slug metadata", async () => {
+    const processor = {
+      runtime: {
+        getCellFromEntityId: () => ({
+          sync: () => Promise.resolve(),
+          getAsNormalizedFullLink: () => ({
+            space: "did:key:z6Mk-runtime-processor-slug",
+            id: "of:fid1-slugged-piece",
+            scope: "space",
+            path: [],
+          }),
+        }),
+        readTx: () => ({
+          readOrThrow: () => ({ not: "a slug" }),
+        }),
+      },
+      pieceManager: {
+        getSpace: () => "did:key:z6Mk-runtime-processor-slug",
+      },
+    };
+
+    const result = await (RuntimeProcessor.prototype as any).handlePageGetSlug
+      .call(processor, {
+        type: RequestType.PageGetSlug,
+        pageId: "fid1-slugged-piece",
+      });
+
+    expect(result).toEqual({ slug: undefined });
+  });
+});
+
 describe("sanitizeForPostMessage", () => {
   describe("primitives", () => {
     it("passes through null and undefined", () => {

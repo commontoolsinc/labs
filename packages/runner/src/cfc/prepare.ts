@@ -709,7 +709,7 @@ const valueWriteTargets = (
   >();
   const log = tx.getReactivityLog?.();
   const seenWriteSpaces = new Set<MemorySpace>(
-    [...(log?.writes ?? []), ...(log?.potentialWrites ?? [])].map((write) =>
+    [...(log?.writes ?? []), ...(log?.attemptedWrites ?? [])].map((write) =>
       write.space
     ),
   );
@@ -1279,7 +1279,7 @@ const ifcEntryAppliesToAttemptedWrite = (
 
   const exactAttemptedPaths = [
     ...(tx.getReactivityLog?.().writes ?? []),
-    ...(tx.getReactivityLog?.().potentialWrites ?? []),
+    ...(tx.getReactivityLog?.().attemptedWrites ?? []),
   ].map((write) => ({
     write,
     path: canonicalizeLogicalPath(write.path),

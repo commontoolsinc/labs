@@ -78,6 +78,13 @@ If you are developing runtime code, read the following documentation:
 - `docs/development/debugging/` - Runtime errors, type errors, and
   troubleshooting
 
+When investigating transformer behavior, inspect the emitted output directly
+before inferring from source code alone:
+
+```bash
+deno task cf check <pattern-or-fixture>.tsx --show-transformed --no-run
+```
+
 ### Adding New Packages
 
 When adding a new workspace package:

@@ -48,7 +48,8 @@ export default pattern((__cf_pattern_input) => {
             type: "object",
             properties: {
                 count: {
-                    type: "number"
+                    type: "number",
+                    "default": 0
                 }
             },
             required: ["count"]

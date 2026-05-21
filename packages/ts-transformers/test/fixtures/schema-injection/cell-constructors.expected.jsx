@@ -57,6 +57,10 @@ export default function TestCellConstructors() {
     const writeonly = new WriteonlyCell(400, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("writeonly", true);
+    const LocalWritable = WritableConstructor;
+    const aliased = new LocalWritable("aliased", {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema).for("aliased", true);
     return {
         explicitString,
         inferredNumber,
@@ -67,6 +71,7 @@ export default function TestCellConstructors() {
         comparable,
         readonly,
         writeonly,
+        aliased,
     };
 }
 __cfHardenFn(TestCellConstructors);

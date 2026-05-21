@@ -2,12 +2,17 @@ import { css, html } from "lit";
 import { property, state } from "lit/decorators.js";
 import { BaseView, createDefaultAppState } from "./BaseView.ts";
 import { KeyStore } from "@commonfabric/identity";
+import { slugIdForSpace, validateSlug } from "@commonfabric/runner/slugs";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import { DebuggerController } from "../lib/debugger-controller.ts";
 import { Task, TaskStatus } from "@lit/task";
 import { CellEventTarget, CellUpdateEvent } from "../lib/cell-event-target.ts";
 import { type NameSchema, stringSchema } from "@commonfabric/runner/schemas";
-import { updatePageTitle } from "../../shared/mod.ts";
+import {
+  isViewingDefaultPatternView,
+  replaceNavigation,
+  updatePageTitle,
+} from "../../shared/mod.ts";
 import { KeyboardController } from "../lib/keyboard-router.ts";
 import { NAME, PageHandle } from "@commonfabric/runtime-client";
 
@@ -88,9 +93,26 @@ export class XAppView extends BaseView {
     > => {
       if (!rt) return;
       this._patternError = undefined;
+      if ("pieceSlug" in app.view && app.view.pieceSlug) {
+        try {
+          const pieceId = slugIdForSpace(rt.space(), app.view.pieceSlug);
+          const pattern = await rt.getPattern(pieceId);
+          // Track as recently visited (fire-and-forget)
+          rt.trackRecentPiece(pieceId);
+          return pattern;
+        } catch (e) {
+          if (!signal.aborted) {
+            this._patternError = e as any;
+          }
+        }
+      }
       if ("pieceId" in app.view && app.view.pieceId) {
         try {
           const pattern = await rt.getPattern(app.view.pieceId);
+          const slug = await rt.getSlug(app.view.pieceId);
+          if (!signal.aborted && slug) {
+            this.#replacePieceUrlWithSlug(app.view, slug);
+          }
           // Track as recently visited (fire-and-forget)
           rt.trackRecentPiece(app.view.pieceId);
           return pattern;
@@ -127,7 +149,9 @@ export class XAppView extends BaseView {
       // The "active" pattern is the main pattern to be rendered.
       // This may be the same as the space root pattern, unless we're
       // in a view that specifies a different pattern to use.
-      const useSpaceRootAsActive = !("pieceId" in app.view && app.view.pieceId);
+      const useSpaceRootAsActive =
+        !("pieceId" in app.view && app.view.pieceId) &&
+        !("pieceSlug" in app.view && app.view.pieceSlug);
       const activePattern = useSpaceRootAsActive
         ? spaceRootPattern
         : selectedPatternStatus === TaskStatus.COMPLETE
@@ -178,6 +202,19 @@ export class XAppView extends BaseView {
     const event = e as CellUpdateEvent<string | undefined>;
     this.pieceTitle = event.detail ?? "";
   };
+
+  #replacePieceUrlWithSlug(view: typeof this.app.view, slug: string) {
+    try {
+      validateSlug(slug);
+    } catch {
+      return;
+    }
+    if ("spaceName" in view) {
+      replaceNavigation({ spaceName: view.spaceName, pieceSlug: slug });
+    } else if ("spaceDid" in view) {
+      replaceNavigation({ spaceDid: view.spaceDid, pieceSlug: slug });
+    }
+  }
 
   #isRecreatingSpaceRootPattern = false;
 
@@ -257,6 +294,11 @@ export class XAppView extends BaseView {
     if ("pieceId" in this.app.view && this.app.view.pieceId) {
       return this.app.view.pieceId;
     }
+    if ("pieceSlug" in this.app.view && this.app.view.pieceSlug) {
+      return this.rt
+        ? slugIdForSpace(this.rt.space(), this.app.view.pieceSlug)
+        : this.app.view.pieceSlug;
+    }
   }
 
   override render() {
@@ -285,9 +327,7 @@ export class XAppView extends BaseView {
     const spaceDid = this.app && "spaceDid" in this.app.view
       ? this.app.view.spaceDid
       : undefined;
-    // We're viewing the default pattern if there's no pieceId in the current view
-    const isViewingDefaultPattern = !("pieceId" in this.app.view &&
-      this.app.view.pieceId);
+    const isViewingDefaultPattern = isViewingDefaultPatternView(this.app.view);
     const content = this.app?.identity ? authenticated : unauthenticated;
     return html`
       <div class="shell-container">

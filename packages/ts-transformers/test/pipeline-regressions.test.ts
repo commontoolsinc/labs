@@ -757,6 +757,80 @@ export default pattern<{ values: string[] }>(({ values }) => {
 );
 
 Deno.test(
+  "Pipeline regression: local concise ternary event handlers stay function-valued",
+  async () => {
+    const source =
+      `import { derive, handler, pattern, UI, Writable } from "commonfabric";
+
+interface Item {
+  id: string;
+}
+
+interface Vote {
+  itemId: string;
+  vote: "yes" | "no";
+}
+
+const castVote = handler<{ itemId: string; vote: "yes" }, { votes: Writable<Vote[]> }>(
+  (event, { votes }) => {
+    votes.push(event);
+  },
+);
+
+const clearVote = handler<{ itemId: string }, {}>(() => {});
+
+export default pattern<{ items: Writable<Item[]>; votes: Writable<Vote[]> }>(
+  ({ items, votes }) => {
+    const boundCastVote = castVote({ votes });
+    const boundClearVote = clearVote({});
+
+    return {
+      [UI]: (
+        <div>
+          {items.map((item) => {
+            const iid = item.id;
+            const myVote = derive(
+              { votes, itemId: iid },
+              ({ votes, itemId }) =>
+                votes.get().find((vote) => vote.itemId === itemId)?.vote,
+            );
+
+            const onVoteYes = () =>
+              myVote === "yes"
+                ? boundClearVote.send({ itemId: iid })
+                : boundCastVote.send({ itemId: iid, vote: "yes" });
+
+            return <cf-button onClick={onVoteYes}>yes</cf-button>;
+          })}
+        </div>
+      ),
+    };
+  },
+);
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+
+    assertStringIncludes(output, 'const onVoteYes = () => myVote === "yes"');
+    assertStringIncludes(output, "boundClearVote.send({ itemId: iid })");
+    assertStringIncludes(
+      output,
+      'boundCastVote.send({ itemId: iid, vote: "yes" })',
+    );
+    assert(
+      !output.includes("const onVoteYes = __cfHelpers.derive("),
+      "local event handler variable must not become a derive cell containing a function",
+    );
+    assert(
+      !output.includes("=> () => __cfHelpers.ifElse("),
+      "local event handler body must keep imperative ternary semantics",
+    );
+  },
+);
+
+Deno.test(
   "Pipeline regression: helper-owned IIFE local cell reads lower before use",
   async () => {
     const source = `import { pattern, UI, Writable } from "commonfabric";
@@ -837,6 +911,111 @@ export default pattern<{ options: Option[] }, { [UI]: any }>(({ options }) => {
     assert(
       !minimalNullableWindow.includes('required: ["length", "0"]'),
       "expected the derive input schema not to require object-style array members",
+    );
+  },
+);
+
+Deno.test(
+  "Pipeline regression: computed captures preserve destructured PerUser defaults",
+  async () => {
+    const source =
+      `import { computed, Default, NAME, pattern, type PerSpace, type PerUser, UI, type VNode } from "commonfabric";
+
+const trimmedName = (name: string | undefined) => (name ?? "").trim();
+
+interface Input {
+  question?: PerSpace<string | Default<"Where should we eat?">>;
+  myName?: PerUser<string | Default<"">>;
+}
+
+export default pattern<Input, { [NAME]: string; [UI]: VNode }>(({ question, ["myName"]: displayName }) => ({
+  [NAME]: "ct-1606",
+  [UI]: (
+    <cf-screen>
+      <div slot="header">
+        <h2>{question}</h2>
+        {computed(() => {
+          const value = trimmedName(displayName);
+          return <div>me is: "{value}"</div>;
+        })}
+      </div>
+      <div>body renders</div>
+    </cf-screen>
+  ),
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const deriveStart = output.indexOf("{__cfHelpers.derive({");
+    assert(deriveStart >= 0, "expected computed() to lower to derive()");
+    const deriveWindow = output.slice(deriveStart, deriveStart + 700);
+
+    assertStringIncludes(deriveWindow, "displayName: {");
+    assertStringIncludes(deriveWindow, 'type: "string"');
+    assertStringIncludes(deriveWindow, '"default": ""');
+    assertStringIncludes(deriveWindow, 'scope: "user"');
+  },
+);
+
+Deno.test(
+  "Pipeline regression: computed captures preserve destructured Writable defaults",
+  async () => {
+    const source =
+      `import { computed, Default, NAME, pattern, UI, type VNode, type Writable } from "commonfabric";
+
+interface Input {
+  draftTitle: Writable<string | Default<"">>;
+}
+
+export default pattern<Input, { [NAME]: string; [UI]: VNode }>(({ draftTitle }) => ({
+  [NAME]: "writable-default-capture",
+  [UI]: <div>{computed(() => <span>{draftTitle}</span>)}</div>,
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const deriveStart = output.indexOf("{__cfHelpers.derive({");
+    assert(deriveStart >= 0, "expected computed() to lower to derive()");
+    const deriveWindow = output.slice(deriveStart, deriveStart + 700);
+
+    assertStringIncludes(deriveWindow, "draftTitle: {");
+    assertStringIncludes(deriveWindow, 'type: "string"');
+    assertStringIncludes(deriveWindow, '"default": ""');
+    assertStringIncludes(deriveWindow, "asCell:");
+  },
+);
+
+Deno.test(
+  "Pipeline regression: computed captures preserve Writable Record defaults without orphan refs",
+  async () => {
+    const source =
+      `import { computed, Default, NAME, pattern, UI, type VNode, type Writable } from "commonfabric";
+
+interface Input {
+  selections: Writable<Record<string, boolean> | Default<Record<string, never>>>;
+}
+
+export default pattern<Input, { [NAME]: string; [UI]: VNode }>(({ selections }) => ({
+  [NAME]: "writable-record-default-capture",
+  [UI]: <div>{computed(() => selections.foo ? "yes" : "no")}</div>,
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const deriveStart = output.indexOf("{__cfHelpers.derive({");
+    assert(deriveStart >= 0, "expected computed() to lower to derive()");
+    const deriveWindow = output.slice(deriveStart, deriveStart + 900);
+
+    assertStringIncludes(deriveWindow, "selections:");
+    assert(
+      !deriveWindow.includes("AnonymousType_"),
+      "expected Writable<Record<...Default...>> capture not to emit orphan anonymous refs",
     );
   },
 );

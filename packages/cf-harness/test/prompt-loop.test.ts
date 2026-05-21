@@ -1,4 +1,9 @@
-import { assert, assertEquals, assertRejects } from "@std/assert";
+import {
+  assert,
+  assertEquals,
+  assertRejects,
+  assertStringIncludes,
+} from "@std/assert";
 import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
 import { decodeBase64 } from "@std/encoding/base64";
 import { join } from "@std/path";
@@ -3669,6 +3674,494 @@ Deno.test("CfHarnessPromptLoop exposes mediated read_file content and tracks mod
   );
   assertEquals(
     invocationInputLabelContains(result.runState, 1, "command", secretLabel),
+    true,
+  );
+});
+
+Deno.test("CfHarnessPromptLoop carries observed CFC labels into later write_file inputs", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const secretLabel = "did:key:write-file-secret";
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime([
+        {
+          stdout: "raw file secret\n",
+          stderr: "",
+          exitCode: 0,
+          cfcResult: observedCfcResult("released file secret\n", {
+            stdoutLabel: { confidentiality: [secretLabel] },
+          }),
+        },
+        {
+          stdout: "",
+          stderr: "",
+          exitCode: 0,
+        },
+      ]),
+      runId: "run-write-file-cfc-model-context",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "enforce-explicit",
+    }),
+    fetchFn: (_input, init) => {
+      fetchCalls.push(init ?? {});
+      const payload = fetchCalls.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-read-write-secret",
+                type: "function",
+                function: {
+                  name: "read_file",
+                  arguments: JSON.stringify({ path: "secret.txt" }),
+                },
+              }],
+            },
+          }],
+        }
+        : fetchCalls.length === 2
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-write-secret-derived-output",
+                type: "function",
+                function: {
+                  name: "write_file",
+                  arguments: JSON.stringify({
+                    path: "derived.txt",
+                    content: "derived from released file secret\n",
+                  }),
+                },
+              }],
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Done.",
+            },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Read a file, then write derived output.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+
+  assertEquals(
+    result.runState.cfcInvocationContexts?.map((context) => context.toolId),
+    ["read_file", "write_file"],
+  );
+  assertEquals(
+    invocationInputLabelContains(result.runState, 1, "args", secretLabel),
+    true,
+  );
+  assertEquals(
+    invocationInputLabelContains(result.runState, 1, "stdin", secretLabel),
+    true,
+  );
+  assertEquals(
+    result.runState.cfcInvocationContexts?.[1]?.toolOutputId,
+    createToolOutputId("run-write-file-cfc-model-context", "write_file", 2),
+  );
+});
+
+Deno.test("CfHarnessPromptLoop carries observed CFC labels into edit_file write inputs", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const priorSecretLabel = "did:key:edit-prior-secret";
+  const editSourceLabel = "did:key:edit-source-secret";
+  const editVerifiedLabel = "did:key:edit-verified-secret";
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime([
+        {
+          stdout: "raw prior secret\n",
+          stderr: "",
+          exitCode: 0,
+          cfcResult: observedCfcResult("released prior secret\n", {
+            stdoutLabel: { confidentiality: [priorSecretLabel] },
+          }),
+        },
+        {
+          stdout: "alpha\nraw-beta\n",
+          stderr: "",
+          exitCode: 0,
+          cfcResult: observedCfcResult("alpha\nreleased-beta\n", {
+            stdoutLabel: { confidentiality: [editSourceLabel] },
+          }),
+        },
+        {
+          stdout: "",
+          stderr: "",
+          exitCode: 0,
+        },
+        {
+          stdout: "alpha\nraw-BETA\n",
+          stderr: "",
+          exitCode: 0,
+          cfcResult: observedCfcResult("alpha\nreleased-BETA\n", {
+            stdoutLabel: { confidentiality: [editVerifiedLabel] },
+          }),
+        },
+      ]),
+      runId: "run-edit-file-cfc-model-context",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "enforce-explicit",
+    }),
+    fetchFn: (_input, init) => {
+      fetchCalls.push(init ?? {});
+      const payload = fetchCalls.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-read-secret-before-edit",
+                type: "function",
+                function: {
+                  name: "read_file",
+                  arguments: JSON.stringify({ path: "secret.txt" }),
+                },
+              }],
+            },
+          }],
+        }
+        : fetchCalls.length === 2
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-edit-secret-derived-file",
+                type: "function",
+                function: {
+                  name: "edit_file",
+                  arguments: JSON.stringify({
+                    path: "notes/secret.txt",
+                    edits: [{
+                      oldText: "raw-beta\n",
+                      newText: "raw-BETA\n",
+                    }],
+                  }),
+                },
+              }],
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Done.",
+            },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Read a file, then edit another derived file.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+
+  assertEquals(
+    result.runState.cfcInvocationContexts?.map((context) => ({
+      toolId: context.toolId,
+      toolOutputId: context.toolOutputId,
+    })),
+    [
+      {
+        toolId: "read_file",
+        toolOutputId: undefined,
+      },
+      {
+        toolId: "edit_file",
+        toolOutputId: createToolOutputId(
+          "run-edit-file-cfc-model-context",
+          "edit_file",
+          2,
+        ),
+      },
+      {
+        toolId: "edit_file",
+        toolOutputId: createToolOutputId(
+          "run-edit-file-cfc-model-context",
+          "edit_file",
+          2,
+        ),
+      },
+      {
+        toolId: "edit_file",
+        toolOutputId: createToolOutputId(
+          "run-edit-file-cfc-model-context",
+          "edit_file",
+          2,
+        ),
+      },
+    ],
+  );
+  assertEquals(
+    invocationInputLabelContains(result.runState, 2, "args", priorSecretLabel),
+    true,
+  );
+  assertEquals(
+    invocationInputLabelContains(
+      result.runState,
+      2,
+      "stdin",
+      priorSecretLabel,
+    ),
+    true,
+  );
+  assertEquals(
+    invocationInputLabelContains(
+      result.runState,
+      2,
+      "stdin",
+      editSourceLabel,
+    ),
+    true,
+  );
+
+  const editToolMessage = result.transcript.find((message) =>
+    message.role === "tool" && message.toolName === "edit_file"
+  );
+  if (editToolMessage?.role !== "tool") {
+    throw new Error("expected edit_file tool message");
+  }
+  const modelFacingEditOutput = JSON.parse(editToolMessage.content) as Record<
+    string,
+    unknown
+  >;
+  assertEquals("cfcResult" in modelFacingEditOutput, false);
+  assertEquals(
+    (modelFacingEditOutput.cfc as { stdout?: { label?: unknown } }).stdout
+      ?.label,
+    { confidentiality: [editSourceLabel, editVerifiedLabel] },
+  );
+  assertStringIncludes(String(modelFacingEditOutput.diff), "-released-beta");
+  assertStringIncludes(String(modelFacingEditOutput.diff), "+released-BETA");
+  assertEquals(String(modelFacingEditOutput.diff).includes("raw-beta"), false);
+  assertEquals(String(modelFacingEditOutput.diff).includes("raw-BETA"), false);
+});
+
+Deno.test("CfHarnessPromptLoop denies edit_file success when an internal read lacks CFC metadata", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime([
+        {
+          stdout: "alpha\nraw-beta\n",
+          stderr: "",
+          exitCode: 0,
+        },
+        {
+          stdout: "",
+          stderr: "",
+          exitCode: 0,
+        },
+        {
+          stdout: "alpha\nraw-BETA\n",
+          stderr: "",
+          exitCode: 0,
+          cfcResult: observedCfcResult("alpha\nreleased-BETA\n"),
+        },
+      ]),
+      runId: "run-edit-file-missing-cfc-result",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "enforce-explicit",
+    }),
+    fetchFn: (_input, init) => {
+      fetchCalls.push(init ?? {});
+      const payload = fetchCalls.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-edit-missing-cfc",
+                type: "function",
+                function: {
+                  name: "edit_file",
+                  arguments: JSON.stringify({
+                    path: "notes/secret.txt",
+                    edits: [{
+                      oldText: "raw-beta\n",
+                      newText: "raw-BETA\n",
+                    }],
+                  }),
+                },
+              }],
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Done.",
+            },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Edit a file.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+
+  const editToolMessage = result.transcript.find((message) =>
+    message.role === "tool" && message.toolName === "edit_file"
+  );
+  if (editToolMessage?.role !== "tool") {
+    throw new Error("expected edit_file tool message");
+  }
+  const modelFacingEditOutput = JSON.parse(editToolMessage.content) as {
+    type?: string;
+    handle?: { handleId?: string };
+  };
+  assertEquals(modelFacingEditOutput.type, "cf-harness.observation-denied");
+  assertStringIncludes(
+    String(modelFacingEditOutput.handle?.handleId),
+    "run-edit-file-missing-cfc-result:edit_file:1",
+  );
+  assertEquals(editToolMessage.content.includes("raw-beta"), false);
+  assertEquals(editToolMessage.content.includes("raw-BETA"), false);
+  assertEquals(
+    result.runState.policyEvents.some((event) =>
+      event.severity === "denied" && event.toolId === "edit_file"
+    ),
+    true,
+  );
+});
+
+Deno.test("CfHarnessPromptLoop redacts recoverable edit_file errors in enforce mode", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime([
+        {
+          stdout: "alpha\nsecret-token\n",
+          stderr: "",
+          exitCode: 0,
+          cfcResult: observedCfcResult("alpha\nreleased-secret\n"),
+        },
+      ]),
+      runId: "run-edit-file-error-redaction",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "enforce-explicit",
+    }),
+    fetchFn: (_input, init) => {
+      fetchCalls.push(init ?? {});
+      const payload = fetchCalls.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-edit-conflict",
+                type: "function",
+                function: {
+                  name: "edit_file",
+                  arguments: JSON.stringify({
+                    path: "notes/secret.txt",
+                    edits: [{
+                      oldText: "missing-secret\n",
+                      newText: "replacement\n",
+                    }],
+                  }),
+                },
+              }],
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Done.",
+            },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Edit a file.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+
+  const editToolMessage = result.transcript.find((message) =>
+    message.role === "tool" && message.toolName === "edit_file"
+  );
+  if (editToolMessage?.role !== "tool") {
+    throw new Error("expected edit_file tool message");
+  }
+  const modelFacingEditOutput = JSON.parse(editToolMessage.content) as {
+    outputId?: string;
+    path?: string;
+    ok?: boolean;
+    error?: { code?: string; path?: string; message?: string };
+  };
+  assertEquals(
+    modelFacingEditOutput.outputId,
+    "run-edit-file-error-redaction:edit_file:1",
+  );
+  assertEquals(modelFacingEditOutput.path, "[redacted]");
+  assertEquals(modelFacingEditOutput.ok, false);
+  assertEquals(modelFacingEditOutput.error?.code, "unknown");
+  assertEquals(modelFacingEditOutput.error?.path, "[redacted]");
+  assertStringIncludes(
+    String(modelFacingEditOutput.error?.message),
+    "edit_file failed",
+  );
+  assertEquals(editToolMessage.content.includes("notes/secret.txt"), false);
+  assertEquals(editToolMessage.content.includes("missing-secret"), false);
+  assertEquals(editToolMessage.content.includes("secret-token"), false);
+  assertEquals(
+    result.runState.policyEvents.some((event) =>
+      event.severity === "denied" && event.toolId === "edit_file"
+    ),
     true,
   );
 });

@@ -220,6 +220,7 @@ export interface SchedulerActionRunState {
   readonly inFlightSourceState: InFlightSourceState;
   readonly actionTimingState: ActionTimingState;
   readonly pullDemandedFirstRunComputations: WeakSet<Action>;
+  readonly pullDemandedContinuationComputations: WeakSet<Action>;
   readonly retries: WeakMap<Action, number>;
   readonly pending: Set<Action>;
   readonly actionRunTrace: ActionRunTraceEntry[];
@@ -349,6 +350,7 @@ function finalizeSchedulerAction(
   state.maybeAutoDebounce(args.action);
   state.markActionHasRun(args.action);
   state.pullDemandedFirstRunComputations.delete(args.action);
+  state.pullDemandedContinuationComputations.delete(args.action);
 
   try {
     if (args.error) {

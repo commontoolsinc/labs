@@ -1,7 +1,13 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { cf, checkStderr, stripAnsi } from "./utils.ts";
-import { recreateSpaceRootPattern, type SpaceConfig } from "../lib/piece.ts";
+import {
+  recreateSpaceRootPattern,
+  resolveLinkEndpointAddress,
+  resolvePieceConfig,
+  type SpaceConfig,
+} from "../lib/piece.ts";
+import { SlugResolutionError } from "@commonfabric/piece";
 import {
   parseLink,
   parsePieceOptions,
@@ -294,5 +300,92 @@ describe("cli piece parsing", () => {
       expect(result.pieceId).toBe("piece");
       expect(result.path).toEqual(["field", ""]);
     });
+  });
+
+  it("shows slug option for piece new", async () => {
+    const { code, stdout, stderr } = await cf("piece new --help");
+    checkStderr(stderr);
+    expect(code).toBe(0);
+    expect(stripAnsi(stdout.join("\n"))).toContain("--slug");
+  });
+
+  it("shows set-slug command options", async () => {
+    const { code, stdout, stderr } = await cf("piece set-slug --help");
+    checkStderr(stderr);
+    const output = stripAnsi(stdout.join("\n"));
+    expect(code).toBe(0);
+    expect(output).toContain("Set a slug redirect");
+    expect(output).toContain("--resolve-before-linking");
+  });
+
+  it("resolves slug piece config through storage", async () => {
+    const manager = {};
+    const resolved = await resolvePieceConfig({
+      apiUrl: API_URL,
+      space: SPACE,
+      identity: ID,
+      piece: "demo",
+    }, {
+      loadManager: (config: SpaceConfig) => {
+        expect(config.space).toBe(SPACE);
+        return Promise.resolve(manager as any);
+      },
+      resolvePieceAddress: (seenManager: unknown, token: string) => {
+        expect(seenManager).toBe(manager);
+        expect(token).toBe("demo");
+        return Promise.resolve(PIECE);
+      },
+    });
+
+    expect(resolved.piece).toBe(PIECE);
+  });
+
+  it("preserves URI piece config without slug lookup", async () => {
+    const resolved = await resolvePieceConfig({
+      apiUrl: API_URL,
+      space: SPACE,
+      identity: ID,
+      piece: "of:fid1:piece-123",
+    }, {
+      loadManager: () => Promise.resolve({} as any),
+    });
+
+    expect(resolved.piece).toBe("of:fid1:piece-123");
+  });
+
+  it("preserves URI link endpoints without slug lookup", async () => {
+    const token = "of:fid1:piece-123";
+    const resolved = await resolveLinkEndpointAddress({} as any, token);
+
+    expect(resolved).toBe(token);
+  });
+
+  it("preserves non-fid link endpoints when no slug document exists", async () => {
+    const manager = {};
+    const token = "baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye";
+    const resolved = await resolveLinkEndpointAddress(
+      manager as any,
+      token,
+      () =>
+        Promise.reject(
+          new SlugResolutionError(`Slug "${token}" not found.`, "missing"),
+        ),
+      { allowMissingSlugFallback: true },
+    );
+
+    expect(resolved).toBe(token);
+  });
+
+  it("rejects missing destination slug endpoints", async () => {
+    const manager = {};
+    const token = "demo";
+    await expect(resolveLinkEndpointAddress(
+      manager as any,
+      token,
+      () =>
+        Promise.reject(
+          new SlugResolutionError(`Slug "${token}" not found.`, "missing"),
+        ),
+    )).rejects.toThrow(/Slug "demo" not found/);
   });
 });

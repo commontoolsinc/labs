@@ -334,11 +334,17 @@ well-known symbols:
 ```typescript
 const DECONSTRUCT = Symbol.for('common.deconstruct');
 const RECONSTRUCT = Symbol.for('common.reconstruct');
+const DEEP_FREEZE = Symbol.for('common.deepFreeze');
+const IS_DEEP_FROZEN = Symbol.for('common.isDeepFrozen');
 // If protocol evolution is needed: Symbol.for('common.deconstruct@2')
 
-// Instance protocol: "here's my essential state"
+// Instance protocol: "here's my essential state, here's how to freeze
+// me deeply, and here's how to clone me."
 abstract class FabricInstance {
   abstract [DECONSTRUCT](): FabricValue;
+  abstract [DEEP_FREEZE](subFreeze: (v: FabricValue) => FabricValue): FabricValue;
+  abstract [IS_DEEP_FROZEN](subIsDeepFrozen: (v: FabricValue) => boolean): boolean;
+  abstract deepClone(frozen: boolean): FabricInstance;
 }
 
 // Class protocol: "here's how to bring one back"
@@ -346,6 +352,15 @@ interface FabricClass<T extends FabricInstance> {
   [RECONSTRUCT](state: FabricValue, context: ReconstructionContext): T;
 }
 ```
+
+The `[DEEP_FREEZE]` / `[IS_DEEP_FROZEN]` pair lets a generic top-level
+`deepFreeze()` utility freeze any `FabricValue` tree by dispatching on the
+abstract `FabricInstance` base. The `subFreeze` / `subIsDeepFrozen`
+callbacks (rather than direct utility imports) thread shared
+cycle-detection state through implementations without creating an import
+cycle. See `space-model-formal-spec/1-fabric-values.md` Section 8.6 for
+the full protocol, dispatch shape, and boundary-crossing egress
+contracts.
 
 `[RECONSTRUCT]` is a dedicated static method rather than using the class
 constructor for two reasons:

@@ -21,6 +21,7 @@ import {
   setCellValue,
   setHomePattern,
   setPiecePattern,
+  setPieceSlug,
   SpaceConfig,
   stepPiece,
 } from "../lib/piece.ts";
@@ -239,6 +240,7 @@ export const piece = new Command()
     "--root <path:string>",
     "Root directory for resolving imports. Allows imports from parent directories within this root.",
   )
+  .option("--slug <slug:string>", "Slug URL/address for this piece.")
   .action(async (options, main) => {
     setQuietMode(!!options.quiet);
     const spaceConfig = parseSpaceOptions(options);
@@ -249,14 +251,54 @@ export const piece = new Command()
         mainExport: options.mainExport,
         rootPath: options.root ? absPath(options.root) : undefined,
       },
-      { start: options.start },
+      { start: options.start, slug: options.slug },
     );
     render(pieceId);
+    const browserPieceRef = options.slug ?? pieceId;
     hint(cliText(`NEXT STEPS:
-  → Open in browser: ${spaceConfig.apiUrl}/${spaceConfig.space}/${pieceId}
+  → Open in browser: ${spaceConfig.apiUrl}/${spaceConfig.space}/${browserPieceRef}
   → Update code:     cf piece setsrc --piece ${pieceId} ${main} ...
   → Test a callable: cf piece call --piece ${pieceId} <callableName> ...
   → Inspect state:   cf piece inspect --piece ${pieceId} ...`));
+  })
+  /* piece set-slug */
+  .command(
+    "set-slug",
+    "Set a slug redirect to a piece or cell link.",
+  )
+  .usage(spaceUsage)
+  .example(
+    cliText(`cf piece set-slug ${EX_ID} ${EX_COMP} project-notes bafypiece1`),
+    `Set slug "project-notes" to piece "bafypiece1".`,
+  )
+  .example(
+    cliText(
+      `cf piece set-slug ${EX_ID} ${EX_COMP} latest-note old-slug --resolve-before-linking`,
+    ),
+    `Set slug "latest-note" to the cell currently resolved by "old-slug".`,
+  )
+  .arguments("<slug:string> <source:string>")
+  .option(
+    "--resolve-before-linking",
+    "Resolve the source cell before writing it as the slug redirect target.",
+  )
+  .action(async (options, slug, sourceRef) => {
+    setQuietMode(!!options.quiet);
+    const spaceConfig = parseSpaceOptions(options);
+    const source = parseLink(sourceRef);
+    await setPieceSlug(
+      spaceConfig,
+      slug,
+      source.pieceId,
+      source.path || [],
+      {
+        sourceScope: source.scope,
+        resolveBeforeLinking: !!(options as any).resolveBeforeLinking,
+      },
+    );
+    render(`Set slug ${slug} to ${sourceRef}`);
+    hint(cliText(`NEXT STEPS:
+  → Open in browser: ${spaceConfig.apiUrl}/${spaceConfig.space}/${slug}`));
   })
   /* piece step */
   .command("step", "Run a single scheduling step: start → idle → synced → stop")

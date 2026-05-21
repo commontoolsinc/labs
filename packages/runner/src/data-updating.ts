@@ -42,7 +42,7 @@ import { type Runtime } from "./runtime.ts";
 import { toURI } from "./uri-utils.ts";
 import {
   allowMutableTransactionRead,
-  markReadAsPotentialWrite,
+  markReadAsAttemptedWrite,
 } from "./scheduler.ts";
 import {
   readStoredCfcMetadata,
@@ -274,7 +274,7 @@ export function diffAndUpdate(
     ...options,
     meta: {
       ...options?.meta,
-      ...markReadAsPotentialWrite,
+      ...markReadAsAttemptedWrite,
       ...allowMutableTransactionRead,
     },
   };
@@ -1032,7 +1032,7 @@ export function applyChangeSet(
   }
   for (const change of changes) {
     // `diffAndUpdate()` establishes attempted-target coverage before we get
-    // here, so these direct writes preserve the phase-1 `potentialWrites` view.
+    // here, so these direct writes preserve the phase-1 `attemptedWrites` view.
     tx.writeValueOrThrow(change.location, change.value);
   }
 }

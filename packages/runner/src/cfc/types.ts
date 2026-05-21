@@ -216,7 +216,7 @@ export type WritePolicyInput =
 
 export type PreparedDigestInput = {
   readonly consumedReads: readonly ConsumedRead[];
-  readonly potentialWrites: readonly AttemptedWrite[];
+  readonly attemptedWrites: readonly AttemptedWrite[];
   readonly writes: readonly AttemptedWrite[];
   readonly dereferenceTraces: readonly CfcDereferenceTrace[];
   readonly writePolicyInputs: readonly WritePolicyInput[];

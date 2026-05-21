@@ -162,3 +162,9 @@ export {
   parseCellPath,
   resolveCellPath,
 } from "./piece-helpers.ts";
+export {
+  isSlugAddress,
+  slugCause,
+  slugIdForSpace,
+  validateSlug,
+} from "./slugs.ts";
