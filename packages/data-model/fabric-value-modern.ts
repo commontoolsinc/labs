@@ -7,6 +7,7 @@ import {
 } from "./interface.ts";
 import { FabricEpochNsec } from "./fabric-epoch.ts";
 import {
+  errorClassFromType,
   FabricError,
   FabricNativeWrapper,
   FabricRegExp,
@@ -66,7 +67,7 @@ export function shallowFabricFromNativeValueModern(
       return value as FabricValueLayer;
 
     case NATIVE_TAGS.Error: {
-      const wrapped = new FabricError(value as Error);
+      const wrapped = FabricError.fromNativeError(value as Error);
       if (freeze) Object.freeze(wrapped);
       return wrapped;
     }
@@ -296,23 +297,13 @@ function fabricFromNativeValueModernInternal(
     return value;
   }
 
-  // TODO(danfuzz): Look into avoiding this special case for `FabricError`.
-  // Ideally the recursive internals conversion would be handled generically
-  // rather than requiring a type-specific branch here.
-  //
-  // `FabricError` wraps a raw `Error` whose internals (`.cause`, custom
-  // properties) may contain raw native types that aren't `FabricValue`.
-  // We must recursively convert those internals NOW so that when
-  // `[DECONSTRUCT]` runs at serialization time, all nested values are
-  // already `FabricValue`. See spec: the conversion layer (not the
-  // serializer) is responsible for ensuring this.
+  // `FabricError` has `FabricValue`-typed state slots (`cause`, `extra`) by
+  // type contract, but the shallow conversion above copied them through from
+  // the native `Error` as-is (where they may be raw `Error`, `Map`, etc.).
+  // Rebuild via the deep recursion so the resulting `FabricError`'s slots
+  // really are `FabricValue`.
   if (value instanceof FabricError) {
-    const convertedError = convertErrorInternals(
-      value.error,
-      converted,
-      freeze,
-    );
-    const result = new FabricError(convertedError);
+    const result = rebuildFabricErrorDeep(value, converted, freeze);
     if (freeze) Object.freeze(result);
     if (isOriginalRecord) {
       converted.set(original, result);
@@ -383,47 +374,33 @@ function fabricFromNativeValueModernInternal(
  * We create a new `Error` rather than mutating the original because the
  * caller's `Error` should not be modified as a side effect of storing it.
  */
-function convertErrorInternals(
-  error: Error,
+function rebuildFabricErrorDeep(
+  shallow: FabricError,
   converted: Map<object, FabricValue>,
   freeze: boolean,
-): Error {
-  // Construct the same `Error` subclass.
-  const result = new (error.constructor as ErrorConstructor)(error.message);
-
-  // Preserve name (covers custom names like "MyError").
-  if (result.name !== error.name) {
-    result.name = error.name;
-  }
-
-  // Preserve stack as-is (string, no conversion needed).
-  if (error.stack !== undefined) {
-    result.stack = error.stack;
-  }
-
+): FabricError {
   // Recursively convert `.cause` -- it could be a raw `Error`, `Map`, etc.
-  if (error.cause !== undefined) {
-    result.cause = fabricFromNativeValueModernInternal(
-      error.cause,
-      converted,
-      freeze,
-    );
+  const cause = shallow.cause !== undefined
+    ? fabricFromNativeValueModernInternal(shallow.cause, converted, freeze)
+    : undefined;
+
+  // Recursively convert custom enumerable properties.
+  const extras: Array<[string, FabricValue]> = [];
+  for (const [key, value] of shallow.extraEntries()) {
+    extras.push([
+      key,
+      fabricFromNativeValueModernInternal(value, converted, freeze),
+    ]);
   }
 
-  // Recursively convert custom enumerable properties, skipping known `Error`
-  // keys (handled above) and prototype-pollution-sensitive keys.
-  const SKIP_KEYS = new Set(["name", "message", "stack", "cause"]);
-  for (const key of Object.keys(error)) {
-    if (SKIP_KEYS.has(key) || UNSAFE_KEYS.has(key)) continue;
-    (result as unknown as Record<string, unknown>)[key] =
-      fabricFromNativeValueModernInternal(
-        (error as unknown as Record<string, unknown>)[key],
-        converted,
-        freeze,
-      );
-  }
-
-  return result;
+  return new FabricError({
+    type: shallow.type,
+    name: shallow.name,
+    message: shallow.message,
+    stack: shallow.stack,
+    cause,
+    extras,
+  });
 }
 
 /**
@@ -625,7 +602,7 @@ export function nativeFromFabricValueModern(
   frozen = true,
 ): unknown {
   if (value instanceof FabricError) {
-    return deepUnwrapError(value.error, frozen);
+    return deepUnwrapFabricError(value, frozen);
   }
 
   if (value instanceof FabricNativeWrapper) {
@@ -666,26 +643,21 @@ export function nativeFromFabricValueModern(
   return result;
 }
 
-function deepUnwrapError(error: Error, frozen: boolean): Error {
-  const copy = new (error.constructor as ErrorConstructor)(error.message);
-  if (copy.name !== error.name) copy.name = error.name;
-  if (error.stack !== undefined) copy.stack = error.stack;
+function deepUnwrapFabricError(fe: FabricError, frozen: boolean): Error {
+  const type = fe.type;
+  const name = fe.name ?? type;
+  const ErrorClass = errorClassFromType(type);
+  const copy = new ErrorClass(fe.message);
+  if (copy.name !== name) copy.name = name;
+  if (fe.stack !== undefined) copy.stack = fe.stack;
 
-  if (error.cause !== undefined) {
-    copy.cause = nativeFromFabricValueModern(
-      error.cause as FabricValue,
-      frozen,
-    );
+  if (fe.cause !== undefined) {
+    copy.cause = nativeFromFabricValueModern(fe.cause, frozen);
   }
 
-  const SKIP = new Set(["name", "message", "stack", "cause"]);
-  for (const key of Object.keys(error)) {
-    if (SKIP.has(key) || UNSAFE_KEYS.has(key)) continue;
+  for (const [key, value] of fe.extraEntries()) {
     (copy as unknown as Record<string, unknown>)[key] =
-      nativeFromFabricValueModern(
-        (error as unknown as Record<string, unknown>)[key] as FabricValue,
-        frozen,
-      );
+      nativeFromFabricValueModern(value, frozen);
   }
 
   if (frozen) Object.freeze(copy);
