@@ -74,6 +74,7 @@ export enum RequestType {
   RecreateSpaceRootPattern = "pattern:recreateSpaceRoot",
   PageCreate = "page:create",
   PageGet = "page:get",
+  PageGetSlug = "page:getSlug",
   PageRemove = "page:remove",
   PageStart = "page:start",
   PageStop = "page:stop",
@@ -440,6 +441,11 @@ export interface PageGetRequest extends BaseRequest {
   runIt?: boolean;
 }
 
+export interface PageGetSlugRequest extends BaseRequest {
+  type: RequestType.PageGetSlug;
+  pageId: string;
+}
+
 export interface PageRemoveRequest extends BaseRequest {
   type: RequestType.PageRemove;
   pageId: string;
@@ -583,6 +589,7 @@ export type IPCClientRequest =
   | PageGetSpaceDefault
   | RecreateSpaceRootPatternRequest
   | PageGetRequest
+  | PageGetSlugRequest
   | PageRemoveRequest
   | PageStartRequest
   | PageStopRequest
@@ -618,6 +625,10 @@ export interface CfcLabelViewResponse {
 
 export interface PageResponse {
   page: PageRef;
+}
+
+export interface SlugResponse {
+  slug: string | undefined;
 }
 
 export interface GraphSnapshotResponse {
@@ -721,6 +732,7 @@ export type RemoteResponse =
   | TriggerTraceResponse
   | WriteStackTraceResponse
   | PageResponse
+  | SlugResponse
   | VDomMountResponse
   | DetectNonIdempotentResponse
   | PatternSourcesResponse
@@ -864,6 +876,10 @@ export type Commands = {
   [RequestType.PageGet]: {
     request: PageGetRequest;
     response: PageResponse | NullResponse;
+  };
+  [RequestType.PageGetSlug]: {
+    request: PageGetSlugRequest;
+    response: SlugResponse;
   };
   [RequestType.PageRemove]: {
     request: PageRemoveRequest;
