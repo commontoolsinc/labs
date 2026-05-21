@@ -216,13 +216,21 @@ const stripCfcInvocationContexts = (
     return { type: "runShell", request };
   });
 
-const observedCfcResult = (stdout: string): CfcSandboxResult => ({
+const observedCfcResult = (
+  stdout: string,
+  options: {
+    stdoutLabel?: CfcSandboxResult["stdout"]["label"];
+  } = {},
+): CfcSandboxResult => ({
   version: 1,
   stdout: {
     channel: "stdout",
     policy: "observed",
-    label: { confidentiality: ["public"] },
-    segments: [{ text: stdout, label: { confidentiality: ["public"] } }],
+    label: options.stdoutLabel ?? { confidentiality: ["public"] },
+    segments: [{
+      text: stdout,
+      label: options.stdoutLabel ?? { confidentiality: ["public"] },
+    }],
   },
   stderr: {
     channel: "stderr",
@@ -1134,9 +1142,122 @@ Deno.test("edit_file applies exact replacements and returns a unified diff", asy
     "edit_file",
   );
   assertEquals(
+    sandbox.calls.map((call) =>
+      call.type === "runShell"
+        ? call.request.cfcInvocationContext?.toolOutputId
+        : undefined
+    ),
+    [
+      createToolOutputId("run-1", "edit_file", 1),
+      createToolOutputId("run-1", "edit_file", 1),
+      createToolOutputId("run-1", "edit_file", 1),
+    ],
+  );
+  assertEquals(
     sandbox.calls[1]?.request.cfcInvocationContext?.inputs.stdin?.bytes,
     edited.length,
   );
+});
+
+Deno.test("edit_file labels write stdin with internal read CFC labels", async () => {
+  const original = "alpha\nbeta\n";
+  const edited = "alpha\nBETA\n";
+  const readLabel = { confidentiality: ["did:key:file-secret"] };
+  const trustedLabels: CfcLabelView = {
+    version: 1,
+    entries: [{
+      path: ["args"],
+      label: { confidentiality: ["did:key:trusted-path"] },
+    }],
+  };
+  const sandbox = new FakeSandboxRuntime([
+    {
+      stdout: original,
+      stderr: "",
+      exitCode: 0,
+      cfcResult: observedCfcResult(original, { stdoutLabel: readLabel }),
+    },
+    { stdout: "", stderr: "", exitCode: 0 },
+    {
+      stdout: edited,
+      stderr: "",
+      exitCode: 0,
+      cfcResult: observedCfcResult(edited, {
+        stdoutLabel: { confidentiality: ["did:key:verified-file"] },
+      }),
+    },
+  ]);
+
+  const output = await editFileTool.invoke(createContext(sandbox), {
+    path: "notes/secret.txt",
+    edits: [{ oldText: "beta\n", newText: "BETA\n" }],
+    cfcInputLabels: trustedLabels,
+  });
+
+  if ("ok" in output) {
+    throw new Error("expected successful edit_file output");
+  }
+  assertEquals(output.outputId, "run-1:edit_file:1");
+  assertEquals(output.cfcResult?.stdout.label, {
+    confidentiality: ["did:key:file-secret", "did:key:verified-file"],
+  });
+  assertEquals(output.cfcResult?.stdout.policy, "observed");
+  if (output.cfcResult?.stdout.policy !== "observed") {
+    throw new Error("expected observed CFC stdout");
+  }
+  assertEquals(
+    output.cfcResult.stdout.segments.map((segment) => segment.text).join(""),
+    [
+      "--- /workspace/notes/secret.txt",
+      "+++ /workspace/notes/secret.txt",
+      "@@ -1,2 +1,2 @@",
+      " alpha",
+      "-beta",
+      "+BETA",
+      "",
+    ].join("\n"),
+  );
+  assertEquals(
+    sandbox.calls[1]?.request.cfcInvocationContext?.cfcInputLabels,
+    {
+      version: 1,
+      entries: [
+        {
+          path: ["args"],
+          label: { confidentiality: ["did:key:trusted-path"] },
+        },
+        {
+          path: ["stdin"],
+          label: { confidentiality: ["did:key:file-secret"] },
+        },
+      ],
+    },
+  );
+});
+
+Deno.test("edit_file omits CFC result when either internal read is unmediated", async () => {
+  const original = "alpha\nbeta\n";
+  const edited = "alpha\nBETA\n";
+  const sandbox = new FakeSandboxRuntime([
+    { stdout: original, stderr: "", exitCode: 0 },
+    { stdout: "", stderr: "", exitCode: 0 },
+    {
+      stdout: edited,
+      stderr: "",
+      exitCode: 0,
+      cfcResult: observedCfcResult(edited),
+    },
+  ]);
+
+  const output = await editFileTool.invoke(createContext(sandbox), {
+    path: "notes/secret.txt",
+    edits: [{ oldText: "beta\n", newText: "BETA\n" }],
+  });
+
+  if ("ok" in output) {
+    throw new Error("expected successful edit_file output");
+  }
+  assertEquals("cfcResult" in output, false);
 });
 
 Deno.test("edit_file returns separate hunks for distant edits", async () => {
