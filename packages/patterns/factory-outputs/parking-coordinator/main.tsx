@@ -1230,6 +1230,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                 {todayFormatted}
               </span>
               <cf-button
+                id="parking-admin-mode-toggle"
                 variant={adminModeEnabled ? "primary" : "secondary"}
                 size="sm"
                 disabled={!currentPersonIsAdmin}
@@ -1434,6 +1435,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                         : "Cannot manage admins"}
                     />
                     <cf-button
+                      id="parking-enable-admin-manager"
                       size="sm"
                       disabled={currentUserCanManageAdmins}
                       onClick={() => enableAdminManager.send()}
@@ -1457,6 +1459,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                     const rowCanManageAdmins = row.canManageAdmins;
                     return (
                       <cf-hstack
+                        data-parking-admin-row={rowName}
                         justify="between"
                         align="center"
                         gap="2"
@@ -1476,6 +1479,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                           </span>
                         </cf-vstack>
                         <cf-button
+                          data-parking-admin-toggle={rowName}
                           size="sm"
                           disabled={!rowCanManageAdmins}
                           onClick={() =>
@@ -1707,10 +1711,11 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                 ? (
                   <>
                     {/* People */}
-                    <cf-vstack gap="2">
+                    <cf-vstack id="parking-admin-people-section" gap="2">
                       <cf-hstack justify="between" align="center">
                         <cf-heading level={6}>People</cf-heading>
                         <cf-button
+                          id="parking-admin-add-person-open"
                           variant="primary"
                           size="sm"
                           onClick={() => toggleAddPersonForm.send()}

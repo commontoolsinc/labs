@@ -297,6 +297,128 @@ export async function waitForRuntimeIdle(
   }, { timeout, delay: 250 });
 }
 
+export async function waitForDisabled(
+  page: Page,
+  selector: string,
+  disabled: boolean,
+  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
+) {
+  let probe: { disabled?: boolean; selector: string } | undefined;
+  try {
+    await waitFor(async () => {
+      try {
+        const node = await page.waitForSelector(selector, {
+          strategy: "pierce",
+          timeout: 1_000,
+        });
+        probe = await node.evaluate((element: Element) => {
+          const button = element instanceof HTMLButtonElement
+            ? element
+            : element.shadowRoot?.querySelector("button");
+          return {
+            selector: element.tagName.toLowerCase(),
+            disabled: button instanceof HTMLButtonElement
+              ? button.disabled
+              : undefined,
+          };
+        });
+        return probe.disabled === disabled;
+      } catch {
+        return false;
+      }
+    }, { timeout, delay: 250 });
+  } catch (cause) {
+    throw new Error(
+      `Timed out waiting for ${selector} disabled=${disabled}. Last probe: ${
+        toIndentedDebugString(probe)
+      }`,
+      { cause },
+    );
+  }
+}
+
+export async function clickCfButton(
+  page: Page,
+  selector: string,
+  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
+) {
+  const token = `cf-button-${crypto.randomUUID()}`;
+  const mark = async () =>
+    await page.evaluate(async (targetSelector, targetToken, targetAttr) => {
+      function collect(
+        root: Document | ShadowRoot,
+        result: Element[],
+      ): void {
+        for (const element of root.querySelectorAll("*")) {
+          try {
+            if (element.matches(targetSelector)) {
+              result.push(element);
+            }
+          } catch {
+            // Invalid selectors are reported by returning false.
+          }
+          if (element.shadowRoot) {
+            collect(element.shadowRoot, result);
+          }
+        }
+      }
+
+      const matches: Element[] = [];
+      collect(document, matches);
+      const target = matches[0] as HTMLElement | undefined;
+      if (!target) {
+        return false;
+      }
+      target.scrollIntoView({ block: "center", inline: "center" });
+      await new Promise((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(resolve))
+      );
+      const clickTarget =
+        (target.shadowRoot?.querySelector("[data-cf-button]") as
+          | HTMLElement
+          | null) ?? target;
+      clickTarget.setAttribute(targetAttr, targetToken);
+      return true;
+    }, { args: [selector, token, CLICK_TARGET_ATTR] });
+  try {
+    await waitFor(mark, { timeout, delay: 250 });
+  } catch (cause) {
+    throw new Error(`Unable to mark ${selector} for click`, { cause });
+  }
+  try {
+    const clickTarget = await page.waitForSelector(
+      `[${CLICK_TARGET_ATTR}="${token}"]`,
+      {
+        strategy: "pierce",
+        timeout: 2_000,
+      },
+    );
+    await clickTarget.click();
+  } finally {
+    await page.evaluate((targetToken, targetAttr) => {
+      function collect(
+        root: Document | ShadowRoot,
+        result: Element[],
+      ): void {
+        for (const element of root.querySelectorAll("*")) {
+          if (element.getAttribute(targetAttr) === targetToken) {
+            result.push(element);
+          }
+          if (element.shadowRoot) {
+            collect(element.shadowRoot, result);
+          }
+        }
+      }
+
+      const matches: Element[] = [];
+      collect(document, matches);
+      for (const element of matches) {
+        element.removeAttribute(targetAttr);
+      }
+    }, { args: [token, CLICK_TARGET_ATTR] }).catch(() => {});
+  }
+}
+
 async function textIsPresent(
   page: Page,
   selector: string,
