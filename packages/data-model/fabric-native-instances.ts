@@ -174,34 +174,40 @@ export type FabricErrorState = {
  * `stack`, `cause`) plus a hidden extras bag accessed via map-like methods
  * (`getExtra`, `setExtra`, `hasExtra`, `deleteExtra`, `extraKeys`,
  * `extraEntries`). The native `Error` form is produced on demand by
- * `toNativeValue()`. Mutability of the extras bag tracks the instance's
- * frozen state: `setExtra` / `deleteExtra` throw when this instance is
- * frozen. The serialization layer handles `FabricError` via the generic
- * `FabricInstanceHandler` path. See Section 1.4.1 of the formal spec.
+ * `toNativeValue()`.
+ *
+ * Like all `FabricInstance`s, a `FabricError` is wholeheartedly mutable
+ * until frozen and immutable thereafter. The fixed-schema slots are plain
+ * writable own properties: assigning to one throws once the instance is
+ * `Object.freeze`'d (strict-mode non-writable-property semantics). The
+ * extras bag mirrors this by gating `setExtra` / `deleteExtra` on the
+ * frozen state. The serialization layer handles `FabricError` via the
+ * generic `FabricInstanceHandler` path. See Section 1.4.1 of the formal
+ * spec.
  */
 export class FabricError extends FabricNativeWrapper<Error> {
   /** @inheritDoc */
   readonly typeTag = TAGS.Error;
 
   /** Constructor name of the originating native `Error` (e.g. `"TypeError"`). */
-  readonly type: string;
+  type: string;
   /** The `.name` property (always a concrete string). */
-  readonly name: string;
+  name: string;
   /** The `.message` property. */
-  readonly message: string;
+  message: string;
   /** The `.stack` property, or `undefined`. */
-  readonly stack: string | undefined;
+  stack: string | undefined;
   /** The `.cause` value, in `FabricValue` form, or `undefined`. */
-  readonly cause: FabricValue | undefined;
+  cause: FabricValue | undefined;
 
   /** Hidden bag of custom enumerable properties, in `FabricValue` form. */
   readonly #extras: Map<string, FabricValue>;
 
   /**
-   * Cached lazy native projection. Built on first call to `wrappedValue` /
-   * `toNativeValue()` and reused thereafter. Always deep-frozen when
-   * populated (matching the typical use case); thawed copies are minted by
-   * `toNativeThawed()` on demand.
+   * Cached lazy native projection, populated only once this instance is
+   * frozen (so the projection can never go stale against mutable state).
+   * While unfrozen, `wrappedValue` rebuilds on each access; thawed copies
+   * are always minted fresh by `toNativeThawed()`.
    */
   #nativeFrozen: Error | undefined;
 
@@ -399,11 +405,16 @@ export class FabricError extends FabricNativeWrapper<Error> {
   }
 
   /**
-   * Returns the cached native projection, building it on first access. The
-   * cached projection is always deep-frozen; `toNativeValue(false)` uses
-   * `toNativeThawed()` to mint a thawed copy each time.
+   * Returns the frozen native projection. Once this instance is frozen the
+   * projection is cached (state can no longer change, so the cache is always
+   * valid); while mutable it is rebuilt on each access. `toNativeValue(false)`
+   * uses `toNativeThawed()` to mint a thawed copy each time.
    */
   protected get wrappedValue(): Error {
+    if (!Object.isFrozen(this)) {
+      // Mutable: state may still change, so never cache.
+      return this.#buildNativeError(true);
+    }
     if (this.#nativeFrozen === undefined) {
       this.#nativeFrozen = this.#buildNativeError(true);
     }

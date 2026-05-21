@@ -69,6 +69,30 @@ describe("fabric-native-instances", () => {
       expect(se.message).toBe("bad");
     });
 
+    it("fixed-schema slots are mutable while unfrozen", () => {
+      const se = FabricError.fromNativeError(new Error("orig"));
+      se.message = "changed";
+      se.name = "Renamed";
+      se.cause = { detail: 1 } as FabricValue;
+      expect(se.message).toBe("changed");
+      expect(se.name).toBe("Renamed");
+      expect(se.cause).toEqual({ detail: 1 });
+      // The native projection reflects the mutated state (no stale cache).
+      expect(se.toNativeValue(true).message).toBe("changed");
+    });
+
+    it("fixed-schema slots throw on assignment once frozen", () => {
+      const se = FabricError.fromNativeError(new Error("orig"));
+      Object.freeze(se);
+      expect(() => {
+        se.message = "nope";
+      }).toThrow();
+      expect(() => {
+        (se as { name: string }).name = "nope";
+      }).toThrow();
+      expect(se.message).toBe("orig");
+    });
+
     it("is instanceof FabricNativeWrapper", () => {
       const se = FabricError.fromNativeError(new Error("test"));
       expect(se instanceof FabricNativeWrapper).toBe(true);
@@ -265,8 +289,12 @@ describe("fabric-native-instances", () => {
       expect(Object.isFrozen(err)).toBe(false);
     });
 
-    it("toNativeValue(true) returns the same projection on repeat calls", () => {
+    it("toNativeValue(true) caches the projection once frozen", () => {
       const se = FabricError.fromNativeError(new Error("native"));
+      // While mutable, repeated calls rebuild (no stale cache risk).
+      expect(se.toNativeValue(true)).not.toBe(se.toNativeValue(true));
+      // Once frozen, the projection is cached and returned by identity.
+      Object.freeze(se);
       const a = se.toNativeValue(true);
       const b = se.toNativeValue(true);
       expect(a).toBe(b);
