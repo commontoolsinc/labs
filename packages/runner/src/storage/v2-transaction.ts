@@ -150,10 +150,10 @@ function withCommitTiming<T>(
  * recursion, so partially-frozen trees only copy their unfrozen portions.
  *
  * The result is NOT guaranteed to be mutable, since deep-frozen inputs are
- * returned as-is. Callers that need a mutable copy (e.g. before in-place
- * write helpers like `ensureParentContainers` or `applyMutablePathWrite`)
- * must use `cloneIfNecessary(value, { frozen: false })` from
- * `@commonfabric/data-model` instead.
+ * returned as-is. The remaining caller that wants a thaw-the-spine-only
+ * mutable handle (`writeWithinSpaceCreatingParents`) uses
+ * `cloneIfNecessary(value, { frozen: false, deep: false, force: false })`
+ * instead; `applyMutablePathWrite` handles its own spine thaws internally.
  */
 const isolateTransactionValue = <T>(
   value: T,
@@ -353,6 +353,27 @@ type MutableWriteResult = {
   changed: boolean;
 };
 
+/**
+ * Applies a write at `address.path` within `currentRoot`, returning the
+ * (possibly new) root, the previous value at the path, and whether
+ * anything changed.
+ *
+ * Does its own spine copy-on-write: each container along the write path is
+ * shallow-thawed (via
+ * `cloneIfNecessary(_, { frozen: false, deep: false, force: false })`) and
+ * the freshly-thawed clone is spliced into its (now-mutable) parent.
+ * Subtrees off the spine are preserved by identity -- they retain their
+ * `deepFrozenCache` registration, so re-freezing the result tree
+ * short-circuits everywhere except the spine.
+ *
+ * The caller's `currentRoot` is mutated in place ONLY where the input's
+ * spine is already mutable. Frozen inputs are thawed via shallow clones
+ * before any mutation, leaving the input tree untouched. Practically this
+ * means: when `currentRoot` is the storage-layer's deep-frozen current
+ * document value, the input is never mutated; when `currentRoot` is the
+ * batch loop's own freshly-thawed root, subsequent applies reuse and
+ * mutate it in place.
+ */
 const applyMutablePathWrite = (
   currentRoot: FabricValue | undefined,
   address: IMemoryAddress,
@@ -387,6 +408,16 @@ const applyMutablePathWrite = (
         "write",
       ),
     };
+  } else {
+    // Shallow-thaw the root so we can mutate its spine in place without
+    // leaking changes back to the caller's frozen input. `force: false`
+    // makes this a no-op if the caller already handed us a mutable root
+    // (the steady state inside `writeBatchRun`'s loop).
+    currentRoot = cloneIfNecessary(currentRoot as FabricValue, {
+      frozen: false,
+      deep: false,
+      force: false,
+    });
   }
 
   const root = currentRoot;
@@ -489,6 +520,19 @@ const applyMutablePathWrite = (
             "write",
           ),
         };
+      } else {
+        // Shallow-thaw the next spine container if frozen. Mutable
+        // children are returned by identity (no allocation, no
+        // re-splice).
+        const thawed = cloneIfNecessary(next, {
+          frozen: false,
+          deep: false,
+          force: false,
+        });
+        if (thawed !== next) {
+          current[slot] = thawed;
+          next = thawed;
+        }
       }
       current = next as Record<string, FabricValue> | FabricValue[];
       continue;
@@ -527,6 +571,18 @@ const applyMutablePathWrite = (
           "write",
         ),
       };
+    } else {
+      // Shallow-thaw the next spine container if frozen. Mutable children
+      // are returned by identity (no allocation, no re-splice).
+      const thawed = cloneIfNecessary(next, {
+        frozen: false,
+        deep: false,
+        force: false,
+      });
+      if (thawed !== next) {
+        current[key] = thawed;
+        next = thawed;
+      }
     }
     current = next as Record<string, FabricValue> | FabricValue[];
   }
@@ -1336,11 +1392,17 @@ export class V2StorageTransaction implements IStorageTransaction {
       if (!isRecord(existingParent) && !Array.isArray(existingParent)) {
         return direct;
       }
-      // Use `cloneIfNecessary({ frozen: false })` (not
-      // `isolateTransactionValue()`): the parent is about to be mutated in
-      // place by `ensureParentContainers`, so we need a guaranteed-mutable
-      // copy even when the stored value is deep-frozen.
-      parentValue = cloneIfNecessary(existingParent, { frozen: false });
+      // Shallow-thaw is sufficient: `ensureParentContainers` only mutates
+      // the parent's top-level slot to attach the first freshly-created
+      // intermediate container (the missing-path segments are all absent
+      // by construction here, so the helper never descends through
+      // existing children). Subtrees off that single slot stay shared by
+      // identity and keep their place in the deep-frozen cache.
+      parentValue = cloneIfNecessary(existingParent, {
+        frozen: false,
+        deep: false,
+        force: false,
+      });
     }
 
     const seededParent = ensureParentContainers(
@@ -1440,7 +1502,6 @@ export class V2StorageTransaction implements IStorageTransaction {
     const doc = ensureWritableDocument(readDoc);
     const originalRoot = doc.current.value;
     let nextRoot = originalRoot;
-    let hasMutableRoot = false;
     let changed = false;
 
     for (const { address, value } of writes) {
@@ -1463,17 +1524,11 @@ export class V2StorageTransaction implements IStorageTransaction {
           allowArrayLength: true,
         }),
       ) as FabricValue | undefined;
-      if (
-        !hasMutableRoot && address.path.length > 0 && nextRoot !== undefined
-      ) {
-        // Use `cloneIfNecessary({ frozen: false })` (not
-        // `isolateTransactionValue()`): the next line passes `nextRoot` to
-        // `applyMutablePathWrite`, which mutates in place along the write
-        // path, so we need a guaranteed-mutable root even when the stored
-        // value is deep-frozen.
-        nextRoot = cloneIfNecessary(nextRoot, { frozen: false });
-        hasMutableRoot = true;
-      }
+      // `applyMutablePathWrite` shallow-thaws the spine internally; no
+      // pre-thaw needed here. The first write of a batch starts from the
+      // frozen `doc.current.value` and the function produces a fresh
+      // mutable root; subsequent writes reuse that mutable root by
+      // identity.
       const result = applyMutablePathWrite(nextRoot, address, isolatedValue);
       if (result.error) {
         if (changed) {
@@ -1510,9 +1565,6 @@ export class V2StorageTransaction implements IStorageTransaction {
         previousActivityValue,
         doc,
       );
-      if (address.path.length === 0 || !hasMutableRoot) {
-        hasMutableRoot = true;
-      }
     }
 
     if (!changed) {
