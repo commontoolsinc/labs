@@ -485,7 +485,7 @@ describe("hashOf()", () => {
     // Build the expected byte stream programmatically because the
     // deconstructed state includes `stack` which is environment-dependent.
     // We construct the stream the same way `hashOf()` does, then SHA-256 it.
-    const error = new FabricError(new Error("test"));
+    const error = FabricError.fromNativeError(new Error("test"));
     const enc = new TextEncoder();
 
     // TAG_INSTANCE (0x12)
@@ -520,7 +520,7 @@ describe("hashOf()", () => {
 
     // Key "stack" + value (the actual stack string)
     pushShortString("stack");
-    pushLongString(error.error.stack!);
+    pushLongString(error.stack!);
 
     // Key "type" + value "Error"
     pushShortString("type");
@@ -534,14 +534,14 @@ describe("hashOf()", () => {
   });
 
   it("different errors produce different hashes", () => {
-    const e1 = new FabricError(new Error("hello"));
-    const e2 = new FabricError(new Error("world"));
+    const e1 = FabricError.fromNativeError(new Error("hello"));
+    const e2 = FabricError.fromNativeError(new Error("world"));
     expect(hex(hashBytesOf(e1))).not.toBe(hex(hashBytesOf(e2)));
   });
 
   it("TypeError vs Error produce different hashes", () => {
-    const e1 = new FabricError(new Error("msg"));
-    const e2 = new FabricError(new TypeError("msg"));
+    const e1 = FabricError.fromNativeError(new Error("msg"));
+    const e2 = FabricError.fromNativeError(new TypeError("msg"));
     expect(hex(hashBytesOf(e1))).not.toBe(hex(hashBytesOf(e2)));
   });
 
@@ -757,7 +757,7 @@ describe("hashOf()", () => {
       new FabricEpochNsec(0n),
       new FabricEpochDays(0n),
       new FabricBytes(new Uint8Array([1])),
-      new FabricError(new Error("x")),
+      FabricError.fromNativeError(new Error("x")),
     ];
     for (const v of values) {
       expect(hashBytesOf(v).length).toBe(32);

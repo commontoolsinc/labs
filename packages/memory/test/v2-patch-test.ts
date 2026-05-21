@@ -22,12 +22,16 @@ Deno.test("memory v2 patch preserves `FabricInstance` values with full fidelity"
         {
           op: "replace",
           path: "/a",
-          value: new FabricError(new Error("boom")),
+          value: FabricError.fromNativeError(new Error("boom")),
         },
       ]) as { a: unknown },
     () =>
       applyPatch({}, [
-        { op: "add", path: "/a", value: new FabricError(new Error("boom")) },
+        {
+          op: "add",
+          path: "/a",
+          value: FabricError.fromNativeError(new Error("boom")),
+        },
       ]) as { a: unknown },
     () =>
       applyPatch({ a: ["keep"] }, [
@@ -36,7 +40,7 @@ Deno.test("memory v2 patch preserves `FabricInstance` values with full fidelity"
           path: "/a",
           index: 1,
           remove: 0,
-          add: [new FabricError(new Error("boom"))],
+          add: [FabricError.fromNativeError(new Error("boom"))],
         },
       ]) as { a: unknown[] },
   ];
@@ -49,14 +53,18 @@ Deno.test("memory v2 patch preserves `FabricInstance` values with full fidelity"
   placements.forEach((place, i) => {
     const out = reads[i]!(place()) as FabricError;
     assert(out instanceof FabricError, `placement ${i}: not a FabricError`);
-    assertEquals(out.error.message, "boom");
-    assertEquals(typeof out.error.stack, "string");
+    assertEquals(out.message, "boom");
+    assertEquals(typeof out.stack, "string");
   });
 });
 
 Deno.test("memory v2 patch keeps `FabricInstance` values as `FabricInstance`s (not demoted to plain objects)", () => {
   const patched = applyPatch({}, [
-    { op: "add", path: "/e", value: new FabricError(new Error("boom")) },
+    {
+      op: "add",
+      path: "/e",
+      value: FabricError.fromNativeError(new Error("boom")),
+    },
   ]) as { e: unknown };
   const out = patched.e;
 
@@ -69,7 +77,11 @@ Deno.test("memory v2 patch keeps `FabricInstance` values as `FabricInstance`s (n
 
 Deno.test("memory v2 patch round-trips `FabricInstance` values across replayed patch passes", () => {
   const first = applyPatch({ box: {} }, [
-    { op: "add", path: "/box/err", value: new FabricError(new Error("boom")) },
+    {
+      op: "add",
+      path: "/box/err",
+      value: FabricError.fromNativeError(new Error("boom")),
+    },
   ]);
   // `first` is deep-frozen by applyPatch; a second pass mimics the engine
   // replaying a stored patch sequence (here `move` -> `add`-clones the
@@ -80,8 +92,8 @@ Deno.test("memory v2 patch round-trips `FabricInstance` values across replayed p
   const out = second.moved as FabricError;
 
   assert(out instanceof FabricError);
-  assertEquals(out.error.message, "boom");
-  assertEquals(typeof out.error.stack, "string");
+  assertEquals(out.message, "boom");
+  assertEquals(typeof out.stack, "string");
 });
 
 Deno.test("memory v2 patch preserves `FabricPrimitive` values with full fidelity", () => {

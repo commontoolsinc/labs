@@ -52,43 +52,6 @@ export const UNSAFE_KEYS: FrozenSet<string> = new FrozenSet([
   "constructor",
 ]);
 
-/**
- * Helper for `copyError()` and `FabricError.[DECONSTRUCT]()`, which copies
- * own enumerable properties from `source` to `target`, skipping
- * prototype-sensitive keys (`__proto__`, `constructor`). When `noOverride`
- * is `true`, keys already present on `target` are also skipped.
- */
-function copyOwnSafeProperties(
-  source: object,
-  target: Record<string, unknown>,
-  noOverride = false,
-): void {
-  for (const key of Object.keys(source)) {
-    if (UNSAFE_KEYS.has(key)) continue;
-    if (noOverride && key in target) continue;
-    target[key] = (source as Record<string, unknown>)[key];
-  }
-}
-
-/**
- * Creates a shallow copy of an `Error`, preserving `constructor()`, `.name`,
- * `.message`, `.stack`, `.cause`, and custom enumerable properties. Used by
- * `toNativeValue()` when the freeze state of the wrapped `Error` doesn't match
- * the requested state.
- */
-function copyError(error: Error): Error {
-  const copy = new (error.constructor as ErrorConstructor)(error.message);
-  if (copy.name !== error.name) copy.name = error.name;
-  if (error.stack !== undefined) copy.stack = error.stack;
-  if (error.cause !== undefined) copy.cause = error.cause;
-  copyOwnSafeProperties(
-    error,
-    copy as unknown as Record<string, unknown>,
-    true,
-  );
-  return copy;
-}
-
 // ---------------------------------------------------------------------------
 // Utility: `Error` class lookup
 // ---------------------------------------------------------------------------
@@ -108,7 +71,7 @@ const ERROR_CLASS_BY_TYPE: ReadonlyMap<string, ErrorConstructor> = new Map([
  * constructor for the given type string (e.g. `"TypeError"`). Falls back
  * to the base `Error` constructor for unknown types.
  */
-function errorClassFromType(type: string): ErrorConstructor {
+export function errorClassFromType(type: string): ErrorConstructor {
   return ERROR_CLASS_BY_TYPE.get(type) ?? Error;
 }
 
@@ -157,180 +120,347 @@ export abstract class FabricNativeWrapper<T extends object>
 // ---------------------------------------------------------------------------
 
 /**
+ * Reserved key set for `FabricError`'s extras bag: these names belong to the
+ * fixed-schema slots (`type`, `name`, `message`, `stack`, `cause`) and cannot
+ * be used as extras keys.
+ */
+const FABRIC_ERROR_RESERVED_KEYS: FrozenSet<string> = new FrozenSet([
+  "type",
+  "name",
+  "message",
+  "stack",
+  "cause",
+]);
+
+/**
+ * Structured state for constructing a `FabricError`. Spec slots are
+ * `FabricValue`-typed; the optional `extras` carries any custom enumerable
+ * properties (also in `FabricValue` form). After construction, extras are
+ * accessed via map-like methods (`getExtra`, `setExtra`, etc.) on the
+ * instance; they are not exposed as an own property.
+ */
+export type FabricErrorState = {
+  /** Constructor name of the originating native `Error` (e.g. `"TypeError"`). */
+  readonly type: string;
+  /**
+   * The `.name` property. Pass `null` (or omit) to mean "same as `type`"; the
+   * resulting instance's `.name` is always a concrete string (`null` is a
+   * wire-level optimization at the `[DECONSTRUCT]` boundary, not part of the
+   * public API).
+   */
+  readonly name?: string | null | undefined;
+  /** The `.message` property. */
+  readonly message: string;
+  /** The `.stack` property, or `undefined`. */
+  readonly stack: string | undefined;
+  /** The `.cause` value, in `FabricValue` form, or `undefined`. */
+  readonly cause: FabricValue | undefined;
+  /**
+   * Optional iterable of custom enumerable own properties, in `FabricValue`
+   * form. Keys must not collide with the fixed-schema slot names or with
+   * prototype-sensitive keys.
+   */
+  readonly extras?:
+    | Iterable<readonly [string, FabricValue]>
+    | Readonly<Record<string, FabricValue>>
+    | undefined;
+};
+
+/**
  * Wrapper for `Error` instances in the fabric type system. Bridges native
  * `Error` (JS wild west) into the strongly-typed `FabricValue` layer by
- * implementing `FabricInstance`. The serialization layer handles
- * `FabricError` via the generic `FabricInstanceHandler` path.
- * See Section 1.4.1 of the formal spec.
+ * implementing `FabricInstance`. The publicly observable state is entirely
+ * `FabricValue`-typed: fixed-schema slots (`type`, `name`, `message`,
+ * `stack`, `cause`) plus a hidden extras bag accessed via map-like methods
+ * (`getExtra`, `setExtra`, `hasExtra`, `deleteExtra`, `extraKeys`,
+ * `extraEntries`). The native `Error` form is produced on demand by
+ * `toNativeValue()`. Mutability of the extras bag tracks the instance's
+ * frozen state: `setExtra` / `deleteExtra` throw when this instance is
+ * frozen. The serialization layer handles `FabricError` via the generic
+ * `FabricInstanceHandler` path. See Section 1.4.1 of the formal spec.
  */
 export class FabricError extends FabricNativeWrapper<Error> {
   /** @inheritDoc */
   readonly typeTag = TAGS.Error;
 
-  constructor(
-    /** The wrapped native `Error`. */
-    readonly error: Error,
-  ) {
+  /** Constructor name of the originating native `Error` (e.g. `"TypeError"`). */
+  readonly type: string;
+  /** The `.name` property (always a concrete string). */
+  readonly name: string;
+  /** The `.message` property. */
+  readonly message: string;
+  /** The `.stack` property, or `undefined`. */
+  readonly stack: string | undefined;
+  /** The `.cause` value, in `FabricValue` form, or `undefined`. */
+  readonly cause: FabricValue | undefined;
+
+  /** Hidden bag of custom enumerable properties, in `FabricValue` form. */
+  readonly #extras: Map<string, FabricValue>;
+
+  /**
+   * Cached lazy native projection. Built on first call to `wrappedValue` /
+   * `toNativeValue()` and reused thereafter. Always deep-frozen when
+   * populated (matching the typical use case); thawed copies are minted by
+   * `toNativeThawed()` on demand.
+   */
+  #nativeFrozen: Error | undefined;
+
+  /**
+   * Constructs from a `FabricErrorState` record. All state values must
+   * already be in `FabricValue` form -- the conversion layer
+   * (`fabric-value-modern.ts`) is responsible for ensuring this when
+   * constructing from a native `Error`. Use `FabricError.fromNativeError()`
+   * for shallow conversion from a native `Error`.
+   */
+  constructor(state: FabricErrorState) {
     super();
+    this.type = state.type;
+    this.name = state.name ?? state.type;
+    this.message = state.message;
+    this.stack = state.stack;
+    this.cause = state.cause;
+    this.#extras = new Map();
+    const extras = state.extras;
+    if (extras !== undefined) {
+      const entries: Iterable<readonly [string, FabricValue]> =
+        Symbol.iterator in extras
+          ? extras as Iterable<readonly [string, FabricValue]>
+          : Object.entries(extras as Record<string, FabricValue>);
+      for (const [key, value] of entries) {
+        if (UNSAFE_KEYS.has(key) || FABRIC_ERROR_RESERVED_KEYS.has(key)) {
+          continue;
+        }
+        this.#extras.set(key, value);
+      }
+    }
   }
 
   /**
-   * Deconstructs into essential state for serialization. Returns `.type`,
-   * `.name`, `.message`, `.stack`, `.cause`, and custom enumerable properties.
-   * Does NOT recurse into nested values -- the serialization system handles that.
+   * Shallow conversion from a native `Error`. Used by the shallow conversion
+   * layer (`shallowFabricFromNativeValueModern`). The error's `.cause` and
+   * custom properties are stored as-is (cast to `FabricValue`); the deep
+   * conversion path is responsible for converting them when needed.
+   */
+  static fromNativeError(error: Error): FabricError {
+    const type = error.constructor.name;
+    const name = error.name === type ? null : error.name;
+    const extras: Array<[string, FabricValue]> = [];
+    for (const key of Object.keys(error)) {
+      if (UNSAFE_KEYS.has(key) || FABRIC_ERROR_RESERVED_KEYS.has(key)) {
+        continue;
+      }
+      extras.push([
+        key,
+        (error as unknown as Record<string, FabricValue>)[key],
+      ]);
+    }
+    return new FabricError({
+      type,
+      name,
+      message: error.message,
+      stack: error.stack,
+      cause: error.cause as FabricValue | undefined,
+      extras,
+    });
+  }
+
+  /** Returns the value associated with `key`, or `undefined`. */
+  getExtra(key: string): FabricValue | undefined {
+    return this.#extras.get(key);
+  }
+
+  /** Returns `true` if `key` is present in the extras bag. */
+  hasExtra(key: string): boolean {
+    return this.#extras.has(key);
+  }
+
+  /**
+   * Sets `key` to `value` in the extras bag. Throws if this instance is
+   * frozen, if `key` is a fixed-schema slot name, or if `key` is a
+   * prototype-sensitive key (`__proto__`, `constructor`).
+   */
+  setExtra(key: string, value: FabricValue): void {
+    if (Object.isFrozen(this)) {
+      throw new Error("Cannot modify frozen FabricError");
+    }
+    if (UNSAFE_KEYS.has(key)) {
+      throw new Error(`Cannot use unsafe key in FabricError extras: ${key}`);
+    }
+    if (FABRIC_ERROR_RESERVED_KEYS.has(key)) {
+      throw new Error(
+        `Cannot use fixed-schema slot name in FabricError extras: ${key}`,
+      );
+    }
+    this.#extras.set(key, value);
+  }
+
+  /**
+   * Removes `key` from the extras bag, returning `true` if it was present.
+   * Throws if this instance is frozen.
+   */
+  deleteExtra(key: string): boolean {
+    if (Object.isFrozen(this)) {
+      throw new Error("Cannot modify frozen FabricError");
+    }
+    return this.#extras.delete(key);
+  }
+
+  /** Returns the number of entries in the extras bag. */
+  get extraSize(): number {
+    return this.#extras.size;
+  }
+
+  /** Returns the keys present in the extras bag. */
+  extraKeys(): IterableIterator<string> {
+    return this.#extras.keys();
+  }
+
+  /** Returns the `[key, value]` entries in the extras bag. */
+  extraEntries(): IterableIterator<[string, FabricValue]> {
+    return this.#extras.entries();
+  }
+
+  /**
+   * Deconstructs into essential state for serialization. Returns a flat
+   * record with `type`, `name`, `message`, `stack`, `cause`, and custom
+   * enumerable properties from the extras bag. Does NOT recurse into nested
+   * values -- the serialization system handles that.
    *
-   * `type` is the constructor name (e.g. "TypeError") used for reconstruction.
-   * `name` is the `.name` property -- emitted as `null` when it equals `type`
-   * (the common case) to avoid redundancy.
-   *
-   * **Invariant**: By the time this method runs, `this.error.cause` and any
-   * custom enumerable properties are already `FabricValue`. The conversion
-   * layer (`convertErrorInternals()` in `fabric-value-modern.ts`) ensures
-   * this by recursively converting `Error` internals before wrapping in
-   * `FabricError`. The `as FabricValue` casts below are therefore safe.
+   * `name` is emitted as `null` when it equals `type` (the common case) to
+   * avoid redundancy.
    */
   [DECONSTRUCT](): FabricValue {
-    const type = this.error.constructor.name;
-    const name = this.error.name;
     const state: Record<string, FabricValue> = {
-      type,
-      name: name === type ? null : name,
-      message: this.error.message,
+      type: this.type,
+      name: this.name === this.type ? null : this.name,
+      message: this.message,
     };
-    if (this.error.stack !== undefined) {
-      state.stack = this.error.stack;
+    if (this.stack !== undefined) {
+      state.stack = this.stack;
     }
-    if (this.error.cause !== undefined) {
-      state.cause = this.error.cause as FabricValue;
+    if (this.cause !== undefined) {
+      state.cause = this.cause;
     }
-    copyOwnSafeProperties(
-      this.error,
-      state as Record<string, unknown>,
-      true,
-    );
+    for (const [key, value] of this.#extras) {
+      state[key] = value;
+    }
     return state as FabricValue;
   }
 
   /**
-   * Deep-freezes in place. `Object.freeze` on the wrapped `Error` covers the
-   * standard non-enumerable slots (`message`, `name`, `stack`); the only
-   * deep-freeze gap is the (`FabricValue`-typed, per the `[DECONSTRUCT]`
-   * invariant) `cause` and any custom enumerable own properties, which are
-   * recursed via `subFreeze`. This freezes the existing instance -- it does
-   * NOT rebuild and does NOT narrow to string-valued state (that narrowing
-   * is a `deepClone()` stop-gap detail, not a `[DEEP_FREEZE]` requirement).
+   * Deep-freezes in place. Freezes this instance and recurses into the
+   * `FabricValue`-typed `cause` and extras-bag values via `subFreeze`. The
+   * extras bag's mutation methods are gated by this instance's frozen state,
+   * so freezing `this` is sufficient -- there is no separate `Object.freeze`
+   * on the bag itself (a `Map` ignores `Object.freeze` for `set`/`delete`).
+   * There is no native-`Error` slot to freeze -- the native projection is a
+   * derivation produced on demand, not stored as canonical state.
    */
   [DEEP_FREEZE](
     subFreeze: (value: FabricValue) => FabricValue,
   ): FabricValue {
-    if (this.error.cause !== undefined) {
-      subFreeze(this.error.cause as FabricValue);
+    if (this.cause !== undefined) {
+      subFreeze(this.cause);
     }
-    for (const key of Object.keys(this.error)) {
-      if (UNSAFE_KEYS.has(key) || key === "cause") continue;
-      subFreeze(
-        (this.error as unknown as Record<string, FabricValue>)[key],
-      );
+    for (const value of this.#extras.values()) {
+      subFreeze(value);
     }
-    Object.freeze(this.error);
     return Object.freeze(this) as unknown as FabricValue;
   }
 
   /**
    * Side-effect-free check mirroring `[DEEP_FREEZE]`'s canonical form: this
-   * wrapper and its wrapped `Error` are frozen, and the (`FabricValue`-typed)
-   * `cause` plus any custom enumerable own properties are recursively
-   * deep-frozen. Never throws.
+   * instance is frozen, and the `cause` plus each value in the extras bag
+   * are recursively deep-frozen. Never throws.
    */
   [IS_DEEP_FROZEN](
     subIsDeepFrozen: (value: FabricValue) => boolean,
   ): boolean {
-    if (!Object.isFrozen(this) || !Object.isFrozen(this.error)) {
+    if (!Object.isFrozen(this)) return false;
+    if (this.cause !== undefined && !subIsDeepFrozen(this.cause)) {
       return false;
     }
-    if (
-      this.error.cause !== undefined &&
-      !subIsDeepFrozen(this.error.cause as FabricValue)
-    ) {
-      return false;
-    }
-    for (const key of Object.keys(this.error)) {
-      if (UNSAFE_KEYS.has(key) || key === "cause") continue;
-      if (
-        !subIsDeepFrozen(
-          (this.error as unknown as Record<string, FabricValue>)[key],
-        )
-      ) {
-        return false;
-      }
+    for (const value of this.#extras.values()) {
+      if (!subIsDeepFrozen(value)) return false;
     }
     return true;
   }
 
   /** @inheritDoc */
   protected shallowUnfrozenClone(): FabricError {
-    return new FabricError(this.error);
+    return new FabricError({
+      type: this.type,
+      name: this.name,
+      message: this.message,
+      stack: this.stack,
+      cause: this.cause,
+      extras: this.#extras,
+    });
   }
 
-  /** @inheritDoc */
+  /**
+   * Returns the cached native projection, building it on first access. The
+   * cached projection is always deep-frozen; `toNativeValue(false)` uses
+   * `toNativeThawed()` to mint a thawed copy each time.
+   */
   protected get wrappedValue(): Error {
-    return this.error;
+    if (this.#nativeFrozen === undefined) {
+      this.#nativeFrozen = this.#buildNativeError(true);
+    }
+    return this.#nativeFrozen;
   }
 
   /** @inheritDoc */
   protected toNativeFrozen(): Error {
-    return Object.freeze(copyError(this.error));
+    return this.wrappedValue;
   }
 
   /** @inheritDoc */
   protected toNativeThawed(): Error {
-    return copyError(this.error);
+    return this.#buildNativeError(false);
+  }
+
+  /**
+   * Builds a fresh native `Error` from this `FabricError`'s state. `cause`
+   * and extras are copied through as-is (no recursive unwrap). Callers that
+   * need recursive unwrap should use `nativeFromFabricValue()`.
+   */
+  #buildNativeError(frozen: boolean): Error {
+    const ErrorClass = errorClassFromType(this.type);
+    const error = new ErrorClass(this.message);
+    if (error.name !== this.name) error.name = this.name;
+    if (this.stack !== undefined) error.stack = this.stack;
+    if (this.cause !== undefined) error.cause = this.cause;
+    for (const [key, value] of this.#extras) {
+      (error as unknown as Record<string, unknown>)[key] = value;
+    }
+    return frozen ? Object.freeze(error) : error;
   }
 
   /** @inheritDoc */
   override deepClone(frozen: boolean): FabricError {
-    // TODO(danfuzz): This is a partial implementation, meant to keep thins
-    // working well enough as the modern data model gets fleshed out.
-    // Ultimately, concrete classes should not have to implement this method at
-    // all.
+    if (frozen && isDeepFrozen(this)) return this;
 
-    if (frozen && isDeepFrozen(this)) {
-      return this;
-    }
-
-    // This makes a result that just has the  string properties of the original.
-
-    const state: Record<string, unknown> = this[DECONSTRUCT]() as Record<
-      string,
-      unknown
-    >;
-
-    for (const key in state) {
-      if (typeof state[key] !== "string") {
-        delete state[key];
-      }
-    }
-
-    // `[RECONSTRUCT]` now honors `context.shouldDeepFreeze`. This clone path
-    // owns its own frozenness decision (the `frozen ? deepFreeze : result`
-    // below), so it must NOT have `[RECONSTRUCT]` pre-freeze: pass a context
-    // whose `shouldDeepFreeze` matches this clone's `frozen` intent. The first
-    // ctor arg MUST be `frozen` (not defaulted) so the context's frozenness
-    // tracks this clone's intent rather than defaulting to `true`.
+    // `[RECONSTRUCT]` honors `context.shouldDeepFreeze`. This clone path owns
+    // its own frozenness decision via the wrapper `frozen ? deepFreeze :
+    // result` below, so pre-freezing inside `[RECONSTRUCT]` would be
+    // redundant when `frozen` is true and wrong when it is false. Match
+    // contexts to this clone's intent.
     const reconstructContext = new EmptyReconstructionContext(
       frozen,
       "no runtime context (FabricError deep-clone path).",
     );
-    const result = FabricError[RECONSTRUCT](state, reconstructContext);
-
+    const result = FabricError[RECONSTRUCT](
+      this[DECONSTRUCT](),
+      reconstructContext,
+    );
     return frozen ? deepFreeze(result) : result;
   }
 
   /**
-   * Reconstructs a `FabricError` from its essential state. Nested values
-   * in `state` have already been reconstructed by the serialization system.
-   * Returns a `FabricError` wrapping the reconstructed `Error`; callers
-   * who need the native `Error` use `nativeFromFabricValue()`.
+   * Reconstructs a `FabricError` from its essential state (flat record).
+   * Nested values in `state` have already been reconstructed by the
+   * serialization system.
    */
   static [RECONSTRUCT](
     state: FabricValue,
@@ -338,35 +468,28 @@ export class FabricError extends FabricNativeWrapper<Error> {
   ): FabricError {
     const s = state as Record<string, FabricValue>;
     const type = (s.type as string) ?? (s.name as string) ?? "Error";
-    // null name means "same as type" (the common case optimization).
-    const name = (s.name as string | null) ?? type;
+    // null name means "same as type" (the wire-level optimization).
+    const name = (s.name as string | null | undefined) ?? type;
     const message = (s.message as string) ?? "";
+    const stack = s.stack as string | undefined;
+    const cause = s.cause;
 
-    const ErrorClass = errorClassFromType(type);
-    const error = new ErrorClass(message);
-
-    // Set name explicitly (covers custom names like "MyError", and the case
-    // where type and name differ).
-    if (error.name !== name) {
-      error.name = name;
-    }
-
-    if (s.stack !== undefined) {
-      error.stack = s.stack as string;
-    }
-    if (s.cause !== undefined) {
-      error.cause = s.cause;
-    }
-
-    // Copy custom properties from state onto the error.
-    const skip = new Set(["type", "name", "message", "stack", "cause"]);
+    const extras: Array<[string, FabricValue]> = [];
     for (const key of Object.keys(s)) {
-      if (!skip.has(key) && !UNSAFE_KEYS.has(key)) {
-        (error as unknown as Record<string, unknown>)[key] = s[key];
+      if (FABRIC_ERROR_RESERVED_KEYS.has(key) || UNSAFE_KEYS.has(key)) {
+        continue;
       }
+      extras.push([key, s[key]]);
     }
 
-    const result = new FabricError(error);
+    const result = new FabricError({
+      type,
+      name,
+      message,
+      stack,
+      cause,
+      extras,
+    });
     // Honor `shouldDeepFreeze`: produce the type's correct deep-frozen form
     // via its `[DEEP_FREEZE]` member (recursing through `deepFreeze`).
     return context.shouldDeepFreeze ? deepFreeze(result) : result;

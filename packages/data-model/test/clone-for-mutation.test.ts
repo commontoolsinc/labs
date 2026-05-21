@@ -78,7 +78,7 @@ describe("cloneForMutation", () => {
         });
 
         it("handles an empty-path FabricInstance via shallowClone(false)", () => {
-          const err = new FabricError(new Error("test"));
+          const err = FabricError.fromNativeError(new Error("test"));
           Object.freeze(err);
           const { value, pathValue } = cloneForMutation(
             err as unknown as FabricValue,
@@ -88,8 +88,11 @@ describe("cloneForMutation", () => {
           expect(value).toBeInstanceOf(FabricError);
           expect(Object.isFrozen(value)).toBe(false);
           expect(pathValue).toBe(value);
-          // The wrapped Error reference is shared by `shallowUnfrozenClone`.
-          expect((value as unknown as FabricError).error).toBe(err.error);
+          // `shallowUnfrozenClone` preserves the FabricValue-shaped state.
+          const cloned = value as unknown as FabricError;
+          expect(cloned.type).toBe(err.type);
+          expect(cloned.name).toBe(err.name);
+          expect(cloned.message).toBe(err.message);
         });
       });
 
@@ -293,7 +296,7 @@ describe("cloneForMutation", () => {
 
       describe("FabricInstance at leaf", () => {
         it("clones via shallowClone(false), not as a plain object", () => {
-          const err = new FabricError(new Error("boom"));
+          const err = FabricError.fromNativeError(new Error("boom"));
           Object.freeze(err);
           const root = Object.freeze({ payload: err }) as FabricValue;
 
@@ -302,8 +305,10 @@ describe("cloneForMutation", () => {
           expect(pathValue).toBeInstanceOf(FabricError);
           expect(pathValue).not.toBe(err);
           expect(Object.isFrozen(pathValue)).toBe(false);
-          // The wrapped native Error is preserved by identity (shallowClone).
-          expect((pathValue as unknown as FabricError).error).toBe(err.error);
+          // The FabricValue-shaped state is preserved (shallowClone).
+          const cloned = pathValue as unknown as FabricError;
+          expect(cloned.type).toBe(err.type);
+          expect(cloned.message).toBe(err.message);
           // And spliced into the new spine.
           expect((value as unknown as Record<string, unknown>).payload).toBe(
             pathValue,
@@ -642,7 +647,7 @@ describe("cloneForMutation", () => {
         });
 
         it("throws when descending through a FabricInstance", () => {
-          const err = new FabricError(new Error("inside"));
+          const err = FabricError.fromNativeError(new Error("inside"));
           const root = Object.freeze({ err }) as FabricValue;
           // `path = ["err", "something"]` tries to descend INTO the
           // FabricInstance, which isn't supported.
@@ -688,7 +693,7 @@ describe("cloneForMutation", () => {
         it("throws on non-empty path against a FabricInstance root", () => {
           // A FabricInstance is OK at the leaf but not as the root of a
           // non-empty path (we don't descend into FabricInstance internals).
-          const err = new FabricError(new Error("test"));
+          const err = FabricError.fromNativeError(new Error("test"));
           expect(() => cloneForMutation(err as unknown as FabricValue, ["x"]))
             .toThrow("cannot descend into");
         });

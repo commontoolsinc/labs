@@ -781,9 +781,9 @@ export function normalizeAndDiff(
   // `FabricRegExp`) are atomic from this layer's perspective: their
   // own-enumerable properties are implementation details, not
   // user-visible structure, and iterating them via the generic
-  // `isRecord` branch below would re-wrap embedded native values (e.g.,
-  // `FabricError.error` is a native `Error`) on each pass, recursing
-  // forever. Emit a single change at this link with the wrapper as the
+  // `isRecord` branch below would walk wrapper-internal fields, which
+  // is meaningless at the change-emission level. Emit a single change at
+  // this link with the wrapper as the
   // value — the storage layer's JSON encoding handles serialization via
   // `[DECONSTRUCT]`/`[RECONSTRUCT]`. Placed after the write-redirect
   // resolution above so writes through a redirect land on the target,
