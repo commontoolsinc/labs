@@ -76,7 +76,7 @@ describe("piece slugs", () => {
     await slugCell.sync();
     const link = parseLink(slugCell.getRaw(), slugCell);
     expect(link?.overwrite).toBe("redirect");
-    expect(link?.id).toBe(`of:${pieceId(piece)}`);
+    expect(link?.id).toBe(piece.getAsNormalizedFullLink().id);
     expect(link?.path).toEqual(["value"]);
     expect(readRootMeta(slugId, "slug")).toBe("value-link");
   });
@@ -99,7 +99,7 @@ describe("piece slugs", () => {
     await secondSlugCell.sync();
     const link = parseLink(secondSlugCell.getRaw(), secondSlugCell);
     expect(link?.overwrite).toBe("redirect");
-    expect(link?.id).toBe(`of:${pieceId(piece)}`);
+    expect(link?.id).toBe(piece.getAsNormalizedFullLink().id);
   });
 
   it("preserves URI-shaped piece addresses", async () => {
