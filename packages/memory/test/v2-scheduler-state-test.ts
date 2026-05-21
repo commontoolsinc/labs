@@ -1,4 +1,4 @@
-import { assertEquals, assertExists } from "@std/assert";
+import { assertEquals, assertExists, assertThrows } from "@std/assert";
 import { toFileUrl } from "@std/path";
 import { Database } from "@db/sqlite";
 import {
@@ -270,6 +270,46 @@ Deno.test("memory v2 coalesces identical scheduler observations without leaving 
       },
     });
     assertEquals(replay.schedulerObservationId, first.schedulerObservationId);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 rejects mismatched observation-only commit replay", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:scheduler-observation-replay-mismatch",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [],
+        schedulerObservation: observation,
+      },
+    });
+
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:scheduler-observation-replay-mismatch",
+          commit: {
+            localSeq: 1,
+            reads: { confirmed: [], pending: [] },
+            operations: [],
+            schedulerObservation: {
+              ...observation,
+              reads: [{
+                ...sourceRead,
+                path: ["value", "different"],
+              }],
+            },
+          },
+        }),
+      Error,
+      "scheduler observation replay mismatch",
+    );
   } finally {
     close(engine);
     await Deno.remove(path);
