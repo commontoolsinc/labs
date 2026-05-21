@@ -10,6 +10,8 @@ import { BaseElement } from "../../core/base-element.ts";
  * @slot main - Main content that expands to fill available space (default slot)
  * @slot footer - Fixed footer content at the bottom
  *
+ * @cssprop --cf-screen-footer-fade-height - Height of the main content fade when the footer contains an inset cf-tab-bar.
+ *
  * @example
  * <cf-screen>
  *   <h1 slot="header">Title</h1>
@@ -40,10 +42,47 @@ export class CFScreen extends BaseElement {
       overflow-x: hidden;
     }
 
+    :host([data-footer-fade]) .main {
+      --_cf-screen-footer-fade-height: var(
+        --cf-screen-footer-fade-height,
+        calc(var(--cf-tab-bar-height, 4rem) / 2)
+      );
+      -webkit-mask-image: linear-gradient(
+        to bottom,
+        black 0,
+        black calc(100% - var(--_cf-screen-footer-fade-height)),
+        transparent 100%
+      );
+      mask-image: linear-gradient(
+        to bottom,
+        black 0,
+        black calc(100% - var(--_cf-screen-footer-fade-height)),
+        transparent 100%
+      );
+    }
+
     .footer {
       flex: none;
     }
   `;
+
+  override firstUpdated() {
+    this._syncFooterFade();
+  }
+
+  private _syncFooterFade = () => {
+    const footerSlot = this.shadowRoot?.querySelector<HTMLSlotElement>(
+      'slot[name="footer"]',
+    );
+    const hasFooterFade = footerSlot?.assignedElements({ flatten: true }).some(
+      (element) =>
+        element.localName === "cf-tab-bar" &&
+        element.getAttribute("variant") === "inset" &&
+        element.getAttribute("position") !== "top",
+    ) ?? false;
+
+    this.toggleAttribute("data-footer-fade", hasFooterFade);
+  };
 
   override render() {
     return html`
@@ -54,7 +93,7 @@ export class CFScreen extends BaseElement {
         <slot></slot>
       </div>
       <div class="footer" part="footer">
-        <slot name="footer"></slot>
+        <slot name="footer" @slotchange="${this._syncFooterFade}"></slot>
       </div>
     `;
   }

@@ -27,8 +27,8 @@ import type { CFTabBarItem } from "./cf-tab-bar-item.ts";
  * @csspart bar - The nav pill surface containing the navigation items.
  * @csspart action - The wrapper around the action slot. Hidden when the slot is empty.
  *
- * @cssprop --cf-tab-bar-footer-fade-background - Background color used by the footer-slot fade.
- * @cssprop --cf-tab-bar-footer-fade-height - Height of the fade above a footer-slotted inset bar.
+ * @cssprop --cf-tab-bar-footer-fade-background - Opaque background color used by the footer-slot fade.
+ * @cssprop --cf-tab-bar-footer-fade-transparent - Transparent background color used by the footer-slot fade.
  *
  * @example
  * const activeTab = cell("home");
@@ -189,16 +189,17 @@ export class CFTabBar extends BaseElement {
           :host([slot="footer"][variant="inset"][position="bottom"])::before {
             content: "";
             position: absolute;
-            left: 0;
-            right: 0;
-            top: calc(-1 * var(--cf-tab-bar-footer-fade-height, 5rem));
-            height: calc(100% + var(--cf-tab-bar-footer-fade-height, 5rem));
+            inset: 0;
             pointer-events: none;
             z-index: 0;
             background: linear-gradient(
               to bottom,
-              transparent 0%,
-              var(--cf-tab-bar-footer-fade-background, rgb(240, 244, 248)) 72%
+              var(
+                --cf-tab-bar-footer-fade-transparent,
+                rgba(240, 244, 248, 0)
+              ) 0%,
+              var(--cf-tab-bar-footer-fade-background, rgb(240, 244, 248)) 50%,
+              var(--cf-tab-bar-footer-fade-background, rgb(240, 244, 248)) 100%
             );
           }
 

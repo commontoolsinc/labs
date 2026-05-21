@@ -93,6 +93,9 @@ Deno.test("cf-screen reserves space for footer-slotted inset cf-tab-bar", async 
     assertEquals(getComputedStyle(tabBar).position, "relative");
 
     const fadeStyle = getComputedStyle(tabBar, "::before");
+    const mainStyle = getComputedStyle(main);
+    const mainMaskImage = mainStyle.maskImage ||
+      mainStyle.webkitMaskImage;
     const mainRect = main.getBoundingClientRect();
     const footerRect = footer.getBoundingClientRect();
     const tabBarRect = tabBar.getBoundingClientRect();
@@ -101,9 +104,19 @@ Deno.test("cf-screen reserves space for footer-slotted inset cf-tab-bar", async 
 
     assertEquals(fadeStyle.content, '""');
     assertEquals(fadeStyle.position, "absolute");
+    assertEquals(fadeStyle.top, "0px");
     assert(fadeStyle.backgroundImage.includes("linear-gradient"));
+    assert(fadeStyle.backgroundImage.includes("rgba(240, 244, 248, 0)"));
     assert(fadeStyle.backgroundImage.includes("rgb(240, 244, 248)"));
+    assert(fadeStyle.backgroundImage.includes("50%"));
+    assert(mainMaskImage.includes("linear-gradient"), mainMaskImage);
+    assert(
+      mainMaskImage.includes("transparent") ||
+        /rgba\(0,\s*0,\s*0,\s*0\)/.test(mainMaskImage),
+      mainMaskImage,
+    );
     assertAlmostEquals(tabBarRect.height, 80, 0.5);
+    assertAlmostEquals(parseFloat(fadeStyle.height), tabBarRect.height, 0.5);
     assertAlmostEquals(footerRect.height, 80, 0.5);
     assert(
       mainRect.bottom <= footerRect.top + 0.5,
