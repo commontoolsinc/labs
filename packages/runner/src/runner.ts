@@ -1983,10 +1983,27 @@ export class Runner {
     reads: readonly NormalizedFullLink[],
     depTx: IExtendedStorageTransaction,
   ): void {
-    // Transformer-declared reads are narrower than traversing captured
-    // argument objects, so event preflight should use them when available.
+    // For event preflight, writable-input links are narrower than traversing
+    // captured argument objects and avoid treating broad closures as demand.
     for (const read of reads) {
-      this.runtime.getCellFromLink(read, undefined, depTx)?.get();
+      let target = read;
+      if (read.overwrite === "redirect") {
+        try {
+          const { overwrite: _overwrite, ...resolved } = resolveLink(
+            this.runtime,
+            depTx,
+            read,
+            "writeRedirect",
+          );
+          target = resolved;
+        } catch (error) {
+          logger.debug("scheduler-read-redirect", () => [
+            "Unable to resolve scheduler read redirect",
+            { read, error },
+          ]);
+        }
+      }
+      this.runtime.getCellFromLink(target, target.schema, depTx)?.get();
     }
   }
 
@@ -2021,6 +2038,51 @@ export class Runner {
     inputsCell.asSchema(eventDependencySchema).get({
       traverseCells: true,
     });
+  }
+
+  private collectWritableCellArgumentLinks(
+    argumentSchema: JSONSchema | undefined,
+    value: unknown,
+    processCell: Cell<any>,
+  ): NormalizedFullLink[] {
+    const links: NormalizedFullLink[] = [];
+    const seen = new WeakSet<object>();
+
+    const visit = (schema: unknown, currentValue: unknown): void => {
+      if (!isRecord(schema)) return;
+      if (seen.has(schema)) return;
+      seen.add(schema);
+
+      const asCell = schema.asCell;
+      if (
+        Array.isArray(asCell) &&
+        (asCell.includes("cell") || asCell.includes("writeonly"))
+      ) {
+        links.push(...findAllWriteRedirectCells(currentValue, processCell));
+        return;
+      }
+
+      if (isRecord(schema.properties) && isRecord(currentValue)) {
+        for (const [key, propertySchema] of Object.entries(schema.properties)) {
+          visit(propertySchema, currentValue[key]);
+        }
+      }
+
+      for (const key of ["items", "additionalProperties"] as const) {
+        if (schema[key] !== undefined) {
+          visit(schema[key], currentValue);
+        }
+      }
+      for (const key of ["anyOf", "oneOf", "allOf"] as const) {
+        const branches = schema[key];
+        if (Array.isArray(branches)) {
+          for (const branch of branches) visit(branch, currentValue);
+        }
+      }
+    };
+
+    visit(argumentSchema, value);
+    return dedupeNormalizedLinks(links);
   }
 
   private resolveJavaScriptFunction(
@@ -2846,7 +2908,14 @@ export class Runner {
       );
     }
 
-    const staticRedirectWriteTargets = module.materializerWriteEnvelopes
+    const materializerWriteEnvelopes = module.materializerWriteEnvelopes ??
+      this.collectWritableCellArgumentLinks(
+        module.argumentSchema,
+        inputs,
+        processCell,
+      );
+    const hasMaterializerWriteEnvelopes = materializerWriteEnvelopes.length > 0;
+    const staticRedirectWriteTargets = hasMaterializerWriteEnvelopes
       ? []
       : this.collectStaticRedirectWriteTargets(tx, writes);
     const schedulingWrites = dedupeNormalizedLinks([
@@ -2856,9 +2925,7 @@ export class Runner {
     const wrappedAction = Object.assign(action, {
       reads,
       writes: schedulingWrites,
-      ...(module.materializerWriteEnvelopes
-        ? { materializerWriteEnvelopes: module.materializerWriteEnvelopes }
-        : {}),
+      ...(hasMaterializerWriteEnvelopes ? { materializerWriteEnvelopes } : {}),
       module,
       pattern,
     });
