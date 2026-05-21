@@ -11,6 +11,7 @@ import {
   isAlive,
   isMountStateAlive,
   mountpointHash,
+  type MountStateEntry,
   readAllMountStates,
   readMountState,
   removeMountStateFile,
@@ -45,6 +46,9 @@ interface FuseChildSupervisorStatus {
 export function childStatusPathForStatePath(statePath: string): string {
   return `${statePath}.child-status`;
 }
+
+export const mountStatusHeader =
+  "MOUNTPOINT\tSUPERVISOR_PID\tCHILD_PID\tSTATUS\tSTARTED\tLOG";
 
 function parseChildSupervisorStatus(
   text: string,
@@ -574,40 +578,46 @@ export const fuse = new Command()
     const stateDir = defaultStateDir();
     const entries = await readAllMountStates(stateDir);
 
-    if (entries.length === 0) {
-      console.log("No active FUSE mounts.");
-      return;
-    }
-
-    const rows: string[][] = [];
-
-    for (const { entry, path } of entries) {
-      const alive = isMountStateAlive(entry);
-      if (!alive) {
-        // Clean stale entry
-        await removeMountStateFile(path);
-        continue;
-      }
-      rows.push([
-        entry.mountpoint,
-        String(entry.pid),
-        entry.childPid === undefined ? "-" : String(entry.childPid),
-        entry.childStatusPath ? await readChildMountStatus(entry) : "running",
-        entry.startedAt,
-        entry.logFile ?? "-",
-      ]);
-    }
-
-    if (rows.length === 0) {
-      console.log("No active FUSE mounts.");
-      return;
-    }
-
-    console.log("MOUNTPOINT\tSUPERVISOR_PID\tCHILD_PID\tSTATUS\tSTARTED\tLOG");
-    for (const row of rows) {
-      console.log(row.join("\t"));
-    }
+    console.log(formatMountStatusTable(await buildMountStatusRows(entries)));
   });
+
+export async function buildMountStatusRows(
+  entries: Array<{ entry: MountStateEntry; path: string }>,
+  deps: {
+    isMountStateAlive?: (entry: MountStateEntry) => boolean;
+    removeMountStateFile?: (path: string) => Promise<void>;
+    readChildMountStatus?: (entry: MountStateEntry) => Promise<string>;
+  } = {},
+): Promise<string[][]> {
+  const isMountStateAliveFn = deps.isMountStateAlive ?? isMountStateAlive;
+  const removeMountStateFileFn = deps.removeMountStateFile ??
+    removeMountStateFile;
+  const readChildMountStatusFn = deps.readChildMountStatus ??
+    readChildMountStatus;
+  const rows: string[][] = [];
+
+  for (const { entry, path } of entries) {
+    if (!isMountStateAliveFn(entry)) {
+      await removeMountStateFileFn(path);
+      continue;
+    }
+    rows.push([
+      entry.mountpoint,
+      String(entry.pid),
+      entry.childPid === undefined ? "-" : String(entry.childPid),
+      entry.childStatusPath ? await readChildMountStatusFn(entry) : "running",
+      entry.startedAt,
+      entry.logFile ?? "-",
+    ]);
+  }
+
+  return rows;
+}
+
+export function formatMountStatusTable(rows: string[][]): string {
+  if (rows.length === 0) return "No active FUSE mounts.";
+  return [mountStatusHeader, ...rows.map((row) => row.join("\t"))].join("\n");
+}
 
 async function readChildMountStatus(entry: { childStatusPath?: string }) {
   if (!entry.childStatusPath) return "running";

@@ -4,9 +4,12 @@ import { basename, join, resolve, toFileUrl } from "@std/path";
 import {
   awaitBackgroundMountStartup,
   awaitForegroundMountExit,
+  buildMountStatusRows,
   childStatusPathForStatePath,
+  formatMountStatusTable,
   fuse,
   isFuseProcessCommand,
+  mountStatusHeader,
 } from "../commands/fuse.ts";
 import {
   buildBackgroundSupervisorDenoArgs,
@@ -597,6 +600,70 @@ describe("mount state operations", () => {
     const states = await readAllMountStates(tmpDir);
 
     expect(states.map(({ path }) => path)).toEqual([statePath]);
+  });
+
+  it("formats active supervisor and child status rows", async () => {
+    const statePath = await writeMountState(tmpDir, {
+      pid: 123,
+      childPid: 456,
+      mountpoint: "/tmp/test-mount",
+      apiUrl: "",
+      identity: "",
+      startedAt: "2026-03-17T00:00:00.000Z",
+      logFile: "/tmp/cf-fuse-test-mount.log",
+      childStatusPath: join(tmpDir, "child-status"),
+    });
+    await Deno.writeTextFile(
+      join(tmpDir, "child-status"),
+      JSON.stringify({
+        state: "mounted",
+        pid: 456,
+        mountpoint: "/tmp/test-mount",
+        updatedAt: "2026-03-17T00:00:01.000Z",
+      }),
+    );
+
+    const rows = await buildMountStatusRows(await readAllMountStates(tmpDir), {
+      isMountStateAlive: () => true,
+    });
+
+    expect(formatMountStatusTable(rows)).toBe([
+      mountStatusHeader,
+      [
+        "/tmp/test-mount",
+        "123",
+        "456",
+        "mounted",
+        "2026-03-17T00:00:00.000Z",
+        "/tmp/cf-fuse-test-mount.log",
+      ].join("\t"),
+    ].join("\n"));
+    expect(rows).toHaveLength(1);
+    expect((await Deno.stat(statePath)).isFile).toBe(true);
+  });
+
+  it("formats empty status after removing stale mount entries", async () => {
+    const statePath = await writeMountState(tmpDir, {
+      pid: 123,
+      mountpoint: "/tmp/test-mount",
+      apiUrl: "",
+      identity: "",
+      startedAt: "2026-03-17T00:00:00.000Z",
+    });
+    const removed: string[] = [];
+
+    const rows = await buildMountStatusRows(await readAllMountStates(tmpDir), {
+      isMountStateAlive: () => false,
+      removeMountStateFile: async (path) => {
+        removed.push(path);
+        await Deno.remove(path);
+      },
+    });
+
+    expect(rows).toEqual([]);
+    expect(formatMountStatusTable(rows)).toBe("No active FUSE mounts.");
+    expect(removed).toEqual([statePath]);
+    await expect(Deno.stat(statePath)).rejects.toThrow();
   });
 
   it("rejects background mounts when child reports startup failure", async () => {
