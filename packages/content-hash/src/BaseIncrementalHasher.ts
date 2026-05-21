@@ -12,6 +12,7 @@ import type { IncrementalHasher } from "./interface.ts";
 export abstract class BaseIncrementalHasher implements IncrementalHasher {
   #done: boolean = false;
 
+  /** @inheritDoc */
   digest(): Uint8Array;
   digest(encoding: "base64url"): string;
   digest(encoding: string | undefined): Uint8Array | string;
@@ -39,6 +40,7 @@ export abstract class BaseIncrementalHasher implements IncrementalHasher {
     }
   }
 
+  /** @inheritDoc */
   update(data: Uint8Array) {
     this.#throwIfDone();
     this._rawUpdate(data);
