@@ -92,7 +92,6 @@ Deno.test("cf-screen reserves space for footer-slotted inset cf-tab-bar", async 
     assert(container);
     assertEquals(getComputedStyle(tabBar).position, "relative");
 
-    const fadeStyle = getComputedStyle(tabBar, "::before");
     const mainStyle = getComputedStyle(main);
     const mainMaskImage = mainStyle.maskImage ||
       mainStyle.webkitMaskImage;
@@ -102,26 +101,17 @@ Deno.test("cf-screen reserves space for footer-slotted inset cf-tab-bar", async 
     const fixtureRect = fixture.getBoundingClientRect();
     const containerRect = container.getBoundingClientRect();
 
-    assertEquals(fadeStyle.content, '""');
-    assertEquals(fadeStyle.position, "absolute");
-    assertEquals(fadeStyle.top, "0px");
-    assert(fadeStyle.backgroundImage.includes("linear-gradient"));
-    assert(fadeStyle.backgroundImage.includes("rgba(240, 244, 248, 0)"));
-    assert(fadeStyle.backgroundImage.includes("rgb(240, 244, 248)"));
-    assert(fadeStyle.backgroundImage.includes("50%"));
     assert(mainMaskImage.includes("linear-gradient"), mainMaskImage);
     assert(
       mainMaskImage.includes("transparent") ||
         /rgba\(0,\s*0,\s*0,\s*0\)/.test(mainMaskImage),
       mainMaskImage,
     );
+    assertAlmostEquals(parseFloat(mainStyle.paddingBottom), 64, 0.5);
+    assertAlmostEquals(parseFloat(mainStyle.marginBottom), -64, 0.5);
     assertAlmostEquals(tabBarRect.height, 80, 0.5);
-    assertAlmostEquals(parseFloat(fadeStyle.height), tabBarRect.height, 0.5);
     assertAlmostEquals(footerRect.height, 80, 0.5);
-    assert(
-      mainRect.bottom <= footerRect.top + 0.5,
-      `main bottom ${mainRect.bottom} should not overlap footer top ${footerRect.top}`,
-    );
+    assertAlmostEquals(mainRect.bottom - footerRect.top, 64, 0.5);
     assertAlmostEquals(fixtureRect.bottom - containerRect.bottom, 16, 0.5);
   } finally {
     fixture.remove();

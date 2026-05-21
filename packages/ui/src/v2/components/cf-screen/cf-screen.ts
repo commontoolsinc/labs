@@ -11,6 +11,7 @@ import { BaseElement } from "../../core/base-element.ts";
  * @slot footer - Fixed footer content at the bottom
  *
  * @cssprop --cf-screen-footer-fade-height - Height of the main content fade when the footer contains an inset cf-tab-bar.
+ * @cssprop --cf-screen-footer-overlap - Distance the main scroller overlaps into an inset cf-tab-bar footer.
  *
  * @example
  * <cf-screen>
@@ -43,10 +44,16 @@ export class CFScreen extends BaseElement {
     }
 
     :host([data-footer-fade]) .main {
+      --_cf-screen-footer-overlap: var(
+        --cf-screen-footer-overlap,
+        var(--cf-tab-bar-height, 4rem)
+      );
       --_cf-screen-footer-fade-height: var(
         --cf-screen-footer-fade-height,
-        calc(var(--cf-tab-bar-height, 4rem) / 2)
+        calc(var(--_cf-screen-footer-overlap) / 2)
       );
+      margin-bottom: calc(-1 * var(--_cf-screen-footer-overlap));
+      padding-bottom: var(--_cf-screen-footer-overlap);
       -webkit-mask-image: linear-gradient(
         to bottom,
         black 0,
