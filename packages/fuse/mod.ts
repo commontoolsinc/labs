@@ -3201,6 +3201,7 @@ export async function main(argv: string[] = Deno.args) {
   });
   const supervisorHeartbeat = supervisorStatusPath
     ? setInterval(() => {
+      if (unmounting) return;
       writeSupervisorStatus("mounted").catch(() => undefined);
     }, 1_000)
     : undefined;
