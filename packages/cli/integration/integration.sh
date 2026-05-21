@@ -309,7 +309,7 @@ run_piece_links() {
   echo "Testing piece link with invented piece ID..."
 
   # Use an invented piece ID (not created via cf piece new) as a data source
-  INVENTED_ID="baedreizzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+  INVENTED_ID="fid1:zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
 
   # Write a value to the invented piece
   echo '42' | cf piece set $SPACE_ARGS --piece $INVENTED_ID value
