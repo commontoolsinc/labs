@@ -72,6 +72,9 @@ export type ResolveHostAddresses = (
   hostname: string,
 ) => Promise<readonly string[]>;
 
+type WebFetchHttpFetch = typeof fetch;
+type WebFetchBytes = Uint8Array<ArrayBuffer>;
+
 const DEFAULT_MAX_BYTES = 200_000;
 const MAX_MAX_BYTES = 1_000_000;
 const DEFAULT_MAX_TEXT_CHARS = 20_000;
@@ -204,16 +207,17 @@ export const webFetchToolDescriptor: HarnessToolDescriptor = {
 };
 
 export interface CreateWebFetchToolOptions {
-  fetchFn?: typeof fetch;
+  fetchFn?: WebFetchHttpFetch;
   resolveHostAddresses?: ResolveHostAddresses;
 }
 
 export const createWebFetchTool = (
   options: CreateWebFetchToolOptions = {},
 ): HarnessToolDefinition<WebFetchToolInput, WebFetchToolOutput> => {
-  const fetchFn = options.fetchFn ?? fetch;
   const resolveHostAddresses = options.resolveHostAddresses ??
     defaultResolveHostAddresses;
+  const fetchFn = options.fetchFn ??
+    createPinnedPublicFetch(resolveHostAddresses);
   return {
     descriptor: webFetchToolDescriptor,
     async invoke(context, input) {
@@ -419,6 +423,10 @@ type PublicHttpUrlResult =
   | { ok: true; url: string }
   | { ok: false; code: "invalid_url" | "blocked_url"; message: string };
 
+class WebFetchBlockedUrlError extends Error {
+  readonly code = "blocked_url" as const;
+}
+
 const validatePublicHttpUrl = async (
   input: string,
   resolveHostAddresses: ResolveHostAddresses,
@@ -455,7 +463,7 @@ const validatePublicHttpUrl = async (
       message: hostBlockReason,
     };
   }
-  const resolution = await resolvePublicHostAddresses(
+  const resolution = await resolveValidatedPublicAddresses(
     url.hostname,
     resolveHostAddresses,
   );
@@ -479,16 +487,8 @@ const blockedHostReason = (hostname: string): string | undefined => {
   ) {
     return `web_fetch host ${hostname} is local and is not allowed`;
   }
-  if (normalized.includes(":")) {
-    const mappedIpv4 = normalized.startsWith("::ffff:")
-      ? normalized.slice("::ffff:".length)
-      : undefined;
-    if (
-      isBlockedIpv6Address(normalized) ||
-      (mappedIpv4 !== undefined && isBlockedIpv4Address(mappedIpv4))
-    ) {
-      return `web_fetch host ${hostname} is private and is not allowed`;
-    }
+  if (isIpv6Address(normalized) && isBlockedIpv6Address(normalized)) {
+    return `web_fetch host ${hostname} is private and is not allowed`;
   }
   if (isBlockedIpv4Address(normalized)) {
     return `web_fetch host ${hostname} is private and is not allowed`;
@@ -499,10 +499,13 @@ const blockedHostReason = (hostname: string): string | undefined => {
 const normalizeHostname = (hostname: string): string =>
   hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
 
-const resolvePublicHostAddresses = async (
+const resolveValidatedPublicAddresses = async (
   hostname: string,
   resolveHostAddresses: ResolveHostAddresses,
-): Promise<{ ok: true } | { ok: false; message: string }> => {
+): Promise<
+  | { ok: true; addresses: readonly string[] }
+  | { ok: false; message: string }
+> => {
   let addresses: readonly string[];
   try {
     addresses = await resolveHostAddresses(hostname);
@@ -528,7 +531,7 @@ const resolvePublicHostAddresses = async (
       return { ok: false, message: addressBlockReason };
     }
   }
-  return { ok: true };
+  return { ok: true, addresses };
 };
 
 const defaultResolveHostAddresses: ResolveHostAddresses = async (
@@ -567,6 +570,498 @@ const blockedResolvedAddressReason = (
   return undefined;
 };
 
+const createPinnedPublicFetch = (
+  resolveHostAddresses: ResolveHostAddresses,
+): WebFetchHttpFetch =>
+async (input, init = {}) => {
+  const url = new URL(input instanceof Request ? input.url : String(input));
+  const resolution = await resolveValidatedPublicAddresses(
+    url.hostname,
+    resolveHostAddresses,
+  );
+  if (!resolution.ok) {
+    throw new WebFetchBlockedUrlError(resolution.message);
+  }
+  const signal = init.signal ?? undefined;
+  throwIfWebFetchAborted(signal);
+  const errors: string[] = [];
+  for (const address of resolution.addresses) {
+    try {
+      return await fetchPinnedToAddress(url, address, init, signal);
+    } catch (error) {
+      if (isAbortError(error)) {
+        throw error;
+      }
+      errors.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+  throw new Error(
+    `web_fetch could not connect to public host ${url.hostname}: ${
+      errors.join("; ")
+    }`,
+  );
+};
+
+const fetchPinnedToAddress = async (
+  url: URL,
+  address: string,
+  init: RequestInit,
+  signal?: AbortSignal,
+): Promise<Response> => {
+  const port = url.port === ""
+    ? (url.protocol === "https:" ? 443 : 80)
+    : Number(url.port);
+  if (!Number.isSafeInteger(port) || port <= 0 || port > 65_535) {
+    throw new Error(`web_fetch URL port is not valid: ${url.port}`);
+  }
+  const conn = await openPinnedConnection(url, address, port, signal);
+  const abortHandler = signal === undefined
+    ? undefined
+    : () => closeConnection(conn);
+  if (signal !== undefined && abortHandler !== undefined) {
+    signal.addEventListener("abort", abortHandler, { once: true });
+  }
+  try {
+    await writeAll(
+      conn,
+      new TextEncoder().encode(serializeHttpRequest(url, init)),
+      signal,
+    );
+    const response = await readHttpResponseHead(conn, signal);
+    return new Response(
+      createHttpResponseBodyStream(
+        conn,
+        response.bodyPrefix,
+        response.headers,
+        signal,
+      ),
+      {
+        status: response.status,
+        headers: response.headers,
+      },
+    );
+  } catch (error) {
+    closeConnection(conn);
+    throw error;
+  } finally {
+    if (signal !== undefined && abortHandler !== undefined) {
+      signal.removeEventListener("abort", abortHandler);
+    }
+  }
+};
+
+const openPinnedConnection = async (
+  url: URL,
+  address: string,
+  port: number,
+  signal?: AbortSignal,
+): Promise<Deno.Conn> => {
+  throwIfWebFetchAborted(signal);
+  const tcpConn = await Deno.connect({ hostname: address, port });
+  if (url.protocol === "http:") {
+    if (signal?.aborted) {
+      closeConnection(tcpConn);
+      throw webFetchAbortReason(signal);
+    }
+    return tcpConn;
+  }
+  let abortHandler: (() => void) | undefined;
+  if (signal !== undefined) {
+    abortHandler = () => closeConnection(tcpConn);
+    signal.addEventListener("abort", abortHandler, { once: true });
+  }
+  try {
+    throwIfWebFetchAborted(signal);
+    const tlsConn = await Deno.startTls(tcpConn, {
+      hostname: normalizeHostname(url.hostname),
+      alpnProtocols: ["http/1.1"],
+    });
+    throwIfWebFetchAborted(signal);
+    return tlsConn;
+  } catch (error) {
+    closeConnection(tcpConn);
+    throw error;
+  } finally {
+    if (signal !== undefined && abortHandler !== undefined) {
+      signal.removeEventListener("abort", abortHandler);
+    }
+  }
+};
+
+const serializeHttpRequest = (url: URL, init: RequestInit): string => {
+  const method = init.method ?? "GET";
+  if (method.toUpperCase() !== "GET") {
+    throw new Error(`web_fetch only supports GET requests`);
+  }
+  const headers = new Headers(init.headers);
+  const requestTarget = `${
+    url.pathname === "" ? "/" : url.pathname
+  }${url.search}`;
+  const lines = [
+    `GET ${requestTarget} HTTP/1.1`,
+    `Host: ${url.host}`,
+    "Connection: close",
+    "Accept-Encoding: identity",
+  ];
+  for (const [name, value] of headers) {
+    const normalized = name.toLowerCase();
+    if (
+      normalized === "host" ||
+      normalized === "connection" ||
+      normalized === "content-length" ||
+      normalized === "transfer-encoding"
+    ) {
+      continue;
+    }
+    lines.push(`${name}: ${value}`);
+  }
+  return `${lines.join("\r\n")}\r\n\r\n`;
+};
+
+interface HttpResponseHead {
+  status: number;
+  headers: Headers;
+  bodyPrefix: WebFetchBytes;
+}
+
+const MAX_RESPONSE_HEADER_BYTES = 64 * 1024;
+
+const readHttpResponseHead = async (
+  conn: Deno.Conn,
+  signal?: AbortSignal,
+): Promise<HttpResponseHead> => {
+  let buffered: WebFetchBytes = new Uint8Array();
+  while (buffered.byteLength <= MAX_RESPONSE_HEADER_BYTES) {
+    const headerEnd = findHeaderEnd(buffered);
+    if (headerEnd !== -1) {
+      const headerBytes = buffered.slice(0, headerEnd);
+      const bodyPrefix = buffered.slice(headerEnd + 4);
+      return {
+        ...parseHttpResponseHead(headerBytes),
+        bodyPrefix,
+      };
+    }
+    const chunk = await readConnChunk(conn, signal);
+    if (chunk === undefined) {
+      break;
+    }
+    buffered = concatBytes(buffered, chunk);
+  }
+  throw new Error("web_fetch response headers were incomplete or too large");
+};
+
+const parseHttpResponseHead = (
+  headerBytes: WebFetchBytes,
+): Omit<HttpResponseHead, "bodyPrefix"> => {
+  const headerText = new TextDecoder().decode(headerBytes);
+  const lines = headerText.split("\r\n");
+  const statusLine = lines.shift() ?? "";
+  const statusMatch = /^HTTP\/\d(?:\.\d)?\s+(\d{3})(?:\s|$)/.exec(
+    statusLine,
+  );
+  if (statusMatch === null) {
+    throw new Error(`web_fetch received an invalid HTTP status line`);
+  }
+  const status = Number(statusMatch[1]);
+  const headers = new Headers();
+  let lastHeaderName: string | undefined;
+  for (const line of lines) {
+    if (line === "") {
+      continue;
+    }
+    if (/^[ \t]/.test(line) && lastHeaderName !== undefined) {
+      headers.set(
+        lastHeaderName,
+        `${headers.get(lastHeaderName) ?? ""} ${line.trim()}`,
+      );
+      continue;
+    }
+    const separator = line.indexOf(":");
+    if (separator <= 0) {
+      continue;
+    }
+    const name = line.slice(0, separator).trim();
+    const value = line.slice(separator + 1).trim();
+    headers.append(name, value);
+    lastHeaderName = name;
+  }
+  return { status, headers };
+};
+
+const findHeaderEnd = (bytes: WebFetchBytes): number => {
+  for (let index = 0; index <= bytes.byteLength - 4; index += 1) {
+    if (
+      bytes[index] === 13 &&
+      bytes[index + 1] === 10 &&
+      bytes[index + 2] === 13 &&
+      bytes[index + 3] === 10
+    ) {
+      return index;
+    }
+  }
+  return -1;
+};
+
+const createHttpResponseBodyStream = (
+  conn: Deno.Conn,
+  bodyPrefix: WebFetchBytes,
+  headers: Headers,
+  signal?: AbortSignal,
+): ReadableStream<Uint8Array> => {
+  let buffered = bodyPrefix;
+  let contentLengthRemaining = parseContentLength(headers);
+  let chunkBytesRemaining = 0;
+  let closed = false;
+  let abortHandler: (() => void) | undefined;
+  const isChunked = (headers.get("transfer-encoding") ?? "")
+    .toLowerCase()
+    .split(",")
+    .map((value) => value.trim())
+    .includes("chunked");
+
+  const close = () => {
+    if (closed) {
+      return;
+    }
+    closed = true;
+    if (signal !== undefined && abortHandler !== undefined) {
+      signal.removeEventListener("abort", abortHandler);
+    }
+    closeConnection(conn);
+  };
+
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      if (signal === undefined) {
+        return;
+      }
+      abortHandler = () => {
+        close();
+        controller.error(webFetchAbortReason(signal));
+      };
+      signal.addEventListener("abort", abortHandler, { once: true });
+    },
+    async pull(controller) {
+      try {
+        throwIfWebFetchAborted(signal);
+        if (isChunked) {
+          await pullChunkedBodyChunk({
+            conn,
+            signal,
+            controller,
+            close,
+            get buffered() {
+              return buffered;
+            },
+            set buffered(value) {
+              buffered = value;
+            },
+            get chunkBytesRemaining() {
+              return chunkBytesRemaining;
+            },
+            set chunkBytesRemaining(value) {
+              chunkBytesRemaining = value;
+            },
+          });
+          return;
+        }
+        if (contentLengthRemaining !== undefined) {
+          if (contentLengthRemaining <= 0) {
+            close();
+            controller.close();
+            return;
+          }
+          if (buffered.byteLength === 0) {
+            const chunk = await readConnChunk(conn, signal);
+            if (chunk === undefined) {
+              close();
+              controller.close();
+              return;
+            }
+            buffered = chunk;
+          }
+          const bytesToSend = Math.min(
+            buffered.byteLength,
+            contentLengthRemaining,
+          );
+          controller.enqueue(buffered.slice(0, bytesToSend));
+          buffered = buffered.slice(bytesToSend);
+          contentLengthRemaining -= bytesToSend;
+          return;
+        }
+        if (buffered.byteLength > 0) {
+          controller.enqueue(buffered);
+          buffered = new Uint8Array();
+          return;
+        }
+        const chunk = await readConnChunk(conn, signal);
+        if (chunk === undefined) {
+          close();
+          controller.close();
+          return;
+        }
+        controller.enqueue(chunk);
+      } catch (error) {
+        close();
+        controller.error(error);
+      }
+    },
+    cancel() {
+      close();
+    },
+  });
+};
+
+interface ChunkedBodyState {
+  conn: Deno.Conn;
+  signal?: AbortSignal;
+  controller: ReadableStreamDefaultController<Uint8Array>;
+  close: () => void;
+  buffered: WebFetchBytes;
+  chunkBytesRemaining: number;
+}
+
+const pullChunkedBodyChunk = async (
+  state: ChunkedBodyState,
+): Promise<void> => {
+  while (true) {
+    if (state.chunkBytesRemaining > 0) {
+      await fillBodyBuffer(state, 1);
+      const bytesToSend = Math.min(
+        state.buffered.byteLength,
+        state.chunkBytesRemaining,
+      );
+      const chunk = state.buffered.slice(0, bytesToSend);
+      state.buffered = state.buffered.slice(bytesToSend);
+      state.chunkBytesRemaining -= bytesToSend;
+      if (state.chunkBytesRemaining === 0) {
+        await fillBodyBuffer(state, 2);
+        if (state.buffered[0] !== 13 || state.buffered[1] !== 10) {
+          throw new Error("web_fetch received an invalid chunked response");
+        }
+        state.buffered = state.buffered.slice(2);
+      }
+      state.controller.enqueue(chunk);
+      return;
+    }
+    const line = await readChunkedLine(state);
+    const chunkSizeText = line.split(";", 1)[0]!.trim();
+    if (!/^[0-9a-f]+$/i.test(chunkSizeText)) {
+      throw new Error("web_fetch received an invalid chunked response");
+    }
+    const chunkSize = Number.parseInt(chunkSizeText, 16);
+    if (chunkSize === 0) {
+      await discardChunkedTrailers(state);
+      state.close();
+      state.controller.close();
+      return;
+    }
+    state.chunkBytesRemaining = chunkSize;
+  }
+};
+
+const readChunkedLine = async (state: ChunkedBodyState): Promise<string> => {
+  while (true) {
+    const lineEnd = findCrlf(state.buffered);
+    if (lineEnd !== -1) {
+      const line = new TextDecoder().decode(state.buffered.slice(0, lineEnd));
+      state.buffered = state.buffered.slice(lineEnd + 2);
+      return line;
+    }
+    await fillBodyBuffer(state, state.buffered.byteLength + 1);
+  }
+};
+
+const discardChunkedTrailers = async (
+  state: ChunkedBodyState,
+): Promise<void> => {
+  while (true) {
+    const line = await readChunkedLine(state);
+    if (line === "") {
+      return;
+    }
+  }
+};
+
+const fillBodyBuffer = async (
+  state: ChunkedBodyState,
+  minBytes: number,
+): Promise<void> => {
+  while (state.buffered.byteLength < minBytes) {
+    const chunk = await readConnChunk(state.conn, state.signal);
+    if (chunk === undefined) {
+      throw new Error("web_fetch response ended unexpectedly");
+    }
+    state.buffered = concatBytes(state.buffered, chunk);
+  }
+};
+
+const findCrlf = (bytes: WebFetchBytes): number => {
+  for (let index = 0; index <= bytes.byteLength - 2; index += 1) {
+    if (bytes[index] === 13 && bytes[index + 1] === 10) {
+      return index;
+    }
+  }
+  return -1;
+};
+
+const parseContentLength = (headers: Headers): number | undefined => {
+  const value = headers.get("content-length");
+  if (value === null) {
+    return undefined;
+  }
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
+};
+
+const readConnChunk = async (
+  conn: Deno.Conn,
+  signal?: AbortSignal,
+): Promise<WebFetchBytes | undefined> => {
+  throwIfWebFetchAborted(signal);
+  const buffer = new Uint8Array(16 * 1024);
+  try {
+    const bytesRead = await conn.read(buffer);
+    throwIfWebFetchAborted(signal);
+    return bytesRead === null ? undefined : buffer.slice(0, bytesRead);
+  } catch (error) {
+    if (signal?.aborted) {
+      throw webFetchAbortReason(signal);
+    }
+    throw error;
+  }
+};
+
+const writeAll = async (
+  conn: Deno.Conn,
+  bytes: WebFetchBytes,
+  signal?: AbortSignal,
+): Promise<void> => {
+  let offset = 0;
+  while (offset < bytes.byteLength) {
+    throwIfWebFetchAborted(signal);
+    offset += await conn.write(bytes.slice(offset));
+  }
+};
+
+const concatBytes = (
+  left: WebFetchBytes,
+  right: WebFetchBytes,
+): WebFetchBytes => {
+  const combined = new Uint8Array(left.byteLength + right.byteLength);
+  combined.set(left, 0);
+  combined.set(right, left.byteLength);
+  return combined;
+};
+
+const closeConnection = (conn: Deno.Conn): void => {
+  try {
+    conn.close();
+  } catch {
+    // The connection may already be closed by the peer or by abort cleanup.
+  }
+};
+
 const isIpv4Address = (value: string): boolean => {
   const octets = value.split(".").map((part) => Number(part));
   return octets.length === 4 &&
@@ -576,38 +1071,193 @@ const isIpv4Address = (value: string): boolean => {
 };
 
 const isBlockedIpv4Address = (value: string): boolean => {
-  if (!isIpv4Address(value)) {
+  const octets = parseIpv4Address(value);
+  if (octets === undefined) {
     return false;
   }
-  const [a, b] = value.split(".").map((part) => Number(part)) as [
-    number,
-    number,
-    number,
-    number,
-  ];
-  return a === 0 ||
-    a === 10 ||
-    a === 127 ||
-    (a === 169 && b === 254) ||
-    (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && b === 168);
+  return !isGloballyRoutableIpv4(octets);
+};
+
+const parseIpv4Address = (
+  value: string,
+): [number, number, number, number] | undefined => {
+  const octets = value.split(".").map((part) => Number(part));
+  if (
+    octets.length !== 4 ||
+    !octets.every((octet) =>
+      Number.isInteger(octet) && octet >= 0 && octet <= 255
+    )
+  ) {
+    return undefined;
+  }
+  return octets as [number, number, number, number];
+};
+
+const isGloballyRoutableIpv4 = (
+  [a, b, c, d]: [number, number, number, number],
+): boolean => {
+  if (a === 0) return false; // Current network.
+  if (a === 10) return false; // RFC 1918 private.
+  if (a === 100 && b >= 64 && b <= 127) return false; // CGNAT.
+  if (a === 127) return false; // Loopback.
+  if (a === 169 && b === 254) return false; // Link-local.
+  if (a === 172 && b >= 16 && b <= 31) return false; // RFC 1918 private.
+  if (a === 192 && b === 0 && c === 0) return false; // IETF protocol assignments.
+  if (a === 192 && b === 0 && c === 2) return false; // TEST-NET-1.
+  if (a === 192 && b === 88 && c === 99) return false; // Deprecated 6to4 relay anycast.
+  if (a === 192 && b === 168) return false; // RFC 1918 private.
+  if (a === 198 && (b === 18 || b === 19)) return false; // Benchmarking.
+  if (a === 198 && b === 51 && c === 100) return false; // TEST-NET-2.
+  if (a === 203 && b === 0 && c === 113) return false; // TEST-NET-3.
+  if (a >= 224) return false; // Multicast, reserved, broadcast.
+  return !(a === 255 && b === 255 && c === 255 && d === 255);
 };
 
 const isBlockedIpv6Address = (value: string): boolean => {
-  if (value === "::" || value === "::1") {
+  const bytes = parseIpv6Address(value);
+  if (bytes === undefined) {
+    return false;
+  }
+  return !isGloballyRoutableIpv6(bytes);
+};
+
+const isIpv6Address = (value: string): boolean =>
+  parseIpv6Address(value) !== undefined;
+
+const parseIpv6Address = (value: string): Uint8Array | undefined => {
+  const normalized = value.toLowerCase();
+  if (normalized === "") {
+    return undefined;
+  }
+  const doubleColon = normalized.match(/::/g) ?? [];
+  if (doubleColon.length > 1) {
+    return undefined;
+  }
+
+  let input = normalized;
+  const embeddedIpv4Match = /(^|:)(\d{1,3}(?:\.\d{1,3}){3})$/.exec(input);
+  if (embeddedIpv4Match !== null) {
+    const ipv4 = parseIpv4Address(embeddedIpv4Match[2]!);
+    if (ipv4 === undefined) {
+      return undefined;
+    }
+    const ipv4Hextets = [
+      ((ipv4[0] << 8) | ipv4[1]).toString(16),
+      ((ipv4[2] << 8) | ipv4[3]).toString(16),
+    ];
+    input = `${input.slice(0, embeddedIpv4Match.index + 1)}${
+      ipv4Hextets.join(":")
+    }`;
+  }
+
+  const hasCompression = input.includes("::");
+  const [headText, tailText = ""] = input.split("::", 2);
+  const head = headText === "" ? [] : headText.split(":");
+  const tail = tailText === "" ? [] : tailText.split(":");
+  if (
+    head.some((part) => part === "") ||
+    tail.some((part) => part === "")
+  ) {
+    return undefined;
+  }
+  const explicitParts = [...head, ...tail];
+  if (hasCompression) {
+    if (explicitParts.length >= 8) {
+      return undefined;
+    }
+  } else if (explicitParts.length !== 8) {
+    return undefined;
+  }
+  const missingParts = hasCompression ? 8 - explicitParts.length : 0;
+  const parts = [...head, ...Array(missingParts).fill("0"), ...tail];
+  const bytes = new Uint8Array(16);
+  for (let index = 0; index < parts.length; index += 1) {
+    const part = parts[index]!;
+    if (!/^[0-9a-f]{1,4}$/.test(part)) {
+      return undefined;
+    }
+    const value = Number.parseInt(part, 16);
+    bytes[index * 2] = value >> 8;
+    bytes[index * 2 + 1] = value & 0xff;
+  }
+  return bytes;
+};
+
+const isGloballyRoutableIpv6 = (bytes: Uint8Array): boolean => {
+  const mappedIpv4 = ipv4FromMappedIpv6(bytes) ??
+    ipv4FromNat64WellKnownPrefix(bytes);
+  if (mappedIpv4 !== undefined) {
+    return isGloballyRoutableIpv4(mappedIpv4);
+  }
+  if (bytes.every((byte) => byte === 0)) return false; // Unspecified.
+  if (bytes.slice(0, 15).every((byte) => byte === 0) && bytes[15] === 1) {
+    return false; // Loopback.
+  }
+  if ((bytes[0]! & 0xfe) === 0xfc) return false; // Unique local.
+  if (bytes[0] === 0xfe && (bytes[1]! & 0xc0) === 0x80) {
+    return false; // Link-local.
+  }
+  if (bytes[0] === 0xff) return false; // Multicast.
+  if (!((bytes[0]! & 0xe0) === 0x20)) {
+    return false; // Not global unicast 2000::/3.
+  }
+  if (hasIpv6Prefix(bytes, [0x20, 0x01, 0x0d, 0xb8], 32)) {
+    return false; // Documentation.
+  }
+  if (hasIpv6Prefix(bytes, [0x20, 0x02], 16)) {
+    return false; // Deprecated 6to4.
+  }
+  if (hasIpv6Prefix(bytes, [0x20, 0x01, 0x00, 0x00], 32)) {
+    return false; // Teredo.
+  }
+  if (hasIpv6Prefix(bytes, [0x20, 0x01, 0x00, 0x02], 48)) {
+    return false; // Benchmarking.
+  }
+  if (hasIpv6Prefix(bytes, [0x20, 0x01, 0x00, 0x10], 28)) {
+    return false; // ORCHID.
+  }
+  return true;
+};
+
+const ipv4FromMappedIpv6 = (
+  bytes: Uint8Array,
+): [number, number, number, number] | undefined => {
+  if (
+    bytes.slice(0, 10).every((byte) => byte === 0) &&
+    bytes[10] === 0xff &&
+    bytes[11] === 0xff
+  ) {
+    return [bytes[12]!, bytes[13]!, bytes[14]!, bytes[15]!];
+  }
+  return undefined;
+};
+
+const ipv4FromNat64WellKnownPrefix = (
+  bytes: Uint8Array,
+): [number, number, number, number] | undefined => {
+  if (hasIpv6Prefix(bytes, [0x00, 0x64, 0xff, 0x9b], 96)) {
+    return [bytes[12]!, bytes[13]!, bytes[14]!, bytes[15]!];
+  }
+  return undefined;
+};
+
+const hasIpv6Prefix = (
+  bytes: Uint8Array,
+  prefix: readonly number[],
+  bitLength: number,
+): boolean => {
+  const fullBytes = Math.floor(bitLength / 8);
+  for (let index = 0; index < fullBytes; index += 1) {
+    if (bytes[index] !== (prefix[index] ?? 0)) {
+      return false;
+    }
+  }
+  const remainingBits = bitLength % 8;
+  if (remainingBits === 0) {
     return true;
   }
-  const firstHextetText = value.split(":").find((part) => part !== "");
-  if (firstHextetText === undefined) {
-    return false;
-  }
-  const firstHextet = Number.parseInt(firstHextetText, 16);
-  if (!Number.isInteger(firstHextet)) {
-    return false;
-  }
-  return (firstHextet & 0xfe00) === 0xfc00 ||
-    (firstHextet & 0xffc0) === 0xfe80 ||
-    (firstHextet & 0xff00) === 0xff00;
+  const mask = 0xff << (8 - remainingBits) & 0xff;
+  return (bytes[fullBytes]! & mask) === ((prefix[fullBytes] ?? 0) & mask);
 };
 
 interface FetchWithRedirectsOptions {
@@ -642,16 +1292,29 @@ const fetchWithRedirects = async (
     redirectCount += 1
   ) {
     throwIfWebFetchAborted(options.signal);
-    const response = await options.fetchFn(currentUrl, {
-      method: "GET",
-      redirect: "manual",
-      signal: options.signal,
-      headers: {
-        Accept:
-          "text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.1",
-        "User-Agent": USER_AGENT,
-      },
-    });
+    let response: Response;
+    try {
+      response = await options.fetchFn(currentUrl, {
+        method: "GET",
+        redirect: "manual",
+        signal: options.signal,
+        headers: {
+          Accept:
+            "text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.1",
+          "User-Agent": USER_AGENT,
+        },
+      });
+    } catch (error) {
+      if (error instanceof WebFetchBlockedUrlError) {
+        return {
+          ok: false,
+          code: error.code,
+          message: error.message,
+          finalUrl: currentUrl,
+        };
+      }
+      throw error;
+    }
     const location = response.headers.get("location");
     if (
       response.status < 300 ||
@@ -666,6 +1329,7 @@ const fetchWithRedirects = async (
       };
     }
     if (redirectCount === MAX_REDIRECTS) {
+      await response.body?.cancel();
       return {
         ok: false,
         code: "too_many_redirects",
@@ -679,6 +1343,7 @@ const fetchWithRedirects = async (
       options.resolveHostAddresses,
     );
     if (!validation.ok) {
+      await response.body?.cancel();
       return {
         ok: false,
         code: validation.code === "invalid_url"
@@ -688,6 +1353,7 @@ const fetchWithRedirects = async (
         finalUrl: currentUrl,
       };
     }
+    await response.body?.cancel();
     redirects.push({
       status: response.status,
       url: currentUrl,
@@ -706,11 +1372,11 @@ const fetchWithRedirects = async (
 const createWebFetchAbortError = (): DOMException =>
   new DOMException("web_fetch timed out", "AbortError");
 
-const webFetchAbortReason = (signal: AbortSignal): unknown =>
-  signal.reason ?? createWebFetchAbortError();
+const webFetchAbortReason = (signal?: AbortSignal): unknown =>
+  signal?.reason ?? createWebFetchAbortError();
 
-const throwIfWebFetchAborted = (signal: AbortSignal): void => {
-  if (signal.aborted) {
+const throwIfWebFetchAborted = (signal?: AbortSignal): void => {
+  if (signal?.aborted) {
     throw webFetchAbortReason(signal);
   }
 };

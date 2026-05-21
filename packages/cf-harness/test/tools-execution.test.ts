@@ -502,6 +502,62 @@ Deno.test("web_fetch rejects DNS targets that resolve to private addresses befor
   });
 });
 
+Deno.test("web_fetch rejects DNS rebinding between validation and connect", async () => {
+  const resolutions = [["93.184.216.34"], ["10.0.0.7"]];
+  const tool = createWebFetchTool({
+    resolveHostAddresses: () =>
+      Promise.resolve(resolutions.shift() ?? ["93.184.216.34"]),
+  });
+  const context = createContext(new FakeSandboxRuntime());
+
+  const output = await tool.invoke(context, {
+    url: "https://rebind.example/private",
+  });
+
+  assertEquals(output, {
+    type: "cf-harness.web-fetch-error",
+    outputId: "run-1:web_fetch:1",
+    url: "https://rebind.example/private",
+    code: "blocked_url",
+    message:
+      "web_fetch host rebind.example resolved to private address 10.0.0.7 and is not allowed",
+    finalUrl: "https://rebind.example/private",
+    fetchedAt: "2026-05-01T17:54:00.000Z",
+  });
+});
+
+Deno.test("web_fetch rejects non-global IP literals before fetching", async () => {
+  const cases = [
+    "http://100.64.0.1/",
+    "http://192.0.2.1/",
+    "http://198.18.0.1/",
+    "http://224.0.0.1/",
+    "http://240.0.0.1/",
+    "http://[::ffff:7f00:1]/",
+    "http://[2001:db8::1]/",
+    "http://[64:ff9b::a00:1]/",
+  ];
+  for (const url of cases) {
+    const calls: string[] = [];
+    const tool = createWebFetchTool({
+      fetchFn: (input) => {
+        calls.push(String(input));
+        return Promise.resolve(new Response("should not fetch"));
+      },
+    });
+    const context = createContext(new FakeSandboxRuntime());
+
+    const output = await tool.invoke(context, { url });
+
+    assertEquals(calls, []);
+    if (output.type !== "cf-harness.web-fetch-error") {
+      throw new Error(`expected web_fetch error for ${url}`);
+    }
+    assertEquals(output.code, "blocked_url");
+    assertStringIncludes(output.message, "is private and is not allowed");
+  }
+});
+
 Deno.test("web_fetch rejects unsupported content types without returning the body", async () => {
   const tool = createWebFetchTool({
     resolveHostAddresses: resolvePublicTestHost,
