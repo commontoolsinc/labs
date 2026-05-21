@@ -27,6 +27,9 @@ import type { CFTabBarItem } from "./cf-tab-bar-item.ts";
  * @csspart bar - The nav pill surface containing the navigation items.
  * @csspart action - The wrapper around the action slot. Hidden when the slot is empty.
  *
+ * @cssprop --cf-tab-bar-footer-fade-background - Background color used by the footer-slot fade.
+ * @cssprop --cf-tab-bar-footer-fade-height - Height of the fade above a footer-slotted inset bar.
+ *
  * @example
  * const activeTab = cell("home");
  * <cf-tab-bar $value={activeTab}>
@@ -183,11 +186,32 @@ export class CFTabBar extends BaseElement {
             );
           }
 
+          :host([slot="footer"][variant="inset"][position="bottom"])::before {
+            content: "";
+            position: absolute;
+            left: 0;
+            right: 0;
+            top: calc(-1 * var(--cf-tab-bar-footer-fade-height, 5rem));
+            height: calc(100% + var(--cf-tab-bar-footer-fade-height, 5rem));
+            pointer-events: none;
+            z-index: 0;
+            background: linear-gradient(
+              to bottom,
+              transparent 0%,
+              var(--cf-tab-bar-footer-fade-background, rgb(240, 244, 248)) 72%
+            );
+          }
+
           :host([slot="footer"][variant="inset"][position="top"]) {
             top: auto;
             padding-top: calc(
               var(--cf-tab-bar-inset-margin, 1rem) + env(safe-area-inset-top, 0px)
             );
+          }
+
+          :host([slot="footer"][variant="inset"]) .container {
+            position: relative;
+            z-index: 1;
           }
 
           /* === Reduced Motion === */

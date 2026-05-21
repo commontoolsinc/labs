@@ -92,12 +92,17 @@ Deno.test("cf-screen reserves space for footer-slotted inset cf-tab-bar", async 
     assert(container);
     assertEquals(getComputedStyle(tabBar).position, "relative");
 
+    const fadeStyle = getComputedStyle(tabBar, "::before");
     const mainRect = main.getBoundingClientRect();
     const footerRect = footer.getBoundingClientRect();
     const tabBarRect = tabBar.getBoundingClientRect();
     const fixtureRect = fixture.getBoundingClientRect();
     const containerRect = container.getBoundingClientRect();
 
+    assertEquals(fadeStyle.content, '""');
+    assertEquals(fadeStyle.position, "absolute");
+    assert(fadeStyle.backgroundImage.includes("linear-gradient"));
+    assert(fadeStyle.backgroundImage.includes("rgb(240, 244, 248)"));
     assertAlmostEquals(tabBarRect.height, 80, 0.5);
     assertAlmostEquals(footerRect.height, 80, 0.5);
     assert(
