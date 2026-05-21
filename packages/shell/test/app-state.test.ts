@@ -3,8 +3,10 @@ import {
   applyCommand,
   AppState,
   AppStateSerialized,
+  appViewToUrlPath,
   deserialize,
   serialize,
+  urlToAppView,
 } from "@commonfabric/shell/shared";
 import { Identity, serializeKeyPairRaw } from "@commonfabric/identity";
 import { assert } from "@std/assert";
@@ -93,5 +95,19 @@ describe("AppState", () => {
     });
 
     assert(next.config.showShellPieceListView === false);
+  });
+
+  it("parses and serializes slug piece routes", () => {
+    assert(
+      JSON.stringify(urlToAppView(new URL("http://common.test/space/demo"))) ===
+        JSON.stringify({ spaceName: "space", pieceSlug: "demo" }),
+    );
+    assert(
+      JSON.stringify(
+        urlToAppView(new URL("http://common.test/space/fid1:abc")),
+      ) === JSON.stringify({ spaceName: "space", pieceId: "fid1:abc" }),
+    );
+    assert(appViewToUrlPath({ spaceName: "space", pieceSlug: "demo" }) ===
+      "/space/demo");
   });
 });

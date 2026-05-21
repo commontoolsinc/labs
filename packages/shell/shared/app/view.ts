@@ -1,16 +1,20 @@
 import { DID, isDID } from "@commonfabric/identity";
+import { isSlugAddress } from "@commonfabric/runner";
 
 export type AppBuiltInView = "home";
 
+export type PieceViewRef = {
+  pieceId?: string;
+  pieceSlug?: string;
+};
+
 export type AppView = {
   builtin: AppBuiltInView;
-} | {
+} | ({
   spaceName: string;
-  pieceId?: string;
-} | {
+} & PieceViewRef) | ({
   spaceDid: DID;
-  pieceId?: string;
-};
+} & PieceViewRef);
 
 export function isAppBuiltInView(view: unknown): view is AppBuiltInView {
   switch (view as AppBuiltInView) {
@@ -24,9 +28,12 @@ export function isAppView(view: unknown): view is AppView {
   if (!view || typeof view !== "object") return false;
   if ("builtin" in view) return isAppBuiltInView(view.builtin);
   if ("spaceName" in view) {
-    return typeof view.spaceName === "string" && !!view.spaceName;
+    return typeof view.spaceName === "string" && !!view.spaceName &&
+      !("pieceId" in view && "pieceSlug" in view);
   }
-  if ("spaceDid" in view) return isDID(view.spaceDid);
+  if ("spaceDid" in view) {
+    return isDID(view.spaceDid) && !("pieceId" in view && "pieceSlug" in view);
+  }
   return false;
 }
 
@@ -42,11 +49,15 @@ export function appViewToUrlPath(view: AppView): `/${string}` {
         return `/`;
     }
   } else if ("spaceName" in view) {
-    return "pieceId" in view
+    return "pieceSlug" in view && view.pieceSlug
+      ? `/${view.spaceName}/${view.pieceSlug}`
+      : "pieceId" in view
       ? `/${view.spaceName}/${view.pieceId}`
       : `/${view.spaceName}`;
   } else if ("spaceDid" in view) {
-    return "pieceId" in view
+    return "pieceSlug" in view && view.pieceSlug
+      ? `/${view.spaceDid}/${view.pieceSlug}`
+      : "pieceId" in view
       ? `/${view.spaceDid}/${view.pieceId}`
       : `/${view.spaceDid}`;
   }
@@ -62,8 +73,14 @@ export function urlToAppView(url: URL): AppView {
     return { builtin: "home" };
   }
   if (isDID(first)) {
-    return pieceId ? { spaceDid: first, pieceId } : { spaceDid: first };
+    if (!pieceId) return { spaceDid: first };
+    return isSlugAddress(pieceId)
+      ? { spaceDid: first, pieceSlug: pieceId }
+      : { spaceDid: first, pieceId };
   } else {
-    return pieceId ? { spaceName: first, pieceId } : { spaceName: first };
+    if (!pieceId) return { spaceName: first };
+    return isSlugAddress(pieceId)
+      ? { spaceName: first, pieceSlug: pieceId }
+      : { spaceName: first, pieceId };
   }
 }
