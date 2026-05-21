@@ -1,7 +1,11 @@
-import { FabricInstance, FabricValue } from "./interface.ts";
+import { FabricInstance, FabricPrimitive, FabricValue } from "./interface.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
-import { isDeepFrozenFabricValue } from "./deep-freeze.ts";
-import { type Immutable, isPlainContainer } from "@commonfabric/utils/types";
+import { isDeepFrozen, isDeepFrozenFabricValue } from "./deep-freeze.ts";
+import {
+  type Immutable,
+  isPlainContainer,
+  isPlainObject,
+} from "@commonfabric/utils/types";
 import { toDebugKindString } from "./value-debug.ts";
 import { isArrayIndexPropertyName } from "./array-utils.ts";
 
@@ -540,4 +544,107 @@ function createMissingContainer(
  */
 function isMutableHandle(value: unknown): boolean {
   return isPlainContainer(value) || value instanceof FabricInstance;
+}
+
+// =============================================================================
+// `cloneForIsolation`
+// =============================================================================
+
+/**
+ * Produces a deep clone of `value` that is isolated from later mutations to
+ * the source, with one targeted optimization: already-deep-frozen subtrees
+ * are preserved by identity rather than re-cloned. This makes the dominant
+ * "everything is already deep-frozen" case (common in modern data model,
+ * where the storage layer hands back deep-frozen values) an O(1)
+ * cache-lookup-and-return; partially-frozen trees only copy their mutable
+ * portions.
+ *
+ * Dispatch:
+ *
+ * - Primitives are returned as-is.
+ * - Already-deep-frozen values (per `isDeepFrozen`, which uses the
+ *   `[IS_DEEP_FROZEN]` protocol for `FabricInstance`) are returned by
+ *   identity at any level of the recursion. This is the perf
+ *   optimization the simpler `cloneIfNecessary(_, { frozen: false })`
+ *   doesn't have (it `force: true`s a full deep clone).
+ * - `FabricPrimitive` instances are returned as-is (immutable by
+ *   construction; their frozenness is irrelevant).
+ * - `FabricInstance` instances are deep-cloned via `.deepClone(false)`
+ *   (whose own semantics govern any nested values inside the wrapper).
+ * - Plain objects and arrays are deep-cloned recursively, with cycle
+ *   detection.
+ * - Any other class instance is a `FabricValue` type violation upstream;
+ *   the function throws.
+ *
+ * Result mutability: the returned tree is mutable along any path that
+ * wasn't already deep-frozen in the input; deep-frozen subtrees inside
+ * the result remain frozen by reference. Callers that need a uniformly
+ * mutable result should use `cloneIfNecessary(value, { frozen: false })`.
+ *
+ * Intended use: snapshotting and write-isolation paths where the goal is
+ * "the result is independent of any subsequent mutation to the source"
+ * but the caller doesn't itself mutate the result. (The storage layer's
+ * read freezing and patch-intent recording are the canonical consumers.)
+ */
+export function cloneForIsolation<T extends FabricValue>(value: T): T {
+  return cloneForIsolationHelper(value, new Map()) as T;
+}
+
+function cloneForIsolationHelper(
+  value: FabricValue,
+  seen: Map<object, FabricValue>,
+): FabricValue {
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+
+  // Optimization: already-deep-frozen subtrees are immutable, so the
+  // source reference is safe to share with the caller.
+  if (isDeepFrozen(value)) {
+    return value;
+  }
+
+  const cached = seen.get(value);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  if (Array.isArray(value)) {
+    const copy: FabricValue[] = new Array(value.length);
+    seen.set(value, copy);
+    for (let i = 0; i < value.length; i++) {
+      if (i in value) {
+        copy[i] = cloneForIsolationHelper(value[i], seen);
+      }
+    }
+    return copy;
+  }
+
+  if (isPlainObject(value)) {
+    // Preserve null prototypes (e.g. `Object.create(null)`).
+    const proto = Object.getPrototypeOf(value);
+    const copy = Object.create(proto) as Record<PropertyKey, FabricValue>;
+    seen.set(value, copy);
+    const obj = value as Record<PropertyKey, FabricValue>;
+    for (const key of Reflect.ownKeys(obj)) {
+      copy[key] = cloneForIsolationHelper(obj[key], seen);
+    }
+    return copy;
+  }
+
+  // The only legal non-plain-prototype values inside a FabricValue are
+  // FabricPrimitive (immutable by construction; return as-is) and
+  // FabricInstance (delegate to its own clone protocol).
+  if (value instanceof FabricPrimitive) {
+    return value;
+  }
+  if (value instanceof FabricInstance) {
+    return (value as FabricInstance).deepClone(false) as FabricValue;
+  }
+
+  throw new Error(
+    `cloneForIsolation: unexpected non-FabricValue (${
+      toDebugKindString(value)
+    })`,
+  );
 }
