@@ -1,9 +1,17 @@
 /**
+ * Type definitions for SHA-256 hashing: the incremental hasher interface
+ * and the all-at-once digest function type used by the package.
+ */
+
+/**
  * Incremental hasher. Feed data via `update()`, finalize with
  * `digest()`. A hasher must not be reused after `digest()` is called.
  */
 export interface IncrementalHasher {
-  /** Feeds the given data into the hasher. Must not be called after `digest()`. */
+  /**
+   * Feeds the given data into the hasher. Must not be called after
+   * `digest()`.
+   */
   update(data: Uint8Array): void;
 
   /** Finalizes the hash and returns the digest as a `Uint8Array`. */
