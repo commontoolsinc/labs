@@ -14,7 +14,13 @@
  *
  * NOTE: Uses .filter(() => true).length for array lengths per reactivity tracking note.
  */
-import { action, computed, pattern, safeDateNow } from "commonfabric";
+import { action, computed, pattern, safeDateNow, UI } from "commonfabric";
+import {
+  findNodeById,
+  findNodeByProp,
+  nodeIncludesText,
+  propValue,
+} from "../../test-ui-helpers.ts";
 import ParkingCoordinator, { DEFAULT_SPOTS } from "./main.tsx";
 import type { ParkingSpot, Person, SpotRequest } from "./main.tsx";
 
@@ -527,13 +533,79 @@ export default pattern(() => {
   );
 
   const assert_s8_admin_off = computed(() => s8.adminMode === false);
+  const assert_s8_admin_view_locked = computed(() => {
+    const adminAccess = findNodeById(s8[UI], "parking-admin-access");
+    const enableManager = findNodeById(
+      s8[UI],
+      "parking-enable-admin-manager",
+    );
+    const adminToggle = findNodeById(s8[UI], "parking-admin-mode-toggle");
+    const aliceAdminToggle = findNodeByProp(
+      s8[UI],
+      "data-parking-admin-toggle",
+      "Alice",
+    );
+    return nodeIncludesText(adminAccess, "Cannot manage admins") &&
+      nodeIncludesText(aliceAdminToggle, "Make admin") &&
+      propValue(enableManager, "disabled") === false &&
+      propValue(aliceAdminToggle, "disabled") === true &&
+      propValue(adminToggle, "disabled") === true &&
+      findNodeById(s8[UI], "parking-admin-people-section") === undefined;
+  });
   const assert_s8_can_manage_admins = computed(() =>
     s8.currentUserCanManageAdmins === true
   );
+  const assert_s8_admin_view_manager_enabled = computed(() => {
+    const adminAccess = findNodeById(s8[UI], "parking-admin-access");
+    const enableManager = findNodeById(
+      s8[UI],
+      "parking-enable-admin-manager",
+    );
+    const aliceAdminToggle = findNodeByProp(
+      s8[UI],
+      "data-parking-admin-toggle",
+      "Alice",
+    );
+    return nodeIncludesText(adminAccess, "Can manage admins") &&
+      nodeIncludesText(aliceAdminToggle, "Make admin") &&
+      propValue(enableManager, "disabled") === true &&
+      propValue(aliceAdminToggle, "disabled") === false;
+  });
   const assert_s8_alice_is_admin = computed(() =>
     s8.currentPersonIsAdmin === true
   );
+  const assert_s8_admin_view_alice_admin = computed(() => {
+    const adminToggle = findNodeById(s8[UI], "parking-admin-mode-toggle");
+    const aliceRow = findNodeByProp(
+      s8[UI],
+      "data-parking-admin-row",
+      "Alice",
+    );
+    const aliceAdminToggle = findNodeByProp(
+      s8[UI],
+      "data-parking-admin-toggle",
+      "Alice",
+    );
+    return nodeIncludesText(aliceRow, "Admin") &&
+      nodeIncludesText(aliceAdminToggle, "Remove admin") &&
+      propValue(adminToggle, "disabled") === false &&
+      nodeIncludesText(adminToggle, "Admin: OFF");
+  });
   const assert_s8_admin_on = computed(() => s8.adminMode === true);
+  const assert_s8_admin_view_admin_mode_visible = computed(() =>
+    nodeIncludesText(
+      findNodeById(s8[UI], "parking-admin-mode-toggle"),
+      "Admin: ON",
+    ) &&
+    nodeIncludesText(
+      findNodeById(s8[UI], "parking-admin-people-section"),
+      "People",
+    ) &&
+    nodeIncludesText(
+      findNodeById(s8[UI], "parking-admin-add-person-open"),
+      "+ Add Person",
+    )
+  );
 
   // ============================================================
   // Test sequence
@@ -626,14 +698,18 @@ export default pattern(() => {
 
       // Admin mode toggle
       { assertion: assert_s8_admin_off },
+      { assertion: assert_s8_admin_view_locked },
       { action: action_toggle_admin },
       { assertion: assert_s8_admin_off },
       { action: action_enable_s8_admin_manager },
       { assertion: assert_s8_can_manage_admins },
+      { assertion: assert_s8_admin_view_manager_enabled },
       { action: action_make_alice_mode_admin },
       { assertion: assert_s8_alice_is_admin },
+      { assertion: assert_s8_admin_view_alice_admin },
       { action: action_toggle_admin },
       { assertion: assert_s8_admin_on },
+      { assertion: assert_s8_admin_view_admin_mode_visible },
       { action: action_toggle_admin },
       { assertion: assert_s8_admin_off },
     ],
