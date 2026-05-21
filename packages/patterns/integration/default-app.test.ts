@@ -46,8 +46,10 @@ type BrowserTriggerTraceEntry = {
 };
 
 const { FRONTEND_URL, SPACE_NAME } = env;
-const HOME_RELOAD_ACTION_RUN_LIMIT = 20;
-const NOTEBOOK_RELOAD_ACTION_RUN_LIMIT = 30;
+const HOME_RELOAD_TOTAL_ACTION_RUN_LIMIT = 40;
+const HOME_RELOAD_COMPUTATION_RUN_LIMIT = 5;
+const NOTEBOOK_RELOAD_TOTAL_ACTION_RUN_LIMIT = 40;
+const NOTEBOOK_RELOAD_COMPUTATION_RUN_LIMIT = 10;
 
 export function parseCaptureSeriesCount(raw: string | undefined): number {
   if (!raw) return 0;
@@ -588,8 +590,19 @@ describe("default-app flow test", () => {
       "Expected reload summary to include action run count",
     );
     assert(
-      reloadActionRunCount <= HOME_RELOAD_ACTION_RUN_LIMIT,
-      `Expected second reload to reuse persisted scheduler state with <= ${HOME_RELOAD_ACTION_RUN_LIMIT} action runs, saw ${reloadActionRunCount}`,
+      reloadActionRunCount <= HOME_RELOAD_TOTAL_ACTION_RUN_LIMIT,
+      `Expected second reload to stay within <= ${HOME_RELOAD_TOTAL_ACTION_RUN_LIMIT} total action runs, saw ${reloadActionRunCount}`,
+    );
+    const reloadComputationRunCount = computationRunCountFromHomeLoadSummary(
+      reloadSummary,
+    );
+    assert(
+      reloadComputationRunCount !== undefined,
+      "Expected reload summary to include computation run count",
+    );
+    assert(
+      reloadComputationRunCount <= HOME_RELOAD_COMPUTATION_RUN_LIMIT,
+      `Expected second reload to reuse persisted scheduler state with <= ${HOME_RELOAD_COMPUTATION_RUN_LIMIT} computation runs, saw ${reloadComputationRunCount}`,
     );
 
     if (actionRunSeries.length > 0) {
@@ -768,8 +781,19 @@ describe("default-app flow test", () => {
       "Expected notebook reload summary to include action run count",
     );
     assert(
-      reloadActionRunCount <= NOTEBOOK_RELOAD_ACTION_RUN_LIMIT,
-      `Expected notebook reload to reuse persisted scheduler state with <= ${NOTEBOOK_RELOAD_ACTION_RUN_LIMIT} action runs, saw ${reloadActionRunCount}`,
+      reloadActionRunCount <= NOTEBOOK_RELOAD_TOTAL_ACTION_RUN_LIMIT,
+      `Expected notebook reload to stay within <= ${NOTEBOOK_RELOAD_TOTAL_ACTION_RUN_LIMIT} total action runs, saw ${reloadActionRunCount}`,
+    );
+    const reloadComputationRunCount = computationRunCountFromHomeLoadSummary(
+      notebookReloadSummary,
+    );
+    assert(
+      reloadComputationRunCount !== undefined,
+      "Expected notebook reload summary to include computation run count",
+    );
+    assert(
+      reloadComputationRunCount <= NOTEBOOK_RELOAD_COMPUTATION_RUN_LIMIT,
+      `Expected notebook reload to reuse persisted scheduler state with <= ${NOTEBOOK_RELOAD_COMPUTATION_RUN_LIMIT} computation runs, saw ${reloadComputationRunCount}`,
     );
   });
 });
@@ -1757,6 +1781,18 @@ function actionRunCountFromHomeLoadSummary(
   if (!summary || typeof summary !== "object") return undefined;
   const graph = (summary as { graph?: { actionRuns?: unknown } }).graph;
   return typeof graph?.actionRuns === "number" ? graph.actionRuns : undefined;
+}
+
+function computationRunCountFromHomeLoadSummary(
+  summary: unknown,
+): number | undefined {
+  if (!summary || typeof summary !== "object") return undefined;
+  const graph = (summary as {
+    graph?: { computationRunsFromStats?: unknown };
+  }).graph;
+  return typeof graph?.computationRunsFromStats === "number"
+    ? graph.computationRunsFromStats
+    : undefined;
 }
 
 async function collectHomeLoadSummaryFromFreshPage(
