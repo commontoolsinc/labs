@@ -27,24 +27,46 @@ export async function assignSlug(
   piece: Cell<unknown>,
   slug: string,
 ): Promise<void> {
+  await setSlugLink(manager, slug, piece, { writeTargetMetadata: true });
+}
+
+export async function setSlugLink(
+  manager: PieceManager,
+  slug: string,
+  source: Cell<unknown>,
+  options?: {
+    resolveBeforeLinking?: boolean;
+    writeTargetMetadata?: boolean;
+  },
+): Promise<void> {
   const validSlug = validateSlug(slug);
+  const target = options?.resolveBeforeLinking
+    ? source.resolveAsCell()
+    : source;
+  await target.sync();
+
   const slugCell = manager.runtime.getCellFromEntityId(
     manager.getSpace(),
     { "/": slugIdForSpace(manager.getSpace(), validSlug) },
   );
 
   await manager.runtime.editWithRetry((tx) => {
-    const pieceWithTx = piece.withTx(tx);
+    const targetWithTx = target.withTx(tx);
     const slugWithTx = slugCell.withTx(tx);
-    const pieceLink = pieceWithTx.getAsNormalizedFullLink();
+    const targetLink = targetWithTx.getAsNormalizedFullLink();
     const slugLink = slugWithTx.getAsNormalizedFullLink();
 
-    tx.writeOrThrow({
-      space: pieceLink.space,
-      id: pieceLink.id,
-      scope: pieceLink.scope,
-      path: ["slug"],
-    }, validSlug);
+    if (
+      options?.writeTargetMetadata &&
+      (!targetLink.path || targetLink.path.length === 0)
+    ) {
+      tx.writeOrThrow({
+        space: targetLink.space,
+        id: targetLink.id,
+        scope: targetLink.scope,
+        path: ["slug"],
+      }, validSlug);
+    }
     tx.writeOrThrow({
       space: slugLink.space,
       id: slugLink.id,
@@ -52,7 +74,7 @@ export async function assignSlug(
       path: ["slug"],
     }, validSlug);
     slugWithTx.setRawUntyped(
-      pieceWithTx.getAsWriteRedirectLink({ base: slugWithTx }),
+      targetWithTx.getAsWriteRedirectLink({ base: slugWithTx }),
     );
   });
 

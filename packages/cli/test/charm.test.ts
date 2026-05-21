@@ -309,6 +309,15 @@ describe("cli piece parsing", () => {
     expect(stripAnsi(stdout.join("\n"))).toContain("--slug");
   });
 
+  it("shows set-slug command options", async () => {
+    const { code, stdout, stderr } = await cf("piece set-slug --help");
+    checkStderr(stderr);
+    const output = stripAnsi(stdout.join("\n"));
+    expect(code).toBe(0);
+    expect(output).toContain("Set a slug redirect");
+    expect(output).toContain("--resolve-before-linking");
+  });
+
   it("resolves slug piece config through storage", async () => {
     const manager = {};
     const resolved = await resolvePieceConfig({
@@ -361,8 +370,22 @@ describe("cli piece parsing", () => {
         Promise.reject(
           new SlugResolutionError(`Slug "${token}" not found.`, "missing"),
         ),
+      { allowMissingSlugFallback: true },
     );
 
     expect(resolved).toBe(token);
+  });
+
+  it("rejects missing destination slug endpoints", async () => {
+    const manager = {};
+    const token = "demo";
+    await expect(resolveLinkEndpointAddress(
+      manager as any,
+      token,
+      () =>
+        Promise.reject(
+          new SlugResolutionError(`Slug "${token}" not found.`, "missing"),
+        ),
+    )).rejects.toThrow(/Slug "demo" not found/);
   });
 });

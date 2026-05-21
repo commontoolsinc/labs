@@ -16,6 +16,7 @@ import {
   pieceId,
   PieceManager,
   resolvePieceAddress as resolveStoredPieceAddress,
+  setSlugLink,
   SlugResolutionError,
 } from "@commonfabric/piece";
 import { PiecesController } from "@commonfabric/piece/ops";
@@ -285,11 +286,16 @@ export async function resolveLinkEndpointAddress(
   token: string,
   resolver: PieceResolutionDeps["resolvePieceAddress"] =
     resolveStoredPieceAddress,
+  options?: { allowMissingSlugFallback?: boolean },
 ): Promise<string> {
   try {
     return await resolver(manager, token);
   } catch (error) {
-    if (error instanceof SlugResolutionError && error.code === "missing") {
+    if (
+      options?.allowMissingSlugFallback &&
+      error instanceof SlugResolutionError &&
+      error.code === "missing"
+    ) {
       return token;
     }
     throw error;
@@ -364,6 +370,56 @@ export async function newPiece(
   );
 
   return piece.id;
+}
+
+export async function setPieceSlug(
+  config: SpaceConfig,
+  slug: string,
+  sourcePieceId: string,
+  sourcePath: (string | number)[],
+  options?: {
+    sourceScope?: PieceConfig["pieceScope"];
+    resolveBeforeLinking?: boolean;
+  },
+): Promise<void> {
+  const manager = await timeCliPhase(
+    "setPieceSlug.loadManager",
+    () => loadManager(config),
+  );
+  const resolvedSourcePieceId = await timeCliPhase(
+    "setPieceSlug.resolveSource",
+    () => resolveStoredPieceAddress(manager, sourcePieceId),
+  );
+  const source = sourcePath.length === 0
+    ? manager.runtime.getCellFromEntityId(
+      manager.getSpace(),
+      { "/": resolvedSourcePieceId },
+      [],
+      undefined,
+      undefined,
+      options?.sourceScope,
+    )
+    : (await timeCliPhase(
+      "setPieceSlug.getSourcePiece",
+      () => {
+        const pieces = new PiecesController(manager);
+        return pieces.get(
+          resolvedSourcePieceId,
+          false,
+          undefined,
+          options?.sourceScope,
+        );
+      },
+    )).getCell().key(...sourcePath);
+  await timeCliPhase("setPieceSlug.source.sync", () => source.sync());
+  await timeCliPhase(
+    "setPieceSlug.setSlugLink",
+    () =>
+      setSlugLink(manager, slug, source, {
+        resolveBeforeLinking: options?.resolveBeforeLinking,
+        writeTargetMetadata: sourcePath.length === 0,
+      }),
+  );
 }
 
 export async function setPiecePattern(
@@ -663,7 +719,10 @@ export async function linkPieces(
   const pieces = new PiecesController(manager);
   const resolvedSourcePieceId = await timeCliPhase(
     "linkPieces.resolveSource",
-    () => resolveLinkEndpointAddress(manager, sourcePieceId),
+    () =>
+      resolveLinkEndpointAddress(manager, sourcePieceId, undefined, {
+        allowMissingSlugFallback: true,
+      }),
   );
   const resolvedTargetPieceId = await timeCliPhase(
     "linkPieces.resolveTarget",

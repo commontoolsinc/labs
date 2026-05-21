@@ -254,6 +254,14 @@ run_piece_links() {
 
   echo "Testing piece link..."
 
+  cf piece set-slug $SPACE_ARGS counter-alias $PIECE_ID
+
+  cf piece get $SPACE_ARGS --piece counter-alias value > /dev/null
+
+  cf piece set-slug $SPACE_ARGS resolved-counter counter-alias --resolve-before-linking
+
+  cf piece get $SPACE_ARGS --piece resolved-counter value > /dev/null
+
   # Create a second piece from the same pattern
   PIECE_ID2=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS $PATTERN_SRC)
   echo "Created second piece: $PIECE_ID2"
@@ -280,6 +288,12 @@ run_piece_links() {
 
   # Link piece1's output value to piece2's input value
   cf piece link $SPACE_ARGS $PIECE_ID/value $PIECE_ID2/value
+
+  # Linking to a missing destination slug should fail instead of treating it
+  # as an invented target piece ID.
+  if cf piece link $SPACE_ARGS $PIECE_ID/value missing-destination-slug/value 2>/dev/null; then
+    error "Linking to missing destination slug should have failed"
+  fi
 
   # Read back piece2's input value - should be piece1's output value (10)
   RESULT=$(cf piece get $SPACE_ARGS --piece $PIECE_ID2 value --input)

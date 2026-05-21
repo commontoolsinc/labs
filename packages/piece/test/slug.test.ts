@@ -4,9 +4,10 @@ import { createSession, Identity } from "@commonfabric/identity";
 import { Runtime, type URI } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createBuilder } from "../../runner/src/builder/factory.ts";
+import { parseLink } from "../../runner/src/link-utils.ts";
 import { slugIdForSpace } from "../../runner/src/slugs.ts";
 import { pieceId, PieceManager } from "../src/manager.ts";
-import { assignSlug, resolvePieceAddress } from "../src/slugs.ts";
+import { assignSlug, resolvePieceAddress, setSlugLink } from "../src/slugs.ts";
 
 const signer = await Identity.fromPassphrase("piece slug tests");
 
@@ -61,6 +62,44 @@ describe("piece slugs", () => {
     expect(readRootMeta(id, "slug")).toBe("demo");
     expect(readRootMeta(slugId, "slug")).toBe("demo");
     expect(await resolvePieceAddress(manager, "demo")).toBe(id);
+  });
+
+  it("sets slug redirects to arbitrary cell links", async () => {
+    const piece = await createPiece("slug-link-target");
+    const slugId = slugIdForSpace(manager.getSpace(), "value-link");
+    const slugCell = runtime.getCellFromEntityId(manager.getSpace(), {
+      "/": slugId,
+    });
+
+    await setSlugLink(manager, "value-link", piece.key("value"));
+
+    await slugCell.sync();
+    const link = parseLink(slugCell.getRaw(), slugCell);
+    expect(link?.overwrite).toBe("redirect");
+    expect(link?.id).toBe(`of:${pieceId(piece)}`);
+    expect(link?.path).toEqual(["value"]);
+    expect(readRootMeta(slugId, "slug")).toBe("value-link");
+  });
+
+  it("can resolve source links before setting a slug redirect", async () => {
+    const piece = await createPiece("slug-resolved-link-target");
+    await setSlugLink(manager, "first-link", piece);
+
+    const firstSlugCell = runtime.getCellFromEntityId(manager.getSpace(), {
+      "/": slugIdForSpace(manager.getSpace(), "first-link"),
+    });
+    const secondSlugCell = runtime.getCellFromEntityId(manager.getSpace(), {
+      "/": slugIdForSpace(manager.getSpace(), "second-link"),
+    });
+
+    await setSlugLink(manager, "second-link", firstSlugCell, {
+      resolveBeforeLinking: true,
+    });
+
+    await secondSlugCell.sync();
+    const link = parseLink(secondSlugCell.getRaw(), secondSlugCell);
+    expect(link?.overwrite).toBe("redirect");
+    expect(link?.id).toBe(`of:${pieceId(piece)}`);
   });
 
   it("preserves URI-shaped piece addresses", async () => {
