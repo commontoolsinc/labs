@@ -2,7 +2,7 @@ import { css, html } from "lit";
 import { property, state } from "lit/decorators.js";
 import { BaseView, createDefaultAppState } from "./BaseView.ts";
 import { KeyStore } from "@commonfabric/identity";
-import { slugIdForSpace, validateSlug } from "@commonfabric/runner";
+import { slugIdForSpace, validateSlug } from "@commonfabric/runner/slugs";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import { DebuggerController } from "../lib/debugger-controller.ts";
 import { Task, TaskStatus } from "@lit/task";

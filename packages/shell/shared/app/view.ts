@@ -1,5 +1,5 @@
 import { DID, isDID } from "@commonfabric/identity";
-import { isSlugAddress } from "@commonfabric/runner";
+import { isSlugAddress } from "@commonfabric/runner/slugs";
 
 export type AppBuiltInView = "home";
 
@@ -8,13 +8,16 @@ export type PieceViewRef = {
   pieceSlug?: string;
 };
 
-export type AppView = {
-  builtin: AppBuiltInView;
-} | ({
-  spaceName: string;
-} & PieceViewRef) | ({
-  spaceDid: DID;
-} & PieceViewRef);
+export type AppView =
+  | {
+    builtin: AppBuiltInView;
+  }
+  | ({
+    spaceName: string;
+  } & PieceViewRef)
+  | ({
+    spaceDid: DID;
+  } & PieceViewRef);
 
 export function isAppBuiltInView(view: unknown): view is AppBuiltInView {
   switch (view as AppBuiltInView) {

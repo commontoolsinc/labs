@@ -1,5 +1,5 @@
 import type { MemorySpace } from "@commonfabric/memory/interface";
-import { createRef } from "./create-ref.ts";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 
 export interface SlugCause {
   space: MemorySpace;
@@ -28,7 +28,7 @@ export function slugCause(space: MemorySpace, slug: string): SlugCause {
 }
 
 export function slugIdForSpace(space: MemorySpace, slug: string): string {
-  const id = createRef({}, slugCause(space, slug)).toJSON?.()["/"];
+  const id = hashOf({ causal: slugCause(space, slug) }).toJSON?.()["/"];
   if (typeof id !== "string") {
     throw new Error("Could not derive slug id.");
   }
