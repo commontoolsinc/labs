@@ -495,7 +495,7 @@ export { value };
     });
     assertStringIncludes(
       enabledByDefault["/main.ts"]!,
-      "__cfHelpers.derive(",
+      "__cfHelpers.lift(",
     );
 
     const disabled = await transformFiles({
@@ -503,7 +503,7 @@ export { value };
     });
 
     assertStringIncludes(disabled["/main.ts"]!, "computed(() => 1)");
-    assertNotMatch(disabled["/main.ts"]!, /__cfHelpers\.derive/);
+    assertNotMatch(disabled["/main.ts"]!, /__cfHelpers\.lift/);
   });
 
   it("wraps top-level data candidates with __cfHelpers.__cf_data", async () => {

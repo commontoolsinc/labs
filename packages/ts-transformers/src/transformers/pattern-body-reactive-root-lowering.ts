@@ -950,7 +950,18 @@ function rewriteNestedDeriveCallbackBodies(
     );
     if (!deriveArgs) return visited;
     const { callback: callbackArg } = deriveArgs;
-    const callbackIndex = visited.arguments.indexOf(callbackArg);
+
+    // The callback can live on either the outer call (legacy derive shape:
+    // derive(input, cb)) or the inner call (lift-applied shape:
+    // lift(cb)(input)). Detect which by searching both argument lists.
+    const isLiftAppliedShape = ts.isCallExpression(visited.expression);
+    const innerCall = isLiftAppliedShape
+      ? (visited.expression as ts.CallExpression)
+      : undefined;
+    const callbackHostArgs = innerCall
+      ? innerCall.arguments
+      : visited.arguments;
+    const callbackIndex = callbackHostArgs.indexOf(callbackArg);
 
     let processedBody = rewriteNestedDeriveCallbackBodies(
       callbackArg.body,
@@ -1000,6 +1011,23 @@ function rewriteNestedDeriveCallbackBodies(
         callbackArg.type,
         processedBody as ts.Block,
       );
+
+    if (innerCall) {
+      const newInnerArgs = [...innerCall.arguments];
+      newInnerArgs[callbackIndex] = newCallback;
+      const newInnerCall = context.factory.updateCallExpression(
+        innerCall,
+        innerCall.expression,
+        innerCall.typeArguments,
+        newInnerArgs,
+      );
+      return context.factory.updateCallExpression(
+        visited,
+        newInnerCall,
+        visited.typeArguments,
+        visited.arguments,
+      );
+    }
 
     const args = [...visited.arguments];
     args[callbackIndex] = newCallback;

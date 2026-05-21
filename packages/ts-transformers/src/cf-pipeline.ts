@@ -17,7 +17,7 @@ import {
   WriteAuthorizedByValidationTransformer,
 } from "./transformers/mod.ts";
 import { ClosureTransformer } from "./closures/transformer.ts";
-import { ComputedTransformer } from "./computed/transformer.ts";
+import { LiftLoweringTransformer } from "./lift/transformer.ts";
 import {
   Pipeline,
   TransformationDiagnostic,
@@ -52,8 +52,8 @@ const CFC_TRANSFORMER_STAGE_SPECS: readonly TransformerStageSpec[] = [
     create: (options) => new JsxExpressionSiteRouterTransformer(options),
   },
   {
-    name: "ComputedTransformer",
-    create: (options) => new ComputedTransformer(options),
+    name: "LiftLoweringTransformer",
+    create: (options) => new LiftLoweringTransformer(options),
   },
   {
     name: "ClosureTransformer",

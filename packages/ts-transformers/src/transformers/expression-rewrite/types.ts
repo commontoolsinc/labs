@@ -32,7 +32,7 @@ export interface RewriteParams {
   /**
    * When true, reactive compute wrappers introduced during rewriting should be
    * emitted directly as derive() calls rather than computed() calls. This is
-   * needed for post-closure lowering passes that run after ComputedTransformer.
+   * needed for post-closure lowering passes that run after LiftLoweringTransformer.
    */
   readonly preferDeriveWrappers?: boolean;
 }

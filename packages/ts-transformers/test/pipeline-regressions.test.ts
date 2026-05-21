@@ -100,7 +100,7 @@ Deno.test(
       "OpaqueGetValidationTransformer",
       "PatternContextValidationTransformer",
       "JsxExpressionSiteRouterTransformer",
-      "ComputedTransformer",
+      "LiftLoweringTransformer",
       "ClosureTransformer",
       "PatternOwnedExpressionSiteLoweringTransformer",
       "HelperOwnedExpressionSiteLoweringTransformer",

@@ -2237,6 +2237,24 @@ function prependSchemaArguments(
     }
   }
 
+  // For the lift-applied shape (__cfHelpers.lift(cb)(input)), schemas must
+  // be prepended to the INNER lift call's arguments, not the outer applied
+  // call's. The outer call's input stays at index 0; the inner call gains
+  // [argSchema, resSchema, ...originalInnerArgs].
+  const innerCallee = node.expression;
+  if (ts.isCallExpression(innerCallee)) {
+    const rebuiltInner = context.factory.createCallExpression(
+      innerCallee.expression,
+      innerCallee.typeArguments,
+      [argSchemaCall, resSchemaCall, ...innerCallee.arguments],
+    );
+    return context.factory.createCallExpression(
+      rebuiltInner,
+      undefined,
+      node.arguments,
+    );
+  }
+
   return context.factory.createCallExpression(
     node.expression,
     undefined,
@@ -2278,6 +2296,28 @@ function resolveDeriveInputAndCallbackArgument(
   const callKind = detectCallKind(call, checker);
   if (callKind?.kind !== "derive") {
     return undefined;
+  }
+
+  // See getDeriveInputAndCallbackArgument in src/ast/call-kind.ts for the
+  // two recognized shapes (legacy derive vs lift-applied).
+  const innerCallee = call.expression;
+  if (ts.isCallExpression(innerCallee)) {
+    // Lift-applied: callback is the last arg of the inner lift call; input
+    // is the first arg of the outer applied call.
+    const innerCall = innerCallee;
+    const callbackIndex = innerCall.arguments.length - 1;
+    const callbackExpression = innerCall.arguments[callbackIndex];
+    const callback = callbackExpression
+      ? resolveFunctionLikeExpression(callbackExpression, checker, sourceFile)
+      : undefined;
+    if (!callback) {
+      return undefined;
+    }
+    const input = call.arguments[0];
+    if (!input) {
+      return undefined;
+    }
+    return { input, callback };
   }
 
   const callbackIndex = call.arguments.length - 1;

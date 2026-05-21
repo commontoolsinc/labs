@@ -166,7 +166,7 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema), {});
     }).for("fromLift", true);
-    const fromWish = __cfHelpers.derive({
+    const fromWish = __cfHelpers.lift({
         type: "object",
         properties: {}
     } as const satisfies __cfHelpers.JSONSchema, {
@@ -174,7 +174,7 @@ export default pattern((state) => {
         items: {
             type: "string"
         }
-    } as const satisfies __cfHelpers.JSONSchema, {}, __cfModuleCallback_1).for("fromWish", true);
+    } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({}).for("fromWish", true);
     const fromFiltered = __cfHelpers.derive({
         type: "object",
         properties: {

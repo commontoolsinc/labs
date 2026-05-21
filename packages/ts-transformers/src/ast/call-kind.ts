@@ -309,7 +309,13 @@ export function getCapabilitySummaryCallbackArgument(
 
   let callbackArg: ts.Expression | undefined;
   if (callKind.kind === "derive") {
-    callbackArg = call.arguments[call.arguments.length - 1];
+    // For lift-applied shape (lift(cb)(input)), the callback lives on the
+    // inner lift call. For legacy derive shape, on the outer call itself.
+    const innerCallee = stripWrappers(call.expression);
+    const argSource = ts.isCallExpression(innerCallee)
+      ? innerCallee.arguments
+      : call.arguments;
+    callbackArg = argSource[argSource.length - 1];
   } else if (
     callKind.kind === "builder" &&
     (
@@ -339,6 +345,35 @@ export function getDeriveInputAndCallbackArgument(
     return undefined;
   }
 
+  // Two shapes are recognized as kind:"derive":
+  //   (a) Legacy derive shape: __cfHelpers.derive(input, cb) or
+  //       __cfHelpers.derive(argSchema, resSchema, input, cb).
+  //   (b) Lift-applied shape: __cfHelpers.lift(cb)(input) or
+  //       __cfHelpers.lift(argSchema, resSchema, cb)(input).
+  // The lift-applied shape's outer call has the callee as a CallExpression.
+  const innerCallee = stripWrappers(call.expression);
+  if (ts.isCallExpression(innerCallee)) {
+    // Lift-applied: callback is the last arg of the inner lift call; input
+    // is the first arg of the outer applied call.
+    const innerCall = innerCallee;
+    const callbackIndex = innerCall.arguments.length - 1;
+    const callbackArg = innerCall.arguments[callbackIndex];
+    const callback = callbackArg
+      ? resolveCallbackFunctionExpression(callbackArg, checker)
+      : undefined;
+    if (!callback) {
+      return undefined;
+    }
+
+    const input = call.arguments[0];
+    if (!input) {
+      return undefined;
+    }
+
+    return { input, callback };
+  }
+
+  // Legacy derive shape.
   const callbackIndex = call.arguments.length - 1;
   const callbackArg = call.arguments[callbackIndex];
   const callback = callbackArg
@@ -1063,6 +1098,24 @@ function resolveExpressionKind(
     followFactoryResults: true,
   });
   if (builderKind) {
+    // Lift-applied recognition: when the callee is itself a call to lift
+    // (e.g. __cfHelpers.lift(cb)({})), the *outer* call applies the lift
+    // factory to inputs and is semantically equivalent to derive(input, cb).
+    // Return kind:"derive" so existing downstream dispatchers handle it.
+    //
+    // The plain unapplied builder case (e.g. __cfHelpers.lift(cb) on its
+    // own, or a pattern() call) has `target` not as a CallExpression.
+    if (
+      builderKind.builderName === "lift" &&
+      ts.isCallExpression(target)
+    ) {
+      const liftAppliedKind: CallKind = {
+        kind: "derive",
+        symbol: builderKind.symbol,
+      };
+      cache.set(expression, liftAppliedKind);
+      return liftAppliedKind;
+    }
     cache.set(expression, builderKind);
     return builderKind;
   }

@@ -26,7 +26,7 @@ type Question = {
 //   with asOpaque: true for the topQuestion capture.
 export default pattern((_) => {
     // This computed can return null - simulates finding a question from a list
-    const topQuestion = __cfHelpers.derive({
+    const topQuestion = __cfHelpers.lift({
         type: "object",
         properties: {}
     } as const satisfies __cfHelpers.JSONSchema, {
@@ -52,10 +52,10 @@ export default pattern((_) => {
                 required: ["question", "category", "priority"]
             }
         }
-    } as const satisfies __cfHelpers.JSONSchema, {}, (): Question | null => {
+    } as const satisfies __cfHelpers.JSONSchema, (): Question | null => {
         // In real code this would filter and return first match, or null
         return null;
-    }).for("topQuestion", true);
+    })({}).for("topQuestion", true);
     return {
         [NAME]: "Computed Nullable Optional Chain",
         [UI]: (<div>
