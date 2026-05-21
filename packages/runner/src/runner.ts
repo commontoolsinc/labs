@@ -1979,6 +1979,50 @@ export class Runner {
     return dedupeNormalizedLinks(targets);
   }
 
+  private populateDeclaredSchedulerReads(
+    reads: readonly NormalizedFullLink[],
+    depTx: IExtendedStorageTransaction,
+  ): void {
+    // Transformer-declared reads are narrower than traversing captured
+    // argument objects, so event preflight should use them when available.
+    for (const read of reads) {
+      this.runtime.getCellFromLink(read, undefined, depTx)?.get();
+    }
+  }
+
+  private populateHandlerEventSchedulerReads(
+    argumentSchema: JSONSchema | undefined,
+    processCell: Cell<any>,
+    event: unknown,
+    depTx: IExtendedStorageTransaction,
+  ): void {
+    if (!isRecord(argumentSchema) || !isRecord(argumentSchema.properties)) {
+      return;
+    }
+    const eventSchema = argumentSchema.properties.$event;
+    if (eventSchema === undefined) {
+      return;
+    }
+
+    const eventDependencySchema: JSONSchema = {
+      type: "object",
+      properties: { $event: eventSchema as JSONSchema },
+      ...(argumentSchema.$defs !== undefined &&
+        { $defs: argumentSchema.$defs }),
+      ...(argumentSchema.definitions !== undefined &&
+        { definitions: argumentSchema.definitions }),
+    };
+    const inputsCell = this.runtime.getImmutableCell(
+      processCell.space,
+      { $event: event },
+      undefined,
+      depTx,
+    );
+    inputsCell.asSchema(eventDependencySchema).get({
+      traverseCells: true,
+    });
+  }
+
   private resolveJavaScriptFunction(
     module: Module,
     pattern: Pattern,
@@ -2576,7 +2620,17 @@ export class Runner {
       pattern,
     });
 
-    const populateDependencies = module.argumentSchema
+    const populateDependencies = reads.length > 0
+      ? (depTx: IExtendedStorageTransaction, event: any) => {
+        this.populateDeclaredSchedulerReads(reads, depTx);
+        this.populateHandlerEventSchedulerReads(
+          module.argumentSchema,
+          processCell,
+          event,
+          depTx,
+        );
+      }
+      : module.argumentSchema
       ? (depTx: IExtendedStorageTransaction, event: any) => {
         const eventInputs = {
           ...(inputs as Record<string, any>),
@@ -2812,7 +2866,9 @@ export class Runner {
     const populateDependencies = (depTx: IExtendedStorageTransaction) => {
       logger.timeStart("action", "populateDependencies");
       try {
-        if (module.argumentSchema !== undefined) {
+        if (reads.length > 0) {
+          this.populateDeclaredSchedulerReads(reads, depTx);
+        } else if (module.argumentSchema !== undefined) {
           const inputsCell = this.runtime.getImmutableCell(
             processCell.space,
             inputs,
@@ -2822,10 +2878,6 @@ export class Runner {
           inputsCell.asSchema(module.argumentSchema!).get({
             traverseCells: true,
           });
-        } else {
-          for (const read of reads) {
-            this.runtime.getCellFromLink(read, undefined, depTx)?.get();
-          }
         }
 
         for (const output of writes) {
