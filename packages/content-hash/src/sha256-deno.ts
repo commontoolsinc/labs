@@ -35,12 +35,12 @@ class DenoHasher extends BaseIncrementalHasher {
   #hasher = crypto!.createHash("sha256");
 
   /** @inheritDoc */
-  _rawUpdate(data: Uint8Array) {
+  protected _rawUpdate(data: Uint8Array) {
     this.#hasher.update(data);
   }
 
   /** @inheritDoc */
-  _rawDigest(encoding: string | undefined): Uint8Array | string {
+  protected _rawDigest(encoding: string | undefined): Uint8Array | string {
     switch (encoding) {
       case "base64url": {
         return this.#hasher.digest(encoding);
