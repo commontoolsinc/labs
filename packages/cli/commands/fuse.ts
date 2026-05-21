@@ -43,6 +43,11 @@ interface FuseChildSupervisorStatus {
   exitCode?: number;
 }
 
+const BACKGROUND_STARTUP_ATTEMPTS = 20;
+const CHILD_STATUS_STARTUP_ATTEMPTS = 200;
+const BACKGROUND_STARTUP_DELAY_MS = 50;
+const CHILD_STATUS_STARTUP_DELAY_MS = 100;
+
 export function childStatusPathForStatePath(statePath: string): string {
   return `${statePath}.child-status`;
 }
@@ -139,8 +144,14 @@ export async function awaitBackgroundMountStartup(
     sleep?: (ms: number) => Promise<void>;
   } = {},
 ): Promise<void> {
-  const attempts = deps.attempts ?? (deps.childStatusPath ? 50 : 20);
-  const delayMs = deps.delayMs ?? (deps.childStatusPath ? 100 : 50);
+  const attempts = deps.attempts ??
+    (deps.childStatusPath
+      ? CHILD_STATUS_STARTUP_ATTEMPTS
+      : BACKGROUND_STARTUP_ATTEMPTS);
+  const delayMs = deps.delayMs ??
+    (deps.childStatusPath
+      ? CHILD_STATUS_STARTUP_DELAY_MS
+      : BACKGROUND_STARTUP_DELAY_MS);
   const isAliveFn = deps.isAlive ?? isAlive;
   const removeStateFileFn = deps.removeStateFile ?? removeMountStateFile;
   const readTextFile = deps.readTextFile ?? Deno.readTextFile;
