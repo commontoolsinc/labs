@@ -41,6 +41,66 @@ const ONE_PIXEL_PNG = decodeBase64(
 
 const resolvePublicTestHost = () => Promise.resolve(["93.184.216.34"]);
 
+interface FakeHttpConn {
+  conn: Deno.Conn;
+  writes: string[];
+  isClosed: () => boolean;
+}
+
+const createFakeHttpConn = (responseText: string): FakeHttpConn => {
+  const responseBytes = new TextEncoder().encode(responseText);
+  const writes: string[] = [];
+  let offset = 0;
+  let closed = false;
+  const conn = {
+    read(buffer: Uint8Array): Promise<number | null> {
+      if (closed) {
+        return Promise.resolve(null);
+      }
+      if (offset >= responseBytes.byteLength) {
+        return Promise.resolve(null);
+      }
+      const byteCount = Math.min(
+        buffer.byteLength,
+        responseBytes.byteLength - offset,
+      );
+      buffer.set(responseBytes.slice(offset, offset + byteCount));
+      offset += byteCount;
+      return Promise.resolve(byteCount);
+    },
+    write(buffer: Uint8Array): Promise<number> {
+      writes.push(new TextDecoder().decode(buffer));
+      return Promise.resolve(buffer.byteLength);
+    },
+    close(): void {
+      closed = true;
+    },
+  } as unknown as Deno.Conn;
+  return {
+    conn,
+    writes,
+    isClosed: () => closed,
+  };
+};
+
+const installMockDenoConnect = (
+  connect: typeof Deno.connect,
+): () => void => {
+  const originalConnect = Deno.connect;
+  Object.defineProperty(Deno, "connect", {
+    configurable: true,
+    writable: true,
+    value: connect,
+  });
+  return () => {
+    Object.defineProperty(Deno, "connect", {
+      configurable: true,
+      writable: true,
+      value: originalConnect,
+    });
+  };
+};
+
 class FakeSandboxRuntime implements SandboxRuntime {
   readonly kind = "docker-runsc-cfc" as const;
   readonly calls: Array<
@@ -559,11 +619,20 @@ Deno.test("web_fetch rejects non-global IP literals before fetching", async () =
 });
 
 Deno.test("web_fetch rejects unsupported content types without returning the body", async () => {
+  let canceled = false;
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode("png bytes"));
+    },
+    cancel() {
+      canceled = true;
+    },
+  });
   const tool = createWebFetchTool({
     resolveHostAddresses: resolvePublicTestHost,
     fetchFn: () =>
       Promise.resolve(
-        new Response("png bytes", {
+        new Response(body, {
           status: 200,
           headers: { "content-type": "image/png" },
         }),
@@ -586,6 +655,7 @@ Deno.test("web_fetch rejects unsupported content types without returning the bod
     contentType: "image/png",
     fetchedAt: "2026-05-01T17:54:00.000Z",
   });
+  assertEquals(canceled, true);
 });
 
 Deno.test("web_fetch rejects responses without a supported content-type", async () => {
@@ -700,6 +770,215 @@ Deno.test("web_fetch applies timeout while reading response body", async () => {
     message: "web_fetch timed out",
     fetchedAt: "2026-05-01T17:54:00.000Z",
   });
+});
+
+Deno.test("web_fetch applies timeout while resolving host", async () => {
+  const tool = createWebFetchTool({
+    resolveHostAddresses: () => new Promise(() => {}),
+  });
+  const context = createContext(new FakeSandboxRuntime());
+
+  let watchdog: ReturnType<typeof setTimeout> | undefined;
+  const output = await Promise.race([
+    tool.invoke(context, {
+      url: "https://slow.example/resolve",
+      timeoutMs: 20,
+    }),
+    new Promise<never>((_, reject) => {
+      watchdog = setTimeout(
+        () => reject(new Error("web_fetch did not time out DNS resolution")),
+        1_000,
+      );
+    }),
+  ]).finally(() => {
+    if (watchdog !== undefined) {
+      clearTimeout(watchdog);
+    }
+  });
+
+  assertEquals(output, {
+    type: "cf-harness.web-fetch-error",
+    outputId: "run-1:web_fetch:1",
+    url: "https://slow.example/resolve",
+    code: "timeout",
+    message: "web_fetch timed out",
+    fetchedAt: "2026-05-01T17:54:00.000Z",
+  });
+});
+
+Deno.test("web_fetch applies timeout while connecting", async () => {
+  let sawConnectSignal = false;
+  const restoreConnect = installMockDenoConnect(
+    ((options: Deno.ConnectOptions) => {
+      sawConnectSignal = options.signal instanceof AbortSignal;
+      return new Promise(() => {});
+    }) as unknown as typeof Deno.connect,
+  );
+  const tool = createWebFetchTool({
+    resolveHostAddresses: resolvePublicTestHost,
+  });
+  const context = createContext(new FakeSandboxRuntime());
+
+  try {
+    let watchdog: ReturnType<typeof setTimeout> | undefined;
+    const output = await Promise.race([
+      tool.invoke(context, {
+        url: "http://example.com/connect",
+        timeoutMs: 20,
+      }),
+      new Promise<never>((_, reject) => {
+        watchdog = setTimeout(
+          () => reject(new Error("web_fetch did not time out connect")),
+          1_000,
+        );
+      }),
+    ]).finally(() => {
+      if (watchdog !== undefined) {
+        clearTimeout(watchdog);
+      }
+    });
+
+    assertEquals(sawConnectSignal, true);
+    assertEquals(output, {
+      type: "cf-harness.web-fetch-error",
+      outputId: "run-1:web_fetch:1",
+      url: "http://example.com/connect",
+      code: "timeout",
+      message: "web_fetch timed out",
+      fetchedAt: "2026-05-01T17:54:00.000Z",
+    });
+  } finally {
+    restoreConnect();
+  }
+});
+
+Deno.test("web_fetch applies timeout while writing the request", async () => {
+  let closed = false;
+  const conn = {
+    read(): Promise<number | null> {
+      return Promise.resolve(null);
+    },
+    write(): Promise<number> {
+      return new Promise(() => {});
+    },
+    close(): void {
+      closed = true;
+    },
+  } as unknown as Deno.Conn;
+  const restoreConnect = installMockDenoConnect(
+    (() => Promise.resolve(conn)) as unknown as typeof Deno.connect,
+  );
+  const tool = createWebFetchTool({
+    resolveHostAddresses: resolvePublicTestHost,
+  });
+  const context = createContext(new FakeSandboxRuntime());
+
+  try {
+    let watchdog: ReturnType<typeof setTimeout> | undefined;
+    const output = await Promise.race([
+      tool.invoke(context, {
+        url: "http://example.com/write",
+        timeoutMs: 20,
+      }),
+      new Promise<never>((_, reject) => {
+        watchdog = setTimeout(
+          () => reject(new Error("web_fetch did not time out request write")),
+          1_000,
+        );
+      }),
+    ]).finally(() => {
+      if (watchdog !== undefined) {
+        clearTimeout(watchdog);
+      }
+    });
+
+    assertEquals(output, {
+      type: "cf-harness.web-fetch-error",
+      outputId: "run-1:web_fetch:1",
+      url: "http://example.com/write",
+      code: "timeout",
+      message: "web_fetch timed out",
+      fetchedAt: "2026-05-01T17:54:00.000Z",
+    });
+    assertEquals(closed, true);
+  } finally {
+    restoreConnect();
+  }
+});
+
+Deno.test("web_fetch rejects oversized chunked size lines", async () => {
+  const fakeConn = createFakeHttpConn([
+    "HTTP/1.1 200 OK\r\n",
+    "Content-Type: text/plain\r\n",
+    "Transfer-Encoding: chunked\r\n",
+    "\r\n",
+    "1".repeat(5000),
+  ].join(""));
+  const restoreConnect = installMockDenoConnect(
+    (() => Promise.resolve(fakeConn.conn)) as unknown as typeof Deno.connect,
+  );
+  const tool = createWebFetchTool({
+    resolveHostAddresses: resolvePublicTestHost,
+  });
+  const context = createContext(new FakeSandboxRuntime());
+
+  try {
+    const output = await tool.invoke(context, {
+      url: "http://example.com/chunked",
+    });
+
+    if (output.type !== "cf-harness.web-fetch-error") {
+      throw new Error("expected web_fetch error");
+    }
+    assertEquals(output.code, "fetch_failed");
+    assertStringIncludes(output.message, "chunked line exceeded size limit");
+    assertEquals(fakeConn.isClosed(), true);
+  } finally {
+    restoreConnect();
+  }
+});
+
+Deno.test("web_fetch rejects oversized chunked trailers", async () => {
+  const trailers = Array.from(
+    { length: 90 },
+    (_, index) => `X-Trailer-${index}: ${"a".repeat(200)}\r\n`,
+  ).join("");
+  const fakeConn = createFakeHttpConn([
+    "HTTP/1.1 200 OK\r\n",
+    "Content-Type: text/plain\r\n",
+    "Transfer-Encoding: chunked\r\n",
+    "\r\n",
+    "1\r\n",
+    "a\r\n",
+    "0\r\n",
+    trailers,
+    "\r\n",
+  ].join(""));
+  const restoreConnect = installMockDenoConnect(
+    (() => Promise.resolve(fakeConn.conn)) as unknown as typeof Deno.connect,
+  );
+  const tool = createWebFetchTool({
+    resolveHostAddresses: resolvePublicTestHost,
+  });
+  const context = createContext(new FakeSandboxRuntime());
+
+  try {
+    const output = await tool.invoke(context, {
+      url: "http://example.com/chunked-trailers",
+    });
+
+    if (output.type !== "cf-harness.web-fetch-error") {
+      throw new Error("expected web_fetch error");
+    }
+    assertEquals(output.code, "fetch_failed");
+    assertStringIncludes(
+      output.message,
+      "chunked trailers exceeded size limit",
+    );
+    assertEquals(fakeConn.isClosed(), true);
+  } finally {
+    restoreConnect();
+  }
 });
 
 Deno.test("bash tool updates currentDir in enforce mode from observed CFC stdout", async () => {

@@ -70,6 +70,7 @@ export type WebFetchModelFacingOutput =
 
 export type ResolveHostAddresses = (
   hostname: string,
+  signal?: AbortSignal,
 ) => Promise<readonly string[]>;
 
 type WebFetchHttpFetch = typeof fetch;
@@ -83,6 +84,9 @@ const DEFAULT_TIMEOUT_MS = 15_000;
 const MAX_TIMEOUT_MS = 60_000;
 const MAX_REDIRECTS = 5;
 const MAX_LINKS = 50;
+const MAX_CHUNKED_LINE_BYTES = 4096;
+const MAX_CHUNKED_TRAILER_BYTES = 16 * 1024;
+const MAX_CHUNKED_TRAILER_LINES = 100;
 
 const USER_AGENT = "cf-harness-web-fetch/1.0";
 
@@ -241,25 +245,27 @@ export const createWebFetchTool = (
         MAX_TIMEOUT_MS,
         "web_fetch timeoutMs",
       );
-      const initialUrl = await validatePublicHttpUrl(
-        input.url,
-        resolveHostAddresses,
-      );
-      if (!initialUrl.ok) {
-        return webFetchError({
-          outputId,
-          url: input.url,
-          code: initialUrl.code,
-          message: initialUrl.message,
-          fetchedAt,
-        });
-      }
-
       const controller = new AbortController();
       const timer = setTimeout(() => {
         controller.abort(createWebFetchAbortError());
       }, timeoutMs);
+      let resultUrl = input.url;
       try {
+        const initialUrl = await validatePublicHttpUrl(
+          input.url,
+          resolveHostAddresses,
+          controller.signal,
+        );
+        if (!initialUrl.ok) {
+          return webFetchError({
+            outputId,
+            url: input.url,
+            code: initialUrl.code,
+            message: initialUrl.message,
+            fetchedAt,
+          });
+        }
+        resultUrl = initialUrl.url;
         const fetchResult = await fetchWithRedirects({
           url: initialUrl.url,
           fetchFn,
@@ -281,6 +287,7 @@ export const createWebFetchTool = (
         const response = fetchResult.response;
         const contentType = response.headers.get("content-type") ?? undefined;
         if (!isSupportedContentType(contentType)) {
+          await cancelResponseBody(response);
           return webFetchError({
             outputId,
             url: initialUrl.url,
@@ -335,7 +342,7 @@ export const createWebFetchTool = (
       } catch (error) {
         return webFetchError({
           outputId,
-          url: initialUrl.url,
+          url: resultUrl,
           code: isAbortError(error) ? "timeout" : "fetch_failed",
           message: error instanceof Error ? error.message : String(error),
           fetchedAt,
@@ -430,6 +437,7 @@ class WebFetchBlockedUrlError extends Error {
 const validatePublicHttpUrl = async (
   input: string,
   resolveHostAddresses: ResolveHostAddresses,
+  signal?: AbortSignal,
 ): Promise<PublicHttpUrlResult> => {
   let url: URL;
   try {
@@ -466,6 +474,7 @@ const validatePublicHttpUrl = async (
   const resolution = await resolveValidatedPublicAddresses(
     url.hostname,
     resolveHostAddresses,
+    signal,
   );
   if (!resolution.ok) {
     return {
@@ -502,14 +511,23 @@ const normalizeHostname = (hostname: string): string =>
 const resolveValidatedPublicAddresses = async (
   hostname: string,
   resolveHostAddresses: ResolveHostAddresses,
+  signal?: AbortSignal,
 ): Promise<
   | { ok: true; addresses: readonly string[] }
   | { ok: false; message: string }
 > => {
   let addresses: readonly string[];
   try {
-    addresses = await resolveHostAddresses(hostname);
+    throwIfWebFetchAborted(signal);
+    addresses = await withWebFetchAbort(
+      resolveHostAddresses(hostname, signal),
+      signal,
+    );
+    throwIfWebFetchAborted(signal);
   } catch (error) {
+    if (isAbortError(error)) {
+      throw error;
+    }
     return {
       ok: false,
       message:
@@ -536,15 +554,19 @@ const resolveValidatedPublicAddresses = async (
 
 const defaultResolveHostAddresses: ResolveHostAddresses = async (
   hostname,
+  signal,
 ) => {
   const normalized = normalizeHostname(hostname);
   if (isIpv4Address(normalized) || normalized.includes(":")) {
     return [normalized];
   }
-  const results = await Promise.allSettled([
-    Deno.resolveDns(normalized, "A"),
-    Deno.resolveDns(normalized, "AAAA"),
-  ]);
+  const results = await withWebFetchAbort(
+    Promise.allSettled([
+      Deno.resolveDns(normalized, "A"),
+      Deno.resolveDns(normalized, "AAAA"),
+    ]),
+    signal,
+  );
   const addresses = results.flatMap((result) =>
     result.status === "fulfilled" ? result.value : []
   );
@@ -575,14 +597,16 @@ const createPinnedPublicFetch = (
 ): WebFetchHttpFetch =>
 async (input, init = {}) => {
   const url = new URL(input instanceof Request ? input.url : String(input));
+  const signal = init.signal ?? undefined;
+  throwIfWebFetchAborted(signal);
   const resolution = await resolveValidatedPublicAddresses(
     url.hostname,
     resolveHostAddresses,
+    signal,
   );
   if (!resolution.ok) {
     throw new WebFetchBlockedUrlError(resolution.message);
   }
-  const signal = init.signal ?? undefined;
   throwIfWebFetchAborted(signal);
   const errors: string[] = [];
   for (const address of resolution.addresses) {
@@ -657,7 +681,10 @@ const openPinnedConnection = async (
   signal?: AbortSignal,
 ): Promise<Deno.Conn> => {
   throwIfWebFetchAborted(signal);
-  const tcpConn = await Deno.connect({ hostname: address, port });
+  const tcpConn = await withWebFetchAbort(
+    Deno.connect({ hostname: address, port, signal }),
+    signal,
+  );
   if (url.protocol === "http:") {
     if (signal?.aborted) {
       closeConnection(tcpConn);
@@ -672,14 +699,20 @@ const openPinnedConnection = async (
   }
   try {
     throwIfWebFetchAborted(signal);
-    const tlsConn = await Deno.startTls(tcpConn, {
-      hostname: normalizeHostname(url.hostname),
-      alpnProtocols: ["http/1.1"],
-    });
+    const tlsConn = await withWebFetchAbort(
+      Deno.startTls(tcpConn, {
+        hostname: normalizeHostname(url.hostname),
+        alpnProtocols: ["http/1.1"],
+      }),
+      signal,
+    );
     throwIfWebFetchAborted(signal);
     return tlsConn;
   } catch (error) {
     closeConnection(tcpConn);
+    if (signal?.aborted) {
+      throw webFetchAbortReason(signal);
+    }
     throw error;
   } finally {
     if (signal !== undefined && abortHandler !== undefined) {
@@ -950,6 +983,9 @@ const pullChunkedBodyChunk = async (
       throw new Error("web_fetch received an invalid chunked response");
     }
     const chunkSize = Number.parseInt(chunkSizeText, 16);
+    if (!Number.isSafeInteger(chunkSize) || chunkSize < 0) {
+      throw new Error("web_fetch received an invalid chunked response");
+    }
     if (chunkSize === 0) {
       await discardChunkedTrailers(state);
       state.close();
@@ -964,9 +1000,15 @@ const readChunkedLine = async (state: ChunkedBodyState): Promise<string> => {
   while (true) {
     const lineEnd = findCrlf(state.buffered);
     if (lineEnd !== -1) {
+      if (lineEnd > MAX_CHUNKED_LINE_BYTES) {
+        throw new Error("web_fetch chunked line exceeded size limit");
+      }
       const line = new TextDecoder().decode(state.buffered.slice(0, lineEnd));
       state.buffered = state.buffered.slice(lineEnd + 2);
       return line;
+    }
+    if (state.buffered.byteLength > MAX_CHUNKED_LINE_BYTES + 1) {
+      throw new Error("web_fetch chunked line exceeded size limit");
     }
     await fillBodyBuffer(state, state.buffered.byteLength + 1);
   }
@@ -975,10 +1017,20 @@ const readChunkedLine = async (state: ChunkedBodyState): Promise<string> => {
 const discardChunkedTrailers = async (
   state: ChunkedBodyState,
 ): Promise<void> => {
+  let trailerBytes = 0;
+  let trailerLines = 0;
   while (true) {
     const line = await readChunkedLine(state);
+    trailerBytes += new TextEncoder().encode(line).byteLength + 2;
+    if (trailerBytes > MAX_CHUNKED_TRAILER_BYTES) {
+      throw new Error("web_fetch chunked trailers exceeded size limit");
+    }
     if (line === "") {
       return;
+    }
+    trailerLines += 1;
+    if (trailerLines > MAX_CHUNKED_TRAILER_LINES) {
+      throw new Error("web_fetch chunked trailers exceeded line limit");
     }
   }
 };
@@ -1040,7 +1092,17 @@ const writeAll = async (
   let offset = 0;
   while (offset < bytes.byteLength) {
     throwIfWebFetchAborted(signal);
-    offset += await conn.write(bytes.slice(offset));
+    try {
+      offset += await withWebFetchAbort(
+        conn.write(bytes.slice(offset)),
+        signal,
+      );
+    } catch (error) {
+      if (signal?.aborted) {
+        throw webFetchAbortReason(signal);
+      }
+      throw error;
+    }
   }
 };
 
@@ -1329,7 +1391,7 @@ const fetchWithRedirects = async (
       };
     }
     if (redirectCount === MAX_REDIRECTS) {
-      await response.body?.cancel();
+      await cancelResponseBody(response);
       return {
         ok: false,
         code: "too_many_redirects",
@@ -1343,7 +1405,7 @@ const fetchWithRedirects = async (
       options.resolveHostAddresses,
     );
     if (!validation.ok) {
-      await response.body?.cancel();
+      await cancelResponseBody(response);
       return {
         ok: false,
         code: validation.code === "invalid_url"
@@ -1353,7 +1415,7 @@ const fetchWithRedirects = async (
         finalUrl: currentUrl,
       };
     }
-    await response.body?.cancel();
+    await cancelResponseBody(response);
     redirects.push({
       status: response.status,
       url: currentUrl,
@@ -1379,6 +1441,40 @@ const throwIfWebFetchAborted = (signal?: AbortSignal): void => {
   if (signal?.aborted) {
     throw webFetchAbortReason(signal);
   }
+};
+
+const withWebFetchAbort = async <T>(
+  promise: Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> => {
+  if (signal === undefined) {
+    return await promise;
+  }
+  throwIfWebFetchAborted(signal);
+  return await new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      cleanup();
+      reject(webFetchAbortReason(signal));
+    };
+    const cleanup = () => {
+      signal.removeEventListener("abort", onAbort);
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        cleanup();
+        if (signal.aborted) {
+          reject(webFetchAbortReason(signal));
+          return;
+        }
+        resolve(value);
+      },
+      (error) => {
+        cleanup();
+        reject(signal.aborted ? webFetchAbortReason(signal) : error);
+      },
+    );
+  });
 };
 
 const readChunkWithAbort = async (
@@ -1419,6 +1515,14 @@ const cancelReaderAfterAbort = async (
     await reader.cancel(webFetchAbortReason(signal));
   } catch {
     // Ignore cancellation cleanup failures; the timeout itself is the result.
+  }
+};
+
+const cancelResponseBody = async (response: Response): Promise<void> => {
+  try {
+    await response.body?.cancel();
+  } catch {
+    // Ignore cancellation cleanup failures; the tool is already returning.
   }
 };
 
