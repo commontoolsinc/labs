@@ -75,6 +75,7 @@ describe("cfc group chat demo integration test", () => {
     });
     await waitForRuntimeIdle(page);
 
+    await waitForText(page, "#group-chat-manager-chip", "Manager off");
     await waitForDisabled(page, "#trusted-send-button", true);
 
     await scrollIntoView(page, "#trusted-profile-name");
@@ -89,6 +90,11 @@ describe("cfc group chat demo integration test", () => {
     await waitForText(
       page,
       "#trusted-admin-manager-status",
+      "Can manage admins",
+    );
+    await waitForText(
+      page,
+      "#group-chat-manager-chip",
       "Can manage admins",
     );
     await waitForRuntimeIdle(page);

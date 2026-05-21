@@ -263,6 +263,8 @@ const personIsParkingAdmin = (
   personName: string | undefined,
 ): boolean => parkingAdminRoleForPerson(registry, personName) !== undefined;
 
+// Demo-only identity model: the selected person name stands in for the actor.
+// Do not copy this for production authorization; use a stable user/profile cell.
 const currentActorName = (
   selectedPersonName: Writable<string>,
   people: PeopleCell,
@@ -1070,7 +1072,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     );
 
     const adminModeEnabled = computed(() =>
-      Boolean(adminMode.get() && currentPersonIsAdmin)
+      adminMode.get() ? currentPersonIsAdmin : false
     );
 
     const currentUserCanManageAdmins = computed(() =>
@@ -1082,7 +1084,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
         name: person.name,
         email: person.email,
         isAdmin: personIsParkingAdmin(adminRegistry, person.name),
-        canManageAdmins: currentUserCanManageAdmins,
+        canManageAdmins: currentUserCanManageAdmins === true,
       }))
     );
 
@@ -1117,7 +1119,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       const overrideSpot = gridOverrideSpot.get();
       const overrideDate = gridOverrideDate.get();
       const overridePerson = overridePersonName.get();
-      const weekGridShowAdmin = adminModeEnabled;
+      const weekGridShowAdmin = adminModeEnabled === true;
 
       return allSpots.map((spot) => {
         const spotNum = spot.spotNumber;
@@ -1163,7 +1165,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       const allSpots = spots.get().filter((s) => s != null && s.active);
       const allRequests = requests.get();
       const currentPerson = selectedPersonName.get();
-      const todayStripShowAdmin = adminModeEnabled;
+      const todayStripShowAdmin = adminModeEnabled === true;
 
       return allSpots.map((spot) => {
         const req = allRequests.find(
@@ -1228,19 +1230,17 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                 {todayFormatted}
               </span>
               <cf-button
-                variant={computed(() =>
-                  adminModeEnabled ? "primary" : "secondary"
-                )}
+                variant={adminModeEnabled ? "primary" : "secondary"}
                 size="sm"
-                disabled={computed(() => !currentPersonIsAdmin)}
+                disabled={!currentPersonIsAdmin}
                 onClick={() => toggleAdminMode.send()}
               >
-                {computed(() => `Admin: ${adminModeEnabled ? "ON" : "OFF"}`)}
+                {adminModeEnabled ? "Admin: ON" : "Admin: OFF"}
               </cf-button>
               <cf-chip
-                label={computed(() =>
-                  currentPersonIsAdmin ? "Current person is admin" : "Member"
-                )}
+                label={currentPersonIsAdmin
+                  ? "Current person is admin"
+                  : "Member"}
               />
             </div>
           </div>
@@ -1429,17 +1429,13 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                       </span>
                     </cf-vstack>
                     <cf-chip
-                      label={computed(() =>
-                        currentUserCanManageAdmins
-                          ? "Can manage admins"
-                          : "Cannot manage admins"
-                      )}
+                      label={currentUserCanManageAdmins
+                        ? "Can manage admins"
+                        : "Cannot manage admins"}
                     />
                     <cf-button
                       size="sm"
-                      disabled={computed(() =>
-                        Boolean(currentUserCanManageAdmins)
-                      )}
+                      disabled={currentUserCanManageAdmins}
                       onClick={() => enableAdminManager.send()}
                     >
                       Enable manager demo
@@ -1495,7 +1491,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                 </cf-vstack>
               </cf-card>
 
-              {/* === Section C: Week-Ahead Grid === */}
+              {/* === Section D: Week-Ahead Grid === */}
               <cf-vstack gap="1">
                 <cf-heading level={6}>This Week</cf-heading>
 
@@ -1706,7 +1702,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                 </div>
               </cf-vstack>
 
-              {/* === Section D: Admin (admin mode only) === */}
+              {/* === Section E: Admin (admin mode only) === */}
               {adminModeEnabled
                 ? (
                   <>
@@ -2410,7 +2406,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       people,
       requests,
       adminRegistry: adminRegistry as PerSpace<ParkingAdminRegistryCell>,
-      adminMode: computed(() => Boolean(adminModeEnabled)),
+      adminMode: adminModeEnabled,
       currentPersonIsAdmin,
       currentUserCanManageAdmins,
       selectedPersonName: computed(() => selectedPersonName.get() ?? ""),
