@@ -1,7 +1,8 @@
-import { FabricInstance, FabricPrimitive, FabricValue } from "./interface.ts";
+import { FabricInstance, FabricValue } from "./interface.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { isDeepFrozenFabricValue } from "./deep-freeze.ts";
-import { type Immutable, isPlainObject } from "@commonfabric/utils/types";
+import { type Immutable, isPlainContainer } from "@commonfabric/utils/types";
+import { toDebugKindString } from "./value-debug.ts";
 
 /**
  * Options for `cloneIfNecessary()`.
@@ -316,7 +317,7 @@ export function cloneForMutation<T extends FabricValue>(
   if (path.length === 0) {
     if (!isMutableHandle(value)) {
       throw new Error(
-        `cloneForMutation: cannot mutate ${describeKind(value)} at root ` +
+        `cloneForMutation: cannot mutate ${toDebugKindString(value)} at root ` +
           `(empty path)`,
       );
     }
@@ -330,7 +331,7 @@ export function cloneForMutation<T extends FabricValue>(
   // internals isn't supported).
   if (!isPlainContainer(value)) {
     throw new Error(
-      `cloneForMutation: cannot descend into ${describeKind(value)} at ` +
+      `cloneForMutation: cannot descend into ${toDebugKindString(value)} at ` +
         `root (path has ${path.length} segment${path.length === 1 ? "" : "s"})`,
     );
   }
@@ -359,14 +360,18 @@ export function cloneForMutation<T extends FabricValue>(
     if (isLast) {
       if (!isMutableHandle(next)) {
         throw new Error(
-          `cloneForMutation: cannot mutate ${describeKind(next)} at path ` +
+          `cloneForMutation: cannot mutate ${
+            toDebugKindString(next)
+          } at path ` +
             `index ${i} (final segment)`,
         );
       }
     } else {
       if (!isPlainContainer(next)) {
         throw new Error(
-          `cloneForMutation: cannot descend into ${describeKind(next)} at ` +
+          `cloneForMutation: cannot descend into ${
+            toDebugKindString(next)
+          } at ` +
             `path index ${i}`,
         );
       }
@@ -398,18 +403,6 @@ export function cloneForMutation<T extends FabricValue>(
 }
 
 /**
- * Returns `true` when `value` can serve as a descent target -- i.e. it's a
- * plain object or array whose properties are accessed JSON-Pointer-style.
- * `FabricInstance`s and `FabricPrimitive`s deliberately do not qualify;
- * their internals aren't path-accessible.
- */
-function isPlainContainer(
-  value: unknown,
-): value is Record<string, FabricValue> | FabricValue[] {
-  return Array.isArray(value) || isPlainObject(value);
-}
-
-/**
  * Returns `true` when `cloneForMutation` can produce a mutable handle for
  * the value at `path`. Plain containers and `FabricInstance`s qualify;
  * primitives and `FabricPrimitive`s (which are immutable by construction)
@@ -417,24 +410,4 @@ function isPlainContainer(
  */
 function isMutableHandle(value: unknown): boolean {
   return isPlainContainer(value) || value instanceof FabricInstance;
-}
-
-/**
- * Short human-readable description of `value`'s kind, for error messages.
- * Distinguishes plain containers, `FabricInstance`s, `FabricPrimitive`s,
- * and primitives.
- */
-function describeKind(value: unknown): string {
-  if (value === null) return "null";
-  if (value === undefined) return "undefined";
-  if (Array.isArray(value)) return "array";
-  if (typeof value !== "object") return typeof value;
-  if (value instanceof FabricInstance) {
-    return `FabricInstance (${value.constructor.name})`;
-  }
-  if (value instanceof FabricPrimitive) {
-    return `FabricPrimitive (${value.constructor.name})`;
-  }
-  if (isPlainObject(value)) return "object";
-  return value.constructor?.name ?? "object";
 }
