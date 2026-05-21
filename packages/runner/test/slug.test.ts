@@ -27,9 +27,16 @@ describe("slug helpers", () => {
 
   it("validates slug syntax", () => {
     expect(validateSlug("demo")).toBe("demo");
+    expect(validateSlug("project-notes-2026")).toBe("project-notes-2026");
     expect(() => validateSlug("")).toThrow(/Slug must not be empty/);
     expect(() => validateSlug("has/slash")).toThrow(/must not contain/);
     expect(() => validateSlug("fid1:abc")).toThrow(/must not contain ':'/);
     expect(() => validateSlug("of:fid1:abc")).toThrow(/must not contain ':'/);
+    expect(() => validateSlug("Project")).toThrow(/lowercase/);
+    expect(() => validateSlug("has_underscore")).toThrow(/lowercase/);
+    expect(() => validateSlug("-leading")).toThrow(/lowercase/);
+    expect(() => validateSlug("trailing-")).toThrow(/lowercase/);
+    expect(() => validateSlug("two--hyphens")).toThrow(/lowercase/);
+    expect(() => validateSlug("x".repeat(81))).toThrow(/at most 80/);
   });
 });

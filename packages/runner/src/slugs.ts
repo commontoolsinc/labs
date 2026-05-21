@@ -6,6 +6,9 @@ export interface SlugCause {
   slug: string;
 }
 
+const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const MAX_SLUG_LENGTH = 80;
+
 export function isSlugAddress(value: string): boolean {
   return !value.includes(":");
 }
@@ -19,6 +22,14 @@ export function validateSlug(slug: string): string {
   }
   if (slug.includes(":")) {
     throw new Error("Slug must not contain ':'.");
+  }
+  if (slug.length > MAX_SLUG_LENGTH) {
+    throw new Error(`Slug must be at most ${MAX_SLUG_LENGTH} characters.`);
+  }
+  if (!SLUG_PATTERN.test(slug)) {
+    throw new Error(
+      "Slug must use lowercase letters, numbers, and single hyphens between words.",
+    );
   }
   return slug;
 }
