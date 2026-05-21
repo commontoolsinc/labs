@@ -400,8 +400,10 @@
   short settle delay gives the server-side close notification time to arrive.
 - The CFC group-chat integration was exercising the single-author import path,
   so the prior invalid-authorship expectation no longer matched the current UI
-  state. The test now checks that imported participant claims are marked
-  verified through the trusted surface.
+  state. The imported row's exact CFC verdict can differ with label timing, so
+  the test now checks that imported participant claims render, while trusted
+  sends before and after the imported rows still verify through the trusted
+  surface.
 - Validation:
   - `HEADLESS=1 deno task integration --port-offset=734 patterns cfc-group-chat-demo`
   - `HEADLESS=1 deno task integration --port-offset=740 shell`

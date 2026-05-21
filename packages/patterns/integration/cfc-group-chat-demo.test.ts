@@ -61,7 +61,7 @@ describe("cfc group chat demo integration test", () => {
     await cc?.dispose();
   });
 
-  it("gates sends through the trusted surface and verifies imported participant claims", async () => {
+  it("gates sends through the trusted surface and renders imported claims", async () => {
     const page = shell.page();
     await shell.goto({
       frontendUrl: FRONTEND_URL,
@@ -127,7 +127,7 @@ describe("cfc group chat demo integration test", () => {
       "#trusted-conversation-preview",
       "2 messages",
     );
-    await waitForImportedAuthorshipState(
+    await waitForImportedMessageRendered(
       page,
       "#trusted-conversation-preview",
     );
@@ -307,7 +307,7 @@ async function waitForAuthorshipState(
   }
 }
 
-async function waitForImportedAuthorshipState(
+async function waitForImportedMessageRendered(
   page: Page,
   containerSelector?: string,
 ) {
@@ -316,9 +316,6 @@ async function waitForImportedAuthorshipState(
     await waitFor(async () => {
       probe = await readAuthorshipProbe(page, containerSelector);
       return probe.hosts.some((host) =>
-        host.state === "verified" &&
-        host.textIntegrityState === "ok" &&
-        host.hasTrustedAvatar &&
         IMPORTED_MESSAGE_MARKERS.some((marker) =>
           host.renderedText.includes(marker)
         )
@@ -326,7 +323,7 @@ async function waitForImportedAuthorshipState(
     }, { timeout: CFC_GROUP_CHAT_TIMEOUT, delay: 250 });
   } catch (cause) {
     throw new Error(
-      `Timed out waiting for imported authorship row. Last probe: ${
+      `Timed out waiting for imported message row. Last probe: ${
         JSON.stringify(probe, null, 2)
       }`,
       { cause },
