@@ -10,9 +10,11 @@ import {
 const SPACE = "did:key:z6Mk-slug-space";
 
 describe("slug helpers", () => {
-  it("distinguishes slug addresses from fid1 ids", () => {
+  it("distinguishes slug addresses from URI ids", () => {
     expect(isSlugAddress("demo")).toBe(true);
     expect(isSlugAddress("fid1:abc")).toBe(false);
+    expect(isSlugAddress("of:fid1:abc")).toBe(false);
+    expect(isSlugAddress("of:abc")).toBe(false);
   });
 
   it("derives stable ids from space and slug", () => {
@@ -27,6 +29,7 @@ describe("slug helpers", () => {
     expect(validateSlug("demo")).toBe("demo");
     expect(() => validateSlug("")).toThrow(/Slug must not be empty/);
     expect(() => validateSlug("has/slash")).toThrow(/must not contain/);
-    expect(() => validateSlug("fid1:abc")).toThrow(/must not start/);
+    expect(() => validateSlug("fid1:abc")).toThrow(/must not contain ':'/);
+    expect(() => validateSlug("of:fid1:abc")).toThrow(/must not contain ':'/);
   });
 });

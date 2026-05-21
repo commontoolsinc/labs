@@ -331,6 +331,26 @@ describe("cli piece parsing", () => {
     expect(resolved.piece).toBe(PIECE);
   });
 
+  it("preserves URI piece config without slug lookup", async () => {
+    const resolved = await resolvePieceConfig({
+      apiUrl: API_URL,
+      space: SPACE,
+      identity: ID,
+      piece: "of:fid1:piece-123",
+    }, {
+      loadManager: () => Promise.resolve({} as any),
+    });
+
+    expect(resolved.piece).toBe("of:fid1:piece-123");
+  });
+
+  it("preserves URI link endpoints without slug lookup", async () => {
+    const token = "of:fid1:piece-123";
+    const resolved = await resolveLinkEndpointAddress({} as any, token);
+
+    expect(resolved).toBe(token);
+  });
+
   it("preserves non-fid link endpoints when no slug document exists", async () => {
     const manager = {};
     const token = "baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye";

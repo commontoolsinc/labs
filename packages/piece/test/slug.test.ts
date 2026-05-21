@@ -63,6 +63,15 @@ describe("piece slugs", () => {
     expect(await resolvePieceAddress(manager, "demo")).toBe(id);
   });
 
+  it("preserves URI-shaped piece addresses", async () => {
+    expect(await resolvePieceAddress(manager, "fid1:piece-123")).toBe(
+      "fid1:piece-123",
+    );
+    expect(await resolvePieceAddress(manager, "of:fid1:piece-123")).toBe(
+      "of:fid1:piece-123",
+    );
+  });
+
   it("overwrites an existing slug redirect", async () => {
     const first = await createPiece("slug-first");
     const second = await createPiece("slug-second");

@@ -7,7 +7,7 @@ export interface SlugCause {
 }
 
 export function isSlugAddress(value: string): boolean {
-  return !value.startsWith("fid1:");
+  return !value.includes(":");
 }
 
 export function validateSlug(slug: string): string {
@@ -17,8 +17,8 @@ export function validateSlug(slug: string): string {
   if (slug.includes("/")) {
     throw new Error("Slug must not contain '/'.");
   }
-  if (!isSlugAddress(slug)) {
-    throw new Error("Slug must not start with 'fid1:'.");
+  if (slug.includes(":")) {
+    throw new Error("Slug must not contain ':'.");
   }
   return slug;
 }

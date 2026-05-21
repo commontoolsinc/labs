@@ -109,6 +109,11 @@ describe("AppState", () => {
       ) === JSON.stringify({ spaceName: "space", pieceId: "fid1:abc" }),
     );
     assert(
+      JSON.stringify(
+        urlToAppView(new URL("http://common.test/space/of:fid1:abc")),
+      ) === JSON.stringify({ spaceName: "space", pieceId: "of:fid1:abc" }),
+    );
+    assert(
       appViewToUrlPath({ spaceName: "space", pieceSlug: "demo" }) ===
         "/space/demo",
     );
