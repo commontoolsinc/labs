@@ -246,9 +246,14 @@ identity is intentionally conservative. Runner startup annotates actions with
 the process cell's normalized space/scope/id, branch, and process generation
 `0`. This is stronger than a pattern/module-name fallback because colocated
 pieces of the same pattern get distinct identities, but it is not a full graph
-generation. Future durable graph generations, stronger implementation
-fingerprints, or schema/process migrations should invalidate or migrate these
-rows instead of treating them as fully versioned graph observations.
+generation. JavaScript action ids and raw builtin action ids must also include
+stable node-local binding information, such as a hash of the process cell plus
+their bound input and output cells, because a single piece can contain many
+actions from the same source location or many `raw:map` / `raw:when` instances
+with the same implementation name. Future durable graph generations, stronger
+implementation fingerprints, or schema/process migrations should invalidate or
+migrate these rows instead of treating them as fully versioned graph
+observations.
 
 ### Scheduler Observation Shape
 
@@ -642,10 +647,15 @@ against one page.
 
 Runner startup passes this subscription option for pattern result, JavaScript,
 and raw actions using the process cell's stable space/scope/id identity. The
-version-1 process generation is currently `0`, so any future durable process
-graph generation or stronger implementation fingerprinting should invalidate or
-migrate these observations rather than treating them as fully versioned process
-snapshots.
+version-1 process generation is currently `0`. JavaScript actions add a stable
+hash of their process cell and bound input/output cells to the diagnostic action
+name before that name becomes the persisted scheduler action id. Raw builtin
+actions similarly add a stable hash of their bound input/output cells to the
+diagnostic raw action name. This prevents repeated source locations and
+multiple raw instances in one piece from sharing one snapshot row. Any future
+durable process graph generation or stronger implementation fingerprinting
+should invalidate or migrate these observations rather than treating them as
+fully versioned process snapshots.
 
 `unknown` is stricter than dirty. Dirty means the scheduler has a valid previous
 dependency view and knows what can make the action fresh again. Unknown means

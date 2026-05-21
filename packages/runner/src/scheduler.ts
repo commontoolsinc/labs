@@ -158,6 +158,7 @@ import {
 import {
   markReadersDirtyForChangedWrites,
   recordChangedComputationWrites,
+  recordChangedWritesHistory,
   type WritePropagationState,
 } from "./scheduler/write-propagation.ts";
 import {
@@ -764,7 +765,9 @@ export class Scheduler {
     token: symbol,
   ): boolean {
     return this.initialRehydrationTokens.get(action) === token &&
-      (this.effects.has(action) || this.computations.has(action));
+      (this.effects.has(action) || this.computations.has(action)) &&
+      !this.pending.has(action) &&
+      !this.staleness.dirty.has(action);
   }
 
   private scheduleInitialActionRun(action: Action): void {
@@ -2141,6 +2144,15 @@ export class Scheduler {
           this.dirtyDependencyCollectionState,
           trace,
         ),
+      onEventCommitWrites: (sourceAction, writes) => {
+        if (!this.pullMode) return;
+        recordChangedWritesHistory(this.writePropagationState, writes);
+        markReadersDirtyForChangedWrites(
+          this.writePropagationState,
+          sourceAction,
+          writes,
+        );
+      },
     };
   }
 
@@ -2193,7 +2205,10 @@ export class Scheduler {
       getNoDebounce: (target) => this.delays.getNoDebounce(target),
       getThrottle: (target) => this.delays.getThrottle(target),
       maybeAutoDebounce: (target) => this.maybeAutoDebounce(target),
-      markActionHasRun: (target) => this.delays.markActionHasRun(target),
+      markActionHasRun: (target) => {
+        this.delays.markActionHasRun(target);
+        this.initialRehydrationTokens.delete(target);
+      },
       handleError: (error, target) => this.handleError(error, target),
       resubscribe: (target, log) => this.resubscribe(target, log),
       markDirectDirty: (target) => this.staleness.markDirectDirty(target),

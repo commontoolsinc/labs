@@ -424,6 +424,11 @@ function finalizeReactiveActionCommit(
     throw new Error("scheduler action commit did not build a reactivity log");
   }
   const committedLog = log;
+  const changedComputationWrites = state.recordChangedComputationWrites(
+    args.action,
+    args.tx,
+    committedLog,
+  );
   watchReactiveActionCommit({
     action: args.action,
     tx: args.tx,
@@ -441,11 +446,6 @@ function finalizeReactiveActionCommit(
         source,
       ),
   });
-  const changedComputationWrites = state.recordChangedComputationWrites(
-    args.action,
-    args.tx,
-    committedLog,
-  );
 
   logger.debug("schedule-run-complete", () => [
     `[RUN] Action completed: ${args.actionId}`,

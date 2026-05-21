@@ -78,7 +78,7 @@ class WebSocketTransport implements MemoryClient.Transport {
       return await this.#opening;
     }
     const address = toWebSocketAddress(this.address);
-    this.#opening = new Promise<WebSocket>((resolve, reject) => {
+    const opening = new Promise<WebSocket>((resolve, reject) => {
       const socket = new WebSocket(address);
       this.#socket = socket;
       let opened = false;
@@ -95,7 +95,7 @@ class WebSocketTransport implements MemoryClient.Transport {
         if (this.#socket === socket) {
           this.#socket = null;
         }
-        if (this.#opening) {
+        if (this.#opening === opening) {
           this.#opening = null;
         }
         this.#closeReceiver();
@@ -107,7 +107,7 @@ class WebSocketTransport implements MemoryClient.Transport {
         if (this.#socket === socket) {
           this.#socket = null;
         }
-        if (this.#opening) {
+        if (this.#opening === opening) {
           this.#opening = null;
         }
         this.#closeReceiver(
@@ -118,6 +118,7 @@ class WebSocketTransport implements MemoryClient.Transport {
         reject(event);
       }, { once: true });
     });
+    this.#opening = opening;
     return await this.#opening;
   }
 }

@@ -2,6 +2,7 @@ import {
   fabricFromNativeValue,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import {
   toCompactDebugString,
   toIndentedDebugString,
@@ -118,6 +119,47 @@ const EAGER_RESULT_BUILTIN_REFS = new Set([
   "navigateTo",
   "streamData",
 ]);
+
+function schedulerRawActionName(
+  rawTargetName: string,
+  inputCells: readonly NormalizedFullLink[],
+  outputCells: readonly NormalizedFullLink[],
+): string {
+  const identity = hashOf({
+    type: "raw-node",
+    name: rawTargetName,
+    inputs: inputCells.map(schedulerActionLinkIdentity),
+    outputs: outputCells.map(schedulerActionLinkIdentity),
+  }).toJSON()["/"].slice(0, 12);
+  return `raw:${rawTargetName}:${identity}`;
+}
+
+function schedulerJavaScriptActionName(
+  actionName: string,
+  processCell: Cell<unknown>,
+  reads: readonly NormalizedFullLink[],
+  writes: readonly NormalizedFullLink[],
+): string {
+  const identity = hashOf({
+    type: "javascript-node",
+    name: actionName,
+    process: schedulerActionLinkIdentity(
+      processCell.getAsNormalizedFullLink(),
+    ),
+    reads: reads.map(schedulerActionLinkIdentity),
+    writes: writes.map(schedulerActionLinkIdentity),
+  }).toJSON()["/"].slice(0, 12);
+  return `action:${actionName}:${identity}`;
+}
+
+function schedulerActionLinkIdentity(link: NormalizedFullLink) {
+  return {
+    space: link.space,
+    id: link.id,
+    scope: link.scope,
+    path: link.path,
+  };
+}
 
 type ProcessCellData<T> = {
   [TYPE]: string;
@@ -437,10 +479,19 @@ type JavaScriptNodeContext = BoundNodeIO & {
   fn: (...args: any[]) => any;
   name: string | undefined;
   verifiedLoadId: string | undefined;
+  schedulerRehydration: SchedulerRehydrationSubscriptionOptions;
 };
 
 type JavaScriptActionResultCells = {
   byScope: Map<CellScope, Cell<any>>;
+};
+
+type SchedulerRehydrationSubscriptionOptions = {
+  rehydrateFromStorage?: {
+    space: MemorySpace;
+    pieceId: string;
+    processGeneration: number;
+  };
 };
 
 function dedupeNormalizedLinks(
@@ -461,6 +512,7 @@ export class Runner {
   private allCancels = new Set<Cancel>();
   private functionCache = new FunctionCache();
   private locallyPreparedResults = new Set<`${MemorySpace}/${URI}`>();
+  private locallyStoppedResults = new Set<`${MemorySpace}/${URI}`>();
   // Map whose key is the result cell's full key, and whose values are the
   // patterns as strings
   private resultPatternCache = new Map<
@@ -940,11 +992,12 @@ export class Runner {
       tx?: IExtendedStorageTransaction;
       givenPattern?: Pattern;
       doNotUpdateOnPatternChange?: boolean;
+      rehydrateSchedulerFromStorage?: boolean;
     } = {},
   ): void {
     const { tx, givenPattern, doNotUpdateOnPatternChange } = options;
     const key = this.getDocKey(resultCell);
-    this.locallyPreparedResults.delete(key);
+    this.locallyStoppedResults.delete(key);
 
     // Create cancel group early - before the $TYPE sink
     const [cancel, addCancel] = useCancelGroup();
@@ -976,6 +1029,10 @@ export class Runner {
       this.discoverAndCacheFunctions(pattern, new Set());
       const actualTx = useTx ?? this.runtime.edit();
       const shouldCommit = !useTx;
+      const schedulerRehydration = options.rehydrateSchedulerFromStorage ===
+          false
+        ? {}
+        : this.schedulerRehydrationOptions(processCell);
       try {
         for (const node of pattern.nodes) {
           this.instantiateNode(
@@ -986,6 +1043,7 @@ export class Runner {
             processCell.withTx(actualTx),
             addNodeCancel,
             pattern,
+            schedulerRehydration,
           );
         }
       } finally {
@@ -1119,6 +1177,7 @@ export class Runner {
 
     const key = this.getDocKey(rootCell);
     const wasPreparedLocally = this.locallyPreparedResults.has(key);
+    const wasStoppedLocally = this.locallyStoppedResults.has(key);
 
     // Step 2: Already started? Return success
     if (this.cancels.has(key)) return Promise.resolve(true);
@@ -1177,6 +1236,7 @@ export class Runner {
           syncedPatternId,
           wasSyncedAtEntry,
           wasPreparedLocally,
+          wasStoppedLocally,
           seenCells,
         );
       });
@@ -1187,6 +1247,7 @@ export class Runner {
       patternId,
       wasSyncedAtEntry,
       wasPreparedLocally,
+      wasStoppedLocally,
       seenCells,
     );
   }
@@ -1197,6 +1258,7 @@ export class Runner {
     patternId: string,
     wasSyncedAtEntry: boolean,
     wasPreparedLocally: boolean,
+    wasStoppedLocally: boolean,
     seenCells: Set<Cell>,
   ): Promise<boolean> {
     const pattern = this.runtime.patternManager.patternById(patternId);
@@ -1218,15 +1280,17 @@ export class Runner {
 
     const resolvedPattern = this.resolveToPattern(pattern);
 
-    // Fast path for pieces prepared in the current runtime via setup()/run().
-    // Those writes are already present locally, so we should preserve the
-    // historical synchronous start() behavior even if an earlier read flipped
-    // the cell's generic `synced` flag. The dependency sync below is
-    // specifically for resumed pieces that came from storage.
-    if (!wasSyncedAtEntry || wasPreparedLocally) {
+    // Fast path for pieces prepared in the current runtime via setup()/run() or
+    // explicitly restarted after stop(). Those writes are already present
+    // locally, so we should preserve the historical synchronous start()
+    // behavior even if an earlier read flipped the cell's generic `synced`
+    // flag. The dependency sync below is specifically for resumed pieces that
+    // came from storage.
+    if (!wasSyncedAtEntry || wasPreparedLocally || wasStoppedLocally) {
       try {
         this.startCore(rootCell, processCell, {
           givenPattern: resolvedPattern,
+          rehydrateSchedulerFromStorage: !wasStoppedLocally,
         });
       } catch (err) {
         return Promise.reject(err);
@@ -1638,7 +1702,7 @@ export class Runner {
     const key = this.getDocKey(resultCell);
     this.cancels.get(key)?.();
     this.cancels.delete(key);
-    this.locallyPreparedResults.delete(key);
+    this.locallyStoppedResults.add(key);
   }
 
   stopAll(): void {
@@ -1655,6 +1719,7 @@ export class Runner {
     // canceled
     this.resultPatternCache.clear();
     this.locallyPreparedResults.clear();
+    this.locallyStoppedResults.clear();
   }
 
   /**
@@ -1785,6 +1850,7 @@ export class Runner {
     processCell: Cell<any>,
     addCancel: AddCancel,
     pattern: Pattern,
+    schedulerRehydration: SchedulerRehydrationSubscriptionOptions,
     moduleRefName?: string,
   ) {
     if (isModule(module)) {
@@ -1801,6 +1867,7 @@ export class Runner {
             processCell,
             addCancel,
             pattern,
+            schedulerRehydration,
             refName,
           );
           break;
@@ -1814,6 +1881,7 @@ export class Runner {
             processCell,
             addCancel,
             pattern,
+            schedulerRehydration,
           );
           break;
         case "raw":
@@ -1825,6 +1893,7 @@ export class Runner {
             processCell,
             addCancel,
             pattern,
+            schedulerRehydration,
             moduleRefName,
           );
           break;
@@ -2088,6 +2157,7 @@ export class Runner {
     processCell: Cell<any>,
     addCancel: AddCancel,
     cause: Record<string, any>,
+    schedulerRehydration: SchedulerRehydrationSubscriptionOptions,
   ): any {
     if (
       !validateAndCheckOpaqueRefs(result, name) &&
@@ -2138,7 +2208,7 @@ export class Runner {
       const cancel = this.runtime.scheduler.subscribe(
         readResultAction,
         readResultAction,
-        { isEffect: true, ...this.schedulerRehydrationOptions(processCell) },
+        { isEffect: true, ...schedulerRehydration },
       );
       tx.addCommitCallback((_committedTx, result) => {
         if (result.error) {
@@ -2357,6 +2427,7 @@ export class Runner {
       reads,
       writes,
       verifiedLoadId,
+      schedulerRehydration,
       streamLink,
     }: JavaScriptNodeContext & { streamLink: NormalizedFullLink },
   ): void {
@@ -2476,6 +2547,7 @@ export class Runner {
               processCell,
               addCancel,
               cause,
+              schedulerRehydration,
             );
           } finally {
             logger.timeEnd("stream", "postRun");
@@ -2545,6 +2617,7 @@ export class Runner {
       reads,
       writes,
       verifiedLoadId,
+      schedulerRehydration,
     }: JavaScriptNodeContext,
   ): void {
     if (isRecord(inputs) && "$event" in inputs) {
@@ -2712,7 +2785,11 @@ export class Runner {
     };
 
     if (name) {
-      setRunnableName(action, `action:${name}`, { setSrc: true });
+      setRunnableName(
+        action,
+        schedulerJavaScriptActionName(name, processCell, reads, writes),
+        { setSrc: true },
+      );
     }
 
     const staticRedirectWriteTargets = module.materializerWriteEnvelopes
@@ -2763,7 +2840,7 @@ export class Runner {
 
     addCancel(
       this.runtime.scheduler.subscribe(wrappedAction, populateDependencies, {
-        ...this.schedulerRehydrationOptions(processCell),
+        ...schedulerRehydration,
       }),
     );
   }
@@ -2776,6 +2853,7 @@ export class Runner {
     processCell: Cell<any>,
     addCancel: AddCancel,
     pattern: Pattern,
+    schedulerRehydration: SchedulerRehydrationSubscriptionOptions,
   ) {
     const io = this.bindNodeIO(inputBindings, outputBindings, processCell);
     const { fn, name, verifiedLoadId } = this.resolveJavaScriptFunction(
@@ -2791,6 +2869,7 @@ export class Runner {
       fn,
       name,
       verifiedLoadId,
+      schedulerRehydration,
       ...io,
     };
 
@@ -2873,6 +2952,7 @@ export class Runner {
     processCell: Cell<any>,
     addCancel: AddCancel,
     pattern: Pattern,
+    schedulerRehydration: SchedulerRehydrationSubscriptionOptions,
     moduleRefName?: string,
   ) {
     if (typeof module.implementation !== "function") {
@@ -3006,7 +3086,11 @@ export class Runner {
       sanitizeDebugLabel(impl.src) ??
       sanitizeDebugLabel(impl.name) ??
       "anonymous";
-    const rawName = `raw:${rawTargetName}`;
+    const rawName = schedulerRawActionName(
+      rawTargetName,
+      inputCells,
+      outputCells,
+    );
 
     const action: Action = (tx: IExtendedStorageTransaction) => {
       logger.timeStart("raw", "run", rawTargetName);
@@ -3092,7 +3176,7 @@ export class Runner {
         debounce,
         noDebounce,
         throttle,
-        ...this.schedulerRehydrationOptions(processCell),
+        ...schedulerRehydration,
       }),
     );
   }

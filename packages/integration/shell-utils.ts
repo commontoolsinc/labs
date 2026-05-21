@@ -106,6 +106,10 @@ export class ShellIntegration {
     await login(this.page(), identity);
   }
 
+  async disposeRuntime(): Promise<void> {
+    await this.#disposePageRuntime();
+  }
+
   // Wait for the app state to match all properties
   // provided here. Throws if timeout is reached.
   //

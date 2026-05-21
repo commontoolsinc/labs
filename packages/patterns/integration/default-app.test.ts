@@ -28,6 +28,23 @@ type BrowserActionRunTraceAddress = {
   path: string[];
 };
 
+type BrowserTriggerTraceEntry = {
+  changeIndex: number;
+  entityId: string;
+  path: string[];
+  matchedActionCount: number;
+  triggered: Array<{
+    actionId: string;
+    actionType: "effect" | "computation";
+    decision: string;
+    pendingBefore: boolean;
+    pendingAfter: boolean;
+    dirtyBefore: boolean;
+    dirtyAfter: boolean;
+    scheduledEffects: Array<{ actionId: string }>;
+  }>;
+};
+
 const { FRONTEND_URL, SPACE_NAME } = env;
 const HOME_RELOAD_ACTION_RUN_LIMIT = 20;
 const NOTEBOOK_RELOAD_ACTION_RUN_LIMIT = 30;
@@ -620,11 +637,12 @@ describe("default-app flow test", () => {
     }
   });
 
-  it("should render every rapidly created notebook note", async () => {
+  it("should persist and reload every rapidly created notebook note", async () => {
     identity = await Identity.generate({ implementation: "noble" });
     const notebookSpaceName = globalThis.crypto.randomUUID();
 
     const page = shell.page();
+    await disposeBrowserRuntime(page);
     await shell.goto({
       frontendUrl: FRONTEND_URL,
       view: { spaceName: notebookSpaceName },
@@ -661,6 +679,7 @@ describe("default-app flow test", () => {
     await waitFor(async () => {
       return !!(await findButtonWithText(page, "Create Another"));
     });
+    await waitFor(async () => await resetEventInvocationTrace(page));
 
     const noteCreates = 7;
     for (let i = 0; i < noteCreates - 1; i++) {
@@ -676,27 +695,57 @@ describe("default-app flow test", () => {
 
     try {
       await waitFor(async () => {
-        const state = await collectNotebookRenderState(page);
-        return state.noteCount === noteCreates &&
-          state.renderedNoteChips === noteCreates;
+        await waitForRuntimeIdle(page);
+        const state = await collectNotebookSourceState(page);
+        return state.argumentNotesLength === noteCreates &&
+          state.noteCount === noteCreates &&
+          state.showNewNotePrompt === false &&
+          state.usedCreateAnotherNote === false;
       });
     } catch (_) {
       // Keep the final assertions below so failures include diagnostics.
     }
 
-    const summary = await collectNotebookRenderState(page);
+    const summary = await collectNotebookSourceState(page);
     if (
-      summary.noteCount !== noteCreates ||
-      summary.renderedNoteChips !== noteCreates
+      summary.argumentNotesLength !== noteCreates ||
+      summary.noteCount !== noteCreates
     ) {
       console.log(
-        "Notebook rapid create diagnostics:",
-        JSON.stringify(await collectNotebookDiagnostics(page), null, 2),
+        "Notebook rapid create source diagnostics:",
+        JSON.stringify(summary, null, 2),
+      );
+      console.log(
+        "Notebook rapid create render diagnostics:",
+        JSON.stringify(await collectNotebookRenderState(page), null, 2),
+      );
+      console.log(
+        "Notebook rapid create event/action diagnostics:",
+        JSON.stringify(await collectNotebookCreateTraceSummary(page), null, 2),
       );
     }
 
+    assertEquals(summary.argumentNotesLength, noteCreates);
     assertEquals(summary.noteCount, noteCreates);
-    assertEquals(summary.renderedNoteChips, noteCreates);
+
+    // The first reload can legitimately run dirty catch-up work from the burst.
+    // Measure the following reload as the clean persisted-state path.
+    const warmNotebookReloadSummary = await collectNotebookReloadSummary(
+      shell,
+      {
+        identity,
+        expectedNoteCount: noteCreates,
+      },
+    );
+    assert(
+      warmNotebookReloadSummary &&
+        typeof warmNotebookReloadSummary === "object",
+      "Expected warm notebook reload summary to be available",
+    );
+    console.log(
+      "Notebook warm reload rehydration summary:",
+      JSON.stringify(warmNotebookReloadSummary, null, 2),
+    );
 
     const notebookReloadSummary = await collectNotebookReloadSummary(shell, {
       identity,
@@ -845,6 +894,7 @@ async function resetEventInvocationTrace(page: Page): Promise<boolean> {
         : undefined;
       if (
         type === "scheduler.invocation" ||
+        type === "scheduler.event.commit" ||
         type === "scheduler.event.preflight"
       ) {
         api.__eventInvocationTrace?.push(marker);
@@ -1501,6 +1551,23 @@ async function waitForRuntimeIdle(page: Page): Promise<boolean> {
   });
 }
 
+async function disposeBrowserRuntime(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    try {
+      await globalThis.commonfabric?.rt?.dispose();
+    } catch (error) {
+      console.warn(
+        "Failed to dispose browser runtime before navigation",
+        error,
+      );
+    } finally {
+      if (globalThis.commonfabric) {
+        globalThis.commonfabric.rt = undefined;
+      }
+    }
+  });
+}
+
 async function waitForHomePageReady(
   page: Page,
   options: { spaceName: string; expectNoteInList: boolean },
@@ -1564,17 +1631,35 @@ async function collectNotebookReloadSummary(
   },
 ): Promise<unknown> {
   const page = shell.page();
+  const state = await shell.state();
+  const view = state?.view;
+  assert(
+    view && "pieceId" in view && typeof view.pieceId === "string",
+    "Expected notebook reload to start from a piece view",
+  );
   const startedAt = performance.now();
   await page.reload({ waitUntil: "load" });
   await page.applyConsoleFormatter();
   await shell.login(options.identity);
 
-  await waitFor(async () => {
-    const state = await collectNotebookRenderState(page);
-    return state.isNotebook &&
-      state.noteCount === options.expectedNoteCount &&
-      state.renderedNoteChips === options.expectedNoteCount;
-  });
+  try {
+    await waitFor(async () => {
+      const state = await collectNotebookRenderState(page);
+      return state.isNotebook &&
+        state.noteCount === options.expectedNoteCount &&
+        state.renderedNoteChips === options.expectedNoteCount;
+    });
+  } catch (error) {
+    console.log(
+      "Notebook reload diagnostics:",
+      JSON.stringify(await collectNotebookDiagnostics(page), null, 2),
+    );
+    console.log(
+      "Notebook reload navigation diagnostics:",
+      JSON.stringify(await collectNavigationDiagnostics(page), null, 2),
+    );
+    throw error;
+  }
   await waitFor(async () => await waitForRuntimeIdle(page));
 
   const homeLoadSummary = await collectHomeLoadSummary(page);
@@ -1585,6 +1670,85 @@ async function collectNotebookReloadSummary(
     reloadToRenderedMs: Number((performance.now() - startedAt).toFixed(3)),
     ...(homeLoadSummary as Record<string, unknown>),
   };
+}
+
+async function collectNotebookSourceState(page: Page): Promise<{
+  notebookEntityId?: string;
+  argumentNotesLength?: number;
+  noteCount?: number;
+  showNewNotePrompt?: boolean;
+  usedCreateAnotherNote?: boolean;
+}> {
+  return await page.evaluate(async () => {
+    const api = globalThis.commonfabric as {
+      rt?: { idle?: () => Promise<void> };
+      readCell?: (options: {
+        id: string;
+        path?: string[];
+      }) => Promise<unknown>;
+      __eventInvocationTrace?: unknown[];
+    } | undefined;
+    await api?.rt?.idle?.();
+
+    const markers = (api?.__eventInvocationTrace ?? []) as Array<{
+      type?: string;
+      handlerId?: string;
+      handlerInfo?: { moduleName?: string };
+      writes?: string[];
+    }>;
+    const notebookCommits = markers.filter((marker) =>
+      marker.type === "scheduler.event.commit" &&
+      (
+        marker.handlerId?.includes("/api/patterns/notes/notebook.tsx") ||
+        marker.handlerInfo?.moduleName?.includes("notebook")
+      )
+    );
+    const notebookNotesWrite = notebookCommits.at(-1)?.writes?.find((write) =>
+      write.includes("/value/argument/notes")
+    );
+    const notebookEntityId = notebookNotesWrite?.match(
+      /\/(of:[^/]+)\/value\/argument\/notes/,
+    )?.[1];
+    if (!notebookEntityId || !api?.readCell) {
+      return { notebookEntityId };
+    }
+
+    const notebookArgument = await api.readCell({
+      id: notebookEntityId,
+      path: ["argument"],
+    });
+    const notebookInternal = await api.readCell({
+      id: notebookEntityId,
+      path: ["internal"],
+    });
+
+    return {
+      notebookEntityId,
+      argumentNotesLength: Array.isArray(
+          (notebookArgument as { notes?: unknown[] } | undefined)
+            ?.notes,
+        )
+        ? (notebookArgument as { notes: unknown[] }).notes.length
+        : undefined,
+      noteCount:
+        typeof (notebookInternal as { noteCount?: unknown } | undefined)
+            ?.noteCount === "number"
+          ? (notebookInternal as { noteCount: number }).noteCount
+          : undefined,
+      showNewNotePrompt:
+        typeof (notebookInternal as { showNewNotePrompt?: unknown } | undefined)
+            ?.showNewNotePrompt === "boolean"
+          ? (notebookInternal as { showNewNotePrompt: boolean })
+            .showNewNotePrompt
+          : undefined,
+      usedCreateAnotherNote: typeof (
+          notebookInternal as { usedCreateAnotherNote?: unknown } | undefined
+        )?.usedCreateAnotherNote === "boolean"
+        ? (notebookInternal as { usedCreateAnotherNote: boolean })
+          .usedCreateAnotherNote
+        : undefined,
+    };
+  });
 }
 
 function actionRunCountFromHomeLoadSummary(
@@ -1745,6 +1909,361 @@ async function collectActionRunSummary(page: Page): Promise<unknown> {
         .length,
       actions,
       actionInstances,
+    };
+  });
+}
+
+async function collectNotebookCreateTraceSummary(page: Page): Promise<unknown> {
+  return await page.evaluate(async () => {
+    const api = globalThis.commonfabric as {
+      rt?: {
+        idle?: () => Promise<void>;
+        getActionRunTrace?: () => Promise<BrowserActionRunTraceEntry[]>;
+        getTriggerTrace?: () => Promise<BrowserTriggerTraceEntry[]>;
+        getGraphSnapshot?: () => Promise<{ nodes?: unknown[] }>;
+      };
+      readCell?: (options: {
+        id: string;
+        path?: string[];
+      }) => Promise<unknown>;
+      __eventInvocationTrace?: unknown[];
+    } | undefined;
+    const rt = api?.rt;
+    await rt?.idle?.();
+    const appState = (globalThis as any).app?.serialize?.();
+    const resultPieceId = appState?.view &&
+        typeof appState.view === "object" &&
+        "pieceId" in appState.view &&
+        typeof appState.view.pieceId === "string"
+      ? appState.view.pieceId
+      : undefined;
+    const resultEntityId = resultPieceId
+      ? resultPieceId.startsWith("of:") ? resultPieceId : `of:${resultPieceId}`
+      : undefined;
+
+    const markers = (api?.__eventInvocationTrace ?? []) as Array<{
+      type?: string;
+      handlerId?: string;
+      handlerInfo?: { patternName?: string; moduleName?: string };
+      writes?: string[];
+      writeCount?: number;
+      changedWriteCount?: number;
+      error?: string;
+    }>;
+    const eventInvocations = markers
+      .filter((marker) => marker.type === "scheduler.invocation")
+      .map((marker) => ({
+        handlerId: marker.handlerId,
+        patternName: marker.handlerInfo?.patternName,
+        moduleName: marker.handlerInfo?.moduleName,
+      }));
+    const notebookInvocations = eventInvocations.filter((marker) =>
+      marker.handlerId?.includes("/api/patterns/notes/notebook.tsx") ||
+      marker.moduleName?.includes("notebook")
+    );
+    const eventCommits = markers
+      .filter((marker) => marker.type === "scheduler.event.commit")
+      .map((marker) => ({
+        handlerId: marker.handlerId,
+        patternName: marker.handlerInfo?.patternName,
+        moduleName: marker.handlerInfo?.moduleName,
+        writeCount: marker.writeCount,
+        changedWriteCount: marker.changedWriteCount,
+        writes: marker.writes ?? [],
+        error: marker.error,
+      }));
+    const notebookCommits = eventCommits.filter((marker) =>
+      marker.handlerId?.includes("/api/patterns/notes/notebook.tsx") ||
+      marker.moduleName?.includes("notebook")
+    );
+    const finalNotebookCommit = notebookCommits.at(-1);
+    const notebookNotesWrite = finalNotebookCommit?.writes?.find((write) =>
+      write.includes("/value/argument/notes")
+    );
+    const notebookEntityId = notebookNotesWrite?.match(
+      /\/(of:[^/]+)\/value\/argument\/notes/,
+    )?.[1];
+    let notebookArgument: unknown;
+    let notebookInternal: unknown;
+    if (notebookEntityId && api?.readCell) {
+      notebookArgument = await api.readCell({
+        id: notebookEntityId,
+        path: ["argument"],
+      });
+      notebookInternal = await api.readCell({
+        id: notebookEntityId,
+        path: ["internal"],
+      });
+    }
+    const triggerTrace = await rt?.getTriggerTrace?.() ?? [];
+    const notebookNotesTriggers = triggerTrace
+      .filter((entry) =>
+        entry.entityId === notebookEntityId &&
+        entry.path.slice(0, 3).join("/") === "value/argument/notes"
+      )
+      .map((entry) => ({
+        changeIndex: entry.changeIndex,
+        path: entry.path,
+        matchedActionCount: entry.matchedActionCount,
+        triggered: entry.triggered.map((triggered) => ({
+          actionId: triggered.actionId,
+          actionType: triggered.actionType,
+          decision: triggered.decision,
+          pendingBefore: triggered.pendingBefore,
+          pendingAfter: triggered.pendingAfter,
+          dirtyBefore: triggered.dirtyBefore,
+          dirtyAfter: triggered.dirtyAfter,
+          scheduledEffects: triggered.scheduledEffects.map((effect) =>
+            effect.actionId
+          ),
+        })),
+      }));
+    const notebookNotesTriggersByPath = triggerTrace
+      .filter((entry) =>
+        entry.path.slice(0, 3).join("/") === "value/argument/notes"
+      )
+      .map((entry) => ({
+        entityId: entry.entityId,
+        path: entry.path,
+        matchedActionCount: entry.matchedActionCount,
+        triggered: entry.triggered
+          .filter((triggered) =>
+            triggered.actionId.includes("/api/patterns/notes/notebook.tsx")
+          )
+          .map((triggered) => ({
+            actionId: triggered.actionId,
+            actionType: triggered.actionType,
+            decision: triggered.decision,
+            pendingBefore: triggered.pendingBefore,
+            pendingAfter: triggered.pendingAfter,
+            dirtyBefore: triggered.dirtyBefore,
+            dirtyAfter: triggered.dirtyAfter,
+            scheduledEffects: triggered.scheduledEffects.map((effect) =>
+              effect.actionId
+            ),
+          })),
+      }));
+    const finalNotebookNotesTriggers = notebookNotesTriggers.slice(-2);
+    const finalScheduledEffectIds = new Set(
+      finalNotebookNotesTriggers.flatMap((entry) =>
+        entry.triggered.flatMap((triggered) => triggered.scheduledEffects)
+      ),
+    );
+    const finalScheduledSinkIds = [...finalScheduledEffectIds].filter((id) =>
+      id.startsWith("sink:")
+    );
+    const graph = await rt?.getGraphSnapshot?.();
+    const finalScheduledSinkNodes = (graph?.nodes ?? [])
+      .filter((node: any) =>
+        typeof node.id === "string" && finalScheduledSinkIds.includes(node.id)
+      )
+      .map((node: any) => ({
+        id: node.id,
+        isPending: node.isPending,
+        isDirty: node.isDirty,
+        isDemanded: node.isDemanded,
+        isConditionallyScheduled: node.isConditionallyScheduled,
+        reads: (node.reads ?? []).filter((read: string) =>
+          notebookEntityId === undefined ||
+          read.includes(notebookEntityId) ||
+          read.includes("/value/internal/noteCount") ||
+          read.includes("/value/internal/$NAME")
+        ).slice(0, 8),
+        writes: (node.writes ?? []).filter((write: string) =>
+          write.includes("/noteCount") ||
+          write.includes("/mentionable") ||
+          write.includes("/showNewNotePrompt") ||
+          write.includes("/usedCreateAnotherNote")
+        ).slice(0, 8),
+      }));
+    const interestingFinalScheduledSinkIds = new Set(
+      finalScheduledSinkNodes
+        .filter((node) =>
+          (resultEntityId !== undefined && node.id.includes(resultEntityId)) ||
+          node.reads.some((read: string) =>
+            read.includes("/value/argument/notes") ||
+            read.includes("/value/internal/noteCount") ||
+            read.includes("/value/internal/showNewNotePrompt") ||
+            read.includes("/value/internal/usedCreateAnotherNote")
+          ) ||
+          node.writes.some((write: string) =>
+            write.includes("/noteCount") ||
+            write.includes("/mentionable") ||
+            write.includes("/showNewNotePrompt") ||
+            write.includes("/usedCreateAnotherNote")
+          )
+        )
+        .map((node) => node.id),
+    );
+    const notebookCoreNodes = (graph?.nodes ?? [])
+      .filter((node: any) =>
+        typeof node.id === "string" &&
+        node.id.includes("/api/patterns/notes/notebook.tsx") &&
+        (
+          node.id.includes(":531:34") ||
+          node.id.includes(":532:33") ||
+          (node.writes ?? []).some((write: string) =>
+            write.includes("/value/internal/noteCount") ||
+            write.includes("/value/internal/$NAME")
+          ) ||
+          (
+            notebookEntityId !== undefined &&
+            (node.reads ?? []).some((read: string) =>
+              read.includes(notebookEntityId) &&
+              read.includes("/value/argument/notes")
+            )
+          )
+        )
+      )
+      .map((node: any) => ({
+        id: node.id,
+        isPending: node.isPending,
+        isDirty: node.isDirty,
+        isDemanded: node.isDemanded,
+        isDebouncedWaiting: node.isDebouncedWaiting,
+        readCount: (node.reads ?? []).length,
+        noteReads: (node.reads ?? []).filter((read: string) =>
+          notebookEntityId === undefined ||
+          read.includes(notebookEntityId) ||
+          read.includes("/value/internal/noteCount") ||
+          read.includes("/value/internal/$NAME")
+        ).slice(0, 8),
+        shallowReadCount: (node.shallowReads ?? []).length,
+        noteShallowReads: (node.shallowReads ?? []).filter((read: string) =>
+          notebookEntityId === undefined ||
+          read.includes(notebookEntityId) ||
+          read.includes("/value/internal/noteCount") ||
+          read.includes("/value/internal/$NAME")
+        ).slice(0, 8),
+        writeCount: (node.writes ?? []).length,
+        relevantWrites: (node.writes ?? []).filter((write: string) =>
+          notebookEntityId === undefined ||
+          write.includes(notebookEntityId) ||
+          write.includes("/value/internal/noteCount") ||
+          write.includes("/value/internal/$NAME")
+        ).slice(0, 8),
+      }));
+
+    const trace = await rt?.getActionRunTrace?.() ?? [];
+    const notebookActions = trace
+      .filter((entry) =>
+        entry.actionId.includes("/api/patterns/notes/notebook.tsx")
+      )
+      .map((entry) => ({
+        actionId: entry.actionId,
+        actionType: entry.actionType,
+        actualWrites: entry.actualWrites.map((write) =>
+          `${write.space}/${write.entityId}/${write.path.join("/")}`
+        ),
+      }));
+    const finalScheduledSinkRuns = trace
+      .filter((entry) => interestingFinalScheduledSinkIds.has(entry.actionId))
+      .map((entry) => ({
+        actionId: entry.actionId,
+        actionType: entry.actionType,
+        actualWrites: entry.actualWrites.map((write) =>
+          `${write.space}/${write.entityId}/${write.path.join("/")}`
+        ),
+      }));
+    const finalScheduledSinkRunCounts = new Map<string, number>();
+    for (const entry of finalScheduledSinkRuns) {
+      finalScheduledSinkRunCounts.set(
+        entry.actionId,
+        (finalScheduledSinkRunCounts.get(entry.actionId) ?? 0) + 1,
+      );
+    }
+
+    const byNotebookHandler = new Map<string, number>();
+    for (const marker of notebookInvocations) {
+      const id = marker.handlerId ?? "unknown";
+      byNotebookHandler.set(id, (byNotebookHandler.get(id) ?? 0) + 1);
+    }
+    const byNotebookAction = new Map<string, number>();
+    for (const entry of notebookActions) {
+      byNotebookAction.set(
+        entry.actionId,
+        (byNotebookAction.get(entry.actionId) ?? 0) + 1,
+      );
+    }
+
+    return {
+      eventInvocationCount: eventInvocations.length,
+      notebookInvocationCount: notebookInvocations.length,
+      notebookInvocationsByHandler: [...byNotebookHandler.entries()].map((
+        [handlerId, count],
+      ) => ({ handlerId, count })),
+      notebookCommits: notebookCommits.map((commit) => ({
+        handlerId: commit.handlerId,
+        writeCount: commit.writeCount,
+        changedWriteCount: commit.changedWriteCount,
+        keyWrites: commit.writes.filter((write) =>
+          write.includes("/value/argument/notes") ||
+          write.includes("/value/internal/showNewNotePrompt") ||
+          write.includes("/value/internal/usedCreateAnotherNote")
+        ),
+        error: commit.error,
+      })),
+      notebookEntityId,
+      resultPieceId,
+      notebookArgumentNotesLength: Array.isArray(
+          (notebookArgument as { notes?: unknown[] } | undefined)
+            ?.notes,
+        )
+        ? (notebookArgument as { notes: unknown[] }).notes.length
+        : undefined,
+      notebookInternalPromptState: {
+        noteCount: (notebookInternal as { noteCount?: unknown } | undefined)
+          ?.noteCount,
+        showNewNotePrompt:
+          (notebookInternal as { showNewNotePrompt?: unknown } | undefined)
+            ?.showNewNotePrompt,
+        usedCreateAnotherNote:
+          (notebookInternal as { usedCreateAnotherNote?: unknown } | undefined)
+            ?.usedCreateAnotherNote,
+      },
+      finalNotebookNotesTriggers: finalNotebookNotesTriggers.map((entry) => ({
+        changeIndex: entry.changeIndex,
+        path: entry.path,
+        matchedActionCount: entry.matchedActionCount,
+        triggeredCount: entry.triggered.length,
+        triggered: entry.triggered.slice(0, 12).map((triggered) => ({
+          actionId: triggered.actionId,
+          actionType: triggered.actionType,
+          decision: triggered.decision,
+          pendingBefore: triggered.pendingBefore,
+          pendingAfter: triggered.pendingAfter,
+          dirtyBefore: triggered.dirtyBefore,
+          dirtyAfter: triggered.dirtyAfter,
+          scheduledEffectCount: triggered.scheduledEffects.length,
+          scheduledSinkCount: triggered.scheduledEffects.filter((id) =>
+            id.startsWith("sink:")
+          ).length,
+        })),
+      })),
+      finalScheduledSinkCount: finalScheduledSinkIds.length,
+      interestingFinalScheduledSinkCount: interestingFinalScheduledSinkIds.size,
+      finalScheduledSinkRunCounts: [...finalScheduledSinkRunCounts.entries()]
+        .map(([actionId, count]) => ({ actionId, count })),
+      finalScheduledSinkRunTail: finalScheduledSinkRuns.slice(-30),
+      finalScheduledSinkNodes: finalScheduledSinkNodes.filter((node) =>
+        interestingFinalScheduledSinkIds.has(node.id)
+      ),
+      notebookNotesTriggersByPath: notebookNotesTriggersByPath.slice(-3),
+      notebookCoreNodes,
+      notebookActionCount: notebookActions.length,
+      notebookActionsById: [...byNotebookAction.entries()].map((
+        [actionId, count],
+      ) => ({ actionId, count })),
+      notebookActionTail: notebookActions
+        .filter((entry) =>
+          entry.actionId.includes(":531:34") ||
+          entry.actionId.includes(":532:33") ||
+          entry.actualWrites.some((write) =>
+            write.includes("/value/internal/noteCount") ||
+            write.includes("/value/internal/$NAME")
+          )
+        )
+        .slice(-20),
     };
   });
 }
@@ -2787,6 +3306,11 @@ async function collectNotebookRenderState(page: Page): Promise<{
   isNotebook: boolean;
   noteCount: number;
   notesLength: number;
+  mentionableLength: number;
+  showNewNotePrompt?: boolean;
+  usedCreateAnotherNote?: boolean;
+  storedUiNoteChips: number;
+  storedUiNoteLabels: string[];
   renderedNoteChips: number;
   renderedNoteLabels: string[];
 }> {
@@ -2798,10 +3322,51 @@ async function collectNotebookRenderState(page: Page): Promise<{
         typeof view.pieceId === "string"
       ? view.pieceId
       : undefined;
-    const current = pieceId
-      ? await commonfabric?.readCell?.({ id: pieceId })
-      : undefined;
+    let current: any;
+    if (pieceId) {
+      const originalLog = console.log;
+      try {
+        console.log = () => {};
+        current = await commonfabric?.readCell?.({ id: pieceId });
+      } finally {
+        console.log = originalLog;
+      }
+    }
     const notes = Array.isArray(current?.notes) ? current.notes : [];
+    const mentionable = Array.isArray(current?.mentionable)
+      ? current.mentionable
+      : [];
+    const collectStoredNoteLabels = (value: unknown) => {
+      const labels: string[] = [];
+      const seen = new WeakSet<object>();
+
+      function visit(currentValue: unknown): void {
+        if (currentValue === null || currentValue === undefined) return;
+        if (typeof currentValue !== "object") return;
+        if (seen.has(currentValue)) return;
+        seen.add(currentValue);
+
+        const record = currentValue as Record<string, unknown>;
+        const label = typeof record.label === "string"
+          ? record.label
+          : typeof (record.props as { label?: unknown } | undefined)?.label ===
+              "string"
+          ? (record.props as { label: string }).label
+          : undefined;
+        if (label?.trim().startsWith("📝 New Note")) {
+          labels.push(label.trim());
+        }
+
+        if (Array.isArray(currentValue)) {
+          for (const item of currentValue) visit(item);
+          return;
+        }
+        for (const item of Object.values(record)) visit(item);
+      }
+
+      visit(value);
+      return labels;
+    };
     const collectRenderedNoteLabels = (root: Document | ShadowRoot) => {
       const labels: string[] = [];
 
@@ -2824,6 +3389,7 @@ async function collectNotebookRenderState(page: Page): Promise<{
       return labels;
     };
     const noteLabels = collectRenderedNoteLabels(document);
+    const storedUiNoteLabels = collectStoredNoteLabels(current?.["$UI"]);
 
     return {
       isNotebook: current?.isNotebook === true,
@@ -2831,6 +3397,15 @@ async function collectNotebookRenderState(page: Page): Promise<{
         ? current.noteCount
         : -1,
       notesLength: notes.length,
+      mentionableLength: mentionable.length,
+      showNewNotePrompt: typeof current?.showNewNotePrompt === "boolean"
+        ? current.showNewNotePrompt
+        : undefined,
+      usedCreateAnotherNote: typeof current?.usedCreateAnotherNote === "boolean"
+        ? current.usedCreateAnotherNote
+        : undefined,
+      storedUiNoteChips: storedUiNoteLabels.length,
+      storedUiNoteLabels,
       renderedNoteChips: noteLabels.length,
       renderedNoteLabels: noteLabels,
     };

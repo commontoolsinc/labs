@@ -131,15 +131,18 @@ export function isSchedulerActionObservation(
     typeof candidate.pieceId === "string" &&
     typeof candidate.processGeneration === "number" &&
     typeof candidate.actionId === "string" &&
+    isSchedulerActionKind(candidate.actionKind) &&
     typeof candidate.implementationFingerprint === "string" &&
     typeof candidate.runtimeFingerprint === "string" &&
     typeof candidate.observedAtSeq === "number" &&
+    isSchedulerObservationTransactionKind(candidate.transactionKind) &&
     Array.isArray(candidate.reads) &&
     Array.isArray(candidate.shallowReads) &&
     Array.isArray(candidate.actualChangedWrites) &&
     Array.isArray(candidate.currentKnownWrites) &&
     Array.isArray(candidate.declaredWrites) &&
-    Array.isArray(candidate.materializerWriteEnvelopes);
+    Array.isArray(candidate.materializerWriteEnvelopes) &&
+    isSchedulerObservationStatus(candidate.status);
 }
 
 function cloneAddresses(
@@ -149,4 +152,24 @@ function cloneAddresses(
     ...address,
     path: [...address.path],
   }));
+}
+
+function isSchedulerActionKind(value: unknown): value is SchedulerActionKind {
+  return value === "computation" ||
+    value === "effect" ||
+    value === "event-handler";
+}
+
+function isSchedulerObservationTransactionKind(
+  value: unknown,
+): value is SchedulerObservationTransactionKind {
+  return value === "dependency-collection" ||
+    value === "action-run" ||
+    value === "event-preflight";
+}
+
+function isSchedulerObservationStatus(
+  value: unknown,
+): value is SchedulerActionObservation["status"] {
+  return value === "success" || value === "failed";
 }
