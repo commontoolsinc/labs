@@ -15,10 +15,12 @@ import {
 class NobleHasher extends BaseSmallChunkUpdatingHasher {
   #hasher = sha256.create();
 
+  /** @inheritDoc */
   protected _rawUpdate(data: Uint8Array) {
     this.#hasher.update(data);
   }
 
+  /** @inheritDoc */
   protected _rawDigest(_encoding: string | undefined): Uint8Array {
     return this.#hasher.digest();
   }
