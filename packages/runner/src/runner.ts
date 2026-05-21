@@ -1117,6 +1117,17 @@ export class Runner {
     // Step 4: Check whether the pattern is available, otherwise load it
     const patternId = getPatternId(rootCell);
     if (!patternId) {
+      // We may have a slug instead of a resultCell, so try the link.
+      const maybeLink = parseLink(rootCell.getRaw(), rootCell);
+      if (maybeLink) {
+        const nextCell = this.runtime.getCellFromLink(maybeLink);
+        if (seenCells.has(nextCell)) {
+          return Promise.reject(new Error("Circular link detected"));
+        }
+        seenCells.add(nextCell);
+        return this.doStart(nextCell, seenCells);
+      }
+
       return Promise.reject(
         new Error(`Cannot start: no pattern ID (pattern)`),
       );

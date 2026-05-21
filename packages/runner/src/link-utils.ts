@@ -576,6 +576,12 @@ function recursiveStripAsCellFromSchema(
     } else {
       result = restSchema;
     }
+    const asCellScope = ContextualFlowControl.getAsCellScope(
+      asCellValues.at(0),
+    );
+    if (asCellScope !== undefined && result.scope === undefined) {
+      result = { ...result, scope: asCellScope };
+    }
   }
 
   // Recursively process all object properties
