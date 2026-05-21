@@ -128,6 +128,11 @@ target path parsing rules and examples.
    not auto-retry a timed-out handler write unless a future idempotency-key
    contract exists.
 
+Runtime handoff alone is not a success boundary for mounted handler writes.
+Downstream reactive effects may continue after the write returns successfully,
+but known handler rejection, sync/idle timeout, and timed-out-unknown outcomes
+must be visible as errno plus `.status`/diagnostic state.
+
 Handlers remain writable so legacy flows like
 `echo '{"message":"hi"}' > result/addItem.handler` keep working.
 

@@ -115,6 +115,11 @@ projection invalidation/reconciliation. A future implementation may tune that
 deadline downward, but the old <200ms network-round-trip target is no longer the
 default correctness contract for mutating operations.
 
+Open latency work should therefore track two budgets separately: low-latency
+cached metadata/read operations, and commit-confirmed mutation deadlines that
+include backend acceptance, CFC/writeback reconciliation, and explicit
+known-failure versus timed-out-unknown diagnostics.
+
 If the Deno IPC round-trip adds too much latency for `getattr`/`readdir`,
 the Rust layer must be fully self-sufficient for these operations (serving
 from its in-memory tree without IPC).

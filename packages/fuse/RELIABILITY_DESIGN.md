@@ -227,6 +227,12 @@ no longer tell whether the backend will eventually commit; return `ETIMEDOUT`,
 record the operation in `.status`, and never replay automatically unless the
 operation has an idempotency key.
 
+Human and agent diagnostics must preserve that distinction. `.status` should
+show whether the last mutation was a known failure, a timed-out unknown, or an
+accepted operation whose downstream reactive effects may still be settling, so
+normal errno-style failures remain debuggable from both shell clients and
+cf-harness runs.
+
 ### Success Boundaries
 
 | Operation                                | Default success boundary                                                                                                                                         |
@@ -270,10 +276,11 @@ recovery, and TTL garbage collection may read `QuarantineStore`. Completion must
 match by operation ID and validate parent ref, target name, operation type,
 generation, and prepared/finalized labels before publishing anything into the
 normal projection. FUSE should scan quarantine records on startup and
-periodically at runtime, aborting records older than the configured TTL; one hour
-is the initial target unless active trusted completion is in progress.
+periodically at runtime, aborting records older than the configured TTL; one
+hour is the initial target unless active trusted completion is in progress.
 Post-create xattrs are separate modeled metadata operations; they may not
-retroactively authorize a usable entry or lower confidentiality/integrity labels.
+retroactively authorize a usable entry or lower confidentiality/integrity
+labels.
 
 ## Backpressure Policy
 
