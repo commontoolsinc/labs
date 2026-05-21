@@ -2,17 +2,69 @@ import { Command } from "@cliffy/command";
 import { basename, resolve } from "@std/path";
 import ports from "@commonfabric/ports" with { type: "json" };
 import {
+  buildBackgroundSupervisorDenoArgs,
   buildDenoArgs,
   defaultStateDir,
   ensureExecShim,
   fuseMod,
+  fuseSupervisorMod,
   isAlive,
+  isMountStateAlive,
+  mountpointHash,
   readAllMountStates,
   readMountState,
   removeMountStateFile,
   writeMountState,
 } from "../lib/fuse.ts";
 import { cliText } from "../lib/cli-name.ts";
+
+export function isFuseProcessCommand(command: string): boolean {
+  return command.includes("packages/fuse/mod.ts") ||
+    command.includes("packages/cli/lib/fuse-supervisor.ts") ||
+    command.includes("fuse-supervisor") ||
+    command.includes("fuse-daemon");
+}
+
+type FuseChildSupervisorState =
+  | "starting"
+  | "mounted"
+  | "failed"
+  | "exiting"
+  | "exited";
+
+interface FuseChildSupervisorStatus {
+  state: FuseChildSupervisorState;
+  pid?: number;
+  mountpoint?: string;
+  updatedAt?: string;
+  token?: string;
+  error?: string;
+  exitCode?: number;
+}
+
+export function childStatusPathForStatePath(statePath: string): string {
+  return `${statePath}.child-status`;
+}
+
+function parseChildSupervisorStatus(
+  text: string,
+): FuseChildSupervisorStatus | null {
+  try {
+    const parsed = JSON.parse(text) as Partial<FuseChildSupervisorStatus>;
+    switch (parsed.state) {
+      case "starting":
+      case "mounted":
+      case "failed":
+      case "exiting":
+      case "exited":
+        return parsed as FuseChildSupervisorStatus;
+      default:
+        return null;
+    }
+  } catch {
+    return null;
+  }
+}
 
 const fuseDescription = cliText(
   `Mount Common Fabric spaces as a FUSE filesystem.
@@ -75,13 +127,20 @@ export async function awaitBackgroundMountStartup(
     delayMs?: number;
     isAlive?: (pid: number) => boolean;
     removeStateFile?: (path: string) => Promise<void>;
+    readTextFile?: (path: string) => Promise<string>;
+    readMountStateFile?: (path: string) => Promise<string>;
+    childStatusPath?: string;
+    childStatusToken?: string;
+    mountpoint?: string;
     sleep?: (ms: number) => Promise<void>;
   } = {},
 ): Promise<void> {
-  const attempts = deps.attempts ?? 20;
-  const delayMs = deps.delayMs ?? 50;
+  const attempts = deps.attempts ?? (deps.childStatusPath ? 50 : 20);
+  const delayMs = deps.delayMs ?? (deps.childStatusPath ? 100 : 50);
   const isAliveFn = deps.isAlive ?? isAlive;
   const removeStateFileFn = deps.removeStateFile ?? removeMountStateFile;
+  const readTextFile = deps.readTextFile ?? Deno.readTextFile;
+  const readMountStateFile = deps.readMountStateFile ?? Deno.readTextFile;
   const sleep = deps.sleep ??
     ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
@@ -92,9 +151,72 @@ export async function awaitBackgroundMountStartup(
         "Background FUSE process exited during startup. Re-run without --background to inspect startup errors.",
       );
     }
+    if (deps.childStatusPath) {
+      let status: FuseChildSupervisorStatus | null = null;
+      try {
+        status = parseChildSupervisorStatus(
+          await readTextFile(deps.childStatusPath),
+        );
+      } catch {
+        status = null;
+      }
+      const belongsToThisMount = await childStatusBelongsToMount(
+        status,
+        statePath,
+        {
+          token: deps.childStatusToken,
+          mountpoint: deps.mountpoint,
+          readMountStateFile,
+        },
+      );
+      if (status?.state === "mounted" && belongsToThisMount) return;
+      if (
+        belongsToThisMount &&
+        (status?.state === "failed" || status?.state === "exiting" ||
+          status?.state === "exited")
+      ) {
+        await removeStateFileFn(statePath);
+        throw new Error(
+          `Background FUSE mount failed during startup: ${
+            status.error ?? `child reported ${status.state}`
+          }`,
+        );
+      }
+    }
     if (i < attempts - 1) {
       await sleep(delayMs);
     }
+  }
+
+  if (deps.childStatusPath) {
+    await removeStateFileFn(statePath);
+    throw new Error(
+      "Background FUSE process did not report mount readiness before startup timeout.",
+    );
+  }
+}
+
+async function childStatusBelongsToMount(
+  status: FuseChildSupervisorStatus | null,
+  statePath: string,
+  deps: {
+    token?: string;
+    mountpoint?: string;
+    readMountStateFile: (path: string) => Promise<string>;
+  },
+): Promise<boolean> {
+  if (!status) return false;
+  if (deps.token && status.token !== deps.token) return false;
+  if (deps.mountpoint && status.mountpoint !== deps.mountpoint) return false;
+  if (typeof status.pid !== "number") return false;
+
+  try {
+    const state = JSON.parse(await deps.readMountStateFile(statePath)) as {
+      childPid?: unknown;
+    };
+    return state.childPid === status.pid;
+  } catch {
+    return false;
   }
 }
 
@@ -241,9 +363,62 @@ export const fuse = new Command()
       // Derive log file path: /tmp/cf-fuse-<mountname>.log
       const logFile = `/tmp/cf-fuse-${basename(absMountpoint)}.log`;
 
-      // Pass --log-file so the daemon redirects its own output (including
-      // the ring-buffer crash dump) to disk rather than /dev/null.
-      spawnArgs.push("--log-file", logFile);
+      const statePath = resolve(
+        stateDir,
+        `${await mountpointHash(absMountpoint)}.json`,
+      );
+      const childStatusPath = childStatusPathForStatePath(statePath);
+      const childStatusToken = crypto.randomUUID();
+      try {
+        await Deno.remove(childStatusPath);
+      } catch (error) {
+        if (!(error instanceof Deno.errors.NotFound)) throw error;
+      }
+
+      if (isCompiledBinary) {
+        spawnCmd = execPath;
+        spawnArgs = ["fuse-supervisor", absMountpoint];
+        if (apiUrl) spawnArgs.push("--api-url", apiUrl);
+        if (identity) spawnArgs.push("--identity", identity);
+        if (options.allowOther) spawnArgs.push("--allow-other");
+        if (options.cfcMode) spawnArgs.push("--cfc-mode", options.cfcMode);
+        if (options.cfcAnnotations) spawnArgs.push("--cfc-annotations");
+        if (options.cfcXattrNamespace) {
+          spawnArgs.push("--cfc-xattr-namespace", options.cfcXattrNamespace);
+        }
+        if (options.cfcWritebackXattrs) {
+          spawnArgs.push("--cfc-writeback-xattrs");
+        }
+        if (options.cfcWritebackState) {
+          spawnArgs.push("--cfc-writeback-state", options.cfcWritebackState);
+        }
+        if (execCli) spawnArgs.push("--exec-cli", execCli);
+        spawnArgs.push("--log-file", logFile);
+        spawnArgs.push("--state-path", statePath);
+        spawnArgs.push("--supervisor-status", childStatusPath);
+        spawnArgs.push("--supervisor-token", childStatusToken);
+        for (const s of options.space ?? []) spawnArgs.push("--space", s);
+      } else {
+        spawnCmd = execPath;
+        spawnArgs = buildBackgroundSupervisorDenoArgs({
+          cliModPath: fuseSupervisorMod(import.meta.url),
+          mountpoint: absMountpoint,
+          apiUrl,
+          identity,
+          execCli,
+          logFile,
+          spaces: options.space ?? [],
+          allowOther: options.allowOther,
+          cfcMode: options.cfcMode,
+          cfcAnnotations: options.cfcAnnotations,
+          cfcXattrNamespace: options.cfcXattrNamespace,
+          cfcWritebackXattrs: options.cfcWritebackXattrs,
+          cfcWritebackState: options.cfcWritebackState,
+          statePath,
+          supervisorStatusPath: childStatusPath,
+          supervisorToken: childStatusToken,
+        });
+      }
 
       // Detached background process
       const cmd = new Deno.Command(spawnCmd, {
@@ -256,17 +431,21 @@ export const fuse = new Command()
       child.unref();
 
       const pid = child.pid;
-      let statePath: string;
       try {
-        statePath = await writeMountState(stateDir, {
+        await writeMountState(stateDir, {
           pid,
           mountpoint: absMountpoint,
           apiUrl,
           identity,
           startedAt: new Date().toISOString(),
           logFile,
+          childStatusPath,
         });
-        await awaitBackgroundMountStartup(pid, statePath);
+        await awaitBackgroundMountStartup(pid, statePath, {
+          childStatusPath,
+          childStatusToken,
+          mountpoint: absMountpoint,
+        });
       } catch (error) {
         try {
           Deno.kill(pid, "SIGTERM");
@@ -330,39 +509,45 @@ export const fuse = new Command()
     const stateDir = defaultStateDir();
     const pidFile = await readMountState(stateDir, absMountpoint);
 
-    if (pidFile && isAlive(pidFile.entry.pid)) {
+    const targetPid = pidFile && isAlive(pidFile.entry.pid)
+      ? pidFile.entry.pid
+      : pidFile?.entry.childPid;
+
+    if (pidFile && targetPid !== undefined && isAlive(targetPid)) {
       // Verify the PID belongs to a deno/fuse process before killing
       let verified = false;
       try {
         const ps = new Deno.Command("ps", {
-          args: ["-p", String(pidFile.entry.pid), "-o", "command="],
+          args: ["-p", String(targetPid), "-o", "command="],
           stdout: "piped",
         });
         const out = await ps.output();
         const cmd = new TextDecoder().decode(out.stdout).trim();
-        verified = cmd.includes("deno") && cmd.includes("fuse");
+        verified = isFuseProcessCommand(cmd);
       } catch {
         // ps failed — proceed cautiously (skip kill)
       }
 
       if (verified) {
-        console.log(`Sending SIGTERM to PID ${pidFile.entry.pid}...`);
+        console.log(`Sending SIGTERM to PID ${targetPid}...`);
         try {
-          Deno.kill(pidFile.entry.pid, "SIGTERM");
-          // Wait briefly for graceful shutdown
-          await new Promise((r) => setTimeout(r, 1000));
+          Deno.kill(targetPid, "SIGTERM");
+          // Wait briefly for the supervisor to terminate after child cleanup.
+          for (let i = 0; i < 20 && isAlive(targetPid); i++) {
+            await new Promise((r) => setTimeout(r, 100));
+          }
         } catch {
           // Process may have already exited
         }
-      } else if (isAlive(pidFile.entry.pid)) {
+      } else if (isAlive(targetPid)) {
         console.log(
-          `PID ${pidFile.entry.pid} does not appear to be a FUSE process; skipping kill.`,
+          `PID ${targetPid} does not appear to be a FUSE process; skipping kill.`,
         );
       }
     }
 
     // Fallback: try system unmount
-    if (pidFile && isAlive(pidFile.entry.pid)) {
+    if (pidFile && isMountStateAlive(pidFile.entry)) {
       console.log("Process still alive, trying system unmount...");
       const unmountCmd = Deno.build.os === "darwin"
         ? new Deno.Command("umount", { args: [absMountpoint] })
@@ -376,7 +561,7 @@ export const fuse = new Command()
     }
 
     // Clean up PID file
-    if (pidFile) {
+    if (pidFile && !isMountStateAlive(pidFile.entry)) {
       await removeMountStateFile(pidFile.path);
     }
 
@@ -397,7 +582,7 @@ export const fuse = new Command()
     const rows: string[][] = [];
 
     for (const { entry, path } of entries) {
-      const alive = isAlive(entry.pid);
+      const alive = isMountStateAlive(entry);
       if (!alive) {
         // Clean stale entry
         await removeMountStateFile(path);
@@ -406,7 +591,8 @@ export const fuse = new Command()
       rows.push([
         entry.mountpoint,
         String(entry.pid),
-        "running",
+        entry.childPid === undefined ? "-" : String(entry.childPid),
+        entry.childStatusPath ? await readChildMountStatus(entry) : "running",
         entry.startedAt,
         entry.logFile ?? "-",
       ]);
@@ -417,8 +603,20 @@ export const fuse = new Command()
       return;
     }
 
-    console.log("MOUNTPOINT\tPID\tSTATUS\tSTARTED\tLOG");
+    console.log("MOUNTPOINT\tSUPERVISOR_PID\tCHILD_PID\tSTATUS\tSTARTED\tLOG");
     for (const row of rows) {
       console.log(row.join("\t"));
     }
   });
+
+async function readChildMountStatus(entry: { childStatusPath?: string }) {
+  if (!entry.childStatusPath) return "running";
+  try {
+    const status = parseChildSupervisorStatus(
+      await Deno.readTextFile(entry.childStatusPath),
+    );
+    return status?.state ?? "unknown";
+  } catch {
+    return "unknown";
+  }
+}
