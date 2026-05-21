@@ -6,7 +6,11 @@ import { createStringCellController } from "../../core/cell-controller.ts";
 import type { CFTabBarItem } from "./cf-tab-bar-item.ts";
 
 /**
- * CFTabBar - Fixed-position navigation bar for mobile and app-like UIs
+ * CFTabBar - Navigation bar for mobile and app-like UIs
+ *
+ * The bar is fixed-position by default. When placed in a `slot="footer"`,
+ * it participates in layout so containers such as `cf-screen` can reserve
+ * space for the footer chrome.
  *
  * @element cf-tab-bar
  *
@@ -70,7 +74,7 @@ export class CFTabBar extends BaseElement {
         padding-inline: var(--cf-spacing-2, 0.5rem);
       }
 
-      /* === Bar (nav items) — always the visual surface === */
+      /* === Bar (nav items) - always the visual surface === */
       .bar {
         display: flex;
         align-items: center;
@@ -82,12 +86,12 @@ export class CFTabBar extends BaseElement {
       }
 
       /* Default: bar spans full width with top/bottom border */
-      :host(:not([variant="inset"])[position="bottom"]) .bar {
+      :host([position="bottom"]) .bar {
         border-top: 1px solid
           var(--cf-tab-bar-border-color, var(--cf-theme-color-border, #e5e7eb));
         }
 
-        :host(:not([variant="inset"])[position="top"]) .bar {
+        :host([position="top"]) .bar {
           border-bottom: 1px solid
             var(--cf-tab-bar-border-color, var(--cf-theme-color-border, #e5e7eb));
           }
@@ -162,6 +166,28 @@ export class CFTabBar extends BaseElement {
           :host([variant="inset"]) ::slotted(cf-tab-bar-item) {
             flex: 0 0 auto;
             min-width: 3.5rem;
+          }
+
+          :host([slot="footer"]) {
+            position: relative;
+            top: auto;
+            right: auto;
+            bottom: auto;
+            left: auto;
+          }
+
+          :host([slot="footer"][variant="inset"][position="bottom"]) {
+            bottom: auto;
+            padding-bottom: calc(
+              var(--cf-tab-bar-inset-margin, 1rem) + env(safe-area-inset-bottom, 0px)
+            );
+          }
+
+          :host([slot="footer"][variant="inset"][position="top"]) {
+            top: auto;
+            padding-top: calc(
+              var(--cf-tab-bar-inset-margin, 1rem) + env(safe-area-inset-top, 0px)
+            );
           }
 
           /* === Reduced Motion === */
