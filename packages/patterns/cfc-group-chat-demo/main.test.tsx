@@ -1,4 +1,10 @@
-import { action, computed, Default, pattern, Writable } from "commonfabric";
+import { action, computed, Default, pattern, UI, Writable } from "commonfabric";
+import {
+  findNodeById,
+  findNodeByProp,
+  nodeIncludesText,
+  propValue,
+} from "../test-ui-helpers.ts";
 import { sortDisplayMessages } from "./logic.ts";
 import {
   type ChatAdminRegistryValue,
@@ -11,6 +17,7 @@ import {
   type SharedChatMessage,
   type SharedMessagesValue,
   type SharedRoomsValue,
+  TRUSTED_GROUP_CHAT_SET_ADMIN_ACTION,
 } from "./trusted.tsx";
 import { GroupChatDemo } from "./main.tsx";
 
@@ -109,6 +116,16 @@ export default pattern(() => {
     (myProfile.get() as MyProfileValue | undefined)?.profile === undefined &&
     (messages.get()?.length ?? 0) === 0
   );
+  const assert_admin_view_initially_locked = computed(() => {
+    const managerChip = findNodeById(chat[UI], "group-chat-manager-chip");
+    const panelStatus = findNodeById(
+      chat[UI],
+      "trusted-admin-manager-panel-status",
+    );
+    return propValue(managerChip, "label") === "Manager off" &&
+      propValue(panelStatus, "label") ===
+        "Save profile with admin-manager enabled to edit";
+  });
   const assert_profile_created = computed(() =>
     chat.currentProfileName === "Alice"
   );
@@ -118,6 +135,22 @@ export default pattern(() => {
   const assert_profile_can_manage_admins = computed(() =>
     chat.currentUserCanManageAdmins === true
   );
+  const assert_admin_view_manager_enabled = computed(() => {
+    const toggleButton = findNodeByProp(
+      chat[UI],
+      "data-ui-action",
+      TRUSTED_GROUP_CHAT_SET_ADMIN_ACTION,
+    );
+    const managerChip = findNodeById(chat[UI], "group-chat-manager-chip");
+    const panelStatus = findNodeById(
+      chat[UI],
+      "trusted-admin-manager-panel-status",
+    );
+    return propValue(managerChip, "label") === "Can manage admins" &&
+      propValue(panelStatus, "label") === "Admin registry editing enabled" &&
+      propValue(toggleButton, "disabled") === false &&
+      nodeIncludesText(toggleButton, "Make admin");
+  });
   const assert_non_admin_cannot_add_room = computed(() =>
     roomsValue(rooms).length === 0
   );
@@ -125,6 +158,19 @@ export default pattern(() => {
     chat.currentUserIsAdmin === true &&
     chatAdminRolesValue(adminRegistry).length === 1
   );
+  const assert_admin_view_current_user_admin = computed(() => {
+    const toggleButton = findNodeByProp(
+      chat[UI],
+      "data-ui-action",
+      TRUSTED_GROUP_CHAT_SET_ADMIN_ACTION,
+    );
+    return propValue(toggleButton, "disabled") === false &&
+      nodeIncludesText(toggleButton, "Remove admin") &&
+      nodeIncludesText(
+        findNodeById(chat[UI], "trusted-admin-user-list"),
+        "Admin",
+      );
+  });
   const assert_admin_can_add_room = computed(() => {
     const roomList = roomsValue(rooms);
     return roomList.length === 1 &&
@@ -181,11 +227,13 @@ export default pattern(() => {
   return {
     tests: [
       { assertion: assert_initially_empty },
+      { assertion: assert_admin_view_initially_locked },
       { action: action_set_profile_alice },
       { action: action_save_profile },
       { assertion: assert_profile_created },
       { assertion: assert_profile_starts_non_admin },
       { assertion: assert_profile_can_manage_admins },
+      { assertion: assert_admin_view_manager_enabled },
       { action: action_set_room_ops },
       { action: action_try_add_room_without_admin },
       { assertion: assert_non_admin_cannot_add_room },
@@ -194,6 +242,7 @@ export default pattern(() => {
       { assertion: assert_profile_can_manage_admins },
       { action: action_toggle_alice_admin },
       { assertion: assert_admin_enabled },
+      { assertion: assert_admin_view_current_user_admin },
       { action: action_add_room },
       { assertion: assert_admin_can_add_room },
       { action: action_set_message_alice },
