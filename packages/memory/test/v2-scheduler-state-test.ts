@@ -27,6 +27,11 @@ const createEngine = async (): Promise<{
   return { engine, path };
 };
 
+const countRows = (engine: Engine, table: string): number =>
+  (engine.database.prepare(
+    `SELECT count(*) AS count FROM ${table}`,
+  ).get() as { count: number }).count;
+
 const sourceRead = {
   space: "did:key:read-space",
   scope: "space" as const,
@@ -177,6 +182,203 @@ Deno.test("memory v2 accepts observation-only commits without semantic revisions
       `SELECT count(*) AS count FROM scheduler_observation`,
     ).get() as { count: number };
     assertEquals(observationRows.count, 1);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 coalesces identical scheduler observations without leaving actions dirty", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    const first = applyCommit(engine, {
+      sessionId: "session:scheduler-observation-coalesce",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [],
+        schedulerObservation: observation,
+      },
+    });
+
+    const dirtyCommit = applyCommit(engine, {
+      sessionId: "session:external-dirty-writer",
+      space: sourceRead.space,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: sourceRead.id,
+          scope: sourceRead.scope,
+          value: { value: { count: 1 } },
+        }],
+      },
+    });
+    markSchedulerReadersDirtyForWrites(engine, {
+      branch: "",
+      dirtySeq: dirtyCommit.seq,
+      writes: [sourceRead],
+    });
+    assertEquals(
+      getSchedulerActionState(engine, {
+        branch: "",
+        pieceId: observation.pieceId,
+        processGeneration: observation.processGeneration,
+        actionId: observation.actionId,
+      })?.directDirtySeq,
+      dirtyCommit.seq,
+    );
+
+    const second = applyCommit(engine, {
+      sessionId: "session:scheduler-observation-coalesce",
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [],
+        schedulerObservation: {
+          ...observation,
+          observedAtLocalSeq: 2,
+        },
+      },
+    });
+
+    assertEquals(second.schedulerObservationId, first.schedulerObservationId);
+    assertEquals(countRows(engine, "scheduler_observation"), 1);
+    assertEquals(countRows(engine, "scheduler_observation_replay"), 2);
+    assertEquals(
+      getSchedulerActionState(engine, {
+        branch: "",
+        pieceId: observation.pieceId,
+        processGeneration: observation.processGeneration,
+        actionId: observation.actionId,
+      })?.directDirtySeq,
+      null,
+    );
+
+    const replay = applyCommit(engine, {
+      sessionId: "session:scheduler-observation-coalesce",
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [],
+        schedulerObservation: {
+          ...observation,
+          observedAtLocalSeq: 2,
+        },
+      },
+    });
+    assertEquals(replay.schedulerObservationId, first.schedulerObservationId);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 keeps actual changed writes out of durable dependency snapshots", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    const first = upsertSchedulerObservation(engine, {
+      branch: "",
+      observedAtSeq: 1,
+      observation,
+    });
+    const second = upsertSchedulerObservation(engine, {
+      branch: "",
+      observedAtSeq: 2,
+      observation: {
+        ...observation,
+        observedAtSeq: 2,
+        actualChangedWrites: [targetWrite],
+      },
+    });
+
+    assertEquals(second.observationId, first.observationId);
+    assertEquals(countRows(engine, "scheduler_observation"), 1);
+
+    const snapshot = getLatestSchedulerActionSnapshot(engine, {
+      branch: "",
+      pieceId: observation.pieceId,
+      processGeneration: observation.processGeneration,
+      actionId: observation.actionId,
+    });
+    assertEquals(snapshot?.observedAtSeq, 2);
+    assertEquals(snapshot?.observation.observedAtSeq, 2);
+    assertEquals(snapshot?.observation.actualChangedWrites, []);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 updates scheduler index rows by diff instead of rewriting unchanged rows", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    const stableRead = {
+      ...sourceRead,
+      path: ["value", "stable"],
+    };
+    const removedRead = {
+      ...sourceRead,
+      path: ["value", "removed"],
+    };
+    const addedRead = {
+      ...sourceRead,
+      path: ["value", "added"],
+    };
+    const first = upsertSchedulerObservation(engine, {
+      branch: "",
+      observedAtSeq: 1,
+      observation: {
+        ...observation,
+        reads: [stableRead, removedRead],
+      },
+    });
+    const stableRowBefore = engine.database.prepare(`
+      SELECT observation_id
+      FROM scheduler_read_index
+      WHERE read_path LIKE :read_path
+    `).get({
+      read_path: '%"stable"%',
+    }) as { observation_id: number };
+
+    const second = upsertSchedulerObservation(engine, {
+      branch: "",
+      observedAtSeq: 2,
+      observation: {
+        ...observation,
+        observedAtSeq: 2,
+        reads: [stableRead, addedRead],
+      },
+    });
+
+    assertEquals(second.observationId > first.observationId, true);
+    assertEquals(countRows(engine, "scheduler_read_index"), 2);
+    const stableRowAfter = engine.database.prepare(`
+      SELECT observation_id
+      FROM scheduler_read_index
+      WHERE read_path LIKE :read_path
+    `).get({
+      read_path: '%"stable"%',
+    }) as { observation_id: number };
+    assertEquals(stableRowAfter.observation_id, stableRowBefore.observation_id);
+    assertEquals(
+      findSchedulerReadersForWrite(engine, {
+        branch: "",
+        write: removedRead,
+      }).length,
+      0,
+    );
+    assertEquals(
+      findSchedulerReadersForWrite(engine, {
+        branch: "",
+        write: addedRead,
+      }).length,
+      1,
+    );
   } finally {
     close(engine);
     await Deno.remove(path);
