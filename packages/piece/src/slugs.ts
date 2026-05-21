@@ -8,7 +8,15 @@ import {
 import { pieceId, PieceManager } from "./manager.ts";
 
 export class SlugResolutionError extends Error {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    readonly code?:
+      | "invalid"
+      | "missing"
+      | "malformed"
+      | "not-piece"
+      | "missing-piece-id",
+  ) {
     super(message);
     this.name = "SlugResolutionError";
   }
@@ -69,13 +77,14 @@ export async function resolvePieceAddress(
   await slugCell.sync();
   const raw = slugCell.getRaw();
   if (raw === undefined) {
-    throw new SlugResolutionError(`Slug "${slug}" not found.`);
+    throw new SlugResolutionError(`Slug "${slug}" not found.`, "missing");
   }
 
   const targetLink = parseLink(raw, slugCell);
   if (!targetLink || targetLink.overwrite !== "redirect") {
     throw new SlugResolutionError(
       `Slug "${slug}" does not contain a valid redirect.`,
+      "malformed",
     );
   }
 
@@ -89,6 +98,7 @@ export async function resolvePieceAddress(
   if (!target.getSourceCell()) {
     throw new SlugResolutionError(
       `Slug "${slug}" redirects to a document that is not a piece.`,
+      "not-piece",
     );
   }
 
@@ -96,6 +106,7 @@ export async function resolvePieceAddress(
   if (!id) {
     throw new SlugResolutionError(
       `Slug "${slug}" redirects to a document without a piece id.`,
+      "missing-piece-id",
     );
   }
   return id;

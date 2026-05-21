@@ -16,6 +16,7 @@ import {
   pieceId,
   PieceManager,
   resolvePieceAddress as resolveStoredPieceAddress,
+  SlugResolutionError,
 } from "@commonfabric/piece";
 import { PiecesController } from "@commonfabric/piece/ops";
 import { dirname, join } from "@std/path";
@@ -277,6 +278,22 @@ export async function resolvePieceConfig(
     manager,
     deps.resolvePieceAddress,
   );
+}
+
+export async function resolveLinkEndpointAddress(
+  manager: PieceManager,
+  token: string,
+  resolver: PieceResolutionDeps["resolvePieceAddress"] =
+    resolveStoredPieceAddress,
+): Promise<string> {
+  try {
+    return await resolver(manager, token);
+  } catch (error) {
+    if (error instanceof SlugResolutionError && error.code === "missing") {
+      return token;
+    }
+    throw error;
+  }
 }
 
 // Creates a new piece from source code and optional input.
@@ -646,11 +663,11 @@ export async function linkPieces(
   const pieces = new PiecesController(manager);
   const resolvedSourcePieceId = await timeCliPhase(
     "linkPieces.resolveSource",
-    () => resolveStoredPieceAddress(manager, sourcePieceId),
+    () => resolveLinkEndpointAddress(manager, sourcePieceId),
   );
   const resolvedTargetPieceId = await timeCliPhase(
     "linkPieces.resolveTarget",
-    () => resolveStoredPieceAddress(manager, targetPieceId),
+    () => resolveLinkEndpointAddress(manager, targetPieceId),
   );
 
   // Validate that source and target pieces/paths exist by reading them

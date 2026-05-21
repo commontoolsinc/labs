@@ -3,9 +3,11 @@ import { expect } from "@std/expect";
 import { cf, checkStderr, stripAnsi } from "./utils.ts";
 import {
   recreateSpaceRootPattern,
+  resolveLinkEndpointAddress,
   resolvePieceConfig,
   type SpaceConfig,
 } from "../lib/piece.ts";
+import { SlugResolutionError } from "@commonfabric/piece";
 import {
   parseLink,
   parsePieceOptions,
@@ -327,5 +329,20 @@ describe("cli piece parsing", () => {
     });
 
     expect(resolved.piece).toBe(PIECE);
+  });
+
+  it("preserves non-fid link endpoints when no slug document exists", async () => {
+    const manager = {};
+    const token = "baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye";
+    const resolved = await resolveLinkEndpointAddress(
+      manager as any,
+      token,
+      () =>
+        Promise.reject(
+          new SlugResolutionError(`Slug "${token}" not found.`, "missing"),
+        ),
+    );
+
+    expect(resolved).toBe(token);
   });
 });

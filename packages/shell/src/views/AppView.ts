@@ -8,7 +8,11 @@ import { DebuggerController } from "../lib/debugger-controller.ts";
 import { Task, TaskStatus } from "@lit/task";
 import { CellEventTarget, CellUpdateEvent } from "../lib/cell-event-target.ts";
 import { type NameSchema, stringSchema } from "@commonfabric/runner/schemas";
-import { replaceNavigation, updatePageTitle } from "../../shared/mod.ts";
+import {
+  isViewingDefaultPatternView,
+  replaceNavigation,
+  updatePageTitle,
+} from "../../shared/mod.ts";
 import { KeyboardController } from "../lib/keyboard-router.ts";
 import { NAME, PageHandle } from "@commonfabric/runtime-client";
 
@@ -323,9 +327,7 @@ export class XAppView extends BaseView {
     const spaceDid = this.app && "spaceDid" in this.app.view
       ? this.app.view.spaceDid
       : undefined;
-    // We're viewing the default pattern if there's no pieceId in the current view
-    const isViewingDefaultPattern = !("pieceId" in this.app.view &&
-      this.app.view.pieceId);
+    const isViewingDefaultPattern = isViewingDefaultPatternView(this.app.view);
     const content = this.app?.identity ? authenticated : unauthenticated;
     return html`
       <div class="shell-container">

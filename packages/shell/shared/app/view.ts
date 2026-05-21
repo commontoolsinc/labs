@@ -45,6 +45,13 @@ export function isAppViewEqual(a: AppView, b: AppView): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+export function isViewingDefaultPatternView(view: AppView): boolean {
+  return !(
+    ("pieceId" in view && view.pieceId) ||
+    ("pieceSlug" in view && view.pieceSlug)
+  );
+}
+
 export function appViewToUrlPath(view: AppView): `/${string}` {
   if ("builtin" in view) {
     switch (view.builtin) {

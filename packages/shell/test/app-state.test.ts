@@ -5,6 +5,7 @@ import {
   AppStateSerialized,
   appViewToUrlPath,
   deserialize,
+  isViewingDefaultPatternView,
   serialize,
   urlToAppView,
 } from "@commonfabric/shell/shared";
@@ -110,6 +111,21 @@ describe("AppState", () => {
     assert(
       appViewToUrlPath({ spaceName: "space", pieceSlug: "demo" }) ===
         "/space/demo",
+    );
+  });
+
+  it("treats slug piece routes as non-default pattern views", () => {
+    assert(isViewingDefaultPatternView({ spaceName: "space" }) === true);
+    assert(
+      isViewingDefaultPatternView({
+        spaceName: "space",
+        pieceId: "fid1:abc",
+      }) ===
+        false,
+    );
+    assert(
+      isViewingDefaultPatternView({ spaceName: "space", pieceSlug: "demo" }) ===
+        false,
     );
   });
 });
