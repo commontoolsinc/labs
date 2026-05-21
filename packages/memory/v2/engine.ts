@@ -1252,28 +1252,36 @@ const upsertSchedulerObservationTransaction = (
   };
   const latest = selectSchedulerSnapshotRow(engine, actionKey);
   const payloadChanged = latest?.payload !== payload;
-  const observationId = payloadChanged || !latest
-    ? insertSchedulerObservationRow(engine, {
+  const observationId = latest?.observation_id ??
+    insertSchedulerObservationRow(engine, {
       branch,
       commitSeq: options.commitSeq ?? null,
       observedAtSeq: options.observedAtSeq,
-      sessionId: options.sessionId,
-      localSeq: options.localSeq,
       observation,
       payload,
-    })
-    : latest.observation_id;
+    });
+  if (latest && payloadChanged) {
+    updateSchedulerObservationRow(engine, {
+      observationId,
+      commitSeq: options.commitSeq ?? null,
+      observedAtSeq: options.observedAtSeq,
+      observation,
+      payload,
+    });
+  }
 
-  reconcileSchedulerReadRows(engine, {
-    branch,
-    observationId,
-    observation,
-  });
-  reconcileSchedulerWriteRows(engine, {
-    branch,
-    observationId,
-    observation,
-  });
+  if (payloadChanged) {
+    reconcileSchedulerReadRows(engine, {
+      branch,
+      observationId,
+      observation,
+    });
+    reconcileSchedulerWriteRows(engine, {
+      branch,
+      observationId,
+      observation,
+    });
+  }
   upsertSchedulerSnapshot(engine, {
     branch,
     observationId,
@@ -1899,8 +1907,6 @@ function insertSchedulerObservationRow(
     branch: BranchName;
     commitSeq: number | null;
     observedAtSeq: number;
-    sessionId?: SessionId;
-    localSeq?: number;
     observation: SchedulerActionObservation;
     payload: string;
   },
@@ -1932,8 +1938,8 @@ function insertSchedulerObservationRow(
     branch: options.branch,
     commit_seq: options.commitSeq,
     observed_at_seq: options.observedAtSeq,
-    session_id: options.sessionId ?? null,
-    local_seq: options.localSeq ?? null,
+    session_id: null,
+    local_seq: null,
     piece_id: options.observation.pieceId,
     action_id: options.observation.actionId,
     process_generation: options.observation.processGeneration,
@@ -1942,6 +1948,37 @@ function insertSchedulerObservationRow(
   const row = engine.database.prepare(`SELECT last_insert_rowid() AS id`)
     .get() as { id: number };
   return row.id;
+}
+
+function updateSchedulerObservationRow(
+  engine: Engine,
+  options: {
+    observationId: number;
+    commitSeq: number | null;
+    observedAtSeq: number;
+    observation: SchedulerActionObservation;
+    payload: string;
+  },
+): void {
+  engine.database.prepare(`
+    UPDATE scheduler_observation
+    SET
+      commit_seq = :commit_seq,
+      observed_at_seq = :observed_at_seq,
+      piece_id = :piece_id,
+      action_id = :action_id,
+      process_generation = :process_generation,
+      payload = :payload
+    WHERE observation_id = :observation_id
+  `).run({
+    observation_id: options.observationId,
+    commit_seq: options.commitSeq,
+    observed_at_seq: options.observedAtSeq,
+    piece_id: options.observation.pieceId,
+    action_id: options.observation.actionId,
+    process_generation: options.observation.processGeneration,
+    payload: options.payload,
+  });
 }
 
 function recordSchedulerObservationReplay(
@@ -2145,21 +2182,36 @@ function reconcileSchedulerReadRows(
     row,
   ]));
 
-  for (const [key, row] of existingKeys) {
-    if (nextKeys.has(key)) continue;
+  const sharedKeys = [...nextKeys.keys()].filter((key) =>
+    existingKeys.has(key)
+  );
+  if (sharedKeys.length === 0 && existingRows.length > 0) {
     engine.database.prepare(`
       DELETE FROM scheduler_read_index
       WHERE branch = :branch
-        AND owner_space IS :owner_space
-        AND read_space = :read_space
-        AND read_id = :read_id
-        AND read_scope = :read_scope
-        AND read_path = :read_path
-        AND read_kind = :read_kind
         AND piece_id = :piece_id
         AND process_generation = :process_generation
         AND action_id = :action_id
-    `).run({
+    `).run(params);
+    existingKeys.clear();
+  }
+
+  const deleteReadRow = engine.database.prepare(`
+    DELETE FROM scheduler_read_index
+    WHERE branch = :branch
+      AND owner_space IS :owner_space
+      AND read_space = :read_space
+      AND read_id = :read_id
+      AND read_scope = :read_scope
+      AND read_path = :read_path
+      AND read_kind = :read_kind
+      AND piece_id = :piece_id
+      AND process_generation = :process_generation
+      AND action_id = :action_id
+  `);
+  for (const [key, row] of existingKeys) {
+    if (nextKeys.has(key)) continue;
+    deleteReadRow.run({
       branch: row.branch,
       owner_space: row.owner_space,
       read_space: row.read_space,
@@ -2173,36 +2225,37 @@ function reconcileSchedulerReadRows(
     });
   }
 
+  const insertReadRow = engine.database.prepare(`
+    INSERT INTO scheduler_read_index (
+      branch,
+      owner_space,
+      read_space,
+      read_id,
+      read_scope,
+      read_path,
+      read_kind,
+      piece_id,
+      process_generation,
+      action_id,
+      observation_id
+    )
+    VALUES (
+      :branch,
+      :owner_space,
+      :read_space,
+      :read_id,
+      :read_scope,
+      :read_path,
+      :read_kind,
+      :piece_id,
+      :process_generation,
+      :action_id,
+      :observation_id
+    )
+  `);
   for (const [key, row] of nextKeys) {
     if (existingKeys.has(key)) continue;
-    engine.database.prepare(`
-      INSERT INTO scheduler_read_index (
-        branch,
-        owner_space,
-        read_space,
-        read_id,
-        read_scope,
-        read_path,
-        read_kind,
-        piece_id,
-        process_generation,
-        action_id,
-        observation_id
-      )
-      VALUES (
-        :branch,
-        :owner_space,
-        :read_space,
-        :read_id,
-        :read_scope,
-        :read_path,
-        :read_kind,
-        :piece_id,
-        :process_generation,
-        :action_id,
-        :observation_id
-      )
-    `).run({
+    insertReadRow.run({
       ...row,
     });
   }
@@ -2304,20 +2357,35 @@ function reconcileSchedulerWriteRows(
     row,
   ]));
 
-  for (const [key, row] of existingKeys) {
-    if (nextKeys.has(key)) continue;
+  const sharedKeys = [...nextKeys.keys()].filter((key) =>
+    existingKeys.has(key)
+  );
+  if (sharedKeys.length === 0 && existingRows.length > 0) {
     engine.database.prepare(`
       DELETE FROM scheduler_write_index
       WHERE branch = :branch
-        AND write_space = :write_space
-        AND write_id = :write_id
-        AND write_scope = :write_scope
-        AND write_path = :write_path
-        AND write_kind = :write_kind
         AND piece_id = :piece_id
         AND process_generation = :process_generation
         AND action_id = :action_id
-    `).run({
+    `).run(params);
+    existingKeys.clear();
+  }
+
+  const deleteWriteRow = engine.database.prepare(`
+    DELETE FROM scheduler_write_index
+    WHERE branch = :branch
+      AND write_space = :write_space
+      AND write_id = :write_id
+      AND write_scope = :write_scope
+      AND write_path = :write_path
+      AND write_kind = :write_kind
+      AND piece_id = :piece_id
+      AND process_generation = :process_generation
+      AND action_id = :action_id
+  `);
+  for (const [key, row] of existingKeys) {
+    if (nextKeys.has(key)) continue;
+    deleteWriteRow.run({
       branch: row.branch,
       write_space: row.write_space,
       write_id: row.write_id,
@@ -2330,34 +2398,35 @@ function reconcileSchedulerWriteRows(
     });
   }
 
+  const insertWriteRow = engine.database.prepare(`
+    INSERT INTO scheduler_write_index (
+      branch,
+      write_space,
+      write_id,
+      write_scope,
+      write_path,
+      write_kind,
+      piece_id,
+      process_generation,
+      action_id,
+      observation_id
+    )
+    VALUES (
+      :branch,
+      :write_space,
+      :write_id,
+      :write_scope,
+      :write_path,
+      :write_kind,
+      :piece_id,
+      :process_generation,
+      :action_id,
+      :observation_id
+    )
+  `);
   for (const [key, row] of nextKeys) {
     if (existingKeys.has(key)) continue;
-    engine.database.prepare(`
-      INSERT INTO scheduler_write_index (
-        branch,
-        write_space,
-        write_id,
-        write_scope,
-        write_path,
-        write_kind,
-        piece_id,
-        process_generation,
-        action_id,
-        observation_id
-      )
-      VALUES (
-        :branch,
-        :write_space,
-        :write_id,
-        :write_scope,
-        :write_path,
-        :write_kind,
-        :piece_id,
-        :process_generation,
-        :action_id,
-        :observation_id
-      )
-    `).run({
+    insertWriteRow.run({
       ...row,
     });
   }

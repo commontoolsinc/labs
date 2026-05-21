@@ -28,6 +28,7 @@ type BenchmarkMetric = {
   commits: number;
   revisions: number;
   schedulerObservations: number;
+  schedulerObservationReplays: number;
   schedulerReadIndexRows: number;
   schedulerWriteIndexRows: number;
 };
@@ -110,6 +111,7 @@ function observationFor(
   localSeq: number,
   pathCount: number,
   actualChangedWrites: SchedulerObservationAddress[] = [],
+  pathOffset = 0,
 ): SchedulerActionObservation {
   return {
     version: 1,
@@ -126,13 +128,13 @@ function observationFor(
     transactionKind: "action-run",
     reads: Array.from(
       { length: pathCount },
-      (_, index) => addressFor("read", index),
+      (_, index) => addressFor("read", pathOffset + index),
     ),
     shallowReads: [],
     actualChangedWrites,
     currentKnownWrites: Array.from(
       { length: pathCount },
-      (_, index) => addressFor("write", index),
+      (_, index) => addressFor("write", pathOffset + index),
     ),
     declaredWrites: [],
     materializerWriteEnvelopes: [],
@@ -210,6 +212,10 @@ function collectMetrics(
     commits: countRows(engine, `"commit"`),
     revisions: countRows(engine, "revision"),
     schedulerObservations: countRows(engine, "scheduler_observation"),
+    schedulerObservationReplays: countRows(
+      engine,
+      "scheduler_observation_replay",
+    ),
     schedulerReadIndexRows: countRows(engine, "scheduler_read_index"),
     schedulerWriteIndexRows: countRows(engine, "scheduler_write_index"),
   };
@@ -300,6 +306,41 @@ for (const pathCount of PATH_COUNTS) {
 
   Deno.bench({
     name:
+      `semantic commits with changing scheduler observation - runs=${RUN_COUNT}, paths=${pathCount}`,
+    group: "v2-scheduler-observation-persistence",
+    n: 1,
+    warmup: 0,
+    async fn(b) {
+      const { engine, path } = await createEngine();
+      try {
+        b.start();
+        for (let localSeq = 1; localSeq <= RUN_COUNT; localSeq++) {
+          applySemanticCommit(
+            engine,
+            localSeq,
+            observationFor(
+              localSeq,
+              pathCount,
+              [addressFor("changed", localSeq)],
+              localSeq * pathCount,
+            ),
+          );
+        }
+        b.end();
+        recordMetrics(
+          `semantic commits with changing observation, paths=${pathCount}`,
+          engine,
+          path,
+          pathCount,
+        );
+      } finally {
+        await cleanupEngine(engine, path);
+      }
+    },
+  });
+
+  Deno.bench({
+    name:
       `observation-only no-op commits - runs=${RUN_COUNT}, paths=${pathCount}`,
     group: "v2-scheduler-observation-persistence",
     n: 1,
@@ -327,6 +368,36 @@ for (const pathCount of PATH_COUNTS) {
       }
     },
   });
+
+  Deno.bench({
+    name:
+      `observation-only changing commits - runs=${RUN_COUNT}, paths=${pathCount}`,
+    group: "v2-scheduler-observation-persistence",
+    n: 1,
+    warmup: 0,
+    async fn(b) {
+      const { engine, path } = await createEngine();
+      try {
+        b.start();
+        for (let localSeq = 1; localSeq <= RUN_COUNT; localSeq++) {
+          applyObservationOnlyCommit(
+            engine,
+            localSeq,
+            observationFor(localSeq, pathCount, [], localSeq * pathCount),
+          );
+        }
+        b.end();
+        recordMetrics(
+          `observation-only changing commits, paths=${pathCount}`,
+          engine,
+          path,
+          pathCount,
+        );
+      } finally {
+        await cleanupEngine(engine, path);
+      }
+    },
+  });
 }
 
 addEventListener("unload", () => {
@@ -339,7 +410,7 @@ addEventListener("unload", () => {
         `activeSqlite=${formatBytes(metrics.activeSqliteBytes)} (${
           formatBytes(metrics.bytesPerRun)
         }/run), commits=${metrics.commits}, revisions=${metrics.revisions}, ` +
-        `observations=${metrics.schedulerObservations}, readIndex=${metrics.schedulerReadIndexRows}, writeIndex=${metrics.schedulerWriteIndexRows}`,
+        `observations=${metrics.schedulerObservations}, replays=${metrics.schedulerObservationReplays}, readIndex=${metrics.schedulerReadIndexRows}, writeIndex=${metrics.schedulerWriteIndexRows}`,
     );
   }
 });
