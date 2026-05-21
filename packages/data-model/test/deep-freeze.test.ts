@@ -215,35 +215,41 @@ describe("isDeepFrozen", () => {
     });
 
     it("FabricInstance pre-freeze returns false (wrapper unfrozen)", () => {
-      const fe = new FabricError(new Error("not-yet-frozen"));
+      const fe = FabricError.fromNativeError(new Error("not-yet-frozen"));
       expect(isDeepFrozen(fe)).toBe(false);
     });
 
     it("FabricInstance post-deepFreeze returns true (wrapper + wrapped recursively frozen)", () => {
       const inner = new Error("cause");
       const outer = new Error("outer", { cause: inner });
-      const fe = new FabricError(outer);
+      const fe = FabricError.fromNativeError(outer);
       deepFreeze(fe);
       expect(isDeepFrozen(fe)).toBe(true);
     });
 
-    it("partially-frozen FabricInstance returns false (wrapper frozen but inner Error not)", () => {
-      const fe = new FabricError(new Error("partial"));
+    it("partially-frozen FabricInstance returns false (wrapper frozen but cause not)", () => {
+      // FabricError no longer has a wrapped-native-Error slot; the only
+      // recursing slot is `cause` (and any extras). Construct one whose
+      // `cause` is a mutable plain object, freeze only the wrapper.
+      const err = new Error("partial", { cause: { mutable: true } });
+      const fe = FabricError.fromNativeError(err);
       Object.freeze(fe);
-      // Inner Error not frozen -> recursive walk discovers an unfrozen child.
+      // Cause is not frozen -> recursive walk discovers an unfrozen child.
       expect(isDeepFrozen(fe)).toBe(false);
     });
 
     it("FabricInstance participating in a circular reference terminates and returns true post-deepFreeze", () => {
       // Build a cycle: a plain-object wrapper holds the FabricError, and
-      // the FabricError's `error.cause` points back at the wrapper. After
+      // the FabricError's `cause` points back at the wrapper. After
       // `deepFreeze(wrapper)` (which threads `inProgress` cycle-state
       // through arm 3 and arm 4), every reachable value is frozen and the
-      // graph is cycle-safe for read-side traversal too.
-      const err = new Error("cycle-cause");
-      const fe = new FabricError(err);
-      const wrapper: Record<string, unknown> = { fe };
-      err.cause = wrapper;
+      // graph is cycle-safe for read-side traversal too. (FabricError
+      // snapshots its FabricValue state at construction, so the `cause`
+      // must be wired BEFORE `fromNativeError`.)
+      const wrapper: Record<string, unknown> = {};
+      const err = new Error("cycle-cause", { cause: wrapper });
+      const fe = FabricError.fromNativeError(err);
+      wrapper.fe = fe;
       deepFreeze(wrapper);
       // `isDeepFrozen` must terminate (its own `inProgress`-threading in
       // `isDeepFrozenInProgress` handles the cycle) and report true.
@@ -265,7 +271,7 @@ describe("deepFreeze [DEEP_FREEZE] protocol dispatch", () => {
   it("arm 3: delegates to [DEEP_FREEZE] and freezes in place", () => {
     const inner = new Error("cause");
     const outer = new Error("outer", { cause: inner });
-    const fe = new FabricError(outer);
+    const fe = FabricError.fromNativeError(outer);
     expect(Object.isFrozen(fe)).toBe(false);
 
     const result = deepFreeze(fe);
@@ -274,23 +280,25 @@ describe("deepFreeze [DEEP_FREEZE] protocol dispatch", () => {
     // Error + recursed cause).
     expect(result).toBe(fe);
     expect(Object.isFrozen(fe)).toBe(true);
-    expect(Object.isFrozen(fe.error)).toBe(true);
+    // (FabricError no longer has a wrapped Error slot to check directly;
+    // the native projection is lazy, and any built projection is frozen.)
     expect(Object.isFrozen(inner)).toBe(true);
   });
 
   it("arm 3: recurses [DEEP_FREEZE] into nested FabricValues", () => {
-    const fe = new FabricError(new Error("e"));
+    const fe = FabricError.fromNativeError(new Error("e"));
     const container = { wrapped: fe as unknown as FabricValue, n: 1 };
     deepFreeze(container);
     expect(Object.isFrozen(container)).toBe(true);
     expect(Object.isFrozen(fe)).toBe(true);
-    expect(Object.isFrozen(fe.error)).toBe(true);
+    // (FabricError no longer has a wrapped Error slot to check directly;
+    // the native projection is lazy, and any built projection is frozen.)
   });
 });
 
 describe("isDeepFrozenFabricValue with FabricInstance (R6)", () => {
   it("no longer throws on a FabricInstance; classifies via protocol", () => {
-    const fe = new FabricError(new Error("test"));
+    const fe = FabricError.fromNativeError(new Error("test"));
     // Pre-freeze: not deep-frozen, but must NOT throw (the #3604
     // `FabricInstance`-arm throw is retired).
     expect(() => isDeepFrozenFabricValue(fe)).not.toThrow();
@@ -298,20 +306,21 @@ describe("isDeepFrozenFabricValue with FabricInstance (R6)", () => {
   });
 
   it("returns true for a deep-frozen FabricInstance", () => {
-    const fe = new FabricError(new Error("test"));
+    const fe = FabricError.fromNativeError(new Error("test"));
     deepFreeze(fe);
     expect(isDeepFrozenFabricValue(fe)).toBe(true);
   });
 
   it("returns true for a deep-frozen FabricInstance nested in a tree", () => {
-    const fe = new FabricError(new Error("nested"));
+    const fe = FabricError.fromNativeError(new Error("nested"));
     const tree = deepFreeze({ a: 1, e: fe as unknown as FabricValue });
     expect(isDeepFrozenFabricValue(tree)).toBe(true);
   });
 
   it("returns false (no throw) for a non-canonical-form instance", () => {
-    // Wrapper frozen but inner Error left unfrozen -> not deep-frozen.
-    const fe = new FabricError(new Error("partial"));
+    // Wrapper frozen but `cause` left unfrozen -> not deep-frozen.
+    const err = new Error("partial", { cause: { mutable: true } });
+    const fe = FabricError.fromNativeError(err);
     Object.freeze(fe);
     expect(() => isDeepFrozenFabricValue(fe)).not.toThrow();
     expect(isDeepFrozenFabricValue(fe)).toBe(false);

@@ -128,7 +128,7 @@ describe("ExperimentalOptions", () => {
       const err = new Error("test error");
       const result = shallowFabricFromNativeValue(err);
       expect(result).toBeInstanceOf(FabricError);
-      expect((result as FabricError).error.message).toBe("test error");
+      expect((result as FabricError).message).toBe("test error");
     });
 
     it("preserves undefined in arrays when flag is ON", () => {
@@ -185,7 +185,7 @@ describe("ExperimentalOptions", () => {
         unknown
       >;
       expect(result.data).toBeInstanceOf(FabricError);
-      expect((result.data as FabricError).error.message).toBe("nested");
+      expect((result.data as FabricError).message).toBe("nested");
     });
 
     it("preserves undefined-valued object properties when flag is ON", () => {
@@ -200,7 +200,7 @@ describe("ExperimentalOptions", () => {
       const err = new Error("in array");
       const result = fabricFromNativeValue([1, err, 3]) as unknown[];
       expect(result[1]).toBeInstanceOf(FabricError);
-      expect((result[1] as FabricError).error.message).toBe("in array");
+      expect((result[1] as FabricError).message).toBe("in array");
     });
 
     it("preserves sparse array holes when flag is ON", () => {
