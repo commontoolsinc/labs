@@ -3,6 +3,11 @@
  *
  * Exercises the scope idioms (per-space directory, per-user identity,
  * derived admin) and the core voting flows.
+ *
+ * Single-identity caveat (CT-1598): the test framework dispatches every
+ * action from one identity, so we cannot simulate a second user. Admin
+ * gating is exercised by attempting admin actions *before* any join
+ * (myName empty → handler bails).
  */
 
 import { action, computed, pattern } from "commonfabric";
@@ -12,6 +17,18 @@ export default pattern(() => {
   const poll = CozyPoll({});
 
   // === Actions ===
+
+  const action_try_add_before_join = action(() => {
+    poll.addOption.send({ title: "Should not appear" });
+  });
+
+  const action_try_remove_before_join = action(() => {
+    poll.removeOption.send({ optionId: "any" });
+  });
+
+  const action_try_reset_before_join = action(() => {
+    poll.resetVotes.send({});
+  });
 
   const action_join_as_alex = action(() => {
     poll.joinAs.send({ name: "Alex" });
@@ -32,6 +49,11 @@ export default pattern(() => {
   const action_vote_green_first = action(() => {
     const first = poll.options[0];
     if (first) poll.castVote.send({ optionId: first.id, voteType: "green" });
+  });
+
+  const action_vote_yellow_first = action(() => {
+    const first = poll.options[0];
+    if (first) poll.castVote.send({ optionId: first.id, voteType: "yellow" });
   });
 
   const action_vote_red_first = action(() => {
@@ -55,6 +77,10 @@ export default pattern(() => {
 
   // === Assertions ===
 
+  // After joining, no leftovers from the pre-join admin attempts: only
+  // Alex is in users, no admin name was claimed by anyone else, and the
+  // "Should not appear" option is absent (implied by chipotle assertions
+  // later — options.length === 1 after only Chipotle is added).
   const assert_joined_as_alex = computed(() =>
     poll.users.length === 1 &&
     poll.users[0]?.name === "Alex" &&
@@ -84,6 +110,12 @@ export default pattern(() => {
       v?.voterName === "Alex";
   });
 
+  const assert_changed_to_yellow = computed(() => {
+    const v = poll.votes[0];
+    return poll.votes.length === 1 &&
+      v?.voteType === "yellow";
+  });
+
   const assert_changed_to_red = computed(() => {
     const v = poll.votes[0];
     return poll.votes.length === 1 &&
@@ -94,10 +126,24 @@ export default pattern(() => {
 
   const assert_votes_reset = computed(() => poll.votes.length === 0);
 
-  const assert_option_removed = computed(() => poll.options.length === 1);
+  const assert_option_removed_with_its_votes = computed(() =>
+    poll.options.length === 1 &&
+    poll.options[0]?.title === "Thai Kitchen" &&
+    poll.votes.length === 0
+  );
 
   return {
     tests: [
+      // Admin-gated handlers are no-ops before anyone joins (myName empty).
+      // The handler bails on `if (!me || me !== admin) return`. No
+      // separate assertion here — downstream assertions (e.g. only
+      // Chipotle ends up in options, only Alex in users) implicitly
+      // verify these attempts left no state. See ADMIN-FUTURE.md for
+      // the kernel-level upgrade path.
+      { action: action_try_add_before_join },
+      { action: action_try_remove_before_join },
+      { action: action_try_reset_before_join },
+
       // First join → claims admin
       { action: action_join_as_alex },
       { assertion: assert_joined_as_alex },
@@ -112,9 +158,11 @@ export default pattern(() => {
       { action: action_add_thai },
       { assertion: assert_two_options },
 
-      // Vote green, change to red
+      // Vote green → yellow → red (covers all three colors)
       { action: action_vote_green_first },
       { assertion: assert_green_vote_recorded },
+      { action: action_vote_yellow_first },
+      { assertion: assert_changed_to_yellow },
       { action: action_vote_red_first },
       { assertion: assert_changed_to_red },
 
@@ -131,9 +179,10 @@ export default pattern(() => {
       { action: action_reset_votes },
       { assertion: assert_votes_reset },
 
-      // Admin removes option (Chipotle), Thai remains
+      // Remove option with votes → option AND its votes are discarded
+      { action: action_vote_green_first },
       { action: action_remove_first_option },
-      { assertion: assert_option_removed },
+      { assertion: assert_option_removed_with_its_votes },
     ],
     poll,
   };

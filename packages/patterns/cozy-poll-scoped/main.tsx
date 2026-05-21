@@ -342,6 +342,11 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     // introduced by parking-coordinator (PR #3610).
     const joinName = Writable.perSession.of<string>("");
     const optionDraft = Writable.perSession.of<string>("");
+    // Two-step confirmation for destructive actions. Stores the optionId
+    // pending remove-confirm (null = nothing pending). Same idiom as
+    // parking-coordinator's `removePersonConfirmTarget`.
+    const removeConfirmTarget = Writable.perSession.of<string | null>(null);
+    const resetConfirmPending = Writable.perSession.of<boolean>(false);
 
     const boundJoin = joinAs({ users, myName, adminName, joinName });
     const boundAddOption = addOption({
@@ -370,6 +375,17 @@ export default pattern<CozyPollInput, CozyPollOutput>(
         trimmedName(myName) !== "" &&
         trimmedName(myName) === trimmedName(adminName),
     );
+    const joinHint = derive(
+      adminName,
+      (a) =>
+        trimmedName(a) === ""
+          ? "First to join becomes the host."
+          : `Hosted by ${trimmedName(a)}.`,
+    );
+    // Hoist a boolean cell for the reset-confirm JSX ternary so TS doesn't
+    // narrow `resetConfirmPending` itself and lose the `.set` method in
+    // the false branch.
+    const isResetConfirm = computed(() => resetConfirmPending.get());
     const ranked = derive(
       { options, votes, users },
       ({ options, votes, users }) => tallyOptions(options, votes, users),
@@ -530,6 +546,15 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                       }}
                     >
                       Join the poll
+                    </div>
+                    <div
+                      style={{
+                        fontSize: "13px",
+                        color: "#78350f",
+                        marginBottom: "12px",
+                      }}
+                    >
+                      {joinHint}
                     </div>
                     <div
                       style={{
@@ -760,30 +785,16 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                       return idx >= 0 ? idx + 1 : 0;
                     },
                   );
-                  // Vote buttons toggle: clicking your active color clears
-                  // it; clicking a different color updates. Keeps the button
-                  // row a stable 3-chip group regardless of state.
-                  const onVoteGreen = () =>
-                    myVote === "green"
-                      ? boundClearMyVote.send({ optionId: oid })
-                      : boundCastVote.send({
-                        optionId: oid,
-                        voteType: "green",
-                      });
-                  const onVoteYellow = () =>
-                    myVote === "yellow"
-                      ? boundClearMyVote.send({ optionId: oid })
-                      : boundCastVote.send({
-                        optionId: oid,
-                        voteType: "yellow",
-                      });
-                  const onVoteRed = () =>
-                    myVote === "red"
-                      ? boundClearMyVote.send({ optionId: oid })
-                      : boundCastVote.send({
-                        optionId: oid,
-                        voteType: "red",
-                      });
+                  const isRemoveConfirm = computed(() =>
+                    removeConfirmTarget.get() === oid
+                  );
+                  // The castVote handler toggles per-color: clicking your
+                  // active color clears, a different color updates, none
+                  // pushes. JSX dispatches one event per click; the handler
+                  // decides what to do. The onClick lambdas are inlined
+                  // (not assigned to locals) so the transformer lifts each
+                  // into a handler-with-bindings — same idiom as
+                  // parking-coordinator's per-item action dispatch.
                   return (
                     <div
                       style={{
@@ -834,8 +845,9 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                         >
                           <span>added by {option.addedByName}</span>
                           {
-                            /* Admin-only Remove — inline with the "added by"
-                              metadata, muted, far from the vote chips. */
+                            /* Admin-only Remove — muted, far from the vote
+                              chips. Two-step confirm when the option has
+                              votes (same idiom as parking-coordinator). */
                           }
                           {isAdmin
                             ? (
@@ -851,14 +863,53 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                                   textDecoration: "underline",
                                   cursor: "pointer",
                                 }}
-                                onClick={() =>
-                                  boundRemoveOption.send({ optionId: oid })}
+                                onClick={() => removeConfirmTarget.set(oid)}
                               >
                                 · remove
                               </button>
                             )
                             : null}
                         </div>
+                        {isRemoveConfirm
+                          ? (
+                            <div
+                              style={{
+                                marginTop: "8px",
+                                padding: "8px 10px",
+                                backgroundColor: "#fef2f2",
+                                border: "1px solid #fecaca",
+                                borderRadius: "6px",
+                                fontSize: "12px",
+                                color: "#991b1b",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "8px",
+                                flexWrap: "wrap",
+                              }}
+                            >
+                              <span>
+                                Remove "{optionTitle}" and discard its votes?
+                              </span>
+                              <cf-button
+                                size="sm"
+                                variant="primary"
+                                onClick={() => {
+                                  boundRemoveOption.send({ optionId: oid });
+                                  removeConfirmTarget.set(null);
+                                }}
+                              >
+                                Yes, remove
+                              </cf-button>
+                              <cf-button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => removeConfirmTarget.set(null)}
+                              >
+                                Cancel
+                              </cf-button>
+                            </div>
+                          )
+                          : null}
                       </div>
                       {isJoined
                         ? (
@@ -878,7 +929,11 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                                 : myVote
                                 ? "opacity: 0.4;"
                                 : ""}
-                              onClick={onVoteGreen}
+                              onClick={() =>
+                                boundCastVote.send({
+                                  optionId: oid,
+                                  voteType: "green",
+                                })}
                             >
                               🟢
                             </cf-button>
@@ -891,7 +946,11 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                                 : myVote
                                 ? "opacity: 0.4;"
                                 : ""}
-                              onClick={onVoteYellow}
+                              onClick={() =>
+                                boundCastVote.send({
+                                  optionId: oid,
+                                  voteType: "yellow",
+                                })}
                             >
                               🟡
                             </cf-button>
@@ -904,7 +963,11 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                                 : myVote
                                 ? "opacity: 0.4;"
                                 : ""}
-                              onClick={onVoteRed}
+                              onClick={() =>
+                                boundCastVote.send({
+                                  optionId: oid,
+                                  voteType: "red",
+                                })}
                             >
                               🔴
                             </cf-button>
@@ -954,9 +1017,33 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                           style="flex:1"
                         />
                         <cf-button onClick={boundAddOption}>Add</cf-button>
-                        <cf-button onClick={boundResetVotes}>
-                          Reset votes
-                        </cf-button>
+                        {isResetConfirm
+                          ? (
+                            <>
+                              <cf-button
+                                variant="primary"
+                                onClick={() => {
+                                  boundResetVotes.send({});
+                                  resetConfirmPending.set(false);
+                                }}
+                              >
+                                Yes, reset
+                              </cf-button>
+                              <cf-button
+                                variant="ghost"
+                                onClick={() => resetConfirmPending.set(false)}
+                              >
+                                Cancel
+                              </cf-button>
+                            </>
+                          )
+                          : (
+                            <cf-button
+                              onClick={() => resetConfirmPending.set(true)}
+                            >
+                              Reset votes
+                            </cf-button>
+                          )}
                       </div>
                     </div>
                   )
