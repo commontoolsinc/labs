@@ -2,12 +2,24 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   cloneIfNecessary,
+  type CloneOptions,
   resetDataModelConfig,
   setDataModelConfig,
 } from "../fabric-value.ts";
 import type { FabricValue } from "../fabric-value.ts";
-import { FabricEpochNsec } from "../fabric-epoch.ts";
-import { FabricError } from "../fabric-native-instances.ts";
+import { isDeepFrozen, isDeepFrozenFabricValue } from "../deep-freeze.ts";
+import { FabricBytes } from "../fabric-bytes.ts";
+import { FabricEpochDays, FabricEpochNsec } from "../fabric-epoch.ts";
+import { FabricHash } from "../fabric-hash.ts";
+import {
+  FabricError,
+  FabricMap,
+  FabricRegExp,
+  FabricSet,
+} from "../fabric-native-instances.ts";
+import { ProblematicValue } from "../problematic-value.ts";
+import { UnknownValue } from "../unknown-value.ts";
+import { FabricPrimitive, FabricSpecialObject } from "../interface.ts";
 
 // ============================================================================
 // Tests
@@ -492,4 +504,313 @@ describe("cloneIfNecessary", () => {
       expect(legacyResult).toEqual({ a: 1 });
     });
   });
+});
+
+// ============================================================================
+// Per-subclass coverage matrix
+// ============================================================================
+//
+// Systematically exercises every concrete `FabricInstance` and
+// `FabricPrimitive` subclass in this package across the full `cloneIfNecessary`
+// option matrix, and validates the result -- frozenness, identity preservation,
+// observable state -- or that the call throws when a subclass's protocol
+// implementation is a documented stub.
+//
+// The point is twofold: (a) make sure existing subclasses behave consistently
+// under every option combination callers in production are likely to use, and
+// (b) make sure any future subclass added to the package without full protocol
+// coverage trips this matrix instead of silently breaking call sites.
+
+/**
+ * Describes what `cloneIfNecessary` is expected to do for a given subclass on
+ * a given option vector. `kind: "ok"` means the call returns; `kind: "throws"`
+ * means it throws (we don't pin the exact message -- subclass stubs use
+ * varying phrasing).
+ */
+type ExpectedOutcome =
+  | { kind: "ok" }
+  | { kind: "throws" };
+
+/**
+ * Per-subclass metadata that drives the matrix below.
+ *
+ * `deepCloneImplemented` indicates whether `deepClone(frozen)` is a real
+ * implementation (not a stub or the inherited `FabricNativeWrapper.deepClone`
+ * that throws). When false, `cloneIfNecessary` paths that fall through to
+ * `deepClone()` will throw.
+ *
+ * Other distinctions (whether the subclass is a `FabricPrimitive`, whether
+ * the deep-freeze protocol is implemented as a real impl vs. a stub) are
+ * detected at test time -- the former via `instanceof FabricPrimitive` on the
+ * factory output, the latter via `try/catch` around `isDeepFrozenFabricValue`
+ * in the predicate.
+ */
+type SubclassCase = {
+  readonly name: string;
+  // Returns either a `FabricInstance` (non-primitive cases) or a
+  // `FabricPrimitive` (primitive cases). Both extend `FabricSpecialObject`.
+  readonly factory: () => FabricSpecialObject;
+  readonly deepCloneImplemented: boolean;
+};
+
+const subclassCases: readonly SubclassCase[] = [
+  // ---------- `FabricInstance` with full protocol coverage ----------
+  {
+    name: "FabricError",
+    factory: () => new FabricError(new Error("test")),
+    deepCloneImplemented: true,
+  },
+  // ---------- `FabricInstance` with `deepClone` stub ----------
+  {
+    name: "FabricRegExp",
+    factory: () => new FabricRegExp(/abc/g, "es2025"),
+    deepCloneImplemented: false,
+  },
+  {
+    name: "ProblematicValue",
+    factory: () =>
+      new ProblematicValue("Foo@1", "state-data" as FabricValue, "boom"),
+    deepCloneImplemented: false,
+  },
+  {
+    name: "UnknownValue",
+    factory: () => new UnknownValue("Foo@1", "state-data" as FabricValue),
+    deepCloneImplemented: false,
+  },
+  // ---------- `FabricInstance` with all-protocol stubs (only shallow works) ----------
+  {
+    name: "FabricMap",
+    factory: () =>
+      new FabricMap(
+        new Map<FabricValue, FabricValue>([[
+          "k" as FabricValue,
+          1 as FabricValue,
+        ]]),
+      ),
+    deepCloneImplemented: false,
+  },
+  {
+    name: "FabricSet",
+    factory: () => new FabricSet(new Set<FabricValue>([1 as FabricValue])),
+    deepCloneImplemented: false,
+  },
+  // ---------- `FabricPrimitive` subclasses (intrinsically immutable) ----------
+  {
+    name: "FabricBytes",
+    factory: () => new FabricBytes(new Uint8Array([1, 2, 3])),
+    deepCloneImplemented: false,
+  },
+  {
+    name: "FabricEpochNsec",
+    factory: () => new FabricEpochNsec(1234567890n),
+    deepCloneImplemented: false,
+  },
+  {
+    name: "FabricEpochDays",
+    factory: () => new FabricEpochDays(42n),
+    deepCloneImplemented: false,
+  },
+  {
+    name: "FabricHash",
+    factory: () => new FabricHash(new Uint8Array([1, 2, 3, 4]), "fid1"),
+    deepCloneImplemented: false,
+  },
+];
+
+/**
+ * Compute the expected outcome of a `cloneIfNecessary(value, opts)` call for
+ * a given subclass, by inspecting the *actual* value to predict which
+ * `cloneHelper` arm is reached. The point of computing rather than tabulating
+ * is so that adding a new subclass to `subclassCases` (or changing what its
+ * factory returns) keeps the test self-consistent automatically.
+ *
+ * Encodes the `cloneHelper` call-path logic:
+ *
+ *   1. `FabricPrimitive` subclasses are returned by identity unconditionally.
+ *   2. For `FabricInstance`, `canReturnAsIs` short-circuits the call when
+ *      the requested frozenness matches the input's frozenness AND
+ *      `force: false`. In `deep: true` mode that check uses
+ *      `isDeepFrozenFabricValue`, which invokes `[IS_DEEP_FROZEN]` on
+ *      `FabricInstance` arms -- a subclass with a throwing stub for that
+ *      member throws if the probe descends that far.
+ *   3. Otherwise `cloneIfNecessary` falls through to `shallowClone(frozen)`
+ *      (always implemented via `FabricInstance`'s base impl) or
+ *      `deepClone(frozen)` (a throwing stub on subclasses that haven't
+ *      implemented it yet).
+ */
+function expectedOutcome(
+  c: SubclassCase,
+  value: FabricValue,
+  opts: Required<CloneOptions>,
+): ExpectedOutcome {
+  // (1) `FabricPrimitive`: cloneHelper returns the value as-is.
+  if (value instanceof FabricPrimitive) return { kind: "ok" };
+
+  const { frozen, deep, force } = opts;
+
+  // (2) `canReturnAsIs` short-circuit.
+  if (!force) {
+    let canReturnAsIs: boolean;
+    if (deep) {
+      // The check is `frozen && isDeepFrozenFabricValue(v)`. The latter may
+      // call `[IS_DEEP_FROZEN]` on a `FabricInstance` arm -- if a subclass's
+      // implementation is a throwing stub, the probe throws and propagates.
+      if (!frozen) {
+        canReturnAsIs = false;
+      } else {
+        try {
+          canReturnAsIs = isDeepFrozenFabricValue(value);
+        } catch {
+          return { kind: "throws" };
+        }
+      }
+    } else {
+      // Shallow uses plain `Object.isFrozen`, no protocol call.
+      canReturnAsIs = Object.isFrozen(value) === frozen;
+    }
+    if (canReturnAsIs) return { kind: "ok" };
+  }
+
+  // (3) Fell through to a clone method.
+  if (deep) {
+    if (!c.deepCloneImplemented) return { kind: "throws" };
+  }
+  // shallowClone is always implemented via the base class.
+  return { kind: "ok" };
+}
+
+/**
+ * The option vectors exercised against every subclass. We omit
+ * `{ frozen: false, force: false, deep: true }` (rejected as ambiguous by
+ * `cloneIfNecessary` itself) and `{ frozen: true, force: true, ... }`
+ * (rejected as pointless). Those error cases are covered by the per-mode
+ * `error cases` tests above.
+ */
+const optionVectors: ReadonlyArray<{
+  label: string;
+  opts: Required<CloneOptions>;
+}> = [
+  // Defaults
+  {
+    label: "defaults {frozen: true, deep: true, force: false}",
+    opts: { frozen: true, deep: true, force: false },
+  },
+  // Deep, mutable result
+  {
+    label: "{frozen: false, deep: true, force: true}",
+    opts: { frozen: false, deep: true, force: true },
+  },
+  // Shallow, frozen result, identity-when-possible
+  {
+    label: "{frozen: true, deep: false, force: false}",
+    opts: { frozen: true, deep: false, force: false },
+  },
+  // Shallow, mutable result, always copy
+  {
+    label: "{frozen: false, deep: false, force: true}",
+    opts: { frozen: false, deep: false, force: true },
+  },
+  // Shallow, mutable result, identity-when-possible (the spine-walk case)
+  {
+    label: "{frozen: false, deep: false, force: false}",
+    opts: { frozen: false, deep: false, force: false },
+  },
+];
+
+describe("cloneIfNecessary: subclass coverage matrix", () => {
+  afterEach(() => {
+    resetDataModelConfig();
+  });
+
+  for (const modernMode of [false, true]) {
+    const modeLabel = modernMode ? "modern" : "legacy";
+
+    describe(`(${modeLabel} path)`, () => {
+      beforeEach(() => setDataModelConfig(modernMode));
+
+      for (const c of subclassCases) {
+        describe(c.name, () => {
+          for (const inputFrozen of [false, true]) {
+            const frozenLabel = inputFrozen ? "frozen input" : "mutable input";
+
+            describe(frozenLabel, () => {
+              for (const vec of optionVectors) {
+                it(vec.label, () => {
+                  const value = c.factory();
+                  if (inputFrozen) Object.freeze(value);
+                  const ctor = value.constructor as new (
+                    ...args: never[]
+                  ) => FabricSpecialObject;
+                  const wasFrozen = Object.isFrozen(value);
+
+                  const expected = expectedOutcome(
+                    c,
+                    value as unknown as FabricValue,
+                    vec.opts,
+                  );
+
+                  if (expected.kind === "throws") {
+                    expect(() =>
+                      cloneIfNecessary(
+                        value as unknown as FabricValue,
+                        vec.opts,
+                      )
+                    ).toThrow();
+                    return;
+                  }
+
+                  // Determine whether `cloneIfNecessary` should short-circuit
+                  // via `canReturnAsIs` -- which we mirror in the test for
+                  // identity assertions. This is the same logic as
+                  // `expectedOutcome`'s `canReturnAsIs` arm, restated here in
+                  // a form that doesn't presume an "ok" outcome.
+                  let identityExpected: boolean;
+                  if (vec.opts.force) {
+                    identityExpected = false;
+                  } else if (vec.opts.deep) {
+                    identityExpected = vec.opts.frozen &&
+                      isDeepFrozenFabricValue(value as unknown as FabricValue);
+                  } else {
+                    identityExpected = wasFrozen === vec.opts.frozen;
+                  }
+
+                  const result = cloneIfNecessary(
+                    value as unknown as FabricValue,
+                    vec.opts,
+                  ) as FabricSpecialObject;
+
+                  // (1) Class identity is preserved.
+                  expect(result).toBeInstanceOf(ctor);
+
+                  // (2) `FabricPrimitive`: always returns the source by
+                  // identity; result is always frozen (constructor invariant).
+                  if (value instanceof FabricPrimitive) {
+                    expect(result).toBe(value);
+                    expect(Object.isFrozen(result)).toBe(true);
+                    return;
+                  }
+
+                  // (3) Frozenness matches the requested `frozen` option.
+                  expect(Object.isFrozen(result)).toBe(vec.opts.frozen);
+
+                  // (4) Identity preservation matches the canReturnAsIs
+                  // prediction.
+                  if (identityExpected) {
+                    expect(result).toBe(value);
+                  } else {
+                    expect(result).not.toBe(value);
+                  }
+
+                  // (5) `isDeepFrozen` agrees on deep-frozen requests.
+                  if (vec.opts.deep && vec.opts.frozen) {
+                    expect(isDeepFrozen(result as unknown)).toBe(true);
+                  }
+                });
+              }
+            });
+          }
+        });
+      }
+    });
+  }
 });
