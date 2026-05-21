@@ -565,7 +565,7 @@ function recursiveStripAsCellFromSchema(
   if (context.options.keepAsCell) {
     result = { ...schema };
   } else {
-    const { asCell: _c, asStream: _s, ...restSchema } = schema;
+    const { asCell: _c, ...restSchema } = schema;
     const asCellValues = ContextualFlowControl.getAsCellValues(schema);
     // If we're keeping streams and the outermost is a stream, keep it
     if (

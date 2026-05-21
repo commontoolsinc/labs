@@ -31,7 +31,7 @@ const OutputSchema = {
     pushNumbersHandler: {
       type: "object",
       properties: { value: { type: "number" } },
-      asStream: true,
+      asCell: ["stream"],
     },
     pushObjectsHandler: {
       type: "object",
@@ -41,7 +41,7 @@ const OutputSchema = {
           properties: { count: { type: "number" } },
         },
       },
-      asStream: true,
+      asCell: ["stream"],
     },
   },
   required: [

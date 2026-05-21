@@ -335,7 +335,7 @@ describe("parseExecArgs", () => {
 
   it("allows schema-less handlers to invoke without arguments", () => {
     const result = parseExecArgs(
-      makeSpec("handler", { asStream: true } as JSONSchema),
+      makeSpec("handler", { asCell: ["stream"] } as JSONSchema),
       [],
     );
 
@@ -556,7 +556,7 @@ describe("renderExecHelp", () => {
   it("renders schema-less handlers as void no-input callables", () => {
     const help = renderExecHelp(
       "./onAddContact.handler",
-      makeSpec("handler", { asStream: true } as JSONSchema),
+      makeSpec("handler", { asCell: ["stream"] } as JSONSchema),
       { invocationStyle: "direct" },
     );
 
@@ -697,7 +697,7 @@ describe("renderPieceCallHelp", () => {
   it("renders bare usage for schema-less handler piece-call help", () => {
     const help = renderPieceCallHelp(
       "cf piece call ... onAddContact",
-      makeSpec("handler", { asStream: true } as JSONSchema),
+      makeSpec("handler", { asCell: ["stream"] } as JSONSchema),
     );
 
     expect(help).toContain("cf piece call ... onAddContact");

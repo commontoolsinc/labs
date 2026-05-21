@@ -79,7 +79,7 @@ export default pattern((state) => {
                         $ref: "#/$defs/CellScope"
                     },
                     "with": {
-                        asStream: true
+                        asCell: ["stream"]
                     }
                 },
                 required: ["type", "with"]

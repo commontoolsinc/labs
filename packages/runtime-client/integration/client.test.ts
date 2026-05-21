@@ -113,7 +113,7 @@ describe("RuntimeClient", () => {
       });
       const cell = page.cell();
       const value = await cell.sync() as { $UI?: VNode; $NAME?: string };
-      // With schema-driven serialization (asCell: true), children are resolved
+      // With schema-driven serialization (asCell: ["cell"]), children are resolved
       // inline as VNodes rather than wrapped in CellHandle indirection.
       const children = value.$UI?.children as VNode[];
       const firstChild = children?.[0];

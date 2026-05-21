@@ -69,7 +69,7 @@ describe("llmDialog outbox mechanism", () => {
     const resultSchema = {
       type: "object",
       properties: {
-        addMessage: { ...LLMMessageSchema, asStream: true },
+        addMessage: { ...LLMMessageSchema, asCell: ["stream"] },
         pending: { type: "boolean" },
         error: { type: "object", additionalProperties: true },
         messages: {

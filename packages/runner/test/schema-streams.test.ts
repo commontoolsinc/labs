@@ -56,7 +56,7 @@ describe("Schema - Streams and Promises", () => {
           name: { type: "string" },
           events: {
             type: "object",
-            asStream: true,
+            asCell: ["stream"],
           },
         },
       } as const satisfies JSONSchema;
@@ -103,7 +103,7 @@ describe("Schema - Streams and Promises", () => {
                   name: { type: "string" },
                   notifications: {
                     type: "object",
-                    asStream: true,
+                    asCell: ["stream"],
                   },
                 },
               },
@@ -140,7 +140,7 @@ describe("Schema - Streams and Promises", () => {
           name: { type: "string" },
           events: {
             type: "object",
-            asStream: true,
+            asCell: ["stream"],
           },
         },
       } as const satisfies JSONSchema;
@@ -172,11 +172,11 @@ describe("Schema - Streams and Promises", () => {
         properties: {
           cellData: {
             type: "object",
-            asCell: true,
+            asCell: ["cell"],
           },
           streamData: {
             type: "object",
-            asStream: true,
+            asCell: ["stream"],
           },
         },
       } as const satisfies JSONSchema;

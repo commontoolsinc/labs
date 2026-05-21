@@ -118,7 +118,7 @@ const testStepPeekSchema = internSchema(
 const testStepEntrySchema = internSchema(
   {
     type: "object",
-    asCell: true,
+    asCell: ["cell"],
   },
 );
 

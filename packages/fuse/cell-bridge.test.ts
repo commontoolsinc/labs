@@ -1262,7 +1262,7 @@ Deno.test("CellBridge.hydratePieceProp labels void handlers as no-arg callables 
 
   const onAddContactCell = makeCell(
     { $stream: true },
-    { asStream: true },
+    { asCell: ["stream"] },
     {},
     { isStream: true },
   );
@@ -1271,7 +1271,7 @@ Deno.test("CellBridge.hydratePieceProp labels void handlers as no-arg callables 
     {
       type: "object",
       properties: {
-        onAddContact: { asStream: true },
+        onAddContact: { asCell: ["stream"] },
       },
     },
     { onAddContact: onAddContactCell },

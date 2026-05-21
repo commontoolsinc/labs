@@ -50,7 +50,7 @@ describe("SelectorTracker", () => {
           "props": {
             "type": "object",
             "additionalProperties": {
-              "asCell": true,
+              asCell: ["cell"],
             },
           },
           "children": {
@@ -59,30 +59,30 @@ describe("SelectorTracker", () => {
               "anyOf": [
                 {
                   "$ref": "#/$defs/VNode",
-                  "asCell": true,
+                  asCell: ["cell"],
                 },
                 {
                   "type": "string",
-                  "asCell": true,
+                  asCell: ["cell"],
                 },
                 {
                   "type": "number",
-                  "asCell": true,
+                  asCell: ["cell"],
                 },
                 {
                   "type": "boolean",
-                  "asCell": true,
+                  asCell: ["cell"],
                 },
                 {
                   "type": "array",
                   "items": {
                     "$ref": "#/$defs/VNode",
-                    "asCell": true,
+                    asCell: ["cell"],
                   },
                 },
               ],
             },
-            "asCell": true,
+            asCell: ["cell"],
           },
           "$UI": {
             "$ref": "#/$defs/VNode",
@@ -193,22 +193,22 @@ describe("SelectorTracker", () => {
     it("interns standardized structurally equal schemas", () => {
       const first = {
         type: "object",
-        asCell: true,
+        asCell: ["cell"],
         properties: {
           child: {
             type: "string",
-            asStream: true,
+            asCell: ["stream"],
           },
         },
       } as const satisfies JSONSchema;
       const second = {
         properties: {
           child: {
-            asStream: true,
+            asCell: ["stream"],
             type: "string",
           },
         },
-        asCell: true,
+        asCell: ["cell"],
         type: "object",
       } as const satisfies JSONSchema;
 
@@ -232,7 +232,7 @@ describe("SelectorTracker", () => {
         properties: {
           child: {
             type: "string",
-            asCell: true,
+            asCell: ["cell"],
           },
         },
       } as {

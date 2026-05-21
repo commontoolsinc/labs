@@ -465,11 +465,11 @@ Deno.test("simplifySchemaForContext preserves asStream marker", () => {
   const schema: any = {
     type: "object",
     properties: {
-      events: { asStream: true, type: "string" },
+      events: { asCell: ["stream"], type: "string" },
     },
   };
   const result = simplifySchemaForContext(schema) as any;
-  assertEquals(result.properties?.events?.asStream, true);
+  assertEquals(result.properties?.events?.asCell, ["stream"]);
   assertEquals(result.properties?.events?.type, "string");
 });
 
@@ -478,7 +478,7 @@ Deno.test("simplifySchemaForContext preserves asCell marker with nested properti
     type: "object",
     properties: {
       user: {
-        asCell: true,
+        asCell: ["cell"],
         type: "object",
         properties: {
           name: { type: "string" },
@@ -489,7 +489,7 @@ Deno.test("simplifySchemaForContext preserves asCell marker with nested properti
     },
   };
   const result = simplifySchemaForContext(schema) as any;
-  assertEquals(result.properties?.user?.asCell, true);
+  assertEquals(result.properties?.user?.asCell, ["cell"]);
   assertEquals(result.properties?.user?.properties?.name?.type, "string");
   assertEquals(result.properties?.user?.properties?.age?.type, "number");
   assertEquals(result.properties?.user?.required, ["name", "age"]);
@@ -619,7 +619,7 @@ Deno.test("simplifySchemaForContext handles Stream with nested detail structure"
     type: "object",
     properties: {
       editContent: {
-        asStream: true,
+        asCell: ["stream"],
         type: "object",
         properties: {
           detail: {
@@ -633,7 +633,7 @@ Deno.test("simplifySchemaForContext handles Stream with nested detail structure"
     },
   };
   const result = simplifySchemaForContext(schema) as any;
-  assertEquals(result.properties?.editContent?.asStream, true);
+  assertEquals(result.properties?.editContent?.asCell, ["stream"]);
   assertEquals(result.properties?.editContent?.type, "object");
   assertEquals(
     result.properties?.editContent?.properties?.detail?.properties?.value?.type,
@@ -801,19 +801,15 @@ Deno.test("prepareSchemaForLLM strips internal markers and resolves $ref", () =>
       Item: { type: "string" },
     },
     properties: {
-      data: { $ref: "#/$defs/Item", asCell: true },
-      otherData: { $ref: "#/$defs/Item", asCell: ["cell"] },
+      data: { $ref: "#/$defs/Item", asCell: ["cell"] },
       stream: { type: "number", asCell: ["stream"] },
-      otherStream: { type: "number", asStream: true }, // legacy asStream marker
       hidden: { type: "object", asCell: ["opaque"] },
     },
   };
   const result = prepareSchemaForLLM(schema) as any;
   // asCell, asStream, asOpaque should be stripped
   assertEquals(result.properties?.data?.asCell, undefined);
-  assertEquals(result.properties?.otherData?.asCell, undefined);
   assertEquals(result.properties?.stream?.asCell, undefined);
-  assertEquals(result.properties?.otherStream?.asStream, undefined);
   assertEquals(result.properties?.hidden?.asCell, undefined);
   // $ref should be resolved
   assertEquals(result.properties?.data?.type, "string");
@@ -831,7 +827,11 @@ Deno.test("prepareSchemaForLLM handles recursive TodoItem schema", () => {
       TodoItem: {
         properties: {
           done: { default: false, type: "boolean" },
-          items: { $ref: "#/$defs/AnonymousType_1", asCell: true, default: [] },
+          items: {
+            $ref: "#/$defs/AnonymousType_1",
+            asCell: ["cell"],
+            default: [],
+          },
           title: { type: "string" },
         },
         required: ["done", "items", "title"],

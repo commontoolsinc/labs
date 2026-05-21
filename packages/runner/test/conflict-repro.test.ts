@@ -73,9 +73,9 @@ describe("Conflict Reproduction", () => {
         items: {
           type: "array",
           items: { type: "object", properties: { id: { type: "string" } } },
-          asCell: true,
+          asCell: ["cell"],
         },
-        sequence: { asCell: true },
+        sequence: { asCell: ["cell"] },
       },
       required: ["items", "sequence"],
     }, (_event, context) => {
@@ -145,9 +145,9 @@ describe("Conflict Reproduction", () => {
         items: {
           type: "array",
           items: { type: "object", properties: { id: { type: "string" } } },
-          asCell: true,
+          asCell: ["cell"],
         },
-        sequence: { asCell: true },
+        sequence: { asCell: ["cell"] },
       },
       required: ["items", "sequence"],
     }, (_event, context) => {

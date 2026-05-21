@@ -503,14 +503,8 @@ export class ContextualFlowControl {
     schema: JSONSchema | undefined,
   ): readonly AsCellEntry[] {
     // Support both modern and legacy versions
-    if (isRecord(schema)) {
-      if (Array.isArray(schema.asCell)) {
-        return schema.asCell;
-      } else if (schema.asCell === true) {
-        return ["cell"];
-      } else if (schema.asStream === true) {
-        return ["stream"];
-      }
+    if (isRecord(schema) && Array.isArray(schema.asCell)) {
+      return schema.asCell;
     }
     return [];
   }

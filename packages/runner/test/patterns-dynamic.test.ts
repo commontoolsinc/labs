@@ -156,7 +156,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
               },
               required: ["values"],
             },
-            asCell: true,
+            asCell: ["cell"],
           },
         },
         required: ["groups"],

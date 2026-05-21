@@ -240,7 +240,7 @@ describe("Schema Lineage", () => {
       // Access the items with a schema that specifies array items should be cells
       const itemsCellWithSchema = itemsCell.asSchema(
         {
-          asCell: true,
+          asCell: ["cell"],
         } as const satisfies JSONSchema,
       );
 
@@ -333,7 +333,7 @@ describe("Schema propagation end-to-end example", () => {
           name: { type: "string" },
           props: {
             type: "object",
-            additionalProperties: { asCell: true },
+            additionalProperties: { asCell: ["cell"] },
           },
         },
       } as const satisfies JSONSchema,

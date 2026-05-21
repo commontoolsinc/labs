@@ -1646,10 +1646,10 @@ function _mergeSchemaFlagsUncached(
   schema: JSONSchema,
 ) {
   if (isRecord(flagSchema)) {
-    // we want to preserve asCell and asStream -- if true, these will override
-    // the value in the schema
-    const { asCell, asStream } = flagSchema;
-    if (asCell || asStream) {
+    // we want to preserve asCell -- if set, this will override the value in
+    // the schema
+    const { asCell } = flagSchema;
+    if (asCell) {
       const props = { asCell: asCell ?? ["stream"] };
       return schemaWithProperties(schema, props);
     }
@@ -3516,7 +3516,7 @@ function _mergeAnyOfBranchSchemasUncached(
     ...(requiredSet.size > 0 && { required: [...requiredSet] }),
     ...(!anyAllowsAdditional && { additionalProperties: false }),
     ...(mergedDefs && { $defs: mergedDefs }),
-    ...((outerSchema.asCell || outerSchema.asStream) &&
+    ...((outerSchema.asCell) &&
       { asCell: outerSchema.asCell ?? ["stream"] }),
   } as JSONSchemaObj;
 }

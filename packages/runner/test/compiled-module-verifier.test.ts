@@ -583,7 +583,7 @@ ${bindingHelper}
       addChild: (0, commonfabric_1.handler)(false, {
         type: "object",
         properties: {
-          children: { type: "array", items: { type: "number" }, asCell: true }
+          children: { type: "array", items: { type: "number" }, asCell: ["cell"] }
         },
         required: ["children"]
       }, (_, { children }) => children.push(1))({ children: [] }),

@@ -882,7 +882,7 @@ describe("Cell circular references", () => {
                   items: {
                     type: "object",
                     properties: { parent: { $ref: "#/$defs/Root" } },
-                    asCell: true,
+                    asCell: ["cell"],
                     required: ["parent"],
                   },
                 },

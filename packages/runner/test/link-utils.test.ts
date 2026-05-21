@@ -637,11 +637,10 @@ describe("link-utils", () => {
   });
 
   describe("stripAsCellAndStreamFromSchema", () => {
-    it("should remove asCell and asStream from simple schema", () => {
+    it("should remove asCell from simple schema", () => {
       const schema = {
         type: "object",
-        asCell: true,
-        asStream: false,
+        asCell: ["cell"],
         properties: {
           name: { type: "string" },
         },
@@ -657,18 +656,18 @@ describe("link-utils", () => {
       });
     });
 
-    it("should remove asCell and asStream from nested properties", () => {
+    it("should remove asCell from nested properties", () => {
       const schema = {
         type: "object",
         properties: {
           user: {
             type: "object",
-            asCell: true,
+            asCell: ["cell"],
             properties: {
               name: { type: "string" },
               settings: {
                 type: "object",
-                asStream: true,
+                asCell: ["stream"],
                 properties: {
                   theme: { type: "string" },
                 },
@@ -763,7 +762,7 @@ describe("link-utils", () => {
             type: "array",
             items: {
               type: "string",
-              asCell: true,
+              asCell: ["cell"],
             },
           },
         },
@@ -788,8 +787,8 @@ describe("link-utils", () => {
       const schema = {
         type: "object",
         anyOf: [
-          { type: "string", asCell: true },
-          { type: "number", asStream: true },
+          { type: "string", asCell: ["cell"] },
+          { type: "number", asCell: ["stream"] },
         ],
       } as const satisfies JSONSchema;
 
@@ -809,7 +808,7 @@ describe("link-utils", () => {
         type: "object",
         additionalProperties: {
           type: "string",
-          asCell: true,
+          asCell: ["cell"],
         },
       } as const satisfies JSONSchema;
 
@@ -826,28 +825,28 @@ describe("link-utils", () => {
     it("should not mutate the original schema", () => {
       const originalSchema = {
         type: "object",
-        asCell: true,
+        asCell: ["cell"],
         properties: {
-          name: { type: "string", asStream: true },
+          name: { type: "string", asCell: ["stream"] },
         },
       } as const satisfies JSONSchema;
 
       const result = sanitizeSchemaForLinks(originalSchema);
 
       // Original should be unchanged
-      expect(originalSchema.asCell).toBe(true);
-      expect(originalSchema.properties.name.asStream).toBe(true);
+      expect(originalSchema.asCell).toEqual(["cell"]);
+      expect(originalSchema.properties.name.asCell).toEqual(["stream"]);
 
       // Result should have flags removed
       expect(result).not.toHaveProperty("asCell");
-      expect((result as any).properties.name).not.toHaveProperty("asStream");
+      expect((result as any).properties.name).not.toHaveProperty("asCell");
     });
 
     it("should handle circular schema references without stack overflow", () => {
       // Create a circular schema like Record pattern has
       const schema: any = {
         type: "object",
-        asCell: true,
+        asCell: ["cell"],
         properties: {
           name: { type: "string" },
           subPieces: {
@@ -883,16 +882,23 @@ describe("link-utils", () => {
     it("should handle direct self-reference cycle with $ref", () => {
       const schema: any = {
         type: "object",
-        asCell: true,
-        asStream: true,
+        asCell: ["cell"],
       };
       schema.self = schema;
-
       const result = sanitizeSchemaForLinks(schema);
 
-      // Top level flags should be removed
+      // Top level asCell ["cell"] flags should be removed
       expect(result).not.toHaveProperty("asCell");
-      expect(result).not.toHaveProperty("asStream");
+      const schema2: any = {
+        type: "object",
+        asCell: ["stream"],
+      };
+      schema.self = schema;
+      const result2 = sanitizeSchemaForLinks(schema2);
+
+      // Top level asCell ["stream"] flags should be removed
+      expect(result2).not.toHaveProperty("asCell");
+
       // Cycle reference should be replaced with $ref
       expect((result as any).self.$ref).toBeDefined();
       expect((result as any).self.$ref).toMatch(/^#\/\$defs\//);
@@ -903,9 +909,9 @@ describe("link-utils", () => {
     });
 
     it("should handle three-way cycle (A → B → C → A) with $ref", () => {
-      const a: any = { type: "a", asCell: true, next: null };
-      const b: any = { type: "b", asStream: true, next: null };
-      const c: any = { type: "c", asCell: true, next: null };
+      const a: any = { type: "a", asCell: ["cell"], next: null };
+      const b: any = { type: "b", asCell: ["stream"], next: null };
+      const c: any = { type: "c", asCell: ["cell"], next: null };
       a.next = b;
       b.next = c;
       c.next = a;
@@ -926,7 +932,7 @@ describe("link-utils", () => {
     it("should handle cycle through array items with $ref", () => {
       const schema: any = {
         type: "array",
-        asCell: true,
+        asCell: ["cell"],
         items: null,
       };
       schema.items = schema;
@@ -944,7 +950,7 @@ describe("link-utils", () => {
     it("should handle cycle through anyOf with $ref", () => {
       const schema: any = {
         type: "object",
-        asCell: true,
+        asCell: ["cell"],
         anyOf: [{ type: "string" }, null],
       };
       schema.anyOf[1] = schema;
@@ -961,22 +967,22 @@ describe("link-utils", () => {
     });
 
     it("should handle multiple independent cycles", () => {
-      const cycle1: any = { type: "cycle1", asCell: true };
+      const cycle1: any = { type: "cycle1", asCell: ["cell"] };
       cycle1.self = cycle1;
-      const cycle2: any = { type: "cycle2", asStream: true };
+      const cycle2: any = { type: "cycle2", asCell: ["stream"] };
       cycle2.self = cycle2;
       const schema: any = { a: cycle1, b: cycle2 };
 
       const result = sanitizeSchemaForLinks(schema);
 
       expect((result as any).a).not.toHaveProperty("asCell");
-      expect((result as any).b).not.toHaveProperty("asStream");
+      expect((result as any).b).not.toHaveProperty("asCell");
     });
 
     it("should handle keepStreams option with circular schemas", () => {
       const schema: any = {
         type: "object",
-        asStream: true,
+        asCell: ["stream"],
       };
       schema.self = schema;
 
@@ -990,7 +996,7 @@ describe("link-utils", () => {
 
     it("should handle shared references (diamond pattern) correctly", () => {
       // Test that same object referenced from multiple places is handled
-      const shared: any = { type: "shared", asCell: true };
+      const shared: any = { type: "shared", asCell: ["cell"] };
       const schema: any = {
         left: { path: shared },
         right: { path: shared },
@@ -1006,19 +1012,18 @@ describe("link-utils", () => {
     });
 
     it("should process schemas inside existing $defs", () => {
-      // Bug fix test: schemas inside $defs should have asCell/asStream stripped
+      // Bug fix test: schemas inside $defs should have asCell stripped
       const schema: any = {
         type: "object",
         $defs: {
           MyType: {
             type: "string",
-            asCell: true,
-            asStream: true,
+            asCell: ["cell"],
           },
           NestedType: {
             type: "object",
             properties: {
-              nested: { asCell: true },
+              nested: { asCell: ["cell"] },
             },
           },
         },
@@ -1029,7 +1034,6 @@ describe("link-utils", () => {
 
       // $defs schemas should have asCell/asStream stripped
       expect((result as any).$defs.MyType).not.toHaveProperty("asCell");
-      expect((result as any).$defs.MyType).not.toHaveProperty("asStream");
       expect((result as any).$defs.MyType.type).toBe("string");
       // Nested properties too
       expect(
@@ -1072,7 +1076,7 @@ describe("link-utils", () => {
     it("should handle cycles through oneOf", () => {
       const schema: any = {
         type: "object",
-        asCell: true,
+        asCell: ["cell"],
         oneOf: [{ type: "null" }, null],
       };
       schema.oneOf[1] = schema;
@@ -1102,7 +1106,7 @@ describe("link-utils", () => {
 
     it("should handle $defs with internal cycles", () => {
       // A definition that references itself
-      const myDef: any = { type: "object", asCell: true };
+      const myDef: any = { type: "object", asCell: ["cell"] };
       myDef.properties = { child: myDef };
 
       const schema: any = {

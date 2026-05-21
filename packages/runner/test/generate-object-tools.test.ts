@@ -679,12 +679,12 @@ describe("generateObject with tools", () => {
     const getDataHandler = handler(
       {
         type: "object",
-        properties: { result: { type: "object", asCell: true } },
+        properties: { result: { type: "object", asCell: ["cell"] } },
         required: ["result"],
       },
       {
         type: "object",
-        properties: { dataSource: { type: "object", asCell: true } },
+        properties: { dataSource: { type: "object", asCell: ["cell"] } },
         required: ["dataSource"],
       },
       (args: { result: any }, _state: { dataSource: any }) => {
@@ -696,12 +696,12 @@ describe("generateObject with tools", () => {
     const countHandler = handler(
       {
         type: "object",
-        properties: { result: { type: "object", asCell: true } },
+        properties: { result: { type: "object", asCell: ["cell"] } },
         required: ["result"],
       },
       {
         type: "object",
-        properties: { counter: { type: "object", asCell: true } },
+        properties: { counter: { type: "object", asCell: ["cell"] } },
         required: ["counter"],
       },
       (args: { result: any }, _state: { counter: any }) => {
@@ -948,7 +948,7 @@ describe("generateObject with tools", () => {
     const fetchData = handler(
       {
         type: "object",
-        properties: { result: { type: "object", asCell: true } },
+        properties: { result: { type: "object", asCell: ["cell"] } },
         required: ["result"],
       },
       { type: "object", properties: {} },
@@ -1154,7 +1154,7 @@ describe("generateObject with tools", () => {
     const toolA = handler(
       {
         type: "object",
-        properties: { result: { type: "object", asCell: true } },
+        properties: { result: { type: "object", asCell: ["cell"] } },
         required: ["result"],
       },
       { type: "object", properties: {} },
@@ -1167,7 +1167,7 @@ describe("generateObject with tools", () => {
     const toolB = handler(
       {
         type: "object",
-        properties: { result: { type: "object", asCell: true } },
+        properties: { result: { type: "object", asCell: ["cell"] } },
         required: ["result"],
       },
       { type: "object", properties: {} },
@@ -1302,7 +1302,7 @@ describe("generateObject with tools", () => {
     const resultSchema: JSONSchema = {
       type: "object",
       properties: {
-        link: { type: "object", asCell: true },
+        link: { type: "object", asCell: ["cell"] },
       },
     };
 
