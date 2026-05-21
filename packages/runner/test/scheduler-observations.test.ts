@@ -3,6 +3,7 @@ import {
   describe,
   disposeSchedulerTestRuntime,
   expect,
+  getStaleSchedulerInternals,
   it,
   space,
   toMemorySpaceAddress,
@@ -110,12 +111,40 @@ describe("persistent scheduler observations", () => {
     expect(isSchedulerActionObservation(observation)).toBe(true);
   });
 
+  it("rejects persisted observations missing required scheduler metadata", () => {
+    const observation = buildSchedulerActionObservation({
+      actionId: "pattern.tsx:computed:1",
+      actionKind: "computation",
+      branch: "",
+      pieceId: "of:piece",
+      processGeneration: 1,
+      implementationFingerprint: "impl:v1",
+      runtimeFingerprint: "runtime:test",
+      observedAtSeq: 42,
+      transactionKind: "action-run",
+      transactionLog: {
+        reads: [],
+        shallowReads: [],
+        writes: [],
+        attemptedWrites: [],
+      } satisfies TransactionReactivityLog,
+    });
+
+    for (const key of ["actionKind", "transactionKind", "status"] as const) {
+      const candidate = { ...observation } as Partial<
+        SchedulerActionObservation
+      >;
+      delete candidate[key];
+      expect(isSchedulerActionObservation(candidate)).toBe(false);
+    }
+  });
+
   it("rehydrates clean scheduler observations without rerun pressure", async () => {
     const testRuntime = createSchedulerTestRuntime("https://example.test", {
       pullMode: "enabled",
     });
     try {
-      function persistedAction() {}
+      const persistedAction = () => {};
       testRuntime.runtime.scheduler.subscribe(persistedAction, {
         reads: [],
         shallowReads: [],
@@ -257,7 +286,7 @@ describe("persistent scheduler observations", () => {
       pullMode: "enabled",
     });
     try {
-      function dirtyPersistedAction() {}
+      const dirtyPersistedAction = () => {};
       testRuntime.runtime.scheduler.subscribe(dirtyPersistedAction, {
         reads: [],
         shallowReads: [],
@@ -301,7 +330,7 @@ describe("persistent scheduler observations", () => {
       pullMode: "enabled",
     });
     try {
-      function storageBackedAction() {}
+      const storageBackedAction = () => {};
       testRuntime.runtime.scheduler.subscribe(storageBackedAction, {
         reads: [],
         shallowReads: [],
@@ -328,9 +357,9 @@ describe("persistent scheduler observations", () => {
     });
     try {
       let runs = 0;
-      function autoPersistedAction() {
+      const autoPersistedAction = () => {
         runs++;
-      }
+      };
       const actionId = "autoPersistedAction";
       const provider = testRuntime.runtime.storageManager.open(space) as {
         listSchedulerActionSnapshots?: (
@@ -341,9 +370,9 @@ describe("persistent scheduler observations", () => {
         }>;
       };
       let querySeen: unknown;
-      provider.listSchedulerActionSnapshots = async (query) => {
+      provider.listSchedulerActionSnapshots = (query) => {
         querySeen = query;
-        return {
+        return Promise.resolve({
           serverSeq: 5,
           snapshots: [{
             observationId: 1,
@@ -371,7 +400,7 @@ describe("persistent scheduler observations", () => {
               currentKnownWrites: [writeAddress],
             }),
           }],
-        };
+        });
       };
 
       testRuntime.runtime.scheduler.subscribe(autoPersistedAction, {
@@ -422,10 +451,10 @@ describe("persistent scheduler observations", () => {
       await tx.commit();
 
       let runs = 0;
-      function ownerNoopReader(actionTx: IExtendedStorageTransaction) {
+      const ownerNoopReader = (actionTx: IExtendedStorageTransaction) => {
         runs++;
         readCell.withTx(actionTx).get();
-      }
+      };
 
       runtime.scheduler.subscribe(ownerNoopReader, {
         reads: [],
@@ -490,12 +519,12 @@ describe("persistent scheduler observations", () => {
       await tx.commit();
 
       let runs = 0;
-      function inactiveCrossSpaceReader(
+      const inactiveCrossSpaceReader = (
         actionTx: IExtendedStorageTransaction,
-      ) {
+      ) => {
         runs++;
         readCell.withTx(actionTx).get();
-      }
+      };
 
       const subscribe = () =>
         runtime.scheduler.subscribe(
@@ -539,8 +568,8 @@ describe("persistent scheduler observations", () => {
     });
     try {
       const { runtime } = testRuntime;
-      function persistedReader() {}
-      function persistedWriter() {}
+      const persistedReader = () => {};
+      const persistedWriter = () => {};
 
       runtime.scheduler.subscribe(persistedReader, {
         reads: [writeAddress],
@@ -633,7 +662,7 @@ describe("persistent scheduler observations", () => {
           resolveSnapshots = resolve;
         });
 
-      function canceledBeforeRehydrate() {}
+      const canceledBeforeRehydrate = () => {};
       const cancel = runtime.scheduler.subscribe(canceledBeforeRehydrate, {
         reads: [],
         shallowReads: [],
@@ -691,30 +720,60 @@ describe("persistent scheduler observations", () => {
     }
   });
 
-  it("falls back to the normal first run when fingerprints mismatch", async () => {
+  it("does not apply async initial rehydration after an action becomes dirty", async () => {
     const testRuntime = createSchedulerTestRuntime("https://example.test", {
       pullMode: "enabled",
     });
     try {
-      const provider = testRuntime.runtime.storageManager.open(space) as {
+      const { runtime } = testRuntime;
+      const provider = runtime.storageManager.open(space) as {
         listSchedulerActionSnapshots?: () => Promise<{
           serverSeq: number;
           snapshots: unknown[];
         }>;
       };
-      provider.listSchedulerActionSnapshots = async () => ({
+      let resolveSnapshots:
+        | ((result: { serverSeq: number; snapshots: unknown[] }) => void)
+        | undefined;
+      provider.listSchedulerActionSnapshots = () =>
+        new Promise((resolve) => {
+          resolveSnapshots = resolve;
+        });
+
+      const dirtyBeforeRehydrate = () => {};
+      runtime.scheduler.subscribe(dirtyBeforeRehydrate, {
+        reads: [],
+        shallowReads: [],
+        writes: [],
+      }, {
+        rehydrateFromStorage: {
+          space,
+          pieceId: "space:dirty-process",
+          processGeneration: 1,
+        },
+      });
+
+      getStaleSchedulerInternals(runtime.scheduler).markDirty(
+        dirtyBeforeRehydrate,
+      );
+
+      resolveSnapshots?.({
         serverSeq: 5,
         snapshots: [{
           observationId: 1,
           commitSeq: null,
           observedAtSeq: 5,
           observation: buildSchedulerActionObservation({
-            actionId: "stalePersistedAction",
-            actionKind: "effect",
+            actionId: "dirtyBeforeRehydrate",
+            actionKind: "computation",
             branch: "",
-            pieceId: "space:stale-process",
+            pieceId: "space:dirty-process",
             processGeneration: 1,
-            implementationFingerprint: "impl:old",
+            implementationFingerprint: schedulerImplementationFingerprint(
+              dirtyBeforeRehydrate,
+              "dirtyBeforeRehydrate",
+              undefined,
+            ),
             runtimeFingerprint: schedulerRuntimeFingerprint("pull"),
             observedAtSeq: 5,
             transactionKind: "action-run",
@@ -727,11 +786,59 @@ describe("persistent scheduler observations", () => {
           }),
         }],
       });
+      await runtime.idle();
+
+      expect(runtime.scheduler.isDirty(dirtyBeforeRehydrate)).toBe(true);
+      expect(runtime.scheduler.getMightWrite(dirtyBeforeRehydrate)).toEqual(
+        [],
+      );
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
+  it("falls back to the normal first run when fingerprints mismatch", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {
+      pullMode: "enabled",
+    });
+    try {
+      const provider = testRuntime.runtime.storageManager.open(space) as {
+        listSchedulerActionSnapshots?: () => Promise<{
+          serverSeq: number;
+          snapshots: unknown[];
+        }>;
+      };
+      provider.listSchedulerActionSnapshots = () =>
+        Promise.resolve({
+          serverSeq: 5,
+          snapshots: [{
+            observationId: 1,
+            commitSeq: null,
+            observedAtSeq: 5,
+            observation: buildSchedulerActionObservation({
+              actionId: "stalePersistedAction",
+              actionKind: "effect",
+              branch: "",
+              pieceId: "space:stale-process",
+              processGeneration: 1,
+              implementationFingerprint: "impl:old",
+              runtimeFingerprint: schedulerRuntimeFingerprint("pull"),
+              observedAtSeq: 5,
+              transactionKind: "action-run",
+              transactionLog: {
+                reads: [readAddress],
+                shallowReads: [],
+                writes: [],
+              },
+              currentKnownWrites: [writeAddress],
+            }),
+          }],
+        });
 
       let runs = 0;
-      function stalePersistedAction() {
+      const stalePersistedAction = () => {
         runs++;
-      }
+      };
 
       testRuntime.runtime.scheduler.subscribe(stalePersistedAction, {
         reads: [],
@@ -767,15 +874,16 @@ describe("persistent scheduler observations", () => {
           snapshots: unknown[];
         }>;
       };
-      provider.listSchedulerActionSnapshots = async () => ({
-        serverSeq: 5,
-        snapshots: [],
-      });
+      provider.listSchedulerActionSnapshots = () =>
+        Promise.resolve({
+          serverSeq: 5,
+          snapshots: [],
+        });
 
       let runs = 0;
-      function missingPersistedAction() {
+      const missingPersistedAction = () => {
         runs++;
-      }
+      };
 
       testRuntime.runtime.scheduler.subscribe(missingPersistedAction, {
         reads: [],

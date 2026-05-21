@@ -985,6 +985,17 @@ COMMIT;
 `);
 };
 
+const migrateSchedulerReadIndexOwnerSpace = (database: Database): void => {
+  if (hasColumn(database, "scheduler_read_index", "owner_space")) {
+    return;
+  }
+
+  database.exec(`
+ALTER TABLE scheduler_read_index
+ADD COLUMN owner_space TEXT;
+`);
+};
+
 export const open = async (
   {
     url,
@@ -997,6 +1008,7 @@ export const open = async (
   database.exec(PRAGMAS);
   database.exec(INIT);
   migrateScopedEntityTables(database);
+  migrateSchedulerReadIndexOwnerSpace(database);
   return {
     url,
     database,

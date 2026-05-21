@@ -316,9 +316,13 @@ describe("Pattern Runner - ifElse", () => {
     runtime.run(tx, ifElsePattern, { condition: true }, resultCell);
     await tx.commit();
 
-    expect(subscribedActions).toContainEqual({
-      name: "raw:ifElse",
-      src: "raw:ifElse",
-    });
+    expect(subscribedActions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: expect.stringMatching(/^raw:ifElse:/),
+          src: expect.stringMatching(/^raw:ifElse:/),
+        }),
+      ]),
+    );
   });
 });

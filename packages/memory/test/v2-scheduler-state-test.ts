@@ -1,5 +1,6 @@
 import { assertEquals, assertExists } from "@std/assert";
 import { toFileUrl } from "@std/path";
+import { Database } from "@db/sqlite";
 import {
   applyCommit,
   close,
@@ -59,6 +60,40 @@ const observation = {
   materializerWriteEnvelopes: [],
   status: "success",
 } satisfies SchedulerActionObservation;
+
+Deno.test("memory v2 migrates scheduler read indexes to include owner space", async () => {
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+  const legacyDb = new Database(path, { create: true });
+  try {
+    legacyDb.exec(`
+      CREATE TABLE scheduler_read_index (
+        branch              TEXT    NOT NULL DEFAULT '',
+        read_space          TEXT    NOT NULL,
+        read_id             TEXT    NOT NULL,
+        read_scope          TEXT    NOT NULL,
+        read_path           JSON    NOT NULL,
+        read_kind           TEXT    NOT NULL,
+        piece_id            TEXT    NOT NULL,
+        process_generation  INTEGER NOT NULL,
+        action_id           TEXT    NOT NULL,
+        observation_id      INTEGER NOT NULL
+      );
+    `);
+  } finally {
+    legacyDb.close();
+  }
+
+  const engine = await openEngine({ url: toFileUrl(path) });
+  try {
+    const columns = engine.database.prepare(
+      `PRAGMA table_info("scheduler_read_index")`,
+    ).all() as Array<{ name: string }>;
+    assertEquals(columns.some((column) => column.name === "owner_space"), true);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
 
 Deno.test("memory v2 stores no-op scheduler observations without semantic commits", async () => {
   const { engine, path } = await createEngine();
@@ -240,7 +275,10 @@ Deno.test("memory v2 marks persisted readers dirty during semantic commits", asy
 Deno.test("memory v2 server mirrors scheduler read indexes into read spaces", async () => {
   const storePath = await Deno.makeTempDir();
   const store = toFileUrl(`${storePath}/`);
-  const server = new Server({ store });
+  const server = new Server({
+    store,
+    authorizeSessionOpen: () => "did:key:test-principal",
+  });
   const client = await connect({ transport: loopback(server) });
   const ownerSpace = "did:key:scheduler-owner-space";
   const readSpace = "did:key:scheduler-read-space";
@@ -301,6 +339,56 @@ Deno.test("memory v2 server mirrors scheduler read indexes into read spaces", as
         actionId: observation.actionId,
       });
       assertEquals(state?.directDirtySeq, 1);
+    } finally {
+      close(readEngine);
+    }
+  } finally {
+    await client.close().catch(() => {});
+    await server.close().catch(() => {});
+    await Deno.remove(storePath, { recursive: true });
+  }
+});
+
+Deno.test("memory v2 server skips scheduler mirrors for unmounted read spaces", async () => {
+  const storePath = await Deno.makeTempDir();
+  const store = toFileUrl(`${storePath}/`);
+  const server = new Server({
+    store,
+    authorizeSessionOpen: () => "did:key:test-principal",
+  });
+  const client = await connect({ transport: loopback(server) });
+  const ownerSpace = "did:key:scheduler-owner-authorized-space";
+  const readSpace = "did:key:scheduler-unmounted-read-space";
+  const owner = await client.mount(ownerSpace);
+  const mirroredRead = {
+    ...sourceRead,
+    space: readSpace,
+  };
+  const mirroredObservation = {
+    ...observation,
+    reads: [mirroredRead],
+  } satisfies SchedulerActionObservation;
+
+  try {
+    await owner.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservation: mirroredObservation,
+    });
+
+    await client.close();
+    await server.close();
+
+    const readEngine = await openEngine({
+      url: resolveSpaceStoreUrl(store, readSpace),
+    });
+    try {
+      const readers = findSchedulerReadersForWrite(readEngine, {
+        branch: "",
+        write: mirroredRead,
+      });
+      assertEquals(readers, []);
     } finally {
       close(readEngine);
     }

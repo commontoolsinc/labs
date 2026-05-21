@@ -58,7 +58,7 @@ import {
   toCacheEntry,
   trackedIdsFromEntries,
 } from "./server-sync.ts";
-import { SessionRegistry } from "./session-registry.ts";
+import { SessionRegistry, type SessionState } from "./session-registry.ts";
 
 export { SessionRegistry } from "./session-registry.ts";
 
@@ -543,7 +543,13 @@ export class Server {
         }],
       },
     });
-    await this.propagateSchedulerDirtyToOwnerSpaces(space, commit);
+    await this.runPostCommitSchedulerSideEffects(
+      space,
+      commit,
+      undefined,
+      new Set(),
+      undefined,
+    );
     this.markSpaceDirty(space, [toDirtyKey(id)]);
     return commit;
   }
@@ -667,15 +673,13 @@ export class Server {
         principal: session.principal,
         commit: message.commit,
       });
-      await this.propagateSchedulerDirtyToOwnerSpaces(message.space, commit);
-      if (schedulerObservation) {
-        await this.mirrorSchedulerObservation(
-          message.space,
-          schedulerObservation,
-          commit,
-          previousReadSpaces,
-        );
-      }
+      await this.runPostCommitSchedulerSideEffects(
+        message.space,
+        commit,
+        schedulerObservation,
+        previousReadSpaces,
+        session,
+      );
       this.markSpaceDirty(
         message.space,
         message.commit.operations.map((operation) =>
@@ -1417,6 +1421,7 @@ export class Server {
     observation: Engine.SchedulerActionObservation,
     commit: Engine.AppliedCommit,
     previousReadSpaces: ReadonlySet<string>,
+    session: SessionState | undefined,
   ): Promise<void> {
     const mirrorSpaces = this.schedulerObservationReadSpaces(observation);
     for (const space of previousReadSpaces) {
@@ -1425,6 +1430,12 @@ export class Server {
     mirrorSpaces.delete(ownerSpace);
 
     for (const space of mirrorSpaces) {
+      if (
+        !previousReadSpaces.has(space) &&
+        !this.canMirrorSchedulerObservationToSpace(space, session)
+      ) {
+        continue;
+      }
       const engine = await this.openEngine(space);
       Engine.upsertSchedulerObservation(engine, {
         branch: commit.branch,
@@ -1433,6 +1444,48 @@ export class Server {
         observation,
       });
     }
+  }
+
+  private async runPostCommitSchedulerSideEffects(
+    ownerSpace: string,
+    commit: Engine.AppliedCommit,
+    observation: Engine.SchedulerActionObservation | undefined,
+    previousReadSpaces: ReadonlySet<string>,
+    session: SessionState | undefined,
+  ): Promise<void> {
+    try {
+      await this.propagateSchedulerDirtyToOwnerSpaces(ownerSpace, commit);
+      if (observation) {
+        await this.mirrorSchedulerObservation(
+          ownerSpace,
+          observation,
+          commit,
+          previousReadSpaces,
+          session,
+        );
+      }
+    } catch (error) {
+      console.warn(
+        "Post-commit scheduler state update failed after semantic commit:",
+        error,
+      );
+    }
+  }
+
+  private canMirrorSchedulerObservationToSpace(
+    readSpace: string,
+    session: SessionState | undefined,
+  ): boolean {
+    if (!this.options.authorizeSessionOpen) {
+      return true;
+    }
+    if (!session) {
+      return false;
+    }
+    return this.#sessions.hasOpenSessionForPrincipal(
+      readSpace,
+      session.principal,
+    );
   }
 
   private async propagateSchedulerDirtyToOwnerSpaces(

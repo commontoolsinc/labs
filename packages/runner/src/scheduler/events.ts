@@ -18,6 +18,7 @@ import {
   trustedEventWriteCandidatesFromTransaction,
   txToReactivityLog,
 } from "./reactivity.ts";
+import { collectChangedWritesForTransaction } from "./write-propagation.ts";
 import type {
   Action,
   DirtyDependencyTraceContext,
@@ -25,6 +26,7 @@ import type {
   QueuedEvent,
   ReactivityLog,
 } from "./types.ts";
+import type { IMemorySpaceAddress } from "../storage/interface.ts";
 
 const logger = getLogger("scheduler", {
   enabled: true,
@@ -213,6 +215,10 @@ export interface SchedulerEventExecutionState {
   readonly snapshotDirtyDependencyTraceContext: (
     trace: DirtyDependencyTraceContext,
   ) => SchedulerEventPreflightStats;
+  readonly onEventCommitWrites?: (
+    sourceAction: Action,
+    writes: readonly IMemorySpaceAddress[],
+  ) => void;
 }
 
 export function preflightQueuedEventDependencies(state: {
@@ -402,6 +408,10 @@ export async function dispatchQueuedEvent(state: {
   ) => SchedulerActionInfo | undefined;
   readonly handleError: (error: Error, action: Action) => void;
   readonly queueExecution: () => void;
+  readonly onEventCommitWrites?: (
+    sourceAction: Action,
+    writes: readonly IMemorySpaceAddress[],
+  ) => void;
 }, queuedEvent: QueuedEvent): Promise<void> {
   const { action, handler, event: eventValue, retriesLeft, onCommit } =
     queuedEvent;
@@ -432,7 +442,7 @@ export async function dispatchQueuedEvent(state: {
     }
   };
 
-  const finalize = (error?: unknown) => {
+  const finalize = async (error?: unknown): Promise<void> => {
     if (error) {
       try {
         state.handleError(error as Error, action);
@@ -445,7 +455,23 @@ export async function dispatchQueuedEvent(state: {
     }
 
     state.runtime.prepareTxForCommit(tx);
-    tx.commit().then((result) => {
+    const log = txToReactivityLog(tx);
+    const changedWrites = collectChangedWritesForTransaction(tx, log);
+    try {
+      const result = await tx.commit();
+      if (!result.error && changedWrites.length > 0) {
+        state.onEventCommitWrites?.(action, changedWrites);
+      }
+      state.runtime.telemetry.submit({
+        type: "scheduler.event.commit",
+        handlerId,
+        handlerInfo: state.getActionTelemetryInfo(handler),
+        readCount: log.reads.length + log.shallowReads.length,
+        writeCount: log.writes.length,
+        changedWriteCount: changedWrites.length,
+        writes: log.writes.map(formatEventCommitAddress),
+        ...(result.error ? { error: result.error.message } : {}),
+      });
       if (result.error && retriesLeft > 0) {
         logger.warn(
           "scheduler",
@@ -471,13 +497,13 @@ export async function dispatchQueuedEvent(state: {
           { error: result.error, handlerId },
         );
       }
-    }).catch((error) => {
+    } catch (error) {
       logger.error(
         "schedule-error",
         "Event handler commit promise rejected:",
         error,
       );
-    });
+    }
   };
 
   try {
@@ -513,7 +539,7 @@ export async function dispatchQueuedEvent(state: {
             `Action ${actionId} completed in ${duration.toFixed(3)}s`,
           ];
         });
-        finalize();
+        return finalize();
       }).catch((error) => finalize(error));
       state.setRunningPromise(runningPromise);
       await runningPromise;
@@ -526,6 +552,14 @@ export async function dispatchQueuedEvent(state: {
       );
     }
   } catch (error) {
-    finalize(error);
+    await finalize(error);
   }
+}
+
+function formatEventCommitAddress(address: {
+  space: string;
+  id: string;
+  path: readonly string[];
+}): string {
+  return `${address.space}/${address.id}/${address.path.join("/")}`;
 }

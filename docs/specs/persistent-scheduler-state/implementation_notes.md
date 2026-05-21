@@ -335,3 +335,75 @@
   write view computed with the same rules as resubscription. Persisting the
   pre-run writer-index value can stale rehydrated writer indexes by one run, so
   the code should be aligned to the spec in the next implementation slice.
+
+## 2026-05-20 - CI Follow-up: Raw Action Identity
+
+- CI/default-app reload coverage exposed that raw builtin actions were still
+  keyed too broadly for persistence. Multiple `raw:map` actions in one notebook
+  piece could share the same persisted action id and overwrite each other's
+  latest scheduler snapshot.
+- Decision: keep the version-1 process-cell identity, but make raw action ids
+  node-local by adding a short stable hash of the bound input and output cells to
+  the raw action name before it becomes the scheduler action id.
+- Test adjustment: the rapid notebook test now verifies that the burst created
+  all source notebook notes, performs one real page reload to let any durable
+  dirty catch-up work render the complex notebook state, then measures a second
+  reload as the clean persisted-state path. That keeps this PR's integration
+  coverage focused on durable scheduler rehydration while still exercising the
+  more complex notebook state after seven rapid note creates.
+
+## 2026-05-20 - CI Follow-up: Initial Rehydration Race
+
+- The default-app rapid-create failure showed a source notebook state with all
+  seven notes, but a stale rendered output with only six. That pointed at
+  delayed initial scheduler rehydration applying an older clean snapshot after
+  the live action had already become dirty.
+- Decision: subscription-time rehydration is only allowed while the action is
+  still clean and unqueued. Once the action becomes dirty or runs, the
+  in-memory scheduler state is newer than the delayed snapshot and wins.
+- Added a focused scheduler test that holds the snapshot request open, dirties
+  the action, then resolves a clean persisted observation and asserts the dirty
+  state is preserved.
+
+## 2026-05-20 - CI Follow-up: Repeated JavaScript Action Identity
+
+- The same default-app failure also showed repeated notebook row actions sharing
+  one source-location action id. A newly-created mapped row could therefore see
+  another row's persisted scheduler snapshot during subscription-time
+  rehydration in the same live process.
+- Decision: JavaScript action ids now include a stable hash of the process cell
+  plus bound read/write cells, matching the raw-builtin binding-hash approach.
+  This keeps source-location diagnostics readable while making repeated pattern
+  instances distinct for persistent scheduler snapshots.
+
+## 2026-05-20 - CI Follow-up: Review Hardening
+
+- Review feedback identified three persistence hardening gaps: incomplete
+  observation guard validation, stale remote-memory socket open promises, and
+  post-commit scheduler side effects that could make an already-committed
+  transaction appear to fail.
+- Decision: the server treats post-commit scheduler mirroring/dirty propagation
+  as best-effort for the current response once the semantic commit has
+  succeeded. Failures are logged and can be repaired by later observations or
+  unknown-state fallback rather than causing client retries of an already
+  committed transaction.
+- Decision: cross-space scheduler mirrors are only written to read spaces that
+  are already mounted by the same principal when server authorization is
+  enabled. This keeps version-1 mirroring non-atomic, as documented, but avoids
+  letting a client inject scheduler metadata into arbitrary unmounted spaces.
+
+## 2026-05-20 - CI Follow-up: Integration Flakes
+
+- The shell piece integration failure was a teardown leak after the test had
+  functionally passed. Exposing `ShellIntegration.disposeRuntime()` lets the
+  test dispose the page runtime before the client connection closes, and the
+  short settle delay gives the server-side close notification time to arrive.
+- The CFC group-chat integration was exercising the single-author import path,
+  so the prior invalid-authorship expectation no longer matched the current UI
+  state. The test now checks that imported participant claims are marked
+  verified through the trusted surface.
+- Validation:
+  - `HEADLESS=1 deno task integration --port-offset=734 patterns cfc-group-chat-demo`
+  - `HEADLESS=1 deno task integration --port-offset=740 shell`
+  - `HEADLESS=1 deno task test`
+  - `deno task check`
