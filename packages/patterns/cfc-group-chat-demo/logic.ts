@@ -35,6 +35,13 @@ export type PlainChatMessage<ProfileRef = unknown> =
   | SentChatMessage<ProfileRef>
   | ImportedClaimedChatMessage<ProfileRef>;
 
+export interface ChatRoom<Message = PlainChatMessage> {
+  readonly id: string;
+  readonly name: string;
+  readonly messages: Message[];
+  readonly createdAt: number;
+}
+
 const PROFILE_COLORS = [
   "#2563eb",
   "#059669",
@@ -83,6 +90,15 @@ export const createSentMessageSnapshot = <ProfileRef>(
   authorProfile,
   body,
   timestamp: safeDateNow(),
+});
+
+export const createRoomSnapshot = <Message>(
+  name: string,
+): ChatRoom<Message> => ({
+  id: createId("room"),
+  name,
+  messages: [],
+  createdAt: safeDateNow(),
 });
 
 const createImportedClaimedMessage = <ProfileRef>(
