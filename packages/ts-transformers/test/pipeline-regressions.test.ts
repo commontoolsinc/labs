@@ -757,6 +757,80 @@ export default pattern<{ values: string[] }>(({ values }) => {
 );
 
 Deno.test(
+  "Pipeline regression: local concise ternary event handlers stay function-valued",
+  async () => {
+    const source =
+      `import { derive, handler, pattern, UI, Writable } from "commonfabric";
+
+interface Item {
+  id: string;
+}
+
+interface Vote {
+  itemId: string;
+  vote: "yes" | "no";
+}
+
+const castVote = handler<{ itemId: string; vote: "yes" }, { votes: Writable<Vote[]> }>(
+  (event, { votes }) => {
+    votes.push(event);
+  },
+);
+
+const clearVote = handler<{ itemId: string }, {}>(() => {});
+
+export default pattern<{ items: Writable<Item[]>; votes: Writable<Vote[]> }>(
+  ({ items, votes }) => {
+    const boundCastVote = castVote({ votes });
+    const boundClearVote = clearVote({});
+
+    return {
+      [UI]: (
+        <div>
+          {items.map((item) => {
+            const iid = item.id;
+            const myVote = derive(
+              { votes, itemId: iid },
+              ({ votes, itemId }) =>
+                votes.get().find((vote) => vote.itemId === itemId)?.vote,
+            );
+
+            const onVoteYes = () =>
+              myVote === "yes"
+                ? boundClearVote.send({ itemId: iid })
+                : boundCastVote.send({ itemId: iid, vote: "yes" });
+
+            return <cf-button onClick={onVoteYes}>yes</cf-button>;
+          })}
+        </div>
+      ),
+    };
+  },
+);
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+
+    assertStringIncludes(output, 'const onVoteYes = () => myVote === "yes"');
+    assertStringIncludes(output, "boundClearVote.send({ itemId: iid })");
+    assertStringIncludes(
+      output,
+      'boundCastVote.send({ itemId: iid, vote: "yes" })',
+    );
+    assert(
+      !output.includes("const onVoteYes = __cfHelpers.derive("),
+      "local event handler variable must not become a derive cell containing a function",
+    );
+    assert(
+      !output.includes("=> () => __cfHelpers.ifElse("),
+      "local event handler body must keep imperative ternary semantics",
+    );
+  },
+);
+
+Deno.test(
   "Pipeline regression: helper-owned IIFE local cell reads lower before use",
   async () => {
     const source = `import { pattern, UI, Writable } from "commonfabric";

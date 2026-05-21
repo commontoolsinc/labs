@@ -521,6 +521,12 @@ export function rewritePatternOwnedExpressionSites<T extends ts.Node>(
 
   const visit: ts.Visitor = (node) => {
     if (ts.isVariableDeclaration(node)) {
+      if (
+        node.initializer && isFunctionLikeExpression(node.initializer)
+      ) {
+        return node;
+      }
+
       const visited = visitEachChildWithJsx(node, visit, context.tsContext);
       if (ts.isVariableDeclaration(visited)) {
         markSyntheticReactiveCollectionDeclarationIfNeeded(
@@ -829,6 +835,10 @@ export function rewriteArrayMethodCallbackExpressionSites(
   const rewriteSkippedArrayMethodCallbackInitializer = (
     expression: ts.Expression,
   ): ts.Expression | undefined => {
+    if (isFunctionLikeExpression(expression)) {
+      return undefined;
+    }
+
     if (isControlFlowRewriteExpression(expression)) {
       return undefined;
     }
