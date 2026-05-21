@@ -1400,12 +1400,13 @@ const fetchWithRedirects = async (
       };
     }
     const nextUrl = new URL(location, currentUrl).toString();
+    await cancelResponseBody(response);
     const validation = await validatePublicHttpUrl(
       nextUrl,
       options.resolveHostAddresses,
+      options.signal,
     );
     if (!validation.ok) {
-      await cancelResponseBody(response);
       return {
         ok: false,
         code: validation.code === "invalid_url"
@@ -1415,7 +1416,6 @@ const fetchWithRedirects = async (
         finalUrl: currentUrl,
       };
     }
-    await cancelResponseBody(response);
     redirects.push({
       status: response.status,
       url: currentUrl,

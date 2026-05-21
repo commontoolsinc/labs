@@ -806,6 +806,55 @@ Deno.test("web_fetch applies timeout while resolving host", async () => {
   });
 });
 
+Deno.test("web_fetch applies timeout while validating redirect target", async () => {
+  const tool = createWebFetchTool({
+    resolveHostAddresses: (hostname) => {
+      if (hostname === "slow.example") {
+        return new Promise(() => {});
+      }
+      return resolvePublicTestHost();
+    },
+    fetchFn: () =>
+      Promise.resolve(
+        new Response("", {
+          status: 302,
+          headers: { location: "https://slow.example/" },
+        }),
+      ),
+  });
+  const context = createContext(new FakeSandboxRuntime());
+
+  let watchdog: ReturnType<typeof setTimeout> | undefined;
+  const output = await Promise.race([
+    tool.invoke(context, {
+      url: "https://example.com/start",
+      timeoutMs: 20,
+    }),
+    new Promise<never>((_, reject) => {
+      watchdog = setTimeout(
+        () =>
+          reject(
+            new Error("web_fetch did not time out redirect DNS resolution"),
+          ),
+        1_000,
+      );
+    }),
+  ]).finally(() => {
+    if (watchdog !== undefined) {
+      clearTimeout(watchdog);
+    }
+  });
+
+  assertEquals(output, {
+    type: "cf-harness.web-fetch-error",
+    outputId: "run-1:web_fetch:1",
+    url: "https://example.com/start",
+    code: "timeout",
+    message: "web_fetch timed out",
+    fetchedAt: "2026-05-01T17:54:00.000Z",
+  });
+});
+
 Deno.test("web_fetch applies timeout while connecting", async () => {
   let sawConnectSignal = false;
   const restoreConnect = installMockDenoConnect(
