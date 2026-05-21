@@ -442,7 +442,7 @@ export async function dispatchQueuedEvent(state: {
     }
   };
 
-  const finalize = async (error?: unknown): Promise<void> => {
+  const finalize = (error?: unknown): void => {
     if (error) {
       try {
         state.handleError(error as Error, action);
@@ -457,8 +457,12 @@ export async function dispatchQueuedEvent(state: {
     state.runtime.prepareTxForCommit(tx);
     const log = txToReactivityLog(tx);
     const changedWrites = collectChangedWritesForTransaction(tx, log);
-    try {
-      const result = await tx.commit();
+    // Do not await event commits here. commit() applies the transaction
+    // locally before returning, and the scheduler must let later client work
+    // continue against that speculative state while server confirmation is in
+    // flight. If the server rejects it, dependent speculative transactions are
+    // rejected as well and the normal retry path reruns the event.
+    tx.commit().then((result) => {
       if (!result.error && changedWrites.length > 0) {
         state.onEventCommitWrites?.(action, changedWrites);
       }
@@ -497,13 +501,13 @@ export async function dispatchQueuedEvent(state: {
           { error: result.error, handlerId },
         );
       }
-    } catch (error) {
+    }).catch((error) => {
       logger.error(
         "schedule-error",
         "Event handler commit promise rejected:",
         error,
       );
-    }
+    });
   };
 
   try {
@@ -539,7 +543,7 @@ export async function dispatchQueuedEvent(state: {
             `Action ${actionId} completed in ${duration.toFixed(3)}s`,
           ];
         });
-        return finalize();
+        finalize();
       }).catch((error) => finalize(error));
       state.setRunningPromise(runningPromise);
       await runningPromise;
@@ -552,7 +556,7 @@ export async function dispatchQueuedEvent(state: {
       );
     }
   } catch (error) {
-    await finalize(error);
+    finalize(error);
   }
 }
 

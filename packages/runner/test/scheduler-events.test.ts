@@ -196,19 +196,19 @@ describe("event handling", () => {
     expect(events).toEqual([1, 2, 3]);
   });
 
-  it("should preserve every queued event append before idle resolves", async () => {
+  it("should dispatch queued event commits without waiting for server confirmation", async () => {
     runtime.scheduler.enablePullMode();
 
     const eventCell = runtime.getCell<number>(
       space,
-      "should preserve every queued event append before idle resolves 1",
+      "should dispatch queued event commits without waiting for server confirmation 1",
       undefined,
       tx,
     );
     eventCell.set(0);
     const listCell = runtime.getCell<number[]>(
       space,
-      "should preserve every queued event append before idle resolves 2",
+      "should dispatch queued event commits without waiting for server confirmation 2",
       {
         type: "array",
         items: { type: "number" },
@@ -220,9 +220,32 @@ describe("event handling", () => {
     await tx.commit();
 
     let eventCount = 0;
+    let commitWasStarted = false;
+    let resolveCommitStarted!: () => void;
+    const commitStarted = new Promise<void>((resolve) => {
+      resolveCommitStarted = resolve;
+    });
+    let releaseCommit!: () => void;
+    const commitRelease = new Promise<void>((resolve) => {
+      releaseCommit = resolve;
+    });
+    let resolveCommitFinished!: () => void;
+    const commitFinished = new Promise<void>((resolve) => {
+      resolveCommitFinished = resolve;
+    });
+
     const eventHandler: EventHandler = (handlerTx, event) => {
       eventCount++;
       listCell.withTx(handlerTx).push(event);
+      const originalCommit = handlerTx.commit.bind(handlerTx);
+      handlerTx.commit = () => {
+        commitWasStarted = true;
+        resolveCommitStarted();
+        return originalCommit().then(async (result) => {
+          await commitRelease;
+          return result;
+        }).finally(resolveCommitFinished);
+      };
     };
 
     runtime.scheduler.addEventHandler(
@@ -230,15 +253,36 @@ describe("event handling", () => {
       eventCell.getAsNormalizedFullLink(),
     );
 
-    for (let i = 1; i <= 7; i++) {
-      runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), i);
+    runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), 1);
+
+    const idlePromise = runtime.idle();
+    let idleTimeoutId: number | undefined;
+    try {
+      await waitForSignal(commitStarted, "queued event commit did not start");
+      const idleResult = await Promise.race([
+        idlePromise.then(() => "resolved" as const),
+        new Promise<"blocked">((resolve) => {
+          idleTimeoutId = setTimeout(() => resolve("blocked"), 500);
+        }),
+      ]);
+
+      expect(idleResult).toBe("resolved");
+      expect(eventCount).toBe(1);
+    } finally {
+      if (idleTimeoutId !== undefined) clearTimeout(idleTimeoutId);
+      releaseCommit();
+      await idlePromise.catch(() => {});
+      if (commitWasStarted) {
+        await waitForSignal(
+          commitFinished,
+          "queued event commit did not finish after release",
+        );
+      }
     }
 
-    await runtime.idle();
     await listCell.pull();
 
-    expect(eventCount).toBe(7);
-    expect(listCell.get()).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(listCell.get()).toEqual([1]);
   });
 
   it("should preserve queued event appends to multiple arrays", async () => {
