@@ -24,7 +24,7 @@ if (canUseDeno()) {
   sha256 = sha256Deno;
   createHasher = createHasherDeno;
 } else if (await initWasm()) {
-  // The `hash-wasm` imolementation is available.
+  // The `hash-wasm` implementation is available.
   sha256 = sha256Wasm;
   createHasher = createHasherWasm;
 } else {

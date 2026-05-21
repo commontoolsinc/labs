@@ -44,6 +44,10 @@ export abstract class BaseIncrementalHasher implements IncrementalHasher {
     this._rawUpdate(data);
   }
 
+  /**
+   * Helper for `digest()` and `update()`, which throws if this instance
+   * has already been finalized via `digest()`.
+   */
   #throwIfDone() {
     if (this.#done) {
       throw new Error("Cannot use instance: `digest()` already done.");

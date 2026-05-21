@@ -23,7 +23,7 @@ const createFuncs = [
 
 beforeAll(async () => {
   if (!await initWasm()) {
-    throw new Error("`sha256-wasm not available!");
+    throw new Error("`sha256-wasm` not available!");
   }
 });
 
