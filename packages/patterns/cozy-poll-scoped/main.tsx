@@ -762,30 +762,28 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                   );
                   // Vote buttons toggle: clicking your active color clears
                   // it; clicking a different color updates. Keeps the button
-                  // row a stable 3-chip group regardless of state. Use
-                  // statement bodies (not value-returning ternaries) so the
-                  // transformer treats these as event handlers, not derives.
-                  const onVoteGreen = () => {
-                    if (myVote === "green") {
-                      boundClearMyVote.send({ optionId: oid });
-                    } else {
-                      boundCastVote.send({ optionId: oid, voteType: "green" });
-                    }
-                  };
-                  const onVoteYellow = () => {
-                    if (myVote === "yellow") {
-                      boundClearMyVote.send({ optionId: oid });
-                    } else {
-                      boundCastVote.send({ optionId: oid, voteType: "yellow" });
-                    }
-                  };
-                  const onVoteRed = () => {
-                    if (myVote === "red") {
-                      boundClearMyVote.send({ optionId: oid });
-                    } else {
-                      boundCastVote.send({ optionId: oid, voteType: "red" });
-                    }
-                  };
+                  // row a stable 3-chip group regardless of state.
+                  const onVoteGreen = () =>
+                    myVote === "green"
+                      ? boundClearMyVote.send({ optionId: oid })
+                      : boundCastVote.send({
+                        optionId: oid,
+                        voteType: "green",
+                      });
+                  const onVoteYellow = () =>
+                    myVote === "yellow"
+                      ? boundClearMyVote.send({ optionId: oid })
+                      : boundCastVote.send({
+                        optionId: oid,
+                        voteType: "yellow",
+                      });
+                  const onVoteRed = () =>
+                    myVote === "red"
+                      ? boundClearMyVote.send({ optionId: oid })
+                      : boundCastVote.send({
+                        optionId: oid,
+                        voteType: "red",
+                      });
                   return (
                     <div
                       style={{
