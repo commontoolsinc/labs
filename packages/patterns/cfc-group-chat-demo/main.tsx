@@ -25,7 +25,7 @@ import {
   type ChatAdminRegistryValue,
   commitTrustedMessageSend,
   currentProfileCell,
-  currentUserIsAdmin,
+  currentUserIsAdmin as currentProfileIsAdmin,
   messagesValue,
   type MyProfileCell,
   participantClaimsValue,
@@ -278,6 +278,8 @@ export const GroupChatDemo = pattern<GroupChatDemoInput, GroupChatDemoOutput>((
     nameDraft: profileDraftCell,
     adminManagerDraft: adminManagerDraftCell,
   });
+  const currentUserCanManageAdminsStatus =
+    trustedProfileSave.currentUserCanManageAdmins;
   const trustedAdminPanel = TrustedAdminPanel({
     myProfile: myProfileCell,
     messages: messagesCell,
@@ -365,17 +367,16 @@ export const GroupChatDemo = pattern<GroupChatDemoInput, GroupChatDemoOutput>((
                   />
                   <cf-chip
                     label={computed(() =>
-                      currentUserIsAdmin(myProfileCell, adminRegistryCell)
+                      currentProfileIsAdmin(myProfileCell, adminRegistryCell)
                         ? "Admin enabled"
                         : "Admin off"
                     )}
                   />
                   <cf-chip
-                    label={computed(() =>
-                      trustedProfileSave.currentUserCanManageAdmins
-                        ? "Can manage admins"
-                        : "Manager off"
-                    )}
+                    id="group-chat-manager-chip"
+                    label={currentUserCanManageAdminsStatus
+                      ? "Can manage admins"
+                      : "Manager off"}
                   />
                 </cf-hstack>
               </cf-hstack>
@@ -463,9 +464,9 @@ export const GroupChatDemo = pattern<GroupChatDemoInput, GroupChatDemoOutput>((
     setRoomDraft,
     currentProfileName: trustedProfileSave.currentProfileName,
     currentUserIsAdmin: computed(() =>
-      currentUserIsAdmin(myProfileCell, adminRegistryCell)
+      currentProfileIsAdmin(myProfileCell, adminRegistryCell)
     ),
-    currentUserCanManageAdmins: trustedProfileSave.currentUserCanManageAdmins,
+    currentUserCanManageAdmins: currentUserCanManageAdminsStatus,
     saveProfile: trustedProfileSave.saveProfile,
     toggleCurrentUserAdmin: trustedAdminPanel.toggleCurrentUserAdmin,
     sendTrustedMessage: trustedSend.sendMessage,
