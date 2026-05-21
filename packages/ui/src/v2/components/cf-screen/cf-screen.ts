@@ -10,8 +10,8 @@ import { BaseElement } from "../../core/base-element.ts";
  * @slot main - Main content that expands to fill available space (default slot)
  * @slot footer - Fixed footer content at the bottom
  *
- * @cssprop --cf-screen-footer-fade-height - Height of the main content fade when the footer contains an inset cf-tab-bar.
- * @cssprop --cf-screen-footer-overlap - Distance the main scroller overlaps into an inset cf-tab-bar footer.
+ * @cssprop --cf-screen-footer-overlap - Distance the main scroller overlaps into reserved inset footer space. Increase this to move the fade lower into the footer region.
+ * @cssprop --cf-screen-footer-fade-height - Height of the main content fade at the bottom of the overlapped scroller region.
  *
  * @example
  * <cf-screen>

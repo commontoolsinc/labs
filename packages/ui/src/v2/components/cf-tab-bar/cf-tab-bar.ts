@@ -27,6 +27,9 @@ import type { CFTabBarItem } from "./cf-tab-bar-item.ts";
  * @csspart bar - The nav pill surface containing the navigation items.
  * @csspart action - The wrapper around the action slot. Hidden when the slot is empty.
  *
+ * @cssprop --cf-tab-bar-height - Height of the tab bar container; contributes to footer reserved space when slotted into `cf-screen`.
+ * @cssprop --cf-tab-bar-inset-margin - Inset clearance from the screen edge; contributes to footer reserved space for inset footer bars.
+ *
  * @example
  * const activeTab = cell("home");
  * <cf-tab-bar $value={activeTab}>
@@ -168,6 +171,7 @@ export class CFTabBar extends BaseElement {
             min-width: 3.5rem;
           }
 
+          /* Footer-slotted bars are in-flow so cf-screen can reserve space. */
           :host([slot="footer"]) {
             position: relative;
             top: auto;
