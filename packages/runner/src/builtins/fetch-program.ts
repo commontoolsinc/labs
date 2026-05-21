@@ -9,6 +9,7 @@ import { resolveProgram, TARGET } from "@commonfabric/js-compiler/typescript";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
 import { computeInputHashFromValue } from "./fetch-utils.ts";
+import { setPatternCell, setResultCell } from "../result-utils.ts";
 import { scopedCell } from "./scope-policy.ts";
 
 const PROGRAM_REQUEST_TIMEOUT = 1000 * 10; // 10 seconds for program resolution
@@ -220,10 +221,17 @@ export function fetchProgram(
         outputScope,
       ) as Cell<Record<string, FetchCacheEntry>>;
 
-      pending.setSourceCell(parentCell);
-      result.setSourceCell(parentCell);
-      error.setSourceCell(parentCell);
-      cache.setSourceCell(parentCell);
+      // Link the new result cells to the parent result cell
+      setResultCell(pending, parentCell);
+      setResultCell(result, parentCell);
+      setResultCell(error, parentCell);
+      setResultCell(cache, parentCell);
+      // Link the new result cells to the pattern cell too
+      const patternCellPtr = parentCell.key("pattern");
+      setPatternCell(pending, patternCellPtr);
+      setPatternCell(result, patternCellPtr);
+      setPatternCell(error, patternCellPtr);
+      setPatternCell(cache, patternCellPtr);
 
       // Kick off sync in the background
       pending.sync();

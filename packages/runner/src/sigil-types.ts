@@ -58,7 +58,7 @@ export type SigilWriteRedirectLink = SigilValue<WriteRedirectV1>;
  */
 export type LegacyAlias = {
   $alias: {
-    cell?: number | { "/": string };
+    cell?: number | { "/": string } | "result" | "argument" | "internal";
     path: readonly PropertyKey[];
     scope?: LinkScope;
     schema?: JSONSchema;

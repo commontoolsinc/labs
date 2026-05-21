@@ -33,10 +33,10 @@ import {
 import { NameSchema, rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { StorageManager } from "../../runner/src/storage/cache.ts";
 import {
+  getMetaLink,
   type NormalizedFullLink,
   parseLink,
 } from "../../runner/src/link-utils.ts";
-import { syncSourceCellChain } from "../../runner/src/source-cell.ts";
 import {
   type ActionRunTraceResponse,
   BooleanResponse,
@@ -114,7 +114,7 @@ import { cellRefToKey } from "../shared/utils.ts";
 import { RemoteResponse } from "@commonfabric/runtime-client";
 import { WorkerReconciler } from "@commonfabric/html/worker";
 import type { VDomOp } from "../protocol/types.ts";
-import type { RuntimeOptions } from "@commonfabric/runner";
+import type { RuntimeOptions, URI } from "@commonfabric/runner";
 
 const MAX_SERIALIZATION_DEPTH = 5;
 const blobUploadEncoding = new JsonEncodingContext();
@@ -558,7 +558,7 @@ export class RuntimeProcessor {
       ...cell.getAsNormalizedFullLink(),
       path: [],
     });
-    await syncSourceCellChain(rootCell);
+    await syncMetaLinkedDocs(rootCell);
     await cell.sync();
     return {
       cfcLabel: cfcLabelViewForCell(cell),
@@ -600,8 +600,10 @@ export class RuntimeProcessor {
     await defaultPatternCell.sync();
 
     // Fast path: pattern already exists
-    // (Value is a Cell itself, and source cell means it's instantiated)
-    if (defaultPatternCell.getSourceCell()) {
+    // (Value is a Cell itself, and pattern metadata means it's instantiated)
+    // We've followed all the links from "defaultPattern", so our cell should
+    // be the result cell for the default pattern.
+    if (getMetaLink(defaultPatternCell, "pattern")) {
       await this.runtime.start(defaultPatternCell);
       await this.runtime.idle();
       return {
@@ -833,7 +835,7 @@ export class RuntimeProcessor {
         seen.add(node.patternId);
         try {
           const meta = this.runtime.patternManager.getPatternMeta({
-            patternId: node.patternId,
+            patternId: node.patternId as URI,
           });
           if (meta?.program && typeof meta.program === "object") {
             const program = meta.program as {
@@ -1156,5 +1158,31 @@ export class RuntimeProcessor {
     mount.cancel();
     mount.reconciler.unmount();
     this.vdomMounts.delete(mountId);
+  }
+}
+
+/**
+ * Sync a root cell and each meta cell reachable from it.
+ *
+ * Callers that need a transactional root cell can create it first and pass it.
+ */
+async function syncMetaLinkedDocs(
+  cell: Cell<any>,
+  cycleCheck: Set<string> = new Set<string>(),
+) {
+  const pendingCells = [cell];
+  cycleCheck.add(cell.sourceURI);
+  while (pendingCells.length > 0) {
+    const currentCell = pendingCells.shift()!;
+    await currentCell.sync();
+    for (const meta of ["pattern", "argument", "internal"] as const) {
+      const link = getMetaLink(currentCell, meta);
+      if (link === undefined) continue;
+      const linkedCell = currentCell.runtime.getCellFromLink(link, undefined);
+      if (linkedCell === undefined) continue;
+      if (cycleCheck.has(linkedCell.sourceURI)) continue;
+      cycleCheck.add(linkedCell.sourceURI);
+      pendingCells.push(linkedCell);
+    }
   }
 }

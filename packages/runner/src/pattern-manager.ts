@@ -8,13 +8,15 @@ import {
   unsafe_verifiedLoadId,
 } from "./builder/types.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { Cell } from "./cell.ts";
+import { Cell, createCell } from "./cell.ts";
 import type { MemorySpace, Runtime } from "./runtime.ts";
 import { createRef } from "./create-ref.ts";
 import type { CompileResult } from "./harness/types.ts";
 import { RuntimeProgram } from "./harness/types.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import { getTopFrame } from "./builder/pattern.ts";
+import { URI } from "./sigil-types.ts";
+import { toURI } from "./uri-utils.ts";
 import { parseLink } from "./link-utils.ts";
 import { isRecord } from "@commonfabric/utils/types";
 
@@ -31,9 +33,6 @@ export const patternMetaSchema = internSchema(
   {
     type: "object",
     properties: {
-      id: { type: "string" },
-      // @deprecated Represents a pattern with a single source file
-      src: { type: "string" },
       spec: { type: "string" },
       parents: { type: "array", items: { type: "string" } },
       patternName: { type: "string" },
@@ -57,7 +56,6 @@ export const patternMetaSchema = internSchema(
         required: ["main", "files"],
       },
     },
-    required: ["id"],
   },
 );
 
@@ -67,12 +65,12 @@ export class PatternManager {
   private inProgressCompilations = new Map<string, Promise<Pattern>>();
   // Maps keyed by patternId for consistent lookups
   private patternMetaCellById = new Map<string, Cell<PatternMeta>>();
-  private patternIdMap = new Map<string, Pattern>();
+  private patternIdMap = new Map<URI, Pattern>();
   // Map from pattern object instance to patternId
-  private patternToIdMap = new WeakMap<Pattern, string>();
+  private patternToIdMap = new WeakMap<Pattern, URI>();
   private patternToVerifiedLoadId = new WeakMap<Pattern, string>();
   // Pending metadata set before the meta cell exists (e.g., spec, parents)
-  private pendingMetaById = new Map<string, Partial<PatternMeta>>();
+  private pendingMetaById = new Map<URI, Partial<PatternMeta>>();
 
   constructor(readonly runtime: Runtime) {}
 
@@ -101,7 +99,7 @@ export class PatternManager {
    * Touch a pattern to mark it as recently used (moves to end of Map).
    * Call this on cache hits to maintain LRU order.
    */
-  private touchPattern(patternId: string): void {
+  private touchPattern(patternId: URI): void {
     const pattern = this.patternIdMap.get(patternId);
     if (pattern) {
       // Re-insert to move to end (most recently used)
@@ -117,27 +115,30 @@ export class PatternManager {
   }
 
   private getPatternMetaCell(
-    { patternId, space }: { patternId: string; space: MemorySpace },
+    { patternId, space }: { patternId: URI; space: MemorySpace },
     tx?: IExtendedStorageTransaction,
   ): Cell<PatternMeta> {
-    const cell = this.runtime.getCell(
-      space,
-      { patternId, type: "pattern" },
-      patternMetaSchema,
+    return createCell(
+      this.runtime,
+      {
+        id: patternId,
+        path: [],
+        space,
+        schema: patternMetaSchema,
+      },
       tx,
+      true,
     );
-
-    return cell;
   }
 
-  /** Legacy fallback: read pattern meta from the old {recipeId, type: "recipe"} cause. */
-  private getLegacyRecipeMetaCell(
-    { patternId, space }: { patternId: string; space: MemorySpace },
+  /** Legacy fallback: read pattern meta from the old {patternId, type: "pattern"} cause. */
+  private getLegacyPatternMetaCell(
+    { patternId, space }: { patternId: URI; space: MemorySpace },
     tx?: IExtendedStorageTransaction,
   ): Cell<PatternMeta> {
     return this.runtime.getCell(
       space,
-      { recipeId: patternId, type: "recipe" },
+      { patternId, type: "pattern" },
       patternMetaSchema,
       tx,
     );
@@ -147,7 +148,7 @@ export class PatternManager {
    * Get the patternId for a pattern or module object.
    * Returns undefined if the pattern is not registered.
    */
-  getPatternId(pattern: Pattern | Module): string | undefined {
+  getPatternId(pattern: Pattern | Module): URI | undefined {
     return this.patternToIdMap.get(
       this.findOriginalPattern(pattern as Pattern),
     );
@@ -203,30 +204,35 @@ export class PatternManager {
   }
 
   async loadPatternMeta(
-    patternId: string,
+    patternId: URI,
     space: MemorySpace,
   ): Promise<PatternMeta> {
     const cell = this.getPatternMetaCell({ patternId, space });
     await cell.sync();
-    if (cell.get()?.id) {
+    if (cell.get() !== undefined) {
       // Cache so sync getPatternMeta({ patternId }) works afterward
       this.patternMetaCellById.set(patternId, cell);
       return cell.get();
     }
 
-    // Fall back to legacy {recipeId, type: "recipe"} cause
-    const legacyCell = this.getLegacyRecipeMetaCell({ patternId, space });
-    await legacyCell.sync();
-    if (legacyCell.get()?.id) {
-      this.patternMetaCellById.set(patternId, legacyCell);
+    // Fall back to legacy {patternId, type: "pattern"} cause
+    const legacyPatternCell = this.getLegacyPatternMetaCell({
+      patternId,
+      space,
+    });
+    await legacyPatternCell.sync();
+    if (legacyPatternCell.get() !== undefined) {
+      this.patternMetaCellById.set(patternId, legacyPatternCell);
+      return legacyPatternCell.get();
     }
-    return legacyCell.get();
+
+    throw new Error("missing pattern meta cell");
   }
 
   getPatternMeta(
-    input: Pattern | Module | { patternId: string },
+    input: Pattern | Module | { patternId: URI },
   ): PatternMeta {
-    let patternId: string | undefined;
+    let patternId: URI | undefined;
     if ("patternId" in input) {
       patternId = input.patternId;
     } else if (input && typeof input === "object") {
@@ -247,8 +253,6 @@ export class PatternManager {
       throw new Error(`Pattern ${patternId} has no metadata available`);
     }
     const meta: PatternMeta = {
-      id: patternId,
-      ...(typeof source === "string" ? { src: source } : {}),
       ...(typeof source === "object" ? { program: source } : {}),
       ...(pending as Partial<PatternMeta>),
     } as PatternMeta;
@@ -257,8 +261,8 @@ export class PatternManager {
 
   registerPattern(
     pattern: Pattern | Module,
-    src?: string | RuntimeProgram,
-  ): string {
+    src?: RuntimeProgram,
+  ): URI {
     // Walk up derivation copies to original
     pattern = this.findOriginalPattern(pattern as Pattern);
     const verifiedLoadId = getTopFrame()?.verifiedLoadId ??
@@ -286,9 +290,10 @@ export class PatternManager {
       return existingId;
     }
 
-    const generatedId = src
-      ? createRef({ src }, "pattern source").toString()
-      : createRef(pattern, "pattern").toString();
+    const generatedRef = src
+      ? createRef({ src }, "pattern source")
+      : createRef(pattern, "pattern");
+    const generatedId = toURI(generatedRef);
 
     this.patternToIdMap.set(pattern as Pattern, generatedId);
 
@@ -307,7 +312,7 @@ export class PatternManager {
 
   savePattern(
     { patternId, space }: {
-      patternId: string;
+      patternId: URI;
       space: MemorySpace;
     },
     providedTx?: IExtendedStorageTransaction,
@@ -330,7 +335,6 @@ export class PatternManager {
 
     const pending = this.pendingMetaById.get(patternId) ?? {};
     const patternMeta: PatternMeta = {
-      id: patternId,
       program,
       ...(pending as Partial<PatternMeta>),
     } as PatternMeta;
@@ -360,7 +364,7 @@ export class PatternManager {
 
   async saveAndSyncPattern(
     { patternId, space }: {
-      patternId: string;
+      patternId: URI;
       space: MemorySpace;
     },
     tx?: IExtendedStorageTransaction,
@@ -406,7 +410,7 @@ export class PatternManager {
   }
 
   // returns a pattern already loaded
-  patternById(patternId: string): Pattern | undefined {
+  patternById(patternId: URI): Pattern | undefined {
     const pattern = this.patternIdMap.get(patternId);
     if (pattern) {
       // Touch to mark as recently used
@@ -492,7 +496,8 @@ export class PatternManager {
     }
 
     // Compute deterministic patternId (matches registerPattern's ID generation)
-    const patternId = createRef({ src: program }, "pattern source").toString();
+    const patternRef = createRef({ src: program }, "pattern source");
+    const patternId = toURI(patternRef);
 
     // Check cache
     const existing = this.patternIdMap.get(patternId);
@@ -532,38 +537,36 @@ export class PatternManager {
   // we need to ensure we only compile once otherwise we get ~12 +/- 4
   // compiles of each pattern
   private async compilePatternOnce(
-    patternId: string,
+    patternId: URI,
     space: MemorySpace,
     tx?: IExtendedStorageTransaction,
   ): Promise<Pattern> {
     let metaCell = this.getPatternMetaCell({ patternId, space }, tx);
     await metaCell.sync();
     let patternMeta = metaCell.get();
-    if (!patternMeta?.src && !patternMeta?.program) {
+    if (!patternMeta?.program) {
       const rawMeta = metaCell.getRaw();
       await this.syncLinkedPatternSource(metaCell, rawMeta);
       patternMeta = metaCell.get();
     }
 
-    // Fall back to legacy {recipeId, type: "recipe"} cause
-    if (!patternMeta?.src && !patternMeta?.program) {
-      metaCell = this.getLegacyRecipeMetaCell({ patternId, space }, tx);
+    // Fall back to legacy {patternId, type: "pattern"} cause
+    if (!patternMeta?.program) {
+      metaCell = this.getLegacyPatternMetaCell({ patternId, space }, tx);
       await metaCell.sync();
       patternMeta = metaCell.get();
-      if (!patternMeta?.src && !patternMeta?.program) {
+      if (!patternMeta?.program) {
         const rawMeta = metaCell.getRaw();
         await this.syncLinkedPatternSource(metaCell, rawMeta);
         patternMeta = metaCell.get();
       }
     }
 
-    if (!patternMeta?.src && !patternMeta?.program) {
+    if (!patternMeta?.program) {
       throw new Error(`Pattern ${patternId} has no stored source`);
     }
 
-    const source = patternMeta.program
-      ? (patternMeta.program as RuntimeProgram)
-      : patternMeta.src!;
+    const source = patternMeta.program!;
     const pattern = await this.compilePattern(source);
     this.patternIdMap.set(patternId, pattern);
     this.patternToIdMap.set(pattern, patternId);
@@ -574,7 +577,7 @@ export class PatternManager {
   }
 
   async loadPattern(
-    id: string,
+    id: URI,
     space: MemorySpace,
     tx?: IExtendedStorageTransaction,
   ): Promise<Pattern> {
@@ -604,14 +607,14 @@ export class PatternManager {
    * Otherwise, it stores the fields to be applied on the next save.
    */
   async setPatternMetaFields(
-    patternId: string,
+    patternId: URI,
     fields: Partial<PatternMeta>,
   ): Promise<void> {
     const cell = this.patternMetaCellById.get(patternId);
     if (cell) {
       const current = cell.get();
       await this.runtime.editWithRetry((tx) => {
-        cell.withTx(tx).set({ ...current, ...fields, id: patternId });
+        cell.withTx(tx).set({ ...current, ...fields });
       });
     } else {
       const pending = this.pendingMetaById.get(patternId) ?? {};
@@ -620,7 +623,7 @@ export class PatternManager {
   }
 
   private associateVerifiedFunctions(
-    patternId: string,
+    patternId: URI,
     value: Pattern | Module,
   ): void {
     const originalPattern = this.findOriginalPattern(value as Pattern) as

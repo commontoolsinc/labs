@@ -32,6 +32,9 @@ import {
   parseLinkPrimitive,
   PrimitiveCellLink,
 } from "./link-types.ts";
+import { MetaField } from "@commonfabric/api";
+import { ignoreReadForScheduling } from "./scheduler.ts";
+import { createRef } from "./create-ref.ts";
 
 export * from "./link-types.ts";
 
@@ -63,6 +66,9 @@ export function isCellLink(
  * Beware: Unlike all the other types that `isLink` is checking for, this could
  * appear in regular data and not actually be meant as a link. So only use this
  * if you know for sure that the value is a link.
+ *
+ * We don't verify that the id and space are URI or MemorySpace, but we do
+ * verify that they are strings.
  */
 export function isNormalizedFullLink(value: any): value is NormalizedFullLink {
   return (
@@ -255,7 +261,12 @@ export function createSigilLinkFromParsedLink(
   // Include schema if requested. Empty `{}` and JSON Schema `true` are
   // permissive and should not turn links into schema-bearing links.
   if (options.includeSchema && link.schema !== undefined) {
-    const schema = sanitizeSchemaForLinks(link.schema, options);
+    // If they didn't opt-out of keepStreams, set it to true
+    const extendedOptions = {
+      ...options,
+      keepStreams: options.keepStreams ?? true,
+    };
+    const schema = sanitizeSchemaForLinks(link.schema, extendedOptions);
     if (isNontrivialSchema(schema)) reference.schema = schema;
   }
 
@@ -614,6 +625,12 @@ function recursiveStripAsCellFromSchema(
     }
   }
 
+  // Stream properties will be removed if didn't keep streams, so we need to
+  // remove them from required if present.
+  if (context.options.keepStreams !== true) {
+    removeStrippedStreamPropertiesFromRequired(schema, result, context);
+  }
+
   // Check if this schema was marked as circular while processing
   const existingRef = context.seen.get(schema);
   if (existingRef && existingRef.$ref) {
@@ -627,4 +644,88 @@ function recursiveStripAsCellFromSchema(
   context.seen.set(schema, result);
 
   return result;
+}
+
+function schemaLosesStreamCellMarker(
+  schema: unknown,
+  context: SanitizeContext,
+): boolean {
+  if (context.options.keepAsCell || !isRecord(schema)) return false;
+
+  const asCellValues = ContextualFlowControl.getAsCellValues(schema);
+  const hasStreamMarker = asCellValues.some((entry) =>
+    ContextualFlowControl.getAsCellKind(entry) === "stream"
+  );
+  if (!hasStreamMarker) return false;
+
+  return !(
+    context.options.keepStreams &&
+    ContextualFlowControl.getAsCellKind(asCellValues.at(0)) === "stream"
+  );
+}
+
+function removeStrippedStreamPropertiesFromRequired(
+  originalSchema: unknown,
+  result: unknown,
+  context: SanitizeContext,
+): void {
+  if (!isRecord(originalSchema) || !isRecord(result)) return;
+  const properties = originalSchema.properties;
+  if (!isRecord(properties)) return;
+  if (!Array.isArray(result.required)) return;
+
+  const required = result.required.filter((property) =>
+    typeof property !== "string" ||
+    !schemaLosesStreamCellMarker(
+      properties[property],
+      context,
+    )
+  );
+
+  if (required.length === 0) {
+    delete result.required;
+  } else {
+    result.required = required;
+  }
+}
+
+/** Get or create a cell using the resultCell as the cause. */
+export function getMetaCell(
+  resultCell: Cell,
+  type: "internal" | "argument",
+  tx: IExtendedStorageTransaction,
+  schema?: JSONSchema,
+): Cell {
+  const metaCause = { type, parent: resultCell };
+  const resultCellLink = resultCell.getAsNormalizedFullLink();
+  const metaLink = {
+    space: resultCellLink.space,
+    id: toURI(createRef({}, metaCause)),
+    path: [],
+    ...(resultCellLink.scope !== undefined && { scope: resultCellLink.scope }),
+    ...(schema !== undefined && { schema }),
+  };
+  return resultCell.runtime.getCellFromLink(metaLink, undefined, tx);
+}
+
+const META_READ_OPTIONS = {
+  meta: ignoreReadForScheduling,
+} as const;
+
+/**
+ * Our internal and argument cells are linked to by the result cell.
+ * This gets those links from the meta fields, and returns a link if present.
+ *
+ * By default, the meta reads are ignored for scheduling, and the schema
+ * will be frozen.
+ */
+export function getMetaLink(
+  resultCell: Cell<any>,
+  field: MetaField,
+  options: unknown = META_READ_OPTIONS,
+): NormalizedFullLink | undefined {
+  const linkObj = resultCell.getMetaRaw(field, options);
+  if (linkObj === undefined) return undefined;
+  const link = parseLink(linkObj, resultCell);
+  return link;
 }

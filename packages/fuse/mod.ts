@@ -1363,10 +1363,6 @@ export async function main(argv: string[] = Deno.args) {
           baseMain = meta.program.main;
           baseMainExport = meta.program.mainExport;
           baseFiles = meta.program.files;
-        } else if (meta?.src) {
-          baseMain = "/main.tsx";
-          baseMainExport = undefined;
-          baseFiles = [{ name: "/main.tsx", contents: meta.src }];
         } else {
           console.error(
             `[source] No program or src in pattern meta for ${relPath}`,

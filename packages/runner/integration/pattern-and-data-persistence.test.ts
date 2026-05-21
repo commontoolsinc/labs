@@ -18,7 +18,7 @@ import { assert, assertEquals } from "@std/assert";
 import { Runtime, type RuntimeProgram } from "@commonfabric/runner";
 import { Identity, type IdentityCreateConfig } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import type { Cell, JSONSchema, MemorySpace } from "@commonfabric/runner";
+import type { Cell, JSONSchema, MemorySpace, URI } from "@commonfabric/runner";
 import { env } from "@commonfabric/integration";
 
 const API_URL = new URL(env.API_URL);
@@ -138,7 +138,7 @@ function getResultCell(
 async function phase1SavePatternAndData(
   identity: Identity,
   space: MemorySpace,
-): Promise<string> {
+): Promise<URI> {
   console.log("\n--- Phase 1: Save pattern and data ---");
 
   const ctx = createTestContext(identity);
@@ -175,7 +175,7 @@ async function phase1SavePatternAndData(
 async function phase2LoadAndVerify(
   identity: Identity,
   space: MemorySpace,
-  patternId: string,
+  patternId: URI,
 ): Promise<void> {
   console.log("\n--- Phase 2: Load pattern and data from storage ---");
 
@@ -232,7 +232,7 @@ async function phase2LoadAndVerify(
 async function phase3ReactivityAndIsolation(
   identity: Identity,
   space: MemorySpace,
-  patternId: string,
+  patternId: URI,
 ): Promise<void> {
   console.log("\n--- Phase 3: Reactivity and instance isolation ---");
 

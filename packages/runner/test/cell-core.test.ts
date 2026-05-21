@@ -22,12 +22,13 @@ import {
   JSONSchema,
   type Pattern,
 } from "../src/builder/types.ts";
-import { isPrimitiveCellLink } from "../src/link-utils.ts";
+import { getMetaLink, isPrimitiveCellLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import {
   type IExtendedStorageTransaction,
   type IMemorySpaceAddress,
 } from "../src/storage/interface.ts";
+import { setResultCell } from "../src/result-utils.ts";
 import { trustPattern } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -702,36 +703,42 @@ describe("Cell", () => {
 
   it("should set and get the source cell", () => {
     // Create two cells
-    const sourceCell = runtime.getCell<{ foo: number }>(
+    const resultCell = runtime.getCell<{ foo: number }>(
       space,
-      "source cell for setSourceCell/getSourceCell test",
+      "result cell for result metadata test",
       undefined,
       tx,
     );
-    sourceCell.set({ foo: 123 });
+    resultCell.set({ foo: 123 });
 
     const targetCell = runtime.getCell<{ bar: string }>(
       space,
-      "target cell for setSourceCell/getSourceCell test",
+      "target cell for result metadata test",
       undefined,
       tx,
     );
     targetCell.set({ bar: "baz" });
 
-    // Initially, getSourceCell should return undefined
-    expect(targetCell.getSourceCell()).toBeUndefined();
+    // Initially, result metadata should be unset
+    expect(getMetaLink(targetCell, "result")).toBeUndefined();
 
-    // Set the source cell
-    targetCell.setSourceCell(sourceCell);
+    // Set the result cell
+    setResultCell(targetCell, resultCell);
 
-    // Now getSourceCell should return a Cell with the same value as sourceCell
-    const retrievedSource = targetCell.getSourceCell();
-    expect(isCell(retrievedSource)).toBe(true);
-    expect(retrievedSource?.get()).toEqual({ foo: 123 });
+    // Now getMetaLink should return a link to resultCell
+    const retrievedResultLink = getMetaLink(targetCell, "result");
+    expect(retrievedResultLink).toBeDefined();
+    const retrievedResult = runtime.getCellFromLink(
+      retrievedResultLink!,
+      undefined,
+      tx,
+    );
+    expect(isCell(retrievedResult)).toBe(true);
+    expect(retrievedResult?.get()).toEqual({ foo: 123 });
 
     // Changing the source cell's value should be reflected
-    sourceCell.set({ foo: 456 });
-    expect(retrievedSource?.get()).toEqual({ foo: 456 });
+    resultCell.set({ foo: 456 });
+    expect(retrievedResult?.get()).toEqual({ foo: 456 });
   });
 
   it("should update pattern output when argument is changed via getArgumentCell", async () => {
@@ -746,15 +753,15 @@ describe("Cell", () => {
         type: "object",
         properties: { output: { type: "number" } },
       },
-      result: { output: { $alias: { path: ["internal", "doubled"] } } },
+      result: { output: { $alias: { cell: "internal", path: ["doubled"] } } },
       nodes: [
         {
           module: {
             type: "javascript",
             implementation: (args: { input: number }) => (args.input * 2),
           },
-          inputs: { input: { $alias: { path: ["argument", "input"] } } },
-          outputs: { $alias: { path: ["internal", "doubled"] } },
+          inputs: { input: { $alias: { cell: "argument", path: ["input"] } } },
+          outputs: { $alias: { cell: "internal", path: ["doubled"] } },
         },
       ],
     } as Pattern);
@@ -1351,16 +1358,16 @@ describe("Cell raw methods: frozen-or-not (modernDataModel ON)", () => {
   });
 });
 
-// Source-cell round-trip across commit + fresh-tx reload. These tests assert
-// end-to-end correctness of the standard `setSourceCell` → commit →
-// `getSourceCell` round-trip: the round-trip preserves the source-link object,
-// and a raw `tx.read` of `path: ["source"]` returns it as an object link record
-// (with own-property `"/"`), never as a string.
+// Result-meta round-trip across commit + fresh-tx reload. These tests assert
+// end-to-end correctness of the standard result meta link round-trip: the
+// round-trip preserves the result-link object, and a raw `tx.read` of
+// `path: ["result"]` returns it as an object link record (with own-property
+//  `"/"`), never as a string.
 //
 // Historical context: these tests were authored alongside the deletion of
 // two defensive `JSON.parse` blocks that previously existed in
 // `runner/src/storage/transaction.ts` (in `read()`) and `runner/src/cell.ts`
-// (in `getSourceCell`). Both blocks guarded a parse with the same shape —
+// (in the old source metadata path). Both blocks guarded a parse with the same shape —
 // `typeof value === "string" && value.startsWith('{"/":')` — and were
 // originally added (PRs #1472, #1562) to handle string-form values
 // returned from a previous shape of the storage layer. PR #2971 in
@@ -1375,11 +1382,11 @@ describe("Cell raw methods: frozen-or-not (modernDataModel ON)", () => {
 //
 // The tests below pin the round-trip behavior that, post-deletion, is the
 // observable contract. They serve as a passive regression net for any future
-// change that might re-introduce a non-object value at `path: ["source"]`.
+// change that might re-introduce a non-object value at `path: ["result"]`.
 //
 // See `coordination/docs/2026-04-30-fvj1-parse-site-kickoff.md` (project
 // kickoff doc, session 2026-067) for the full liveness analysis.
-describe(`Cell source-cell round-trip`, () => {
+describe(`Cell result-meta round-trip`, () => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let tx: IExtendedStorageTransaction;
@@ -1399,16 +1406,16 @@ describe(`Cell source-cell round-trip`, () => {
   });
 
   it(
-    "setSourceCell + commit + getSourceCell round-trips correctly across a fresh tx",
+    "result meta link round-trips correctly across a fresh tx",
     async () => {
-      // Set up a source/target pair via the standard API.
-      const sourceCell = runtime.getCell<{ foo: number }>(
+      // Set up a result/target pair via the standard meta-link API.
+      const resultCell = runtime.getCell<{ foo: number }>(
         space,
         "fvj1 source-cell round-trip: source",
         undefined,
         tx,
       );
-      sourceCell.set({ foo: 123 });
+      resultCell.set({ foo: 123 });
 
       const targetCell = runtime.getCell<{ bar: string }>(
         space,
@@ -1417,36 +1424,37 @@ describe(`Cell source-cell round-trip`, () => {
         tx,
       );
       targetCell.set({ bar: "baz" });
-      targetCell.setSourceCell(sourceCell);
+      setResultCell(targetCell, resultCell);
 
-      // Commit, then start a fresh tx. This forces the `path: ["source"]`
+      // Commit, then start a fresh tx. This forces the `path: ["result"]`
       // read to go through the storage layer (rather than the in-tx
       // novelty cache, which short-circuits serialization), so
       // `valueFromJson` runs as the actual decode step.
       await tx.commit();
       tx = runtime.edit();
 
-      // Fresh-tx getSourceCell: reads `path: ["source"]` through the
-      // storage layer, where `valueFromJson` decodes the row to an
-      // object before it surfaces here. `getSourceCell` then takes its
-      // `isRecord` branch and converts the link record to a URI string.
-      const retrievedSource = targetCell.withTx(tx).getSourceCell();
-      expect(isCell(retrievedSource)).toBe(true);
-      expect(retrievedSource?.withTx(tx).get()).toEqual({ foo: 123 });
+      const retrievedResultLink = getMetaLink(
+        targetCell.withTx(tx),
+        "result",
+      );
+      expect(retrievedResultLink).toBeDefined();
+      const retrievedResult = runtime.getCellFromLink(retrievedResultLink!);
+      expect(isCell(retrievedResult)).toBe(true);
+      expect(retrievedResult?.withTx(tx).get()).toEqual({ foo: 123 });
     },
   );
 
   it(
-    "raw read of path: ['source'] returns an object link record",
+    "raw read of path: ['result'] returns an object link record",
     async () => {
-      // Set up a source/target pair and commit.
-      const sourceCell = runtime.getCell<{ foo: number }>(
+      // Set up a result/target pair and commit.
+      const resultCell = runtime.getCell<{ foo: number }>(
         space,
         "fvj1 source-cell raw read: source",
         undefined,
         tx,
       );
-      sourceCell.set({ foo: 123 });
+      resultCell.set({ foo: 123 });
 
       const targetCell = runtime.getCell<{ bar: string }>(
         space,
@@ -1455,23 +1463,23 @@ describe(`Cell source-cell round-trip`, () => {
         tx,
       );
       targetCell.set({ bar: "baz" });
-      targetCell.setSourceCell(sourceCell);
+      setResultCell(targetCell, resultCell);
 
       await tx.commit();
       tx = runtime.edit();
 
-      // Raw read of `path: ["source"]` exercises the same storage-layer
-      // code path as `getSourceCell`'s underlying `readOrThrow`. The
-      // value the storage layer surfaces should be an object link
-      // record (with own-property `"/"`), never a JSON-stringified
-      // form, under both flag states.
+      // Raw read of `path: ["result"]` exercises the same storage-layer
+      // code path as `getMetaLink`'s underlying `readOrThrow`. The value
+      // the storage layer surfaces should be an object link record (with
+      // own-property `"/"`), never a JSON-stringified form, under both flag
+      // states.
       const targetLink = targetCell.getAsNormalizedFullLink();
-      const sourceAddress = {
+      const resultAddress = {
         space,
         id: targetLink.id,
-        path: ["source"],
+        path: ["result"],
       } as IMemorySpaceAddress;
-      const readResult = tx.read(sourceAddress);
+      const readResult = tx.read(resultAddress);
       expect(readResult.ok).toBeDefined();
 
       const value = readResult.ok!.value;

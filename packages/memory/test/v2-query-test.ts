@@ -49,12 +49,11 @@ const authorization = {
 
 Deno.test("memory v2 query keys require explicit scope", () => {
   assertEquals(
-    fromDocKey("did:key:space/user/of:doc/application/json"),
+    fromDocKey("did:key:space/user/of:doc"),
     {
       space: "did:key:space",
       scope: "user",
       id: "of:doc",
-      type: "application/json",
     },
   );
   assertEquals(fromDirtyKey("session\0of:doc"), {
@@ -63,7 +62,7 @@ Deno.test("memory v2 query keys require explicit scope", () => {
   });
 
   assertThrows(
-    () => fromDocKey("did:key:space/of:doc/application/json" as never),
+    () => fromDocKey("did:key:space/of:doc" as never),
     Error,
     "invalid memory v2 query doc key",
   );
@@ -441,12 +440,108 @@ Deno.test("memory v2 query does not walk nested links inside inline opaque cells
   }
 });
 
+Deno.test("memory v2 query includes metadata links without traversing their values", async () => {
+  const { engine, path } = await createEngine();
+  const space = "did:key:z6Mk-memory-v2-query-meta-link-schema";
+  const rootPiece = "of:root-piece";
+  const argument = "of:argument";
+  const childPiece = "of:child-piece";
+  const childResult = "of:child-result";
+  const argumentSchema = {
+    type: "object",
+    properties: {
+      child: {
+        type: "object",
+        properties: {
+          label: { type: "string" },
+        },
+        required: ["label"],
+      },
+    },
+    required: ["child"],
+  };
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: childResult,
+          value: { value: { answer: 42 } },
+        }, {
+          op: "set",
+          id: childPiece,
+          value: {
+            value: { label: "child" },
+            argument: {
+              "/": {
+                "link@1": {
+                  id: argument,
+                  path: [],
+                  schema: argumentSchema,
+                },
+              },
+            },
+            result: { "/": { "link@1": { id: childResult, path: [] } } },
+          },
+        }, {
+          op: "set",
+          id: argument,
+          value: {
+            value: {
+              child: { "/": { "link@1": { id: childPiece, path: [] } } },
+            },
+          },
+        }, {
+          op: "set",
+          id: rootPiece,
+          value: {
+            value: { title: "root" },
+            argument: {
+              "/": {
+                "link@1": {
+                  id: argument,
+                  path: [],
+                  schema: argumentSchema,
+                },
+              },
+            },
+          },
+        }],
+      },
+    });
+
+    const result = queryGraph(space, engine, {
+      roots: [{
+        id: rootPiece,
+        selector: {
+          path: [],
+          schema: false,
+        },
+      }],
+    });
+
+    assertEquals(result.entities.map((entity) => entity.id), [
+      argument,
+      rootPiece,
+    ]);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 query reuses a persistent manager cache for shared source growth", async () => {
   const { engine, path } = await createEngine();
   const space = "did:key:z6Mk-memory-v2-query-manager-growth";
   const pieceA = "of:piece-a";
   const pieceB = "of:piece-b";
-  const process = "of:process";
+  const result = "of:result";
   const base = "of:base";
 
   try {
@@ -463,21 +558,21 @@ Deno.test("memory v2 query reuses a persistent manager cache for shared source g
           value: { value: { label: "base" } },
         }, {
           op: "set",
-          id: process,
+          id: result,
           value: {
-            source: { "/": "base" },
+            result: { "/": { "link@1": { id: base, path: [] } } },
           },
         }, {
           op: "set",
           id: pieceA,
           value: {
-            source: { "/": "process" },
+            result: { "/": { "link@1": { id: result, path: [] } } },
           },
         }, {
           op: "set",
           id: pieceB,
           value: {
-            source: { "/": "process" },
+            result: { "/": { "link@1": { id: result, path: [] } } },
           },
         }],
       },
@@ -616,7 +711,7 @@ Deno.test("memory v2 query treats schema true as covering narrower selectors", a
         },
       }],
     });
-    const rootKey = `${space}/space/${rootId}/application/json`;
+    const rootKey = `${space}/space/${rootId}`;
     assertEquals(tracked.state.tracker.get(rootKey)?.size, 1);
 
     extendTrackedGraph(space, engine, tracked.state, {
@@ -799,7 +894,7 @@ Deno.test("memory v2 query refresh updates the growth manager cache for later wa
   const space = "did:key:z6Mk-memory-v2-query-manager-refresh";
   const pieceA = "of:piece-a";
   const pieceB = "of:piece-b";
-  const process = "of:process";
+  const result = "of:result";
   const base1 = "of:base-1";
   const base2 = "of:base-2";
 
@@ -821,21 +916,21 @@ Deno.test("memory v2 query refresh updates the growth manager cache for later wa
           value: { value: { label: "base-2" } },
         }, {
           op: "set",
-          id: process,
+          id: result,
           value: {
-            source: { "/": "base-1" },
+            result: { "/": { "link@1": { id: base1, path: [] } } },
           },
         }, {
           op: "set",
           id: pieceA,
           value: {
-            source: { "/": "process" },
+            result: { "/": { "link@1": { id: result, path: [] } } },
           },
         }, {
           op: "set",
           id: pieceB,
           value: {
-            source: { "/": "process" },
+            result: { "/": { "link@1": { id: result, path: [] } } },
           },
         }],
       },
@@ -862,9 +957,9 @@ Deno.test("memory v2 query refresh updates the growth manager cache for later wa
         reads: { confirmed: [], pending: [] },
         operations: [{
           op: "set",
-          id: process,
+          id: result,
           value: {
-            source: { "/": "base-2" },
+            result: { "/": { "link@1": { id: base2, path: [] } } },
           },
         }],
       },
@@ -874,7 +969,7 @@ Deno.test("memory v2 query refresh updates the growth manager cache for later wa
       space,
       engine,
       tracked.state,
-      new Set([toDirtyKey(process)]),
+      new Set([toDirtyKey(result)]),
     );
     assertExists(refreshed);
 

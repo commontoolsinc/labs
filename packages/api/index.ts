@@ -283,6 +283,28 @@ export interface IReadable<T> {
 }
 
 /**
+ * The `pattern` field links a result cell to its pattern
+ * The `argument` field links a result cell to its argument cell
+ * The `internal` field links a result cell to its internal cell for state
+ * The `schema` field stores the schema for a result cell
+ * The `result` field lets a result cell link to its parent result cell,
+ * and also lets the argument and internal cells link back to the result cell.
+ * The cfc code accesses the `cfc` field directly, but I include it here too.
+ */
+export type MetaField =
+  | "pattern"
+  | "argument"
+  | "internal"
+  | "schema"
+  | "result" // this lets us get from internal/argument back to result
+  | "cfc";
+
+export interface IMetaCell {
+  getMetaRaw(metaField: MetaField, options?: unknown): FabricValue;
+  setMetaRaw(metaField: MetaField, value: FabricValue): void;
+}
+
+/**
  * Writable cells can update their value.
  *
  * **Frozenness contract (modern data model only):** Values passed into
@@ -1040,6 +1062,7 @@ export interface ICell<T>
     IEquatable,
     IKeyable<T, AsCell>,
     IDerivable<T>,
+    IMetaCell,
     IResolvable<T, Cell<T>> {}
 
 export interface Cell<T = unknown> extends BrandedCell<T, "cell">, ICell<T> {}

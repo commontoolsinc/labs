@@ -3,6 +3,7 @@ import { ensureDir } from "@std/fs";
 import { loadIdentity } from "./identity.ts";
 import {
   Cell,
+  getMetaLink,
   NAME,
   Runtime,
   RuntimeProgram,
@@ -454,10 +455,7 @@ export async function savePiecePattern(
   );
   const meta = await piece.getPatternMeta();
 
-  if (meta.src) {
-    // Write the main source file
-    await Deno.writeTextFile(join(outPath, "main.tsx"), meta.src);
-  } else if (meta.program) {
+  if (meta.program) {
     for (const { name, contents } of meta.program.files) {
       if (name[0] !== "/") {
         throw new Error("Ungrounded file in pattern.");
@@ -733,7 +731,7 @@ export async function linkPieces(
   if (!options?.allowNonExisting) {
     const errors: string[] = [];
 
-    // Check source piece exists by verifying it has a source/process cell
+    // Check source piece exists by verifying it has a pattern cell
     // (i.e., was created via cf piece new, not just written to with cf piece set)
     const sourcePiece = await timeCliPhase(
       "linkPieces.getSourcePiece",
@@ -745,10 +743,9 @@ export async function linkPieces(
           options?.sourceScope,
         ),
     );
-    const sourceHasProcess =
-      sourcePiece.getCell().getSourceCell() !== undefined;
-    if (!sourceHasProcess) {
-      errors.push(`Source piece ${sourcePieceId} does not exist`);
+    const sourcePatternLink = getMetaLink(sourcePiece.getCell(), "pattern");
+    if (sourcePatternLink === undefined) {
+      errors.push(`Source piece ${sourcePieceId} does not have pattern`);
     } else if (sourcePath.length > 0) {
       const sourceData = await timeCliPhase(
         "linkPieces.readSourceResult",
@@ -760,9 +757,7 @@ export async function linkPieces(
         if (current == null || typeof current !== "object") {
           errors.push(
             `Source path "${
-              sourcePath.join(
-                "/",
-              )
+              sourcePath.join("/")
             }" does not exist on piece ${sourcePieceId}`,
           );
           break;
@@ -772,15 +767,13 @@ export async function linkPieces(
       if (current === undefined) {
         errors.push(
           `Source path "${
-            sourcePath.join(
-              "/",
-            )
+            sourcePath.join("/")
           }" does not exist on piece ${sourcePieceId}`,
         );
       }
     }
 
-    // Check target piece exists by verifying it has a source/process cell
+    // Check target piece exists by verifying it has a pattern cell
     const targetPiece = await timeCliPhase(
       "linkPieces.getTargetPiece",
       () =>
@@ -791,10 +784,9 @@ export async function linkPieces(
           options?.targetScope,
         ),
     );
-    const targetHasProcess =
-      targetPiece.getCell().getSourceCell() !== undefined;
-    if (!targetHasProcess) {
-      errors.push(`Target piece ${targetPieceId} does not exist`);
+    const targetPatternLink = getMetaLink(targetPiece.getCell(), "pattern");
+    if (targetPatternLink === undefined) {
+      errors.push(`Target piece ${targetPieceId} does not have pattern`);
     } else if (targetPath.length > 0) {
       // Check target path resolves on the input cell
       const targetData = await timeCliPhase(
@@ -806,9 +798,7 @@ export async function linkPieces(
         if (current == null || typeof current !== "object") {
           errors.push(
             `Target path "${
-              targetPath.join(
-                "/",
-              )
+              targetPath.join("/")
             }" does not exist on piece ${targetPieceId}`,
           );
           break;
@@ -818,9 +808,7 @@ export async function linkPieces(
       if (current === undefined) {
         errors.push(
           `Target path "${
-            targetPath.join(
-              "/",
-            )
+            targetPath.join("/")
           }" does not exist on piece ${targetPieceId}`,
         );
       }

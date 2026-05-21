@@ -1,5 +1,6 @@
 import type { Cell, URI } from "@commonfabric/runner";
 import {
+  getMetaLink,
   isSlugAddress,
   parseLink,
   slugIdForSpace,
@@ -117,7 +118,7 @@ export async function resolvePieceAddress(
     scope: targetLink.scope ?? "space",
   });
   await target.sync();
-  if (!target.getSourceCell()) {
+  if (getMetaLink(target, "pattern") === undefined) {
     throw new SlugResolutionError(
       `Slug "${slug}" redirects to a document that is not a piece.`,
       "not-piece",

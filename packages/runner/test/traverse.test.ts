@@ -14,6 +14,8 @@ import { internPathSelector } from "@commonfabric/data-model/schema-utils";
 import {
   canBranchMatch,
   CompoundCycleTracker,
+  createDefaultTraversalContext,
+  createTraversalContext,
   getAtPath,
   ManagedStorageTransaction,
   MapSet,
@@ -678,6 +680,7 @@ describe("SchemaObjectTraverser array traversal", () => {
       >();
       const cfc = new ContextualFlowControl();
       const schemaTracker = new MapSet<string, SchemaPathSelector>();
+      const context = createTraversalContext(tracker, cfc, schemaTracker);
       const docAFoo: IMemorySpaceValueAttestation = {
         address: {
           id: revA.of,
@@ -695,20 +698,15 @@ describe("SchemaObjectTraverser array traversal", () => {
         tx,
         docAFoo,
         [],
-        tracker,
-        cfc,
-        schemaTracker,
+        context,
         docASelector,
       );
       const [redirDoc, _selector2] = getAtPath(
         tx,
         docAFoo,
         [],
-        tracker,
-        cfc,
-        schemaTracker,
+        context,
         docASelector,
-        false,
         "writeRedirect",
       );
       expect(curDoc.address.id).toBe(revD.of);
@@ -745,6 +743,7 @@ describe("SchemaObjectTraverser array traversal", () => {
       >();
       const cfc = new ContextualFlowControl();
       const schemaTracker = new MapSet<string, SchemaPathSelector>();
+      const context = createTraversalContext(tracker, cfc, schemaTracker);
       const docACurrent: IMemorySpaceValueAttestation = {
         address: {
           id: revA.of,
@@ -759,20 +758,15 @@ describe("SchemaObjectTraverser array traversal", () => {
         tx,
         docACurrent,
         [],
-        tracker,
-        cfc,
-        schemaTracker,
+        context,
         docASelector,
       );
       const [redirDoc, _selector2] = getAtPath(
         tx,
         docACurrent,
         [],
-        tracker,
-        cfc,
-        schemaTracker,
+        context,
         docASelector,
-        false,
         "writeRedirect",
       );
       expect(curDoc.address.id).toBe(revC.of);
@@ -813,6 +807,7 @@ describe("SchemaObjectTraverser array traversal", () => {
       >();
       const cfc = new ContextualFlowControl();
       const schemaTracker = new MapSet<string, SchemaPathSelector>();
+      const context = createTraversalContext(tracker, cfc, schemaTracker);
       const docACurrent: IMemorySpaceValueAttestation = {
         address: {
           id: revA.of,
@@ -830,20 +825,15 @@ describe("SchemaObjectTraverser array traversal", () => {
         tx,
         docACurrent,
         [],
-        tracker,
-        cfc,
-        schemaTracker,
+        context,
         docASelector,
       );
       const [redirDoc, redirDocSelector] = getAtPath(
         tx,
         docACurrent,
         [],
-        tracker,
-        cfc,
-        schemaTracker,
+        context,
         docASelector,
-        false,
         "writeRedirect",
       );
       // we should also be able to get the value starting at the redir doc
@@ -851,9 +841,7 @@ describe("SchemaObjectTraverser array traversal", () => {
         tx,
         redirDoc,
         [],
-        tracker,
-        cfc,
-        schemaTracker,
+        context,
         redirDocSelector,
       );
       expect(curDoc.address.id).toBe(revD.of);
@@ -894,6 +882,7 @@ describe("getAtPath array index validation", () => {
     >();
     const cfc = new ContextualFlowControl();
     const schemaTracker = new MapSetStringToPathSelectors(true);
+    const context = createTraversalContext(tracker, cfc, schemaTracker);
 
     const doc: IMemorySpaceValueAttestation = {
       address: {
@@ -910,9 +899,7 @@ describe("getAtPath array index validation", () => {
       tx,
       doc,
       ["01"],
-      tracker,
-      cfc,
-      schemaTracker,
+      context,
     );
 
     // Navigate with valid index "1"
@@ -920,9 +907,7 @@ describe("getAtPath array index validation", () => {
       tx,
       doc,
       ["1"],
-      tracker,
-      cfc,
-      schemaTracker,
+      context,
     );
 
     // "01" is not a valid array index (leading zero), should return undefined
@@ -2393,7 +2378,7 @@ describe("anyOf fast-reject reactivity invariants (traverseCells)", () => {
 
   /** Build a tracker key matching the internal getTrackerKey() format. */
   function trackerKey(id: string, scope = "space"): string {
-    return `${SPACE}/${scope}/${id}/${TYPE}`;
+    return `${SPACE}/${scope}/${id}`;
   }
 
   /** Shortcut: store a document in the map-based store. */
@@ -3400,11 +3385,7 @@ describe("SchemaObjectTraverser unknown type handling", () => {
     const traverser = new SchemaObjectTraverser(
       tx,
       { path: ["value"], schema },
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      false,
+      createDefaultTraversalContext(false),
     );
 
     const { ok: result, error } = traverser.traverse({

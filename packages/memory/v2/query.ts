@@ -1,16 +1,18 @@
 import {
   CompoundCycleTracker,
   createSchemaMemo,
+  createTraversalContext,
   getAtPath,
   type IAttestation,
   type IMemorySpaceValueAttestation,
-  loadSource,
+  loadMetaLinkedDocs,
   ManagedStorageTransaction,
   MapSetStringToPathSelectors,
   type ObjectStorageManager,
   SchemaObjectTraverser,
   type SchemaPathSelector,
   schemaTrackerCoversSelector,
+  type TraversalContext,
 } from "@commonfabric/runner/traverse";
 import type { JSONSchema } from "../../runner/src/builder/types.ts";
 import { ExtendedStorageTransaction } from "../../runner/src/storage/extended-storage-transaction.ts";
@@ -28,7 +30,7 @@ import * as Engine from "./engine.ts";
 
 const DEFAULT_SCOPE: CellScope = "space";
 
-export type QueryDocKey = `${string}/${CellScope}/${string}/${string}`;
+export type QueryDocKey = `${string}/${CellScope}/${string}`;
 
 export interface TrackedGraphState {
   branch: string;
@@ -312,6 +314,12 @@ export const trackGraph = (
   >();
   const schemaTracker = new MapSetStringToPathSelectors(true);
   const cfc = new ContextualFlowControl();
+  const traversalContext = createTraversalContext(
+    tracker,
+    cfc,
+    schemaTracker,
+    true,
+  );
   const sharedMemo = createSchemaMemo();
   const stats = createQueryTraversalStats();
   const readCountBefore = manager.readCount;
@@ -329,16 +337,14 @@ export const trackGraph = (
         manager,
         loaded,
         selector,
-        tracker,
-        cfc,
+        traversalContext,
         space,
-        schemaTracker,
         sharedMemo,
         stats,
       );
     } else {
       schemaTracker.add(
-        toDocKey(space, root.id, "application/json", rootScope),
+        toDocKey(space, root.id, rootScope),
         selector,
       );
     }
@@ -390,14 +396,13 @@ export const extendTrackedGraph = (
     const rootKey = toDocKey(
       space,
       root.id,
-      "application/json",
       rootScope,
     );
     touched.add(rootKey);
     evaluateTrackedDocument(
       space,
       manager,
-      { id: root.id, type: "application/json", scope: rootScope },
+      { id: root.id, scope: rootScope },
       selector,
       state.tracker,
       state.memo,
@@ -410,9 +415,7 @@ export const extendTrackedGraph = (
     if (previouslyLoaded.has(key)) {
       continue;
     }
-    touched.add(
-      toDocKey(space, address.id, "application/json", address.scope),
-    );
+    touched.add(toDocKey(space, address.id, address.scope));
   }
 
   const updates = new Map<QueryDocKey, EntitySnapshot>();
@@ -449,12 +452,7 @@ export const isGraphQueryCoveredByState = (
 ): boolean =>
   query.roots.every((root) => {
     const selector = toDocumentSelector(root.selector);
-    const rootKey = toDocKey(
-      space,
-      root.id,
-      "application/json",
-      root.scope ?? DEFAULT_SCOPE,
-    );
+    const rootKey = toDocKey(space, root.id, root.scope ?? DEFAULT_SCOPE);
     return schemaTrackerCoversSelector(state.tracker, rootKey, selector);
   });
 
@@ -499,7 +497,7 @@ export const refreshTrackedGraph = (
       invalidations.set(scope, scopedIds);
     }
     scopedIds.add(id);
-    const key = toDocKey(space, id, "application/json", scope);
+    const key = toDocKey(space, id, scope);
     const selectors = state.tracker.get(key);
     if (selectors !== undefined && selectors.size > 0) {
       affectedDocs.set(key, new Set(selectors));
@@ -524,12 +522,12 @@ export const refreshTrackedGraph = (
   }
 
   for (const [key, selectors] of affectedDocs) {
-    const { id, type, scope } = fromDocKey(key);
+    const { id, scope } = fromDocKey(key);
     for (const selector of selectors) {
       evaluateTrackedDocument(
         space,
         manager,
-        { id, type, scope },
+        { id, scope },
         selector,
         state.tracker,
         sharedMemo,
@@ -540,12 +538,7 @@ export const refreshTrackedGraph = (
 
   const touched = new Set<QueryDocKey>(affectedDocs.keys());
   for (const address of manager.loadedAddresses()) {
-    const key = toDocKey(
-      space,
-      address.id,
-      "application/json",
-      address.scope,
-    );
+    const key = toDocKey(space, address.id, address.scope);
     const previous = state.entities.get(key);
     const detail = manager.detail({ id: address.id, scope: address.scope });
     if (previous !== undefined && detail?.seq === previous.seq) {
@@ -590,13 +583,8 @@ const loadFactsForDoc = (
   manager: EngineObjectManager,
   fact: IAttestation,
   selector: SchemaPathSelector,
-  tracker: CompoundCycleTracker<
-    Immutable<FabricValue>,
-    JSONSchema | undefined
-  >,
-  cfc: ContextualFlowControl,
+  traversalContext: TraversalContext,
   space: string,
-  schemaTracker: MapSetStringToPathSelectors,
   sharedMemo: ReturnType<typeof createSchemaMemo>,
   stats: QueryTraversalStats,
 ) => {
@@ -607,15 +595,20 @@ const loadFactsForDoc = (
   const docKey = toDocKey(
     space,
     fact.address.id,
-    fact.address.type ?? "application/json",
     fact.address.scope ?? DEFAULT_SCOPE,
   );
   const internedSelector = internPathSelector(selector);
-  if (schemaTrackerCoversSelector(schemaTracker, docKey, internedSelector)) {
+  if (
+    schemaTrackerCoversSelector(
+      traversalContext.schemaTracker,
+      docKey,
+      internedSelector,
+    )
+  ) {
     stats.coveredSelectorSkips++;
     return;
   }
-  schemaTracker.add(docKey, internedSelector);
+  traversalContext.schemaTracker.add(docKey, internedSelector);
 
   if (!isObject(fact.value)) {
     return;
@@ -637,9 +630,7 @@ const loadFactsForDoc = (
     tx,
     factValue,
     selector.path.slice(1),
-    tracker,
-    cfc,
-    schemaTracker,
+    traversalContext,
     selector,
   );
   if (
@@ -650,10 +641,7 @@ const loadFactsForDoc = (
     const traverser = new SchemaObjectTraverser(
       tx,
       nextSelector,
-      tracker,
-      schemaTracker,
-      cfc,
-      undefined,
+      traversalContext,
       undefined,
       sharedMemo,
     );
@@ -661,21 +649,20 @@ const loadFactsForDoc = (
     addTraverserStats(stats, traverser);
   }
 
-  loadSource(
+  loadMetaLinkedDocs(
     tx,
     {
       address: { ...fact.address, space: space as MemorySpace },
       value: fact.value,
     },
-    new Set<string>(),
-    schemaTracker,
+    traversalContext,
   );
 };
 
 const evaluateTrackedDocument = (
   space: string,
   manager: EngineObjectManager,
-  address: { id: string; type: string; scope?: CellScope },
+  address: { id: string; scope?: CellScope },
   selector: SchemaPathSelector,
   schemaTracker: MapSetStringToPathSelectors,
   sharedMemo: ReturnType<typeof createSchemaMemo>,
@@ -684,12 +671,7 @@ const evaluateTrackedDocument = (
   const loaded = manager.load(address);
   if (loaded === null || loaded.value === undefined) {
     schemaTracker.add(
-      toDocKey(
-        space,
-        address.id,
-        "application/json",
-        address.scope ?? DEFAULT_SCOPE,
-      ),
+      toDocKey(space, address.id, address.scope ?? DEFAULT_SCOPE),
       internPathSelector(selector),
     );
     return;
@@ -699,14 +681,18 @@ const evaluateTrackedDocument = (
     JSONSchema | undefined
   >();
   const cfc = new ContextualFlowControl();
+  const traversalContext = createTraversalContext(
+    tracker,
+    cfc,
+    schemaTracker,
+    true,
+  );
   loadFactsForDoc(
     manager,
     loaded,
     selector,
-    tracker,
-    cfc,
+    traversalContext,
     space,
-    schemaTracker,
     sharedMemo,
     stats,
   );
@@ -715,9 +701,23 @@ const evaluateTrackedDocument = (
 export const toDocKey = (
   space: string,
   id: string,
-  type: string,
   scope: CellScope = DEFAULT_SCOPE,
-): QueryDocKey => `${space}/${scope}/${id}/${type}`;
+): QueryDocKey => `${space}/${scope}/${id}`;
+
+export const fromDocKey = (key: QueryDocKey): {
+  space: string;
+  id: string;
+  scope: CellScope;
+} => {
+  const parts = key.split("/");
+  if (parts.length === 3) {
+    const [space, scope, id] = parts;
+    if (scope === "space" || scope === "user" || scope === "session") {
+      return { space, scope, id };
+    }
+  }
+  throw new Error(`invalid memory v2 query doc key: ${key}`);
+};
 
 export const toDirtyKey = (
   id: string,
@@ -735,30 +735,4 @@ export const fromDirtyKey = (
     }
   }
   throw new Error(`invalid memory v2 dirty key: ${key}`);
-};
-
-export const fromDocKey = (
-  key: QueryDocKey,
-): {
-  space: string;
-  id: string;
-  type: string;
-  scope: CellScope;
-} => {
-  const match = /^([^/]+)\/(space|user|session)\/(.+)\/application\/json$/
-    .exec(key);
-  if (match !== null) {
-    const [, space, scope, id] = match;
-    return { space, scope: scope as CellScope, id, type: "application/json" };
-  }
-  const [space, maybeScope, ...rest] = key.split("/");
-  if (
-    maybeScope === "space" || maybeScope === "user" ||
-    maybeScope === "session"
-  ) {
-    const type = rest.slice(-2).join("/");
-    const id = rest.slice(0, -2).join("/");
-    return { space, scope: maybeScope as CellScope, id, type };
-  }
-  throw new Error(`invalid memory v2 query doc key: ${key}`);
 };

@@ -287,7 +287,7 @@ function factoryFromPattern<T, R>(
   // So we need to get the underlying cell for comparison
   const selfRefCell = getCellOrThrow(selfRef);
   if (allCells.has(selfRefCell)) {
-    paths.set(selfRefCell, ["resultRef"]);
+    paths.set(selfRefCell, ["result"]);
   }
 
   // Add paths for all the internal cells
@@ -307,6 +307,7 @@ function factoryFromPattern<T, R>(
         const streamMarker = isRecord(value) && value.$stream === true
           ? "stream"
           : "";
+        // These paths that start with internal will be converted to cell: "internal", path: rest
         let internalPathSegment = stableName ??
           `__#${count++}${streamMarker}`;
         let internalPathKey = String(internalPathSegment);

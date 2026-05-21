@@ -57,6 +57,7 @@ export { addCommonIDfromObjectID } from "./data-updating.ts";
 export { resolveLink } from "./link-resolution.ts";
 export {
   areLinksSame,
+  getMetaLink,
   isCellLink as isLink,
   isWriteRedirectLink,
   parseLink,
@@ -122,7 +123,6 @@ export {
   type toJSON,
   TYPE,
   UI,
-  unsafe_materializeFactory,
   unsafe_originalPattern,
   unsafe_parentPattern,
   type UnsafeBinding,
@@ -159,8 +159,6 @@ export {
   cellEntityIdString,
   type CellPath,
   compileAndSavePattern,
-  getPatternIdFromResultCell,
-  getResultCellWithSourceSchema,
   parseCellPath,
   resolveCellPath,
 } from "./piece-helpers.ts";

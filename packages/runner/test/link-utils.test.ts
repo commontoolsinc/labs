@@ -699,6 +699,62 @@ describe("link-utils", () => {
       });
     });
 
+    it("should remove required entries for stripped stream properties", () => {
+      const schema = {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          setTitle: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+            },
+            required: ["title"],
+            asCell: ["stream"],
+          },
+        },
+        required: ["title", "setTitle"],
+      } as const satisfies JSONSchema;
+
+      const result = sanitizeSchemaForLinks(schema);
+
+      expect(result).toEqual({
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          setTitle: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+            },
+            required: ["title"],
+          },
+        },
+        required: ["title"],
+      });
+    });
+
+    it("should keep required entries for preserved stream properties", () => {
+      const schema = {
+        type: "object",
+        properties: {
+          setTitle: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+            },
+            required: ["title"],
+            asCell: ["stream"],
+          },
+        },
+        required: ["setTitle"],
+      } as const satisfies JSONSchema;
+
+      const result = sanitizeSchemaForLinks(schema, { keepStreams: true });
+
+      expect(result).toEqual(schema);
+    });
+
     it("should handle arrays of schemas", () => {
       const schema = {
         type: "object",

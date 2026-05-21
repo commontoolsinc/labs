@@ -61,11 +61,6 @@ function rawLinkSchema(value: unknown): unknown {
   return (value as Record<string, any>)?.["/"]?.[LINK_V1_TAG]?.schema;
 }
 
-function rawWishResultSchema(value: unknown): unknown {
-  return (rawLinkSchema(value) as Record<string, any>)?.properties?.result
-    ?.anyOf?.[1];
-}
-
 Deno.test(
   "shared hashtag wish node scans mentionables once for repeated identical wishes",
   async () => {
@@ -235,10 +230,10 @@ Deno.test(
         expect(wishResult?.candidates?.length).toBe(30);
       }
       expect(
-        rawWishResultSchema(results[0].key("result").getRaw()),
+        rawLinkSchema(results[0].key("result").getRaw()),
       ).toEqual(nameOnlyWishSchema);
       expect(
-        rawWishResultSchema(results[1].key("result").getRaw()),
+        rawLinkSchema(results[1].key("result").getRaw()),
       ).toEqual(bodyOnlyWishSchema);
     } finally {
       await runtime.dispose();

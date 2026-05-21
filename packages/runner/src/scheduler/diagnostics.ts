@@ -1,7 +1,7 @@
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import { isRecord } from "@commonfabric/utils/types";
 import { getTopFrame } from "../builder/pattern.ts";
-import { type Frame, TYPE } from "../builder/types.ts";
+import { type Frame } from "../builder/types.ts";
 import {
   getCellOrThrow,
   isCellResultForDereferencing,
@@ -17,7 +17,7 @@ import type {
   TriggerTraceEntry,
   TriggerTraceValueSummary,
 } from "./types.ts";
-import type { NormalizedFullLink } from "../link-utils.ts";
+import { getMetaLink, type NormalizedFullLink } from "../link-utils.ts";
 import type { SchedulerActionInfo } from "../telemetry.ts";
 import { MAX_TRIGGER_TRACE_HISTORY } from "./constants.ts";
 
@@ -158,26 +158,21 @@ export function getPieceMetadataFromFrame(frame?: Frame): {
   // abstractions for context here as well.
   frame ??= getTopFrame();
 
-  const sourceAsProxy = frame?.unsafe_binding?.materialize([]);
+  const resultAsProxy = frame?.unsafe_binding?.materialize([]);
 
-  if (!isCellResultForDereferencing(sourceAsProxy)) {
+  if (!isCellResultForDereferencing(resultAsProxy)) {
     return {};
   }
   const result: ReturnType<typeof getPieceMetadataFromFrame> = {};
-  const source = getCellOrThrow(sourceAsProxy).asSchema({
-    type: "object",
-    properties: {
-      [TYPE]: { type: "string" },
-      spell: { type: "object", asCell: ["cell"] },
-      resultRef: { type: "object", asCell: ["cell"] },
-    },
-  });
-  result.patternId = source.get()?.[TYPE];
-  const spellCell = source.get()?.spell;
-  result.spellId = spellCell?.getAsNormalizedFullLink().id;
-  const resultCell = source.get()?.resultRef;
-  result.space = source.space;
-  result.pieceId = resultCell?.entityId?.["/"];
+  const resultCell = getCellOrThrow(resultAsProxy);
+  result.patternId = getMetaLink(resultCell, "pattern")?.id ??
+    (frame?.unsafe_binding?.pattern
+      ? frame.runtime?.patternManager.getPatternId(frame.unsafe_binding.pattern)
+      : undefined);
+  result.space = resultCell.space;
+  // TODO(@ubik2): This should really just be sourceURI, but I'd need
+  // to update all the consumers. For now, strip the 'of:'
+  result.pieceId = resultCell.sourceURI.slice("of:".length);
   return result;
 }
 

@@ -1,6 +1,7 @@
 // Effect and computation tracking tests: verifying that effects are scheduled
 // correctly and computations are re-run when dependencies change.
 
+import { getSigilLink } from "../src/runner-utils.ts";
 import {
   afterEach,
   beforeEach,
@@ -12,7 +13,6 @@ import {
   Runtime,
   space,
   toMemorySpaceAddress,
-  TYPE,
 } from "./scheduler-test-utils.ts";
 import type {
   Action,
@@ -430,7 +430,7 @@ describe("effect/computation tracking", () => {
     } = (actionTx) => {
       output.withTx(actionTx).set(1);
       childProcess.withTx(actionTx).setRaw({
-        [TYPE]: "child-pattern",
+        pattern: getSigilLink("of:child-pattern"),
       });
     };
 

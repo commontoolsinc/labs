@@ -603,7 +603,7 @@ describe("RuntimeProcessor CFC label IPC", () => {
             }),
           },
           getAsNormalizedFullLink: () => ref,
-          getSourceCell: () => undefined,
+          getMetaRaw: () => undefined,
           sync: () => Promise.resolve(),
         }),
       },
@@ -690,7 +690,7 @@ describe("RuntimeProcessor CFC label IPC", () => {
     });
   });
 
-  it("does not look up CFC labels from a result cell source", async () => {
+  it("does not look up CFC labels from a result meta cell", async () => {
     const resultRef: CellRef = {
       id: "of:cfc-label-result" as CellRef["id"],
       space: "did:key:test" as CellRef["space"],
@@ -725,12 +725,13 @@ describe("RuntimeProcessor CFC label IPC", () => {
             }
             : { value: "result cell" },
       }),
-      getCellFromLink: () => resultCell,
+      getCellFromLink: (link: { id?: string }) =>
+        link.id === sourceRef.id ? sourceCell : resultCell,
     };
     const sourceCell = {
       runtime,
       getAsNormalizedFullLink: () => sourceRef,
-      getSourceCell: () => undefined,
+      getMetaRaw: (_metaField: string) => undefined,
       sync: () => {
         sourceSynced = true;
         return Promise.resolve();
@@ -739,7 +740,11 @@ describe("RuntimeProcessor CFC label IPC", () => {
     const resultCell = {
       runtime,
       getAsNormalizedFullLink: () => resultRef,
-      getSourceCell: () => resultSynced ? sourceCell : undefined,
+      resultRef,
+      getMetaRaw: (metaField: string) =>
+        resultSynced && metaField === "result"
+          ? cellRefToSigilLink(sourceRef)
+          : undefined,
       sync: () => {
         resultSynced = true;
         return Promise.resolve();
@@ -756,7 +761,7 @@ describe("RuntimeProcessor CFC label IPC", () => {
       cfcLabel: undefined,
     });
     expect(resultSynced).toBe(true);
-    expect(sourceSynced).toBe(true);
+    expect(sourceSynced).toBe(false);
   });
 
   it("ignores schema-bearing anyOf refs when reading nested stored labels", async () => {

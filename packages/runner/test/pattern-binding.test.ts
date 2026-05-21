@@ -11,6 +11,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   areLinksSame,
   areNormalizedLinksSame,
+  getMetaCell,
   parseLink,
 } from "../src/link-utils.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -49,8 +50,15 @@ describe("pattern-binding", () => {
         undefined,
         tx,
       );
+
+      const argumentCellLink = getMetaCell(testCell, "argument", tx)
+        .getAsNormalizedFullLink();
+      const internalCellLink = getMetaCell(testCell, "internal", tx)
+        .getAsNormalizedFullLink();
       testCell.set({ value: 0 });
-      sendValueToBinding(tx, testCell, { $alias: { path: ["value"] } }, 42);
+      sendValueToBinding(tx, testCell, argumentCellLink, internalCellLink, {
+        $alias: { cell: "result", path: ["value"] },
+      }, 42);
       expect(testCell.getAsQueryResult()).toEqual({ value: 42 });
     });
 
@@ -62,10 +70,18 @@ describe("pattern-binding", () => {
         tx,
       );
       testCell.set({ arr: [0, 0, 0] });
+      const argumentCellLink = getMetaCell(testCell, "argument", tx)
+        .getAsNormalizedFullLink();
+      const internalCellLink = getMetaCell(testCell, "internal", tx)
+        .getAsNormalizedFullLink();
       sendValueToBinding(
         tx,
         testCell,
-        [{ $alias: { path: ["arr", 0] } }, { $alias: { path: ["arr", 2] } }],
+        argumentCellLink,
+        internalCellLink,
+        [{ $alias: { cell: "result", path: ["arr", 0] } }, {
+          $alias: { cell: "result", path: ["arr", 2] },
+        }],
         [1, 3],
       );
       expect(testCell.getAsQueryResult()).toEqual({ arr: [1, 0, 3] });
@@ -95,14 +111,22 @@ describe("pattern-binding", () => {
           age: 30,
         },
       });
+      const argumentCellLink = getMetaCell(testCell, "argument", tx)
+        .getAsNormalizedFullLink();
+      const internalCellLink = getMetaCell(testCell, "internal", tx)
+        .getAsNormalizedFullLink();
 
       const binding = {
         person: {
           fullName: {
-            firstName: { $alias: { path: ["user", "name", "first"] } },
-            lastName: { $alias: { path: ["user", "name", "last"] } },
+            firstName: {
+              $alias: { cell: "result", path: ["user", "name", "first"] },
+            },
+            lastName: {
+              $alias: { cell: "result", path: ["user", "name", "last"] },
+            },
           },
-          currentAge: { $alias: { path: ["user", "age"] } },
+          currentAge: { $alias: { cell: "result", path: ["user", "age"] } },
         },
       };
 
@@ -116,7 +140,14 @@ describe("pattern-binding", () => {
         },
       };
 
-      sendValueToBinding(tx, testCell, binding, value);
+      sendValueToBinding(
+        tx,
+        testCell,
+        argumentCellLink,
+        internalCellLink,
+        binding,
+        value,
+      );
 
       expect(testCell.getAsQueryResult()).toEqual({
         user: {
@@ -137,6 +168,11 @@ describe("pattern-binding", () => {
         tx,
       );
       output.set({ value: null });
+      const argumentCellLink = getMetaCell(output, "argument", tx)
+        .getAsNormalizedFullLink();
+      const internalCellLink = getMetaCell(output, "internal", tx)
+        .getAsNormalizedFullLink();
+
       const source = runtime.getCell<string>(
         space,
         "narrow scoped binding cell value source",
@@ -148,6 +184,8 @@ describe("pattern-binding", () => {
       sendValueToBinding(
         tx,
         output,
+        argumentCellLink,
+        internalCellLink,
         output.key("value").getAsWriteRedirectLink(),
         source,
         { narrowestReadScope: "user" },
@@ -184,6 +222,11 @@ describe("pattern-binding", () => {
         tx,
       );
       output.set({ value: null });
+      const argumentCellLink = getMetaCell(output, "argument", tx)
+        .getAsNormalizedFullLink();
+      const internalCellLink = getMetaCell(output, "internal", tx)
+        .getAsNormalizedFullLink();
+
       const source = runtime.getCell<string>(
         space,
         "narrow scoped binding nested cell source",
@@ -195,6 +238,8 @@ describe("pattern-binding", () => {
       sendValueToBinding(
         tx,
         output,
+        argumentCellLink,
+        internalCellLink,
         output.key("value").getAsWriteRedirectLink(),
         { nested: source },
         { narrowestReadScope: "user" },
@@ -221,32 +266,49 @@ describe("pattern-binding", () => {
 
   describe("mapBindingToCell", () => {
     it("should map bindings to cell aliases", () => {
-      const testCell = runtime.getCell<{ a: number; b: { c: number } }>(
+      // Bindings are pseudo-links; the initial "internal" or "argument" determines how they are resolved
+      const binding = {
+        x: { $alias: { cell: "internal", path: ["a"] } },
+        y: { $alias: { cell: "argument", path: ["b", "c"] } },
+        z: 3,
+      };
+      const resultCell = runtime.getCell<{ a: number }>(
         space,
-        "should map bindings to cell aliases 1",
+        "result cell",
         undefined,
         tx,
       );
-      testCell.set({ a: 1, b: { c: 2 } });
-      const binding = {
-        x: { $alias: { path: ["a"] } },
-        y: { $alias: { path: ["b", "c"] } },
-        z: 3,
-      };
-
-      const result = unwrapOneLevelAndBindtoDoc(binding, testCell);
+      const argumentCell = runtime.getCell<{ b: { c: number } }>(
+        space,
+        "argument cell",
+        undefined,
+        tx,
+      );
+      argumentCell.set({ b: { c: 2 } });
+      const internalCell = runtime.getCell<{ a: number }>(
+        space,
+        "internal cell",
+        undefined,
+        tx,
+      );
+      internalCell.set({ a: 1 });
+      const result = unwrapOneLevelAndBindtoDoc(
+        runtime.cfc,
+        binding,
+        argumentCell.getAsNormalizedFullLink(),
+        internalCell.getAsNormalizedFullLink(),
+        resultCell.getAsNormalizedFullLink(),
+      );
       expect(
         areLinksSame(
           result.x,
-          testCell.key("a").getAsWriteRedirectLink(),
-          testCell,
+          internalCell.key("a").getAsWriteRedirectLink(),
         ),
       ).toBe(true);
       expect(
         areLinksSame(
           result.y,
-          testCell.key("b").key("c").getAsWriteRedirectLink(),
-          testCell,
+          argumentCell.key("b").key("c").getAsWriteRedirectLink(),
         ),
       ).toBe(true);
     });

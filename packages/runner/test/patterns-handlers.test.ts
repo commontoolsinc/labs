@@ -12,8 +12,8 @@ import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type ErrorWithContext } from "../src/scheduler.ts";
-import { isPrimitiveCellLink, parseLink } from "../src/link-utils.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { getMetaLink } from "@commonfabric/runner";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -26,7 +26,6 @@ describe("Pattern Runner - Handlers", () => {
   let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
   let handler: ReturnType<typeof createBuilder>["commonfabric"]["handler"];
   let Writable: ReturnType<typeof createBuilder>["commonfabric"]["Writable"];
-  let TYPE: ReturnType<typeof createBuilder>["commonfabric"]["TYPE"];
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -43,7 +42,6 @@ describe("Pattern Runner - Handlers", () => {
       pattern,
       handler,
       Writable,
-      TYPE,
     } = commonfabric);
   });
 
@@ -407,15 +405,9 @@ describe("Pattern Runner - Handlers", () => {
     expect(value).toMatchObject({ result: 5 });
 
     // Cast to any to avoid type checking
-    const sourceCellValue = piece.getSourceCell()?.getRaw() as any;
-    const patternId = sourceCellValue?.[TYPE];
+    const patternId = getMetaLink(piece, "pattern")?.id;
     expect(patternId).toBeDefined();
     expect(lastError?.patternId).toBe(patternId);
-    expect(isPrimitiveCellLink(sourceCellValue?.["spell"])).toBe(true);
-    const spellLink = parseLink(sourceCellValue["spell"]);
-    const spellId = spellLink?.id;
-    expect(spellId).toBeDefined();
-    expect(lastError?.spellId).toBe(spellId);
     expect(lastError?.space).toBe(space);
     expect(lastError?.pieceId).toBe(
       JSON.parse(JSON.stringify(piece.entityId))["/"],

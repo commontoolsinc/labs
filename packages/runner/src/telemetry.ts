@@ -43,7 +43,7 @@ export interface SchedulerGraphNode {
   debounceMs?: number; // Current debounce delay in ms (if set)
   throttleMs?: number; // Current throttle period in ms (if set)
   // Pattern association
-  patternId?: string; // ID of the pattern this action belongs to
+  patternId?: string; // ID of the pattern this action belongs to -- without `of:`
 }
 
 export interface SchedulerGraphEdge {

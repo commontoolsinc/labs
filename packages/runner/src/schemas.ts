@@ -4,7 +4,7 @@
  * /!\ interfaces and utilities.
  */
 
-import { NAME, type Schema, TYPE, UI } from "./shared.ts";
+import { NAME, type Schema, UI } from "./shared.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 
 export const rendererVDOMSchema = internSchema(
@@ -281,8 +281,7 @@ export const pieceSourceCellSchema = internSchema(
   {
     type: "object",
     properties: {
-      [TYPE]: { type: "string" },
-      spell: { type: "object" },
+      spell: { type: "object", asCell: ["readonly"] },
       lineage: {
         type: "array",
         items: pieceLineageSchema,
@@ -298,10 +297,20 @@ export const processSchema = internSchema(
     type: "object",
     properties: {
       argument: { type: "object" },
-      [TYPE]: { type: "string" },
-      spell: { type: "object" },
+      pattern: { type: "object", asCell: ["readonly"] },
     },
-    required: [TYPE],
+  },
+);
+
+export const processLinkSchema = internSchema(
+  {
+    type: "object",
+    properties: {
+      pattern: { type: "object", asCell: ["readonly"] },
+      resultRef: { type: "object", asCell: ["cell"] },
+      // phase this out in favor of pattern
+      spell: { type: "object", asCell: ["readonly"] },
+    },
   },
 );
 

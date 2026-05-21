@@ -11,7 +11,11 @@ import { raw } from "../src/module.ts";
 import { storedCfcMetadataAppliesToPath } from "../src/cfc/metadata.ts";
 import { Runtime } from "../src/runtime.ts";
 import { createCell } from "../src/cell.ts";
-import { parseLink, toMemorySpaceAddress } from "../src/link-utils.ts";
+import {
+  getMetaLink,
+  parseLink,
+  toMemorySpaceAddress,
+} from "../src/link-utils.ts";
 import {
   canonicalizeCfcMetadata,
   canonicalizePreparedDigestInput,
@@ -22,6 +26,9 @@ import { flowPrecisionSchemaForBuiltin } from "../src/cfc/flow-precision.ts";
 import { CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION } from "../src/cfc/types.ts";
 import type { JSONSchema, Pattern } from "../src/builder/types.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
+import { ignoreReadForScheduling } from "../src/scheduler.ts";
+import { internalVerifierRead } from "../src/storage/reactivity-log.ts";
+import { setResultCell } from "../src/result-utils.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-boundary-tests");
 
@@ -216,7 +223,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           },
         },
         result: {
-          savedTitle: { $alias: { path: ["internal", "savedTitle"] } },
+          savedTitle: { $alias: { cell: "internal", path: ["savedTitle"] } },
         },
         nodes: [],
       } satisfies Pattern;
@@ -228,11 +235,15 @@ describe("ExtendedStorageTransaction CFC gate", () => {
 
       await runtime.setup(undefined, pattern, {}, resultCell);
 
-      expect(resultCell.getSourceCell()).toBeDefined();
-      expect((resultCell.getRaw() as any)?.savedTitle?.$alias?.path).toEqual([
-        "internal",
-        "savedTitle",
-      ]);
+      expect(parseLink(resultCell.getMetaRaw("pattern"), resultCell))
+        .toBeDefined();
+      expect(parseLink(resultCell.getMetaRaw("argument"), resultCell))
+        .toBeDefined();
+      const savedTitleLink = parseLink(resultCell.key("savedTitle").getRaw());
+      const internalCellLink = parseLink(resultCell.getMetaRaw("internal"));
+      expect(internalCellLink).toBeDefined();
+      expect(savedTitleLink?.id).toBe(internalCellLink?.id);
+      expect(savedTitleLink?.path).toEqual(["savedTitle"]);
 
       const replica = storageManager.open(signer.did()).replica as unknown as {
         getDocument(id: string): {
@@ -299,7 +310,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           },
         },
         result: {
-          savedTitle: { $alias: { path: ["internal", "savedTitle"] } },
+          savedTitle: { $alias: { cell: "internal", path: ["savedTitle"] } },
         },
         nodes: [],
       } satisfies Pattern;
@@ -311,11 +322,16 @@ describe("ExtendedStorageTransaction CFC gate", () => {
 
       await runtime.setup(undefined, pattern, {}, resultCell);
 
-      expect(resultCell.getSourceCell()).toBeDefined();
-      expect((resultCell.getRaw() as any)?.savedTitle?.$alias?.path).toEqual([
-        "internal",
-        "savedTitle",
-      ]);
+      expect(getMetaLink(resultCell, "result")).toBeUndefined();
+      expect(parseLink(resultCell.getMetaRaw("pattern"), resultCell))
+        .toBeDefined();
+      expect(parseLink(resultCell.getMetaRaw("argument"), resultCell))
+        .toBeDefined();
+      const savedTitleLink = parseLink(resultCell.key("savedTitle").getRaw());
+      const internalCellLink = parseLink(resultCell.getMetaRaw("internal"));
+      expect(internalCellLink).toBeDefined();
+      expect(savedTitleLink?.id).toBe(internalCellLink?.id);
+      expect(savedTitleLink?.path).toEqual(["savedTitle"]);
 
       const replica = storageManager.open(signer.did()).replica as unknown as {
         getDocument(id: string): {
@@ -389,7 +405,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
 
       await expect(runtime.setup(undefined, pattern, {}, resultCell)).rejects
         .toThrow("CFC enforcement rejected commit");
-      expect(resultCell.getSourceCell()).toBeUndefined();
+      expect(getMetaLink(resultCell, "result")).toBeUndefined();
     } finally {
       await runtime.dispose();
       await storageManager.close();
@@ -588,9 +604,9 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         }),
       }, resultCell);
 
-      expect(resultCell.getSourceCell()).toBeDefined();
+      expect(resultCell.getArgumentCell()).toBeDefined();
       expect(
-        (resultCell.getSourceCell()?.getRaw() as any)?.argument?.savedTitle?.[
+        (resultCell.getArgumentCell()?.getRaw() as any)?.savedTitle?.[
           "/"
         ]?.["link@1"]?.id,
       ).toBe(sourceCell.getAsNormalizedFullLink().id);
@@ -4255,7 +4271,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         setupTx,
       );
       targetCell.set({ bar: "seed" });
-      targetCell.setSourceCell(sourceCell);
+      setResultCell(targetCell, sourceCell);
       setupTx.prepareCfc();
       expect((await setupTx.commit()).ok).toBeDefined();
 
@@ -4300,7 +4316,10 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         },
         tx2,
       );
-      expect(plainTarget2.getSourceCell()).toBeDefined();
+      expect(getMetaLink(plainTarget2, "result", {
+        meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
+        frozen: false,
+      })).toBeDefined();
       plainTarget2.set({ bar: "updated" });
       tx2.prepareCfc();
       const prepared2 = tx2.getCfcState().prepare;

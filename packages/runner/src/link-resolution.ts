@@ -112,6 +112,7 @@ const canFollowLinkHop = (
  * @param tx - The storage transaction to read from.
  * @param link - The link to read.
  * @param lastNode - The last node in the path.
+ * @param options - Allows you to preserve the `overwrite` field if needed
  * @returns The resolved link.
  */
 export function resolveLink(
@@ -119,6 +120,7 @@ export function resolveLink(
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
   lastNode: LastNode = "value",
+  options: { preserveOverwrite?: boolean } = {},
 ): ResolvedFullLink {
   const seen = new Set<string>();
 
@@ -298,7 +300,9 @@ export function resolveLink(
   // Remove overwrite field, i.e. when the last followed link was a write
   // redirect. The idea is that this is a link pointing to the final value, it
   // doesn't matter how we got there.
-  delete result.overwrite;
+  if (!options.preserveOverwrite) {
+    delete result.overwrite;
+  }
 
   // The casting is a workaround for the branding, we don't actually want to add
   // the symbol to the result.
