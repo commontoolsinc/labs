@@ -1,0 +1,290 @@
+import { assertEquals } from "@std/assert";
+import {
+  HARNESS_CHAT_PROTOCOL_VERSION,
+  HARNESS_CHAT_REQUEST_TYPE,
+  type HarnessChatRequestEnvelope,
+  READONLY_HARNESS_CHAT_POLICY,
+} from "../src/contracts/interactive-chat.ts";
+import {
+  HarnessInteractiveChatService,
+  type HarnessInteractivePromptLoopFactory,
+} from "../src/interactive-chat-service.ts";
+import type {
+  HarnessPromptLoopResult,
+  RunHarnessTranscriptOptions,
+} from "../src/prompt-loop.ts";
+
+const nextIsoNow = () => {
+  let counter = 0;
+  return () => {
+    counter += 1;
+    return `2026-05-22T00:00:${String(counter).padStart(2, "0")}.000Z`;
+  };
+};
+
+const makeResult = (
+  options: RunHarnessTranscriptOptions,
+  finalAssistantText: string,
+): HarnessPromptLoopResult => ({
+  model: options.model ?? "gpt-test",
+  finalAssistantText,
+  transcript: [
+    ...options.transcript,
+    { role: "assistant", content: finalAssistantText },
+  ],
+  modelTurns: 1,
+  runState: {} as HarnessPromptLoopResult["runState"],
+});
+
+Deno.test("interactive service starts sessions and completes non-streaming turns", async () => {
+  const loopOptions: unknown[] = [];
+  const createPromptLoop: HarnessInteractivePromptLoopFactory = (options) => {
+    loopOptions.push(options);
+    return {
+      runTranscript: async (runOptions) => {
+        const result = makeResult(runOptions, "Done.");
+        await runOptions.onTranscriptEvent?.({
+          message: result.transcript[result.transcript.length - 1],
+          transcript: result.transcript,
+        });
+        return result;
+      },
+    };
+  };
+  const service = new HarnessInteractiveChatService({
+    createPromptLoop,
+    now: nextIsoNow(),
+    randomUUID: () => "generated-id",
+  });
+
+  const startSession = await service.handleRequest({
+    type: HARNESS_CHAT_REQUEST_TYPE,
+    protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
+    requestId: "req-1",
+    method: "start_session",
+    params: {
+      sessionId: "session-1",
+      workspace: { hostPath: "/workspace", cwd: "/workspace/project" },
+      model: "gpt-test",
+    },
+  });
+  assertEquals(startSession.ok, true);
+
+  const startTurn = await service.handleRequest({
+    type: HARNESS_CHAT_REQUEST_TYPE,
+    protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
+    requestId: "req-2",
+    method: "start_turn",
+    params: {
+      sessionId: "session-1",
+      turnId: "turn-1",
+      input: { text: "Hi" },
+    },
+  });
+  assertEquals(startTurn.ok, true);
+  await service.waitForTurn("session-1", "turn-1");
+
+  assertEquals(
+    service.events("session-1").map((event) => event.event.kind),
+    [
+      "session_started",
+      "turn_started",
+      "assistant_delta",
+      "assistant_completed",
+      "turn_completed",
+    ],
+  );
+  assertEquals(service.status("session-1").sessions[0].status, "idle");
+  assertEquals(service.status("session-1").sessions[0].turnCount, 1);
+  assertEquals(loopOptions[0], {
+    workspaceHostPath: "/workspace",
+    cwd: "/workspace/project",
+    model: "gpt-test",
+    allowedToolIds: [
+      "bash",
+      "read_file",
+      "view_image",
+      "read_skill_resource",
+      "edit_file",
+      "write_file",
+      "delegate_task",
+    ],
+    allowedSubagentProfiles: ["default"],
+  });
+});
+
+Deno.test("interactive service applies read-only policy to prompt-loop options", async () => {
+  const loopOptions: unknown[] = [];
+  const createPromptLoop: HarnessInteractivePromptLoopFactory = (options) => {
+    loopOptions.push(options);
+    return {
+      runTranscript: async (runOptions) => makeResult(runOptions, "Readonly."),
+    };
+  };
+  const service = new HarnessInteractiveChatService({
+    createPromptLoop,
+    now: nextIsoNow(),
+  });
+
+  await service.startSession("req-1", {
+    sessionId: "session-1",
+    workspace: { hostPath: "/workspace" },
+    policy: {
+      ...READONLY_HARNESS_CHAT_POLICY,
+      allowedSubagentProfiles: ["browser"],
+    },
+  });
+  await service.startTurn("req-2", {
+    sessionId: "session-1",
+    turnId: "turn-1",
+    input: { text: "Read only please" },
+  });
+  await service.waitForTurn("session-1", "turn-1");
+
+  assertEquals(loopOptions[0], {
+    workspaceHostPath: "/workspace",
+    allowedToolIds: ["read_file", "view_image", "read_skill_resource"],
+    allowedSubagentProfiles: ["browser"],
+  });
+});
+
+Deno.test("interactive service cancels a turn without closing the session", async () => {
+  let release: (() => void) | undefined;
+  const createPromptLoop: HarnessInteractivePromptLoopFactory = () => ({
+    runTranscript: () =>
+      new Promise((resolve) => {
+        release = () =>
+          resolve({
+            model: "gpt-test",
+            finalAssistantText: "Late answer.",
+            transcript: [{ role: "assistant", content: "Late answer." }],
+            modelTurns: 1,
+            runState: {} as HarnessPromptLoopResult["runState"],
+          });
+      }),
+  });
+  const service = new HarnessInteractiveChatService({
+    createPromptLoop,
+    now: nextIsoNow(),
+  });
+
+  await service.startSession("req-1", {
+    sessionId: "session-1",
+    workspace: { hostPath: "/workspace" },
+  });
+  await service.startTurn("req-2", {
+    sessionId: "session-1",
+    turnId: "turn-1",
+    input: { text: "Start" },
+  });
+  const canceled = await service.cancelTurn(
+    "req-3",
+    "session-1",
+    "turn-1",
+    "user_requested",
+  );
+  assertEquals(canceled.ok, true);
+  assertEquals(service.status("session-1").sessions[0].status, "idle");
+  assertEquals(service.status("session-1").sessions[0].reusable, true);
+
+  release?.();
+  await service.waitForTurn("session-1", "turn-1");
+  assertEquals(
+    service.events("session-1").map((event) => event.event.kind),
+    ["session_started", "turn_started", "turn_canceled"],
+  );
+});
+
+Deno.test("interactive service closes sessions and filters status", async () => {
+  const service = new HarnessInteractiveChatService({
+    createPromptLoop: () => ({
+      runTranscript: async (options) => makeResult(options, "Done."),
+    }),
+    now: nextIsoNow(),
+  });
+  await service.startSession("req-1", {
+    sessionId: "session-1",
+    workspace: { hostPath: "/workspace" },
+  });
+  await service.startSession("req-2", {
+    sessionId: "session-2",
+    workspace: { hostPath: "/other-workspace" },
+  });
+
+  assertEquals(service.status().sessions.length, 2);
+  assertEquals(service.status("session-1").sessions.length, 1);
+
+  const closed = await service.closeSession("req-3", "session-1", "done");
+  assertEquals(closed.ok, true);
+  assertEquals(service.status("session-1").sessions[0].status, "closed");
+  assertEquals(service.status("session-1").sessions[0].reusable, false);
+
+  const startTurn = await service.startTurn("req-4", {
+    sessionId: "session-1",
+    input: { text: "Hello again" },
+  });
+  assertEquals(startTurn.ok, false);
+  assertEquals(
+    startTurn.ok === false ? startTurn.error.code : "",
+    "session_closed",
+  );
+});
+
+Deno.test("interactive service rejects missing sessions and concurrent turns", async () => {
+  const service = new HarnessInteractiveChatService({
+    createPromptLoop: () => ({
+      runTranscript: async (options) => makeResult(options, "Done."),
+    }),
+    now: nextIsoNow(),
+  });
+
+  const missing = await service.handleRequest(
+    {
+      type: HARNESS_CHAT_REQUEST_TYPE,
+      protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
+      requestId: "req-missing",
+      method: "start_turn",
+      params: {
+        sessionId: "missing",
+        input: { text: "Hi" },
+      },
+    } satisfies HarnessChatRequestEnvelope<"start_turn">,
+  );
+  assertEquals(missing.ok, false);
+  assertEquals(
+    missing.ok === false ? missing.error.code : "",
+    "session_not_found",
+  );
+
+  let release: (() => void) | undefined;
+  const busyService = new HarnessInteractiveChatService({
+    createPromptLoop: () => ({
+      runTranscript: () =>
+        new Promise((resolve) => {
+          release = () => resolve(makeResult({ transcript: [] }, "Done."));
+        }),
+    }),
+    now: nextIsoNow(),
+  });
+  await busyService.startSession("req-1", {
+    sessionId: "session-1",
+    workspace: { hostPath: "/workspace" },
+  });
+  await busyService.startTurn("req-2", {
+    sessionId: "session-1",
+    turnId: "turn-1",
+    input: { text: "First" },
+  });
+  const concurrent = await busyService.startTurn("req-3", {
+    sessionId: "session-1",
+    turnId: "turn-2",
+    input: { text: "Second" },
+  });
+  assertEquals(concurrent.ok, false);
+  assertEquals(
+    concurrent.ok === false ? concurrent.error.code : "",
+    "turn_already_running",
+  );
+  release?.();
+  await busyService.waitForTurn("session-1", "turn-1");
+});

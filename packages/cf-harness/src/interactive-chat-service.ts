@@ -1,0 +1,478 @@
+import {
+  CfHarnessPromptLoop,
+  type CreateHarnessPromptLoopOptions,
+  type HarnessPromptLoopResult,
+  type RunHarnessTranscriptOptions,
+} from "./prompt-loop.ts";
+import {
+  createHarnessChatErrorResponse,
+  createHarnessChatEventEnvelope,
+  createHarnessChatOkResponse,
+  createHarnessChatSessionStatus,
+  DEFAULT_HARNESS_CHAT_POLICY,
+  type HarnessChatErrorResponse,
+  type HarnessChatEventEnvelope,
+  type HarnessChatOkResponse,
+  type HarnessChatPolicy,
+  type HarnessChatRequestEnvelope,
+  type HarnessChatResponse,
+  type HarnessChatSessionStatus,
+  type HarnessChatStartSessionParams,
+  type HarnessChatStartTurnParams,
+  type HarnessChatStatusResult,
+  type HarnessChatStructuredEvent,
+  type HarnessChatTurnStatus,
+  reduceHarnessChatSessionStatus,
+} from "./contracts/interactive-chat.ts";
+import type {
+  HarnessAssistantTranscriptMessage,
+  HarnessToolTranscriptMessage,
+  HarnessTranscriptMessage,
+} from "./contracts/transcript.ts";
+
+export type HarnessInteractivePromptLoop = Pick<
+  CfHarnessPromptLoop,
+  "runTranscript"
+>;
+
+export type HarnessInteractivePromptLoopFactory = (
+  options: CreateHarnessPromptLoopOptions,
+) => HarnessInteractivePromptLoop;
+
+export type HarnessInteractiveChatEventListener = (
+  event: HarnessChatEventEnvelope,
+) => void | Promise<void>;
+
+export interface CreateHarnessInteractiveChatServiceOptions {
+  basePromptLoopOptions?: CreateHarnessPromptLoopOptions;
+  createPromptLoop?: HarnessInteractivePromptLoopFactory;
+  now?: () => string;
+  randomUUID?: () => string;
+  onEvent?: HarnessInteractiveChatEventListener;
+}
+
+interface HarnessInteractiveChatSessionRecord {
+  status: HarnessChatSessionStatus;
+  transcript: HarnessTranscriptMessage[];
+  activeTask?: Promise<void>;
+  canceledTurnIds: Set<string>;
+}
+
+const defaultPromptLoopFactory: HarnessInteractivePromptLoopFactory = (
+  options,
+) => new CfHarnessPromptLoop(options);
+
+const defaultRandomUUID = (): string => crypto.randomUUID();
+
+const activeTurnError = (
+  requestId: string,
+  session: HarnessChatSessionStatus,
+): HarnessChatErrorResponse =>
+  createHarnessChatErrorResponse(requestId, {
+    code: "turn_already_running",
+    message:
+      `session ${session.sessionId} already has active turn ${session.activeTurnId}`,
+    retryable: true,
+  });
+
+const sessionNotFoundError = (
+  requestId: string,
+  sessionId: string,
+): HarnessChatErrorResponse =>
+  createHarnessChatErrorResponse(requestId, {
+    code: "session_not_found",
+    message: `chat session not found: ${sessionId}`,
+  });
+
+const sessionClosedError = (
+  requestId: string,
+  sessionId: string,
+): HarnessChatErrorResponse =>
+  createHarnessChatErrorResponse(requestId, {
+    code: "session_closed",
+    message: `chat session is closed: ${sessionId}`,
+  });
+
+const turnNotFoundError = (
+  requestId: string,
+  sessionId: string,
+): HarnessChatErrorResponse =>
+  createHarnessChatErrorResponse(requestId, {
+    code: "turn_not_found",
+    message: `active turn not found for session ${sessionId}`,
+  });
+
+export class HarnessInteractiveChatService {
+  readonly #basePromptLoopOptions: CreateHarnessPromptLoopOptions;
+  readonly #createPromptLoop: HarnessInteractivePromptLoopFactory;
+  readonly #now: () => string;
+  readonly #randomUUID: () => string;
+  readonly #onEvent?: HarnessInteractiveChatEventListener;
+  readonly #sessions = new Map<string, HarnessInteractiveChatSessionRecord>();
+  readonly #events: HarnessChatEventEnvelope[] = [];
+  #sequence = 0;
+
+  constructor(options: CreateHarnessInteractiveChatServiceOptions = {}) {
+    this.#basePromptLoopOptions = options.basePromptLoopOptions ?? {};
+    this.#createPromptLoop = options.createPromptLoop ??
+      defaultPromptLoopFactory;
+    this.#now = options.now ?? (() => new Date().toISOString());
+    this.#randomUUID = options.randomUUID ?? defaultRandomUUID;
+    this.#onEvent = options.onEvent;
+  }
+
+  events(sessionId?: string): readonly HarnessChatEventEnvelope[] {
+    return sessionId === undefined
+      ? [...this.#events]
+      : this.#events.filter((event) => event.sessionId === sessionId);
+  }
+
+  status(sessionId?: string): HarnessChatStatusResult {
+    return {
+      sessions: [...this.#sessions.values()]
+        .map((record) => record.status)
+        .filter((status) =>
+          sessionId === undefined || status.sessionId === sessionId
+        ),
+    };
+  }
+
+  async waitForTurn(sessionId: string, turnId: string): Promise<void> {
+    const record = this.#sessions.get(sessionId);
+    if (record?.activeTask === undefined) {
+      return;
+    }
+    await record.activeTask;
+    const latest = this.#sessions.get(sessionId);
+    if (
+      latest?.status.activeTurnId === turnId &&
+      latest.activeTask !== undefined
+    ) {
+      await latest.activeTask;
+    }
+  }
+
+  async handleRequest(
+    request: HarnessChatRequestEnvelope,
+  ): Promise<HarnessChatResponse> {
+    switch (request.method) {
+      case "start_session":
+        return await this.startSession(request.requestId, request.params);
+      case "start_turn":
+        return await this.startTurn(request.requestId, request.params);
+      case "cancel_turn":
+        return await this.cancelTurn(
+          request.requestId,
+          request.params.sessionId,
+          request.params.turnId,
+          request.params.reason,
+        );
+      case "close_session":
+        return await this.closeSession(
+          request.requestId,
+          request.params.sessionId,
+          request.params.reason,
+        );
+      case "status":
+        return createHarnessChatOkResponse(
+          request.requestId,
+          this.status(request.params.sessionId),
+        );
+    }
+  }
+
+  async startSession(
+    requestId: string,
+    params: HarnessChatStartSessionParams,
+  ): Promise<HarnessChatOkResponse<HarnessChatSessionStatus>> {
+    const session = createHarnessChatSessionStatus({
+      sessionId: params.sessionId ?? this.#randomUUID(),
+      createdAt: this.#now(),
+      workspace: params.workspace,
+      model: params.model,
+      artifactRoot: params.artifactRoot,
+      capabilities: params.capabilities,
+      policy: params.policy,
+      browserAccess: params.browserAccess,
+      metadata: params.metadata,
+    });
+    this.#sessions.set(session.sessionId, {
+      status: session,
+      transcript: [],
+      canceledTurnIds: new Set(),
+    });
+    await this.#emit(session.sessionId, undefined, {
+      kind: "session_started",
+      session,
+    });
+    return createHarnessChatOkResponse(requestId, session);
+  }
+
+  async startTurn(
+    requestId: string,
+    params: HarnessChatStartTurnParams,
+  ): Promise<HarnessChatResponse<HarnessChatTurnStatus>> {
+    const record = this.#sessions.get(params.sessionId);
+    if (record === undefined) {
+      return sessionNotFoundError(requestId, params.sessionId);
+    }
+    if (record.status.status === "closed") {
+      return sessionClosedError(requestId, params.sessionId);
+    }
+    if (record.status.activeTurnId !== undefined) {
+      return activeTurnError(requestId, record.status);
+    }
+
+    const startedAt = this.#now();
+    const turn: HarnessChatTurnStatus = {
+      turnId: params.turnId ?? this.#randomUUID(),
+      status: "running",
+      startedAt,
+      updatedAt: startedAt,
+    };
+    await this.#emit(params.sessionId, turn.turnId, {
+      kind: "turn_started",
+      turn,
+    });
+
+    const updatedRecord = this.#sessions.get(params.sessionId);
+    if (updatedRecord === undefined) {
+      return sessionNotFoundError(requestId, params.sessionId);
+    }
+    const task = this.#runTurn(updatedRecord, turn.turnId, params);
+    updatedRecord.activeTask = task;
+    task.finally(() => {
+      const latest = this.#sessions.get(params.sessionId);
+      if (latest?.activeTask === task) {
+        latest.activeTask = undefined;
+      }
+    });
+    return createHarnessChatOkResponse(requestId, turn);
+  }
+
+  async cancelTurn(
+    requestId: string,
+    sessionId: string,
+    turnId?: string,
+    reason = "canceled",
+  ): Promise<HarnessChatResponse<HarnessChatSessionStatus>> {
+    const record = this.#sessions.get(sessionId);
+    if (record === undefined) {
+      return sessionNotFoundError(requestId, sessionId);
+    }
+    if (record.status.activeTurnId === undefined) {
+      return turnNotFoundError(requestId, sessionId);
+    }
+    if (turnId !== undefined && record.status.activeTurnId !== turnId) {
+      return turnNotFoundError(requestId, sessionId);
+    }
+    const activeTurnId = record.status.activeTurnId;
+    record.canceledTurnIds.add(activeTurnId);
+    await this.#emit(sessionId, activeTurnId, {
+      kind: "turn_canceled",
+      turnId: activeTurnId,
+      reason,
+    });
+    return createHarnessChatOkResponse(
+      requestId,
+      this.#sessions.get(sessionId)!.status,
+    );
+  }
+
+  async closeSession(
+    requestId: string,
+    sessionId: string,
+    reason = "closed",
+  ): Promise<HarnessChatResponse<HarnessChatSessionStatus>> {
+    const record = this.#sessions.get(sessionId);
+    if (record === undefined) {
+      return sessionNotFoundError(requestId, sessionId);
+    }
+    if (record.status.activeTurnId !== undefined) {
+      record.canceledTurnIds.add(record.status.activeTurnId);
+    }
+    await this.#emit(sessionId, undefined, {
+      kind: "session_closed",
+      reason,
+    });
+    return createHarnessChatOkResponse(
+      requestId,
+      this.#sessions.get(sessionId)!.status,
+    );
+  }
+
+  async #runTurn(
+    record: HarnessInteractiveChatSessionRecord,
+    turnId: string,
+    params: HarnessChatStartTurnParams,
+  ): Promise<void> {
+    const session = record.status;
+    const policy = params.policy ?? session.policy ??
+      DEFAULT_HARNESS_CHAT_POLICY;
+    const transcript: HarnessTranscriptMessage[] = [
+      ...record.transcript,
+      {
+        role: "user",
+        content: params.input.text,
+        ...(params.input.imageAttachments !== undefined &&
+            params.input.imageAttachments.length > 0
+          ? { imageAttachments: params.input.imageAttachments }
+          : {}),
+      },
+    ];
+    let observedTranscriptLength = transcript.length;
+    const loop = this.#createPromptLoop(
+      this.#buildPromptLoopOptions(session, policy),
+    );
+
+    try {
+      const result = await loop.runTranscript({
+        transcript,
+        model: session.model,
+        promptSlotBinding: policy.promptSlot,
+        onTranscriptEvent: async (event) => {
+          if (record.canceledTurnIds.has(turnId)) {
+            return;
+          }
+          if (event.transcript.length <= observedTranscriptLength) {
+            return;
+          }
+          observedTranscriptLength = event.transcript.length;
+          await this.#emitTranscriptEvent(session.sessionId, turnId, event);
+        },
+      });
+      if (record.canceledTurnIds.has(turnId)) {
+        return;
+      }
+      record.transcript = result.transcript;
+      await this.#emit(session.sessionId, turnId, {
+        kind: "turn_completed",
+        turnId,
+        finalText: result.finalAssistantText,
+      });
+    } catch (error) {
+      if (record.canceledTurnIds.has(turnId)) {
+        return;
+      }
+      await this.#emit(session.sessionId, turnId, {
+        kind: "error",
+        fatal: true,
+        error: {
+          code: "internal_error",
+          message: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
+  }
+
+  #buildPromptLoopOptions(
+    session: HarnessChatSessionStatus,
+    policy: HarnessChatPolicy,
+  ): CreateHarnessPromptLoopOptions {
+    return {
+      ...this.#basePromptLoopOptions,
+      ...(session.workspace?.hostPath !== undefined
+        ? { workspaceHostPath: session.workspace.hostPath }
+        : {}),
+      ...(session.workspace?.cwd !== undefined
+        ? { cwd: session.workspace.cwd }
+        : {}),
+      ...(session.model !== undefined ? { model: session.model } : {}),
+      ...(session.artifactRoot !== undefined
+        ? { artifactRoot: session.artifactRoot }
+        : {}),
+      allowedToolIds: policy.allowedToolIds,
+      allowedSubagentProfiles: policy.allowedSubagentProfiles,
+      ...(policy.cfcEnforcementMode !== undefined
+        ? { cfcEnforcementModeOverride: policy.cfcEnforcementMode }
+        : {}),
+    };
+  }
+
+  async #emitTranscriptEvent(
+    sessionId: string,
+    turnId: string,
+    event: Parameters<
+      NonNullable<RunHarnessTranscriptOptions["onTranscriptEvent"]>
+    >[0],
+  ): Promise<void> {
+    switch (event.message.role) {
+      case "assistant":
+        await this.#emitAssistantMessage(sessionId, turnId, event.message);
+        break;
+      case "tool":
+        await this.#emitToolMessage(sessionId, turnId, event.message);
+        break;
+      case "system":
+      case "user":
+        break;
+    }
+  }
+
+  async #emitAssistantMessage(
+    sessionId: string,
+    turnId: string,
+    message: HarnessAssistantTranscriptMessage,
+  ): Promise<void> {
+    for (const toolCall of message.toolCalls ?? []) {
+      await this.#emit(sessionId, turnId, {
+        kind: "tool_started",
+        tool: {
+          toolCallId: toolCall.id,
+          toolId: toolCall.function.name,
+        },
+      });
+    }
+    if (message.content.length === 0) {
+      return;
+    }
+    await this.#emit(sessionId, turnId, {
+      kind: "assistant_delta",
+      text: message.content,
+    });
+    await this.#emit(sessionId, turnId, {
+      kind: "assistant_completed",
+      text: message.content,
+    });
+  }
+
+  async #emitToolMessage(
+    sessionId: string,
+    turnId: string,
+    message: HarnessToolTranscriptMessage,
+  ): Promise<void> {
+    await this.#emit(sessionId, turnId, {
+      kind: "tool_completed",
+      status: "completed",
+      tool: {
+        toolCallId: message.toolCallId,
+        toolId: message.toolName,
+      },
+      resultSummary: message.content,
+    });
+  }
+
+  async #emit(
+    sessionId: string,
+    turnId: string | undefined,
+    event: HarnessChatStructuredEvent,
+  ): Promise<void> {
+    const envelope = createHarnessChatEventEnvelope({
+      sessionId,
+      ...(turnId !== undefined ? { turnId } : {}),
+      sequence: ++this.#sequence,
+      emittedAt: this.#now(),
+      event,
+    });
+    this.#events.push(envelope);
+    const record = this.#sessions.get(sessionId);
+    if (record !== undefined) {
+      record.status = reduceHarnessChatSessionStatus(record.status, envelope);
+    }
+    await this.#onEvent?.(envelope);
+  }
+}
+
+export const createHarnessInteractiveChatService = (
+  options: CreateHarnessInteractiveChatServiceOptions = {},
+): HarnessInteractiveChatService => new HarnessInteractiveChatService(options);
