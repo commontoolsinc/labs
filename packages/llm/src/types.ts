@@ -16,6 +16,7 @@ export const DEFAULT_GENERATE_OBJECT_MODELS: ModelName = "openai:gpt-5-mini";
 export type LLMResponse = BuiltInLLMMessage & {
   // The trace span ID
   id: string;
+  nativeModelToolResults?: readonly LLMNativeModelToolResult[];
 };
 
 export type ModelName = string;
@@ -35,11 +36,34 @@ export const LLM_NATIVE_MODEL_TOOL_IDS = [
 
 export type LLMNativeModelToolId = typeof LLM_NATIVE_MODEL_TOOL_IDS[number];
 
+export interface LLMNativeModelToolResult {
+  type: "cf-harness.native-model-tool-result";
+  toolId: LLMNativeModelToolId;
+  provider?: string;
+  providerMetadata?: unknown;
+  sources?: unknown;
+}
+
 export function isLLMNativeModelToolId(
   input: unknown,
 ): input is LLMNativeModelToolId {
   return typeof input === "string" &&
     (LLM_NATIVE_MODEL_TOOL_IDS as readonly string[]).includes(input);
+}
+
+export function isLLMNativeModelToolResult(
+  input: unknown,
+): input is LLMNativeModelToolResult {
+  return isRecord(input) && !Array.isArray(input) &&
+    input.type === "cf-harness.native-model-tool-result" &&
+    isLLMNativeModelToolId(input.toolId) &&
+    (!("provider" in input) || typeof input.provider === "string");
+}
+
+export function isLLMNativeModelToolResults(
+  input: unknown,
+): input is LLMNativeModelToolResult[] {
+  return Array.isArray(input) && input.every(isLLMNativeModelToolResult);
 }
 
 export interface LLMToolCall {

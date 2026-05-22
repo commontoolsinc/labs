@@ -2,6 +2,7 @@ import { jsonSchema, ModelMessage, stepCountIs, streamText, tool } from "ai";
 import { AttributeValue, trace } from "@opentelemetry/api";
 import {
   type LLMNativeModelToolId,
+  type LLMNativeModelToolResult,
   type LLMRequest,
 } from "@commonfabric/llm/types";
 import { type BuiltInLLMMessage } from "@commonfabric/api";
@@ -165,7 +166,7 @@ async function readNativeModelToolResults(
   llmStream: unknown,
   nativeModelToolIds: readonly LLMNativeModelToolId[] | undefined,
   modelName: string,
-): Promise<unknown[] | undefined> {
+): Promise<LLMNativeModelToolResult[] | undefined> {
   if (nativeModelToolIds === undefined || nativeModelToolIds.length === 0) {
     return undefined;
   }
@@ -509,11 +510,16 @@ export async function generateText(
         }
 
         // Send finish event to client
+        const finishEvent: {
+          type: "finish";
+          nativeModelToolResults?: LLMNativeModelToolResult[];
+        } = { type: "finish" };
+        if (nativeModelToolResults !== undefined) {
+          finishEvent.nativeModelToolResults = nativeModelToolResults;
+        }
         controller.enqueue(
           encoder.encode(
-            JSON.stringify({
-              type: "finish",
-            }) + "\n",
+            JSON.stringify(finishEvent) + "\n",
           ),
         );
 
