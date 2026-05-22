@@ -12,6 +12,7 @@
     "./engine": "./src/engine.ts",
     "./prompt-loop": "./src/prompt-loop.ts",
     "./interactive-chat-service": "./src/interactive-chat-service.ts",
+    "./interactive-chat-stdio": "./src/interactive-chat-stdio.ts",
     "./subagent-return": "./src/subagent-return.ts",
     "./artifacts": "./src/artifacts.ts",
     "./cli": "./src/cli.ts",

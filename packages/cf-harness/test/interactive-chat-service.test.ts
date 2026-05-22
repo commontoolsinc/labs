@@ -148,6 +148,107 @@ Deno.test("interactive service applies read-only policy to prompt-loop options",
   });
 });
 
+Deno.test("interactive service maps tool transcript messages to tool and file events", async () => {
+  const createPromptLoop: HarnessInteractivePromptLoopFactory = () => ({
+    runTranscript: async (runOptions) => {
+      const assistantMessage = {
+        role: "assistant" as const,
+        content: "",
+        toolCalls: [{
+          id: "tool-write-1",
+          type: "function" as const,
+          function: {
+            name: "write_file",
+            arguments: JSON.stringify({
+              path: "notes.md",
+              content: "hello",
+            }),
+          },
+        }],
+      };
+      const toolMessage = {
+        role: "tool" as const,
+        toolCallId: "tool-write-1",
+        toolName: "write_file",
+        content: JSON.stringify({
+          outputId: "run-1:write_file:1",
+          path: "/workspace/notes.md",
+          mode: "replace",
+        }),
+      };
+      const finalMessage = {
+        role: "assistant" as const,
+        content: "Wrote notes.",
+      };
+      const transcript = [
+        ...runOptions.transcript,
+        assistantMessage,
+        toolMessage,
+        finalMessage,
+      ];
+      await runOptions.onTranscriptEvent?.({
+        message: assistantMessage,
+        transcript: [...runOptions.transcript, assistantMessage],
+      });
+      await runOptions.onTranscriptEvent?.({
+        message: toolMessage,
+        transcript: [...runOptions.transcript, assistantMessage, toolMessage],
+      });
+      await runOptions.onTranscriptEvent?.({
+        message: finalMessage,
+        transcript,
+      });
+      return {
+        model: "gpt-test",
+        finalAssistantText: "Wrote notes.",
+        transcript,
+        modelTurns: 2,
+        runState: {} as HarnessPromptLoopResult["runState"],
+      };
+    },
+  });
+  const service = new HarnessInteractiveChatService({
+    createPromptLoop,
+    now: nextIsoNow(),
+  });
+
+  await service.startSession("req-1", {
+    sessionId: "session-1",
+    workspace: { hostPath: "/workspace" },
+  });
+  await service.startTurn("req-2", {
+    sessionId: "session-1",
+    turnId: "turn-1",
+    input: { text: "Write notes" },
+  });
+  await service.waitForTurn("session-1", "turn-1");
+
+  assertEquals(
+    service.events("session-1").map((event) => event.event.kind),
+    [
+      "session_started",
+      "turn_started",
+      "tool_started",
+      "tool_completed",
+      "file_changed",
+      "assistant_delta",
+      "assistant_completed",
+      "turn_completed",
+    ],
+  );
+  const fileEvent = service.events("session-1").find((event) =>
+    event.event.kind === "file_changed"
+  );
+  assertEquals(fileEvent?.event, {
+    kind: "file_changed",
+    change: {
+      kind: "update",
+      path: "/workspace/notes.md",
+      summary: "write_file replace",
+    },
+  });
+});
+
 Deno.test("interactive service cancels a turn without closing the session", async () => {
   let release: (() => void) | undefined;
   const createPromptLoop: HarnessInteractivePromptLoopFactory = () => ({

@@ -30,6 +30,9 @@ import type {
   HarnessTranscriptMessage,
 } from "./contracts/transcript.ts";
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
 export type HarnessInteractivePromptLoop = Pick<
   CfHarnessPromptLoop,
   "runTranscript"
@@ -102,6 +105,82 @@ const turnNotFoundError = (
     message: `active turn not found for session ${sessionId}`,
   });
 
+const parseToolMessageContent = (
+  content: string,
+): Record<string, unknown> | undefined => {
+  try {
+    const parsed: unknown = JSON.parse(content);
+    return isRecord(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const toolMessageStatus = (
+  parsedContent: Record<string, unknown> | undefined,
+): "completed" | "failed" | "denied" => {
+  if (parsedContent?.type === "cf-harness.observation-denied") {
+    return "denied";
+  }
+  if (parsedContent?.ok === false) {
+    return "failed";
+  }
+  return "completed";
+};
+
+const fileChangeFromToolMessage = (
+  message: HarnessToolTranscriptMessage,
+  parsedContent: Record<string, unknown> | undefined,
+): HarnessChatStructuredEvent | undefined => {
+  if (
+    parsedContent === undefined ||
+    toolMessageStatus(parsedContent) !== "completed"
+  ) {
+    return undefined;
+  }
+  const path = parsedContent.path;
+  if (typeof path !== "string" || path.length === 0) {
+    return undefined;
+  }
+  switch (message.toolName) {
+    case "write_file": {
+      const mode = typeof parsedContent.mode === "string"
+        ? parsedContent.mode
+        : "replace";
+      return {
+        kind: "file_changed",
+        change: {
+          kind: "update",
+          path,
+          summary: `write_file ${mode}`,
+        },
+      };
+    }
+    case "edit_file": {
+      const editsApplied = typeof parsedContent.editsApplied === "number"
+        ? parsedContent.editsApplied
+        : undefined;
+      const replacements = typeof parsedContent.replacements === "number"
+        ? parsedContent.replacements
+        : undefined;
+      return {
+        kind: "file_changed",
+        change: {
+          kind: "update",
+          path,
+          summary: editsApplied !== undefined || replacements !== undefined
+            ? `edit_file applied ${editsApplied ?? "?"} edit(s), ${
+              replacements ?? "?"
+            } replacement(s)`
+            : "edit_file updated file",
+        },
+      };
+    }
+    default:
+      return undefined;
+  }
+};
+
 export class HarnessInteractiveChatService {
   readonly #basePromptLoopOptions: CreateHarnessPromptLoopOptions;
   readonly #createPromptLoop: HarnessInteractivePromptLoopFactory;
@@ -149,6 +228,18 @@ export class HarnessInteractiveChatService {
       latest.activeTask !== undefined
     ) {
       await latest.activeTask;
+    }
+  }
+
+  async waitForIdle(): Promise<void> {
+    while (true) {
+      const tasks = [...this.#sessions.values()].flatMap((record) =>
+        record.activeTask === undefined ? [] : [record.activeTask]
+      );
+      if (tasks.length === 0) {
+        return;
+      }
+      await Promise.allSettled(tasks);
     }
   }
 
@@ -441,15 +532,21 @@ export class HarnessInteractiveChatService {
     turnId: string,
     message: HarnessToolTranscriptMessage,
   ): Promise<void> {
+    const parsedContent = parseToolMessageContent(message.content);
+    const status = toolMessageStatus(parsedContent);
     await this.#emit(sessionId, turnId, {
       kind: "tool_completed",
-      status: "completed",
+      status,
       tool: {
         toolCallId: message.toolCallId,
         toolId: message.toolName,
       },
       resultSummary: message.content,
     });
+    const fileChange = fileChangeFromToolMessage(message, parsedContent);
+    if (fileChange !== undefined) {
+      await this.#emit(sessionId, turnId, fileChange);
+    }
   }
 
   async #emit(

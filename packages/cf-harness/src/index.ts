@@ -3,6 +3,7 @@ export * from "./run-state.ts";
 export * from "./engine.ts";
 export * from "./prompt-loop.ts";
 export * from "./interactive-chat-service.ts";
+export * from "./interactive-chat-stdio.ts";
 export * from "./structured-result.ts";
 export * from "./subagent-return.ts";
 export * from "./artifacts.ts";
