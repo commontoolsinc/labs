@@ -12,10 +12,13 @@ import {
   areLinksSame,
   areNormalizedLinksSame,
   getMetaCell,
+  isLegacyAlias,
   parseLink,
 } from "../src/link-utils.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { isCell } from "../src/cell.ts";
+import { popFrame, pushFrame } from "../src/builder/pattern.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -311,6 +314,36 @@ describe("pattern-binding", () => {
           argumentCell.key("b").key("c").getAsWriteRedirectLink(),
         ),
       ).toBe(true);
+    });
+
+    it("serializes returned local pattern cells as aliases", () => {
+      const frame = pushFrame({
+        runtime,
+        tx,
+        space,
+        cause: { test: "returned local pattern cells are aliases" },
+      });
+      try {
+        const { pattern, Writable } = createTrustedBuilder(runtime)
+          .commonfabric;
+        const Root = pattern(() => {
+          const name = Writable.of("Ada").for("name", true);
+          return { name };
+        });
+
+        const nameBinding = (Root.result as { name: unknown }).name;
+        expect(isLegacyAlias(nameBinding)).toBe(true);
+        expect(nameBinding).toEqual({
+          $alias: {
+            cell: "internal",
+            path: ["name"],
+            scope: "space",
+            schema: { default: "Ada" },
+          },
+        });
+      } finally {
+        popFrame(frame);
+      }
     });
   });
 

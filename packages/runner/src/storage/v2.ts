@@ -1797,7 +1797,10 @@ const snapshotState = (
   scope?: CellScope,
 ): State => {
   return replica.get({ id, type: DOCUMENT_MIME, path: [], scope }) ??
-    unclaimed({ of: id, the: DOCUMENT_MIME });
+    ({
+      ...unclaimed({ of: id, the: DOCUMENT_MIME }),
+      scope: normalizeCellScope(scope),
+    } as State);
 };
 
 const toConnectionError = (error: unknown): IConnectionError =>
