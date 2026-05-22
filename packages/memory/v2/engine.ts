@@ -701,11 +701,19 @@ export interface AppliedRevision {
   patches?: PatchOp[];
 }
 
+export interface AppliedSchedulerObservationResult {
+  localSeq: number;
+  status: "kept" | "dropped";
+  schedulerObservationId?: number;
+  reason?: "stale-confirmed-read" | "stale-pending-read" | "pending-read-missing";
+}
+
 export interface AppliedCommit {
   seq: number;
   branch: BranchName;
   revisions: AppliedRevision[];
   schedulerObservationId?: number;
+  schedulerObservationResults?: AppliedSchedulerObservationResult[];
   schedulerDirtiedReaders?: SchedulerReaderIndexEntry[];
 }
 

@@ -17,6 +17,7 @@ import {
 import { connect, loopback } from "../v2/client.ts";
 import { Server } from "../v2/server.ts";
 import { resolveSpaceStoreUrl } from "../v2/storage-path.ts";
+import { toDocumentPath } from "../v2.ts";
 
 const createEngine = async (): Promise<{
   engine: Engine;
@@ -65,6 +66,15 @@ const observation = {
   materializerWriteEnvelopes: [],
   status: "success",
 } satisfies SchedulerActionObservation;
+
+const observationForAction = (
+  actionId: string,
+  overrides: Partial<SchedulerActionObservation> = {},
+): SchedulerActionObservation => ({
+  ...observation,
+  actionId,
+  ...overrides,
+});
 
 Deno.test("memory v2 migrates scheduler read indexes to include owner space", async () => {
   const path = await Deno.makeTempFile({ suffix: ".sqlite" });
@@ -182,6 +192,162 @@ Deno.test("memory v2 accepts observation-only commits without semantic revisions
       `SELECT count(*) AS count FROM scheduler_observation`,
     ).get() as { count: number };
     assertEquals(observationRows.count, 1);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 accepts batched no-op scheduler observations", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    const beforeHead = headSeq(engine);
+    const commit = {
+      localSeq: 100,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservationBatch: [
+        {
+          localSeq: 101,
+          reads: { confirmed: [], pending: [] },
+          schedulerObservation: observationForAction("pattern.tsx:computed:1"),
+        },
+        {
+          localSeq: 102,
+          reads: { confirmed: [], pending: [] },
+          schedulerObservation: observationForAction("pattern.tsx:computed:2"),
+        },
+      ],
+    };
+
+    const result = applyCommit(engine, {
+      sessionId: "session:scheduler-observation-batch",
+      commit,
+    });
+
+    assertEquals(result.seq, beforeHead);
+    assertEquals(result.revisions, []);
+    assertEquals(headSeq(engine), beforeHead);
+    assertEquals(result.schedulerObservationResults?.map((entry) => ({
+      localSeq: entry.localSeq,
+      status: entry.status,
+    })), [
+      { localSeq: 101, status: "kept" },
+      { localSeq: 102, status: "kept" },
+    ]);
+    assertExists(result.schedulerObservationResults?.[0].schedulerObservationId);
+    assertExists(result.schedulerObservationResults?.[1].schedulerObservationId);
+    assertEquals(countRows(engine, "scheduler_observation"), 2);
+    assertEquals(countRows(engine, "scheduler_observation_replay"), 2);
+    assertEquals(countRows(engine, "commit"), 0);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 drops stale batched no-op observations independently", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:scheduler-observation-batch-drop",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [],
+        schedulerObservation: observationForAction("pattern.tsx:computed:1"),
+      },
+    });
+
+    const dirtyCommit = applyCommit(engine, {
+      sessionId: "session:external-dirty-writer",
+      space: sourceRead.space,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: sourceRead.id,
+          scope: sourceRead.scope,
+          value: { value: { count: 1 } },
+        }],
+      },
+    });
+    markSchedulerReadersDirtyForWrites(engine, {
+      branch: "",
+      dirtySeq: dirtyCommit.seq,
+      writes: [sourceRead],
+    });
+
+    const result = applyCommit(engine, {
+      sessionId: "session:scheduler-observation-batch-drop",
+      commit: {
+        localSeq: 100,
+        reads: { confirmed: [], pending: [] },
+        operations: [],
+        schedulerObservationBatch: [
+          {
+            localSeq: 101,
+            reads: {
+              confirmed: [{
+                id: sourceRead.id,
+                scope: sourceRead.scope,
+                path: toDocumentPath(sourceRead.path),
+                seq: 0,
+              }],
+              pending: [],
+            },
+            schedulerObservation: observationForAction(
+              "pattern.tsx:computed:1",
+              { observedAtLocalSeq: 101 },
+            ),
+          },
+          {
+            localSeq: 102,
+            reads: { confirmed: [], pending: [] },
+            schedulerObservation: observationForAction(
+              "pattern.tsx:computed:2",
+              { observedAtLocalSeq: 102 },
+            ),
+          },
+        ],
+      },
+    });
+
+    assertEquals(result.schedulerObservationResults?.map((entry) => ({
+      localSeq: entry.localSeq,
+      status: entry.status,
+      reason: entry.reason,
+    })), [
+      {
+        localSeq: 101,
+        status: "dropped",
+        reason: "stale-confirmed-read",
+      },
+      {
+        localSeq: 102,
+        status: "kept",
+        reason: undefined,
+      },
+    ]);
+    assertEquals(
+      getSchedulerActionState(engine, {
+        branch: "",
+        pieceId: observation.pieceId,
+        processGeneration: observation.processGeneration,
+        actionId: "pattern.tsx:computed:1",
+      })?.directDirtySeq,
+      dirtyCommit.seq,
+    );
+    assertExists(getLatestSchedulerActionSnapshot(engine, {
+      branch: "",
+      pieceId: observation.pieceId,
+      processGeneration: observation.processGeneration,
+      actionId: "pattern.tsx:computed:2",
+    }));
+    assertEquals(countRows(engine, "scheduler_observation_replay"), 3);
   } finally {
     close(engine);
     await Deno.remove(path);

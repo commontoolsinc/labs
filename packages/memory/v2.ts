@@ -103,6 +103,15 @@ export interface PendingRead {
   localSeq: number;
 }
 
+export interface SchedulerObservationCommit {
+  localSeq: number;
+  reads: {
+    confirmed: ConfirmedRead[];
+    pending: PendingRead[];
+  };
+  schedulerObservation: unknown;
+}
+
 export interface ClientCommit {
   localSeq: number;
   reads: {
@@ -111,6 +120,7 @@ export interface ClientCommit {
   };
   operations: Operation[];
   schedulerObservation?: unknown;
+  schedulerObservationBatch?: SchedulerObservationCommit[];
   codeCID?: Reference;
   branch?: BranchName;
   merge?: {
