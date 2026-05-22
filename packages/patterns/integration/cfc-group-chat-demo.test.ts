@@ -333,23 +333,25 @@ async function readAuthorshipProbe(
       isWithinContainer(element, targetContainerSelector)
     );
     const matchingContainers: Element[] = [];
-    if (targetContainerSelector) {
-      const selector = targetContainerSelector;
-      function collectMatchingContainers(root: Document | ShadowRoot): void {
-        for (const element of root.querySelectorAll("*")) {
-          try {
-            if (element.matches(selector)) {
-              matchingContainers.push(element);
-            }
-          } catch {
-            // Invalid selectors are reported by returning an empty text probe.
+    const collectMatchingContainers = (
+      root: Document | ShadowRoot,
+      selector: string,
+    ): void => {
+      for (const element of root.querySelectorAll("*")) {
+        try {
+          if (element.matches(selector)) {
+            matchingContainers.push(element);
           }
-          if (element.shadowRoot) {
-            collectMatchingContainers(element.shadowRoot);
-          }
+        } catch {
+          // Invalid selectors are reported by returning an empty text probe.
+        }
+        if (element.shadowRoot) {
+          collectMatchingContainers(element.shadowRoot, selector);
         }
       }
-      collectMatchingContainers(document);
+    };
+    if (targetContainerSelector) {
+      collectMatchingContainers(document, targetContainerSelector);
     }
     const container = matchingContainers[0] ?? document.body;
     const hosts = elements.map(async (element) => {
