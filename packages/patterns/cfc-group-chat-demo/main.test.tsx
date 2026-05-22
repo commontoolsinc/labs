@@ -16,6 +16,7 @@ import {
   roomsValue,
   type SharedChatMessage,
   type SharedMessagesValue,
+  type SharedProfilesValue,
   type SharedRoomsValue,
   TRUSTED_GROUP_CHAT_SET_ADMIN_ACTION,
 } from "./trusted.tsx";
@@ -30,6 +31,9 @@ export default pattern(() => {
   const messages = Writable.of<SharedMessagesValue>(
     [] as SharedMessagesValue,
   );
+  const profiles = Writable.of<SharedProfilesValue>(
+    [] as SharedProfilesValue,
+  );
   const rooms = Writable.of<SharedRoomsValue>(
     {} as SharedRoomsValue,
   );
@@ -43,6 +47,7 @@ export default pattern(() => {
   const roomDraft = Writable.of("");
   const chat = GroupChatDemo({
     myProfile,
+    profiles,
     messages,
     rooms,
     adminRegistry,
@@ -52,12 +57,38 @@ export default pattern(() => {
     hostMessageDraft,
     roomDraft,
   } as GroupChatDemoInputArg);
+  const bobProfile = Writable.of<MyProfileCellValue>(
+    {} as Default<EmptyMyProfileValue>,
+  );
+  const bobProfileDraft = Writable.of("");
+  const bobAdminDraft = Writable.of(true);
+  const bobMessageDraft = Writable.of("");
+  const bobHostMessageDraft = Writable.of("");
+  const bobRoomDraft = Writable.of("");
+  const bobChat = GroupChatDemo({
+    myProfile: bobProfile,
+    profiles,
+    messages,
+    rooms,
+    adminRegistry,
+    profileDraft: bobProfileDraft,
+    adminDraft: bobAdminDraft,
+    messageDraft: bobMessageDraft,
+    hostMessageDraft: bobHostMessageDraft,
+    roomDraft: bobRoomDraft,
+  } as GroupChatDemoInputArg);
 
   const action_set_profile_alice = action(() => {
     chat.setProfileDraft.send("Alice");
   });
   const action_save_profile = action(() => {
     chat.saveProfile.send();
+  });
+  const action_set_profile_bob = action(() => {
+    bobChat.setProfileDraft.send("Bob");
+  });
+  const action_save_profile_bob = action(() => {
+    bobChat.saveProfile.send();
   });
   const action_set_room_ops = action(() => {
     chat.setRoomDraft.send("Ops");
@@ -135,6 +166,11 @@ export default pattern(() => {
   const assert_profile_can_manage_admins = computed(() =>
     chat.currentUserCanManageAdmins === true
   );
+  const assert_alice_sees_bob_without_bob_message = computed(() => {
+    const participants = participantClaimsValue(profiles, myProfile, messages);
+    return participants.some((participant) => participant.name === "Alice") &&
+      participants.some((participant) => participant.name === "Bob");
+  });
   const assert_admin_view_manager_enabled = computed(() => {
     const toggleButton = findNodeByProp(
       chat[UI],
@@ -207,7 +243,7 @@ export default pattern(() => {
       importedMessages.every((message) =>
         message.authorName.length > 0 &&
         message.body.length > 0 &&
-        message.authorProfile === undefined
+        message.authorProfile !== undefined
       );
   });
   const assert_thread_order_sortable = computed(() => {
@@ -217,8 +253,13 @@ export default pattern(() => {
         index === 0 || ordered[index - 1]!.timestamp <= message.timestamp
       );
   });
+  const assert_verified_imports_do_not_duplicate_participants = computed(() =>
+    participantClaimsValue(profiles, myProfile, messages).filter((
+      participant,
+    ) => participant.name === "Alice Renamed").length === 1
+  );
   const assert_same_name_unverified_imports_are_distinct = computed(() => {
-    const participants = participantClaimsValue(myProfile, messages);
+    const participants = participantClaimsValue(profiles, myProfile, messages);
     return participants.filter((participant) =>
       participant.name === "Sam" && participant.profile === undefined
     ).length === 2;
@@ -233,6 +274,9 @@ export default pattern(() => {
       { assertion: assert_profile_created },
       { assertion: assert_profile_starts_non_admin },
       { assertion: assert_profile_can_manage_admins },
+      { action: action_set_profile_bob },
+      { action: action_save_profile_bob },
+      { assertion: assert_alice_sees_bob_without_bob_message },
       { assertion: assert_admin_view_manager_enabled },
       { action: action_set_room_ops },
       { action: action_try_add_room_without_admin },
@@ -258,6 +302,7 @@ export default pattern(() => {
       { action: action_add_random_imported },
       { assertion: assert_imported_messages_injected },
       { assertion: assert_thread_order_sortable },
+      { assertion: assert_verified_imports_do_not_duplicate_participants },
       { action: action_add_same_name_unverified_imports },
       { assertion: assert_same_name_unverified_imports_are_distinct },
     ],

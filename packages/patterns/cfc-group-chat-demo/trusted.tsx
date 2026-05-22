@@ -128,6 +128,13 @@ export type SharedChatMessage =
 export type SharedMessagesValue = SharedChatMessage[] | Default<[]>;
 export type SharedMessagesCell = Writable<SharedMessagesValue>;
 
+export interface SharedProfileEntry {
+  readonly profile: ProfileCell;
+}
+
+export type SharedProfilesValue = SharedProfileEntry[] | Default<[]>;
+export type SharedProfilesCell = Writable<SharedProfilesValue>;
+
 export type TrustedChatRoom = ChatRoom<SharedChatMessage>;
 
 export type ChatAdminList = RequiresIntegrity<
@@ -178,6 +185,19 @@ export const messagesValue = (
 ): SharedChatMessage[] =>
   Array.from((messages.get() as SharedChatMessage[] | undefined) ?? []);
 
+export const profilesValue = (
+  profiles: SharedProfilesCell,
+): ProfileCell[] =>
+  Array.from((profiles.get() as SharedProfileEntry[] | undefined) ?? [])
+    .map((entry) => entry.profile)
+    .reduce<ProfileCell[]>(
+      (uniqueProfiles, profile) =>
+        uniqueProfiles.some((knownProfile) => equals(knownProfile, profile))
+          ? uniqueProfiles
+          : [...uniqueProfiles, profile],
+      [],
+    );
+
 export const roomsValue = (
   rooms: SharedRoomsCell,
 ): TrustedChatRoom[] =>
@@ -221,6 +241,7 @@ export const currentUserCanManageAdmins = (
 ): boolean => adminManagerCredentialIsActive(adminManagerCredential.get());
 
 export const participantClaimsValue = (
+  profiles: SharedProfilesCell,
   myProfile: MyProfileCell,
   messages: SharedMessagesCell,
 ): ParticipantClaim<AuthorProfileCell>[] => {
@@ -246,6 +267,11 @@ export const participantClaimsValue = (
     });
   };
 
+  profilesValue(profiles).forEach((profile) => {
+    const profileValue = profile.get();
+    addParticipant(profileValue?.name, profileValue?.accentColor, profile);
+  });
+
   const mineValue = currentProfileSnapshot(myProfile);
   addParticipant(
     mineValue?.name,
@@ -267,10 +293,11 @@ export const participantClaimsValue = (
 };
 
 export const participantSummary = (
+  profiles: SharedProfilesCell,
   myProfile: MyProfileCell,
   messages: SharedMessagesCell,
 ): string => {
-  const participants = participantClaimsValue(myProfile, messages);
+  const participants = participantClaimsValue(profiles, myProfile, messages);
   return participants.length === 0
     ? "No participants yet"
     : participants.map((participant) => participant.name).join(" · ");
@@ -285,6 +312,7 @@ export interface AdminParticipantRow {
 }
 
 export const adminParticipantRowsValue = (
+  profiles: SharedProfilesCell,
   myProfile: MyProfileCell,
   messages: SharedMessagesCell,
   adminRegistry: ChatAdminRegistryCell,
@@ -292,19 +320,34 @@ export const adminParticipantRowsValue = (
 ): AdminParticipantRow[] => {
   const adminRoles = chatAdminRolesValue(adminRegistry);
   const canManageAdmins = currentUserCanManageAdmins(adminManagerCredential);
-  return participantClaimsValue(myProfile, messages).map((participant) => ({
-    name: participant.name,
-    accentColor: participant.accentColor,
-    ...(participant.profile !== undefined
-      ? { profile: participant.profile }
-      : {}),
-    isAdmin: subjectHasAdminRole(adminRoles, participant.profile),
-    canManageAdmins: canManageAdmins && participant.profile !== undefined,
-  }));
+  return participantClaimsValue(profiles, myProfile, messages)
+    .filter((participant) => participant.profile !== undefined)
+    .map((participant) => ({
+      name: participant.name,
+      accentColor: participant.accentColor,
+      profile: participant.profile,
+      isAdmin: subjectHasAdminRole(adminRoles, participant.profile),
+      canManageAdmins,
+    }));
+};
+
+export const registerProfile = (
+  profiles: SharedProfilesCell,
+  profile: ProfileCell,
+): void => {
+  const currentProfiles = profilesValue(profiles);
+  const nextProfiles =
+    currentProfiles.some((knownProfile) => equals(knownProfile, profile))
+      ? currentProfiles
+      : [...currentProfiles, profile];
+  profiles.set(
+    nextProfiles.map((profile) => ({ profile })) as SharedProfilesValue,
+  );
 };
 
 export const applyTrustedProfileSave = (
   myProfile: MyProfileCell,
+  profiles: SharedProfilesCell,
   adminManagerCredential: AdminManagerCredentialCell,
   rawName: string,
   canManageAdmins: boolean,
@@ -328,6 +371,7 @@ export const applyTrustedProfileSave = (
     makeProfileSnapshot(trimmedName, existingProfile) as TrustedProfile,
   );
   myProfile.set({ profile });
+  registerProfile(profiles, profile);
   if (canManageAdmins) {
     adminManagerCredential.set({
       canManageAdmins: true,
@@ -428,13 +472,18 @@ export const commitTrustedProfileSave = handler<
   void,
   {
     myProfile: MyProfileCell;
+    profiles: SharedProfilesCell;
     adminManagerCredential: AdminManagerCredentialCell;
     nameDraft: Writable<string | Default<"">>;
     adminManagerDraft: AdminManagerDraftCell;
   }
->((_, { myProfile, adminManagerCredential, nameDraft, adminManagerDraft }) => {
+>((
+  _,
+  { myProfile, profiles, adminManagerCredential, nameDraft, adminManagerDraft },
+) => {
   const { trimmedName } = applyTrustedProfileSave(
     myProfile,
+    profiles,
     adminManagerCredential,
     draftText(nameDraft),
     adminManagerDraft.get() !== false,
@@ -443,6 +492,7 @@ export const commitTrustedProfileSave = handler<
     nameDraft.set(trimmedName);
   }
 });
+type TrustedProfileSaveInput = Parameters<typeof commitTrustedProfileSave>[0];
 
 export const commitTrustedMessageSend = handler<
   void,
@@ -549,6 +599,7 @@ export const commitTrustedRoomAdd = handler<
 type TrustedRoomAddInput = Parameters<typeof commitTrustedRoomAdd>[0];
 
 interface TrustedParticipantsPanelInput {
+  profiles: SharedProfilesCell;
   myProfile: MyProfileCell;
   messages: SharedMessagesCell;
   id: string;
@@ -558,13 +609,15 @@ const TrustedParticipantsPanel = pattern<
   TrustedParticipantsPanelInput,
   { [NAME]: string; [UI]: any }
 >((
-  { myProfile, messages, id }: TrustedParticipantsPanelInput,
+  { profiles, myProfile, messages, id }: TrustedParticipantsPanelInput,
 ): { [NAME]: string; [UI]: any } => ({
   [NAME]: computed(() => `${id} participants panel`),
   [UI]: (
     <cf-hstack id={id} gap="2" wrap>
       <cf-chip
-        label={computed(() => participantSummary(myProfile, messages))}
+        label={computed(() =>
+          participantSummary(profiles, myProfile, messages)
+        )}
         variant="accent"
       />
     </cf-hstack>
@@ -576,6 +629,7 @@ type TrustedParticipantsPanelInputArg = Parameters<
 
 export interface TrustedProfileSaveSurfaceInput {
   myProfile: MyProfileCell;
+  profiles: SharedProfilesCell;
   adminManagerCredential: AdminManagerCredentialCell;
   nameDraft: Writable<string | Default<"">>;
   adminManagerDraft: AdminManagerDraftCell;
@@ -597,6 +651,7 @@ export const TrustedProfileSaveSurface = pattern<
 >((
   {
     myProfile,
+    profiles,
     adminManagerCredential,
     nameDraft,
     adminManagerDraft,
@@ -604,10 +659,11 @@ export const TrustedProfileSaveSurface = pattern<
 ): TrustedProfileSaveSurfaceOutput => {
   const saveProfile = commitTrustedProfileSave({
     myProfile,
+    profiles,
     adminManagerCredential,
     nameDraft,
     adminManagerDraft,
-  });
+  } as TrustedProfileSaveInput);
   const currentSavedName = computed(() =>
     currentProfileSnapshot(myProfile)?.name ?? "Name not set"
   );
@@ -668,6 +724,7 @@ export const TrustedProfileSaveSurface = pattern<
 });
 
 export interface TrustedAdminPanelInput {
+  profiles: SharedProfilesCell;
   myProfile: MyProfileCell;
   messages: SharedMessagesCell;
   adminRegistry: ChatAdminRegistryCell;
@@ -686,6 +743,7 @@ export const TrustedAdminPanel = pattern<
   TrustedAdminPanelOutput
 >((
   {
+    profiles,
     myProfile,
     messages,
     adminRegistry,
@@ -694,6 +752,7 @@ export const TrustedAdminPanel = pattern<
 ): TrustedAdminPanelOutput => {
   const adminRows = computed(() =>
     adminParticipantRowsValue(
+      profiles,
       myProfile,
       messages,
       adminRegistry,
@@ -789,6 +848,7 @@ export const TrustedAdminPanel = pattern<
 });
 
 export interface TrustedChatSendSurfaceInput {
+  profiles: SharedProfilesCell;
   myProfile: MyProfileCell;
   messageDraft: Writable<string | Default<"">>;
   messages: SharedMessagesCell;
@@ -805,7 +865,7 @@ export const TrustedChatSendSurface = pattern<
   TrustedChatSendSurfaceInput,
   TrustedChatSendSurfaceOutput
 >((
-  { myProfile, messageDraft, messages }: TrustedChatSendSurfaceInput,
+  { profiles, myProfile, messageDraft, messages }: TrustedChatSendSurfaceInput,
 ): TrustedChatSendSurfaceOutput => {
   const sendDisabled = computed(() =>
     currentProfileSnapshot(myProfile) === undefined ||
@@ -827,6 +887,7 @@ export const TrustedChatSendSurface = pattern<
       >
         <cf-vstack slot="content" gap="2">
           {TrustedParticipantsPanel({
+            profiles,
             myProfile,
             messages,
             id: "trusted-participants-panel",

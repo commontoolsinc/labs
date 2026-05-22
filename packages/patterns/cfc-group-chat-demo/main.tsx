@@ -34,6 +34,8 @@ import {
   type SharedChatMessage,
   type SharedMessagesCell,
   type SharedMessagesValue,
+  type SharedProfilesCell,
+  type SharedProfilesValue,
   type SharedRoomsCell,
   type SharedRoomsValue,
   TrustedAdminPanel,
@@ -199,6 +201,9 @@ type RoomsListInputArg = Parameters<typeof RoomsList>[0];
 type TrustedChatSendSurfaceInputArg = Parameters<
   typeof TrustedChatSendSurface
 >[0];
+type TrustedProfileSaveSurfaceInputArg = Parameters<
+  typeof TrustedProfileSaveSurface
+>[0];
 type TrustedAdminPanelInputArg = Parameters<typeof TrustedAdminPanel>[0];
 type TrustedRoomAddSurfaceInputArg = Parameters<
   typeof TrustedRoomAddSurface
@@ -209,6 +214,7 @@ type TrustedMessageSendInputArg = Parameters<typeof commitTrustedMessageSend>[
 
 export interface GroupChatDemoInput {
   myProfile?: PerUser<MyProfileCell>;
+  profiles?: PerSpace<SharedProfilesCell>;
   messages?: PerSpace<SharedMessagesCell>;
   rooms?: PerSpace<SharedRoomsCell>;
   adminRegistry?: PerSpace<ChatAdminRegistryCell>;
@@ -223,6 +229,7 @@ export interface GroupChatDemoOutput {
   [NAME]: string;
   [UI]: any;
   myProfile: PerUser<MyProfileCell>;
+  profiles: PerSpace<SharedProfilesCell>;
   messages: PerSpace<SharedMessagesCell>;
   rooms: PerSpace<SharedRoomsCell>;
   adminRegistry: PerSpace<ChatAdminRegistryCell>;
@@ -250,6 +257,7 @@ export interface GroupChatDemoOutput {
 export const GroupChatDemo = pattern<GroupChatDemoInput, GroupChatDemoOutput>((
   {
     myProfile,
+    profiles,
     messages,
     rooms,
     adminRegistry,
@@ -264,6 +272,7 @@ export const GroupChatDemo = pattern<GroupChatDemoInput, GroupChatDemoOutput>((
   const adminManagerCredentialCell = new Writable.perUser<
     ChatAdminManagerCredential | null
   >(null) as AdminManagerCredentialCell;
+  const profilesCell = profiles as SharedProfilesCell;
   const messagesCell = messages as SharedMessagesCell;
   const roomsCell = rooms as SharedRoomsCell;
   const adminRegistryCell = adminRegistry as ChatAdminRegistryCell;
@@ -274,19 +283,22 @@ export const GroupChatDemo = pattern<GroupChatDemoInput, GroupChatDemoOutput>((
   const roomDraftCell = roomDraft as RoomDraftCell;
   const trustedProfileSave = TrustedProfileSaveSurface({
     myProfile: myProfileCell,
+    profiles: profilesCell,
     adminManagerCredential: adminManagerCredentialCell,
     nameDraft: profileDraftCell,
     adminManagerDraft: adminManagerDraftCell,
-  });
+  } as TrustedProfileSaveSurfaceInputArg);
   const currentUserCanManageAdminsStatus =
     trustedProfileSave.currentUserCanManageAdmins;
   const trustedAdminPanel = TrustedAdminPanel({
+    profiles: profilesCell,
     myProfile: myProfileCell,
     messages: messagesCell,
     adminRegistry: adminRegistryCell,
     adminManagerCredential: adminManagerCredentialCell,
   } as TrustedAdminPanelInputArg);
   const trustedSend = TrustedChatSendSurface({
+    profiles: profilesCell,
     myProfile: myProfileCell,
     messageDraft: messageDraftCell,
     messages: messagesCell,
@@ -308,7 +320,8 @@ export const GroupChatDemo = pattern<GroupChatDemoInput, GroupChatDemoOutput>((
   const setHostMessageDraft = writeDraftText({ value: hostMessageDraftCell });
   const setRoomDraft = writeDraftText({ value: roomDraftCell });
   const participantCountLabel = computed(() => {
-    const count = participantClaimsValue(myProfileCell, messagesCell).length;
+    const count =
+      participantClaimsValue(profilesCell, myProfileCell, messagesCell).length;
     return `${count} participant${count === 1 ? "" : "s"}`;
   });
   const roomCountLabel = computed(() =>
@@ -318,13 +331,14 @@ export const GroupChatDemo = pattern<GroupChatDemoInput, GroupChatDemoOutput>((
     draftText(hostMessageDraftCell).trim().length === 0
   );
   const addRandomMessagesDisabled = computed(() =>
-    participantClaimsValue(myProfileCell, messagesCell).length === 0 ||
+    participantClaimsValue(profilesCell, myProfileCell, messagesCell).length ===
+      0 ||
     messagesValue(messagesCell).length === 0
   );
   const addRandomMessages = action(() => {
     const nextMessages = createRandomImportedClaimedMessages(
       sortDisplayMessages(messagesValue(messagesCell)),
-      participantClaimsValue(myProfileCell, messagesCell),
+      participantClaimsValue(profilesCell, myProfileCell, messagesCell),
     );
     nextMessages.forEach((message) =>
       messagesCell.push(message as SharedChatMessage)
@@ -449,6 +463,7 @@ export const GroupChatDemo = pattern<GroupChatDemoInput, GroupChatDemoOutput>((
       </cf-screen>
     ),
     myProfile: myProfileCell as PerUser<MyProfileCell>,
+    profiles: profilesCell as PerSpace<SharedProfilesCell>,
     messages: messagesCell as PerSpace<SharedMessagesCell>,
     rooms: roomsCell as PerSpace<SharedRoomsCell>,
     adminRegistry: adminRegistryCell as PerSpace<ChatAdminRegistryCell>,
@@ -478,4 +493,9 @@ export const GroupChatDemo = pattern<GroupChatDemoInput, GroupChatDemoOutput>((
 
 export default GroupChatDemo;
 
-export type { ChatAdminRegistryValue, SharedMessagesValue, SharedRoomsValue };
+export type {
+  ChatAdminRegistryValue,
+  SharedMessagesValue,
+  SharedProfilesValue,
+  SharedRoomsValue,
+};
