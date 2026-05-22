@@ -24,6 +24,7 @@
     "./contracts/run-report": "./src/contracts/run-report.ts",
     "./contracts/skill": "./src/contracts/skill.ts",
     "./contracts/subagent": "./src/contracts/subagent.ts",
+    "./contracts/interactive-chat": "./src/contracts/interactive-chat.ts",
     "./contracts/tool-result": "./src/contracts/tool-result.ts",
     "./contracts/tool-descriptor": "./src/contracts/tool-descriptor.ts",
     "./contracts/transcript": "./src/contracts/transcript.ts",

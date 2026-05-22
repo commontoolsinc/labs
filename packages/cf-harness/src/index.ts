@@ -17,11 +17,13 @@ export {
   confidentialityOnlyIfcLabel,
   createHarnessCfcModelContextInputLabels,
   createHarnessCfcModelContextObservation,
-  type HarnessCfcModelContext,
-  type HarnessCfcModelContextChannel,
-  type HarnessCfcModelContextObservation,
-  type HarnessCfcModelContextObservationInput,
   mergeConfidentialityOnlyLabels,
+} from "./contracts/cfc-model-context.ts";
+export type {
+  HarnessCfcModelContext,
+  HarnessCfcModelContextChannel,
+  HarnessCfcModelContextObservation,
+  HarnessCfcModelContextObservationInput,
 } from "./contracts/cfc-model-context.ts";
 export * from "./contracts/cfc-policy-snapshot.ts";
 export * from "./contracts/run-manifest.ts";
@@ -31,6 +33,7 @@ export * from "./contracts/policy-trace.ts";
 export * from "./contracts/run-report.ts";
 export * from "./contracts/skill.ts";
 export * from "./contracts/subagent.ts";
+export * from "./contracts/interactive-chat.ts";
 export * from "./contracts/tool-result.ts";
 export * from "./contracts/tool-descriptor.ts";
 export * from "./contracts/transcript.ts";
