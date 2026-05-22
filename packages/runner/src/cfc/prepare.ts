@@ -975,12 +975,18 @@ export const writeDetailValueForTarget = (
   for (const write of writeDetails) {
     if (write.address.id !== target.id) continue;
     if (normalizeCellScope(write.address.scope) !== target.scope) continue;
-    if (write.address.path[0] !== "value") continue;
+    if (write.address.path[0] !== "value") {
+      continue;
+    }
     const writePath = write.address.path.slice(1).map((entry) => String(entry));
 
     if (writePath.length <= targetPath.length) {
       // Ancestor-or-exact: `writePath` must be a prefix of `targetPath`.
-      if (!writePath.every((segment, i) => segment === targetPath[i])) continue;
+      if (
+        !writePath.every((segment, index) => segment === targetPath[index])
+      ) {
+        continue;
+      }
       if (writePath.length > baseWritePathLength) {
         baseWritePathLength = writePath.length;
         sawBase = true;
@@ -991,7 +997,11 @@ export const writeDetailValueForTarget = (
       }
     } else {
       // Descendant: `targetPath` must be a prefix of `writePath`.
-      if (!targetPath.every((segment, i) => segment === writePath[i])) continue;
+      if (
+        !targetPath.every((segment, index) => segment === writePath[index])
+      ) {
+        continue;
+      }
       descendants.push({
         rel: writePath.slice(targetPath.length),
         value: write[key],
