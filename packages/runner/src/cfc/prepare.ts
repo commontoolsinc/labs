@@ -957,6 +957,7 @@ export const writeDetailValueForTarget = (
   key: "value" | "previousValue",
 ): FabricValue => {
   const writeDetails = [...(tx.getWriteDetails?.(target.space) ?? [])];
+  const targetPath = target.path.map((entry) => String(entry));
   let matchingWrite:
     | {
       address: {
@@ -982,7 +983,6 @@ export const writeDetailValueForTarget = (
       continue;
     }
     const writePath = write.address.path.slice(1).map((entry) => String(entry));
-    const targetPath = target.path.map((entry) => String(entry));
     if (writePath.length > targetPath.length) {
       // Descendant write: when `targetPath` is a prefix, keep it to overlay
       // onto the base value (composing granular field-writes).
@@ -1010,7 +1010,6 @@ export const writeDetailValueForTarget = (
   if (value === undefined || matchingWritePath === undefined) {
     return undefined;
   }
-  const targetPath = target.path.map((entry) => String(entry));
   const baseValue = matchingWritePath.length === targetPath.length
     ? value
     : getValueAtPath(value, targetPath.slice(matchingWritePath.length));
