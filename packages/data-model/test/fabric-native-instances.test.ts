@@ -7,8 +7,8 @@ import {
   type FabricValue,
   IS_DEEP_FROZEN,
   RECONSTRUCT,
-} from "../interface.ts";
-import { BaseReconstructionContext } from "../base-reconstruction-context.ts";
+} from "../src/interface.ts";
+import { BaseReconstructionContext } from "../src/BaseReconstructionContext.ts";
 import {
   FabricError,
   FabricMap,
@@ -16,22 +16,22 @@ import {
   FabricRegExp,
   FabricSet,
   isConvertibleNativeInstance,
-} from "../fabric-native-instances.ts";
-import { nativeFromFabricValueModern } from "../fabric-value-modern.ts";
-import { FrozenMap, FrozenSet } from "../frozen-builtins.ts";
+} from "../src/fabric-native-instances.ts";
+import { nativeFromFabricValueModern } from "../src/fabric-value-modern.ts";
+import { FrozenMap, FrozenSet } from "../src/frozen-builtins.ts";
 import {
   NATIVE_TAGS,
   tagFromNativeClass,
   tagFromNativeValue,
-} from "../native-type-tags.ts";
-import { UnknownValue } from "../unknown-value.ts";
-import { ProblematicValue } from "../problematic-value.ts";
-import { ExplicitTagValue } from "../explicit-tag-value.ts";
+} from "../src/native-type-tags.ts";
+import { UnknownValue } from "../src/UnknownValue.ts";
+import { ProblematicValue } from "../src/ProblematicValue.ts";
+import { ExplicitTagValue } from "../src/ExplicitTagValue.ts";
 import {
   deepFreeze,
   isDeepFrozen,
   isDeepFrozenFabricValue,
-} from "../deep-freeze.ts";
+} from "../src/deep-freeze.ts";
 
 /** Dummy reconstruction context for tests. */
 class DummyReconstructionContext extends BaseReconstructionContext {

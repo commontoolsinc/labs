@@ -2,7 +2,7 @@ import { assert, assertEquals, assertStrictEquals } from "@std/assert";
 import { applyPatch } from "../v2/patch.ts";
 import { FabricError } from "@commonfabric/data-model/fabric-native-instances";
 import { FabricInstance } from "@commonfabric/data-model/interface";
-import { FabricBytes } from "@commonfabric/data-model/fabric-bytes";
+import { FabricBytes } from "@commonfabric/data-model/FabricBytes";
 import { FabricEpochNsec } from "@commonfabric/data-model/fabric-epoch";
 
 // `patch.ts` deep-clones incoming op values for isolation. It MUST preserve

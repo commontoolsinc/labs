@@ -6,7 +6,7 @@ import {
   RECONSTRUCT,
   type ReconstructionContext,
 } from "./interface.ts";
-import { ExplicitTagValue } from "./explicit-tag-value.ts";
+import { ExplicitTagValue } from "./ExplicitTagValue.ts";
 import { deepFreeze } from "./deep-freeze.ts";
 
 /**

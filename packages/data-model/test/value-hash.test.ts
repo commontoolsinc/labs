@@ -1,13 +1,13 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { hashOf, hashStringOf, taggedHashStringOf } from "../value-hash.ts";
+import { hashOf, hashStringOf, taggedHashStringOf } from "../src/value-hash.ts";
 import { createHasher } from "@commonfabric/content-hash";
 import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
-import { FabricHash } from "../fabric-hash.ts";
-import { FabricValue } from "../interface.ts";
-import { FabricEpochDays, FabricEpochNsec } from "../fabric-epoch.ts";
-import { FabricError, FabricRegExp } from "../fabric-native-instances.ts";
-import { FabricBytes } from "../fabric-bytes.ts";
+import { FabricHash } from "../src/FabricHash.ts";
+import { FabricValue } from "../src/interface.ts";
+import { FabricEpochDays, FabricEpochNsec } from "../src/fabric-epoch.ts";
+import { FabricError, FabricRegExp } from "../src/fabric-native-instances.ts";
+import { FabricBytes } from "../src/FabricBytes.ts";
 
 // Dynamic import to satisfy the no-external-import lint rule.
 const nodeCrypto = await import("node:crypto");

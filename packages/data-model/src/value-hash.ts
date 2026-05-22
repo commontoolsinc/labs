@@ -13,8 +13,8 @@ import {
   sha256,
 } from "@commonfabric/content-hash";
 import { isDeepFrozen } from "./deep-freeze.ts";
-import { FabricHash } from "./fabric-hash.ts";
-import { FabricBytes } from "./fabric-bytes.ts";
+import { FabricHash } from "./FabricHash.ts";
+import { FabricBytes } from "./FabricBytes.ts";
 import { DECONSTRUCT, type FabricInstance } from "./interface.ts";
 import { shallowFabricFromNativeValueModern } from "./fabric-value-modern.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";

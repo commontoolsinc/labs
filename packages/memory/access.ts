@@ -7,7 +7,7 @@ import {
   Proof,
   Signer,
 } from "./interface.ts";
-import type { FabricHash } from "@commonfabric/data-model/fabric-hash";
+import type { FabricHash } from "@commonfabric/data-model/FabricHash";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { unauthorized } from "./error.ts";
 import { type DID } from "@commonfabric/identity";

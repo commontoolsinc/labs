@@ -361,7 +361,7 @@ export interface BuilderFunctionsAndConstants {
     typeof import("@commonfabric/data-model/fabric-epoch").FabricEpochNsec;
   FabricEpochDays:
     typeof import("@commonfabric/data-model/fabric-epoch").FabricEpochDays;
-  FabricHash: typeof import("@commonfabric/data-model/fabric-hash").FabricHash;
+  FabricHash: typeof import("@commonfabric/data-model/FabricHash").FabricHash;
 
   // Debug stringifiers
   toCompactDebugString:

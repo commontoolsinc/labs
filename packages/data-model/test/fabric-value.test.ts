@@ -8,9 +8,9 @@ import {
   resetDataModelConfig,
   setDataModelConfig,
   shallowFabricFromNativeValue,
-} from "../fabric-value.ts";
-import { FabricError } from "../fabric-native-instances.ts";
-import { FabricBytes } from "../fabric-bytes.ts";
+} from "../src/fabric-value.ts";
+import { FabricError } from "../src/fabric-native-instances.ts";
+import { FabricBytes } from "../src/FabricBytes.ts";
 
 describe("fabric-value", () => {
   // Explicitly pin modernDataModel off so the legacy-path tests (below the

@@ -11,7 +11,7 @@ import { deepFreeze, isDeepFrozen } from "./deep-freeze.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { TAGS } from "./fabric-type-tags.ts";
 import { FrozenMap, FrozenSet } from "./frozen-builtins.ts";
-import { EmptyReconstructionContext } from "./empty-reconstruction-context.ts";
+import { EmptyReconstructionContext } from "./EmptyReconstructionContext.ts";
 
 // ---------------------------------------------------------------------------
 // Utility: native-instance type guard

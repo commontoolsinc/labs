@@ -6,9 +6,9 @@ import {
   nativeFromFabricValue,
   resetDataModelConfig,
   setDataModelConfig,
-} from "../fabric-value.ts";
-import type { FabricValue } from "../fabric-value.ts";
-import { FabricError } from "../fabric-native-instances.ts";
+} from "../src/fabric-value.ts";
+import type { FabricValue } from "../src/fabric-value.ts";
+import { FabricError } from "../src/fabric-native-instances.ts";
 
 /** Encode then decode a value through the current dispatch configuration. */
 function roundTrip(value: FabricValue): FabricValue {

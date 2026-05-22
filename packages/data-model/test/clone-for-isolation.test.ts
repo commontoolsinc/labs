@@ -5,12 +5,12 @@ import {
   fabricFromNativeValue,
   resetDataModelConfig,
   setDataModelConfig,
-} from "../fabric-value.ts";
-import type { FabricValue } from "../fabric-value.ts";
-import { deepFreeze, isDeepFrozen } from "../deep-freeze.ts";
-import { FabricBytes } from "../fabric-bytes.ts";
-import { FabricEpochNsec } from "../fabric-epoch.ts";
-import { FabricError } from "../fabric-native-instances.ts";
+} from "../src/fabric-value.ts";
+import type { FabricValue } from "../src/fabric-value.ts";
+import { deepFreeze, isDeepFrozen } from "../src/deep-freeze.ts";
+import { FabricBytes } from "../src/FabricBytes.ts";
+import { FabricEpochNsec } from "../src/fabric-epoch.ts";
+import { FabricError } from "../src/fabric-native-instances.ts";
 
 // ============================================================================
 // cloneForIsolation

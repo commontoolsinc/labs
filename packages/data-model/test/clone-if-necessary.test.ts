@@ -5,21 +5,21 @@ import {
   type CloneOptions,
   resetDataModelConfig,
   setDataModelConfig,
-} from "../fabric-value.ts";
-import type { FabricValue } from "../fabric-value.ts";
-import { isDeepFrozen, isDeepFrozenFabricValue } from "../deep-freeze.ts";
-import { FabricBytes } from "../fabric-bytes.ts";
-import { FabricEpochDays, FabricEpochNsec } from "../fabric-epoch.ts";
-import { FabricHash } from "../fabric-hash.ts";
+} from "../src/fabric-value.ts";
+import type { FabricValue } from "../src/fabric-value.ts";
+import { isDeepFrozen, isDeepFrozenFabricValue } from "../src/deep-freeze.ts";
+import { FabricBytes } from "../src/FabricBytes.ts";
+import { FabricEpochDays, FabricEpochNsec } from "../src/fabric-epoch.ts";
+import { FabricHash } from "../src/FabricHash.ts";
 import {
   FabricError,
   FabricMap,
   FabricRegExp,
   FabricSet,
-} from "../fabric-native-instances.ts";
-import { ProblematicValue } from "../problematic-value.ts";
-import { UnknownValue } from "../unknown-value.ts";
-import { FabricPrimitive, FabricSpecialObject } from "../interface.ts";
+} from "../src/fabric-native-instances.ts";
+import { ProblematicValue } from "../src/ProblematicValue.ts";
+import { UnknownValue } from "../src/UnknownValue.ts";
+import { FabricPrimitive, FabricSpecialObject } from "../src/interface.ts";
 
 // ============================================================================
 // Tests

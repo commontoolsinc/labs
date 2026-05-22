@@ -4,10 +4,10 @@ import {
   type FabricValue,
   type ReconstructionContext,
 } from "./interface.ts";
-import { ExplicitTagValue } from "./explicit-tag-value.ts";
-import { ProblematicValue } from "./problematic-value.ts";
+import { ExplicitTagValue } from "./ExplicitTagValue.ts";
+import { ProblematicValue } from "./ProblematicValue.ts";
 import { FabricEpochDays, FabricEpochNsec } from "./fabric-epoch.ts";
-import { FabricBytes } from "./fabric-bytes.ts";
+import { FabricBytes } from "./FabricBytes.ts";
 import { TAGS } from "./fabric-type-tags.ts";
 import {
   fromBase64url,
