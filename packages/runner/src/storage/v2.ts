@@ -1021,7 +1021,7 @@ class SpaceReplica implements ISpaceReplica {
     this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>();
   }
 
-  async closeNow(): Promise<void> {
+  closeNow(): void {
     this.cancelQueuedWatchRefresh();
     this.#watchView?.close();
     this.#watchView = null;
