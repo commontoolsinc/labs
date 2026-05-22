@@ -204,6 +204,98 @@ export function cloneHelper(
 }
 
 // =============================================================================
+// `cloneForIsolation`
+// =============================================================================
+
+/**
+ * Produces a deep clone of `value` that is isolated from later mutations to
+ * the source, while preserving the identity of already-deep-frozen subtrees
+ * by reference.
+ *
+ * Dispatch:
+ * - Primitives and `FabricPrimitive` instances → returned as-is (immutable).
+ * - Already-deep-frozen values (per `isDeepFrozenFabricValue`) → returned by
+ *   identity at every level of the recursion. This is the perf optimization
+ *   the simpler `cloneIfNecessary(_, { frozen: false })` lacks: that one
+ *   `force`-clones, allocating new identities even for unchanged subtrees.
+ * - `FabricInstance` → deep-cloned via `.deepClone(false)` (its own semantics
+ *   govern any nested values).
+ * - Plain objects and arrays → deep-cloned recursively, with cycle detection
+ *   (back-references resolve to the in-progress copy, preserving shared
+ *   structure and terminating on cycles).
+ * - Any other class instance is a `FabricValue` type violation upstream; this
+ *   throws rather than silently passing it through.
+ *
+ * Result mutability is intentionally "mixed": the returned tree is mutable
+ * along any path that wasn't already deep-frozen in the input; deep-frozen
+ * subtrees inside the result remain frozen by reference. Callers that need a
+ * uniformly mutable result should use `cloneIfNecessary(value, { frozen:
+ * false })` instead.
+ */
+export function cloneForIsolation<T extends FabricValue>(value: T): T {
+  return cloneForIsolationHelper(value, null) as T;
+}
+
+function cloneForIsolationHelper(
+  value: FabricValue,
+  seen: Map<object, FabricValue> | null,
+): FabricValue {
+  switch (tagFromNativeValue(value)) {
+    // Inherently immutable: nothing to isolate from.
+    case NATIVE_TAGS.Primitive:
+    case NATIVE_TAGS.EpochNsec:
+    case NATIVE_TAGS.EpochDays:
+    case NATIVE_TAGS.ContentHash:
+    case NATIVE_TAGS.FabricBytes:
+      return value;
+
+    case NATIVE_TAGS.FabricInstance: {
+      // Already-deep-frozen instances can't be mutated, so share by identity.
+      if (isDeepFrozenFabricValue(value)) return value;
+      return (value as FabricInstance).deepClone(false);
+    }
+
+    case NATIVE_TAGS.Array: {
+      if (isDeepFrozenFabricValue(value)) return value;
+      const arr = value as FabricValue[];
+      const existing = seen?.get(arr);
+      if (existing !== undefined) return existing;
+      seen ??= new Map();
+      const copy: FabricValue[] = new Array(arr.length);
+      seen.set(arr, copy);
+      for (let i = 0; i < arr.length; i++) {
+        if (i in arr) copy[i] = cloneForIsolationHelper(arr[i], seen);
+      }
+      return copy;
+    }
+
+    case NATIVE_TAGS.Object: {
+      if (isDeepFrozenFabricValue(value)) return value;
+      const obj = value as object;
+      const existing = seen?.get(obj);
+      if (existing !== undefined) return existing;
+      seen ??= new Map();
+      // Preserve null prototypes (e.g. `Object.create(null)`).
+      const proto = Object.getPrototypeOf(obj);
+      const copy = Object.create(proto) as Record<string, FabricValue>;
+      seen.set(obj, copy);
+      for (const [key, val] of Object.entries(obj)) {
+        copy[key] = cloneForIsolationHelper(val as FabricValue, seen);
+      }
+      return copy;
+    }
+
+    default:
+      // Any other class instance is a `FabricValue` type violation upstream.
+      throw new Error(
+        `Cannot clone for isolation: ${
+          (value as object).constructor?.name ?? typeof value
+        }`,
+      );
+  }
+}
+
+// =============================================================================
 // `cloneForMutation`
 // =============================================================================
 
