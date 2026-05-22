@@ -410,6 +410,45 @@ Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant 
   );
 });
 
+Deno.test("CfHarnessPromptLoop forwards abort signals to gateway requests", async () => {
+  const controller = new AbortController();
+  let seenSignal: RequestInit["signal"];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-loop-signal",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "disabled",
+    }),
+    fetchFn: (_input, init) => {
+      seenSignal = init?.signal;
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "Hi.",
+              },
+            }],
+          }),
+          { status: 200 },
+        ),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Say hi.",
+    signal: controller.signal,
+  });
+
+  assertEquals(result.finalAssistantText, "Hi.");
+  assertEquals(seenSignal, controller.signal);
+});
+
 Deno.test("CfHarnessPromptLoop strips trusted-only CFC input labels from model tool args", async () => {
   const sandbox = new FakeSandboxRuntime([
     { stdout: "ok\n", stderr: "", exitCode: 0 },

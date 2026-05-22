@@ -128,6 +128,7 @@ export interface RunHarnessPromptOptions {
   maxModelTurns?: number;
   model?: string;
   promptSlotBinding?: PromptSlotBinding;
+  signal?: AbortSignal;
   onTranscriptEvent?: (
     event: HarnessTranscriptEvent,
   ) => void | Promise<void>;
@@ -138,6 +139,7 @@ export interface RunHarnessTranscriptOptions {
   maxModelTurns?: number;
   model?: string;
   promptSlotBinding?: PromptSlotBinding;
+  signal?: AbortSignal;
   onTranscriptEvent?: (
     event: HarnessTranscriptEvent,
   ) => void | Promise<void>;
@@ -1799,6 +1801,7 @@ export class CfHarnessPromptLoop {
       model: options.model,
       maxModelTurns: options.maxModelTurns,
       promptSlotBinding: options.promptSlotBinding,
+      signal: options.signal,
       onTranscriptEvent: options.onTranscriptEvent,
     });
   }
@@ -1902,7 +1905,10 @@ export class CfHarnessPromptLoop {
         modelTurns += 1;
         const response = await this.gatewayClient.createChatCompletionJson(
           await this.#buildChatCompletionRequest(model, transcript),
-          { onChatCompletionAttempt: recordGatewayAttempt },
+          {
+            signal: options.signal,
+            onChatCompletionAttempt: recordGatewayAttempt,
+          },
         );
         const assistantMessage = createAssistantTranscriptMessage(response);
         transcript.push(assistantMessage);

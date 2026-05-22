@@ -58,6 +58,7 @@ interface HarnessInteractiveChatSessionRecord {
   status: HarnessChatSessionStatus;
   transcript: HarnessTranscriptMessage[];
   activeTask?: Promise<void>;
+  activeAbortController?: AbortController;
   canceledTurnIds: Set<string>;
 }
 
@@ -104,6 +105,12 @@ const turnNotFoundError = (
     code: "turn_not_found",
     message: `active turn not found for session ${sessionId}`,
   });
+
+const createTurnAbortError = (turnId: string, reason: string): DOMException =>
+  new DOMException(
+    `cf-harness chat turn ${turnId} canceled: ${reason}`,
+    "AbortError",
+  );
 
 const parseToolMessageContent = (
   content: string,
@@ -330,12 +337,20 @@ export class HarnessInteractiveChatService {
     if (updatedRecord === undefined) {
       return sessionNotFoundError(requestId, params.sessionId);
     }
-    const task = this.#runTurn(updatedRecord, turn.turnId, params);
+    const abortController = new AbortController();
+    const task = this.#runTurn(
+      updatedRecord,
+      turn.turnId,
+      params,
+      abortController.signal,
+    );
     updatedRecord.activeTask = task;
+    updatedRecord.activeAbortController = abortController;
     task.finally(() => {
       const latest = this.#sessions.get(params.sessionId);
       if (latest?.activeTask === task) {
         latest.activeTask = undefined;
+        latest.activeAbortController = undefined;
       }
     });
     return createHarnessChatOkResponse(requestId, turn);
@@ -359,6 +374,9 @@ export class HarnessInteractiveChatService {
     }
     const activeTurnId = record.status.activeTurnId;
     record.canceledTurnIds.add(activeTurnId);
+    record.activeAbortController?.abort(
+      createTurnAbortError(activeTurnId, reason),
+    );
     await this.#emit(sessionId, activeTurnId, {
       kind: "turn_canceled",
       turnId: activeTurnId,
@@ -381,6 +399,9 @@ export class HarnessInteractiveChatService {
     }
     if (record.status.activeTurnId !== undefined) {
       record.canceledTurnIds.add(record.status.activeTurnId);
+      record.activeAbortController?.abort(
+        createTurnAbortError(record.status.activeTurnId, reason),
+      );
     }
     await this.#emit(sessionId, undefined, {
       kind: "session_closed",
@@ -396,6 +417,7 @@ export class HarnessInteractiveChatService {
     record: HarnessInteractiveChatSessionRecord,
     turnId: string,
     params: HarnessChatStartTurnParams,
+    signal: AbortSignal,
   ): Promise<void> {
     const session = record.status;
     const policy = params.policy ?? session.policy ??
@@ -421,6 +443,7 @@ export class HarnessInteractiveChatService {
         transcript,
         model: session.model,
         promptSlotBinding: policy.promptSlot,
+        signal,
         onTranscriptEvent: async (event) => {
           if (record.canceledTurnIds.has(turnId)) {
             return;

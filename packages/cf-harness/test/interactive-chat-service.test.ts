@@ -249,20 +249,33 @@ Deno.test("interactive service maps tool transcript messages to tool and file ev
   });
 });
 
-Deno.test("interactive service cancels a turn without closing the session", async () => {
-  let release: (() => void) | undefined;
+Deno.test("interactive service aborts canceled turns without closing the session", async () => {
+  let runCount = 0;
+  let firstSignal: AbortSignal | undefined;
   const createPromptLoop: HarnessInteractivePromptLoopFactory = () => ({
-    runTranscript: () =>
-      new Promise((resolve) => {
-        release = () =>
-          resolve({
-            model: "gpt-test",
-            finalAssistantText: "Late answer.",
-            transcript: [{ role: "assistant", content: "Late answer." }],
-            modelTurns: 1,
-            runState: {} as HarnessPromptLoopResult["runState"],
-          });
-      }),
+    runTranscript: async (options) => {
+      runCount += 1;
+      if (runCount === 1) {
+        firstSignal = options.signal;
+        return await new Promise<HarnessPromptLoopResult>(
+          (_resolve, reject) => {
+            if (options.signal?.aborted) {
+              reject(options.signal.reason);
+              return;
+            }
+            options.signal?.addEventListener("abort", () => {
+              reject(options.signal?.reason);
+            }, { once: true });
+          },
+        );
+      }
+      const result = makeResult(options, "Second answer.");
+      await options.onTranscriptEvent?.({
+        message: result.transcript[result.transcript.length - 1],
+        transcript: result.transcript,
+      });
+      return result;
+    },
   });
   const service = new HarnessInteractiveChatService({
     createPromptLoop,
@@ -285,14 +298,84 @@ Deno.test("interactive service cancels a turn without closing the session", asyn
     "user_requested",
   );
   assertEquals(canceled.ok, true);
+  assertEquals(firstSignal instanceof AbortSignal, true);
+  assertEquals(firstSignal?.aborted, true);
   assertEquals(service.status("session-1").sessions[0].status, "idle");
   assertEquals(service.status("session-1").sessions[0].reusable, true);
 
-  release?.();
   await service.waitForTurn("session-1", "turn-1");
   assertEquals(
     service.events("session-1").map((event) => event.event.kind),
     ["session_started", "turn_started", "turn_canceled"],
+  );
+
+  const secondTurn = await service.startTurn("req-4", {
+    sessionId: "session-1",
+    turnId: "turn-2",
+    input: { text: "Again" },
+  });
+  assertEquals(secondTurn.ok, true);
+  await service.waitForTurn("session-1", "turn-2");
+
+  assertEquals(runCount, 2);
+  assertEquals(service.status("session-1").sessions[0].status, "idle");
+  assertEquals(service.status("session-1").sessions[0].reusable, true);
+  assertEquals(service.status("session-1").sessions[0].turnCount, 2);
+  assertEquals(
+    service.events("session-1").map((event) => event.event.kind),
+    [
+      "session_started",
+      "turn_started",
+      "turn_canceled",
+      "turn_started",
+      "assistant_delta",
+      "assistant_completed",
+      "turn_completed",
+    ],
+  );
+});
+
+Deno.test("interactive service aborts active turns when closing a session", async () => {
+  let activeSignal: AbortSignal | undefined;
+  const createPromptLoop: HarnessInteractivePromptLoopFactory = () => ({
+    runTranscript: async (options) => {
+      activeSignal = options.signal;
+      return await new Promise<HarnessPromptLoopResult>((_resolve, reject) => {
+        if (options.signal?.aborted) {
+          reject(options.signal.reason);
+          return;
+        }
+        options.signal?.addEventListener("abort", () => {
+          reject(options.signal?.reason);
+        }, { once: true });
+      });
+    },
+  });
+  const service = new HarnessInteractiveChatService({
+    createPromptLoop,
+    now: nextIsoNow(),
+  });
+
+  await service.startSession("req-1", {
+    sessionId: "session-1",
+    workspace: { hostPath: "/workspace" },
+  });
+  await service.startTurn("req-2", {
+    sessionId: "session-1",
+    turnId: "turn-1",
+    input: { text: "Start" },
+  });
+  const closed = await service.closeSession("req-3", "session-1", "done");
+  assertEquals(closed.ok, true);
+  assertEquals(activeSignal instanceof AbortSignal, true);
+  assertEquals(activeSignal?.aborted, true);
+  assertEquals(service.status("session-1").sessions[0].status, "closed");
+  assertEquals(service.status("session-1").sessions[0].reusable, false);
+
+  await service.waitForTurn("session-1", "turn-1");
+  assertEquals(
+    service.events("session-1").map((event) => event.event.kind),
+    ["session_started", "turn_started", "session_closed"],
   );
 });
 
