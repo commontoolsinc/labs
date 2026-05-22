@@ -22,7 +22,7 @@ export type Capabilities = {
   prefill: boolean;
   images: boolean;
   reasoning: boolean;
-  nativeModelToolIds?: readonly LLMNativeModelToolId[];
+  nativeModelToolIds?: LLMNativeModelToolId[];
 };
 
 // Gateway /v1/models response types
@@ -397,9 +397,9 @@ if (env.CFTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
     [GOOGLE_SEARCH_NATIVE_MODEL_TOOL]: () =>
       vertexProvider.tools.googleSearch({}),
   };
-  const googleSearchNativeModelToolIds = [
+  const googleSearchNativeModelToolIds: LLMNativeModelToolId[] = [
     GOOGLE_SEARCH_NATIVE_MODEL_TOOL,
-  ] as const;
+  ];
 
   addModel({
     provider: vertexProvider,
