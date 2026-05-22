@@ -13,6 +13,8 @@ import {
   sourceRelPathToTreeSegments,
   writeUnavailableErrno,
 } from "./mod.ts";
+import darwinPlatform from "./platform-darwin.ts";
+import linuxPlatform from "./platform-linux.ts";
 import { EACCES, EINVAL, EROFS } from "./platform.ts";
 
 function env(values: Record<string, string | undefined>) {
@@ -289,6 +291,11 @@ Deno.test("CFC writeback xattr errno policy distinguishes unsupported and malfor
     ),
     EINVAL,
   );
+});
+
+Deno.test("platform ENOTSUP matches host errno values", () => {
+  assertEquals(darwinPlatform.ENOTSUP, 45);
+  assertEquals(linuxPlatform.ENOTSUP, 95);
 });
 
 Deno.test("root space lookup decodes request names and replies with canonical names", () => {

@@ -76,8 +76,6 @@ import { decodeFuseComponent, encodeFusePathSegments } from "./path-codec.ts";
 import { buildNodeStat, getMountOwnership, nodeMode } from "./stat.ts";
 
 const encoder = new TextEncoder();
-const ENOTSUP = 95;
-
 // Operation ring buffer — last 50 ops for crash diagnostics
 const OP_RING: string[] = [];
 const OP_RING_SIZE = 50;
@@ -435,6 +433,7 @@ export async function main(argv: string[] = Deno.args) {
     writeFileInfo,
     O_TRUNC,
     ENODATA,
+    ENOTSUP,
   } = platform;
 
   // Create filesystem tree
