@@ -6,6 +6,7 @@ import {
   resolveLinkEndpointAddress,
   resolvePieceConfig,
   type SpaceConfig,
+  withRuntimeCleanupOnFailure,
 } from "../lib/piece.ts";
 import { SlugResolutionError } from "@commonfabric/piece";
 import {
@@ -22,6 +23,42 @@ const FULL_URL = `${API_URL}/${SPACE}/${PIECE}`;
 const NO_PIECE_FULL_URL = `${API_URL}/${SPACE}`;
 
 describe("cli piece parsing", () => {
+  it("force-closes loadManager storage when initialization fails", async () => {
+    let disposeCalls = 0;
+    let closeNowCalls = 0;
+    const originalError = new Error("sync failed");
+
+    await expect(withRuntimeCleanupOnFailure({
+      dispose: () => {
+        disposeCalls++;
+        return Promise.resolve();
+      },
+      storageManager: {
+        closeNow: () => {
+          closeNowCalls++;
+          return Promise.resolve();
+        },
+      },
+    }, () => Promise.reject(originalError))).rejects.toBe(originalError);
+
+    expect(closeNowCalls).toBe(1);
+    expect(disposeCalls).toBe(0);
+  });
+
+  it("does not dispose loadManager runtime after successful initialization", async () => {
+    let disposeCalls = 0;
+
+    const result = await withRuntimeCleanupOnFailure({
+      dispose: () => {
+        disposeCalls++;
+        return Promise.resolve();
+      },
+    }, () => Promise.resolve("ready"));
+
+    expect(result).toBe("ready");
+    expect(disposeCalls).toBe(0);
+  });
+
   it("parseSpaceOptions() handles individual components and full url", () => {
     const expected = {
       apiUrl: API_URL,

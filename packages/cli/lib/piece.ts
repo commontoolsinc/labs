@@ -96,6 +96,50 @@ export interface PieceResolutionDeps {
 
 const CLI_TRACE_TIMINGS = Deno.env.get("CF_CLI_TRACE_TIMINGS") === "1";
 
+interface DisposableRuntime {
+  dispose(): Promise<unknown>;
+  storageManager?: unknown;
+}
+
+function storageManagerCloseNow(
+  storageManager: unknown,
+): (() => Promise<unknown>) | undefined {
+  if (
+    typeof storageManager === "object" && storageManager !== null &&
+    "closeNow" in storageManager
+  ) {
+    const closeNow = Reflect.get(storageManager, "closeNow");
+    if (typeof closeNow === "function") {
+      return () => Promise.resolve(closeNow.call(storageManager));
+    }
+  }
+  return undefined;
+}
+
+export async function withRuntimeCleanupOnFailure<T>(
+  runtime: DisposableRuntime,
+  run: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    const cleanup = storageManagerCloseNow(runtime.storageManager) ??
+      runtime.dispose.bind(runtime);
+    await cleanup().catch(
+      (disposeError) => {
+        console.warn(
+          `loadManager cleanup failed: ${
+            disposeError instanceof Error
+              ? disposeError.message
+              : String(disposeError)
+          }`,
+        );
+      },
+    );
+    throw error;
+  }
+}
+
 async function timeCliPhase<T>(
   label: string,
   run: () => T | Promise<T>,
@@ -191,25 +235,27 @@ export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
     CF_RUNTIME_ERROR_LOG
   ] = runtimeErrors;
 
-  if (
-    !(await timeCliPhase(
-      "loadManager.healthCheck",
-      () => runtime.healthCheck(),
-    ))
-  ) {
-    throw new Error(`Could not connect to "${config.apiUrl.toString()}".`);
-  }
+  return await withRuntimeCleanupOnFailure(runtime, async () => {
+    if (
+      !(await timeCliPhase(
+        "loadManager.healthCheck",
+        () => runtime.healthCheck(),
+      ))
+    ) {
+      throw new Error(`Could not connect to "${config.apiUrl.toString()}".`);
+    }
 
-  const pieceManager = await timeCliPhase(
-    "loadManager.pieceManager",
-    () => new PieceManager(session, runtime),
-  );
-  pieceManagerRef.current = pieceManager;
-  await timeCliPhase(
-    "loadManager.synced",
-    () => awaitSyncWithTimeout(pieceManager.synced()),
-  );
-  return pieceManager;
+    const pieceManager = await timeCliPhase(
+      "loadManager.pieceManager",
+      () => new PieceManager(session, runtime),
+    );
+    pieceManagerRef.current = pieceManager;
+    await timeCliPhase(
+      "loadManager.synced",
+      () => awaitSyncWithTimeout(pieceManager.synced()),
+    );
+    return pieceManager;
+  });
 }
 
 async function getProgramFromFile(
