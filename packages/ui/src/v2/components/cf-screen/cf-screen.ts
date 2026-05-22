@@ -23,6 +23,11 @@ import { BaseElement } from "../../core/base-element.ts";
 export class CFScreen extends BaseElement {
   static override styles = css`
     :host {
+      /* CT-1613 footer tab-bar tuning defaults. Edit these while dialing
+        the reserved footer overlap and fade before committing final values. */
+      --_cf-screen-footer-overlap-default: 4rem;
+      --_cf-screen-footer-fade-height-default: 2rem;
+
       display: flex;
       flex-direction: column;
       height: 100%;
@@ -46,11 +51,14 @@ export class CFScreen extends BaseElement {
     :host([data-footer-fade]) .main {
       --_cf-screen-footer-overlap: var(
         --cf-screen-footer-overlap,
-        var(--cf-tab-bar-height, 4rem)
+        var(
+          --cf-tab-bar-height,
+          var(--_cf-screen-footer-overlap-default)
+        )
       );
       --_cf-screen-footer-fade-height: var(
         --cf-screen-footer-fade-height,
-        calc(var(--_cf-screen-footer-overlap) / 2)
+        var(--_cf-screen-footer-fade-height-default)
       );
       margin-bottom: calc(-1 * var(--_cf-screen-footer-overlap));
       padding-bottom: var(--_cf-screen-footer-overlap);

@@ -50,6 +50,19 @@ export class CFTabBar extends BaseElement {
     BaseElement.baseStyles,
     css`
       :host {
+        /* CT-1613 footer layout tuning defaults. Edit these while dialing
+          the footer reservation before committing final values. */
+        --_cf-tab-bar-height-default: 4rem;
+        --_cf-tab-bar-inset-margin-default: 1rem;
+        --_cf-tab-bar-height: var(
+          --cf-tab-bar-height,
+          var(--_cf-tab-bar-height-default)
+        );
+        --_cf-tab-bar-inset-margin: var(
+          --cf-tab-bar-inset-margin,
+          var(--_cf-tab-bar-inset-margin-default)
+        );
+
         display: block;
         position: fixed;
         z-index: var(--cf-tab-bar-z-index, 50);
@@ -72,7 +85,7 @@ export class CFTabBar extends BaseElement {
         display: flex;
         align-items: center;
         justify-content: center;
-        height: var(--cf-tab-bar-height, 4rem);
+        height: var(--_cf-tab-bar-height);
         gap: var(--cf-spacing-2, 0.5rem);
         padding-inline: var(--cf-spacing-2, 0.5rem);
       }
@@ -128,14 +141,12 @@ export class CFTabBar extends BaseElement {
 
           :host([variant="inset"][position="bottom"]) {
             bottom: calc(
-              var(--cf-tab-bar-inset-margin, 1rem) + env(safe-area-inset-bottom, 0px)
+              var(--_cf-tab-bar-inset-margin) + env(safe-area-inset-bottom, 0px)
             );
           }
 
           :host([variant="inset"][position="top"]) {
-            top: calc(
-              var(--cf-tab-bar-inset-margin, 1rem) + env(safe-area-inset-top, 0px)
-            );
+            top: calc(var(--_cf-tab-bar-inset-margin) + env(safe-area-inset-top, 0px));
           }
 
           :host([variant="inset"]) .container {
@@ -183,14 +194,14 @@ export class CFTabBar extends BaseElement {
           :host([slot="footer"][variant="inset"][position="bottom"]) {
             bottom: auto;
             padding-bottom: calc(
-              var(--cf-tab-bar-inset-margin, 1rem) + env(safe-area-inset-bottom, 0px)
+              var(--_cf-tab-bar-inset-margin) + env(safe-area-inset-bottom, 0px)
             );
           }
 
           :host([slot="footer"][variant="inset"][position="top"]) {
             top: auto;
             padding-top: calc(
-              var(--cf-tab-bar-inset-margin, 1rem) + env(safe-area-inset-top, 0px)
+              var(--_cf-tab-bar-inset-margin) + env(safe-area-inset-top, 0px)
             );
           }
 
