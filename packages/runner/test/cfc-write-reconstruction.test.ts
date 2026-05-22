@@ -81,15 +81,17 @@ Deno.test("writeDetailValueForTarget: deeper writes win over a stale envelope fi
   });
 });
 
-Deno.test("writeDetailValueForTarget: granular writes with no envelope reconstruct an object", () => {
+Deno.test("writeDetailValueForTarget: descendant writes overlay onto a base (no base => undefined)", () => {
+  // Composition overlays deeper field-writes onto a base write at the target;
+  // it does not synthesize a base when none exists. With no write at the
+  // target itself, reconstruction returns undefined (unchanged from before
+  // this fix). In practice the cases that matter (e.g. a deep-frozen object
+  // written field-by-field) always include the envelope write at the target.
   const tx = txWith([
     detail(["value", "origin"], "imported"),
     detail(["value", "body"], "allowed"),
   ]);
-  assertEquals(writeDetailValueForTarget(tx, target([]), "value"), {
-    origin: "imported",
-    body: "allowed",
-  });
+  assertEquals(writeDetailValueForTarget(tx, target([]), "value"), undefined);
 });
 
 Deno.test("writeDetailValueForTarget: array-index granular writes reconstruct an array", () => {
