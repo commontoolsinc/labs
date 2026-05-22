@@ -1078,6 +1078,13 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     const currentUserCanManageAdmins = computed(() =>
       currentUserCanManageParkingAdmins(adminManagerCredential)
     );
+    const canBootstrapPeople = computed(() =>
+      people.get().length === 0 &&
+      currentUserCanManageParkingAdmins(adminManagerCredential)
+    );
+    const showAdminPeopleSection = computed(() =>
+      adminModeEnabled === true || canBootstrapPeople === true
+    );
 
     const adminAccessRows = computed(() =>
       people.get().map((person) => ({
@@ -1706,8 +1713,8 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                 </div>
               </cf-vstack>
 
-              {/* === Section E: Admin (admin mode only) === */}
-              {adminModeEnabled
+              {/* === Section E: Admin / bootstrap people management === */}
+              {showAdminPeopleSection
                 ? (
                   <>
                     {/* People */}
@@ -2126,42 +2133,231 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                     </cf-vstack>
 
                     {/* Parking Spots */}
-                    <cf-vstack gap="2">
-                      <cf-hstack justify="between" align="center">
-                        <cf-heading level={6}>Parking Spots</cf-heading>
-                        <cf-button
-                          variant="primary"
-                          size="sm"
-                          onClick={() => toggleAddSpotForm.send()}
-                        >
-                          + Add Spot
-                        </cf-button>
-                      </cf-hstack>
+                    {adminModeEnabled
+                      ? (
+                        <cf-vstack gap="2">
+                          <cf-hstack justify="between" align="center">
+                            <cf-heading level={6}>Parking Spots</cf-heading>
+                            <cf-button
+                              variant="primary"
+                              size="sm"
+                              onClick={() => toggleAddSpotForm.send()}
+                            >
+                              + Add Spot
+                            </cf-button>
+                          </cf-hstack>
 
-                      {adminSpotsData.map((spot) => {
-                        const spotNum2 = spot.spotNumber;
-                        const spotLabel2 = spot.label;
-                        const spotNotes2 = spot.notes;
-                        const spotActive2 = spot.active;
-                        const isEditingSpot = computed(() =>
-                          editingSpotNumber.get() === spotNum2
-                        );
-                        const isRemoveSpotConfirm = computed(() =>
-                          removeSpotConfirmTarget.get() === spotNum2
-                        );
+                          {adminSpotsData.map((spot) => {
+                            const spotNum2 = spot.spotNumber;
+                            const spotLabel2 = spot.label;
+                            const spotNotes2 = spot.notes;
+                            const spotActive2 = spot.active;
+                            const isEditingSpot = computed(() =>
+                              editingSpotNumber.get() === spotNum2
+                            );
+                            const isRemoveSpotConfirm = computed(() =>
+                              removeSpotConfirmTarget.get() === spotNum2
+                            );
 
-                        return (
-                          <cf-card style={spotActive2 ? "" : "opacity: 0.65;"}>
-                            {isEditingSpot
-                              ? (
+                            return (
+                              <cf-card
+                                style={spotActive2 ? "" : "opacity: 0.65;"}
+                              >
+                                {isEditingSpot
+                                  ? (
+                                    <cf-vstack gap="2">
+                                      <cf-hstack gap="2" wrap>
+                                        <cf-vstack
+                                          gap="1"
+                                          style="min-width: 60px;"
+                                        >
+                                          <span style="font-size: 0.75rem; font-weight: 500;">
+                                            Number *
+                                          </span>
+                                          <cf-input
+                                            $value={editSpotNum}
+                                            placeholder="e.g. 12"
+                                            style="width: 4rem;"
+                                          />
+                                        </cf-vstack>
+                                        <cf-vstack gap="1" style="flex: 1;">
+                                          <span style="font-size: 0.75rem; font-weight: 500;">
+                                            Label
+                                          </span>
+                                          <cf-input
+                                            $value={editSpotLabel}
+                                            placeholder="e.g. Near entrance"
+                                            style="width: 100%;"
+                                          />
+                                        </cf-vstack>
+                                      </cf-hstack>
+                                      <cf-vstack gap="1">
+                                        <span style="font-size: 0.75rem; font-weight: 500;">
+                                          Notes
+                                        </span>
+                                        <cf-input
+                                          $value={editSpotNotes}
+                                          placeholder="e.g. Tight, no large vehicles"
+                                          style="width: 100%;"
+                                        />
+                                      </cf-vstack>
+                                      <cf-hstack gap="2" align="center">
+                                        <cf-checkbox $checked={editSpotActive}>
+                                          Active
+                                        </cf-checkbox>
+                                        {spotDeactivateWarning
+                                          ? (
+                                            <span style="font-size: 0.75rem; color: var(--cf-color-amber-600);">
+                                              Has upcoming allocations — they
+                                              will remain.
+                                            </span>
+                                          )
+                                          : null}
+                                      </cf-hstack>
+                                      <cf-hstack gap="2">
+                                        <cf-button
+                                          variant="primary"
+                                          size="sm"
+                                          onClick={() =>
+                                            saveEditSpot.send({
+                                              originalNumber: spotNum2,
+                                            })}
+                                        >
+                                          Save
+                                        </cf-button>
+                                        <cf-button
+                                          variant="secondary"
+                                          size="sm"
+                                          onClick={() => cancelEditSpot.send()}
+                                        >
+                                          Cancel
+                                        </cf-button>
+                                      </cf-hstack>
+                                    </cf-vstack>
+                                  )
+                                  : (
+                                    <>
+                                      <cf-hstack
+                                        justify="between"
+                                        align="center"
+                                        gap="2"
+                                        wrap
+                                      >
+                                        <cf-hstack gap="2" align="center" wrap>
+                                          <span
+                                            style={`font-weight: 700; font-size: 1rem; color: ${
+                                              spotActive2
+                                                ? "var(--cf-color-gray-800)"
+                                                : "var(--cf-color-gray-400)"
+                                            };`}
+                                          >
+                                            #{spotNum2}
+                                          </span>
+                                          <cf-vstack gap="0">
+                                            <span
+                                              style={`font-size: 0.875rem; color: ${
+                                                spotActive2
+                                                  ? "var(--cf-color-gray-700)"
+                                                  : "var(--cf-color-gray-400)"
+                                              }; text-decoration: ${
+                                                spotActive2
+                                                  ? "none"
+                                                  : "line-through"
+                                              };`}
+                                            >
+                                              {spotLabel2 || "(no label)"}
+                                            </span>
+                                            {spotNotes2
+                                              ? (
+                                                <span style="font-size: 0.75rem; color: var(--cf-color-gray-400);">
+                                                  {spotNotes2}
+                                                </span>
+                                              )
+                                              : null}
+                                          </cf-vstack>
+                                          {!spotActive2
+                                            ? (
+                                              <span style="font-size: 0.6875rem; background-color: #f3f4f6; color: #6b7280; padding: 1px 6px; border-radius: 9999px;">
+                                                Inactive
+                                              </span>
+                                            )
+                                            : null}
+                                        </cf-hstack>
+                                        <cf-hstack gap="1">
+                                          <cf-button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() =>
+                                              startEditSpot.send({
+                                                spotNumber: spotNum2,
+                                              })}
+                                          >
+                                            Edit
+                                          </cf-button>
+                                          <cf-button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() =>
+                                              initiateRemoveSpot.send({
+                                                spotNumber: spotNum2,
+                                              })}
+                                          >
+                                            Remove
+                                          </cf-button>
+                                        </cf-hstack>
+                                      </cf-hstack>
+                                      {isRemoveSpotConfirm
+                                        ? (
+                                          <cf-card style="background: #fef2f2; border: 1px solid #fecaca; margin-top: 0.5rem;">
+                                            <cf-vstack gap="1">
+                                              <span style="font-size: 0.75rem; color: var(--cf-color-red-700);">
+                                                Spot #{spotNum2}{" "}
+                                                has upcoming allocations. They
+                                                will be preserved. Remove
+                                                anyway?
+                                              </span>
+                                              <cf-hstack gap="2">
+                                                <cf-button
+                                                  variant="primary"
+                                                  size="sm"
+                                                  onClick={() =>
+                                                    removeSpot.send({
+                                                      spotNumber: spotNum2,
+                                                    })}
+                                                >
+                                                  Remove
+                                                </cf-button>
+                                                <cf-button
+                                                  variant="ghost"
+                                                  size="sm"
+                                                  onClick={() =>
+                                                    cancelRemoveSpot.send()}
+                                                >
+                                                  Cancel
+                                                </cf-button>
+                                              </cf-hstack>
+                                            </cf-vstack>
+                                          </cf-card>
+                                        )
+                                        : null}
+                                    </>
+                                  )}
+                              </cf-card>
+                            );
+                          })}
+
+                          {addSpotFormOpen.get()
+                            ? (
+                              <cf-card style="border: 2px dashed var(--cf-color-gray-200);">
                                 <cf-vstack gap="2">
+                                  <cf-heading level={6}>Add Spot</cf-heading>
                                   <cf-hstack gap="2" wrap>
                                     <cf-vstack gap="1" style="min-width: 60px;">
                                       <span style="font-size: 0.75rem; font-weight: 500;">
                                         Number *
                                       </span>
                                       <cf-input
-                                        $value={editSpotNum}
+                                        $value={newSpotNumber}
                                         placeholder="e.g. 12"
                                         style="width: 4rem;"
                                       />
@@ -2171,7 +2367,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                         Label
                                       </span>
                                       <cf-input
-                                        $value={editSpotLabel}
+                                        $value={newSpotLabel}
                                         placeholder="e.g. Near entrance"
                                         style="width: 100%;"
                                       />
@@ -2182,222 +2378,43 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                       Notes
                                     </span>
                                     <cf-input
-                                      $value={editSpotNotes}
-                                      placeholder="e.g. Tight, no large vehicles"
+                                      $value={newSpotNotes}
+                                      placeholder="e.g. Compact only"
                                       style="width: 100%;"
                                     />
                                   </cf-vstack>
-                                  <cf-hstack gap="2" align="center">
-                                    <cf-checkbox $checked={editSpotActive}>
-                                      Active
-                                    </cf-checkbox>
-                                    {spotDeactivateWarning
-                                      ? (
-                                        <span style="font-size: 0.75rem; color: var(--cf-color-amber-600);">
-                                          Has upcoming allocations — they will
-                                          remain.
-                                        </span>
-                                      )
-                                      : null}
-                                  </cf-hstack>
+                                  {computed(() => {
+                                    const err = addSpotError.get();
+                                    if (!err) return null;
+                                    return (
+                                      <span style="font-size: 0.75rem; color: var(--cf-color-red-600);">
+                                        {err}
+                                      </span>
+                                    );
+                                  })}
                                   <cf-hstack gap="2">
                                     <cf-button
                                       variant="primary"
                                       size="sm"
-                                      onClick={() =>
-                                        saveEditSpot.send({
-                                          originalNumber: spotNum2,
-                                        })}
+                                      onClick={() => submitAddSpot.send()}
                                     >
-                                      Save
+                                      Add Spot
                                     </cf-button>
                                     <cf-button
-                                      variant="secondary"
+                                      variant="ghost"
                                       size="sm"
-                                      onClick={() => cancelEditSpot.send()}
+                                      onClick={() => toggleAddSpotForm.send()}
                                     >
                                       Cancel
                                     </cf-button>
                                   </cf-hstack>
                                 </cf-vstack>
-                              )
-                              : (
-                                <>
-                                  <cf-hstack
-                                    justify="between"
-                                    align="center"
-                                    gap="2"
-                                    wrap
-                                  >
-                                    <cf-hstack gap="2" align="center" wrap>
-                                      <span
-                                        style={`font-weight: 700; font-size: 1rem; color: ${
-                                          spotActive2
-                                            ? "var(--cf-color-gray-800)"
-                                            : "var(--cf-color-gray-400)"
-                                        };`}
-                                      >
-                                        #{spotNum2}
-                                      </span>
-                                      <cf-vstack gap="0">
-                                        <span
-                                          style={`font-size: 0.875rem; color: ${
-                                            spotActive2
-                                              ? "var(--cf-color-gray-700)"
-                                              : "var(--cf-color-gray-400)"
-                                          }; text-decoration: ${
-                                            spotActive2
-                                              ? "none"
-                                              : "line-through"
-                                          };`}
-                                        >
-                                          {spotLabel2 || "(no label)"}
-                                        </span>
-                                        {spotNotes2
-                                          ? (
-                                            <span style="font-size: 0.75rem; color: var(--cf-color-gray-400);">
-                                              {spotNotes2}
-                                            </span>
-                                          )
-                                          : null}
-                                      </cf-vstack>
-                                      {!spotActive2
-                                        ? (
-                                          <span style="font-size: 0.6875rem; background-color: #f3f4f6; color: #6b7280; padding: 1px 6px; border-radius: 9999px;">
-                                            Inactive
-                                          </span>
-                                        )
-                                        : null}
-                                    </cf-hstack>
-                                    <cf-hstack gap="1">
-                                      <cf-button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() =>
-                                          startEditSpot.send({
-                                            spotNumber: spotNum2,
-                                          })}
-                                      >
-                                        Edit
-                                      </cf-button>
-                                      <cf-button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() =>
-                                          initiateRemoveSpot.send({
-                                            spotNumber: spotNum2,
-                                          })}
-                                      >
-                                        Remove
-                                      </cf-button>
-                                    </cf-hstack>
-                                  </cf-hstack>
-                                  {isRemoveSpotConfirm
-                                    ? (
-                                      <cf-card style="background: #fef2f2; border: 1px solid #fecaca; margin-top: 0.5rem;">
-                                        <cf-vstack gap="1">
-                                          <span style="font-size: 0.75rem; color: var(--cf-color-red-700);">
-                                            Spot #{spotNum2}{" "}
-                                            has upcoming allocations. They will
-                                            be preserved. Remove anyway?
-                                          </span>
-                                          <cf-hstack gap="2">
-                                            <cf-button
-                                              variant="primary"
-                                              size="sm"
-                                              onClick={() =>
-                                                removeSpot.send({
-                                                  spotNumber: spotNum2,
-                                                })}
-                                            >
-                                              Remove
-                                            </cf-button>
-                                            <cf-button
-                                              variant="ghost"
-                                              size="sm"
-                                              onClick={() =>
-                                                cancelRemoveSpot.send()}
-                                            >
-                                              Cancel
-                                            </cf-button>
-                                          </cf-hstack>
-                                        </cf-vstack>
-                                      </cf-card>
-                                    )
-                                    : null}
-                                </>
-                              )}
-                          </cf-card>
-                        );
-                      })}
-
-                      {addSpotFormOpen.get()
-                        ? (
-                          <cf-card style="border: 2px dashed var(--cf-color-gray-200);">
-                            <cf-vstack gap="2">
-                              <cf-heading level={6}>Add Spot</cf-heading>
-                              <cf-hstack gap="2" wrap>
-                                <cf-vstack gap="1" style="min-width: 60px;">
-                                  <span style="font-size: 0.75rem; font-weight: 500;">
-                                    Number *
-                                  </span>
-                                  <cf-input
-                                    $value={newSpotNumber}
-                                    placeholder="e.g. 12"
-                                    style="width: 4rem;"
-                                  />
-                                </cf-vstack>
-                                <cf-vstack gap="1" style="flex: 1;">
-                                  <span style="font-size: 0.75rem; font-weight: 500;">
-                                    Label
-                                  </span>
-                                  <cf-input
-                                    $value={newSpotLabel}
-                                    placeholder="e.g. Near entrance"
-                                    style="width: 100%;"
-                                  />
-                                </cf-vstack>
-                              </cf-hstack>
-                              <cf-vstack gap="1">
-                                <span style="font-size: 0.75rem; font-weight: 500;">
-                                  Notes
-                                </span>
-                                <cf-input
-                                  $value={newSpotNotes}
-                                  placeholder="e.g. Compact only"
-                                  style="width: 100%;"
-                                />
-                              </cf-vstack>
-                              {computed(() => {
-                                const err = addSpotError.get();
-                                if (!err) return null;
-                                return (
-                                  <span style="font-size: 0.75rem; color: var(--cf-color-red-600);">
-                                    {err}
-                                  </span>
-                                );
-                              })}
-                              <cf-hstack gap="2">
-                                <cf-button
-                                  variant="primary"
-                                  size="sm"
-                                  onClick={() => submitAddSpot.send()}
-                                >
-                                  Add Spot
-                                </cf-button>
-                                <cf-button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => toggleAddSpotForm.send()}
-                                >
-                                  Cancel
-                                </cf-button>
-                              </cf-hstack>
-                            </cf-vstack>
-                          </cf-card>
-                        )
-                        : null}
-                    </cf-vstack>
+                              </cf-card>
+                            )
+                            : null}
+                        </cf-vstack>
+                      )
+                      : null}
                   </>
                 )
                 : null}

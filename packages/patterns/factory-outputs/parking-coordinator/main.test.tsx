@@ -51,6 +51,18 @@ export default pattern(() => {
     requests: [],
   });
 
+  const action_enable_s1_admin_manager = action(() =>
+    s1.enableAdminManager.send()
+  );
+
+  const assert_s1_manager_can_start_people_flow = computed(() =>
+    s1.currentUserCanManageAdmins === true &&
+    nodeIncludesText(
+      findNodeById(s1[UI], "parking-admin-add-person-open"),
+      "+ Add Person",
+    )
+  );
+
   const action_add_alice = action(() => {
     s1.addPerson.send({
       name: "Alice",
@@ -616,6 +628,8 @@ export default pattern(() => {
       // People management
       { assertion: assert_s1_no_people },
       { assertion: assert_s1_three_spots },
+      { action: action_enable_s1_admin_manager },
+      { assertion: assert_s1_manager_can_start_people_flow },
       { action: action_add_alice },
       { assertion: assert_s1_alice_exists },
       { assertion: assert_s1_alice_default_spot },
