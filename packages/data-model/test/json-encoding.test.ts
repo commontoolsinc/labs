@@ -282,7 +282,7 @@ describe("json-encoding", () => {
     });
 
     it("throws on a class instance (FabricError)", () => {
-      const err = new FabricError(new Error("test"));
+      const err = FabricError.fromNativeError(new Error("test"));
       const json = jsonFromValue(err as FabricValue);
       expect(() => plainObjectFromJson(json)).toThrow(/instance/);
     });

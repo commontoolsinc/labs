@@ -119,7 +119,7 @@ describe("JsonEncodingContext", () => {
 
     it("round-trips FabricError through Uint8Array", () => {
       const { context, runtime } = makeTestContext();
-      const err = new FabricError(new TypeError("oops"));
+      const err = FabricError.fromNativeError(new TypeError("oops"));
       const bytes = context.encodeToBytes(err as FabricValue);
       const result = context.decodeFromBytes(
         bytes,
@@ -127,8 +127,8 @@ describe("JsonEncodingContext", () => {
       );
       expect(result).toBeInstanceOf(FabricError);
       const se = result as unknown as FabricError;
-      expect(se.error).toBeInstanceOf(TypeError);
-      expect(se.error.message).toBe("oops");
+      expect(se.toNativeValue(true)).toBeInstanceOf(TypeError);
+      expect(se.message).toBe("oops");
     });
 
     it("round-trips undefined through Uint8Array", () => {
@@ -142,7 +142,7 @@ describe("JsonEncodingContext", () => {
       const { context, runtime } = makeTestContext();
       const value = {
         users: [{ name: "Alice" }, { name: "Bob" }],
-        error: new FabricError(new Error("fail")),
+        error: FabricError.fromNativeError(new Error("fail")),
         nothing: undefined,
       } as unknown as FabricValue;
       const bytes = context.encodeToBytes(value);
@@ -782,7 +782,7 @@ describe("JsonEncodingContext", () => {
 
   describe("FabricError", () => {
     it("serializes basic FabricError to /Error@1", () => {
-      const se = new FabricError(new Error("test"));
+      const se = FabricError.fromNativeError(new Error("test"));
       const result = toWireFormat(
         se as FabricValue,
       ) as Record<string, unknown>;
@@ -794,51 +794,51 @@ describe("JsonEncodingContext", () => {
     });
 
     it("round-trips basic Error via FabricError", () => {
-      const se = new FabricError(new Error("hello"));
+      const se = FabricError.fromNativeError(new Error("hello"));
       const result = roundTrip(
         se as FabricValue,
       ) as unknown as FabricError;
       expect(result).toBeInstanceOf(FabricError);
-      expect(result.error).toBeInstanceOf(Error);
-      expect(result.error.name).toBe("Error");
-      expect(result.error.message).toBe("hello");
+      expect(result.toNativeValue(true)).toBeInstanceOf(Error);
+      expect(result.name).toBe("Error");
+      expect(result.message).toBe("hello");
     });
 
     it("round-trips TypeError", () => {
-      const se = new FabricError(new TypeError("bad type"));
+      const se = FabricError.fromNativeError(new TypeError("bad type"));
       const result = roundTrip(
         se as FabricValue,
       ) as unknown as FabricError;
       expect(result).toBeInstanceOf(FabricError);
-      expect(result.error).toBeInstanceOf(TypeError);
-      expect(result.error.name).toBe("TypeError");
-      expect(result.error.message).toBe("bad type");
+      expect(result.toNativeValue(true)).toBeInstanceOf(TypeError);
+      expect(result.name).toBe("TypeError");
+      expect(result.message).toBe("bad type");
     });
 
     it("round-trips RangeError", () => {
-      const se = new FabricError(new RangeError("out of range"));
+      const se = FabricError.fromNativeError(new RangeError("out of range"));
       const result = roundTrip(
         se as FabricValue,
       ) as unknown as FabricError;
       expect(result).toBeInstanceOf(FabricError);
-      expect(result.error).toBeInstanceOf(RangeError);
-      expect(result.error.name).toBe("RangeError");
+      expect(result.toNativeValue(true)).toBeInstanceOf(RangeError);
+      expect(result.name).toBe("RangeError");
     });
 
     it("round-trips Error with cause", () => {
-      const inner = new FabricError(new Error("inner"));
-      const outer = new FabricError(
+      const inner = FabricError.fromNativeError(new Error("inner"));
+      const outer = FabricError.fromNativeError(
         new Error("outer", { cause: inner }),
       );
       const result = roundTrip(
         outer as FabricValue,
       ) as unknown as FabricError;
-      expect(result.error.message).toBe("outer");
+      expect(result.message).toBe("outer");
       // The cause was serialized as a FabricError (the inner wrapper).
       // After round-trip, the cause is a FabricError.
-      expect(result.error.cause).toBeInstanceOf(FabricError);
+      expect(result.cause).toBeInstanceOf(FabricError);
       expect(
-        (result.error.cause as FabricError).error.message,
+        (result.cause as FabricError).message,
       ).toBe("inner");
     });
 
@@ -846,33 +846,34 @@ describe("JsonEncodingContext", () => {
       const err = new Error("oops");
       (err as unknown as Record<string, unknown>).code = 42;
       (err as unknown as Record<string, unknown>).detail = "more info";
-      const se = new FabricError(err);
+      const se = FabricError.fromNativeError(err);
       const result = roundTrip(
         se as FabricValue,
       ) as unknown as FabricError;
-      expect(result.error.message).toBe("oops");
+      expect(result.message).toBe("oops");
       expect(
-        (result.error as unknown as Record<string, unknown>).code,
+        (result.toNativeValue(true) as unknown as Record<string, unknown>).code,
       ).toBe(42);
       expect(
-        (result.error as unknown as Record<string, unknown>).detail,
+        (result.toNativeValue(true) as unknown as Record<string, unknown>)
+          .detail,
       ).toBe("more info");
     });
 
     it("round-trips Error with custom name", () => {
       const err = new Error("custom");
       err.name = "MyCustomError";
-      const se = new FabricError(err);
+      const se = FabricError.fromNativeError(err);
       const result = roundTrip(
         se as FabricValue,
       ) as unknown as FabricError;
-      expect(result.error.name).toBe("MyCustomError");
-      expect(result.error.message).toBe("custom");
+      expect(result.name).toBe("MyCustomError");
+      expect(result.message).toBe("custom");
     });
 
     it("wire format has name: null when name matches type (TypeError)", () => {
       // TypeError: name === constructor.name === "TypeError"
-      const se = new FabricError(new TypeError("type check"));
+      const se = FabricError.fromNativeError(new TypeError("type check"));
       const result = toWireFormat(
         se as FabricValue,
       ) as Record<string, unknown>;
@@ -885,7 +886,7 @@ describe("JsonEncodingContext", () => {
     it("wire format has explicit name when name differs from type", () => {
       const err = new Error("custom");
       err.name = "MyCustomError";
-      const se = new FabricError(err);
+      const se = FabricError.fromNativeError(err);
       const result = toWireFormat(
         se as FabricValue,
       ) as Record<string, unknown>;
@@ -898,30 +899,30 @@ describe("JsonEncodingContext", () => {
     it("round-trips TypeError preserving name === type identity", () => {
       // After round-trip, name and type should both be "TypeError",
       // and the Error should reconstruct as a TypeError instance.
-      const se = new FabricError(new TypeError("rt"));
+      const se = FabricError.fromNativeError(new TypeError("rt"));
       const result = roundTrip(
         se as FabricValue,
       ) as unknown as FabricError;
-      expect(result.error).toBeInstanceOf(TypeError);
-      expect(result.error.name).toBe("TypeError");
-      expect(result.error.constructor.name).toBe("TypeError");
+      expect(result.toNativeValue(true)).toBeInstanceOf(TypeError);
+      expect(result.name).toBe("TypeError");
+      expect(result.toNativeValue(true).constructor.name).toBe("TypeError");
     });
 
     it("round-trips Error with mismatched name and type", () => {
       // Error constructor is "Error" but name is overridden.
       const err = new Error("mismatch");
       err.name = "CustomName";
-      const se = new FabricError(err);
+      const se = FabricError.fromNativeError(err);
       const result = roundTrip(
         se as FabricValue,
       ) as unknown as FabricError;
-      expect(result.error).toBeInstanceOf(Error);
-      expect(result.error.name).toBe("CustomName");
-      expect(result.error.constructor.name).toBe("Error");
+      expect(result.toNativeValue(true)).toBeInstanceOf(Error);
+      expect(result.name).toBe("CustomName");
+      expect(result.toNativeValue(true).constructor.name).toBe("Error");
     });
 
     it("has typeTag property", () => {
-      const se = new FabricError(new Error("test"));
+      const se = FabricError.fromNativeError(new Error("test"));
       expect(se.typeTag).toBe("Error@1");
     });
 
@@ -930,18 +931,18 @@ describe("JsonEncodingContext", () => {
       // wrapping an Error whose cause is itself a FabricError (not a
       // raw Error). The serializer's recurse on [DECONSTRUCT] output
       // must find FabricValue, not raw Error.
-      const innerSe = new FabricError(new Error("inner"));
+      const innerSe = FabricError.fromNativeError(new Error("inner"));
       const outerErr = new Error("outer");
       outerErr.cause = innerSe;
-      const outerSe = new FabricError(outerErr);
+      const outerSe = FabricError.fromNativeError(outerErr);
 
       const result = roundTrip(
         outerSe as FabricValue,
       ) as unknown as FabricError;
-      expect(result.error.message).toBe("outer");
-      expect(result.error.cause).toBeInstanceOf(FabricError);
+      expect(result.message).toBe("outer");
+      expect(result.cause).toBeInstanceOf(FabricError);
       expect(
-        (result.error.cause as FabricError).error.message,
+        (result.cause as FabricError).message,
       ).toBe("inner");
     });
   });
@@ -1278,18 +1279,18 @@ describe("JsonEncodingContext", () => {
     });
 
     it("emits /object for /-keyed object with FabricError value", () => {
-      const err = new FabricError(new TypeError("eep!"));
+      const err = FabricError.fromNativeError(new TypeError("eep!"));
       const obj = { "/x": err } as unknown as FabricValue;
       const wire = toWireFormat(obj);
       expect(Object.keys(wire as object)).toEqual(["/object"]);
     });
 
     it("round-trips FabricError as value inside /-prefixed key object", () => {
-      const err = new FabricError(new TypeError("eep!"));
+      const err = FabricError.fromNativeError(new TypeError("eep!"));
       const obj = { "/x": err } as unknown as FabricValue;
       const result = roundTrip(obj) as Record<string, FabricValue>;
       expect(result["/x"]).toBeInstanceOf(FabricError);
-      expect((result["/x"] as unknown as FabricError).error.message).toBe(
+      expect((result["/x"] as unknown as FabricError).message).toBe(
         "eep!",
       );
     });
@@ -1305,7 +1306,7 @@ describe("JsonEncodingContext", () => {
     it("emits /object for mixed: literal and encoded values", () => {
       const obj = {
         "/a": "literal",
-        "/b": new FabricError(new Error("oops")),
+        "/b": FabricError.fromNativeError(new Error("oops")),
       } as unknown as FabricValue;
       const wire = toWireFormat(obj);
       expect(Object.keys(wire as object)).toEqual(["/object"]);
@@ -1314,7 +1315,7 @@ describe("JsonEncodingContext", () => {
     it("round-trips mixed literal+encoded /-keyed object", () => {
       const obj = {
         "/a": "literal",
-        "/b": new FabricError(new Error("oops")),
+        "/b": FabricError.fromNativeError(new Error("oops")),
       } as unknown as FabricValue;
       const result = roundTrip(obj) as Record<string, FabricValue>;
       expect(result["/a"]).toBe("literal");
@@ -1862,11 +1863,11 @@ describe("JsonEncodingContext", () => {
     it("encode/decode round-trip for tagged types", () => {
       const ctx = new JsonEncodingContext();
       const runtime = new TestReconstructionContext();
-      const se = new FabricError(new Error("test"));
+      const se = FabricError.fromNativeError(new Error("test"));
       const encoded = ctx.encode(se as FabricValue);
       const decoded = ctx.decode(encoded, runtime);
       expect(decoded).toBeInstanceOf(FabricError);
-      expect((decoded as unknown as FabricError).error.message).toBe("test");
+      expect((decoded as unknown as FabricError).message).toBe("test");
     });
 
     it("encodeToBytes/decodeFromBytes round-trip", () => {
@@ -1874,7 +1875,7 @@ describe("JsonEncodingContext", () => {
       const runtime = new TestReconstructionContext();
       const data = {
         name: "test",
-        error: new FabricError(new Error("fail")),
+        error: FabricError.fromNativeError(new Error("fail")),
       } as unknown as FabricValue;
       const bytes = ctx.encodeToBytes(data);
       expect(bytes).toBeInstanceOf(Uint8Array);
@@ -1928,33 +1929,33 @@ describe("JsonEncodingContext", () => {
     });
 
     it("round-trips FabricError in array", () => {
-      const se = new FabricError(new Error("oops"));
+      const se = FabricError.fromNativeError(new Error("oops"));
       const arr = [1, se, 3] as unknown as FabricValue;
       const result = roundTrip(arr) as FabricValue[];
       expect(result[0]).toBe(1);
       expect(result[1]).toBeInstanceOf(FabricError);
       expect(
-        (result[1] as unknown as FabricError).error.message,
+        (result[1] as unknown as FabricError).message,
       ).toBe("oops");
       expect(result[2]).toBe(3);
     });
 
     it("round-trips FabricError as object value", () => {
       const obj = {
-        error: new FabricError(new Error("fail")),
+        error: FabricError.fromNativeError(new Error("fail")),
         code: 500,
       } as unknown as FabricValue;
       const result = roundTrip(obj) as Record<string, FabricValue>;
       expect(result.error).toBeInstanceOf(FabricError);
       expect(
-        (result.error as unknown as FabricError).error.message,
+        (result.error as unknown as FabricError).message,
       ).toBe("fail");
       expect(result.code).toBe(500);
     });
 
     it("wire format is unchanged (backward compatible)", () => {
       // FabricError should produce the same wire format as the old ErrorHandler.
-      const se = new FabricError(new TypeError("compat test"));
+      const se = FabricError.fromNativeError(new TypeError("compat test"));
       const serialized = toWireFormat(
         se as FabricValue,
       ) as Record<string, unknown>;

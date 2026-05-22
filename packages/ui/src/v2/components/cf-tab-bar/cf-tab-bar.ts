@@ -6,7 +6,11 @@ import { createStringCellController } from "../../core/cell-controller.ts";
 import type { CFTabBarItem } from "./cf-tab-bar-item.ts";
 
 /**
- * CFTabBar - Fixed-position navigation bar for mobile and app-like UIs
+ * CFTabBar - Navigation bar for mobile and app-like UIs
+ *
+ * The bar is fixed-position by default. When placed in a `slot="footer"`,
+ * it participates in layout so containers such as `cf-screen` can reserve
+ * space for the footer chrome.
  *
  * @element cf-tab-bar
  *
@@ -22,6 +26,9 @@ import type { CFTabBarItem } from "./cf-tab-bar-item.ts";
  * @csspart container - The outermost flex row holding the nav pill and action slot side by side.
  * @csspart bar - The nav pill surface containing the navigation items.
  * @csspart action - The wrapper around the action slot. Hidden when the slot is empty.
+ *
+ * @cssprop --cf-tab-bar-height - Height of the tab bar container; contributes to footer reserved space when slotted into `cf-screen`.
+ * @cssprop --cf-tab-bar-inset-margin - Inset clearance from the screen edge; contributes to footer reserved space for inset footer bars.
  *
  * @example
  * const activeTab = cell("home");
@@ -43,6 +50,18 @@ export class CFTabBar extends BaseElement {
     BaseElement.baseStyles,
     css`
       :host {
+        /* Internal fallback defaults for footer tab-bar spacing. */
+        --_cf-tab-bar-height-default: 4rem;
+        --_cf-tab-bar-inset-margin-default: 1rem;
+        --_cf-tab-bar-height: var(
+          --cf-tab-bar-height,
+          var(--_cf-tab-bar-height-default)
+        );
+        --_cf-tab-bar-inset-margin: var(
+          --cf-tab-bar-inset-margin,
+          var(--_cf-tab-bar-inset-margin-default)
+        );
+
         display: block;
         position: fixed;
         z-index: var(--cf-tab-bar-z-index, 50);
@@ -65,12 +84,12 @@ export class CFTabBar extends BaseElement {
         display: flex;
         align-items: center;
         justify-content: center;
-        height: var(--cf-tab-bar-height, 4rem);
+        height: var(--_cf-tab-bar-height);
         gap: var(--cf-spacing-2, 0.5rem);
         padding-inline: var(--cf-spacing-2, 0.5rem);
       }
 
-      /* === Bar (nav items) — always the visual surface === */
+      /* === Bar (nav items) - always the visual surface === */
       .bar {
         display: flex;
         align-items: center;
@@ -82,12 +101,12 @@ export class CFTabBar extends BaseElement {
       }
 
       /* Default: bar spans full width with top/bottom border */
-      :host(:not([variant="inset"])[position="bottom"]) .bar {
+      :host([position="bottom"]:not([variant="inset"])) .bar {
         border-top: 1px solid
           var(--cf-tab-bar-border-color, var(--cf-theme-color-border, #e5e7eb));
         }
 
-        :host(:not([variant="inset"])[position="top"]) .bar {
+        :host([position="top"]:not([variant="inset"])) .bar {
           border-bottom: 1px solid
             var(--cf-tab-bar-border-color, var(--cf-theme-color-border, #e5e7eb));
           }
@@ -121,14 +140,12 @@ export class CFTabBar extends BaseElement {
 
           :host([variant="inset"][position="bottom"]) {
             bottom: calc(
-              var(--cf-tab-bar-inset-margin, 1rem) + env(safe-area-inset-bottom, 0px)
+              var(--_cf-tab-bar-inset-margin) + env(safe-area-inset-bottom, 0px)
             );
           }
 
           :host([variant="inset"][position="top"]) {
-            top: calc(
-              var(--cf-tab-bar-inset-margin, 1rem) + env(safe-area-inset-top, 0px)
-            );
+            top: calc(var(--_cf-tab-bar-inset-margin) + env(safe-area-inset-top, 0px));
           }
 
           :host([variant="inset"]) .container {
@@ -162,6 +179,29 @@ export class CFTabBar extends BaseElement {
           :host([variant="inset"]) ::slotted(cf-tab-bar-item) {
             flex: 0 0 auto;
             min-width: 3.5rem;
+          }
+
+          /* Footer-slotted bars are in-flow so cf-screen can reserve space. */
+          :host([slot="footer"]) {
+            position: relative;
+            top: auto;
+            right: auto;
+            bottom: auto;
+            left: auto;
+          }
+
+          :host([slot="footer"][variant="inset"][position="bottom"]) {
+            bottom: auto;
+            padding-bottom: calc(
+              var(--_cf-tab-bar-inset-margin) + env(safe-area-inset-bottom, 0px)
+            );
+          }
+
+          :host([slot="footer"][variant="inset"][position="top"]) {
+            top: auto;
+            padding-top: calc(
+              var(--_cf-tab-bar-inset-margin) + env(safe-area-inset-top, 0px)
+            );
           }
 
           /* === Reduced Motion === */

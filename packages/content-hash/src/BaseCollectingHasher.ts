@@ -36,6 +36,7 @@ export abstract class BaseCollectingHasher extends BaseIncrementalHasher {
     chunks: Uint8Array[],
   ): Uint8Array | string;
 
+  /** @inheritDoc */
   protected _rawUpdate(data: Uint8Array) {
     const length = data.length;
 
@@ -44,6 +45,7 @@ export abstract class BaseCollectingHasher extends BaseIncrementalHasher {
     this.#currentOffset += length;
   }
 
+  /** @inheritDoc */
   protected _rawDigest(encoding: string | undefined): Uint8Array | string {
     let lastChunk = this.#currentChunk;
     if (lastChunk) {

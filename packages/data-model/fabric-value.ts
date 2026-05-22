@@ -18,6 +18,7 @@ export {
 } from "./interface.ts";
 
 export {
+  cloneForIsolation,
   cloneForMutation,
   CloneForMutationError,
   type CloneForMutationErrorKind,

@@ -554,21 +554,23 @@ describe("fetch-data mutex mechanism", () => {
     };
 
     // Modern path: error is a `FabricError`-shaped value (`typeTag`
-    // "Error@1"), not the legacy `@Error` wrapper; its `.error` slot
-    // exposes the wrapped Error's observable fields. Regression guard for
-    // the `memory/v2/patch.ts` `structuredClone()` class-stripping bug,
-    // which made errors round-trip back as `{ error: {}, typeTag:
-    // "Error@1" }` with message/stack lost.
+    // "Error@1"), not the legacy `@Error` wrapper; its observable fields
+    // (`name`, `message`, `stack`) are exposed directly on the wrapper.
+    // Regression guard for the `memory/v2/patch.ts` `structuredClone()`
+    // class-stripping bug, which made errors round-trip back as `{ ... }`
+    // with message/stack lost.
     expect(data.error).toBeDefined();
     expect((data.error as { "@Error"?: unknown })["@Error"]).toBeUndefined();
     const fe = data.error as {
       typeTag: string;
-      error: { name: string; message: string; stack: string };
+      name: string;
+      message: string;
+      stack: string;
     };
     expect(fe.typeTag).toBe("Error@1");
-    expect(fe.error.name).toBe("Error");
-    expect(fe.error.message).toMatch(/HTTP 404/);
-    expect(typeof fe.error.stack).toBe("string");
+    expect(fe.name).toBe("Error");
+    expect(fe.message).toMatch(/HTTP 404/);
+    expect(typeof fe.stack).toBe("string");
     expect(data.pending).toBe(false);
 
     await localTx.commit();

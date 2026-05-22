@@ -52,28 +52,54 @@ describe("fabric-native-instances", () => {
 
   describe("FabricError", () => {
     it("implements FabricInstance (instanceof returns true)", () => {
-      const se = new FabricError(new Error("test"));
+      const se = FabricError.fromNativeError(new Error("test"));
       expect(se instanceof FabricInstance).toBe(true);
     });
 
     it("has typeTag 'Error@1'", () => {
-      const se = new FabricError(new Error("test"));
+      const se = FabricError.fromNativeError(new Error("test"));
       expect(se.typeTag).toBe("Error@1");
     });
 
-    it("wraps the original Error", () => {
+    it("wraps the Error's FabricValue-shaped state", () => {
       const err = new TypeError("bad");
-      const se = new FabricError(err);
-      expect(se.error).toBe(err);
+      const se = FabricError.fromNativeError(err);
+      expect(se.type).toBe("TypeError");
+      expect(se.name).toBe("TypeError");
+      expect(se.message).toBe("bad");
+    });
+
+    it("fixed-schema slots are mutable while unfrozen", () => {
+      const se = FabricError.fromNativeError(new Error("orig"));
+      se.message = "changed";
+      se.name = "Renamed";
+      se.cause = { detail: 1 } as FabricValue;
+      expect(se.message).toBe("changed");
+      expect(se.name).toBe("Renamed");
+      expect(se.cause).toEqual({ detail: 1 });
+      // The native projection reflects the mutated state (no stale cache).
+      expect(se.toNativeValue(true).message).toBe("changed");
+    });
+
+    it("fixed-schema slots throw on assignment once frozen", () => {
+      const se = FabricError.fromNativeError(new Error("orig"));
+      Object.freeze(se);
+      expect(() => {
+        se.message = "nope";
+      }).toThrow();
+      expect(() => {
+        (se as { name: string }).name = "nope";
+      }).toThrow();
+      expect(se.message).toBe("orig");
     });
 
     it("is instanceof FabricNativeWrapper", () => {
-      const se = new FabricError(new Error("test"));
+      const se = FabricError.fromNativeError(new Error("test"));
       expect(se instanceof FabricNativeWrapper).toBe(true);
     });
 
     it("[DECONSTRUCT] returns type, name=null (common case), message, stack", () => {
-      const se = new FabricError(new Error("hello"));
+      const se = FabricError.fromNativeError(new Error("hello"));
       const state = se[DECONSTRUCT]() as Record<string, FabricValue>;
       expect(state.type).toBe("Error");
       expect(state.name).toBe(null);
@@ -82,7 +108,7 @@ describe("fabric-native-instances", () => {
     });
 
     it("[DECONSTRUCT] name is null when type === name (TypeError)", () => {
-      const se = new FabricError(new TypeError("bad"));
+      const se = FabricError.fromNativeError(new TypeError("bad"));
       const state = se[DECONSTRUCT]() as Record<string, FabricValue>;
       expect(state.type).toBe("TypeError");
       expect(state.name).toBe(null);
@@ -91,15 +117,15 @@ describe("fabric-native-instances", () => {
     it("[DECONSTRUCT] name is non-null when type !== name", () => {
       const err = new TypeError("bad");
       err.name = "CustomName";
-      const se = new FabricError(err);
+      const se = FabricError.fromNativeError(err);
       const state = se[DECONSTRUCT]() as Record<string, FabricValue>;
       expect(state.type).toBe("TypeError");
       expect(state.name).toBe("CustomName");
     });
 
     it("[DECONSTRUCT] includes cause when present", () => {
-      const inner = new FabricError(new Error("inner"));
-      const outer = new FabricError(
+      const inner = FabricError.fromNativeError(new Error("inner"));
+      const outer = FabricError.fromNativeError(
         new Error("outer", { cause: inner }),
       );
       const state = outer[DECONSTRUCT]() as Record<string, FabricValue>;
@@ -110,7 +136,7 @@ describe("fabric-native-instances", () => {
       const err = new Error("oops");
       (err as unknown as Record<string, unknown>).code = 42;
       (err as unknown as Record<string, unknown>).detail = "more info";
-      const se = new FabricError(err);
+      const se = FabricError.fromNativeError(err);
       const state = se[DECONSTRUCT]() as Record<string, FabricValue>;
       expect(state.code).toBe(42);
       expect(state.detail).toBe("more info");
@@ -122,7 +148,7 @@ describe("fabric-native-instances", () => {
         value: "bad",
         enumerable: true,
       });
-      const se = new FabricError(err);
+      const se = FabricError.fromNativeError(err);
       const state = se[DECONSTRUCT]() as Record<string, FabricValue>;
       expect("__proto__" in state).toBe(false);
     });
@@ -135,7 +161,7 @@ describe("fabric-native-instances", () => {
         enumerable: true,
       });
       (err as unknown as Record<string, unknown>).name = "Error";
-      const se = new FabricError(err);
+      const se = FabricError.fromNativeError(err);
       const state = se[DECONSTRUCT]() as Record<string, FabricValue>;
       expect(state.message).toBe("original");
     });
@@ -143,7 +169,7 @@ describe("fabric-native-instances", () => {
     it("[DECONSTRUCT] omits stack when undefined", () => {
       const err = new Error("no stack");
       err.stack = undefined;
-      const se = new FabricError(err);
+      const se = FabricError.fromNativeError(err);
       const state = se[DECONSTRUCT]() as Record<string, FabricValue>;
       expect("stack" in state).toBe(false);
     });
@@ -156,9 +182,9 @@ describe("fabric-native-instances", () => {
       } as FabricValue;
       const result = FabricError[RECONSTRUCT](state, dummyContext);
       expect(result).toBeInstanceOf(FabricError);
-      expect(result.error).toBeInstanceOf(Error);
-      expect(result.error.name).toBe("Error");
-      expect(result.error.message).toBe("hello");
+      expect(result.toNativeValue(true)).toBeInstanceOf(Error);
+      expect(result.name).toBe("Error");
+      expect(result.message).toBe("hello");
     });
 
     it("[RECONSTRUCT] creates correct Error subclass from type (null name)", () => {
@@ -173,8 +199,8 @@ describe("fabric-native-instances", () => {
       for (const [type, cls] of cases) {
         const state = { type, name: null, message: "test" } as FabricValue;
         const result = FabricError[RECONSTRUCT](state, dummyContext);
-        expect(result.error).toBeInstanceOf(cls);
-        expect(result.error.name).toBe(type);
+        expect(result.toNativeValue(true)).toBeInstanceOf(cls);
+        expect(result.name).toBe(type);
       }
     });
 
@@ -185,8 +211,8 @@ describe("fabric-native-instances", () => {
         message: "mismatch",
       } as FabricValue;
       const result = FabricError[RECONSTRUCT](state, dummyContext);
-      expect(result.error).toBeInstanceOf(TypeError);
-      expect(result.error.name).toBe("CustomTypeName");
+      expect(result.toNativeValue(true)).toBeInstanceOf(TypeError);
+      expect(result.name).toBe("CustomTypeName");
     });
 
     it("[RECONSTRUCT] falls back to name when type is absent (back-compat)", () => {
@@ -195,7 +221,7 @@ describe("fabric-native-instances", () => {
         message: "old format",
       } as FabricValue;
       const result = FabricError[RECONSTRUCT](state, dummyContext);
-      expect(result.error).toBeInstanceOf(TypeError);
+      expect(result.toNativeValue(true)).toBeInstanceOf(TypeError);
     });
 
     it("[RECONSTRUCT] handles custom name", () => {
@@ -205,7 +231,7 @@ describe("fabric-native-instances", () => {
         message: "custom",
       } as FabricValue;
       const result = FabricError[RECONSTRUCT](state, dummyContext);
-      expect(result.error.name).toBe("MyCustomError");
+      expect(result.name).toBe("MyCustomError");
     });
 
     it("[RECONSTRUCT] restores cause and custom properties", () => {
@@ -217,32 +243,28 @@ describe("fabric-native-instances", () => {
         code: 404,
       } as FabricValue;
       const result = FabricError[RECONSTRUCT](state, dummyContext);
-      expect(result.error.cause).toBe("something went wrong");
-      expect(
-        (result.error as unknown as Record<string, unknown>).code,
-      ).toBe(404);
+      expect(result.cause).toBe("something went wrong");
+      expect(result.getExtra("code")).toBe(404);
     });
 
     it("round-trips through DECONSTRUCT/RECONSTRUCT", () => {
       const original = new Error("round trip");
       original.name = "CustomError";
       (original as unknown as Record<string, unknown>).code = 42;
-      const se = new FabricError(original);
+      const se = FabricError.fromNativeError(original);
 
       const state = se[DECONSTRUCT]();
       const restored = FabricError[RECONSTRUCT](state, dummyContext);
 
-      expect(restored.error.name).toBe("CustomError");
-      expect(restored.error.message).toBe("round trip");
-      expect(
-        (restored.error as unknown as Record<string, unknown>).code,
-      ).toBe(42);
+      expect(restored.name).toBe("CustomError");
+      expect(restored.message).toBe("round trip");
+      expect(restored.getExtra("code")).toBe(42);
     });
 
     it("round-trips TypeError with overridden name", () => {
       const original = new TypeError("bad value");
       original.name = "SpecialType";
-      const se = new FabricError(original);
+      const se = FabricError.fromNativeError(original);
 
       const state = se[DECONSTRUCT]() as Record<string, FabricValue>;
       expect(state.type).toBe("TypeError");
@@ -252,48 +274,47 @@ describe("fabric-native-instances", () => {
         state as FabricValue,
         dummyContext,
       );
-      expect(restored.error).toBeInstanceOf(TypeError);
-      expect(restored.error.name).toBe("SpecialType");
+      expect(restored.toNativeValue(true)).toBeInstanceOf(TypeError);
+      expect(restored.name).toBe("SpecialType");
     });
 
-    it("toNativeValue(true) returns frozen error (copy of unfrozen)", () => {
+    it("toNativeValue(true) returns a frozen Error projection", () => {
       const err = new Error("native");
-      const se = new FabricError(err);
+      const se = FabricError.fromNativeError(err);
       const result = se.toNativeValue(true);
-      // Creates a frozen copy since the input is unfrozen.
       expect(result).toBeInstanceOf(Error);
       expect(result.message).toBe("native");
       expect(Object.isFrozen(result)).toBe(true);
-      // Original should NOT be mutated.
+      // The originating native Error is not stored / not mutated.
       expect(Object.isFrozen(err)).toBe(false);
     });
 
-    it("toNativeValue(true) returns same error if already frozen", () => {
-      const err = new Error("native");
-      Object.freeze(err);
-      const se = new FabricError(err);
-      const result = se.toNativeValue(true);
-      expect(result).toBe(err); // same reference
-      expect(Object.isFrozen(result)).toBe(true);
+    it("toNativeValue(true) caches the projection once frozen", () => {
+      const se = FabricError.fromNativeError(new Error("native"));
+      // While mutable, repeated calls rebuild (no stale cache risk).
+      expect(se.toNativeValue(true)).not.toBe(se.toNativeValue(true));
+      // Once frozen, the projection is cached and returned by identity.
+      Object.freeze(se);
+      const a = se.toNativeValue(true);
+      const b = se.toNativeValue(true);
+      expect(a).toBe(b);
+      expect(Object.isFrozen(a)).toBe(true);
     });
 
-    it("toNativeValue(false) returns unfrozen error", () => {
-      const err = new Error("native");
-      const se = new FabricError(err);
+    it("toNativeValue(false) returns a fresh unfrozen Error projection", () => {
+      const se = FabricError.fromNativeError(new Error("native"));
       const result = se.toNativeValue(false);
-      expect(result).toBe(err); // same reference (already unfrozen)
-      expect(Object.isFrozen(result)).toBe(false);
-    });
-
-    it("toNativeValue(false) returns unfrozen copy of frozen error", () => {
-      const err = new Error("native");
-      Object.freeze(err);
-      const se = new FabricError(err);
-      const result = se.toNativeValue(false);
-      // Creates an unfrozen copy since the input is frozen.
       expect(result).toBeInstanceOf(Error);
       expect(result.message).toBe("native");
       expect(Object.isFrozen(result)).toBe(false);
+    });
+
+    it("toNativeValue(false) returns a fresh copy each call", () => {
+      const se = FabricError.fromNativeError(new Error("native"));
+      const a = se.toNativeValue(false);
+      const b = se.toNativeValue(false);
+      expect(a).not.toBe(b);
+      expect(a.message).toBe(b.message);
     });
   });
 
@@ -410,7 +431,7 @@ describe("fabric-native-instances", () => {
 
   describe("nativeFromFabricValueModern", () => {
     it("unwraps FabricError in nested object", () => {
-      const se = new FabricError(new Error("deep"));
+      const se = FabricError.fromNativeError(new Error("deep"));
       const obj = { error: se } as FabricValue;
       const result = nativeFromFabricValueModern(obj) as Record<
         string,
@@ -449,7 +470,7 @@ describe("fabric-native-instances", () => {
     });
 
     it("recursively unwraps nested structures", () => {
-      const se = new FabricError(new Error("nested"));
+      const se = FabricError.fromNativeError(new Error("nested"));
       const obj = {
         outer: {
           inner: se,
@@ -464,7 +485,7 @@ describe("fabric-native-instances", () => {
 
     it("deeply unwraps FabricError in objects (frozen)", () => {
       const err = new Error("deep");
-      const se = new FabricError(err);
+      const se = FabricError.fromNativeError(err);
       const obj = {
         error: se,
         code: 500,
@@ -482,7 +503,7 @@ describe("fabric-native-instances", () => {
 
     it("deeply unwraps FabricError in arrays (frozen)", () => {
       const err = new Error("array");
-      const se = new FabricError(err);
+      const se = FabricError.fromNativeError(err);
       const arr = [1, se, 3] as unknown as FabricValue;
       const result = nativeFromFabricValueModern(arr) as unknown[];
       expect(result[0]).toBe(1);
@@ -567,13 +588,13 @@ describe("fabric-native-instances", () => {
     it("deeply unwraps Error internals (C2)", () => {
       // Error with a FabricError cause and a custom FabricMap property.
       const innerErr = new Error("inner");
-      const innerSe = new FabricError(innerErr);
+      const innerSe = FabricError.fromNativeError(innerErr);
       const outerErr = new Error("outer");
       outerErr.cause = innerSe;
       (outerErr as unknown as Record<string, unknown>).data = new FabricMap(
         new Map([["k", 1]] as [FabricValue, FabricValue][]),
       );
-      const outerSe = new FabricError(outerErr);
+      const outerSe = FabricError.fromNativeError(outerErr);
 
       const result = nativeFromFabricValueModern(
         outerSe as FabricValue,
@@ -590,10 +611,10 @@ describe("fabric-native-instances", () => {
 
     it("deeply unwraps Error internals unfrozen (C2)", () => {
       const innerErr = new Error("inner");
-      const innerSe = new FabricError(innerErr);
+      const innerSe = FabricError.fromNativeError(innerErr);
       const outerErr = new Error("outer");
       outerErr.cause = innerSe;
-      const outerSe = new FabricError(outerErr);
+      const outerSe = FabricError.fromNativeError(outerErr);
 
       const result = nativeFromFabricValueModern(
         outerSe as FabricValue,
@@ -869,7 +890,7 @@ describe("fabric-native-instances", () => {
     });
 
     it("returns true for FabricError", () => {
-      const se = new FabricError(new Error("test"));
+      const se = FabricError.fromNativeError(new Error("test"));
       expect(se instanceof FabricInstance).toBe(true);
     });
   });
@@ -968,34 +989,34 @@ describe("fabric-native-instances", () => {
 
   describe("[DEEP_FREEZE] / [IS_DEEP_FROZEN] protocol — via dispatch", () => {
     describe("FabricError", () => {
-      it("[DEEP_FREEZE] freezes wrapper + Error + recurses cause", () => {
-        const inner = new Error("cause");
-        const fe = new FabricError(new Error("outer", { cause: inner }));
+      it("[DEEP_FREEZE] freezes wrapper + recurses cause", () => {
+        const inner = FabricError.fromNativeError(new Error("cause"));
+        const fe = FabricError.fromNativeError(
+          new Error("outer", { cause: inner }),
+        );
         const result = deepFreeze(fe);
         expect(result).toBe(fe); // freeze-in-place identity
         expect(Object.isFrozen(fe)).toBe(true);
-        expect(Object.isFrozen(fe.error)).toBe(true);
-        expect(Object.isFrozen(inner)).toBe(true);
+        expect(isDeepFrozen(inner)).toBe(true);
       });
 
-      it("[DEEP_FREEZE] recurses enumerable custom props, no string-narrow", () => {
+      it("[DEEP_FREEZE] recurses enumerable custom props (preserved via extras)", () => {
         const err = new Error("e");
         const childObj = { nested: 1 };
         (err as unknown as Record<string, unknown>).custom = childObj;
-        const fe = new FabricError(err);
+        const fe = FabricError.fromNativeError(err);
         deepFreeze(fe);
-        // Non-string custom state is preserved AND deep-frozen (it must not
-        // be dropped -- that narrowing is a deepClone stop-gap, not this).
-        expect((fe.error as unknown as Record<string, unknown>).custom)
-          .toBe(childObj);
+        // Non-string custom state is preserved AND deep-frozen.
+        expect(fe.getExtra("custom")).toBe(childObj);
         expect(Object.isFrozen(childObj)).toBe(true);
       });
 
-      it("[IS_DEEP_FROZEN] true only when wrapper + Error frozen", () => {
-        const fe = new FabricError(new Error("test"));
+      it("[IS_DEEP_FROZEN] true only when wrapper + cause are frozen", () => {
+        const fe = FabricError.fromNativeError(new Error("test"));
         expect(isDeepFrozenFabricValue(fe)).toBe(false);
-        Object.freeze(fe); // wrapper only; inner Error still mutable
-        expect(isDeepFrozenFabricValue(fe)).toBe(false);
+        Object.freeze(fe); // wrapper only; some descendants still mutable
+        // (May be true since this particular FabricError has no nested
+        // FabricValue descendants beyond primitive strings.)
         deepFreeze(fe);
         expect(isDeepFrozenFabricValue(fe)).toBe(true);
       });
@@ -1098,33 +1119,30 @@ describe("fabric-native-instances", () => {
       const subIsDeepFrozen = (v: FabricValue): boolean => isDeepFrozen(v);
 
       describe("FabricError", () => {
-        it("[DEEP_FREEZE] freezes wrapper + Error + recurses cause", () => {
-          const inner = new Error("cause");
-          const fe = new FabricError(new Error("outer", { cause: inner }));
+        it("[DEEP_FREEZE] freezes wrapper + recurses cause", () => {
+          const inner = FabricError.fromNativeError(new Error("cause"));
+          const fe = FabricError.fromNativeError(
+            new Error("outer", { cause: inner }),
+          );
           const result = fe[DEEP_FREEZE](subFreeze);
           expect(result).toBe(fe); // freeze-in-place identity
           expect(Object.isFrozen(fe)).toBe(true);
-          expect(Object.isFrozen(fe.error)).toBe(true);
-          expect(Object.isFrozen(inner)).toBe(true);
+          expect(isDeepFrozen(inner)).toBe(true);
         });
 
-        it("[DEEP_FREEZE] recurses enumerable custom props, no string-narrow", () => {
+        it("[DEEP_FREEZE] recurses enumerable custom props (preserved via extras)", () => {
           const err = new Error("e");
           const childObj = { nested: 1 };
           (err as unknown as Record<string, unknown>).custom = childObj;
-          const fe = new FabricError(err);
+          const fe = FabricError.fromNativeError(err);
           fe[DEEP_FREEZE](subFreeze);
-          // Non-string custom state is preserved AND deep-frozen (it must not
-          // be dropped -- that narrowing is a deepClone stop-gap, not this).
-          expect((fe.error as unknown as Record<string, unknown>).custom)
-            .toBe(childObj);
+          // Non-string custom state is preserved AND deep-frozen.
+          expect(fe.getExtra("custom")).toBe(childObj);
           expect(Object.isFrozen(childObj)).toBe(true);
         });
 
-        it("[IS_DEEP_FROZEN] true only when wrapper + Error frozen", () => {
-          const fe = new FabricError(new Error("test"));
-          expect(fe[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(false);
-          Object.freeze(fe); // wrapper only; inner Error still mutable
+        it("[IS_DEEP_FROZEN] true only when wrapper is frozen", () => {
+          const fe = FabricError.fromNativeError(new Error("test"));
           expect(fe[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(false);
           fe[DEEP_FREEZE](subFreeze);
           expect(fe[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(true);
@@ -1302,7 +1320,7 @@ describe("fabric-native-instances", () => {
       // (Arm 3), which subFreezes `error.cause` = wrapper, which re-enters
       // `deepFreeze()` -> the FabricError again -> ...
       const err = new Error("cycle-cause");
-      const fe = new FabricError(err);
+      const fe = FabricError.fromNativeError(err);
       const wrapper: Record<string, unknown> = { fe };
       err.cause = wrapper;
       expect(() => deepFreeze(wrapper)).not.toThrow();
@@ -1331,16 +1349,18 @@ describe("fabric-native-instances", () => {
     it("cross-instance cycle (FabricError <-> ProblematicValue) terminates", () => {
       // Two `FabricInstance` subclasses pointing into each other via their
       // recursing slots. Both must terminate, both must end deep-frozen.
+      // FabricError snapshots its FabricValue state at construction, so wire
+      // up the native Error's `cause` BEFORE `fromNativeError`.
       const peShared: Record<string, unknown> = { tag: "shared" };
       const pv = new ProblematicValue(
         "Cycle@1",
         peShared as FabricValue,
         "loop",
       );
-      const err = new Error("cross-cycle");
-      const fe = new FabricError(err);
-      peShared.fe = fe;
+      const err = new Error("cross-cycle") as Error & { cause: unknown };
       err.cause = pv;
+      const fe = FabricError.fromNativeError(err);
+      peShared.fe = fe;
       expect(() => deepFreeze(fe)).not.toThrow();
       expect(Object.isFrozen(fe)).toBe(true);
       expect(Object.isFrozen(pv)).toBe(true);

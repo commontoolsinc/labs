@@ -439,7 +439,7 @@ describe("value-debug", () => {
     });
 
     it("renders FabricInstance subclasses with their constructor name", () => {
-      expect(toDebugKindString(new FabricError(new Error("x"))))
+      expect(toDebugKindString(FabricError.fromNativeError(new Error("x"))))
         .toBe("FabricInstance (FabricError)");
       expect(toDebugKindString(new FabricRegExp(/abc/g, "es2025")))
         .toBe("FabricInstance (FabricRegExp)");

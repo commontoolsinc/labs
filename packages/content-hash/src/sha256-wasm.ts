@@ -73,6 +73,7 @@ function assertUsable() {
  * one-shot digest at the end of processing.
  */
 class WasmCollectingHasher extends BaseCollectingHasher {
+  /** @inheritDoc */
   protected _digestChunks(
     _encoding: string | undefined,
     chunks: Uint8Array[],
@@ -94,10 +95,12 @@ class WasmCollectingHasher extends BaseCollectingHasher {
 class WasmUpdatingHasher extends BaseSmallChunkUpdatingHasher {
   #hasher: IHasher = hasherPool.acquire(this);
 
+  /** @inheritDoc */
   protected _rawUpdate(data: Uint8Array) {
     this.#hasher.update(data);
   }
 
+  /** @inheritDoc */
   protected _rawDigest(_encoding: string | undefined): Uint8Array {
     const hasher = this.#hasher;
     const result: Uint8Array = hasher.digest("binary");
