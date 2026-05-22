@@ -1666,7 +1666,7 @@ Deno.test("CfHarnessPromptLoop applies the web_search profile model override", a
 
   assertEquals(result.finalAssistantText, "Web search parent completed.");
   assertEquals(requestBodies[0].model, "gpt-5.4");
-  assertEquals(requestBodies[1].model, "google:gemini-2.5-flash");
+  assertEquals(requestBodies[1].model, "google:gemini-3.5-flash");
   assertEquals(requestBodies[2].model, "gpt-5.4");
   assertEquals(
     requestBodies[1].tools.map((tool) => tool.function.name),
@@ -1684,9 +1684,9 @@ Deno.test("CfHarnessPromptLoop applies the web_search profile model override", a
     ),
     true,
   );
-  assertEquals(output.subagent.model, "google:gemini-2.5-flash");
+  assertEquals(output.subagent.model, "google:gemini-3.5-flash");
   assertEquals(output.subagent.manifest.profile, "web_search");
-  assertEquals(output.subagent.manifest.model, "google:gemini-2.5-flash");
+  assertEquals(output.subagent.manifest.model, "google:gemini-3.5-flash");
   assertEquals(output.subagent.manifest.modelSource, "profile");
   assertEquals(output.subagent.manifest.allowedToolIds, []);
   assertEquals(output.subagent.manifest.hostToolIds, []);
