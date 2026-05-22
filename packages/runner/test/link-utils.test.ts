@@ -699,6 +699,40 @@ describe("link-utils", () => {
       });
     });
 
+    it("should preserve scope from stripped scoped asCell entries", () => {
+      const schema = {
+        type: "object",
+        properties: {
+          rack: {
+            type: "array",
+            items: { type: "string" },
+            asCell: [{ kind: "cell", scope: "user" }],
+          },
+          message: {
+            type: "string",
+            asCell: [{ kind: "cell", scope: "session" }],
+          },
+        },
+      } as const satisfies JSONSchema;
+
+      const result = sanitizeSchemaForLinks(schema);
+
+      expect(result).toEqual({
+        type: "object",
+        properties: {
+          rack: {
+            type: "array",
+            items: { type: "string" },
+            scope: "user",
+          },
+          message: {
+            type: "string",
+            scope: "session",
+          },
+        },
+      });
+    });
+
     it("should remove required entries for stripped stream properties", () => {
       const schema = {
         type: "object",
