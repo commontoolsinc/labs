@@ -2,8 +2,8 @@ import { assertEquals } from "@std/assert";
 import {
   HARNESS_CHAT_PROTOCOL_VERSION,
   HARNESS_CHAT_REQUEST_TYPE,
+  type HarnessChatBrowserAccessLease,
   type HarnessChatRequestEnvelope,
-  READONLY_HARNESS_CHAT_POLICY,
 } from "../src/contracts/interactive-chat.ts";
 import {
   HarnessInteractiveChatService,
@@ -35,6 +35,13 @@ const makeResult = (
   modelTurns: 1,
   runState: {} as HarnessPromptLoopResult["runState"],
 });
+
+const browserAccess: HarnessChatBrowserAccessLease = {
+  type: "cf-harness.chat.browser-access-lease",
+  leaseId: "lease-1",
+  cdpUrl: "http://127.0.0.1:9222",
+  owner: "loom",
+};
 
 Deno.test("interactive service starts sessions and completes non-streaming turns", async () => {
   const loopOptions: unknown[] = [];
@@ -113,7 +120,7 @@ Deno.test("interactive service starts sessions and completes non-streaming turns
   });
 });
 
-Deno.test("interactive service applies read-only policy to prompt-loop options", async () => {
+Deno.test("interactive service forces comment-thread turns to read-only prompt-loop options", async () => {
   const loopOptions: unknown[] = [];
   const createPromptLoop: HarnessInteractivePromptLoopFactory = (options) => {
     loopOptions.push(options);
@@ -129,9 +136,21 @@ Deno.test("interactive service applies read-only policy to prompt-loop options",
   await service.startSession("req-1", {
     sessionId: "session-1",
     workspace: { hostPath: "/workspace" },
+    context: {
+      type: "comment-thread",
+      threadId: "thread-1",
+    },
     policy: {
-      ...READONLY_HARNESS_CHAT_POLICY,
-      allowedSubagentProfiles: ["browser"],
+      type: "cf-harness.chat-policy",
+      toolMode: "workspace-write",
+      allowedToolIds: [
+        "bash",
+        "read_file",
+        "edit_file",
+        "write_file",
+        "delegate_task",
+      ],
+      allowedSubagentProfiles: ["default"],
     },
   });
   await service.startTurn("req-2", {
@@ -144,8 +163,94 @@ Deno.test("interactive service applies read-only policy to prompt-loop options",
   assertEquals(loopOptions[0], {
     workspaceHostPath: "/workspace",
     allowedToolIds: ["read_file", "view_image", "read_skill_resource"],
-    allowedSubagentProfiles: ["browser"],
+    allowedSubagentProfiles: [],
   });
+  assertEquals(service.status("session-1").sessions[0].policy, {
+    type: "cf-harness.chat-policy",
+    toolMode: "read-only",
+    allowedToolIds: ["read_file", "view_image", "read_skill_resource"],
+    allowedSubagentProfiles: [],
+  });
+});
+
+Deno.test("interactive service passes Browser Access leases to browser-profile turns", async () => {
+  const loopOptions: unknown[] = [];
+  const createPromptLoop: HarnessInteractivePromptLoopFactory = (options) => {
+    loopOptions.push(options);
+    return {
+      runTranscript: async (runOptions) => makeResult(runOptions, "Browser."),
+    };
+  };
+  const service = new HarnessInteractiveChatService({
+    createPromptLoop,
+    now: nextIsoNow(),
+  });
+
+  await service.startSession("req-1", {
+    sessionId: "session-1",
+    workspace: { hostPath: "/workspace" },
+    browserAccess,
+    policy: {
+      type: "cf-harness.chat-policy",
+      toolMode: "workspace-write",
+      allowedToolIds: ["delegate_task"],
+      allowedSubagentProfiles: ["browser"],
+    },
+  });
+  const turn = await service.startTurn("req-2", {
+    sessionId: "session-1",
+    turnId: "turn-1",
+    input: { text: "Inspect the browser" },
+  });
+  assertEquals(turn.ok, true);
+  await service.waitForTurn("session-1", "turn-1");
+
+  assertEquals(loopOptions[0], {
+    workspaceHostPath: "/workspace",
+    allowedToolIds: ["delegate_task"],
+    allowedSubagentProfiles: ["browser"],
+    browserAccess,
+  });
+});
+
+Deno.test("interactive service rejects browser-profile turns without Browser Access leases", async () => {
+  let createdLoop = false;
+  const service = new HarnessInteractiveChatService({
+    createPromptLoop: () => {
+      createdLoop = true;
+      return {
+        runTranscript: async (runOptions) => makeResult(runOptions, "Browser."),
+      };
+    },
+    now: nextIsoNow(),
+  });
+
+  await service.startSession("req-1", {
+    sessionId: "session-1",
+    workspace: { hostPath: "/workspace" },
+    policy: {
+      type: "cf-harness.chat-policy",
+      toolMode: "workspace-write",
+      allowedToolIds: ["delegate_task"],
+      allowedSubagentProfiles: ["browser"],
+    },
+  });
+  const turn = await service.startTurn("req-2", {
+    sessionId: "session-1",
+    turnId: "turn-1",
+    input: { text: "Inspect the browser" },
+  });
+
+  assertEquals(turn.ok, false);
+  assertEquals(
+    turn.ok === false ? turn.error.code : "",
+    "browser_access_required",
+  );
+  assertEquals(createdLoop, false);
+  assertEquals(
+    service.events("session-1").map((event) => event.event.kind),
+    ["session_started"],
+  );
 });
 
 Deno.test("interactive service maps tool transcript messages to tool and file events", async () => {

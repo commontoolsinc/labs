@@ -1,4 +1,5 @@
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
+import type { HarnessBrowserAccessLease } from "./browser-access.ts";
 import type { HarnessImageAttachment } from "./image.ts";
 import type { PromptSlotBinding } from "./prompt-slot.ts";
 import {
@@ -44,6 +45,16 @@ export type HarnessChatTurnLifecycle =
 
 export type HarnessChatToolPolicyMode = "workspace-write" | "read-only";
 
+export type HarnessChatContext =
+  | {
+    type: "workspace";
+  }
+  | {
+    type: "comment-thread";
+    threadId?: string;
+    subject?: string;
+  };
+
 export interface HarnessChatCapabilities {
   partialTextStream: boolean;
   toolTelemetry: boolean;
@@ -61,8 +72,8 @@ export const DEFAULT_HARNESS_CHAT_CAPABILITIES: HarnessChatCapabilities = {
   partialTextStream: false,
   toolTelemetry: true,
   fileMutationEvents: true,
-  browserProfile: false,
-  browserAccessLease: false,
+  browserProfile: true,
+  browserAccessLease: true,
   delegation: true,
   readonlyMode: true,
   imageAttachments: true,
@@ -83,13 +94,7 @@ export interface HarnessChatWorkspace {
   sandboxPath?: string;
 }
 
-export interface HarnessChatBrowserAccessLease {
-  type: "cf-harness.chat.browser-access-lease";
-  leaseId: string;
-  cdpUrl: string;
-  owner?: string;
-  expiresAt?: string;
-}
+export type HarnessChatBrowserAccessLease = HarnessBrowserAccessLease;
 
 export interface HarnessChatPolicy {
   type: "cf-harness.chat-policy";
@@ -114,6 +119,42 @@ export const READONLY_HARNESS_CHAT_POLICY: HarnessChatPolicy = {
   allowedSubagentProfiles: [],
 };
 
+export const COMMENT_THREAD_HARNESS_CHAT_POLICY: HarnessChatPolicy = {
+  ...READONLY_HARNESS_CHAT_POLICY,
+};
+
+const READONLY_INTERACTIVE_CHAT_TOOL_ID_SET = new Set<BuiltinToolId>(
+  READONLY_INTERACTIVE_CHAT_TOOL_IDS,
+);
+
+export const resolveHarnessChatPolicy = (
+  policy: HarnessChatPolicy = DEFAULT_HARNESS_CHAT_POLICY,
+  context?: HarnessChatContext,
+): HarnessChatPolicy => {
+  if (context?.type === "comment-thread") {
+    return {
+      ...COMMENT_THREAD_HARNESS_CHAT_POLICY,
+      ...(policy.cfcEnforcementMode !== undefined
+        ? { cfcEnforcementMode: policy.cfcEnforcementMode }
+        : {}),
+      ...(policy.promptSlot !== undefined
+        ? { promptSlot: policy.promptSlot }
+        : {}),
+    };
+  }
+  if (policy.toolMode !== "read-only") {
+    return policy;
+  }
+  return {
+    ...policy,
+    toolMode: "read-only",
+    allowedToolIds: policy.allowedToolIds.filter((toolId) =>
+      READONLY_INTERACTIVE_CHAT_TOOL_ID_SET.has(toolId)
+    ),
+    allowedSubagentProfiles: [],
+  };
+};
+
 export interface HarnessChatTurnInput {
   text: string;
   imageAttachments?: readonly HarnessImageAttachment[];
@@ -122,6 +163,7 @@ export interface HarnessChatTurnInput {
 export interface HarnessChatStartSessionParams {
   sessionId?: string;
   workspace: HarnessChatWorkspace;
+  context?: HarnessChatContext;
   model?: string;
   artifactRoot?: string;
   policy?: HarnessChatPolicy;
@@ -133,6 +175,7 @@ export interface HarnessChatStartSessionParams {
 export interface HarnessChatStartTurnParams {
   sessionId: string;
   turnId?: string;
+  context?: HarnessChatContext;
   input: HarnessChatTurnInput;
   policy?: HarnessChatPolicy;
   browserAccess?: HarnessChatBrowserAccessLease;
@@ -230,6 +273,7 @@ export interface HarnessChatSessionStatus {
   activeTurnId?: string;
   activeTurn?: HarnessChatTurnStatus;
   workspace?: HarnessChatWorkspace;
+  context?: HarnessChatContext;
   model?: string;
   harnessRunId?: string;
   artifactRoot?: string;
@@ -365,6 +409,7 @@ export interface CreateHarnessChatSessionStatusOptions {
   sessionId: string;
   createdAt?: string;
   workspace?: HarnessChatWorkspace;
+  context?: HarnessChatContext;
   model?: string;
   harnessRunId?: string;
   artifactRoot?: string;
@@ -388,6 +433,7 @@ export const createHarnessChatSessionStatus = (
     ...(options.workspace !== undefined
       ? { workspace: options.workspace }
       : {}),
+    ...(options.context !== undefined ? { context: options.context } : {}),
     ...(options.model !== undefined ? { model: options.model } : {}),
     ...(options.harnessRunId !== undefined
       ? { harnessRunId: options.harnessRunId }

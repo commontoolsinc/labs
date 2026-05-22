@@ -9,7 +9,7 @@ import {
   createHarnessChatEventEnvelope,
   createHarnessChatOkResponse,
   createHarnessChatSessionStatus,
-  DEFAULT_HARNESS_CHAT_POLICY,
+  type HarnessChatBrowserAccessLease,
   type HarnessChatErrorResponse,
   type HarnessChatEventEnvelope,
   type HarnessChatOkResponse,
@@ -23,7 +23,9 @@ import {
   type HarnessChatStructuredEvent,
   type HarnessChatTurnStatus,
   reduceHarnessChatSessionStatus,
+  resolveHarnessChatPolicy,
 } from "./contracts/interactive-chat.ts";
+import { BROWSER_SUBAGENT_PROFILE } from "./contracts/subagent.ts";
 import type {
   HarnessAssistantTranscriptMessage,
   HarnessToolTranscriptMessage,
@@ -95,6 +97,15 @@ const sessionClosedError = (
   createHarnessChatErrorResponse(requestId, {
     code: "session_closed",
     message: `chat session is closed: ${sessionId}`,
+  });
+
+const browserAccessRequiredError = (
+  requestId: string,
+): HarnessChatErrorResponse =>
+  createHarnessChatErrorResponse(requestId, {
+    code: "browser_access_required",
+    message: "Browser Access lease is required for browser profile turns.",
+    retryable: true,
   });
 
 const turnNotFoundError = (
@@ -287,10 +298,11 @@ export class HarnessInteractiveChatService {
       sessionId: params.sessionId ?? this.#randomUUID(),
       createdAt: this.#now(),
       workspace: params.workspace,
+      context: params.context,
       model: params.model,
       artifactRoot: params.artifactRoot,
       capabilities: params.capabilities,
-      policy: params.policy,
+      policy: resolveHarnessChatPolicy(params.policy, params.context),
       browserAccess: params.browserAccess,
       metadata: params.metadata,
     });
@@ -320,6 +332,18 @@ export class HarnessInteractiveChatService {
     if (record.status.activeTurnId !== undefined) {
       return activeTurnError(requestId, record.status);
     }
+    const context = params.context ?? record.status.context;
+    const policy = resolveHarnessChatPolicy(
+      params.policy ?? record.status.policy,
+      context,
+    );
+    const browserAccess = params.browserAccess ?? record.status.browserAccess;
+    if (
+      policy.allowedSubagentProfiles.includes(BROWSER_SUBAGENT_PROFILE) &&
+      browserAccess === undefined
+    ) {
+      return browserAccessRequiredError(requestId);
+    }
 
     const startedAt = this.#now();
     const turn: HarnessChatTurnStatus = {
@@ -343,6 +367,8 @@ export class HarnessInteractiveChatService {
       turn.turnId,
       params,
       abortController.signal,
+      policy,
+      browserAccess,
     );
     updatedRecord.activeTask = task;
     updatedRecord.activeAbortController = abortController;
@@ -418,10 +444,10 @@ export class HarnessInteractiveChatService {
     turnId: string,
     params: HarnessChatStartTurnParams,
     signal: AbortSignal,
+    policy: HarnessChatPolicy,
+    browserAccess: HarnessChatBrowserAccessLease | undefined,
   ): Promise<void> {
     const session = record.status;
-    const policy = params.policy ?? session.policy ??
-      DEFAULT_HARNESS_CHAT_POLICY;
     const transcript: HarnessTranscriptMessage[] = [
       ...record.transcript,
       {
@@ -435,7 +461,7 @@ export class HarnessInteractiveChatService {
     ];
     let observedTranscriptLength = transcript.length;
     const loop = this.#createPromptLoop(
-      this.#buildPromptLoopOptions(session, policy),
+      this.#buildPromptLoopOptions(session, policy, browserAccess),
     );
 
     try {
@@ -482,6 +508,7 @@ export class HarnessInteractiveChatService {
   #buildPromptLoopOptions(
     session: HarnessChatSessionStatus,
     policy: HarnessChatPolicy,
+    browserAccess?: HarnessChatBrowserAccessLease,
   ): CreateHarnessPromptLoopOptions {
     return {
       ...this.#basePromptLoopOptions,
@@ -497,6 +524,7 @@ export class HarnessInteractiveChatService {
         : {}),
       allowedToolIds: policy.allowedToolIds,
       allowedSubagentProfiles: policy.allowedSubagentProfiles,
+      ...(browserAccess !== undefined ? { browserAccess } : {}),
       ...(policy.cfcEnforcementMode !== undefined
         ? { cfcEnforcementModeOverride: policy.cfcEnforcementMode }
         : {}),

@@ -1,5 +1,6 @@
 import { assertEquals } from "@std/assert";
 import {
+  COMMENT_THREAD_HARNESS_CHAT_POLICY,
   createHarnessChatErrorResponse,
   createHarnessChatEventEnvelope,
   createHarnessChatOkResponse,
@@ -17,6 +18,7 @@ import {
   READONLY_HARNESS_CHAT_POLICY,
   reduceHarnessChatSessionStatus,
   resolveHarnessChatCapabilities,
+  resolveHarnessChatPolicy,
 } from "../src/contracts/interactive-chat.ts";
 
 class InMemoryInteractiveChatContract {
@@ -29,9 +31,10 @@ class InMemoryInteractiveChatContract {
       sessionId: params.sessionId ?? "session-1",
       createdAt: "2026-05-22T00:00:00.000Z",
       workspace: params.workspace,
+      context: params.context,
       model: params.model,
       capabilities: params.capabilities,
-      policy: params.policy,
+      policy: resolveHarnessChatPolicy(params.policy, params.context),
       browserAccess: params.browserAccess,
       metadata: params.metadata,
     });
@@ -138,6 +141,8 @@ Deno.test("interactive chat capabilities are explicit about v1 limits", () => {
   assertEquals(DEFAULT_HARNESS_CHAT_CAPABILITIES.partialTextStream, false);
   assertEquals(DEFAULT_HARNESS_CHAT_CAPABILITIES.toolTelemetry, true);
   assertEquals(DEFAULT_HARNESS_CHAT_CAPABILITIES.fileMutationEvents, true);
+  assertEquals(DEFAULT_HARNESS_CHAT_CAPABILITIES.browserProfile, true);
+  assertEquals(DEFAULT_HARNESS_CHAT_CAPABILITIES.browserAccessLease, true);
   assertEquals(DEFAULT_HARNESS_CHAT_CAPABILITIES.delegation, true);
   assertEquals(DEFAULT_HARNESS_CHAT_CAPABILITIES.readonlyMode, true);
   assertEquals(DEFAULT_HARNESS_CHAT_CAPABILITIES.cfcEnforcement, true);
@@ -216,6 +221,41 @@ Deno.test("interactive chat contract supports reusable turn cancel", () => {
   assertEquals(
     service.events.map((event) => event.event.kind),
     ["session_started", "turn_started", "turn_canceled"],
+  );
+});
+
+Deno.test("interactive chat contract forces comment threads into read-only policy", () => {
+  const service = new InMemoryInteractiveChatContract();
+  const session = service.startSession({
+    sessionId: "comment-session-1",
+    workspace: { hostPath: "/workspace" },
+    context: {
+      type: "comment-thread",
+      threadId: "comment-thread-1",
+      subject: "review comment",
+    },
+  });
+
+  assertEquals(session.context, {
+    type: "comment-thread",
+    threadId: "comment-thread-1",
+    subject: "review comment",
+  });
+  assertEquals(session.policy, COMMENT_THREAD_HARNESS_CHAT_POLICY);
+  assertEquals(
+    resolveHarnessChatPolicy({
+      type: "cf-harness.chat-policy",
+      toolMode: "workspace-write",
+      allowedToolIds: [
+        "bash",
+        "read_file",
+        "edit_file",
+        "write_file",
+        "delegate_task",
+      ],
+      allowedSubagentProfiles: ["default"],
+    }, { type: "comment-thread" }),
+    COMMENT_THREAD_HARNESS_CHAT_POLICY,
   );
 });
 
