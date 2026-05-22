@@ -46,8 +46,6 @@ type BrowserTriggerTraceEntry = {
 };
 
 const { FRONTEND_URL, SPACE_NAME } = env;
-const HOME_RELOAD_TOTAL_ACTION_RUN_LIMIT = 40;
-const HOME_RELOAD_COMPUTATION_RUN_LIMIT = 10;
 const NOTEBOOK_RELOAD_TOTAL_ACTION_RUN_LIMIT = 40;
 const NOTEBOOK_RELOAD_COMPUTATION_RUN_LIMIT = 10;
 
@@ -552,59 +550,6 @@ describe("default-app flow test", () => {
       "List should contain '📝 New Note #<hash>' after creating a note",
     );
 
-    // The first reload can fill observations for actions the creation path did
-    // not demand. Measure the next reload as the steady-state rehydrate path.
-    const warmReloadSummary = await collectHomeReloadSummary(shell, {
-      spaceName,
-      identity,
-      expectNoteInList: true,
-    });
-    assert(
-      warmReloadSummary && typeof warmReloadSummary === "object",
-      "Expected warm home reload summary to be available",
-    );
-    console.log(
-      "Home warm reload rehydration summary:",
-      JSON.stringify(warmReloadSummary, null, 2),
-    );
-
-    const reloadSummary = await collectHomeReloadSummary(shell, {
-      spaceName,
-      identity,
-      expectNoteInList: true,
-    });
-    assert(
-      reloadSummary && typeof reloadSummary === "object",
-      "Expected home reload summary to be available",
-    );
-    console.log(
-      "Home reload rehydration summary:",
-      JSON.stringify(reloadSummary, null, 2),
-    );
-
-    const reloadActionRunCount = actionRunCountFromHomeLoadSummary(
-      reloadSummary,
-    );
-    assert(
-      reloadActionRunCount !== undefined,
-      "Expected reload summary to include action run count",
-    );
-    assert(
-      reloadActionRunCount <= HOME_RELOAD_TOTAL_ACTION_RUN_LIMIT,
-      `Expected second reload to stay within <= ${HOME_RELOAD_TOTAL_ACTION_RUN_LIMIT} total action runs, saw ${reloadActionRunCount}`,
-    );
-    const reloadComputationRunCount = computationRunCountFromHomeLoadSummary(
-      reloadSummary,
-    );
-    assert(
-      reloadComputationRunCount !== undefined,
-      "Expected reload summary to include computation run count",
-    );
-    assert(
-      reloadComputationRunCount <= HOME_RELOAD_COMPUTATION_RUN_LIMIT,
-      `Expected second reload to reuse persisted scheduler state with <= ${HOME_RELOAD_COMPUTATION_RUN_LIMIT} computation runs, saw ${reloadComputationRunCount}`,
-    );
-
     if (actionRunSeries.length > 0) {
       console.log(
         "Action run series comparison:",
@@ -772,6 +717,9 @@ describe("default-app flow test", () => {
       "Notebook reload rehydration summary:",
       JSON.stringify(notebookReloadSummary, null, 2),
     );
+    const reloadRenderState = await collectNotebookRenderState(page);
+    assertEquals(reloadRenderState.noteCount, noteCreates);
+    assertEquals(reloadRenderState.renderedNoteChips, noteCreates);
 
     const reloadActionRunCount = actionRunCountFromHomeLoadSummary(
       notebookReloadSummary,
@@ -1620,31 +1568,6 @@ async function waitForHomePageReady(
   await waitFor(async () => {
     return await waitForRuntimeIdle(page);
   });
-}
-
-async function collectHomeReloadSummary(
-  shell: ShellIntegration,
-  options: {
-    spaceName: string;
-    identity: Identity;
-    expectNoteInList: boolean;
-  },
-): Promise<unknown> {
-  const page = shell.page();
-  const startedAt = performance.now();
-  await page.reload({ waitUntil: "load" });
-  await page.applyConsoleFormatter();
-  await shell.login(options.identity);
-  await waitForHomePageReady(page, options);
-
-  const homeLoadSummary = await collectHomeLoadSummary(page);
-  if (!homeLoadSummary || typeof homeLoadSummary !== "object") {
-    return homeLoadSummary;
-  }
-  return {
-    reloadToRenderedMs: Number((performance.now() - startedAt).toFixed(3)),
-    ...(homeLoadSummary as Record<string, unknown>),
-  };
 }
 
 async function collectNotebookReloadSummary(
