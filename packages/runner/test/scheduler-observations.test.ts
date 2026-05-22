@@ -21,8 +21,11 @@ import {
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import type {
   Action,
+  Cell,
   IExtendedStorageTransaction,
+  Runtime,
 } from "./scheduler-test-utils.ts";
+import type { SchedulerActionSnapshotResult } from "@commonfabric/memory/v2";
 
 const readAddress = {
   space: "did:key:space" as const,
@@ -58,6 +61,59 @@ const materializerEnvelope = {
   id: "of:materialized" as const,
   path: ["value"],
 };
+
+type SchedulerSnapshotWithObservation =
+  & SchedulerActionSnapshotResult
+  & { observation: SchedulerActionObservation };
+
+const resultCellPieceId = (cell: Cell<unknown>): string => {
+  const processCell = cell.getSourceCell();
+  expect(processCell).toBeDefined();
+  const { scope, id } = processCell!.getAsNormalizedFullLink();
+  return `${scope}:${id}`;
+};
+
+const persistedSchedulerSnapshots = async (
+  runtime: Runtime,
+  pieceId: string,
+): Promise<SchedulerSnapshotWithObservation[]> => {
+  const provider = runtime.storageManager.open(space);
+  const result = await provider.listSchedulerActionSnapshots?.({
+    pieceId,
+    processGeneration: 0,
+  });
+  expect(result).toBeDefined();
+  return (result?.snapshots ?? []).filter((snapshot) =>
+    isSchedulerActionObservation(snapshot.observation)
+  ) as SchedulerSnapshotWithObservation[];
+};
+
+const hasPersistedDirtyState = (
+  snapshot: SchedulerActionSnapshotResult,
+): boolean =>
+  snapshot.directDirtySeq !== undefined ||
+  snapshot.staleSeq !== undefined ||
+  snapshot.unknownReason !== undefined;
+
+const sameSchedulerAddress = (
+  left: SchedulerActionObservation["reads"][number],
+  right: SchedulerActionObservation["reads"][number],
+): boolean =>
+  left.space === right.space &&
+  left.scope === right.scope &&
+  left.id === right.id &&
+  JSON.stringify(left.path) === JSON.stringify(right.path);
+
+const observationReadsAddress = (
+  snapshot: SchedulerSnapshotWithObservation,
+  address: SchedulerActionObservation["reads"][number],
+): boolean =>
+  snapshot.observation.reads.some((read) =>
+    sameSchedulerAddress(read, address)
+  ) ||
+  snapshot.observation.shallowReads.some((read) =>
+    sameSchedulerAddress(read, address)
+  );
 
 describe("persistent scheduler observations", () => {
   it("builds scheduler observations without attemptedWrites", () => {
@@ -557,6 +613,501 @@ describe("persistent scheduler observations", () => {
       await runtime.idle();
 
       expect(runs).toBe(2);
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
+  it("rehydrates only the dirty nodes when an inactive piece reads another piece's computed data", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {
+      pullMode: "enabled",
+    });
+    try {
+      const { runtime, tx } = testRuntime;
+      const { commonfabric } = createTrustedBuilder(runtime);
+      const { lift, pattern } = commonfabric;
+
+      const source = runtime.getCell<number>(
+        space,
+        "persistent scheduler producer source",
+        undefined,
+        tx,
+      );
+      source.set(1);
+
+      const counts = {
+        producer: 0,
+        consumer: 0,
+      };
+      const producerPattern = pattern<{ source: number }>(({ source }) => {
+        const generated = lift((input: number) => {
+          counts.producer++;
+          return input * 10;
+        })(source);
+        return { generated };
+      });
+      const consumerPattern = pattern<{ generated: number }>(
+        ({ generated }) => {
+          const fromGenerated = lift((input: number) => {
+            counts.consumer++;
+            return input + 1;
+          })(generated);
+          return { fromGenerated };
+        },
+      );
+
+      const producerCell = runtime.getCell<{ generated: number }>(
+        space,
+        "persistent scheduler producer piece",
+        undefined,
+        tx,
+      );
+      const consumerCell = runtime.getCell<{ fromGenerated: number }>(
+        space,
+        "persistent scheduler consumer piece",
+        undefined,
+        tx,
+      );
+      const producerResult = runtime.run(tx, producerPattern, {
+        source,
+      }, producerCell);
+      const consumerResult = runtime.run(tx, consumerPattern, {
+        generated: producerResult.key("generated"),
+      }, consumerCell);
+      runtime.prepareTxForCommit(tx);
+      await tx.commit();
+
+      expect(await consumerResult.pull()).toEqual({ fromGenerated: 11 });
+      expect(counts).toEqual({
+        producer: 1,
+        consumer: 1,
+      });
+      await runtime.storageManager.synced();
+
+      const consumerPieceId = resultCellPieceId(consumerCell);
+      const generatedAddress = toMemorySpaceAddress(
+        producerResult.key("generated").getAsNormalizedFullLink(),
+      );
+      runtime.runner.stop(consumerCell);
+
+      const updateTx = runtime.edit();
+      source.withTx(updateTx).set(2);
+      await updateTx.commit();
+      expect(await producerResult.pull()).toEqual({ generated: 20 });
+      await runtime.storageManager.synced();
+
+      expect(counts).toEqual({
+        producer: 2,
+        consumer: 1,
+      });
+
+      const dirtyConsumerSnapshots = (await persistedSchedulerSnapshots(
+        runtime,
+        consumerPieceId,
+      )).filter(hasPersistedDirtyState);
+      expect(
+        dirtyConsumerSnapshots.some((snapshot) =>
+          observationReadsAddress(snapshot, generatedAddress)
+        ),
+      ).toBe(true);
+
+      await runtime.start(consumerCell);
+      await runtime.idle();
+
+      expect(await consumerResult.pull()).toEqual({ fromGenerated: 21 });
+      expect(counts).toEqual({
+        producer: 2,
+        consumer: 2,
+      });
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
+  it("marks inactive readers dirty when another piece only changes data from an event", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {
+      pullMode: "enabled",
+    });
+    try {
+      const { runtime, tx } = testRuntime;
+      const { commonfabric } = createTrustedBuilder(runtime);
+      const { handler, lift, pattern } = commonfabric;
+
+      let producerEvents = 0;
+      const updateGenerated = handler<
+        { value: number },
+        { generated: number }
+      >(({ value }, state) => {
+        producerEvents++;
+        state.generated = value;
+      }, { proxy: true });
+
+      const eventOnlyProducerPattern = pattern<{ generated: number }>(
+        ({ generated }) => ({
+          generated,
+          stream: updateGenerated({ generated }),
+        }),
+      );
+
+      const counts = {
+        consumer: 0,
+      };
+      const consumerPattern = pattern<{ generated: number }>(
+        ({ generated }) => {
+          const fromGenerated = lift((input: number) => {
+            counts.consumer++;
+            return input + 1;
+          })(generated);
+          return { fromGenerated };
+        },
+      );
+
+      const producerCell = runtime.getCell<{ generated: number; stream: any }>(
+        space,
+        "persistent scheduler event producer piece",
+        undefined,
+        tx,
+      );
+      const consumerCell = runtime.getCell<{ fromGenerated: number }>(
+        space,
+        "persistent scheduler event consumer piece",
+        undefined,
+        tx,
+      );
+      const producerResult = runtime.run(tx, eventOnlyProducerPattern, {
+        generated: 1,
+      }, producerCell);
+      const consumerResult = runtime.run(tx, consumerPattern, {
+        generated: producerResult.key("generated"),
+      }, consumerCell);
+      runtime.prepareTxForCommit(tx);
+      await tx.commit();
+
+      expect(await consumerResult.pull()).toEqual({ fromGenerated: 2 });
+      expect(producerEvents).toBe(0);
+      expect(counts).toEqual({ consumer: 1 });
+      await runtime.storageManager.synced();
+
+      const consumerPieceId = resultCellPieceId(consumerCell);
+      const generatedAddress = toMemorySpaceAddress(
+        producerResult.key("generated").getAsNormalizedFullLink(),
+      );
+      runtime.runner.stop(consumerCell);
+
+      producerResult.key("stream").send({ value: 2 });
+      expect(await producerResult.pull()).toMatchObject({ generated: 2 });
+      await runtime.storageManager.synced();
+
+      expect(producerEvents).toBe(1);
+      expect(counts).toEqual({ consumer: 1 });
+
+      const dirtyConsumerSnapshots = (await persistedSchedulerSnapshots(
+        runtime,
+        consumerPieceId,
+      )).filter(hasPersistedDirtyState);
+      expect(
+        dirtyConsumerSnapshots.some((snapshot) =>
+          observationReadsAddress(snapshot, generatedAddress)
+        ),
+      ).toBe(true);
+
+      await runtime.start(consumerCell);
+      await runtime.idle();
+
+      expect(await consumerResult.pull()).toEqual({ fromGenerated: 3 });
+      expect(counts).toEqual({ consumer: 2 });
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
+  it("rehydrates only newly dirty persisted actions after another piece runs", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {
+      pullMode: "enabled",
+    });
+    try {
+      const { runtime, tx } = testRuntime;
+      const source = runtime.getCell<number>(
+        space,
+        "persistent scheduler direct producer source",
+        undefined,
+        tx,
+      );
+      const generated = runtime.getCell<number>(
+        space,
+        "persistent scheduler direct generated",
+        undefined,
+        tx,
+      );
+      const stable = runtime.getCell<number>(
+        space,
+        "persistent scheduler direct stable input",
+        undefined,
+        tx,
+      );
+      const generatedOutput = runtime.getCell<number>(
+        space,
+        "persistent scheduler direct generated output",
+        undefined,
+        tx,
+      );
+      const stableOutput = runtime.getCell<number>(
+        space,
+        "persistent scheduler direct stable output",
+        undefined,
+        tx,
+      );
+      source.set(1);
+      generated.set(0);
+      stable.set(5);
+      generatedOutput.set(0);
+      stableOutput.set(0);
+      await tx.commit();
+
+      let producerRuns = 0;
+      const produceGenerated = (actionTx: IExtendedStorageTransaction) => {
+        producerRuns++;
+        generated.withTx(actionTx).set(source.withTx(actionTx).get() * 10);
+      };
+
+      let generatedReaderRuns = 0;
+      const readGenerated = (actionTx: IExtendedStorageTransaction) => {
+        generatedReaderRuns++;
+        generatedOutput.withTx(actionTx).set(
+          generated.withTx(actionTx).get() + 1,
+        );
+      };
+
+      let stableReaderRuns = 0;
+      const readStable = (actionTx: IExtendedStorageTransaction) => {
+        stableReaderRuns++;
+        stableOutput.withTx(actionTx).set(stable.withTx(actionTx).get() * 2);
+      };
+
+      const producerPieceId = "space:persistent-direct-producer";
+      const consumerPieceId = "space:persistent-direct-consumer";
+      runtime.scheduler.subscribe(produceGenerated, {
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(generated.getAsNormalizedFullLink())],
+      }, {
+        rehydrateFromStorage: {
+          space,
+          pieceId: producerPieceId,
+          processGeneration: 0,
+        },
+      });
+
+      const subscribeGeneratedReader = () =>
+        runtime.scheduler.subscribe(
+          readGenerated,
+          {
+            reads: [toMemorySpaceAddress(generated.getAsNormalizedFullLink())],
+            shallowReads: [],
+            writes: [
+              toMemorySpaceAddress(generatedOutput.getAsNormalizedFullLink()),
+            ],
+          },
+          {
+            isEffect: true,
+            rehydrateFromStorage: {
+              space,
+              pieceId: consumerPieceId,
+              processGeneration: 0,
+            },
+          },
+        );
+      const subscribeStableReader = () =>
+        runtime.scheduler.subscribe(
+          readStable,
+          {
+            reads: [toMemorySpaceAddress(stable.getAsNormalizedFullLink())],
+            shallowReads: [],
+            writes: [
+              toMemorySpaceAddress(stableOutput.getAsNormalizedFullLink()),
+            ],
+          },
+          {
+            isEffect: true,
+            rehydrateFromStorage: {
+              space,
+              pieceId: consumerPieceId,
+              processGeneration: 0,
+            },
+          },
+        );
+
+      await runtime.scheduler.run(produceGenerated);
+      const cancelGeneratedReader = subscribeGeneratedReader();
+      const cancelStableReader = subscribeStableReader();
+      await runtime.idle();
+      await runtime.storageManager.synced();
+      expect(producerRuns).toBe(1);
+      expect(generatedReaderRuns).toBe(1);
+      expect(stableReaderRuns).toBe(1);
+      expect(generatedOutput.get()).toBe(11);
+      expect(stableOutput.get()).toBe(10);
+
+      cancelGeneratedReader();
+      cancelStableReader();
+
+      const updateTx = runtime.edit();
+      source.withTx(updateTx).set(2);
+      await updateTx.commit();
+      await runtime.scheduler.run(produceGenerated);
+      await runtime.storageManager.synced();
+
+      expect(producerRuns).toBe(2);
+      expect(generatedReaderRuns).toBe(1);
+      expect(stableReaderRuns).toBe(1);
+
+      const dirtyConsumerSnapshots = (await persistedSchedulerSnapshots(
+        runtime,
+        consumerPieceId,
+      )).filter(hasPersistedDirtyState);
+      expect(
+        dirtyConsumerSnapshots.map((snapshot) => snapshot.observation.actionId),
+      ).toEqual(["readGenerated"]);
+
+      subscribeGeneratedReader();
+      subscribeStableReader();
+      await runtime.idle();
+
+      expect(generatedReaderRuns).toBe(2);
+      expect(stableReaderRuns).toBe(1);
+      expect(generatedOutput.get()).toBe(21);
+      expect(stableOutput.get()).toBe(10);
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
+  it("persists dirty state for an inactive materializer that can eagerly write other cells", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {
+      pullMode: "enabled",
+    });
+    try {
+      const { runtime, tx } = testRuntime;
+      const source = runtime.getCell<number>(
+        space,
+        "persistent scheduler materializer source",
+        undefined,
+        tx,
+      );
+      const target = runtime.getCell<number>(
+        space,
+        "persistent scheduler materializer target",
+        undefined,
+        tx,
+      );
+      source.set(1);
+      target.set(0);
+      await tx.commit();
+
+      let materializerRuns = 0;
+      const eagerMaterializer = (actionTx: IExtendedStorageTransaction) => {
+        materializerRuns++;
+        target.withTx(actionTx).set(source.withTx(actionTx).get() * 10);
+      };
+      const materializer = Object.assign(eagerMaterializer, {
+        materializerWriteEnvelopes: [
+          toMemorySpaceAddress(target.getAsNormalizedFullLink()),
+        ],
+      }) as Action & {
+        materializerWriteEnvelopes: SchedulerActionObservation[
+          "materializerWriteEnvelopes"
+        ];
+      };
+
+      let readerRuns = 0;
+      const targetReader = (actionTx: IExtendedStorageTransaction) => {
+        readerRuns++;
+        target.withTx(actionTx).get();
+      };
+
+      const materializerPieceId = "space:persistent-eager-materializer";
+      const readerPieceId = "space:persistent-materialized-reader";
+      const subscribeMaterializer = () =>
+        runtime.scheduler.subscribe(
+          materializer,
+          {
+            reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+            shallowReads: [],
+            writes: [],
+          },
+          {
+            rehydrateFromStorage: {
+              space,
+              pieceId: materializerPieceId,
+              processGeneration: 0,
+            },
+          },
+        );
+      const subscribeReader = () =>
+        runtime.scheduler.subscribe(
+          targetReader,
+          {
+            reads: [toMemorySpaceAddress(target.getAsNormalizedFullLink())],
+            shallowReads: [],
+            writes: [],
+          },
+          {
+            isEffect: true,
+            rehydrateFromStorage: {
+              space,
+              pieceId: readerPieceId,
+              processGeneration: 0,
+            },
+          },
+        );
+
+      const cancelMaterializer = subscribeMaterializer();
+      await runtime.idle();
+      await runtime.storageManager.synced();
+      expect(materializerRuns).toBe(1);
+      expect(target.get()).toBe(10);
+
+      const cancelReader = subscribeReader();
+      await runtime.idle();
+      await runtime.storageManager.synced();
+      expect(readerRuns).toBe(1);
+
+      cancelMaterializer();
+      cancelReader();
+
+      const updateTx = runtime.edit();
+      source.withTx(updateTx).set(2);
+      await updateTx.commit();
+      await runtime.storageManager.synced();
+
+      const materializerDirtySnapshots = (await persistedSchedulerSnapshots(
+        runtime,
+        materializerPieceId,
+      )).filter(hasPersistedDirtyState);
+      expect(
+        materializerDirtySnapshots.some((snapshot) =>
+          snapshot.observation.actionId === "eagerMaterializer"
+        ),
+      ).toBe(true);
+
+      subscribeMaterializer();
+      await runtime.idle();
+      await runtime.storageManager.synced();
+      expect(materializerRuns).toBe(2);
+      expect(target.get()).toBe(20);
+
+      const readerDirtySnapshotsAfterMaterializer =
+        (await persistedSchedulerSnapshots(runtime, readerPieceId)).filter(
+          hasPersistedDirtyState,
+        );
+      expect(
+        readerDirtySnapshotsAfterMaterializer.some((snapshot) =>
+          observationReadsAddress(
+            snapshot,
+            toMemorySpaceAddress(target.getAsNormalizedFullLink()),
+          )
+        ),
+      ).toBe(true);
     } finally {
       await disposeSchedulerTestRuntime(testRuntime);
     }
