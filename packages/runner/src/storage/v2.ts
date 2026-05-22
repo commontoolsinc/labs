@@ -868,10 +868,9 @@ class Provider implements IStorageProviderWithReplica {
   }
 
   async destroyNow(): Promise<void> {
-    if (this.#destroyed) {
-      return;
+    if (!this.#destroyed) {
+      this.#destroyed = true;
     }
-    this.#destroyed = true;
     await this.replica.closeNow();
   }
 
