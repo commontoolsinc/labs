@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import {
   appendDecodedJsonPath,
   bufferForNoHandleTruncate,
@@ -21,6 +21,34 @@ function env(values: Record<string, string | undefined>) {
       return values[name];
     },
   };
+}
+
+function assertAppearsBefore(
+  source: string,
+  earlier: string,
+  later: string,
+  label = "source order",
+): void {
+  const earlierIndex = source.indexOf(earlier);
+  const laterIndex = source.indexOf(later);
+  assert(earlierIndex >= 0, `${label}: missing source fragment: ${earlier}`);
+  assert(laterIndex >= 0, `${label}: missing source fragment: ${later}`);
+  assert(
+    earlierIndex < laterIndex,
+    `expected ${earlier} to appear before ${later}`,
+  );
+}
+
+function assertAppearsBeforeAfter(
+  source: string,
+  after: string,
+  earlier: string,
+  later: string,
+  label: string,
+): void {
+  const start = source.indexOf(after);
+  assert(start >= 0, `${label}: missing section marker: ${after}`);
+  assertAppearsBefore(source.slice(start), earlier, later, label);
 }
 
 Deno.test("CFC xattr namespace defaults to both and rejects unknown values", () => {
@@ -100,6 +128,98 @@ Deno.test("disconnectedWriteErrno only rejects degraded writes", () => {
   assertEquals(disconnectedWriteErrno({ disconnected: true }), EROFS);
   assertEquals(disconnectedWriteErrno({ disconnected: false }), null);
   assertEquals(disconnectedWriteErrno(undefined), null);
+});
+
+Deno.test("mutating callbacks reject disconnected writes before optimistic mutation", async () => {
+  const source = await Deno.readTextFile(new URL("./mod.ts", import.meta.url));
+  const mutationGuards = [
+    [
+      "write callback",
+      'logOp("write"',
+      "const errno = disconnectedWriteErrno(bridge);",
+      "!handles.write(fh, data, off)",
+    ],
+    [
+      "flushHandle",
+      "async function flushHandle",
+      "const disconnectedErrno = disconnectedWriteErrno(bridge);",
+      'if (writeTarget?.kind === "handler")',
+    ],
+    [
+      "setattr",
+      'logOp("setattr"',
+      "if ((sizeChange || metadataChange) && failIfDisconnectedWrite(req))",
+      "applyPreparedExistingWrite",
+    ],
+    [
+      "setxattr",
+      'logOp("setxattr"',
+      "if (failIfDisconnectedWrite(req)) return;\n      const name = readCString(namePtr);",
+      "cfcWritebacks.setPreparedXattr",
+    ],
+    [
+      "create",
+      "const parentPath = bridge.resolveWritePath(parent);",
+      'if (failIfDisconnectedWrite(req)) return;\n      if (!authorizeCreateCfcWrite(parent, "create", name))',
+      "tree.addFile(parent, name",
+    ],
+    [
+      "mkdir",
+      'logOp("mkdir"',
+      'if (failIfDisconnectedWrite(req)) return;\n      if (!authorizeCreateCfcWrite(parent, "mkdir", name))',
+      "tree.addDir(parent, name",
+    ],
+    [
+      "unlink",
+      "parentPath ??= bridge.resolveWritePath(parent);",
+      'if (failIfDisconnectedWrite(req)) return;\n      authorization ??= authorizeNamespaceCfcWrite(parent, "unlink", name);',
+      "tree.removeChild(parent, name)",
+    ],
+    [
+      "rmdir",
+      'logOp("rmdir"',
+      'if (failIfDisconnectedWrite(req)) return;\n      authorization ??= authorizeNamespaceCfcWrite(parent, "rmdir", name);',
+      "tree.removeChild(parent, name)",
+    ],
+    [
+      "rename",
+      'logOp("rename"',
+      "if (failIfDisconnectedWrite(req)) return;\n      renameAuthorization ??= authorizeRenameCfcWrite",
+      "tree.rename(oldParent, oldName, newParent, newName)",
+    ],
+    [
+      "symlink",
+      "const symlinkCb",
+      "if (failIfDisconnectedWrite(req)) return;\n\n      let authorization = undefined",
+      "tree.addSymlink(parent, name, target)",
+    ],
+  ] as const;
+
+  for (const [label, marker, guard, mutation] of mutationGuards) {
+    assertAppearsBeforeAfter(source, marker, guard, mutation, label);
+  }
+});
+
+Deno.test("namespace write failures use shared outage accounting", async () => {
+  const source = await Deno.readTextFile(new URL("./mod.ts", import.meta.url));
+
+  for (
+    const operation of [
+      "create",
+      "mkdir",
+      "unlink",
+      "rmdir",
+      "rename",
+      "symlink",
+    ]
+  ) {
+    assert(
+      source.includes(
+        `recordAsyncWriteFailure(\"${operation} write error\", e);`,
+      ),
+      `missing shared outage accounting for ${operation}`,
+    );
+  }
 });
 
 Deno.test("connection write failure classifier recognizes backend outages", () => {

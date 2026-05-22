@@ -76,6 +76,7 @@ import { decodeFuseComponent, encodeFusePathSegments } from "./path-codec.ts";
 import { buildNodeStat, getMountOwnership, nodeMode } from "./stat.ts";
 
 const encoder = new TextEncoder();
+const ENOTSUP = 95;
 
 // Operation ring buffer — last 50 ops for crash diagnostics
 const OP_RING: string[] = [];
@@ -468,6 +469,13 @@ export async function main(argv: string[] = Deno.args) {
   function recordAsyncWriteFailure(context: string, e: unknown): void {
     const msg = noteWriteFailure(e);
     console.error(`[fuse] ${context}: ${msg}`);
+  }
+
+  function failIfDisconnectedWrite(req: Deno.PointerValue): boolean {
+    const errno = disconnectedWriteErrno(bridge);
+    if (errno === null) return false;
+    fuse.symbols.fuse_reply_err(req, errno);
+    return true;
   }
 
   globalThis.addEventListener("unhandledrejection", (event: Event) => {
@@ -1092,6 +1100,7 @@ export async function main(argv: string[] = Deno.args) {
 
         let writeTarget: HandleWriteTarget | undefined;
         if (node.callableKind === "handler" && isWriting) {
+          if (failIfDisconnectedWrite(req)) return;
           if (isCfcEnforcing(cfcMode)) {
             fuse.symbols.fuse_reply_err(req, EACCES);
             return;
@@ -1149,6 +1158,10 @@ export async function main(argv: string[] = Deno.args) {
           }
           writeTarget = { kind: "value", target: writePath };
         }
+      }
+
+      if (isWriting && writeTarget?.kind !== "ignored") {
+        if (failIfDisconnectedWrite(req)) return;
       }
 
       // Get current content for the handle buffer
@@ -1437,6 +1450,12 @@ export async function main(argv: string[] = Deno.args) {
         return 0;
       }
 
+      const disconnectedErrno = disconnectedWriteErrno(bridge);
+      if (disconnectedErrno !== null) {
+        markExistingFailed("backend disconnected");
+        return disconnectedErrno;
+      }
+
       if (writeTarget?.kind === "handler") {
         const text = new TextDecoder().decode(buffer);
         const trimmed = text.trim();
@@ -1683,29 +1702,25 @@ export async function main(argv: string[] = Deno.args) {
         : "[fuse] flush error";
       console.error(`${logPrefix}: ${e}`);
 
-      // Detect transport/connection failures and mark the bridge as
-      // disconnected so subsequent writes fail loudly (EACCES) instead
-      // of silently succeeding in the optimistic local tree.
-      const msg = e instanceof Error ? e.message : String(e);
-      writeStats.flushErrors++;
-      writeStats.lastError = msg;
-      writeStats.lastErrorAt = new Date().toISOString();
+      const isConnectionFailure = isConnectionWriteFailure(e);
+      const msg = isConnectionFailure
+        ? noteWriteFailure(e)
+        : e instanceof Error
+        ? e.message
+        : String(e);
+      if (!isConnectionFailure) {
+        writeStats.flushErrors++;
+        writeStats.lastError = msg;
+        writeStats.lastErrorAt = new Date().toISOString();
+      }
       console.error(
         `[write-trace] flush-err ino=${handle.ino} err=${
           e instanceof Error ? e.stack ?? e.message : String(e)
         }`,
       );
-      if (
-        bridge && !bridge.disconnected &&
-        (msg.includes("transport closed") ||
-          msg.includes("ConnectionError") ||
-          msg.includes("connection refused"))
-      ) {
-        bridge.markDisconnected(msg);
-      }
 
       markExistingFailed(msg);
-      return EIO;
+      return isConnectionFailure ? EROFS : EIO;
     } finally {
       handle.flushing = false;
       if (handleHasPendingChanges(handle) && handle.version !== flushVersion) {
@@ -1786,6 +1801,13 @@ export async function main(argv: string[] = Deno.args) {
       }
 
       const writeTarget = handle.writeTarget as HandleWriteTarget | undefined;
+      if (writeTarget?.kind !== "ignored") {
+        const errno = disconnectedWriteErrno(bridge);
+        if (errno !== null) {
+          fuse.symbols.fuse_reply_err(req, errno);
+          return;
+        }
+      }
       if (
         writeTarget?.kind !== "ignored" &&
         !authorizeHandleCfcWrite(fh, handle, "write")
@@ -1892,6 +1914,9 @@ export async function main(argv: string[] = Deno.args) {
       const metadataFields = metadataChange
         ? metadataFieldsForSetattrFlags(metadataFlags)
         : [];
+      if ((sizeChange || metadataChange) && failIfDisconnectedWrite(req)) {
+        return;
+      }
       let newSize = 0;
       if (sizeChange) {
         const attrView = new Deno.UnsafePointerView(_attrPtr!);
@@ -2229,6 +2254,7 @@ export async function main(argv: string[] = Deno.args) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
+      if (failIfDisconnectedWrite(req)) return;
       const name = readCString(namePtr);
       const normalizedName = normalizeCfcWritebackXattrName(name);
       const value = new TextDecoder().decode(readBuffer(valuePtr, size));
@@ -2246,7 +2272,10 @@ export async function main(argv: string[] = Deno.args) {
       if (!result.ok) {
         console.warn(`[FUSE:CFC] rejected ${name}: ${result.reason}`);
         bridge?.refreshStatus();
-        fuse.symbols.fuse_reply_err(req, EINVAL);
+        fuse.symbols.fuse_reply_err(
+          req,
+          cfcWritebackXattrResultErrno(result, { enotsup: ENOTSUP }),
+        );
         return;
       }
       bridge?.refreshStatus();
@@ -2267,6 +2296,7 @@ export async function main(argv: string[] = Deno.args) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
+      if (failIfDisconnectedWrite(req)) return;
       const name = readCString(namePtr);
       const normalizedName = normalizeCfcWritebackXattrName(name);
       if (
@@ -2337,6 +2367,7 @@ export async function main(argv: string[] = Deno.args) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
+      if (failIfDisconnectedWrite(req)) return;
       if (!authorizeCreateCfcWrite(parent, "create", name)) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
@@ -2398,7 +2429,7 @@ export async function main(argv: string[] = Deno.args) {
         cfcWritebacks.deletePrepared(parent, "create", name);
       }).catch((e) => {
         cfcWritebacks.markRunnerCommitFailed(parent, "create", String(e), name);
-        console.error(`[fuse] create write error: ${e}`);
+        recordAsyncWriteFailure("create write error", e);
       });
     },
   );
@@ -2430,6 +2461,7 @@ export async function main(argv: string[] = Deno.args) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
+      if (failIfDisconnectedWrite(req)) return;
       if (!authorizeCreateCfcWrite(parent, "mkdir", name)) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
@@ -2457,7 +2489,7 @@ export async function main(argv: string[] = Deno.args) {
         cfcWritebacks.deletePrepared(parent, "mkdir", name);
       }).catch((e) => {
         cfcWritebacks.markRunnerCommitFailed(parent, "mkdir", String(e), name);
-        console.error(`[fuse] mkdir write error: ${e}`);
+        recordAsyncWriteFailure("mkdir write error", e);
       });
     },
   );
@@ -2519,6 +2551,7 @@ export async function main(argv: string[] = Deno.args) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
+      if (failIfDisconnectedWrite(req)) return;
       authorization ??= authorizeNamespaceCfcWrite(parent, "unlink", name);
       if (!authorization.allowed) {
         fuse.symbols.fuse_reply_err(req, EACCES);
@@ -2600,7 +2633,7 @@ export async function main(argv: string[] = Deno.args) {
         }
       })().catch((e) => {
         cfcWritebacks.markRunnerCommitFailed(parent, "unlink", String(e), name);
-        console.error(`[fuse] unlink write error: ${e}`);
+        recordAsyncWriteFailure("unlink write error", e);
       });
     },
   );
@@ -2663,6 +2696,7 @@ export async function main(argv: string[] = Deno.args) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
+      if (failIfDisconnectedWrite(req)) return;
       authorization ??= authorizeNamespaceCfcWrite(parent, "rmdir", name);
       if (!authorization.allowed) {
         fuse.symbols.fuse_reply_err(req, EACCES);
@@ -2737,7 +2771,7 @@ export async function main(argv: string[] = Deno.args) {
         }
       })().catch((e) => {
         cfcWritebacks.markRunnerCommitFailed(parent, "rmdir", String(e), name);
-        console.error(`[fuse] rmdir write error: ${e}`);
+        recordAsyncWriteFailure("rmdir write error", e);
       });
     },
   );
@@ -2825,6 +2859,7 @@ export async function main(argv: string[] = Deno.args) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
+      if (failIfDisconnectedWrite(req)) return;
       renameAuthorization ??= authorizeRenameCfcWrite(
         oldParent,
         oldName,
@@ -2966,7 +3001,7 @@ export async function main(argv: string[] = Deno.args) {
           String(e),
           newName,
         );
-        console.error(`[fuse] rename write error: ${e}`);
+        recordAsyncWriteFailure("rename write error", e);
       });
     },
   );
@@ -2998,6 +3033,7 @@ export async function main(argv: string[] = Deno.args) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
+      if (failIfDisconnectedWrite(req)) return;
 
       let authorization = undefined as
         | ReturnType<typeof authorizeSymlinkWriteback>
@@ -3078,7 +3114,7 @@ export async function main(argv: string[] = Deno.args) {
           String(e),
           name,
         );
-        console.error(`[fuse] symlink write error: ${e}`);
+        recordAsyncWriteFailure("symlink write error", e);
       });
     },
   );
