@@ -263,7 +263,9 @@ function getBuilderCallbackIndices(
       //       scope: it carries the structural contract the runtime
       //       relies on. Untyped user-authored 2-arg derives are
       //       skipped (better to leave them inline than guess).
-      if (context.isSyntheticComputeCallback?.(legacyDeriveCallback)) return [1];
+      if (context.isSyntheticComputeCallback?.(legacyDeriveCallback)) {
+        return [1];
+      }
       if (hasSelfDescribingFunctionTypes(legacyDeriveCallback)) return [1];
       return [];
     }

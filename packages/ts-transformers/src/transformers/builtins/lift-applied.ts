@@ -191,9 +191,10 @@ export function createLiftAppliedCall(
   if (refs.length === 0) return undefined;
 
   const { factory, tsContext, cfHelpers, context } = options;
-  const { captureTree, fallbackEntries, refToParamName } = planLiftAppliedInputEntries(
-    refs,
-  );
+  const { captureTree, fallbackEntries, refToParamName } =
+    planLiftAppliedInputEntries(
+      refs,
+    );
   if (captureTree.size === 0 && fallbackEntries.length === 0) {
     return undefined;
   }

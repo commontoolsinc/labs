@@ -1161,4 +1161,3 @@ export function hasArrayTypeArgument(
 
   return false;
 }
-
