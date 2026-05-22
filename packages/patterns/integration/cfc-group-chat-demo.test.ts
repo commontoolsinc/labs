@@ -32,7 +32,6 @@ describe("cfc group chat demo integration test", () => {
   let identity: Identity;
   let cc: PiecesController;
   let pieceId: string;
-  let pieceSinkCancel: (() => void) | undefined;
 
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
@@ -54,12 +53,9 @@ describe("cfc group chat demo integration test", () => {
     );
     const piece = await cc.create(program, { start: true });
     pieceId = piece.id;
-    const resultCell = cc.manager().getResult(piece.getCell());
-    pieceSinkCancel = resultCell.sink(() => {});
   });
 
   afterAll(async () => {
-    pieceSinkCancel?.();
     await cc?.dispose();
   });
 
