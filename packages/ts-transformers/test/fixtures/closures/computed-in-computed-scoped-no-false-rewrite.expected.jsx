@@ -11,25 +11,6 @@ import { computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(() => {
-    const condition = 1 > 0;
-    if (condition) {
-        const config = __cfHelpers.derive({
-            type: "object",
-            properties: {}
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "object",
-            properties: {
-                bar: {
-                    type: "number"
-                }
-            },
-            required: ["bar"]
-        } as const satisfies __cfHelpers.JSONSchema, {}, () => ({ bar: 1 })).for("config", true);
-        return config.key("bar");
-    }
-    return config.bar;
-});
 const config = __cfHelpers.__cf_data({ bar: "module-level" });
 // FIXTURE: computed-in-computed-scoped-no-false-rewrite
 // Verifies: a block-scoped computed() result named `config` does NOT cause
@@ -44,7 +25,25 @@ export default pattern(() => {
         properties: {}
     } as const satisfies __cfHelpers.JSONSchema, {
         type: ["number", "string"]
-    } as const satisfies __cfHelpers.JSONSchema, {}, __cfModuleCallback_1).for("outer", true);
+    } as const satisfies __cfHelpers.JSONSchema, {}, () => {
+        const condition = 1 > 0;
+        if (condition) {
+            const config = __cfHelpers.derive({
+                type: "object",
+                properties: {}
+            } as const satisfies __cfHelpers.JSONSchema, {
+                type: "object",
+                properties: {
+                    bar: {
+                        type: "number"
+                    }
+                },
+                required: ["bar"]
+            } as const satisfies __cfHelpers.JSONSchema, {}, () => ({ bar: 1 })).for("config", true);
+            return config.key("bar");
+        }
+        return config.bar;
+    }).for("outer", true);
     return outer;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: ["number", "string"]

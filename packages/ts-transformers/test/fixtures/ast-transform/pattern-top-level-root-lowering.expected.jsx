@@ -11,6 +11,8 @@ import { pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn(({ state }) => identity(state.user.name));
+const __cfModuleCallback_2 = __cfHardenFn(({ state }) => identity(state.maybeUser?.name));
 const identity = __cfHardenFn(<T,>(value: T) => value);
 // FIXTURE: pattern-top-level-root-lowering
 // Verifies: top-level non-JSX ordinary helper calls with reactive inputs are
@@ -48,7 +50,7 @@ export default pattern((state) => {
             user: {
                 name: state.key("user", "name")
             }
-        } }, ({ state }) => identity(state.user.name)).for("label", true);
+        } }, __cfModuleCallback_1).for("label", true);
     const maybeLabel = __cfHelpers.derive({
         type: "object",
         properties: {
@@ -72,7 +74,7 @@ export default pattern((state) => {
         type: ["string", "undefined"]
     } as const satisfies __cfHelpers.JSONSchema, { state: {
             maybeUser: state.key("maybeUser")
-        } }, ({ state }) => identity(state.maybeUser?.name)).for("maybeLabel", true);
+        } }, __cfModuleCallback_2).for("maybeLabel", true);
     return {
         label,
         maybeLabel,

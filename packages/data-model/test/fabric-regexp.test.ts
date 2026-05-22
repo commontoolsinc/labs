@@ -5,32 +5,33 @@ import {
   FabricInstance,
   type FabricValue,
   RECONSTRUCT,
-  type ReconstructionContext,
-} from "../interface.ts";
+} from "../src/interface.ts";
+import { BaseReconstructionContext } from "../src/BaseReconstructionContext.ts";
 import {
   FabricNativeWrapper,
   FabricRegExp,
   isConvertibleNativeInstance,
-} from "../fabric-native-instances.ts";
+} from "../src/fabric-native-instances.ts";
 import {
   isFabricCompatible,
   resetDataModelConfig,
   setDataModelConfig,
   shallowFabricFromNativeValue,
-} from "../fabric-value.ts";
+} from "../src/fabric-value.ts";
 import {
   NATIVE_TAGS,
   tagFromNativeClass,
   tagFromNativeValue,
-} from "../native-type-tags.ts";
-import { hashOf } from "../value-hash.ts";
+} from "../src/native-type-tags.ts";
+import { hashOf } from "../src/value-hash.ts";
 
 /** Dummy reconstruction context for tests. */
-const dummyContext: ReconstructionContext = {
-  getCell(_ref) {
+class DummyReconstructionContext extends BaseReconstructionContext {
+  override getCell(): never {
     throw new Error("getCell not implemented in test");
-  },
-};
+  }
+}
+const dummyContext = new DummyReconstructionContext();
 
 // ============================================================================
 // Tests

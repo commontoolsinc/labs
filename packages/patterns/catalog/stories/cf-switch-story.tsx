@@ -18,8 +18,8 @@ interface SwitchStoryOutput {
 }
 
 export default pattern<SwitchStoryInput, SwitchStoryOutput>(() => {
-  const checked = Writable.of(false);
-  const disabled = Writable.of(false);
+  const checked = new Writable(false);
+  const disabled = new Writable(false);
   const statusText = computed(() => (checked.get() ? "On" : "Off"));
 
   return {

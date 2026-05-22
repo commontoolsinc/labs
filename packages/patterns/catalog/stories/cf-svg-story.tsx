@@ -13,7 +13,7 @@ export default pattern<SvgStoryInput, SvgStoryOutput>(() => {
   const defaultSvg =
     '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><circle cx="50" cy="50" r="40" fill="#3b82f6"/></svg>';
 
-  const customSvg = Writable.of(defaultSvg);
+  const customSvg = new Writable(defaultSvg);
 
   const shapesSvg =
     '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><circle cx="30" cy="50" r="25" fill="#3b82f6"/><rect x="60" y="25" width="30" height="50" rx="4" fill="#10b981"/></svg>';

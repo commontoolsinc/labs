@@ -8,9 +8,9 @@ import {
   resetDataModelConfig,
   setDataModelConfig,
   shallowFabricFromNativeValue,
-} from "../fabric-value.ts";
-import { FabricError } from "../fabric-native-instances.ts";
-import { FabricBytes } from "../fabric-bytes.ts";
+} from "../src/fabric-value.ts";
+import { FabricError } from "../src/fabric-native-instances.ts";
+import { FabricBytes } from "../src/FabricBytes.ts";
 
 describe("fabric-value", () => {
   // Explicitly pin modernDataModel off so the legacy-path tests (below the
@@ -1271,12 +1271,12 @@ describe("fabric-value", () => {
       // Top level should be a FabricError.
       expect(result).toBeInstanceOf(FabricError);
       const se = result as FabricError;
-      expect(se.error.message).toBe("outer");
+      expect(se.message).toBe("outer");
 
       // cause should also be a FabricError (not a raw Error).
-      expect(se.error.cause).toBeInstanceOf(FabricError);
-      const innerSe = se.error.cause as FabricError;
-      expect(innerSe.error.message).toBe("inner");
+      expect(se.cause).toBeInstanceOf(FabricError);
+      const innerSe = se.cause as FabricError;
+      expect(innerSe.message).toBe("inner");
     });
 
     it("converts deeply nested Error chain (3 levels)", () => {
@@ -1285,13 +1285,13 @@ describe("fabric-value", () => {
       const top = new Error("top", { cause: mid });
       const result = fabricFromNativeValue(top) as FabricError;
 
-      expect(result.error.message).toBe("top");
-      const midSe = result.error.cause as FabricError;
+      expect(result.message).toBe("top");
+      const midSe = result.cause as FabricError;
       expect(midSe).toBeInstanceOf(FabricError);
-      expect(midSe.error.message).toBe("mid");
-      const rootSe = midSe.error.cause as FabricError;
+      expect(midSe.message).toBe("mid");
+      const rootSe = midSe.cause as FabricError;
       expect(rootSe).toBeInstanceOf(FabricError);
-      expect(rootSe.error.message).toBe("root");
+      expect(rootSe.message).toBe("root");
     });
 
     it("converts custom enumerable properties on Error", () => {
@@ -1303,11 +1303,10 @@ describe("fabric-value", () => {
       error.details = { nested: "value" };
 
       const result = fabricFromNativeValue(error) as FabricError;
-      expect(result.error.message).toBe("with props");
+      expect(result.message).toBe("with props");
       // Custom properties should be preserved and converted.
-      const converted = result.error as unknown as Record<string, unknown>;
-      expect(converted.statusCode).toBe(404);
-      expect(converted.details).toEqual({ nested: "value" });
+      expect(result.getExtra("statusCode")).toBe(404);
+      expect(result.getExtra("details")).toEqual({ nested: "value" });
     });
 
     it("converts Error with non-Error cause (plain object)", () => {
@@ -1316,8 +1315,8 @@ describe("fabric-value", () => {
       const result = fabricFromNativeValue(error) as FabricError;
 
       // cause should be a plain object (already valid FabricValue).
-      expect(result.error.cause).toEqual({ code: "ENOENT", path: "/missing" });
-      expect(Object.isFrozen(result.error.cause)).toBe(true);
+      expect(result.cause).toEqual({ code: "ENOENT", path: "/missing" });
+      expect(Object.isFrozen(result.cause)).toBe(true);
     });
 
     it("preserves Error subclass through internals conversion", () => {
@@ -1325,11 +1324,11 @@ describe("fabric-value", () => {
       const outer = new TypeError("bad type", { cause: inner });
       const result = fabricFromNativeValue(outer) as FabricError;
 
-      expect(result.error).toBeInstanceOf(TypeError);
-      expect(result.error.name).toBe("TypeError");
-      const innerSe = result.error.cause as FabricError;
-      expect(innerSe.error).toBeInstanceOf(RangeError);
-      expect(innerSe.error.name).toBe("RangeError");
+      expect(result.toNativeValue(true)).toBeInstanceOf(TypeError);
+      expect(result.name).toBe("TypeError");
+      const innerSe = result.cause as FabricError;
+      expect(innerSe.toNativeValue(true)).toBeInstanceOf(RangeError);
+      expect(innerSe.name).toBe("RangeError");
     });
 
     it("does not mutate the original Error's cause", () => {
@@ -1345,7 +1344,7 @@ describe("fabric-value", () => {
     it("handles Error with undefined cause (no conversion needed)", () => {
       const error = new Error("simple");
       const result = fabricFromNativeValue(error) as FabricError;
-      expect(result.error.cause).toBeUndefined();
+      expect(result.cause).toBeUndefined();
     });
 
     it("freezes the FabricError wrapper when freeze=true", () => {
@@ -1361,7 +1360,7 @@ describe("fabric-value", () => {
       // But internals should still be converted.
       expect(result).toBeInstanceOf(FabricError);
       const se = result as FabricError;
-      expect(se.error.cause).toBeInstanceOf(FabricError);
+      expect(se.cause).toBeInstanceOf(FabricError);
     });
   });
 
@@ -1599,7 +1598,8 @@ describe("fabric-value", () => {
 
     // -- FabricInstance values --
     it("accepts FabricError wrappers", () => {
-      expect(isFabricCompatible(new FabricError(new Error("test")))).toBe(true);
+      expect(isFabricCompatible(FabricError.fromNativeError(new Error("test"))))
+        .toBe(true);
     });
 
     // -- Containers --

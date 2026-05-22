@@ -55,6 +55,10 @@ export interface HarnessToolContext {
     env?: Record<string, string>;
     cfcInputLabels?: CfcLabelView;
     cfcInputLabelPaths?: readonly HarnessCfcInvocationInputLabelPath[];
+    cfcPromptSlotInputLabelPaths?:
+      readonly HarnessCfcInvocationInputLabelPath[];
+    cfcModelContextInputLabelPaths?:
+      readonly HarnessCfcInvocationInputLabelPath[];
   }): Promise<HarnessCfcInvocationContext>;
 }
 

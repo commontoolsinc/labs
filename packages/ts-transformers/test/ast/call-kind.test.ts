@@ -6,6 +6,7 @@ import {
   classifyArrayMethodCall,
   classifyArrayMethodCallSite,
   detectCallKind,
+  detectNewExpressionKind,
   getCapabilitySummaryCallbackArgument,
   getDeriveInputAndCallbackArgument,
   getPatternBuilderCallbackArgument,
@@ -233,6 +234,42 @@ Deno.test("array method classification ignores prototype-key names", () => {
   assertEquals(classifyArrayMethodCall(elementAccess), undefined);
   assertEquals(detectCallKind(propertyAccess, checker), undefined);
   assertEquals(detectCallKind(elementAccess, checker), undefined);
+});
+
+Deno.test("constructor classification ignores non-Common-Fabric ambient classes", () => {
+  const { sourceFile, checker } = createProgram(`
+    declare class Stream {
+      constructor(value?: unknown);
+    }
+
+    const value = new Stream("foreign");
+  `);
+
+  const expression = findInitializer(sourceFile, "value");
+  if (!ts.isNewExpression(expression)) {
+    throw new Error("Expected new expression initializer");
+  }
+
+  assertEquals(detectNewExpressionKind(expression, checker), undefined);
+});
+
+Deno.test("constructor classification follows local Common-Fabric constructor aliases", () => {
+  const { sourceFile, checker } = createProgram(`
+    import { Writable } from "commonfabric";
+
+    const LocalWritable = Writable;
+    const value = new LocalWritable("aliased");
+  `);
+
+  const expression = findInitializer(sourceFile, "value");
+  if (!ts.isNewExpression(expression)) {
+    throw new Error("Expected new expression initializer");
+  }
+
+  assertEquals(detectNewExpressionKind(expression, checker), {
+    kind: "cell-factory",
+    factoryName: "Writable",
+  });
 });
 
 Deno.test("classifyArrayCallbackContainerCall recognizes plain value-returning non-map array callbacks", () => {

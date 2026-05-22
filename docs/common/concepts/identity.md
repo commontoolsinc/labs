@@ -33,21 +33,21 @@ Use `equals()` to compare cells or values. For cells, this checks reference equa
 ```typescript
 import { equals, Writable } from 'commonfabric';
 
-const data = Writable.of({ name: "Ben" });
+const data = new Writable({ name: "Ben" });
 
 // Reference equality for cells
 equals(data, data);                    // => true
-equals(Writable.of({ name: "Ben" }),
-       Writable.of({ name: "Ben" }));  // => false (different cells)
+equals(new Writable({ name: "Ben" }),
+       new Writable({ name: "Ben" }));  // => false (different cells)
 
 // Reference equality for values from a cell
 equals(data, data.get());              // => true
 
 // Does not compare cell values!
-equals(Writable.of({ name: "Gideon" }), { name: "Gideon" });  // => false
+equals(new Writable({ name: "Gideon" }), { name: "Gideon" });  // => false
 
 // Works when navigating via .key()
-const deepData = Writable.of({ address: { street: "123 Main" } });
+const deepData = new Writable({ address: { street: "123 Main" } });
 equals(deepData.key("address"), deepData.get().address); // => true
 
 // But only for objects

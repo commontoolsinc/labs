@@ -55,9 +55,9 @@ const isPast = (date: string): boolean => date < getTodayDate();
 export default pattern<CalendarInput, CalendarOutput>(({ events }) => {
   const todayDate = getTodayDate();
 
-  const newTitle = Writable.of("");
-  const newDate = Writable.of(todayDate);
-  const newTime = Writable.of("");
+  const newTitle = new Writable("");
+  const newDate = new Writable(todayDate);
+  const newTime = new Writable("");
 
   const eventCount = computed(() => events.get()?.length ?? 0);
 

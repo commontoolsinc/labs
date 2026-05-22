@@ -172,9 +172,9 @@ function chipColor(
 }
 
 export default pattern<MobileAppDemoInput, MobileAppDemoOutput>(() => {
-  const activeTab = Writable.of("home");
-  const sheetOpen = Writable.of(false);
-  const toastOpen = Writable.of(false);
+  const activeTab = new Writable("home");
+  const sheetOpen = new Writable(false);
+  const toastOpen = new Writable(false);
 
   const openSheet = action(() => sheetOpen.set(true));
   const closeSheet = action(() => sheetOpen.set(false));

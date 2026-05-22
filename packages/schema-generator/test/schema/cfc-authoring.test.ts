@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createSchemaTransformerV2 } from "../../src/plugin.ts";
-import { asObjectSchema, getTypeFromCode } from "../utils.ts";
+import { asObjectSchema, getTypeFromCode, getTypeFromFiles } from "../utils.ts";
 
 describe("Schema: CFC authoring aliases", () => {
   it("lowers Confidential and OpaqueInput through the canonical Cfc carrier", async () => {
@@ -116,6 +116,8 @@ describe("Schema: CFC authoring aliases", () => {
       type Confidential<T, X extends readonly unknown[]> = Cfc<T, { confidentiality: X }>;
       type Integrity<T, X extends readonly unknown[]> = Cfc<T, { integrity: X }>;
       type AddIntegrity<T, X extends readonly unknown[]> = Cfc<T, { addIntegrity: X }>;
+      type RepresentsCurrentUser<T> = Cfc<T, { addIntegrity: readonly [{ kind: "represents-principal"; subject: { __ctCurrentPrincipal: true } }] }>;
+      type AuthoredByCurrentUser<T> = Cfc<T, { addIntegrity: readonly [{ kind: "authored-by"; subject: { __ctCurrentPrincipal: true } }] }>;
       type RequiresIntegrity<T, X extends readonly unknown[]> = Cfc<T, { requiredIntegrity: X }>;
       type MaxConfidentiality<T, X extends readonly unknown[]> = Cfc<T, { maxConfidentiality: X }>;
       type ExactCopy<T, P extends string> = Cfc<T, { exactCopyOf: P }>;
@@ -129,6 +131,8 @@ describe("Schema: CFC authoring aliases", () => {
         confidential: Confidential<string, readonly ["confidential"]>;
         integrity: Integrity<string, readonly ["integrity"]>;
         addIntegrity: AddIntegrity<string, readonly ["add-integrity"]>;
+        representsCurrentUser: RepresentsCurrentUser<{ name: string }>;
+        authoredByCurrentUser: AuthoredByCurrentUser<{ body: string }>;
         requiresIntegrity: RequiresIntegrity<string, readonly ["required-integrity"]>;
         maxConfidentiality: MaxConfidentiality<string, readonly ["max-confidentiality"]>;
         exactCopy: ExactCopy<string, "/source">;
@@ -155,6 +159,16 @@ describe("Schema: CFC authoring aliases", () => {
     ]);
     expect((schema.properties?.addIntegrity as any).ifc?.addIntegrity)
       .toEqual(["add-integrity"]);
+    expect((schema.properties?.representsCurrentUser as any).ifc?.addIntegrity)
+      .toEqual([{
+        kind: "represents-principal",
+        subject: { __ctCurrentPrincipal: true },
+      }]);
+    expect((schema.properties?.authoredByCurrentUser as any).ifc?.addIntegrity)
+      .toEqual([{
+        kind: "authored-by",
+        subject: { __ctCurrentPrincipal: true },
+      }]);
     expect((schema.properties?.requiresIntegrity as any).ifc?.requiredIntegrity)
       .toEqual(["required-integrity"]);
     expect(
@@ -373,6 +387,97 @@ describe("Schema: CFC authoring aliases", () => {
       __ctWriterIdentityOf: {
         file: "test.ts",
         path: ["commitTrustedSaveTitle"],
+      },
+    });
+  });
+
+  it("preserves imported writeAuthorizedBy binding declaration identity", async () => {
+    const { type, checker } = await getTypeFromFiles(
+      {
+        "/trusted.ts": `
+        export type Cfc<T, Meta> = T & { readonly __ct_cfc__?: Meta };
+        export type WriteAuthorizedBy<T, Binding> = Cfc<T, { writeAuthorizedBy: Binding }>;
+
+        export type TrustedActionWriteWithIntegrity<
+          T,
+          Binding,
+          Action extends string,
+          Pattern extends string,
+          Integrity extends readonly [string, ...string[]],
+        > = Cfc<
+          WriteAuthorizedBy<T, Binding>,
+          {
+            uiContract: {
+              helper: "UiAction";
+              action: Action;
+              trustedPattern: Pattern;
+              requiredEventIntegrity: Integrity;
+            };
+          }
+        >;
+
+        declare function handler<A, B>(fn: (argument: A, state: B) => void): { readonly __handler: [A, B] };
+        interface Writable<T> {
+          get(): T;
+          set(value: T): void;
+        }
+
+        export const TRUSTED_SEND_ACTION = "TrustedSend";
+        export const TRUSTED_SEND_SURFACE = "TrustedSendSurface";
+        export const commitTrustedMessageSend = handler<void, { messages: Writable<string[]> }>(
+          (_, { messages }) => messages.set([...messages.get(), "sent"]),
+        );
+
+        export type TrustedSentMessage = TrustedActionWriteWithIntegrity<
+          { origin: "sent"; body: string },
+          typeof commitTrustedMessageSend,
+          typeof TRUSTED_SEND_ACTION,
+          typeof TRUSTED_SEND_SURFACE,
+          [typeof TRUSTED_SEND_SURFACE]
+        >;
+
+        export type SharedChatMessage =
+          | TrustedSentMessage
+          | { origin: "imported"; body: string };
+      `,
+        "/main.ts": `
+        import type { SharedChatMessage } from "./trusted.ts";
+
+        export interface SchemaRoot {
+          messages: SharedChatMessage[];
+        }
+      `,
+      },
+      "/main.ts",
+      "SchemaRoot",
+    );
+    const schema = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker),
+    );
+
+    const writeAuthorizedByClaims: unknown[] = [];
+    const collectWriteAuthorizedBy = (value: unknown) => {
+      if (!value || typeof value !== "object") {
+        return;
+      }
+      const record = value as Record<string, any>;
+      if (record.ifc?.writeAuthorizedBy) {
+        writeAuthorizedByClaims.push(record.ifc.writeAuthorizedBy);
+      }
+      for (const child of Object.values(record)) {
+        if (Array.isArray(child)) {
+          child.forEach(collectWriteAuthorizedBy);
+        } else {
+          collectWriteAuthorizedBy(child);
+        }
+      }
+    };
+    collectWriteAuthorizedBy(schema);
+
+    expect(writeAuthorizedByClaims).toContainEqual({
+      __ctWriterIdentityOf: {
+        file: "/trusted.ts",
+        path: ["commitTrustedMessageSend"],
       },
     });
   });

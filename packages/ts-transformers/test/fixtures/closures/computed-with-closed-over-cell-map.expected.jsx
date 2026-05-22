@@ -18,13 +18,13 @@ const __cfAmdHooks = undefined;
 //   inside a derive callback. The .map() callback's closed-over `multiplier` cell
 //   is passed as a params object to mapWithPattern.
 export default pattern(() => {
-    const numbers = Writable.of([1, 2, 3], {
+    const numbers = new Writable([1, 2, 3], {
         type: "array",
         items: {
             type: "number"
         }
     } as const satisfies __cfHelpers.JSONSchema).for("numbers", true);
-    const multiplier = Writable.of(2, {
+    const multiplier = new Writable(2, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("multiplier", true);
     // Inside computed, we close over numbers (a Cell)

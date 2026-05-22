@@ -16,13 +16,13 @@ interface AlertStoryOutput {
 }
 
 export default pattern<AlertStoryInput, AlertStoryOutput>(() => {
-  const status = Writable.of<"info" | "success" | "warning" | "error">("info");
-  const dismissible = Writable.of(false);
-  const icon = Writable.of("i");
-  const showIcon = Writable.of(true);
-  const title = Writable.of("Alert title");
-  const description = Writable.of("This is alert description text.");
-  const body = Writable.of("");
+  const status = new Writable<"info" | "success" | "warning" | "error">("info");
+  const dismissible = new Writable(false);
+  const icon = new Writable("i");
+  const showIcon = new Writable(true);
+  const title = new Writable("Alert title");
+  const description = new Writable("This is alert description text.");
+  const body = new Writable("");
 
   return {
     [NAME]: "cf-alert Story",

@@ -150,6 +150,8 @@ export function areLinksSame(
   txForResolving?: IExtendedStorageTransaction,
   runtime?: Runtime,
 ): boolean {
+  if (value1 === undefined && value2 === undefined) return false;
+
   // If both are the same object, they're equal
   if (value1 === value2) return true;
 

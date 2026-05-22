@@ -20,7 +20,7 @@ export default pattern<{ title: string | Default<"Suggestion Tester"> }>(
       situation: "gimme note with the attached content",
       context: {
         content: "This is the expected content",
-        value: Writable.of(0),
+        value: new Writable(0),
       },
       initialResults: [],
     });

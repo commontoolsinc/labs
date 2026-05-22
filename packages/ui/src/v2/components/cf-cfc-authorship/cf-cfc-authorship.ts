@@ -19,6 +19,7 @@ type CfcLabelSubscribableValue = {
 type CfcReadableClaimValue = {
   get?(): unknown;
   sync?(): Promise<unknown>;
+  resolveAsCell?(): Promise<unknown> | unknown;
 };
 
 const DEFAULT_AUTHORSHIP_KIND = "authored-by";
@@ -65,6 +66,131 @@ const hasReadableClaim = (
   typeof value === "object" && value !== null &&
   (typeof (value as { get?: unknown }).get === "function" ||
     typeof (value as { sync?: unknown }).sync === "function");
+
+const labelHasRootIntegrityKind = (
+  view: CfcLabelView,
+  kind: string,
+): boolean =>
+  view.entries.some((entry) =>
+    entry.path.length === 0 &&
+    (entry.label.integrity ?? []).some((atom) => {
+      if (typeof atom === "string") {
+        return atom.startsWith(`${kind}:`);
+      }
+      if (
+        typeof atom !== "object" || atom === null || Array.isArray(atom)
+      ) {
+        return false;
+      }
+      return (atom as Record<string, unknown>).kind === kind;
+    })
+  );
+
+const mergeLabelViews = (
+  ...views: Array<CfcLabelView | undefined>
+): CfcLabelView | undefined => {
+  const entries: CfcLabelView["entries"] = [];
+  const seen = new Set<string>();
+  for (const view of views) {
+    if (view === undefined) {
+      continue;
+    }
+    for (const entry of view.entries) {
+      const key = JSON.stringify(entry);
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      entries.push(entry);
+    }
+  }
+  return entries.length === 0 ? undefined : { version: 1, entries };
+};
+
+const isConcreteAuthorClaim = (value: unknown): boolean => {
+  if (
+    typeof value === "string" || typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return true;
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return AUTHOR_FIELDS.some((field) => {
+    const fieldValue = record[field];
+    return typeof fieldValue === "string" ||
+      typeof fieldValue === "number" ||
+      typeof fieldValue === "boolean";
+  });
+};
+
+const readClaimValue = async (
+  value: CfcReadableClaimValue,
+): Promise<unknown> => {
+  const readCandidate = async (candidate: unknown): Promise<unknown> => {
+    if (!hasReadableClaim(candidate)) {
+      return isConcreteAuthorClaim(candidate) ? candidate : undefined;
+    }
+
+    const beforeSync = candidate.get?.();
+    if (beforeSync !== undefined) {
+      return beforeSync;
+    }
+
+    const synced = typeof candidate.sync === "function"
+      ? await candidate.sync()
+      : undefined;
+    if (synced !== undefined && synced !== candidate) {
+      const syncedClaim = await readCandidate(synced);
+      if (syncedClaim !== undefined) {
+        return syncedClaim;
+      }
+    }
+
+    return candidate.get?.();
+  };
+
+  const directClaim = await readCandidate(value);
+  if (directClaim !== undefined) {
+    return directClaim;
+  }
+
+  if (typeof value.resolveAsCell === "function") {
+    const resolved = await value.resolveAsCell();
+    return await readCandidate(resolved);
+  }
+
+  return undefined;
+};
+
+const readLabelView = async (
+  value: unknown,
+  requiredRootIntegrityKind?: string,
+): Promise<CfcLabelView | undefined> => {
+  let direct: CfcLabelView | undefined;
+  if (hasLabelQuery(value)) {
+    direct = await value.getCfcLabel();
+  }
+
+  if (
+    direct !== undefined && requiredRootIntegrityKind !== undefined &&
+    labelHasRootIntegrityKind(direct, requiredRootIntegrityKind)
+  ) {
+    return direct;
+  }
+
+  let resolvedLabel: CfcLabelView | undefined;
+  if (hasLabelResolution(value)) {
+    const resolved = await value.resolveAsCell();
+    if (hasLabelQuery(resolved)) {
+      resolvedLabel = await resolved.getCfcLabel();
+    }
+  }
+
+  return mergeLabelViews(direct, resolvedLabel);
+};
 
 const primitiveToString = (value: unknown): string | undefined => {
   if (typeof value === "string") {
@@ -114,6 +240,43 @@ const primaryAuthorId = (author: unknown): string | undefined =>
 const authorDisplayName = (author: unknown): string | undefined =>
   objectStringFields(author, AUTHOR_DISPLAY_FIELDS)[0];
 
+const representsPrincipalSubjectForLabel = (
+  view: CfcLabelView | undefined,
+): string | undefined => {
+  if (!view) {
+    return undefined;
+  }
+  for (const entry of rootEntries(view)) {
+    for (const atom of entry.label.integrity ?? []) {
+      if (typeof atom !== "object" || atom === null || Array.isArray(atom)) {
+        continue;
+      }
+      const atomRecord = atom as Record<string, unknown>;
+      if (objectField(atomRecord, "kind") !== "represents-principal") {
+        continue;
+      }
+      const subject = objectField(atomRecord, "subject");
+      if (subject !== undefined) {
+        return subject;
+      }
+    }
+  }
+  return undefined;
+};
+
+const principalAuthorClaim = (
+  subject: string | undefined,
+  displayName: string | undefined,
+): unknown | undefined => {
+  if (subject === undefined) {
+    return undefined;
+  }
+  return {
+    subject,
+    ...(displayName !== undefined ? { name: displayName } : {}),
+  };
+};
+
 export const integrityAtomMatchesAuthor = (
   atom: unknown,
   author: unknown,
@@ -143,9 +306,21 @@ export const integrityAtomMatchesAuthor = (
   });
 };
 
-const hasAnyIntegrity = (view: CfcLabelView): boolean =>
-  view.entries.some((entry) =>
-    Array.isArray(entry.label.integrity) && entry.label.integrity.length > 0
+const rootEntries = (view: CfcLabelView) =>
+  view.entries.filter((entry) => entry.path.length === 0);
+
+const hasAuthorshipIntegrity = (
+  entries: ReturnType<typeof rootEntries>,
+  kind: string,
+): boolean =>
+  entries.some((entry) =>
+    (entry.label.integrity ?? []).some((atom) =>
+      typeof atom === "string"
+        ? atom.startsWith(`${kind}:`)
+        : typeof atom === "object" && atom !== null &&
+          !Array.isArray(atom) &&
+          objectField(atom as Record<string, unknown>, "kind") === kind
+    )
   );
 
 export const authorshipStateForLabel = (
@@ -157,7 +332,8 @@ export const authorshipStateForLabel = (
     return "unknown";
   }
 
-  for (const entry of view.entries) {
+  const entries = rootEntries(view);
+  for (const entry of entries) {
     const integrity = entry.label.integrity;
     if (!Array.isArray(integrity)) {
       continue;
@@ -169,7 +345,7 @@ export const authorshipStateForLabel = (
     }
   }
 
-  return hasAnyIntegrity(view) ? "unverified" : "unknown";
+  return hasAuthorshipIntegrity(entries, kind) ? "unverified" : "unknown";
 };
 
 const initialsForName = (name: string | undefined): string => {
@@ -224,6 +400,11 @@ export class CFCFCAuthorship extends BaseElement {
         align-items: start;
       }
 
+      :host([badge-placement="end"]) .authorship,
+      :host([data-badge-placement="end"]) .authorship {
+        grid-template-columns: minmax(0, 1fr) minmax(0, auto);
+      }
+
       .badge {
         display: inline-grid;
         grid-template-columns: auto minmax(0, 1fr);
@@ -234,6 +415,27 @@ export class CFCFCAuthorship extends BaseElement {
         border-radius: 999px;
         border: 1px solid var(--cf-theme-color-border, hsl(220, 14%, 86%));
         background: var(--cf-theme-color-surface, hsl(220, 20%, 98%));
+      }
+
+      :host([badge-placement="end"]) .badge,
+      :host([data-badge-placement="end"]) .badge {
+        grid-column: 2;
+        grid-row: 1;
+        grid-template-columns: minmax(0, 1fr) auto;
+      }
+
+      :host([badge-placement="end"]) .avatar,
+      :host([badge-placement="end"]) .status-dot,
+      :host([data-badge-placement="end"]) .avatar,
+      :host([data-badge-placement="end"]) .status-dot {
+        grid-column: 2;
+      }
+
+      :host([badge-placement="end"]) .label,
+      :host([data-badge-placement="end"]) .label {
+        grid-column: 1;
+        grid-row: 1;
+        text-align: right;
       }
 
       .authorship.verified .badge {
@@ -300,6 +502,12 @@ export class CFCFCAuthorship extends BaseElement {
       .content {
         min-width: 0;
       }
+
+      :host([badge-placement="end"]) .content,
+      :host([data-badge-placement="end"]) .content {
+        grid-column: 1;
+        grid-row: 1;
+      }
     `,
   ];
 
@@ -309,6 +517,11 @@ export class CFCFCAuthorship extends BaseElement {
     author: { attribute: false },
     authorName: { attribute: false },
     avatar: { attribute: false },
+    badgePlacement: {
+      type: String,
+      attribute: "badge-placement",
+      reflect: true,
+    },
     kind: { type: String },
     verifyTextIntegrity: {
       type: Boolean,
@@ -328,6 +541,7 @@ export class CFCFCAuthorship extends BaseElement {
   declare cfcLabel: CfcLabelView | undefined;
   declare authorName: unknown;
   declare avatar: unknown;
+  declare badgePlacement: "start" | "end";
   declare kind: string | undefined;
   declare verifyTextIntegrity: boolean;
   declare allowLiteralText: boolean;
@@ -348,6 +562,7 @@ export class CFCFCAuthorship extends BaseElement {
     this.cfcLabel = undefined;
     this.authorName = undefined;
     this.avatar = undefined;
+    this.badgePlacement = "start";
     this.kind = DEFAULT_AUTHORSHIP_KIND;
     this.verifyTextIntegrity = false;
     this.allowLiteralText = false;
@@ -393,7 +608,10 @@ export class CFCFCAuthorship extends BaseElement {
   }
 
   get authorClaim(): unknown {
-    return hasReadableClaim(this.author) ? this._authorClaim : this.author;
+    return hasReadableClaim(this.author) || hasLabelQuery(this.author) ||
+        hasLabelResolution(this.author)
+      ? this._authorClaim
+      : this.author;
   }
 
   override connectedCallback() {
@@ -465,6 +683,10 @@ export class CFCFCAuthorship extends BaseElement {
     }
 
     this._unsubscribeAuthor = author.subscribe((claim) => {
+      if (hasLabelQuery(author) || hasLabelResolution(author)) {
+        void this.refreshAuthorClaim();
+        return;
+      }
       const previous = this._authorClaim;
       this._authorClaim = claim;
       this.requestUpdate("author", previous);
@@ -480,18 +702,10 @@ export class CFCFCAuthorship extends BaseElement {
 
   async refreshLabel(): Promise<void> {
     const requestId = ++this._labelRequestId;
-    if (!hasLabelQuery(this.value)) {
-      const previous = this.cfcLabel;
-      this.cfcLabel = undefined;
-      this.requestUpdate("cfcLabel", previous);
-      return;
-    }
-
-    let cfcLabel = await this.value.getCfcLabel();
-    if (!cfcLabel && hasLabelResolution(this.value)) {
-      const resolved = await this.value.resolveAsCell();
-      cfcLabel = await resolved.getCfcLabel();
-    }
+    const cfcLabel = await readLabelView(
+      this.value,
+      this.kind ?? DEFAULT_AUTHORSHIP_KIND,
+    );
     if (requestId === this._labelRequestId) {
       const previous = this.cfcLabel;
       this.cfcLabel = cfcLabel;
@@ -501,7 +715,12 @@ export class CFCFCAuthorship extends BaseElement {
 
   async refreshAuthorClaim(): Promise<void> {
     const requestId = ++this._authorRequestId;
-    if (!hasReadableClaim(this.author)) {
+    const author = this.author;
+    const canReadAuthor = hasReadableClaim(author);
+    if (
+      !canReadAuthor && !hasLabelQuery(author) &&
+      !hasLabelResolution(author)
+    ) {
       const previous = this._authorClaim;
       this._authorClaim = undefined;
       this.requestUpdate("author", previous);
@@ -510,9 +729,15 @@ export class CFCFCAuthorship extends BaseElement {
 
     let authorClaim: unknown;
     try {
-      authorClaim = typeof this.author.sync === "function"
-        ? await this.author.sync()
-        : this.author.get?.();
+      const valueClaim = canReadAuthor
+        ? await readClaimValue(author)
+        : undefined;
+      const profileLabel = await readLabelView(author, "represents-principal");
+      const profileSubject = representsPrincipalSubjectForLabel(profileLabel);
+      authorClaim = principalAuthorClaim(
+        profileSubject,
+        authorDisplayName(valueClaim) ?? primitiveToString(this.authorName),
+      ) ?? valueClaim;
     } catch {
       authorClaim = undefined;
     }

@@ -5,7 +5,6 @@ import { ActionStrategy } from "./strategies/action-strategy.ts";
 import { ArrayMethodStrategy } from "./strategies/array-method-strategy.ts";
 import { DeriveStrategy } from "./strategies/derive-strategy.ts";
 import { HandlerStrategy } from "./strategies/handler-strategy.ts";
-import { hoistModuleScopedBuilderCallbacks } from "./module-scope-callback-hoisting.ts";
 import { PatternToolStrategy } from "./strategies/patternTool-strategy.ts";
 import type { ClosureTransformationStrategy } from "./strategies/strategy.ts";
 
@@ -50,6 +49,5 @@ function transformClosures(context: TransformationContext): ts.SourceFile {
   const { sourceFile } = context;
 
   const visitor = createClosureTransformVisitor(context);
-  const transformed = ts.visitNode(sourceFile, visitor) as ts.SourceFile;
-  return hoistModuleScopedBuilderCallbacks(transformed, context);
+  return ts.visitNode(sourceFile, visitor) as ts.SourceFile;
 }

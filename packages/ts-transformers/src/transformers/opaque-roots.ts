@@ -1,10 +1,11 @@
 import ts from "typescript";
 
-import { detectCallKind, isReactiveOriginCall } from "../ast/mod.ts";
+import { detectCallKind, isReactiveOriginExpression } from "../ast/mod.ts";
 import type { TransformationContext } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 import { getKnownComputedKeyExpression } from "../utils/reactive-keys.ts";
 import type { PathSegment } from "./destructuring-lowering.ts";
+import { isPatternFactoryCalleeExpression } from "./structural-reactive-factory.ts";
 
 export interface OpaqueAccessInfo {
   root?: string;
@@ -134,11 +135,23 @@ export function isTopmostMemberAccess(node: ts.Node): boolean {
 }
 
 export function isOpaqueOriginCall(
-  expression: ts.CallExpression,
+  expression: ts.CallExpression | ts.NewExpression,
   context: TransformationContext,
 ): boolean {
-  return isReactiveOriginCall(expression, context.checker) ||
-    detectCallKind(expression, context.checker)?.kind === "pattern-tool";
+  if (isReactiveOriginExpression(expression, context.checker)) return true;
+  if (ts.isNewExpression(expression)) return false;
+  if (detectCallKind(expression, context.checker)?.kind === "pattern-tool") {
+    return true;
+  }
+  // User-authored pattern factories (callable values whose type has
+  // `argumentSchema` + `resultSchema` and no `with`) return opaque-source
+  // values by construction. Treat their invocations as opaque-origin so
+  // bindings initialized from them (e.g. `const row = EntryRow({...})`)
+  // participate in the same late `.key()` lowering as direct cell sources.
+  return isPatternFactoryCalleeExpression(
+    expression.expression,
+    context.checker,
+  );
 }
 
 export function isOpaqueRootInfo(
@@ -196,6 +209,10 @@ export function isOpaqueSourceExpression(
     }
   }
 
+  if (ts.isNewExpression(current) && isOpaqueOriginCall(current, context)) {
+    return true;
+  }
+
   // Property/element access chains that bottom out on an opaque-origin
   // call (`wish(...).result`, `fetchData(...).result.items`, etc.) are
   // also opaque sources — the chain navigates through reactive cells
@@ -221,7 +238,10 @@ export function isOpaqueSourceExpression(
       inner = unwrapped;
       break;
     }
-    if (ts.isCallExpression(inner) && isOpaqueOriginCall(inner, context)) {
+    if (
+      (ts.isCallExpression(inner) || ts.isNewExpression(inner)) &&
+      isOpaqueOriginCall(inner, context)
+    ) {
       return true;
     }
   }

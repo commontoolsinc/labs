@@ -6,7 +6,7 @@ import { Writable, derive, pattern } from "commonfabric";
 //   derive(value, fn) → derive(schema, schema, { value, numLiteral, floatLiteral, boolLiteral, strLiteral }, fn)
 // Context: each literal type maps to its widened JSON schema type (e.g., 42 → "number", "hello" → "string")
 export default pattern(() => {
-  const value = Writable.of(10);
+  const value = new Writable(10);
 
   // All literal types that should be widened
   const numLiteral = 42;

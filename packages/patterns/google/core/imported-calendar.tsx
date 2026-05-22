@@ -361,29 +361,29 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
   ).result!;
 
   // Navigation State (Writable so navigation buttons work)
-  const startDate = Writable.of(getWeekStart(getTodayDate()));
-  const visibleDays = Writable.of(7);
+  const startDate = new Writable(getWeekStart(getTodayDate()));
+  const visibleDays = new Writable(7);
 
   // Create Form State
-  const showNewEventPrompt = Writable.of<boolean>(false);
-  const newEventTitle = Writable.of<string>("");
-  const newEventDate = Writable.of<string>(getTodayDate());
-  const newEventStartTime = Writable.of<string>("09:00");
-  const newEventEndTime = Writable.of<string>("10:00");
-  const newEventColor = Writable.of<string>(COLORS[0]);
-  const usedCreateAnother = Writable.of<boolean>(false);
+  const showNewEventPrompt = new Writable<boolean>(false);
+  const newEventTitle = new Writable<string>("");
+  const newEventDate = new Writable<string>(getTodayDate());
+  const newEventStartTime = new Writable<string>("09:00");
+  const newEventEndTime = new Writable<string>("10:00");
+  const newEventColor = new Writable<string>(COLORS[0]);
+  const usedCreateAnother = new Writable<boolean>(false);
 
   // Edit Form State
-  const showEditModal = Writable.of<boolean>(false);
-  const editingEventIndex = Writable.of<number>(-1);
-  const editEventTitle = Writable.of<string>("");
-  const editEventDate = Writable.of<string>("");
-  const editEventStartTime = Writable.of<string>("09:00");
-  const editEventEndTime = Writable.of<string>("10:00");
-  const editEventColor = Writable.of<string>(COLORS[0]);
+  const showEditModal = new Writable<boolean>(false);
+  const editingEventIndex = new Writable<number>(-1);
+  const editEventTitle = new Writable<string>("");
+  const editEventDate = new Writable<string>("");
+  const editEventStartTime = new Writable<string>("09:00");
+  const editEventEndTime = new Writable<string>("10:00");
+  const editEventColor = new Writable<string>(COLORS[0]);
 
   // Track last drop time to prevent click firing after drag
-  const lastDropTime = Cell.of(0);
+  const lastDropTime = new Cell(0);
 
   // Computed Values
   const importedEventCount = derive(
@@ -1081,7 +1081,7 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
                   });
 
                   // Compute position/visibility in single derive
-                  // Note: startDate and visibleDays are Cell.of(), so access with .get()
+                  // Note: startDate and visibleDays are new Cell(), so access with .get()
                   const styles = derive(evt, (e) => {
                     const weekStart = startDate.get();
                     const visibleCount = visibleDays.get();

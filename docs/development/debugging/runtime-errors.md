@@ -23,7 +23,7 @@ const addItem = handler<unknown, { items: Writable<Item[]>; itemTitle: Writable<
 );
 
 export default pattern<Input, Input>(({ items }) => {
-  const itemTitle = Writable.of("");
+  const itemTitle = new Writable("");
   return {
     [UI]: (
       <div>

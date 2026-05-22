@@ -11,9 +11,9 @@ interface InputStoryOutput {
 }
 
 export default pattern<InputStoryInput, InputStoryOutput>(() => {
-  const placeholder = Writable.of("Type something...");
-  const disabled = Writable.of(false);
-  const value = Writable.of("");
+  const placeholder = new Writable("Type something...");
+  const disabled = new Writable(false);
+  const value = new Writable("");
 
   return {
     [NAME]: "cf-input Story",

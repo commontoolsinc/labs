@@ -8,7 +8,7 @@ import type {
   JSONSchemaTypes,
   SchemaPathSelector,
 } from "@commonfabric/api";
-import { deepFreeze, isDeepFrozen } from "../deep-freeze.ts";
+import { deepFreeze, isDeepFrozen } from "../src/deep-freeze.ts";
 import {
   cloneSchemaMutable,
   emptySchemaObject,
@@ -19,8 +19,8 @@ import {
   schemaWithoutProperties,
   schemaWithProperties,
   toDeepFrozenSchema,
-} from "../schema-utils.ts";
-import { internSchema, isInternedSchema } from "../schema-hash.ts";
+} from "../src/schema-utils.ts";
+import { internSchema, isInternedSchema } from "../src/schema-hash.ts";
 
 describe("toDeepFrozenSchema", () => {
   describe("boolean schemas", () => {
@@ -853,19 +853,19 @@ describe("emptySchemaObject", () => {
 });
 
 describe("internSchemaPairAsKey()", () => {
-  it("composes the two interned `hashString`s with `|`", () => {
+  it("composes the two interned `.taggedHashString`s with `|`", () => {
     const a: JSONSchema = { type: "number" };
     const b: JSONSchema = { type: "string" };
-    const aHash = internSchema(a, true).hashString;
-    const bHash = internSchema(b, true).hashString;
+    const aHash = internSchema(a, true).taggedHashString;
+    const bHash = internSchema(b, true).taggedHashString;
     expect(internSchemaPairAsKey(a, b)).toBe(`${aHash}|${bHash}`);
   });
 
   it("handles boolean schemas on either side", () => {
     const obj: JSONSchema = { type: "number" };
-    const objHash = internSchema(obj, true).hashString;
-    const trueHash = internSchema(true, true).hashString;
-    const falseHash = internSchema(false, true).hashString;
+    const objHash = internSchema(obj, true).taggedHashString;
+    const trueHash = internSchema(true, true).taggedHashString;
+    const falseHash = internSchema(false, true).taggedHashString;
     expect(internSchemaPairAsKey(true, obj)).toBe(`${trueHash}|${objHash}`);
     expect(internSchemaPairAsKey(obj, false)).toBe(`${objHash}|${falseHash}`);
     expect(internSchemaPairAsKey(true, false)).toBe(

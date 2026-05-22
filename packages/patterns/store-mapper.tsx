@@ -308,15 +308,15 @@ export default pattern<Input, Output>(
     void _initDepts;
 
     // UI state
-    const currentSection = Writable.of<
+    const currentSection = new Writable<
       "map" | "aisles" | "departments" | "corrections" | "outline"
     >("map");
-    const newCorrectionItem = Writable.of("");
-    const newCorrectionAisle = Writable.of("");
+    const newCorrectionItem = new Writable("");
+    const newCorrectionAisle = new Writable("");
 
     // Photo import state
-    const uploadedPhotos = Writable.of<ImageData[]>([]);
-    const hiddenPhotoIds = Writable.of<string[]>([]);
+    const uploadedPhotos = new Writable<ImageData[]>([]);
+    const hiddenPhotoIds = new Writable<string[]>([]);
 
     // Process uploaded photos with AI
     // Note: Photos are NOT auto-deleted after "Add All" to prevent the photo extraction

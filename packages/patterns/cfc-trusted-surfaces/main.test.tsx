@@ -29,70 +29,70 @@ const trigger = handler<void, { stream: Stream<void> }>((_, { stream }) => {
 });
 
 export default pattern(() => {
-  const draftTitle = Writable.of("");
-  const savedTitle = Writable.of("");
-  const draftBody = Writable.of("");
-  const savedBody = Writable.of("");
+  const draftTitle = new Writable("");
+  const savedTitle = new Writable("");
+  const draftBody = new Writable("");
+  const savedBody = new Writable("");
 
-  const forwardSource = Writable.of(
+  const forwardSource = new Writable(
     "Guest arrives late and needs the bell desk to hold room access after midnight. Raw inbox context stays in the note.",
   );
-  const forwardRecipient = Writable.of("ops@hotel.example");
-  const forwardPrepared = Writable.of("");
-  const forwardedNote = Writable.of("");
+  const forwardRecipient = new Writable("ops@hotel.example");
+  const forwardPrepared = new Writable("");
+  const forwardedNote = new Writable("");
 
-  const commandInput = Writable.of(
+  const commandInput = new Writable(
     "Research Common Fabric launch updates and email a three-bullet brief to team@example.com",
   );
-  const capturedCommand = Writable.of("");
-  const preparedBrief = Writable.of("");
-  const authorizedSend = Writable.of("");
+  const capturedCommand = new Writable("");
+  const preparedBrief = new Writable("");
+  const authorizedSend = new Writable("");
 
-  const sourceUrl = Writable.of(
+  const sourceUrl = new Writable(
     "https://source.example.com/private/report?token=secret-token&draft=internal",
   );
-  const preparedSafeLink = Writable.of("");
-  const releasedSafeLink = Writable.of("");
+  const preparedSafeLink = new Writable("");
+  const releasedSafeLink = new Writable("");
 
-  const conversationTitle = Writable.of("");
-  const audienceInput = Writable.of("");
-  const messageDraft = Writable.of("");
-  const sentMessage = Writable.of("");
+  const conversationTitle = new Writable("");
+  const audienceInput = new Writable("");
+  const messageDraft = new Writable("");
+  const sentMessage = new Writable("");
 
-  const targetAudience = Writable.of("");
-  const publishSubject = Writable.of("");
-  const publishBody = Writable.of("");
-  const preparedAudiencePublish = Writable.of("");
-  const publishedAudiencePost = Writable.of("");
+  const targetAudience = new Writable("");
+  const publishSubject = new Writable("");
+  const publishBody = new Writable("");
+  const preparedAudiencePublish = new Writable("");
+  const publishedAudiencePost = new Writable("");
 
-  const disclaimerText = Writable.of("");
-  const acknowledgedDisclaimer = Writable.of("");
+  const disclaimerText = new Writable("");
+  const acknowledgedDisclaimer = new Writable("");
 
-  const provenanceText = Writable.of("");
-  const reviewedProvenance = Writable.of("");
+  const provenanceText = new Writable("");
+  const reviewedProvenance = new Writable("");
 
-  const factCheckClaim = Writable.of("");
-  const factCheckResult = Writable.of("");
+  const factCheckClaim = new Writable("");
+  const factCheckResult = new Writable("");
 
-  const songHint = Writable.of("");
-  const identifiedSongId = Writable.of("");
+  const songHint = new Writable("");
+  const identifiedSongId = new Writable("");
 
-  const policyAudience = Writable.of("");
-  const policyScope = Writable.of("");
-  const savedSharePolicy = Writable.of("");
+  const policyAudience = new Writable("");
+  const policyScope = new Writable("");
+  const savedSharePolicy = new Writable("");
 
-  const jobName = Writable.of("");
-  const jobStatus = Writable.of("");
-  const jobAuthorization = Writable.of("");
-  const jobCancellation = Writable.of("");
+  const jobName = new Writable("");
+  const jobStatus = new Writable("");
+  const jobAuthorization = new Writable("");
+  const jobCancellation = new Writable("");
 
-  const recipientLabel = Writable.of("");
-  const recipientPayloadPreview = Writable.of("");
-  const confirmedRecipientRelease = Writable.of("");
+  const recipientLabel = new Writable("");
+  const recipientPayloadPreview = new Writable("");
+  const confirmedRecipientRelease = new Writable("");
 
-  const redactionLabel = Writable.of("");
-  const redactionSourceText = Writable.of("");
-  const releasedRedactedContent = Writable.of("");
+  const redactionLabel = new Writable("");
+  const redactionSourceText = new Writable("");
+  const releasedRedactedContent = new Writable("");
 
   const trustedSave = TrustedSaveSurface({ draftTitle, savedTitle });
   const trustedSaveDraft = TrustedSaveDraftSurface({

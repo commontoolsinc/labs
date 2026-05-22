@@ -269,16 +269,16 @@ const submitAnswerHandler = handler<
 
 export default pattern((_) => {
   // OWN the data cells (.for for id stability)
-  const favorites = Writable.of<Favorite[]>([]).for("favorites");
-  const journal = Writable.of<JournalEntry[]>([]).for("journal");
-  const learned = Writable.of<LearnedSection>(EMPTY_LEARNED).for("learned");
-  const spaces = Writable.of<SpaceEntry[]>([]).for("spaces");
-  const defaultAppUrl = Writable.of("").for("defaultAppUrl");
+  const favorites = new Writable<Favorite[]>([]).for("favorites");
+  const journal = new Writable<JournalEntry[]>([]).for("journal");
+  const learned = new Writable<LearnedSection>(EMPTY_LEARNED).for("learned");
+  const spaces = new Writable<SpaceEntry[]>([]).for("spaces");
+  const defaultAppUrl = new Writable("").for("defaultAppUrl");
 
   // Child components use wish() to access favorites/journal through defaultPattern
   const favoritesComponent = FavoritesManager({});
   const journalComponent = Journal({});
-  const activeTab = Writable.of("spaces").for("activeTab");
+  const activeTab = new Writable("spaces").for("activeTab");
 
   // === REACTIVE NARRATIVE ENRICHMENT ===
   // LLM Error Handling: generateText/generateObject return { pending, result, error }.

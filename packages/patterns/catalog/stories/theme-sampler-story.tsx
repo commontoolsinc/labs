@@ -452,7 +452,7 @@ function ComponentSampler() {
 
 export default pattern<ThemeSamplerStoryInput, ThemeSamplerStoryOutput>(
   () => {
-    const selectedTheme = Writable.of("default");
+    const selectedTheme = new Writable("default");
 
     const activeTheme = computed(() => themes[selectedTheme.get()] ?? {});
 

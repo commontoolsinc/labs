@@ -534,12 +534,12 @@ const toggleShowEvents = handler<unknown, { showEvents: Writable<boolean> }>(
 // Settings is not optional - we provide it with a default
 const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
   ({ settings, overrideAuth }) => {
-    const events = Writable.of<Confidential<CalendarEvent[]>>([]);
-    const calendars = Writable.of<Calendar[]>([]);
-    const fetching = Writable.of(false);
-    const currentPage = Writable.of(0);
-    const showEvents = Writable.of(false); // Collapsed by default
-    const selectedCalendarIds = Writable.of<string[]>([]); // Empty = all selected on first fetch
+    const events = new Writable<Confidential<CalendarEvent[]>>([]);
+    const calendars = new Writable<Calendar[]>([]);
+    const fetching = new Writable(false);
+    const currentPage = new Writable(0);
+    const showEvents = new Writable(false); // Collapsed by default
+    const selectedCalendarIds = new Writable<string[]>([]); // Empty = all selected on first fetch
     const PAGE_SIZE = 10;
 
     // Pre-compute calendar selection state for efficient lookup
@@ -587,8 +587,8 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
 
     // Use overrideAuth if provided, otherwise use wished auth
     // This allows manual linking via CLI when wish() is unavailable (e.g., favorites disabled)
-    // Note: We wrap overrideAuth in Writable.of outside of reactive context
-    const overrideAuthCell = Writable.of<Auth | null>(null);
+    // Note: We wrap overrideAuth in a local Writable outside of reactive context
+    const overrideAuthCell = new Writable<Auth | null>(null);
     computed(() => {
       if (overrideAuth?.token) {
         overrideAuthCell.set(overrideAuth as any);

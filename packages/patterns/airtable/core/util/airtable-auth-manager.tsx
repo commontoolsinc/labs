@@ -98,25 +98,25 @@ export const AirtableAuthManager = pattern<
       AirtableAuth(
         {
           selectedScopes: {
-            "data.records:read": Writable.of(
+            "data.records:read": new Writable(
               required.includes("data.records:read"),
             ),
-            "data.records:write": Writable.of(
+            "data.records:write": new Writable(
               required.includes("data.records:write"),
             ),
-            "data.recordComments:read": Writable.of(
+            "data.recordComments:read": new Writable(
               required.includes("data.recordComments:read"),
             ),
-            "data.recordComments:write": Writable.of(
+            "data.recordComments:write": new Writable(
               required.includes("data.recordComments:write"),
             ),
-            "schema.bases:read": Writable.of(
+            "schema.bases:read": new Writable(
               required.includes("schema.bases:read"),
             ),
-            "schema.bases:write": Writable.of(
+            "schema.bases:write": new Writable(
               required.includes("schema.bases:write"),
             ),
-            "webhook:manage": Writable.of(required.includes("webhook:manage")),
+            "webhook:manage": new Writable(required.includes("webhook:manage")),
           },
           auth: emptyAuth,
         } as Parameters<typeof AirtableAuth>[0],

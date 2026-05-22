@@ -11,10 +11,29 @@ import { derive, pattern, patternTool, type PatternToolResult, Writable } from "
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const multiplier = __cfHelpers.__cf_data(Writable.of(2, {
+const __cfModuleCallback_1 = __cfHardenFn(({ value, prefix, multiplier }: {
+    value: number;
+    prefix: import("commonfabric").Cell<string>;
+    multiplier: import("commonfabric").Cell<number>;
+}) => {
+    return derive({
+        type: "object",
+        properties: {
+            value: {
+                type: "number"
+            }
+        },
+        required: ["value"]
+    } as const satisfies __cfHelpers.JSONSchema, {
+        type: "string"
+    } as const satisfies __cfHelpers.JSONSchema, { value }, ({ value }) => {
+        return prefix.get() + String(value * multiplier.get());
+    });
+});
+const multiplier = __cfHelpers.__cf_data(new Writable(2, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema).for("multiplier", true));
-const prefix = __cfHelpers.__cf_data(Writable.of("Result: ", {
+const prefix = __cfHelpers.__cf_data(new Writable("Result: ", {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema).for("prefix", true));
 type Output = {
@@ -24,29 +43,11 @@ type Output = {
 // Verifies: patternTool with no explicit extraParams auto-captures multiple module-scoped reactive vars
 //   patternTool(fn) → patternTool(fn, { prefix, multiplier })
 //   callback signature gains captured params: ({ value }) → ({ value, prefix, multiplier })
-// Context: Both `prefix` and `multiplier` are module-scoped Writable.of() values
+// Context: Both `prefix` and `multiplier` are module-scoped new Writable() values
 //   referenced via .get() inside the callback. The transformer detects both and
 //   injects them into the extraParams object and the callback's destructured input.
 export default pattern(() => {
-    const tool = patternTool(({ value, prefix, multiplier }: {
-        value: number;
-        prefix: import("commonfabric").Cell<string>;
-        multiplier: import("commonfabric").Cell<number>;
-    }) => {
-        return derive({
-            type: "object",
-            properties: {
-                value: {
-                    type: "number"
-                }
-            },
-            required: ["value"]
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { value }, ({ value }) => {
-            return prefix.get() + String(value * multiplier.get());
-        });
-    }, {
+    const tool = patternTool(__cfModuleCallback_1, {
         prefix: prefix,
         multiplier: multiplier
     });

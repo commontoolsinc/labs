@@ -17,3 +17,4 @@ Directory listings reflect space contents and JSON structure traversal.
 - [7. Open Questions](./7-open-questions.md)
 - [8. Filesystem Projections (`[FS]`)](./8-fs-projections.md)
 - [9. CFC Annotations](./9-cfc-annotations.md)
+- [10. CFC Filesystem API Semantics](./10-cfc-filesystem-api-semantics.md)

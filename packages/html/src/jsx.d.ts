@@ -3546,6 +3546,9 @@ interface CFCFCAuthorshipAttributes<T> extends CFHTMLAttributes<T> {
   "author"?: unknown;
   "authorName"?: unknown;
   "avatar"?: unknown;
+  "badgePlacement"?: "start" | "end";
+  "badge-placement"?: "start" | "end";
+  "data-badge-placement"?: "start" | "end";
   "kind"?: string;
   "verifyTextIntegrity"?: boolean;
   "allowLiteralText"?: boolean;

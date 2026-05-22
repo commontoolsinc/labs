@@ -50,10 +50,10 @@ To prevent the window where synced state temporarily reverts a pending edit:
 - Optionally move applied edits to an `appliedEdits` array for audit/UI
   purposes.
 
-### 5. Stable Identity via `Cell.of()`
+### 5. Stable Identity via `Cell.for()`
 
 When writing items that have an external canonical ID, use
-`Cell.of(externalId).set(...)` to create the data. This ensures that links
+`Cell.for(externalId).set(...)` to create the data. This ensures that links
 created in the fabric point to stable cells derived from the canonical ID,
 rather than ephemeral cells that get replaced on each sync.
 
@@ -69,7 +69,7 @@ ensures any links created between the edit and the sync remain valid.
 
 ```typescript
 // After getting canonical ID for a newly created item:
-const canonicalCell = Cell.of(canonicalId);
+const canonicalCell = Cell.for(canonicalId);
 const editCell = item.asResolvedCell();
 editCell.setRaw(canonicalCell.getAsWriteRedirectLink({ base: editCell }));
 ```
@@ -208,16 +208,16 @@ async function runSyncLoop(
         editWatermark = edits.length;
 
         // 2. Read full filesystem state, build cell structure
-        //    IMPORTANT: Use Cell.of(canonicalId) for each item that has
+        //    IMPORTANT: Use Cell.for(canonicalId) for each item that has
         //    an external ID. This ensures stable links in the fabric.
         const fsState = readFilesystemState(watchPath);
         stateCell.set(
-          buildStateFromFs(fsState), // Must use Cell.of() internally — see below
+          buildStateFromFs(fsState), // Must use Cell.for() internally — see below
         );
 
         // 3. Write redirect links for newly created items
         for (const [edit, canonicalId] of editIdMap) {
-          const canonicalCell = Cell.of(canonicalId);
+          const canonicalCell = Cell.for(canonicalId);
           const editCell = edit.tempRef.asResolvedCell();
           editCell.setRaw(
             canonicalCell.getAsWriteRedirectLink({ base: editCell }),
@@ -248,22 +248,22 @@ async function runSyncLoop(
 
 ### Building State with Stable Identity
 
-> **TODO(seefeld):** `Cell.of()` in handler frames creates cells scoped to that
+> **TODO(seefeld):** `Cell.for()` in handler frames creates cells scoped to that
 > handler invocation. For importers operating outside a pattern, we need a shared
-> frame so `Cell.of()` produces consistent cells across the whole import. Current
+> frame so `Cell.for()` produces consistent cells across the whole import. Current
 > workaround: `pushFrameFromCause` with a stable cause string. This needs
 > platform-level support.
 
-The `buildStateFromFs` function (or equivalent) **must** use `Cell.of()` for
+The `buildStateFromFs` function (or equivalent) **must** use `Cell.for()` for
 every sub-item that has an external canonical ID. For example:
 
 ```typescript
 function buildStateFromFs(fsState: FsState): State {
   return {
     items: fsState.items.map((item) =>
-      // Cell.of() ensures this item has a stable cell derived from
+      // Cell.for() ensures this item has a stable cell derived from
       // its canonical ID. Links to this item survive across syncs.
-      Cell.of(item.canonicalId).set({
+      Cell.for(item.canonicalId).set({
         name: item.name,
         path: item.path,
         // ...
@@ -275,7 +275,7 @@ function buildStateFromFs(fsState: FsState): State {
 
 This is not a post-processing step — it must happen as part of constructing the
 state structure. If you write the structure first and then try to set up
-`Cell.of()` mappings afterward, the items in the array will have ephemeral cell
+`Cell.for()` mappings afterward, the items in the array will have ephemeral cell
 IDs that break on every sync.
 
 ### Don't Diff — Let the Runtime Do It
@@ -595,7 +595,7 @@ Not all edits are treated the same:
 - **Heavy actions** (create issue, close PR, merge branch): Do NOT optimistically
   apply to local state. Instead, render the edit itself as a pending action in the
   UI — a grayed-out card with a spinner. When the API responds or a webhook
-  confirms success, write the real entity with `Cell.of(canonicalId)`. No write
+  confirms success, write the real entity with `Cell.for(canonicalId)`. No write
   redirects are needed because the edit was never materialized as a cell in the
   state structure.
 
@@ -614,7 +614,7 @@ When the user performs an action:
    `stage: "pending"`
 2. **Fire the API call** — immediately dispatch the request and advance to
    `stage: "in-flight"`
-3. **On success** — write the canonical entity via `Cell.of(canonicalId)`,
+3. **On success** — write the canonical entity via `Cell.for(canonicalId)`,
    advance edit to `succeeded`, clean up
 4. **On failure** — mark edit as `failed` with error info
 
@@ -637,7 +637,7 @@ const createIssue = handler<{ edits: ApiEdit[] }>(
       try {
         const result = await github.createIssue({ title, body });
         // Write canonical entity
-        Cell.of(`issue:${result.number}`).set({
+        Cell.for(`issue:${result.number}`).set({
           number: result.number,
           title: result.title,
           body: result.body,
@@ -671,11 +671,11 @@ async function handleWebhookEvent(event: WebhookEvent) {
   processedEvents.add(event.id);
 
   // Handle out-of-order delivery: ignore stale updates
-  const existing = Cell.of(`issue:${event.issue.number}`).get();
+  const existing = Cell.for(`issue:${event.issue.number}`).get();
   if (existing && existing.updatedAt > event.issue.updatedAt) return;
 
   // Apply the update
-  Cell.of(`issue:${event.issue.number}`).set({
+  Cell.for(`issue:${event.issue.number}`).set({
     number: event.issue.number,
     title: event.issue.title,
     body: event.issue.body,
@@ -721,7 +721,7 @@ async function fullRebuild() {
   try {
     stateCell.set({
       issues: allIssues.map((issue) =>
-        Cell.of(`issue:${issue.number}`).set({
+        Cell.for(`issue:${issue.number}`).set({
           number: issue.number,
           title: issue.title,
           body: issue.body,
@@ -730,7 +730,7 @@ async function fullRebuild() {
         })
       ),
       pullRequests: allPRs.map((pr) =>
-        Cell.of(`pr:${pr.number}`).set({
+        Cell.for(`pr:${pr.number}`).set({
           number: pr.number,
           title: pr.title,
           state: pr.state,
@@ -746,7 +746,7 @@ async function fullRebuild() {
 ```
 
 This is the same pattern as filesystem sync: read everything, write with
-`Cell.of()`, single transaction. The only difference is the data source.
+`Cell.for()`, single transaction. The only difference is the data source.
 
 ### Pattern (UI) Integration for API Sync
 
@@ -824,7 +824,7 @@ need it.
 | Optimistic updates     | Apply edits to local state in same tx as enqueue       |
 | External canonical     | Overwrite local state from external source each sync   |
 | Anti-backsliding       | Single tx: apply edits + update state + clear queue    |
-| Stable identity        | `Cell.of(externalId)` for canonical-ID-bearing items   |
+| Stable identity        | `Cell.for(externalId)` for canonical-ID-bearing items   |
 | In-flight link safety  | Write redirect links from temp cells to canonical ones |
 | Process safety         | Lockfile with PID, stale lock recovery                 |
 | System edit failures   | Keep in queue, crash daemon, operator restarts         |
@@ -832,4 +832,4 @@ need it.
 | UI pending state       | Render from edit queue; auto-clears on sync            |
 | Edit lifecycle         | Staged entities: pending → in-flight → succeeded/failed |
 | Heavy actions          | Render as pending edits, not optimistic state          |
-| Webhook sync           | Incremental updates via `Cell.of()`; full rebuild as backstop |
+| Webhook sync           | Incremental updates via `Cell.for()`; full rebuild as backstop |

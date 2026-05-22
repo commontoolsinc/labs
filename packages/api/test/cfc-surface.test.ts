@@ -3,6 +3,7 @@ import type { Cfc as RootCfc } from "@commonfabric/api";
 import { CFC_CANONICAL_ALIAS_NAMES } from "@commonfabric/api";
 import type {
   AddIntegrity,
+  AuthoredByCurrentUser,
   CanonicalPointer,
   Cfc,
   Confidential,
@@ -19,6 +20,7 @@ import type {
   ProjectionPath,
   Ref,
   RefValue,
+  RepresentsCurrentUser,
   RequiresIntegrity,
   SubsetOf,
   WriteAuthorizedBy,
@@ -34,6 +36,12 @@ Deno.test("CFC API surface preserves the authored runtime value shape", () => {
   };
   const addIntegrity: AddIntegrity<{ title: string }, readonly ["added"]> = {
     title: "gamma",
+  };
+  const representsCurrentUser: RepresentsCurrentUser<{ name: string }> = {
+    name: "Ada",
+  };
+  const authoredByCurrentUser: AuthoredByCurrentUser<{ body: string }> = {
+    body: "hello",
   };
   const requiresIntegrity: RequiresIntegrity<
     { title: string },
@@ -114,6 +122,8 @@ Deno.test("CFC API surface preserves the authored runtime value shape", () => {
   assertEquals(confidential, { title: "alpha" });
   assertEquals(integrity, { title: "beta" });
   assertEquals(addIntegrity, { title: "gamma" });
+  assertEquals(representsCurrentUser, { name: "Ada" });
+  assertEquals(authoredByCurrentUser, { body: "hello" });
   assertEquals(requiresIntegrity, { title: "delta" });
   assertEquals(maxConfidentiality, { title: "epsilon" });
   assertEquals(exactCopy, { title: "zeta" });
@@ -136,6 +146,8 @@ Deno.test("CFC API surface preserves the authored runtime value shape", () => {
     "Confidential",
     "Integrity",
     "AddIntegrity",
+    "RepresentsCurrentUser",
+    "AuthoredByCurrentUser",
     "RequiresIntegrity",
     "MaxConfidentiality",
     "OpaqueInput",

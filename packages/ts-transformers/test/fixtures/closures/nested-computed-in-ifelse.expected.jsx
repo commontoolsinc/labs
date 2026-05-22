@@ -30,10 +30,10 @@ const __cfAmdHooks = undefined;
 //   an ifElse branch must NOT get an extra derive wrapper, since computed is
 //   already a safe reactive context.
 export default pattern(() => {
-    const showOuter = Writable.of(false, {
+    const showOuter = new Writable(false, {
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema).for("showOuter", true);
-    const secondToggle = Writable.of(false, {
+    const secondToggle = new Writable(false, {
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema).for("secondToggle", true);
     return {

@@ -5,14 +5,14 @@ import {
   findInternedSchema,
   hashSchema,
   internSchema,
-  internSchemaAsHashString,
+  internSchemaAsTaggedHashString,
   isInternedSchema,
-} from "../schema-hash.ts";
-import { SchemaAndHash } from "../schema-and-hash.ts";
-import { FabricHash } from "../fabric-hash.ts";
-import { hashStringOf } from "../value-hash.ts";
-import { isDeepFrozen } from "../deep-freeze.ts";
-import { toDeepFrozenSchema } from "../schema-utils.ts";
+} from "../src/schema-hash.ts";
+import { SchemaAndHash } from "../src/SchemaAndHash.ts";
+import { FabricHash } from "../src/FabricHash.ts";
+import { hashStringOf } from "../src/value-hash.ts";
+import { isDeepFrozen } from "../src/deep-freeze.ts";
+import { toDeepFrozenSchema } from "../src/schema-utils.ts";
 import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 
 describe("schema-hash dispatch", () => {
@@ -265,7 +265,7 @@ describe("schema-hash dispatch", () => {
             },
             true,
           );
-          const found = callFind(sah.hashString);
+          const found = callFind(sah.taggedHashString);
           expectSame(found, sah);
         });
 
@@ -287,21 +287,21 @@ describe("schema-hash dispatch", () => {
     }
   });
 
-  describe("internSchemaAsHashString()", () => {
-    it("returns the interned schema's hashString for an object", () => {
+  describe("internSchemaAsTaggedHashString()", () => {
+    it("returns the interned schema's `.taggedHashString` for an object", () => {
       const schema: JSONSchema = { type: "number" };
       const sah = internSchema(schema, true);
-      expect(internSchemaAsHashString(schema)).toBe(sah.hashString);
+      expect(internSchemaAsTaggedHashString(schema)).toBe(sah.taggedHashString);
     });
 
-    it("returns the boolean schema's prefab hashString for `true`", () => {
-      const expected = internSchema(true, true).hashString;
-      expect(internSchemaAsHashString(true)).toBe(expected);
+    it("returns the boolean schema's prefab `.taggedHashString` for `true`", () => {
+      const expected = internSchema(true, true).taggedHashString;
+      expect(internSchemaAsTaggedHashString(true)).toBe(expected);
     });
 
-    it("returns the boolean schema's prefab hashString for `false`", () => {
-      const expected = internSchema(false, true).hashString;
-      expect(internSchemaAsHashString(false)).toBe(expected);
+    it("returns the boolean schema's prefab `.taggedHashString` for `false`", () => {
+      const expected = internSchema(false, true).taggedHashString;
+      expect(internSchemaAsTaggedHashString(false)).toBe(expected);
     });
 
     it("produces matching strings for structurally-equal objects", () => {
@@ -313,15 +313,17 @@ describe("schema-hash dispatch", () => {
         type: "object",
         properties: { x: { type: "string" } },
       };
-      expect(internSchemaAsHashString(a)).toBe(internSchemaAsHashString(b));
+      expect(internSchemaAsTaggedHashString(a)).toBe(
+        internSchemaAsTaggedHashString(b),
+      );
     });
 
     it("produces different strings for different schemas", () => {
-      expect(internSchemaAsHashString({ type: "number" })).not.toEqual(
-        internSchemaAsHashString({ type: "string" }),
+      expect(internSchemaAsTaggedHashString({ type: "number" })).not.toEqual(
+        internSchemaAsTaggedHashString({ type: "string" }),
       );
-      expect(internSchemaAsHashString(true)).not.toEqual(
-        internSchemaAsHashString(false),
+      expect(internSchemaAsTaggedHashString(true)).not.toEqual(
+        internSchemaAsTaggedHashString(false),
       );
     });
 
@@ -333,15 +335,15 @@ describe("schema-hash dispatch", () => {
         title: `schemaHashTestAt${Date.now()}-${Math.random()}`,
       };
       expect(isInternedSchema(schema)).toBe(false);
-      internSchemaAsHashString(schema);
+      internSchemaAsTaggedHashString(schema);
       expect(isInternedSchema(schema)).toBe(true);
       assert(isDeepFrozen(schema));
     });
 
     it("is idempotent on already-interned schemas", () => {
       const schema: JSONSchema = { type: "number" };
-      const first = internSchemaAsHashString(schema);
-      const second = internSchemaAsHashString(schema);
+      const first = internSchemaAsTaggedHashString(schema);
+      const second = internSchemaAsTaggedHashString(schema);
       expect(first).toBe(second);
     });
   });

@@ -1,7 +1,13 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { cf, checkStderr, stripAnsi } from "./utils.ts";
-import { recreateSpaceRootPattern, type SpaceConfig } from "../lib/piece.ts";
+import {
+  recreateSpaceRootPattern,
+  resolveLinkEndpointAddress,
+  resolvePieceConfig,
+  type SpaceConfig,
+} from "../lib/piece.ts";
+import { SlugResolutionError } from "@commonfabric/piece";
 import {
   parseLink,
   parsePieceOptions,
@@ -94,6 +100,31 @@ describe("cli piece parsing", () => {
       url: FULL_URL,
       identity: ID,
     })).toMatchObject(expected);
+  });
+
+  it("parsePieceOptions() parses scope suffixes from piece ids and urls", () => {
+    expect(parsePieceOptions({
+      apiUrl: API_URL,
+      space: SPACE,
+      identity: ID,
+      piece: `${PIECE}@user`,
+    })).toMatchObject({
+      apiUrl: API_URL,
+      space: SPACE,
+      identity: ID,
+      piece: PIECE,
+      pieceScope: "user",
+    });
+    expect(parsePieceOptions({
+      url: `${API_URL}/${SPACE}/${PIECE}@session`,
+      identity: ID,
+    })).toMatchObject({
+      apiUrl: API_URL,
+      space: SPACE,
+      identity: ID,
+      piece: PIECE,
+      pieceScope: "session",
+    });
   });
   it("parsePieceOptions() throws on incomplete input", () => {
     expect(() =>
@@ -208,6 +239,31 @@ describe("cli piece parsing", () => {
       expect(result.path).toBeUndefined();
     });
 
+    it("should parse scope suffixes on the piece ID segment", () => {
+      expect(parseLink("piece1@user")).toEqual({
+        pieceId: "piece1",
+        scope: "user",
+      });
+      expect(parseLink("piece1@session/path/0")).toEqual({
+        pieceId: "piece1",
+        scope: "session",
+        path: ["path", 0],
+      });
+      expect(parseLink("piece1@space/path")).toEqual({
+        pieceId: "piece1",
+        scope: "space",
+        path: ["path"],
+      });
+    });
+
+    it("should reject invalid scope suffixes on the piece ID segment", () => {
+      expect(() => parseLink("piece1@any")).toThrow(/Invalid scope suffix/);
+      expect(() => parseLink("piece1@inherit")).toThrow(
+        /Invalid scope suffix/,
+      );
+      expect(() => parseLink("piece1@")).toThrow(/Invalid scope suffix/);
+    });
+
     it("should parse simple paths correctly", () => {
       const result = parseLink("piece1/field");
       expect(result.pieceId).toBe("piece1");
@@ -232,10 +288,104 @@ describe("cli piece parsing", () => {
       expect(result.path).toEqual([0, 1, 2]);
     });
 
+    it("should preserve @ in path segments after the piece ID", () => {
+      const result = parseLink("piece/user@email");
+      expect(result.pieceId).toBe("piece");
+      expect(result.path).toEqual(["user@email"]);
+      expect(result.scope).toBeUndefined();
+    });
+
     it("should handle empty string after slash", () => {
       const result = parseLink("piece/field/");
       expect(result.pieceId).toBe("piece");
       expect(result.path).toEqual(["field", ""]);
     });
+  });
+
+  it("shows slug option for piece new", async () => {
+    const { code, stdout, stderr } = await cf("piece new --help");
+    checkStderr(stderr);
+    expect(code).toBe(0);
+    expect(stripAnsi(stdout.join("\n"))).toContain("--slug");
+  });
+
+  it("shows set-slug command options", async () => {
+    const { code, stdout, stderr } = await cf("piece set-slug --help");
+    checkStderr(stderr);
+    const output = stripAnsi(stdout.join("\n"));
+    expect(code).toBe(0);
+    expect(output).toContain("Set a slug redirect");
+    expect(output).toContain("--resolve-before-linking");
+  });
+
+  it("resolves slug piece config through storage", async () => {
+    const manager = {};
+    const resolved = await resolvePieceConfig({
+      apiUrl: API_URL,
+      space: SPACE,
+      identity: ID,
+      piece: "demo",
+    }, {
+      loadManager: (config: SpaceConfig) => {
+        expect(config.space).toBe(SPACE);
+        return Promise.resolve(manager as any);
+      },
+      resolvePieceAddress: (seenManager: unknown, token: string) => {
+        expect(seenManager).toBe(manager);
+        expect(token).toBe("demo");
+        return Promise.resolve(PIECE);
+      },
+    });
+
+    expect(resolved.piece).toBe(PIECE);
+  });
+
+  it("preserves URI piece config without slug lookup", async () => {
+    const resolved = await resolvePieceConfig({
+      apiUrl: API_URL,
+      space: SPACE,
+      identity: ID,
+      piece: "of:fid1:piece-123",
+    }, {
+      loadManager: () => Promise.resolve({} as any),
+    });
+
+    expect(resolved.piece).toBe("of:fid1:piece-123");
+  });
+
+  it("preserves URI link endpoints without slug lookup", async () => {
+    const token = "of:fid1:piece-123";
+    const resolved = await resolveLinkEndpointAddress({} as any, token);
+
+    expect(resolved).toBe(token);
+  });
+
+  it("preserves non-fid link endpoints when no slug document exists", async () => {
+    const manager = {};
+    const token = "baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye";
+    const resolved = await resolveLinkEndpointAddress(
+      manager as any,
+      token,
+      () =>
+        Promise.reject(
+          new SlugResolutionError(`Slug "${token}" not found.`, "missing"),
+        ),
+      { allowMissingSlugFallback: true },
+    );
+
+    expect(resolved).toBe(token);
+  });
+
+  it("rejects missing destination slug endpoints", async () => {
+    const manager = {};
+    const token = "demo";
+    await expect(resolveLinkEndpointAddress(
+      manager as any,
+      token,
+      () =>
+        Promise.reject(
+          new SlugResolutionError(`Slug "${token}" not found.`, "missing"),
+        ),
+    )).rejects.toThrow(/Slug "demo" not found/);
   });
 });

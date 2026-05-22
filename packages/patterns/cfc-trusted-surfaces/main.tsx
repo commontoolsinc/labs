@@ -6,6 +6,7 @@ import {
   pattern,
   Stream,
   UI,
+  type VNode,
   Writable,
   WriteAuthorizedBy,
 } from "commonfabric";
@@ -522,7 +523,7 @@ export interface TrustedSaveSurfaceInput {
 
 export interface TrustedSaveSurfaceOutput {
   [NAME]: string;
-  [UI]: unknown;
+  [UI]: VNode;
   savedTitle: TrustedSaveTitleUiContract;
   save: Stream<void>;
 }
@@ -579,7 +580,7 @@ export interface TrustedSaveDraftSurfaceInput {
 
 export interface TrustedSaveDraftSurfaceOutput {
   [NAME]: string;
-  [UI]: unknown;
+  [UI]: VNode;
   savedTitle: TrustedSavedDraftTitleUiContract;
   savedBody: TrustedSavedDraftBodyUiContract;
   saveDraft: Stream<void>;
@@ -653,7 +654,7 @@ export interface TrustedReviewSurfaceInput {
 
 export interface TrustedReviewSurfaceOutput {
   [NAME]: string;
-  [UI]: unknown;
+  [UI]: VNode;
   reviewedTitle: TrustedReviewedTitleUiContract;
   reviewedBody: TrustedReviewedBodyUiContract;
   reviewSaved: Stream<void>;
@@ -714,7 +715,7 @@ export interface TrustedPublishSurfaceInput {
 
 export interface TrustedPublishSurfaceOutput {
   [NAME]: string;
-  [UI]: unknown;
+  [UI]: VNode;
   publishedTitle: TrustedPublishedTitleUiContract;
   publishedBody: TrustedPublishedBodyUiContract;
   publishReviewed: Stream<void>;
@@ -775,7 +776,7 @@ export interface TrustedForwardSurfaceInput {
 
 export interface TrustedForwardSurfaceOutput {
   [NAME]: string;
-  [UI]: unknown;
+  [UI]: VNode;
   recipientInput: string;
   preparedPreview: TrustedActionWrite<
     string,
@@ -883,7 +884,7 @@ export interface TrustedDirectCommandSurfaceInput {
 
 export interface TrustedDirectCommandSurfaceOutput {
   [NAME]: string;
-  [UI]: unknown;
+  [UI]: VNode;
   commandInput: string;
   capturedCommand: TrustedActionWrite<
     string,
@@ -1005,7 +1006,7 @@ export interface TrustedSafeLinkSurfaceInput {
 
 export interface TrustedSafeLinkSurfaceOutput {
   [NAME]: string;
-  [UI]: unknown;
+  [UI]: VNode;
   sourceUrl: string;
   preparedSafeLink: TrustedActionWrite<
     string,
@@ -1104,7 +1105,7 @@ export interface TrustedConversationSendSurfaceInput {
 
 export interface TrustedConversationSendSurfaceOutput {
   [NAME]: string;
-  [UI]: unknown;
+  [UI]: VNode;
   sentMessage: TrustedActionWrite<
     string,
     typeof commitTrustedConversationSend,
@@ -1200,7 +1201,7 @@ export interface TrustedAudiencePublishSurfaceInput {
 
 export interface TrustedAudiencePublishSurfaceOutput {
   [NAME]: string;
-  [UI]: unknown;
+  [UI]: VNode;
   preparedAudiencePublish: TrustedActionWrite<
     string,
     typeof prepareTrustedAudiencePublish,
@@ -1324,7 +1325,7 @@ export interface TrustedDisclaimerAckSurfaceInput {
 
 export interface TrustedDisclaimerAckSurfaceOutput {
   [NAME]: string;
-  [UI]: unknown;
+  [UI]: VNode;
   acknowledgedDisclaimer: TrustedActionWriteWithIntegrity<
     string,
     typeof acknowledgeTrustedDisclaimer,
@@ -1397,7 +1398,7 @@ export interface TrustedProvenanceReviewSurfaceInput {
 
 export interface TrustedProvenanceReviewSurfaceOutput {
   [NAME]: string;
-  [UI]: unknown;
+  [UI]: VNode;
   reviewedProvenance: TrustedActionWriteWithIntegrity<
     string,
     typeof reviewTrustedProvenance,
@@ -1470,7 +1471,7 @@ export interface TrustedFactCheckGateSurfaceInput {
 
 export interface TrustedFactCheckGateSurfaceOutput {
   [NAME]: string;
-  [UI]: unknown;
+  [UI]: VNode;
   factCheckResult: TrustedActionWriteWithIntegrity<
     string,
     typeof commitTrustedFactCheckGate,
@@ -1542,7 +1543,7 @@ export interface TrustedSongIdRecordingSurfaceInput {
 
 export interface TrustedSongIdRecordingSurfaceOutput {
   [NAME]: string;
-  [UI]: unknown;
+  [UI]: VNode;
   identifiedSongId: TrustedActionWrite<
     string,
     typeof recordTrustedSongId,
@@ -1608,7 +1609,7 @@ export interface TrustedSharePolicySurfaceInput {
 
 export interface TrustedSharePolicySurfaceOutput {
   [NAME]: string;
-  [UI]: unknown;
+  [UI]: VNode;
   savedSharePolicy: TrustedActionWrite<
     string,
     typeof saveTrustedSharePolicy,
@@ -1690,7 +1691,7 @@ export interface TrustedLongRunningJobSurfaceInput {
 
 export interface TrustedLongRunningJobSurfaceOutput {
   [NAME]: string;
-  [UI]: unknown;
+  [UI]: VNode;
   jobAuthorization: TrustedActionWrite<
     string,
     typeof authorizeTrustedLongRunningJob,
@@ -1792,7 +1793,7 @@ export interface TrustedRecipientConfirmSurfaceInput {
 
 export interface TrustedRecipientConfirmSurfaceOutput {
   [NAME]: string;
-  [UI]: unknown;
+  [UI]: VNode;
   confirmedRecipientRelease: TrustedActionWrite<
     string,
     typeof confirmTrustedRecipientRelease,
@@ -1878,7 +1879,7 @@ export interface TrustedRedactedReleaseSurfaceInput {
 
 export interface TrustedRedactedReleaseSurfaceOutput {
   [NAME]: string;
-  [UI]: unknown;
+  [UI]: VNode;
   releasedRedactedContent: TrustedActionWriteWithIntegrity<
     string,
     typeof releaseTrustedRedactedContent,

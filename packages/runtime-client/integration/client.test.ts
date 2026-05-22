@@ -34,7 +34,7 @@ const identity = await Identity.fromPassphrase("test operator", keyConfig);
 
 const TEST_PROGRAM = `import { Cell, NAME, pattern, UI } from "commonfabric";
 export default pattern((_) => {
-  const cell = Cell.of("hello");
+  const cell = new Cell("hello");
   return {
     [NAME]: "Home",
     [UI]: (
@@ -720,6 +720,103 @@ export default pattern<State>(({ value }) => {
       cancel();
     });
 
+    it("renders PerUser-derived computed JSX inside cf-screen header slot (CT-1606)", async () => {
+      const scopedHeaderPattern = `import {
+  computed,
+  Default,
+  NAME,
+  pattern,
+  type PerSpace,
+  type PerUser,
+  UI,
+  type VNode,
+} from "commonfabric";
+
+const trimmedName = (name: string | undefined) => (name ?? "").trim();
+
+interface Input {
+  question?: PerSpace<string | Default<"Where should we eat?">>;
+  myName?: PerUser<string | Default<"">>;
+}
+
+interface Output {
+  [NAME]: string;
+  [UI]: VNode;
+  myName: PerUser<string | Default<"">>;
+}
+
+export default pattern<Input, Output>(({ question, myName }) => {
+  return {
+    [NAME]: "ct-1606-scoped-header-slot",
+    myName,
+    [UI]: (
+      <cf-screen>
+        <div slot="header">
+          <h2>{question}</h2>
+          {computed(() => {
+            const value = trimmedName(myName);
+            return <div>me is: "{value}"</div>;
+          })}
+        </div>
+        <div>body renders</div>
+      </cf-screen>
+    ),
+  };
+});`;
+
+      const scopedHeaderProgram: Program = {
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: scopedHeaderPattern,
+        }],
+      };
+
+      const session = await createTestSession();
+      await using rt = await createRuntimeClient(session);
+
+      const page = await rt.createPage(scopedHeaderProgram, {
+        run: true,
+      });
+      const cell = page.cell() as CellHandle<VNode>;
+      const nameCell = (page.cell() as any).key("myName").asSchema({
+        type: "string",
+        scope: "user",
+      });
+      const mock = new MockDoc(
+        `<!DOCTYPE html><html><body><div id="root"></div></body></html>`,
+      );
+      const { document, renderOptions } = mock;
+      const root = document.getElementById("root")!;
+
+      const cancel = render(root, cell, renderOptions);
+
+      try {
+        await waitFor(
+          () => {
+            const html = root.innerHTML;
+            return Promise.resolve(
+              html.includes("Where should we eat?") &&
+                html.includes("me is: &quot;&quot;") &&
+                html.includes("body renders"),
+            );
+          },
+          { timeout: 15000 },
+        );
+
+        await nameCell.set("Alex");
+        await waitFor(
+          () =>
+            Promise.resolve(
+              root.innerHTML.includes("me is: &quot;Alex&quot;"),
+            ),
+          { timeout: 5000 },
+        );
+      } finally {
+        cancel();
+      }
+    });
+
     it("dispatches click events through rendered page handlers", async () => {
       const clickPattern =
         `import { action, Default, NAME, pattern, UI, Writable } from "commonfabric";
@@ -971,7 +1068,7 @@ const go = handler<void, { menuOpen: Writable<boolean> }>((_, { menuOpen }) => {
 });
 
 export default pattern<Record<string, never>>(() => {
-  const menuOpen = Writable.of(true);
+  const menuOpen = new Writable(true);
   return {
     [NAME]: "Navigate Handler State Test",
     menuOpen,

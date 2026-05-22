@@ -15,7 +15,7 @@ import {
  */
 export default pattern(() => {
   // URL to a simple pattern file
-  const url = Writable.of(
+  const url = new Writable(
     "https://raw.githubusercontent.com/commontoolsinc/labs/main/packages/patterns/counter.tsx",
   );
 

@@ -349,6 +349,18 @@ type Draft = PerSession<Writable<DraftState>>;
 type AnyScopedValue = PerAny<Cell<Result>>;
 ```
 
+Local cell constructors can also declare scope directly:
+
+```ts
+const sharedTodos = new Writable.perSpace<Todo[]>([]);
+const userPrefs = new Writable.perUser<Preferences>(DEFAULT_PREFS);
+const draft = new Writable.perSession<DraftState>(EMPTY_DRAFT);
+```
+
+Plain `new Writable(...)` does not set a scope by itself; it inherits from the
+containing pattern or factory context unless contextual typing adds an explicit
+scoped schema.
+
 Nested scope wrappers without a cell boundary are invalid because there is no
 separate storage object on which to place each scope. For example,
 `PerUser<PerSession<T>>` is invalid. A nested scope is valid when a `Cell`

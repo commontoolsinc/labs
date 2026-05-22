@@ -35,8 +35,8 @@ interface Project {
 }
 // [TRANSFORM] pattern: type param stripped; input+output schemas appended after callback
 export default pattern((state) => {
-    // [TRANSFORM] Writable.of: schema arg injected
-    const fallbackMembers = Writable.of(["ops", "sales"], {
+    // [TRANSFORM] new Writable: schema arg injected
+    const fallbackMembers = new Writable(["ops", "sales"], {
         type: "array",
         items: {
             type: "string"

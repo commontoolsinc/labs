@@ -11,27 +11,7 @@ import { pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(({ element: item, params: {} }) => (<div>
-            Item: {__cfHelpers.derive({
-    type: "object",
-    properties: {
-        item: {
-            type: "object",
-            properties: {
-                price: {
-                    type: "number"
-                }
-            },
-            required: ["price"]
-        }
-    },
-    required: ["item"]
-} as const satisfies __cfHelpers.JSONSchema, {
-    type: "string"
-} as const satisfies __cfHelpers.JSONSchema, { item: {
-        price: item.price
-    } }, ({ item }) => formatPrice(item.price * (1 + TAX_RATE)))}
-          </div>));
+const __cfModuleCallback_1 = __cfHardenFn(({ item }) => formatPrice(item.price * (1 + TAX_RATE)));
 // Module-level constant - should NOT be captured
 const TAX_RATE = 0.08;
 // Module-level function - should NOT be captured
@@ -55,20 +35,51 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Should NOT capture module-level constant or function */}
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
+        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const item = __cf_pattern_input.key("element");
+                return (<div>
+            Item: {__cfHelpers.derive({
+                    type: "object",
+                    properties: {
+                        item: {
+                            type: "object",
+                            properties: {
+                                price: {
+                                    type: "number"
+                                }
+                            },
+                            required: ["price"]
+                        }
+                    },
+                    required: ["item"]
+                } as const satisfies __cfHelpers.JSONSchema, {
+                    type: "string"
+                } as const satisfies __cfHelpers.JSONSchema, { item: {
+                        price: item.key("price")
+                    } }, __cfModuleCallback_1)}
+          </div>);
+            }, {
                 type: "object",
                 properties: {
                     element: {
+                        $ref: "#/$defs/Item"
+                    }
+                },
+                required: ["element"],
+                $defs: {
+                    Item: {
                         type: "object",
                         properties: {
+                            id: {
+                                type: "number"
+                            },
                             price: {
                                 type: "number"
                             }
                         },
-                        required: ["price"]
+                        required: ["id", "price"]
                     }
-                },
-                required: ["element"]
+                }
             } as const satisfies __cfHelpers.JSONSchema, {
                 anyOf: [{
                         $ref: "https://commonfabric.org/schemas/vnode.json"

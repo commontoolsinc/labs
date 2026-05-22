@@ -16,16 +16,16 @@ const __cfAmdHooks = undefined;
 //   computed(() => value.get() > threshold.get() ? a.get() : b.get()) → derive(captureSchema, resultSchema, { value, threshold, a, b }, ({ value, threshold, a, b }) => ...)
 //   All four cells are captured with asCell: true in the schema.
 export default pattern(() => {
-    const value = Writable.of(10, {
+    const value = new Writable(10, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("value", true);
-    const threshold = Writable.of(5, {
+    const threshold = new Writable(5, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("threshold", true);
-    const a = Writable.of(100, {
+    const a = new Writable(100, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("a", true);
-    const b = Writable.of(200, {
+    const b = new Writable(200, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("b", true);
     const result = __cfHelpers.derive({

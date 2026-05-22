@@ -6,7 +6,7 @@ import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import {
-  clickTrustedAction,
+  clickTrustedActionAndWaitForText,
   waitForRuntimeIdle,
   waitForText,
   waitForTextAbsent,
@@ -76,13 +76,12 @@ describe("cfc render policy demo integration test", () => {
       "Sensitive health data:",
     );
 
-    await clickTrustedAction(page, "TrustedRevealHealthData", {
-      timeout: 45_000,
-    });
-    await waitForText(
+    await clickTrustedActionAndWaitForText(
       page,
+      "TrustedRevealHealthData",
       "#trusted-health-visible",
       "Sensitive health data: migraine treatment plan",
+      { timeout: 45_000 },
     );
     await waitForTextAbsent(
       page,

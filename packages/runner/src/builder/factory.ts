@@ -56,7 +56,7 @@ import {
   FabricEpochDays,
   FabricEpochNsec,
 } from "@commonfabric/data-model/fabric-epoch";
-import { FabricHash } from "@commonfabric/data-model/fabric-hash";
+import { FabricHash } from "@commonfabric/data-model/FabricHash";
 import {
   toCompactDebugString,
   toIndentedDebugString,

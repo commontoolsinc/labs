@@ -19,7 +19,7 @@ const __cfAmdHooks = undefined;
 //   from the pattern input), while `value` is captured with asCell: true.
 export default pattern((__cf_pattern_input) => {
     const multiplier = __cf_pattern_input.key("multiplier");
-    const value = Writable.of(10, {
+    const value = new Writable(10, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("value", true);
     const result = __cfHelpers.derive({

@@ -1,5 +1,6 @@
 import { isRecord } from "@commonfabric/utils/types";
 import {
+  fabricFromNativeValue,
   FabricInstance,
   type FabricObject,
   type FabricValue,
@@ -10,7 +11,11 @@ import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getLogger } from "@commonfabric/utils/logger";
 import { ID, ID_FIELD, type JSONSchema } from "./builder/types.ts";
 import { createRef } from "./create-ref.ts";
-import { CellImpl, isCell } from "./cell.ts";
+import {
+  CellImpl,
+  isCell,
+  recordRelevantSchemaWritePolicyInput,
+} from "./cell.ts";
 import { resolveLink } from "./link-resolution.ts";
 import {
   areLinksSame,
@@ -29,6 +34,7 @@ import {
   getCellOrThrow,
   isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
+import { resolveSchemaForValue } from "./schema.ts";
 import type {
   IExtendedStorageTransaction,
   IReadOptions,
@@ -37,7 +43,7 @@ import { type Runtime } from "./runtime.ts";
 import { toURI } from "./uri-utils.ts";
 import {
   allowMutableTransactionRead,
-  markReadAsPotentialWrite,
+  markReadAsAttemptedWrite,
 } from "./scheduler.ts";
 import {
   readStoredCfcMetadata,
@@ -269,7 +275,7 @@ export function diffAndUpdate(
     ...options,
     meta: {
       ...options?.meta,
-      ...markReadAsPotentialWrite,
+      ...markReadAsAttemptedWrite,
       ...allowMutableTransactionRead,
     },
   };
@@ -448,7 +454,7 @@ export function normalizeAndDiff(
     linkOriginFromCell = true;
     const carriedCfcLabelView = getCarriedCfcLabelView(newValue);
     newValue = attachCfcLabelViewToSigilLink(
-      newValue.getAsLink(),
+      newValue.getAsLink({ includeSchema: true }),
       carriedCfcLabelView,
     );
   }
@@ -645,9 +651,14 @@ export function normalizeAndDiff(
       space: link.space,
       scope: link.scope,
       path: [],
+      schema: resolveSchemaForValue(link.schema, rest),
     };
 
     seen.set(newValue, newEntryLink);
+
+    // When a child value becomes its own entity document, carry the child
+    // schema over so CFC metadata can be prepared for that new document too.
+    recordRelevantSchemaWritePolicyInput(tx, newEntryLink, newEntryLink.schema);
 
     return [
       // If it wasn't already, set the current value to be a doc link to this doc
@@ -771,9 +782,9 @@ export function normalizeAndDiff(
   // `FabricRegExp`) are atomic from this layer's perspective: their
   // own-enumerable properties are implementation details, not
   // user-visible structure, and iterating them via the generic
-  // `isRecord` branch below would re-wrap embedded native values (e.g.,
-  // `FabricError.error` is a native `Error`) on each pass, recursing
-  // forever. Emit a single change at this link with the wrapper as the
+  // `isRecord` branch below would walk wrapper-internal fields, which
+  // is meaningless at the change-emission level. Emit a single change at
+  // this link with the wrapper as the
   // value — the storage layer's JSON encoding handles serialization via
   // `[DECONSTRUCT]`/`[RECONSTRUCT]`. Placed after the write-redirect
   // resolution above so writes through a redirect land on the target,
@@ -783,7 +794,36 @@ export function normalizeAndDiff(
       "diff",
       () => `[BRANCH_FABRIC_INSTANCE] Atomic FabricInstance at path=${pathStr}`,
     );
-    changes.push({ location: link, value: newValue as FabricValue });
+    // TODO(danfuzz): Replace this band-aid once the unified walk supports
+    // coordinated descent into `FabricInstance` internals (see below); at that
+    // point switch this to a shallow conversion.
+    //
+    // BAND-AID: this *should* be a shallow conversion. This is a unified walk
+    // (one `seen` map for shared-ref/cycle handling, `[ID]` assignment, and
+    // diffing), and the right design is to shallow-wrap the `FabricInstance`
+    // here and let this walk descend into its `FabricValue` internals as part
+    // of the same coordinated pass. We don't support that descent yet, so the
+    // wrapper's internals could otherwise reach storage improperly converted.
+    //
+    // As a stopgap we run the deep `fabricFromNativeValue()`, which converts
+    // the internals via a *separate, uncoordinated* pass. The cost: any
+    // `FabricValue` reachable both inside the wrapper and elsewhere in the
+    // outer tree gets de-shared (the outer walk handles one copy; this deep
+    // call mints an independent, separately-frozen copy with no shared `seen`
+    // / ID bookkeeping). That is invisible for `FabricError` today only
+    // because an error's `cause` / custom props aren't, in practice, shared
+    // with the rest of the tree -- but `FabricSet` / `FabricMap` (collections
+    // of arbitrary, routinely-shared `FabricValue`s) WILL break here once they
+    // carry real traffic. Proper fix: coordinated descent into wrapper
+    // internals, after which a shallow conversion suffices.
+    //
+    // The call is class-agnostic (no concrete-subclass special-casing): each
+    // subclass governs its own deep conversion and already-proper / deep-frozen
+    // instances short-circuit by identity.
+    changes.push({
+      location: link,
+      value: fabricFromNativeValue(newValue) as FabricValue,
+    });
     return changes;
   }
 
@@ -1022,7 +1062,7 @@ export function applyChangeSet(
   }
   for (const change of changes) {
     // `diffAndUpdate()` establishes attempted-target coverage before we get
-    // here, so these direct writes preserve the phase-1 `potentialWrites` view.
+    // here, so these direct writes preserve the phase-1 `attemptedWrites` view.
     tx.writeValueOrThrow(change.location, change.value);
   }
 }

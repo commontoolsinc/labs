@@ -74,11 +74,12 @@ await commonfabric.rt.setLoggerEnabled(true);
 These are used by the debugger UI but can also be called from the browser console
 or application code when you have a `RuntimeClient` reference.
 
-For scheduler churn debugging, prefer targeted loggers before raising the whole
-`scheduler` module:
+For scheduler churn debugging, prefer structured scheduler trace APIs and
+targeted loggers before raising the whole `scheduler` module:
 
-- `scheduler.trigger-flow` for change matching, trigger decisions, and
-  re-schedule causality
+- `commonfabric.rt.setTriggerTraceEnabled(true)` /
+  `commonfabric.rt.getTriggerTrace()` for change matching, trigger decisions,
+  and re-schedule causality
 - `runner.trigger-flow` for nested `Runner.run()`, `setupInternal()`, and
   `instantiatePatternNode()` activity keyed by the current source action id
 - `runner.wish-flow` for `wish()` query resolution, hashtag-search branches,

@@ -19,7 +19,7 @@ interface Config {
 //   derive(value, fn) → derive(schema, schema, { value, config: { multiplier: ... } }, fn)
 // Context: `config.multiplier` is `number | undefined`; schema uses `type: ["number", "undefined"]`
 export default pattern((config: Config) => {
-    const value = Writable.of(10, {
+    const value = new Writable(10, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("value", true);
     const result = __cfHelpers.derive({

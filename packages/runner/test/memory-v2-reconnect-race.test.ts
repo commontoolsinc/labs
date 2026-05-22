@@ -519,6 +519,52 @@ Deno.test("memory v2 runner restores watched graph state after reconnect and kee
   }
 });
 
+Deno.test("memory v2 runner confirms its own watched commit without an integrate echo", async () => {
+  const storageManager = CutoverStorageManager.emulate({
+    as: signer,
+  });
+  const notifications = new NotificationRecorder();
+  const provider = storageManager.open(space) as TestProvider;
+  const uri = `of:memory-v2-own-commit-${crypto.randomUUID()}` as URI;
+  const address = { id: uri, type: DOCUMENT_MIME as MIME };
+
+  storageManager.subscribe(notifications);
+
+  try {
+    await provider.sync(uri);
+    await storageManager.synced();
+    notifications.clear();
+
+    const result = await provider.send([{
+      uri,
+      value: { value: { version: 1 } },
+    }]);
+    assertEquals(result, { ok: {} });
+    await storageManager.synced();
+
+    const candidate = storageManager as unknown as {
+      server?: () => MemoryV2Server.Server;
+    };
+    if (typeof candidate.server !== "function") {
+      throw new Error("Expected a memory/v2 emulated storage manager");
+    }
+    await candidate.server().idle();
+
+    const state = provider.replica.get(address) as
+      | { since?: number }
+      | undefined;
+    assertEquals(provider.get(uri), { value: { version: 1 } });
+    assertEquals(state?.since, 1);
+
+    const notificationTypes = notifications.notifications.map((
+      notification,
+    ) => notification.type);
+    assertEquals(notificationTypes, ["commit"]);
+  } finally {
+    await storageManager.close();
+  }
+});
+
 Deno.test("memory v2 runner can retry immediately after a conflict revert", async () => {
   const storageManager = CutoverStorageManager.emulate({
     as: signer,

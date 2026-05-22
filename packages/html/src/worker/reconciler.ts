@@ -26,6 +26,7 @@ import {
   UI,
   useCancelGroup,
 } from "@commonfabric/runner";
+import type { CellRef } from "@commonfabric/runtime-client";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
 import type {
@@ -398,11 +399,16 @@ export class WorkerReconciler {
       "allow-literal-text",
       "data-cfc-allow-literal-text",
     ]) ?? false;
-    const requiredIntegrity = this.nodePropAsAtomList(node, [
+    const explicitRequiredIntegrity = this.nodePropAsAtomList(node, [
       "requiredTextIntegrity",
       "requiredIntegrity",
       "data-cfc-required-text-integrity",
-    ]) ?? [];
+    ]);
+    // Without an explicit requirement, a cell-backed author that represents a
+    // principal makes the text boundary require authored-by for that principal.
+    const requiredIntegrity = explicitRequiredIntegrity ??
+      this.requiredAuthorshipIntegrityFromAuthor(node) ??
+      [];
 
     return {
       ...policy,
@@ -517,6 +523,100 @@ export class WorkerReconciler {
         continue;
       }
       return Array.isArray(resolved) ? resolved : [resolved];
+    }
+    return undefined;
+  }
+
+  private requiredAuthorshipIntegrityFromAuthor(
+    node: WorkerVNode,
+  ): readonly unknown[] | undefined {
+    const author = this.nodePropForRenderPolicy(node, "author") ??
+      this.nodePropForRenderPolicy(node, "$author");
+    if (!isCell(author)) {
+      return undefined;
+    }
+    const subject = this.representsPrincipalSubjectForCell(
+      author as Cell<unknown>,
+    );
+    return subject === undefined
+      ? undefined
+      : [{ kind: "authored-by", subject }];
+  }
+
+  private bindingOpsForCell(
+    state: NodeState,
+    propName: string,
+    cell: Cell<unknown>,
+  ): VDomOp[] {
+    return [{
+      op: "set-binding",
+      nodeId: state.nodeId,
+      propName,
+      cellRef: this.cellRefForBinding(cell),
+    }];
+  }
+
+  private cellRefForBinding(cell: Cell<unknown>): CellRef {
+    const link = cell.getAsNormalizedFullLink();
+    let labelView: CfcLabelView | undefined;
+    try {
+      labelView = cfcLabelViewForCell(cell);
+      if (labelView === undefined) {
+        labelView = cfcLabelViewForCell(cell.resolveAsCell());
+      }
+    } catch {
+      labelView = undefined;
+    }
+    return {
+      id: link.id,
+      space: link.space,
+      scope: link.scope,
+      path: [...link.path],
+      schema: this.bindingSchema(link.schema),
+      ...(link.overwrite !== undefined && { overwrite: link.overwrite }),
+      ...(labelView !== undefined && { cfcLabelView: labelView }),
+    };
+  }
+
+  private bindingSchema(schema: CellRef["schema"] | undefined): CellRef[
+    "schema"
+  ] {
+    if (
+      schema === undefined ||
+      (typeof schema === "object" && schema !== null &&
+        Object.keys(schema).length === 0)
+    ) {
+      return true;
+    }
+    return schema;
+  }
+
+  private representsPrincipalSubjectForCell(
+    cell: Cell<unknown>,
+  ): string | undefined {
+    let labelView: CfcLabelView | undefined;
+    try {
+      labelView = cfcLabelViewForCell(cell);
+      if (labelView === undefined) {
+        labelView = cfcLabelViewForCell(cell.resolveAsCell());
+      }
+    } catch {
+      return undefined;
+    }
+    if (labelView === undefined) {
+      return undefined;
+    }
+    for (const atom of this.integrityLabels(labelView)) {
+      if (typeof atom !== "object" || atom === null || Array.isArray(atom)) {
+        continue;
+      }
+      const record = atom as Record<string, unknown>;
+      if (record.kind !== "represents-principal") {
+        continue;
+      }
+      if (typeof record.subject === "string") {
+        return record.subject;
+      }
     }
     return undefined;
   }
@@ -698,6 +798,9 @@ export class WorkerReconciler {
     let labelView: CfcLabelView | undefined;
     try {
       labelView = cfcLabelViewForCell(cell);
+      if (labelView === undefined) {
+        labelView = cfcLabelViewForCell(cell.resolveAsCell());
+      }
     } catch {
       return false;
     }
@@ -786,6 +889,8 @@ export class WorkerReconciler {
     return key === "requiredTextIntegrity" ||
       key === "requiredIntegrity" ||
       key === "data-cfc-required-text-integrity" ||
+      key === "author" ||
+      key === "$author" ||
       key === "verifyTextIntegrity" ||
       key === "verify-text-integrity" ||
       key === "data-cfc-verify-text-integrity" ||
@@ -858,6 +963,9 @@ export class WorkerReconciler {
     let labelView: CfcLabelView | undefined;
     try {
       labelView = cfcLabelViewForCell(cell);
+      if (labelView === undefined) {
+        labelView = cfcLabelViewForCell(cell.resolveAsCell());
+      }
     } catch {
       return false;
     }
@@ -873,9 +981,9 @@ export class WorkerReconciler {
 
   private integrityLabels(labelView: CfcLabelView): readonly unknown[] {
     return ContextualFlowControl.uniqueAtoms(
-      labelView.entries.flatMap((entry) => [
-        ...(entry.label.integrity ?? []),
-      ]),
+      labelView.entries.flatMap((entry) =>
+        entry.path.length === 0 ? [...(entry.label.integrity ?? [])] : []
+      ),
     );
   }
 
@@ -1468,13 +1576,9 @@ export class WorkerReconciler {
       if (existingState) {
         existingState.cancel();
       }
-      const cellRef = (value as Cell<unknown>).getAsNormalizedFullLink();
-      this.queueOps([{
-        op: "set-binding",
-        nodeId: state.nodeId,
-        propName,
-        cellRef,
-      }]);
+      this.queueOps(
+        this.bindingOpsForCell(state, propName, value as Cell<unknown>),
+      );
       state.propSubscriptions.set(key, {
         cell: value as Cell<unknown>,
         cancel: () => {},
@@ -1630,13 +1734,9 @@ export class WorkerReconciler {
           if (existingState) existingState.cancel();
 
           const propName = getBindingPropName(key);
-          const cellRef = resolvedTarget.getAsNormalizedFullLink();
-          this.queueOps([{
-            op: "set-binding",
-            nodeId: state.nodeId,
-            propName,
-            cellRef,
-          }]);
+          this.queueOps(
+            this.bindingOpsForCell(state, propName, resolvedTarget),
+          );
           state.propSubscriptions.set(key, {
             cell: resolvedTarget,
             cancel: () => {},
@@ -2426,13 +2526,9 @@ export class WorkerReconciler {
         // Bidirectional binding ($prop)
         const propName = getBindingPropName(key);
         if (isCell(value)) {
-          const cellRef = value.getAsNormalizedFullLink();
-          this.queueOps([{
-            op: "set-binding",
-            nodeId: state.nodeId,
-            propName,
-            cellRef,
-          }]);
+          this.queueOps(
+            this.bindingOpsForCell(state, propName, value as Cell<unknown>),
+          );
           state.propSubscriptions.set(key, {
             cell: value as Cell<unknown>,
             cancel: () => {},

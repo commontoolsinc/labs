@@ -156,7 +156,7 @@ const recordSchemaWritePolicyInput = (
       scope: link.scope,
       path: [...link.path],
     },
-    schemaHash: schemaAndHash.hashString,
+    schemaHash: schemaAndHash.taggedHashString,
     schema: schemaAndHash.schema,
   });
 };
@@ -186,7 +186,7 @@ const storedSchemaForWritePolicyInput = (
   );
 };
 
-const recordRelevantSchemaWritePolicyInput = (
+export const recordRelevantSchemaWritePolicyInput = (
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
   schema: JSONSchema | undefined,
@@ -2265,10 +2265,10 @@ export function recursivelyAddIDIfNeeded<T>(
 
   // `FabricInstance` values (`FabricError`, `FabricMap`, `FabricSet`,
   // `FabricRegExp`) are immutable wrappers with class-defined identity.
-  // Their own-enumerable properties are implementation details (e.g.,
-  // `FabricError.error` is the wrapped native `Error`), not user-visible
-  // structure; iterating them would re-wrap the embedded native value on
-  // each pass and recurse forever. Instead, walk the observable internal
+  // Their own-enumerable properties are implementation details, not
+  // user-visible structure; iterating them via the generic walker would
+  // descend into wrapper internals meaninglessly. Instead, walk the
+  // observable internal
   // structure via `[DECONSTRUCT]()` (the same mechanism the serialization
   // system uses) for side effects only — tracking shared references in
   // `seen` and populating `frame.generatedIdCounter` for any
@@ -2518,19 +2518,67 @@ export type DeepKeyLookup<T, Path extends PropertyKey[]> = Path extends [] ? T
     : any
   : any;
 
+const scopedConstructorNames = {
+  space: "perSpace",
+  user: "perUser",
+  session: "perSession",
+} as const satisfies Record<CellScope, string>;
+
+type ConstructableCellFactory<Wrap extends HKT> = {
+  new <T>(value?: T, providedSchema?: JSONSchema): Apply<Wrap, T>;
+  of<T>(value?: T, providedSchema?: JSONSchema): Apply<Wrap, T>;
+  for<T>(cause: unknown): Apply<Wrap, T>;
+};
+
+function mergeSchemaScope(
+  providedSchema: JSONSchema | undefined,
+  scope: CellScope | undefined,
+): JSONSchema | undefined {
+  if (!scope) return providedSchema;
+
+  const schema = ContextualFlowControl.toSchemaObj(providedSchema);
+  if (schema.scope !== undefined && schema.scope !== scope) {
+    throw new Error(
+      `Cannot use ${
+        scopedConstructorNames[scope]
+      } with schema scope "${schema.scope}".`,
+    );
+  }
+  return { ...schema, scope };
+}
+
+function schemaWithDefaultAndScope<T>(
+  value: T | undefined,
+  providedSchema: JSONSchema | undefined,
+  scope: CellScope | undefined,
+): JSONSchema | undefined {
+  const scopedSchema = mergeSchemaScope(providedSchema, scope);
+  if (value !== undefined && !isCell(value)) {
+    return {
+      ...ContextualFlowControl.toSchemaObj(scopedSchema),
+      default: value as any,
+    };
+  }
+  return scopedSchema;
+}
+
+function schemaCellScope(
+  schema: JSONSchema | undefined,
+): CellScope | undefined {
+  return isRecord(schema) && isCellScope(schema.scope)
+    ? schema.scope
+    : undefined;
+}
+
 /**
  * Factory function to create Cell constructor with static methods for a specific cell kind
  */
 export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
-  return {
-    /**
-     * Create a Cell wrapping a value with optional schema.
-     * This is a convenience method that creates a cell with a schema that has a default value.
-     * @param value - The value to wrap in a Cell
-     * @param providedSchema - Optional JSON schema for the cell
-     * @returns A new Cell wrapping the value
-     */
-    of<T>(value?: T, providedSchema?: JSONSchema): Apply<Wrap, T> {
+  const createCellConstructor = (scope?: CellScope) => {
+    const createWithDefault = <T>(
+      value?: T,
+      providedSchema?: JSONSchema,
+    ): Apply<Wrap, T> => {
       const frame = getTopFrame();
       if (!frame || !frame.runtime) {
         throw new Error(
@@ -2547,15 +2595,8 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
       // BUT: Don't embed Cell objects in the schema's default property, as this
       // causes infinite recursion when the schema is serialized
       // TODO(ubik2): Use Cell links for default here once that's supported
-      const schema: JSONSchema | undefined =
-        value !== undefined && !isCell(value)
-          ? {
-            ...ContextualFlowControl.toSchemaObj(providedSchema),
-            default: value as any,
-          }
-          : providedSchema === undefined
-          ? undefined
-          : ContextualFlowControl.toSchemaObj(providedSchema);
+      const schema = schemaWithDefaultAndScope(value, providedSchema, scope);
+      const linkScope = scope ?? schemaCellScope(schema);
 
       // Create a cell without a link - it will be created on demand via .for()
       const cell = createCell<T>(
@@ -2564,6 +2605,7 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
           path: [],
           ...(schema !== undefined && { schema }),
           ...(frame.space && { space: frame.space }),
+          ...(linkScope !== undefined && { scope: linkScope }),
         },
         frame.tx,
         false,
@@ -2576,7 +2618,66 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
       }
 
       return cell;
-    },
+    };
+
+    const createWithCause = <T>(cause: unknown): Apply<Wrap, T> => {
+      const frame = getTopFrame();
+      if (!frame || !frame.runtime) {
+        throw new Error(
+          "Can't invoke Cell.for() outside of a pattern/handler/lift context",
+        );
+      }
+
+      const schema = mergeSchemaScope(undefined, scope);
+      const linkScope = scope ?? schemaCellScope(schema);
+
+      // Create a cell without a link
+      const cell = createCell<T>(
+        frame.runtime,
+        {
+          path: [],
+          ...(schema !== undefined && { schema }),
+          ...(frame.space && { space: frame.space }),
+          ...(linkScope !== undefined && { scope: linkScope }),
+        },
+        frame.tx,
+        false,
+        kind,
+      );
+
+      // Associate it with the cause
+      cell.for(cause);
+
+      return cell;
+    };
+
+    const constructor = function <T>(
+      this: unknown,
+      value?: T,
+      providedSchema?: JSONSchema,
+    ): Apply<Wrap, T> {
+      return createWithDefault(value, providedSchema);
+    };
+
+    return Object.assign(constructor, {
+      of: createWithDefault,
+      for: createWithCause,
+    }) as unknown as ConstructableCellFactory<Wrap>;
+  };
+
+  const baseConstructor = createCellConstructor();
+  return Object.assign(baseConstructor, {
+    perSpace: createCellConstructor("space") as unknown as CellTypeConstructor<
+      Wrap
+    >["perSpace"],
+    perUser: createCellConstructor("user") as unknown as CellTypeConstructor<
+      Wrap
+    >["perUser"],
+    perSession: createCellConstructor(
+      "session",
+    ) as unknown as CellTypeConstructor<
+      Wrap
+    >["perSession"],
 
     /**
      * Compare two cells or values for equality, after resolving them.
@@ -2584,7 +2685,10 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
      * @param b - Second cell or value to compare
      * @returns true if the values are equal
      */
-    equals(a: AnyCell<any> | object, b: AnyCell<any> | object): boolean {
+    equals(
+      a: AnyCell<any> | object | undefined,
+      b: AnyCell<any> | object | undefined,
+    ): boolean {
       const frame = getTopFrame();
       return areLinksSame(
         a,
@@ -2602,39 +2706,11 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
      * @param b - Second cell or value to compare
      * @returns true if the values are equal
      */
-    equalLinks(a: AnyCell<any> | object, b: AnyCell<any> | object): boolean {
+    equalLinks(
+      a: AnyCell<any> | object | undefined,
+      b: AnyCell<any> | object | undefined,
+    ): boolean {
       return areLinksSame(a, b);
     },
-
-    /**
-     * Create a Cell with an optional cause.
-     * @param cause - The cause to associate with this cell
-     * @returns A new Cell
-     */
-    for<T>(cause: unknown): Apply<Wrap, T> {
-      const frame = getTopFrame();
-      if (!frame || !frame.runtime) {
-        throw new Error(
-          "Can't invoke Cell.for() outside of a pattern/handler/lift context",
-        );
-      }
-
-      // Create a cell without a link
-      const cell = createCell<T>(
-        frame.runtime,
-        {
-          path: [],
-          ...(frame.space && { space: frame.space }),
-        },
-        frame.tx,
-        false,
-        kind,
-      );
-
-      // Associate it with the cause
-      cell.for(cause);
-
-      return cell;
-    },
-  } satisfies CellTypeConstructor<Wrap>;
+  }) as unknown as CellTypeConstructor<Wrap>;
 }

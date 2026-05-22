@@ -1,7 +1,7 @@
 import { DID, Identity, type Session } from "@commonfabric/identity";
-import { FabricBytes } from "@commonfabric/data-model/fabric-bytes";
+import { FabricBytes } from "@commonfabric/data-model/FabricBytes";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { JsonEncodingContext } from "@commonfabric/data-model/json-encoding-context";
+import { JsonEncodingContext } from "@commonfabric/data-model/JsonEncodingContext";
 import { PieceManager } from "@commonfabric/piece";
 import { PiecesController } from "@commonfabric/piece/ops";
 import {
@@ -72,6 +72,7 @@ import {
   NotificationType,
   type PageCreateRequest,
   type PageGetRequest,
+  type PageGetSlugRequest,
   PageGetSpaceDefault as PatternGetSpaceRoot,
   type PageRemoveRequest,
   PageResponse,
@@ -91,6 +92,7 @@ import {
   type SettleStatsResponse,
   type SetTriggerTraceEnabledRequest,
   type SetWriteStackTraceMatchersRequest,
+  type SlugResponse,
   type TriggerTraceResponse,
   type UploadBlobRequest,
   type UploadBlobResponse,
@@ -255,6 +257,12 @@ export function sanitizeForPostMessage(
     return "[Object - uncloneable]";
   }
 }
+
+export const hasExplicitSubscriptionSchema = (schema: unknown): boolean =>
+  schema === true ||
+  (schema !== undefined && schema !== false &&
+    typeof schema === "object" && schema !== null &&
+    Object.keys(schema).length > 0);
 
 export class RuntimeProcessor {
   private runtime: Runtime;
@@ -486,9 +494,7 @@ export class RuntimeProcessor {
     const cancel = cell.sink((value) => {
       // Log empty-schema subscriptions that produce CellResult proxies.
       // These are the call sites that need real schemas added.
-      const hasSchema = request.cell.schema &&
-        typeof request.cell.schema === "object" &&
-        Object.keys(request.cell.schema).length > 0;
+      const hasSchema = hasExplicitSubscriptionSchema(request.cell.schema);
       if (!hasSchema && isCellResult(value)) {
         console.error(
           `[handleCellSubscribe] EMPTY SCHEMA SUBSCRIPTION producing ` +
@@ -544,7 +550,10 @@ export class RuntimeProcessor {
   async handleCellGetCfcLabel(
     request: CellGetCfcLabelRequest,
   ): Promise<CfcLabelViewResponse> {
-    const cell = getCell(this.runtime, request.cell);
+    // Label reads must use the runtime's stored cell identity. The request
+    // schema is client-supplied view context, not trusted label provenance.
+    const { schema: _schema, ...cellRef } = request.cell;
+    const cell = getCell(this.runtime, cellRef);
     const rootCell = this.runtime.getCellFromLink({
       ...cell.getAsNormalizedFullLink(),
       path: [],
@@ -674,6 +683,24 @@ export class RuntimeProcessor {
     return {
       page: createPageRef(cell),
     };
+  }
+
+  async handlePageGetSlug(
+    request: PageGetSlugRequest,
+  ): Promise<SlugResponse> {
+    const cell = this.runtime.getCellFromEntityId(
+      this.pieceManager.getSpace(),
+      { "/": request.pageId },
+    );
+    await cell.sync();
+    const link = cell.getAsNormalizedFullLink();
+    const slug = this.runtime.readTx().readOrThrow({
+      space: link.space,
+      id: link.id,
+      scope: link.scope,
+      path: ["slug"],
+    });
+    return { slug: typeof slug === "string" ? slug : undefined };
   }
 
   async handlePageRemove(
@@ -982,6 +1009,8 @@ export class RuntimeProcessor {
         );
       case RequestType.PageGet:
         return await this.handlePageGet(request);
+      case RequestType.PageGetSlug:
+        return await this.handlePageGetSlug(request);
       case RequestType.PageRemove:
         return await this.handlePageRemove(request);
       case RequestType.PageStart:

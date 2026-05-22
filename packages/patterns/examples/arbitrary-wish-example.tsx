@@ -10,10 +10,10 @@ import {
 } from "commonfabric";
 
 export default pattern<Record<string, never>>((_) => {
-  const wishText = Writable.of("#note");
-  const searchHome = Writable.of(false);
-  const searchSpace = Writable.of(true);
-  const arbitraryDID = Writable.of("");
+  const wishText = new Writable("#note");
+  const searchHome = new Writable(false);
+  const searchSpace = new Writable(true);
+  const arbitraryDID = new Writable("");
 
   const wishResult = wish<{ [UI]: VNode }>({
     query: wishText,

@@ -15,7 +15,7 @@ piece issues.
 - `docs/development/debugging/README.md` - Error reference matrix
 - `docs/common/concepts/reactivity.md` - reactive values, Cell behavior, and
   `.get()` / `.set()` boundaries
-- `docs/common/patterns/new-cells.md` - `Writable.of()` and local cell
+- `docs/common/patterns/new-cells.md` - `new Writable()` and local cell
   initialization rules
 
 ## Process
@@ -56,10 +56,10 @@ piece issues.
 - Check if field needs write access → use Writable<>
 - Check if field could be undefined → use Default<T, value>
 
-**`Cell.of() only accepts static data`:**
+**`new Cell() only accepts static data`:**
 
 - Do not pass input props, mapped fields, or computed/reactive values into
-  `Writable.of()` / `Cell.of()`
+  `new Writable()` / `new Cell()`
 - Use an input writable cell directly when the caller owns the state
 - For pattern-owned draft state, initialize from a static value and copy from
   input state inside an action or another valid reactive/event context

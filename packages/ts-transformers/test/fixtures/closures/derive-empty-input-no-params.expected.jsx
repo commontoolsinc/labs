@@ -16,10 +16,10 @@ const __cfAmdHooks = undefined;
 //   derive({}, () => ...) → derive(schema, schema, { a, b }, ({ a, b }) => ...)
 // Context: no explicit input param; captures become the sole parameters of the rewritten callback
 export default pattern(() => {
-    const a = Writable.of(10, {
+    const a = new Writable(10, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("a", true);
-    const b = Writable.of(20, {
+    const b = new Writable(20, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("b", true);
     // Zero-parameter callback that closes over a and b

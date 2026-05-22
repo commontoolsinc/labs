@@ -5,6 +5,7 @@ import {
   NAME,
   nonPrivateRandom,
   pattern,
+  type PerSpace,
   safeDateNow,
   Stream,
   UI,
@@ -46,26 +47,30 @@ export interface SpotRequest {
   autoAllocated: boolean;
 }
 
+type SpotsCell = Writable<
+  | ParkingSpot[]
+  | Default<[
+    { spotNumber: "1"; label: "Near entrance"; notes: ""; active: true },
+    { spotNumber: "5"; label: ""; notes: ""; active: true },
+    {
+      spotNumber: "12";
+      label: "Compact only";
+      notes: "Tight, no large vehicles";
+      active: true;
+    },
+  ]>
+>;
+type PeopleCell = Writable<Person[] | Default<[]>>;
+type RequestsCell = Writable<SpotRequest[] | Default<[]>>;
+
 // ============================================================
 // Pattern I/O Types
 // ============================================================
 
 export interface ParkingCoordinatorInput {
-  spots: Writable<
-    | ParkingSpot[]
-    | Default<[
-      { spotNumber: "1"; label: "Near entrance"; notes: ""; active: true },
-      { spotNumber: "5"; label: ""; notes: ""; active: true },
-      {
-        spotNumber: "12";
-        label: "Compact only";
-        notes: "Tight, no large vehicles";
-        active: true;
-      },
-    ]>
-  >;
-  people: Writable<Person[] | Default<[]>>;
-  requests: Writable<SpotRequest[] | Default<[]>>;
+  spots?: PerSpace<SpotsCell>;
+  people?: PerSpace<PeopleCell>;
+  requests?: PerSpace<RequestsCell>;
 }
 
 export interface ParkingCoordinatorOutput {
@@ -173,8 +178,8 @@ const formatDateDisplay = (dateStr: string): string => {
 const genId = (): string =>
   `req-${safeDateNow()}-${nonPrivateRandom().toString(36).slice(2, 10)}`;
 
-const parsePreferences = (s: string): string[] =>
-  s.split(",").map((x) => x.trim()).filter(Boolean);
+const parsePreferences = (s: string | null | undefined): string[] =>
+  (s ?? "").split(",").map((x) => x.trim()).filter(Boolean);
 
 const commuteIcon = (mode: CommuteMode): string => {
   const icons: Record<CommuteMode, string> = {
@@ -247,60 +252,69 @@ export const DEFAULT_SPOTS: ParkingSpot[] = [
 // ============================================================
 
 export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
-  ({ spots, people, requests }) => {
+  ({ spots: inputSpots, people: inputPeople, requests: inputRequests }) => {
+    const spots = inputSpots ?? Writable.perSpace.of(DEFAULT_SPOTS);
+    const people = inputPeople ?? Writable.perSpace.of<Person[]>([]);
+    const requests = inputRequests ?? Writable.perSpace.of<SpotRequest[]>([]);
+
     const nowTimestamp = wish<number>({ query: "#now" });
     const todayStr = computed(() =>
       toLocalDateStr(nowTimestamp.result || safeDateNow())
     );
     const weekDatesArr = computed(() => getWeekDates(todayStr));
 
-    // UI state
-    const adminMode = Writable.of(false);
-    const selectedPersonName = Writable.of("");
-    const requestDate = Writable.of(toLocalDateStr(safeDateNow()));
-    const requestResult = Writable.of("");
+    // User/session UI state
+    const selectedPersonName = new Writable.perUser("");
+    const adminMode = new Writable.perSession(false);
+    const requestDate = new Writable.perSession(toLocalDateStr(safeDateNow()));
+    const requestResult = new Writable.perSession("");
 
     // Admin form state
-    const addPersonFormOpen = Writable.of(false);
-    const addSpotFormOpen = Writable.of(false);
-    const editingPersonName = Writable.of<string | null>(null);
-    const editingSpotNumber = Writable.of<string | null>(null);
-    const removePersonConfirmTarget = Writable.of<string | null>(null);
-    const removeSpotConfirmTarget = Writable.of<string | null>(null);
+    const addPersonFormOpen = new Writable.perSession(false);
+    const addSpotFormOpen = new Writable.perSession(false);
+    const editingPersonName = new Writable.perSession<string | null>(null);
+    const editingSpotNumber = new Writable.perSession<string | null>(null);
+    const removePersonConfirmTarget = new Writable.perSession<string | null>(
+      null,
+    );
+    const removeSpotConfirmTarget = new Writable.perSession<string | null>(
+      null,
+    );
 
     // Add person form fields
-    const newPersonName = Writable.of("");
-    const newPersonEmail = Writable.of("");
-    const newPersonCommuteMode = Writable.of<CommuteMode>("drive");
-    const newPersonPriority = Writable.of("1");
-    const newPersonDefaultSpot = Writable.of("");
-    const newPersonPreferences = Writable.of("");
-    const addPersonError = Writable.of("");
+    const newPersonName = new Writable.perSession("");
+    const newPersonEmail = new Writable.perSession("");
+    const newPersonCommuteMode = new Writable.perSession<CommuteMode>("drive");
+    const newPersonPriority = new Writable.perSession("1");
+    const newPersonDefaultSpot = new Writable.perSession("");
+    const newPersonPreferences = new Writable.perSession("");
+    const addPersonError = new Writable.perSession("");
 
     // Add spot form fields
-    const newSpotNumber = Writable.of("");
-    const newSpotLabel = Writable.of("");
-    const newSpotNotes = Writable.of("");
-    const addSpotError = Writable.of("");
+    const newSpotNumber = new Writable.perSession("");
+    const newSpotLabel = new Writable.perSession("");
+    const newSpotNotes = new Writable.perSession("");
+    const addSpotError = new Writable.perSession("");
 
     // Edit person form fields
-    const editName = Writable.of("");
-    const editEmail = Writable.of("");
-    const editCommuteMode = Writable.of<CommuteMode>("drive");
-    const editPriorityRank = Writable.of("1");
-    const editDefaultSpot = Writable.of("");
-    const editPreferences = Writable.of("");
+    const editName = new Writable.perSession("");
+    const editEmail = new Writable.perSession("");
+    const editCommuteMode = new Writable.perSession<CommuteMode>("drive");
+    const editPriorityRank = new Writable.perSession("1");
+    const editDefaultSpot = new Writable.perSession("");
+    const editPreferences = new Writable.perSession("");
 
     // Edit spot form fields
-    const editSpotNum = Writable.of("");
-    const editSpotLabel = Writable.of("");
-    const editSpotNotes = Writable.of("");
-    const editSpotActive = Writable.of(true);
+    const editSpotNum = new Writable.perSession("");
+    const editSpotLabel = new Writable.perSession("");
+    const editSpotNotes = new Writable.perSession("");
+    const editSpotActive = new Writable.perSession(true);
 
     // Override state
-    const gridOverrideSpot = Writable.of("");
-    const gridOverrideDate = Writable.of("");
-    const overridePersonName = Writable.of("");
+    const gridOverrideSpot = new Writable.perSession("");
+    const gridOverrideDate = new Writable.perSession("");
+    const overridePersonName = new Writable.perSession("");
+    const activeRequestDate = computed(() => requestDate.get() || todayStr);
 
     // --------------------------------------------------------
     // Actions
@@ -313,8 +327,8 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     const submitRequest = action<{ personName: string; date: string }>(
       ({ personName: pNameArg, date: dateArg }) => {
         // Use provided args, or fall back to form state
-        const pName = pNameArg || selectedPersonName.get();
-        const date = dateArg || requestDate.get();
+        const pName = pNameArg || selectedPersonName.get() || "";
+        const date = dateArg || activeRequestDate || todayStr;
 
         if (!pName || !date || date < todayStr) {
           requestResult.set("Please select a person and a valid date.");
@@ -402,9 +416,15 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
         defaultSpot: string;
         preferences: string;
       }
-    >((
-      { name, email, commuteMode, priorityRank, defaultSpot, preferences },
-    ) => {
+    >((event) => {
+      const {
+        name = newPersonName.get() ?? "",
+        email = newPersonEmail.get() ?? "",
+        commuteMode = newPersonCommuteMode.get() ?? "drive",
+        priorityRank = parseInt(newPersonPriority.get() ?? "") || 1,
+        defaultSpot = newPersonDefaultSpot.get() ?? "",
+        preferences = newPersonPreferences.get() ?? "",
+      } = event ?? {};
       const trimName = name.trim();
       const trimEmail = email.trim();
       if (!trimName || !trimEmail) return;
@@ -449,19 +469,20 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
         defaultSpot: string;
         preferences: string;
       }
-    >((
-      {
-        originalName,
-        name,
-        email,
-        commuteMode,
-        priorityRank,
-        defaultSpot,
-        preferences,
-      },
-    ) => {
-      const trimName = name.trim();
-      const trimEmail = email.trim();
+    >((event) => {
+      const {
+        originalName = editingPersonName.get() ?? "",
+        name: editPersonNameArg = editName.get() ?? "",
+        email: editPersonEmailArg = editEmail.get() ?? "",
+        commuteMode: editPersonCommuteModeArg = editCommuteMode.get() ??
+          "drive",
+        priorityRank: editPersonPriorityArg =
+          parseInt(editPriorityRank.get() ?? "") || 1,
+        defaultSpot: editPersonDefaultSpotArg = editDefaultSpot.get() ?? "",
+        preferences: editPersonPreferencesArg = editPreferences.get() ?? "",
+      } = event ?? {};
+      const trimName = editPersonNameArg.trim();
+      const trimEmail = editPersonEmailArg.trim();
       if (!trimName || !trimEmail) return;
 
       const current = people.get();
@@ -475,10 +496,10 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
             ...p,
             name: trimName,
             email: trimEmail,
-            commuteMode,
-            priorityRank: priorityRank || p.priorityRank,
-            defaultSpot: defaultSpot || "",
-            spotPreferences: parsePreferences(preferences),
+            commuteMode: editPersonCommuteModeArg,
+            priorityRank: editPersonPriorityArg || p.priorityRank,
+            defaultSpot: editPersonDefaultSpotArg || "",
+            spotPreferences: parsePreferences(editPersonPreferencesArg),
           }
           : p
       ));
@@ -547,7 +568,12 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
 
     const addSpot = action<
       { spotNumber: string; label: string; notes: string }
-    >(({ spotNumber: spotNumArg, label, notes }) => {
+    >((event) => {
+      const {
+        spotNumber: spotNumArg = newSpotNumber.get() ?? "",
+        label = newSpotLabel.get() ?? "",
+        notes = newSpotNotes.get() ?? "",
+      } = event ?? {};
       const trimNum = spotNumArg.trim();
       if (!trimNum) return;
       const current = spots.get();
@@ -576,7 +602,14 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
         notes: string;
         active: boolean;
       }
-    >(({ originalNumber, spotNumber: spotNumArg2, label, notes, active }) => {
+    >((event) => {
+      const {
+        originalNumber = editingSpotNumber.get() ?? "",
+        spotNumber: spotNumArg2 = editSpotNum.get() ?? "",
+        label: editSpotLabelArg = editSpotLabel.get() ?? "",
+        notes: editSpotNotesArg = editSpotNotes.get() ?? "",
+        active: editSpotActiveArg = editSpotActive.get() ?? true,
+      } = event ?? {};
       const trimNum = spotNumArg2.trim();
       if (!trimNum) return;
       const current = spots.get();
@@ -591,9 +624,9 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
             ? {
               ...s,
               spotNumber: trimNum,
-              label: label.trim(),
-              notes: notes.trim(),
-              active,
+              label: editSpotLabelArg.trim(),
+              notes: editSpotNotesArg.trim(),
+              active: editSpotActiveArg,
             }
             : s
         ),
@@ -793,11 +826,11 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     // Helper computeds for UI (keep action closures using .get())
     // --------------------------------------------------------
 
-    const _isDateInPast = computed(() => requestDate.get() < todayStr);
+    const _isDateInPast = computed(() => activeRequestDate < todayStr);
 
     const spotDeactivateWarning = computed(() => {
       const editNum = editingSpotNumber.get();
-      if (!editNum || editSpotActive.get()) return false;
+      if (!editNum || (editSpotActive.get() ?? true)) return false;
       return requests.get().some(
         (r) =>
           r.assignedSpot === editNum && r.status === "allocated" &&
@@ -812,15 +845,9 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     );
 
     const requestDisabled = computed(() =>
-      !selectedPersonName.get() || !requestDate.get() ||
-      requestDate.get() < todayStr || people.get().length === 0
+      !selectedPersonName.get() ||
+      activeRequestDate < todayStr || people.get().length === 0
     );
-
-    const addPersonDisabled = computed(() =>
-      !newPersonName.get() || !newPersonEmail.get() || !newPersonPriority.get()
-    );
-
-    const addSpotDisabled = computed(() => !newSpotNumber.get());
 
     const commuteModeOptions = [
       { label: "🚗 Drive", value: "drive" },
@@ -1114,7 +1141,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                       onClick={() =>
                         submitRequest.send({
                           personName: selectedPersonName.get(),
-                          date: requestDate.get(),
+                          date: activeRequestDate,
                         })}
                     >
                       Request Spot
@@ -1122,7 +1149,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                   </cf-hstack>
 
                   {computed(() => {
-                    if (!(requestDate.get() < todayStr)) return null;
+                    if (!(activeRequestDate < todayStr)) return null;
                     return (
                       <span style="font-size: 0.75rem; color: #92400e; background-color: #fef3c7; padding: 0.375rem 0.625rem; border-radius: 6px; display: block;">
                         Please select today or a future date.
@@ -1131,7 +1158,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                   })}
 
                   {computed(() => {
-                    const result = requestResult.get();
+                    const result = requestResult.get() ?? "";
                     if (!result) return null;
                     const isSuccess = result.startsWith("Spot #");
                     const color = isSuccess ? "#166534" : "#991b1b";
@@ -1359,7 +1386,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
               </cf-vstack>
 
               {/* === Section D: Admin (admin mode only) === */}
-              {adminMode
+              {adminMode.get()
                 ? (
                   <>
                     {/* People */}
@@ -1657,7 +1684,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                         );
                       })}
 
-                      {addPersonFormOpen
+                      {addPersonFormOpen.get()
                         ? (
                           <cf-card style="border: 2px dashed var(--cf-color-gray-200);">
                             <cf-vstack gap="2">
@@ -1673,6 +1700,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                   <cf-input
                                     $value={newPersonName}
                                     placeholder="Full name"
+                                    timingStrategy="immediate"
                                     style="width: 100%;"
                                   />
                                 </cf-vstack>
@@ -1686,6 +1714,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                   <cf-input
                                     $value={newPersonEmail}
                                     placeholder="email@company.com"
+                                    timingStrategy="immediate"
                                     style="width: 100%;"
                                   />
                                 </cf-vstack>
@@ -1709,6 +1738,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                     $value={newPersonPriority}
                                     type="number"
                                     placeholder="1"
+                                    timingStrategy="immediate"
                                     style="width: 5rem;"
                                   />
                                 </cf-vstack>
@@ -1738,6 +1768,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                 <cf-input
                                   $value={newPersonPreferences}
                                   placeholder="e.g. 1, 5"
+                                  timingStrategy="immediate"
                                   style="width: 100%;"
                                 />
                               </cf-vstack>
@@ -1754,7 +1785,6 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                 <cf-button
                                   variant="primary"
                                   size="sm"
-                                  disabled={addPersonDisabled}
                                   onClick={() => submitAddPerson.send()}
                                 >
                                   Add Person
@@ -1979,7 +2009,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                         );
                       })}
 
-                      {addSpotFormOpen
+                      {addSpotFormOpen.get()
                         ? (
                           <cf-card style="border: 2px dashed var(--cf-color-gray-200);">
                             <cf-vstack gap="2">
@@ -2029,7 +2059,6 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                 <cf-button
                                   variant="primary"
                                   size="sm"
-                                  disabled={addSpotDisabled}
                                   onClick={() => submitAddSpot.send()}
                                 >
                                   Add Spot
@@ -2059,10 +2088,10 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       spots,
       people,
       requests,
-      adminMode,
-      selectedPersonName,
-      requestDate,
-      requestResult,
+      adminMode: computed(() => Boolean(adminMode.get())),
+      selectedPersonName: computed(() => selectedPersonName.get() ?? ""),
+      requestDate: activeRequestDate,
+      requestResult: computed(() => requestResult.get() ?? ""),
 
       // Exposed actions
       toggleAdminMode,

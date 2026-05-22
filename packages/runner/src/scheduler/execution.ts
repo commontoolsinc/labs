@@ -1,8 +1,13 @@
+import { getLogger } from "@commonfabric/utils/logger";
+import { type Frame } from "../builder/types.ts";
+import type { IMemorySpaceAddress } from "../storage/interface.ts";
 import {
   CYCLE_DEBOUNCE_MIN_RUNS,
   CYCLE_DEBOUNCE_MULTIPLIER,
   CYCLE_DEBOUNCE_THRESHOLD_MS,
+  MAX_ITERATIONS_PER_RUN,
 } from "./constants.ts";
+import type { MaterializerIndexState } from "./materializers.ts";
 import type {
   Action,
   PopulateDependenciesEntry,
@@ -11,6 +16,11 @@ import type {
   SettleStats,
   SpaceScopeAndURI,
 } from "./types.ts";
+
+const logger = getLogger("scheduler", {
+  enabled: true,
+  level: "warn",
+});
 
 export interface SettlingTracker {
   windowStart: number;
@@ -89,7 +99,6 @@ export function recordExecuteEnd(
 }
 
 export function buildPullInitialSeeds(state: {
-  readonly pullMode: boolean;
   readonly pending: ReadonlySet<Action>;
   readonly dirty: ReadonlySet<Action>;
   readonly effects: ReadonlySet<Action>;
@@ -98,7 +107,6 @@ export function buildPullInitialSeeds(state: {
   readonly computationDebounceFlushSeeds: Iterable<Action>;
 }): Set<Action> {
   const initialSeeds = new Set<Action>();
-  if (!state.pullMode) return initialSeeds;
 
   // Pending effects are demand roots. Computations stay lazy unless pulled.
   for (const action of state.pending) {
@@ -125,6 +133,100 @@ export function buildPullInitialSeeds(state: {
   }
 
   return initialSeeds;
+}
+
+export interface ExecuteDependencyCollectionState {
+  readonly pendingDependencyCollection: Set<Action>;
+  readonly populateDependenciesCallbacks: WeakMap<
+    Action,
+    PopulateDependenciesEntry
+  >;
+  readonly effects: ReadonlySet<Action>;
+  readonly getSchedulingWrites: (
+    action: Action,
+  ) => readonly unknown[] | undefined;
+  readonly collectDependenciesForAction: (
+    action: Action,
+    populateDependencies: PopulateDependenciesEntry,
+    options: {
+      readonly errorLogLabel: string;
+      readonly errorMessage: (target: Action, error: unknown) => string;
+      readonly useRawReadsForTriggers?: boolean;
+    },
+  ) => { log: ReactivityLog; entities: Set<SpaceScopeAndURI> };
+  readonly getActionId: (action: Action) => string;
+  readonly scheduleAffectedEffects?: (action: Action) => void;
+}
+
+export function collectInitialExecuteDependencies(
+  state: ExecuteDependencyCollectionState,
+): {
+  collectedActions: Action[];
+  newActionsWithoutDependencies: Action[];
+} {
+  logger.timeStart("scheduler", "execute", "depCollect");
+  try {
+    // Find computation actions whose writes are still unknown. We run them on
+    // the first cycle to capture writes that cannot be inferred from declared
+    // outputs.
+    //
+    // TODO(seefeld): Once we more reliably capture what they can write via
+    // WriteableCell or so, then we can treat this more deliberately via the
+    // dependency collection process above. We'll have to re-run it whenever
+    // inputs change, as they might change what they can write to. We hope that
+    // for now this will be sufficiently captured in mightWrite.
+    return collectPendingDependencyActions({
+      pendingDependencyCollection: state.pendingDependencyCollection,
+      populateDependenciesCallbacks: state.populateDependenciesCallbacks,
+      effects: state.effects,
+      getSchedulingWrites: state.getSchedulingWrites,
+      collectDependenciesForAction: (action, populateDependencies) =>
+        state.collectDependenciesForAction(action, populateDependencies, {
+          errorLogLabel: "schedule-dep-error",
+          errorMessage: (target, error) =>
+            `Error populating dependencies for ${
+              state.getActionId(target)
+            }: ${error}`,
+        }),
+      onCollected: (action, { log, entities }) =>
+        logger.debug("schedule-dep-collect", () => [
+          `Collected dependencies for ${
+            state.getActionId(action)
+          }: ${log.reads.length} reads, ${log.writes.length} writes, ${entities.size} entities`,
+        ]),
+      scheduleAffectedEffects: state.scheduleAffectedEffects,
+    });
+  } finally {
+    logger.timeEnd("scheduler", "execute", "depCollect");
+  }
+}
+
+export function collectPostEventDependencies(
+  state: ExecuteDependencyCollectionState,
+): void {
+  // Process any newly subscribed actions that were added during event handling.
+  // This handles cases like event handlers that create sub-patterns whose
+  // computations need their dependencies discovered before we build the workSet.
+  if (state.pendingDependencyCollection.size === 0) return;
+
+  collectPendingDependencyActions({
+    pendingDependencyCollection: state.pendingDependencyCollection,
+    populateDependenciesCallbacks: state.populateDependenciesCallbacks,
+    effects: state.effects,
+    getSchedulingWrites: state.getSchedulingWrites,
+    collectDependenciesForAction: (action, populateDependencies) =>
+      state.collectDependenciesForAction(action, populateDependencies, {
+        errorLogLabel: "schedule-dep-error-post-event",
+        errorMessage: (target, error) =>
+          `Error populating dependencies for ${
+            state.getActionId(target)
+          }: ${error}`,
+      }),
+    onCollected: (action) =>
+      logger.debug("schedule-dep-collect-post-event", () => [
+        `Collected dependencies for ${state.getActionId(action)}`,
+      ]),
+  });
 }
 
 export function collectPendingDependencyActions(state: {
@@ -188,72 +290,106 @@ export function collectPendingDependencyActions(state: {
   return { collectedActions, newActionsWithoutDependencies };
 }
 
-export function buildIterationWorkSet(state: {
-  readonly pullMode: boolean;
+export type SchedulerSettleResult = {
+  settledEarly: boolean;
+  lastWorkSet: Set<Action>;
+  earlyIterationComputations: Set<Action>;
+  maxSettleIterations: number;
+  settleStats?: SettleStats;
+};
+
+export interface SchedulerSettleLoopState {
+  readonly getCollectSettleStats: () => boolean;
+  readonly pendingDependencyCollection: Set<Action>;
+  readonly populateDependenciesCallbacks: WeakMap<
+    Action,
+    PopulateDependenciesEntry
+  >;
+  readonly effects: ReadonlySet<Action>;
+  readonly computations: ReadonlySet<Action>;
   readonly pending: Set<Action>;
-  readonly initialSeeds: ReadonlySet<Action>;
-  readonly settleIter: number;
-  readonly collectPullIterationSeeds: (iterationSeeds: Set<Action>) => void;
+  readonly dirty: ReadonlySet<Action>;
+  readonly dependencies: WeakMap<Action, ReactivityLog>;
+  readonly actionParent: WeakMap<Action, Action>;
+  readonly dependents: WeakMap<Action, Set<Action>>;
+  readonly conditionallyScheduledEffects: Map<Action, number>;
+  readonly filterStats: { filtered: number; executed: number };
+  readonly getLoopCounter: () => WeakMap<Action, number>;
+  readonly runsThisExecute: Map<Action, number>;
+  readonly activePullDemandActions: WeakSet<Action>;
+  readonly materializerIndex: MaterializerIndexState;
+  readonly getSchedulingWrites: (
+    action: Action,
+  ) => readonly IMemorySpaceAddress[] | undefined;
+  readonly getSchedulingWritesMap: () => WeakMap<
+    Action,
+    IMemorySpaceAddress[]
+  >;
+  readonly collectDependenciesForAction: (
+    action: Action,
+    populateDependencies: PopulateDependenciesEntry,
+    options: {
+      readonly errorLogLabel: string;
+      readonly errorMessage: (target: Action, error: unknown) => string;
+      readonly useRawReadsForTriggers?: boolean;
+    },
+  ) => { log: ReactivityLog; entities: Set<SpaceScopeAndURI> };
+  readonly collectPullIterationSeeds: (seeds: Set<Action>) => void;
   readonly collectDirtyDependencies: (
     seed: Action,
-    workSet: Set<Action>,
+    targetWorkSet: Set<Action>,
     memo: Map<Action, boolean>,
   ) => boolean;
-}): {
-  workSet: Set<Action>;
-  iterationSeeds: Set<Action>;
-  dirtyDependencyCount: number;
-} {
-  if (!state.pullMode) {
-    return {
-      // Push mode mutates pending while executing, preserving existing behavior.
-      workSet: state.pending,
-      iterationSeeds: new Set(),
-      dirtyDependencyCount: 0,
-    };
-  }
+  readonly collectDirtyDependenciesFromTraversalRoot: (
+    seed: Action,
+    targetWorkSet: Set<Action>,
+    memo: Map<Action, boolean>,
+  ) => boolean;
+  readonly getActionId: (action: Action) => string;
+  readonly clearDirty: (action: Action) => void;
+  readonly markDirectDirty: (action: Action) => void;
+  readonly isThrottled: (action: Action) => boolean;
+  readonly isDebouncedComputationWaiting: (action: Action) => boolean;
+  readonly clearComputationDebounceState: (action: Action) => void;
+  readonly conditionalEffectHasChangedInputs: (action: Action) => boolean;
+  readonly isPullDemandRootEffect: (action: Action) => boolean;
+  readonly handleError: (error: Error, action: Action) => void;
+  readonly runAction: (action: Action) => Promise<unknown>;
+}
 
-  const workSet = new Set<Action>();
-  const iterationSeeds = new Set<Action>();
-
-  // Every iteration needs to consider newly created pending effects.
-  // Without this, nested/recursive patterns can stall after creating
-  // new demand-root effects in an earlier iteration.
-  state.collectPullIterationSeeds(iterationSeeds);
-
-  // On first iteration, add special-case seeds discovered before settle.
-  if (state.settleIter === 0) {
-    for (const seed of state.initialSeeds) {
-      iterationSeeds.add(seed);
+export function recordSettleActionRun(
+  state: SchedulerSettleLoopState,
+  fn: Action,
+): boolean {
+  const loopCounter = state.getLoopCounter();
+  loopCounter.set(fn, (loopCounter.get(fn) || 0) + 1);
+  // Track runs for cycle-aware debounce
+  state.runsThisExecute.set(fn, (state.runsThisExecute.get(fn) ?? 0) + 1);
+  if (loopCounter.get(fn)! > MAX_ITERATIONS_PER_RUN) {
+    const error = new Error(
+      `Too many iterations: ${loopCounter.get(fn)} ${state.getActionId(fn)}`,
+    );
+    // Attach the last frame from the action so handleError can
+    // extract piece/spell metadata (CT-1316: fixes message:null).
+    const lastFrame = (fn as Action & { lastFrame?: Frame }).lastFrame;
+    if (lastFrame) {
+      (error as Error & { frame?: Frame }).frame = lastFrame;
     }
+    state.handleError(error, fn);
+    return false;
   }
 
-  for (const seed of iterationSeeds) {
-    workSet.add(seed);
-  }
-
-  // Pull in dirty computations that feed the currently runnable seeds.
-  const dirtyDependencyMemo = new Map<Action, boolean>();
-  for (const seed of iterationSeeds) {
-    state.collectDirtyDependencies(seed, workSet, dirtyDependencyMemo);
-  }
-
-  return {
-    workSet,
-    iterationSeeds,
-    dirtyDependencyCount: workSet.size - iterationSeeds.size,
-  };
+  return true;
 }
 
 export function recordEarlyIterationComputations(state: {
-  readonly pullMode: boolean;
   readonly settleIter: number;
   readonly threshold: number;
   readonly workSet: ReadonlySet<Action>;
   readonly effects: ReadonlySet<Action>;
   readonly earlyIterationComputations: Set<Action>;
 }): void {
-  if (!state.pullMode || state.settleIter >= state.threshold) return;
+  if (state.settleIter >= state.threshold) return;
   for (const action of state.workSet) {
     if (!state.effects.has(action)) {
       state.earlyIterationComputations.add(action);
@@ -346,8 +482,7 @@ export interface CycleBreakPlan {
   dirtyEffectsToRun: Action[];
 }
 
-export function planCycleBreak(state: {
-  readonly pullMode: boolean;
+export function planPullCycleBreak(state: {
   readonly settledEarly: boolean;
   readonly lastWorkSet: ReadonlySet<Action>;
   readonly earlyIterationComputations: ReadonlySet<Action>;
@@ -356,9 +491,7 @@ export function planCycleBreak(state: {
   readonly runsThisExecute: ReadonlyMap<Action, number>;
   readonly isThrottled: (action: Action) => boolean;
 }): CycleBreakPlan {
-  const shouldBreak = state.pullMode &&
-    !state.settledEarly &&
-    state.lastWorkSet.size > 0;
+  const shouldBreak = !state.settledEarly && state.lastWorkSet.size > 0;
   if (!shouldBreak) {
     return { shouldBreak, computationsToClear: [], dirtyEffectsToRun: [] };
   }
@@ -388,8 +521,7 @@ export interface CycleDebounceUpdate {
   delayMs: number;
 }
 
-export function planAdaptiveCycleDebounce(state: {
-  readonly pullMode: boolean;
+export function planPullAdaptiveCycleDebounce(state: {
   readonly executeStartTime: number;
   readonly runsThisExecute: ReadonlyMap<Action, number>;
   readonly canAutomaticallyDebounce: (action: Action) => boolean;
@@ -401,7 +533,7 @@ export function planAdaptiveCycleDebounce(state: {
 } {
   const now = state.now ?? performance.now();
   const elapsedMs = now - state.executeStartTime;
-  if (!state.pullMode || elapsedMs < CYCLE_DEBOUNCE_THRESHOLD_MS) {
+  if (elapsedMs < CYCLE_DEBOUNCE_THRESHOLD_MS) {
     return { elapsedMs, updates: [] };
   }
 
@@ -474,11 +606,11 @@ export function planEventDirtyDependencyScheduling(state: {
   };
 }
 
-export function planExecuteContinuation(state: {
-  readonly pullMode: boolean;
+export function planPullExecuteContinuation(state: {
   readonly pending: ReadonlySet<Action>;
   readonly dirty: ReadonlySet<Action>;
   readonly effects: ReadonlySet<Action>;
+  readonly materializerIndex: MaterializerIndexState;
   readonly shouldRerunAfterCurrentExecute: boolean;
   readonly hasQueuedEventReadyNow: boolean;
   readonly hasParkedHeadEvent: boolean;
@@ -492,46 +624,47 @@ export function planExecuteContinuation(state: {
   readonly now?: number;
 }): ExecuteContinuationPlan {
   const now = state.now ?? performance.now();
-  const hasPendingPullWork = state.pullMode
-    ? [...state.pending].some((action) =>
-      state.effects.has(action) ||
-      state.isDemandedPullComputation(action) ||
-      state.shouldRunFirstPullComputationInDemandContext(action)
-    )
-    : state.pending.size > 0;
+  const hasPendingPullWork = [...state.pending].some((action) =>
+    state.effects.has(action) ||
+    state.materializerIndex.isMaterializer(action) ||
+    state.isDemandedPullComputation(action) ||
+    state.shouldRunFirstPullComputationInDemandContext(action)
+  );
 
   let nextDirtyPullRunAt: number | undefined;
   let nextDirtyPullRunWaitsForIdle = false;
-  const hasDirtyPullWork = state.pullMode &&
-    [...state.dirty].some((action) => {
-      if (
-        !state.effects.has(action) &&
-        !state.isDemandedPullComputation(action)
-      ) {
-        return false;
-      }
+  const hasDirtyPullWork = [...state.dirty].some((action) => {
+    if (
+      !state.effects.has(action) &&
+      !state.isDemandedPullComputation(action) &&
+      !state.materializerIndex.isMaterializer(action)
+    ) {
+      return false;
+    }
 
-      if (state.isDebouncedComputationWaiting(action)) {
-        const nextDebounceAt = state.getNextDebounceRunTime(action);
-        if (nextDebounceAt !== undefined) {
-          nextDirtyPullRunAt = minDefined(
-            nextDirtyPullRunAt,
-            nextDebounceAt,
-          );
-          nextDirtyPullRunWaitsForIdle ||= state.effects.has(action);
-        }
-        return false;
+    if (state.isDebouncedComputationWaiting(action)) {
+      const nextDebounceAt = state.getNextDebounceRunTime(action);
+      if (nextDebounceAt !== undefined) {
+        nextDirtyPullRunAt = minDefined(
+          nextDirtyPullRunAt,
+          nextDebounceAt,
+        );
+        nextDirtyPullRunWaitsForIdle ||= state.effects.has(action) ||
+          state.materializerIndex.isMaterializer(action);
       }
+      return false;
+    }
 
-      const nextEligibleAt = state.getNextEligibleRunTime(action);
-      if (nextEligibleAt !== undefined && nextEligibleAt > now) {
-        nextDirtyPullRunAt = minDefined(nextDirtyPullRunAt, nextEligibleAt);
-        nextDirtyPullRunWaitsForIdle ||= state.effects.has(action);
-        return false;
-      }
+    const nextEligibleAt = state.getNextEligibleRunTime(action);
+    if (nextEligibleAt !== undefined && nextEligibleAt > now) {
+      nextDirtyPullRunAt = minDefined(nextDirtyPullRunAt, nextEligibleAt);
+      nextDirtyPullRunWaitsForIdle ||= state.effects.has(action) ||
+        state.materializerIndex.isMaterializer(action);
+      return false;
+    }
 
-      return true;
-    });
+    return true;
+  });
 
   const hasImmediateRerunRequest = state.shouldRerunAfterCurrentExecute &&
     nextDirtyPullRunAt === undefined;

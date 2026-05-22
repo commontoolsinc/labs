@@ -12,26 +12,26 @@ const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 // FIXTURE: cell-like-classes
-// Verifies: schema injection works for cell(), ComparableCell.of(), ReadonlyCell.of(), and WriteonlyCell.of()
+// Verifies: schema injection works for cell(), new ComparableCell(), new ReadonlyCell(), and new WriteonlyCell()
 //   cell(100) → cell(100, { type: "number" })
-//   ComparableCell.of(200) → ComparableCell.of(200, { type: "number" })
-//   ReadonlyCell.of(300) → ReadonlyCell.of(300, { type: "number" })
-//   WriteonlyCell.of(400) → WriteonlyCell.of(400, { type: "number" })
+//   new ComparableCell(200) → new ComparableCell(200, { type: "number" })
+//   new ReadonlyCell(300) → new ReadonlyCell(300, { type: "number" })
+//   new WriteonlyCell(400) → new WriteonlyCell(400, { type: "number" })
 export default function TestCellLikeClasses() {
     // Standalone cell() function
     const _standalone = cell(100, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("_standalone", true);
-    // ComparableCell.of()
-    const _comparable = ComparableCell.of(200, {
+    // new ComparableCell()
+    const _comparable = new ComparableCell(200, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("_comparable", true);
-    // ReadonlyCell.of()
-    const _readonly = ReadonlyCell.of(300, {
+    // new ReadonlyCell()
+    const _readonly = new ReadonlyCell(300, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("_readonly", true);
-    // WriteonlyCell.of()
-    const _writeonly = WriteonlyCell.of(400, {
+    // new WriteonlyCell()
+    const _writeonly = new WriteonlyCell(400, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("_writeonly", true);
     return {

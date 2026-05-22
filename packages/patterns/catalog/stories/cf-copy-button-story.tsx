@@ -14,8 +14,8 @@ interface CopyButtonStoryOutput {
 }
 
 export default pattern<CopyButtonStoryInput, CopyButtonStoryOutput>(() => {
-  const variant = Writable.of<"secondary" | "ghost" | "outline">("secondary");
-  const iconOnly = Writable.of(false);
+  const variant = new Writable<"secondary" | "ghost" | "outline">("secondary");
+  const iconOnly = new Writable(false);
 
   return {
     [NAME]: "cf-copy-button Story",

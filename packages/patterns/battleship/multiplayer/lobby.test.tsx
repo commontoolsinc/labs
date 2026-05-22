@@ -22,10 +22,10 @@ import {
 
 export default pattern(() => {
   // Create Writable cells with initial values for the lobby state
-  const player1Cell = Writable.of<PlayerData | null>(null);
-  const player2Cell = Writable.of<PlayerData | null>(null);
-  const shotsCell = Writable.of<ShotsState>(createInitialShots());
-  const gameStateCell = Writable.of<GameState>(INITIAL_GAME_STATE);
+  const player1Cell = new Writable<PlayerData | null>(null);
+  const player2Cell = new Writable<PlayerData | null>(null);
+  const shotsCell = new Writable<ShotsState>(createInitialShots());
+  const gameStateCell = new Writable<GameState>(INITIAL_GAME_STATE);
 
   // Instantiate the lobby pattern with properly initialized cells
   const lobby = BattleshipLobby({

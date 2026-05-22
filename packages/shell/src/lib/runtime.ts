@@ -194,6 +194,11 @@ export class RuntimeInternals extends EventTarget {
     return promise;
   }
 
+  async getSlug(id: string): Promise<string | undefined> {
+    this.#check();
+    return await this.#client.getPageSlug(id);
+  }
+
   async removePage(id: string): Promise<boolean> {
     return await this.#client.removePage(id);
   }

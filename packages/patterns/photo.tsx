@@ -82,9 +82,9 @@ export const PhotoModule = pattern<PhotoModuleInput, PhotoModuleOutput>(
   ({ image: inputImage, label }) => {
     // We use an array internally for cf-image-input compatibility
     // but the module only supports a single image
-    // NOTE: Writable.of must use empty array to avoid TypeScript OOM (CT-1148)
-    // Using input params in Writable.of() causes deep type inference explosion
-    const images = Writable.of<ImageData[]>([]);
+    // NOTE: Writable must use empty array to avoid TypeScript OOM (CT-1148)
+    // Using input params in new Writable() causes deep type inference explosion
+    const images = new Writable<ImageData[]>([]);
 
     // Sync image Cell with images array (first element)
     // Also handles initialization from inputImage for import/restore

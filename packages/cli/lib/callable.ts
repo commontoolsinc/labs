@@ -1,4 +1,4 @@
-import type { JSONSchema } from "@commonfabric/api";
+import type { CellScope, JSONSchema } from "@commonfabric/api";
 import {
   type CallableKind,
   classifyCallableEntry,
@@ -6,6 +6,7 @@ import {
 import type { ExecCommandSpec } from "./exec-schema.ts";
 
 export const CF_RUNTIME_ERROR_LOG = Symbol.for("cf.cli.runtimeErrorLog");
+const DEFAULT_TOOL_RESULT_TIMEOUT_MS = 15_000;
 
 export interface CliRuntimeErrorRecord {
   message: string;
@@ -33,6 +34,7 @@ export interface CallableCellLike {
   asSchemaFromLinks?: () => CallableCellLike;
   key: (segment: string) => CallableCellLike;
   pull?: () => Promise<unknown>;
+  getAsNormalizedFullLink?: () => { scope?: CellScope };
   send?: (
     value: unknown,
     onCommit?: (tx: CallableTransactionLike) => void,
@@ -54,6 +56,7 @@ export interface CallableRuntimeLike {
     id: string,
     schema: JSONSchema | undefined,
     tx: CallableTransactionLike,
+    scope?: CellScope,
   ) => CallableCellLike;
   run: (
     tx: CallableTransactionLike,
@@ -334,11 +337,13 @@ export async function executeResolvedCallable(
     resolved.callableCell.key("extraParams").get?.(),
   );
   const tx = resolved.manager.runtime.edit();
+  const resultScope = resolved.callableCell.getAsNormalizedFullLink?.().scope;
   const resultCell = resolved.manager.runtime.getCell(
     resolved.space,
     deps.uuid?.() ?? crypto.randomUUID(),
     pattern?.resultSchema,
     tx,
+    resultScope,
   );
   const running = resolved.manager.runtime.run(
     tx,
@@ -346,25 +351,38 @@ export async function executeResolvedCallable(
     mergeToolInput(input, extraParams),
     resultCell,
   );
+  let sinkValue: unknown;
+  let hasSinkValue = false;
   const cancelSink = typeof running?.sink === "function"
-    ? running.sink(() => {})
+    ? running.sink((value) => {
+      if (value !== undefined) {
+        sinkValue = value;
+        hasSinkValue = true;
+      }
+    })
     : undefined;
 
   let outputValue: unknown;
   try {
+    await resolved.manager.runtime.idle();
     resolved.manager.runtime.prepareTxForCommit?.(tx);
     if (typeof tx.commit !== "function") {
       throw new Error("Callable runtime transaction is not committable");
     }
     await tx.commit();
+    const waitForResult = deps.waitForResult ?? defaultWaitForResult;
+    const timeoutMs = deps.timeoutMs ?? DEFAULT_TOOL_RESULT_TIMEOUT_MS;
+
     await resolved.manager.runtime.idle();
     await resolved.manager.synced();
-    const waitForResult = deps.waitForResult ?? defaultWaitForResult;
-    const timeoutMs = deps.timeoutMs ?? 5000;
-
-    await waitForResult(resultCell, timeoutMs);
     await resolved.manager.runtime.storageManager?.synced();
-    outputValue = await waitForResult(resultCell, timeoutMs);
+    if (hasSinkValue) {
+      outputValue = sinkValue;
+    } else {
+      await waitForResult(resultCell, timeoutMs);
+      await resolved.manager.runtime.storageManager?.synced();
+      outputValue = await waitForResult(resultCell, timeoutMs);
+    }
   } finally {
     cancelSink?.();
   }

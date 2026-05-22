@@ -22,7 +22,7 @@ describe("executePieceCallable", () => {
       {
         apiUrl: "http://localhost:8000",
         identity: "/tmp/test-identity.pem",
-        piece: "of:piece-123",
+        piece: "fid1:piece-123",
         space: "home",
       },
       "recordMessage",
@@ -93,7 +93,7 @@ describe("executePieceCallable", () => {
       {
         apiUrl: "http://localhost:8000",
         identity: "/tmp/test-identity.pem",
-        piece: "of:piece-123",
+        piece: "fid1:piece-123",
         space: "home",
       },
       "search",
@@ -118,6 +118,86 @@ describe("executePieceCallable", () => {
     });
   });
 
+  it("passes the configured piece scope when resolving callables", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "recordMessage",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+        required: ["message"],
+      },
+    });
+    let resolvedScope: string | undefined;
+
+    await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        pieceScope: "session",
+        space: "home",
+      },
+      "recordMessage",
+      ["--message", "milk"],
+      {
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: (_manager, _pieceId, scope) => {
+          resolvedScope = scope;
+          return Promise.resolve(harness.piece);
+        },
+      },
+    );
+
+    expect(resolvedScope).toBe("session");
+  });
+
+  it("creates pattern tool result cells with the callable scope", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "tool",
+      cellKey: "search",
+      callableScope: "user",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+        },
+        required: ["query"],
+      },
+      pattern: {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            query: { type: "string" },
+          },
+          required: ["query"],
+        },
+        resultSchema: { type: "object" },
+      },
+      toolResult: { ok: true },
+    });
+
+    await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "search",
+      ["--query", "tea"],
+      {
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        uuid: () => "tool-result-id",
+      },
+    );
+
+    expect(harness.tracker.toolResultScope).toBe("user");
+  });
+
   it("reads primitive handler input from --value-file", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "handler",
@@ -129,7 +209,7 @@ describe("executePieceCallable", () => {
       {
         apiUrl: "http://localhost:8000",
         identity: "/tmp/test-identity.pem",
-        piece: "of:piece-123",
+        piece: "fid1:piece-123",
         space: "home",
       },
       "editContent",
@@ -172,7 +252,7 @@ describe("executePieceCallable", () => {
       {
         apiUrl: "http://localhost:8000",
         identity: "/tmp/test-identity.pem",
-        piece: "of:piece-123",
+        piece: "fid1:piece-123",
         space: "home",
       },
       "editContent",
@@ -220,7 +300,7 @@ describe("executePieceCallable", () => {
       {
         apiUrl: "http://localhost:8000",
         identity: "/tmp/test-identity.pem",
-        piece: "of:piece-123",
+        piece: "fid1:piece-123",
         space: "home",
       },
       "editContent",
@@ -252,7 +332,7 @@ describe("executePieceCallable", () => {
       {
         apiUrl: "http://localhost:8000",
         identity: "/tmp/test-identity.pem",
-        piece: "of:piece-123",
+        piece: "fid1:piece-123",
         space: "home",
       },
       "editContent",
@@ -296,7 +376,7 @@ describe("executePieceCallable", () => {
       {
         apiUrl: "http://localhost:8000",
         identity: "/tmp/test-identity.pem",
-        piece: "of:piece-123",
+        piece: "fid1:piece-123",
         space: "home",
       },
       "editContent",
@@ -343,7 +423,7 @@ describe("executePieceCallable", () => {
       {
         apiUrl: "http://localhost:8000",
         identity: "/tmp/test-identity.pem",
-        piece: "of:piece-123",
+        piece: "fid1:piece-123",
         space: "home",
       },
       "editContent",
@@ -387,7 +467,7 @@ describe("executePieceCallable", () => {
       {
         apiUrl: "http://localhost:8000",
         identity: "/tmp/test-identity.pem",
-        piece: "of:piece-123",
+        piece: "fid1:piece-123",
         space: "home",
       },
       "editContent",
@@ -433,7 +513,7 @@ describe("executePieceCallable", () => {
       {
         apiUrl: "http://localhost:8000",
         identity: "/tmp/test-identity.pem",
-        piece: "of:piece-123",
+        piece: "fid1:piece-123",
         space: "home",
       },
       "search",
@@ -482,7 +562,7 @@ describe("executePieceCallable", () => {
         {
           apiUrl: "http://localhost:8000",
           identity: "/tmp/test-identity.pem",
-          piece: "of:piece-123",
+          piece: "fid1:piece-123",
           space: "home",
         },
         "recordMessage",
@@ -507,6 +587,7 @@ function createPieceCallableHarness(options: {
   extraParams?: Record<string, unknown>;
   toolResult?: unknown;
   handlerFailureMessage?: string;
+  callableScope?: "space" | "user" | "session";
 }) {
   const tracker = {
     handlerWrites: [] as Array<{
@@ -516,6 +597,7 @@ function createPieceCallableHarness(options: {
     }>,
     toolRunPattern: undefined as unknown,
     toolRunInput: undefined as unknown,
+    toolResultScope: undefined as string | undefined,
   };
 
   const callableSchema: JSONSchema = options.callableKind === "tool"
@@ -543,34 +625,37 @@ function createPieceCallableHarness(options: {
   const callableCell = createMockCell(
     callableValue,
     callableSchema,
-    options.callableKind === "handler"
-      ? {
-        send: (
-          value: unknown,
-          onCommit?: (
-            tx: { status: () => { status: string; error?: Error } },
-          ) => void,
-        ) => {
-          tracker.handlerWrites.push({
-            cellProp: "result",
-            path: [options.cellKey],
-            value,
-          });
-          if (options.handlerFailureMessage) {
-            runtimeErrors.push({ message: options.handlerFailureMessage });
-          }
-          onCommit?.({
-            status: () =>
-              options.handlerFailureMessage
-                ? {
-                  status: "error",
-                  error: new Error(options.handlerFailureMessage),
-                }
-                : { status: "done" },
-          });
-        },
-      }
-      : undefined,
+    {
+      scope: options.callableScope,
+      ...(options.callableKind === "handler"
+        ? {
+          send: (
+            value: unknown,
+            onCommit?: (
+              tx: { status: () => { status: string; error?: Error } },
+            ) => void,
+          ) => {
+            tracker.handlerWrites.push({
+              cellProp: "result",
+              path: [options.cellKey],
+              value,
+            });
+            if (options.handlerFailureMessage) {
+              runtimeErrors.push({ message: options.handlerFailureMessage });
+            }
+            onCommit?.({
+              status: () =>
+                options.handlerFailureMessage
+                  ? {
+                    status: "error",
+                    error: new Error(options.handlerFailureMessage),
+                  }
+                  : { status: "done" },
+            });
+          },
+        }
+        : {}),
+    },
   );
   const rootCell = createMockCell(
     {
@@ -635,7 +720,11 @@ function createPieceCallableHarness(options: {
         _id: string,
         _schema: JSONSchema | undefined,
         _tx: unknown,
-      ) => resultCell,
+        scope?: string,
+      ) => {
+        tracker.toolResultScope = scope;
+        return resultCell;
+      },
       run: (
         _tx: unknown,
         pattern: unknown,
@@ -667,6 +756,7 @@ function createMockCell(
         tx: { status: () => { status: string; error?: Error } },
       ) => void,
     ) => void;
+    scope?: "space" | "user" | "session";
   },
 ) {
   const cell = {
@@ -674,6 +764,7 @@ function createMockCell(
     get: () => value,
     getRaw: () => value,
     asSchemaFromLinks: () => cell,
+    getAsNormalizedFullLink: () => ({ scope: options?.scope }),
     send: options?.send,
     key: (key: string) => {
       if (options?.childOverrides?.[key]) {

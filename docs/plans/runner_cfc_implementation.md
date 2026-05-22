@@ -133,13 +133,13 @@ last-write-wins compaction.
 Phase 1 does not require that precision. It uses two deterministic transaction
 views:
 
-- `potentialWrites`: the maybe-write target set, sourced from tx
-  `markReadAsPotentialWrite` reads performed while deciding whether a diff
+- `attemptedWrites`: the maybe-write target set, sourced from tx
+  `markReadAsAttemptedWrite` reads performed while deciding whether a diff
   results in a write
 - `writes`: the actual changed/final write set sourced from v2 transaction
   internals
 
-Boundary checking uses `potentialWrites ∪ writes` as the target set for
+Boundary checking uses `attemptedWrites ∪ writes` as the target set for
 relevance and conservative target-side policy checks. Persisted output label-map
 updates and metadata updates are derived from `writes` only. If later rules
 need per-write provenance or exact attempt order, we can add dedicated
@@ -147,11 +147,11 @@ write-attempt logging as a follow-on precision optimization.
 
 Phase-1 invariant: direct `tx.write*()` usage remains internal-only runner API.
 No-op attempted-target coverage depends on higher-level diff paths performing
-`markReadAsPotentialWrite` reads before deciding whether to write. That
+`markReadAsAttemptedWrite` reads before deciding whether to write. That
 assumption should be documented explicitly on the transaction write APIs and
 covered by guardrail tests. This is not just theoretical: current v2 writes
 short-circuit same-value writes before recording write activity, so no-op
-attempted-target coverage must come from `markReadAsPotentialWrite` or a future
+attempted-target coverage must come from `markReadAsAttemptedWrite` or a future
 explicit attempted-write API.
 
 ### Write-Policy Input
@@ -215,7 +215,7 @@ handler has produced its reads and writes but before commit succeeds.
 
 Prepare:
 
-- gathers consumed reads, canonical `potentialWrites`, canonical `writes`, and
+- gathers consumed reads, canonical `attemptedWrites`, canonical `writes`, and
   canonical write-policy inputs
 - evaluates schema and policy obligations
 - computes output label maps and metadata
@@ -226,7 +226,7 @@ Prepare:
 The prepared digest is a stable hash of:
 
 - canonical consumed reads
-- canonical `potentialWrites`
+- canonical `attemptedWrites`
 - canonical `writes`
 - canonical write-policy inputs
 - implementation identity
@@ -538,15 +538,15 @@ Primary files:
 Tasks:
 
 - [x] Build a canonical extractor over the v2 inspection APIs
-- [x] Surface tx `potentialWrites` as the phase-1 maybe-write target set
+- [x] Surface tx `attemptedWrites` as the phase-1 maybe-write target set
 - [x] Produce a deterministic final-per-path `writes` set for phase 1
-- [x] Preserve no-op attempted-target coverage through `potentialWrites`
+- [x] Preserve no-op attempted-target coverage through `attemptedWrites`
 - [x] Add JSDoc and guardrails on internal `tx.write*` APIs explaining that
       phase-1 no-op attempted-target coverage relies on higher-level diff paths
-      using `markReadAsPotentialWrite`; blind same-value direct writes are not
-      surfaced through `potentialWrites`
+      using `markReadAsAttemptedWrite`; blind same-value direct writes are not
+      surfaced through `attemptedWrites`
 - [x] Audit existing internal direct `tx.write*` / `writeValueOrThrow()` call
-      sites and either ensure they establish `potentialWrites` coverage before
+      sites and either ensure they establish `attemptedWrites` coverage before
       same-value short-circuiting or explicitly keep them out of phase-1 CFC
       scope
 - [x] Add explicit APIs to record canonical `WritePolicyInput` entries at
@@ -556,20 +556,20 @@ Tasks:
 - [x] Exclude only `internalVerifierRead` from the consumed-read set
 - [x] Make the phase-1 prepare engine free to pessimistically treat all
       consumed reads as influencing all target paths in
-      `potentialWrites ∪ writes`
+      `attemptedWrites ∪ writes`
 - [x] Defer exact ordered write-attempt logging to a follow-up precision slice
       if later rules need it
 
 Acceptance:
 
 - [x] Canonical path handling strips the `value` wrapper consistently
-- [x] Phase-1 canonical `potentialWrites` extraction is deterministic across
+- [x] Phase-1 canonical `attemptedWrites` extraction is deterministic across
       runs
 - [x] Phase-1 canonical `writes` extraction is deterministic across runs
 - [x] Canonical `WritePolicyInput` capture is deterministic across runs
 - [x] Internal verifier reads remain visible for diagnostics but not policy
 - [x] Final-per-path view is deterministic
-- [x] Same-value direct writes are either covered by `potentialWrites` or
+- [x] Same-value direct writes are either covered by `attemptedWrites` or
       explicitly out of phase-1 scope
 
 ### 4. Relevance Detection
@@ -589,7 +589,7 @@ Tasks:
 - [x] Mark write-only transactions relevant when the target path carries CFC
       obligations even if no read happened first
 - [x] Treat attempted no-op writes as relevant when they appear in
-      `potentialWrites` for a path carrying CFC obligations
+      `attemptedWrites` for a path carrying CFC obligations
 - [x] Ensure dependency-discovery transactions and other non-committing
       inspection transactions do not trigger prepare
 - [x] Audit helper reads that should be tagged `internalVerifierRead`
@@ -670,7 +670,7 @@ Tasks:
       `requiredIntegrity`, and `maxConfidentiality`
 - [x] Implement `writeAuthorizedBy`, `exactCopyOf`, `projection`, and
       collection-derived transition checks where they can be evaluated from
-      consumed reads plus `potentialWrites`/`writes` plus explicit write-policy
+      consumed reads plus `attemptedWrites`/`writes` plus explicit write-policy
       inputs; otherwise fail closed or remain conservative
 - [x] Until stable implementation identities and trust snapshots land, treat
       trust-sensitive claims such as `writeAuthorizedBy` as non-enforceable:
@@ -679,8 +679,8 @@ Tasks:
 - [x] Persist only concrete evidence in stored metadata; derived trust closure
       remains runtime-only
 - [x] In phase 1, allow a conservative all-consumed-reads-to-all-targets
-      influence model over `potentialWrites ∪ writes`
-- [x] Use `potentialWrites ∪ writes` for target-side enforcement and use
+      influence model over `attemptedWrites ∪ writes`
+- [x] Use `attemptedWrites ∪ writes` for target-side enforcement and use
       `writes` only for persisted output metadata
 - [x] If a target entity has no stored `schemaHash`, seed it from the first
       canonical `SchemaAndHash` and persist or reuse `cid:<hash>`; if merge
@@ -1120,7 +1120,7 @@ Land the work in mergeable vertical slices:
 1. [x] Types, canonical path helpers, write-policy input helpers, and digest
        helpers
 2. [x] Transaction CFC state and rollout modes with observe-mode prepare
-3. [x] V2 consumed-read, `potentialWrites`, compact final-write extraction, and
+3. [x] V2 consumed-read, `attemptedWrites`, compact final-write extraction, and
        write-policy input capture APIs
 4. [x] Relevance detection and merged-schema envelope implementation
 5. [x] Embedded v2 CFC metadata persistence, `cid:<hash>` schema-document

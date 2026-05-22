@@ -9,6 +9,7 @@ const logger = getLogger("shell.navigation", {
 export type NavigationCommand = AppView;
 
 const NavigationEventName = "cf-navigate";
+const ReplaceNavigationEventName = "cf-replace-navigation";
 
 class NavigationEvent extends CustomEvent<NavigationCommand> {
   command: NavigationCommand;
@@ -20,6 +21,18 @@ class NavigationEvent extends CustomEvent<NavigationCommand> {
 
 export function navigate(command: NavigationCommand) {
   globalThis.dispatchEvent(new NavigationEvent(command));
+}
+
+class ReplaceNavigationEvent extends CustomEvent<NavigationCommand> {
+  command: NavigationCommand;
+  constructor(command: NavigationCommand) {
+    super(ReplaceNavigationEventName, { detail: command });
+    this.command = command;
+  }
+}
+
+export function replaceNavigation(command: NavigationCommand) {
+  globalThis.dispatchEvent(new ReplaceNavigationEvent(command));
 }
 
 const UpdatePageTitleEventName = "cf-update-page-title";
@@ -49,6 +62,10 @@ export class Navigation {
     this.#app = app;
 
     globalThis.addEventListener(NavigationEventName, this.onNavigate);
+    globalThis.addEventListener(
+      ReplaceNavigationEventName,
+      this.onReplaceNavigate,
+    );
     globalThis.addEventListener(
       UpdatePageTitleEventName,
       this.onUpdatePageTitle,
@@ -86,6 +103,14 @@ export class Navigation {
     logger.log("Navigate", command);
     command = mapNavigationView(this.#app, command);
     this.push(command);
+    this.apply(command);
+  };
+
+  private onReplaceNavigate = (e: Event) => {
+    let command = (e as ReplaceNavigationEvent).command;
+    logger.log("ReplaceNavigate", command);
+    command = mapNavigationView(this.#app, command);
+    this.replace(command);
     this.apply(command);
   };
 
@@ -131,6 +156,7 @@ function mapNavigationView(
   ) {
     return {
       ...("pieceId" in view ? { pieceId: view.pieceId } : undefined),
+      ...("pieceSlug" in view ? { pieceSlug: view.pieceSlug } : undefined),
       spaceName: currentSpaceName,
     };
   }

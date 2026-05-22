@@ -58,7 +58,8 @@ step, and we'll ratchet targets down as we improve.
   90-day retention
 - Regression detector every 4 hours (median + 3σ or +15%, auto-creates GitHub issues)
 - Recent wins: compilation cache (~100-500ms saved), schema freeze caching,
-  LLM queue batching, scheduler debouncing, refer() caching (~2x)
+  LLM queue batching, scheduler debouncing, scheduler writer-index cleanup
+  (`writersByEntity` is Set-backed), refer() caching (~2x)
 
 **What we don't have:**
 - No measurement of where wall-clock time actually goes in a user-visible flow
@@ -197,7 +198,6 @@ path) · Medium (benchmarks improve, modest user impact) · Low (micro)
 | PERF-7 | Schema traversal caching | High | M-L | Cache resolved schemas via WeakMap. Profile first to confirm schema resolution dominates traversal time. |
 | PERF-8 | Batch storage reads | High | M | N sequential reads during list traversal → single batch. Matters for 50+ item patterns. |
 | PERF-9 | transformPropValue memoization | Medium | S-M | Cache cell-to-DOM-attribute transforms between reactive cycles. Profile first. |
-| PERF-10 | Scheduler writer index cleanup | Medium | S | Use Set instead of array for per-entity writer list. Matters when many actions write to same entity. [Tests needed.](#scheduler-perf-10) |
 | PERF-11 | IPC event serialization | Medium | M | Serialize only the event properties the handler reads. Matters for high-frequency events. |
 
 ## Test Prerequisites
@@ -224,6 +224,3 @@ transitive import chain tests before filtering.**
 **<a id="perf-1-document-caching"></a>PERF-1 (document caching):** Zero tests for cache-specific behavior. For
 CAS-only caching, test: correct storage/retrieval, space isolation, id-is-hash
 invariant. **Test scope depends on chosen strategy.**
-
-**<a id="scheduler-perf-10"></a>Scheduler (PERF-10):** No direct test for the `writersByEntity` index. No
-glitch-free guarantee test. **Write these before changing the data structure.**

@@ -23,6 +23,7 @@ import type {
   IExtendedStorageTransaction,
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
+import { getDirectTransactionReactivityLog } from "../src/storage/transaction-inspection.ts";
 
 describe("scheduler", () => {
   let storageManager: SchedulerTestStorageManager;
@@ -134,6 +135,56 @@ describe("scheduler", () => {
     await c.pull();
     expect(runCount).toBe(1);
     expect(c.get()).toBe(4);
+  });
+
+  it("records push-mode settle work-set size before actions mutate pending", async () => {
+    runtime.scheduler.enableSettleStats();
+
+    let runCount = 0;
+    const actionA: Action = () => {
+      runCount++;
+    };
+    const actionB: Action = () => {
+      runCount++;
+    };
+
+    const emptyLog = {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    };
+    runtime.scheduler.subscribe(actionA, emptyLog);
+    runtime.scheduler.subscribe(actionB, emptyLog);
+
+    await runtime.scheduler.idle();
+
+    const stats = runtime.scheduler.getSettleStats();
+    expect(runCount).toBe(2);
+    expect(stats?.iterations[0]?.workSetSize).toBe(2);
+    expect(stats?.iterations[0]?.actionsRun).toBe(2);
+  });
+
+  it("normalizes non-Error action throws before error handlers", async () => {
+    const errors: Error[] = [];
+    runtime.scheduler.onError((error) => {
+      errors.push(error);
+    });
+
+    const throwingAction: Action = () => {
+      throw "boom";
+    };
+
+    runtime.scheduler.subscribe(throwingAction, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    });
+
+    await runtime.scheduler.idle();
+
+    expect(errors.length).toBe(1);
+    expect(errors[0]).toBeInstanceOf(Error);
+    expect(errors[0].message).toBe("boom");
   });
 
   it("should re-run an async read-only effect when invalidated while paused", async () => {
@@ -1022,11 +1073,11 @@ describe("scheduler", () => {
     expect(resultCell.get()).toEqual({ count: 2, version: 1 });
   });
 
-  it("should track potentialWrites via Cell.set on nested path", async () => {
+  it("should track attemptedWrites via Cell.set on nested path", async () => {
     // Create a cell with nested structure
     const testCell = runtime.getCell<{ nested: { a: number; b: string } }>(
       space,
-      "potential-writes-cell-set-test",
+      "attempted-writes-cell-set-test",
       undefined,
       tx,
     );
@@ -1038,26 +1089,34 @@ describe("scheduler", () => {
     const setTx = runtime.edit();
     testCell.withTx(setTx).key("nested").set({ a: 1, b: "world" });
 
-    const log = txToReactivityLog(setTx);
+    const storageLog = getDirectTransactionReactivityLog(setTx)!;
+    const schedulerLog = txToReactivityLog(setTx);
 
-    // key("nested").set() reads the nested object to compare
-    // The "nested" path should appear in potentialWrites
-    expect(log.potentialWrites).toBeDefined();
+    // key("nested").set() reads the nested object to compare.
+    // The "nested" path should appear in attemptedWrites for CFC/security,
+    // but scheduler-facing ReactivityLog should not expose attemptedWrites.
+    const schedulerLogWithAttemptedWrites = schedulerLog as
+      & typeof schedulerLog
+      & {
+        attemptedWrites?: typeof schedulerLog.writes;
+      };
+    expect(storageLog.attemptedWrites).toBeDefined();
+    expect(schedulerLogWithAttemptedWrites.attemptedWrites).toBeUndefined();
     expect(
-      log.potentialWrites!.some((addr) =>
+      storageLog.attemptedWrites!.some((addr) =>
         addr.path[0] === "value" && addr.path[1] === "nested"
       ),
     ).toBe(true);
 
     // Only `b` changed within nested, so nested.b should be in writes
     expect(
-      log.writes.some((w) =>
+      schedulerLog.writes.some((w) =>
         w.path[0] === "value" && w.path[1] === "nested" && w.path[2] === "b"
       ),
     ).toBe(true);
     // nested.a should NOT be in writes (value didn't change)
     expect(
-      log.writes.some((w) =>
+      schedulerLog.writes.some((w) =>
         w.path[0] === "value" && w.path[1] === "nested" && w.path[2] === "a"
       ),
     ).toBe(false);
@@ -1065,13 +1124,13 @@ describe("scheduler", () => {
     await setTx.commit();
   });
 
-  it("should include nested path in potentialWrites when using key().set()", async () => {
+  it("should include nested path in attemptedWrites when using key().set()", async () => {
     // Create a cell with nested structure
     const testCell = runtime.getCell<{
       data: { unchanged: number; changed: number };
     }>(
       space,
-      "diff-update-potential-writes-cell",
+      "diff-update-attempted-writes-cell",
       undefined,
       tx,
     );
@@ -1083,27 +1142,34 @@ describe("scheduler", () => {
     const setTx = runtime.edit();
     testCell.withTx(setTx).key("data").set({ unchanged: 42, changed: 999 });
 
-    const log = txToReactivityLog(setTx);
+    const storageLog = getDirectTransactionReactivityLog(setTx)!;
+    const schedulerLog = txToReactivityLog(setTx);
 
-    // The "data" path should be in potentialWrites because diffAndUpdate
-    // reads the nested object to compare
-    expect(log.potentialWrites).toBeDefined();
+    // The "data" path should be in attemptedWrites because diffAndUpdate
+    // reads the nested object to compare.
+    const schedulerLogWithAttemptedWrites = schedulerLog as
+      & typeof schedulerLog
+      & {
+        attemptedWrites?: typeof schedulerLog.writes;
+      };
+    expect(storageLog.attemptedWrites).toBeDefined();
+    expect(schedulerLogWithAttemptedWrites.attemptedWrites).toBeUndefined();
     expect(
-      log.potentialWrites!.some((addr) =>
+      storageLog.attemptedWrites!.some((addr) =>
         addr.path[0] === "value" && addr.path[1] === "data"
       ),
     ).toBe(true);
 
     // Only changed property within data should be in writes
     expect(
-      log.writes.some((w) =>
+      schedulerLog.writes.some((w) =>
         w.path[0] === "value" && w.path[1] === "data" &&
         w.path[2] === "changed"
       ),
     ).toBe(true);
     // unchanged property should NOT be in writes (value didn't change)
     expect(
-      log.writes.some((w) =>
+      schedulerLog.writes.some((w) =>
         w.path[0] === "value" && w.path[1] === "data" &&
         w.path[2] === "unchanged"
       ),
@@ -1112,10 +1178,10 @@ describe("scheduler", () => {
     await setTx.commit();
   });
 
-  it("should not have potentialWrites when using getRaw without metadata", async () => {
+  it("should not have attemptedWrites when using getRaw without metadata", async () => {
     const testCell = runtime.getCell<{ value: number }>(
       space,
-      "no-potential-writes-cell",
+      "no-attempted-writes-cell",
       undefined,
       tx,
     );
@@ -1123,15 +1189,22 @@ describe("scheduler", () => {
     tx.commit();
     tx = runtime.edit();
 
-    // getRaw without metadata should not create potentialWrites
+    // getRaw without metadata should not create attemptedWrites
     const readTx = runtime.edit();
     testCell.withTx(readTx).key("value").getRaw();
 
-    const log = txToReactivityLog(readTx);
+    const storageLog = getDirectTransactionReactivityLog(readTx)!;
+    const schedulerLog = txToReactivityLog(readTx);
 
-    // Should have reads but no potentialWrites
-    expect(log.reads.length).toBeGreaterThanOrEqual(1);
-    expect(log.potentialWrites).toBeUndefined();
+    // Should have reads but no attemptedWrites
+    const schedulerLogWithAttemptedWrites = schedulerLog as
+      & typeof schedulerLog
+      & {
+        attemptedWrites?: typeof schedulerLog.writes;
+      };
+    expect(schedulerLog.reads.length).toBeGreaterThanOrEqual(1);
+    expect(storageLog.attemptedWrites).toBeUndefined();
+    expect(schedulerLogWithAttemptedWrites.attemptedWrites).toBeUndefined();
 
     await readTx.commit();
   });

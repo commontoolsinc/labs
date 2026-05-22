@@ -511,7 +511,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
   ) => {
     // Ensure parentNotebook is always a Writable (input is optional)
     const parentNotebook = _parentNotebook ??
-      Writable.of(null as NotebookPiece | null);
+      new Writable(null as NotebookPiece | null);
     // Type-based discovery for notebooks and "All Notes" piece
     const notebookWish = wish<NotebookPiece>({
       query: "#notebook",
@@ -539,36 +539,36 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
     });
 
     // Selection state for multi-select
-    const selectedNoteIndices = Writable.of<number[]>([]);
-    const lastSelectedNoteIndex = Writable.of<number>(-1);
-    const selectedAddNotebook = Writable.of<string>("");
-    const selectedMoveNotebook = Writable.of<string>("");
+    const selectedNoteIndices = new Writable<number[]>([]);
+    const lastSelectedNoteIndex = new Writable<number>(-1);
+    const selectedAddNotebook = new Writable<string>("");
+    const selectedMoveNotebook = new Writable<string>("");
 
     // Computed helpers for selection
     const selectedCount = computed(() => selectedNoteIndices.get().length);
     const hasSelection = computed(() => selectedNoteIndices.get().length > 0);
 
     // State for "New Notebook" prompt modal
-    const showNewNotebookPrompt = Writable.of<boolean>(false);
-    const newNotebookName = Writable.of<string>("");
-    const pendingNotebookAction = Writable.of<"add" | "move" | "">(""); // Track which action triggered the modal
+    const showNewNotebookPrompt = new Writable<boolean>(false);
+    const newNotebookName = new Writable<string>("");
+    const pendingNotebookAction = new Writable<"add" | "move" | "">(""); // Track which action triggered the modal
 
     // State for "New Note" prompt modal
-    const showNewNotePrompt = Writable.of<boolean>(false);
-    const newNoteTitle = Writable.of<string>("");
-    const usedCreateAnotherNote = Writable.of<boolean>(false); // Track if "Create Another" was used
+    const showNewNotePrompt = new Writable<boolean>(false);
+    const newNoteTitle = new Writable<string>("");
+    const usedCreateAnotherNote = new Writable<boolean>(false); // Track if "Create Another" was used
 
     // State for "New Nested Notebook" prompt modal (from dropdown menu)
-    const showNewNestedNotebookPrompt = Writable.of<boolean>(false);
-    const newNestedNotebookTitle = Writable.of<string>("");
+    const showNewNestedNotebookPrompt = new Writable<boolean>(false);
+    const newNestedNotebookTitle = new Writable<string>("");
 
-    const usedCreateAnotherNotebook = Writable.of<boolean>(false); // Track if "Create Another" was used
+    const usedCreateAnotherNotebook = new Writable<boolean>(false); // Track if "Create Another" was used
 
     // Backlinks - populated by backlinks-index.tsx
-    const backlinks = Writable.of<MentionablePiece[]>([]);
+    const backlinks = new Writable<MentionablePiece[]>([]);
 
     // State for inline title editing
-    const isEditingTitle = Writable.of<boolean>(false);
+    const isEditingTitle = new Writable<boolean>(false);
 
     // ===== Actions (converted from module-scope handlers) =====
 

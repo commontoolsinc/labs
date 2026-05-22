@@ -59,6 +59,19 @@ Use the plain-input style when the pattern API should stay data-shaped. Use the
 writable-input style when handlers need `.key(...)`, `.equals(...)`, or stable
 cell bindings, especially in mutation-heavy multi-user UI.
 
+For local cells that should not become public pattern inputs, use scoped cell
+constructors:
+
+```ts
+const sharedBoard = new Writable.perSpace(DEFAULT_BOARD);
+const displayName = new Writable.perUser("");
+const selectedItem = new Writable.perSession<string | null>(null);
+```
+
+Plain `new Writable(...)` inherits the containing pattern or factory scope. Use
+`new Writable.perUser(...)` or `new Writable.perSession(...)` when the local
+cell must have a specific sharing boundary independent of that context.
+
 `PerAny<T>` is rare. Use it only when an inner value must override an outer
 scope declaration and may validly come from any concrete scope:
 

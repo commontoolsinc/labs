@@ -8,13 +8,13 @@
 import { computed, nonPrivateRandom, pattern, Writable } from "commonfabric";
 
 export default pattern(() => {
-  const items = Writable.of([
+  const items = new Writable([
     { title: "Apples", tag: "fruit" },
     { title: "Carrots", tag: "vegetable" },
     { title: "Bananas", tag: "fruit" },
     { title: "Broccoli", tag: "vegetable" },
   ]);
-  const uniqueTags = Writable.of<string[]>([]);
+  const uniqueTags = new Writable<string[]>([]);
 
   // Non-idempotent: random sort before Set changes iteration order
   computed(() => {

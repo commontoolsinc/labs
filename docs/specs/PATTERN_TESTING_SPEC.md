@@ -87,11 +87,13 @@ This format keeps `action()` streams and `computed()` cells separate in the type
 import { action, computed, pattern, Writable } from "commonfabric";
 import ExpenseTracker from "./expense-tracker.tsx";
 
+type Expense = { description: string; amount: number; category: string };
+
 // Test pattern for expense tracker
 export default pattern(() => {
   // 1. Instantiate the pattern under test with initial state
   const subject = ExpenseTracker({
-    expenses: Writable.of([]),
+    expenses: new Writable<Expense[]>([]),
   });
 
   // 2. Define test actions using action() - triggers events on the pattern
@@ -529,7 +531,7 @@ import Counter from "./counter.tsx";
 
 export default pattern(() => {
   // Instantiate counter with initial value
-  const counter = Counter({ value: Writable.of(0) });
+  const counter = Counter({ value: new Writable(0) });
 
   // Test actions - use action() to create void streams
   const action_increment = action(() => {

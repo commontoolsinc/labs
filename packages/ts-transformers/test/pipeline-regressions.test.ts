@@ -106,6 +106,7 @@ Deno.test(
       "HelperOwnedExpressionSiteLoweringTransformer",
       "WriteAuthorizedByValidationTransformer",
       "PatternCallbackLoweringTransformer",
+      "BuilderCallbackHoistingTransformer",
       "SchemaInjectionTransformer",
       "SchemaGeneratorTransformer",
       "ReactiveVariableForTransformer",
@@ -161,8 +162,19 @@ const p = pattern<{ mentionable: MentionablePiece[] }, { [UI]: any }>((
       types: COMMONFABRIC_TYPES,
     });
 
-    assertStringIncludes(output, "c[__cfHelpers.NAME]");
-    assert(!output.includes("return c.key(NAME)!"));
+    // Test intent: imported well-known CF keys (NAME/UI/SELF/FS) must never
+    // appear as bare identifiers in the lowered output — they must always be
+    // helper-backed (__cfHelpers.NAME etc.). After CT-1586, well-known CF
+    // keys on tracked-opaque roots lower to `expr.key(__cfHelpers.NAME)`
+    // in-place rather than being wrapped in `derive(..., ({c}) =>
+    // c[__cfHelpers.NAME])`. The surface form must include the helper
+    // expression on the `c` root specifically — generic substring
+    // checks could pass even if `c` got renamed by an unrelated bug.
+    assertStringIncludes(output, "c.key(__cfHelpers.NAME)");
+    assert(
+      !output.includes("c.key(NAME)") && !output.includes("c[NAME]"),
+      "Bare NAME identifier must not appear in lowered output",
+    );
   },
 );
 
@@ -518,12 +530,124 @@ export default pattern<{ entries: Entry[] }, { [UI]: VNode }>(({ entries }) => (
     assertStringIncludes(output, 'piece: entry.key("piece")');
     assertStringIncludes(output, 'name: entry.key("name")');
     assertStringIncludes(output, 'backlinks: entry.key("backlinks")');
+    // CT-1586: row[UI] must lower to row.key(__cfHelpers.UI) in-place,
+    // never to a derive wrapper around the [UI] element access. This is
+    // the exact ticket repro — without the assertion below, the bug
+    // (derive(..., ({row}) => row[__cfHelpers.UI])) would have passed the
+    // outer "stays structural" check above unnoticed.
+    assertStringIncludes(output, "row.key(__cfHelpers.UI)");
     assert(
       !/__cfHelpers\.derive\([\s\S]{0,500}EntryRow: EntryRow[\s\S]{0,500}EntryRow\(\{/
         .test(
           output,
         ),
       "expected mapped pattern factory invocation to stay structural instead of being wrapped in derive",
+    );
+  },
+);
+
+Deno.test(
+  "Pipeline regression: plain callables that lack pattern-factory shape are not classified as opaque-origin calls (CT-1586 boundary)",
+  async () => {
+    // CT-1586 extended `isOpaqueOriginCall` to recognize structural pattern
+    // factories via `isPatternFactoryCalleeExpression`, which requires the
+    // callee type to expose both `argumentSchema` and `resultSchema`
+    // properties (and NOT `with`). A plain user-authored helper that
+    // returns a regular value should NOT trip the new gate.
+    //
+    // The call itself must therefore be wrapped in derive(...) when used
+    // inside a reactive context — that's the pre-existing behavior for
+    // non-opaque-origin calls. If `isPatternFactoryCalleeExpression`
+    // started false-positively matching plain helpers (e.g. due to type
+    // widening), we'd see the plainHelper call land structurally instead
+    // of being derive-wrapped. This test locks in the boundary.
+    const source = `import { pattern, UI, type VNode } from "commonfabric";
+
+interface Entry { piece: string }
+
+function plainHelper(input: { piece: string }): { rendered: string; [UI]: string } {
+  return { rendered: input.piece, [UI]: input.piece };
+}
+
+export default pattern<{ entries: Entry[] }, { [UI]: VNode }>(({ entries }) => ({
+  [UI]: (
+    <div>
+      {entries.map((entry) => {
+        const row = plainHelper({ piece: entry.piece });
+        return row[UI];
+      })}
+    </div>
+  ),
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+
+    // The plain helper call is preserved.
+    assertStringIncludes(output, "plainHelper(");
+    // Because plainHelper is NOT classified as opaque-origin, the call
+    // result must be derive-wrapped — the call should appear inside a
+    // synthetic compute callback's body. The arrow `({ entry }) =>
+    // plainHelper(...)` is the tell. If isPatternFactoryCalleeExpression
+    // matched it, the call would land structurally as `const row =
+    // plainHelper(...)` with no surrounding derive.
+    assertStringIncludes(output, "}) => plainHelper(");
+    assert(
+      !/const row = plainHelper\(/.test(output),
+      "expected plainHelper call to be wrapped in derive(...) — non-opaque-origin calls must NOT be treated as pattern factories",
+    );
+  },
+);
+
+Deno.test(
+  "Pipeline regression: dynamic key access on pattern-factory result still wraps in derive (CT-1586 boundary)",
+  async () => {
+    // After CT-1586, well-known CF computed keys (UI/NAME/SELF/FS) lower
+    // to `.key()` in-place even when the access lives inside a JSX slot.
+    // But genuinely-dynamic key access — where the argument resolves to a
+    // value that isn't a static path segment — must STILL go through the
+    // dynamic-wrap (derive) path. The reorder in pattern-body-reactive-
+    // root-lowering is gated on `info?.root && !info.dynamic`; this test
+    // exercises the `info.dynamic === true` branch to lock in that
+    // boundary.
+    const source = `import { pattern, UI, type VNode } from "commonfabric";
+
+type Entry = { piece: string; fieldName: string };
+type Row = Record<string, string> & { [UI]: VNode };
+
+const EntryRow = pattern<Entry, Row>(({ piece }) => ({
+  [UI]: <span>{piece}</span>,
+  body: piece,
+}));
+
+export default pattern<{ entries: Entry[] }, { [UI]: VNode }>(({ entries }) => ({
+  [UI]: (
+    <div>
+      {entries.map((entry) => {
+        const row = EntryRow({ piece: entry.piece, fieldName: entry.fieldName });
+        // Dynamic key — entry.fieldName is a reactive string, not a known
+        // static path segment.
+        return row[entry.fieldName.toString()];
+      })}
+    </div>
+  ),
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+
+    // The pattern-factory call itself still stays structural.
+    assertStringIncludes(output, "const row = EntryRow({");
+    // The dynamic access should NOT have lowered to `.key()` — `.key()` is
+    // only valid for known-static path segments. The dynamic-wrap path
+    // is responsible for this case.
+    assert(
+      !/row\.key\(entry\./.test(output),
+      "expected dynamic key access not to lower to row.key(...)",
     );
   },
 );
@@ -633,6 +757,80 @@ export default pattern<{ values: string[] }>(({ values }) => {
 );
 
 Deno.test(
+  "Pipeline regression: local concise ternary event handlers stay function-valued",
+  async () => {
+    const source =
+      `import { derive, handler, pattern, UI, Writable } from "commonfabric";
+
+interface Item {
+  id: string;
+}
+
+interface Vote {
+  itemId: string;
+  vote: "yes" | "no";
+}
+
+const castVote = handler<{ itemId: string; vote: "yes" }, { votes: Writable<Vote[]> }>(
+  (event, { votes }) => {
+    votes.push(event);
+  },
+);
+
+const clearVote = handler<{ itemId: string }, {}>(() => {});
+
+export default pattern<{ items: Writable<Item[]>; votes: Writable<Vote[]> }>(
+  ({ items, votes }) => {
+    const boundCastVote = castVote({ votes });
+    const boundClearVote = clearVote({});
+
+    return {
+      [UI]: (
+        <div>
+          {items.map((item) => {
+            const iid = item.id;
+            const myVote = derive(
+              { votes, itemId: iid },
+              ({ votes, itemId }) =>
+                votes.get().find((vote) => vote.itemId === itemId)?.vote,
+            );
+
+            const onVoteYes = () =>
+              myVote === "yes"
+                ? boundClearVote.send({ itemId: iid })
+                : boundCastVote.send({ itemId: iid, vote: "yes" });
+
+            return <cf-button onClick={onVoteYes}>yes</cf-button>;
+          })}
+        </div>
+      ),
+    };
+  },
+);
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+
+    assertStringIncludes(output, 'const onVoteYes = () => myVote === "yes"');
+    assertStringIncludes(output, "boundClearVote.send({ itemId: iid })");
+    assertStringIncludes(
+      output,
+      'boundCastVote.send({ itemId: iid, vote: "yes" })',
+    );
+    assert(
+      !output.includes("const onVoteYes = __cfHelpers.derive("),
+      "local event handler variable must not become a derive cell containing a function",
+    );
+    assert(
+      !output.includes("=> () => __cfHelpers.ifElse("),
+      "local event handler body must keep imperative ternary semantics",
+    );
+  },
+);
+
+Deno.test(
   "Pipeline regression: helper-owned IIFE local cell reads lower before use",
   async () => {
     const source = `import { pattern, UI, Writable } from "commonfabric";
@@ -654,5 +852,170 @@ export default pattern<{ enabled: Writable<boolean> }>(({ enabled }) => ({
       "expected the eager cell read to be lowered into a derive before the IIFE body uses it",
     );
     assertStringIncludes(output, "({ enabled }) => enabled.get()");
+  },
+);
+
+Deno.test(
+  "Pipeline regression: nullable computed capture keeps source array schema array-shaped",
+  async () => {
+    const source =
+      `import { computed, derive, pattern, UI } from "commonfabric";
+
+interface Option {
+  title: string;
+  ignored: string;
+}
+
+export default pattern<{ options: Option[] }, { [UI]: any }>(({ options }) => {
+  const minimalNullable = derive(
+    options,
+    (o) => o.length > 0 ? o[0].title : null,
+  );
+
+  return {
+    [UI]: (
+      <div>
+        {computed(() => {
+          const value = minimalNullable;
+          return <span>{value ?? "null"}</span>;
+        })}
+      </div>
+    ),
+  };
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const minimalNullableStart = output.indexOf(
+      "const minimalNullable = derive(",
+    );
+    assert(
+      minimalNullableStart >= 0,
+      "expected transformed minimalNullable derive",
+    );
+    const minimalNullableWindow = output.slice(
+      minimalNullableStart,
+      minimalNullableStart + 1200,
+    );
+
+    assertStringIncludes(minimalNullableWindow, 'type: "array"');
+    assertStringIncludes(minimalNullableWindow, "items:");
+    assertStringIncludes(minimalNullableWindow, "title:");
+    assertStringIncludes(minimalNullableWindow, 'type: "null"');
+    assert(
+      !minimalNullableWindow.includes('properties: {\n        "0"'),
+      "expected the derive input schema to stay array-shaped, not shrink to an object with numeric keys",
+    );
+    assert(
+      !minimalNullableWindow.includes('required: ["length", "0"]'),
+      "expected the derive input schema not to require object-style array members",
+    );
+  },
+);
+
+Deno.test(
+  "Pipeline regression: computed captures preserve destructured PerUser defaults",
+  async () => {
+    const source =
+      `import { computed, Default, NAME, pattern, type PerSpace, type PerUser, UI, type VNode } from "commonfabric";
+
+const trimmedName = (name: string | undefined) => (name ?? "").trim();
+
+interface Input {
+  question?: PerSpace<string | Default<"Where should we eat?">>;
+  myName?: PerUser<string | Default<"">>;
+}
+
+export default pattern<Input, { [NAME]: string; [UI]: VNode }>(({ question, ["myName"]: displayName }) => ({
+  [NAME]: "ct-1606",
+  [UI]: (
+    <cf-screen>
+      <div slot="header">
+        <h2>{question}</h2>
+        {computed(() => {
+          const value = trimmedName(displayName);
+          return <div>me is: "{value}"</div>;
+        })}
+      </div>
+      <div>body renders</div>
+    </cf-screen>
+  ),
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const deriveStart = output.indexOf("{__cfHelpers.derive({");
+    assert(deriveStart >= 0, "expected computed() to lower to derive()");
+    const deriveWindow = output.slice(deriveStart, deriveStart + 700);
+
+    assertStringIncludes(deriveWindow, "displayName: {");
+    assertStringIncludes(deriveWindow, 'type: "string"');
+    assertStringIncludes(deriveWindow, '"default": ""');
+    assertStringIncludes(deriveWindow, 'scope: "user"');
+  },
+);
+
+Deno.test(
+  "Pipeline regression: computed captures preserve destructured Writable defaults",
+  async () => {
+    const source =
+      `import { computed, Default, NAME, pattern, UI, type VNode, type Writable } from "commonfabric";
+
+interface Input {
+  draftTitle: Writable<string | Default<"">>;
+}
+
+export default pattern<Input, { [NAME]: string; [UI]: VNode }>(({ draftTitle }) => ({
+  [NAME]: "writable-default-capture",
+  [UI]: <div>{computed(() => <span>{draftTitle}</span>)}</div>,
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const deriveStart = output.indexOf("{__cfHelpers.derive({");
+    assert(deriveStart >= 0, "expected computed() to lower to derive()");
+    const deriveWindow = output.slice(deriveStart, deriveStart + 700);
+
+    assertStringIncludes(deriveWindow, "draftTitle: {");
+    assertStringIncludes(deriveWindow, 'type: "string"');
+    assertStringIncludes(deriveWindow, '"default": ""');
+    assertStringIncludes(deriveWindow, "asCell:");
+  },
+);
+
+Deno.test(
+  "Pipeline regression: computed captures preserve Writable Record defaults without orphan refs",
+  async () => {
+    const source =
+      `import { computed, Default, NAME, pattern, UI, type VNode, type Writable } from "commonfabric";
+
+interface Input {
+  selections: Writable<Record<string, boolean> | Default<Record<string, never>>>;
+}
+
+export default pattern<Input, { [NAME]: string; [UI]: VNode }>(({ selections }) => ({
+  [NAME]: "writable-record-default-capture",
+  [UI]: <div>{computed(() => selections.foo ? "yes" : "no")}</div>,
+}));
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const deriveStart = output.indexOf("{__cfHelpers.derive({");
+    assert(deriveStart >= 0, "expected computed() to lower to derive()");
+    const deriveWindow = output.slice(deriveStart, deriveStart + 900);
+
+    assertStringIncludes(deriveWindow, "selections:");
+    assert(
+      !deriveWindow.includes("AnonymousType_"),
+      "expected Writable<Record<...Default...>> capture not to emit orphan anonymous refs",
+    );
   },
 );

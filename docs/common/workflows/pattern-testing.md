@@ -64,7 +64,7 @@ export default pattern(() => {
 });
 ```
 
-**Note:** Pass plain values when instantiating patterns in tests. The runtime creates independent writable cells automatically. Use `Writable.of()` only when you need to test shared state behavior. See [Writable](../concepts/types-and-schemas/writable.md#passing-values-to-pattern-inputs) for details.
+**Note:** Pass plain values when instantiating patterns in tests. The runtime creates independent writable cells automatically. Use `new Writable()` only when you need to test shared state behavior. See [Writable](../concepts/types-and-schemas/writable.md#passing-values-to-pattern-inputs) for details.
 
 ## Running Tests
 

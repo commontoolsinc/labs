@@ -115,8 +115,8 @@ export const GiftPrefsModule = pattern<
   GiftPrefsModuleInput
 >(
   ({ giftTier, favorites, avoid }) => {
-    const favoriteInput = Writable.of<string>("");
-    const avoidInput = Writable.of<string>("");
+    const favoriteInput = new Writable<string>("");
+    const avoidInput = new Writable<string>("");
 
     const displayText = computed(() => {
       const opt = TIER_OPTIONS.find((o) => o.value === giftTier);

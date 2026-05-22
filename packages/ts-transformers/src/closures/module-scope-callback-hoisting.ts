@@ -1,8 +1,11 @@
 import ts from "typescript";
+import { FUNCTION_HARDENING_HELPER_NAME } from "@commonfabric/utils/sandbox-contract";
+import { SYNTHETIC_MODULE_CALLBACK_PREFIX } from "../ast/call-kind.ts";
 import {
   isDeclaredWithinFunction,
   isModuleScopedDeclaration,
 } from "../ast/scope-analysis.ts";
+import { CF_HELPERS_IDENTIFIER } from "../core/cf-helpers.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 import type { TransformationContext } from "../core/mod.ts";
 
@@ -14,11 +17,57 @@ const HOISTABLE_BUILDER_NAMES = new Set([
   "patternTool",
 ]);
 
+/**
+ * Identifiers that the pipeline itself injects into transformed source
+ * and that consequently appear in lowered callback bodies as transformer
+ * scaffolding rather than user-authored references. Treat references to
+ * these as not contributing to the "uses module-scoped references"
+ * signal that gates hoisting — a callback whose only module-level
+ * references are synthesized helpers isn't materially benefiting from
+ * being moved to module scope.
+ *
+ * Covers:
+ *   - `__cfHelpers`: the helper-module import injected by every transform.
+ *   - `__cfHardenFn` (prefix): module-scope function hardening helper.
+ *     Matched as a prefix because `module-scope-function-hardening` uses
+ *     `createUniqueName`, which defers numeric suffixing to emit, so a
+ *     single source file can carry `__cfHardenFn` and `__cfHardenFn_1`
+ *     for the same conceptual helper.
+ *   - `__cfModuleCallback` (prefix): the hoister's own output. When
+ *     hoisting an inner builder callback (e.g. a synthetic derive inside
+ *     a map callback) before its outer callback is analyzed, the outer
+ *     callback's body suddenly contains a `__cfModuleCallback_N`
+ *     reference. Without this exclusion, that reference would itself
+ *     count as "uses module-scoped references" and incorrectly promote
+ *     the outer callback to hoistable. The exclusion keeps the inner
+ *     and outer hoist decisions independent.
+ */
+function isTransformerInjectedIdentifier(text: string): boolean {
+  return text === CF_HELPERS_IDENTIFIER ||
+    text.startsWith(FUNCTION_HARDENING_HELPER_NAME) ||
+    text.startsWith(SYNTHETIC_MODULE_CALLBACK_PREFIX);
+}
+
 export function hoistModuleScopedBuilderCallbacks(
   sourceFile: ts.SourceFile,
   context: TransformationContext,
 ): ts.SourceFile {
   const hoistedStatements: ts.Statement[] = [];
+  // Counter for synthesizing unique hoisted-callback names per source file.
+  // We deliberately do NOT use `context.factory.createUniqueName` here: that
+  // helper returns identifiers whose `.text` is the bare prefix
+  // (`"__cfModuleCallback"`) and defers numeric suffixing to the emitter at
+  // print time. Downstream stages — notably `SchemaInjectionTransformer`'s
+  // `getSyntheticModuleCallbackInitializer` (`schema-injection.ts`) — match
+  // call-site `__cfModuleCallback_N` references back to their initializers
+  // by `identifier.text === declaration.name.text`. With `createUniqueName`
+  // every hoisted identifier has the same `.text`, so every lookup matches
+  // the first declaration regardless of which `_N` the printed source shows
+  // — and capability summaries from the *first* hoisted callback get
+  // applied to *every* hoisted callback's call site. Synthesizing the
+  // suffix into `.text` directly keeps the identifier's stored name and
+  // its printed name in sync, so identity-by-text resolution is sound.
+  let hoistCounter = 0;
 
   const visit: ts.Visitor = (node: ts.Node): ts.Node => {
     const visited = ts.visitEachChild(node, visit, context.tsContext);
@@ -26,7 +75,7 @@ export function hoistModuleScopedBuilderCallbacks(
       return visited;
     }
 
-    const callbackIndices = getBuilderCallbackIndices(visited);
+    const callbackIndices = getBuilderCallbackIndices(visited, context);
     if (callbackIndices.length === 0) {
       return visited;
     }
@@ -82,8 +131,9 @@ export function hoistModuleScopedBuilderCallbacks(
       }
 
       changed = true;
-      const callbackName = context.factory.createUniqueName(
-        "__cfModuleCallback",
+      hoistCounter += 1;
+      const callbackName = context.factory.createIdentifier(
+        `__cfModuleCallback_${hoistCounter}`,
       );
       hoistedStatements.push(
         context.factory.createVariableStatement(
@@ -134,6 +184,7 @@ export function hoistModuleScopedBuilderCallbacks(
 
 function getBuilderCallbackIndices(
   call: ts.CallExpression,
+  context: TransformationContext,
 ): readonly number[] {
   const callee = unwrapExpression(call.expression);
   const builderName = ts.isIdentifier(callee)
@@ -148,12 +199,32 @@ function getBuilderCallbackIndices(
 
   switch (builderName) {
     case "derive": {
+      // Schema-injected (4+ arg) derive calls: callback at index 3. This
+      // branch is dead at the hoist's current pipeline position (we run
+      // before SchemaInjectionTransformer) but keeps the function
+      // tolerant of future reordering.
+      if (call.arguments.length >= 4) return [3];
+      if (call.arguments.length < 2) return [];
       const deriveCallback = call.arguments[1];
-      return call.arguments.length >= 4 ? [3] : call.arguments.length >= 2 &&
-          isFunctionLikeExpression(deriveCallback) &&
-          hasSelfDescribingFunctionTypes(deriveCallback)
-        ? [1]
-        : [];
+      if (!isFunctionLikeExpression(deriveCallback)) return [];
+      // Two shapes of 2-arg derive reach the hoister:
+      //   (a) Synthetic compute callbacks produced by the closure
+      //       transformer's reactive-wrapping (e.g. `__cfHelpers.derive(
+      //       captures, ({ item }) => formatPrice(item.price * TAX_RATE))`).
+      //       These have destructured params with no explicit type
+      //       annotations because the transformer synthesizes them, and
+      //       the closure pipeline tags them via
+      //       `context.markAsSyntheticComputeCallback`.
+      //   (b) User-authored `derive(inputs, callback)` calls written
+      //       directly in source — usually with a destructured-and-typed
+      //       parameter like `({ x }: { x: T }) => …`. The type
+      //       annotation is what makes them safe to relocate to module
+      //       scope: it carries the structural contract the runtime
+      //       relies on. Untyped user-authored 2-arg derives are
+      //       skipped (better to leave them inline than guess).
+      if (context.isSyntheticComputeCallback?.(deriveCallback)) return [1];
+      if (hasSelfDescribingFunctionTypes(deriveCallback)) return [1];
+      return [];
     }
     case "handler":
     case "lift":
@@ -189,6 +260,29 @@ function analyzeCallbackForHoisting(
   let usesModuleScopedReferences = false;
   const capturedEnclosingNames = new Set<string>();
 
+  // Pre-compute names declared locally inside the callback (its
+  // parameter binding targets plus variable declarations in its body,
+  // not descending into nested function-likes). When a referenced
+  // identifier's name is in this set, classify it as `local` without
+  // going through `getReferenceScope`.
+  //
+  // This sidesteps the documented synthetic-node hazard in
+  // `isDeclaredWithinFunction` (see ast/scope-analysis.ts:70-86):
+  // upstream transformers can synthesize callbacks whose body declares
+  // locals via synthesized nodes (pos = -1). For those, the
+  // symbol-resolution path falls back to the original-AST declaration
+  // and concludes the local is captured from enclosing scope, poisoning
+  // the hoist decision. Name-based recognition is safe here because the
+  // walker already stops at nested function boundaries — we only need
+  // to cover names declared in this exact scope.
+  const localNames = new Set<string>();
+  for (const parameter of callback.parameters) {
+    collectBindingNames(parameter.name, localNames);
+  }
+  if (callback.body) {
+    collectLocalDeclarationNames(callback.body, callback, localNames);
+  }
+
   const visit = (node: ts.Node): void => {
     if (
       node !== callback &&
@@ -198,6 +292,15 @@ function analyzeCallbackForHoisting(
     }
 
     if (ts.isIdentifier(node)) {
+      if (
+        !shouldIgnoreReferenceSite(node) &&
+        localNames.has(node.text)
+      ) {
+        // Locally-declared in this callback — skip enclosing/module
+        // classification entirely.
+        ts.forEachChild(node, visit);
+        return;
+      }
       const scope = getReferenceScope(node, callback, checker);
       if (scope === "module") {
         usesModuleScopedReferences = true;
@@ -225,6 +328,37 @@ function analyzeCallbackForHoisting(
   };
 }
 
+function collectBindingNames(
+  name: ts.BindingName,
+  bucket: Set<string>,
+): void {
+  if (ts.isIdentifier(name)) {
+    bucket.add(name.text);
+    return;
+  }
+  for (const element of name.elements) {
+    if (ts.isOmittedExpression(element)) continue;
+    collectBindingNames(element.name, bucket);
+  }
+}
+
+function collectLocalDeclarationNames(
+  body: ts.Node,
+  callback: ts.FunctionLikeDeclaration,
+  bucket: Set<string>,
+): void {
+  const visit = (node: ts.Node): void => {
+    if (node !== body && node !== callback && isFunctionLikeDeclaration(node)) {
+      return;
+    }
+    if (ts.isVariableDeclaration(node)) {
+      collectBindingNames(node.name, bucket);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(body);
+}
+
 type ReferenceScope = "local" | "module" | "enclosing" | "other";
 
 function getReferenceScope(
@@ -234,6 +368,17 @@ function getReferenceScope(
 ): ReferenceScope {
   if (shouldIgnoreReferenceSite(node)) {
     return "local";
+  }
+
+  // Transformer-injected scaffolding (`__cfHelpers`, `__cfHardenFn*`)
+  // appears in many lowered callback bodies but doesn't reflect any user-
+  // authored module-level reference. Treat as `"other"` so it neither
+  // contributes to `usesModuleScopedReferences` nor flags an enclosing
+  // capture. Without this, ~60% of array-method callback hoists in the
+  // existing fixture suite were false positives — pointed out by Berni
+  // in the CT-1585 PR review.
+  if (isTransformerInjectedIdentifier(node.text)) {
+    return "other";
   }
 
   const symbol = ts.isShorthandPropertyAssignment(node.parent)
@@ -261,6 +406,18 @@ function getReferenceScope(
 
   if (declarations.some((decl) => ts.isTypeParameterDeclaration(decl))) {
     return "local";
+  }
+
+  // Ambient globals (e.g. `console`, `Math`, `JSON`, `Promise`) have all
+  // their declarations in TypeScript's `lib.*.d.ts` files. They aren't
+  // module-level bindings of the current module — they're part of the
+  // runtime's ambient environment, available everywhere. A callback that
+  // only "uses module-scoped references" because it references `console`
+  // isn't materially benefiting from being moved to module scope, so
+  // classify these as `"other"` rather than `"module"`. Pointed out by
+  // Berni in the CT-1585 PR review.
+  if (declarations.every((decl) => decl.getSourceFile().isDeclarationFile)) {
+    return "other";
   }
 
   if (

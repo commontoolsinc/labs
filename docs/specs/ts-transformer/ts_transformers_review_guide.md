@@ -90,6 +90,12 @@ does **not** make foreign callback containers themselves part of the language.
 
 ## Files To Review
 
+First diagnostic command when a transformer behavior is surprising:
+
+```bash
+deno task cf check <pattern-or-fixture>.tsx --show-transformed --no-run
+```
+
 - [expression-site-policy.ts](../../../packages/ts-transformers/src/transformers/expression-site-policy.ts)
   - shared expression-site handling decision
 - [call-kind.ts](../../../packages/ts-transformers/src/ast/call-kind.ts)
@@ -110,7 +116,7 @@ does **not** make foreign callback containers themselves part of the language.
 | `pattern()` result inferred as `any`                                          | error unless an explicit Output type/schema is provided                  |
 | `pattern()` result inferred as `unknown`                                      | error unless an explicit Output type/schema is provided                  |
 | inline-destructured `pattern(({...}: T) => ...)` vs `pattern<T>(...)`         | equivalent input/result schemas                                          |
-| generic helper definition site `wish<T>` / `generateObject<T>` / `Cell.of<T>` | degrade unresolved type params to `{ type: "unknown" }`                  |
+| generic helper definition site `wish<T>` / `generateObject<T>` / `new Cell<T>` | degrade unresolved type params to `{ type: "unknown" }`                 |
 | explicit-generic builder definition site `lift<T, U>` / `handler<E, S>`       | degrade unresolved type params to `{ type: "unknown" }`                  |
 | transformed structural cell values                                            | preserve recovered structure rather than collapsing to `any` / `unknown` |
 | reactive array element access `items[index]`                                  | preserve `string \| undefined` precision                                 |

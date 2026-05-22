@@ -18,6 +18,7 @@ import { Default, pattern, UI, VNode, Writable, } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn(({ entries, p }) => visibleEntries(entries, p[0] || ""));
 interface Entry {
     name: string;
 }
@@ -36,13 +37,13 @@ function visibleEntries(entries: Writable<Default<Entry[], [
 __cfHardenFn(visibleEntries);
 export default pattern((__cf_pattern_input) => {
     const entries = __cf_pattern_input.key("entries");
-    const path = Writable.of<string[]>([], {
+    const path = new Writable<string[]>([], {
         type: "array",
         items: {
             type: "string"
         }
     } as const satisfies __cfHelpers.JSONSchema).for("path", true);
-    const labelPrefix = Writable.of("prefix:", {
+    const labelPrefix = new Writable("prefix:", {
         type: "string"
     } as const satisfies __cfHelpers.JSONSchema).for("labelPrefix", true);
     return {
@@ -87,6 +88,7 @@ export default pattern((__cf_pattern_input) => {
                             items: {
                                 $ref: "#/$defs/Entry"
                             },
+                            "default": [],
                             asCell: ["readonly"]
                         },
                         p: {
@@ -127,7 +129,7 @@ export default pattern((__cf_pattern_input) => {
                 } as const satisfies __cfHelpers.JSONSchema, {
                     entries: entries,
                     p: p
-                }, ({ entries, p }) => visibleEntries(entries, p[0] || "")).for("visible", true);
+                }, __cfModuleCallback_1).for("visible", true);
                 return visible.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                     const entry = __cf_pattern_input.key("element");
                     const labelPrefix = __cf_pattern_input.key("params", "labelPrefix");

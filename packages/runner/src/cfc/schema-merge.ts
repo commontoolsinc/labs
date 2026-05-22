@@ -56,6 +56,7 @@ const mergeSetLikeIfcArray = (
   key: string,
   existing: unknown,
   candidate: unknown,
+  path: string,
 ): unknown => {
   if (existing === undefined) {
     return candidate;
@@ -70,14 +71,14 @@ const mergeSetLikeIfcArray = (
     case "addIntegrity": {
       if (!Array.isArray(existing) || !Array.isArray(candidate)) {
         if (!deepEqual(existing, candidate)) {
-          throw new Error(`${key} must remain stable`);
+          throw new Error(`${key} must remain stable at ${path || "/"}`);
         }
         return existing;
       }
       const existingArray = existing as readonly unknown[];
       const candidateArray = candidate as readonly unknown[];
       if (!arraySubsetOf(existingArray, candidateArray)) {
-        throw new Error(`${key} cannot be weakened`);
+        throw new Error(`${key} cannot be weakened at ${path || "/"}`);
       }
       return mergeArraySet(existingArray, candidateArray);
     }
@@ -90,14 +91,14 @@ const mergeSetLikeIfcArray = (
         !candidate.every((entry) => typeof entry === "string")
       ) {
         if (!deepEqual(existing, candidate)) {
-          throw new Error(`${key} must remain stable`);
+          throw new Error(`${key} must remain stable at ${path || "/"}`);
         }
         return existing;
       }
       const existingArray = existing as readonly unknown[];
       const candidateArray = candidate as readonly unknown[];
       if (!arraySubsetOf(candidateArray, existingArray)) {
-        throw new Error(`${key} cannot be weakened`);
+        throw new Error(`${key} cannot be weakened at ${path || "/"}`);
       }
       return mergeArraySet(candidateArray);
     }
@@ -105,13 +106,13 @@ const mergeSetLikeIfcArray = (
     case "projection":
     case "collection":
       if (!deepEqual(existing, candidate)) {
-        throw new Error(`${key} must remain stable`);
+        throw new Error(`${key} must remain stable at ${path || "/"}`);
       }
       return existing;
     case "flowPrecisionClaim":
     case "uiContract":
       if (!deepEqual(existing, candidate)) {
-        throw new Error(`${key} must remain stable`);
+        throw new Error(`${key} must remain stable at ${path || "/"}`);
       }
       return existing;
     default:
@@ -122,6 +123,7 @@ const mergeSetLikeIfcArray = (
 const mergeIfc = (
   existing: JSONSchemaObj["ifc"],
   candidate: JSONSchemaObj["ifc"],
+  path: string,
 ): JSONSchemaObj["ifc"] => {
   if (existing === undefined) {
     return candidate;
@@ -138,6 +140,7 @@ const mergeIfc = (
       key,
       existingIfc[key],
       candidateIfc[key],
+      path,
     );
   }
   return merged as JSONSchemaObj["ifc"];
@@ -261,7 +264,11 @@ const mergeSchemaNode = (
       !arraySubsetOf(leftTypes, rightTypes) ||
       !arraySubsetOf(rightTypes, leftTypes))
   ) {
-    throw new Error(`type changed incompatibly at ${path || "/"}`);
+    throw new Error(
+      `type changed incompatibly at ${path || "/"}: ${
+        JSON.stringify(leftTypes)
+      } -> ${JSON.stringify(rightTypes)}`,
+    );
   }
 
   const mergedProperties: Record<string, JSONSchema> = {
@@ -291,7 +298,7 @@ const mergeSchemaNode = (
       ? { properties: mergedProperties }
       : {}),
     ...(mergedItems !== undefined ? { items: mergedItems } : {}),
-    ifc: mergeIfc(left.ifc, right.ifc),
+    ifc: mergeIfc(left.ifc, right.ifc, path),
     required: mergeRequired(left.required, right.required, mergedProperties),
     default: mergeDefaults(left.default, right.default),
   };

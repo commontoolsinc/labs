@@ -8,7 +8,7 @@ Use `action()` to handle user events like button clicks, form submissions, and o
 import { action, pattern, Writable, UI } from 'commonfabric';
 
 export default pattern(() => {
-  const count = Writable.of(0);
+  const count = new Writable(0);
 
   // action() closes over `count` - no binding needed
   const increment = action(() => {
@@ -38,7 +38,7 @@ Actions are defined inside your pattern body and naturally close over any cells 
 When you need data from the event (like form input), the action receives it as a parameter:
 
 ```tsx
-const items = Writable.of<string[]>([]);
+const items = new Writable<string[]>([]);
 
 const addItem = action((event: { title: string }) => {
   items.push(event.title);

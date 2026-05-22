@@ -846,6 +846,116 @@ describe("pull-based scheduling", () => {
     expect(effectResult.get()).toBe(11);
   });
 
+  it("should continue a parent pull when a child writes a parent read", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const source = runtime.getCell<number>(
+      space,
+      "pull-continuation-source",
+      undefined,
+      tx,
+    );
+    source.set(3);
+    const childResult = runtime.getCell<number>(
+      space,
+      "pull-continuation-child-result",
+      undefined,
+      tx,
+    );
+    childResult.set(0);
+    const parentResult = runtime.getCell<number>(
+      space,
+      "pull-continuation-parent-result",
+      undefined,
+      tx,
+    );
+    parentResult.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let childSubscribed = false;
+    let parentRuns = 0;
+    let childRuns = 0;
+
+    const child: Action = (actionTx) => {
+      childRuns++;
+      childResult.withTx(actionTx).send(source.withTx(actionTx).get() ?? 0);
+    };
+
+    const parent: Action = (actionTx) => {
+      parentRuns++;
+      if (!childSubscribed) {
+        childSubscribed = true;
+        runtime.scheduler.subscribe(child, {
+          reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+          shallowReads: [],
+          writes: [toMemorySpaceAddress(childResult.getAsNormalizedFullLink())],
+        });
+      }
+      parentResult.withTx(actionTx).send(
+        (childResult.withTx(actionTx).get() ?? 0) + 1,
+      );
+    };
+
+    runtime.scheduler.subscribe(parent, {
+      reads: [toMemorySpaceAddress(childResult.getAsNormalizedFullLink())],
+      shallowReads: [],
+      writes: [toMemorySpaceAddress(parentResult.getAsNormalizedFullLink())],
+    });
+
+    expect(await parentResult.pull()).toBe(4);
+    expect(parentRuns).toBe(2);
+    expect(childRuns).toBe(1);
+  });
+
+  it("should clear pull continuation demand when unsubscribing", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const source = runtime.getCell<number>(
+      space,
+      "pull-continuation-unsubscribe-source",
+      undefined,
+      tx,
+    );
+    source.set(2);
+    const result = runtime.getCell<number>(
+      space,
+      "pull-continuation-unsubscribe-result",
+      undefined,
+      tx,
+    );
+    result.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let runs = 0;
+    const action: Action = (actionTx) => {
+      runs++;
+      result.withTx(actionTx).send(source.withTx(actionTx).get() ?? 0);
+    };
+    const log = {
+      reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+      shallowReads: [],
+      writes: [toMemorySpaceAddress(result.getAsNormalizedFullLink())],
+    };
+
+    runtime.scheduler.subscribe(action, log);
+    await runtime.scheduler.idle();
+    expect(runs).toBe(0);
+
+    const schedulerInternals = runtime.scheduler as unknown as {
+      pullDemandedContinuationComputations: WeakSet<Action>;
+    };
+    schedulerInternals.pullDemandedContinuationComputations.add(action);
+
+    runtime.scheduler.unsubscribe(action);
+    runtime.scheduler.subscribe(action, log);
+    await runtime.scheduler.idle();
+
+    expect(runs).toBe(0);
+    expect(result.get()).toBe(0);
+  });
+
   it("should first-run child computations created by demand-root effects", async () => {
     runtime.scheduler.enablePullMode();
 

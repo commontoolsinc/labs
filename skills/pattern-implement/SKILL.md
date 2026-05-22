@@ -52,28 +52,28 @@ Build guide plus the two foundational reactivity/local-cell references above.
 **action()** - Closes over local state in pattern body:
 
 ```tsx
-const inputValue = Writable.of("");
+const inputValue = new Writable("");
 const submit = action(() => {
   items.push({ text: inputValue.get() });
   inputValue.set("");
 });
 ```
 
-Use `Writable.of()` only for pattern-owned local cells initialized from static
+Use `new Writable()` only for pattern-owned local cells initialized from static
 values. Do not pass an input prop, mapped field, computed value, or other
-reactive value into `Writable.of()`. If the pattern receives writable state, use
-that input cell directly; if a draft needs to copy from input state, copy in an
-action or another valid reactive/event context.
+reactive value into `new Writable()`. If the pattern receives writable state,
+use that input cell directly; if a draft needs to copy from input state, copy in
+an action or another valid reactive/event context.
 
 For Pattern Factory Build, this rule applies to the top-level pattern input
-object too. Do not initialize local state with `Writable.of(input.name || "")`,
-`Writable.of(input.items || [])`, `Cell.of(input.field)`, or helper calls around
-`input.field`. First decide whether each field is primary pattern state, static
-local UI state, or draft/editing state:
+object too. Do not initialize local state with `new Writable(input.name || "")`,
+`new Writable(input.items || [])`, `new Cell(input.field)`, or helper calls
+around `input.field`. First decide whether each field is primary pattern state,
+static local UI state, or draft/editing state:
 
 - Primary pattern state: expose it in the `Input`/`Output` contract with
   `Default<>` and `Writable<>` as needed, then use the reactive input directly.
-- Static local UI state: create it with `Writable.of(...)` from static literals
+- Static local UI state: create it with `new Writable(...)` from static literals
   only.
 - Draft/editing state: create it from a static value, then copy from input state
   inside an `action()` or another valid event/reactive context.

@@ -4,11 +4,19 @@ import { internSchema } from "@commonfabric/data-model/schema-hash";
 const MAP_INPUT_SCHEMA = internSchema({
   type: "object",
   properties: {
-    // type: "unknown" is ignored by the asCell code path (no type validation)
+    // `processDefaultValue()` treats `asCell` as an opaque cell boundary, so
+    // `type: "unknown"` only documents the inner value shape here.
     list: { type: "array", items: { asCell: ["cell"], type: "unknown" } },
     op: { asCell: ["cell"] },
   },
   required: ["op"],
+});
+
+const MAP_LIST_SCHEMA = internSchema({
+  type: "array",
+  // `processDefaultValue()` treats `asCell` as an opaque cell boundary, so
+  // `type: "unknown"` only documents the inner value shape here.
+  items: { asCell: ["cell"], type: "unknown" },
 });
 
 import { type Cell } from "../cell.ts";
@@ -73,12 +81,19 @@ export function map(
   >();
 
   return (tx: IExtendedStorageTransaction) => {
-    const { list, op } = inputsCell.asSchema(MAP_INPUT_SCHEMA)
-      .withTx(tx).get();
-    const listCell = inputsCell.key("list");
-    const listLink = parseLink(listCell.withTx(tx).getRaw(), listCell);
+    const mappedInputs = inputsCell.asSchema(MAP_INPUT_SCHEMA).withTx(tx);
+    const op = mappedInputs.key("op").get();
+    const sourceListCell = inputsCell.key("list");
+    const listLink = parseLink(
+      sourceListCell.withTx(tx).getRaw(),
+      sourceListCell,
+    );
     const listScope = listLink?.scope ??
-      listCell.getAsNormalizedFullLink().scope;
+      sourceListCell.getAsNormalizedFullLink().scope;
+    // `array` callback arguments should observe the actual list entity, not the
+    // alias/boxed reference used to pass that list into the builtin.
+    const listCell = sourceListCell.withTx(tx).resolveAsCell();
+    const list = listCell.asSchema(MAP_LIST_SCHEMA).withTx(tx).get();
     // .getRaw() because we want the pattern itself and avoid following the
     // aliases in the pattern.
     const opPattern = op.getRaw();
@@ -110,7 +125,7 @@ export function map(
     const createRunInput = (element: Cell<any>, index: number) => ({
       ...(argumentUsage.usesElement ? { element } : {}),
       ...(argumentUsage.usesIndex ? { index } : {}),
-      ...(argumentUsage.usesArray ? { array: inputsCell.key("list") } : {}),
+      ...(argumentUsage.usesArray ? { array: listCell } : {}),
       ...(argumentUsage.usesParams ? { params: inputsCell.key("params") } : {}),
     });
 

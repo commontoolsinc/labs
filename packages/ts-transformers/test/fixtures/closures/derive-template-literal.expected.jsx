@@ -15,10 +15,10 @@ const __cfAmdHooks = undefined;
 // Verifies: a captured cell used inside a template literal expression is extracted
 //   derive(value, fn) → derive(schema, schema, { value, prefix }, fn)
 export default pattern(() => {
-    const value = Writable.of(10, {
+    const value = new Writable(10, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("value", true);
-    const prefix = Writable.of("Value: ", {
+    const prefix = new Writable("Value: ", {
         type: "string"
     } as const satisfies __cfHelpers.JSONSchema).for("prefix", true);
     const result = __cfHelpers.derive({

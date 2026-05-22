@@ -22,7 +22,7 @@ interface Input {
 //   computed(() => JSX with action ref) → derive(captureSchema, ..., { card, startEditing }, fn)
 // Context: Action referenced inside computed expression must appear in the derive's capture object
 export default pattern<Input>(({ card }) => {
-  const isEditing = Cell.of(false);
+  const isEditing = new Cell(false);
 
   const startEditing = action(() => {
     isEditing.set(true);

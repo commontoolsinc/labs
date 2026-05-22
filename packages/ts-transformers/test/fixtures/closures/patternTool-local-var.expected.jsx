@@ -59,15 +59,15 @@ const __cfModuleCallback_1 = __cfHardenFn(({ language, content }: {
     } as const satisfies __cfHelpers.JSONSchema, {
         type: ["string", "undefined"]
     } as const satisfies __cfHelpers.JSONSchema, { genResult: {
-            pending: genResult.key("pending"),
-            result: genResult.key("result")
+            pending: genResult.pending,
+            result: genResult.result
         } }, ({ genResult }) => {
         if (genResult.pending)
             return undefined;
         return genResult.result;
     });
 });
-const content = __cfHelpers.__cf_data(Writable.of("Hello world", {
+const content = __cfHelpers.__cf_data(new Writable("Hello world", {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema).for("content", true));
 type Output = {
@@ -84,7 +84,7 @@ type Output = {
 //   genResult (local) is NOT added to extraParams despite having a reactive type
 // Context: Regression test — local variables like `genResult` (from generateText)
 //   must not be hoisted into extraParams. Only module-scoped reactive bindings
-//   (here, `content` from Writable.of) should be captured.
+//   (here, `content` from new Writable) should be captured.
 export default pattern(() => {
     const tool = patternTool(__cfModuleCallback_1, { content: content.for(["tool", 1, "content"], true) });
     return { tool };

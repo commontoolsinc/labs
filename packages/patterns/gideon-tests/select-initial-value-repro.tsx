@@ -29,8 +29,8 @@ interface Output {
 }
 
 export default pattern<Record<string, never>, Output>(() => {
-  const type = Writable.of<string>("article");
-  const status = Writable.of<string>("want");
+  const type = new Writable<string>("article");
+  const status = new Writable<string>("want");
 
   return {
     [NAME]: "Select Initial Value Repro",

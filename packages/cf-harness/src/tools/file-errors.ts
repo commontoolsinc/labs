@@ -103,13 +103,14 @@ export const createStructuredFileToolErrorOutput = (
   context: HarnessToolContext,
   toolId: "read_file" | "view_image" | "write_file" | "edit_file",
   options: {
+    outputId?: string;
     path: string;
     code: StructuredFileToolErrorCode;
     detail?: string;
     exitCode?: number;
   },
 ): StructuredFileToolErrorOutput => ({
-  outputId: context.nextOutputId(toolId),
+  outputId: options.outputId ?? context.nextOutputId(toolId),
   path: options.path,
   ok: false,
   error: {

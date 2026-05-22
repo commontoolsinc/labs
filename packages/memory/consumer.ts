@@ -48,7 +48,7 @@ import type {
   UTCUnixTimestampInSeconds,
 } from "./interface.ts";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { FabricHash } from "@commonfabric/data-model/fabric-hash";
+import { FabricHash } from "@commonfabric/data-model/FabricHash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import * as Socket from "./socket.ts";

@@ -17,7 +17,7 @@ const __cfAmdHooks = undefined;
 //   derive(value, fn) → derive(schema, schema, { value, numLiteral, floatLiteral, boolLiteral, strLiteral }, fn)
 // Context: each literal type maps to its widened JSON schema type (e.g., 42 → "number", "hello" → "string")
 export default pattern(() => {
-    const value = Writable.of(10, {
+    const value = new Writable(10, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("value", true);
     // All literal types that should be widened

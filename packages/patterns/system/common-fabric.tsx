@@ -418,7 +418,7 @@ export const listPatternIndex = pattern<ListPatternIndexInput>(
       query: "#pattern-index",
     });
 
-    const resolvedUrl = Writable.of<string>("/api/patterns/index.md");
+    const resolvedUrl = new Writable<string>("/api/patterns/index.md");
     computed(() => {
       const urlRef = patternIndexUrl?.result?.url;
       const urlValue = typeof urlRef?.get === "function"

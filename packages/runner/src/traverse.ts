@@ -3,7 +3,7 @@ import { hashOf, hashStringOf } from "@commonfabric/data-model/value-hash";
 import {
   hashSchema,
   internSchema,
-  internSchemaAsHashString,
+  internSchemaAsTaggedHashString,
 } from "@commonfabric/data-model/schema-hash";
 import { MIME } from "@commonfabric/memory/interface";
 import type { JSONSchemaObj } from "@commonfabric/api";
@@ -384,7 +384,7 @@ export class CycleTracker<K> {
  *
  * Identity check on `partialKey`, structural check on `extraKey` via
  * the interned hash string of `extraKey`: the inner per-partialKey map
- * is keyed on `internSchemaAsHashString(extraKey ?? true)`, so repeat
+ * is keyed on `internSchemaAsTaggedHashString(extraKey ?? true)`, so repeat
  * calls with a structurally-equal schema re-lookup the same entry in
  * O(1) without re-hashing — the intern cache's WeakMap returns the
  * canonical hash string without invoking `hashStringOf()` on
@@ -419,7 +419,7 @@ export class CompoundCycleTracker<
       existing = new Map();
       this.partial.set(partialKey, existing);
     }
-    const hash = internSchemaAsHashString(extraKey ?? true);
+    const hash = internSchemaAsTaggedHashString(extraKey ?? true);
     if (existing.has(hash)) {
       return null;
     }
@@ -443,7 +443,7 @@ export class CompoundCycleTracker<
     if (existing === undefined) {
       return undefined;
     }
-    const hash = internSchemaAsHashString(extraKey ?? true);
+    const hash = internSchemaAsTaggedHashString(extraKey ?? true);
     return existing.get(hash);
   }
 }
@@ -2282,6 +2282,12 @@ export class SchemaObjectTraverser<V extends FabricValue>
       }
     }
     if (isRecord(resolved)) {
+      if (
+        doc.value === undefined && resolved.default !== undefined &&
+        (resolved.anyOf || resolved.oneOf || resolved.allOf)
+      ) {
+        return { ok: this.applyDefault(doc, resolved) };
+      }
       // There are a lot of valid logical schema flags, and we only handle
       // a very limited set here, with no support for combinations.
       if (resolved.anyOf) {
@@ -2873,21 +2879,15 @@ export class SchemaObjectTraverser<V extends FabricValue>
         !this.traverseCells &&
         SchemaObjectTraverser.hasAsCell(curSelector.schema)
       ) {
-        if (curDoc.value === undefined) {
-          // If we hit a broken link following write redirects, I think we have
-          // to abort.
-          logger.info(
-            "traverse",
-            () => ["Encountered broken redirect", doc, curDoc],
-          );
-          return false;
-        }
         // For my cell link, curDoc currently points to the last
         // redirect target, but we want cell properties to be based on the
         // link value at that location, so we effectively follow one more
         // link if available.
         // If we have a value instead of a link, create a link to the element
         // We don't traverse and validate, since this is an asCell boundary.
+        // If the target is not written yet, still return a cell for it instead
+        // of invalidating the parent array; downstream consumers can subscribe
+        // to the child cell and observe it when the target materializes.
         const isLink = isPrimitiveCellLink(curDoc.value);
         if (isLink) this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
         const cellLink = isLink
@@ -3415,8 +3415,8 @@ export function mergeAnyOfBranchSchemas(
   // Interning each input stabilizes its identity so downstream callers
   // hit the hash-cache fast path; `||` separates outer from branches,
   // `|` separates branches.
-  const key = `${internSchemaAsHashString(outerSchema)}||` +
-    branches.map(internSchemaAsHashString).join("|");
+  const key = `${internSchemaAsTaggedHashString(outerSchema)}||` +
+    branches.map(internSchemaAsTaggedHashString).join("|");
   const cached = _mergeAnyOfBranchCache.get(key);
   if (cached !== undefined) return cached;
 
@@ -3500,7 +3500,7 @@ function _mergeAnyOfBranchSchemasUncached(
     // identities for any downstream caller that re-hashes them.
     const uniqueHashes = new Map<string, JSONSchema>();
     for (const s of schemas) {
-      uniqueHashes.set(internSchemaAsHashString(s), s);
+      uniqueHashes.set(internSchemaAsTaggedHashString(s), s);
     }
     if (uniqueHashes.size === 1) {
       // All branches agree on this property's schema

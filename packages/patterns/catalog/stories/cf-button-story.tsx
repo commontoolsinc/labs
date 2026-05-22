@@ -16,14 +16,14 @@ interface ButtonStoryOutput {
 }
 
 export default pattern<ButtonStoryInput, ButtonStoryOutput>(() => {
-  const variant = Writable.of<"solid" | "outline" | "ghost">("solid");
-  const color = Writable.of<"neutral" | "primary" | "accent" | "danger">(
+  const variant = new Writable<"solid" | "outline" | "ghost">("solid");
+  const color = new Writable<"neutral" | "primary" | "accent" | "danger">(
     "primary",
   );
-  const disabled = Writable.of(false);
-  const label = Writable.of("Click me");
-  const size = Writable.of<"xs" | "sm" | "md" | "lg" | "xl" | "icon">("md");
-  const clickCount = Writable.of(0);
+  const disabled = new Writable(false);
+  const label = new Writable("Click me");
+  const size = new Writable<"xs" | "sm" | "md" | "lg" | "xl" | "icon">("md");
+  const clickCount = new Writable(0);
 
   const handleClick = action(() => {
     clickCount.set(clickCount.get() + 1);

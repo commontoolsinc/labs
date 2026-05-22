@@ -96,6 +96,67 @@ describe("Cell Static Methods", () => {
     await storageManager?.close();
   });
 
+  describe("cell constructors", () => {
+    it("should create a cell with a primitive value", () => {
+      withinHandlerContext(runtime, space, tx, () => {
+        const cell = new Cell(42);
+        expect(cell).toBeDefined();
+        expect(cell.get()).toBe(42);
+      });
+    });
+
+    it("should create cells for every cell constructor", () => {
+      withinHandlerContext(runtime, space, tx, () => {
+        const { commonfabric } = createTrustedBuilder(runtime);
+        const constructors = [
+          commonfabric.Cell,
+          commonfabric.Writable,
+          commonfabric.OpaqueCell,
+          commonfabric.Stream,
+          commonfabric.ComparableCell,
+          commonfabric.ReadonlyCell,
+          commonfabric.WriteonlyCell,
+        ] as Array<new (value?: string, schema?: JSONSchema) => any>;
+
+        for (const constructor of constructors) {
+          const cell = new constructor("Ada", { type: "string" }) as any;
+          expect(cell.schema).toEqual({
+            type: "string",
+            default: "Ada",
+          });
+        }
+      });
+    });
+
+    it("should create scoped cells with defaults", () => {
+      withinHandlerContext(runtime, space, tx, () => {
+        const { commonfabric } = createTrustedBuilder(runtime);
+        const cell = new commonfabric.Writable.perUser("Ada", {
+          type: "string",
+        }) as any;
+
+        expect(cell.schema).toEqual({
+          type: "string",
+          scope: "user",
+          default: "Ada",
+        });
+      });
+    });
+
+    it("should support constructor results chained with .for()", () => {
+      withinLiftContext(runtime, space, tx, () => {
+        const cell = new Cell("Ada", { type: "string" }).for("name") as any;
+
+        expect(cell.get()).toBe("Ada");
+        expect(cell.getAsNormalizedFullLink()).toBeDefined();
+        expect(cell.schema).toEqual({
+          type: "string",
+          default: "Ada",
+        });
+      });
+    });
+  });
+
   describe("Cell.of()", () => {
     it("should create a cell with a primitive value", () => {
       withinHandlerContext(runtime, space, tx, () => {
@@ -288,6 +349,65 @@ describe("Cell Static Methods", () => {
     });
   });
 
+  describe("scoped cell constructors", () => {
+    it("should create scoped cells with defaults for every cell constructor", () => {
+      withinHandlerContext(runtime, space, tx, () => {
+        const { commonfabric } = createTrustedBuilder(runtime);
+        const constructors = [
+          commonfabric.Cell,
+          commonfabric.Writable,
+          commonfabric.OpaqueCell,
+          commonfabric.Stream,
+          commonfabric.ComparableCell,
+          commonfabric.ReadonlyCell,
+          commonfabric.WriteonlyCell,
+        ];
+
+        for (const constructor of constructors) {
+          const cell = constructor.perUser.of("Ada", {
+            type: "string",
+          }) as any;
+          expect(cell.schema).toEqual({
+            type: "string",
+            scope: "user",
+            default: "Ada",
+          });
+        }
+      });
+    });
+
+    it("should create scoped cells with causes", () => {
+      withinLiftContext(runtime, space, tx, () => {
+        const cell = Cell.perSession.for<string>("draft") as any;
+        expect(cell).toBeDefined();
+        expect(cell.schema).toEqual({ scope: "session" });
+      });
+    });
+
+    it("should apply schema scopes to plain constructor links", () => {
+      withinLiftContext(runtime, space, tx, () => {
+        const { commonfabric } = createTrustedBuilder(runtime);
+        const cell = commonfabric.Writable.of("Ada", {
+          type: "string",
+          scope: "user",
+        } as JSONSchema).for("contextual", true) as any;
+
+        expect(cell.getAsNormalizedFullLink().scope).toBe("user");
+      });
+    });
+
+    it("should reject conflicting schema scopes", () => {
+      withinHandlerContext(runtime, space, tx, () => {
+        expect(() =>
+          Cell.perUser.of("Ada", {
+            type: "string",
+            scope: "space",
+          } as JSONSchema)
+        ).toThrow('Cannot use perUser with schema scope "space".');
+      });
+    });
+  });
+
   describe("Cell.equals()", () => {
     it("should return true for the same cell", () => {
       const cell = runtime.getCell<number>(
@@ -359,6 +479,7 @@ describe("Cell Static Methods", () => {
       );
       expect(Cell.equals(cell, null as any)).toBe(false);
       expect(Cell.equals(null as any, cell)).toBe(false);
+      expect(Cell.equals(undefined, undefined)).toBe(false);
     });
 
     it("should resolve links before comparing", () => {
@@ -534,6 +655,7 @@ describe("Cell Static Methods", () => {
       );
       expect(Cell.equalLinks(cell, null as any)).toBe(false);
       expect(Cell.equalLinks(null as any, cell)).toBe(false);
+      expect(Cell.equalLinks(undefined, undefined)).toBe(false);
     });
 
     it("should handle comparison with non-cell objects", () => {

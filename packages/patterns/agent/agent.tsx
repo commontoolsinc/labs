@@ -163,14 +163,14 @@ export default pattern<AgentInput, AgentOutput>(
     });
 
     // UI state
-    const isEditingName = Writable.of(false);
+    const isEditingName = new Writable(false);
     const startEditingName = action(() => isEditingName.set(true));
     const stopEditingName = action(() => isEditingName.set(false));
     const handleNameKeydown = action((event: { key?: string }) => {
       if (event?.key === "Enter") isEditingName.set(false);
     });
 
-    const learnedExpanded = Writable.of(false);
+    const learnedExpanded = new Writable(false);
     const toggleLearned = action(() =>
       learnedExpanded.set(!learnedExpanded.get())
     );

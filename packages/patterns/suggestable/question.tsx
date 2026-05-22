@@ -73,7 +73,7 @@ const Question = pattern<QuestionInput, QuestionOutput>(
       model: "anthropic:claude-haiku-4-5",
     });
 
-    const answer = Writable.of("");
+    const answer = new Writable("");
 
     return {
       [NAME]: computed(() => (topic ? `Question: ${topic}` : "Question")),

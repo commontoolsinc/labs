@@ -40,7 +40,7 @@ interface Output {
 
 export default pattern<Input, Output>(
   ({ fileId, content, savedContent, onSaveFile }) => {
-    const timer = Writable.of<ReturnType<typeof setTimeout> | null>(null);
+    const timer = new Writable<ReturnType<typeof setTimeout> | null>(null);
 
     const trigger = action(() => {
       const prev = timer.get();

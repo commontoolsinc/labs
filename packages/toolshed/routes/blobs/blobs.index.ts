@@ -5,10 +5,10 @@
 import { createRouter } from "@/lib/create-app.ts";
 import { memoryServer } from "@/routes/storage/memory.ts";
 import { isDID } from "@commonfabric/identity";
-import { FabricBytes } from "@commonfabric/data-model/fabric-bytes";
+import { FabricBytes } from "@commonfabric/data-model/FabricBytes";
 import { hashOf } from "@commonfabric/data-model/value-hash";
-import { JsonEncodingContext } from "@commonfabric/data-model/json-encoding-context";
-import type { ReconstructionContext } from "@commonfabric/data-model/fabric-value";
+import { JsonEncodingContext } from "@commonfabric/data-model/JsonEncodingContext";
+import { EmptyReconstructionContext } from "@commonfabric/data-model/EmptyReconstructionContext";
 import {
   decodeMemoryBoundary,
   encodeMemoryBoundary,
@@ -17,11 +17,10 @@ import type { Context } from "@hono/hono";
 
 const router = createRouter();
 const blobUploadEncoding = new JsonEncodingContext();
-const blobReconstructionContext: ReconstructionContext = {
-  getCell() {
-    throw new Error("Blob upload payloads cannot contain cell references");
-  },
-};
+const blobReconstructionContext = new EmptyReconstructionContext(
+  true,
+  "blob upload payloads cannot contain cell references",
+);
 
 type BlobContents = {
   type: string;

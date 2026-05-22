@@ -43,7 +43,7 @@ type LabelledContentArgument = {
 type TrustedHealthDisclosureOutput = {
   [NAME]: string;
   [UI]: unknown;
-  revealed: TrustedActionWrite<
+  revealSensitive: TrustedActionWrite<
     boolean,
     typeof setRevealSensitive,
     typeof TRUSTED_REVEAL_HEALTH_DATA_ACTION,
@@ -199,7 +199,7 @@ export const TrustedHealthDisclosureSurface = pattern<
         </cf-vstack>
       </cf-card>
     ),
-    revealed: revealSensitive,
+    revealSensitive,
     reveal,
     conceal,
   };
@@ -214,7 +214,7 @@ export default pattern<unknown, RenderPolicyDemoOutput>(() => {
   const healthContentRender: Writable<
     Confidential<string, readonly [typeof HEALTH_RECORD_CONFIDENTIALITY]>
   > = healthContent as never;
-  const revealSensitive = Writable.of(false);
+  const revealSensitive = new Writable(false);
   const trustedDisclosure = TrustedHealthDisclosureSurface({
     content: healthContentRender,
     revealSensitive,
@@ -245,7 +245,7 @@ export default pattern<unknown, RenderPolicyDemoOutput>(() => {
         </cf-vstack>
       </cf-screen>
     ),
-    revealSensitive,
+    revealSensitive: trustedDisclosure.revealSensitive,
     reveal: trustedDisclosure.reveal,
     conceal: trustedDisclosure.conceal,
   };

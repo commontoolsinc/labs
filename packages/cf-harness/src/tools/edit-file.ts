@@ -1,4 +1,12 @@
 import type { JSONSchema } from "@commonfabric/api";
+import type {
+  CfcLabelView,
+  CfcSandboxExitCodeObservation,
+  CfcSandboxResult,
+  CfcStreamObservation,
+  IFCLabel,
+} from "@commonfabric/runner/cfc";
+import { mergeCfcLabelViews } from "@commonfabric/runner/cfc";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type { HarnessToolDefinition } from "./types.ts";
 import {
@@ -26,6 +34,9 @@ export interface EditFileToolInput {
   path: string;
   edits: EditFileTextEdit[];
   expectedDigest?: string;
+  // Trusted harness/test plumbing for invocation input labels. This is omitted
+  // from the public tool schema so model-authored tool calls do not mint labels.
+  cfcInputLabels?: CfcLabelView;
 }
 
 export interface EditFileToolSuccessOutput {
@@ -38,11 +49,24 @@ export interface EditFileToolSuccessOutput {
   oldSizeBytes: number;
   newSizeBytes: number;
   diff: string;
+  cfcResult?: CfcSandboxResult;
 }
 
 export type EditFileToolOutput =
   | EditFileToolSuccessOutput
   | StructuredFileToolErrorOutput;
+
+export const isEditFileToolSuccessOutput = (
+  output: unknown,
+): output is EditFileToolSuccessOutput =>
+  typeof output === "object" &&
+  output !== null &&
+  "outputId" in output &&
+  typeof output.outputId === "string" &&
+  "path" in output &&
+  typeof output.path === "string" &&
+  "diff" in output &&
+  typeof output.diff === "string";
 
 interface AppliedEditResult {
   content: string;
@@ -436,6 +460,154 @@ const createUnifiedDiff = (
   return `${truncateUnifiedDiffLines(lines).join("\n")}\n`;
 };
 
+const filterCfcInputLabels = (
+  labels: CfcLabelView | undefined,
+  roots: readonly string[],
+): CfcLabelView | undefined => {
+  if (labels === undefined) {
+    return undefined;
+  }
+  const rootSet = new Set(roots);
+  const entries = labels.entries.filter((entry) =>
+    entry.path.length > 0 && rootSet.has(entry.path[0]!)
+  );
+  return mergeCfcLabelViews([
+    entries.length > 0 ? { version: 1, entries } : undefined,
+  ]);
+};
+
+const cfcLabelViewForReadStdout = (
+  cfcResult: CfcSandboxResult | undefined,
+): CfcLabelView | undefined =>
+  cfcResult === undefined ? undefined : {
+    version: 1,
+    entries: [{ path: ["stdin"], label: cfcResult.stdout.label }],
+  };
+
+const mergeCfcLabels = (
+  labels: Array<IFCLabel | undefined>,
+): IFCLabel => {
+  const view = mergeCfcLabelViews(
+    labels.map((label) =>
+      label === undefined
+        ? undefined
+        : { version: 1, entries: [{ path: [], label }] }
+    ),
+  );
+  return view?.entries[0]?.label ?? {};
+};
+
+const observedStream = (
+  channel: "stdout" | "stderr",
+  label: IFCLabel,
+  text = "",
+): CfcStreamObservation => ({
+  channel,
+  policy: "observed",
+  label,
+  segments: [{ text, label }],
+});
+
+const observedStreamText = (
+  observation: CfcStreamObservation,
+): string | undefined =>
+  observation.policy === "observed"
+    ? observation.segments.map((segment) => segment.text).join("")
+    : undefined;
+
+const diffObservationForEditOutput = (
+  path: string,
+  read: CfcStreamObservation | undefined,
+  verify: CfcStreamObservation | undefined,
+): CfcStreamObservation | undefined => {
+  if (read === undefined || verify === undefined) {
+    return undefined;
+  }
+  const label = mergeCfcLabels([read.label, verify.label]);
+  if (read.policy === "denied" || verify.policy === "denied") {
+    return {
+      channel: "stdout",
+      policy: "denied",
+      label,
+      reason:
+        "edit_file diff includes content that was not released by CFC policy",
+    };
+  }
+  if (read.policy === "opaque" || verify.policy === "opaque") {
+    return {
+      channel: "stdout",
+      policy: "opaque",
+      label,
+      byteLength: (read.policy === "opaque" ? read.byteLength ?? 0 : 0) +
+        (verify.policy === "opaque" ? verify.byteLength ?? 0 : 0),
+      truncated: read.truncated === true || verify.truncated === true,
+    };
+  }
+  const oldText = observedStreamText(read);
+  const newText = observedStreamText(verify);
+  if (oldText === undefined || newText === undefined) {
+    return undefined;
+  }
+  return observedStream(
+    "stdout",
+    label,
+    createUnifiedDiff(path, oldText, newText),
+  );
+};
+
+const cfcResultForEditOutput = (
+  path: string,
+  readResult: CfcSandboxResult | undefined,
+  verifyResult: CfcSandboxResult | undefined,
+): CfcSandboxResult | undefined => {
+  if (readResult === undefined || verifyResult === undefined) {
+    return undefined;
+  }
+  const stdout = diffObservationForEditOutput(
+    path,
+    readResult.stdout,
+    verifyResult.stdout,
+  );
+  if (stdout === undefined) {
+    return undefined;
+  }
+  const stderrLabel = mergeCfcLabels([
+    readResult.stderr.label,
+    verifyResult.stderr.label,
+  ]);
+  const exitCodeLabel = mergeCfcLabels([
+    readResult.exitCode.label,
+    verifyResult.exitCode.label,
+  ]);
+  const exitCode: CfcSandboxExitCodeObservation =
+    readResult.exitCode.policy === "denied" ||
+      verifyResult.exitCode.policy === "denied"
+      ? {
+        policy: "denied",
+        label: exitCodeLabel,
+        reason: "edit_file exit status was not released by CFC policy",
+      }
+      : readResult.exitCode.policy === "opaque" ||
+          verifyResult.exitCode.policy === "opaque"
+      ? { policy: "opaque", label: exitCodeLabel }
+      : { policy: "observed", label: exitCodeLabel, value: 0 };
+  return {
+    version: 1,
+    stdout,
+    stderr: observedStream("stderr", stderrLabel),
+    exitCode,
+    ...(readResult.diagnostics !== undefined ||
+        verifyResult.diagnostics !== undefined
+      ? {
+        diagnostics: [
+          ...(readResult.diagnostics ?? []),
+          ...(verifyResult.diagnostics ?? []),
+        ],
+      }
+      : {}),
+  };
+};
+
 const READ_FILE_COMMAND = [
   "set -eu",
   'if [ ! -e "$1" ]; then',
@@ -506,6 +678,7 @@ export const editFileToolDescriptor: HarnessToolDescriptor = {
         oldSizeBytes: { type: "integer", minimum: 0 },
         newSizeBytes: { type: "integer", minimum: 0 },
         diff: { type: "string" },
+        cfcResult: { type: "object" },
       },
       required: [
         "outputId",
@@ -548,6 +721,10 @@ export const editFileTool: HarnessToolDefinition<
       });
     }
 
+    const outputId = context.nextOutputId("edit_file");
+    const pathInputLabels = filterCfcInputLabels(input.cfcInputLabels, [
+      "args",
+    ]);
     const readArgs = [resolvedPath];
     const readResult = await context.sandbox.runShell({
       command: READ_FILE_COMMAND,
@@ -555,15 +732,20 @@ export const editFileTool: HarnessToolDefinition<
       cwd: context.currentDir,
       cfcInvocationContext: await context.createCfcInvocationContext({
         toolId: "edit_file",
+        toolOutputId: outputId,
         operation: "shell",
         cwd: context.currentDir,
         command: READ_FILE_COMMAND,
         args: readArgs,
+        ...(pathInputLabels !== undefined
+          ? { cfcInputLabels: pathInputLabels }
+          : {}),
         cfcInputLabelPaths: [["args"]],
       }),
     });
     if (readResult.exitCode !== 0) {
       return createStructuredFileToolErrorOutput(context, "edit_file", {
+        outputId,
         path: resolvedPath,
         code: classifyFileToolShellFailure(readResult),
         detail: detailFromShellFailure(readResult),
@@ -577,6 +759,7 @@ export const editFileTool: HarnessToolDefinition<
       input.expectedDigest !== oldSummary.digest
     ) {
       return createStructuredFileToolErrorOutput(context, "edit_file", {
+        outputId,
         path: resolvedPath,
         code: "edit_conflict",
         detail:
@@ -589,6 +772,7 @@ export const editFileTool: HarnessToolDefinition<
       edited = applyEdits(readResult.stdout, input.edits);
     } catch (error) {
       return createStructuredFileToolErrorOutput(context, "edit_file", {
+        outputId,
         path: resolvedPath,
         code: "edit_conflict",
         detail: detailFromUnknownError(error),
@@ -597,6 +781,10 @@ export const editFileTool: HarnessToolDefinition<
 
     const newSummary = await summarizeText(edited.content);
     const writeArgs = [resolvedPath];
+    const writeInputLabels = mergeCfcLabelViews([
+      input.cfcInputLabels,
+      cfcLabelViewForReadStdout(readResult.cfcResult),
+    ]);
     const writeResult = await context.sandbox.runShell({
       command: WRITE_FILE_COMMAND,
       args: writeArgs,
@@ -604,16 +792,21 @@ export const editFileTool: HarnessToolDefinition<
       stdinText: edited.content,
       cfcInvocationContext: await context.createCfcInvocationContext({
         toolId: "edit_file",
+        toolOutputId: outputId,
         operation: "shell",
         cwd: context.currentDir,
         command: WRITE_FILE_COMMAND,
         args: writeArgs,
         stdinText: edited.content,
+        ...(writeInputLabels !== undefined
+          ? { cfcInputLabels: writeInputLabels }
+          : {}),
         cfcInputLabelPaths: [["args"], ["stdin"]],
       }),
     });
     if (writeResult.exitCode !== 0) {
       return createStructuredFileToolErrorOutput(context, "edit_file", {
+        outputId,
         path: resolvedPath,
         code: classifyFileToolShellFailure(writeResult),
         detail: detailFromShellFailure(writeResult),
@@ -627,15 +820,20 @@ export const editFileTool: HarnessToolDefinition<
       cwd: context.currentDir,
       cfcInvocationContext: await context.createCfcInvocationContext({
         toolId: "edit_file",
+        toolOutputId: outputId,
         operation: "shell",
         cwd: context.currentDir,
         command: READ_FILE_COMMAND,
         args: readArgs,
+        ...(pathInputLabels !== undefined
+          ? { cfcInputLabels: pathInputLabels }
+          : {}),
         cfcInputLabelPaths: [["args"]],
       }),
     });
     if (verifyResult.exitCode !== 0) {
       return createStructuredFileToolErrorOutput(context, "edit_file", {
+        outputId,
         path: resolvedPath,
         code: classifyFileToolShellFailure(verifyResult),
         detail: detailFromShellFailure(verifyResult),
@@ -645,6 +843,7 @@ export const editFileTool: HarnessToolDefinition<
     if (verifyResult.stdout !== edited.content) {
       const observedSummary = await summarizeText(verifyResult.stdout);
       return createStructuredFileToolErrorOutput(context, "edit_file", {
+        outputId,
         path: resolvedPath,
         code: "edit_conflict",
         detail:
@@ -653,7 +852,7 @@ export const editFileTool: HarnessToolDefinition<
     }
 
     return {
-      outputId: context.nextOutputId("edit_file"),
+      outputId,
       path: resolvedPath,
       editsApplied: input.edits.length,
       replacements: edited.replacements,
@@ -662,6 +861,14 @@ export const editFileTool: HarnessToolDefinition<
       oldSizeBytes: oldSummary.bytes,
       newSizeBytes: newSummary.bytes,
       diff: createUnifiedDiff(resolvedPath, readResult.stdout, edited.content),
+      ...(() => {
+        const cfcResult = cfcResultForEditOutput(
+          resolvedPath,
+          readResult.cfcResult,
+          verifyResult.cfcResult,
+        );
+        return cfcResult !== undefined ? { cfcResult } : {};
+      })(),
     };
   },
 };

@@ -11,10 +11,10 @@ interface TabListStoryOutput {
 }
 
 export default pattern<TabListStoryInput, TabListStoryOutput>(() => {
-  const orientation = Writable.of<"horizontal" | "vertical">("horizontal");
-  const variant = Writable.of<"underline" | "chip">("underline");
-  const activeTab = Writable.of("overview");
-  const activeChipTab = Writable.of("all");
+  const orientation = new Writable<"horizontal" | "vertical">("horizontal");
+  const variant = new Writable<"underline" | "chip">("underline");
+  const activeTab = new Writable("overview");
+  const activeChipTab = new Writable("all");
 
   return {
     [NAME]: "cf-tab-list Story",

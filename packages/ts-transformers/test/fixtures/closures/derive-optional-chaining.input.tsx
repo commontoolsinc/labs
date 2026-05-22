@@ -9,7 +9,7 @@ interface Config {
 //   derive(value, fn) → derive(schema, schema, { value, config: { multiplier: ... } }, fn)
 // Context: `config.multiplier` is `number | undefined`; schema uses `type: ["number", "undefined"]`
 export default pattern((config: Config) => {
-  const value = Writable.of(10);
+  const value = new Writable(10);
 
   const result = derive(value, (v) => v.get() * (config.multiplier ?? 1));
 

@@ -451,11 +451,11 @@ interface PatternOutput {
 /** Email task engine for processing actionable emails. #emailTaskEngine */
 export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
   // State for label operations
-  const taskCurrentLabelId = Writable.of("").for("taskCurrentLabelId");
-  const loadingLabels = Writable.of(false).for("loadingLabels");
-  const hiddenTasks = Writable.of<string[]>([]).for("hiddenTasks");
-  const processingTasks = Writable.of<string[]>([]).for("processingTasks");
-  const sortNewestFirst = Writable.of(true).for("sortNewestFirst");
+  const taskCurrentLabelId = new Writable("").for("taskCurrentLabelId");
+  const loadingLabels = new Writable(false).for("loadingLabels");
+  const hiddenTasks = new Writable<string[]>([]).for("hiddenTasks");
+  const processingTasks = new Writable<string[]>([]).for("processingTasks");
+  const sortNewestFirst = new Writable(true).for("sortNewestFirst");
 
   // Get all pieces for note discovery
   const { allPieces } = wish<{ allPieces: NotePiece[] }>({ query: "#default" })

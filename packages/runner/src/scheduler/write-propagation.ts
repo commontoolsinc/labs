@@ -5,21 +5,24 @@ import type {
   IMemorySpaceAddress,
 } from "../storage/interface.ts";
 import { getTransactionWriteDetails } from "../storage/transaction-inspection.ts";
-import {
-  collectReadersForWrite,
-  type TriggerIndexState,
-} from "./dependency-index.ts";
+import type { MaterializerIndexState } from "./materializers.ts";
+import type { TriggerIndexState } from "./trigger-index.ts";
 import type { Action, ReactivityLog } from "./types.ts";
 
-export interface WritePropagationState extends TriggerIndexState {
+export interface WritePropagationState {
+  readonly triggerIndex: TriggerIndexState;
   readonly changedWritesHistory: IMemorySpaceAddress[];
   readonly effects: ReadonlySet<Action>;
   readonly computations: ReadonlySet<Action>;
   readonly conditionallyScheduledEffects: Map<Action, number>;
-  readonly isPullMode: () => boolean;
+  readonly actionParent: WeakMap<Action, Action>;
+  readonly pending: Set<Action>;
+  readonly markPullDemandContinuation: (action: Action) => void;
   readonly scheduleWithDebounce: (action: Action) => void;
   readonly markDirty: (action: Action) => void;
+  readonly materializerIndex: MaterializerIndexState;
   readonly scheduleAffectedEffects: (action: Action) => void;
+  readonly queueExecution: () => void;
 }
 
 export function recordChangedComputationWrites(
@@ -28,7 +31,7 @@ export function recordChangedComputationWrites(
   tx: IExtendedStorageTransaction,
   log: ReactivityLog,
 ): IMemorySpaceAddress[] {
-  if (!state.isPullMode() || !state.computations.has(action)) return [];
+  if (!state.computations.has(action)) return [];
   if (log.writes.length === 0) return [];
 
   const spaces = new Set(log.writes.map((write) => write.space));
@@ -53,11 +56,11 @@ export function markReadersDirtyForChangedWrites(
   sourceAction: Action,
   changedWrites: readonly IMemorySpaceAddress[],
 ): void {
-  if (!state.isPullMode() || changedWrites.length === 0) return;
+  if (changedWrites.length === 0) return;
 
   const readers = new Set<Action>();
   for (const write of sortAndCompactPaths([...changedWrites])) {
-    for (const reader of collectReadersForWrite(state, write)) {
+    for (const reader of state.triggerIndex.collectReadersForWrite(write)) {
       if (reader !== sourceAction) {
         readers.add(reader);
       }
@@ -70,7 +73,31 @@ export function markReadersDirtyForChangedWrites(
       state.scheduleWithDebounce(reader);
     } else if (state.computations.has(reader)) {
       state.markDirty(reader);
-      state.scheduleAffectedEffects(reader);
+      if (isAncestorAction(state.actionParent, sourceAction, reader)) {
+        // Continuations are only for actions in the scheduler parent chain.
+        // Dependency edges already schedule ordinary downstream readers; this
+        // handles the narrower case where a child created during a pull writes
+        // something its already-run parent read.
+        state.markPullDemandContinuation(reader);
+        state.pending.add(reader);
+        state.queueExecution();
+      }
+      if (!state.materializerIndex.isMaterializer(reader)) {
+        state.scheduleAffectedEffects(reader);
+      }
     }
   }
+}
+
+function isAncestorAction(
+  actionParent: WeakMap<Action, Action>,
+  sourceAction: Action,
+  candidateAncestor: Action,
+): boolean {
+  let parent = actionParent.get(sourceAction);
+  while (parent) {
+    if (parent === candidateAncestor) return true;
+    parent = actionParent.get(parent);
+  }
+  return false;
 }

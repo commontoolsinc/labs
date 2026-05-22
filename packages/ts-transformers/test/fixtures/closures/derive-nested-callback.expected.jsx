@@ -17,13 +17,13 @@ const __cfAmdHooks = undefined;
 //   inner nums.map(fn) → nums.mapWithPattern(pattern(...), { multiplier })
 // Context: `multiplier` is captured by both derive and the inner map; inner map receives it via params
 export default pattern(() => {
-    const numbers = Writable.of([1, 2, 3], {
+    const numbers = new Writable([1, 2, 3], {
         type: "array",
         items: {
             type: "number"
         }
     } as const satisfies __cfHelpers.JSONSchema).for("numbers", true);
-    const multiplier = Writable.of(2, {
+    const multiplier = new Writable(2, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("multiplier", true);
     // Nested callback - inner array map should not capture outer multiplier
