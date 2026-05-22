@@ -5,8 +5,9 @@
  * by any module without creating circular dependencies.
  *
  * NOTE: `packages/api/index.ts` mirrors these types (and those from
- * `fabric-hash.ts`, `fabric-epoch.ts`) for the pattern compiler. Changes
- * here must be kept in sync with the corresponding declarations there.
+ * `fabric-primitives/FabricHash.ts`, `fabric-primitives/FabricEpochNsec.ts`)
+ * for the pattern compiler. Changes here must be kept in sync with the
+ * corresponding declarations there.
  */
 
 // ===========================================================================
