@@ -149,7 +149,9 @@ const schedulerObservationsFromCommit = (
   const batch = commit.schedulerObservationBatch ?? [];
   const observations: CommitSchedulerObservation[] = [];
   for (const item of batch) {
-    const observation = schedulerObservationFromValue(item.schedulerObservation);
+    const observation = schedulerObservationFromValue(
+      item.schedulerObservation,
+    );
     if (!observation) {
       continue;
     }

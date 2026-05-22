@@ -333,7 +333,17 @@ protocol calls to the runner; the important boundary is that ordinary data
 queries and snapshots should not interpret observation rows as user data. If the
 observation accompanies a real memory commit, it should be written atomically
 with that commit. If it accompanies a no-op, it should still be durable and
-ordered relative to the branch head it observed.
+ordered relative to the branch head it observed. Runners may batch multiple
+no-op observations into one memory transaction, but the server must keep or drop
+each action observation independently.
+
+No-op observations participate in memory v2 session/local sequence replay. A
+fresh no-op observation is kept, updates scheduler indexes, and clears the
+action's dirty state when its reads are current. A stale no-op observation is
+dropped as obsolete scheduler metadata, not rejected as a semantic conflict.
+This handles the cross-device/current-data case: if another commit made the
+runner's observation basis stale, the correct durable state is to retain the
+existing dirty marker or unknown fallback rather than blocking the client.
 
 Observation-only commits must use the action owner space, not whichever space
 happens to appear first in the observation's reads or writes. Read-only and
@@ -399,6 +409,13 @@ The observation id orders no-op observations against each other. The branch head
 sequence anchors them to the memory state they observed. No-op observations do
 not create semantic revisions or normal storage notifications, but they do
 update scheduler read/write indexes and action state.
+
+The runner batches adjacent no-op observations into a single
+`schedulerObservationBatch` commit. Each batch entry carries its own local
+sequence, read watermarks, and observation payload. The batch has an envelope
+local sequence for the transport request, but keep/drop/replay decisions are
+made per entry. A semantic write flushes any queued no-op batch first so the
+server observes the same action order as the runner.
 
 This preserves the memory semantic log while making scheduler state durable and
 server-visible. If cross-device scheduler rehydration becomes a requirement,
@@ -582,10 +599,14 @@ inactive readers.
 
 When an action run is a no-op:
 
-1. Persist the scheduler observation without semantic revisions.
-2. Replace read/write/materializer index rows.
-3. Clear the action's direct dirty bit if its reads are current.
-4. Do not dirty downstream readers, because no actual changed writes occurred.
+1. Persist the scheduler observation without semantic revisions if its read
+   watermarks are current.
+2. Drop the observation without failing the transaction if a read watermark is
+   stale or a pending read dependency is no longer valid.
+3. Replace read/write/materializer index rows for kept observations.
+4. Clear the action's direct dirty bit for kept observations.
+5. Leave existing dirty/stale/unknown state in place for dropped observations.
+6. Do not dirty downstream readers, because no actual changed writes occurred.
 
 This server-side state changes the role of rehydration. Restart no longer has
 to discover from scratch whether inactive writes made the piece dirty; it loads
@@ -821,7 +842,7 @@ Current branch status:
 
 | Area | Version 1 status |
 | --- | --- |
-| Observation construction and no-op persistence | Implemented. |
+| Observation construction and no-op persistence | Implemented, including batched no-op observation commits. |
 | Memory scheduler tables and same-space dirty marking | Implemented. |
 | Cross-space read-index mirrors | Implemented with accepted non-atomic mirror writes. |
 | Snapshot query surface | Implemented. |
@@ -942,8 +963,6 @@ latency, cross-space mirror repair, or full pattern startup.
 
 ## Open Questions
 
-- Should no-op observations participate in memory v2 session/local sequence
-  replay, or should they use a scheduler-local sequence only?
 - Are scheduler observations local cache state, server-replicated runtime state,
   or something in between? Inactive-piece dirtying requires server-side state
   at least for the server that accepts the write.

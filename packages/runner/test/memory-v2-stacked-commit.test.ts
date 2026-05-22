@@ -619,9 +619,12 @@ Deno.test("memory v2 flushes no-op scheduler batches before semantic writes", as
       ),
       ["action:first"],
     );
-    assertEquals(applied[1].commit.operations.map((operation) => operation.op), [
-      "set",
-    ]);
+    assertEquals(
+      applied[1].commit.operations.map((operation) => operation.op),
+      [
+        "set",
+      ],
+    );
   } finally {
     await harness.close();
   }

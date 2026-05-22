@@ -427,3 +427,23 @@
 - Validation:
   - `deno lint packages/runner/test/scheduler-observations.test.ts`
   - `deno test -A packages/runner/test/scheduler-observations.test.ts packages/memory/test/v2-scheduler-state-test.ts`
+
+## 2026-05-22 - No-op Observation Batching
+
+- Added `schedulerObservationBatch` to memory v2 commits. The batch envelope has
+  its own local sequence, but each no-op action observation carries its own
+  local sequence, read watermarks, and payload.
+- Decision: keep/drop/replay is per observation entry. Fresh entries update
+  scheduler snapshots and clear dirty state; stale confirmed/pending read
+  entries are recorded as dropped replay rows and leave existing dirty/stale
+  state untouched. This avoids treating obsolete scheduler metadata as a
+  semantic write conflict.
+- Runner storage now queues adjacent observation-only action commits and flushes
+  them as one batch. A semantic write flushes any queued no-op batch first so
+  server-side observation order matches runner action order.
+- The first runner implementation accidentally inserted an `await` into every
+  semantic commit, even when no no-op batch existed. The stacked-commit suite
+  caught that because optimistic pending state became visible one microtask
+  late; the fix keeps the no-batch semantic-write fast path synchronous.
+- Validation:
+  - `deno test -A packages/runner/test/memory-v2-stacked-commit.test.ts packages/memory/test/v2-scheduler-state-test.ts`

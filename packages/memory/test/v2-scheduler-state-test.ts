@@ -229,15 +229,22 @@ Deno.test("memory v2 accepts batched no-op scheduler observations", async () => 
     assertEquals(result.seq, beforeHead);
     assertEquals(result.revisions, []);
     assertEquals(headSeq(engine), beforeHead);
-    assertEquals(result.schedulerObservationResults?.map((entry) => ({
-      localSeq: entry.localSeq,
-      status: entry.status,
-    })), [
-      { localSeq: 101, status: "kept" },
-      { localSeq: 102, status: "kept" },
-    ]);
-    assertExists(result.schedulerObservationResults?.[0].schedulerObservationId);
-    assertExists(result.schedulerObservationResults?.[1].schedulerObservationId);
+    assertEquals(
+      result.schedulerObservationResults?.map((entry) => ({
+        localSeq: entry.localSeq,
+        status: entry.status,
+      })),
+      [
+        { localSeq: 101, status: "kept" },
+        { localSeq: 102, status: "kept" },
+      ],
+    );
+    assertExists(
+      result.schedulerObservationResults?.[0].schedulerObservationId,
+    );
+    assertExists(
+      result.schedulerObservationResults?.[1].schedulerObservationId,
+    );
     assertEquals(countRows(engine, "scheduler_observation"), 2);
     assertEquals(countRows(engine, "scheduler_observation_replay"), 2);
     assertEquals(countRows(engine, `"commit"`), 0);
@@ -316,22 +323,25 @@ Deno.test("memory v2 drops stale batched no-op observations independently", asyn
       },
     });
 
-    assertEquals(result.schedulerObservationResults?.map((entry) => ({
-      localSeq: entry.localSeq,
-      status: entry.status,
-      reason: entry.reason,
-    })), [
-      {
-        localSeq: 101,
-        status: "dropped",
-        reason: "stale-confirmed-read",
-      },
-      {
-        localSeq: 102,
-        status: "kept",
-        reason: undefined,
-      },
-    ]);
+    assertEquals(
+      result.schedulerObservationResults?.map((entry) => ({
+        localSeq: entry.localSeq,
+        status: entry.status,
+        reason: entry.reason,
+      })),
+      [
+        {
+          localSeq: 101,
+          status: "dropped",
+          reason: "stale-confirmed-read",
+        },
+        {
+          localSeq: 102,
+          status: "kept",
+          reason: undefined,
+        },
+      ],
+    );
     assertEquals(
       getSchedulerActionState(engine, {
         branch: "",
@@ -834,10 +844,13 @@ Deno.test("memory v2 server mirrors batched scheduler observations into read spa
         schedulerObservation: mirroredObservation,
       }],
     });
-    assertEquals(applied.schedulerObservationResults?.map((entry) => ({
-      localSeq: entry.localSeq,
-      status: entry.status,
-    })), [{ localSeq: 2, status: "kept" }]);
+    assertEquals(
+      applied.schedulerObservationResults?.map((entry) => ({
+        localSeq: entry.localSeq,
+        status: entry.status,
+      })),
+      [{ localSeq: 2, status: "kept" }],
+    );
 
     await reader.transact({
       localSeq: 1,

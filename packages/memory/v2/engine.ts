@@ -707,7 +707,10 @@ export interface AppliedSchedulerObservationResult {
   localSeq: number;
   status: "kept" | "dropped";
   schedulerObservationId?: number;
-  reason?: "stale-confirmed-read" | "stale-pending-read" | "pending-read-missing";
+  reason?:
+    | "stale-confirmed-read"
+    | "stale-pending-read"
+    | "pending-read-missing";
 }
 
 export interface AppliedCommit {
@@ -3022,8 +3025,9 @@ const findConflictSeq = (
   return null;
 };
 
-type SchedulerObservationDropReason =
-  NonNullable<AppliedSchedulerObservationResult["reason"]>;
+type SchedulerObservationDropReason = NonNullable<
+  AppliedSchedulerObservationResult["reason"]
+>;
 
 const schedulerObservationReadDropReason = (
   engine: Engine,
