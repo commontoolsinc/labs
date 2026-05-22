@@ -29,7 +29,7 @@
     "./deep-freeze": "./src/deep-freeze.ts",
     "./EmptyReconstructionContext": "./src/EmptyReconstructionContext.ts",
     "./fabric-instances": "./src/fabric-instances/index.ts",
-    "./fabric-native-instances": "./src/fabric-native-instances.ts",
+    "./native-instance-utils": "./src/native-instance-utils.ts",
     "./fabric-primitives": "./src/fabric-primitives/index.ts",
     "./fabric-type-tags": "./src/fabric-type-tags.ts",
     "./fabric-value": "./src/fabric-value.ts",

@@ -14,7 +14,7 @@ import { FabricMap } from "../src/fabric-instances/FabricMap.ts";
 import { FabricNativeWrapper } from "../src/fabric-instances/FabricNativeWrapper.ts";
 import { FabricRegExp } from "../src/fabric-instances/FabricRegExp.ts";
 import { FabricSet } from "../src/fabric-instances/FabricSet.ts";
-import { isConvertibleNativeInstance } from "../src/fabric-native-instances.ts";
+import { isConvertibleNativeInstance } from "../src/native-instance-utils.ts";
 import { nativeFromFabricValueModern } from "../src/fabric-value-modern.ts";
 import { FrozenMap, FrozenSet } from "../src/frozen-builtins.ts";
 import {

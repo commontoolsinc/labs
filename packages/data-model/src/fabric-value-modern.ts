@@ -10,7 +10,7 @@ import {
   errorClassFromType,
   isConvertibleNativeInstance,
   UNSAFE_KEYS,
-} from "./fabric-native-instances.ts";
+} from "./native-instance-utils.ts";
 import { FabricError } from "./fabric-instances/FabricError.ts";
 import { FabricNativeWrapper } from "./fabric-instances/FabricNativeWrapper.ts";
 import { FabricRegExp } from "./fabric-instances/FabricRegExp.ts";
