@@ -128,12 +128,13 @@ for ordinary programs to create or write files under CFC enforcement.
 
 Bridge to quarantine semantics: today, incomplete CFC writeback state is
 represented only by mediated prepare/finalize xattrs plus persisted
-`CfcWritebackStore` records. The current implementation does not create hidden
-quarantine dentries, does not publish incomplete entries into the confirmed
-`FsTree`, and does not make ordinary path lookup depend on quarantine state. The
-next quarantine implementation must keep that separation explicit: quarantine is
-a private transaction store layered beside the confirmed projection, not a hidden
-file in the normal namespace.
+`CfcWritebackStore` records. The current compatibility implementation does not
+create hidden quarantine dentries or a separate quarantine namespace; prepared
+create/symlink scaffolding may still place fail-closed, incomplete annotations in
+the ordinary `FsTree` while local bridge behavior is exercised. The next
+quarantine implementation must remove that compatibility shortcut and keep the
+separation explicit: quarantine is a private transaction store layered beside the
+confirmed projection, not a hidden file in the normal namespace.
 
 For creation-like operations:
 

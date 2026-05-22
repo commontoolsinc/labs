@@ -188,6 +188,26 @@ function readBuffer(ptr: Deno.PointerValue, size: bigint): Uint8Array {
   return data;
 }
 
+type SupervisorStatusState =
+  | "starting"
+  | "mounted"
+  | "failed"
+  | "exiting"
+  | "exited";
+
+export async function writeFailedSupervisorStartupStatus(
+  error: unknown,
+  writeSupervisorStatus: (
+    state: "failed",
+    extra?: Record<string, unknown>,
+  ) => Promise<void>,
+): Promise<void> {
+  console.error(String(error));
+  await writeSupervisorStatus("failed", { error: String(error) }).catch(() => {
+    // Best effort; startup failure is already being reported by process exit.
+  });
+}
+
 export async function main(argv: string[] = Deno.args) {
   const args = parseArgs(argv, {
     string: [
@@ -196,6 +216,8 @@ export async function main(argv: string[] = Deno.args) {
       "identity",
       "exec-cli",
       "log-file",
+      "supervisor-status",
+      "supervisor-token",
       "cfc-xattr-namespace",
       "cfc-mode",
       "cfc-writeback-state",
@@ -213,6 +235,8 @@ export async function main(argv: string[] = Deno.args) {
       identity: Deno.env.get("CF_IDENTITY") ?? "",
       "exec-cli": "",
       "log-file": "",
+      "supervisor-status": "",
+      "supervisor-token": "",
       "cfc-xattr-namespace": DEFAULT_CFC_XATTR_NAMESPACE,
       "cfc-mode": "",
       "cfc-writeback-state": "",
@@ -296,6 +320,37 @@ export async function main(argv: string[] = Deno.args) {
     );
     Deno.exit(1);
   }
+  const supervisorStatusPath = String(args["supervisor-status"] ?? "");
+  const supervisorToken = String(args["supervisor-token"] ?? "");
+  const supervisorStatusStartedAt = new Date().toISOString();
+  async function writeSupervisorStatus(
+    state: SupervisorStatusState,
+    extra: Record<string, unknown> = {},
+  ): Promise<void> {
+    if (!supervisorStatusPath) return;
+    await Deno.writeTextFile(
+      supervisorStatusPath,
+      JSON.stringify(
+        {
+          state,
+          pid: Deno.pid,
+          mountpoint,
+          token: supervisorToken || undefined,
+          startedAt: supervisorStatusStartedAt,
+          updatedAt: new Date().toISOString(),
+          ...extra,
+        },
+        null,
+        2,
+      ),
+    );
+  }
+  try {
+    await writeSupervisorStatus("starting");
+  } catch (error) {
+    console.error(`[FUSE] Unable to write supervisor status: ${error}`);
+    Deno.exit(1);
+  }
   const requestedCfcWritebackState = String(args["cfc-writeback-state"] ?? "");
   const cfcWritebackStatePath = requestedCfcWritebackState ||
     (cfcWritebackXattrs || cfcMode !== "disabled"
@@ -308,16 +363,23 @@ export async function main(argv: string[] = Deno.args) {
   });
   const cfcDiagnostics: string[] = [];
 
-  // Ensure mountpoint exists
+  let platform: Awaited<ReturnType<typeof getPlatform>>;
+  let fuse: ReturnType<Awaited<ReturnType<typeof getPlatform>>["openFuse"]>;
   try {
-    Deno.statSync(mountpoint);
-  } catch {
-    Deno.mkdirSync(mountpoint, { recursive: true });
-  }
+    // Ensure mountpoint exists
+    try {
+      Deno.statSync(mountpoint);
+    } catch {
+      Deno.mkdirSync(mountpoint, { recursive: true });
+    }
 
-  // Open libfuse via platform abstraction
-  const platform = await getPlatform();
-  const fuse = platform.openFuse();
+    // Open libfuse via platform abstraction
+    platform = await getPlatform();
+    fuse = platform.openFuse();
+  } catch (e) {
+    await writeFailedSupervisorStartupStatus(e, writeSupervisorStatus);
+    Deno.exit(1);
+  }
   const {
     STAT_SIZE,
     ENTRY_PARAM_SIZE,
@@ -370,42 +432,47 @@ export async function main(argv: string[] = Deno.args) {
   }
 
   // Populate tree
-  const apiUrl = args["api-url"];
-  if (apiUrl) {
-    bridge = new CellBridge(tree, args["exec-cli"] || "", {
-      cfcAnnotations: cfcAnnotationsEnabled,
-      statusProvider: () => ({
-        writes: { ...writeStats },
-        logFile: logFilePath || null,
-        cfc: {
-          mode: cfcMode,
-          annotations: cfcAnnotationsEnabled,
-          writebackXattrs: cfcWritebackXattrs,
-          writeback: cfcWritebacks.status(),
-          diagnostics: cfcDiagnostics.slice(-50),
-        },
-      }),
-      onCfcProjectionRebuilt: reconcileCfcWritebacks,
-    });
-    bridge.init({
-      apiUrl,
-      identity: args.identity || "",
-    });
-    bridge.setDebug(debug);
-    bridge.initStatus();
+  try {
+    const apiUrl = args["api-url"];
+    if (apiUrl) {
+      bridge = new CellBridge(tree, args["exec-cli"] || "", {
+        cfcAnnotations: cfcAnnotationsEnabled,
+        statusProvider: () => ({
+          writes: { ...writeStats },
+          logFile: logFilePath || null,
+          cfc: {
+            mode: cfcMode,
+            annotations: cfcAnnotationsEnabled,
+            writebackXattrs: cfcWritebackXattrs,
+            writeback: cfcWritebacks.status(),
+            diagnostics: cfcDiagnostics.slice(-50),
+          },
+        }),
+        onCfcProjectionRebuilt: reconcileCfcWritebacks,
+      });
+      bridge.init({
+        apiUrl,
+        identity: args.identity || "",
+      });
+      bridge.setDebug(debug);
+      bridge.initStatus();
 
-    // Connect initial spaces (default: "home")
-    const spaces = (args.space as string[]).length > 0
-      ? (args.space as string[])
-      : ["home"];
-    for (const spaceName of spaces) {
-      await bridge.connectSpace(spaceName);
-      reconcileCfcWritebacks();
-      console.log(`Connected space: ${spaceName}`);
+      // Connect initial spaces (default: "home")
+      const spaces = (args.space as string[]).length > 0
+        ? (args.space as string[])
+        : ["home"];
+      for (const spaceName of spaces) {
+        await bridge.connectSpace(spaceName);
+        reconcileCfcWritebacks();
+        console.log(`Connected space: ${spaceName}`);
+      }
+    } else {
+      tree.addFile(tree.rootIno, "hello.txt", "Hello from FUSE!\n", "string");
+      console.log("Static mode: hello.txt");
     }
-  } else {
-    tree.addFile(tree.rootIno, "hello.txt", "Hello from FUSE!\n", "string");
-    console.log("Static mode: hello.txt");
+  } catch (e) {
+    await writeFailedSupervisorStartupStatus(e, writeSupervisorStatus);
+    Deno.exit(1);
   }
 
   // --- Callbacks ---
@@ -3002,6 +3069,9 @@ export async function main(argv: string[] = Deno.args) {
     );
   } catch (e) {
     console.error(String(e));
+    await writeSupervisorStatus("failed", { error: String(e) }).catch(() => {
+      // Best effort; mount failure is already being reported by process exit.
+    });
     Deno.exit(1);
   }
   // handle is guaranteed assigned — Deno.exit(1) never returns
@@ -3126,6 +3196,16 @@ export async function main(argv: string[] = Deno.args) {
     };
   }
 
+  await writeSupervisorStatus("mounted").catch((error) => {
+    console.warn(`[FUSE] Unable to write mounted supervisor status: ${error}`);
+  });
+  const supervisorHeartbeat = supervisorStatusPath
+    ? setInterval(() => {
+      if (unmounting) return;
+      writeSupervisorStatus("mounted").catch(() => undefined);
+    }, 1_000)
+    : undefined;
+
   console.log(`Mounted at ${mountpoint}`);
   console.log("Press Ctrl+C to unmount");
 
@@ -3134,6 +3214,7 @@ export async function main(argv: string[] = Deno.args) {
     if (unmounting) return;
     unmounting = true;
     console.log("\nUnmounting...");
+    writeSupervisorStatus("exiting").catch(() => undefined);
     platform.unmount(fuse, handle, mountpointBuf);
   }
 
@@ -3147,6 +3228,10 @@ export async function main(argv: string[] = Deno.args) {
   // Run FUSE event loop (nonblocking: true → returns Promise)
   const result = await fuse.symbols.fuse_session_loop(handle.session);
   console.log(`FUSE loop exited (code ${result})`);
+  if (supervisorHeartbeat !== undefined) clearInterval(supervisorHeartbeat);
+  await writeSupervisorStatus("exited", { exitCode: result }).catch(() => {
+    // Best effort during shutdown.
+  });
 
   // Final cleanup
   platform.cleanup(fuse, handle, mountpointBuf, unmounting);
