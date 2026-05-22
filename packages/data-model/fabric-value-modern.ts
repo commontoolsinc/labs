@@ -67,19 +67,13 @@ export function shallowFabricFromNativeValueModern(
       return value as FabricValueLayer;
 
     case NATIVE_TAGS.Error: {
-      // An `Error`'s internal state (`cause`, custom properties) is part of
-      // the `FabricError`'s value, so it must itself be proper `FabricValue`
-      // -- there is no valid "shallow" `FabricError` whose `.cause` is a raw
-      // `Error`. The outer structural walk treats a `FabricInstance` as atomic
-      // and won't descend into it, so the internals are converted here, at
-      // construction. (`freeze` still freezes only the wrapper, matching the
-      // shallow contract for containers; the now-`FabricValue` internals are
-      // left in whatever frozen state the deep converter produced.)
-      const wrapped = rebuildFabricErrorDeep(
-        FabricError.fromNativeError(value as Error),
-        new Map(),
-        false,
-      );
+      // Shallow conversion: wrap the native `Error` without recursing into its
+      // internals (`cause`, custom properties). The result is therefore only a
+      // *shallow* `FabricError` -- its `.cause` may still be a raw `Error`.
+      // Callers that need a proper (fully-`FabricValue`) `FabricError` must use
+      // the deep `fabricFromNativeValue()` instead; the cell write paths do so
+      // at the points where they treat a `FabricError` as an atomic leaf.
+      const wrapped = FabricError.fromNativeError(value as Error);
       if (freeze) Object.freeze(wrapped);
       return wrapped;
     }

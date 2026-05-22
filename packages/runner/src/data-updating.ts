@@ -1,5 +1,6 @@
 import { isRecord } from "@commonfabric/utils/types";
 import {
+  fabricFromNativeValue,
   FabricInstance,
   type FabricObject,
   type FabricValue,
@@ -793,7 +794,18 @@ export function normalizeAndDiff(
       "diff",
       () => `[BRANCH_FABRIC_INSTANCE] Atomic FabricInstance at path=${pathStr}`,
     );
-    changes.push({ location: link, value: newValue as FabricValue });
+    // This layer treats a `FabricInstance` atomically and won't descend into
+    // it, so its internal state must already be a proper `FabricValue` before
+    // it is stored. A shallow conversion may have left non-`FabricValue`
+    // internals (e.g. a wrapper whose nested state is still a raw native), so
+    // run the deep `fabricFromNativeValue()` here. It is class-agnostic:
+    // already-proper / deep-frozen instances short-circuit by identity, and
+    // each subclass governs its own deep conversion -- this code does not (and
+    // must not) special-case any concrete `FabricInstance` subclass.
+    changes.push({
+      location: link,
+      value: fabricFromNativeValue(newValue) as FabricValue,
+    });
     return changes;
   }
 
