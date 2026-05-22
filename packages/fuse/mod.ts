@@ -55,6 +55,7 @@ import {
   ENOENT,
   ENOTDIR,
   ERANGE,
+  EROFS,
   EXDEV,
   FILE_MODE_RW,
   FUSE_SET_ATTR_SIZE,
@@ -104,6 +105,17 @@ globalThis.addEventListener("error", (e) => {
   console.error("[FUSE] Uncaught error:", e.error ?? e.message);
   e.preventDefault();
 });
+
+type FusePromiseRejectionEvent = Event & {
+  readonly reason?: unknown;
+  preventDefault(): void;
+};
+
+type FuseErrorEvent = Event & {
+  readonly error?: unknown;
+  readonly message?: string;
+  preventDefault(): void;
+};
 
 type HandleWriteTarget =
   | { kind: "handler"; target: HandlerTarget }
@@ -167,6 +179,36 @@ export function bufferForNoHandleTruncate(
 ): Uint8Array {
   if (newSize <= 0) return new Uint8Array(0);
   return content.slice(0, Math.min(newSize, content.length));
+}
+
+export function writeUnavailableErrno(
+  bridge: Pick<CellBridge, "disconnected"> | null | undefined,
+): number {
+  return bridge?.disconnected ? EROFS : EACCES;
+}
+
+export function disconnectedWriteErrno(
+  bridge: Pick<CellBridge, "disconnected"> | null | undefined,
+): number | null {
+  return bridge?.disconnected ? EROFS : null;
+}
+
+export function isConnectionWriteFailure(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  return msg.includes("transport closed") ||
+    msg.includes("ConnectionError") ||
+    msg.includes("connection refused") ||
+    msg.includes("failed to connect to WebSocket");
+}
+
+export function cfcWritebackXattrResultErrno(
+  result: { ok: true } | { ok: false; reason: string },
+  errnos: { enotsup: number },
+): number {
+  if (result.ok) return 0;
+  return result.reason === "unsupported writeback xattr"
+    ? errnos.enotsup
+    : EINVAL;
 }
 
 export function rootSpaceLookupNames(name: string): {
@@ -411,6 +453,37 @@ export async function main(argv: string[] = Deno.args) {
     lastError: null as string | null,
     lastErrorAt: null as string | null,
   };
+
+  function noteWriteFailure(e: unknown): string {
+    const msg = e instanceof Error ? e.message : String(e);
+    writeStats.flushErrors++;
+    writeStats.lastError = msg;
+    writeStats.lastErrorAt = new Date().toISOString();
+    if (bridge && !bridge.disconnected && isConnectionWriteFailure(e)) {
+      bridge.markDisconnected(msg);
+    }
+    return msg;
+  }
+
+  function recordAsyncWriteFailure(context: string, e: unknown): void {
+    const msg = noteWriteFailure(e);
+    console.error(`[fuse] ${context}: ${msg}`);
+  }
+
+  globalThis.addEventListener("unhandledrejection", (event: Event) => {
+    const rejection = event as FusePromiseRejectionEvent;
+    if (!isConnectionWriteFailure(rejection.reason)) return;
+    recordAsyncWriteFailure("unhandled async write failure", rejection.reason);
+    rejection.preventDefault();
+  });
+
+  globalThis.addEventListener("error", (event: Event) => {
+    const errorEvent = event as FuseErrorEvent;
+    const error = errorEvent.error ?? errorEvent.message;
+    if (!isConnectionWriteFailure(error)) return;
+    recordAsyncWriteFailure("uncaught async write failure", error);
+    errorEvent.preventDefault();
+  });
 
   // Number of FUSE requests whose reply is intentionally delayed while async
   // bridge work runs. Reverse invalidations are unsafe while these requests are
@@ -1417,8 +1490,11 @@ export async function main(argv: string[] = Deno.args) {
           meta = await piece.getPatternMeta();
         } catch (e) {
           console.error(`[source] Failed to get pattern meta: ${e}`);
-          markExistingFailed(String(e));
-          return EACCES;
+          const errorMsg = isConnectionWriteFailure(e)
+            ? noteWriteFailure(e)
+            : String(e);
+          markExistingFailed(errorMsg);
+          return isConnectionWriteFailure(e) ? EROFS : EACCES;
         }
 
         // Normalise to a files array, mirroring buildSourceTree:
@@ -1487,6 +1563,11 @@ export async function main(argv: string[] = Deno.args) {
         } catch (e) {
           // Write compile error to error.log
           const errorMsg = e instanceof Error ? e.message : String(e);
+          if (isConnectionWriteFailure(e)) {
+            noteWriteFailure(e);
+            markExistingFailed(errorMsg);
+            return EROFS;
+          }
           const errorLogIno = tree.lookup(srcIno, "error.log");
           if (errorLogIno !== undefined) {
             tree.updateFile(errorLogIno, errorMsg);
@@ -1630,7 +1711,7 @@ export async function main(argv: string[] = Deno.args) {
       if (handleHasPendingChanges(handle) && handle.version !== flushVersion) {
         queueMicrotask(() => {
           flushHandle(handle).catch((e) => {
-            console.error(`[fuse] flush retry error: ${e}`);
+            recordAsyncWriteFailure("flush retry error", e);
           });
         });
       }
@@ -1661,7 +1742,7 @@ export async function main(argv: string[] = Deno.args) {
         return;
       }
       flushHandle(handle).catch((e) => {
-        console.error(`[fuse] scheduled flush error: ${e}`);
+        recordAsyncWriteFailure("scheduled flush error", e);
       });
     }, delayMs);
     scheduledFlushes.set(handle, timer);
@@ -1768,7 +1849,7 @@ export async function main(argv: string[] = Deno.args) {
       } else {
         clearScheduledFlush(handle);
         flushHandle(handle).catch((e) => {
-          console.error(`[fuse] flush write error: ${e}`);
+          recordAsyncWriteFailure("flush write error", e);
         });
       }
     },
@@ -1930,7 +2011,7 @@ export async function main(argv: string[] = Deno.args) {
             }
             tree.updateFile(inode, truncateHandle.buffer, node.jsonType);
             flushHandle(truncateHandle).catch((e) => {
-              console.error(`[fuse] truncate write error: ${e}`);
+              recordAsyncWriteFailure("truncate write error", e);
             }).finally(() => {
               handles.close(truncateFh);
             });
@@ -1983,7 +2064,7 @@ export async function main(argv: string[] = Deno.args) {
           handle.truncatePending && !handle.dirty && !handle.flushing
         ) {
           flushPromise = flushHandle(handle).catch((e) => {
-            console.error(`[fuse] release flush error: ${e}`);
+            recordAsyncWriteFailure("release flush error", e);
           });
         } else if (
           writeTarget?.kind === "value" &&
@@ -1992,7 +2073,7 @@ export async function main(argv: string[] = Deno.args) {
           scheduleFlush(handle, 0);
         } else if (!handle.flushing) {
           flushPromise = flushHandle(handle).catch((e) => {
-            console.error(`[fuse] release flush error: ${e}`);
+            recordAsyncWriteFailure("release flush error", e);
           });
         }
         if (flushPromise) {
