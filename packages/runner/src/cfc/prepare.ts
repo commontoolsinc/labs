@@ -1026,7 +1026,9 @@ export const writeDetailValueForTarget = (
     // Base isn't a container yet deeper writes exist (rare/incoherent): build a
     // fresh container and overlay onto it (it's freshly mutable -- no COW).
     const result: Record<PropertyKey, unknown> | unknown[] =
-      descendants.every(({ rel }) => isArrayIndexPropertyName(rel[0])) ? [] : {};
+      descendants.every(({ rel }) => isArrayIndexPropertyName(rel[0]))
+        ? []
+        : {};
     for (const { rel, value: descendantValue } of descendants) {
       setValueAtPath(result, rel, descendantValue);
     }
