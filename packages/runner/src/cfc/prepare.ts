@@ -1,5 +1,9 @@
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { emptySchemaObject } from "@commonfabric/data-model/schema-utils";
+import {
+  cloneIfNecessary,
+  isArrayIndexPropertyName,
+} from "@commonfabric/data-model/fabric-value";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import type {
   FabricValue,
@@ -23,7 +27,7 @@ import {
   isWriteRedirectLink,
   parseLink,
 } from "../link-utils.ts";
-import { getValueAtPath } from "../path-utils.ts";
+import { getValueAtPath, setValueAtPath } from "../path-utils.ts";
 import { encodePointer } from "../../../memory/v2/path.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { canonicalizeLogicalPath } from "./canonical.ts";
@@ -940,7 +944,9 @@ const currentPrincipalIntegrityReason = (
   return undefined;
 };
 
-const writeDetailValueForTarget = (
+// Exported for unit testing of write-detail reconstruction (the granularity
+// composition below). Not part of the public CFC surface.
+export const writeDetailValueForTarget = (
   tx: IExtendedStorageTransaction,
   target: {
     space: MemorySpace;
@@ -951,50 +957,66 @@ const writeDetailValueForTarget = (
   key: "value" | "previousValue",
 ): FabricValue => {
   const writeDetails = [...(tx.getWriteDetails?.(target.space) ?? [])];
-  let matchingWrite:
-    | {
-      address: {
-        id: URI;
-        type?: MediaType;
-        path: readonly string[];
-      };
-      value?: FabricValue;
-      previousValue?: FabricValue;
-    }
-    | undefined;
-  let matchingWritePath: string[] | undefined;
+  const targetPath = target.path.map((entry) => String(entry));
+
+  // The value at `targetPath` may have been recorded as a single coarse write
+  // (e.g. a whole object at `targetPath`) OR split across granular writes
+  // (e.g. an envelope `{}` at `targetPath` plus per-field writes at deeper
+  // paths). Both must reconstruct to the same value, so we (a) take the
+  // longest ancestor-or-exact write as the base and (b) overlay any deeper
+  // ("descendant") writes at their relative subpaths. Reconstruction must be
+  // robust to write granularity; depending on it silently breaks when, e.g.,
+  // a value is deep-frozen and so written field-by-field rather than whole.
+  let baseValue: FabricValue | undefined;
+  let baseWritePathLength = -1;
+  let sawBase = false;
+  const descendants: { rel: string[]; value: FabricValue | undefined }[] = [];
+
   for (const write of writeDetails) {
     if (write.address.id !== target.id) continue;
     if (normalizeCellScope(write.address.scope) !== target.scope) continue;
-    if (write.address.path[0] !== "value") {
-      continue;
-    }
+    if (write.address.path[0] !== "value") continue;
     const writePath = write.address.path.slice(1).map((entry) => String(entry));
-    const targetPath = target.path.map((entry) => String(entry));
-    if (writePath.length > targetPath.length) {
-      continue;
-    }
-    if (!writePath.every((segment, index) => segment === targetPath[index])) {
-      continue;
-    }
-    if (
-      matchingWrite === undefined ||
-      (matchingWritePath?.length ?? -1) < writePath.length
-    ) {
-      matchingWrite = write;
-      matchingWritePath = writePath;
+
+    if (writePath.length <= targetPath.length) {
+      // Ancestor-or-exact: `writePath` must be a prefix of `targetPath`.
+      if (!writePath.every((segment, i) => segment === targetPath[i])) continue;
+      if (writePath.length > baseWritePathLength) {
+        baseWritePathLength = writePath.length;
+        sawBase = true;
+        const wv = write[key];
+        baseValue = wv === undefined
+          ? undefined
+          : getValueAtPath(wv, targetPath.slice(writePath.length));
+      }
+    } else {
+      // Descendant: `targetPath` must be a prefix of `writePath`.
+      if (!targetPath.every((segment, i) => segment === writePath[i])) continue;
+      descendants.push({
+        rel: writePath.slice(targetPath.length),
+        value: write[key],
+      });
     }
   }
 
-  const value = matchingWrite?.[key];
-  if (value === undefined || matchingWritePath === undefined) {
-    return undefined;
+  // Deeper field-writes only need to be composed for the effective written
+  // `value`. The `previousValue` of the longest ancestor write already
+  // captures the whole pre-write subtree at `targetPath`, so per-field
+  // previous-values are redundant there.
+  if (key !== "value" || descendants.length === 0) {
+    return sawBase ? baseValue : undefined;
   }
-  const targetPath = target.path.map((entry) => String(entry));
-  if (matchingWritePath.length === targetPath.length) {
-    return value;
+
+  const baseIsContainer = isRecord(baseValue) || Array.isArray(baseValue);
+  const result: Record<PropertyKey, unknown> | unknown[] = baseIsContainer
+    ? cloneIfNecessary(baseValue as FabricValue, { frozen: false }) as
+      | Record<PropertyKey, unknown>
+      | unknown[]
+    : (descendants.every(({ rel }) => isArrayIndexPropertyName(rel[0])) ? [] : {});
+  for (const { rel, value } of descendants) {
+    setValueAtPath(result, rel, value);
   }
-  return getValueAtPath(value, targetPath.slice(matchingWritePath.length));
+  return result as FabricValue;
 };
 
 const writeValueForTarget = (
