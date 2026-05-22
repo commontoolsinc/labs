@@ -297,6 +297,7 @@ export type MetaField =
   | "internal"
   | "schema"
   | "result" // this lets us get from internal/argument back to result
+  | "slug"
   | "cfc";
 
 export interface IMetaCell {

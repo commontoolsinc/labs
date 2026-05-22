@@ -55,25 +55,14 @@ export async function setSlugLink(
     const targetWithTx = target.withTx(tx);
     const slugWithTx = slugCell.withTx(tx);
     const targetLink = targetWithTx.getAsNormalizedFullLink();
-    const slugLink = slugWithTx.getAsNormalizedFullLink();
 
     if (
       options?.writeTargetMetadata &&
       (!targetLink.path || targetLink.path.length === 0)
     ) {
-      tx.writeOrThrow({
-        space: targetLink.space,
-        id: targetLink.id,
-        scope: targetLink.scope,
-        path: ["slug"],
-      }, validSlug);
+      targetWithTx.setMetaRaw("slug", validSlug);
     }
-    tx.writeOrThrow({
-      space: slugLink.space,
-      id: slugLink.id,
-      scope: slugLink.scope,
-      path: ["slug"],
-    }, validSlug);
+    slugWithTx.setMetaRaw("slug", validSlug);
     slugWithTx.setRawUntyped(
       targetWithTx.getAsWriteRedirectLink({ base: slugWithTx }),
     );

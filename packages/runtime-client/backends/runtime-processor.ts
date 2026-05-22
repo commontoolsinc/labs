@@ -695,13 +695,7 @@ export class RuntimeProcessor {
       { "/": request.pageId },
     );
     await cell.sync();
-    const link = cell.getAsNormalizedFullLink();
-    const slug = this.runtime.readTx().readOrThrow({
-      space: link.space,
-      id: link.id,
-      scope: link.scope,
-      path: ["slug"],
-    });
+    const slug = cell.getMetaRaw("slug");
     return { slug: typeof slug === "string" ? slug : undefined };
   }
 

@@ -79,17 +79,14 @@ describe("page slug metadata", () => {
       runtime: {
         getCellFromEntityId: () => ({
           sync: () => Promise.resolve(),
-          getAsNormalizedFullLink: () => ({
-            space: "did:key:z6Mk-runtime-processor-slug",
-            id: "of:fid1-slugged-piece",
-            scope: "space",
-            path: [],
-          }),
-        }),
-        readTx: () => ({
-          readOrThrow: (address: unknown) => {
-            reads.push(address);
-            return "demo";
+          getMetaRaw: (metaField: string) => {
+            reads.push({
+              space: "did:key:z6Mk-runtime-processor-slug",
+              id: "of:fid1-slugged-piece",
+              scope: "space",
+              path: [metaField],
+            });
+            return metaField === "slug" ? "demo" : undefined;
           },
         }),
       },
@@ -118,15 +115,8 @@ describe("page slug metadata", () => {
       runtime: {
         getCellFromEntityId: () => ({
           sync: () => Promise.resolve(),
-          getAsNormalizedFullLink: () => ({
-            space: "did:key:z6Mk-runtime-processor-slug",
-            id: "of:fid1-slugged-piece",
-            scope: "space",
-            path: [],
-          }),
-        }),
-        readTx: () => ({
-          readOrThrow: () => ({ not: "a slug" }),
+          getMetaRaw: (metaField: string) =>
+            metaField === "slug" ? { not: "a slug" } : undefined,
         }),
       },
       pieceManager: {
