@@ -1,4 +1,4 @@
-import { FabricInstance, type FabricValue } from "./interface.ts";
+import { FabricInstance, type FabricValue } from "../interface.ts";
 
 /**
  * Base class for fabric types that carry an explicit wire-format tag.

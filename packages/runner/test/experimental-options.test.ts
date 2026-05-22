@@ -11,7 +11,7 @@ import {
   setDataModelConfig,
   shallowFabricFromNativeValue,
 } from "@commonfabric/data-model/fabric-value";
-import { FabricError } from "@commonfabric/data-model/fabric-native-instances";
+import { FabricError } from "@commonfabric/data-model/fabric-instances";
 
 const signer = await Identity.fromPassphrase("test experimental");
 

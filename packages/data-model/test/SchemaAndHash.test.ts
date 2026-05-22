@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { assert } from "@std/assert";
 import { expect } from "@std/expect";
-import { FabricHash } from "../src/FabricHash.ts";
+import { FabricHash } from "../src/fabric-primitives/FabricHash.ts";
 import { SchemaAndHash } from "../src/SchemaAndHash.ts";
 import { toDeepFrozenSchema } from "../src/schema-utils.ts";
 

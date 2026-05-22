@@ -7,11 +7,9 @@ import {
   RECONSTRUCT,
 } from "../src/interface.ts";
 import { BaseReconstructionContext } from "../src/BaseReconstructionContext.ts";
-import {
-  FabricNativeWrapper,
-  FabricRegExp,
-  isConvertibleNativeInstance,
-} from "../src/fabric-native-instances.ts";
+import { FabricNativeWrapper } from "../src/fabric-instances/FabricNativeWrapper.ts";
+import { FabricRegExp } from "../src/fabric-instances/FabricRegExp.ts";
+import { isConvertibleNativeInstance } from "../src/native-instance-utils.ts";
 import {
   isFabricCompatible,
   resetDataModelConfig,

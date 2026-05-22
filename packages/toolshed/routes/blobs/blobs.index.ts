@@ -5,7 +5,7 @@
 import { createRouter } from "@/lib/create-app.ts";
 import { memoryServer } from "@/routes/storage/memory.ts";
 import { isDID } from "@commonfabric/identity";
-import { FabricBytes } from "@commonfabric/data-model/FabricBytes";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { JsonEncodingContext } from "@commonfabric/data-model/JsonEncodingContext";
 import { EmptyReconstructionContext } from "@commonfabric/data-model/EmptyReconstructionContext";

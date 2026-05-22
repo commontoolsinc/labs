@@ -3,11 +3,13 @@ import { expect } from "@std/expect";
 import { hashOf, hashStringOf, taggedHashStringOf } from "../src/value-hash.ts";
 import { createHasher } from "@commonfabric/content-hash";
 import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
-import { FabricHash } from "../src/FabricHash.ts";
+import { FabricHash } from "../src/fabric-primitives/FabricHash.ts";
 import { FabricValue } from "../src/interface.ts";
-import { FabricEpochDays, FabricEpochNsec } from "../src/fabric-epoch.ts";
-import { FabricError, FabricRegExp } from "../src/fabric-native-instances.ts";
-import { FabricBytes } from "../src/FabricBytes.ts";
+import { FabricEpochDays } from "../src/fabric-primitives/FabricEpochDays.ts";
+import { FabricEpochNsec } from "../src/fabric-primitives/FabricEpochNsec.ts";
+import { FabricError } from "../src/fabric-instances/FabricError.ts";
+import { FabricRegExp } from "../src/fabric-instances/FabricRegExp.ts";
+import { FabricBytes } from "../src/fabric-primitives/FabricBytes.ts";
 
 // Dynamic import to satisfy the no-external-import lint rule.
 const nodeCrypto = await import("node:crypto");

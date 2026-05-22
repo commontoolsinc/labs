@@ -1,5 +1,5 @@
 import { DID, Identity, type Session } from "@commonfabric/identity";
-import { FabricBytes } from "@commonfabric/data-model/FabricBytes";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { JsonEncodingContext } from "@commonfabric/data-model/JsonEncodingContext";
 import { PieceManager } from "@commonfabric/piece";

@@ -1,4 +1,4 @@
-import { FabricPrimitive } from "./interface.ts";
+import { FabricPrimitive } from "../interface.ts";
 
 /**
  * Immutable byte sequence in the fabric type system. Extends `FabricPrimitive`

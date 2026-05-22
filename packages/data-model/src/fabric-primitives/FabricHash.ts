@@ -2,7 +2,7 @@ import type {
   FabricHash as ApiFabricHash,
   FabricHashConstructor as ApiFabricHashConstructor,
 } from "@commonfabric/api";
-import { FabricPrimitive } from "./interface.ts";
+import { FabricPrimitive } from "../interface.ts";
 import {
   fromBase64url,
   toUnpaddedBase64url,
