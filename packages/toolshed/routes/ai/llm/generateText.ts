@@ -1,8 +1,11 @@
 import { jsonSchema, ModelMessage, stepCountIs, streamText, tool } from "ai";
 import { AttributeValue, trace } from "@opentelemetry/api";
-import { type LLMRequest } from "@commonfabric/llm/types";
+import {
+  type LLMNativeModelToolId,
+  type LLMRequest,
+} from "@commonfabric/llm/types";
 import { type BuiltInLLMMessage } from "@commonfabric/api";
-import { findModel } from "./models.ts";
+import { findModel, type ModelConfig } from "./models.ts";
 import { normalizeSchemaForProvider } from "./schema.ts";
 import { provider as otelProvider } from "@/lib/otel.ts";
 import env from "@/env.ts";
@@ -129,6 +132,64 @@ export function cleanJsonResponse(text: string): string {
   return text;
 }
 
+export function applyNativeModelTools(
+  streamParams: Record<string, unknown>,
+  nativeModelToolIds: readonly LLMNativeModelToolId[] | undefined,
+  modelConfig: Pick<ModelConfig, "name" | "nativeModelToolFactories">,
+): void {
+  if (nativeModelToolIds === undefined || nativeModelToolIds.length === 0) {
+    return;
+  }
+
+  const tools = {
+    ...((streamParams.tools as Record<string, unknown> | undefined) ?? {}),
+  };
+  for (const toolId of nativeModelToolIds) {
+    if (tools[toolId] !== undefined) {
+      throw new Error(
+        `Native model tool '${toolId}' conflicts with an existing tool definition`,
+      );
+    }
+    const factory = modelConfig.nativeModelToolFactories?.[toolId];
+    if (factory === undefined) {
+      throw new Error(
+        `Native model tool '${toolId}' is not supported by model '${modelConfig.name}'`,
+      );
+    }
+    tools[toolId] = factory();
+  }
+  streamParams.tools = tools;
+}
+
+async function readNativeModelToolResults(
+  llmStream: unknown,
+  nativeModelToolIds: readonly LLMNativeModelToolId[] | undefined,
+  modelName: string,
+): Promise<unknown[] | undefined> {
+  if (nativeModelToolIds === undefined || nativeModelToolIds.length === 0) {
+    return undefined;
+  }
+  const stream = llmStream as {
+    providerMetadata?: Promise<unknown> | unknown;
+    sources?: Promise<unknown> | unknown;
+  };
+  const providerMetadata = await Promise.resolve(stream.providerMetadata);
+  const sources = await Promise.resolve(stream.sources);
+  if (providerMetadata === undefined && sources === undefined) {
+    return undefined;
+  }
+  const provider = modelName.includes(":")
+    ? modelName.split(":")[0]
+    : undefined;
+  return nativeModelToolIds.map((toolId) => ({
+    type: "cf-harness.native-model-tool-result",
+    toolId,
+    ...(provider !== undefined ? { provider } : {}),
+    ...(providerMetadata !== undefined ? { providerMetadata } : {}),
+    ...(sources !== undefined ? { sources } : {}),
+  }));
+}
+
 export async function generateText(
   params: GenerateTextParams,
 ): Promise<GenerateTextResult> {
@@ -174,6 +235,12 @@ export async function generateText(
 
     (streamParams as any).tools = aiSdkTools;
   }
+
+  applyNativeModelTools(
+    streamParams as Record<string, unknown>,
+    params.nativeModelToolIds,
+    modelConfig,
+  );
 
   // remove stopSequences if the model doesn't support them
   if (!modelConfig.capabilities.stopSequences) {
@@ -294,6 +361,15 @@ export async function generateText(
       messages.push({ role: "assistant", content: result });
     } else {
       messages[messages.length - 1].content = result;
+    }
+    const nativeModelToolResults = await readNativeModelToolResults(
+      llmStream,
+      params.nativeModelToolIds,
+      modelConfig.name,
+    );
+    if (nativeModelToolResults !== undefined) {
+      (messages[messages.length - 1] as any).nativeModelToolResults =
+        nativeModelToolResults;
     }
 
     return {
@@ -421,6 +497,15 @@ export async function generateText(
           } as any);
         } else {
           messages[messages.length - 1].content = assistantContent as any;
+        }
+        const nativeModelToolResults = await readNativeModelToolResults(
+          llmStream,
+          params.nativeModelToolIds,
+          modelConfig.name,
+        );
+        if (nativeModelToolResults !== undefined) {
+          (messages[messages.length - 1] as any).nativeModelToolResults =
+            nativeModelToolResults;
         }
 
         // Send finish event to client

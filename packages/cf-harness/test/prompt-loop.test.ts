@@ -1573,11 +1573,12 @@ Deno.test("CfHarnessPromptLoop lets an explicit subagent profile expand child to
   assertEquals(output.subagent.manifest.hostToolIds, []);
 });
 
-Deno.test("CfHarnessPromptLoop applies the web_search profile model override", async () => {
+Deno.test("CfHarnessPromptLoop applies the web_search profile model override and native search tool", async () => {
   const requestBodies: Array<{
     model: string;
     messages: Array<{ role: string; content: string }>;
     tools: Array<{ function: { name: string } }>;
+    native_model_tools?: Array<{ type: string }>;
   }> = [];
   const loop = new CfHarnessPromptLoop({
     apiKey: "test-key",
@@ -1594,6 +1595,7 @@ Deno.test("CfHarnessPromptLoop applies the web_search profile model override", a
         model: string;
         messages: Array<{ role: string; content: string }>;
         tools: Array<{ function: { name: string } }>;
+        native_model_tools?: Array<{ type: string }>;
       };
       requestBodies.push(body);
       const payload = requestBodies.length === 1
@@ -1672,6 +1674,11 @@ Deno.test("CfHarnessPromptLoop applies the web_search profile model override", a
     requestBodies[1].tools.map((tool) => tool.function.name),
     [],
   );
+  assertEquals(requestBodies[0].native_model_tools, undefined);
+  assertEquals(requestBodies[1].native_model_tools, [{
+    type: "google_search",
+  }]);
+  assertEquals(requestBodies[2].native_model_tools, undefined);
   assertEquals(
     requestBodies[1].messages[0].content.includes(
       "Subagent profile: web_search",
@@ -1690,7 +1697,7 @@ Deno.test("CfHarnessPromptLoop applies the web_search profile model override", a
   assertEquals(output.subagent.manifest.modelSource, "profile");
   assertEquals(output.subagent.manifest.allowedToolIds, []);
   assertEquals(output.subagent.manifest.hostToolIds, []);
-  assertEquals(output.subagent.manifest.nativeModelToolIds, []);
+  assertEquals(output.subagent.manifest.nativeModelToolIds, ["google_search"]);
 });
 
 Deno.test("CfHarnessPromptLoop keeps bash-no-sandbox unavailable to the parent by default", async () => {

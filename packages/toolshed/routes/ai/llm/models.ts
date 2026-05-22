@@ -4,6 +4,11 @@ import { createGroq, groq } from "@ai-sdk/groq";
 import { openai } from "@ai-sdk/openai";
 import { createVertex, vertex } from "@ai-sdk/google-vertex";
 import type { LanguageModel } from "ai";
+import {
+  GOOGLE_SEARCH_NATIVE_MODEL_TOOL,
+  isLLMNativeModelToolId,
+  type LLMNativeModelToolId,
+} from "@commonfabric/llm/types";
 
 import env from "@/env.ts";
 
@@ -17,6 +22,7 @@ export type Capabilities = {
   prefill: boolean;
   images: boolean;
   reasoning: boolean;
+  nativeModelToolIds?: readonly LLMNativeModelToolId[];
 };
 
 // Gateway /v1/models response types
@@ -30,6 +36,7 @@ type GatewayModelCapabilities = {
   prefill?: boolean;
   images?: boolean;
   reasoning?: boolean;
+  nativeModelToolIds?: string[];
 };
 
 type GatewayModel = {
@@ -44,11 +51,12 @@ type GatewayModelsResponse = {
   data: GatewayModel[];
 };
 
-type ModelConfig = {
+export type ModelConfig = {
   model: LanguageModel;
   name: string;
   capabilities: Capabilities;
   aliases: string[];
+  nativeModelToolFactories?: Partial<Record<LLMNativeModelToolId, () => any>>;
 };
 
 export type ModelList = Record<string, ModelConfig>;
@@ -72,6 +80,7 @@ const addModel = ({
   aliases,
   capabilities,
   providerOptions: _,
+  nativeModelToolFactories,
 }: {
   provider:
     | typeof anthropic
@@ -82,6 +91,7 @@ const addModel = ({
   aliases: string[];
   capabilities: Capabilities;
   providerOptions?: Record<string, unknown>;
+  nativeModelToolFactories?: Partial<Record<LLMNativeModelToolId, () => any>>;
 }) => {
   let modelName = name.includes(":")
     ? name.split(":").slice(1).join(":")
@@ -103,6 +113,9 @@ const addModel = ({
     name,
     capabilities,
     aliases,
+    ...(nativeModelToolFactories !== undefined
+      ? { nativeModelToolFactories }
+      : {}),
   };
 
   MODELS[name] = config;
@@ -380,6 +393,13 @@ if (env.CFTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
     project: env.CFTS_AI_LLM_GOOGLE_VERTEX_PROJECT,
     location: env.CFTS_AI_LLM_GOOGLE_VERTEX_LOCATION,
   });
+  const googleSearchNativeModelToolFactories = {
+    [GOOGLE_SEARCH_NATIVE_MODEL_TOOL]: () =>
+      vertexProvider.tools.googleSearch({}),
+  };
+  const googleSearchNativeModelToolIds = [
+    GOOGLE_SEARCH_NATIVE_MODEL_TOOL,
+  ] as const;
 
   addModel({
     provider: vertexProvider,
@@ -399,6 +419,24 @@ if (env.CFTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
 
   addModel({
     provider: vertexProvider,
+    name: "google:gemini-3.5-flash",
+    aliases: ["google:gemini-3.5-flash-latest", "gemini-3.5-flash"],
+    capabilities: {
+      contextWindow: 1_000_000,
+      maxOutputTokens: 8_192,
+      images: true,
+      prefill: true,
+      systemPrompt: true,
+      stopSequences: true,
+      streaming: true,
+      reasoning: true,
+      nativeModelToolIds: googleSearchNativeModelToolIds,
+    },
+    nativeModelToolFactories: googleSearchNativeModelToolFactories,
+  });
+
+  addModel({
+    provider: vertexProvider,
     name: "google:gemini-2.5-flash",
     aliases: ["google:gemini-2.5-flash-latest", "gemini-2.5-flash"],
     capabilities: {
@@ -410,7 +448,9 @@ if (env.CFTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
       stopSequences: true,
       streaming: true,
       reasoning: true,
+      nativeModelToolIds: googleSearchNativeModelToolIds,
     },
+    nativeModelToolFactories: googleSearchNativeModelToolFactories,
   });
 }
 
@@ -459,6 +499,9 @@ async function loadGatewayModels() {
         prefill: m.capabilities.prefill ?? false,
         images: m.capabilities.images ?? false,
         reasoning: m.capabilities.reasoning ?? false,
+        nativeModelToolIds: m.capabilities.nativeModelToolIds?.filter(
+          isLLMNativeModelToolId,
+        ),
       };
 
       // Build aliases: bare model id + owned_by:model-id

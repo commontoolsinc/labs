@@ -10,6 +10,7 @@ import {
   type CfcStreamObservation,
   evaluateHarnessWriteFileAuthorization,
 } from "@commonfabric/runner/cfc";
+import { type LLMNativeModelToolId } from "@commonfabric/llm/types";
 import {
   type OpenAIChatCompletionAttemptDiagnostic,
   type OpenAIChatCompletionMessage,
@@ -35,6 +36,7 @@ import {
 import type { HarnessCfcModelContextObservationInput } from "./contracts/cfc-model-context.ts";
 import type {
   HarnessAssistantTranscriptMessage,
+  HarnessNativeModelToolResult,
   HarnessToolCall,
   HarnessToolTranscriptMessage,
   HarnessTranscriptEvent,
@@ -111,6 +113,7 @@ export interface CreateHarnessPromptLoopOptions
   maxModelTurns?: number;
   allowedToolIds?: readonly BuiltinToolId[];
   allowedSubagentProfiles?: readonly HarnessSubagentProfile[];
+  nativeModelToolIds?: readonly LLMNativeModelToolId[];
 }
 
 export interface RunHarnessPromptOptions {
@@ -938,10 +941,21 @@ const createAssistantTranscriptMessage = (
       arguments: toolCall.function.arguments,
     },
   }));
+  const nativeModelToolResults: HarnessNativeModelToolResult[] | undefined =
+    response.native_model_tool_results?.map((result) => ({
+      type: "cf-harness.native-model-tool-result",
+      toolId: result.type,
+      ...(result.provider !== undefined ? { provider: result.provider } : {}),
+      ...(result.providerMetadata !== undefined
+        ? { providerMetadata: result.providerMetadata }
+        : {}),
+      ...(result.sources !== undefined ? { sources: result.sources } : {}),
+    }));
   return {
     role: "assistant",
     content: normalizeTextContent(message.content),
     ...(toolCalls !== undefined ? { toolCalls } : {}),
+    ...(nativeModelToolResults !== undefined ? { nativeModelToolResults } : {}),
   };
 };
 
@@ -1595,6 +1609,7 @@ export class CfHarnessPromptLoop {
   readonly gatewayClient: OpenAICompatibleGatewayClient;
   readonly #maxModelTurns: number;
   readonly #allowedToolIds: ReadonlySet<BuiltinToolId>;
+  readonly #nativeModelToolIds: readonly LLMNativeModelToolId[];
   readonly #parentToolAllowanceMode: HarnessParentToolAllowance;
   readonly #allowedSubagentProfiles: ReadonlySet<HarnessSubagentProfile>;
 
@@ -1615,6 +1630,7 @@ export class CfHarnessPromptLoop {
     this.#allowedToolIds = new Set(
       options.allowedToolIds ?? DEFAULT_PROMPT_LOOP_TOOL_IDS,
     );
+    this.#nativeModelToolIds = options.nativeModelToolIds ?? [];
     this.#allowedSubagentProfiles = new Set(
       options.allowedSubagentProfiles ??
         (options.allowedToolIds === undefined
@@ -1910,10 +1926,16 @@ export class CfHarnessPromptLoop {
     model: string,
     transcript: readonly HarnessTranscriptMessage[],
   ): Promise<OpenAIChatCompletionRequest> {
+    const nativeModelTools = this.#nativeModelToolIds.map((toolId) => ({
+      type: toolId,
+    }));
     return {
       model,
       messages: await Promise.all(transcript.map(toOpenAIChatMessage)),
       tools: toOpenAITools(this.#allowedToolIds),
+      ...(nativeModelTools.length > 0
+        ? { native_model_tools: nativeModelTools }
+        : {}),
       tool_choice: "auto",
     };
   }
@@ -2539,6 +2561,7 @@ export class CfHarnessPromptLoop {
       maxModelTurns,
       allowedToolIds: profileConfig.allowedToolIds,
       allowedSubagentProfiles: [],
+      nativeModelToolIds: profileConfig.nativeModelToolIds,
     });
     let subagentStatus: HarnessSubagentResult["status"] = "completed";
     let summary = "";

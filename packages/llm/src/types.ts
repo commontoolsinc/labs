@@ -28,6 +28,20 @@ export interface LLMTool {
   inputSchema: JSONSchema;
 }
 
+export const GOOGLE_SEARCH_NATIVE_MODEL_TOOL = "google_search" as const;
+export const LLM_NATIVE_MODEL_TOOL_IDS = [
+  GOOGLE_SEARCH_NATIVE_MODEL_TOOL,
+] as const;
+
+export type LLMNativeModelToolId = typeof LLM_NATIVE_MODEL_TOOL_IDS[number];
+
+export function isLLMNativeModelToolId(
+  input: unknown,
+): input is LLMNativeModelToolId {
+  return typeof input === "string" &&
+    (LLM_NATIVE_MODEL_TOOL_IDS as readonly string[]).includes(input);
+}
+
 export interface LLMToolCall {
   id: string;
   name: string;
@@ -52,6 +66,7 @@ export interface LLMRequest {
   mode?: "json";
   metadata?: LLMRequestMetadata;
   tools?: Record<string, LLMTool>;
+  nativeModelToolIds?: readonly LLMNativeModelToolId[];
 }
 
 export interface LLMGenerateObjectRequest {
@@ -163,5 +178,8 @@ export function isLLMRequest(input: unknown): input is LLMRequest {
     (!("mode" in input) || input.mode === "json") &&
     (!("metadata" in input) || isLLMRequestMetadata(input.metadata)) &&
     (!("tools" in input) || (isRecord(input.tools) &&
-      Object.values(input.tools).every((tool: unknown) => isLLMTool(tool))));
+      Object.values(input.tools).every((tool: unknown) => isLLMTool(tool)))) &&
+    (!("nativeModelToolIds" in input) ||
+      (Array.isArray(input.nativeModelToolIds) &&
+        input.nativeModelToolIds.every(isLLMNativeModelToolId)));
 }

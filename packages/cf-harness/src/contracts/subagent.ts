@@ -1,5 +1,9 @@
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import type { JSONSchema } from "@commonfabric/api";
+import {
+  GOOGLE_SEARCH_NATIVE_MODEL_TOOL,
+  type LLMNativeModelToolId,
+} from "@commonfabric/llm/types";
 import type { HarnessFailureRecord } from "../diagnostics.ts";
 import type { BuiltinToolId } from "./tool-descriptor.ts";
 
@@ -33,9 +37,9 @@ export const NO_HOST_TOOL_IDS = [] as const satisfies readonly BuiltinToolId[];
 export const BROWSER_SUBAGENT_HOST_TOOL_IDS = [
   "bash-no-sandbox",
 ] as const satisfies readonly BuiltinToolId[];
-export const GOOGLE_SEARCH_NATIVE_MODEL_TOOL = "google_search" as const;
-export const WEB_SEARCH_SUBAGENT_NATIVE_MODEL_TOOL_IDS =
-  [] as const satisfies readonly HarnessNativeModelToolId[];
+export const WEB_SEARCH_SUBAGENT_NATIVE_MODEL_TOOL_IDS = [
+  GOOGLE_SEARCH_NATIVE_MODEL_TOOL,
+] as const satisfies readonly HarnessNativeModelToolId[];
 
 export const HARNESS_SUBAGENT_PROFILES = [
   DEFAULT_SUBAGENT_PROFILE,
@@ -46,7 +50,7 @@ export const HARNESS_SUBAGENT_PROFILES = [
 
 export type HarnessSubagentProfile = typeof HARNESS_SUBAGENT_PROFILES[number];
 export type HarnessSubagentModelSource = "parent" | "profile";
-export type HarnessNativeModelToolId = typeof GOOGLE_SEARCH_NATIVE_MODEL_TOOL;
+export type HarnessNativeModelToolId = LLMNativeModelToolId;
 export type HarnessSubagentRunStatus = "completed" | "failed";
 export type HarnessSubagentReturnChannel =
   typeof DEFAULT_SUBAGENT_RETURN_CHANNEL;
