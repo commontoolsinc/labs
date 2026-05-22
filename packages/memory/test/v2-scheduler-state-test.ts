@@ -802,6 +802,67 @@ Deno.test("memory v2 server mirrors scheduler read indexes into read spaces", as
   }
 });
 
+Deno.test("memory v2 server mirrors batched scheduler observations into read spaces", async () => {
+  const storePath = await Deno.makeTempDir();
+  const store = toFileUrl(`${storePath}/`);
+  const server = new Server({
+    store,
+    authorizeSessionOpen: () => "did:key:test-principal",
+  });
+  const client = await connect({ transport: loopback(server) });
+  const ownerSpace = "did:key:scheduler-batch-owner-space";
+  const readSpace = "did:key:scheduler-batch-read-space";
+  const owner = await client.mount(ownerSpace);
+  const reader = await client.mount(readSpace);
+  const mirroredRead = {
+    ...sourceRead,
+    space: readSpace,
+  };
+  const mirroredObservation = {
+    ...observation,
+    reads: [mirroredRead],
+  } satisfies SchedulerActionObservation;
+
+  try {
+    const applied = await owner.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservationBatch: [{
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        schedulerObservation: mirroredObservation,
+      }],
+    });
+    assertEquals(applied.schedulerObservationResults?.map((entry) => ({
+      localSeq: entry.localSeq,
+      status: entry.status,
+    })), [{ localSeq: 2, status: "kept" }]);
+
+    await reader.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: mirroredRead.id,
+        scope: mirroredRead.scope,
+        value: { value: { count: 1 } },
+      }],
+    });
+    const listed = await reader.listSchedulerActionSnapshots({
+      pieceId: observation.pieceId,
+      processGeneration: observation.processGeneration,
+      actionId: observation.actionId,
+    });
+    assertEquals(listed.snapshots.length, 1);
+    assertEquals(listed.snapshots[0]?.directDirtySeq, 1);
+  } finally {
+    await client.close().catch(() => {});
+    await server.close().catch(() => {});
+    await Deno.remove(storePath, { recursive: true });
+  }
+});
+
 Deno.test("memory v2 server skips scheduler mirrors for unmounted read spaces", async () => {
   const storePath = await Deno.makeTempDir();
   const store = toFileUrl(`${storePath}/`);

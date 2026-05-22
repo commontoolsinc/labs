@@ -116,10 +116,9 @@ export const getSlowQueries = (): readonly SlowQuery[] => slowQueries;
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
-const schedulerObservationFromCommit = (
-  commit: ClientCommit,
+const schedulerObservationFromValue = (
+  observation: unknown,
 ): Engine.SchedulerActionObservation | undefined => {
-  const observation = commit.schedulerObservation;
   if (
     !isRecord(observation) ||
     observation.version !== 1 ||
@@ -132,6 +131,31 @@ const schedulerObservationFromCommit = (
     return undefined;
   }
   return observation as unknown as Engine.SchedulerActionObservation;
+};
+
+type CommitSchedulerObservation = {
+  localSeq: number;
+  observation: Engine.SchedulerActionObservation;
+};
+
+const schedulerObservationsFromCommit = (
+  commit: ClientCommit,
+): CommitSchedulerObservation[] => {
+  const single = schedulerObservationFromValue(commit.schedulerObservation);
+  if (single) {
+    return [{ localSeq: commit.localSeq, observation: single }];
+  }
+
+  const batch = commit.schedulerObservationBatch ?? [];
+  const observations: CommitSchedulerObservation[] = [];
+  for (const item of batch) {
+    const observation = schedulerObservationFromValue(item.schedulerObservation);
+    if (!observation) {
+      continue;
+    }
+    observations.push({ localSeq: item.localSeq, observation });
+  }
+  return observations;
 };
 
 const toError = (name: string, message: string): V2Error => ({
@@ -546,8 +570,8 @@ export class Server {
     await this.runPostCommitSchedulerSideEffects(
       space,
       commit,
-      undefined,
-      new Set(),
+      [],
+      new Map(),
       undefined,
     );
     this.markSpaceDirty(space, [toDirtyKey(id)]);
@@ -654,19 +678,23 @@ export class Server {
 
     try {
       const engine = await this.openEngine(message.space);
-      const schedulerObservation = schedulerObservationFromCommit(
+      const schedulerObservations = schedulerObservationsFromCommit(
         message.commit,
       );
-      const previousReadSpaces = schedulerObservation
-        ? this.schedulerObservationReadSpaces(
-          Engine.getLatestSchedulerActionSnapshot(engine, {
-            branch: message.commit.branch ?? "",
-            pieceId: schedulerObservation.pieceId,
-            processGeneration: schedulerObservation.processGeneration,
-            actionId: schedulerObservation.actionId,
-          })?.observation,
-        )
-        : new Set<string>();
+      const previousReadSpaces = new Map<number, Set<string>>();
+      for (const { localSeq, observation } of schedulerObservations) {
+        previousReadSpaces.set(
+          localSeq,
+          this.schedulerObservationReadSpaces(
+            Engine.getLatestSchedulerActionSnapshot(engine, {
+              branch: message.commit.branch ?? "",
+              pieceId: observation.pieceId,
+              processGeneration: observation.processGeneration,
+              actionId: observation.actionId,
+            })?.observation,
+          ),
+        );
+      }
       const commit = Engine.applyCommit(engine, {
         sessionId: message.sessionId,
         space: message.space,
@@ -676,7 +704,7 @@ export class Server {
       await this.runPostCommitSchedulerSideEffects(
         message.space,
         commit,
-        schedulerObservation,
+        schedulerObservations,
         previousReadSpaces,
         session,
       );
@@ -1449,18 +1477,31 @@ export class Server {
   private async runPostCommitSchedulerSideEffects(
     ownerSpace: string,
     commit: Engine.AppliedCommit,
-    observation: Engine.SchedulerActionObservation | undefined,
-    previousReadSpaces: ReadonlySet<string>,
+    observations: readonly CommitSchedulerObservation[],
+    previousReadSpaces: ReadonlyMap<number, ReadonlySet<string>>,
     session: SessionState | undefined,
   ): Promise<void> {
     try {
       await this.propagateSchedulerDirtyToOwnerSpaces(ownerSpace, commit);
-      if (observation) {
+      const keptObservationLocalSeqs = commit.schedulerObservationResults
+        ? new Set(
+          commit.schedulerObservationResults
+            .filter((result) => result.status === "kept")
+            .map((result) => result.localSeq),
+        )
+        : undefined;
+      for (const { localSeq, observation } of observations) {
+        if (
+          keptObservationLocalSeqs &&
+          !keptObservationLocalSeqs.has(localSeq)
+        ) {
+          continue;
+        }
         await this.mirrorSchedulerObservation(
           ownerSpace,
           observation,
           commit,
-          previousReadSpaces,
+          previousReadSpaces.get(localSeq) ?? new Set(),
           session,
         );
       }
