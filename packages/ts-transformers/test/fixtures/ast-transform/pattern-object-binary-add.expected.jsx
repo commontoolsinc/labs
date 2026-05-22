@@ -18,7 +18,11 @@ const __cfAmdHooks = undefined;
 //   return { next: state.count + 1 }
 //   → return { next: derive(state.count + 1) }
 export default pattern((state) => ({
-    next: __cfHelpers.derive({
+    next: __cfHelpers.lift<{
+        state: {
+            count: number;
+        };
+    }, number>({
         type: "object",
         properties: {
             state: {
@@ -34,9 +38,9 @@ export default pattern((state) => ({
         required: ["state"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count + 1)({ state: {
             count: state.key("count")
-        } }, ({ state }) => state.count + 1).for(["__patternResult", "next"], true)
+        } }).for(["__patternResult", "next"], true)
 }), {
     type: "object",
     properties: {

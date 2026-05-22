@@ -199,7 +199,10 @@ export default pattern((__cf_pattern_input) => {
                 const groupedByAisle = __cf_pattern_input.key("params", "groupedByAisle");
                 return (<div>
               <h3>{aisleName}</h3>
-              {__cfHelpers.derive({
+              {__cfHelpers.lift<{
+                        groupedByAisle: Record<string, Assignment[]>;
+                        aisleName: string;
+                    }, Assignment[] | undefined>({
                         type: "object",
                         properties: {
                             groupedByAisle: {
@@ -280,10 +283,10 @@ export default pattern((__cf_pattern_input) => {
                                 required: ["name", "done"]
                             }
                         }
-                    } as const satisfies __cfHelpers.JSONSchema, {
+                    } as const satisfies __cfHelpers.JSONSchema, ({ groupedByAisle, aisleName }) => groupedByAisle[aisleName])({
                         groupedByAisle: groupedByAisle,
                         aisleName: aisleName
-                    }, ({ groupedByAisle, aisleName }) => groupedByAisle[aisleName])!.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                    })!.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                         const assignment = __cf_pattern_input.key("element");
                         return (<div>
                   <span>{assignment.key("item", "name")}</span>

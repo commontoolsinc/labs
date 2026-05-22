@@ -39,13 +39,15 @@ export default pattern(() => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+            items: import("commonfabric").Cell<string[]>;
+        }, boolean>({
             type: "object",
             properties: {
                 items: {
                     type: "array",
                     items: {
-                        type: "string"
+                        type: "unknown"
                     },
                     asCell: ["readonly"]
                 }
@@ -53,7 +55,7 @@ export default pattern(() => {
             required: ["items"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { items: items }, ({ items }) => !items.get().length), <span>No items</span>)}
+        } as const satisfies __cfHelpers.JSONSchema, ({ items }) => !items.get().length)({ items: items }), <span>No items</span>)}
       </div>),
     };
 }, false as const satisfies __cfHelpers.JSONSchema, {

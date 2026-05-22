@@ -53,7 +53,9 @@ export default pattern((_state) => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+            user: import("commonfabric").Cell<{ active: boolean; verified: boolean; name: string; }>;
+        }, boolean>({
             type: "object",
             properties: {
                 user: {
@@ -64,42 +66,35 @@ export default pattern((_state) => {
                         },
                         verified: {
                             type: "boolean"
-                        },
-                        name: {
-                            type: "string"
                         }
                     },
-                    required: ["active", "verified", "name"],
+                    required: ["active", "verified"],
                     asCell: ["readonly"]
                 }
             },
             required: ["user"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { user: user }, ({ user }) => user.get().active && user.get().verified), <span>Welcome, {__cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, ({ user }) => user.get().active && user.get().verified)({ user: user }), <span>Welcome, {__cfHelpers.lift<{
+            user: import("commonfabric").Cell<{ active: boolean; verified: boolean; name: string; }>;
+        }, string>({
             type: "object",
             properties: {
                 user: {
                     type: "object",
                     properties: {
-                        active: {
-                            type: "boolean"
-                        },
-                        verified: {
-                            type: "boolean"
-                        },
                         name: {
                             type: "string"
                         }
                     },
-                    required: ["active", "verified", "name"],
+                    required: ["name"],
                     asCell: ["readonly"]
                 }
             },
             required: ["user"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { user: user }, ({ user }) => user.get().name)}!</span>)}
+        } as const satisfies __cfHelpers.JSONSchema, ({ user }) => user.get().name)({ user: user })}!</span>)}
       </div>),
     };
 }, false as const satisfies __cfHelpers.JSONSchema, {

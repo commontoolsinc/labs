@@ -3154,8 +3154,18 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           sourceFile,
         );
 
-        if (node.typeArguments && node.typeArguments.length >= 2) {
-          const [argumentType, resultType] = node.typeArguments;
+        // For lift-applied shape (callee is itself a call), the generic
+        // type arguments live on the *inner* lift call, not on the outer
+        // applied call. The legacy derive shape kept them on the call
+        // itself. Read from whichever holds them.
+        const innerCallee = node.expression;
+        const sourceTypeArguments =
+          ts.isCallExpression(innerCallee) && innerCallee.typeArguments
+            ? innerCallee.typeArguments
+            : node.typeArguments;
+
+        if (sourceTypeArguments && sourceTypeArguments.length >= 2) {
+          const [argumentType, resultType] = sourceTypeArguments;
           if (!argumentType || !resultType) {
             return ts.visitEachChild(node, visit, transformation);
           }

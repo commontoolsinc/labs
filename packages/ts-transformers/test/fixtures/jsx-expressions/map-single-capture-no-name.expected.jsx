@@ -50,22 +50,15 @@ export default pattern((_state: any) => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+            people: import("commonfabric").Cell<{ id: string; name: string; }[]>;
+        }, boolean>({
             type: "object",
             properties: {
                 people: {
                     type: "array",
                     items: {
-                        type: "object",
-                        properties: {
-                            id: {
-                                type: "string"
-                            },
-                            name: {
-                                type: "string"
-                            }
-                        },
-                        required: ["id", "name"]
+                        type: "unknown"
                     },
                     asCell: ["readonly"]
                 }
@@ -73,7 +66,7 @@ export default pattern((_state: any) => {
             required: ["people"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { people: people }, ({ people }) => people.get().length > 0), <ul>
+        } as const satisfies __cfHelpers.JSONSchema, ({ people }) => people.get().length > 0)({ people: people }), <ul>
             {people.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const person = __cf_pattern_input.key("element");
                 const index = __cf_pattern_input.key("index");

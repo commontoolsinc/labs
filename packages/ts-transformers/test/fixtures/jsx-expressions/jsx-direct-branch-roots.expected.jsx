@@ -34,7 +34,13 @@ export default pattern((state) => ({
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, state.key("showCompleted"), __cfHelpers.derive({
+    } as const satisfies __cfHelpers.JSONSchema, state.key("showCompleted"), __cfHelpers.lift<{
+        state: {
+            task: {
+                done: boolean;
+            };
+        };
+    }, boolean>({
         type: "object",
         properties: {
             state: {
@@ -56,11 +62,11 @@ export default pattern((state) => ({
         required: ["state"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => !state.task.done)({ state: {
             task: {
                 done: state.key("task", "done")
             }
-        } }, ({ state }) => !state.task.done)), "Visible", "")}</p>
+        } })), "Visible", "")}</p>
       <p>{__cfHelpers.ifElse({
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema, {
@@ -93,7 +99,11 @@ export default pattern((state) => ({
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
     } as const satisfies __cfHelpers.JSONSchema, state.key("fallbackLabel"), "C"))}</p>
-      <p>{__cfHelpers.derive({
+      <p>{__cfHelpers.lift<{
+        state: {
+            label?: string | null | undefined;
+        };
+    }, string>({
         type: "object",
         properties: {
             state: {
@@ -108,9 +118,9 @@ export default pattern((state) => ({
         required: ["state"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.label ?? "Pending")({ state: {
             label: state.key("label")
-        } }, ({ state }) => state.label ?? "Pending")}</p>
+        } })}</p>
     </div>),
 }), {
     type: "object",

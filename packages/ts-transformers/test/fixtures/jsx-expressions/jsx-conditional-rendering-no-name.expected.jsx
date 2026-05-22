@@ -56,7 +56,11 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["High", "Low"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+            state: {
+                count: number;
+            };
+        }, boolean>({
             type: "object",
             properties: {
                 state: {
@@ -72,9 +76,9 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count > 10)({ state: {
                 count: state.key("count")
-            } }, ({ state }) => state.count > 10), "High", "Low")}</span>
+            } }), "High", "Low")}</span>
         <span>{__cfHelpers.ifElse({
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema, {
@@ -83,7 +87,11 @@ export default pattern((state) => {
             "enum": ["B", "C"]
         } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["B", "C", "A"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+            state: {
+                score: number;
+            };
+        }, boolean>({
             type: "object",
             properties: {
                 state: {
@@ -99,9 +107,9 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.score >= 90)({ state: {
                 score: state.key("score")
-            } }, ({ state }) => state.score >= 90), "A", __cfHelpers.ifElse({
+            } }), "A", __cfHelpers.ifElse({
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
@@ -109,7 +117,11 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["B", "C"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+            state: {
+                score: number;
+            };
+        }, boolean>({
             type: "object",
             properties: {
                 state: {
@@ -125,9 +137,9 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.score >= 80)({ state: {
                 score: state.key("score")
-            } }, ({ state }) => state.score >= 80), "B", "C"))}</span>
+            } }), "B", "C"))}</span>
         <span>
           {__cfHelpers.ifElse({
             type: "boolean"
@@ -137,7 +149,11 @@ export default pattern((state) => {
             "enum": ["Single", "Multiple"]
         } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["Single", "Multiple", "Empty"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+            state: {
+                count: number;
+            };
+        }, boolean>({
             type: "object",
             properties: {
                 state: {
@@ -153,9 +169,9 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count === 0)({ state: {
                 count: state.key("count")
-            } }, ({ state }) => state.count === 0), "Empty", __cfHelpers.ifElse({
+            } }), "Empty", __cfHelpers.ifElse({
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
@@ -163,7 +179,11 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["Single", "Multiple"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+            state: {
+                count: number;
+            };
+        }, boolean>({
             type: "object",
             properties: {
                 state: {
@@ -179,9 +199,9 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count === 1)({ state: {
                 count: state.key("count")
-            } }, ({ state }) => state.count === 1), "Single", "Multiple"))}
+            } }), "Single", "Multiple"))}
         </span>
 
         <h3>Nested Ternary</h3>
@@ -213,7 +233,11 @@ export default pattern((state) => {
             "enum": ["User", "Guest"]
         } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["User", "Guest", "Admin"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+            state: {
+                userType: string;
+            };
+        }, boolean>({
             type: "object",
             properties: {
                 state: {
@@ -229,9 +253,9 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.userType === "admin")({ state: {
                 userType: state.key("userType")
-            } }, ({ state }) => state.userType === "admin"), "Admin", __cfHelpers.ifElse({
+            } }), "Admin", __cfHelpers.ifElse({
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
@@ -239,7 +263,11 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["User", "Guest"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+            state: {
+                userType: string;
+            };
+        }, boolean>({
             type: "object",
             properties: {
                 state: {
@@ -255,9 +283,9 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.userType === "user")({ state: {
                 userType: state.key("userType")
-            } }, ({ state }) => state.userType === "user"), "User", "Guest"))}
+            } }), "User", "Guest"))}
         </span>
 
         <h3>Complex Conditions</h3>
@@ -293,7 +321,11 @@ export default pattern((state) => {
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+            state: {
+                count: number;
+            };
+        }, boolean>({
             type: "object",
             properties: {
                 state: {
@@ -309,9 +341,13 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count > 0)({ state: {
                 count: state.key("count")
-            } }, ({ state }) => state.count > 0), __cfHelpers.derive({
+            } }), __cfHelpers.lift<{
+            state: {
+                count: number;
+            };
+        }, boolean>({
             type: "object",
             properties: {
                 state: {
@@ -327,9 +363,9 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count < 10)({ state: {
                 count: state.key("count")
-            } }, ({ state }) => state.count < 10)), "In Range", "Out of Range")}
+            } })), "In Range", "Out of Range")}
         </span>
         <span>
           {__cfHelpers.ifElse({
@@ -346,7 +382,11 @@ export default pattern((state) => {
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, state.key("isPremium"), __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, state.key("isPremium"), __cfHelpers.lift<{
+            state: {
+                score: number;
+            };
+        }, boolean>({
             type: "object",
             properties: {
                 state: {
@@ -362,9 +402,9 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.score > 100)({ state: {
                 score: state.key("score")
-            } }, ({ state }) => state.score > 100)), "Premium Features", "Basic Features")}
+            } })), "Premium Features", "Basic Features")}
         </span>
 
         <h3>IfElse Component</h3>
@@ -394,7 +434,11 @@ export default pattern((state) => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+            state: {
+                count: number;
+            };
+        }, boolean>({
             type: "object",
             properties: {
                 state: {
@@ -410,9 +454,9 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.count > 5)({ state: {
                 count: state.key("count")
-            } }, ({ state }) => state.count > 5), <ul>
+            } }), <ul>
             <li>Many items: {state.key("count")}</li>
           </ul>, <p>Few items: {state.key("count")}</p>)}
       </div>),

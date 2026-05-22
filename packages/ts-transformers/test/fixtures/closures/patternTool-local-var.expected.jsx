@@ -16,7 +16,9 @@ const __cfModuleCallback_1 = __cfHardenFn(({ language, content }: {
     content: string;
 }) => {
     const genResult = generateText({
-        system: __cfHelpers.derive({
+        system: __cfHelpers.lift<{
+            language: string;
+        }, string>({
             type: "object",
             properties: {
                 language: {
@@ -26,8 +28,10 @@ const __cfModuleCallback_1 = __cfHardenFn(({ language, content }: {
             required: ["language"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { language: language }, ({ language }) => `Translate to ${language}.`).for(["genResult", "system"], true),
-        prompt: __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, ({ language }) => `Translate to ${language}.`)({ language: language }).for(["genResult", "system"], true),
+        prompt: __cfHelpers.lift<{
+            content: string;
+        }, string>({
             type: "object",
             properties: {
                 content: {
@@ -37,9 +41,14 @@ const __cfModuleCallback_1 = __cfHardenFn(({ language, content }: {
             required: ["content"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { content: content }, ({ content }) => content).for(["genResult", "prompt"], true)
+        } as const satisfies __cfHelpers.JSONSchema, ({ content }) => content)({ content: content }).for(["genResult", "prompt"], true)
     }).for("genResult", true);
-    return __cfHelpers.derive({
+    return __cfHelpers.lift<{
+        genResult: {
+            pending: boolean;
+            result?: string | undefined;
+        };
+    }, string | undefined>({
         type: "object",
         properties: {
             genResult: {
@@ -58,14 +67,14 @@ const __cfModuleCallback_1 = __cfHardenFn(({ language, content }: {
         required: ["genResult"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: ["string", "undefined"]
-    } as const satisfies __cfHelpers.JSONSchema, { genResult: {
-            pending: genResult.pending,
-            result: genResult.result
-        } }, ({ genResult }) => {
+    } as const satisfies __cfHelpers.JSONSchema, ({ genResult }) => {
         if (genResult.pending)
             return undefined;
         return genResult.result;
-    });
+    })({ genResult: {
+            pending: genResult.pending,
+            result: genResult.result
+        } });
 });
 const content = __cfHelpers.__cf_data(new Writable("Hello world", {
     type: "string"

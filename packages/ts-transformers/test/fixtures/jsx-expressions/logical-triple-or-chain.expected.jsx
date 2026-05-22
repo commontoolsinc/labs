@@ -38,7 +38,10 @@ export default pattern((_state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: ["number", "string"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+            primary: import("commonfabric").Cell<string>;
+            secondary: import("commonfabric").Cell<string>;
+        }, number>({
             type: "object",
             properties: {
                 primary: {
@@ -53,10 +56,10 @@ export default pattern((_state) => {
             required: ["primary", "secondary"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, ({ primary, secondary }) => primary.get().length || secondary.get().length)({
             primary: primary,
             secondary: secondary
-        }, ({ primary, secondary }) => primary.get().length || secondary.get().length), "no content")}</span>
+        }), "no content")}</span>
 
         {/* Triple || with mixed types */}
         <span>{__cfHelpers.unless({
@@ -65,7 +68,9 @@ export default pattern((_state) => {
             type: "number"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+            items: import("commonfabric").Cell<string[]>;
+        }, number | undefined>({
             type: "object",
             properties: {
                 items: {
@@ -79,7 +84,7 @@ export default pattern((_state) => {
             required: ["items"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: ["number", "undefined"]
-        } as const satisfies __cfHelpers.JSONSchema, { items: items }, ({ items }) => items.get()[0]?.length || items.get()[1]?.length), 0)}</span>
+        } as const satisfies __cfHelpers.JSONSchema, ({ items }) => items.get()[0]?.length || items.get()[1]?.length)({ items: items }), 0)}</span>
       </div>),
     };
 }, false as const satisfies __cfHelpers.JSONSchema, {

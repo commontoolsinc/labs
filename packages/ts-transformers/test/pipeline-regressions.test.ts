@@ -342,9 +342,15 @@ export default pattern<{
       output,
       "=> f.validationIssue !== undefined",
     );
+    // After CT-1615 Phase 1, the synthesized wrapper is lift-applied:
+    //   __cfHelpers.lift<...>(({ f }) => f.validationIssue !== undefined)(
+    //     { validationIssue: f.key("validationIssue") }
+    //   )
+    // The callback lives on the inner lift call; the input on the outer
+    // applied call.
     assertMatch(
       output,
-      /__cfHelpers\.derive\([\s\S]*validationIssue: f(?:\.validationIssue|\.key\("validationIssue"\))[\s\S]*\(\{ f \}\) => f\.validationIssue !== undefined\)/,
+      /__cfHelpers\.lift\([\s\S]*\(\{ f \}\) => f\.validationIssue !== undefined\)\(\{[\s\S]*validationIssue: f(?:\.validationIssue|\.key\("validationIssue"\))[\s\S]*\}\)/,
     );
   },
 );
@@ -952,14 +958,23 @@ export default pattern<Input, { [NAME]: string; [UI]: VNode }>(({ question, ["my
     const output = await transformSource(source, {
       types: COMMONFABRIC_TYPES,
     });
-    const deriveStart = output.indexOf("{__cfHelpers.derive({");
-    assert(deriveStart >= 0, "expected computed() to lower to derive()");
-    const deriveWindow = output.slice(deriveStart, deriveStart + 700);
+    // After CT-1615 Phase 1, computed() lowers to lift-applied:
+    //   __cfHelpers.lift<...>({argSchema}, {resSchema}, cb)({inputObj})
+    // The lift call (with generic type args) begins the wrapper; the
+    // captured displayName lives in the outer applied call's input object.
+    // Match the lift identifier with optional type arguments via regex.
+    const liftMatch = output.match(/__cfHelpers\.lift\s*</);
+    assert(
+      liftMatch && liftMatch.index !== undefined,
+      "expected computed() to lower to lift-applied; output had no __cfHelpers.lift<",
+    );
+    const liftWindow = output.slice(liftMatch.index, liftMatch.index + 1200);
 
-    assertStringIncludes(deriveWindow, "displayName: {");
-    assertStringIncludes(deriveWindow, 'type: "string"');
-    assertStringIncludes(deriveWindow, '"default": ""');
-    assertStringIncludes(deriveWindow, 'scope: "user"');
+    // Capture-input properties appear in the outer applied call's argument.
+    assertStringIncludes(liftWindow, "displayName: {");
+    assertStringIncludes(liftWindow, 'type: "string"');
+    assertStringIncludes(liftWindow, '"default": ""');
+    assertStringIncludes(liftWindow, 'scope: "user"');
   },
 );
 
@@ -982,14 +997,18 @@ export default pattern<Input, { [NAME]: string; [UI]: VNode }>(({ draftTitle }) 
     const output = await transformSource(source, {
       types: COMMONFABRIC_TYPES,
     });
-    const deriveStart = output.indexOf("{__cfHelpers.derive({");
-    assert(deriveStart >= 0, "expected computed() to lower to derive()");
-    const deriveWindow = output.slice(deriveStart, deriveStart + 700);
+    // After CT-1615 Phase 1, computed() lowers to lift-applied.
+    const liftMatch = output.match(/__cfHelpers\.lift\s*</);
+    assert(
+      liftMatch && liftMatch.index !== undefined,
+      "expected computed() to lower to lift-applied; output had no __cfHelpers.lift<",
+    );
+    const liftWindow = output.slice(liftMatch.index, liftMatch.index + 1200);
 
-    assertStringIncludes(deriveWindow, "draftTitle: {");
-    assertStringIncludes(deriveWindow, 'type: "string"');
-    assertStringIncludes(deriveWindow, '"default": ""');
-    assertStringIncludes(deriveWindow, "asCell:");
+    assertStringIncludes(liftWindow, "draftTitle: {");
+    assertStringIncludes(liftWindow, 'type: "string"');
+    assertStringIncludes(liftWindow, '"default": ""');
+    assertStringIncludes(liftWindow, "asCell:");
   },
 );
 
@@ -1012,13 +1031,17 @@ export default pattern<Input, { [NAME]: string; [UI]: VNode }>(({ selections }) 
     const output = await transformSource(source, {
       types: COMMONFABRIC_TYPES,
     });
-    const deriveStart = output.indexOf("{__cfHelpers.derive({");
-    assert(deriveStart >= 0, "expected computed() to lower to derive()");
-    const deriveWindow = output.slice(deriveStart, deriveStart + 900);
-
-    assertStringIncludes(deriveWindow, "selections:");
+    // After CT-1615 Phase 1, computed() lowers to lift-applied.
+    const liftMatch = output.match(/__cfHelpers\.lift\s*</);
     assert(
-      !deriveWindow.includes("AnonymousType_"),
+      liftMatch && liftMatch.index !== undefined,
+      "expected computed() to lower to lift-applied; output had no __cfHelpers.lift<",
+    );
+    const liftWindow = output.slice(liftMatch.index, liftMatch.index + 1400);
+
+    assertStringIncludes(liftWindow, "selections:");
+    assert(
+      !liftWindow.includes("AnonymousType_"),
       "expected Writable<Record<...Default...>> capture not to emit orphan anonymous refs",
     );
   },

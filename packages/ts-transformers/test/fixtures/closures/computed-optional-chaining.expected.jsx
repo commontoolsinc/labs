@@ -33,7 +33,10 @@ export default pattern(() => {
     const value = new Writable(10, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("value", true);
-    const result = __cfHelpers.derive({
+    const result = __cfHelpers.lift<{
+        value: __cfHelpers.ReadonlyCell<number>;
+        config: __cfHelpers.ReadonlyCell<{ multiplier?: number; } | null>;
+    }, number>({
         type: "object",
         properties: {
             value: {
@@ -57,10 +60,10 @@ export default pattern(() => {
         required: ["value", "config"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, ({ value, config }) => value.get() * (config.get()?.multiplier ?? 1))({
         value: value,
         config: config
-    }, ({ value, config }) => value.get() * (config.get()?.multiplier ?? 1)).for("result", true);
+    }).for("result", true);
     return result;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "number"

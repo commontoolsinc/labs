@@ -144,7 +144,15 @@ export function createReactiveWrapperForExpression(
     resultType = undefined;
   }
 
-  // Create computed(() => expression)
+  // Emit the canonical lift-applied form for a zero-input compute wrapper:
+  //   __cfHelpers.lift(() => expression)({})
+  //
+  // This matches LiftLoweringTransformer's lowering of source-level
+  // `computed(() => expr)`. Previously this site emitted bare
+  // `__cfHelpers.computed(...)` — but LiftLoweringTransformer has already run
+  // by this stage in the pipeline, so emitting computed here would leave it
+  // in lowered output, defeating Phase 1's "no computed/derive in lowered
+  // output" invariant.
   const arrowFunction = factory.createArrowFunction(
     undefined,
     undefined,
@@ -155,24 +163,30 @@ export function createReactiveWrapperForExpression(
   );
   context.markAsSyntheticComputeCallback(arrowFunction);
 
-  const computedCall = context.cfHelpers.createHelperCall(
-    "computed",
+  const innerLiftCall = context.cfHelpers.createHelperCall(
+    "lift",
     expression,
     undefined,
     [arrowFunction],
   );
+  const emptyInput = factory.createObjectLiteralExpression([], false);
+  const liftAppliedCall = factory.createCallExpression(
+    innerLiftCall,
+    undefined,
+    [emptyInput],
+  );
 
-  // Register types for both the TypeNode and the computed CallExpression
+  // Register types for both the TypeNode and the lift-applied CallExpression
   if (resultTypeNode && resultType && context.options.typeRegistry) {
     context.options.typeRegistry.set(resultTypeNode, resultType);
-    context.options.typeRegistry.set(computedCall, resultType);
+    context.options.typeRegistry.set(liftAppliedCall, resultType);
   }
 
   // CRITICAL: Set parent pointers and connect to parent chain
   // This maintains the parent chain so walking up from nested callbacks works
-  setParentPointers(computedCall, expression.parent);
+  setParentPointers(liftAppliedCall, expression.parent);
 
-  return computedCall;
+  return liftAppliedCall;
 }
 
 /**

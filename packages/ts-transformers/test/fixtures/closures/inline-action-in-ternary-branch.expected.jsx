@@ -56,7 +56,11 @@ export default pattern((state) => {
             <span>{state.key("card", "title")}</span>
             {/* Explicit computed() wrapping a button with inline handler */}
             {/* The Cell ref in the handler must be captured in the derive */}
-            {__cfHelpers.derive({
+            {__cfHelpers.lift<{
+                state: {
+                    isEditing: __cfHelpers.ReadonlyCell<boolean>;
+                };
+            }, import("commonfabric").JSXElement>({
                 type: "object",
                 properties: {
                     state: {
@@ -91,9 +95,7 @@ export default pattern((state) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __cfHelpers.JSONSchema, { state: {
-                    isEditing: state.key("isEditing")
-                } }, ({ state }) => (<cf-button onClick={__cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, ({ state }) => (<cf-button onClick={__cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
                 type: "object",
                 properties: {
                     state: {
@@ -112,7 +114,9 @@ export default pattern((state) => {
                 state: {
                     isEditing: state.isEditing
                 }
-            })}>Edit</cf-button>))}
+            })}>Edit</cf-button>))({ state: {
+                    isEditing: state.key("isEditing")
+                } })}
           </div>)}
       </cf-card>),
         card: state.key("card"),

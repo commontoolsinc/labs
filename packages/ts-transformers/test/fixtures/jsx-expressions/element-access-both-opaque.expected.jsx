@@ -28,7 +28,10 @@ export default pattern((_state) => {
         [UI]: (<div>
         <h3>Element Access with Both OpaqueRefs</h3>
         {/* Both items and index are OpaqueRefs */}
-        <p>Selected item: {__cfHelpers.derive({
+        <p>Selected item: {__cfHelpers.lift<{
+            items: import("commonfabric").Cell<string[]>;
+            index: import("commonfabric").Cell<number>;
+        }, string | undefined>({
             type: "object",
             properties: {
                 items: {
@@ -46,10 +49,10 @@ export default pattern((_state) => {
             required: ["items", "index"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: ["string", "undefined"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, ({ items, index }) => items.get()[index.get()])({
             items: items,
             index: index
-        }, ({ items, index }) => items.get()[index.get()])}</p>
+        })}</p>
       </div>),
     };
 }, false as const satisfies __cfHelpers.JSONSchema, {

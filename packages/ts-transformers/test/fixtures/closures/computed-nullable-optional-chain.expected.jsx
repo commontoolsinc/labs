@@ -62,7 +62,11 @@ export default pattern((_) => {
         {/* BUG CASE: Optional chaining loses nullability in schema inference */}
         {/* The input schema should have topQuestion as anyOf [Question, null] */}
         {/* but instead infers topQuestion as object with required "question" */}
-        <p>Optional chaining: {__cfHelpers.derive({
+        <p>Optional chaining: {__cfHelpers.lift<{
+            topQuestion: {
+                question: string;
+            } | null;
+        }, string>({
             type: "object",
             properties: {
                 topQuestion: {
@@ -82,11 +86,13 @@ export default pattern((_) => {
             required: ["topQuestion"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { topQuestion: topQuestion }, ({ topQuestion }) => topQuestion?.question || "")}</p>
+        } as const satisfies __cfHelpers.JSONSchema, ({ topQuestion }) => topQuestion?.question || "")({ topQuestion: topQuestion })}</p>
 
         {/* WORKAROUND: Explicit null check preserves nullability */}
         {/* This correctly generates anyOf [Question, null] in the schema */}
-        <p>Explicit check: {__cfHelpers.derive({
+        <p>Explicit check: {__cfHelpers.lift<{
+            topQuestion: Question | null;
+        }, string>({
             type: "object",
             properties: {
                 topQuestion: {
@@ -117,10 +123,14 @@ export default pattern((_) => {
             }
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { topQuestion: topQuestion }, ({ topQuestion }) => topQuestion === null ? "" : topQuestion.question)}</p>
+        } as const satisfies __cfHelpers.JSONSchema, ({ topQuestion }) => topQuestion === null ? "" : topQuestion.question)({ topQuestion: topQuestion })}</p>
 
         {/* Same issue with category field */}
-        <span>Category (buggy): {__cfHelpers.derive({
+        <span>Category (buggy): {__cfHelpers.lift<{
+            topQuestion: {
+                category: string;
+            } | null;
+        }, string>({
             type: "object",
             properties: {
                 topQuestion: {
@@ -140,8 +150,10 @@ export default pattern((_) => {
             required: ["topQuestion"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { topQuestion: topQuestion }, ({ topQuestion }) => topQuestion?.category || "")}</span>
-        <span>Category (works): {__cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, ({ topQuestion }) => topQuestion?.category || "")({ topQuestion: topQuestion })}</span>
+        <span>Category (works): {__cfHelpers.lift<{
+            topQuestion: Question | null;
+        }, string>({
             type: "object",
             properties: {
                 topQuestion: {
@@ -172,7 +184,7 @@ export default pattern((_) => {
             }
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { topQuestion: topQuestion }, ({ topQuestion }) => topQuestion === null ? "" : topQuestion.category)}</span>
+        } as const satisfies __cfHelpers.JSONSchema, ({ topQuestion }) => topQuestion === null ? "" : topQuestion.category)({ topQuestion: topQuestion })}</span>
       </div>),
     };
 }, false as const satisfies __cfHelpers.JSONSchema, {

@@ -26,7 +26,12 @@ export default pattern((__cf_pattern_input) => {
         labels: items.filterWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
             const item = __cf_pattern_input.key("element");
             const suffix = __cf_pattern_input.params.suffix;
-            return __cfHelpers.derive({
+            return __cfHelpers.lift<{
+                item: {
+                    label: string;
+                };
+                suffix: string;
+            }, boolean>({
                 type: "object",
                 properties: {
                     item: {
@@ -45,12 +50,12 @@ export default pattern((__cf_pattern_input) => {
                 required: ["item", "suffix"]
             } as const satisfies __cfHelpers.JSONSchema, {
                 type: "boolean"
-            } as const satisfies __cfHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, ({ item, suffix }) => item.label.endsWith(suffix))({
                 item: {
                     label: item.key("label")
                 },
                 suffix: suffix
-            }, ({ item, suffix }) => item.label.endsWith(suffix));
+            });
         }, {
             type: "object",
             properties: {
@@ -102,7 +107,12 @@ export default pattern((__cf_pattern_input) => {
                 items: {
                     type: "string"
                 }
-            } as const satisfies __cfHelpers.JSONSchema, item.key("tags", "length"), __cfHelpers.derive({
+            } as const satisfies __cfHelpers.JSONSchema, item.key("tags", "length"), __cfHelpers.lift<{
+                item: {
+                    tags: string[];
+                };
+                prefix: string;
+            }, string[]>({
                 type: "object",
                 properties: {
                     prefix: {
@@ -127,12 +137,12 @@ export default pattern((__cf_pattern_input) => {
                 items: {
                     type: "string"
                 }
-            } as const satisfies __cfHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, ({ item, prefix }) => [prefix + item.tags[0]])({
                 item: {
                     tags: item.key("tags")
                 },
                 prefix: prefix
-            }, ({ item, prefix }) => [prefix + item.tags[0]]), []);
+            }), []);
         }, {
             type: "object",
             properties: {

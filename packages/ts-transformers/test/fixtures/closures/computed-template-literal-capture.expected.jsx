@@ -19,7 +19,9 @@ export default pattern((__cf_pattern_input: {
     token: string;
 }) => {
     const token = __cf_pattern_input.key("token");
-    const url = __cfHelpers.derive({
+    const url = __cfHelpers.lift<{
+        token: string;
+    }, string>({
         type: "object",
         properties: {
             token: {
@@ -29,8 +31,10 @@ export default pattern((__cf_pattern_input: {
         required: ["token"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, { token: token }, ({ token }) => `http://api.example.com?token=${token}`).for("url", true);
-    const options = __cfHelpers.derive({
+    } as const satisfies __cfHelpers.JSONSchema, ({ token }) => `http://api.example.com?token=${token}`)({ token: token }).for("url", true);
+    const options = __cfHelpers.lift<{
+        token: string;
+    }, { headers: { Authorization: string; }; }>({
         type: "object",
         properties: {
             token: {
@@ -52,9 +56,9 @@ export default pattern((__cf_pattern_input: {
             }
         },
         required: ["headers"]
-    } as const satisfies __cfHelpers.JSONSchema, { token: token }, ({ token }) => ({
+    } as const satisfies __cfHelpers.JSONSchema, ({ token }) => ({
         headers: { Authorization: `Bearer ${token}` },
-    })).for("options", true);
+    }))({ token: token }).for("options", true);
     return { url, options };
 }, {
     type: "object",

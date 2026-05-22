@@ -226,10 +226,22 @@ export function createDeriveCall(
   );
   context.markAsSyntheticComputeCallback?.(arrowFunction);
 
-  const deriveArgs = [
-    ...createDeriveArgs(factory, captureTree, fallbackEntries),
-    arrowFunction,
-  ];
+  // Split into the lift-applied shape:
+  //   __cfHelpers.lift<inputTypeNode, resultTypeNode>(callback)(inputObject)
+  //
+  // The input object is the outer applied call's single argument; the
+  // callback (and type arguments, since lift<In, Out> is the generic) live
+  // on the inner lift call. This matches the canonical post-Phase-1 shape
+  // produced by LiftLoweringTransformer (see src/lift/transformer.ts) for
+  // user-authored derive(...) calls.
+  const [inputObject] = createDeriveArgs(
+    factory,
+    captureTree,
+    fallbackEntries,
+  );
+  if (!inputObject) {
+    return undefined;
+  }
 
   // Build input type node that preserves Cell<T> types
   const inputTypeNode = buildInputTypeNode(
@@ -241,19 +253,27 @@ export function createDeriveCall(
   // Build result type node from expression type
   const resultTypeNode = buildResultTypeNode(expression, context);
 
-  // Create derive call with type arguments for SchemaInjectionTransformer
-  const deriveCall = cfHelpers.createHelperCall(
-    "derive",
+  // Inner lift call: __cfHelpers.lift<inputTypeNode, resultTypeNode>(callback)
+  const innerLiftCall = cfHelpers.createHelperCall(
+    "lift",
     expression,
     [inputTypeNode, resultTypeNode],
-    deriveArgs,
+    [arrowFunction],
   );
 
-  // Register the type of the derive call expression itself in the typeRegistry
-  // so that type inference works correctly for synthetic nodes
+  // Outer applied call: (inputObject)
+  const liftAppliedCall = factory.createCallExpression(
+    innerLiftCall,
+    undefined,
+    [inputObject],
+  );
+
+  // Register the type of the call expression itself in the typeRegistry
+  // so that type inference works correctly for synthetic nodes. The
+  // result type is the value the callback returns.
   if (context.options.typeRegistry && context.checker) {
     registerDeriveCallType(
-      deriveCall,
+      liftAppliedCall,
       resultTypeNode,
       undefined, // resultType not available in this code path
       context.checker,
@@ -262,10 +282,10 @@ export function createDeriveCall(
   }
 
   // Maintain parent chains and compute-wrapper ownership for later passes that
-  // revisit synthetic derive callbacks after post-closure lowering.
-  setParentPointers(deriveCall, expression.parent);
+  // revisit synthetic lift-applied callbacks after post-closure lowering.
+  setParentPointers(liftAppliedCall, expression.parent);
 
-  return deriveCall;
+  return liftAppliedCall;
 }
 
 function buildInputTypeNode(

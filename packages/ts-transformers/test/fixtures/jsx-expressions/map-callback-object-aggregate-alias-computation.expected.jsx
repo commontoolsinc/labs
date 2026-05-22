@@ -35,7 +35,11 @@ export default pattern((__cf_pattern_input) => {
         {files.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const file = __cf_pattern_input.key("element");
                 const meta = { kind: file.key("type") };
-                const isFolder = __cfHelpers.derive({
+                const isFolder = __cfHelpers.lift<{
+                    meta: {
+                        kind: string;
+                    };
+                }, boolean>({
                     type: "object",
                     properties: {
                         meta: {
@@ -51,9 +55,9 @@ export default pattern((__cf_pattern_input) => {
                     required: ["meta"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, { meta: {
+                } as const satisfies __cfHelpers.JSONSchema, ({ meta }) => meta.kind === "folder")({ meta: {
                         kind: meta.kind
-                    } }, ({ meta }) => meta.kind === "folder").for("isFolder", true);
+                    } }).for("isFolder", true);
                 return <span>{__cfHelpers.ifElse({
                     type: "boolean"
                 } as const satisfies __cfHelpers.JSONSchema, {

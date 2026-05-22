@@ -24,7 +24,10 @@ export default pattern(() => {
     const b = new Writable(20, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("b", true);
-    const sum = __cfHelpers.derive({
+    const sum = __cfHelpers.lift<{
+        a: __cfHelpers.ReadonlyCell<number>;
+        b: __cfHelpers.ReadonlyCell<number>;
+    }, number>({
         type: "object",
         properties: {
             a: {
@@ -39,11 +42,13 @@ export default pattern(() => {
         required: ["a", "b"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, ({ a, b }) => a.get() + b.get())({
         a: a,
         b: b
-    }, ({ a, b }) => a.get() + b.get()).for("sum", true);
-    const doubled = __cfHelpers.derive({
+    }).for("sum", true);
+    const doubled = __cfHelpers.lift<{
+        sum: number;
+    }, number>({
         type: "object",
         properties: {
             sum: {
@@ -53,7 +58,7 @@ export default pattern(() => {
         required: ["sum"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, { sum: sum }, ({ sum }) => sum * 2).for("doubled", true);
+    } as const satisfies __cfHelpers.JSONSchema, ({ sum }) => sum * 2)({ sum: sum }).for("doubled", true);
     return doubled;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "number"

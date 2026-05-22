@@ -26,7 +26,11 @@ interface State {
 // FIXTURE: non-jsx-wildcard-traversal-call-roots
 // Verifies: wildcard traversal calls lower as whole call roots outside JSX
 export default pattern((state) => ({
-    serialized: __cfHelpers.derive({
+    serialized: __cfHelpers.lift<{
+        state: {
+            wishes: [{ id: string; status: string; }, { id: string; status: string; }];
+        };
+    }, string>({
         type: "object",
         properties: {
             state: {
@@ -54,10 +58,14 @@ export default pattern((state) => ({
         required: ["state"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => JSON.stringify(state.wishes[1]))({ state: {
             wishes: state.key("wishes")
-        } }, ({ state }) => JSON.stringify(state.wishes[1])).for(["__patternResult", "serialized"], true),
-    keys: __cfHelpers.derive({
+        } }).for(["__patternResult", "serialized"], true),
+    keys: __cfHelpers.lift<{
+        state: {
+            wishes: [{ id: string; status: string; }, { id: string; status: string; }];
+        };
+    }, string[]>({
         type: "object",
         properties: {
             state: {
@@ -88,10 +96,14 @@ export default pattern((state) => ({
         items: {
             type: "string"
         }
-    } as const satisfies __cfHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => Object.keys(state.wishes[1]))({ state: {
             wishes: state.key("wishes")
-        } }, ({ state }) => Object.keys(state.wishes[1])).for(["__patternResult", "keys"], true),
-    values: __cfHelpers.derive({
+        } }).for(["__patternResult", "keys"], true),
+    values: __cfHelpers.lift<{
+        state: {
+            wishes: [{ id: string; status: string; }, { id: string; status: string; }];
+        };
+    }, string[]>({
         type: "object",
         properties: {
             state: {
@@ -122,10 +134,14 @@ export default pattern((state) => ({
         items: {
             type: "string"
         }
-    } as const satisfies __cfHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => Object.values(state.wishes[1]))({ state: {
             wishes: state.key("wishes")
-        } }, ({ state }) => Object.values(state.wishes[1])).for(["__patternResult", "values"], true),
-    entries: __cfHelpers.derive({
+        } }).for(["__patternResult", "values"], true),
+    entries: __cfHelpers.lift<{
+        state: {
+            wishes: [{ id: string; status: string; }, { id: string; status: string; }];
+        };
+    }, [string, string][]>({
         type: "object",
         properties: {
             state: {
@@ -159,9 +175,9 @@ export default pattern((state) => ({
                 type: "string"
             }
         }
-    } as const satisfies __cfHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => Object.entries(state.wishes[1]))({ state: {
             wishes: state.key("wishes")
-        } }, ({ state }) => Object.entries(state.wishes[1])).for(["__patternResult", "entries"], true)
+        } }).for(["__patternResult", "entries"], true)
 }), {
     type: "object",
     properties: {

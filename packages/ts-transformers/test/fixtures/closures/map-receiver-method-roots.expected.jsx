@@ -23,7 +23,9 @@ export default pattern((__cf_pattern_input) => {
         [UI]: (<div>
       {items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
             const item = __cf_pattern_input.key("element");
-            return <span>{__cfHelpers.derive({
+            return <span>{__cfHelpers.lift<{
+                item: string;
+            }, string>({
                 type: "object",
                 properties: {
                     item: {
@@ -33,7 +35,7 @@ export default pattern((__cf_pattern_input) => {
                 required: ["item"]
             } as const satisfies __cfHelpers.JSONSchema, {
                 type: "string"
-            } as const satisfies __cfHelpers.JSONSchema, { item: item }, ({ item }) => item.toUpperCase())}</span>;
+            } as const satisfies __cfHelpers.JSONSchema, ({ item }) => item.toUpperCase())({ item: item })}</span>;
         }, {
             type: "object",
             properties: {
@@ -65,7 +67,9 @@ export default pattern((__cf_pattern_input) => {
         } as const satisfies __cfHelpers.JSONSchema), {})}
       {items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
             const item = __cf_pattern_input.key("element");
-            return <span>{__cfHelpers.derive({
+            return <span>{__cfHelpers.lift<{
+                item: string;
+            }, string>({
                 type: "object",
                 properties: {
                     item: {
@@ -75,7 +79,7 @@ export default pattern((__cf_pattern_input) => {
                 required: ["item"]
             } as const satisfies __cfHelpers.JSONSchema, {
                 type: "string"
-            } as const satisfies __cfHelpers.JSONSchema, { item: item }, __cfModuleCallback_1)}</span>;
+            } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({ item: item })}</span>;
         }, {
             type: "object",
             properties: {

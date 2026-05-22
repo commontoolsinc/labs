@@ -58,7 +58,9 @@ export default pattern((__cf_pattern_input) => {
                     items: {
                         type: "string"
                     }
-                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+                    path: import("commonfabric").Cell<string[]>;
+                }, readonly string[]>({
                     type: "object",
                     properties: {
                         path: {
@@ -75,8 +77,12 @@ export default pattern((__cf_pattern_input) => {
                     items: {
                         type: "string"
                     }
-                } as const satisfies __cfHelpers.JSONSchema, { path: path }, ({ path }) => path.get()).for(["p", 3], true), []).for("p", true);
-                const visible = __cfHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, ({ path }) => path.get())({ path: path }).for(["p", 3], true), []).for("p", true);
+                const visible = __cfHelpers.lift<{
+                    entries: Writable<Default<Entry[], [
+                    ]>>;
+                    p: readonly string[];
+                }, Entry[]>({
                     type: "object",
                     properties: {
                         entries: {
@@ -122,14 +128,19 @@ export default pattern((__cf_pattern_input) => {
                             required: ["name"]
                         }
                     }
-                } as const satisfies __cfHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({
                     entries: entries,
                     p: p
-                }, __cfModuleCallback_1).for("visible", true);
+                }).for("visible", true);
                 const filtered = visible.filterWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                     const entry = __cf_pattern_input.key("element");
                     const labelPrefix = __cf_pattern_input.key("params", "labelPrefix");
-                    return __cfHelpers.derive({
+                    return __cfHelpers.lift<{
+                        entry: {
+                            name: string;
+                        };
+                        labelPrefix: import("commonfabric").Cell<string>;
+                    }, boolean>({
                         type: "object",
                         properties: {
                             entry: {
@@ -149,12 +160,12 @@ export default pattern((__cf_pattern_input) => {
                         required: ["entry", "labelPrefix"]
                     } as const satisfies __cfHelpers.JSONSchema, {
                         type: "boolean"
-                    } as const satisfies __cfHelpers.JSONSchema, {
+                    } as const satisfies __cfHelpers.JSONSchema, ({ entry, labelPrefix }) => entry.name.startsWith(`${labelPrefix}`))({
                         entry: {
                             name: entry.key("name")
                         },
                         labelPrefix: labelPrefix
-                    }, ({ entry, labelPrefix }) => entry.name.startsWith(`${labelPrefix}`));
+                    });
                 }, {
                     type: "object",
                     properties: {

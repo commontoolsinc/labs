@@ -41,7 +41,9 @@ export default pattern((_state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: ["boolean", "string"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+            user: import("commonfabric").Cell<{ name: string; age: number; }>;
+        }, boolean>({
             type: "object",
             properties: {
                 user: {
@@ -49,19 +51,18 @@ export default pattern((_state) => {
                     properties: {
                         name: {
                             type: "string"
-                        },
-                        age: {
-                            type: "number"
                         }
                     },
-                    required: ["name", "age"],
+                    required: ["name"],
                     asCell: ["readonly"]
                 }
             },
             required: ["user"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { user: user }, ({ user }) => user.get().name.length > 0), __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, ({ user }) => user.get().name.length > 0)({ user: user }), __cfHelpers.lift<{
+            user: import("commonfabric").Cell<{ name: string; age: number; }>;
+        }, string>({
             type: "object",
             properties: {
                 user: {
@@ -69,19 +70,16 @@ export default pattern((_state) => {
                     properties: {
                         name: {
                             type: "string"
-                        },
-                        age: {
-                            type: "number"
                         }
                     },
-                    required: ["name", "age"],
+                    required: ["name"],
                     asCell: ["readonly"]
                 }
             },
             required: ["user"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { user: user }, ({ user }) => `Hello, ${user.get().name}!`))}</p>
+        } as const satisfies __cfHelpers.JSONSchema, ({ user }) => `Hello, ${user.get().name}!`)({ user: user }))}</p>
 
         {/* Non-JSX right side: number expression */}
         <p>Age: {__cfHelpers.when({
@@ -90,47 +88,45 @@ export default pattern((_state) => {
             type: "number"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: ["boolean", "number"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+            user: import("commonfabric").Cell<{ name: string; age: number; }>;
+        }, boolean>({
             type: "object",
             properties: {
                 user: {
                     type: "object",
                     properties: {
-                        name: {
-                            type: "string"
-                        },
                         age: {
                             type: "number"
                         }
                     },
-                    required: ["name", "age"],
+                    required: ["age"],
                     asCell: ["readonly"]
                 }
             },
             required: ["user"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { user: user }, ({ user }) => user.get().age > 18), __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, ({ user }) => user.get().age > 18)({ user: user }), __cfHelpers.lift<{
+            user: import("commonfabric").Cell<{ name: string; age: number; }>;
+        }, number>({
             type: "object",
             properties: {
                 user: {
                     type: "object",
                     properties: {
-                        name: {
-                            type: "string"
-                        },
                         age: {
                             type: "number"
                         }
                     },
-                    required: ["name", "age"],
+                    required: ["age"],
                     asCell: ["readonly"]
                 }
             },
             required: ["user"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { user: user }, ({ user }) => user.get().age))}</p>
+        } as const satisfies __cfHelpers.JSONSchema, ({ user }) => user.get().age)({ user: user }))}</p>
       </div>),
     };
 }, false as const satisfies __cfHelpers.JSONSchema, {

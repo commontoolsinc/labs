@@ -66,7 +66,12 @@ const castVote = handler({
 // Context: The conditional branch makes expression rewriting recurse into the
 // handler subtree; the authored handler arrow must be treated as safe context.
 export default pattern((state) => {
-    const boundCastVote = __cfHelpers.derive({
+    const boundCastVote = __cfHelpers.lift<{
+        castVote: import("commonfabric").HandlerFactory<{ votes: Cell<VoteEvent[]>; }, unknown>;
+        state: {
+            votes: VoteEvent[];
+        };
+    }, import("commonfabric").Stream<unknown>>({
         type: "object",
         properties: {
             castVote: {
@@ -115,12 +120,12 @@ export default pattern((state) => {
                 "enum": ["space", "user", "session"]
             }
         }
-    } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, ({ castVote, state }) => castVote({ votes: state.votes }).for({ stream: "boundCastVote" }))({
         castVote: castVote,
         state: {
             votes: state.key("votes")
         }
-    }, ({ castVote, state }) => castVote({ votes: state.votes }).for({ stream: "boundCastVote" })).for({ stream: "boundCastVote" }, true);
+    }).for({ stream: "boundCastVote" }, true);
     return {
         [UI]: (<div>
         {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {

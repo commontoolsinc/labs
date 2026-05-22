@@ -519,20 +519,29 @@ export function transformDeriveCall(
     );
   }
 
-  // Build the derive call expression
-  const newDeriveCall = context.cfHelpers.createHelperCall(
-    "derive",
+  // Build the lift-applied call expression:
+  //   __cfHelpers.lift<inputTypeNode, resultTypeNode>(newCallback)(mergedInput)
+  //
+  // Type arguments (when present) live on the inner lift call — lift<In, Out>
+  // is the generic. The outer applied call carries the merged input object.
+  const innerLiftCall = context.cfHelpers.createHelperCall(
+    "lift",
     deriveCall,
     hasTypeParameter
       ? undefined
       : (resultTypeNode ? [inputTypeNode, resultTypeNode] : [inputTypeNode]),
-    [mergedInput, newCallback],
+    [newCallback],
+  );
+  const liftAppliedCall = factory.createCallExpression(
+    innerLiftCall,
+    undefined,
+    [mergedInput],
   );
 
-  // Register the type of the derive call expression itself
+  // Register the type of the call expression itself
   if (options.typeRegistry) {
     registerDeriveCallType(
-      newDeriveCall,
+      liftAppliedCall,
       resultTypeNode,
       resultType,
       checker,
@@ -540,5 +549,5 @@ export function transformDeriveCall(
     );
   }
 
-  return newDeriveCall;
+  return liftAppliedCall;
 }

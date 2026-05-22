@@ -45,7 +45,12 @@ export default pattern((state) => {
                 const person = __cf_pattern_input.key("element");
                 const state = __cf_pattern_input.key("params", "state");
                 const personName = person.key("name"), email = person.key("email"), commuteMode = person.key("commuteMode"), priorityRank = person.key("priorityRank"), defaultSpot = person.key("defaultSpot"), spotPreferences = person.key("spotPreferences"), isFirst = person.key("isFirst"), isLast = person.key("isLast");
-                const isEditing = __cfHelpers.derive({
+                const isEditing = __cfHelpers.lift<{
+                    state: {
+                        editingPersonName: string | null;
+                    };
+                    personName: string;
+                }, boolean>({
                     type: "object",
                     properties: {
                         state: {
@@ -68,13 +73,18 @@ export default pattern((state) => {
                     required: ["state", "personName"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, ({ state, personName }) => state.editingPersonName === personName)({
                     state: {
                         editingPersonName: state.key("editingPersonName")
                     },
                     personName: personName
-                }, ({ state, personName }) => state.editingPersonName === personName).for("isEditing", true);
-                const isRemoveConfirm = __cfHelpers.derive({
+                }).for("isEditing", true);
+                const isRemoveConfirm = __cfHelpers.lift<{
+                    state: {
+                        removePersonConfirmTarget: string | null;
+                    };
+                    personName: string;
+                }, boolean>({
                     type: "object",
                     properties: {
                         state: {
@@ -97,13 +107,21 @@ export default pattern((state) => {
                     required: ["state", "personName"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, ({ state, personName }) => state.removePersonConfirmTarget === personName)({
                     state: {
                         removePersonConfirmTarget: state.key("removePersonConfirmTarget")
                     },
                     personName: personName
-                }, ({ state, personName }) => state.removePersonConfirmTarget === personName).for("isRemoveConfirm", true);
-                const activeSpotOpts = __cfHelpers.derive({
+                }).for("isRemoveConfirm", true);
+                const activeSpotOpts = __cfHelpers.lift<{
+                    state: {
+                        spots: {
+                            spotNumber: string;
+                            label?: string | undefined;
+                            active: boolean;
+                        }[];
+                    };
+                }, { label: string; value: string; }[]>({
                     type: "object",
                     properties: {
                         state: {
@@ -146,14 +164,14 @@ export default pattern((state) => {
                         },
                         required: ["label", "value"]
                     }
-                } as const satisfies __cfHelpers.JSONSchema, { state: {
-                        spots: state.key("spots")
-                    } }, ({ state }) => state.spots
+                } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.spots
                     .filter((s) => s.active)
                     .map((s) => ({
                     label: "#" + s.spotNumber + (s.label ? " - " + s.label : ""),
                     value: s.spotNumber,
-                }))).for("activeSpotOpts", true);
+                })))({ state: {
+                        spots: state.key("spots")
+                    } }).for("activeSpotOpts", true);
                 return (<section>
               <span>{personName}</span>
               <span>{email}</span>
@@ -260,7 +278,11 @@ export default pattern((state) => {
                             type: "object",
                             properties: {}
                         }]
-                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+                    activeSpotOpts: {
+                        length: number;
+                    };
+                }, boolean>({
                     type: "object",
                     properties: {
                         activeSpotOpts: {
@@ -276,9 +298,9 @@ export default pattern((state) => {
                     required: ["activeSpotOpts"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, { activeSpotOpts: {
+                } as const satisfies __cfHelpers.JSONSchema, ({ activeSpotOpts }) => activeSpotOpts.length > 0)({ activeSpotOpts: {
                         length: activeSpotOpts.key("length")
-                    } }, ({ activeSpotOpts }) => activeSpotOpts.length > 0), <span>spots</span>, null)}
+                    } }), <span>spots</span>, null)}
               {__cfHelpers.ifElse({
                     type: "boolean"
                 } as const satisfies __cfHelpers.JSONSchema, {
@@ -295,7 +317,9 @@ export default pattern((state) => {
                             type: "object",
                             properties: {}
                         }]
-                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+                    spotPreferences: string[];
+                }, boolean>({
                     type: "object",
                     properties: {
                         spotPreferences: {
@@ -308,8 +332,10 @@ export default pattern((state) => {
                     required: ["spotPreferences"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, { spotPreferences: spotPreferences }, ({ spotPreferences }) => spotPreferences.length > 0), <span>
-                    Prefers: {__cfHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, ({ spotPreferences }) => spotPreferences.length > 0)({ spotPreferences: spotPreferences }), <span>
+                    Prefers: {__cfHelpers.lift<{
+                    spotPreferences: string[];
+                }, string>({
                     type: "object",
                     properties: {
                         spotPreferences: {
@@ -322,7 +348,7 @@ export default pattern((state) => {
                     required: ["spotPreferences"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, { spotPreferences: spotPreferences }, ({ spotPreferences }) => spotPreferences.map((n) => "#" + n).join(", "))}
+                } as const satisfies __cfHelpers.JSONSchema, ({ spotPreferences }) => spotPreferences.map((n) => "#" + n).join(", "))({ spotPreferences: spotPreferences })}
                   </span>, null)}
             </section>);
             }, {
