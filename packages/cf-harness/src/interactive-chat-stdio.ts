@@ -1,9 +1,11 @@
 import {
   createHarnessChatErrorResponse,
   HARNESS_CHAT_PROTOCOL_VERSION,
+  HARNESS_CHAT_REQUEST_TYPE,
   HARNESS_CHAT_RESPONSE_TYPE,
   type HarnessChatEventEnvelope,
   type HarnessChatRequestEnvelope,
+  type HarnessChatRequestMethod,
   type HarnessChatResponse,
 } from "./contracts/interactive-chat.ts";
 import {
@@ -32,27 +34,98 @@ const invalidRequestResponse = (
     message,
   });
 
+const SUPPORTED_REQUEST_METHODS = new Set<HarnessChatRequestMethod>([
+  "start_session",
+  "start_turn",
+  "cancel_turn",
+  "close_session",
+  "status",
+]);
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const hasOptionalString = (
+  value: Record<string, unknown>,
+  key: string,
+): boolean => value[key] === undefined || typeof value[key] === "string";
+
+const isValidWorkspaceParam = (value: unknown): boolean =>
+  isRecord(value) &&
+  typeof value.hostPath === "string" &&
+  hasOptionalString(value, "cwd") &&
+  hasOptionalString(value, "sandboxPath");
+
+const isValidTurnInputParam = (value: unknown): boolean =>
+  isRecord(value) &&
+  typeof value.text === "string" &&
+  (value.imageAttachments === undefined ||
+    Array.isArray(value.imageAttachments));
+
+const isValidRequestParams = (
+  method: HarnessChatRequestMethod,
+  params: Record<string, unknown>,
+): boolean => {
+  switch (method) {
+    case "start_session":
+      return hasOptionalString(params, "sessionId") &&
+        isValidWorkspaceParam(params.workspace) &&
+        hasOptionalString(params, "model") &&
+        hasOptionalString(params, "artifactRoot") &&
+        (params.context === undefined || isRecord(params.context)) &&
+        (params.policy === undefined || isRecord(params.policy)) &&
+        (params.capabilities === undefined || isRecord(params.capabilities)) &&
+        (params.browserAccess === undefined ||
+          isRecord(params.browserAccess)) &&
+        (params.metadata === undefined || isRecord(params.metadata));
+    case "start_turn":
+      return typeof params.sessionId === "string" &&
+        hasOptionalString(params, "turnId") &&
+        isValidTurnInputParam(params.input) &&
+        (params.context === undefined || isRecord(params.context)) &&
+        (params.policy === undefined || isRecord(params.policy)) &&
+        (params.browserAccess === undefined ||
+          isRecord(params.browserAccess)) &&
+        (params.metadata === undefined || isRecord(params.metadata));
+    case "cancel_turn":
+      return typeof params.sessionId === "string" &&
+        hasOptionalString(params, "turnId") &&
+        hasOptionalString(params, "reason");
+    case "close_session":
+      return typeof params.sessionId === "string" &&
+        hasOptionalString(params, "reason");
+    case "status":
+      return hasOptionalString(params, "sessionId");
+  }
+};
+
 const isRequestEnvelope = (
   value: unknown,
-): value is HarnessChatRequestEnvelope =>
-  typeof value === "object" &&
-  value !== null &&
-  !Array.isArray(value) &&
-  "protocolVersion" in value &&
-  value.protocolVersion === HARNESS_CHAT_PROTOCOL_VERSION &&
-  "requestId" in value &&
-  typeof value.requestId === "string" &&
-  "method" in value &&
-  typeof value.method === "string" &&
-  "params" in value &&
-  typeof value.params === "object" &&
-  value.params !== null &&
-  !Array.isArray(value.params);
+): value is HarnessChatRequestEnvelope => {
+  if (
+    !isRecord(value) ||
+    !("type" in value) ||
+    value.type !== HARNESS_CHAT_REQUEST_TYPE ||
+    !("protocolVersion" in value) ||
+    value.protocolVersion !== HARNESS_CHAT_PROTOCOL_VERSION ||
+    !("requestId" in value) ||
+    typeof value.requestId !== "string" ||
+    !("method" in value) ||
+    typeof value.method !== "string" ||
+    !SUPPORTED_REQUEST_METHODS.has(value.method as HarnessChatRequestMethod) ||
+    !("params" in value) ||
+    !isRecord(value.params)
+  ) {
+    return false;
+  }
+  return isValidRequestParams(
+    value.method as HarnessChatRequestMethod,
+    value.params,
+  );
+};
 
 const requestIdFromUnknown = (value: unknown): string =>
-  typeof value === "object" &&
-    value !== null &&
-    !Array.isArray(value) &&
+  isRecord(value) &&
     "requestId" in value &&
     typeof value.requestId === "string"
     ? value.requestId

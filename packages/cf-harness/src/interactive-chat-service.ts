@@ -11,7 +11,6 @@ import {
   type HarnessChatBrowserAccessLease,
   type HarnessChatErrorResponse,
   type HarnessChatEventEnvelope,
-  type HarnessChatOkResponse,
   type HarnessChatPolicy,
   type HarnessChatRequestEnvelope,
   type HarnessChatResponse,
@@ -58,6 +57,7 @@ export interface CreateHarnessInteractiveChatServiceOptions {
 interface HarnessInteractiveChatSessionRecord {
   status: HarnessChatSessionStatus;
   transcript: HarnessTranscriptMessage[];
+  activeTurnToken?: object;
   activeTask?: Promise<void>;
   activeAbortController?: AbortController;
   canceledTurnIds: Set<string>;
@@ -75,9 +75,19 @@ const activeTurnError = (
 ): HarnessChatErrorResponse =>
   createHarnessChatErrorResponse(requestId, {
     code: "turn_already_running",
-    message:
-      `session ${session.sessionId} already has active turn ${session.activeTurnId}`,
+    message: session.activeTurnId === undefined
+      ? `session ${session.sessionId} already has an active turn task`
+      : `session ${session.sessionId} already has active turn ${session.activeTurnId}`,
     retryable: true,
+  });
+
+const sessionExistsError = (
+  requestId: string,
+  sessionId: string,
+): HarnessChatErrorResponse =>
+  createHarnessChatErrorResponse(requestId, {
+    code: "session_exists",
+    message: `chat session already exists: ${sessionId}`,
   });
 
 const sessionNotFoundError = (
@@ -121,6 +131,20 @@ const createTurnAbortError = (turnId: string, reason: string): DOMException =>
     `cf-harness chat turn ${turnId} canceled: ${reason}`,
     "AbortError",
   );
+
+const clearActiveTurnStatus = (
+  status: HarnessChatSessionStatus,
+  updatedAt: string,
+): HarnessChatSessionStatus => {
+  const { activeTurn: _activeTurn, activeTurnId: _activeTurnId, ...rest } =
+    status;
+  return {
+    ...rest,
+    status: "idle",
+    reusable: true,
+    updatedAt,
+  };
+};
 
 const parseToolMessageContent = (
   content: string,
@@ -263,6 +287,8 @@ export class HarnessInteractiveChatService {
   async handleRequest(
     request: HarnessChatRequestEnvelope,
   ): Promise<HarnessChatResponse> {
+    const requestId = request.requestId;
+    const method = String(request.method);
     switch (request.method) {
       case "start_session":
         return await this.startSession(request.requestId, request.params);
@@ -286,15 +312,24 @@ export class HarnessInteractiveChatService {
           request.requestId,
           this.status(request.params.sessionId),
         );
+      default:
+        return createHarnessChatErrorResponse(requestId, {
+          code: "invalid_request",
+          message: `unsupported chat request method: ${method}`,
+        });
     }
   }
 
   async startSession(
     requestId: string,
     params: HarnessChatStartSessionParams,
-  ): Promise<HarnessChatOkResponse<HarnessChatSessionStatus>> {
+  ): Promise<HarnessChatResponse<HarnessChatSessionStatus>> {
+    const sessionId = params.sessionId ?? this.#randomUUID();
+    if (this.#sessions.has(sessionId)) {
+      return sessionExistsError(requestId, sessionId);
+    }
     const session = createHarnessChatSessionStatus({
-      sessionId: params.sessionId ?? this.#randomUUID(),
+      sessionId,
       createdAt: this.#now(),
       workspace: params.workspace,
       context: params.context,
@@ -327,6 +362,9 @@ export class HarnessInteractiveChatService {
     }
     if (record.status.status === "closed") {
       return sessionClosedError(requestId, params.sessionId);
+    }
+    if (record.activeTask !== undefined) {
+      return activeTurnError(requestId, record.status);
     }
     if (record.status.activeTurnId !== undefined) {
       return activeTurnError(requestId, record.status);
@@ -361,7 +399,7 @@ export class HarnessInteractiveChatService {
       return sessionNotFoundError(requestId, params.sessionId);
     }
     const abortController = new AbortController();
-    const task = this.#runTurn(
+    const turnTask = this.#runTurn(
       updatedRecord,
       turn.turnId,
       params,
@@ -369,15 +407,13 @@ export class HarnessInteractiveChatService {
       policy,
       browserAccess,
     );
+    const activeTurnToken = {};
+    const finalizeTask = () =>
+      this.#finalizeTurnTask(params.sessionId, turn.turnId, activeTurnToken);
+    const task = turnTask.then(finalizeTask, finalizeTask).catch(() => {});
+    updatedRecord.activeTurnToken = activeTurnToken;
     updatedRecord.activeTask = task;
     updatedRecord.activeAbortController = abortController;
-    task.finally(() => {
-      const latest = this.#sessions.get(params.sessionId);
-      if (latest?.activeTask === task) {
-        latest.activeTask = undefined;
-        latest.activeAbortController = undefined;
-      }
-    });
     return createHarnessChatOkResponse(requestId, turn);
   }
 
@@ -411,6 +447,31 @@ export class HarnessInteractiveChatService {
       requestId,
       this.#sessions.get(sessionId)!.status,
     );
+  }
+
+  async #finalizeTurnTask(
+    sessionId: string,
+    turnId: string,
+    activeTurnToken: object,
+  ): Promise<void> {
+    const latest = this.#sessions.get(sessionId);
+    if (latest?.activeTurnToken !== activeTurnToken) {
+      return;
+    }
+    latest.activeTurnToken = undefined;
+    latest.activeTask = undefined;
+    latest.activeAbortController = undefined;
+    latest.canceledTurnIds.delete(turnId);
+    if (
+      latest.status.status === "canceling" &&
+      latest.status.activeTurnId === turnId
+    ) {
+      const session = clearActiveTurnStatus(latest.status, this.#now());
+      await this.#emit(sessionId, undefined, {
+        kind: "status_changed",
+        session,
+      });
+    }
   }
 
   async closeSession(

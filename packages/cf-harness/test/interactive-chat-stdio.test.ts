@@ -119,3 +119,56 @@ Deno.test("interactive NDJSON transport returns structured parse errors", async 
     "failed to parse chat request JSON:",
   );
 });
+
+Deno.test("interactive NDJSON transport rejects unsupported methods", async () => {
+  const output: string[] = [];
+  await runHarnessInteractiveChatNdjsonTransport({
+    lines: [
+      JSON.stringify({
+        type: HARNESS_CHAT_REQUEST_TYPE,
+        protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
+        requestId: "req-bad-method",
+        method: "delete_everything",
+        params: {},
+      }),
+    ],
+    writeLine: (line) => {
+      output.push(line);
+    },
+  });
+
+  const response = decodeLines(output)[0];
+  assertEquals("ok" in response ? response.ok : true, false);
+  assertEquals(
+    "ok" in response && response.ok === false ? response.error.code : "",
+    "invalid_request",
+  );
+});
+
+Deno.test("interactive NDJSON transport validates method-specific params", async () => {
+  const output: string[] = [];
+  await runHarnessInteractiveChatNdjsonTransport({
+    lines: [
+      JSON.stringify({
+        type: HARNESS_CHAT_REQUEST_TYPE,
+        protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
+        requestId: "req-bad-turn",
+        method: "start_turn",
+        params: {
+          sessionId: "session-1",
+          input: {},
+        },
+      }),
+    ],
+    writeLine: (line) => {
+      output.push(line);
+    },
+  });
+
+  const response = decodeLines(output)[0];
+  assertEquals("ok" in response ? response.ok : true, false);
+  assertEquals(
+    "ok" in response && response.ok === false ? response.error.code : "",
+    "invalid_request",
+  );
+});

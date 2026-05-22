@@ -1960,6 +1960,7 @@ export class CfHarnessPromptLoop {
             toolCall,
             model,
             promptSlotBinding,
+            options.signal,
             toolActivity.length + 1,
             (activity) => toolActivity.push(activity),
           );
@@ -2052,6 +2053,7 @@ export class CfHarnessPromptLoop {
     toolCall: HarnessToolCall,
     model: string,
     promptSlotBinding?: PromptSlotBinding,
+    signal?: AbortSignal,
     sequence = 1,
     recordActivity: (activity: HarnessToolActivity) => void = () => {},
   ): Promise<InvokedToolCallMessages> {
@@ -2347,6 +2349,7 @@ export class CfHarnessPromptLoop {
           input: delegateInput!,
           model,
           promptSlotBinding,
+          signal,
           sequence,
         })
         : await this.#invokeBuiltinTool(
@@ -2623,6 +2626,7 @@ export class CfHarnessPromptLoop {
     input: DelegateTaskToolInput;
     model: string;
     promptSlotBinding?: PromptSlotBinding;
+    signal?: AbortSignal;
     sequence: number;
   }): Promise<{
     output: DelegateTaskToolOutput;
@@ -2702,6 +2706,7 @@ export class CfHarnessPromptLoop {
         model: childModel.model,
         maxModelTurns,
         promptSlotBinding: options.promptSlotBinding,
+        signal: options.signal,
       });
       summary = childResult.finalAssistantText;
       childModelTurns = childResult.modelTurns;

@@ -214,10 +214,11 @@ Deno.test("interactive chat contract supports reusable turn cancel", () => {
   assertEquals(service.status()[0].activeTurnId, "turn-1");
 
   const canceled = service.cancelTurn("chat-session-1", "user_requested");
-  assertEquals(canceled.status, "idle");
-  assertEquals(canceled.reusable, true);
+  assertEquals(canceled.status, "canceling");
+  assertEquals(canceled.reusable, false);
   assertEquals(canceled.turnCount, 1);
-  assertEquals(canceled.activeTurnId, undefined);
+  assertEquals(canceled.activeTurnId, "turn-1");
+  assertEquals(canceled.activeTurn?.status, "canceling");
   assertEquals(
     service.events.map((event) => event.event.kind),
     ["session_started", "turn_started", "turn_canceled"],

@@ -220,6 +220,7 @@ export type HarnessChatRequestEnvelope<
 export interface HarnessChatError {
   code:
     | "invalid_request"
+    | "session_exists"
     | "session_not_found"
     | "turn_not_found"
     | "turn_already_running"
@@ -512,12 +513,21 @@ export const reduceHarnessChatSessionStatus = (
         updatedAt,
       };
     case "turn_canceled": {
-      const { activeTurn: _activeTurn, activeTurnId: _activeTurnId, ...rest } =
-        status;
       return {
-        ...rest,
-        status: "idle",
-        reusable: true,
+        ...status,
+        status: "canceling",
+        reusable: false,
+        activeTurnId: envelope.event.turnId,
+        ...(status.activeTurn !== undefined
+          ? {
+            activeTurn: {
+              ...status.activeTurn,
+              status: "canceling",
+              updatedAt,
+              cancelReason: envelope.event.reason,
+            },
+          }
+          : {}),
         updatedAt,
       };
     }

@@ -360,20 +360,16 @@ Deno.test("interactive service maps tool transcript messages to tool and file ev
 Deno.test("interactive service aborts canceled turns without closing the session", async () => {
   let runCount = 0;
   let firstSignal: AbortSignal | undefined;
+  let finishFirstTurn: (() => void) | undefined;
   const createPromptLoop: HarnessInteractivePromptLoopFactory = () => ({
     runTranscript: async (options) => {
       runCount += 1;
       if (runCount === 1) {
         firstSignal = options.signal;
         return await new Promise<HarnessPromptLoopResult>(
-          (_resolve, reject) => {
-            if (options.signal?.aborted) {
-              reject(options.signal.reason);
-              return;
-            }
-            options.signal?.addEventListener("abort", () => {
-              reject(options.signal?.reason);
-            }, { once: true });
+          (resolve) => {
+            finishFirstTurn = () =>
+              resolve(makeResult(options, "Ignored after cancel."));
           },
         );
       }
@@ -408,13 +404,26 @@ Deno.test("interactive service aborts canceled turns without closing the session
   assertEquals(canceled.ok, true);
   assertEquals(firstSignal instanceof AbortSignal, true);
   assertEquals(firstSignal?.aborted, true);
+  assertEquals(service.status("session-1").sessions[0].status, "canceling");
+  assertEquals(service.status("session-1").sessions[0].reusable, false);
+  const earlySecondTurn = await service.startTurn("req-early", {
+    sessionId: "session-1",
+    turnId: "turn-early",
+    input: { text: "Too soon" },
+  });
+  assertEquals(earlySecondTurn.ok, false);
+  assertEquals(
+    earlySecondTurn.ok === false ? earlySecondTurn.error.code : "",
+    "turn_already_running",
+  );
+
+  finishFirstTurn?.();
+  await service.waitForTurn("session-1", "turn-1");
   assertEquals(service.status("session-1").sessions[0].status, "idle");
   assertEquals(service.status("session-1").sessions[0].reusable, true);
-
-  await service.waitForTurn("session-1", "turn-1");
   assertEquals(
     service.events("session-1").map((event) => event.event.kind),
-    ["session_started", "turn_started", "turn_canceled"],
+    ["session_started", "turn_started", "turn_canceled", "status_changed"],
   );
 
   const secondTurn = await service.startTurn("req-4", {
@@ -435,6 +444,7 @@ Deno.test("interactive service aborts canceled turns without closing the session
       "session_started",
       "turn_started",
       "turn_canceled",
+      "status_changed",
       "turn_started",
       "assistant_delta",
       "assistant_completed",
@@ -519,6 +529,35 @@ Deno.test("interactive service closes sessions and filters status", async () => 
   assertEquals(
     startTurn.ok === false ? startTurn.error.code : "",
     "session_closed",
+  );
+});
+
+Deno.test("interactive service rejects duplicate session ids", async () => {
+  const service = new HarnessInteractiveChatService({
+    createPromptLoop: () => ({
+      runTranscript: (options) => Promise.resolve(makeResult(options, "Done.")),
+    }),
+    now: nextIsoNow(),
+  });
+  const first = await service.startSession("req-1", {
+    sessionId: "session-1",
+    workspace: { hostPath: "/workspace" },
+  });
+  const duplicate = await service.startSession("req-2", {
+    sessionId: "session-1",
+    workspace: { hostPath: "/other-workspace" },
+  });
+
+  assertEquals(first.ok, true);
+  assertEquals(duplicate.ok, false);
+  assertEquals(
+    duplicate.ok === false ? duplicate.error.code : "",
+    "session_exists",
+  );
+  assertEquals(service.status().sessions.length, 1);
+  assertEquals(
+    service.status("session-1").sessions[0].workspace?.hostPath,
+    "/workspace",
   );
 });
 
