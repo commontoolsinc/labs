@@ -23,6 +23,8 @@ import {
   type HarnessSkillResourceContentKind,
   type HarnessSkillResourceKind,
   type HarnessSkillResourceRecord,
+  type HarnessSkillScriptMetadata,
+  type HarnessSkillScriptRuntime,
 } from "../contracts/skill.ts";
 
 const SKILL_FILE_NAME = "SKILL.md";
@@ -344,6 +346,60 @@ const guessSkillResourceContentKind = (
   }
 };
 
+const scriptRuntimeFromShebang = (
+  shebang: string | undefined,
+): HarnessSkillScriptRuntime => {
+  if (shebang === undefined) {
+    return "unknown";
+  }
+  const normalized = shebang.toLowerCase();
+  return normalized.includes("deno") && normalized.includes("run")
+    ? "deno"
+    : "shebang";
+};
+
+const scriptRuntimeFromPath = (
+  path: string,
+  shebang: string | undefined,
+): HarnessSkillScriptRuntime => {
+  const shebangRuntime = scriptRuntimeFromShebang(shebang);
+  if (shebangRuntime !== "unknown") {
+    return shebangRuntime;
+  }
+  return /\.(?:ts|tsx|js|mjs)$/i.test(path) ? "deno" : "unknown";
+};
+
+const extractShebang = (
+  content: Uint8Array,
+  contentKind: HarnessSkillResourceContentKind,
+): string | undefined => {
+  if (contentKind !== "text") {
+    return undefined;
+  }
+  const text = new TextDecoder().decode(content.slice(0, 512));
+  if (!text.startsWith("#!")) {
+    return undefined;
+  }
+  return text.split(/\r?\n/, 1)[0]?.trimEnd();
+};
+
+const scriptMetadataForResource = (
+  options: {
+    path: string;
+    stat: Deno.FileInfo;
+    content: Uint8Array;
+    contentKind: HarnessSkillResourceContentKind;
+  },
+): HarnessSkillScriptMetadata => {
+  const shebang = extractShebang(options.content, options.contentKind);
+  const mode = options.stat.mode ?? 0;
+  return {
+    executable: (mode & 0o111) !== 0,
+    ...(shebang !== undefined ? { shebang } : {}),
+    runtime: scriptRuntimeFromPath(options.path, shebang),
+  };
+};
+
 const collectSkillResources = async (
   options: {
     skillsRoot: string;
@@ -513,9 +569,11 @@ const collectSkillResources = async (
       const resourcePath = normalizeSkillResourcePath(
         relative(options.skillDir, entryPath),
       );
+      const kind = classifySkillResourceKind(resourcePath);
+      const contentKind = guessSkillResourceContentKind(content);
       resources.push({
         path: resourcePath,
-        kind: classifySkillResourceKind(resourcePath),
+        kind,
         resourcePath: entryPath,
         sandboxResourcePath: hostPathToSandboxPath(
           options.skillsRoot,
@@ -524,7 +582,17 @@ const collectSkillResources = async (
         ),
         sizeBytes: stat.size,
         digest: await sha256BytesDigest(content),
-        contentKind: guessSkillResourceContentKind(content),
+        contentKind,
+        ...(kind === "script"
+          ? {
+            script: scriptMetadataForResource({
+              path: resourcePath,
+              stat,
+              content,
+              contentKind,
+            }),
+          }
+          : {}),
         diagnostics: [],
       });
     }

@@ -277,13 +277,14 @@ Why:
 - runtime-generated supporting-resource indexes in skill registry artifacts
 - text-first `read_skill_resource` support for indexed resources
 - `skill-resource-reads.json` provenance artifacts
+- exact-allowlisted `run_skill_script` support for activated skill scripts
+- `skill-script-executions.json` provenance artifacts
 - CFC classification of skill content as context, not direct-command authority
 - context message insertion before the final task prompt
 
 Still planned:
 
 - eventual dedicated `load_skill` tool for model-driven activation
-- script execution through a separately permissioned boundary
 - explicit subagent skill activation policy
 
 Why:

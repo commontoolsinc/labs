@@ -105,7 +105,7 @@ metadata and container path. See
 
 - Installing skills from remote registries.
 - Managing user-global skill directories outside an explicitly configured root.
-- Running skill scripts automatically.
+- Running skill scripts automatically or without an exact operator allowlist.
 - Treating `allowed-tools` as a permission grant.
 - Full Pattern Factory fulfillment in the same slice.
 - Implementing a broad filesystem discovery tool as a prerequisite.
@@ -173,6 +173,7 @@ Each resource record should include:
 - digest
 - text/binary content guess
 - diagnostics
+- for `scripts/**`: executable bit, shebang when present, and inferred runtime
 
 Resource discovery must:
 
@@ -224,6 +225,61 @@ Behavior:
 Resource read output is context. It cannot authorize tools, protected
 observations, writes, or CFC downgrades.
 
+## Skill Script Execution
+
+Status: implemented for exact-allowlisted scripts in already activated skills.
+
+`run_skill_script` is a built-in side-effect tool. It is not available in the
+default parent tool set; callers must explicitly include
+`--allow-tool run_skill_script`.
+
+Tool input:
+
+```json
+{
+  "skill": "deno-memory-profiler",
+  "path": "scripts/memory.ts",
+  "args": ["usage", "--gc"],
+  "cwd": ".",
+  "timeoutMs": 60000
+}
+```
+
+Execution is allowed only when all of these are true:
+
+- a run-start skill registry exists
+- the named skill exists in the registry
+- the named skill was explicitly activated for this run
+- the requested path is relative, normalized, and under `scripts/`
+- the exact `skill:scripts/path` pair was allowlisted by operator config
+- the resource exists in the run-start registry with `kind: "script"`
+- the call-time resolved file still stays inside the resolved skill directory
+  and configured skills root
+- the call-time digest and size still match the run-start registry snapshot
+- the runtime is supported
+
+v1 supports Deno TypeScript/JavaScript scripts. Deno permissions are inferred
+from a checked-in `deno run` shebang when present, otherwise the script runs via
+`deno run` without extra permission flags. Executable non-Deno shebang scripts
+have a constrained direct-exec path, but the current in-repo need is Deno.
+
+The tool executes via the sandbox direct argv API, not a model-authored shell
+string. The default cwd is the workspace root, even if the harness current
+directory is elsewhere. Optional `cwd` is resolved through normal sandbox path
+rules. The runtime receives:
+
+```text
+CF_HARNESS_RUN_ID=<run id>
+SKILL_NAME=<skill name>
+SKILL_DIR=<sandbox skill directory>
+SKILL_SCRIPT=<sandbox script path>
+```
+
+Script execution records provenance in the normal tool output artifact and in
+`skill-script-executions.json`. In CFC enforce modes, `run_skill_script` is
+treated like other side-effect tools: direct-command authorization is required,
+and stdout/stderr/exit-code observations must be mediated before model exposure.
+
 ## CLI and Config Surface
 
 Use the existing config field:
@@ -237,6 +293,7 @@ Add CLI flags:
 ```text
 --skills-root <path>      Skill root containing <name>/SKILL.md
 --skill <name>            Preload a skill for this run (repeatable)
+--allow-skill-script <s>  Allow exact script execution (skill:scripts/path)
 --no-skill-catalog        Disable automatic skill catalog disclosure
 ```
 
@@ -248,6 +305,9 @@ Recommended v1 behavior:
 - `--skill` requires `--skills-root`.
 - Multiple `--skill` values are allowed and loaded in the provided order after
   deduplication.
+- `--allow-skill-script` requires `--skills-root`, is repeatable, deduplicates
+  exact normalized entries, and does not itself expose the execution tool.
+  `--allow-tool run_skill_script` is also required.
 - `--no-skill-catalog` is available for tightly scripted batch runs that only
   want explicit preloaded skills.
 
@@ -401,7 +461,8 @@ Policy rules:
 - A skill cannot grant a tool that the run did not already allow.
 - A skill cannot downgrade CFC enforcement.
 - A skill cannot authorize reading protected substrate observations.
-- A skill script can run only through an already-allowed execution tool.
+- A skill script can run only through `run_skill_script`, and only when both the
+  tool and exact `skill:scripts/path` entry are allowlisted by the operator.
 - `allowed-tools` can narrow or advise, but v1 should not let it expand the
   allowed tool surface.
 - Prompt-injection-like content in a skill should produce a diagnostic event. It
@@ -416,6 +477,7 @@ The CFC policy snapshot should eventually include:
   `subagent-inherit`)
 - whether skill content was injected as context
 - any skill diagnostics relevant to trust or provenance
+- exact skill script allowlist entries
 
 ## Artifacts and Resume
 

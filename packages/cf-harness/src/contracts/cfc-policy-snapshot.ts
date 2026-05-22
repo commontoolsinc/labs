@@ -6,6 +6,7 @@ import type {
 import type { SandboxRuntimeDescription } from "../sandbox/types.ts";
 import type { PromptSlotBinding } from "./prompt-slot.ts";
 import type { HarnessRunManifest } from "./run-manifest.ts";
+import type { HarnessAllowedSkillScript } from "./skill.ts";
 import type {
   HarnessSubagentProfile,
   HarnessSubagentProfileConfig,
@@ -61,6 +62,9 @@ export interface HarnessCfcPolicySnapshot {
     allowance: HarnessParentToolAllowance;
     allowedToolIds: readonly BuiltinToolId[];
   };
+  skillScripts: {
+    allowedScripts: readonly HarnessAllowedSkillScript[];
+  };
   subagents: {
     allowedProfiles: readonly HarnessSubagentProfile[];
     profileConfigs: readonly HarnessSubagentProfileConfig[];
@@ -85,6 +89,7 @@ export interface CreateHarnessCfcPolicySnapshotOptions {
   promptSlotBindingSource: HarnessPromptSlotBindingSource;
   parentToolAllowance: HarnessParentToolAllowance;
   allowedToolIds: readonly BuiltinToolId[];
+  allowedSkillScripts?: readonly HarnessAllowedSkillScript[];
   allowedSubagentProfiles: readonly HarnessSubagentProfile[];
   subagentProfileConfigs: readonly HarnessSubagentProfileConfig[];
   absenceBehavior?: HarnessCfcAbsenceBehavior;
@@ -154,6 +159,11 @@ export const createHarnessCfcPolicySnapshot = (
   parentTools: {
     allowance: options.parentToolAllowance,
     allowedToolIds: [...options.allowedToolIds],
+  },
+  skillScripts: {
+    allowedScripts: (options.allowedSkillScripts ?? []).map((script) => ({
+      ...script,
+    })),
   },
   subagents: {
     allowedProfiles: [...options.allowedSubagentProfiles],

@@ -212,6 +212,13 @@ Deno.test({
       );
       assertEquals(patternDev?.resources[0].sizeBytes, 4);
       assertEquals(patternDev?.resources[0].digest.startsWith("sha256:"), true);
+      const script = patternDev?.resources.find((resource) =>
+        resource.path === "scripts/check.ts"
+      );
+      assertEquals(script?.script, {
+        executable: false,
+        runtime: "deno",
+      });
       assertEquals(
         patternDev?.resources.every((resource) =>
           resource.diagnostics.length === 0
