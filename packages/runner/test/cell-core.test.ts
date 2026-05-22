@@ -885,6 +885,54 @@ describe("Cell", () => {
     expect(final).toEqual({ output: 200 });
   });
 
+  it("should resolve getArgumentCell from argument metadata after reload", async () => {
+    const argumentSchema = {
+      type: "object",
+      properties: { input: { type: "number" } },
+      required: ["input"],
+    } as const;
+    const doublePattern = trustPattern(runtime, {
+      argumentSchema,
+      resultSchema: {
+        type: "object",
+        properties: { output: { type: "number" } },
+      },
+      result: { output: { $alias: { cell: "internal", path: ["doubled"] } } },
+      nodes: [
+        {
+          module: {
+            type: "javascript",
+            implementation: (args: { input: number }) => args.input * 2,
+          },
+          inputs: { input: { $alias: { cell: "argument", path: ["input"] } } },
+          outputs: { $alias: { cell: "internal", path: ["doubled"] } },
+        },
+      ],
+    } as Pattern);
+    const resultCell = runtime.getCell(
+      space,
+      "getArgumentCell after reload",
+      undefined,
+      tx,
+    );
+    runtime.setup(tx, doublePattern, { input: 11 }, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const reloadedResultCell = resultCell.withTx(tx);
+    const argumentLink = getMetaLink(reloadedResultCell, "argument");
+    expect(argumentLink?.schema).toEqual(argumentSchema);
+
+    const argumentCell = reloadedResultCell.getArgumentCell<{ input: number }>(
+      argumentSchema,
+    );
+    expect(argumentCell?.get()).toEqual({ input: 11 });
+    expect(argumentCell?.getAsNormalizedFullLink().id).toBe(argumentLink?.id);
+    expect(argumentCell?.getAsNormalizedFullLink().scope).toBe(
+      argumentLink?.scope,
+    );
+  });
+
   // Cycle-resolution tests live in a separate `describe` below so they can be
   // pinned to both `modernDataModel` flag states explicitly.
 });
