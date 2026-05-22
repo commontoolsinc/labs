@@ -1,5 +1,6 @@
-import { deepFreeze, isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import {
+  cloneForIsolation,
   cloneForMutation,
   CloneForMutationError,
   cloneIfNecessary,
@@ -139,68 +140,6 @@ function withCommitTiming<T>(
   }
 }
 
-/**
- * Produces a value that is isolated from later mutations to the source. For
- * a deep-frozen input the source can't be mutated, so the input is returned
- * unchanged; otherwise plain objects and arrays are deep-cloned (with cycle
- * detection) and non-plain-prototype objects are passed through. Sub-trees
- * that are themselves deep-frozen short-circuit by identity during the
- * recursion, so partially-frozen trees only copy their unfrozen portions.
- *
- * The result is NOT guaranteed to be mutable, since deep-frozen inputs are
- * returned as-is. Callers that need a mutable spine into a value tree at
- * a specific path should use `cloneForMutation()` from
- * `@commonfabric/data-model` instead -- it shallow-thaws only the spine
- * containers, preserving identity of off-spine subtrees (and their place
- * in the deep-frozen cache).
- */
-const isolateTransactionValue = <T>(
-  value: T,
-  seen: Map<object, unknown> = new Map(),
-): T => {
-  if (value === null || typeof value !== "object") {
-    return value;
-  }
-
-  // A deep-frozen value is already isolated: nothing can mutate it, so the
-  // returned reference is safe to share with the caller. `isDeepFrozen()` is
-  // O(1) on values previously cached as deep-frozen (the common case for
-  // values that came back out of storage in modern data model).
-  if (isDeepFrozen(value)) {
-    return value;
-  }
-
-  if (seen.has(value)) {
-    return seen.get(value) as T;
-  }
-
-  if (Array.isArray(value)) {
-    const copy = new Array(value.length);
-    seen.set(value, copy);
-    for (let i = 0; i < value.length; i++) {
-      if (i in value) {
-        copy[i] = isolateTransactionValue(value[i], seen);
-      }
-    }
-    return copy as T;
-  }
-
-  const prototype = Object.getPrototypeOf(value);
-  if (prototype !== Object.prototype && prototype !== null) {
-    return value;
-  }
-
-  const copy = Object.create(prototype) as Record<PropertyKey, unknown>;
-  seen.set(value, copy);
-  for (const key of Reflect.ownKeys(value)) {
-    copy[key] = isolateTransactionValue(
-      (value as Record<PropertyKey, unknown>)[key],
-      seen,
-    );
-  }
-  return copy as T;
-};
-
 const currentDocument = (doc: DocumentEntry): RootAttestation =>
   doc.current ?? doc.initial;
 
@@ -232,11 +171,12 @@ const freezeReadValue = <T extends FabricValue | undefined>(value: T): T => {
   ) {
     return value;
   }
-  // `isolateTransactionValue()` short-circuits on already-deep-frozen input
-  // (returns the source by identity) and `deepFreeze()` is O(1) on values
-  // already in its cache, so the steady-state cost on repeated reads of the
-  // same stored value collapses to two cache lookups.
-  return deepFreeze(isolateTransactionValue(value)) as T;
+  // `cloneForIsolation()` isolates the result from later source mutation by
+  // deep-cloning only the not-already-deep-frozen portions, returning
+  // deep-frozen subtrees by identity; `deepFreeze()` is then O(1) on values
+  // already in its cache. On the hot read path the steady-state cost on
+  // repeated reads of the same stored value collapses to two cache lookups.
+  return deepFreeze(cloneForIsolation(value)) as T;
 };
 
 const collapseEmptyJsonDocumentEnvelope = (
@@ -1240,7 +1180,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
     const isolatedValue = value === undefined
       ? undefined
-      : isolateTransactionValue(value) as FabricValue;
+      : cloneForIsolation(value) as FabricValue;
     const result = writeAttestation(current, address, isolatedValue);
     if (result.error) {
       return { error: result.error.from(space) };
@@ -1269,7 +1209,7 @@ export class V2StorageTransaction implements IStorageTransaction {
         allowArrayLength: true,
       }),
       previous.kind === "ok"
-        ? isolateTransactionValue(previous.value) as FabricValue | undefined
+        ? cloneForIsolation(previous.value) as FabricValue | undefined
         : undefined,
       doc,
     );
@@ -1342,7 +1282,7 @@ export class V2StorageTransaction implements IStorageTransaction {
         nextKeyAfterPath: remainingPath[remainingPath.length - 1]!,
       },
     );
-    const isolatedValue = isolateTransactionValue(value) as FabricValue;
+    const isolatedValue = cloneForIsolation(value) as FabricValue;
     const parentWrite = writeAttestation(
       {
         address: {
@@ -1378,10 +1318,10 @@ export class V2StorageTransaction implements IStorageTransaction {
       return { ok: collapsedNext };
     }
 
-    const previousActivityValue = isolateTransactionValue(
+    const previousActivityValue = cloneForIsolation(
       readValueAtPath(doc.current.value, lastExistingPath, {
         allowArrayLength: true,
-      }),
+      }) as FabricValue,
     ) as FabricValue | undefined;
 
     doc.current = collapsedNext;
@@ -1440,7 +1380,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     for (const { address, value } of writes) {
       const isolatedValue = value === undefined
         ? undefined
-        : isolateTransactionValue(value) as FabricValue;
+        : cloneForIsolation(value) as FabricValue;
       const previousValue = readValueAtPath(nextRoot, address.path, {
         allowArrayLength: true,
       });
@@ -1452,17 +1392,17 @@ export class V2StorageTransaction implements IStorageTransaction {
         address.path,
         isolatedValue,
       ) ?? address.path;
-      const previousActivityValue = isolateTransactionValue(
+      const previousActivityValue = cloneForIsolation(
         readValueAtPath(nextRoot, activityPath, {
           allowArrayLength: true,
-        }),
+        }) as FabricValue,
       ) as FabricValue | undefined;
       if (
         !hasMutableRoot && address.path.length > 0 && nextRoot !== undefined
       ) {
-        // Use `cloneIfNecessary({ frozen: false })` (not
-        // `isolateTransactionValue()`): the next line passes `nextRoot` to
-        // `applyMutablePathWrite`, which mutates in place along the write
+        // Use `cloneIfNecessary({ frozen: false })` (not `cloneForIsolation()`,
+        // whose result is only mixed-mutable): the next line passes `nextRoot`
+        // to `applyMutablePathWrite`, which mutates in place along the write
         // path, so we need a guaranteed-mutable root even when the stored
         // value is deep-frozen.
         nextRoot = cloneIfNecessary(nextRoot, { frozen: false });
@@ -1492,7 +1432,7 @@ export class V2StorageTransaction implements IStorageTransaction {
         readValueAtPath(result.ok.root, address.path, {
           allowArrayLength: true,
         }),
-        isolateTransactionValue(previousValue) as FabricValue | undefined,
+        cloneForIsolation(previousValue) as FabricValue | undefined,
         doc,
       );
       this.recordWriteActivity(
