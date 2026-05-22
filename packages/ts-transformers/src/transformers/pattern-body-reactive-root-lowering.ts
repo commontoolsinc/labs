@@ -455,7 +455,7 @@ function rewriteTrackedOpaquePatternBody(
       context,
       {
         allowDirectExpressionWrap: true,
-        preferDeriveWrapper: true,
+        preferInputBoundWrapper: true,
       },
     );
   };
@@ -507,7 +507,7 @@ function rewriteTrackedOpaquePatternBody(
       context,
       {
         allowDirectExpressionWrap: true,
-        preferDeriveWrapper: true,
+        preferInputBoundWrapper: true,
       },
     );
   };
@@ -740,7 +740,7 @@ function rewriteTrackedOpaquePatternBody(
       // form is `root.key(...)` in-place, regardless of whether the
       // expression lives inside a JSX slot. Falling into
       // `maybeWrapDynamicJsxAccess` here would produce an unnecessary
-      // `derive(...)` wrapper around what is already a reactive expression.
+      // lift-applied wrapper around what is already a reactive expression.
       const hasTrackedStaticAccess = !!info?.root && !info.dynamic;
       if (!hasTrackedStaticAccess && isDynamicElementAccess(visited)) {
         const wrappedDynamicAccess = maybeWrapDynamicJsxAccess(visited);
@@ -923,14 +923,17 @@ function rewriteTrackedOpaquePatternBody(
 }
 
 /**
- * Recursively process derive() callback bodies to rewrite property accesses
- * on locally-declared OpaqueRef variables (e.g., const foo = computed(...); foo.bar → foo.key("bar")).
+ * Recursively process lift-applied callback bodies (the lowered form of
+ * derive()/computed() callbacks) to rewrite property accesses on
+ * locally-declared OpaqueRef variables (e.g., const foo = computed(...);
+ * foo.bar → foo.key("bar")).
  *
- * rewriteTrackedOpaquePatternBody stops at function boundaries, so derive
- * callback bodies are not processed by it. This pass finds derive() calls in
- * the given body, extracts their callbacks, and applies the tracked-opaque
- * rewrite to each callback body
- * with empty opaque roots (since derive callbacks receive unwrapped captures).
+ * rewriteTrackedOpaquePatternBody stops at function boundaries, so
+ * lift-applied callback bodies are not processed by it. This pass finds
+ * lift-applied calls in the given body, extracts their callbacks, and
+ * applies the tracked-opaque rewrite to each callback body
+ * with empty opaque roots (since lift-applied callbacks receive unwrapped
+ * captures).
  * Local variables initialized from derive/computed/lift calls within the callback
  * will be detected as opaque roots by the tracked-opaque body's variable
  * tracking.
@@ -944,12 +947,12 @@ function rewriteNestedDeriveCallbackBodies(
 
     if (!ts.isCallExpression(visited)) return visited;
 
-    const deriveArgs = getLiftAppliedInputAndCallback(
+    const liftAppliedArgs = getLiftAppliedInputAndCallback(
       visited,
       context.checker,
     );
-    if (!deriveArgs) return visited;
-    const { callback: callbackArg } = deriveArgs;
+    if (!liftAppliedArgs) return visited;
+    const { callback: callbackArg } = liftAppliedArgs;
 
     // The callback can live on either the outer call (legacy derive shape:
     // derive(input, cb)) or the inner call (lift-applied shape:

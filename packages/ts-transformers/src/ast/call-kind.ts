@@ -353,10 +353,11 @@ export function getLiftAppliedInputAndCallback(
     return undefined;
   }
 
-  // Two shapes are recognized as kind:"derive":
+  // Two shapes are recognized as kind:"lift-applied":
   //   (a) Legacy derive shape: __cfHelpers.derive(input, cb) or
-  //       __cfHelpers.derive(argSchema, resSchema, input, cb).
-  //   (b) Lift-applied shape: __cfHelpers.lift(cb)(input) or
+  //       __cfHelpers.derive(argSchema, resSchema, input, cb). Recognized
+  //       defensively for any unlowered legacy emission that reaches here.
+  //   (b) Canonical lift-applied shape: __cfHelpers.lift(cb)(input) or
   //       __cfHelpers.lift(argSchema, resSchema, cb)(input).
   // The lift-applied shape's outer call has the callee as a CallExpression.
   const innerCallee = stripWrappers(call.expression);
@@ -1108,8 +1109,9 @@ function resolveExpressionKind(
   if (builderKind) {
     // Lift-applied recognition: when the callee is itself a call to lift
     // (e.g. __cfHelpers.lift(cb)({})), the *outer* call applies the lift
-    // factory to inputs and is semantically equivalent to derive(input, cb).
-    // Return kind:"derive" so existing downstream dispatchers handle it.
+    // factory to inputs and is semantically the lowered form of the
+    // user-source derive(input, cb). Return kind:"lift-applied" so
+    // downstream dispatchers handle it.
     //
     // The plain unapplied builder case (e.g. __cfHelpers.lift(cb) on its
     // own, or a pattern() call) has `target` not as a CallExpression.

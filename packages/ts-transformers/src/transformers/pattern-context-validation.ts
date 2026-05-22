@@ -797,7 +797,7 @@ export class PatternContextValidationTransformer
             return;
           }
 
-          // Check for derive() calls
+          // Check for lift-applied calls (the lowered form of user-source derive())
           if (callKind.kind === "lift-applied") {
             context.reportDiagnostic({
               severity: "error",

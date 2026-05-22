@@ -26,7 +26,7 @@ export interface RewriteParams {
   /**
    * True when inside a safe callback wrapper (action, handler, computed, etc.)
    * where opaque reading is allowed. In safe contexts, we still need to apply
-   * semantic transformations (&&->when, ||->unless) but NOT derive() wrappers.
+   * semantic transformations (&&->when, ||->unless) but NOT lift-applied wrappers.
    */
   readonly inSafeContext?: boolean;
   /**
@@ -41,7 +41,7 @@ export interface RewriteParams {
    * Used by post-closure lowering passes that run after
    * LiftLoweringTransformer.
    */
-  readonly preferDeriveWrappers?: boolean;
+  readonly preferInputBoundWrappers?: boolean;
 }
 
 export interface EmitterContext extends RewriteParams {
@@ -49,7 +49,7 @@ export interface EmitterContext extends RewriteParams {
   readonly inSafeContext: boolean;
   readonly reactiveContextKind: ReactiveContextKind;
   readonly containerKind?: ExpressionContainerKind;
-  readonly preferDeriveWrappers: boolean;
+  readonly preferInputBoundWrappers: boolean;
   rewriteChildren(node: ts.Expression): ts.Expression;
   rewriteSubexpression(node: ts.Expression): ts.Expression;
 }

@@ -27,16 +27,12 @@ import type { TransformationContext } from "../core/mod.ts";
  * argument is a non-undefined object.
  *
  * The lift-applied shape is recognized by detectCallKind as
- * { kind: "derive" } so existing downstream dispatchers continue to work
- * without code change. Subsequent commits in the migration rename the kind
- * to "lift-applied" mechanically.
+ * { kind: "lift-applied" } so downstream dispatchers operate on the
+ * canonical post-CT-1615 discriminator.
  *
- * Note on shape stability: for derive calls with captures, the
- * ClosureTransformer rebuilds the call (still emitting the legacy
- * derive(input, cb) shape at that stage — that will change in a later
- * commit). For derive calls without captures, the lift-applied shape
- * produced here propagates all the way through schema injection unchanged.
- * Schema injection has been taught to prepend schemas to the inner lift
+ * Note on shape stability: the lift-applied shape produced here
+ * (`__cfHelpers.lift(cb)(input)`) propagates all the way through schema
+ * injection unchanged. Schema injection prepends schemas to the inner lift
  * call when given a lift-applied node.
  */
 export class LiftLoweringTransformer extends HelpersOnlyTransformer {
@@ -73,7 +69,7 @@ function createLiftLoweringVisitor(
       return lowerComputedCall(node, context, visitor);
     }
 
-    // Only rewrite the legacy derive shape — not our own lift-applied output.
+    // Only rewrite the user-source derive shape — not our own lift-applied output.
     // detectCallKind returns kind:"lift-applied" for BOTH:
     //   (a) user-source derive(input, cb) — callee is a property access or
     //       bare identifier ("derive" or "__cfHelpers.derive"). This is the
@@ -141,9 +137,10 @@ function lowerDeriveCall(
 ): ts.Node {
   const { factory, checker, tsContext } = context;
 
-  // Two derive shapes:
-  //   2-arg: derive(input, cb)
+  // Two user-source derive shapes to lower:
+  //   2-arg: derive(input, cb)            → lift(cb)(input)
   //   4-arg: derive(argSchema, resultSchema, input, cb)
+  //                                       → lift(argSchema, resultSchema, cb)(input)
   // Anything else is malformed; pass through.
   const args = node.arguments;
   if (args.length !== 2 && args.length !== 4) {
@@ -172,10 +169,12 @@ function lowerDeriveCall(
     innerLiftArgs = [argSchema, resultSchema, callbackArg];
   }
 
-  // Preserve derive's "input type flows into callback parameter" semantics.
+  // Preserve the user-API derive's "input type flows into callback parameter"
+  // semantics across the lowering.
   //
-  // In derive(input, fn), TypeScript contextually-types fn's parameter as
-  // the input's type via the shared generic In: derive<In, Out>(In, (In)=>Out).
+  // In the user-source derive(input, fn), TypeScript contextually-types fn's
+  // parameter as the input's type via the shared generic In:
+  //   derive<In, Out>(In, (In)=>Out).
   // In the lift-applied form lift(fn)(input), TS instantiates In from fn's
   // parameter in isolation (because lift(fn) is resolved before being applied
   // to input). For unannotated parameters this can collapse to unknown or
@@ -184,7 +183,7 @@ function lowerDeriveCall(
   // We restore the original semantics by registering the input expression's
   // widened type against the callback's first parameter in the typeRegistry.
   // inferParameterType consults the registry before falling back to the
-  // checker, so downstream schema injection sees the input-derived type.
+  // checker, so downstream schema injection sees the input-flowed type.
   const typeRegistry = context.options.typeRegistry;
   if (typeRegistry) {
     const callbackFn = unwrapToFunctionLike(callbackArg);

@@ -125,7 +125,7 @@ export interface DiagnosticInput {
  * The registry carries three related kinds of synthetic typing:
  * - replacement expression nodes that should keep the original authored type
  * - synthetic TypeNodes that later schema/codegen phases must resolve faithfully
- * - synthetic call expressions (`derive`, `computed`, `ifElse`, etc.) whose
+ * - synthetic call expressions (`lift-applied`, `ifElse`, etc.) whose
  *   result types would otherwise be lost after rewriting
  *
  * Most TypeNodes are registered directly at creation time. For composite

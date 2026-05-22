@@ -251,7 +251,7 @@ export function analyzeElementBinding(
   };
 }
 
-function createDerivedAliasExpression(
+function createAliasExpressionAsLiftApplied(
   info: ComputedAliasInfo,
   elementIdentifier: ts.Identifier,
   context: TransformationContext,
@@ -274,7 +274,7 @@ function createDerivedAliasExpression(
   // Register the type of the synthetic elementAccess in typeRegistry.
   // The type comes from info.symbol which was captured from the original
   // binding element. Without this registration, createLiftAppliedCall cannot
-  // determine the correct result type for the synthetic derive.
+  // determine the correct result type for the synthetic lift-applied call.
   if (context.options.typeRegistry && info.symbol) {
     const symbolType = checker.getTypeOfSymbol(info.symbol);
     if (symbolType) {
@@ -284,7 +284,7 @@ function createDerivedAliasExpression(
 
   const elementRef = factory.createIdentifier(elementIdentifier.text);
 
-  const deriveExpression = createLiftAppliedCall(
+  const liftAppliedExpression = createLiftAppliedCall(
     elementAccess,
     [elementRef, keyIdent],
     {
@@ -295,7 +295,7 @@ function createDerivedAliasExpression(
     },
   );
 
-  return deriveExpression ?? elementAccess;
+  return liftAppliedExpression ?? elementAccess;
 }
 
 export function rewriteCallbackBody(
@@ -334,7 +334,7 @@ export function rewriteCallbackBody(
               factory.createIdentifier(info.aliasName),
               undefined,
               undefined,
-              createDerivedAliasExpression(
+              createAliasExpressionAsLiftApplied(
                 info,
                 analysis.elementIdentifier,
                 context,

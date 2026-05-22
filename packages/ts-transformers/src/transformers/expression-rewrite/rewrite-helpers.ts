@@ -66,7 +66,7 @@ export function createReactiveWrapperForExpression(
   context: TransformationContext,
   options: {
     allowDirectExpressionWrap?: boolean;
-    preferDeriveWrapper?: boolean;
+    preferInputBoundWrapper?: boolean;
     filterNestedFunctionLocalCaptures?: boolean;
   } = {},
 ): ts.Expression | undefined {
@@ -85,7 +85,7 @@ export function createReactiveWrapperForExpression(
 
   if (wrapperDataFlows.length === 0) return undefined;
 
-  // Don't wrap expressions that are already derive, computed, when, or unless calls
+  // Don't wrap expressions that are already lift-applied, computed, when, or unless calls
   // These are already reactive and wrapping them would create unnecessary nesting
   if (ts.isCallExpression(expression)) {
     const callKind = detectCallKind(expression, context.checker);
@@ -109,7 +109,7 @@ export function createReactiveWrapperForExpression(
     }
   }
 
-  if (options.preferDeriveWrapper) {
+  if (options.preferInputBoundWrapper) {
     const refs = unionWithEnclosingScopeFreeIdentifiers(
       wrapperDataFlows.map((dataFlow) => dataFlow.expression),
       expression,
@@ -194,7 +194,7 @@ export function createReactiveWrapperForExpression(
  * whose declarations live in an enclosing (non-module, non-expression-local)
  * function scope. This is what makes plain-JS captures (e.g. `const suffix =
  * "!"` declared in the enclosing pattern/map callback) become explicit
- * derive inputs instead of flowing through lexical closure.
+ * lift-applied inputs instead of flowing through lexical closure.
  *
  * The dataflow analyzer only surfaces reactive captures (Cell/OpaqueRef).
  * Plain-JS values declared in enclosing scope are invisible to it, so they
@@ -316,7 +316,7 @@ function isEnclosingScopeDeclaration(symbol: ts.Symbol): boolean {
   const declarations = symbol.getDeclarations();
   if (!declarations || declarations.length === 0) return false;
   // Reject if ANY declaration is module-scoped or an import — those don't
-  // need to be passed as derive inputs. They're stable and hoistable.
+  // need to be passed as lift-applied inputs. They're stable and hoistable.
   for (const decl of declarations) {
     if (
       ts.isImportSpecifier(decl) ||

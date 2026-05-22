@@ -744,7 +744,7 @@ export function registerLiftAppliedCallType(
 }
 
 /**
- * Register the result type for a synthetic call (derive, ifElse, when, unless, etc.) in the TypeRegistry.
+ * Register the result type for a synthetic call (lift-applied, ifElse, when, unless, etc.) in the TypeRegistry.
  * This enables schema injection to find the correct result type for the call.
  *
  * @param call The synthetic call node
@@ -1162,9 +1162,3 @@ export function hasArrayTypeArgument(
   return false;
 }
 
-/**
- * Check if an expression is a derive call (synthetic or user-written).
- * derive() always returns OpaqueRef<T> at runtime, but we register the
- * unwrapped callback return type in the type registry. This helper lets
- * us detect derive calls syntactically to work around that limitation.
- */

@@ -16,7 +16,7 @@
  *   pre-shrink type registered here will cause carefully-narrowed inner
  *   schemas to be un-shrunk. See narrowedWrapperTypeRegistry for the
  *   separate channel that bypasses this consumer.
- *   Writers: closure strategies, builtins/derive, expression rewrites,
+ *   Writers: closure strategies, builtins/lift-applied, expression rewrites,
  *            type-building/schema-factory/type-shrinking, schema-injection
  *   Readers: lift-lowering transformer, schema-generator, type-inference,
  *            ast/utils, schema-injection, capability/type-shrinking logic

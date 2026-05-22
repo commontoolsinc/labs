@@ -28,7 +28,7 @@ import type { TransformationContext } from "../../core/mod.ts";
 /**
  * Replace OpaqueRef expressions with parameter identifiers in the callback body.
  * Also registers the new identifiers with their UNWRAPPED types in the typeRegistry,
- * so that type-based checks inside the derive callback see the correct types.
+ * so that type-based checks inside the lift-applied callback see the correct types.
  */
 function replaceOpaqueRefsWithParams(
   expression: ts.Expression,
@@ -44,7 +44,7 @@ function replaceOpaqueRefsWithParams(
         const newIdentifier = factory.createIdentifier(paramName);
 
         // Register the new identifier with its UNWRAPPED type.
-        // The ref has type OpaqueRef<T>, but inside the derive callback
+        // The ref has type OpaqueRef<T>, but inside the lift-applied callback
         // the parameter has type T (unwrapped).
         if (checker && typeRegistry) {
           const refType = checker.getTypeAtLocation(ref);
@@ -77,7 +77,7 @@ export interface LiftAppliedCallOptions {
   readonly context: TransformationContext;
 }
 
-function planDeriveEntries(
+function planLiftAppliedInputEntries(
   refs: readonly ts.Expression[],
 ): {
   readonly captureTree: ReturnType<typeof groupCapturesByRoot>;
@@ -154,7 +154,7 @@ function createParameterForPlan(
   return createParameterFromBindings(bindings, factory);
 }
 
-function createDeriveArgs(
+function createLiftAppliedInputArgs(
   factory: ts.NodeFactory,
   captureTree: ReturnType<typeof groupCapturesByRoot>,
   fallbackEntries: readonly FallbackEntry[],
@@ -191,7 +191,7 @@ export function createLiftAppliedCall(
   if (refs.length === 0) return undefined;
 
   const { factory, tsContext, cfHelpers, context } = options;
-  const { captureTree, fallbackEntries, refToParamName } = planDeriveEntries(
+  const { captureTree, fallbackEntries, refToParamName } = planLiftAppliedInputEntries(
     refs,
   );
   if (captureTree.size === 0 && fallbackEntries.length === 0) {
@@ -234,7 +234,7 @@ export function createLiftAppliedCall(
   // on the inner lift call. This matches the canonical post-Phase-1 shape
   // produced by LiftLoweringTransformer (see src/lift/transformer.ts) for
   // user-authored derive(...) calls.
-  const [inputObject] = createDeriveArgs(
+  const [inputObject] = createLiftAppliedInputArgs(
     factory,
     captureTree,
     fallbackEntries,

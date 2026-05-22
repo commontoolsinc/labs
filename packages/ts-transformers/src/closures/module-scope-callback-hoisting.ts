@@ -34,8 +34,9 @@ const HOISTABLE_BUILDER_NAMES = new Set([
  *     single source file can carry `__cfHardenFn` and `__cfHardenFn_1`
  *     for the same conceptual helper.
  *   - `__cfModuleCallback` (prefix): the hoister's own output. When
- *     hoisting an inner builder callback (e.g. a synthetic derive inside
- *     a map callback) before its outer callback is analyzed, the outer
+ *     hoisting an inner builder callback (e.g. a synthetic lift-applied
+ *     wrapper inside a map callback) before its outer callback is
+ *     analyzed, the outer
  *     callback's body suddenly contains a `__cfModuleCallback_N`
  *     reference. Without this exclusion, that reference would itself
  *     count as "uses module-scoped references" and incorrectly promote
@@ -245,8 +246,8 @@ function getBuilderCallbackIndices(
       // path that re-introduces derive calls reaching the hoister.
       if (call.arguments.length >= 4) return [3];
       if (call.arguments.length < 2) return [];
-      const deriveCallback = call.arguments[1];
-      if (!isFunctionLikeExpression(deriveCallback)) return [];
+      const legacyDeriveCallback = call.arguments[1];
+      if (!isFunctionLikeExpression(legacyDeriveCallback)) return [];
       // Two shapes of 2-arg derive reach the hoister:
       //   (a) Synthetic compute callbacks produced by the closure
       //       transformer's reactive-wrapping (e.g. `__cfHelpers.derive(
@@ -262,8 +263,8 @@ function getBuilderCallbackIndices(
       //       scope: it carries the structural contract the runtime
       //       relies on. Untyped user-authored 2-arg derives are
       //       skipped (better to leave them inline than guess).
-      if (context.isSyntheticComputeCallback?.(deriveCallback)) return [1];
-      if (hasSelfDescribingFunctionTypes(deriveCallback)) return [1];
+      if (context.isSyntheticComputeCallback?.(legacyDeriveCallback)) return [1];
+      if (hasSelfDescribingFunctionTypes(legacyDeriveCallback)) return [1];
       return [];
     }
     case "handler":

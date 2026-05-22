@@ -759,7 +759,7 @@ function buildShrunkTypeNodeFromType(
   }
 
   // Keep array-like roots as arrays. Narrowing `T[]` to `{ length: number }`
-  // breaks runtime schema matching for downstream derives/lifts.
+  // breaks runtime schema matching for downstream lift-applied calls.
   // However, when only array-intrinsic properties like `length` are accessed
   // (no item-level access), shrink the item type to `unknown` to avoid
   // fetching full item schemas unnecessarily.

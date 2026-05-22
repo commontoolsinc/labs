@@ -211,7 +211,7 @@ export function findPendingComputeWrapCandidate(
     }
 
     // Helper-owned calls (builder invocations, authored ifElse/when/unless,
-    // array-method boundaries, derive) own rewrite decisions for their
+    // array-method boundaries, lift-applied) own rewrite decisions for their
     // subtrees even when the call expression itself does not need wrapping.
     // Stop before descending so we do not leak pending-wrap candidates from
     // captured arguments like `handler({ id: msg.id })` or `lift({ piece })`.

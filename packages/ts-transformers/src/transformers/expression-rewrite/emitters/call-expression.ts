@@ -263,7 +263,7 @@ export const emitCallExpression: Emitter = ({
   rewriteChildren,
   inSafeContext,
   reactiveContextKind,
-  preferDeriveWrappers,
+  preferInputBoundWrappers,
 }) => {
   if (!ts.isCallExpression(expression)) return undefined;
   if (dataFlows.length === 0) return undefined;
@@ -346,7 +346,7 @@ export const emitCallExpression: Emitter = ({
     );
   }
 
-  // Skip derive wrapping in safe contexts - they don't need it
+  // Skip lift-applied wrapping in safe contexts - they don't need it
   if (inSafeContext) {
     return undefined;
   }
@@ -373,7 +373,7 @@ export const emitCallExpression: Emitter = ({
         context,
         {
           filterNestedFunctionLocalCaptures: true,
-          preferDeriveWrapper: preferDeriveWrappers,
+          preferInputBoundWrapper: preferInputBoundWrappers,
         },
       ) ?? createLiftAppliedCall(rewritten, unsafeGetReceivers, {
         factory: context.factory,
@@ -398,7 +398,7 @@ export const emitCallExpression: Emitter = ({
         analyze,
       ),
       allowDirectExpressionWrap: isCellGetTerminalCall(expression, context),
-      preferDeriveWrapper: preferDeriveWrappers,
+      preferInputBoundWrapper: preferInputBoundWrappers,
     },
   );
 };

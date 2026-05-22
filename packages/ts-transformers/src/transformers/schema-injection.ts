@@ -629,7 +629,7 @@ function collectFunctionSchemaTypeNodes(
   }
 
   // 3. If we couldn't infer a type, we can't transform at all
-  // Both types are required for derive/lift to work
+  // Both types are required for lift-applied calls to work
   if (!argumentNode && !resultNode) {
     return {}; // No types could be determined
   }
@@ -1600,7 +1600,7 @@ function recoverProjectedResultSchema(
   return undefined;
 }
 
-function inferDeriveResultTypeFromInitializer(
+function inferLiftAppliedResultTypeFromInitializer(
   node: ts.Expression,
   checker: ts.TypeChecker,
   sourceFile: ts.SourceFile,
@@ -1619,15 +1619,15 @@ function inferDeriveResultTypeFromInitializer(
     return undefined;
   }
 
-  const deriveArgs = resolveLiftAppliedInputAndCallback(
+  const liftAppliedArgs = resolveLiftAppliedInputAndCallback(
     initializer,
     checker,
     sourceFile,
   );
-  if (!deriveArgs) {
+  if (!liftAppliedArgs) {
     return undefined;
   }
-  const { input: firstArg, callback } = deriveArgs;
+  const { input: firstArg, callback } = liftAppliedArgs;
 
   let argumentType =
     getTypeAtLocationWithFallback(firstArg, checker, typeRegistry) ??
@@ -1700,7 +1700,7 @@ function inferExpressionTypeWithInitializerFallback(
     return fromLift;
   }
 
-  const fromDerive = inferDeriveResultTypeFromInitializer(
+  const fromLiftApplied = inferLiftAppliedResultTypeFromInitializer(
     expr,
     checker,
     sourceFile,
@@ -1709,8 +1709,8 @@ function inferExpressionTypeWithInitializerFallback(
     capabilityRegistry,
     context,
   );
-  if (fromDerive && !isAnyOrUnknownType(fromDerive)) {
-    return fromDerive;
+  if (fromLiftApplied && !isAnyOrUnknownType(fromLiftApplied)) {
+    return fromLiftApplied;
   }
 
   return type;
@@ -3148,7 +3148,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
 
       if (callKind?.kind === "lift-applied") {
         const factory = transformation.factory;
-        const deriveArgs = resolveLiftAppliedInputAndCallback(
+        const liftAppliedArgs = resolveLiftAppliedInputAndCallback(
           node,
           checker,
           sourceFile,
@@ -3171,7 +3171,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           }
 
           const resolved = resolveDualSchemaBuilderTypes(
-            deriveArgs?.callback,
+            liftAppliedArgs?.callback,
             checker,
             sourceFile,
             factory,
@@ -3203,8 +3203,8 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           );
         }
 
-        if (deriveArgs) {
-          const { input: firstArg, callback } = deriveArgs;
+        if (liftAppliedArgs) {
+          const { input: firstArg, callback } = liftAppliedArgs;
 
           // Special case: detect empty object literal {} and generate specific schema
           let argNode: ts.TypeNode | undefined;
@@ -3737,8 +3737,8 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
         const [conditionExpr, valueExpr] = args;
 
         // Infer types for each argument
-        // Use getTypeAtLocationWithFallback to handle synthetic nodes (e.g., derive calls)
-        // which have their types registered in the typeRegistry
+        // Use getTypeAtLocationWithFallback to handle synthetic nodes (e.g.,
+        // lift-applied calls) which have their types registered in the typeRegistry
         const conditionType = getTypeAtLocationWithFallback(
           conditionExpr!,
           checker,
@@ -3784,8 +3784,8 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
         const [conditionExpr, fallbackExpr] = args;
 
         // Infer types for each argument
-        // Use getTypeAtLocationWithFallback to handle synthetic nodes (e.g., derive calls)
-        // which have their types registered in the typeRegistry
+        // Use getTypeAtLocationWithFallback to handle synthetic nodes (e.g.,
+        // lift-applied calls) which have their types registered in the typeRegistry
         const conditionType = getTypeAtLocationWithFallback(
           conditionExpr!,
           checker,
@@ -3831,8 +3831,8 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
         const [conditionExpr, ifTrueExpr, ifFalseExpr] = args;
 
         // Infer types for each argument
-        // Use getTypeAtLocationWithFallback to handle synthetic nodes (e.g., derive calls)
-        // which have their types registered in the typeRegistry
+        // Use getTypeAtLocationWithFallback to handle synthetic nodes (e.g.,
+        // lift-applied calls) which have their types registered in the typeRegistry
         const conditionType = getTypeAtLocationWithFallback(
           conditionExpr!,
           checker,
