@@ -8,17 +8,16 @@ import {
 } from "../src/fabric-value.ts";
 import type { FabricValue } from "../src/fabric-value.ts";
 import { isDeepFrozen, isDeepFrozenFabricValue } from "../src/deep-freeze.ts";
-import { FabricBytes } from "../src/FabricBytes.ts";
-import { FabricEpochDays, FabricEpochNsec } from "../src/fabric-epoch.ts";
-import { FabricHash } from "../src/FabricHash.ts";
-import {
-  FabricError,
-  FabricMap,
-  FabricRegExp,
-  FabricSet,
-} from "../src/fabric-native-instances.ts";
-import { ProblematicValue } from "../src/ProblematicValue.ts";
-import { UnknownValue } from "../src/UnknownValue.ts";
+import { FabricBytes } from "../src/fabric-primitives/FabricBytes.ts";
+import { FabricEpochDays } from "../src/fabric-primitives/FabricEpochDays.ts";
+import { FabricEpochNsec } from "../src/fabric-primitives/FabricEpochNsec.ts";
+import { FabricHash } from "../src/fabric-primitives/FabricHash.ts";
+import { FabricError } from "../src/fabric-instances/FabricError.ts";
+import { FabricMap } from "../src/fabric-instances/FabricMap.ts";
+import { FabricRegExp } from "../src/fabric-instances/FabricRegExp.ts";
+import { FabricSet } from "../src/fabric-instances/FabricSet.ts";
+import { ProblematicValue } from "../src/fabric-instances/ProblematicValue.ts";
+import { UnknownValue } from "../src/fabric-instances/UnknownValue.ts";
 import { FabricPrimitive, FabricSpecialObject } from "../src/interface.ts";
 
 // ============================================================================

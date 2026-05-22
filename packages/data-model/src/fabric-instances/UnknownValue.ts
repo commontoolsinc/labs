@@ -5,9 +5,9 @@ import {
   IS_DEEP_FROZEN,
   RECONSTRUCT,
   type ReconstructionContext,
-} from "./interface.ts";
+} from "../interface.ts";
 import { ExplicitTagValue } from "./ExplicitTagValue.ts";
-import { deepFreeze } from "./deep-freeze.ts";
+import { deepFreeze } from "../deep-freeze.ts";
 
 /**
  * Container for an unrecognized type's data, used for round-tripping. When

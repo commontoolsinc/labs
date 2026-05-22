@@ -5,16 +5,16 @@ import {
   type FabricValue,
   type FabricValueLayer,
 } from "./interface.ts";
-import { FabricEpochNsec } from "./fabric-epoch.ts";
+import { FabricEpochNsec } from "./fabric-primitives/FabricEpochNsec.ts";
 import {
   errorClassFromType,
-  FabricError,
-  FabricNativeWrapper,
-  FabricRegExp,
   isConvertibleNativeInstance,
   UNSAFE_KEYS,
 } from "./fabric-native-instances.ts";
-import { FabricBytes } from "./FabricBytes.ts";
+import { FabricError } from "./fabric-instances/FabricError.ts";
+import { FabricNativeWrapper } from "./fabric-instances/FabricNativeWrapper.ts";
+import { FabricRegExp } from "./fabric-instances/FabricRegExp.ts";
+import { FabricBytes } from "./fabric-primitives/FabricBytes.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { isArrayWithOnlyIndexProperties } from "./array-utils.ts";
 import { cloneHelper } from "./value-clone.ts";

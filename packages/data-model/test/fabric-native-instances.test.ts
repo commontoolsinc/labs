@@ -9,14 +9,12 @@ import {
   RECONSTRUCT,
 } from "../src/interface.ts";
 import { BaseReconstructionContext } from "../src/BaseReconstructionContext.ts";
-import {
-  FabricError,
-  FabricMap,
-  FabricNativeWrapper,
-  FabricRegExp,
-  FabricSet,
-  isConvertibleNativeInstance,
-} from "../src/fabric-native-instances.ts";
+import { FabricError } from "../src/fabric-instances/FabricError.ts";
+import { FabricMap } from "../src/fabric-instances/FabricMap.ts";
+import { FabricNativeWrapper } from "../src/fabric-instances/FabricNativeWrapper.ts";
+import { FabricRegExp } from "../src/fabric-instances/FabricRegExp.ts";
+import { FabricSet } from "../src/fabric-instances/FabricSet.ts";
+import { isConvertibleNativeInstance } from "../src/fabric-native-instances.ts";
 import { nativeFromFabricValueModern } from "../src/fabric-value-modern.ts";
 import { FrozenMap, FrozenSet } from "../src/frozen-builtins.ts";
 import {
@@ -24,9 +22,9 @@ import {
   tagFromNativeClass,
   tagFromNativeValue,
 } from "../src/native-type-tags.ts";
-import { UnknownValue } from "../src/UnknownValue.ts";
-import { ProblematicValue } from "../src/ProblematicValue.ts";
-import { ExplicitTagValue } from "../src/ExplicitTagValue.ts";
+import { UnknownValue } from "../src/fabric-instances/UnknownValue.ts";
+import { ProblematicValue } from "../src/fabric-instances/ProblematicValue.ts";
+import { ExplicitTagValue } from "../src/fabric-instances/ExplicitTagValue.ts";
 import {
   deepFreeze,
   isDeepFrozen,

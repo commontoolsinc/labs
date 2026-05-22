@@ -3,10 +3,11 @@ import { expect } from "@std/expect";
 import { JsonEncodingContext } from "../src/JsonEncodingContext.ts";
 import type { FabricValue } from "../src/interface.ts";
 import type { JsonWireValue } from "../src/json-type-handlers.ts";
-import { UnknownValue } from "../src/UnknownValue.ts";
-import { ProblematicValue } from "../src/ProblematicValue.ts";
-import { FabricEpochDays, FabricEpochNsec } from "../src/fabric-epoch.ts";
-import { FabricError } from "../src/fabric-native-instances.ts";
+import { UnknownValue } from "../src/fabric-instances/UnknownValue.ts";
+import { ProblematicValue } from "../src/fabric-instances/ProblematicValue.ts";
+import { FabricEpochDays } from "../src/fabric-primitives/FabricEpochDays.ts";
+import { FabricEpochNsec } from "../src/fabric-primitives/FabricEpochNsec.ts";
+import { FabricError } from "../src/fabric-instances/FabricError.ts";
 import { isDeepFrozen } from "../src/deep-freeze.ts";
 import { BaseReconstructionContext } from "../src/BaseReconstructionContext.ts";
 import {

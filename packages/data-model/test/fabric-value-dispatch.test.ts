@@ -8,7 +8,7 @@ import {
   setDataModelConfig,
 } from "../src/fabric-value.ts";
 import type { FabricValue } from "../src/fabric-value.ts";
-import { FabricError } from "../src/fabric-native-instances.ts";
+import { FabricError } from "../src/fabric-instances/FabricError.ts";
 
 /** Encode then decode a value through the current dispatch configuration. */
 function roundTrip(value: FabricValue): FabricValue {

@@ -9,7 +9,7 @@ import {
   isInternedSchema,
 } from "../src/schema-hash.ts";
 import { SchemaAndHash } from "../src/SchemaAndHash.ts";
-import { FabricHash } from "../src/FabricHash.ts";
+import { FabricHash } from "../src/fabric-primitives/FabricHash.ts";
 import { hashStringOf } from "../src/value-hash.ts";
 import { isDeepFrozen } from "../src/deep-freeze.ts";
 import { toDeepFrozenSchema } from "../src/schema-utils.ts";

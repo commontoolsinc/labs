@@ -8,8 +8,8 @@ import {
 } from "../src/fabric-value.ts";
 import type { FabricValue } from "../src/fabric-value.ts";
 import { deepFreeze, isDeepFrozen } from "../src/deep-freeze.ts";
-import { FabricEpochNsec } from "../src/fabric-epoch.ts";
-import { FabricError } from "../src/fabric-native-instances.ts";
+import { FabricEpochNsec } from "../src/fabric-primitives/FabricEpochNsec.ts";
+import { FabricError } from "../src/fabric-instances/FabricError.ts";
 
 // ============================================================================
 // `cloneForMutation` tests
