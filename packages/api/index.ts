@@ -1459,9 +1459,6 @@ export type AsCellType = AsCellEntry;
 // See https://json-schema.org/draft/2020-12/json-schema-validation
 // There is a lot of potential validation that is not handled, but this object
 // is defined to support them, so that generated schemas will still be usable.
-// TODO(@ubik2) When specifying a JSONSchema, you can often use a boolean
-// This is particularly useful for specifying the schema of a property.
-// That will require reworking some things, so for now, I'm not doing it
 export type JSONSchema = JSONSchemaObj | boolean;
 
 export type JSONSchemaObj = {
