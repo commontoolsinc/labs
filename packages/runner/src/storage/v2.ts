@@ -1447,16 +1447,6 @@ class SpaceReplica implements ISpaceReplica {
       );
     }
 
-    if (
-      this.#schedulerObservationBatch.length > 0 ||
-      this.#schedulerObservationFlushPromise
-    ) {
-      const flushResult = await this.flushSchedulerObservationBatch();
-      if ("error" in flushResult) {
-        return flushResult;
-      }
-    }
-
     const localSeq = this.#nextLocalSeq++;
     const commit = withCommitTiming(
       ["commitOperations", "buildCommit"],
@@ -1552,6 +1542,19 @@ class SpaceReplica implements ISpaceReplica {
     source?: IStorageTransaction,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     try {
+      if (
+        operations.length > 0 &&
+        (this.#schedulerObservationBatch.length > 0 ||
+          this.#schedulerObservationFlushPromise)
+      ) {
+        const flushResult = await this.flushSchedulerObservationBatch();
+        const rejection = flushResult.error;
+        if (rejection !== undefined) {
+          const error = new Error(rejection.message);
+          error.name = rejection.name ?? "TransactionError";
+          throw error;
+        }
+      }
       const { session } = await this.sessionHandle();
       const applied = await session.transact(commit);
       this.confirmPending(localSeq, operations, applied);
