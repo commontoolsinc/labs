@@ -113,7 +113,7 @@ export function subscribePushSchedulerAction(
       action,
       entities,
     );
-  } else {
+  } else if (!deferInitialExecution) {
     // Mark action for dependency collection before first run
     state.pendingDependencyCollection.add(action);
   }

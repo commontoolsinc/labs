@@ -489,6 +489,91 @@ describe("persistent scheduler observations", () => {
     }
   });
 
+  it("does not populate dependencies while initial rehydration is pending", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {
+      pullMode: "enabled",
+    });
+    try {
+      const { runtime } = testRuntime;
+      const provider = runtime.storageManager.open(space) as {
+        listSchedulerActionSnapshots?: () => Promise<{
+          serverSeq: number;
+          snapshots: unknown[];
+        }>;
+      };
+      let resolveSnapshots:
+        | ((result: { serverSeq: number; snapshots: unknown[] }) => void)
+        | undefined;
+      provider.listSchedulerActionSnapshots = () =>
+        new Promise((resolve) => {
+          resolveSnapshots = resolve;
+        });
+
+      let populateCalls = 0;
+      const rehydratingAction = () => {};
+      runtime.scheduler.subscribe(rehydratingAction, () => {
+        populateCalls++;
+      }, {
+        rehydrateFromStorage: {
+          space,
+          pieceId: "space:pending-rehydrate-process",
+          processGeneration: 1,
+        },
+      });
+
+      const wakeEffect = () => {};
+      runtime.scheduler.subscribe(wakeEffect, {
+        reads: [],
+        shallowReads: [],
+        writes: [],
+      }, { isEffect: true });
+
+      await (runtime.scheduler as unknown as { execute(): Promise<void> })
+        .execute();
+      const populateCallsBeforeRehydrate = populateCalls;
+
+      resolveSnapshots?.({
+        serverSeq: 5,
+        snapshots: [{
+          observationId: 1,
+          commitSeq: null,
+          observedAtSeq: 5,
+          observation: buildSchedulerActionObservation({
+            actionId: "rehydratingAction",
+            actionKind: "computation",
+            branch: "",
+            pieceId: "space:pending-rehydrate-process",
+            processGeneration: 1,
+            implementationFingerprint: schedulerImplementationFingerprint(
+              rehydratingAction,
+              "rehydratingAction",
+              undefined,
+            ),
+            runtimeFingerprint: schedulerRuntimeFingerprint("pull"),
+            observedAtSeq: 5,
+            transactionKind: "action-run",
+            transactionLog: {
+              reads: [readAddress],
+              shallowReads: [],
+              writes: [],
+            },
+            currentKnownWrites: [writeAddress],
+          }),
+        }],
+      });
+      await runtime.idle();
+
+      expect(populateCallsBeforeRehydrate).toBe(0);
+      expect(populateCalls).toBe(0);
+      expect(runtime.scheduler.isDirty(rehydratingAction)).toBe(false);
+      expect(runtime.scheduler.getMightWrite(rehydratingAction)).toEqual([
+        writeAddress,
+      ]);
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
   it("persists no-op cross-space observations in the owner space", async () => {
     const testRuntime = createSchedulerTestRuntime("https://example.test", {
       pullMode: "enabled",

@@ -775,6 +775,7 @@ export class Scheduler {
       return;
     }
 
+    this.pendingDependencyCollection.add(action);
     this.staleness.markDirectDirty(action);
     this.pending.add(action);
     this.scheduledFirstTime.add(action);
