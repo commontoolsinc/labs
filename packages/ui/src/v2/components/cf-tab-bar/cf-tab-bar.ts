@@ -50,8 +50,7 @@ export class CFTabBar extends BaseElement {
     BaseElement.baseStyles,
     css`
       :host {
-        /* CT-1613 footer layout tuning defaults. Edit these while dialing
-          the footer reservation before committing final values. */
+        /* Internal fallback defaults for footer tab-bar spacing. */
         --_cf-tab-bar-height-default: 4rem;
         --_cf-tab-bar-inset-margin-default: 1rem;
         --_cf-tab-bar-height: var(
@@ -102,12 +101,12 @@ export class CFTabBar extends BaseElement {
       }
 
       /* Default: bar spans full width with top/bottom border */
-      :host([position="bottom"]) .bar {
+      :host([position="bottom"]:not([variant="inset"])) .bar {
         border-top: 1px solid
           var(--cf-tab-bar-border-color, var(--cf-theme-color-border, #e5e7eb));
         }
 
-        :host([position="top"]) .bar {
+        :host([position="top"]:not([variant="inset"])) .bar {
           border-bottom: 1px solid
             var(--cf-tab-bar-border-color, var(--cf-theme-color-border, #e5e7eb));
           }
