@@ -15,7 +15,7 @@ import {
   RequestType,
 } from "../protocol/mod.ts";
 import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
-import { FabricBytes } from "@commonfabric/data-model/fabric-bytes";
+import { FabricBytes } from "@commonfabric/data-model/FabricBytes";
 import { cellRefToSigilLink } from "./utils.ts";
 import {
   getDataModelConfig,

@@ -8,17 +8,17 @@ import {
 } from "../fabric-value.ts";
 import type { FabricValue } from "../fabric-value.ts";
 import { isDeepFrozen, isDeepFrozenFabricValue } from "../deep-freeze.ts";
-import { FabricBytes } from "../fabric-bytes.ts";
+import { FabricBytes } from "../FabricBytes.ts";
 import { FabricEpochDays, FabricEpochNsec } from "../fabric-epoch.ts";
-import { FabricHash } from "../fabric-hash.ts";
+import { FabricHash } from "../FabricHash.ts";
 import {
   FabricError,
   FabricMap,
   FabricRegExp,
   FabricSet,
 } from "../fabric-native-instances.ts";
-import { ProblematicValue } from "../problematic-value.ts";
-import { UnknownValue } from "../unknown-value.ts";
+import { ProblematicValue } from "../ProblematicValue.ts";
+import { UnknownValue } from "../UnknownValue.ts";
 import { FabricPrimitive, FabricSpecialObject } from "../interface.ts";
 
 // ============================================================================

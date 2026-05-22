@@ -8,7 +8,7 @@ import {
 } from "../json-encoding.ts";
 import { FabricError } from "../fabric-native-instances.ts";
 import type { FabricValue } from "../fabric-value.ts";
-import { BaseReconstructionContext } from "../base-reconstruction-context.ts";
+import { BaseReconstructionContext } from "../BaseReconstructionContext.ts";
 
 /** Mock runtime for deserialization calls. */
 class MockRuntime extends BaseReconstructionContext {

@@ -5,7 +5,7 @@ import {
   toDebugKindString,
   toIndentedDebugString,
 } from "../value-debug.ts";
-import { FabricBytes } from "../fabric-bytes.ts";
+import { FabricBytes } from "../FabricBytes.ts";
 import { FabricEpochNsec } from "../fabric-epoch.ts";
 import {
   FabricError,

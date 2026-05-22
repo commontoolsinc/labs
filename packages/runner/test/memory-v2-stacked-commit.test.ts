@@ -20,7 +20,7 @@ import {
   getMemoryProtocolFlags,
   type PatchOp,
 } from "@commonfabric/memory/v2";
-import { EmptyReconstructionContext } from "@commonfabric/data-model/empty-reconstruction-context";
+import { EmptyReconstructionContext } from "@commonfabric/data-model/EmptyReconstructionContext";
 import type {
   ClientCommit,
   ConfirmedRead,

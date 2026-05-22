@@ -8,7 +8,7 @@ import {
 } from "../fabric-value.ts";
 import type { FabricValue } from "../fabric-value.ts";
 import { deepFreeze, isDeepFrozen } from "../deep-freeze.ts";
-import { FabricBytes } from "../fabric-bytes.ts";
+import { FabricBytes } from "../FabricBytes.ts";
 import { FabricEpochNsec } from "../fabric-epoch.ts";
 import { FabricError } from "../fabric-native-instances.ts";
 

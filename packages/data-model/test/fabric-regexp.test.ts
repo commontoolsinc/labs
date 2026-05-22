@@ -6,7 +6,7 @@ import {
   type FabricValue,
   RECONSTRUCT,
 } from "../interface.ts";
-import { BaseReconstructionContext } from "../base-reconstruction-context.ts";
+import { BaseReconstructionContext } from "../BaseReconstructionContext.ts";
 import {
   FabricNativeWrapper,
   FabricRegExp,
