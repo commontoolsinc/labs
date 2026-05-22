@@ -260,8 +260,10 @@ Execution is allowed only when all of these are true:
 
 v1 supports Deno TypeScript/JavaScript scripts. Deno permissions are inferred
 from a checked-in `deno run` shebang when present, otherwise the script runs via
-`deno run` without extra permission flags. Executable non-Deno shebang scripts
-have a constrained direct-exec path, but the current in-repo need is Deno.
+`deno run` without extra permission flags. The validated script bytes are passed
+to `deno run -` over stdin so execution uses the same content snapshot that was
+checked against the run-start registry. Executable non-Deno shebang scripts are
+indexed for metadata, but are not executable by `run_skill_script` in v1.
 
 The tool executes via the sandbox direct argv API, not a model-authored shell
 string. The default cwd is the workspace root, even if the harness current

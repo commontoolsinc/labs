@@ -217,7 +217,8 @@ const splitShebangWords = (shebang: string): string[] =>
     word.length > 0
   );
 
-const isDenoWord = (word: string): boolean => basename(word) === "deno";
+const isDenoWord = (word: string): boolean =>
+  basename(word).toLowerCase() === "deno";
 
 const denoRunFlagsFromShebang = (shebang: string | undefined): string[] => {
   if (shebang === undefined) {
@@ -225,11 +226,11 @@ const denoRunFlagsFromShebang = (shebang: string | undefined): string[] => {
   }
   const words = splitShebangWords(shebang);
   const commandWords = words.length >= 3 &&
-      basename(words[0] ?? "") === "env" &&
+      basename(words[0] ?? "").toLowerCase() === "env" &&
       words[1] === "-S"
     ? words.slice(2)
     : words.length >= 2 &&
-        basename(words[0] ?? "") === "env" &&
+        basename(words[0] ?? "").toLowerCase() === "env" &&
         isDenoWord(words[1] ?? "")
     ? words.slice(1)
     : words;
@@ -247,31 +248,41 @@ const denoRunFlagsFromShebang = (shebang: string | undefined): string[] => {
   return flags;
 };
 
-const argvForScript = (
+interface ScriptExecution {
+  runtime: HarnessSkillScriptRuntime;
+  argv: string[];
+  stdinText?: string;
+}
+
+const decodeUtf8Script = (content: Uint8Array): string | undefined => {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(content);
+  } catch {
+    return undefined;
+  }
+};
+
+const executionForScript = (
   resource: HarnessSkillResourceRecord,
   args: readonly string[],
-): { runtime: HarnessSkillScriptRuntime; argv: string[] } | undefined => {
+  content: Uint8Array,
+): ScriptExecution | undefined => {
   const runtime = resource.script?.runtime ?? "unknown";
   if (runtime === "deno") {
+    const stdinText = decodeUtf8Script(content);
+    if (stdinText === undefined) {
+      return undefined;
+    }
     return {
       runtime,
       argv: [
         "deno",
         "run",
         ...denoRunFlagsFromShebang(resource.script?.shebang),
-        resource.sandboxResourcePath,
+        "-",
         ...args,
       ],
-    };
-  }
-  if (
-    runtime === "shebang" &&
-    resource.script?.executable === true &&
-    resource.script.shebang !== undefined
-  ) {
-    return {
-      runtime,
-      argv: [resource.sandboxResourcePath, ...args],
+      stdinText,
     };
   }
   return undefined;
@@ -667,8 +678,8 @@ export const runSkillScriptTool: HarnessToolDefinition<
       return output;
     }
 
-    const scriptArgv = argvForScript(resource, args);
-    if (scriptArgv === undefined) {
+    const scriptExecution = executionForScript(resource, args, content);
+    if (scriptExecution === undefined) {
       const output = errorOutput({
         outputId,
         skill: skill.name,
@@ -702,18 +713,24 @@ export const runSkillScriptTool: HarnessToolDefinition<
       SKILL_SCRIPT: resource.sandboxResourcePath,
     };
     const result = await context.sandbox.run({
-      argv: scriptArgv.argv,
+      argv: scriptExecution.argv,
       cwd,
       env,
+      ...(scriptExecution.stdinText !== undefined
+        ? { stdinText: scriptExecution.stdinText }
+        : {}),
       timeoutMs,
       cfcInvocationContext: await context.createCfcInvocationContext({
         toolId: "run_skill_script",
         toolOutputId: outputId,
         operation: "command",
         cwd,
-        argv: scriptArgv.argv,
+        argv: scriptExecution.argv,
         args,
         env,
+        ...(scriptExecution.stdinText !== undefined
+          ? { stdinText: scriptExecution.stdinText }
+          : {}),
         ...(input.cfcInputLabels !== undefined
           ? { cfcInputLabels: input.cfcInputLabels }
           : {}),
@@ -730,8 +747,8 @@ export const runSkillScriptTool: HarnessToolDefinition<
         path: normalizedPath,
         status: "executed",
       }),
-      runtime: scriptArgv.runtime,
-      argv: scriptArgv.argv,
+      runtime: scriptExecution.runtime,
+      argv: scriptExecution.argv,
       args,
       cwd,
       sandboxResourcePath: resource.sandboxResourcePath,

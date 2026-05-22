@@ -1485,16 +1485,13 @@ const renderMediatedRunSkillScriptOutput = (
   ].filter((observation) =>
     observation !== undefined
   ) as HarnessCfcModelContextObservationInput[];
+  const publicOutput = stripInternalCfcFields(output) as Record<
+    string,
+    unknown
+  >;
   return {
     output: {
-      type: output.type,
-      outputId: output.outputId,
-      skill: output.skill,
-      path: output.path,
-      status: output.status,
-      runtime: output.runtime,
-      args: output.args,
-      cwd: output.cwd,
+      ...publicOutput,
       stdout: stdout.value,
       stderr: stderr.value,
       exitCode: renderExitCodeObservation(cfcResult.exitCode, resultRef),

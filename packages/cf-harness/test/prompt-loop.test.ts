@@ -118,6 +118,7 @@ class FakeRunSandboxRuntime extends FakeSandboxRuntime {
       command: request.argv.join(" "),
       cwd: request.cwd,
       env: request.env,
+      stdinText: request.stdinText,
       timeoutMs: request.timeoutMs,
       cfcInvocationContext: request.cfcInvocationContext,
     });
@@ -3622,6 +3623,160 @@ Deno.test({
         result.runState.policyEvents.at(-1)?.detail,
         "run_skill_script output did not include trusted CFC mediation metadata",
       );
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name:
+    "CfHarnessPromptLoop preserves run_skill_script provenance on mediated output",
+  permissions: { read: true, write: true },
+  async fn() {
+    const root = await Deno.makeTempDir({
+      prefix: "cf-harness-prompt-skill-script-",
+    });
+    try {
+      const skillDir = join(root, "deno-memory-profiler");
+      await Deno.mkdir(join(skillDir, "scripts"), { recursive: true });
+      await Deno.writeTextFile(
+        join(skillDir, "SKILL.md"),
+        [
+          "---",
+          "name: deno-memory-profiler",
+          "description: Analyze Deno memory",
+          "---",
+        ].join("\n"),
+      );
+      await Deno.writeTextFile(
+        join(skillDir, "scripts", "memory.ts"),
+        "#!/usr/bin/env -S deno run --allow-net\nconsole.log('secret');\n",
+      );
+      const registry = await discoverHarnessSkills({
+        skillsRoot: root,
+        sandboxSkillsRoot: "/workspace/skills",
+      });
+      const skill = registry.skills[0];
+      const activations: HarnessSkillActivations = {
+        type: "cf-harness.skill-activations",
+        version: 1,
+        generatedAt: "2026-05-01T00:00:00.000Z",
+        activations: [{
+          name: skill.name,
+          source: "cli-preload",
+          runId: "run-mediated-skill-script",
+          skillPath: skill.skillPath,
+          skillDir: skill.skillDir,
+          sandboxSkillPath: skill.sandboxSkillPath,
+          sandboxSkillDir: skill.sandboxSkillDir,
+          digest: skill.digest,
+          activatedAt: "2026-05-01T00:00:00.000Z",
+          cfcPromptRole: "context",
+        }],
+      };
+      const fetchCalls: RequestInit[] = [];
+      const engine = new CfHarnessEngine({
+        sandboxRuntime: new FakeRunSandboxRuntime([
+          {
+            stdout: "raw secret from skill script\n",
+            stderr: "raw secret stderr\n",
+            exitCode: 0,
+            cfcResult: observedCfcResult("released script stdout\n"),
+          },
+        ]),
+        runId: "run-mediated-skill-script",
+        model: "gpt-5.4",
+        cfcEnforcementMode: "enforce-explicit",
+        allowedSkillScripts: [{
+          skill: "deno-memory-profiler",
+          path: "scripts/memory.ts",
+        }],
+      });
+      await engine.persistSkillRegistry(registry);
+      await engine.persistSkillActivations(activations);
+      const loop = new CfHarnessPromptLoop({
+        apiKey: "test-key",
+        allowedToolIds: ["run_skill_script"],
+        engine,
+        fetchFn: (_input, init) => {
+          fetchCalls.push(init ?? {});
+          const payload = fetchCalls.length === 1
+            ? {
+              choices: [{
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content: "",
+                  tool_calls: [{
+                    id: "call-mediated-skill-script",
+                    type: "function",
+                    function: {
+                      name: "run_skill_script",
+                      arguments: JSON.stringify({
+                        skill: "deno-memory-profiler",
+                        path: "scripts/memory.ts",
+                        args: ["usage"],
+                      }),
+                    },
+                  }],
+                },
+              }],
+            }
+            : {
+              choices: [{
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content: "Handled mediated script output.",
+                },
+              }],
+            };
+          return Promise.resolve(
+            new Response(JSON.stringify(payload), { status: 200 }),
+          );
+        },
+      });
+
+      const result = await loop.runPrompt({
+        prompt: "Run the profiler.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
+
+      const toolMessage = result.transcript.at(-2);
+      assert(toolMessage !== undefined && toolMessage.role === "tool");
+      assert(!toolMessage.content.includes("raw secret"));
+      const content = JSON.parse(toolMessage.content);
+      assertEquals(content.type, "cf-harness.run-skill-script-output");
+      assertEquals(
+        content.outputId,
+        "run-mediated-skill-script:run_skill_script:1",
+      );
+      assertEquals(content.skill, "deno-memory-profiler");
+      assertEquals(content.path, "scripts/memory.ts");
+      assertEquals(content.status, "executed");
+      assertEquals(content.runtime, "deno");
+      assertEquals(content.argv, [
+        "deno",
+        "run",
+        "--allow-net",
+        "-",
+        "usage",
+      ]);
+      assertEquals(content.args, ["usage"]);
+      assertEquals(content.cwd, "/workspace");
+      assertEquals(
+        content.sandboxResourcePath,
+        "/workspace/skills/deno-memory-profiler/scripts/memory.ts",
+      );
+      assertStringIncludes(content.registryDigest, "sha256:");
+      assertEquals(content.observedDigest, content.registryDigest);
+      assertEquals(content.digestMatchesRegistry, true);
+      assertEquals(content.diagnostics, []);
+      assertEquals(content.stdout, "released script stdout\n");
+      assertEquals(content.stderr, "");
+      assertEquals(content.exitCode, 0);
+      assertEquals(content.cfc.stdout.policy, "observed");
     } finally {
       await Deno.remove(root, { recursive: true });
     }

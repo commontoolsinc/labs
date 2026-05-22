@@ -100,6 +100,12 @@ Deno.test({
       await writeSkillResource(
         root,
         "pattern-dev",
+        "scripts/not-deno.sh",
+        "#!/usr/bin/env deno-runner\n",
+      );
+      await writeSkillResource(
+        root,
+        "pattern-dev",
         "notes.txt",
         "Other local note\n",
       );
@@ -203,6 +209,12 @@ Deno.test({
             "/workspace/labs/skills/pattern-dev/scripts/check.ts",
           ],
           [
+            "scripts/not-deno.sh",
+            "script",
+            "text",
+            "/workspace/labs/skills/pattern-dev/scripts/not-deno.sh",
+          ],
+          [
             "templates/scaffold.sh",
             "template",
             "text",
@@ -218,6 +230,14 @@ Deno.test({
       assertEquals(script?.script, {
         executable: false,
         runtime: "deno",
+      });
+      const nonDenoShebang = patternDev?.resources.find((resource) =>
+        resource.path === "scripts/not-deno.sh"
+      );
+      assertEquals(nonDenoShebang?.script, {
+        executable: false,
+        shebang: "#!/usr/bin/env deno-runner",
+        runtime: "shebang",
       });
       assertEquals(
         patternDev?.resources.every((resource) =>

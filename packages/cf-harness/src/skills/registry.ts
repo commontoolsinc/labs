@@ -352,8 +352,24 @@ const scriptRuntimeFromShebang = (
   if (shebang === undefined) {
     return "unknown";
   }
-  const normalized = shebang.toLowerCase();
-  return normalized.includes("deno") && normalized.includes("run")
+  const commandBasename = (word: string): string =>
+    basename(word).toLowerCase();
+  const words = shebang.replace(/^#!/, "").trim().split(/\s+/).filter((word) =>
+    word.length > 0
+  );
+  const commandWords = words.length >= 3 &&
+      commandBasename(words[0] ?? "") === "env" &&
+      words[1] === "-S"
+    ? words.slice(2)
+    : words.length >= 2 &&
+        commandBasename(words[0] ?? "") === "env" &&
+        commandBasename(words[1] ?? "") === "deno"
+    ? words.slice(1)
+    : words;
+  const denoIndex = commandWords.findIndex((word) =>
+    commandBasename(word) === "deno"
+  );
+  return denoIndex >= 0 && commandWords[denoIndex + 1] === "run"
     ? "deno"
     : "shebang";
 };

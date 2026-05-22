@@ -1777,6 +1777,8 @@ Deno.test({
     });
     try {
       const skillDir = join(root, "deno-memory-profiler");
+      const scriptSource =
+        "#!/usr/bin/env -S deno run --allow-net --allow-read\nconsole.log('ok');\n";
       await Deno.mkdir(join(skillDir, "scripts"), { recursive: true });
       await Deno.writeTextFile(
         join(skillDir, "SKILL.md"),
@@ -1789,7 +1791,7 @@ Deno.test({
       );
       await Deno.writeTextFile(
         join(skillDir, "scripts", "memory.ts"),
-        "#!/usr/bin/env -S deno run --allow-net --allow-read\nconsole.log('ok');\n",
+        scriptSource,
       );
       const registry = await discoverHarnessSkills({
         skillsRoot: root,
@@ -1851,7 +1853,7 @@ Deno.test({
         "run",
         "--allow-net",
         "--allow-read",
-        "/workspace/skills/deno-memory-profiler/scripts/memory.ts",
+        "-",
         "usage",
         "--gc",
       ];
@@ -1871,6 +1873,7 @@ Deno.test({
             SKILL_SCRIPT:
               "/workspace/skills/deno-memory-profiler/scripts/memory.ts",
           },
+          stdinText: scriptSource,
           timeoutMs: 60000,
         },
       }]);
