@@ -23,9 +23,34 @@ const FULL_URL = `${API_URL}/${SPACE}/${PIECE}`;
 const NO_PIECE_FULL_URL = `${API_URL}/${SPACE}`;
 
 describe("cli piece parsing", () => {
-  it("force-closes loadManager storage when initialization fails", async () => {
+  it("force-closes loadManager storage before disposing failed runtime", async () => {
     let disposeCalls = 0;
     let closeNowCalls = 0;
+    const cleanupOrder: string[] = [];
+    const originalError = new Error("sync failed");
+
+    await expect(withRuntimeCleanupOnFailure({
+      dispose: () => {
+        disposeCalls++;
+        cleanupOrder.push("dispose");
+        return Promise.resolve();
+      },
+      storageManager: {
+        closeNow: () => {
+          closeNowCalls++;
+          cleanupOrder.push("closeNow");
+          return Promise.resolve();
+        },
+      },
+    }, () => Promise.reject(originalError))).rejects.toBe(originalError);
+
+    expect(closeNowCalls).toBe(1);
+    expect(disposeCalls).toBe(1);
+    expect(cleanupOrder).toEqual(["closeNow", "dispose"]);
+  });
+
+  it("still disposes failed runtime when force-close cleanup fails", async () => {
+    let disposeCalls = 0;
     const originalError = new Error("sync failed");
 
     await expect(withRuntimeCleanupOnFailure({
@@ -34,15 +59,11 @@ describe("cli piece parsing", () => {
         return Promise.resolve();
       },
       storageManager: {
-        closeNow: () => {
-          closeNowCalls++;
-          return Promise.resolve();
-        },
+        closeNow: () => Promise.reject(new Error("closeNow failed")),
       },
     }, () => Promise.reject(originalError))).rejects.toBe(originalError);
 
-    expect(closeNowCalls).toBe(1);
-    expect(disposeCalls).toBe(0);
+    expect(disposeCalls).toBe(1);
   });
 
   it("does not dispose loadManager runtime after successful initialization", async () => {

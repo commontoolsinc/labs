@@ -123,9 +123,19 @@ export async function withRuntimeCleanupOnFailure<T>(
   try {
     return await run();
   } catch (error) {
-    const cleanup = storageManagerCloseNow(runtime.storageManager) ??
-      runtime.dispose.bind(runtime);
-    await cleanup().catch(
+    const closeNow = storageManagerCloseNow(runtime.storageManager);
+    if (closeNow) {
+      await closeNow().catch((disposeError) => {
+        console.warn(
+          `loadManager storage cleanup failed: ${
+            disposeError instanceof Error
+              ? disposeError.message
+              : String(disposeError)
+          }`,
+        );
+      });
+    }
+    await runtime.dispose().catch(
       (disposeError) => {
         console.warn(
           `loadManager cleanup failed: ${
