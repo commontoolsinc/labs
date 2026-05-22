@@ -237,7 +237,9 @@ CREATE TABLE IF NOT EXISTS scheduler_observation_replay (
   branch              TEXT    NOT NULL DEFAULT '',
   session_id          TEXT    NOT NULL,
   local_seq           INTEGER NOT NULL,
-  observation_id      INTEGER NOT NULL,
+  status              TEXT    NOT NULL DEFAULT 'kept',
+  reason              TEXT,
+  observation_id      INTEGER,
   observed_at_seq     INTEGER NOT NULL,
   payload             JSON    NOT NULL,
   created_at          TEXT    NOT NULL DEFAULT (datetime('now')),
@@ -1034,6 +1036,59 @@ ADD COLUMN observed_at_seq INTEGER NOT NULL DEFAULT 0;
   }
 };
 
+const migrateSchedulerObservationReplayStatus = (database: Database): void => {
+  if (hasColumn(database, "scheduler_observation_replay", "status")) {
+    return;
+  }
+
+  database.exec(`
+BEGIN TRANSACTION;
+
+ALTER TABLE scheduler_observation_replay
+RENAME TO scheduler_observation_replay_legacy;
+
+CREATE TABLE scheduler_observation_replay (
+  branch              TEXT    NOT NULL DEFAULT '',
+  session_id          TEXT    NOT NULL,
+  local_seq           INTEGER NOT NULL,
+  status              TEXT    NOT NULL DEFAULT 'kept',
+  reason              TEXT,
+  observation_id      INTEGER,
+  observed_at_seq     INTEGER NOT NULL,
+  payload             JSON    NOT NULL,
+  created_at          TEXT    NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (branch, session_id, local_seq),
+  FOREIGN KEY (observation_id)
+    REFERENCES scheduler_observation(observation_id)
+);
+
+INSERT INTO scheduler_observation_replay (
+  branch,
+  session_id,
+  local_seq,
+  status,
+  observation_id,
+  observed_at_seq,
+  payload,
+  created_at
+)
+SELECT
+  branch,
+  session_id,
+  local_seq,
+  'kept',
+  observation_id,
+  observed_at_seq,
+  payload,
+  created_at
+FROM scheduler_observation_replay_legacy;
+
+DROP TABLE scheduler_observation_replay_legacy;
+
+COMMIT;
+`);
+};
+
 export const open = async (
   {
     url,
@@ -1048,6 +1103,7 @@ export const open = async (
   migrateScopedEntityTables(database);
   migrateSchedulerReadIndexOwnerSpace(database);
   migrateSchedulerActionSnapshotMetadata(database);
+  migrateSchedulerObservationReplayStatus(database);
   return {
     url,
     database,
@@ -1308,6 +1364,7 @@ const upsertSchedulerObservationTransaction = (
       branch,
       sessionId: options.sessionId,
       localSeq: options.localSeq,
+      status: "kept",
       observationId,
       observedAtSeq: options.observedAtSeq,
       payload,
@@ -1979,7 +2036,7 @@ function updateSchedulerObservationRow(
       payload = :payload
     WHERE observation_id = :observation_id
   `).run({
-    observation_id: options.observationId,
+    observation_id: options.observationId ?? null,
     commit_seq: options.commitSeq,
     observed_at_seq: options.observedAtSeq,
     piece_id: options.observation.pieceId,
@@ -1995,7 +2052,9 @@ function recordSchedulerObservationReplay(
     branch: BranchName;
     sessionId: SessionId;
     localSeq: number;
-    observationId: number;
+    status: AppliedSchedulerObservationResult["status"];
+    reason?: AppliedSchedulerObservationResult["reason"];
+    observationId?: number;
     observedAtSeq: number;
     payload: string;
   },
@@ -2005,6 +2064,8 @@ function recordSchedulerObservationReplay(
       branch,
       session_id,
       local_seq,
+      status,
+      reason,
       observation_id,
       observed_at_seq,
       payload
@@ -2013,12 +2074,16 @@ function recordSchedulerObservationReplay(
       :branch,
       :session_id,
       :local_seq,
+      :status,
+      :reason,
       :observation_id,
       :observed_at_seq,
       :payload
     )
     ON CONFLICT (branch, session_id, local_seq)
     DO UPDATE SET
+      status = excluded.status,
+      reason = excluded.reason,
       observation_id = excluded.observation_id,
       observed_at_seq = excluded.observed_at_seq,
       payload = excluded.payload
@@ -2026,7 +2091,9 @@ function recordSchedulerObservationReplay(
     branch: options.branch,
     session_id: options.sessionId,
     local_seq: options.localSeq,
-    observation_id: options.observationId,
+    status: options.status,
+    reason: options.reason ?? null,
+    observation_id: options.observationId ?? null,
     observed_at_seq: options.observedAtSeq,
     payload: options.payload,
   });
@@ -2040,12 +2107,14 @@ function getSchedulerObservationReplay(
     localSeq: number;
   },
 ): {
-  observation_id: number;
+  status: AppliedSchedulerObservationResult["status"];
+  reason: AppliedSchedulerObservationResult["reason"] | null;
+  observation_id: number | null;
   observed_at_seq: number;
   payload: string;
 } | undefined {
   return engine.database.prepare(`
-    SELECT observation_id, observed_at_seq, payload
+    SELECT status, reason, observation_id, observed_at_seq, payload
     FROM scheduler_observation_replay
     WHERE branch = :branch
       AND session_id = :session_id
@@ -2055,7 +2124,9 @@ function getSchedulerObservationReplay(
     session_id: options.sessionId,
     local_seq: options.localSeq,
   }) as {
-    observation_id: number;
+    status: AppliedSchedulerObservationResult["status"];
+    reason: AppliedSchedulerObservationResult["reason"] | null;
+    observation_id: number | null;
     observed_at_seq: number;
     payload: string;
   } | undefined;
@@ -2559,40 +2630,50 @@ const applyCommitTransaction = (
   const sessionKey = resolveCommitSessionKey(sessionId, principal);
   const schedulerObservation = commit
     .schedulerObservation as SchedulerActionObservation | undefined;
-  if (commit.operations.length === 0 && !schedulerObservation) {
+  const schedulerObservationBatch = commit.schedulerObservationBatch ?? [];
+  const hasSchedulerObservationBatch = schedulerObservationBatch.length > 0;
+  if (schedulerObservation && hasSchedulerObservationBatch) {
+    throw new ProtocolError(
+      "memory v2 commit cannot mix schedulerObservation and schedulerObservationBatch",
+    );
+  }
+  if (commit.operations.length > 0 && hasSchedulerObservationBatch) {
+    throw new ProtocolError(
+      "memory v2 schedulerObservationBatch commits must not include semantic operations",
+    );
+  }
+  if (
+    commit.operations.length === 0 && !schedulerObservation &&
+    !hasSchedulerObservationBatch
+  ) {
     throw new Error("memory v2 commit requires at least one operation");
   }
 
   const branch = commit.branch ?? DEFAULT_BRANCH;
   ensureActiveBranch(engine, branch);
 
-  if (commit.operations.length === 0 && schedulerObservation) {
-    const replayPayload = encodeSchedulerDependencySnapshot(
-      normalizeSchedulerObservation(
-        schedulerObservation,
-        branch,
-        headSeq(engine, branch),
-        space ?? schedulerObservation.ownerSpace,
-      ),
-    );
-    const existingReplay = getSchedulerObservationReplay(engine, {
+  if (commit.operations.length === 0 && hasSchedulerObservationBatch) {
+    return applySchedulerObservationBatchCommit(engine, {
+      sessionId,
+      sessionKey,
+      space,
+      principal,
       branch,
-      sessionId: sessionKey,
-      localSeq: commit.localSeq,
+      batch: schedulerObservationBatch,
     });
-    if (existingReplay) {
-      if (existingReplay.payload !== replayPayload) {
-        throw new ProtocolError(
-          `scheduler observation replay mismatch for session ${sessionId} localSeq ${commit.localSeq}`,
-        );
-      }
-      return {
-        seq: existingReplay.observed_at_seq,
-        branch,
-        revisions: [],
-        schedulerObservationId: existingReplay.observation_id,
-      };
-    }
+  }
+
+  if (commit.operations.length === 0 && schedulerObservation) {
+    return applySchedulerObservationOnlyCommit(engine, {
+      sessionId,
+      sessionKey,
+      space,
+      principal,
+      branch,
+      localSeq: commit.localSeq,
+      reads: commit.reads,
+      schedulerObservation,
+    });
   }
 
   const existing = engine.statements.selectExistingCommit.get({
@@ -2621,24 +2702,6 @@ const applyCommitTransaction = (
     branch,
     commit,
   );
-
-  if (commit.operations.length === 0 && schedulerObservation) {
-    const observedAtSeq = headSeq(engine, branch);
-    const observationResult = upsertSchedulerObservationTransaction(engine, {
-      branch,
-      ownerSpace: space ?? schedulerObservation.ownerSpace,
-      observedAtSeq,
-      sessionId: sessionKey,
-      localSeq: commit.localSeq,
-      observation: schedulerObservation,
-    });
-    return {
-      seq: observedAtSeq,
-      branch,
-      revisions: [],
-      schedulerObservationId: observationResult.observationId,
-    };
-  }
 
   const seq = (engine.statements.selectNextSeq.get() as { seq: number }).seq;
   const invocationRef = engine.legacyCommitMetadataRefsRequired
@@ -2957,6 +3020,267 @@ const findConflictSeq = (
   }
 
   return null;
+};
+
+type SchedulerObservationDropReason =
+  NonNullable<AppliedSchedulerObservationResult["reason"]>;
+
+const schedulerObservationReadDropReason = (
+  engine: Engine,
+  {
+    sessionKey,
+    sessionId,
+    principal,
+    branch,
+    reads,
+  }: {
+    sessionKey: string;
+    sessionId: SessionId;
+    principal: string | undefined;
+    branch: BranchName;
+    reads: ClientCommit["reads"];
+  },
+): SchedulerObservationDropReason | undefined => {
+  for (const read of reads.confirmed) {
+    const readBranch = read.branch ?? branch;
+    ensureReadableBranch(engine, readBranch);
+    const scopeKey = resolveScopeKey(read.scope, { principal, sessionId });
+    const conflictSeq = findConflictSeq(
+      engine,
+      readBranch,
+      read.id,
+      scopeKey,
+      read.seq,
+      read.path,
+    );
+    if (conflictSeq !== null) {
+      return "stale-confirmed-read";
+    }
+  }
+
+  const resolutions = new Map<number, { localSeq: number; seq: number }>();
+  for (const read of reads.pending) {
+    let resolution = resolutions.get(read.localSeq);
+    if (!resolution) {
+      const row = engine.statements.selectPendingResolution.get({
+        session_id: sessionKey,
+        local_seq: read.localSeq,
+      }) as { seq: number } | undefined;
+      if (!row) {
+        return "pending-read-missing";
+      }
+      resolution = {
+        localSeq: read.localSeq,
+        seq: row.seq,
+      };
+      resolutions.set(read.localSeq, resolution);
+    }
+
+    const conflictSeq = findConflictSeq(
+      engine,
+      branch,
+      read.id,
+      resolveScopeKey(read.scope, { principal, sessionId }),
+      resolution.seq,
+      read.path,
+    );
+    if (conflictSeq !== null) {
+      return "stale-pending-read";
+    }
+  }
+
+  return undefined;
+};
+
+const replayedSchedulerObservationResult = (
+  localSeq: number,
+  replay: {
+    status: AppliedSchedulerObservationResult["status"];
+    reason: AppliedSchedulerObservationResult["reason"] | null;
+    observation_id: number | null;
+  },
+): AppliedSchedulerObservationResult => {
+  if (replay.status === "dropped") {
+    return {
+      localSeq,
+      status: "dropped",
+      reason: replay.reason ?? "stale-confirmed-read",
+    };
+  }
+  if (replay.observation_id === null) {
+    throw new ProtocolError(
+      `kept scheduler observation replay missing observation id for localSeq ${localSeq}`,
+    );
+  }
+  return {
+    localSeq,
+    status: "kept",
+    schedulerObservationId: replay.observation_id,
+  };
+};
+
+const schedulerObservationReplayPayload = (
+  options: {
+    branch: BranchName;
+    observedAtSeq: number;
+    ownerSpace?: string;
+    observation: SchedulerActionObservation;
+  },
+): string =>
+  encodeSchedulerDependencySnapshot(
+    normalizeSchedulerObservation(
+      options.observation,
+      options.branch,
+      options.observedAtSeq,
+      options.ownerSpace,
+    ),
+  );
+
+const applySchedulerObservationOnlyCommit = (
+  engine: Engine,
+  {
+    sessionId,
+    sessionKey,
+    space,
+    principal,
+    branch,
+    localSeq,
+    reads,
+    schedulerObservation,
+  }: {
+    sessionId: SessionId;
+    sessionKey: string;
+    space?: string;
+    principal?: string;
+    branch: BranchName;
+    localSeq: number;
+    reads: ClientCommit["reads"];
+    schedulerObservation: SchedulerActionObservation;
+  },
+): AppliedCommit => {
+  const observedAtSeq = headSeq(engine, branch);
+  const replayPayload = schedulerObservationReplayPayload({
+    branch,
+    observedAtSeq,
+    ownerSpace: space ?? schedulerObservation.ownerSpace,
+    observation: schedulerObservation,
+  });
+  const existingReplay = getSchedulerObservationReplay(engine, {
+    branch,
+    sessionId: sessionKey,
+    localSeq,
+  });
+  if (existingReplay) {
+    if (existingReplay.payload !== replayPayload) {
+      throw new ProtocolError(
+        `scheduler observation replay mismatch for session ${sessionId} localSeq ${localSeq}`,
+      );
+    }
+    const replayed = replayedSchedulerObservationResult(
+      localSeq,
+      existingReplay,
+    );
+    return {
+      seq: existingReplay.observed_at_seq,
+      branch,
+      revisions: [],
+      ...(replayed.schedulerObservationId !== undefined
+        ? { schedulerObservationId: replayed.schedulerObservationId }
+        : {}),
+      schedulerObservationResults: [replayed],
+    };
+  }
+
+  const dropReason = schedulerObservationReadDropReason(engine, {
+    sessionKey,
+    sessionId,
+    principal,
+    branch,
+    reads,
+  });
+  if (dropReason) {
+    recordSchedulerObservationReplay(engine, {
+      branch,
+      sessionId: sessionKey,
+      localSeq,
+      status: "dropped",
+      reason: dropReason,
+      observedAtSeq,
+      payload: replayPayload,
+    });
+    return {
+      seq: observedAtSeq,
+      branch,
+      revisions: [],
+      schedulerObservationResults: [{
+        localSeq,
+        status: "dropped",
+        reason: dropReason,
+      }],
+    };
+  }
+
+  const observationResult = upsertSchedulerObservationTransaction(engine, {
+    branch,
+    ownerSpace: space ?? schedulerObservation.ownerSpace,
+    observedAtSeq,
+    sessionId: sessionKey,
+    localSeq,
+    observation: schedulerObservation,
+  });
+  return {
+    seq: observedAtSeq,
+    branch,
+    revisions: [],
+    schedulerObservationId: observationResult.observationId,
+    schedulerObservationResults: [{
+      localSeq,
+      status: "kept",
+      schedulerObservationId: observationResult.observationId,
+    }],
+  };
+};
+
+const applySchedulerObservationBatchCommit = (
+  engine: Engine,
+  {
+    sessionId,
+    sessionKey,
+    space,
+    principal,
+    branch,
+    batch,
+  }: {
+    sessionId: SessionId;
+    sessionKey: string;
+    space?: string;
+    principal?: string;
+    branch: BranchName;
+    batch: NonNullable<ClientCommit["schedulerObservationBatch"]>;
+  },
+): AppliedCommit => {
+  const results: AppliedSchedulerObservationResult[] = [];
+  for (const item of batch) {
+    const result = applySchedulerObservationOnlyCommit(engine, {
+      sessionId,
+      sessionKey,
+      space,
+      principal,
+      branch,
+      localSeq: item.localSeq,
+      reads: item.reads,
+      schedulerObservation: item
+        .schedulerObservation as SchedulerActionObservation,
+    });
+    results.push(result.schedulerObservationResults![0]);
+  }
+
+  return {
+    seq: headSeq(engine, branch),
+    branch,
+    revisions: [],
+    schedulerObservationResults: results,
+  };
 };
 
 const patchOverlapsRead = (

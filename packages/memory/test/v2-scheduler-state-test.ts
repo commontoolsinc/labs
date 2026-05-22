@@ -240,7 +240,7 @@ Deno.test("memory v2 accepts batched no-op scheduler observations", async () => 
     assertExists(result.schedulerObservationResults?.[1].schedulerObservationId);
     assertEquals(countRows(engine, "scheduler_observation"), 2);
     assertEquals(countRows(engine, "scheduler_observation_replay"), 2);
-    assertEquals(countRows(engine, "commit"), 0);
+    assertEquals(countRows(engine, `"commit"`), 0);
   } finally {
     close(engine);
     await Deno.remove(path);
