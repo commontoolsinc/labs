@@ -11,27 +11,8 @@ import { cell, derive, pattern, patternTool, type PatternToolResult } from "comm
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(({ value, offset, multiplier }: {
-    value: number;
-    offset: number;
-    multiplier: import("commonfabric").Cell<number>;
-}) => {
-    return derive({
-        type: "object",
-        properties: {
-            value: {
-                type: "number"
-            },
-            offset: {
-                type: "number"
-            }
-        },
-        required: ["value", "offset"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, { value, offset }, ({ value, offset }) => {
-        return value * multiplier.get() + offset;
-    });
+const __cfModuleCallback_1 = __cfHardenFn(({ value, offset }) => {
+    return value * multiplier.get() + offset;
 });
 const multiplier = __cfHelpers.__cf_data(cell(2, {
     type: "number"
@@ -55,7 +36,26 @@ type Output = {
 //   detects that `multiplier` (module-scoped cell) is also captured and merges it
 //   into the existing extraParams without duplicating `offset`.
 export default pattern(() => {
-    const tool = patternTool(__cfModuleCallback_1, {
+    const tool = patternTool(({ value, offset, multiplier }: {
+        value: number;
+        offset: number;
+        multiplier: import("commonfabric").Cell<number>;
+    }) => {
+        return __cfHelpers.lift({
+            type: "object",
+            properties: {
+                value: {
+                    type: "number"
+                },
+                offset: {
+                    type: "number"
+                }
+            },
+            required: ["value", "offset"]
+        } as const satisfies __cfHelpers.JSONSchema, {
+            type: "number"
+        } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({ value, offset });
+    }, {
         multiplier: multiplier,
         offset: offset.for(["tool", 1, "offset"], true)
     });

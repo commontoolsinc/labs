@@ -11,6 +11,16 @@ import { Cell, derive, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
+const __cfModuleCallback_1 = __cfHardenFn(({ itemsWithAisles }) => {
+    const groups: Record<string, Assignment[]> = {};
+    for (const assignment of itemsWithAisles) {
+        if (!groups[assignment.aisle]) {
+            groups[assignment.aisle] = [];
+        }
+        groups[assignment.aisle]!.push(assignment);
+    }
+    return groups;
+});
 interface Item {
     name: string;
     done: Cell<boolean>;
@@ -30,7 +40,7 @@ interface Assignment {
 export default pattern((__cf_pattern_input) => {
     const items = __cf_pattern_input.key("items");
     // Create assignments with aisle data
-    const itemsWithAisles = derive({
+    const itemsWithAisles = __cfHelpers.lift({
         type: "object",
         properties: {
             items: {
@@ -85,12 +95,12 @@ export default pattern((__cf_pattern_input) => {
                 required: ["name", "done"]
             }
         }
-    } as const satisfies __cfHelpers.JSONSchema, { items }, ({ items }) => items.map((item, idx) => ({
+    } as const satisfies __cfHelpers.JSONSchema, ({ items }) => items.map((item, idx) => ({
         aisle: `Aisle ${(idx % 3) + 1}`,
         item: item,
-    }))).for("itemsWithAisles", true);
+    })))({ items }).for("itemsWithAisles", true);
     // Group by aisle - returns Record<string, Assignment[]>
-    const groupedByAisle = derive({
+    const groupedByAisle = __cfHelpers.lift({
         type: "object",
         properties: {
             itemsWithAisles: {
@@ -161,65 +171,23 @@ export default pattern((__cf_pattern_input) => {
                 required: ["name", "done"]
             }
         }
-    } as const satisfies __cfHelpers.JSONSchema, { itemsWithAisles }, ({ itemsWithAisles }) => {
-        const groups: Record<string, Assignment[]> = {};
-        for (const assignment of itemsWithAisles) {
-            if (!groups[assignment.aisle]) {
-                groups[assignment.aisle] = [];
-            }
-            groups[assignment.aisle]!.push(assignment);
-        }
-        return groups;
-    }).for("groupedByAisle", true);
+    } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({ itemsWithAisles }).for("groupedByAisle", true);
     // Derive sorted aisle names from grouped object
-    const aisleNames = derive({
+    const aisleNames = __cfHelpers.lift({
         type: "object",
         properties: {
             groupedByAisle: {
                 type: "object",
-                properties: {},
-                additionalProperties: {
-                    type: "array",
-                    items: {
-                        $ref: "#/$defs/Assignment"
-                    }
-                }
+                properties: {}
             }
         },
-        required: ["groupedByAisle"],
-        $defs: {
-            Assignment: {
-                type: "object",
-                properties: {
-                    aisle: {
-                        type: "string"
-                    },
-                    item: {
-                        $ref: "#/$defs/Item"
-                    }
-                },
-                required: ["aisle", "item"]
-            },
-            Item: {
-                type: "object",
-                properties: {
-                    name: {
-                        type: "string"
-                    },
-                    done: {
-                        type: "boolean",
-                        asCell: ["cell"]
-                    }
-                },
-                required: ["name", "done"]
-            }
-        }
+        required: ["groupedByAisle"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "array",
         items: {
             type: "string"
         }
-    } as const satisfies __cfHelpers.JSONSchema, { groupedByAisle }, ({ groupedByAisle }) => Object.keys(groupedByAisle).sort()).for("aisleNames", true);
+    } as const satisfies __cfHelpers.JSONSchema, ({ groupedByAisle }) => Object.keys(groupedByAisle).sort())({ groupedByAisle }).for("aisleNames", true);
     // The pattern from CT-1036:
     // - Map over derived keys (aisleNames)
     // - Access derived object with derived key (groupedByAisle[aisleName])

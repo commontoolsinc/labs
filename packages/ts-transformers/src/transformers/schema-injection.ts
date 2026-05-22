@@ -3289,11 +3289,21 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             sourceFile,
           );
           if (argumentType && liftCallback) {
-            const argumentTypeValue = getTypeFromTypeNodeWithFallback(
-              argumentType,
-              checker,
-              typeRegistry,
-            );
+            // Prefer the pre-shrink type from `narrowedWrapperTypeRegistry`
+            // when available — for our own injected lift-applied output, the
+            // outer call's first toSchema argument is a synthetic wrapper
+            // TypeNode that `checker.getTypeFromTypeNode` resolves to `any`.
+            // See type-shrinking.ts `applyShrinkAndWrap` for where this is
+            // populated and the rationale for the separate registry channel.
+            const narrowedWrapperRegistry =
+              context.options.narrowedWrapperTypeRegistry;
+            const argumentTypeValue =
+              narrowedWrapperRegistry?.get(argumentType) ??
+                getTypeFromTypeNodeWithFallback(
+                  argumentType,
+                  checker,
+                  typeRegistry,
+                );
             const {
               argumentTypeNode: narrowedArgumentType,
               argumentTypeValue: narrowedArgumentTypeValue,

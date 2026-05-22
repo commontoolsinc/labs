@@ -82,6 +82,17 @@ export interface TransformationOptions {
   readonly schemaHints?: SchemaHints;
   readonly capabilitySummaryRegistry?: CapabilitySummaryRegistry;
   /**
+   * Maps synthetic wrapper TypeNodes produced by `applyShrinkAndWrap` back to
+   * the *pre-shrink* semantic Type that drove the narrowing. Read by
+   * SchemaInjection's inner-lift revisit path so it can re-narrow with the
+   * original baseType instead of receiving `any` from the checker on a
+   * synthetic node. Deliberately kept separate from the main `typeRegistry`
+   * because the schema generator consults `typeRegistry` to recover wrapper
+   * properties — if the pre-shrink type lived there, the generator would
+   * un-shrink carefully-narrowed inner schemas.
+   */
+  readonly narrowedWrapperTypeRegistry?: WeakMap<ts.TypeNode, ts.Type>;
+  /**
    * Shared diagnostics collector that accumulates diagnostics across all transformers.
    * If provided, diagnostics are pushed to this array in addition to the local context.
    */

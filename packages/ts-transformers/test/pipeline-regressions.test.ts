@@ -749,9 +749,11 @@ export default pattern<{ values: string[] }>(({ values }) => {
     });
     const normalized = output.replace(/\s+/g, " ");
 
+    // After CT-1615 Phase 1, derive(values, cb) lowers to lift(cb)(values):
+    // const result = __cfHelpers.lift(argSchema, resSchema, cb)(values).for(...)
     assertMatch(
       normalized,
-      /const result = derive\([\s\S]*, values, (?:__cfModuleCallback_\d+|\(entries\) => summarize\(entries\.get\(\)\))\)\.for\("result", true\);/,
+      /const result = __cfHelpers\.lift\([\s\S]*?, (?:__cfModuleCallback_\d+|\(entries\) => summarize\(entries\.get\(\)\))\)\(values\)\.for\("result", true\);/,
     );
   },
 );
@@ -888,12 +890,14 @@ export default pattern<{ options: Option[] }, { [UI]: any }>(({ options }) => {
     const output = await transformSource(source, {
       types: COMMONFABRIC_TYPES,
     });
+    // After CT-1615 Phase 1, the user-authored `derive(options, ...)`
+    // lowers to `__cfHelpers.lift(...)(options)`.
     const minimalNullableStart = output.indexOf(
-      "const minimalNullable = derive(",
+      "const minimalNullable = __cfHelpers.lift(",
     );
     assert(
       minimalNullableStart >= 0,
-      "expected transformed minimalNullable derive",
+      "expected transformed minimalNullable lift-applied call",
     );
     const minimalNullableWindow = output.slice(
       minimalNullableStart,

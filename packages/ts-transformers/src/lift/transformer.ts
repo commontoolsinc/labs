@@ -10,33 +10,45 @@ import type { TransformationContext } from "../core/mod.ts";
  * LiftLoweringTransformer: Lowers compute-style builder calls into the
  * canonical "lift-applied" form.
  *
- * Currently handles:
- *   computed(() => expr) → __cfHelpers.lift(() => expr)({})
+ * Handles:
+ *   computed(() => expr)
+ *     → __cfHelpers.lift(() => expr)({})
+ *   derive(input, cb)
+ *     → __cfHelpers.lift(cb)(input)
+ *   derive(argSchema, resultSchema, input, cb)
+ *     → __cfHelpers.lift(argSchema, resultSchema, cb)(input)
  *
- * Future commits will extend this transformer to also lower user-authored
- * derive(input, fn) and derive(argSchema, resultSchema, input, fn).
+ * Type arguments from the source call (e.g. derive<In, Out>(...)) carry to
+ * the inner lift call where they belong (lift<In, Out>(...)).
  *
- * The empty-object input `({})` mirrors the runtime semantics of today's
- * `computed(fn)` (verified: argumentSchema:false's only observable effect is
- * isValidArgument === true, which is also satisfied when argument is a
- * non-undefined object).
+ * The empty-object input for computed mirrors the runtime semantics of
+ * today's computed(fn) — verified that argumentSchema:false's only
+ * observable effect (isValidArgument === true) is also satisfied when the
+ * argument is a non-undefined object.
  *
  * The lift-applied shape is recognized by detectCallKind as
- * { kind: "derive" } so that existing downstream dispatchers continue to
- * work without code change. The ClosureTransformer normalizes the call back
- * to the existing __cfHelpers.derive(input, callback) shape after capture
- * extraction; the lift-applied form is a transient shape between this stage
- * and ClosureTransformer.
+ * { kind: "derive" } so existing downstream dispatchers continue to work
+ * without code change. Subsequent commits in the migration rename the kind
+ * to "lift-applied" mechanically.
+ *
+ * Note on shape stability: for derive calls with captures, the
+ * ClosureTransformer rebuilds the call (still emitting the legacy
+ * derive(input, cb) shape at that stage — that will change in a later
+ * commit). For derive calls without captures, the lift-applied shape
+ * produced here propagates all the way through schema injection unchanged.
+ * Schema injection has been taught to prepend schemas to the inner lift
+ * call when given a lift-applied node.
  */
 export class LiftLoweringTransformer extends HelpersOnlyTransformer {
   override filter(context: TransformationContext): boolean {
     if (!super.filter(context)) {
       return false;
     }
-    if (context.sourceFile.text.includes("computed")) {
+    const text = context.sourceFile.text;
+    if (text.includes("computed") || text.includes("derive")) {
       return true;
     }
-    return sourceContainsComputedCall(context);
+    return sourceContainsLowerableCall(context);
   }
 
   override transform(context: TransformationContext): ts.SourceFile {
@@ -56,73 +68,197 @@ function createLiftLoweringVisitor(
     }
 
     const callKind = detectCallKind(node, checker);
-    if (callKind?.kind !== "builder" || callKind.builderName !== "computed") {
-      return ts.visitEachChild(node, visitor, tsContext);
+
+    if (callKind?.kind === "builder" && callKind.builderName === "computed") {
+      return lowerComputedCall(node, context, visitor);
     }
 
-    if (node.arguments.length !== 1) {
-      return ts.visitEachChild(node, visitor, tsContext);
+    // Only rewrite legacy derive shape — not our own lift-applied output.
+    // The legacy derive shape has the callee as a property-access or bare
+    // identifier; the lift-applied shape has the callee as a CallExpression.
+    if (
+      callKind?.kind === "derive" &&
+      !ts.isCallExpression(node.expression)
+    ) {
+      return lowerDeriveCall(node, context, visitor);
     }
 
-    const callback = node.arguments[0];
-    if (!callback) {
-      return ts.visitEachChild(node, visitor, tsContext);
-    }
-
-    // Lower: computed(() => expr) → __cfHelpers.lift(() => expr)({})
-    //
-    // The inner lift call carries the original computed call's type arguments
-    // (lift<In, Out>(fn) is the generic). The outer applied call has no type
-    // arguments.
-    const innerLiftCall = context.cfHelpers.createHelperCall(
-      "lift",
-      node,
-      node.typeArguments,
-      [callback],
-    );
-
-    const emptyInput = factory.createObjectLiteralExpression([], false);
-    const liftAppliedCall = factory.createCallExpression(
-      innerLiftCall,
-      undefined,
-      [emptyInput],
-    );
-
-    const visitedCall = ts.visitEachChild(
-      liftAppliedCall,
-      visitor,
-      tsContext,
-    );
-    const preservedVisitedCall = ts.setOriginalNode(
-      ts.setSourceMapRange(
-        ts.setTextRange(visitedCall, node),
-        ts.getSourceMapRange(node) ?? node,
-      ),
-      node,
-    );
-
-    if (context.options.typeRegistry) {
-      const computedType = context.options.typeRegistry.get(node);
-      if (computedType) {
-        registerDeriveCallType(
-          preservedVisitedCall,
-          undefined,
-          computedType,
-          checker,
-          context.options.typeRegistry,
-        );
-      }
-    }
-
-    setParentPointers(preservedVisitedCall, node.parent);
-
-    return preservedVisitedCall;
+    return ts.visitEachChild(node, visitor, tsContext);
   };
 
   return visitor;
 }
 
-function sourceContainsComputedCall(
+function lowerComputedCall(
+  node: ts.CallExpression,
+  context: TransformationContext,
+  visitor: ts.Visitor,
+): ts.Node {
+  const { factory, checker, tsContext } = context;
+
+  if (node.arguments.length !== 1) {
+    return ts.visitEachChild(node, visitor, tsContext);
+  }
+
+  const callback = node.arguments[0];
+  if (!callback) {
+    return ts.visitEachChild(node, visitor, tsContext);
+  }
+
+  // computed(() => expr) → __cfHelpers.lift(() => expr)({})
+  const innerLiftCall = context.cfHelpers.createHelperCall(
+    "lift",
+    node,
+    node.typeArguments,
+    [callback],
+  );
+  const emptyInput = factory.createObjectLiteralExpression([], false);
+  const liftAppliedCall = factory.createCallExpression(
+    innerLiftCall,
+    undefined,
+    [emptyInput],
+  );
+
+  return finalizeLoweredCall(
+    node,
+    liftAppliedCall,
+    context,
+    visitor,
+  );
+}
+
+function lowerDeriveCall(
+  node: ts.CallExpression,
+  context: TransformationContext,
+  visitor: ts.Visitor,
+): ts.Node {
+  const { factory, checker, tsContext } = context;
+
+  // Two derive shapes:
+  //   2-arg: derive(input, cb)
+  //   4-arg: derive(argSchema, resultSchema, input, cb)
+  // Anything else is malformed; pass through.
+  const args = node.arguments;
+  if (args.length !== 2 && args.length !== 4) {
+    return ts.visitEachChild(node, visitor, tsContext);
+  }
+
+  let inputArg: ts.Expression | undefined;
+  let callbackArg: ts.Expression | undefined;
+  let innerLiftArgs: ts.Expression[];
+
+  if (args.length === 2) {
+    inputArg = args[0];
+    callbackArg = args[1];
+    if (!inputArg || !callbackArg) {
+      return ts.visitEachChild(node, visitor, tsContext);
+    }
+    innerLiftArgs = [callbackArg];
+  } else {
+    const argSchema = args[0];
+    const resultSchema = args[1];
+    inputArg = args[2];
+    callbackArg = args[3];
+    if (!argSchema || !resultSchema || !inputArg || !callbackArg) {
+      return ts.visitEachChild(node, visitor, tsContext);
+    }
+    innerLiftArgs = [argSchema, resultSchema, callbackArg];
+  }
+
+  // Preserve derive's "input type flows into callback parameter" semantics.
+  //
+  // In derive(input, fn), TypeScript contextually-types fn's parameter as
+  // the input's type via the shared generic In: derive<In, Out>(In, (In)=>Out).
+  // In the lift-applied form lift(fn)(input), TS instantiates In from fn's
+  // parameter in isolation (because lift(fn) is resolved before being applied
+  // to input). For unannotated parameters this can collapse to unknown or
+  // unwrap cell-like types in ways that change downstream schema inference.
+  //
+  // We restore the original semantics by registering the input expression's
+  // widened type against the callback's first parameter in the typeRegistry.
+  // inferParameterType consults the registry before falling back to the
+  // checker, so downstream schema injection sees the input-derived type.
+  const typeRegistry = context.options.typeRegistry;
+  if (typeRegistry) {
+    const callbackFn = unwrapToFunctionLike(callbackArg);
+    const callbackParam = callbackFn?.parameters[0];
+    if (callbackParam && !callbackParam.type) {
+      const inputType = checker.getTypeAtLocation(inputArg);
+      if (inputType) {
+        typeRegistry.set(callbackParam, inputType);
+      }
+    }
+  }
+
+  const innerLiftCall = context.cfHelpers.createHelperCall(
+    "lift",
+    node,
+    node.typeArguments,
+    innerLiftArgs,
+  );
+  const liftAppliedCall = factory.createCallExpression(
+    innerLiftCall,
+    undefined,
+    [inputArg],
+  );
+
+  return finalizeLoweredCall(
+    node,
+    liftAppliedCall,
+    context,
+    visitor,
+  );
+}
+
+function unwrapToFunctionLike(
+  expr: ts.Expression,
+): ts.ArrowFunction | ts.FunctionExpression | undefined {
+  if (ts.isArrowFunction(expr) || ts.isFunctionExpression(expr)) {
+    return expr;
+  }
+  return undefined;
+}
+
+function finalizeLoweredCall(
+  originalNode: ts.CallExpression,
+  liftAppliedCall: ts.CallExpression,
+  context: TransformationContext,
+  visitor: ts.Visitor,
+): ts.Node {
+  const { checker, tsContext } = context;
+
+  const visitedCall = ts.visitEachChild(
+    liftAppliedCall,
+    visitor,
+    tsContext,
+  );
+  const preservedVisitedCall = ts.setOriginalNode(
+    ts.setSourceMapRange(
+      ts.setTextRange(visitedCall, originalNode),
+      ts.getSourceMapRange(originalNode) ?? originalNode,
+    ),
+    originalNode,
+  );
+
+  if (context.options.typeRegistry) {
+    const originalType = context.options.typeRegistry.get(originalNode);
+    if (originalType) {
+      registerDeriveCallType(
+        preservedVisitedCall,
+        undefined,
+        originalType,
+        checker,
+        context.options.typeRegistry,
+      );
+    }
+  }
+
+  setParentPointers(preservedVisitedCall, originalNode.parent);
+
+  return preservedVisitedCall;
+}
+
+function sourceContainsLowerableCall(
   context: TransformationContext,
 ): boolean {
   let found = false;
@@ -133,6 +269,13 @@ function sourceContainsComputedCall(
       if (
         callKind?.kind === "builder" &&
         callKind.builderName === "computed"
+      ) {
+        found = true;
+        return;
+      }
+      if (
+        callKind?.kind === "derive" &&
+        !ts.isCallExpression(node.expression)
       ) {
         found = true;
         return;

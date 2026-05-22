@@ -199,8 +199,13 @@ export function inferParameterType(
     return explicitType;
   }
 
-  // Try to infer from parameter location
-  let paramType = checker.getTypeAtLocation(parameter);
+  // Try to infer from parameter location. Check typeRegistry first so that
+  // transformer-stage overrides (e.g. lift-applied lowering registering the
+  // input expression's type against the callback parameter) take precedence
+  // over the checker's contextual inference, which may unwrap or otherwise
+  // lose information when the parameter is reached from a curried call form.
+  const registered = typeRegistry?.get(parameter);
+  let paramType = registered ?? checker.getTypeAtLocation(parameter);
 
   // If it's 'any' and we have a fallback, use that
   if (isAnyOrUnknownType(paramType) && fallbackType) {
