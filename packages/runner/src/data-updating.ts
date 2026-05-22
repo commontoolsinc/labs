@@ -794,14 +794,28 @@ export function normalizeAndDiff(
       "diff",
       () => `[BRANCH_FABRIC_INSTANCE] Atomic FabricInstance at path=${pathStr}`,
     );
-    // This layer treats a `FabricInstance` atomically and won't descend into
-    // it, so its internal state must already be a proper `FabricValue` before
-    // it is stored. A shallow conversion may have left non-`FabricValue`
-    // internals (e.g. a wrapper whose nested state is still a raw native), so
-    // run the deep `fabricFromNativeValue()` here. It is class-agnostic:
-    // already-proper / deep-frozen instances short-circuit by identity, and
-    // each subclass governs its own deep conversion -- this code does not (and
-    // must not) special-case any concrete `FabricInstance` subclass.
+    // BAND-AID: this *should* be a shallow conversion. This is a unified walk
+    // (one `seen` map for shared-ref/cycle handling, `[ID]` assignment, and
+    // diffing), and the right design is to shallow-wrap the `FabricInstance`
+    // here and let this walk descend into its `FabricValue` internals as part
+    // of the same coordinated pass. We don't support that descent yet, so the
+    // wrapper's internals could otherwise reach storage improperly converted.
+    //
+    // As a stopgap we run the deep `fabricFromNativeValue()`, which converts
+    // the internals via a *separate, uncoordinated* pass. The cost: any
+    // `FabricValue` reachable both inside the wrapper and elsewhere in the
+    // outer tree gets de-shared (the outer walk handles one copy; this deep
+    // call mints an independent, separately-frozen copy with no shared `seen`
+    // / ID bookkeeping). That is invisible for `FabricError` today only
+    // because an error's `cause` / custom props aren't, in practice, shared
+    // with the rest of the tree -- but `FabricSet` / `FabricMap` (collections
+    // of arbitrary, routinely-shared `FabricValue`s) WILL break here once they
+    // carry real traffic. Proper fix: coordinated descent into wrapper
+    // internals, after which a shallow conversion suffices.
+    //
+    // The call is class-agnostic (no concrete-subclass special-casing): each
+    // subclass governs its own deep conversion and already-proper / deep-frozen
+    // instances short-circuit by identity.
     changes.push({
       location: link,
       value: fabricFromNativeValue(newValue) as FabricValue,
