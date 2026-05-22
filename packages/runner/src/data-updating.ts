@@ -794,6 +794,10 @@ export function normalizeAndDiff(
       "diff",
       () => `[BRANCH_FABRIC_INSTANCE] Atomic FabricInstance at path=${pathStr}`,
     );
+    // TODO(danfuzz): Replace this band-aid once the unified walk supports
+    // coordinated descent into `FabricInstance` internals (see below); at that
+    // point switch this to a shallow conversion.
+    //
     // BAND-AID: this *should* be a shallow conversion. This is a unified walk
     // (one `seen` map for shared-ref/cycle handling, `[ID]` assignment, and
     // diffing), and the right design is to shallow-wrap the `FabricInstance`
