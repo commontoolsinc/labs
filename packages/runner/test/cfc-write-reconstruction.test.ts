@@ -1,12 +1,16 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertStrictEquals } from "@std/assert";
 import { writeDetailValueForTarget } from "../src/cfc/prepare.ts";
 import { normalizeCellScope } from "../src/scope.ts";
+import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
+import type {
+  FabricValue,
+  MemorySpace,
+  URI,
+} from "@commonfabric/memory/interface";
 import type {
   IExtendedStorageTransaction,
-  MemorySpace,
   TransactionWriteDetail,
 } from "../src/storage/interface.ts";
-import type { URI } from "@commonfabric/memory/interface";
 
 // `writeDetailValueForTarget` reconstructs "the value this transaction wrote
 // at a path" from the recorded write-details. A value may be recorded either
@@ -154,4 +158,40 @@ Deno.test("writeDetailValueForTarget: no matching write returns undefined", () =
     ),
     undefined,
   );
+});
+
+Deno.test("writeDetailValueForTarget: composition preserves large off-spine subtrees by reference (no deep copy)", () => {
+  // Deliberately ginormous, synthetic-but-realistic base: a large array of
+  // records plus a small sibling field, deep-frozen (as stored values are).
+  // It's recorded as a coarse base write at the target PLUS a granular write
+  // to the *small* field. Reconstruction must overlay the small field WITHOUT
+  // deep-copying the large array -- under arbitrary user data the base is
+  // unbounded, so a full deep clone here would be an O(size) cost per check.
+  const bigList = Array.from({ length: 50_000 }, (_, i) => ({
+    id: i,
+    body: `message number ${i}`,
+    meta: { seen: false, tags: ["a", "b"] },
+  }));
+  const base = deepFreeze(
+    { items: bigList, status: "draft" } as unknown as FabricValue,
+  ) as unknown as Record<string, unknown>;
+
+  const tx = txWith([
+    detail(["value"], base),
+    detail(["value", "status"], "published"),
+  ]);
+
+  const result = writeDetailValueForTarget(tx, target([]), "value") as Record<
+    string,
+    unknown
+  >;
+
+  // Correctness: the small field is overlaid.
+  assertEquals(result.status, "published");
+  // The top-level container is a fresh thawed copy (its spine changed)...
+  assertStrictEquals(result === base, false);
+  // ...but the large off-spine subtree is preserved BY REFERENCE -- not
+  // deep-copied. Under the pre-COW full-clone reconstruction this assertion
+  // would fail (it allocated a distinct deep copy of the whole array).
+  assertStrictEquals(result.items, base.items);
 });
