@@ -1,7 +1,6 @@
 import {
   CfHarnessPromptLoop,
   type CreateHarnessPromptLoopOptions,
-  type HarnessPromptLoopResult,
   type RunHarnessTranscriptOptions,
 } from "./prompt-loop.ts";
 import {

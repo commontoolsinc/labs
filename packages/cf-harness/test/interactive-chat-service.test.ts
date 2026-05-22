@@ -125,7 +125,8 @@ Deno.test("interactive service forces comment-thread turns to read-only prompt-l
   const createPromptLoop: HarnessInteractivePromptLoopFactory = (options) => {
     loopOptions.push(options);
     return {
-      runTranscript: async (runOptions) => makeResult(runOptions, "Readonly."),
+      runTranscript: (runOptions) =>
+        Promise.resolve(makeResult(runOptions, "Readonly.")),
     };
   };
   const service = new HarnessInteractiveChatService({
@@ -178,7 +179,8 @@ Deno.test("interactive service passes Browser Access leases to browser-profile t
   const createPromptLoop: HarnessInteractivePromptLoopFactory = (options) => {
     loopOptions.push(options);
     return {
-      runTranscript: async (runOptions) => makeResult(runOptions, "Browser."),
+      runTranscript: (runOptions) =>
+        Promise.resolve(makeResult(runOptions, "Browser.")),
     };
   };
   const service = new HarnessInteractiveChatService({
@@ -219,7 +221,8 @@ Deno.test("interactive service rejects browser-profile turns without Browser Acc
     createPromptLoop: () => {
       createdLoop = true;
       return {
-        runTranscript: async (runOptions) => makeResult(runOptions, "Browser."),
+        runTranscript: (runOptions) =>
+          Promise.resolve(makeResult(runOptions, "Browser.")),
       };
     },
     now: nextIsoNow(),
@@ -487,7 +490,7 @@ Deno.test("interactive service aborts active turns when closing a session", asyn
 Deno.test("interactive service closes sessions and filters status", async () => {
   const service = new HarnessInteractiveChatService({
     createPromptLoop: () => ({
-      runTranscript: async (options) => makeResult(options, "Done."),
+      runTranscript: (options) => Promise.resolve(makeResult(options, "Done.")),
     }),
     now: nextIsoNow(),
   });
@@ -522,7 +525,7 @@ Deno.test("interactive service closes sessions and filters status", async () => 
 Deno.test("interactive service rejects missing sessions and concurrent turns", async () => {
   const service = new HarnessInteractiveChatService({
     createPromptLoop: () => ({
-      runTranscript: async (options) => makeResult(options, "Done."),
+      runTranscript: (options) => Promise.resolve(makeResult(options, "Done.")),
     }),
     now: nextIsoNow(),
   });
