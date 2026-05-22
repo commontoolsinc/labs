@@ -4,14 +4,14 @@ import {
   toCompactDebugString,
   toDebugKindString,
   toIndentedDebugString,
-} from "../value-debug.ts";
-import { FabricBytes } from "../FabricBytes.ts";
-import { FabricEpochNsec } from "../fabric-epoch.ts";
+} from "../src/value-debug.ts";
+import { FabricBytes } from "../src/FabricBytes.ts";
+import { FabricEpochNsec } from "../src/fabric-epoch.ts";
 import {
   FabricError,
   FabricMap,
   FabricRegExp,
-} from "../fabric-native-instances.ts";
+} from "../src/fabric-native-instances.ts";
 
 // ============================================================================
 // Tests
