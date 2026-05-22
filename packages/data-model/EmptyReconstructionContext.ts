@@ -6,7 +6,7 @@
  */
 
 import type { FabricInstance, ReconstructionContext } from "./interface.ts";
-import { BaseReconstructionContext } from "./base-reconstruction-context.ts";
+import { BaseReconstructionContext } from "./BaseReconstructionContext.ts";
 
 /**
  * `ReconstructionContext` whose `getCell()` always throws. `shouldDeepFreeze`

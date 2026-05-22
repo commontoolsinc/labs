@@ -14,7 +14,7 @@ import {
   isConvertibleNativeInstance,
   UNSAFE_KEYS,
 } from "./fabric-native-instances.ts";
-import { FabricBytes } from "./fabric-bytes.ts";
+import { FabricBytes } from "./FabricBytes.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { isArrayWithOnlyIndexProperties } from "./array-utils.ts";
 import { cloneHelper } from "./value-clone.ts";

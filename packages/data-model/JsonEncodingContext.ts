@@ -6,10 +6,10 @@ import {
   type ReconstructionContext,
   type SerializationContext,
 } from "./interface.ts";
-import { ExplicitTagValue } from "./explicit-tag-value.ts";
+import { ExplicitTagValue } from "./ExplicitTagValue.ts";
 import { deepFreeze } from "./deep-freeze.ts";
-import { UnknownValue } from "./unknown-value.ts";
-import { ProblematicValue } from "./problematic-value.ts";
+import { UnknownValue } from "./UnknownValue.ts";
+import { ProblematicValue } from "./ProblematicValue.ts";
 import {
   createDefaultRegistry,
   type JsonWireValue,

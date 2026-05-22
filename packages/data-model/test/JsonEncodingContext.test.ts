@@ -1,14 +1,14 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { JsonEncodingContext } from "../json-encoding-context.ts";
+import { JsonEncodingContext } from "../JsonEncodingContext.ts";
 import type { FabricValue } from "../interface.ts";
 import type { JsonWireValue } from "../json-type-handlers.ts";
-import { UnknownValue } from "../unknown-value.ts";
-import { ProblematicValue } from "../problematic-value.ts";
+import { UnknownValue } from "../UnknownValue.ts";
+import { ProblematicValue } from "../ProblematicValue.ts";
 import { FabricEpochDays, FabricEpochNsec } from "../fabric-epoch.ts";
 import { FabricError } from "../fabric-native-instances.ts";
 import { isDeepFrozen } from "../deep-freeze.ts";
-import { BaseReconstructionContext } from "../base-reconstruction-context.ts";
+import { BaseReconstructionContext } from "../BaseReconstructionContext.ts";
 import {
   resetDataModelConfig,
   setDataModelConfig,

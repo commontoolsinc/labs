@@ -8,8 +8,8 @@ import {
   internSchemaAsTaggedHashString,
   isInternedSchema,
 } from "../schema-hash.ts";
-import { SchemaAndHash } from "../schema-and-hash.ts";
-import { FabricHash } from "../fabric-hash.ts";
+import { SchemaAndHash } from "../SchemaAndHash.ts";
+import { FabricHash } from "../FabricHash.ts";
 import { hashStringOf } from "../value-hash.ts";
 import { isDeepFrozen } from "../deep-freeze.ts";
 import { toDeepFrozenSchema } from "../schema-utils.ts";

@@ -10,7 +10,7 @@ import {
   shallowFabricFromNativeValue,
 } from "../fabric-value.ts";
 import { FabricError } from "../fabric-native-instances.ts";
-import { FabricBytes } from "../fabric-bytes.ts";
+import { FabricBytes } from "../FabricBytes.ts";
 
 describe("fabric-value", () => {
   // Explicitly pin modernDataModel off so the legacy-path tests (below the

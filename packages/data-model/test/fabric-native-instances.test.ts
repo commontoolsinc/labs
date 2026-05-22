@@ -8,7 +8,7 @@ import {
   IS_DEEP_FROZEN,
   RECONSTRUCT,
 } from "../interface.ts";
-import { BaseReconstructionContext } from "../base-reconstruction-context.ts";
+import { BaseReconstructionContext } from "../BaseReconstructionContext.ts";
 import {
   FabricError,
   FabricMap,
@@ -24,9 +24,9 @@ import {
   tagFromNativeClass,
   tagFromNativeValue,
 } from "../native-type-tags.ts";
-import { UnknownValue } from "../unknown-value.ts";
-import { ProblematicValue } from "../problematic-value.ts";
-import { ExplicitTagValue } from "../explicit-tag-value.ts";
+import { UnknownValue } from "../UnknownValue.ts";
+import { ProblematicValue } from "../ProblematicValue.ts";
+import { ExplicitTagValue } from "../ExplicitTagValue.ts";
 import {
   deepFreeze,
   isDeepFrozen,
