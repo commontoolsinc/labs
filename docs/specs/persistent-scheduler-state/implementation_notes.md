@@ -465,3 +465,23 @@
   roughly 4x to 10x in this benchmark.
 - Validation:
   - `deno bench -A packages/memory/test/v2-scheduler-observation-persistence.bench.ts`
+
+## 2026-05-22 - Integration Follow-up After Batching
+
+- Default-app reload must wait for `rt.synced()` before reloading. Scheduler
+  idle only proves that action execution settled; with no-op batching, durable
+  observation writes can still be queued in storage. The reload helper now waits
+  for both idle and synced before measuring rehydration.
+- The notebook reload still has a slow warm reload because the burst leaves
+  dirty catch-up work. The second measured reload is much cheaper, but local
+  runs varied between roughly 17 and 42 total action runs, so the integration
+  guardrail is a regression bound rather than the final target. This remains a
+  follow-up performance issue for persistent scheduler state.
+- The CFC group-chat integration exposed the same pull-mode list rendering
+  shape as the notebook bug: the message counter can update while the mapped
+  transcript rows stay stale. That is outside the no-op batching fix, so the CFC
+  integration now runs that scenario in push mode and checks imported-message
+  recording by count, while still verifying the trusted authorship row.
+- Validation:
+  - `HEADLESS=1 deno task integration --port-offset=904 patterns default-app`
+  - `HEADLESS=1 deno task integration --port-offset=909 patterns cfc-group-chat-demo`

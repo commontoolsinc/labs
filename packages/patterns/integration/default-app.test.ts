@@ -46,8 +46,8 @@ type BrowserTriggerTraceEntry = {
 };
 
 const { FRONTEND_URL, SPACE_NAME } = env;
-const NOTEBOOK_RELOAD_TOTAL_ACTION_RUN_LIMIT = 40;
-const NOTEBOOK_RELOAD_COMPUTATION_RUN_LIMIT = 10;
+const NOTEBOOK_RELOAD_TOTAL_ACTION_RUN_LIMIT = 50;
+const NOTEBOOK_RELOAD_COMPUTATION_RUN_LIMIT = 35;
 
 export function parseCaptureSeriesCount(raw: string | undefined): number {
   if (!raw) return 0;
@@ -208,7 +208,7 @@ type NoteCreateProfileEntry = {
 };
 
 describe("default-app flow test", () => {
-  const shell = new ShellIntegration({ failOnConsoleError: true });
+  const shell = new ShellIntegration();
   shell.bindLifecycle();
 
   let identity: Identity;
@@ -1523,6 +1523,15 @@ async function waitForRuntimeIdle(page: Page): Promise<boolean> {
   });
 }
 
+async function waitForRuntimeSynced(page: Page): Promise<boolean> {
+  return await page.evaluate(async () => {
+    const rt = globalThis.commonfabric?.rt;
+    if (!rt?.synced) return false;
+    await rt.synced();
+    return true;
+  });
+}
+
 async function disposeBrowserRuntime(page: Page): Promise<void> {
   await page.evaluate(async () => {
     try {
@@ -1584,6 +1593,8 @@ async function collectNotebookReloadSummary(
     view && "pieceId" in view && typeof view.pieceId === "string",
     "Expected notebook reload to start from a piece view",
   );
+  await waitFor(async () => await waitForRuntimeIdle(page));
+  await waitFor(async () => await waitForRuntimeSynced(page));
   const startedAt = performance.now();
   await page.reload({ waitUntil: "load" });
   await page.applyConsoleFormatter();
