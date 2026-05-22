@@ -75,16 +75,13 @@ export function hoistModuleScopedBuilderCallbacks(
       return visited;
     }
 
-    const callbackIndices = getBuilderCallbackIndices(visited, context);
-    if (callbackIndices.length === 0) {
-      return visited;
-    }
-
-    let changed = false;
-    const updatedArgs = visited.arguments.map((argument, index) => {
-      if (!callbackIndices.includes(index)) {
-        return argument;
-      }
+    // Try the hoist on this call. Returns the (possibly-hoisted)
+    // replacement-or-original argument, advancing hoistCounter and
+    // pushing a hoisted const statement as a side-effect when it does
+    // hoist.
+    const tryHoistCallback = (
+      argument: ts.Expression,
+    ): ts.Expression => {
       if (
         !isFunctionLikeExpression(argument) ||
         !isNestedWithinFunction(argument)
@@ -130,7 +127,6 @@ export function hoistModuleScopedBuilderCallbacks(
         return argument;
       }
 
-      changed = true;
       hoistCounter += 1;
       const callbackName = context.factory.createIdentifier(
         `__cfModuleCallback_${hoistCounter}`,
@@ -152,6 +148,49 @@ export function hoistModuleScopedBuilderCallbacks(
         ),
       );
       return callbackName;
+    };
+
+    const target = resolveHoistTarget(visited, context);
+    if (
+      target.kind === "plain" && target.callbackIndices.length === 0
+    ) {
+      return visited;
+    }
+
+    if (target.kind === "lift-applied") {
+      // The callback lives on the inner lift call. Hoist it there, then
+      // rebuild: lift(...args with cb replaced by hoisted name)(input).
+      const original = target.innerCall.arguments[target.callbackIndex]!;
+      const replaced = tryHoistCallback(original);
+      if (replaced === original) {
+        return visited;
+      }
+      const newInnerArgs = [...target.innerCall.arguments];
+      newInnerArgs[target.callbackIndex] = replaced;
+      const newInnerCall = context.factory.updateCallExpression(
+        target.innerCall,
+        target.innerCall.expression,
+        target.innerCall.typeArguments,
+        newInnerArgs,
+      );
+      return context.factory.updateCallExpression(
+        visited,
+        newInnerCall,
+        visited.typeArguments,
+        visited.arguments,
+      );
+    }
+
+    let changed = false;
+    const updatedArgs = visited.arguments.map((argument, index) => {
+      if (!target.callbackIndices.includes(index)) {
+        return argument;
+      }
+      const replaced = tryHoistCallback(argument);
+      if (replaced !== argument) {
+        changed = true;
+      }
+      return replaced;
     });
 
     if (!changed) {
@@ -199,10 +238,11 @@ function getBuilderCallbackIndices(
 
   switch (builderName) {
     case "derive": {
-      // Schema-injected (4+ arg) derive calls: callback at index 3. This
-      // branch is dead at the hoist's current pipeline position (we run
-      // before SchemaInjectionTransformer) but keeps the function
-      // tolerant of future reordering.
+      // After CT-1615 Phase 1, derive is never emitted by the transformer —
+      // the analogous lift-applied form is handled by getLiftAppliedHoistTarget
+      // in the visit function. This branch is retained until the mechanical
+      // rename removes the "derive" name; it covers a hypothetical future
+      // path that re-introduces derive calls reaching the hoister.
       if (call.arguments.length >= 4) return [3];
       if (call.arguments.length < 2) return [];
       const deriveCallback = call.arguments[1];
@@ -234,6 +274,81 @@ function getBuilderCallbackIndices(
     default:
       return [];
   }
+}
+
+/**
+ * Result of analyzing a call expression for hoist eligibility.
+ *
+ * When `kind` is `"plain"`, the callbacks live on `call.arguments` at the
+ * given indices — the historical hoist target shape.
+ *
+ * When `kind` is `"lift-applied"` (CT-1615 onward), the callback lives on
+ * the *inner* lift call's arguments. The outer applied call has the input
+ * object as its only argument and nothing to hoist. The caller substitutes
+ * the hoisted name into the inner call's arguments, then rebuilds the
+ * outer applied call around the modified inner.
+ */
+type HoistTarget =
+  | { kind: "plain"; callbackIndices: readonly number[] }
+  | {
+    kind: "lift-applied";
+    innerCall: ts.CallExpression;
+    callbackIndex: number;
+  };
+
+function resolveHoistTarget(
+  call: ts.CallExpression,
+  context: TransformationContext,
+): HoistTarget {
+  const callee = unwrapExpression(call.expression);
+
+  // Lift-applied: the outer call's callee is itself a call expression
+  // (the inner __cfHelpers.lift(...) call carrying the callback).
+  if (ts.isCallExpression(callee)) {
+    const innerCall = callee;
+    const innerCallee = unwrapExpression(innerCall.expression);
+    const innerName = ts.isIdentifier(innerCallee)
+      ? innerCallee.text
+      : ts.isPropertyAccessExpression(innerCallee)
+      ? innerCallee.name.text
+      : undefined;
+    if (innerName !== "lift") {
+      return { kind: "plain", callbackIndices: [] };
+    }
+
+    // Pre-schema-injection: lift(cb)(input). Callback at args[0].
+    // Schema-injected: lift(argSchema, resSchema, cb)(input). Callback
+    // at args[last]. Same gating as the legacy 2-arg derive case applies
+    // to the pre-injection form: synthetic-compute callbacks always
+    // hoistable; user-authored callbacks need self-describing types.
+    if (innerCall.arguments.length === 1) {
+      const cb = innerCall.arguments[0];
+      if (!isFunctionLikeExpression(cb)) {
+        return { kind: "plain", callbackIndices: [] };
+      }
+      if (
+        context.isSyntheticComputeCallback?.(cb) ||
+        hasSelfDescribingFunctionTypes(cb)
+      ) {
+        return { kind: "lift-applied", innerCall, callbackIndex: 0 };
+      }
+      return { kind: "plain", callbackIndices: [] };
+    }
+    if (innerCall.arguments.length >= 3) {
+      const cbIndex = innerCall.arguments.length - 1;
+      const cb = innerCall.arguments[cbIndex];
+      if (!isFunctionLikeExpression(cb)) {
+        return { kind: "plain", callbackIndices: [] };
+      }
+      return { kind: "lift-applied", innerCall, callbackIndex: cbIndex };
+    }
+    return { kind: "plain", callbackIndices: [] };
+  }
+
+  return {
+    kind: "plain",
+    callbackIndices: getBuilderCallbackIndices(call, context),
+  };
 }
 
 function hasSelfDescribingFunctionTypes(
