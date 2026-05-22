@@ -1,6 +1,6 @@
 # `derive` → `lift` → sandboxable: design
 
-_Status: Phase 1 in flight. Phases 2 & 3 designed at high level; details deferred until Phase 1 lands._
+_Status: Phase 1 implementation complete in CT-1615 (lift-applied form `__cfHelpers.lift(cb)(input)`). Phases 2 & 3 designed at high level; details deferred. Two follow-ups bundled together to land next: remove the runtime `derive` export, and switch the transformer's emitted form from `lift(...)({})` to `lift(...)()` (requires a small runtime change to `lift`)._
 
 ## Motivation
 
@@ -185,7 +185,7 @@ From CT-1585's investigation, captured here so the Phase 1 implementer doesn't h
 These are explicitly open and should be resolved (or explicitly punted) before the relevant phase lands.
 
 - **[Phase 1]** Verify `lift` and `derive` are runtime synonyms. **Verified 2026-05-21**: `derive(input, f)` is literally `lift(f)(input)` at runtime (`packages/runner/src/builder/module.ts:441-476`).
-- **[Phase 1]** Verify the closure transformer already routes all derive captures through the input-object argument. Find any residual lexical-capture cases and decide their disposition.
+- **[Phase 1]** Verify the closure transformer already routes all derive captures through the input-object argument. Find any residual lexical-capture cases and decide their disposition. **Implicitly verified 2026-05-22**: Phase 1 landed with all 288 ts-transformers fixture tests passing AND the three runtime repros from CT-1585 passing (`packages/patterns/notes/note.test.tsx`, `notebook.test.tsx`, `factory-outputs/parking-coordinator/main.test.tsx`). The lift-applied form is structurally `lift(cb)(input)`; if any callback had a residual lexical-capture-without-input case, the runtime's connect-time check (`packages/runner/src/builder/node-utils.ts:15-18`) would throw "Reactive reference from outer scope cannot be accessed via closure" — that error is absent in all test runs.
 - **[Follow-up after Phase 1]** Investigate the redundant schema re-narrowing in `schema-injection.ts` line 3285 (the `kind === "builder" && builderName === "lift"` branch with `isToSchemaCall(firstArgument)`). When `ts.visitEachChild` re-enters our own injected lift-applied output, this branch fires a *second* narrowing pass on synthetic schema TypeNodes we just produced. CT-1615 worked around this by registering synthetic wrapper TypeNodes against their semantic types in `applyShrinkAndWrap` (so the second pass becomes idempotent rather than degraded). The underlying smell: re-narrowing on freshly-injected output is structurally redundant. Likely cleaner shape: detect that the call came from our own injection (via `ts.getOriginalNode` plus an injection tag) and skip the re-narrowing entirely. Defer to a separate investigation post-Phase 1 — needs to confirm the branch isn't load-bearing for truly user-authored `lift(toSchema(...), toSchema(...), cb)` calls (rare but possible).
 - **[Phase 3]** Final name for `sandboxable` (TL). **Berni 2026-05-21**: prefers `selfcontained`.
 - **[Phase 3]** Are non-deterministic globals (`Date.now()`, `Math.random()`) OK in sandboxable bodies? (Berni.) **Berni 2026-05-21**: yes — `console.log`, `safeDateNow`, `unsecureRandom` all fine; they're injected.
