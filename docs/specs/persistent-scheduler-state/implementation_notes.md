@@ -473,10 +473,10 @@
   observation writes can still be queued in storage. The reload helper now waits
   for both idle and synced before measuring rehydration.
 - The notebook reload still has a slow warm reload because the burst leaves
-  dirty catch-up work. The second measured reload is much cheaper, but local
-  runs varied between roughly 17 and 42 total action runs, so the integration
-  guardrail is a regression bound rather than the final target. This remains a
-  follow-up performance issue for persistent scheduler state.
+  dirty catch-up work. The second measured reload is much cheaper, but local and
+  full-suite runs varied between roughly 17 and 53 total action runs, so the
+  integration guardrail is a regression bound rather than the final target. This
+  remains a follow-up performance issue for persistent scheduler state.
 - The CFC group-chat integration exposed the same pull-mode list rendering
   shape as the notebook bug: the message counter can update while the mapped
   transcript rows stay stale. That is outside the no-op batching fix, so the CFC

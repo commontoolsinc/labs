@@ -46,7 +46,7 @@ type BrowserTriggerTraceEntry = {
 };
 
 const { FRONTEND_URL, SPACE_NAME } = env;
-const NOTEBOOK_RELOAD_TOTAL_ACTION_RUN_LIMIT = 50;
+const NOTEBOOK_RELOAD_TOTAL_ACTION_RUN_LIMIT = 65;
 const NOTEBOOK_RELOAD_COMPUTATION_RUN_LIMIT = 35;
 
 export function parseCaptureSeriesCount(raw: string | undefined): number {
