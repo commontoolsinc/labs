@@ -67,6 +67,12 @@ export function shallowFabricFromNativeValueModern(
       return value as FabricValueLayer;
 
     case NATIVE_TAGS.Error: {
+      // Shallow conversion: wrap the native `Error` without recursing into its
+      // internals (`cause`, custom properties). The result is therefore only a
+      // *shallow* `FabricError` -- its `.cause` may still be a raw `Error`.
+      // Callers that need a proper (fully-`FabricValue`) `FabricError` must use
+      // the deep `fabricFromNativeValue()` instead; the cell write paths do so
+      // at the points where they treat a `FabricError` as an atomic leaf.
       const wrapped = FabricError.fromNativeError(value as Error);
       if (freeze) Object.freeze(wrapped);
       return wrapped;
