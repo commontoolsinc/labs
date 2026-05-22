@@ -447,3 +447,21 @@
   late; the fix keeps the no-batch semantic-write fast path synchronous.
 - Validation:
   - `deno test -A packages/runner/test/memory-v2-stacked-commit.test.ts packages/memory/test/v2-scheduler-state-test.ts`
+
+## 2026-05-22 - No-op Batching Benchmark
+
+- Added a batched no-op case to
+  `packages/memory/test/v2-scheduler-observation-persistence.bench.ts` using a
+  default batch size of 50 observation entries.
+- Local benchmark, default 500 runs:
+  - semantic commits only: 92.0 ms, 33.02 MiB active SQLite
+  - individual no-op observations, 1 path: 62.1 ms, 33.09 MiB
+  - batched no-op observations, 1 path: 40.6 ms, 3.44 MiB
+  - individual no-op observations, 25 paths: 121.9 ms, 36.37 MiB
+  - batched no-op observations, 25 paths: 95.0 ms, 8.10 MiB
+- Interpretation: batching reduces no-op observation CPU time, but the larger
+  measured win is write amplification. Fewer observation-only SQLite
+  transactions reduce active database/WAL bytes per 500 no-op observations by
+  roughly 4x to 10x in this benchmark.
+- Validation:
+  - `deno bench -A packages/memory/test/v2-scheduler-observation-persistence.bench.ts`

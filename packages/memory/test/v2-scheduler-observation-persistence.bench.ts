@@ -10,6 +10,11 @@ import {
 } from "../v2/engine.ts";
 
 const RUN_COUNT = readIntEnv("SCHEDULER_OBSERVATION_BENCH_RUNS", 500, 1);
+const NOOP_BATCH_SIZE = readIntEnv(
+  "SCHEDULER_OBSERVATION_BENCH_NOOP_BATCH_SIZE",
+  50,
+  1,
+);
 const PATH_COUNTS = readIntListEnv(
   "SCHEDULER_OBSERVATION_BENCH_PATHS",
   [1, 25],
@@ -191,6 +196,39 @@ function applyObservationOnlyCommit(
   });
 }
 
+function applyObservationOnlyBatch(
+  engine: Engine,
+  batchLocalSeq: number,
+  startLocalSeq: number,
+  count: number,
+  pathCount: number,
+  pathOffset: (localSeq: number) => number = () => 0,
+): void {
+  applyCommit(engine, {
+    sessionId: "session:scheduler-observation-noop",
+    space,
+    commit: {
+      branch,
+      localSeq: batchLocalSeq,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservationBatch: Array.from({ length: count }, (_, index) => {
+        const localSeq = startLocalSeq + index;
+        return {
+          localSeq,
+          reads: { confirmed: [], pending: [] },
+          schedulerObservation: observationFor(
+            localSeq,
+            pathCount,
+            [],
+            pathOffset(localSeq),
+          ),
+        };
+      }),
+    },
+  });
+}
+
 function countRows(engine: Engine, table: string): number {
   return (engine.database.prepare(
     `SELECT count(*) AS count FROM ${table}`,
@@ -359,6 +397,43 @@ for (const pathCount of PATH_COUNTS) {
         b.end();
         recordMetrics(
           `observation-only commits, paths=${pathCount}`,
+          engine,
+          path,
+          pathCount,
+        );
+      } finally {
+        await cleanupEngine(engine, path);
+      }
+    },
+  });
+
+  Deno.bench({
+    name:
+      `batched observation-only no-op commits - runs=${RUN_COUNT}, paths=${pathCount}, batch=${NOOP_BATCH_SIZE}`,
+    group: "v2-scheduler-observation-persistence",
+    n: 1,
+    warmup: 0,
+    async fn(b) {
+      const { engine, path } = await createEngine();
+      try {
+        b.start();
+        let batchLocalSeq = RUN_COUNT + 1;
+        for (
+          let localSeq = 1;
+          localSeq <= RUN_COUNT;
+          localSeq += NOOP_BATCH_SIZE
+        ) {
+          applyObservationOnlyBatch(
+            engine,
+            batchLocalSeq++,
+            localSeq,
+            Math.min(NOOP_BATCH_SIZE, RUN_COUNT - localSeq + 1),
+            pathCount,
+          );
+        }
+        b.end();
+        recordMetrics(
+          `batched observation-only commits, paths=${pathCount}, batch=${NOOP_BATCH_SIZE}`,
           engine,
           path,
           pathCount,
