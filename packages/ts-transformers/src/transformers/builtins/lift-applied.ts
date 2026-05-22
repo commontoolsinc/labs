@@ -22,7 +22,7 @@ import {
   createRegisteredTypeLiteral,
   expressionToTypeNode,
 } from "../../ast/type-building.ts";
-import { registerDeriveCallType } from "../../ast/type-inference.ts";
+import { registerLiftAppliedCallType } from "../../ast/type-inference.ts";
 import type { TransformationContext } from "../../core/mod.ts";
 
 /**
@@ -70,7 +70,7 @@ interface FallbackEntry {
   readonly propertyName: string;
 }
 
-export interface DeriveCallOptions {
+export interface LiftAppliedCallOptions {
   readonly factory: ts.NodeFactory;
   readonly tsContext: ts.TransformationContext;
   readonly cfHelpers: CFHelpers;
@@ -183,10 +183,10 @@ function createDeriveArgs(
   ];
 }
 
-export function createDeriveCall(
+export function createLiftAppliedCall(
   expression: ts.Expression,
   refs: readonly ts.Expression[],
-  options: DeriveCallOptions,
+  options: LiftAppliedCallOptions,
 ): ts.Expression | undefined {
   if (refs.length === 0) return undefined;
 
@@ -272,7 +272,7 @@ export function createDeriveCall(
   // so that type inference works correctly for synthetic nodes. The
   // result type is the value the callback returns.
   if (context.options.typeRegistry && context.checker) {
-    registerDeriveCallType(
+    registerLiftAppliedCallType(
       liftAppliedCall,
       resultTypeNode,
       undefined, // resultType not available in this code path

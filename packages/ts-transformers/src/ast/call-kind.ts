@@ -152,7 +152,15 @@ export type CallKind =
   | { kind: "unless"; symbol?: ts.Symbol }
   | { kind: "builder"; symbol?: ts.Symbol; builderName: string }
   | { kind: "array-method"; symbol?: ts.Symbol }
-  | { kind: "derive"; symbol?: ts.Symbol }
+  // "lift-applied" labels a __cfHelpers.lift(...)(input) call shape — the
+  // canonical lowered form for reactive lifted-function computations,
+  // established by CT-1615. The historic discriminator was "derive" (the
+  // builder name the transformer used to emit before Phase 1); the
+  // discriminator was renamed in the mechanical rename step of CT-1615.
+  // detectCallKind also classifies an unapplied __cfHelpers.lift(...) call
+  // (no curry) as { kind: "builder", builderName: "lift" }, so the two
+  // are distinguishable at dispatch.
+  | { kind: "lift-applied"; symbol?: ts.Symbol }
   | { kind: "cell-factory"; symbol?: ts.Symbol; factoryName: string }
   | { kind: "cell-for"; symbol?: ts.Symbol }
   | { kind: "wish"; symbol?: ts.Symbol }
@@ -308,7 +316,7 @@ export function getCapabilitySummaryCallbackArgument(
   if (!callKind) return undefined;
 
   let callbackArg: ts.Expression | undefined;
-  if (callKind.kind === "derive") {
+  if (callKind.kind === "lift-applied") {
     // For lift-applied shape (lift(cb)(input)), the callback lives on the
     // inner lift call. For legacy derive shape, on the outer call itself.
     const innerCallee = stripWrappers(call.expression);
@@ -333,7 +341,7 @@ export function getCapabilitySummaryCallbackArgument(
     : undefined;
 }
 
-export function getDeriveInputAndCallbackArgument(
+export function getLiftAppliedInputAndCallback(
   call: ts.CallExpression,
   checker: ts.TypeChecker,
 ): {
@@ -341,7 +349,7 @@ export function getDeriveInputAndCallbackArgument(
   callback: ts.ArrowFunction | ts.FunctionExpression;
 } | undefined {
   const callKind = detectCallKind(call, checker);
-  if (callKind?.kind !== "derive") {
+  if (callKind?.kind !== "lift-applied") {
     return undefined;
   }
 
@@ -774,7 +782,7 @@ function isReactiveOriginKind(callKind: CallKind): boolean {
     case "cell-factory":
     case "cell-for":
       return true;
-    case "derive":
+    case "lift-applied":
       return COMMONFABRIC_REACTIVE_ORIGIN_CALL_EXPORT_NAMES.has("derive");
     case "ifElse":
       return COMMONFABRIC_REACTIVE_ORIGIN_CALL_EXPORT_NAMES.has("ifElse");
@@ -1110,7 +1118,7 @@ function resolveExpressionKind(
       ts.isCallExpression(target)
     ) {
       const liftAppliedKind: CallKind = {
-        kind: "derive",
+        kind: "lift-applied",
         symbol: builderKind.symbol,
       };
       cache.set(expression, liftAppliedKind);
@@ -1741,8 +1749,10 @@ function createNamedCallKind(
   }
 
   switch (spec.callKind) {
-    case "derive":
-      return symbol ? { kind: "derive", symbol } : { kind: "derive" };
+    case "lift-applied":
+      return symbol
+        ? { kind: "lift-applied", symbol }
+        : { kind: "lift-applied" };
     case "ifElse":
       return symbol ? { kind: "ifElse", symbol } : { kind: "ifElse" };
     case "when":

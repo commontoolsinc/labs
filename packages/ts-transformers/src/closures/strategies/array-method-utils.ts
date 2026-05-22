@@ -7,7 +7,7 @@ import {
   maybeReuseIdentifier,
   normalizeBindingName,
 } from "../../utils/identifiers.ts";
-import { createDeriveCall } from "../../transformers/builtins/derive.ts";
+import { createLiftAppliedCall } from "../../transformers/builtins/lift-applied.ts";
 
 function isBindingPattern(name: ts.BindingName): name is ts.BindingPattern {
   return ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name);
@@ -273,7 +273,7 @@ function createDerivedAliasExpression(
 
   // Register the type of the synthetic elementAccess in typeRegistry.
   // The type comes from info.symbol which was captured from the original
-  // binding element. Without this registration, createDeriveCall cannot
+  // binding element. Without this registration, createLiftAppliedCall cannot
   // determine the correct result type for the synthetic derive.
   if (context.options.typeRegistry && info.symbol) {
     const symbolType = checker.getTypeOfSymbol(info.symbol);
@@ -284,7 +284,7 @@ function createDerivedAliasExpression(
 
   const elementRef = factory.createIdentifier(elementIdentifier.text);
 
-  const deriveExpression = createDeriveCall(
+  const deriveExpression = createLiftAppliedCall(
     elementAccess,
     [elementRef, keyIdent],
     {

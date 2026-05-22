@@ -23,7 +23,7 @@ import {
 } from "./expression-rewrite/rewrite-helpers.ts";
 import type { AnalyzeFn } from "./expression-rewrite/types.ts";
 import type { ExpressionContainerKind } from "./expression-site-types.ts";
-import { createDeriveCall } from "./builtins/derive.ts";
+import { createLiftAppliedCall } from "./builtins/lift-applied.ts";
 import { classifyOpaquePathTerminalCall } from "./opaque-roots.ts";
 
 interface RewriteExpressionSiteParams {
@@ -38,14 +38,14 @@ interface RewriteExpressionSiteParams {
 function getReactiveHelperWrapperKind(
   expression: ts.Expression,
   context: TransformationContext,
-): "derive" | "ifElse" | "when" | "unless" | undefined {
+): "lift-applied" | "ifElse" | "when" | "unless" | undefined {
   if (!ts.isCallExpression(expression)) {
     return undefined;
   }
 
   const callKind = detectCallKind(expression, context.checker)?.kind;
   if (
-    callKind === "derive" ||
+    callKind === "lift-applied" ||
     callKind === "ifElse" ||
     callKind === "when" ||
     callKind === "unless"
@@ -56,11 +56,11 @@ function getReactiveHelperWrapperKind(
   return undefined;
 }
 
-function isDirectDeriveCall(
+function isDirectLiftAppliedCall(
   expression: ts.Expression,
   context: TransformationContext,
 ): expression is ts.CallExpression {
-  return getReactiveHelperWrapperKind(expression, context) === "derive";
+  return getReactiveHelperWrapperKind(expression, context) === "lift-applied";
 }
 
 function isReactiveHelperWrapperCall(
@@ -224,7 +224,7 @@ function rewriteDirectCellGetInitializer(
     return wrapped;
   }
 
-  return createDeriveCall(expression, [receiver], {
+  return createLiftAppliedCall(expression, [receiver], {
     factory: context.factory,
     tsContext: context.tsContext,
     cfHelpers: context.cfHelpers,
@@ -320,7 +320,7 @@ export function rewriteExpressionSite(
     return undefined;
   }
 
-  if (preferDeriveWrappers && isDirectDeriveCall(result, context)) {
+  if (preferDeriveWrappers && isDirectLiftAppliedCall(result, context)) {
     return result;
   }
 
@@ -395,7 +395,7 @@ export function rewriteOwnedPreClosureJsxExpressionSite(
     return undefined;
   }
 
-  if (preferDeriveWrappers && isDirectDeriveCall(result, context)) {
+  if (preferDeriveWrappers && isDirectLiftAppliedCall(result, context)) {
     return result;
   }
 

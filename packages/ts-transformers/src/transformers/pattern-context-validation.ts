@@ -798,7 +798,7 @@ export class PatternContextValidationTransformer
           }
 
           // Check for derive() calls
-          if (callKind.kind === "derive") {
+          if (callKind.kind === "lift-applied") {
             context.reportDiagnostic({
               severity: "error",
               type: "standalone-function:reactive-operation",

@@ -7,7 +7,7 @@ import {
 } from "../../ast/mod.ts";
 import { isModuleScopedDeclaration } from "../../ast/scope-analysis.ts";
 import { TransformationContext } from "../../core/mod.ts";
-import { createDeriveCall } from "../builtins/derive.ts";
+import { createLiftAppliedCall } from "../builtins/lift-applied.ts";
 
 function getCaptureRootExpression(expression: ts.Expression): ts.Expression {
   let current = expression;
@@ -90,7 +90,7 @@ export function createReactiveWrapperForExpression(
   if (ts.isCallExpression(expression)) {
     const callKind = detectCallKind(expression, context.checker);
     if (
-      callKind?.kind === "derive" ||
+      callKind?.kind === "lift-applied" ||
       callKind?.kind === "when" ||
       callKind?.kind === "unless" ||
       (callKind?.kind === "builder" && callKind.builderName === "computed")
@@ -115,7 +115,7 @@ export function createReactiveWrapperForExpression(
       expression,
       context.checker,
     );
-    return createDeriveCall(expression, refs, {
+    return createLiftAppliedCall(expression, refs, {
       factory: context.factory,
       tsContext: context.tsContext,
       cfHelpers: context.cfHelpers,
@@ -198,7 +198,7 @@ export function createReactiveWrapperForExpression(
  *
  * The dataflow analyzer only surfaces reactive captures (Cell/OpaqueRef).
  * Plain-JS values declared in enclosing scope are invisible to it, so they
- * default to lexical closure when `createDeriveCall` emits the callback.
+ * default to lexical closure when `createLiftAppliedCall` emits the callback.
  * That breaks the self-contained-callback contract that SES sandboxing and
  * module-scope hoisting rely on. Including them here gives them schema
  * coverage and explicit transport.

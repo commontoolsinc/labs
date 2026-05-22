@@ -2,7 +2,7 @@ import ts from "typescript";
 
 import { detectCallKind } from "../ast/call-kind.ts";
 import { setParentPointers } from "../ast/utils.ts";
-import { registerDeriveCallType } from "../ast/type-inference.ts";
+import { registerLiftAppliedCallType } from "../ast/type-inference.ts";
 import { HelpersOnlyTransformer } from "../core/transformers.ts";
 import type { TransformationContext } from "../core/mod.ts";
 
@@ -73,11 +73,18 @@ function createLiftLoweringVisitor(
       return lowerComputedCall(node, context, visitor);
     }
 
-    // Only rewrite legacy derive shape — not our own lift-applied output.
-    // The legacy derive shape has the callee as a property-access or bare
-    // identifier; the lift-applied shape has the callee as a CallExpression.
+    // Only rewrite the legacy derive shape — not our own lift-applied output.
+    // detectCallKind returns kind:"lift-applied" for BOTH:
+    //   (a) user-source derive(input, cb) — callee is a property access or
+    //       bare identifier ("derive" or "__cfHelpers.derive"). This is the
+    //       shape we want to lower.
+    //   (b) our own __cfHelpers.lift(cb)(input) — callee is itself a
+    //       CallExpression (the inner lift call). We do NOT want to re-lower
+    //       our own output.
+    // Distinguish structurally: if the callee is a CallExpression, it's
+    // already lift-applied and we leave it alone.
     if (
-      callKind?.kind === "derive" &&
+      callKind?.kind === "lift-applied" &&
       !ts.isCallExpression(node.expression)
     ) {
       return lowerDeriveCall(node, context, visitor);
@@ -243,7 +250,7 @@ function finalizeLoweredCall(
   if (context.options.typeRegistry) {
     const originalType = context.options.typeRegistry.get(originalNode);
     if (originalType) {
-      registerDeriveCallType(
+      registerLiftAppliedCallType(
         preservedVisitedCall,
         undefined,
         originalType,
@@ -274,7 +281,7 @@ function sourceContainsLowerableCall(
         return;
       }
       if (
-        callKind?.kind === "derive" &&
+        callKind?.kind === "lift-applied" &&
         !ts.isCallExpression(node.expression)
       ) {
         found = true;

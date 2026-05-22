@@ -8,7 +8,7 @@ import {
 } from "../../../ast/mod.ts";
 import { getCellKind } from "../../opaque-ref/opaque-ref.ts";
 import { classifyOpaquePathTerminalCall } from "../../opaque-roots.ts";
-import { createDeriveCall } from "../../builtins/derive.ts";
+import { createLiftAppliedCall } from "../../builtins/lift-applied.ts";
 import { createReactiveWrapperForExpression } from "../rewrite-helpers.ts";
 import { rewriteHelperOwnedExpression } from "./helper-owned-expression.ts";
 
@@ -375,7 +375,7 @@ export const emitCallExpression: Emitter = ({
           filterNestedFunctionLocalCaptures: true,
           preferDeriveWrapper: preferDeriveWrappers,
         },
-      ) ?? createDeriveCall(rewritten, unsafeGetReceivers, {
+      ) ?? createLiftAppliedCall(rewritten, unsafeGetReceivers, {
         factory: context.factory,
         tsContext: context.tsContext,
         cfHelpers: context.cfHelpers,

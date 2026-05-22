@@ -1615,11 +1615,11 @@ function inferDeriveResultTypeFromInitializer(
   }
 
   const callKind = detectCallKind(initializer, checker);
-  if (callKind?.kind !== "derive") {
+  if (callKind?.kind !== "lift-applied") {
     return undefined;
   }
 
-  const deriveArgs = resolveDeriveInputAndCallbackArgument(
+  const deriveArgs = resolveLiftAppliedInputAndCallback(
     initializer,
     checker,
     sourceFile,
@@ -2285,7 +2285,7 @@ function findFunctionArgument(
   return undefined;
 }
 
-function resolveDeriveInputAndCallbackArgument(
+function resolveLiftAppliedInputAndCallback(
   call: ts.CallExpression,
   checker: ts.TypeChecker,
   sourceFile: ts.SourceFile,
@@ -2294,11 +2294,11 @@ function resolveDeriveInputAndCallbackArgument(
   callback: ts.ArrowFunction | ts.FunctionExpression;
 } | undefined {
   const callKind = detectCallKind(call, checker);
-  if (callKind?.kind !== "derive") {
+  if (callKind?.kind !== "lift-applied") {
     return undefined;
   }
 
-  // See getDeriveInputAndCallbackArgument in src/ast/call-kind.ts for the
+  // See getLiftAppliedInputAndCallback in src/ast/call-kind.ts for the
   // two recognized shapes (legacy derive vs lift-applied).
   const innerCallee = call.expression;
   if (ts.isCallExpression(innerCallee)) {
@@ -3146,9 +3146,9 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
         }
       }
 
-      if (callKind?.kind === "derive") {
+      if (callKind?.kind === "lift-applied") {
         const factory = transformation.factory;
-        const deriveArgs = resolveDeriveInputAndCallbackArgument(
+        const deriveArgs = resolveLiftAppliedInputAndCallback(
           node,
           checker,
           sourceFile,

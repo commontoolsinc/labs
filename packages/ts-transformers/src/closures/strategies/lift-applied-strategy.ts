@@ -6,13 +6,13 @@ import type {
 import type { ClosureTransformationStrategy } from "./strategy.ts";
 import {
   detectCallKind,
-  getDeriveInputAndCallbackArgument,
+  getLiftAppliedInputAndCallback,
   getTypeFromTypeNodeWithFallback,
   setParentPointers,
   unwrapOpaqueLikeType,
 } from "../../ast/mod.ts";
 import { analyzeFunctionCapabilities } from "../../policy/capability-analysis.ts";
-import { registerDeriveCallType } from "../../ast/type-inference.ts";
+import { registerLiftAppliedCallType } from "../../ast/type-inference.ts";
 import { applyShrinkAndWrap } from "../../transformers/type-shrinking.ts";
 import { getCellKind } from "../../transformers/opaque-ref/opaque-ref.ts";
 import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
@@ -83,12 +83,12 @@ function preRegisterCaptureTypes(
   visit(body);
 }
 
-export class DeriveStrategy implements ClosureTransformationStrategy {
+export class LiftAppliedStrategy implements ClosureTransformationStrategy {
   canTransform(
     node: ts.Node,
     context: TransformationContext,
   ): boolean {
-    return ts.isCallExpression(node) && isDeriveCall(node, context);
+    return ts.isCallExpression(node) && isLiftAppliedCall(node, context);
   }
 
   transform(
@@ -97,19 +97,19 @@ export class DeriveStrategy implements ClosureTransformationStrategy {
     visitor: ts.Visitor,
   ): ts.Node | undefined {
     if (!ts.isCallExpression(node)) return undefined;
-    return transformDeriveCall(node, context, visitor);
+    return transformLiftAppliedCall(node, context, visitor);
   }
 }
 
 /**
  * Check if a call expression is a derive() call from commonfabric
  */
-export function isDeriveCall(
+export function isLiftAppliedCall(
   node: ts.CallExpression,
   context: TransformationContext,
 ): boolean {
   const callKind = detectCallKind(node, context.checker);
-  return callKind?.kind === "derive";
+  return callKind?.kind === "lift-applied";
 }
 
 function getFirstParameterCapabilitySummary(
@@ -329,7 +329,7 @@ function rewriteCaptureReferences(
  * Converts: derive(value, (v) => v * multiplier.get())
  * To: derive(inputSchema, resultSchema, {value, multiplier}, ({value: v, multiplier}) => v * multiplier)
  */
-export function transformDeriveCall(
+export function transformLiftAppliedCall(
   deriveCall: ts.CallExpression,
   context: TransformationContext,
   visitor: ts.Visitor,
@@ -337,7 +337,7 @@ export function transformDeriveCall(
   const { factory, checker, options } = context;
 
   // Extract callback
-  const deriveArgs = getDeriveInputAndCallbackArgument(deriveCall, checker);
+  const deriveArgs = getLiftAppliedInputAndCallback(deriveCall, checker);
   if (!deriveArgs) {
     return undefined;
   }
@@ -540,7 +540,7 @@ export function transformDeriveCall(
 
   // Register the type of the call expression itself
   if (options.typeRegistry) {
-    registerDeriveCallType(
+    registerLiftAppliedCallType(
       liftAppliedCall,
       resultTypeNode,
       resultType,

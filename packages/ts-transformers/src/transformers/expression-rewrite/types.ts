@@ -6,7 +6,7 @@ import { TransformationContext } from "../../core/mod.ts";
 import type { ExpressionContainerKind } from "../expression-site-types.ts";
 
 export type OpaqueRefHelperName =
-  | "derive"
+  | "lift"
   | "ifElse"
   | "when"
   | "unless"
@@ -30,9 +30,16 @@ export interface RewriteParams {
    */
   readonly inSafeContext?: boolean;
   /**
-   * When true, reactive compute wrappers introduced during rewriting should be
-   * emitted directly as derive() calls rather than computed() calls. This is
-   * needed for post-closure lowering passes that run after LiftLoweringTransformer.
+   * When true, reactive compute wrappers introduced during rewriting should
+   * be emitted as a lift-applied form bound to its captured inputs
+   * (`__cfHelpers.lift(cb)(inputs)`) rather than a zero-input thunk
+   * (`__cfHelpers.lift(() => expr)({})`). Pre-CT-1615 this flag's name
+   * referred to "derive vs computed" emission shapes; post-Phase-1 both
+   * shapes are forms of lift-applied. The flag still controls whether
+   * captured refs flow through the input object or via lexical closure
+   * (with closures later lifted by ClosureTransformer when possible).
+   * Used by post-closure lowering passes that run after
+   * LiftLoweringTransformer.
    */
   readonly preferDeriveWrappers?: boolean;
 }

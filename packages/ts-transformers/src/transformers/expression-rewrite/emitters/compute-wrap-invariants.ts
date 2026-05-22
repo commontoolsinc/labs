@@ -40,7 +40,7 @@ function isHelperRewriteBoundary(
   const callKind = detectCallKind(node, context.checker);
   return (
     callKind?.kind === "array-method" ||
-    callKind?.kind === "derive" ||
+    callKind?.kind === "lift-applied" ||
     callKind?.kind === "builder" ||
     callKind?.kind === "ifElse" ||
     callKind?.kind === "when" ||
@@ -57,7 +57,7 @@ function isOwnedPatternBoundary(
   const callKind = detectCallKind(node, context.checker);
   return (
     callKind?.kind === "array-method" ||
-    callKind?.kind === "derive" ||
+    callKind?.kind === "lift-applied" ||
     callKind?.kind === "builder"
   );
 }

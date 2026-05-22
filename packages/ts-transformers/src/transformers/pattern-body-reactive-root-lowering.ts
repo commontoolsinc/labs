@@ -1,6 +1,6 @@
 import ts from "typescript";
 import {
-  getDeriveInputAndCallbackArgument,
+  getLiftAppliedInputAndCallback,
   getTypeAtLocationWithFallback,
   isWildcardTraversalCall,
   type NormalizedDataFlow,
@@ -944,7 +944,7 @@ function rewriteNestedDeriveCallbackBodies(
 
     if (!ts.isCallExpression(visited)) return visited;
 
-    const deriveArgs = getDeriveInputAndCallbackArgument(
+    const deriveArgs = getLiftAppliedInputAndCallback(
       visited,
       context.checker,
     );

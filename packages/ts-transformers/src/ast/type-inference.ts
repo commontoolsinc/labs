@@ -708,20 +708,20 @@ export function getTypeFromTypeNodeWithFallback(
 }
 
 /**
- * Register the result type for a synthetic derive CallExpression.
+ * Register the result type for a synthetic lift-applied CallExpression.
  *
  * This is needed because synthetic nodes created by transformers don't have
  * type information from the TypeChecker. We need to explicitly register the
  * type so that later transformations can infer types correctly.
  *
- * @param deriveCall The synthetic derive CallExpression to register type for
- * @param resultTypeNode The TypeNode representing the derive's result type
+ * @param liftAppliedCall The synthetic lift-applied CallExpression to register type for
+ * @param resultTypeNode The TypeNode representing the call's result type
  * @param resultType Optional pre-computed Type object for the result
  * @param checker TypeChecker instance
  * @param typeRegistry The type registry to update
  */
-export function registerDeriveCallType(
-  deriveCall: ts.CallExpression,
+export function registerLiftAppliedCallType(
+  liftAppliedCall: ts.CallExpression,
   resultTypeNode: ts.TypeNode | undefined,
   resultType: ts.Type | undefined,
   checker: ts.TypeChecker,
@@ -739,7 +739,7 @@ export function registerDeriveCallType(
   }
 
   if (typeToRegister) {
-    registerSyntheticCallType(deriveCall, typeToRegister, typeRegistry);
+    registerSyntheticCallType(liftAppliedCall, typeToRegister, typeRegistry);
   }
 }
 

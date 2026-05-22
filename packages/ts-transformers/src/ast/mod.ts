@@ -19,7 +19,7 @@ export {
   detectNewExpressionKind,
   FUNCTION_HARDENING_HELPER_PREFIX,
   getCapabilitySummaryCallbackArgument,
-  getDeriveInputAndCallbackArgument,
+  getLiftAppliedInputAndCallback,
   getLoweredArrayMethodName,
   getPatternBuilderCallbackArgument,
   hasReactiveCollectionProvenance,
