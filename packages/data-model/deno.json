@@ -28,9 +28,6 @@
     "./BaseReconstructionContext": "./src/BaseReconstructionContext.ts",
     "./deep-freeze": "./src/deep-freeze.ts",
     "./EmptyReconstructionContext": "./src/EmptyReconstructionContext.ts",
-    "./ExplicitTagValue": "./src/fabric-instances/ExplicitTagValue.ts",
-    "./FabricBytes": "./src/fabric-primitives/FabricBytes.ts",
-    "./FabricHash": "./src/fabric-primitives/FabricHash.ts",
     "./fabric-instances": "./src/fabric-instances/index.ts",
     "./fabric-native-instances": "./src/fabric-native-instances.ts",
     "./fabric-primitives": "./src/fabric-primitives/index.ts",
@@ -45,10 +42,8 @@
     "./JsonEncodingContext": "./src/JsonEncodingContext.ts",
     "./json-type-handlers": "./src/json-type-handlers.ts",
     "./native-type-tags": "./src/native-type-tags.ts",
-    "./ProblematicValue": "./src/fabric-instances/ProblematicValue.ts",
     "./schema-hash": "./src/schema-hash.ts",
     "./schema-utils": "./src/schema-utils.ts",
-    "./UnknownValue": "./src/fabric-instances/UnknownValue.ts",
     "./value-debug": "./src/value-debug.ts",
     "./value-hash": "./src/value-hash.ts"
   }

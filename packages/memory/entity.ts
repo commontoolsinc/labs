@@ -1,5 +1,5 @@
 import { hashOf } from "@commonfabric/data-model/value-hash";
-import { FabricHash } from "@commonfabric/data-model/FabricHash";
+import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 
 export interface Entity<T extends null | NonNullable<unknown>> {

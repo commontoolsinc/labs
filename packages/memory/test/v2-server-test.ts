@@ -1,6 +1,6 @@
 import { assertEquals, assertExists } from "@std/assert";
 import { FakeTime } from "@std/testing/time";
-import { FabricBytes } from "@commonfabric/data-model/FabricBytes";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import {
   getDataModelConfig,
   resetDataModelConfig,

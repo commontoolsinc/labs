@@ -6,7 +6,7 @@ import memory from "@/routes/storage/memory/memory.index.ts";
 import { memoryServer } from "@/routes/storage/memory.ts";
 import env from "@/env.ts";
 import { Identity } from "@commonfabric/identity";
-import { FabricBytes } from "@commonfabric/data-model/FabricBytes";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { JsonEncodingContext } from "@commonfabric/data-model/JsonEncodingContext";
 import { encodeMemoryBoundary } from "@commonfabric/memory/v2";
