@@ -1,9 +1,9 @@
 import { describe, it } from "@std/testing/bdd";
 import { assert } from "@std/assert";
 import { expect } from "@std/expect";
-import { FabricHash } from "../FabricHash.ts";
-import { SchemaAndHash } from "../SchemaAndHash.ts";
-import { toDeepFrozenSchema } from "../schema-utils.ts";
+import { FabricHash } from "../src/FabricHash.ts";
+import { SchemaAndHash } from "../src/SchemaAndHash.ts";
+import { toDeepFrozenSchema } from "../src/schema-utils.ts";
 
 // Two distinct non-empty byte arrays so tests can observe variance.
 const HASH_A = new FabricHash(

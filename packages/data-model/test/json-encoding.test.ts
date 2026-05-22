@@ -5,10 +5,10 @@ import {
   plainObjectFromJson,
   seemsLikeJsonEncodedFabricValue,
   valueFromJson,
-} from "../json-encoding.ts";
-import { FabricError } from "../fabric-native-instances.ts";
-import type { FabricValue } from "../fabric-value.ts";
-import { BaseReconstructionContext } from "../BaseReconstructionContext.ts";
+} from "../src/json-encoding.ts";
+import { FabricError } from "../src/fabric-native-instances.ts";
+import type { FabricValue } from "../src/fabric-value.ts";
+import { BaseReconstructionContext } from "../src/BaseReconstructionContext.ts";
 
 /** Mock runtime for deserialization calls. */
 class MockRuntime extends BaseReconstructionContext {

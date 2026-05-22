@@ -6,7 +6,7 @@
  * 2. Large numbers that require the numeric comparison path
  */
 
-import { isArrayIndexPropertyName } from "../fabric-value.ts";
+import { isArrayIndexPropertyName } from "../src/fabric-value.ts";
 
 // Pre-generate test data to avoid allocation during benchmarks
 

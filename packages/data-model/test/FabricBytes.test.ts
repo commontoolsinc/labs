@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { FabricInstance, FabricPrimitive } from "../interface.ts";
-import { FabricBytes } from "../FabricBytes.ts";
+import { FabricInstance, FabricPrimitive } from "../src/interface.ts";
+import { FabricBytes } from "../src/FabricBytes.ts";
 
 describe("FabricBytes", () => {
   it("extends FabricPrimitive (not FabricInstance)", () => {

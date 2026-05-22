@@ -8,7 +8,7 @@ import type {
   JSONSchemaTypes,
   SchemaPathSelector,
 } from "@commonfabric/api";
-import { deepFreeze, isDeepFrozen } from "../deep-freeze.ts";
+import { deepFreeze, isDeepFrozen } from "../src/deep-freeze.ts";
 import {
   cloneSchemaMutable,
   emptySchemaObject,
@@ -19,8 +19,8 @@ import {
   schemaWithoutProperties,
   schemaWithProperties,
   toDeepFrozenSchema,
-} from "../schema-utils.ts";
-import { internSchema, isInternedSchema } from "../schema-hash.ts";
+} from "../src/schema-utils.ts";
+import { internSchema, isInternedSchema } from "../src/schema-hash.ts";
 
 describe("toDeepFrozenSchema", () => {
   describe("boolean schemas", () => {

@@ -1,12 +1,12 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { FabricEpochDays, FabricEpochNsec } from "../fabric-epoch.ts";
-import { FabricInstance, FabricPrimitive } from "../interface.ts";
+import { FabricEpochDays, FabricEpochNsec } from "../src/fabric-epoch.ts";
+import { FabricInstance, FabricPrimitive } from "../src/interface.ts";
 import {
   resetDataModelConfig,
   setDataModelConfig,
   shallowFabricFromNativeValue,
-} from "../fabric-value.ts";
+} from "../src/fabric-value.ts";
 
 describe("FabricEpochNsec", () => {
   it("wraps a bigint value", () => {
