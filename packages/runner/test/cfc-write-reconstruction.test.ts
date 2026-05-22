@@ -48,6 +48,29 @@ const target = (path: readonly string[]) => ({
   path,
 });
 
+// Counts the object/array nodes present in both trees but NOT shared by
+// reference (i.e. that were copied). Used to make a "lost the shared
+// structure" failure loud and quantified.
+const countUnsharedNodes = (orig: unknown, copy: unknown): number => {
+  if (orig === copy) return 0; // shared subtree -- stop descending
+  if (
+    orig === null || typeof orig !== "object" ||
+    copy === null || typeof copy !== "object"
+  ) {
+    return 0; // primitives aren't "copies"
+  }
+  let n = 1; // this container differs by reference
+  if (Array.isArray(orig) && Array.isArray(copy)) {
+    const len = Math.min(orig.length, copy.length);
+    for (let i = 0; i < len; i++) n += countUnsharedNodes(orig[i], copy[i]);
+  } else {
+    const o = orig as Record<string, unknown>;
+    const c = copy as Record<string, unknown>;
+    for (const k of Object.keys(o)) n += countUnsharedNodes(o[k], c[k]);
+  }
+  return n;
+};
+
 Deno.test("writeDetailValueForTarget: coarse whole-object write reconstructs as-is", () => {
   const tx = txWith([
     detail(["value"], { origin: "imported", body: "allowed" }),
@@ -190,8 +213,17 @@ Deno.test("writeDetailValueForTarget: composition preserves large off-spine subt
   assertEquals(result.status, "published");
   // The top-level container is a fresh thawed copy (its spine changed)...
   assertStrictEquals(result === base, false);
-  // ...but the large off-spine subtree is preserved BY REFERENCE -- not
-  // deep-copied. Under the pre-COW full-clone reconstruction this assertion
-  // would fail (it allocated a distinct deep copy of the whole array).
-  assertStrictEquals(result.items, base.items);
+  // ...but the large off-spine subtree MUST be preserved by reference -- not
+  // deep-copied. If it isn't (e.g. a regression back to a full-clone
+  // reconstruction), fail loudly with the damage quantified.
+  if (result.items !== base.items) {
+    const copies = countUnsharedNodes(base.items, result.items);
+    const mb = (JSON.stringify(result.items).length / (1024 * 1024)).toFixed(1);
+    throw new Error(
+      `Failed to maintain large shared structure: reconstruction created ` +
+        `${copies.toLocaleString()} separate copies using ~${mb} unnecessary ` +
+        `megabytes. Off-spine subtrees must be preserved by reference (use ` +
+        `copy-on-write spine-thawing, not a full deep clone).`,
+    );
+  }
 });
