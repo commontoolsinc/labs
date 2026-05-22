@@ -536,6 +536,122 @@ Deno.test("memory v2 query includes metadata links without traversing their valu
   }
 });
 
+Deno.test("memory v2 query refresh follows changed metadata links", async () => {
+  const { engine, path } = await createEngine();
+  const space = "did:key:z6Mk-memory-v2-query-meta-link-refresh";
+  const rootPiece = "of:root-piece";
+  const argumentA = "of:argument-a";
+  const argumentB = "of:argument-b";
+  const argumentSchema = {
+    type: "object",
+    properties: {
+      label: { type: "string" },
+    },
+    required: ["label"],
+  };
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: argumentA,
+          value: { value: { label: "first argument" } },
+        }, {
+          op: "set",
+          id: rootPiece,
+          value: {
+            value: { title: "root" },
+            argument: {
+              "/": {
+                "link@1": {
+                  id: argumentA,
+                  path: [],
+                  schema: argumentSchema,
+                },
+              },
+            },
+          },
+        }],
+      },
+    });
+
+    const tracked = trackGraph(space, engine, {
+      roots: [{
+        id: rootPiece,
+        selector: {
+          path: [],
+          schema: false,
+        },
+      }],
+    });
+
+    applyCommit(engine, {
+      sessionId: "session:writer",
+      invocation: invocationFor(2),
+      authorization,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: argumentB,
+          value: { value: { label: "second argument" } },
+        }, {
+          op: "set",
+          id: rootPiece,
+          value: {
+            value: { title: "root" },
+            argument: {
+              "/": {
+                "link@1": {
+                  id: argumentB,
+                  path: [],
+                  schema: argumentSchema,
+                },
+              },
+            },
+          },
+        }],
+      },
+    });
+
+    const refreshed = refreshTrackedGraph(
+      space,
+      engine,
+      tracked.state,
+      new Set([toDirtyKey(rootPiece)]),
+    );
+    assertExists(refreshed);
+    assertEquals(
+      [...refreshed.updates.values()].map((entity) => entity.id).sort(),
+      [argumentB, rootPiece],
+    );
+
+    const fresh = queryGraph(space, engine, {
+      roots: [{
+        id: rootPiece,
+        selector: {
+          path: [],
+          schema: false,
+        },
+      }],
+    });
+    assertEquals(fresh.entities.map((entity) => entity.id), [
+      argumentB,
+      rootPiece,
+    ]);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 query reuses a persistent manager cache for shared source growth", async () => {
   const { engine, path } = await createEngine();
   const space = "did:key:z6Mk-memory-v2-query-manager-growth";

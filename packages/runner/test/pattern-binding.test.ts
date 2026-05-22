@@ -316,6 +316,63 @@ describe("pattern-binding", () => {
       ).toBe(true);
     });
 
+    it("uses the argument link schema when converting aliases", () => {
+      const profileSchema = {
+        type: "object",
+        scope: "user",
+        default: { name: "Ada" },
+        ifc: { confidentiality: ["profile"] },
+        properties: {
+          name: { type: "string" },
+        },
+        required: ["name"],
+      } as const;
+      const argumentSchema = {
+        type: "object",
+        properties: {
+          profile: profileSchema,
+        },
+        required: ["profile"],
+      } as const;
+      const binding = {
+        profile: { $alias: { cell: "argument", path: ["profile"] } },
+      };
+      const resultCell = runtime.getCell(
+        space,
+        "schema fallback result cell",
+        undefined,
+        tx,
+      );
+      const argumentCell = runtime.getCell(
+        space,
+        "schema fallback argument cell",
+        argumentSchema,
+        tx,
+      );
+      const internalCell = runtime.getCell(
+        space,
+        "schema fallback internal cell",
+        undefined,
+        tx,
+      );
+
+      const result = unwrapOneLevelAndBindtoDoc(
+        runtime.cfc,
+        binding,
+        argumentCell.getAsNormalizedFullLink(),
+        internalCell.getAsNormalizedFullLink(),
+        resultCell.getAsNormalizedFullLink(),
+      ) as { profile: unknown };
+
+      expect(parseLink(result.profile, resultCell)).toEqual({
+        ...argumentCell.getAsNormalizedFullLink(),
+        path: ["profile"],
+        scope: "user",
+        schema: profileSchema,
+        overwrite: "redirect",
+      });
+    });
+
     it("serializes returned local pattern cells as aliases", () => {
       const frame = pushFrame({
         runtime,

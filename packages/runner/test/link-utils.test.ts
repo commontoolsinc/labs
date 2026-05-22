@@ -634,6 +634,73 @@ describe("link-utils", () => {
 
       expect(result["/"][LINK_V1_TAG].overwrite).toBe("redirect");
     });
+
+    it("should preserve stream cell schemas by default when including schema", () => {
+      const schema = {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          setTitle: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+            },
+            required: ["title"],
+            asCell: ["stream"],
+          },
+        },
+        required: ["title", "setTitle"],
+      } as const satisfies JSONSchema;
+
+      const result = createSigilLinkFromParsedLink({
+        id: "of:stream-schema",
+        path: [],
+        space,
+        schema,
+      }, { includeSchema: true });
+
+      expect(result["/"][LINK_V1_TAG].schema).toEqual(schema);
+    });
+
+    it("should strip stream cell schemas from links when requested", () => {
+      const schema = {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          setTitle: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+            },
+            required: ["title"],
+            asCell: ["stream"],
+          },
+        },
+        required: ["title", "setTitle"],
+      } as const satisfies JSONSchema;
+
+      const result = createSigilLinkFromParsedLink({
+        id: "of:stream-schema",
+        path: [],
+        space,
+        schema,
+      }, { includeSchema: true, keepStreams: false });
+
+      expect(result["/"][LINK_V1_TAG].schema).toEqual({
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          setTitle: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+            },
+            required: ["title"],
+          },
+        },
+        required: ["title"],
+      });
+    });
   });
 
   describe("stripAsCellAndStreamFromSchema", () => {

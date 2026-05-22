@@ -132,6 +132,106 @@ describe("runPattern", () => {
     expect(resultValue).toEqual({ output: 1 });
   });
 
+  it("sets scoped write-redirect metadata links for argument and internal cells", async () => {
+    const argumentSchema = {
+      type: "object",
+      properties: {
+        input: { type: "number" },
+      },
+      required: ["input"],
+    } as const;
+    const internalSchema = {
+      type: "object",
+      properties: {
+        output: { type: "number" },
+      },
+      required: ["output"],
+    } as const;
+    const resultSchema = {
+      type: "object",
+      scope: "user",
+      properties: {
+        output: { type: "number" },
+      },
+      required: ["output"],
+    } as const;
+    const pattern = {
+      argumentSchema,
+      internalSchema,
+      resultSchema,
+      result: { output: { $alias: { cell: "internal", path: ["output"] } } },
+      nodes: [
+        {
+          module: {
+            type: "passthrough",
+          },
+          inputs: { value: { $alias: { cell: "argument", path: ["input"] } } },
+          outputs: {
+            value: { $alias: { cell: "internal", path: ["output"] } },
+          },
+        },
+      ],
+    } as Pattern;
+
+    const resultCell = runtime.getCell(
+      space,
+      "sets scoped write-redirect metadata links",
+      resultSchema,
+      undefined,
+      "user",
+    );
+    const result = runTrusted(
+      runtime,
+      undefined,
+      pattern,
+      { input: 7 },
+      resultCell,
+    );
+
+    await resultCell.pull();
+
+    const resultCellLink = resultCell.getAsNormalizedFullLink();
+    const argumentLink = getMetaLink(resultCell, "argument");
+    const internalLink = getMetaLink(resultCell, "internal");
+
+    expect(resultCellLink.scope).toBe("user");
+    expect(resultCell.getMetaRaw("schema")).toEqual(resultSchema);
+    expect(argumentLink).toBeDefined();
+    expect(internalLink).toBeDefined();
+    expect(argumentLink!.path).toEqual([]);
+    expect(argumentLink!.space).toBe(space);
+    expect(argumentLink!.scope).toBe("user");
+    expect(argumentLink!.schema).toEqual(argumentSchema);
+    expect(argumentLink!.overwrite).toBe("redirect");
+    expect(internalLink!.path).toEqual([]);
+    expect(internalLink!.space).toBe(space);
+    expect(internalLink!.scope).toBe("user");
+    expect(internalLink!.schema).toEqual(internalSchema);
+    expect(internalLink!.overwrite).toBe("redirect");
+
+    const argumentCell = runtime.getCellFromLink(argumentLink!);
+    const internalCell = runtime.getCellFromLink(internalLink!);
+    expect(argumentCell.get()).toEqual({ input: 7 });
+    expect(internalCell.get()).toEqual({ output: 7 });
+    expect(getMetaLink(argumentCell, "result")).toEqual({
+      ...resultCellLink,
+      schema: resultSchema,
+      overwrite: "redirect",
+    });
+    expect(getMetaLink(internalCell, "result")).toEqual({
+      ...resultCellLink,
+      schema: resultSchema,
+      overwrite: "redirect",
+    });
+    expect(parseLink((result.getRaw() as { output: unknown }).output, result))
+      .toEqual({
+        ...internalLink!,
+        path: ["output"],
+        schema: { type: "number" },
+        overwrite: "redirect",
+      });
+  });
+
   it("should work with nested patterns", async () => {
     const innerPattern = {
       argumentSchema: {

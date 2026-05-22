@@ -22,7 +22,11 @@ import {
   JSONSchema,
   type Pattern,
 } from "../src/builder/types.ts";
-import { getMetaLink, isPrimitiveCellLink } from "../src/link-utils.ts";
+import {
+  getMetaLink,
+  isPrimitiveCellLink,
+  parseLink,
+} from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import {
   type IExtendedStorageTransaction,
@@ -638,6 +642,49 @@ describe("Cell", () => {
     expect(cell.getRaw()).toEqual({ x: 1, y: 2 });
   });
 
+  it("should let getRaw control whether the final link is followed", () => {
+    const source = runtime.getCell<{ value: number }>(
+      space,
+      "getRaw lastNode source",
+      undefined,
+      tx,
+    );
+    source.set({ value: 42 });
+
+    const regularLink = runtime.getCell<unknown>(
+      space,
+      "getRaw lastNode regular link",
+      undefined,
+      tx,
+    );
+    regularLink.setRaw(source.key("value").getAsLink());
+
+    const writeRedirectLink = runtime.getCell<unknown>(
+      space,
+      "getRaw lastNode write redirect link",
+      undefined,
+      tx,
+    );
+    writeRedirectLink.setRaw(source.key("value").getAsWriteRedirectLink());
+
+    const regularRaw = regularLink.getRaw();
+    expect(parseLink(regularRaw, regularLink)?.id).toBe(
+      source.getAsNormalizedFullLink().id,
+    );
+    expect(regularLink.getRaw({ lastNode: "value" })).toBe(42);
+    expect(
+      parseLink(
+        regularLink.getRaw({ lastNode: "writeRedirect" }),
+        regularLink,
+      )?.id,
+    ).toBe(source.getAsNormalizedFullLink().id);
+
+    expect(parseLink(writeRedirectLink.getRaw(), writeRedirectLink)?.id).toBe(
+      source.getAsNormalizedFullLink().id,
+    );
+    expect(writeRedirectLink.getRaw({ lastNode: "writeRedirect" })).toBe(42);
+  });
+
   it("should set raw value using setRaw", () => {
     const cell = runtime.getCell<{ x: number; y: number }>(
       space,
@@ -739,6 +786,45 @@ describe("Cell", () => {
     // Changing the source cell's value should be reflected
     resultCell.set({ foo: 456 });
     expect(retrievedResult?.get()).toEqual({ foo: 456 });
+  });
+
+  it("should sink metadata field changes", async () => {
+    const cell = runtime.getCell<{ value: number }>(
+      space,
+      "sink meta field changes",
+      undefined,
+      tx,
+    );
+    cell.set({ value: 1 });
+    cell.setMetaRaw("slug", "first");
+    await tx.commit();
+    tx = runtime.edit();
+
+    const seen: unknown[] = [];
+    const cleaned: unknown[] = [];
+    const cancel = cell.withTx(tx).sinkMeta("slug", (value) => {
+      seen.push(value);
+      return () => cleaned.push(value);
+    });
+    await runtime.idle();
+    expect(seen).toEqual(["first"]);
+
+    const metaTx = runtime.edit();
+    cell.withTx(metaTx).setMetaRaw("slug", "second");
+    await metaTx.commit();
+    await runtime.idle();
+
+    expect(seen).toEqual(["first", "second"]);
+    expect(cleaned).toEqual(["first"]);
+
+    const valueTx = runtime.edit();
+    cell.withTx(valueTx).set({ value: 2 });
+    await valueTx.commit();
+    await runtime.idle();
+
+    expect(seen).toEqual(["first", "second"]);
+    cancel();
+    expect(cleaned).toEqual(["first", "second"]);
   });
 
   it("should update pattern output when argument is changed via getArgumentCell", async () => {
