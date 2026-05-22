@@ -134,6 +134,12 @@ Deno.test("mutating callbacks reject disconnected writes before optimistic mutat
   const source = await Deno.readTextFile(new URL("./mod.ts", import.meta.url));
   const mutationGuards = [
     [
+      "open callback",
+      'logOp("open"',
+      "if (failIfDisconnectedWrite(req)) return;",
+      "const fh = handles.open(",
+    ],
+    [
       "write callback",
       'logOp("write"',
       "const errno = disconnectedWriteErrno(bridge);",
@@ -146,6 +152,18 @@ Deno.test("mutating callbacks reject disconnected writes before optimistic mutat
       'if (writeTarget?.kind === "handler")',
     ],
     [
+      "flush callback",
+      'logOp("flush"',
+      "const errno = disconnectedWriteErrno(bridge);",
+      "fuse.symbols.fuse_reply_err(req, 0);\n      console.log(`[write-trace] flush-fire fh=${fh}`);",
+    ],
+    [
+      "release callback",
+      'logOp("release"',
+      "const errno = disconnectedWriteErrno(bridge);",
+      "fuse.symbols.fuse_reply_err(req, 0);\n        let flushPromise",
+    ],
+    [
       "setattr",
       'logOp("setattr"',
       "if ((sizeChange || metadataChange) && failIfDisconnectedWrite(req))",
@@ -156,6 +174,12 @@ Deno.test("mutating callbacks reject disconnected writes before optimistic mutat
       'logOp("setxattr"',
       "if (failIfDisconnectedWrite(req)) return;\n      const name = readCString(namePtr);",
       "cfcWritebacks.setPreparedXattr",
+    ],
+    [
+      "removexattr",
+      'logOp("removexattr"',
+      "if (failIfDisconnectedWrite(req)) return;\n      const name = readCString(namePtr);",
+      "cfcWritebacks.deleteAllForIno",
     ],
     [
       "create",

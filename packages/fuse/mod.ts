@@ -1851,6 +1851,15 @@ export async function main(argv: string[] = Deno.args) {
         return;
       }
 
+      const writeTarget = handle.writeTarget as HandleWriteTarget | undefined;
+      if (writeTarget?.kind !== "ignored") {
+        const errno = disconnectedWriteErrno(bridge);
+        if (errno !== null) {
+          fuse.symbols.fuse_reply_err(req, errno);
+          return;
+        }
+      }
+
       // Reply immediately — the subscription rebuild triggered by writeValue
       // must not run while a FUSE reply is still pending (it invalidates
       // inodes via notify_inval_entry which crashes FUSE-T mid-callback).
@@ -1858,7 +1867,6 @@ export async function main(argv: string[] = Deno.args) {
       console.log(`[write-trace] flush-fire fh=${fh}`);
 
       // Fire-and-forget the actual write to the cell
-      const writeTarget = handle.writeTarget as HandleWriteTarget | undefined;
       const shouldDelay = handle.truncatePending ||
         (writeTarget?.kind === "value" &&
           writeTarget.target.fsProjection === "markdown");
@@ -2080,10 +2088,18 @@ export async function main(argv: string[] = Deno.args) {
       // Reply immediately. Fire-and-forget the write if dirty.
       // Defer handles.close() until after the flush settles so
       // flushHandle can still read handle state (writeTarget, buffer).
-      fuse.symbols.fuse_reply_err(req, 0);
-
       if (handle && handleHasPendingChanges(handle) && bridge) {
         const writeTarget = handle.writeTarget as HandleWriteTarget | undefined;
+        if (writeTarget?.kind !== "ignored") {
+          const errno = disconnectedWriteErrno(bridge);
+          if (errno !== null) {
+            handles.close(fh);
+            fuse.symbols.fuse_reply_err(req, errno);
+            return;
+          }
+        }
+
+        fuse.symbols.fuse_reply_err(req, 0);
         let flushPromise: Promise<unknown> | undefined;
         if (
           handle.truncatePending && !handle.dirty && !handle.flushing
@@ -2110,6 +2126,7 @@ export async function main(argv: string[] = Deno.args) {
           queueMicrotask(() => handles.close(fh));
         }
       } else {
+        fuse.symbols.fuse_reply_err(req, 0);
         handles.close(fh);
       }
     },
