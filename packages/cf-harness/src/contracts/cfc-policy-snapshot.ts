@@ -160,6 +160,9 @@ export const createHarnessCfcPolicySnapshot = (
     profileConfigs: options.subagentProfileConfigs.map((config) => ({
       ...config,
       allowedToolIds: [...config.allowedToolIds],
+      ...(config.nativeModelToolIds !== undefined
+        ? { nativeModelToolIds: [...config.nativeModelToolIds] }
+        : {}),
       returnPolicy: { ...config.returnPolicy },
     })),
   },

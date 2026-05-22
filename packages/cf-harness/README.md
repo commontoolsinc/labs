@@ -54,8 +54,8 @@ What works today:
   the default parent tool surface
 - bounded OpenAI-compatible prompt/tool loop
 - single-child subagent delegation with fresh child prompt context, explicit
-  default/browser/web_fetch child profiles, retained child run references, and a
-  sanitized summary/state return channel
+  default/browser/web_fetch/web_search child profiles, retained child run
+  references, and a sanitized summary/state return channel
 - optional schema-validated subagent structured returns, with raw child return
   artifacts retained in the child run and open-ended strings linkified before
   the parent sees them
@@ -306,6 +306,15 @@ deno task run -- \
   --allow-subagent-profile web_fetch \
   --prompt "Delegate inspection of https://example.com and summarize the result."
 ```
+
+The `web_search` profile is a reserved provider-native search profile. It
+currently establishes the profile contract, child model override, artifact
+manifest fields, and prompt boundary for the Gemini native-search integration.
+Until the gateway native-tool plumbing is implemented, do not rely on this
+profile for production search fulfillment. The intended use is the same CFC
+boundary as browser and web_fetch subagents: the parent delegates a focused
+search task, raw search observations stay in child artifacts, and the parent
+receives only the sanitized subagent return channel.
 
 Programmatic `delegate_task` calls may include `returnSchema`, a JSON Schema
 object or boolean. In that mode the child is required to return a single JSON
