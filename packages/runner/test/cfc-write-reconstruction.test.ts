@@ -1,12 +1,16 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertStrictEquals } from "@std/assert";
 import { writeDetailValueForTarget } from "../src/cfc/prepare.ts";
 import { normalizeCellScope } from "../src/scope.ts";
+import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
+import type {
+  FabricValue,
+  MemorySpace,
+  URI,
+} from "@commonfabric/memory/interface";
 import type {
   IExtendedStorageTransaction,
-  MemorySpace,
   TransactionWriteDetail,
 } from "../src/storage/interface.ts";
-import type { URI } from "@commonfabric/memory/interface";
 
 // `writeDetailValueForTarget` reconstructs "the value this transaction wrote
 // at a path" from the recorded write-details. A value may be recorded either
@@ -43,6 +47,29 @@ const target = (path: readonly string[]) => ({
   scope: SCOPE,
   path,
 });
+
+// Counts the object/array nodes present in both trees but NOT shared by
+// reference (i.e. that were copied). Used to make a "lost the shared
+// structure" failure loud and quantified.
+const countUnsharedNodes = (orig: unknown, copy: unknown): number => {
+  if (orig === copy) return 0; // shared subtree -- stop descending
+  if (
+    orig === null || typeof orig !== "object" ||
+    copy === null || typeof copy !== "object"
+  ) {
+    return 0; // primitives aren't "copies"
+  }
+  let n = 1; // this container differs by reference
+  if (Array.isArray(orig) && Array.isArray(copy)) {
+    const len = Math.min(orig.length, copy.length);
+    for (let i = 0; i < len; i++) n += countUnsharedNodes(orig[i], copy[i]);
+  } else {
+    const o = orig as Record<string, unknown>;
+    const c = copy as Record<string, unknown>;
+    for (const k of Object.keys(o)) n += countUnsharedNodes(o[k], c[k]);
+  }
+  return n;
+};
 
 Deno.test("writeDetailValueForTarget: coarse whole-object write reconstructs as-is", () => {
   const tx = txWith([
@@ -154,4 +181,49 @@ Deno.test("writeDetailValueForTarget: no matching write returns undefined", () =
     ),
     undefined,
   );
+});
+
+Deno.test("writeDetailValueForTarget: composition preserves large off-spine subtrees by reference (no deep copy)", () => {
+  // Deliberately ginormous, synthetic-but-realistic base: a large array of
+  // records plus a small sibling field, deep-frozen (as stored values are).
+  // It's recorded as a coarse base write at the target PLUS a granular write
+  // to the *small* field. Reconstruction must overlay the small field WITHOUT
+  // deep-copying the large array -- under arbitrary user data the base is
+  // unbounded, so a full deep clone here would be an O(size) cost per check.
+  const bigList = Array.from({ length: 50_000 }, (_, i) => ({
+    id: i,
+    body: `message number ${i}`,
+    meta: { seen: false, tags: ["a", "b"] },
+  }));
+  const base = deepFreeze(
+    { items: bigList, status: "draft" } as unknown as FabricValue,
+  ) as unknown as Record<string, unknown>;
+
+  const tx = txWith([
+    detail(["value"], base),
+    detail(["value", "status"], "published"),
+  ]);
+
+  const result = writeDetailValueForTarget(tx, target([]), "value") as Record<
+    string,
+    unknown
+  >;
+
+  // Correctness: the small field is overlaid.
+  assertEquals(result.status, "published");
+  // The top-level container is a fresh thawed copy (its spine changed)...
+  assertStrictEquals(result === base, false);
+  // ...but the large off-spine subtree MUST be preserved by reference -- not
+  // deep-copied. If it isn't (e.g. a regression back to a full-clone
+  // reconstruction), fail loudly with the damage quantified.
+  if (result.items !== base.items) {
+    const copies = countUnsharedNodes(base.items, result.items);
+    const mb = (JSON.stringify(result.items).length / (1024 * 1024)).toFixed(1);
+    throw new Error(
+      `Failed to maintain large shared structure: reconstruction created ` +
+        `${copies.toLocaleString()} separate copies using ~${mb} unnecessary ` +
+        `megabytes. Off-spine subtrees must be preserved by reference (use ` +
+        `copy-on-write spine-thawing, not a full deep clone).`,
+    );
+  }
 });

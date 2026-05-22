@@ -1,7 +1,8 @@
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { emptySchemaObject } from "@commonfabric/data-model/schema-utils";
 import {
-  cloneIfNecessary,
+  cloneForMutation,
+  type CloneForMutationResult,
   isArrayIndexPropertyName,
 } from "@commonfabric/data-model/fabric-value";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
@@ -1021,18 +1022,42 @@ export const writeDetailValueForTarget = (
     return baseValue;
   }
 
-  const baseIsContainer = isRecord(baseValue) || Array.isArray(baseValue);
-  const result: Record<PropertyKey, unknown> | unknown[] = baseIsContainer
-    ? cloneIfNecessary(baseValue as FabricValue, { frozen: false }) as
-      | Record<PropertyKey, unknown>
-      | unknown[]
-    : (descendants.every(({ rel }) => isArrayIndexPropertyName(rel[0]))
-      ? []
-      : {});
-  for (const { rel, value: descendantValue } of descendants) {
-    setValueAtPath(result, rel, descendantValue);
+  if (!(isRecord(baseValue) || Array.isArray(baseValue))) {
+    // Base isn't a container yet deeper writes exist (rare/incoherent): build a
+    // fresh container and overlay onto it (it's freshly mutable -- no COW).
+    const result: Record<PropertyKey, unknown> | unknown[] =
+      descendants.every(({ rel }) => isArrayIndexPropertyName(rel[0]))
+        ? []
+        : {};
+    for (const { rel, value: descendantValue } of descendants) {
+      setValueAtPath(result, rel, descendantValue);
+    }
+    return result as FabricValue;
   }
-  return result as FabricValue;
+
+  // Overlay the deeper field-writes onto the base via copy-on-write
+  // spine-thawing: only the containers along each overlay path are shallow-
+  // copied; large off-spine subtrees are preserved by reference, never
+  // deep-copied. Process shallowest-first so an envelope write at a parent
+  // path lands before writes to its children. `cloneForMutation` defaults to
+  // `force: true`, so the shared (deep-frozen) base is never mutated.
+  const ordered = [...descendants].sort((a, b) => a.rel.length - b.rel.length);
+  let root: FabricValue = baseValue;
+  for (const { rel, value: descendantValue } of ordered) {
+    const leaf = rel[rel.length - 1]!;
+    const thawed: CloneForMutationResult<FabricValue> = cloneForMutation(
+      root,
+      rel.slice(0, -1),
+      { createMissing: true, nextKeyAfterPath: leaf },
+    );
+    setValueAtPath(
+      thawed.pathValue as Record<PropertyKey, unknown> | unknown[],
+      [leaf],
+      descendantValue,
+    );
+    root = thawed.value;
+  }
+  return root;
 };
 
 const writeValueForTarget = (
