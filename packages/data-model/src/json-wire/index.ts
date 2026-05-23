@@ -22,7 +22,7 @@ export type {
 
 // Type handler registry and factory.
 export { TypeHandlerRegistry } from "./TypeHandlerRegistry.ts";
-export { createDefaultRegistry } from "./create-default-registry.ts";
+export { createDefaultRegistry } from "./createDefaultRegistry.ts";
 
 // Built-in type handlers.
 export { UndefinedHandler } from "./UndefinedHandler.ts";

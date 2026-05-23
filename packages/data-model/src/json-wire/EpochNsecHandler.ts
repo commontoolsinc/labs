@@ -14,7 +14,7 @@ import type {
   TypeHandler,
   TypeHandlerCodec,
 } from "./json-wire-types.ts";
-import { makeProblematic } from "./make-problematic.ts";
+import { makeProblematic } from "./makeProblematic.ts";
 
 /**
  * Handler for `FabricEpochNsec`. Serializes to a flat base64 string encoding

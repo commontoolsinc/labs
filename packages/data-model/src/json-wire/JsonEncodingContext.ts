@@ -10,7 +10,7 @@ import { ExplicitTagValue } from "../fabric-instances/ExplicitTagValue.ts";
 import { deepFreeze } from "../deep-freeze.ts";
 import { UnknownValue } from "../fabric-instances/UnknownValue.ts";
 import { ProblematicValue } from "../fabric-instances/ProblematicValue.ts";
-import { createDefaultRegistry } from "./create-default-registry.ts";
+import { createDefaultRegistry } from "./createDefaultRegistry.ts";
 import type { JsonWireValue, TypeHandlerCodec } from "./json-wire-types.ts";
 import type { TypeHandlerRegistry } from "./TypeHandlerRegistry.ts";
 import { FabricError } from "../fabric-instances/FabricError.ts";

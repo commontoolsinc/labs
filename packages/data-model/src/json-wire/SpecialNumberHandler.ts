@@ -5,7 +5,7 @@ import type {
   TypeHandler,
   TypeHandlerCodec,
 } from "./json-wire-types.ts";
-import { makeProblematic } from "./make-problematic.ts";
+import { makeProblematic } from "./makeProblematic.ts";
 
 /**
  * Handler for the four "special" numeric values that JSON cannot represent

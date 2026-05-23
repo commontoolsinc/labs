@@ -5,7 +5,7 @@ import type {
   TypeHandler,
   TypeHandlerCodec,
 } from "./json-wire-types.ts";
-import { makeProblematic } from "./make-problematic.ts";
+import { makeProblematic } from "./makeProblematic.ts";
 
 /**
  * Handler for registry-interned symbols. Serializes the registry key as a

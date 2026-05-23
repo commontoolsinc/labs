@@ -13,7 +13,7 @@ import type {
   TypeHandler,
   TypeHandlerCodec,
 } from "./json-wire-types.ts";
-import { makeProblematic } from "./make-problematic.ts";
+import { makeProblematic } from "./makeProblematic.ts";
 
 /**
  * Handler for `bigint`. Serializes to `TAGS.BigInt` tag with an unpadded

@@ -10,7 +10,7 @@ import type {
   TypeHandler,
   TypeHandlerCodec,
 } from "./json-wire-types.ts";
-import { makeProblematic } from "./make-problematic.ts";
+import { makeProblematic } from "./makeProblematic.ts";
 
 /**
  * Handler for `FabricBytes`. Serializes to a flat base64url string
