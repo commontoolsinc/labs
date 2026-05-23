@@ -5,7 +5,7 @@ import {
   plainObjectFromJson,
   seemsLikeJsonEncodedFabricValue,
   valueFromJson,
-} from "../src/json-encoding.ts";
+} from "../src/json-wire/json-encoding.ts";
 import { FabricError } from "../src/fabric-instances/FabricError.ts";
 import type { FabricValue } from "../src/fabric-value.ts";
 import { BaseReconstructionContext } from "../src/BaseReconstructionContext.ts";

@@ -11,7 +11,7 @@ import {
 import {
   jsonFromValue,
   valueFromJson,
-} from "@commonfabric/data-model/json-encoding";
+} from "@commonfabric/data-model/json-wire";
 import { FabricEpochNsec } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
 import type { FabricValue, MIME, URI } from "@commonfabric/memory/interface";
