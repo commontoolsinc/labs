@@ -2050,6 +2050,90 @@ Deno.test("CellBridge.subscribePiece clears stale FS root entries when result sw
   if (subs) { for (const cancel of subs) cancel(); }
 });
 
+Deno.test("CellBridge hydrates and writes back markdown FS projection scalars", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
+  const state = buildTestSpace(bridge, "home", []);
+  const writes: Array<{ path: (string | number)[]; value: unknown }> = [];
+  const resultValue = {
+    $FS: {
+      type: "text/markdown",
+      content: "Hello body",
+      frontmatter: {
+        entityId: "user-supplied-entity",
+        title: "Hello",
+        count: 7,
+        published: false,
+        tags: ["alpha", "beta"],
+        meta: { pinned: true },
+      },
+    },
+  };
+  const inputCell = new SinkableCell({});
+  const resultCell = new SinkableCell(resultValue);
+
+  const piece = {
+    id: "of:fs-roundtrip",
+    name: () => "FS Roundtrip",
+    getPatternMeta: () => Promise.resolve({ patternName: "note" }),
+    input: {
+      getCell: () => Promise.resolve(inputCell as unknown as FakeCell),
+      get: () => Promise.resolve(inputCell.get()),
+    },
+    result: {
+      getCell: () => Promise.resolve(resultCell as unknown as FakeCell),
+      get: (path?: (string | number)[]) => {
+        if (path?.join("/") === "$FS/frontmatter") {
+          return Promise.resolve(resultValue.$FS.frontmatter);
+        }
+        return Promise.resolve(resultCell.get());
+      },
+      set: (value: unknown, path?: (string | number)[]) => {
+        writes.push({ path: path ?? [], value });
+        return Promise.resolve();
+      },
+    },
+  };
+
+  const addPiece = (bridge as unknown as { addPieceToSpace: AddPieceToSpace })
+    .addPieceToSpace.bind(bridge);
+  await addPiece(state, piece, "home");
+
+  const pieceIno = tree.lookup(state.piecesIno, "FS-Roundtrip")!;
+  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
+    .hydratePieceProp.call(bridge, pieceIno, "result");
+
+  const index = getFileContent(tree, pieceIno, "index.md");
+  assertEquals(
+    index,
+    "---\nentityId: of:fs-roundtrip\ntitle: Hello\ncount: 7\npublished: false\n---\n\nHello body",
+  );
+  const tagsIno = tree.lookup(pieceIno, "tags")!;
+  assertEquals(getFileContent(tree, tagsIno, "0"), "alpha");
+  assertEquals(getFileContent(tree, tagsIno, "1"), "beta");
+  const metaIno = tree.lookup(pieceIno, "meta")!;
+  assertEquals(getFileContent(tree, metaIno, "pinned"), "true");
+
+  const ok = await (bridge as unknown as { writeFsFile: WriteFsFile })
+    .writeFsFile(
+      {
+        fsProjection: "markdown",
+        piece: piece as unknown as WritePath["piece"],
+      },
+      "---\nentityId: attacker\ntitle: Updated\ncount: 8\npublished: true\n---\n\nUpdated body",
+    );
+
+  assertEquals(ok, true);
+  assertEquals(writes, [
+    { path: ["$FS", "frontmatter", "title"], value: "Updated" },
+    { path: ["$FS", "frontmatter", "count"], value: 8 },
+    { path: ["$FS", "frontmatter", "published"], value: true },
+    { path: ["$FS", "frontmatter", "tags"], value: undefined },
+    { path: ["$FS", "frontmatter", "meta"], value: undefined },
+    { path: ["$FS", "content"], value: "Updated body" },
+  ]);
+});
+
 Deno.test({
   name: "CellBridge.status tracks debounced rebuild metrics",
   sanitizeOps: false,
