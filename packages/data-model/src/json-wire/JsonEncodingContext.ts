@@ -5,22 +5,19 @@ import {
   RECONSTRUCT,
   type ReconstructionContext,
   type SerializationContext,
-} from "./interface.ts";
-import { ExplicitTagValue } from "./fabric-instances/ExplicitTagValue.ts";
-import { deepFreeze } from "./deep-freeze.ts";
-import { UnknownValue } from "./fabric-instances/UnknownValue.ts";
-import { ProblematicValue } from "./fabric-instances/ProblematicValue.ts";
-import {
-  createDefaultRegistry,
-  type JsonWireValue,
-  type TypeHandlerCodec,
-  type TypeHandlerRegistry,
-} from "./json-type-handlers.ts";
-import { FabricError } from "./fabric-instances/FabricError.ts";
-import { FabricMap } from "./fabric-instances/FabricMap.ts";
-import { FabricRegExp } from "./fabric-instances/FabricRegExp.ts";
-import { FabricSet } from "./fabric-instances/FabricSet.ts";
-import { TAGS } from "./fabric-type-tags.ts";
+} from "../interface.ts";
+import { ExplicitTagValue } from "../fabric-instances/ExplicitTagValue.ts";
+import { deepFreeze } from "../deep-freeze.ts";
+import { UnknownValue } from "../fabric-instances/UnknownValue.ts";
+import { ProblematicValue } from "../fabric-instances/ProblematicValue.ts";
+import { createDefaultRegistry } from "./createDefaultRegistry.ts";
+import type { JsonWireValue, TypeHandlerCodec } from "./interface.ts";
+import type { TypeHandlerRegistry } from "./TypeHandlerRegistry.ts";
+import { FabricError } from "../fabric-instances/FabricError.ts";
+import { FabricMap } from "../fabric-instances/FabricMap.ts";
+import { FabricRegExp } from "../fabric-instances/FabricRegExp.ts";
+import { FabricSet } from "../fabric-instances/FabricSet.ts";
+import { TAGS } from "../fabric-type-tags.ts";
 import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 
 /**

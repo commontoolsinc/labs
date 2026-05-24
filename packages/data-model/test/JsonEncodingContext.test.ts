@@ -1,8 +1,8 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { JsonEncodingContext } from "../src/JsonEncodingContext.ts";
+import { JsonEncodingContext } from "../src/json-wire/JsonEncodingContext.ts";
 import type { FabricValue } from "../src/interface.ts";
-import type { JsonWireValue } from "../src/json-type-handlers.ts";
+import type { JsonWireValue } from "../src/json-wire/interface.ts";
 import { UnknownValue } from "../src/fabric-instances/UnknownValue.ts";
 import { ProblematicValue } from "../src/fabric-instances/ProblematicValue.ts";
 import { FabricEpochDays } from "../src/fabric-primitives/FabricEpochDays.ts";
