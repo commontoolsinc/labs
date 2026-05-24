@@ -601,7 +601,14 @@ export class XLoginView extends BaseView {
       <div class="method-list">
         ${this.availableMethods.map((method) =>
           html`
-            <x-button @click="${() => this.handleMethodSelect(method)}">
+            <x-button
+              test-id="${method === AUTH_METHOD_PASSKEY
+                ? "use-passkey"
+                : method === AUTH_METHOD_PASSPHRASE
+                ? "use-passphrase"
+                : "import-cli-key"}"
+              @click="${() => this.handleMethodSelect(method)}"
+            >
               ${method === AUTH_METHOD_PASSKEY
                 ? "🔑 Use Passkey"
                 : method === AUTH_METHOD_PASSPHRASE
@@ -625,7 +632,7 @@ export class XLoginView extends BaseView {
     if (method === AUTH_METHOD_KEYFILE) {
       return;
     }
-    if (this.flow === "register") {
+    if (this.flow === "register" && method === AUTH_METHOD_PASSKEY) {
       this.handleRegister();
     } else if (this.flow === "login" && method === AUTH_METHOD_PASSKEY) {
       this.handleLogin();
