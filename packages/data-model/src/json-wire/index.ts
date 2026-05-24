@@ -18,7 +18,7 @@ export type {
   JsonWireValue,
   TypeHandler,
   TypeHandlerCodec,
-} from "./json-wire-types.ts";
+} from "./interface.ts";
 
 // Type handler registry and factory.
 export { TypeHandlerRegistry } from "./TypeHandlerRegistry.ts";

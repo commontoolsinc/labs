@@ -13,7 +13,7 @@ import type {
   JsonWireValue,
   TypeHandler,
   TypeHandlerCodec,
-} from "./json-wire-types.ts";
+} from "./interface.ts";
 import { makeProblematic } from "./makeProblematic.ts";
 
 /**

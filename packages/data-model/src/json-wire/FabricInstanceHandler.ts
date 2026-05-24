@@ -9,7 +9,7 @@ import type {
   JsonWireValue,
   TypeHandler,
   TypeHandlerCodec,
-} from "./json-wire-types.ts";
+} from "./interface.ts";
 
 /**
  * Handler for `FabricInstance` values (custom protocol types, including

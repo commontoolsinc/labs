@@ -4,7 +4,7 @@ import type {
   JsonWireValue,
   TypeHandler,
   TypeHandlerCodec,
-} from "./json-wire-types.ts";
+} from "./interface.ts";
 
 /**
  * Handler for `undefined`. Serializes to `TAGS.Undefined` tag with `null`

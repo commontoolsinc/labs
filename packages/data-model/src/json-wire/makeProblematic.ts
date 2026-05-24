@@ -1,6 +1,6 @@
 import type { FabricValue } from "../interface.ts";
 import { ProblematicValue } from "../fabric-instances/ProblematicValue.ts";
-import type { JsonWireValue } from "./json-wire-types.ts";
+import type { JsonWireValue } from "./interface.ts";
 
 // ---------------------------------------------------------------------------
 // Utility: `ProblematicValue` factory

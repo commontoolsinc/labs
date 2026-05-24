@@ -1,5 +1,5 @@
 import type { FabricValue } from "../interface.ts";
-import type { TypeHandler } from "./json-wire-types.ts";
+import type { TypeHandler } from "./interface.ts";
 
 /**
  * Registry of type handlers. Provides tag-based lookup for deserialization
