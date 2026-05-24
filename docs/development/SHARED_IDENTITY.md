@@ -77,10 +77,71 @@ settings, favorites, and session-scoped state are expected to differ too.
 
 ## Agent Browser Workflow
 
-Agents should use the same browser profile after the key has been imported, or
-repeat the `Import CLI Key` step in the profile they control. Avoid creating a
-fresh browser identity during debugging unless the test explicitly needs a
-second user.
+Agents should import the same key into the browser session they control before
+testing identity-sensitive behavior:
+
+```bash
+agent-browser --session cf-shared open http://localhost:8000/<space>/<piece>
+agent-browser --session cf-shared snapshot -i
+# Click Login, then Import CLI Key.
+agent-browser --session cf-shared upload @<choose-file-ref> "$CF_IDENTITY"
+agent-browser --session cf-shared click @<import-key-ref>
+agent-browser --session cf-shared console
+```
+
+Check the console for:
+
+```text
+[Identity] User DID: did:key:...
+```
+
+That DID must match:
+
+```bash
+deno run -A packages/cli/mod.ts id did "$CF_IDENTITY"
+```
+
+Use distinct `agent-browser --session` names when comparing identities. Do not
+infer the active identity from the session name, browser URL, or the key you
+intended to upload; verify the `shell.identity` log every time. Reusing a browser
+session can also reuse stored credentials, so a stale session can silently test
+the wrong user.
+
+Avoid creating a fresh browser identity during debugging unless the test
+explicitly needs a second user.
+
+## Visibility Model
+
+Different identities do not hide an entire piece in the same space. They change
+which scoped instances are addressed.
+
+Expected results when the CLI and browser use different DIDs:
+
+| Data kind | Different identity result |
+| --- | --- |
+| Unscoped or `PerSpace<T>` | Visible in the same space |
+| `PerUser<T>` | Resolves to that user's own value, often default or missing |
+| `PerSession<T>` | Resolves to that user's current session value, often default or missing |
+| Home space data | Different, because home space DID equals user DID |
+
+If the whole piece fails to load, do not blame identity mismatch first. Check the
+space, slug or piece id, local server state, source errors, and authorization
+path. If only personal fields, drafts, favorites, selected tabs, or home-space
+settings look empty, check the active DID first.
+
+## Scoped Visibility Smoke Test
+
+Use this shape when a report says "the data disappeared":
+
+1. Deploy or open a piece with unscoped or `PerSpace<T>` data and verify both
+   identities can see it.
+2. Write a `PerUser<T>` field as identity A.
+3. Open the same piece as identity A and confirm the value is present.
+4. Open the same piece as identity B and confirm shared data remains visible,
+   but the `PerUser<T>` field is default or missing.
+
+This proves the runtime is resolving scoped instances correctly and prevents
+debugging a deliberate scope boundary as a storage loss.
 
 ## Scope Expectations
 
