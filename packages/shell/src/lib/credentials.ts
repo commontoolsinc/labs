@@ -28,21 +28,21 @@ export function clearStoredCredential(): void {
 export function createPasskeyCredential(id: string): StoredCredential {
   return {
     id,
-    method: "passkey",
+    method: AUTH_METHOD_PASSKEY,
   };
 }
 
 export function createPassphraseCredential(): StoredCredential {
   return {
     id: crypto.randomUUID(),
-    method: "passphrase",
+    method: AUTH_METHOD_PASSPHRASE,
   };
 }
 
 export function createKeyFileCredential(did: string): StoredCredential {
   return {
     id: did,
-    method: "keyfile",
+    method: AUTH_METHOD_KEYFILE,
   };
 }
 
