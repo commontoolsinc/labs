@@ -2,6 +2,11 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { FabricEpochNsec } from "../../src/fabric-primitives/FabricEpochNsec.ts";
 import { FabricInstance, FabricPrimitive } from "../../src/interface.ts";
+import {
+  resetDataModelConfig,
+  setDataModelConfig,
+  shallowFabricFromNativeValue,
+} from "../../src/fabric-value.ts";
 
 describe("FabricEpochNsec", () => {
   it("wraps a bigint value", () => {
@@ -44,6 +49,19 @@ describe("FabricEpochNsec", () => {
     it("is NOT a FabricInstance (no DECONSTRUCT)", () => {
       const sn = new FabricEpochNsec(0n);
       expect(sn instanceof FabricInstance).toBe(false);
+    });
+  });
+
+  describe("fabric-value integration", () => {
+    it("passes through shallowFabricFromNativeValue unchanged even with freeze=false", () => {
+      setDataModelConfig(true);
+      try {
+        const nsec = new FabricEpochNsec(123n);
+        // freeze=false should still return the same instance (not a copy).
+        expect(shallowFabricFromNativeValue(nsec, false)).toBe(nsec);
+      } finally {
+        resetDataModelConfig();
+      }
     });
   });
 });

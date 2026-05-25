@@ -2,6 +2,11 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { FabricEpochDays } from "../../src/fabric-primitives/FabricEpochDays.ts";
 import { FabricInstance, FabricPrimitive } from "../../src/interface.ts";
+import {
+  resetDataModelConfig,
+  setDataModelConfig,
+  shallowFabricFromNativeValue,
+} from "../../src/fabric-value.ts";
 
 describe("FabricEpochDays", () => {
   it("wraps a bigint value", () => {
@@ -38,6 +43,19 @@ describe("FabricEpochDays", () => {
     it("is NOT a FabricInstance (no DECONSTRUCT)", () => {
       const sd = new FabricEpochDays(0n);
       expect(sd instanceof FabricInstance).toBe(false);
+    });
+  });
+
+  describe("fabric-value integration", () => {
+    it("passes through shallowFabricFromNativeValue unchanged even with freeze=false", () => {
+      setDataModelConfig(true);
+      try {
+        const days = new FabricEpochDays(456n);
+        // freeze=false should still return the same instance (not a copy).
+        expect(shallowFabricFromNativeValue(days, false)).toBe(days);
+      } finally {
+        resetDataModelConfig();
+      }
     });
   });
 });
