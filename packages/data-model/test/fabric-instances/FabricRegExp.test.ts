@@ -2,26 +2,30 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   DECONSTRUCT,
+  DEEP_FREEZE,
   FabricInstance,
   type FabricValue,
+  IS_DEEP_FROZEN,
   RECONSTRUCT,
-} from "../src/interface.ts";
-import { BaseReconstructionContext } from "../src/BaseReconstructionContext.ts";
-import { FabricNativeWrapper } from "../src/fabric-instances/FabricNativeWrapper.ts";
-import { FabricRegExp } from "../src/fabric-instances/FabricRegExp.ts";
-import { isConvertibleNativeInstance } from "../src/native-instance-utils.ts";
+} from "../../src/interface.ts";
+import { BaseReconstructionContext } from "../../src/BaseReconstructionContext.ts";
+import { FabricNativeWrapper } from "../../src/fabric-instances/FabricNativeWrapper.ts";
+import { FabricRegExp } from "../../src/fabric-instances/FabricRegExp.ts";
+import { isConvertibleNativeInstance } from "../../src/native-instance-utils.ts";
+import { deepFreeze, isDeepFrozenFabricValue } from "../../src/deep-freeze.ts";
+import { subFreeze, subIsDeepFrozen } from "./fixtures.ts";
 import {
   isFabricCompatible,
   resetDataModelConfig,
   setDataModelConfig,
   shallowFabricFromNativeValue,
-} from "../src/fabric-value.ts";
+} from "../../src/fabric-value.ts";
 import {
   NATIVE_TAGS,
   tagFromNativeClass,
   tagFromNativeValue,
-} from "../src/native-type-tags.ts";
-import { hashOf } from "../src/value-hash.ts";
+} from "../../src/native-type-tags.ts";
+import { hashOf } from "../../src/value-hash.ts";
 
 /** Dummy reconstruction context for tests. */
 class DummyReconstructionContext extends BaseReconstructionContext {
@@ -318,6 +322,42 @@ describe("FabricRegExp", () => {
       const h1 = hashOf(new FabricRegExp(/abc/g)).bytes;
       const h2 = hashOf(new FabricRegExp(/abc/i)).bytes;
       expect(h1).not.toEqual(h2);
+    });
+  });
+
+  describe("[DEEP_FREEZE] / [IS_DEEP_FROZEN] protocol — via dispatch", () => {
+    it("[DEEP_FREEZE] freezes the wrapped RegExp in place", () => {
+      const fr = new FabricRegExp(/abc/g);
+      expect(Object.isFrozen(fr.regex)).toBe(false);
+      const result = deepFreeze(fr);
+      expect(result).toBe(fr);
+      expect(Object.isFrozen(fr)).toBe(true);
+      expect(Object.isFrozen(fr.regex)).toBe(true);
+    });
+
+    it("[IS_DEEP_FROZEN] true only when wrapper + RegExp frozen", () => {
+      const fr = new FabricRegExp(/abc/g);
+      expect(isDeepFrozenFabricValue(fr)).toBe(false);
+      deepFreeze(fr);
+      expect(isDeepFrozenFabricValue(fr)).toBe(true);
+    });
+  });
+
+  describe("[DEEP_FREEZE] / [IS_DEEP_FROZEN] protocol — direct member invocation", () => {
+    it("[DEEP_FREEZE] freezes the wrapped RegExp in place", () => {
+      const fr = new FabricRegExp(/abc/g);
+      expect(Object.isFrozen(fr.regex)).toBe(false);
+      const result = fr[DEEP_FREEZE](subFreeze);
+      expect(result).toBe(fr);
+      expect(Object.isFrozen(fr)).toBe(true);
+      expect(Object.isFrozen(fr.regex)).toBe(true);
+    });
+
+    it("[IS_DEEP_FROZEN] true only when wrapper + RegExp frozen", () => {
+      const fr = new FabricRegExp(/abc/g);
+      expect(fr[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(false);
+      fr[DEEP_FREEZE](subFreeze);
+      expect(fr[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(true);
     });
   });
 });
