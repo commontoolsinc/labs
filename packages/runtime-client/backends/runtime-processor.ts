@@ -675,6 +675,37 @@ export class RuntimeProcessor {
   async handlePageGet(
     request: PageGetRequest,
   ): Promise<PageResponse> {
+    const requestedCell = this.runtime.getCellFromEntityId(
+      this.pieceManager.getSpace(),
+      { "/": request.pageId },
+    );
+    await requestedCell.sync();
+    const redirect = parseLink(
+      requestedCell.getRaw(),
+      requestedCell.getAsNormalizedFullLink(),
+    );
+    if (redirect?.overwrite === "redirect") {
+      const target = this.runtime.getCellFromLink({
+        ...redirect,
+        space: redirect.space ?? this.pieceManager.getSpace(),
+        scope: redirect.scope ?? "space",
+      });
+      await target.sync();
+      if (!target.getSourceCell()) {
+        return {
+          page: createPageRef(target),
+        };
+      }
+
+      const cell = await this.cc.manager().get(
+        target,
+        request.runIt ?? false,
+      );
+      return {
+        page: createPageRef(cell),
+      };
+    }
+
     const cell = await this.cc.manager().get(
       request.pageId,
       request.runIt ?? false,
