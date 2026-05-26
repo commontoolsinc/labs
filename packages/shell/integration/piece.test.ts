@@ -5,7 +5,6 @@ import { dirname, join, resolve } from "@std/path";
 import "../src/globals.ts";
 import { Identity } from "@commonfabric/identity";
 import { PieceController, PiecesController } from "@commonfabric/piece/ops";
-import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { clickPierce } from "./shadow-dom.ts";
 import { expect } from "@std/expect";
 
@@ -85,6 +84,41 @@ async function waitForSlugPieceMarker(
   });
 }
 
+async function getClientEngineCompileCount(
+  page: ReturnType<ShellIntegration["page"]>,
+): Promise<number> {
+  return await page.evaluate(async () => {
+    const rt = globalThis.commonfabric?.rt;
+    if (!rt) {
+      throw new Error("Runtime client was not exposed");
+    }
+    const { timing } = await rt.getLoggerCounts();
+    return timing.engine?.compile?.count ?? 0;
+  });
+}
+
+async function waitForSpaceRootPattern(
+  page: ReturnType<ShellIntegration["page"]>,
+): Promise<void> {
+  await waitFor(async () => {
+    return await page.evaluate(() => {
+      const rootView = document.querySelector("x-root-view");
+      const appView = rootView?.shadowRoot?.querySelector("x-app-view") as
+        | {
+          _patterns?: {
+            value?: {
+              spaceRootPattern?: {
+                id(): string;
+              };
+            };
+          };
+        }
+        | null;
+      return !!appView?._patterns?.value?.spaceRootPattern?.id?.();
+    });
+  });
+}
+
 describe("shell piece tests", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
@@ -99,10 +133,13 @@ describe("shell piece tests", () => {
     });
     let piece: PieceController | undefined;
     let pieceSinkCancel: (() => void) | undefined;
+    let identityPath: string | undefined;
     const logDebugSnapshot = async (label: string) => {
       console.log(label, {
         shellState: await shell.state(),
         pieceValue: piece ? await piece.result.get(["value"]) : undefined,
+        clientEngineCompileCount: await getClientEngineCompileCount(page)
+          .catch((error) => error instanceof Error ? error.message : error),
         page: await page.evaluate(() => {
           const rootView = document.querySelector("x-root-view");
           const typedRootView = rootView as
@@ -177,16 +214,14 @@ describe("shell piece tests", () => {
         "counter",
         "counter.tsx",
       );
-      const program = await cc.manager().runtime.harness
-        .resolve(
-          new FileSystemProgramResolver(sourcePath),
-        );
-      const currentPiece = await cc.create(
-        program,
-        { start: true },
-      );
+      identityPath = await writeIdentityKey(identity);
+      const pieceId = await runCfPieceNewWithSlug({
+        sourcePath,
+        identityPath,
+        slug: `compile-cache-${crypto.randomUUID()}`,
+      });
+      const currentPiece = await cc.get(pieceId, false);
       piece = currentPiece;
-      const pieceId = currentPiece.id;
 
       const resultCell = cc.manager().getResult(currentPiece.getCell());
       pieceSinkCancel = resultCell.sink(() => {});
@@ -209,6 +244,10 @@ describe("shell piece tests", () => {
       await waitFor(async () => {
         return await page.evaluate(() => !!globalThis.commonfabric?.rt);
       });
+      await waitForSpaceRootPattern(page);
+      const clientCompileCountBeforePieceLoad =
+        await getClientEngineCompileCount(page);
+
       await page.evaluate(async (spaceName, pieceId) => {
         await globalThis.app.setView({ spaceName, pieceId });
       }, { args: [SPACE_NAME, pieceId] });
@@ -242,6 +281,19 @@ describe("shell piece tests", () => {
       };
 
       await waitForActivePattern();
+      const clientCompileCountAfterPieceLoad =
+        await getClientEngineCompileCount(
+          page,
+        );
+      if (
+        clientCompileCountAfterPieceLoad !== clientCompileCountBeforePieceLoad
+      ) {
+        throw new Error(
+          `Expected 0 in-client compilations while loading cf-created piece ${pieceId}; ` +
+            `engine compile count changed from ${clientCompileCountBeforePieceLoad} to ${clientCompileCountAfterPieceLoad}`,
+        );
+      }
+
       await waitFor(async () =>
         (await currentPiece.result.get(["value"])) === 0
       );
@@ -263,6 +315,11 @@ describe("shell piece tests", () => {
     } finally {
       pieceSinkCancel?.();
       await cc.dispose();
+      if (identityPath) {
+        await Deno.remove(dirname(identityPath), { recursive: true }).catch(
+          () => {},
+        );
+      }
     }
   });
 

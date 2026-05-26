@@ -373,6 +373,46 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
       }
     });
 
+    await t.step(
+      "Cell<Props> object prop transitioning to undefined is emitted",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+
+        const propsCell = new MockPropsCell({
+          style: { color: "blue" },
+        });
+        const rootCell = new MockCell({
+          type: "vnode",
+          name: "div",
+          props: propsCell,
+          children: [],
+        });
+
+        const cancel = mountReconciler(reconciler, rootCell);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          collector.clear();
+
+          propsCell.set({ style: undefined });
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          const setPropOps = collector.getOpsOfType("set-prop");
+          assertEquals(
+            setPropOps.some((op: any) =>
+              op.key === "style" && op.value === undefined
+            ),
+            true,
+            "Should emit set-prop when an object-backed prop becomes undefined",
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
     await t.step("Cell<Props> array prop", async () => {
       const collector = createOpsCollector();
       const reconciler = new WorkerReconciler({

@@ -19,9 +19,14 @@ const DEFAULT_EVICTION_INTERVAL = 50;
 export interface CachedCompilerStats {
   hits: number;
   misses: number;
-  missReasons: { notFound: number; fingerprintMismatch: number };
+  missReasons: {
+    notFound: number;
+    fingerprintMismatch: number;
+    unvalidated: number;
+  };
   writes: number;
   writeErrors: number;
+  skippedUnvalidatedWrites: number;
   countEvictions: number;
 }
 
@@ -33,9 +38,10 @@ export class CachedCompiler {
   private stats: CachedCompilerStats = {
     hits: 0,
     misses: 0,
-    missReasons: { notFound: 0, fingerprintMismatch: 0 },
+    missReasons: { notFound: 0, fingerprintMismatch: 0, unvalidated: 0 },
     writes: 0,
     writeErrors: 0,
+    skippedUnvalidatedWrites: 0,
     countEvictions: 0,
   };
 
@@ -70,15 +76,30 @@ export class CachedCompiler {
       this.stats.missReasons.fingerprintMismatch++;
       return undefined;
     }
+    if (entry.sesValidated !== true) {
+      this.stats.misses++;
+      this.stats.missReasons.unvalidated++;
+      return undefined;
+    }
     this.stats.hits++;
-    return { id: entry.id, jsScript: entry.jsScript };
+    return { id: entry.id, jsScript: entry.jsScript, sesValidated: true };
   }
 
   async set(programHash: string, result: CompileResult): Promise<void> {
+    if (result.sesValidated !== true) {
+      this.stats.skippedUnvalidatedWrites++;
+      logger.warn(
+        "compilation-cache",
+        "Refusing to cache unvalidated compiled bundle",
+        programHash,
+      );
+      return;
+    }
     try {
       await this.cache.set(programHash, {
         id: result.id,
         jsScript: result.jsScript,
+        sesValidated: true,
         fingerprint: this.fingerprint,
         cachedAt: Date.now(),
       });
