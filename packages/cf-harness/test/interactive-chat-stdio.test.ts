@@ -172,3 +172,35 @@ Deno.test("interactive NDJSON transport validates method-specific params", async
     "invalid_request",
   );
 });
+
+Deno.test("interactive NDJSON transport rejects malformed policy params", async () => {
+  const output: string[] = [];
+  await runHarnessInteractiveChatNdjsonTransport({
+    lines: [
+      JSON.stringify({
+        type: HARNESS_CHAT_REQUEST_TYPE,
+        protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
+        requestId: "req-bad-policy",
+        method: "start_session",
+        params: {
+          sessionId: "session-1",
+          workspace: { hostPath: "/workspace" },
+          policy: {
+            type: "cf-harness.chat-policy",
+            toolMode: "workspace-write",
+          },
+        },
+      }),
+    ],
+    writeLine: (line) => {
+      output.push(line);
+    },
+  });
+
+  const response = decodeLines(output)[0];
+  assertEquals("ok" in response ? response.ok : true, false);
+  assertEquals(
+    "ok" in response && response.ok === false ? response.error.code : "",
+    "invalid_request",
+  );
+});

@@ -9,6 +9,11 @@ import {
   type HarnessChatResponse,
 } from "./contracts/interactive-chat.ts";
 import {
+  HARNESS_SUBAGENT_PROFILES,
+  type HarnessSubagentProfile,
+} from "./contracts/subagent.ts";
+import type { BuiltinToolId } from "./contracts/tool-descriptor.ts";
+import {
   createHarnessInteractiveChatService,
   type HarnessInteractiveChatService,
 } from "./interactive-chat-service.ts";
@@ -41,6 +46,27 @@ const SUPPORTED_REQUEST_METHODS = new Set<HarnessChatRequestMethod>([
   "close_session",
   "status",
 ]);
+const SUPPORTED_POLICY_TOOL_MODES = new Set(["workspace-write", "read-only"]);
+const SUPPORTED_POLICY_TOOL_IDS = new Set<BuiltinToolId>([
+  "bash",
+  "bash-no-sandbox",
+  "read_file",
+  "view_image",
+  "web_fetch",
+  "read_skill_resource",
+  "edit_file",
+  "write_file",
+  "delegate_task",
+]);
+const SUPPORTED_POLICY_SUBAGENT_PROFILES = new Set<HarnessSubagentProfile>(
+  HARNESS_SUBAGENT_PROFILES,
+);
+const SUPPORTED_CFC_ENFORCEMENT_MODES = new Set([
+  "disabled",
+  "observe",
+  "enforce-explicit",
+  "enforce-strict",
+]);
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -62,6 +88,28 @@ const isValidTurnInputParam = (value: unknown): boolean =>
   (value.imageAttachments === undefined ||
     Array.isArray(value.imageAttachments));
 
+const isStringArrayIn = (
+  value: unknown,
+  allowedValues: ReadonlySet<string>,
+): boolean =>
+  Array.isArray(value) &&
+  value.every((item) => typeof item === "string" && allowedValues.has(item));
+
+const isValidChatPolicyParam = (value: unknown): boolean =>
+  isRecord(value) &&
+  value.type === "cf-harness.chat-policy" &&
+  typeof value.toolMode === "string" &&
+  SUPPORTED_POLICY_TOOL_MODES.has(value.toolMode) &&
+  isStringArrayIn(value.allowedToolIds, SUPPORTED_POLICY_TOOL_IDS) &&
+  isStringArrayIn(
+    value.allowedSubagentProfiles,
+    SUPPORTED_POLICY_SUBAGENT_PROFILES,
+  ) &&
+  (value.cfcEnforcementMode === undefined ||
+    (typeof value.cfcEnforcementMode === "string" &&
+      SUPPORTED_CFC_ENFORCEMENT_MODES.has(value.cfcEnforcementMode))) &&
+  (value.promptSlot === undefined || isRecord(value.promptSlot));
+
 const isValidRequestParams = (
   method: HarnessChatRequestMethod,
   params: Record<string, unknown>,
@@ -73,7 +121,8 @@ const isValidRequestParams = (
         hasOptionalString(params, "model") &&
         hasOptionalString(params, "artifactRoot") &&
         (params.context === undefined || isRecord(params.context)) &&
-        (params.policy === undefined || isRecord(params.policy)) &&
+        (params.policy === undefined ||
+          isValidChatPolicyParam(params.policy)) &&
         (params.capabilities === undefined || isRecord(params.capabilities)) &&
         (params.browserAccess === undefined ||
           isRecord(params.browserAccess)) &&
@@ -83,7 +132,8 @@ const isValidRequestParams = (
         hasOptionalString(params, "turnId") &&
         isValidTurnInputParam(params.input) &&
         (params.context === undefined || isRecord(params.context)) &&
-        (params.policy === undefined || isRecord(params.policy)) &&
+        (params.policy === undefined ||
+          isValidChatPolicyParam(params.policy)) &&
         (params.browserAccess === undefined ||
           isRecord(params.browserAccess)) &&
         (params.metadata === undefined || isRecord(params.metadata));
