@@ -16,18 +16,28 @@ import {
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 const CFC_GROUP_CHAT_TIMEOUT = 30_000;
+const IMPORTED_MESSAGE_MARKERS = [
+  "Jumping in late here.",
+  "I think we already covered this above.",
+  "Can we loop back on the last point?",
+  "Sharing a quick update from the thread.",
+  "I might be missing context, but this seems fine.",
+  "Content hidden by integrity policy",
+] as const;
 
 describe("cfc group chat demo integration test", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
 
   let identity: Identity;
+  let secondIdentity: Identity;
   let cc: PiecesController;
   let pieceId: string;
   let pieceSinkCancel: (() => void) | undefined;
 
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
+    secondIdentity = await Identity.generate({ implementation: "noble" });
     cc = await PiecesController.initialize({
       spaceName: SPACE_NAME,
       apiUrl: new URL(API_URL),
@@ -55,7 +65,7 @@ describe("cfc group chat demo integration test", () => {
     await cc?.dispose();
   });
 
-  it("gates sends through the trusted surface and records imported claims", async () => {
+  it("gates sends through the trusted surface and lets authorship verification reject imported claims", async () => {
     const page = shell.page();
     await shell.goto({
       frontendUrl: FRONTEND_URL,
@@ -66,7 +76,6 @@ describe("cfc group chat demo integration test", () => {
       identity,
     });
     await waitForRuntimeIdle(page);
-    await waitFor(async () => await setSchedulerPullMode(page, false));
 
     await waitForText(page, "#group-chat-manager-chip", "Manager off");
     await waitForDisabled(page, "#trusted-send-button", true);
@@ -166,11 +175,60 @@ describe("cfc group chat demo integration test", () => {
       "#trusted-conversation-preview",
       "1 message",
     );
-    await readPieceResult(page, pieceId);
-    await waitForRuntimeIdle(page);
     await waitForAuthorshipState(
       page,
       "Hello from Alice",
+      "#trusted-conversation-preview",
+    );
+
+    await shell.login(secondIdentity);
+    await shell.waitForState({
+      identity: secondIdentity,
+      view: {
+        spaceName: SPACE_NAME,
+        pieceId,
+      },
+    });
+
+    await waitForText(
+      page,
+      "#trusted-conversation-preview",
+      "1 message",
+    );
+    await waitForAuthorshipState(
+      page,
+      "Hello from Alice",
+      "#trusted-conversation-preview",
+    );
+    await waitForDisabled(page, "#trusted-send-button", true);
+
+    await scrollIntoView(page, "#trusted-profile-name");
+    await fillCfInput(
+      page,
+      "#trusted-profile-name",
+      "Bob",
+    );
+    await waitForDisabled(page, "#trusted-profile-save", false);
+    await clickCfButton(page, "#trusted-profile-save");
+    await waitForText(page, "#trusted-profile-status", "Bob");
+    await waitForRuntimeIdle(page);
+
+    await scrollIntoView(page, "#trusted-message-draft");
+    await fillCfInput(
+      page,
+      "#trusted-message-draft",
+      "Hello from Bob",
+    );
+    await waitForRuntimeIdle(page);
+    await clickCfButton(page, "#trusted-send-button");
+    await waitForText(
+      page,
+      "#trusted-conversation-preview",
+      "2 messages",
+    );
+    await waitForAuthorshipState(
+      page,
+      "Hello from Bob",
       "#trusted-conversation-preview",
     );
 
@@ -179,35 +237,39 @@ describe("cfc group chat demo integration test", () => {
     await waitForText(
       page,
       "#trusted-conversation-preview",
-      "2 messages",
+      "4 messages",
+    );
+    await waitForTextAbsent(
+      page,
+      "#trusted-conversation-preview",
+      "Invalid claim",
+    );
+    await waitForInvalidAuthorshipState(
+      page,
+      "#trusted-conversation-preview",
+    );
+
+    await scrollIntoView(page, "#trusted-message-draft");
+    await fillCfInput(
+      page,
+      "#trusted-message-draft",
+      "Bob after imported claims",
+    );
+    await waitForRuntimeIdle(page);
+    await clickCfButton(page, "#trusted-send-button");
+    await waitForText(
+      page,
+      "#trusted-conversation-preview",
+      "5 messages",
+    );
+    await waitForAuthorshipState(
+      page,
+      "Bob after imported claims",
+      "#trusted-conversation-preview",
     );
   });
 });
 
-async function readPieceResult(page: Page, pieceId: string): Promise<void> {
-  await page.evaluate(async (id: string) => {
-    const commonfabric = globalThis.commonfabric as
-      | { readCell?: (options: { id: string }) => Promise<unknown> }
-      | undefined;
-    await commonfabric?.readCell?.({ id });
-  }, { args: [pieceId] });
-}
-
-async function setSchedulerPullMode(
-  page: Page,
-  pullMode: boolean,
-): Promise<boolean> {
-  return await page.evaluate<Promise<boolean>, [boolean]>(
-    async (pullMode) => {
-      const rt = globalThis.commonfabric?.rt;
-      if (!rt?.setPullMode || !rt?.idle) return false;
-      await rt.setPullMode(pullMode);
-      await rt.idle();
-      return true;
-    },
-    { args: [pullMode] },
-  );
-}
 async function scrollIntoView(page: Page, selector: string) {
   const node = await page.waitForSelector(selector, {
     strategy: "pierce",
@@ -247,9 +309,33 @@ async function waitForAuthorshipState(
   }
 }
 
+async function waitForInvalidAuthorshipState(
+  page: Page,
+  containerSelector?: string,
+) {
+  let probe: AuthorshipProbe | undefined;
+  try {
+    await waitFor(async () => {
+      probe = await readAuthorshipProbe(page, containerSelector);
+      return probe.hosts.some((host) =>
+        (host.state === "unknown" || host.state === "unverified") &&
+        !host.hasTrustedAvatar &&
+        IMPORTED_MESSAGE_MARKERS.some((marker) =>
+          host.renderedText.includes(marker)
+        )
+      );
+    }, { timeout: CFC_GROUP_CHAT_TIMEOUT, delay: 250 });
+  } catch (cause) {
+    throw new Error(
+      `Timed out waiting for invalid authorship row. Last probe: ${
+        JSON.stringify(probe, null, 2)
+      }`,
+      { cause },
+    );
+  }
+}
+
 type AuthorshipProbe = {
-  totalHosts: number;
-  containerText: string;
   hosts: Array<{
     state: string | undefined;
     textIntegrityState: string | undefined;
@@ -332,28 +418,6 @@ async function readAuthorshipProbe(
     const elements = collected.filter((element) =>
       isWithinContainer(element, targetContainerSelector)
     );
-    const matchingContainers: Element[] = [];
-    const collectMatchingContainers = (
-      root: Document | ShadowRoot,
-      selector: string,
-    ): void => {
-      for (const element of root.querySelectorAll("*")) {
-        try {
-          if (element.matches(selector)) {
-            matchingContainers.push(element);
-          }
-        } catch {
-          // Invalid selectors are reported by returning an empty text probe.
-        }
-        if (element.shadowRoot) {
-          collectMatchingContainers(element.shadowRoot, selector);
-        }
-      }
-    };
-    if (targetContainerSelector) {
-      collectMatchingContainers(document, targetContainerSelector);
-    }
-    const container = matchingContainers[0] ?? document.body;
     const hosts = elements.map(async (element) => {
       const typedElement = element as unknown as {
         authorshipState?: string;
@@ -415,8 +479,6 @@ async function readAuthorshipProbe(
     });
 
     return Promise.all(hosts).then((resolvedHosts) => ({
-      totalHosts: collected.length,
-      containerText: container ? deepText(container).trim().slice(0, 1000) : "",
       hosts: resolvedHosts,
     }));
   }, { args: [containerSelector] });
