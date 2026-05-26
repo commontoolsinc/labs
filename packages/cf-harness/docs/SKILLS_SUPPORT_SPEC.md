@@ -258,12 +258,23 @@ Execution is allowed only when all of these are true:
 - the call-time digest and size still match the run-start registry snapshot
 - the runtime is supported
 
-v1 supports Deno TypeScript/JavaScript scripts. Deno permissions are inferred
-from a checked-in `deno run` shebang when present, otherwise the script runs via
-`deno run` without extra permission flags. The validated script bytes are passed
-to `deno run -` over stdin so execution uses the same content snapshot that was
-checked against the run-start registry. Executable non-Deno shebang scripts are
-indexed for metadata, but are not executable by `run_skill_script` in v1.
+v1 supports standalone Deno TypeScript/JavaScript scripts and standalone Bash
+scripts. The validated script bytes are passed to the interpreter over stdin so
+execution uses the same content snapshot that was checked against the run-start
+registry instead of a mutable script path.
+
+Deno permissions are inferred from a checked-in `deno run` shebang when present,
+otherwise the script runs via `deno run` without extra permission flags. Deno
+scripts run as `deno run -`, so v1 rejects literal relative module
+imports/exports such as `import "./helper.ts"` until cf-harness has an immutable
+staged script-tree design that preserves file-based module resolution.
+
+Bash scripts must use a Bash shebang such as `#!/bin/bash` or
+`#!/usr/bin/env bash` and run as `bash -s -- ...args`. Bash shebang interpreter
+flags and literal relative `source ./helper.sh` includes are rejected in v1 for
+the same reason: stdin execution deliberately avoids resolving supporting code
+from the mutable workspace cwd. Other executable shebang scripts are indexed for
+metadata, but are not executable by `run_skill_script` in v1.
 
 The tool executes via the sandbox direct argv API, not a model-authored shell
 string. The default cwd is the workspace root, even if the harness current

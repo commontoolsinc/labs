@@ -1888,6 +1888,285 @@ Deno.test({
 });
 
 Deno.test({
+  name: "run_skill_script rejects Deno scripts with relative imports in v1",
+  permissions: { read: true, write: true },
+  async fn() {
+    const root = await Deno.makeTempDir({
+      prefix: "cf-harness-skill-script-",
+    });
+    try {
+      const skillDir = join(root, "module-test");
+      await Deno.mkdir(join(skillDir, "scripts"), { recursive: true });
+      await Deno.writeTextFile(
+        join(skillDir, "SKILL.md"),
+        [
+          "---",
+          "name: module-test",
+          "description: Test module helpers",
+          "---",
+        ].join("\n"),
+      );
+      await Deno.writeTextFile(
+        join(skillDir, "scripts", "main.ts"),
+        "import './helper.ts';\nconsole.log('main');\n",
+      );
+      await Deno.writeTextFile(
+        join(skillDir, "scripts", "helper.ts"),
+        "export const value = 1;\n",
+      );
+      const registry = await discoverHarnessSkills({
+        skillsRoot: root,
+        sandboxSkillsRoot: "/workspace/skills",
+      });
+      const skill = registry.skills[0];
+      const activations: HarnessSkillActivations = {
+        type: "cf-harness.skill-activations",
+        version: 1,
+        generatedAt: "2026-05-01T00:00:00.000Z",
+        activations: [{
+          name: skill.name,
+          source: "cli-preload",
+          runId: "run-1",
+          skillPath: skill.skillPath,
+          skillDir: skill.skillDir,
+          sandboxSkillPath: skill.sandboxSkillPath,
+          sandboxSkillDir: skill.sandboxSkillDir,
+          digest: skill.digest,
+          activatedAt: "2026-05-01T00:00:00.000Z",
+          cfcPromptRole: "context",
+        }],
+      };
+      const sandbox = new FakeSandboxRuntime();
+      const executions: HarnessSkillScriptExecution[] = [];
+      const output = await runSkillScriptTool.invoke(
+        createContext(
+          sandbox,
+          "/workspace",
+          new FakeProcessRunner(),
+          "observe",
+          undefined,
+          registry,
+          [],
+          "/tmp/cf-harness-workspace",
+          activations,
+          [{ skill: "module-test", path: "scripts/main.ts" }],
+          executions,
+        ),
+        { skill: "module-test", path: "scripts/main.ts" },
+      );
+
+      assertEquals(output.status, "error");
+      assertEquals(output.error?.code, "unsupported_runtime");
+      assertStringIncludes(output.error?.message ?? "", "relative module");
+      assertStringIncludes(output.error?.message ?? "", "./helper.ts");
+      assertEquals(sandbox.calls, []);
+      assertEquals(executions[0].status, "error");
+      assertEquals(executions[0].error?.code, "unsupported_runtime");
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name:
+    "run_skill_script executes exact allowlisted Bash shebang scripts from stdin",
+  permissions: { read: true, write: true },
+  async fn() {
+    const root = await Deno.makeTempDir({
+      prefix: "cf-harness-skill-script-",
+    });
+    try {
+      const skillDir = join(root, "agent-browser");
+      const scriptSource = [
+        "#!/bin/bash",
+        "set -euo pipefail",
+        'echo "url=$1"',
+        'echo "skill=$SKILL_NAME"',
+        "",
+      ].join("\n");
+      await Deno.mkdir(join(skillDir, "scripts"), { recursive: true });
+      await Deno.writeTextFile(
+        join(skillDir, "SKILL.md"),
+        [
+          "---",
+          "name: agent-browser",
+          "description: Browser automation",
+          "---",
+        ].join("\n"),
+      );
+      await Deno.writeTextFile(
+        join(skillDir, "scripts", "capture-workflow.sh"),
+        scriptSource,
+        { mode: 0o755 },
+      );
+      const registry = await discoverHarnessSkills({
+        skillsRoot: root,
+        sandboxSkillsRoot: "/workspace/skills",
+      });
+      const skill = registry.skills[0];
+      const activations: HarnessSkillActivations = {
+        type: "cf-harness.skill-activations",
+        version: 1,
+        generatedAt: "2026-05-01T00:00:00.000Z",
+        activations: [{
+          name: skill.name,
+          source: "cli-preload",
+          runId: "run-1",
+          skillPath: skill.skillPath,
+          skillDir: skill.skillDir,
+          sandboxSkillPath: skill.sandboxSkillPath,
+          sandboxSkillDir: skill.sandboxSkillDir,
+          digest: skill.digest,
+          activatedAt: "2026-05-01T00:00:00.000Z",
+          cfcPromptRole: "context",
+        }],
+      };
+      const sandbox = new FakeSandboxRuntime([{
+        stdout: "url=https://example.com\nskill=agent-browser\n",
+        stderr: "",
+        exitCode: 0,
+      }]);
+      const executions: HarnessSkillScriptExecution[] = [];
+      const output = await runSkillScriptTool.invoke(
+        createContext(
+          sandbox,
+          "/workspace/subdir",
+          new FakeProcessRunner(),
+          "observe",
+          undefined,
+          registry,
+          [],
+          "/tmp/cf-harness-workspace",
+          activations,
+          [{ skill: "agent-browser", path: "scripts/capture-workflow.sh" }],
+          executions,
+        ),
+        {
+          skill: "agent-browser",
+          path: "scripts/capture-workflow.sh",
+          args: ["https://example.com"],
+        },
+      );
+
+      assertEquals(output.status, "executed");
+      assertEquals(output.runtime, "shebang");
+      assertEquals(output.cwd, "/workspace");
+      const expectedArgv = [
+        "bash",
+        "-s",
+        "--",
+        "https://example.com",
+      ];
+      assertEquals(output.argv, expectedArgv);
+      assertEquals(stripCfcInvocationContexts(sandbox.calls), [{
+        type: "run",
+        request: {
+          argv: expectedArgv,
+          cwd: "/workspace",
+          env: {
+            CF_HARNESS_RUN_ID: "run-1",
+            SKILL_DIR: "/workspace/skills/agent-browser",
+            SKILL_NAME: "agent-browser",
+            SKILL_SCRIPT:
+              "/workspace/skills/agent-browser/scripts/capture-workflow.sh",
+          },
+          stdinText: scriptSource,
+          timeoutMs: 60000,
+        },
+      }]);
+      assertEquals(executions[0].status, "executed");
+      assertEquals(executions[0].runtime, "shebang");
+      assertEquals(executions[0].argv, expectedArgv);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "run_skill_script rejects Bash scripts that source relative helpers",
+  permissions: { read: true, write: true },
+  async fn() {
+    const root = await Deno.makeTempDir({
+      prefix: "cf-harness-skill-script-",
+    });
+    try {
+      const skillDir = join(root, "agent-browser");
+      await Deno.mkdir(join(skillDir, "scripts"), { recursive: true });
+      await Deno.writeTextFile(
+        join(skillDir, "SKILL.md"),
+        [
+          "---",
+          "name: agent-browser",
+          "description: Browser automation",
+          "---",
+        ].join("\n"),
+      );
+      await Deno.writeTextFile(
+        join(skillDir, "scripts", "with-helper.sh"),
+        "#!/bin/bash\nsource ./helper.sh\n",
+        { mode: 0o755 },
+      );
+      await Deno.writeTextFile(
+        join(skillDir, "scripts", "helper.sh"),
+        "echo helper\n",
+      );
+      const registry = await discoverHarnessSkills({
+        skillsRoot: root,
+        sandboxSkillsRoot: "/workspace/skills",
+      });
+      const skill = registry.skills[0];
+      const activations: HarnessSkillActivations = {
+        type: "cf-harness.skill-activations",
+        version: 1,
+        generatedAt: "2026-05-01T00:00:00.000Z",
+        activations: [{
+          name: skill.name,
+          source: "cli-preload",
+          runId: "run-1",
+          skillPath: skill.skillPath,
+          skillDir: skill.skillDir,
+          sandboxSkillPath: skill.sandboxSkillPath,
+          sandboxSkillDir: skill.sandboxSkillDir,
+          digest: skill.digest,
+          activatedAt: "2026-05-01T00:00:00.000Z",
+          cfcPromptRole: "context",
+        }],
+      };
+      const sandbox = new FakeSandboxRuntime();
+      const executions: HarnessSkillScriptExecution[] = [];
+      const output = await runSkillScriptTool.invoke(
+        createContext(
+          sandbox,
+          "/workspace",
+          new FakeProcessRunner(),
+          "observe",
+          undefined,
+          registry,
+          [],
+          "/tmp/cf-harness-workspace",
+          activations,
+          [{ skill: "agent-browser", path: "scripts/with-helper.sh" }],
+          executions,
+        ),
+        { skill: "agent-browser", path: "scripts/with-helper.sh" },
+      );
+
+      assertEquals(output.status, "error");
+      assertEquals(output.error?.code, "unsupported_runtime");
+      assertStringIncludes(output.error?.message ?? "", "relative source");
+      assertStringIncludes(output.error?.message ?? "", "./helper.sh");
+      assertEquals(sandbox.calls, []);
+      assertEquals(executions[0].status, "error");
+      assertEquals(executions[0].error?.code, "unsupported_runtime");
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
   name:
     "run_skill_script requires activation, exact allowlist, and run-start digest",
   permissions: { read: true, write: true },

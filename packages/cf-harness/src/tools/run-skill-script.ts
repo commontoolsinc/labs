@@ -220,20 +220,25 @@ const splitShebangWords = (shebang: string): string[] =>
 const isDenoWord = (word: string): boolean =>
   basename(word).toLowerCase() === "deno";
 
+const isBashWord = (word: string): boolean =>
+  basename(word).toLowerCase() === "bash";
+
+const commandWordsFromShebang = (shebang: string): string[] => {
+  const words = splitShebangWords(shebang);
+  if (words.length >= 3 && basename(words[0] ?? "").toLowerCase() === "env") {
+    return words[1] === "-S" ? words.slice(2) : words.slice(1);
+  }
+  if (words.length >= 2 && basename(words[0] ?? "").toLowerCase() === "env") {
+    return words.slice(1);
+  }
+  return words;
+};
+
 const denoRunFlagsFromShebang = (shebang: string | undefined): string[] => {
   if (shebang === undefined) {
     return [];
   }
-  const words = splitShebangWords(shebang);
-  const commandWords = words.length >= 3 &&
-      basename(words[0] ?? "").toLowerCase() === "env" &&
-      words[1] === "-S"
-    ? words.slice(2)
-    : words.length >= 2 &&
-        basename(words[0] ?? "").toLowerCase() === "env" &&
-        isDenoWord(words[1] ?? "")
-    ? words.slice(1)
-    : words;
+  const commandWords = commandWordsFromShebang(shebang);
   const denoIndex = commandWords.findIndex(isDenoWord);
   if (denoIndex < 0 || commandWords[denoIndex + 1] !== "run") {
     return [];
@@ -254,6 +259,10 @@ interface ScriptExecution {
   stdinText?: string;
 }
 
+type ScriptExecutionPlan =
+  | { ok: true; execution: ScriptExecution }
+  | { ok: false; error: RunSkillScriptToolError };
+
 const decodeUtf8Script = (content: Uint8Array): string | undefined => {
   try {
     return new TextDecoder("utf-8", { fatal: true }).decode(content);
@@ -262,30 +271,344 @@ const decodeUtf8Script = (content: Uint8Array): string | undefined => {
   }
 };
 
+interface SourceToken {
+  kind: "word" | "string" | "punct";
+  value: string;
+}
+
+const isIdentifierStart = (character: string): boolean =>
+  /[A-Za-z_$]/.test(character);
+
+const isIdentifierContinue = (character: string): boolean =>
+  /[A-Za-z0-9_$]/.test(character);
+
+const readStringToken = (
+  source: string,
+  start: number,
+  quote: string,
+): { value: string; end: number } => {
+  let value = "";
+  for (let index = start + 1; index < source.length; index += 1) {
+    const character = source[index] ?? "";
+    if (character === "\\") {
+      const escaped = source[index + 1];
+      if (escaped !== undefined) {
+        value += escaped;
+        index += 1;
+      }
+      continue;
+    }
+    if (character === quote) {
+      return { value, end: index + 1 };
+    }
+    value += character;
+  }
+  return { value, end: source.length };
+};
+
+const tokenizeModuleSource = (source: string): SourceToken[] => {
+  const tokens: SourceToken[] = [];
+  for (let index = 0; index < source.length;) {
+    const character = source[index] ?? "";
+    const next = source[index + 1];
+    if (/\s/.test(character)) {
+      index += 1;
+      continue;
+    }
+    if (character === "/" && next === "/") {
+      index += 2;
+      while (index < source.length && source[index] !== "\n") {
+        index += 1;
+      }
+      continue;
+    }
+    if (character === "/" && next === "*") {
+      index += 2;
+      while (
+        index < source.length &&
+        !(source[index] === "*" && source[index + 1] === "/")
+      ) {
+        index += 1;
+      }
+      index = Math.min(index + 2, source.length);
+      continue;
+    }
+    if (character === '"' || character === "'" || character === "`") {
+      const stringToken = readStringToken(source, index, character);
+      tokens.push({ kind: "string", value: stringToken.value });
+      index = stringToken.end;
+      continue;
+    }
+    if (isIdentifierStart(character)) {
+      let end = index + 1;
+      while (
+        end < source.length && isIdentifierContinue(source[end] ?? "")
+      ) {
+        end += 1;
+      }
+      tokens.push({ kind: "word", value: source.slice(index, end) });
+      index = end;
+      continue;
+    }
+    tokens.push({ kind: "punct", value: character });
+    index += 1;
+  }
+  return tokens;
+};
+
+const isRelativeModuleSpecifier = (specifier: string): boolean =>
+  specifier === "." ||
+  specifier === ".." ||
+  specifier.startsWith("./") ||
+  specifier.startsWith("../");
+
+const isRelativePathSpecifier = (specifier: string): boolean =>
+  specifier === "." ||
+  specifier === ".." ||
+  specifier.startsWith("./") ||
+  specifier.startsWith("../");
+
+const findRelativeFromSpecifier = (
+  tokens: readonly SourceToken[],
+  start: number,
+): string | undefined => {
+  const maxEnd = Math.min(tokens.length, start + 128);
+  for (let index = start; index < maxEnd; index += 1) {
+    const token = tokens[index];
+    if (token?.kind === "punct" && token.value === ";") {
+      return undefined;
+    }
+    if (
+      token?.kind === "word" &&
+      (token.value === "import" || token.value === "export") &&
+      index > start
+    ) {
+      return undefined;
+    }
+    if (token?.kind === "word" && token.value === "from") {
+      const specifier = tokens[index + 1];
+      if (
+        specifier?.kind === "string" &&
+        isRelativeModuleSpecifier(specifier.value)
+      ) {
+        return specifier.value;
+      }
+    }
+  }
+  return undefined;
+};
+
+const findRelativeModuleSpecifier = (source: string): string | undefined => {
+  const tokens = tokenizeModuleSource(source);
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (token?.kind !== "word") {
+      continue;
+    }
+    if (token.value === "import") {
+      const next = tokens[index + 1];
+      if (
+        next?.kind === "string" && isRelativeModuleSpecifier(next.value)
+      ) {
+        return next.value;
+      }
+      if (next?.kind === "punct" && next.value === "(") {
+        const specifier = tokens[index + 2];
+        if (
+          specifier?.kind === "string" &&
+          isRelativeModuleSpecifier(specifier.value)
+        ) {
+          return specifier.value;
+        }
+        continue;
+      }
+      if (next?.kind === "punct" && next.value === ".") {
+        continue;
+      }
+      const fromSpecifier = findRelativeFromSpecifier(tokens, index + 1);
+      if (fromSpecifier !== undefined) {
+        return fromSpecifier;
+      }
+      continue;
+    }
+    if (token.value === "export") {
+      const fromSpecifier = findRelativeFromSpecifier(tokens, index + 1);
+      if (fromSpecifier !== undefined) {
+        return fromSpecifier;
+      }
+    }
+  }
+  return undefined;
+};
+
+const stripUnquotedShellComment = (line: string): string => {
+  let quote: '"' | "'" | undefined;
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index] ?? "";
+    if (character === "\\" && quote !== "'") {
+      index += 1;
+      continue;
+    }
+    if ((character === '"' || character === "'") && quote === undefined) {
+      quote = character;
+      continue;
+    }
+    if (character === quote) {
+      quote = undefined;
+      continue;
+    }
+    if (character === "#" && quote === undefined) {
+      return line.slice(0, index);
+    }
+  }
+  return line;
+};
+
+const unquoteShellToken = (token: string): string =>
+  token.replace(/^(['"])(.*)\1$/, "$2");
+
+const findRelativeShellSourceSpecifier = (
+  source: string,
+): string | undefined => {
+  for (const rawLine of source.split(/\r?\n/)) {
+    const line = stripUnquotedShellComment(rawLine).trim();
+    if (line.length === 0) {
+      continue;
+    }
+    const match = /^(?:source|\.)\s+([^;&|<>()\s]+)/.exec(line);
+    const specifier = match === null
+      ? undefined
+      : unquoteShellToken(match[1] ?? "");
+    if (
+      specifier !== undefined && isRelativePathSpecifier(specifier)
+    ) {
+      return specifier;
+    }
+  }
+  return undefined;
+};
+
+const bashExecutionForShebang = (
+  shebang: string | undefined,
+  args: readonly string[],
+  stdinText: string,
+): ScriptExecution | undefined => {
+  if (shebang === undefined) {
+    return undefined;
+  }
+  const commandWords = commandWordsFromShebang(shebang);
+  if (!isBashWord(commandWords[0] ?? "")) {
+    return undefined;
+  }
+  if (commandWords.length > 1) {
+    return undefined;
+  }
+  return {
+    runtime: "shebang",
+    argv: ["bash", "-s", "--", ...args],
+    stdinText,
+  };
+};
+
 const executionForScript = (
   resource: HarnessSkillResourceRecord,
   args: readonly string[],
   content: Uint8Array,
-): ScriptExecution | undefined => {
+): ScriptExecutionPlan => {
   const runtime = resource.script?.runtime ?? "unknown";
   if (runtime === "deno") {
     const stdinText = decodeUtf8Script(content);
     if (stdinText === undefined) {
-      return undefined;
+      return {
+        ok: false,
+        error: {
+          code: "unsupported_runtime",
+          message:
+            `Deno skill script is not valid UTF-8 text: ${resource.path}`,
+        },
+      };
+    }
+    const relativeSpecifier = findRelativeModuleSpecifier(stdinText);
+    if (relativeSpecifier !== undefined) {
+      return {
+        ok: false,
+        error: {
+          code: "unsupported_runtime",
+          message:
+            `Deno skill scripts must be standalone in v1; relative module specifier ${
+              JSON.stringify(relativeSpecifier)
+            } is not supported by run_skill_script.`,
+        },
+      };
     }
     return {
-      runtime,
-      argv: [
-        "deno",
-        "run",
-        ...denoRunFlagsFromShebang(resource.script?.shebang),
-        "-",
-        ...args,
-      ],
-      stdinText,
+      ok: true,
+      execution: {
+        runtime,
+        argv: [
+          "deno",
+          "run",
+          ...denoRunFlagsFromShebang(resource.script?.shebang),
+          "-",
+          ...args,
+        ],
+        stdinText,
+      },
     };
   }
-  return undefined;
+  if (runtime === "shebang") {
+    const stdinText = decodeUtf8Script(content);
+    if (stdinText === undefined) {
+      return {
+        ok: false,
+        error: {
+          code: "unsupported_runtime",
+          message:
+            `Bash skill script is not valid UTF-8 text: ${resource.path}`,
+        },
+      };
+    }
+    const bashExecution = bashExecutionForShebang(
+      resource.script?.shebang,
+      args,
+      stdinText,
+    );
+    if (bashExecution === undefined) {
+      return {
+        ok: false,
+        error: {
+          code: "unsupported_runtime",
+          message:
+            `unsupported skill script runtime for ${resource.path}: only Deno scripts and Bash shebang scripts without interpreter flags are supported in v1`,
+        },
+      };
+    }
+    const relativeSourceSpecifier = findRelativeShellSourceSpecifier(
+      stdinText,
+    );
+    if (relativeSourceSpecifier !== undefined) {
+      return {
+        ok: false,
+        error: {
+          code: "unsupported_runtime",
+          message:
+            `Bash skill scripts must be standalone in v1; relative source specifier ${
+              JSON.stringify(relativeSourceSpecifier)
+            } is not supported by run_skill_script.`,
+        },
+      };
+    }
+    return { ok: true, execution: bashExecution };
+  }
+  return {
+    ok: false,
+    error: {
+      code: "unsupported_runtime",
+      message: `unsupported skill script runtime for ${resource.path}: ${
+        resource.script?.runtime ?? "unknown"
+      }`,
+    },
+  };
 };
 
 const baseOutput = (
@@ -678,16 +1001,14 @@ export const runSkillScriptTool: HarnessToolDefinition<
       return output;
     }
 
-    const scriptExecution = executionForScript(resource, args, content);
-    if (scriptExecution === undefined) {
+    const scriptExecutionPlan = executionForScript(resource, args, content);
+    if (!scriptExecutionPlan.ok) {
       const output = errorOutput({
         outputId,
         skill: skill.name,
         path: normalizedPath,
-        code: "unsupported_runtime",
-        message: `unsupported skill script runtime for ${normalizedPath}: ${
-          resource.script?.runtime ?? "unknown"
-        }`,
+        code: scriptExecutionPlan.error.code,
+        message: scriptExecutionPlan.error.message,
         resource,
         observedDigest,
         observedSizeBytes,
@@ -702,6 +1023,7 @@ export const runSkillScriptTool: HarnessToolDefinition<
       );
       return output;
     }
+    const scriptExecution = scriptExecutionPlan.execution;
 
     const cwd = input.cwd !== undefined
       ? context.resolvePath(input.cwd)
