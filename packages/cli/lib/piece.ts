@@ -16,6 +16,7 @@ import {
   pieceId,
   PieceManager,
   resolvePieceAddress as resolveStoredPieceAddress,
+  resolveSlugTargetCell,
   setSlugLink,
   SlugResolutionError,
 } from "@commonfabric/piece";
@@ -1072,13 +1073,24 @@ export async function inspectPiece(config: PieceConfig): Promise<{
   id: string;
   name?: string;
   patternName?: string;
-  source: Readonly<unknown>;
+  source?: Readonly<unknown>;
   result: Readonly<unknown>;
   readingFrom: Array<{ id: string; name?: string }>;
   readBy: Array<{ id: string; name?: string }>;
 }> {
   const manager = await loadManager(config);
-  const resolvedConfig = await resolvePieceConfigWithManager(config, manager);
+  let resolvedConfig: PieceConfig;
+  try {
+    resolvedConfig = await resolvePieceConfigWithManager(config, manager);
+  } catch (error) {
+    if (
+      error instanceof SlugResolutionError &&
+      error.code === "not-piece"
+    ) {
+      return await inspectSlugTargetCell(manager, config.piece);
+    }
+    throw error;
+  }
   const pieces = new PiecesController(manager);
   const piece = await pieces.get(
     resolvedConfig.piece,
@@ -1109,6 +1121,35 @@ export async function inspectPiece(config: PieceConfig): Promise<{
     result,
     readingFrom,
     readBy,
+  };
+}
+
+async function inspectSlugTargetCell(
+  manager: PieceManager,
+  slug: string,
+): Promise<{
+  id: string;
+  name?: string;
+  patternName?: string;
+  source?: Readonly<unknown>;
+  result: Readonly<unknown>;
+  readingFrom: Array<{ id: string; name?: string }>;
+  readBy: Array<{ id: string; name?: string }>;
+}> {
+  const target = await resolveSlugTargetCell(manager, slug);
+  await target.pull();
+  const result = target.get() as Readonly<unknown>;
+  const name = isRecord(result) && typeof result[NAME] === "string"
+    ? result[NAME]
+    : undefined;
+
+  return {
+    id: slug,
+    name,
+    patternName: "slug target cell",
+    result,
+    readingFrom: [],
+    readBy: [],
   };
 }
 
