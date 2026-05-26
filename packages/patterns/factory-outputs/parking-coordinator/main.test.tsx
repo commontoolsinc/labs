@@ -22,7 +22,7 @@ import {
   propValue,
 } from "../../test-ui-helpers.ts";
 import ParkingCoordinator, { DEFAULT_SPOTS } from "./main.tsx";
-import type { ParkingSpot, Person, SpotRequest } from "./main.tsx";
+import type { ParkingSpot, Person, SpotRequest, Vehicle } from "./main.tsx";
 
 const len = <T,>(arr: T[]): number => arr.filter(() => true).length;
 
@@ -620,6 +620,185 @@ export default pattern(() => {
   );
 
   // ============================================================
+  // Subject 9: Vehicle data on people
+  // ============================================================
+
+  // 9a: addPerson WITH vehicles — plateId normalized, plateState defaulted
+  const s9a = ParkingCoordinator({
+    spots: DEFAULT_SPOTS,
+    people: [],
+    requests: [],
+  });
+
+  const action_s9a_add_with_vehicles = action(() => {
+    s9a.addPerson.send({
+      name: "Zara",
+      email: "zara@co.com",
+      commuteMode: "drive",
+      priorityRank: 1,
+      defaultSpot: "",
+      preferences: "",
+      vehicles: [
+        // plateId should be normalized: lowercase + special chars stripped
+        {
+          plateId: "7abc-123!",
+          plateState: "",
+          color: "Red",
+          make: "Toyota",
+          model: "Camry",
+        },
+        // blank plateState → defaults to "CA"
+        { plateId: "XYZ999", plateState: "", color: "", make: "", model: "" },
+      ],
+    });
+  });
+
+  const assert_s9a_zara_has_vehicles = computed(() => {
+    const zara = s9a.people.find((p: Person) => p.name === "Zara");
+    const vs: Vehicle[] = zara?.vehicles ?? [];
+    return (
+      len(vs) === 2 &&
+      vs[0].plateId === "7ABC123" && // normalized
+      vs[0].plateState === "CA" && // defaulted from blank
+      vs[0].color === "Red" &&
+      vs[1].plateId === "XYZ999" &&
+      vs[1].plateState === "CA"
+    );
+  });
+
+  // 9b: addPerson with a vehicle whose plateId is blank after normalization → dropped
+  const s9b = ParkingCoordinator({
+    spots: DEFAULT_SPOTS,
+    people: [],
+    requests: [],
+  });
+
+  const action_s9b_add_blank_plate = action(() => {
+    s9b.addPerson.send({
+      name: "Ben",
+      email: "ben@co.com",
+      commuteMode: "drive",
+      priorityRank: 1,
+      defaultSpot: "",
+      preferences: "",
+      vehicles: [
+        // plateId with only special chars → normalizes to "" → dropped
+        { plateId: "---", plateState: "CA", color: "", make: "", model: "" },
+        // valid one stays
+        { plateId: "ABC123", plateState: "NY", color: "", make: "", model: "" },
+      ],
+    });
+  });
+
+  const assert_s9b_blank_plate_dropped = computed(() => {
+    const ben = s9b.people.find((p: Person) => p.name === "Ben");
+    const vs: Vehicle[] = ben?.vehicles ?? [];
+    return len(vs) === 1 && vs[0].plateId === "ABC123" &&
+      vs[0].plateState === "NY";
+  });
+
+  // 9c: existing callers that don't pass vehicles → default [] (backward-compat)
+  const s9c = ParkingCoordinator({
+    spots: DEFAULT_SPOTS,
+    people: [],
+    requests: [],
+  });
+
+  const action_s9c_add_no_vehicles = action(() => {
+    s9c.addPerson.send({
+      name: "Carol",
+      email: "carol@co.com",
+      commuteMode: "bike",
+      priorityRank: 1,
+      defaultSpot: "",
+      preferences: "",
+    });
+  });
+
+  const assert_s9c_no_vehicles_default = computed(() => {
+    const carol = s9c.people.find((p: Person) => p.name === "Carol");
+    const vs: Vehicle[] = carol?.vehicles ?? [];
+    return len(vs) === 0;
+  });
+
+  // 9d: editPerson WITH vehicles replaces them; WITHOUT vehicles preserves them
+  const personWithVehicle: Person = {
+    name: "Dana",
+    email: "dana@co.com",
+    commuteMode: "drive",
+    spotPreferences: [],
+    defaultSpot: "",
+    priorityRank: 1,
+    vehicles: [{
+      plateId: "OLD001",
+      plateState: "CA",
+      color: "Blue",
+      make: "Honda",
+      model: "Civic",
+    }],
+  };
+
+  const s9d = ParkingCoordinator({
+    spots: DEFAULT_SPOTS,
+    people: [personWithVehicle],
+    requests: [],
+  });
+
+  // Edit WITH new vehicles → replaces
+  const action_s9d_edit_with_vehicles = action(() => {
+    s9d.editPerson.send({
+      originalName: "Dana",
+      name: "Dana",
+      email: "dana@co.com",
+      commuteMode: "drive",
+      priorityRank: 1,
+      defaultSpot: "",
+      preferences: "",
+      vehicles: [
+        {
+          plateId: "new-456",
+          plateState: "WA",
+          color: "Black",
+          make: "Ford",
+          model: "F-150",
+        },
+      ],
+    });
+  });
+
+  const assert_s9d_vehicles_replaced = computed(() => {
+    const dana = s9d.people.find((p: Person) => p.name === "Dana");
+    const vs: Vehicle[] = dana?.vehicles ?? [];
+    return len(vs) === 1 && vs[0].plateId === "NEW456" &&
+      vs[0].plateState === "WA";
+  });
+
+  // Edit WITHOUT vehicles → preserves existing
+  const action_s9d_edit_no_vehicles = action(() => {
+    s9d.editPerson.send({
+      originalName: "Dana",
+      name: "Dana",
+      email: "dana2@co.com", // change email only
+      commuteMode: "drive",
+      priorityRank: 1,
+      defaultSpot: "",
+      preferences: "",
+      // vehicles omitted
+    });
+  });
+
+  const assert_s9d_vehicles_preserved = computed(() => {
+    const dana = s9d.people.find((p: Person) => p.name === "Dana");
+    const vs: Vehicle[] = dana?.vehicles ?? [];
+    // vehicles from previous edit still present, email changed
+    return (
+      len(vs) === 1 &&
+      vs[0].plateId === "NEW456" &&
+      dana?.email === "dana2@co.com"
+    );
+  });
+
+  // ============================================================
   // Test sequence
   // ============================================================
 
@@ -726,6 +905,18 @@ export default pattern(() => {
       { assertion: assert_s8_admin_view_admin_mode_visible },
       { action: action_toggle_admin },
       { assertion: assert_s8_admin_off },
+
+      // Vehicle data on people
+      { action: action_s9a_add_with_vehicles },
+      { assertion: assert_s9a_zara_has_vehicles },
+      { action: action_s9b_add_blank_plate },
+      { assertion: assert_s9b_blank_plate_dropped },
+      { action: action_s9c_add_no_vehicles },
+      { assertion: assert_s9c_no_vehicles_default },
+      { action: action_s9d_edit_with_vehicles },
+      { assertion: assert_s9d_vehicles_replaced },
+      { action: action_s9d_edit_no_vehicles },
+      { assertion: assert_s9d_vehicles_preserved },
     ],
     s1,
     s2,
@@ -735,5 +926,9 @@ export default pattern(() => {
     s6,
     s7,
     s8,
+    s9a,
+    s9b,
+    s9c,
+    s9d,
   };
 });
