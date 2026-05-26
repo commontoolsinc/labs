@@ -1,98 +1,215 @@
 #!/bin/bash
 # Script: Authenticated Session Workflow
-# Purpose: Login once, save state, reuse for subsequent runs
-# Usage: ./scripts/authenticated-session.sh <login-url> [state-file]
-#
-# Environment variables:
-#   APP_USERNAME - Login username/email
-#   APP_PASSWORD - Login password
-#
-# Two modes:
-#   1. Discovery mode (default): Shows form structure so you can identify refs
-#   2. Login mode: Performs actual login after you update the refs
-#
-# Setup steps:
-#   1. Run once to see form structure (discovery mode)
-#   2. Update refs in LOGIN FLOW section below
-#   3. Set APP_USERNAME and APP_PASSWORD
-#   4. Delete the DISCOVERY section
+# Purpose: Discover login refs or perform a single credentialed login.
 
 set -euo pipefail
 
 SCRIPT_NAME="${SKILL_SCRIPT:-scripts/authenticated-session.sh}"
-LOGIN_URL="${1:?Usage: $SCRIPT_NAME <login-url> [state-file]}"
-STATE_FILE="${2:-./auth-state.json}"
+CDP="${AGENT_BROWSER_CDP:-}"
+LOGIN_URL=""
+USERNAME_REF=""
+PASSWORD_REF=""
+SUBMIT_REF=""
+WAIT_LOAD="networkidle"
+WAIT_URL=""
+DISCOVERY_ONLY=0
+
+usage() {
+  cat <<USAGE
+Usage:
+  $SCRIPT_NAME --cdp <http://localhost:port> <login-url>
+  $SCRIPT_NAME --cdp <http://localhost:port> <login-url> \\
+    --username-ref @e1 --password-ref @e2 --submit-ref @e3 [--wait-url "**/dashboard"]
+
+Environment:
+  AGENT_BROWSER_CDP  Local CDP origin, used when --cdp is omitted.
+  APP_USERNAME       Username/email for credentialed mode.
+  APP_PASSWORD       Password for credentialed mode.
+
+Notes:
+  - The CDP endpoint must be a local http origin with an explicit port.
+  - Without all three refs, the script runs in discovery mode and prints the
+    login page snapshot so refs can be supplied on a later run.
+  - This script does not save or load browser state; reuse the connected
+    browser/session outside the script when persistence is needed.
+USAGE
+}
+
+fail() {
+  echo "$SCRIPT_NAME: $*" >&2
+  exit 2
+}
+
+require_value() {
+  local flag="$1"
+  local value="${2:-}"
+  [[ -n "$value" ]] || fail "$flag requires a value"
+}
+
+validate_cdp_endpoint() {
+  local endpoint="$1"
+  if [[ ! "$endpoint" =~ ^http://(localhost|127\.0\.0\.1|host\.docker\.internal):[0-9]+$ ]] &&
+    [[ ! "$endpoint" =~ ^http://\[::1\]:[0-9]+$ ]]; then
+    fail "--cdp must be an http:// local origin with an explicit port"
+  fi
+
+  local port="${endpoint##*:}"
+  [[ "$port" =~ ^[0-9]+$ ]] || fail "--cdp port must be numeric"
+  local port_number=$((10#$port))
+  ((port_number >= 1 && port_number <= 65535)) ||
+    fail "--cdp port must be between 1 and 65535"
+}
+
+validate_page_url() {
+  case "$1" in
+    http://* | https://*) ;;
+    *) fail "login-url must be http:// or https://" ;;
+  esac
+}
+
+browser() {
+  agent-browser --cdp "$CDP" "$@"
+}
+
+while (($# > 0)); do
+  case "$1" in
+    --cdp)
+      require_value "$1" "${2:-}"
+      CDP="$2"
+      shift 2
+      ;;
+    --cdp=*)
+      CDP="${1#*=}"
+      [[ -n "$CDP" ]] || fail "--cdp requires a value"
+      shift
+      ;;
+    --username-ref)
+      require_value "$1" "${2:-}"
+      USERNAME_REF="$2"
+      shift 2
+      ;;
+    --username-ref=*)
+      USERNAME_REF="${1#*=}"
+      [[ -n "$USERNAME_REF" ]] || fail "--username-ref requires a value"
+      shift
+      ;;
+    --password-ref)
+      require_value "$1" "${2:-}"
+      PASSWORD_REF="$2"
+      shift 2
+      ;;
+    --password-ref=*)
+      PASSWORD_REF="${1#*=}"
+      [[ -n "$PASSWORD_REF" ]] || fail "--password-ref requires a value"
+      shift
+      ;;
+    --submit-ref)
+      require_value "$1" "${2:-}"
+      SUBMIT_REF="$2"
+      shift 2
+      ;;
+    --submit-ref=*)
+      SUBMIT_REF="${1#*=}"
+      [[ -n "$SUBMIT_REF" ]] || fail "--submit-ref requires a value"
+      shift
+      ;;
+    --wait-load)
+      require_value "$1" "${2:-}"
+      WAIT_LOAD="$2"
+      shift 2
+      ;;
+    --wait-load=*)
+      WAIT_LOAD="${1#*=}"
+      [[ -n "$WAIT_LOAD" ]] || fail "--wait-load requires a value"
+      shift
+      ;;
+    --wait-url)
+      require_value "$1" "${2:-}"
+      WAIT_URL="$2"
+      shift 2
+      ;;
+    --wait-url=*)
+      WAIT_URL="${1#*=}"
+      [[ -n "$WAIT_URL" ]] || fail "--wait-url requires a value"
+      shift
+      ;;
+    --discovery)
+      DISCOVERY_ONLY=1
+      shift
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      fail "unknown option: $1"
+      ;;
+    *)
+      [[ -z "$LOGIN_URL" ]] || fail "unexpected argument: $1"
+      LOGIN_URL="$1"
+      shift
+      ;;
+  esac
+done
+
+while (($# > 0)); do
+  [[ -z "$LOGIN_URL" ]] || fail "unexpected argument: $1"
+  LOGIN_URL="$1"
+  shift
+done
+
+[[ -n "$LOGIN_URL" ]] || {
+  usage >&2
+  exit 2
+}
+[[ -n "$CDP" ]] || fail "provide --cdp or set AGENT_BROWSER_CDP"
+CDP="${CDP%/}"
+validate_cdp_endpoint "$CDP"
+validate_page_url "$LOGIN_URL"
+command -v agent-browser >/dev/null 2>&1 || fail "agent-browser is not on PATH"
 
 echo "Authentication workflow: $LOGIN_URL"
+browser open "$LOGIN_URL"
+browser wait --load "$WAIT_LOAD"
 
-# ================================================================
-# SAVED STATE: Skip login if valid saved state exists
-# ================================================================
-if [[ -f "$STATE_FILE" ]]; then
-    echo "Loading saved state from $STATE_FILE..."
-    agent-browser state load "$STATE_FILE"
-    agent-browser open "$LOGIN_URL"
-    agent-browser wait --load networkidle
+echo
+echo "Login page snapshot:"
+echo "---"
+browser snapshot -i
+echo "---"
 
-    CURRENT_URL=$(agent-browser get url)
-    if [[ "$CURRENT_URL" != *"login"* ]] && [[ "$CURRENT_URL" != *"signin"* ]]; then
-        echo "Session restored successfully"
-        agent-browser snapshot -i
-        exit 0
-    fi
-    echo "Session expired, performing fresh login..."
-    rm -f "$STATE_FILE"
+if ((DISCOVERY_ONLY == 1)) ||
+  [[ -z "$USERNAME_REF" || -z "$PASSWORD_REF" || -z "$SUBMIT_REF" ]]; then
+  echo
+  echo "Discovery mode complete."
+  echo "Re-run with --username-ref, --password-ref, and --submit-ref to submit credentials."
+  exit 0
 fi
 
-# ================================================================
-# DISCOVERY MODE: Shows form structure (delete after setup)
-# ================================================================
-echo "Opening login page..."
-agent-browser open "$LOGIN_URL"
-agent-browser wait --load networkidle
+: "${APP_USERNAME:?Set APP_USERNAME in the script execution environment}"
+: "${APP_PASSWORD:?Set APP_PASSWORD in the script execution environment}"
 
-echo ""
-echo "Login form structure:"
-echo "---"
-agent-browser snapshot -i
-echo "---"
-echo ""
-echo "Next steps:"
-echo "  1. Note the refs: username=@e?, password=@e?, submit=@e?"
-echo "  2. Update the LOGIN FLOW section below with your refs"
-echo "  3. Set: export APP_USERNAME='...' APP_PASSWORD='...'"
-echo "  4. Delete this DISCOVERY MODE section"
-echo ""
-agent-browser close
-exit 0
+echo
+echo "Submitting credentials..."
+browser fill "$USERNAME_REF" "$APP_USERNAME"
+browser fill "$PASSWORD_REF" "$APP_PASSWORD"
+browser click "$SUBMIT_REF"
 
-# ================================================================
-# LOGIN FLOW: Uncomment and customize after discovery
-# ================================================================
-# : "${APP_USERNAME:?Set APP_USERNAME environment variable}"
-# : "${APP_PASSWORD:?Set APP_PASSWORD environment variable}"
-#
-# agent-browser open "$LOGIN_URL"
-# agent-browser wait --load networkidle
-# agent-browser snapshot -i
-#
-# # Fill credentials (update refs to match your form)
-# agent-browser fill @e1 "$APP_USERNAME"
-# agent-browser fill @e2 "$APP_PASSWORD"
-# agent-browser click @e3
-# agent-browser wait --load networkidle
-#
-# # Verify login succeeded
-# FINAL_URL=$(agent-browser get url)
-# if [[ "$FINAL_URL" == *"login"* ]] || [[ "$FINAL_URL" == *"signin"* ]]; then
-#     echo "Login failed - still on login page"
-#     agent-browser screenshot /tmp/login-failed.png
-#     agent-browser close
-#     exit 1
-# fi
-#
-# # Save state for future runs
-# echo "Saving state to $STATE_FILE"
-# agent-browser state save "$STATE_FILE"
-# echo "Login successful"
-# agent-browser snapshot -i
+if [[ -n "$WAIT_URL" ]]; then
+  browser wait --url "$WAIT_URL"
+else
+  browser wait --load "$WAIT_LOAD"
+fi
+
+echo
+echo "Post-login URL:"
+browser get url
+echo
+echo "Post-login snapshot:"
+echo "---"
+browser snapshot -i
+echo "---"
