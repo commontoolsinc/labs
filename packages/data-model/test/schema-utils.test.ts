@@ -788,7 +788,7 @@ describe("schemaForValueType", () => {
     example: FabricValue,
   ) {
     describe(typeName, () => {
-      it(`should return { type: "${typeName}" }`, () => {
+      it(`returns { type: "${typeName}" }`, () => {
         expect(schemaForValueType(example)).toEqual({ type: typeName });
       });
 

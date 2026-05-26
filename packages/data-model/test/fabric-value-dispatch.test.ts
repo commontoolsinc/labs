@@ -30,7 +30,7 @@ describe("fabric-value-dispatch", () => {
   // --------------------------------------------------------------------------
 
   describe("flag OFF: legacy fabric value conversion", () => {
-    it("fabricFromNativeValue performs legacy deep conversion", () => {
+    it("performs legacy deep conversion via `fabricFromNativeValue`", () => {
       setDataModelConfig(false);
       const value = { hello: "world" } as FabricValue;
       // fabricFromNativeValue returns a new frozen copy for objects.
@@ -38,13 +38,13 @@ describe("fabric-value-dispatch", () => {
       expect(stored).toEqual({ hello: "world" });
     });
 
-    it("nativeFromFabricValue is identity passthrough", () => {
+    it("is an identity passthrough via `nativeFromFabricValue`", () => {
       setDataModelConfig(false);
       const value = { hello: "world" } as FabricValue;
       expect(nativeFromFabricValue(value)).toBe(value);
     });
 
-    it("fabricFromNativeValue converts Error via legacy path", () => {
+    it("converts Error via legacy path through `fabricFromNativeValue`", () => {
       setDataModelConfig(false);
       // `fabricFromNativeValue()` handles Error conversion directly.
       const error = new Error("legacy error");
@@ -57,7 +57,7 @@ describe("fabric-value-dispatch", () => {
       );
     });
 
-    it("primitives pass through", () => {
+    it("passes primitives through", () => {
       setDataModelConfig(false);
       expect(fabricFromNativeValue(42 as FabricValue)).toBe(42);
       expect(fabricFromNativeValue("hello" as FabricValue)).toBe("hello");
@@ -101,14 +101,14 @@ describe("fabric-value-dispatch", () => {
       expect(roundTrip(value)).toEqual([1, "two", null]);
     });
 
-    it("fabricFromNativeValue wraps Error into FabricError", () => {
+    it("wraps Error into FabricError via `fabricFromNativeValue`", () => {
       setDataModelConfig(true);
       const error = new Error("test error");
       const stored = fabricFromNativeValue(error as unknown as FabricValue);
       expect(stored).toBeInstanceOf(FabricError);
     });
 
-    it("nativeFromFabricValue unwraps FabricError back to Error", () => {
+    it("unwraps FabricError back to Error via `nativeFromFabricValue`", () => {
       setDataModelConfig(true);
       const error = new Error("test error");
       const stored = fabricFromNativeValue(error as unknown as FabricValue);
@@ -117,7 +117,7 @@ describe("fabric-value-dispatch", () => {
       expect((restored as unknown as Error).message).toBe("test error");
     });
 
-    it("fabricFromNativeValue deep-freezes result", () => {
+    it("deep-freezes the result via `fabricFromNativeValue`", () => {
       setDataModelConfig(true);
       const value = { a: 1, b: [2, 3] } as FabricValue;
       const stored = fabricFromNativeValue(value);
