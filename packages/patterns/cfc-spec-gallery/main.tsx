@@ -7,6 +7,7 @@ import {
   NAME,
   pattern,
   Stream,
+  type TrustedActionWrite,
   UI,
   Writable,
   WriteAuthorizedBy,
@@ -26,7 +27,6 @@ import {
   TrustedForwardSurface,
   TrustedSafeLinkSurface,
 } from "../cfc/trusted-surfaces/mod.ts";
-import type { TrustedActionWrite } from "../cfc/trusted-action.ts";
 
 type ExampleCardProps = {
   title: string;

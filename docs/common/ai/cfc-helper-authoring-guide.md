@@ -9,9 +9,8 @@ learning every part of the CFC runtime.
 
 ## Mental Model
 
-CFC helpers are normal pattern code plus schema-level policy metadata. The
-metadata is carried by TypeScript type aliases from `commonfabric`, then emitted
-into JSON schema by the pattern tooling.
+CFC helpers are normal pattern code plus policy metadata. The metadata is
+carried by TypeScript type aliases from `commonfabric`.
 
 The main pieces helper authors use are:
 
@@ -57,12 +56,11 @@ make policy structure reusable; they should not hide the policy decision.
 
 ## Authoring Trusted Action Types
 
-Use `trusted-action.ts` when a helper writes to a protected output from a
-specific handler.
+Use the trusted action aliases from `commonfabric` when a helper writes to a
+protected output from a specific handler.
 
 ```ts
-import { handler, Writable } from "commonfabric";
-import { type TrustedActionWrite } from "../trusted-action.ts";
+import { handler, type TrustedActionWrite, Writable } from "commonfabric";
 
 export const TRUSTED_REVIEW_SURFACE = "TrustedReviewSurface";
 const REVIEW_TITLE_ACTION = "TrustedReviewTitle";
@@ -116,11 +114,11 @@ import {
   NAME,
   pattern,
   Stream,
+  type TrustedActionWrite,
   UI,
   type VNode,
   Writable,
 } from "commonfabric";
-import { type TrustedActionWrite } from "../trusted-action.ts";
 
 export const TRUSTED_APPROVAL_SURFACE = "TrustedApprovalSurface";
 const APPROVE_ACTION = "TrustedApprove";
@@ -271,7 +269,7 @@ resource ids in shared prompt helpers.
 
 ### Atom Builders
 
-Atoms are JSON evidence values. Builders should require callers to supply the
+Atoms are evidence values. Builders should require callers to supply the
 policy-sensitive parameters.
 
 ```ts

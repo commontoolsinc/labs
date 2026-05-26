@@ -24,7 +24,7 @@ registry shape and common lookup helpers.
 
 ## Trusted Action Contracts
 
-From `trusted-action.ts`:
+From `commonfabric`:
 
 - `TrustedActionWriteWithIntegrity`
 - `TrustedActionWrite`

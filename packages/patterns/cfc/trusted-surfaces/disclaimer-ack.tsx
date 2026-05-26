@@ -4,11 +4,11 @@ import {
   NAME,
   pattern,
   Stream,
+  type TrustedActionWriteWithIntegrity,
   UI,
   type VNode,
   Writable,
 } from "commonfabric";
-import { type TrustedActionWriteWithIntegrity } from "../trusted-action.ts";
 
 export const TRUSTED_DISCLAIMER_ACK_SURFACE = "TrustedDisclaimerAckSurface";
 export const TRUSTED_DISCLAIMER_RENDERED_EVIDENCE =

@@ -4,14 +4,12 @@ import {
   NAME,
   pattern,
   Stream,
+  type TrustedActionUiContract,
+  type TrustedActionWrite,
   UI,
   type VNode,
   Writable,
 } from "commonfabric";
-import {
-  type TrustedActionUiContract,
-  type TrustedActionWrite,
-} from "../trusted-action.ts";
 
 export const TRUSTED_REVIEW_SURFACE = "TrustedReviewSurface";
 

@@ -4,11 +4,11 @@ import {
   NAME,
   pattern,
   Stream,
+  type TrustedActionWrite,
   UI,
   type VNode,
   Writable,
 } from "commonfabric";
-import { type TrustedActionWrite } from "../trusted-action.ts";
 
 export const TRUSTED_SHARE_POLICY_SURFACE = "TrustedSharePolicySurface";
 

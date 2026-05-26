@@ -10,6 +10,7 @@ import {
   RepresentsCurrentUser,
   RequiresIntegrity,
   Stream,
+  type TrustedActionWrite,
   UI,
   Writable,
 } from "commonfabric";
@@ -21,7 +22,6 @@ import {
   type EmptyAdminRegistryValue,
   subjectHasAdminRole,
 } from "../cfc/admin/mod.ts";
-import type { TrustedActionWrite } from "../cfc/trusted-action.ts";
 import {
   type ChatProfile,
   type ChatRoom,

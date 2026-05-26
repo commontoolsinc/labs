@@ -7,10 +7,10 @@ import {
   NAME,
   pattern,
   Stream,
+  type TrustedActionWrite,
   UI,
   Writable,
 } from "commonfabric";
-import type { TrustedActionWrite } from "../cfc/trusted-action.ts";
 
 const TRUSTED_HEALTH_DISCLOSURE_SURFACE = "TrustedHealthDisclosureSurface";
 const TRUSTED_REVEAL_HEALTH_DATA_ACTION = "TrustedRevealHealthData";

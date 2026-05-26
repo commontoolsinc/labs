@@ -4,11 +4,11 @@ import {
   NAME,
   pattern,
   Stream,
+  type TrustedActionWrite,
   UI,
   type VNode,
   Writable,
 } from "commonfabric";
-import { type TrustedActionWrite } from "../trusted-action.ts";
 
 export const TRUSTED_SONG_ID_RECORDING_SURFACE =
   "TrustedSongIdRecordingSurface";

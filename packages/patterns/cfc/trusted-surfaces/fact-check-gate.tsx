@@ -4,11 +4,11 @@ import {
   NAME,
   pattern,
   Stream,
+  type TrustedActionWriteWithIntegrity,
   UI,
   type VNode,
   Writable,
 } from "commonfabric";
-import { type TrustedActionWriteWithIntegrity } from "../trusted-action.ts";
 
 export const TRUSTED_FACT_CHECK_GATE_SURFACE = "TrustedFactCheckGateSurface";
 export const TRUSTED_FACT_CHECK_DISCLAIMER_EVIDENCE =
