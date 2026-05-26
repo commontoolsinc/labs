@@ -756,6 +756,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     if (ts.isTypeLiteralNode(typeNode)) {
       const properties: Record<string, JSONSchemaMutable> = {};
       const required: string[] = [];
+      let additionalProperties: JSONSchemaMutable | undefined;
 
       for (const member of typeNode.members) {
         if (ts.isPropertySignature(member) && member.name && member.type) {
@@ -786,6 +787,32 @@ export class SchemaGenerator implements ISchemaGenerator {
           if (!member.questionToken) {
             required.push(propName);
           }
+        } else if (ts.isIndexSignatureDeclaration(member) && member.type) {
+          // Mirror ObjectFormatter.formatType's handling of string/number index
+          // signatures: emit them as `additionalProperties` with the value
+          // type's schema. Without this branch, synthetic TypeLiteralNodes
+          // representing `Record<K, V>` / `{ [k: string]: V }` shapes silently
+          // drop their index signature when routed through node-based
+          // analysis (e.g. the SchemaInjection lift-revisit path that feeds
+          // `any` as the paired Type, see ts-transformers
+          // schema-injection.ts ~line 3290).
+          let valueType: ts.Type;
+          if (typeRegistry && typeRegistry.has(member.type)) {
+            valueType = typeRegistry.get(member.type)!;
+          } else {
+            valueType = checker.getTypeFromTypeNode(member.type);
+          }
+          const valueSchema = this.formatChildType(
+            valueType,
+            context,
+            member.type,
+          );
+          // If multiple index signatures are present (e.g. both string and
+          // number key), the first non-undefined wins — matching
+          // ObjectFormatter's `stringIndex ?? numberIndex` precedence.
+          if (additionalProperties === undefined) {
+            additionalProperties = valueSchema;
+          }
         }
       }
 
@@ -796,6 +823,11 @@ export class SchemaGenerator implements ISchemaGenerator {
 
       if (required.length > 0) {
         schema.required = required;
+      }
+
+      if (additionalProperties !== undefined) {
+        (schema as Record<string, unknown>).additionalProperties =
+          additionalProperties;
       }
 
       return schema;
