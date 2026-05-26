@@ -1781,8 +1781,13 @@ export class WorkerReconciler {
             existingState.cancel();
           }
 
-          // Skip if value hasn't changed
-          if (existingState && existingState.currentValue === value) continue;
+          // Skip only when a previous primitive value is unchanged. Object/cell
+          // prop states do not track currentValue, so they must still emit a
+          // set-prop when transitioning to a primitive such as undefined.
+          if (
+            existingState && !existingState.cell &&
+            existingState.currentValue === value
+          ) continue;
 
           const propValue = this.transformPropValueForState(
             state,
