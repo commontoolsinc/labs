@@ -14,7 +14,13 @@
  *
  * NOTE: Uses .filter(() => true).length for array lengths per reactivity tracking note.
  */
-import { action, computed, pattern, safeDateNow } from "commonfabric";
+import { action, computed, pattern, safeDateNow, UI } from "commonfabric";
+import {
+  findNodeById,
+  findNodeByProp,
+  nodeIncludesText,
+  propValue,
+} from "../../test-ui-helpers.ts";
 import ParkingCoordinator, { DEFAULT_SPOTS } from "./main.tsx";
 import type { ParkingSpot, Person, SpotRequest } from "./main.tsx";
 
@@ -44,6 +50,18 @@ export default pattern(() => {
     people: [],
     requests: [],
   });
+
+  const action_enable_s1_admin_manager = action(() =>
+    s1.enableAdminManager.send()
+  );
+
+  const assert_s1_manager_can_start_people_flow = computed(() =>
+    s1.currentUserCanManageAdmins === true &&
+    nodeIncludesText(
+      findNodeById(s1[UI], "parking-admin-add-person-open"),
+      "+ Add Person",
+    )
+  );
 
   const action_add_alice = action(() => {
     s1.addPerson.send({
@@ -191,12 +209,29 @@ export default pattern(() => {
   // ============================================================
   // Subject 3: Spot Management
   // ============================================================
+  const adminAlice3: Person = {
+    name: "Alice",
+    email: "alice@co.com",
+    commuteMode: "drive",
+    spotPreferences: [],
+    defaultSpot: "",
+    priorityRank: 1,
+  };
   const s3 = ParkingCoordinator({
     spots: DEFAULT_SPOTS,
-    people: [],
+    people: [adminAlice3],
     requests: [],
   });
 
+  const action_add_spot7_without_admin = action(() =>
+    s3.addSpot.send({ spotNumber: "7", label: "Level 2", notes: "Covered" })
+  );
+  const action_enable_s3_admin_manager = action(() =>
+    s3.enableAdminManager.send()
+  );
+  const action_make_alice_spot_admin = action(() =>
+    s3.togglePersonAdmin.send({ name: "Alice" })
+  );
   const action_add_spot7 = action(() =>
     s3.addSpot.send({ spotNumber: "7", label: "Level 2", notes: "Covered" })
   );
@@ -211,6 +246,13 @@ export default pattern(() => {
   });
 
   const assert_s3_three_spots = computed(() => len(s3.spots) === 3);
+  const assert_s3_non_admin_spot_blocked = computed(() => len(s3.spots) === 3);
+  const assert_s3_can_manage_admins = computed(() =>
+    s3.currentUserCanManageAdmins === true
+  );
+  const assert_s3_alice_is_admin = computed(() =>
+    s3.currentPersonIsAdmin === true
+  );
   const assert_s3_four_spots = computed(() => len(s3.spots) === 4);
   const assert_s3_spot7_label = computed(() => {
     const s = s3.spots.find((sp: ParkingSpot) => sp.spotNumber === "7");
@@ -429,10 +471,28 @@ export default pattern(() => {
     requests: [],
   });
 
+  const action_try_admin_override_without_admin = action(() => {
+    s7.adminOverride.send({ spotNumber: "5", date: today, personName: "Bob" });
+  });
+  const action_enable_s7_admin_manager = action(() =>
+    s7.enableAdminManager.send()
+  );
+  const action_make_alice_override_admin = action(() =>
+    s7.togglePersonAdmin.send({ name: "Alice" })
+  );
   const action_admin_override_bob_spot5 = action(() => {
     s7.adminOverride.send({ spotNumber: "5", date: today, personName: "Bob" });
   });
 
+  const assert_s7_non_admin_override_blocked = computed(() =>
+    len(s7.requests) === 0
+  );
+  const assert_s7_can_manage_admins = computed(() =>
+    s7.currentUserCanManageAdmins === true
+  );
+  const assert_s7_alice_is_admin = computed(() =>
+    s7.currentPersonIsAdmin === true
+  );
   const assert_s7_bob_override = computed(() => {
     return s7.requests.some(
       (r: SpotRequest) =>
@@ -472,14 +532,92 @@ export default pattern(() => {
   // ============================================================
   const s8 = ParkingCoordinator({
     spots: DEFAULT_SPOTS,
-    people: [],
+    people: [alice4],
     requests: [],
   });
 
   const action_toggle_admin = action(() => s8.toggleAdminMode.send());
+  const action_enable_s8_admin_manager = action(() =>
+    s8.enableAdminManager.send()
+  );
+  const action_make_alice_mode_admin = action(() =>
+    s8.togglePersonAdmin.send({ name: "Alice" })
+  );
 
   const assert_s8_admin_off = computed(() => s8.adminMode === false);
+  const assert_s8_admin_view_locked = computed(() => {
+    const adminAccess = findNodeById(s8[UI], "parking-admin-access");
+    const enableManager = findNodeById(
+      s8[UI],
+      "parking-enable-admin-manager",
+    );
+    const adminToggle = findNodeById(s8[UI], "parking-admin-mode-toggle");
+    const aliceAdminToggle = findNodeByProp(
+      s8[UI],
+      "data-parking-admin-toggle",
+      "Alice",
+    );
+    return nodeIncludesText(adminAccess, "Cannot manage admins") &&
+      nodeIncludesText(aliceAdminToggle, "Make admin") &&
+      propValue(enableManager, "disabled") === false &&
+      propValue(aliceAdminToggle, "disabled") === true &&
+      propValue(adminToggle, "disabled") === true &&
+      findNodeById(s8[UI], "parking-admin-people-section") === undefined;
+  });
+  const assert_s8_can_manage_admins = computed(() =>
+    s8.currentUserCanManageAdmins === true
+  );
+  const assert_s8_admin_view_manager_enabled = computed(() => {
+    const adminAccess = findNodeById(s8[UI], "parking-admin-access");
+    const enableManager = findNodeById(
+      s8[UI],
+      "parking-enable-admin-manager",
+    );
+    const aliceAdminToggle = findNodeByProp(
+      s8[UI],
+      "data-parking-admin-toggle",
+      "Alice",
+    );
+    return nodeIncludesText(adminAccess, "Can manage admins") &&
+      nodeIncludesText(aliceAdminToggle, "Make admin") &&
+      propValue(enableManager, "disabled") === true &&
+      propValue(aliceAdminToggle, "disabled") === false;
+  });
+  const assert_s8_alice_is_admin = computed(() =>
+    s8.currentPersonIsAdmin === true
+  );
+  const assert_s8_admin_view_alice_admin = computed(() => {
+    const adminToggle = findNodeById(s8[UI], "parking-admin-mode-toggle");
+    const aliceRow = findNodeByProp(
+      s8[UI],
+      "data-parking-admin-row",
+      "Alice",
+    );
+    const aliceAdminToggle = findNodeByProp(
+      s8[UI],
+      "data-parking-admin-toggle",
+      "Alice",
+    );
+    return nodeIncludesText(aliceRow, "Admin") &&
+      nodeIncludesText(aliceAdminToggle, "Remove admin") &&
+      propValue(adminToggle, "disabled") === false &&
+      nodeIncludesText(adminToggle, "Admin: OFF");
+  });
   const assert_s8_admin_on = computed(() => s8.adminMode === true);
+  const assert_s8_admin_view_admin_mode_visible = computed(() =>
+    nodeIncludesText(
+      findNodeById(s8[UI], "parking-admin-mode-toggle"),
+      "Admin: ON",
+    ) &&
+    nodeIncludesText(
+      findNodeById(s8[UI], "parking-admin-people-section"),
+      "People",
+    ) &&
+    nodeIncludesText(
+      findNodeById(s8[UI], "parking-admin-add-person-open"),
+      "+ Add Person",
+    )
+  );
 
   // ============================================================
   // Test sequence
@@ -490,6 +628,8 @@ export default pattern(() => {
       // People management
       { assertion: assert_s1_no_people },
       { assertion: assert_s1_three_spots },
+      { action: action_enable_s1_admin_manager },
+      { assertion: assert_s1_manager_can_start_people_flow },
       { action: action_add_alice },
       { assertion: assert_s1_alice_exists },
       { assertion: assert_s1_alice_default_spot },
@@ -517,6 +657,12 @@ export default pattern(() => {
 
       // Spot management
       { assertion: assert_s3_three_spots },
+      { action: action_add_spot7_without_admin },
+      { assertion: assert_s3_non_admin_spot_blocked },
+      { action: action_enable_s3_admin_manager },
+      { assertion: assert_s3_can_manage_admins },
+      { action: action_make_alice_spot_admin },
+      { assertion: assert_s3_alice_is_admin },
       { action: action_add_spot7 },
       { assertion: assert_s3_four_spots },
       { assertion: assert_s3_spot7_label },
@@ -552,6 +698,12 @@ export default pattern(() => {
       { assertion: assert_s6_cancelled },
 
       // Admin override
+      { action: action_try_admin_override_without_admin },
+      { assertion: assert_s7_non_admin_override_blocked },
+      { action: action_enable_s7_admin_manager },
+      { assertion: assert_s7_can_manage_admins },
+      { action: action_make_alice_override_admin },
+      { assertion: assert_s7_alice_is_admin },
       { action: action_admin_override_bob_spot5 },
       { assertion: assert_s7_bob_override },
       { action: action_admin_override_alice_spot5 },
@@ -560,8 +712,18 @@ export default pattern(() => {
 
       // Admin mode toggle
       { assertion: assert_s8_admin_off },
+      { assertion: assert_s8_admin_view_locked },
+      { action: action_toggle_admin },
+      { assertion: assert_s8_admin_off },
+      { action: action_enable_s8_admin_manager },
+      { assertion: assert_s8_can_manage_admins },
+      { assertion: assert_s8_admin_view_manager_enabled },
+      { action: action_make_alice_mode_admin },
+      { assertion: assert_s8_alice_is_admin },
+      { assertion: assert_s8_admin_view_alice_admin },
       { action: action_toggle_admin },
       { assertion: assert_s8_admin_on },
+      { assertion: assert_s8_admin_view_admin_mode_visible },
       { action: action_toggle_admin },
       { assertion: assert_s8_admin_off },
     ],
