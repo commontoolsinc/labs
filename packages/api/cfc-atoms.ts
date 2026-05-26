@@ -4,9 +4,11 @@ export type {
   CfcBuiltinAtom,
   CfcCaveatAtom,
   CfcInjectionSafeAtom,
+  CfcJsonArray,
   CfcJsonValue,
   CfcPromptSlotBoundAtom,
   CfcPromptSlotInfluenceAtom,
+  CfcPromptSlotRunManifest,
   CfcResourceAtom,
   CfcUserSurfaceInputAtom,
 } from "./cfc.ts";

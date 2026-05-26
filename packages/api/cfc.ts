@@ -15,12 +15,12 @@ export type CfcJsonValue =
   | boolean
   | number
   | string
-  | readonly CfcJsonValue[]
+  | CfcJsonArray
   | CfcAtomObject;
 
-export interface CfcAtomObject {
-  readonly [key: string]: CfcJsonValue;
-}
+export interface CfcJsonArray extends ReadonlyArray<CfcJsonValue> {}
+
+export interface CfcAtomObject extends Readonly<Record<string, CfcJsonValue>> {}
 
 export type CfcAtom = CfcJsonValue;
 
@@ -52,40 +52,40 @@ export const CFC_FUSE_ATOM_CLASS = {
   TopologyObservation: "FilesystemTopologyObservation",
 } as const;
 
-export interface CfcResourceAtom {
+export type CfcResourceAtom = CfcAtomObject & {
   readonly type: typeof CFC_ATOM_TYPE.Resource;
   readonly class: string;
   readonly subject: string;
   readonly scope?: CfcAtom;
-}
+};
 
-export interface CfcCaveatAtom {
+export type CfcCaveatAtom = CfcAtomObject & {
   readonly type: typeof CFC_ATOM_TYPE.Caveat;
   readonly kind: string;
   readonly source: CfcAtom;
   readonly by?: CfcAtom;
-}
+};
 
-export interface CfcBuiltinAtom {
+export type CfcBuiltinAtom = CfcAtomObject & {
   readonly type: typeof CFC_ATOM_TYPE.Builtin;
   readonly name: string;
-}
+};
 
-export interface CfcInjectionSafeAtom {
+export type CfcInjectionSafeAtom = CfcAtomObject & {
   readonly type: typeof CFC_ATOM_TYPE.InjectionSafe;
-}
+};
 
-export interface CfcUserSurfaceInputAtom {
+export type CfcUserSurfaceInputAtom = CfcAtomObject & {
   readonly type: typeof CFC_ATOM_TYPE.UserSurfaceInput;
   readonly user: string;
   readonly surface: string;
   readonly valueDigest: string;
-}
+};
 
-export interface CfcPromptSlotBoundAtom<
+export type CfcPromptSlotBoundAtom<
   Source extends CfcAtom = CfcAtom,
   Role extends string = string,
-> {
+> = CfcAtomObject & {
   readonly type: typeof CFC_ATOM_TYPE.PromptSlotBound;
   readonly source: Source;
   readonly role: Role;
@@ -98,33 +98,37 @@ export interface CfcPromptSlotBoundAtom<
   readonly slotDigest?: string;
   readonly snapshotDigest?: string;
   readonly targetPath?: string;
-}
+};
 
-export interface CfcPromptSlotInfluenceAtom<Role extends string = string> {
-  readonly type: typeof CFC_ATOM_TYPE.PromptSlotInfluence;
-  readonly version: 1;
-  readonly role: Role;
-  readonly kernelName: string;
-  readonly surface: string;
-  readonly subject?: string;
-  readonly eventId?: string;
-  readonly valueDigest?: string;
-  readonly slotDigest?: string;
-  readonly snapshotDigest?: string;
-  readonly targetPath?: string;
-  readonly runManifest?: {
-    readonly source?: string;
-    readonly wishId?: string;
-    readonly dispatchClass?: string;
+export type CfcPromptSlotRunManifest = CfcAtomObject & {
+  readonly source?: string;
+  readonly wishId?: string;
+  readonly dispatchClass?: string;
+};
+
+export type CfcPromptSlotInfluenceAtom<Role extends string = string> =
+  & CfcAtomObject
+  & {
+    readonly type: typeof CFC_ATOM_TYPE.PromptSlotInfluence;
+    readonly version: 1;
+    readonly role: Role;
+    readonly kernelName: string;
+    readonly surface: string;
+    readonly subject?: string;
+    readonly eventId?: string;
+    readonly valueDigest?: string;
+    readonly slotDigest?: string;
+    readonly snapshotDigest?: string;
+    readonly targetPath?: string;
+    readonly runManifest?: CfcPromptSlotRunManifest;
   };
-}
 
 export const cfcAtom = {
   resource(
     className: string,
     subject: string = CFC_RUNTIME_SUBJECT,
     scope?: CfcAtom,
-  ) {
+  ): CfcResourceAtom {
     return {
       type: CFC_ATOM_TYPE.Resource,
       class: className,
@@ -133,7 +137,7 @@ export const cfcAtom = {
     };
   },
 
-  caveat(kind: string, source: CfcAtom, by?: CfcAtom) {
+  caveat(kind: string, source: CfcAtom, by?: CfcAtom): CfcCaveatAtom {
     return {
       type: CFC_ATOM_TYPE.Caveat,
       kind,
@@ -142,14 +146,14 @@ export const cfcAtom = {
     };
   },
 
-  builtin(name: string) {
+  builtin(name: string): CfcBuiltinAtom {
     return {
       type: CFC_ATOM_TYPE.Builtin,
       name,
     };
   },
 
-  injectionSafe() {
+  injectionSafe(): CfcInjectionSafeAtom {
     return {
       type: CFC_ATOM_TYPE.InjectionSafe,
     };
@@ -159,7 +163,7 @@ export const cfcAtom = {
     user: string,
     surface: string,
     valueDigest: string,
-  ) {
+  ): CfcUserSurfaceInputAtom {
     return {
       type: CFC_ATOM_TYPE.UserSurfaceInput,
       user,
@@ -175,7 +179,7 @@ export const cfcAtom = {
     subject: string,
     surface: string,
     valueDigest: string,
-  ) {
+  ): CfcPromptSlotBoundAtom<Source, Role> {
     return {
       type: CFC_ATOM_TYPE.PromptSlotBound,
       source,

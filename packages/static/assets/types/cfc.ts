@@ -12,12 +12,12 @@ export type CfcJsonValue =
   | boolean
   | number
   | string
-  | readonly CfcJsonValue[]
+  | CfcJsonArray
   | CfcAtomObject;
 
-export interface CfcAtomObject {
-  readonly [key: string]: CfcJsonValue;
-}
+export interface CfcJsonArray extends ReadonlyArray<CfcJsonValue> {}
+
+export interface CfcAtomObject extends Readonly<Record<string, CfcJsonValue>> {}
 
 export type CfcAtom = CfcJsonValue;
 
@@ -53,40 +53,40 @@ export declare const CFC_FUSE_ATOM_CLASS: {
   readonly TopologyObservation: "FilesystemTopologyObservation";
 };
 
-export interface CfcResourceAtom {
+export type CfcResourceAtom = CfcAtomObject & {
   readonly type: typeof CFC_ATOM_TYPE.Resource;
   readonly class: string;
   readonly subject: string;
   readonly scope?: CfcAtom;
-}
+};
 
-export interface CfcCaveatAtom {
+export type CfcCaveatAtom = CfcAtomObject & {
   readonly type: typeof CFC_ATOM_TYPE.Caveat;
   readonly kind: string;
   readonly source: CfcAtom;
   readonly by?: CfcAtom;
-}
+};
 
-export interface CfcBuiltinAtom {
+export type CfcBuiltinAtom = CfcAtomObject & {
   readonly type: typeof CFC_ATOM_TYPE.Builtin;
   readonly name: string;
-}
+};
 
-export interface CfcInjectionSafeAtom {
+export type CfcInjectionSafeAtom = CfcAtomObject & {
   readonly type: typeof CFC_ATOM_TYPE.InjectionSafe;
-}
+};
 
-export interface CfcUserSurfaceInputAtom {
+export type CfcUserSurfaceInputAtom = CfcAtomObject & {
   readonly type: typeof CFC_ATOM_TYPE.UserSurfaceInput;
   readonly user: string;
   readonly surface: string;
   readonly valueDigest: string;
-}
+};
 
-export interface CfcPromptSlotBoundAtom<
+export type CfcPromptSlotBoundAtom<
   Source extends CfcAtom = CfcAtom,
   Role extends string = string,
-> {
+> = CfcAtomObject & {
   readonly type: typeof CFC_ATOM_TYPE.PromptSlotBound;
   readonly source: Source;
   readonly role: Role;
@@ -99,9 +99,16 @@ export interface CfcPromptSlotBoundAtom<
   readonly slotDigest?: string;
   readonly snapshotDigest?: string;
   readonly targetPath?: string;
-}
+};
 
-export interface CfcPromptSlotInfluenceAtom<Role extends string = string> {
+export type CfcPromptSlotRunManifest = CfcAtomObject & {
+  readonly source?: string;
+  readonly wishId?: string;
+  readonly dispatchClass?: string;
+};
+
+export type CfcPromptSlotInfluenceAtom<Role extends string = string> =
+  CfcAtomObject & {
   readonly type: typeof CFC_ATOM_TYPE.PromptSlotInfluence;
   readonly version: 1;
   readonly role: Role;
@@ -113,12 +120,8 @@ export interface CfcPromptSlotInfluenceAtom<Role extends string = string> {
   readonly slotDigest?: string;
   readonly snapshotDigest?: string;
   readonly targetPath?: string;
-  readonly runManifest?: {
-    readonly source?: string;
-    readonly wishId?: string;
-    readonly dispatchClass?: string;
-  };
-}
+  readonly runManifest?: CfcPromptSlotRunManifest;
+};
 
 export declare const cfcAtom: {
   readonly resource: (
