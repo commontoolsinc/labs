@@ -46,6 +46,13 @@ Only split into `schemas.tsx` or additional modules when:
 Do not split by default. A moderate pattern with a few entities can still live
 comfortably in one file while you discover the right shape.
 
+## Multi-User Patterns
+
+For collaborative or identity-sensitive patterns, read
+`docs/common/patterns/multi-user-patterns.md` before choosing the input and
+output shape. Decide which state is shared across the space, which state belongs
+to the active user, and which state is local to one session.
+
 ## Reusing CFC Helpers
 
 For CFC policy code, check `packages/patterns/cfc/README.md` before copying
