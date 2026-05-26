@@ -1,4 +1,5 @@
-import { FabricInstance } from "../interface.ts";
+import type { FabricInstance } from "../interface.ts";
+import { BaseFabricInstance } from "./BaseFabricInstance.ts";
 
 /**
  * Abstract base class for `FabricInstance` wrappers that bridge native JS
@@ -8,7 +9,7 @@ import { FabricInstance } from "../interface.ts";
  * `instanceof FabricNativeWrapper` check.
  */
 export abstract class FabricNativeWrapper<T extends object>
-  extends FabricInstance {
+  extends BaseFabricInstance {
   /** The wire format tag for this wrapper's type (e.g. `TAGS.Error`). */
   abstract readonly typeTag: string;
 

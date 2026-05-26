@@ -1,3 +1,4 @@
+export { BaseFabricInstance } from "./BaseFabricInstance.ts";
 export { ExplicitTagValue } from "./ExplicitTagValue.ts";
 export { ProblematicValue } from "./ProblematicValue.ts";
 export { UnknownValue } from "./UnknownValue.ts";
