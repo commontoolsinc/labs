@@ -1,7 +1,6 @@
 import {
   type Cell,
   cellEntityIdString,
-  cfcAtom,
   EntityId,
   getEntityId,
   getPatternIdFromResultCell,
@@ -20,7 +19,7 @@ import {
   TYPE,
   URI,
 } from "@commonfabric/runner";
-import type { CellScope } from "@commonfabric/api";
+import { type CellScope, cfcAtom } from "@commonfabric/api";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { type Session } from "@commonfabric/identity";
 import { isRecord } from "@commonfabric/utils/types";

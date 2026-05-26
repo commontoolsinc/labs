@@ -1,3 +1,7 @@
+import {
+  CFC_ATOM_TYPE,
+  type CfcPromptSlotInfluenceAtom,
+} from "@commonfabric/api/cfc";
 import type {
   CfcEnforcementMode,
   CfcLabelView,
@@ -26,26 +30,11 @@ export type HarnessCfcInvocationInputLabelPath = readonly [
 ];
 
 export const CF_HARNESS_PROMPT_SLOT_INFLUENCE_ATOM_TYPE =
-  "cf-harness.cfc/PromptSlotInfluence" as const;
+  CFC_ATOM_TYPE.PromptSlotInfluence;
 
-export interface HarnessPromptSlotInfluenceAtom {
-  type: typeof CF_HARNESS_PROMPT_SLOT_INFLUENCE_ATOM_TYPE;
-  version: 1;
-  role: PromptSlotRole;
-  kernelName: string;
-  surface: string;
-  subject?: string;
-  eventId?: string;
-  valueDigest?: string;
-  slotDigest?: string;
-  snapshotDigest?: string;
-  targetPath?: string;
-  runManifest?: {
-    source?: string;
-    wishId?: string;
-    dispatchClass?: string;
-  };
-}
+export type HarnessPromptSlotInfluenceAtom = CfcPromptSlotInfluenceAtom<
+  PromptSlotRole
+>;
 
 export interface HarnessCfcRedactedTextSummary {
   type: "cf-harness.redacted-text-summary";

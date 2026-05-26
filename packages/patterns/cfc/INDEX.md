@@ -33,6 +33,24 @@ From `commonfabric`:
 Use these when defining CFC output types for writes that must be authorized by a
 trusted UI action.
 
+## Shared Atom Vocabulary
+
+From `api-cfc.ts`:
+
+- `CFC_ATOM_BASE`
+- `CFC_ATOM_TYPE`
+- `CFC_CONCEPT_KIND`
+- `CFC_FUSE_ATOM_CLASS`
+- `CFC_RUNTIME_SUBJECT`
+- `cfcAtom`
+- `CfcAtom`
+- `CfcPromptSlotBoundAtom`
+- `CfcPromptSlotInfluenceAtom`
+
+Use these from shared CFC helpers when constructing common atom evidence. Pattern
+authors should still keep local resource subjects, digests, routes, and domain
+policy vocabulary beside the pattern that owns them.
+
 ## Trusted Surfaces
 
 Import trusted surfaces through `trusted-surfaces/mod.ts`.

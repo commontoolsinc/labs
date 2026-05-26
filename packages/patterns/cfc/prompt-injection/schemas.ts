@@ -1,4 +1,5 @@
-import type { ImmutableJSONValue, JSONSchema } from "commonfabric";
+import type { JSONSchema } from "commonfabric";
+import type { CfcAtom } from "../api-cfc.ts";
 
 export const EMPTY_TOOL_INPUT_SCHEMA = {
   type: "object",
@@ -23,7 +24,7 @@ export const TEXT_OR_LINK_SCHEMA = {
 } as const satisfies JSONSchema;
 
 export const sendMailInputSchema = (
-  requiredRecipientIntegrity: readonly ImmutableJSONValue[],
+  requiredRecipientIntegrity: readonly CfcAtom[],
 ): JSONSchema => ({
   type: "object",
   properties: {
@@ -47,7 +48,7 @@ export const sendMailInputSchema = (
 });
 
 export const confidentialMessagesSchema = (
-  confidentiality: readonly ImmutableJSONValue[],
+  confidentiality: readonly CfcAtom[],
 ): JSONSchema => ({
   type: "array",
   items: { type: "object", additionalProperties: true },
