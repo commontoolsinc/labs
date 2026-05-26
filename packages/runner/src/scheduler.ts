@@ -1402,6 +1402,7 @@ export class Scheduler {
       dependents: this.dependents,
       dependencies: this.dependencies,
       actionParent: this.actionParent,
+      actionChildren: this.actionChildren,
       isEffectAction: this.isEffectAction,
       pullDemandedFirstRunComputations: this.pullDemandedFirstRunComputations,
       pullDemandedContinuationComputations: this

@@ -601,6 +601,77 @@ describe("pull-based scheduling", () => {
     expect(effectRuns).toBeGreaterThan(initialEffectRuns);
   });
 
+  it("should run dirty parent computations with live child effect demand", async () => {
+    runtime.scheduler.enablePullMode();
+
+    const source = runtime.getCell<string>(
+      space,
+      "pull-live-child-demand-source",
+      undefined,
+      tx,
+    );
+    source.set("code-editor");
+    const parentOutput = runtime.getCell<string>(
+      space,
+      "pull-live-child-demand-output",
+      undefined,
+      tx,
+    );
+    parentOutput.set("");
+    await tx.commit();
+    tx = runtime.edit();
+
+    let parentRuns = 0;
+    let childEffectRuns = 0;
+    let cancelChildEffect: (() => void) | undefined;
+
+    const childEffect: Action = () => {
+      childEffectRuns++;
+    };
+
+    const parentComputation: Action = (actionTx) => {
+      parentRuns++;
+      parentOutput.withTx(actionTx).send(
+        source.withTx(actionTx).get() ?? "",
+      );
+
+      if (!cancelChildEffect) {
+        cancelChildEffect = runtime.scheduler.subscribe(
+          childEffect,
+          { reads: [], shallowReads: [], writes: [] },
+          { isEffect: true },
+        );
+      }
+    };
+
+    const cancelParent = runtime.scheduler.subscribe(
+      parentComputation,
+      {
+        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(parentOutput.getAsNormalizedFullLink())],
+      },
+      {},
+    );
+
+    expect(await parentOutput.pull()).toBe("code-editor");
+    await runtime.scheduler.idle();
+
+    expect(parentRuns).toBe(1);
+    expect(childEffectRuns).toBeGreaterThanOrEqual(1);
+
+    source.withTx(tx).send("button");
+    await tx.commit();
+    tx = runtime.edit();
+    await runtime.scheduler.idle();
+
+    expect(parentRuns).toBe(2);
+    expect(parentOutput.withTx(tx).get()).toBe("button");
+
+    cancelChildEffect?.();
+    cancelParent();
+  });
+
   it("should run dirty computations with live downstream effect demand", async () => {
     runtime.scheduler.enablePullMode();
 

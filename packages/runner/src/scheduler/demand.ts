@@ -7,6 +7,7 @@ export interface PullDemandState {
   readonly dependents: WeakMap<Action, Set<Action>>;
   readonly dependencies: WeakMap<Action, ReactivityLog>;
   readonly actionParent: WeakMap<Action, Action>;
+  readonly actionChildren: WeakMap<Action, Set<Action>>;
   readonly isEffectAction: WeakMap<Action, boolean>;
   readonly pullDemandedFirstRunComputations: WeakSet<Action>;
   readonly pullDemandedContinuationComputations: WeakSet<Action>;
@@ -52,6 +53,7 @@ export function isDemandedPullComputation(
   visited.add(action);
 
   return hasTransitiveEffectDependent(state, action) ||
+    hasDemandedChildContext(state, action, visited) ||
     hasDemandedParentContext(state, action, visited);
 }
 
@@ -137,4 +139,20 @@ function hasDemandedParentContext(
   }
 
   return isDemandedPullComputation(state, parent, visited);
+}
+
+function hasDemandedChildContext(
+  state: PullDemandState,
+  action: Action,
+  visited = new Set<Action>(),
+): boolean {
+  const children = state.actionChildren.get(action);
+  if (!children) return false;
+
+  for (const child of children) {
+    if (isLiveEffect(state, child)) return true;
+    if (isDemandedPullComputation(state, child, visited)) return true;
+  }
+
+  return false;
 }
