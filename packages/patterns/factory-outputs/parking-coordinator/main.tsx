@@ -20,7 +20,7 @@ import {
   adminManagerCredentialIsActive,
   adminRegistryEntries,
   type EmptyAdminRegistryValue,
-} from "../../admin.ts";
+} from "../../cfc/admin.ts";
 
 // ============================================================
 // Domain Types

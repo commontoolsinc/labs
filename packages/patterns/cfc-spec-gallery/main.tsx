@@ -22,11 +22,11 @@ import {
   TRUSTED_DIRECT_COMMAND_SURFACE,
   TRUSTED_FORWARD_SURFACE,
   TRUSTED_SAFE_LINK_SURFACE,
-  TrustedActionWrite,
   TrustedDirectCommandSurface,
   TrustedForwardSurface,
   TrustedSafeLinkSurface,
-} from "../cfc-trusted-surfaces/main.tsx";
+} from "../cfc/trusted-surfaces/mod.ts";
+import type { TrustedActionWrite } from "../cfc/trusted-action.ts";
 
 type ExampleCardProps = {
   title: string;
