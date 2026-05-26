@@ -53,7 +53,7 @@ describe("EmptyReconstructionContext", () => {
       );
     });
 
-    it("shouldDeepFreeze arg is forwarded (false stays false)", () => {
+    it("correctly passes `shouldDeepFreeze` to the superclass", () => {
       expect(new EmptyReconstructionContext(false).shouldDeepFreeze).toBe(
         false,
       );
@@ -67,7 +67,7 @@ describe("EmptyReconstructionContext", () => {
       ).toThrow("Cannot reconstruct cell reference `of:bafyCUSTOM`: custom");
     });
 
-    it("the two args are independent (frozen-intent context with a situation message)", () => {
+    it("correctly accepts the two-argument form", () => {
       const ctx = new EmptyReconstructionContext(false, "deep-clone path.");
       expect(ctx.shouldDeepFreeze).toBe(false);
       expect(() =>
