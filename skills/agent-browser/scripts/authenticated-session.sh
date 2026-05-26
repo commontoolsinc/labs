@@ -1,7 +1,7 @@
 #!/bin/bash
-# Template: Authenticated Session Workflow
+# Script: Authenticated Session Workflow
 # Purpose: Login once, save state, reuse for subsequent runs
-# Usage: ./authenticated-session.sh <login-url> [state-file]
+# Usage: ./scripts/authenticated-session.sh <login-url> [state-file]
 #
 # Environment variables:
 #   APP_USERNAME - Login username/email
@@ -19,7 +19,8 @@
 
 set -euo pipefail
 
-LOGIN_URL="${1:?Usage: $0 <login-url> [state-file]}"
+SCRIPT_NAME="${SKILL_SCRIPT:-scripts/authenticated-session.sh}"
+LOGIN_URL="${1:?Usage: $SCRIPT_NAME <login-url> [state-file]}"
 STATE_FILE="${2:-./auth-state.json}"
 
 echo "Authentication workflow: $LOGIN_URL"

@@ -97,6 +97,10 @@ import {
   toModelFacingWebFetchOutput,
   type WebFetchToolOutput,
 } from "./tools/web-fetch.ts";
+import {
+  isRunSkillScriptToolSuccessOutput,
+  type RunSkillScriptToolOutput,
+} from "./tools/run-skill-script.ts";
 import type { HarnessFailureRecord } from "./diagnostics.ts";
 import { DEFAULT_PARENT_TOOL_IDS as DEFAULT_PROMPT_LOOP_TOOL_IDS } from "./contracts/tool-descriptor.ts";
 
@@ -482,6 +486,18 @@ const summarizeToolInput = async (
         ...(typeof input.path === "string" ? { path: input.path } : {}),
         ...(isSafeNonNegativeInteger(input.maxBytes)
           ? { maxBytes: input.maxBytes }
+          : {}),
+      };
+    case "run_skill_script":
+      return {
+        type: "cf-harness.tool-input-summary",
+        toolId,
+        ...(typeof input.skill === "string" ? { skill: input.skill } : {}),
+        ...(typeof input.path === "string" ? { path: input.path } : {}),
+        ...(Array.isArray(input.args) ? { argsCount: input.args.length } : {}),
+        ...(typeof input.cwd === "string" ? { cwd: input.cwd } : {}),
+        ...(isSafeNonNegativeInteger(input.timeoutMs)
+          ? { timeoutMs: input.timeoutMs }
           : {}),
       };
     case "edit_file": {
@@ -1035,6 +1051,8 @@ const toolOutputNeedsSandboxMediation = (
   output: unknown,
 ): boolean =>
   toolId === "bash" ||
+  (toolId === "run_skill_script" &&
+    isRunSkillScriptToolSuccessOutput(output)) ||
   (toolId === "read_file" && isReadFileToolSuccessOutput(output)) ||
   (toolId === "edit_file" && isEditFileToolSuccessOutput(output));
 
@@ -1430,6 +1448,73 @@ const renderMediatedBashOutput = (
   };
 };
 
+const renderMediatedRunSkillScriptOutput = (
+  output: RunSkillScriptToolOutput,
+  cfcResult: CfcSandboxResult,
+  resultRef: ToolResultRef,
+  toolCallId: string,
+): ModelFacingToolOutputResult => {
+  const stdout = truncateModelFacingBashStream(
+    renderStreamObservation(cfcResult.stdout, resultRef),
+    "stdout",
+    resultRef,
+  );
+  const stderr = truncateModelFacingBashStream(
+    renderStreamObservation(cfcResult.stderr, resultRef),
+    "stderr",
+    resultRef,
+  );
+  const observations = [
+    modelContextObservationForStream(
+      cfcResult.stdout,
+      resultRef,
+      toolCallId,
+      stdout.truncated,
+    ),
+    modelContextObservationForStream(
+      cfcResult.stderr,
+      resultRef,
+      toolCallId,
+      stderr.truncated,
+    ),
+    modelContextObservationForExitCode(
+      cfcResult.exitCode,
+      resultRef,
+      toolCallId,
+    ),
+  ].filter((observation) =>
+    observation !== undefined
+  ) as HarnessCfcModelContextObservationInput[];
+  const publicOutput = stripInternalCfcFields(output) as Record<
+    string,
+    unknown
+  >;
+  return {
+    output: {
+      ...publicOutput,
+      stdout: stdout.value,
+      stderr: stderr.value,
+      exitCode: renderExitCodeObservation(cfcResult.exitCode, resultRef),
+      cfc: summarizeCfcSandboxResult(cfcResult),
+      ...(stdout.truncated === true
+        ? {
+          stdoutTruncated: true,
+          stdoutOriginalLength: stdout.originalLength,
+        }
+        : {}),
+      ...(stderr.truncated === true
+        ? {
+          stderrTruncated: true,
+          stderrOriginalLength: stderr.originalLength,
+        }
+        : {}),
+    },
+    ...(observations.length > 0
+      ? { cfcModelContextObservations: observations }
+      : {}),
+  };
+};
+
 const renderMediatedReadFileOutput = (
   output: Record<string, unknown>,
   cfcResult: CfcSandboxResult,
@@ -1672,6 +1757,7 @@ export class CfHarnessPromptLoop {
         promptSlotBindingSource,
         parentToolAllowance: this.#parentToolAllowance(),
         allowedToolIds: this.#allowedToolIdsForSnapshot(),
+        allowedSkillScripts: this.engine.config.allowedSkillScripts ?? [],
         allowedSubagentProfiles,
         subagentProfileConfigs: allowedSubagentProfiles.map((profile) =>
           getHarnessSubagentProfileConfig(profile)
@@ -2411,7 +2497,7 @@ export class CfHarnessPromptLoop {
         `${toolId} output did not include trusted CFC mediation metadata`;
       if (mode === "disabled") {
         return {
-          output: toolId === "bash"
+          output: toolId === "bash" || toolId === "run_skill_script"
             ? truncateModelFacingBashOutput(
               stripInternalCfcFields(output),
               resultRef,
@@ -2434,7 +2520,7 @@ export class CfHarnessPromptLoop {
             `${detail}; raw output was exposed because CFC is in observe mode`,
         });
         return {
-          output: toolId === "bash"
+          output: toolId === "bash" || toolId === "run_skill_script"
             ? truncateModelFacingBashOutput(
               stripInternalCfcFields(output),
               resultRef,
@@ -2463,6 +2549,16 @@ export class CfHarnessPromptLoop {
     }
     if (toolId === "bash" && isObjectRecord(output)) {
       return renderMediatedBashOutput(output, cfcResult, resultRef, toolCallId);
+    }
+    if (
+      toolId === "run_skill_script" && isRunSkillScriptToolSuccessOutput(output)
+    ) {
+      return renderMediatedRunSkillScriptOutput(
+        output,
+        cfcResult,
+        resultRef,
+        toolCallId,
+      );
     }
     if (toolId === "read_file" && isObjectRecord(output)) {
       return renderMediatedReadFileOutput(

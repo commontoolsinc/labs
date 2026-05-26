@@ -1,7 +1,7 @@
 #!/bin/bash
-# Template: Content Capture Workflow
+# Script: Content Capture Workflow
 # Purpose: Extract content from web pages (text, screenshots, PDF)
-# Usage: ./capture-workflow.sh <url> [output-dir]
+# Usage: ./scripts/capture-workflow.sh <url> [output-dir]
 #
 # Outputs:
 #   - page-full.png: Full page screenshot
@@ -13,7 +13,8 @@
 
 set -euo pipefail
 
-TARGET_URL="${1:?Usage: $0 <url> [output-dir]}"
+SCRIPT_NAME="${SKILL_SCRIPT:-scripts/capture-workflow.sh}"
+TARGET_URL="${1:?Usage: $SCRIPT_NAME <url> [output-dir]}"
 OUTPUT_DIR="${2:-.}"
 
 echo "Capturing: $TARGET_URL"

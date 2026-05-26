@@ -10,7 +10,19 @@ export * from "./gateway/openai-client.ts";
 export * from "./contracts/image.ts";
 export * from "./contracts/prompt-slot.ts";
 export * from "./contracts/cfc-invocation-context.ts";
-export * from "./contracts/cfc-model-context.ts";
+export {
+  appendHarnessCfcModelContextObservations
+    as appendHarnessCfcModelContextObservationsToContext,
+  cloneIfcLabel,
+  confidentialityOnlyIfcLabel,
+  createHarnessCfcModelContextInputLabels,
+  createHarnessCfcModelContextObservation,
+  type HarnessCfcModelContext,
+  type HarnessCfcModelContextChannel,
+  type HarnessCfcModelContextObservation,
+  type HarnessCfcModelContextObservationInput,
+  mergeConfidentialityOnlyLabels,
+} from "./contracts/cfc-model-context.ts";
 export * from "./contracts/cfc-policy-snapshot.ts";
 export * from "./contracts/run-manifest.ts";
 export * from "./contracts/observation.ts";
@@ -33,6 +45,7 @@ export * from "./tools/delegate-task.ts";
 export * from "./tools/file-errors.ts";
 export * from "./tools/read-file.ts";
 export * from "./tools/read-skill-resource.ts";
+export * from "./tools/run-skill-script.ts";
 export * from "./tools/web-fetch.ts";
 export * from "./tools/write-file.ts";
 export * from "./skills/registry.ts";

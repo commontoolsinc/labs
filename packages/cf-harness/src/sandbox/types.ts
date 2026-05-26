@@ -72,6 +72,7 @@ export interface ResolveDockerRunscSandboxConfigOptions {
 export interface SandboxCommandRequest {
   argv: string[];
   cwd?: string;
+  env?: Record<string, string>;
   stdinText?: string;
   timeoutMs?: number;
   cfcInvocationContext?: HarnessCfcInvocationContext;
@@ -81,6 +82,7 @@ export interface SandboxShellRequest {
   command: string;
   args?: readonly string[];
   cwd?: string;
+  env?: Record<string, string>;
   stdinText?: string;
   timeoutMs?: number;
   cfcInvocationContext?: HarnessCfcInvocationContext;
