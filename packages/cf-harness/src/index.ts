@@ -2,6 +2,8 @@ export * from "./config.ts";
 export * from "./run-state.ts";
 export * from "./engine.ts";
 export * from "./prompt-loop.ts";
+export * from "./interactive-chat-service.ts";
+export * from "./interactive-chat-stdio.ts";
 export * from "./structured-result.ts";
 export * from "./subagent-return.ts";
 export * from "./artifacts.ts";
@@ -17,13 +19,16 @@ export {
   confidentialityOnlyIfcLabel,
   createHarnessCfcModelContextInputLabels,
   createHarnessCfcModelContextObservation,
-  type HarnessCfcModelContext,
-  type HarnessCfcModelContextChannel,
-  type HarnessCfcModelContextObservation,
-  type HarnessCfcModelContextObservationInput,
   mergeConfidentialityOnlyLabels,
 } from "./contracts/cfc-model-context.ts";
+export type {
+  HarnessCfcModelContext,
+  HarnessCfcModelContextChannel,
+  HarnessCfcModelContextObservation,
+  HarnessCfcModelContextObservationInput,
+} from "./contracts/cfc-model-context.ts";
 export * from "./contracts/cfc-policy-snapshot.ts";
+export * from "./contracts/browser-access.ts";
 export * from "./contracts/run-manifest.ts";
 export * from "./contracts/observation.ts";
 export * from "./contracts/policy.ts";
@@ -31,6 +36,7 @@ export * from "./contracts/policy-trace.ts";
 export * from "./contracts/run-report.ts";
 export * from "./contracts/skill.ts";
 export * from "./contracts/subagent.ts";
+export * from "./contracts/interactive-chat.ts";
 export * from "./contracts/tool-result.ts";
 export * from "./contracts/tool-descriptor.ts";
 export * from "./contracts/transcript.ts";
