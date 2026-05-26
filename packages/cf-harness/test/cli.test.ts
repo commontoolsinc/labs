@@ -59,7 +59,7 @@ Deno.test("parseCfHarnessCliArgs resolves defaults from cwd and positional promp
   }
   assertEquals(parsed.workspace, "/tmp/project");
   assertEquals(parsed.prompt, "Summarize this workspace");
-  assertEquals(parsed.model, "gpt-5.4");
+  assertEquals(parsed.model, "gpt-5.5");
   assertEquals(parsed.gatewayAuthMode, "bearer");
   assertEquals(parsed.outputMode, "operator");
   assertEquals(parsed.streamEvents, false);
