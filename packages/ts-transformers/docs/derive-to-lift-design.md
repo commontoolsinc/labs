@@ -60,7 +60,9 @@ Every reactive lift-style computation is a `lift(...)` call. This includes:
   - `createDeriveCall` in
     `packages/ts-transformers/src/transformers/builtins/derive.ts:186` (used to
     wrap JSX expressions whose return value involves opaque captures, and the
-    `computed(...)` → `derive(...)` rewrite).
+    `computed(...)` → `derive(...)` rewrite). (Post-Phase-1: renamed to
+    `createLiftAppliedCall` in `src/transformers/builtins/lift-applied.ts`;
+    emits the lift-applied form directly.)
   - Any other call site in the transformer that synthesizes
     `__cfHelpers.derive(...)` — these should be discoverable via grep for
     `createHelperCall(..., "derive", ...)` or similar.
@@ -159,7 +161,10 @@ deleting.
   rewrites `computed` to `derive`. After Phase 1, either that stage's output is
   rewritten to `lift` by Phase 1's pass, or `ComputedTransformer` itself starts
   emitting `lift` directly. The implementer should decide based on which keeps
-  the diff small.
+  the diff small. (Post-Phase-1: the stage is renamed to
+  `LiftLoweringTransformer` in `src/lift/transformer.ts` and lowers both
+  `computed(...)` and user-source `derive(...)` directly to the lift-applied
+  form.)
 - **`derive` callbacks with explicit `<T, R>` type parameters**: user-authored
   `derive<T, R>(input, cb)` calls in source. The transformer probably reads
   those type params for schema inference at the `derive` call site. After
@@ -309,18 +314,18 @@ The detection logic should reuse the building blocks from CT-1585's hoister:
 For the Phase 1 implementer's quick reference. All paths relative to
 `packages/ts-transformers/`.
 
-| Concept                                        | Where it lives                                                                                                                                     | Notes                                                                                                                               |
-| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| Pipeline stage order                           | `src/cf-pipeline.ts:33-108`                                                                                                                        | `CFC_TRANSFORMER_STAGE_SPECS` — central registry.                                                                                   |
-| `ClosureTransformer`                           | `src/closures/transformer.ts`                                                                                                                      | Stage 5 (after JsxExpressionSiteRouter, ComputedTransformer). The main reactive lowering.                                           |
-| `ComputedTransformer`                          | `src/computed/transformer.ts`                                                                                                                      | Lowers `computed(...)` calls. Currently emits `derive` — may need updating for Phase 1.                                             |
-| `createDeriveCall`                             | `src/transformers/builtins/derive.ts:186`                                                                                                          | The factory for synthesized derives. Phase 1 either changes this to emit `lift`, or rewrites afterward.                             |
-| `BuilderCallbackHoistingTransformer` (CT-1585) | `src/transformers/builder-callback-hoisting.ts` + `src/closures/module-scope-callback-hoisting.ts`                                                 | The current hoister. Phase 2 will likely supersede part of this for `lift`.                                                         |
-| `detectCallKind` / `callKind === "derive"`     | `src/ast/call-kind.ts`                                                                                                                             | Centralized call classifier. Phase 1 will reduce its surface.                                                                       |
-| `SchemaInjectionTransformer`                   | `src/transformers/schema-injection.ts`                                                                                                             | Injects input/output schemas. Has separate code paths for `derive` and `lift` today (lines ~2905 and ~3036).                        |
-| `getSyntheticModuleCallbackInitializer`        | `src/transformers/schema-injection.ts:2335`                                                                                                        | Resolves `__cfModuleCallback_N` identifier references to their source initializers. Phase 2 needs to handle `__cfLift_N` similarly. |
-| Pattern-test runtime                           | `tasks/integration.ts:191 runPatternTests`                                                                                                         | How CI runs `deno task cf test --root packages/patterns ...`. Useful for validating runtime behavior post-Phase-1.                  |
-| Existing CT-1585 regression test               | `test/closures/module-scope-helper-hoisting.test.ts` + `test/fixtures/closures/hoisted-handler-preserves-capture-schemas.{input.tsx,expected.jsx}` | Reference shape for new test fixtures.                                                                                              |
+| Concept                                        | Where it lives                                                                                                                                     | Notes                                                                                                                                 |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Pipeline stage order                           | `src/cf-pipeline.ts:33-108`                                                                                                                        | `CFC_TRANSFORMER_STAGE_SPECS` — central registry.                                                                                     |
+| `ClosureTransformer`                           | `src/closures/transformer.ts`                                                                                                                      | Stage 5 (after JsxExpressionSiteRouter, ComputedTransformer). The main reactive lowering.                                             |
+| `ComputedTransformer`                          | `src/computed/transformer.ts` (pre-Phase-1); `LiftLoweringTransformer` at `src/lift/transformer.ts` (post-Phase-1)                                 | Lowers `computed(...)` calls. Pre-Phase-1: emitted `derive`. Post-Phase-1: also lowers user-source `derive(...)`, emits lift-applied. |
+| `createDeriveCall`                             | `src/transformers/builtins/derive.ts:186` (pre-Phase-1); `createLiftAppliedCall` at `src/transformers/builtins/lift-applied.ts` (post-Phase-1)     | The factory for synthesized lift-style helper calls. Post-Phase-1: emits the lift-applied form (`lift(cb)(input)`).                   |
+| `BuilderCallbackHoistingTransformer` (CT-1585) | `src/transformers/builder-callback-hoisting.ts` + `src/closures/module-scope-callback-hoisting.ts`                                                 | The current hoister. Phase 2 will likely supersede part of this for `lift`.                                                           |
+| `detectCallKind` / `callKind === "derive"`     | `src/ast/call-kind.ts`                                                                                                                             | Centralized call classifier. Phase 1 will reduce its surface.                                                                         |
+| `SchemaInjectionTransformer`                   | `src/transformers/schema-injection.ts`                                                                                                             | Injects input/output schemas. Has separate code paths for `derive` and `lift` today (lines ~2905 and ~3036).                          |
+| `getSyntheticModuleCallbackInitializer`        | `src/transformers/schema-injection.ts:2335`                                                                                                        | Resolves `__cfModuleCallback_N` identifier references to their source initializers. Phase 2 needs to handle `__cfLift_N` similarly.   |
+| Pattern-test runtime                           | `tasks/integration.ts:191 runPatternTests`                                                                                                         | How CI runs `deno task cf test --root packages/patterns ...`. Useful for validating runtime behavior post-Phase-1.                    |
+| Existing CT-1585 regression test               | `test/closures/module-scope-helper-hoisting.test.ts` + `test/fixtures/closures/hoisted-handler-preserves-capture-schemas.{input.tsx,expected.jsx}` | Reference shape for new test fixtures.                                                                                                |
 
 ## Past lessons worth carrying forward
 
