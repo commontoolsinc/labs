@@ -47,9 +47,9 @@ From `api-cfc.ts`:
 - `CfcPromptSlotBoundAtom`
 - `CfcPromptSlotInfluenceAtom`
 
-Use these from shared CFC helpers when constructing common atom evidence. Pattern
-authors should still keep local resource subjects, digests, routes, and domain
-policy vocabulary beside the pattern that owns them.
+Use these from shared CFC helpers when constructing common atom evidence.
+Pattern authors should still keep local resource subjects, digests, routes, and
+domain policy vocabulary beside the pattern that owns them.
 
 ## Trusted Surfaces
 
