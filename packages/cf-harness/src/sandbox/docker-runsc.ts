@@ -580,6 +580,9 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
       request.cwd
         ? this.resolvePath(request.cwd)
         : this.defaultWorkingDirectory(),
+      ...Object.entries(request.env ?? {})
+        .sort(([left], [right]) => left.localeCompare(right))
+        .flatMap(([name, value]) => ["--env", `${name}=${value}`]),
       ...this.config.extraDockerArgs,
       this.config.image,
       ...request.argv,
@@ -661,6 +664,7 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
         ...(request.args ?? []),
       ],
       cwd: request.cwd,
+      env: request.env,
       stdinText: request.stdinText,
       timeoutMs: request.timeoutMs,
       cfcInvocationContext: request.cfcInvocationContext,

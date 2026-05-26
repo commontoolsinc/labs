@@ -90,6 +90,7 @@ PatternManager.compileOrGetPattern(program)
             │
             └─ cache miss → Engine.compile(program) → CompileResult
                               │
+                              ├─ SES bundle validation passes
                               ├─ CachedCompiler.set(programHash, CompileResult)
                               └─ evaluateToPattern() → Pattern
 ```
@@ -165,6 +166,13 @@ takes priority because when set, the operator is declaring the code identity.
 (e.g., type definition loading race), and the cost of a redundant failed
 compilation is bounded. Caching a failure risks masking an error that would
 succeed on retry.
+
+**Only SES-validated bundles are cached.** `Engine.compile()` marks a
+`CompileResult` only after the compiled JavaScript bundle passes the SES
+compiled-bundle validator. `CachedCompiler` refuses to write unvalidated results
+and treats legacy entries without that marker as misses. A validated cache hit
+can skip the evaluate-time bundle validation parse because the cached entry
+already records that the exact emitted JavaScript passed the validator.
 
 **No TTL.** The fingerprint is the source of truth for freshness. If the
 fingerprint matches, the entry is valid regardless of age.

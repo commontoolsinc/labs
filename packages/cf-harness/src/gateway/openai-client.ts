@@ -111,6 +111,7 @@ export interface OpenAIChatCompletionAttemptDiagnostic {
 }
 
 export interface OpenAIChatCompletionAttemptOptions {
+  signal?: AbortSignal;
   onChatCompletionAttempt?: (
     diagnostic: OpenAIChatCompletionAttemptDiagnostic,
   ) => void | Promise<void>;
@@ -158,10 +159,38 @@ const nonNegativeIntegerOrDefault = (
     ? input
     : fallback;
 
-const sleep = (ms: number): Promise<void> =>
-  ms <= 0
-    ? Promise.resolve()
-    : new Promise((resolve) => setTimeout(resolve, ms));
+const chatCompletionAbortReason = (signal: AbortSignal): unknown =>
+  signal.reason ?? new DOMException(
+    "chat completion request aborted",
+    "AbortError",
+  );
+
+const throwIfChatCompletionAborted = (signal?: AbortSignal): void => {
+  if (signal?.aborted) {
+    throw chatCompletionAbortReason(signal);
+  }
+};
+
+const sleep = (ms: number, signal?: AbortSignal): Promise<void> => {
+  throwIfChatCompletionAborted(signal);
+  if (ms <= 0) {
+    return Promise.resolve();
+  }
+  if (signal === undefined) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timeout);
+      reject(chatCompletionAbortReason(signal));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+};
 
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
@@ -334,10 +363,12 @@ export class OpenAICompatibleGatewayClient {
       method: "POST",
       headers: this.headers(),
       body: serializedPayload,
+      ...(options.signal !== undefined ? { signal: options.signal } : {}),
     };
     const maxTransportAttempts = this.#chatCompletionTransportRetries + 1;
     let lastError: unknown;
     for (let attempt = 1; attempt <= maxTransportAttempts; attempt += 1) {
+      throwIfChatCompletionAborted(options.signal);
       const startedAt = new Date();
       const startedAtMs = performance.now();
       try {
@@ -383,10 +414,13 @@ export class OpenAICompatibleGatewayClient {
           outcome: "transport_error",
           errorDetail: errorMessage(error),
         });
+        if (options.signal?.aborted) {
+          throw chatCompletionAbortReason(options.signal);
+        }
         if (attempt >= maxTransportAttempts) {
           throw transportErrorAfterRetries(endpoint, attempt, error);
         }
-        await sleep(this.#chatCompletionRetryDelayMs * attempt);
+        await sleep(this.#chatCompletionRetryDelayMs * attempt, options.signal);
       }
     }
     throw transportErrorAfterRetries(endpoint, maxTransportAttempts, lastError);

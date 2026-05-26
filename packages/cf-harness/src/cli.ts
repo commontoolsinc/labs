@@ -52,13 +52,18 @@ import {
   loadHarnessSkillContext,
 } from "./skills/registry.ts";
 import {
+  parseAllowedSkillScriptSpec,
+  uniqueAllowedSkillScripts,
+} from "./skills/scripts.ts";
+import type { HarnessAllowedSkillScript } from "./contracts/skill.ts";
+import {
   digestJsonValue,
   parseStructuredResultJson,
   parseStructuredResultSchema,
   validateStructuredResultValue,
 } from "./structured-result.ts";
 
-const DEFAULT_MODEL = "gpt-5.4";
+const DEFAULT_MODEL = "gpt-5.5";
 const DEFAULT_MAX_MODEL_TURNS = 8;
 const DEFAULT_ARTIFACT_DIRNAME = ".cf-harness-artifacts";
 const CLI_OUTPUT_MODES = ["operator", "batch"] as const;
@@ -81,6 +86,7 @@ export interface CfHarnessCliConfig {
   skillsRoot?: string;
   skillsRootSandboxPath?: string;
   skillNames: readonly string[];
+  allowedSkillScripts: readonly HarnessAllowedSkillScript[];
   skillCatalogEnabled: boolean;
   model?: string;
   gatewayBaseUrl: string;
@@ -203,7 +209,8 @@ Options:
   --workspace <path>            Workspace host path (defaults to current directory)
   --cwd <path>                  Initial working directory inside the workspace
   --focus-root <path>           Narrow exploration to a workspace subpath when possible
-  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | view_image | web_fetch | read_skill_resource | edit_file | write_file | delegate_task)
+  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | view_image | web_fetch | read_skill_resource | run_skill_script | edit_file | write_file | delegate_task)
+  --allow-skill-script <spec>   Allow exact skill script execution (repeatable: skill:scripts/path)
   --allow-subagent-profile <p>  Authorize delegate_task to spawn a profile (repeatable: default | browser | web_fetch | web_search)
   --output-mode <mode>          operator | batch (default: operator)
   --stream-events               Print transcript events as they happen
@@ -263,6 +270,7 @@ const CLI_PARENT_TOOL_IDS = [
   "view_image",
   "web_fetch",
   "read_skill_resource",
+  "run_skill_script",
   "edit_file",
   "write_file",
   "delegate_task",
@@ -308,6 +316,29 @@ const parseBuiltinToolIds = (
     );
   }
   return [...new Set(parsed)] as readonly BuiltinToolId[];
+};
+
+const parseAllowedSkillScripts = (
+  input: string | readonly string[] | undefined,
+): readonly HarnessAllowedSkillScript[] => {
+  if (input === undefined) {
+    return [];
+  }
+  const values = Array.isArray(input) ? input : [input];
+  if (values.length === 0) {
+    return [];
+  }
+  try {
+    return uniqueAllowedSkillScripts(
+      values.map((value) => parseAllowedSkillScriptSpec(value)),
+    );
+  } catch (error) {
+    throw new Error(
+      `invalid --allow-skill-script: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
 };
 
 const parseSubagentProfile = (
@@ -531,6 +562,7 @@ export const parseCfHarnessCliArgs = async (
       "cwd",
       "focus-root",
       "allow-tool",
+      "allow-skill-script",
       "allow-subagent-profile",
       "output-mode",
       "prompt-slot-role",
@@ -561,7 +593,13 @@ export const parseCfHarnessCliArgs = async (
       "stream-events",
       "no-skill-catalog",
     ],
-    collect: ["allow-tool", "allow-subagent-profile", "skill", "image"],
+    collect: [
+      "allow-tool",
+      "allow-skill-script",
+      "allow-subagent-profile",
+      "skill",
+      "image",
+    ],
     alias: {
       h: "help",
     },
@@ -607,6 +645,12 @@ export const parseCfHarnessCliArgs = async (
   );
   if (skillNames.length > 0 && skillsRoot === undefined) {
     throw new Error("--skill requires --skills-root");
+  }
+  const allowedSkillScripts = parseAllowedSkillScripts(
+    args["allow-skill-script"] as string | readonly string[] | undefined,
+  );
+  if (allowedSkillScripts.length > 0 && skillsRoot === undefined) {
+    throw new Error("--allow-skill-script requires --skills-root");
   }
   const allowedToolIds = parseBuiltinToolIds(
     args["allow-tool"] as string | readonly string[] | undefined,
@@ -768,6 +812,7 @@ export const parseCfHarnessCliArgs = async (
     ...(skillsRoot !== undefined ? { skillsRoot } : {}),
     ...(skillsRootSandboxPath !== undefined ? { skillsRootSandboxPath } : {}),
     skillNames,
+    allowedSkillScripts,
     skillCatalogEnabled: args["no-skill-catalog"] !== true,
     ...(typeof args.model === "string"
       ? { model: args.model }
@@ -1127,6 +1172,21 @@ const summarizeToolCallArguments = (
         )
           .join(" ");
       }
+      case "run_skill_script": {
+        const skill = typeof parsed.skill === "string"
+          ? `skill=${JSON.stringify(parsed.skill)}`
+          : undefined;
+        const path = typeof parsed.path === "string"
+          ? `path=${JSON.stringify(parsed.path)}`
+          : undefined;
+        const args = Array.isArray(parsed.args)
+          ? `args=${parsed.args.length}`
+          : undefined;
+        return [skill, path, args].filter((value): value is string =>
+          value !== undefined
+        )
+          .join(" ");
+      }
       case "write_file": {
         const path = typeof parsed.path === "string"
           ? `path=${JSON.stringify(parsed.path)}`
@@ -1322,6 +1382,9 @@ export const runCfHarnessCli = async (
         ...(parsed.skillsRoot !== undefined
           ? { skillsRoot: parsed.skillsRoot }
           : {}),
+        ...(parsed.allowedSkillScripts.length > 0
+          ? { allowedSkillScripts: parsed.allowedSkillScripts }
+          : {}),
         cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
         ...(runManifest !== undefined ? { runManifest } : {}),
         ...(parsed.runManifestPath !== undefined
@@ -1347,6 +1410,9 @@ export const runCfHarnessCli = async (
         ...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}),
         ...(parsed.skillsRoot !== undefined
           ? { skillsRoot: parsed.skillsRoot }
+          : {}),
+        ...(parsed.allowedSkillScripts.length > 0
+          ? { allowedSkillScripts: parsed.allowedSkillScripts }
           : {}),
         cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
         ...(runManifest !== undefined ? { runManifest } : {}),
@@ -1388,6 +1454,9 @@ export const runCfHarnessCli = async (
         ...(parsed.skillsRoot !== undefined
           ? { skillsRoot: parsed.skillsRoot }
           : {}),
+        ...(parsed.allowedSkillScripts.length > 0
+          ? { allowedSkillScripts: parsed.allowedSkillScripts }
+          : {}),
         cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
         ...(runManifest !== undefined ? { runManifest } : {}),
         ...(parsed.runManifestPath !== undefined
@@ -1413,6 +1482,9 @@ export const runCfHarnessCli = async (
         ...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}),
         ...(parsed.skillsRoot !== undefined
           ? { skillsRoot: parsed.skillsRoot }
+          : {}),
+        ...(parsed.allowedSkillScripts.length > 0
+          ? { allowedSkillScripts: parsed.allowedSkillScripts }
           : {}),
         apiKey: parsed.apiKey,
         apiKeySource: parsed.apiKeySource,
