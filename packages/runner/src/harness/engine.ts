@@ -1,6 +1,7 @@
 import { Console } from "./console.ts";
 import {
   type CompileResult,
+  type EvaluateOptions,
   type Exports,
   type Harness,
   type HarnessedFunction,
@@ -10,11 +11,11 @@ import {
 import {
   getTypeScriptEnvironmentTypes,
   InMemoryProgram,
-  JsScript,
+  type JsScript,
   type MappedPosition,
-  Program,
-  ProgramResolver,
-  Source,
+  type Program,
+  type ProgramResolver,
+  type Source,
   TypeScriptCompiler,
 } from "@commonfabric/js-compiler";
 import {
@@ -99,8 +100,7 @@ export class EngineProgramResolver extends InMemoryProgram {
   }
 }
 
-interface Internals {
-  compiler: TypeScriptCompiler;
+interface RuntimeInternals {
   runtime: SESRuntime;
   runtimeExports: Record<string, any> | undefined;
   // Callback will be called with a map of exported values to `RuntimeProgram`
@@ -109,12 +109,17 @@ interface Internals {
   exportsCallback: (exports: Map<any, RuntimeProgram>) => void;
 }
 
+interface CompilerInternals {
+  compiler: TypeScriptCompiler;
+}
+
 export interface EngineOptions {
   hideInternalStackFrames?: boolean;
 }
 
 export class Engine extends EventTarget implements Harness {
-  private internals: Internals | undefined;
+  private runtimeInternals: RuntimeInternals | undefined;
+  private compilerInternals: CompilerInternals | undefined;
   private ctRuntime: Runtime;
   private sesRuntime: SESRuntime | undefined;
   private loadIds = new WeakMap<JsScript, string>();
@@ -131,19 +136,31 @@ export class Engine extends EventTarget implements Harness {
     this.ctRuntime = ctRuntime;
   }
 
-  async initialize() {
+  async initializeRuntime(): Promise<RuntimeInternals> {
+    const runtime = this.getSESRuntime();
+    const { runtimeExports, exportsCallback } = await getRuntimeModuleExports();
+    return { runtime, runtimeExports, exportsCallback };
+  }
+
+  async initializeCompiler(): Promise<CompilerInternals> {
     const environmentTypes = await Engine.getEnvironmentTypes(
       this.ctRuntime.staticCache,
     );
     const compiler = new TypeScriptCompiler(environmentTypes);
-    const runtime = this.getSESRuntime();
-    const { runtimeExports, exportsCallback } = await getRuntimeModuleExports();
-    return { compiler, runtime, runtimeExports, exportsCallback };
+    return { compiler };
+  }
+
+  async initialize(): Promise<RuntimeInternals & CompilerInternals> {
+    const [runtimeInternals, compilerInternals] = await Promise.all([
+      this.getRuntimeInternals(),
+      this.getCompilerInternals(),
+    ]);
+    return { ...runtimeInternals, ...compilerInternals };
   }
 
   // Resolve a `ProgramResolver` into a `Program`.
   async resolve(program: ProgramResolver): Promise<RuntimeProgram> {
-    const { compiler } = await this.getInternals();
+    const { compiler } = await this.getCompilerInternals();
     logger.timeStart("resolve");
     try {
       return await compiler.resolveProgram(program, {
@@ -169,7 +186,7 @@ export class Engine extends EventTarget implements Harness {
         this.ctRuntime.staticCache,
       );
 
-      const { compiler } = await this.getInternals();
+      const { compiler } = await this.getCompilerInternals();
       const resolvedProgram = await this.resolve(resolver);
 
       const diagnosticMessageTransformer = new OpaqueRefErrorTransformer({
@@ -203,7 +220,7 @@ export class Engine extends EventTarget implements Harness {
 
       this.bundleValidator.verify(jsScript, filename);
 
-      return { id, jsScript };
+      return { id, jsScript, sesValidated: true };
     } finally {
       logger.timeEnd("compile");
     }
@@ -216,14 +233,17 @@ export class Engine extends EventTarget implements Harness {
     id: string,
     jsScript: JsScript,
     files: Source[],
+    options: EvaluateOptions = {},
   ): Promise<
     { main?: Exports; exportMap?: Record<string, Exports>; loadId?: string }
   > {
     logger.timeStart("evaluate");
     try {
-      this.bundleValidator.verify(jsScript, `${id}.js`);
+      if (!options.skipBundleValidation) {
+        this.bundleValidator.verify(jsScript, `${id}.js`);
+      }
       const { runtime, runtimeExports, exportsCallback } = await this
-        .getInternals();
+        .getRuntimeInternals();
       const loadId = this.getLoadId(id, jsScript);
       this.executableRegistry.beginVerifiedLoad(loadId);
       this.executableRegistry.setVerifiedLoadBundleId(
@@ -300,8 +320,8 @@ export class Engine extends EventTarget implements Harness {
     // and if we have functions from this source, this should already
     // be set up.
     // Some tests invoke values outside of this isolate, so just
-    // execute and return if internals have not been initialized.
-    if (!this.internals && !this.sesRuntime) {
+    // execute and return if runtime internals have not been initialized.
+    if (!this.runtimeInternals && !this.sesRuntime) {
       return fn();
     }
     return this.getSESRuntime().getIsolate("__engine-invoke__").value(fn)
@@ -398,17 +418,17 @@ export class Engine extends EventTarget implements Harness {
     line: number,
     column: number,
   ): MappedPosition | null {
-    if (!this.internals) return null;
-    return this.internals.runtime.mapPosition(filename, line, column);
+    if (!this.runtimeInternals) return null;
+    return this.runtimeInternals.runtime.mapPosition(filename, line, column);
   }
 
   // Parse an error stack trace, mapping all positions back to original sources.
-  // Returns the original stack if internals haven't been initialized.
+  // Returns the original stack if runtime internals haven't been initialized.
   parseStack(stack: string): string {
-    if (!this.internals) {
+    if (!this.runtimeInternals) {
       return stack;
     }
-    return this.internals.runtime.parseStack(stack);
+    return this.runtimeInternals.runtime.parseStack(stack);
   }
 
   // Returns a map of runtime module types.
@@ -424,11 +444,18 @@ export class Engine extends EventTarget implements Harness {
     return [...RuntimeModuleIdentifiers];
   }
 
-  private async getInternals(): Promise<Internals> {
-    if (!this.internals) {
-      this.internals = await this.initialize();
+  private async getRuntimeInternals(): Promise<RuntimeInternals> {
+    if (!this.runtimeInternals) {
+      this.runtimeInternals = await this.initializeRuntime();
     }
-    return this.internals;
+    return this.runtimeInternals;
+  }
+
+  private async getCompilerInternals(): Promise<CompilerInternals> {
+    if (!this.compilerInternals) {
+      this.compilerInternals = await this.initializeCompiler();
+    }
+    return this.compilerInternals;
   }
 
   /**
@@ -440,7 +467,8 @@ export class Engine extends EventTarget implements Harness {
       this.sesRuntime.clear();
     }
     this.sesRuntime = undefined;
-    this.internals = undefined;
+    this.runtimeInternals = undefined;
+    this.compilerInternals = undefined;
     this.loadIds = new WeakMap();
     this.nextLoadId = 0;
     this.executableRegistry.clear();
