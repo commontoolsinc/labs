@@ -3,9 +3,9 @@
 Use this guide when creating or promoting shared CFC helpers under
 `packages/patterns/cfc/`.
 
-This is not the full CFC spec. It documents the authoring patterns used by the
-current shared helpers so pattern authors can add new helpers without first
-learning every part of the CFC runtime.
+This guide documents the authoring patterns used by the current shared helpers
+so pattern authors can add new helpers without first learning every part of the
+CFC runtime.
 
 ## Mental Model
 
@@ -392,15 +392,3 @@ For prompt-injection helpers, cover:
 
 Broaden to `deno task check` when the helper affects multiple CFC demos or
 shared contract types.
-
-## Spec References
-
-For deeper context, see the CFC spec in `~/src/specs/cfc/`:
-
-- `03-core-concepts.md`: UI-backed integrity and gesture provenance
-- `06-events-and-intents.md`: prompt-slot evidence and intent refinement
-- `07-write-actions.md`: intent as integrity and commit points
-- `08-15-write-authority.md`: write authority plus event-integrity checks
-- `15-atom-registry.md`: atom names and parameter meanings
-- `16-glossary.md`: concise definitions for caveats, trusted boundaries, and
-  write authority
