@@ -20,7 +20,6 @@ describe("frozen-builtins", () => {
     it("is instanceof Map", () => {
       const fm = new FrozenMap([["a", 1]]);
       expect(fm).toBeInstanceOf(Map);
-      expect(fm).toBeInstanceOf(Map);
     });
 
     it("reports as frozen via `Object.isFrozen()`", () => {
@@ -128,7 +127,6 @@ describe("frozen-builtins", () => {
   describe("FrozenSet", () => {
     it("is instanceof Set", () => {
       const fs = new FrozenSet([1, 2, 3]);
-      expect(fs).toBeInstanceOf(Set);
       expect(fs).toBeInstanceOf(Set);
     });
 
