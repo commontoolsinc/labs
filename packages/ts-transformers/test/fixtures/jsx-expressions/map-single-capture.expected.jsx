@@ -51,7 +51,7 @@ export default pattern((_state) => {
                     properties: {}
                 }]
         } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            people: Cell<{ id: string; name: string; }[]>;
+            people: __cfHelpers.Cell<{ id: string; name: string; }[]>;
         }, boolean>({
             type: "object",
             properties: {

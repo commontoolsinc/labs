@@ -47,7 +47,7 @@ export default pattern((_state) => {
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            user: Cell<{ name: string; age: number; }>;
+            user: __cfHelpers.Cell<{ name: string; age: number; }>;
         }, string | false>({
             type: "object",
             properties: {
@@ -71,7 +71,7 @@ export default pattern((_state) => {
                     "enum": [false]
                 }]
         } as const satisfies __cfHelpers.JSONSchema, ({ user }) => (user.get().name.length > 0 && user.get().name))({ user: user }), __cfHelpers.lift<{
-            defaultMessage: Cell<string>;
+            defaultMessage: __cfHelpers.Cell<string>;
         }, string>({
             type: "object",
             properties: {
@@ -93,7 +93,7 @@ export default pattern((_state) => {
         } as const satisfies __cfHelpers.JSONSchema, {
             type: ["boolean", "string"]
         } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            user: Cell<{ name: string; age: number; }>;
+            user: __cfHelpers.Cell<{ name: string; age: number; }>;
         }, boolean>({
             type: "object",
             properties: {
@@ -118,7 +118,7 @@ export default pattern((_state) => {
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            user: Cell<{ name: string; age: number; }>;
+            user: __cfHelpers.Cell<{ name: string; age: number; }>;
         }, string>({
             type: "object",
             properties: {
@@ -147,7 +147,7 @@ export default pattern((_state) => {
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            user: Cell<{ name: string; age: number; }>;
+            user: __cfHelpers.Cell<{ name: string; age: number; }>;
         }, string | false>({
             type: "object",
             properties: {

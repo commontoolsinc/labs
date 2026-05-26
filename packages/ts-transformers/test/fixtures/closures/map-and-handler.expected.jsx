@@ -164,7 +164,7 @@ export default pattern((state) => {
           Selected: {__cfHelpers.lift<{
             state: {
                 items: { price: number; }[];
-                selectedIndex: Cell<number>;
+                selectedIndex: __cfHelpers.Cell<number>;
             };
         }, number>({
             type: "object",
@@ -202,7 +202,7 @@ export default pattern((state) => {
           {__cfHelpers.lift<{
             state: {
                 items: { price: number; }[];
-                selectedIndex: Cell<number>;
+                selectedIndex: __cfHelpers.Cell<number>;
                 discount: number;
             };
         }, number>({

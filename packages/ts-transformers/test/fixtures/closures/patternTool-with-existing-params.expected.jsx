@@ -39,7 +39,7 @@ export default pattern(() => {
     const tool = patternTool(({ value, offset, multiplier }: {
         value: number;
         offset: number;
-        multiplier: Cell<number>;
+        multiplier: __cfHelpers.Cell<number>;
     }) => {
         return __cfHelpers.lift({
             type: "object",

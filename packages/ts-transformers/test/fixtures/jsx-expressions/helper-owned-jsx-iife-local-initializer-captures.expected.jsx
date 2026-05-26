@@ -95,7 +95,7 @@ export default pattern((__cf_pattern_input) => {
                         type: "string"
                     }
                 } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-                    path: Cell<string[]>;
+                    path: __cfHelpers.Cell<string[]>;
                 }, readonly string[]>({
                     type: "object",
                     properties: {
@@ -115,7 +115,7 @@ export default pattern((__cf_pattern_input) => {
                     }
                 } as const satisfies __cfHelpers.JSONSchema, ({ path }) => path.get())({ path: path }).for(["p", 3], true), []).for("p", true);
                 const unsorted = __cfHelpers.lift<{
-                    tree: Cell<Entry[]>;
+                    tree: __cfHelpers.Cell<Entry[]>;
                     p: readonly string[];
                 }, readonly Entry[]>({
                     type: "object",

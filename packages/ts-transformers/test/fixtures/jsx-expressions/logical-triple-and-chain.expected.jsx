@@ -54,7 +54,7 @@ export default pattern((_state) => {
                     properties: {}
                 }]
         } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            user: Cell<{ active: boolean; verified: boolean; name: string; }>;
+            user: __cfHelpers.Cell<{ active: boolean; verified: boolean; name: string; }>;
         }, boolean>({
             type: "object",
             properties: {
@@ -76,7 +76,7 @@ export default pattern((_state) => {
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema, ({ user }) => user.get().active && user.get().verified)({ user: user }), <span>Welcome, {__cfHelpers.lift<{
-            user: Cell<{ active: boolean; verified: boolean; name: string; }>;
+            user: __cfHelpers.Cell<{ active: boolean; verified: boolean; name: string; }>;
         }, string>({
             type: "object",
             properties: {

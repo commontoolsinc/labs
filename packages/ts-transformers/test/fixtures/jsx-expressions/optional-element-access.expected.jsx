@@ -44,7 +44,7 @@ export default pattern(() => {
                     properties: {}
                 }]
         } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            list: Cell<string[] | undefined>;
+            list: __cfHelpers.Cell<string[] | undefined>;
         }, boolean>({
             type: "object",
             properties: {

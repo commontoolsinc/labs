@@ -24,7 +24,7 @@ interface State {
 export default pattern((input: Writable<State>) => {
     return {
         [UI]: <div>{__cfHelpers.lift<{
-            input: Writable<State>;
+            input: __cfHelpers.Writable<State>;
         }, string>({
             type: "object",
             properties: {

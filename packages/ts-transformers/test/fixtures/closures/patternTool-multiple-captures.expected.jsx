@@ -33,8 +33,8 @@ type Output = {
 export default pattern(() => {
     const tool = patternTool(({ value, prefix, multiplier }: {
         value: number;
-        prefix: Cell<string>;
-        multiplier: Cell<number>;
+        prefix: __cfHelpers.Cell<string>;
+        multiplier: __cfHelpers.Cell<number>;
     }) => {
         return __cfHelpers.lift({
             type: "object",

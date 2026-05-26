@@ -69,7 +69,7 @@ export default pattern((__cf_pattern_input) => {
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __cfHelpers.JSONSchema, show, __cfHelpers.lift<{
-            cell: Writable<number>;
+            cell: __cfHelpers.Writable<number>;
         }, number>({
             type: "object",
             properties: {

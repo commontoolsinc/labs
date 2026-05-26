@@ -59,7 +59,7 @@ export default pattern((__cf_pattern_input) => {
                         type: "string"
                     }
                 } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-                    path: Cell<string[]>;
+                    path: __cfHelpers.Cell<string[]>;
                 }, readonly string[]>({
                     type: "object",
                     properties: {
@@ -139,7 +139,7 @@ export default pattern((__cf_pattern_input) => {
                         entry: {
                             name: string;
                         };
-                        labelPrefix: Cell<string>;
+                        labelPrefix: __cfHelpers.Cell<string>;
                     }, boolean>({
                         type: "object",
                         properties: {

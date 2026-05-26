@@ -29,8 +29,8 @@ export default pattern((_state) => {
         <h3>Element Access with Both OpaqueRefs</h3>
         {/* Both items and index are OpaqueRefs */}
         <p>Selected item: {__cfHelpers.lift<{
-            items: Cell<string[]>;
-            index: Cell<number>;
+            items: __cfHelpers.Cell<string[]>;
+            index: __cfHelpers.Cell<number>;
         }, string | undefined>({
             type: "object",
             properties: {
