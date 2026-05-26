@@ -7,10 +7,18 @@ import {
   IS_DEEP_FROZEN,
 } from "../../src/interface.ts";
 import { ProblematicValue } from "../../src/fabric-instances/ProblematicValue.ts";
+import { ExplicitTagValue } from "../../src/fabric-instances/ExplicitTagValue.ts";
 import { deepFreeze, isDeepFrozenFabricValue } from "../../src/deep-freeze.ts";
 import { subFreeze, subIsDeepFrozen } from "./fixtures.ts";
 
 describe("ProblematicValue", () => {
+  // Subclass-checking-superclass identity: lives directly under the class
+  // describe (the rule's cross-cutting carve-out).
+  it("is an instance of `ExplicitTagValue`", () => {
+    const ps = new ProblematicValue("Test@1", "state", "oops");
+    expect(ps instanceof ExplicitTagValue).toBe(true);
+  });
+
   describe("constructor()", () => {
     it("preserves `typeTag`, `state`, and `error`", () => {
       const ps = new ProblematicValue("BadType@1", { x: 1 }, "boom");
