@@ -2047,6 +2047,83 @@ export class Runner {
     });
   }
 
+  private collectWritableCellArgumentLinks(
+    argumentSchema: JSONSchema | undefined,
+    value: unknown,
+    processCell: Cell<any>,
+    writeInputPaths?: readonly (readonly string[])[],
+  ): NormalizedFullLink[] {
+    const links: NormalizedFullLink[] = [];
+    const seen = new WeakMap<object, Set<string>>();
+
+    const pathsOverlap = (
+      left: readonly string[],
+      right: readonly string[],
+    ): boolean => {
+      const shorter = left.length <= right.length ? left : right;
+      const longer = left.length <= right.length ? right : left;
+      return shorter.every((segment, index) => longer[index] === segment);
+    };
+    const shouldCollectPath = (path: readonly string[]): boolean =>
+      !writeInputPaths || writeInputPaths.length === 0 ||
+      writeInputPaths.some((writePath) => pathsOverlap(path, writePath));
+
+    const visit = (
+      schema: unknown,
+      currentValue: unknown,
+      path: readonly string[],
+    ): void => {
+      if (!isRecord(schema)) return;
+      const pathKey = JSON.stringify(path);
+      const seenPaths = seen.get(schema);
+      if (seenPaths?.has(pathKey)) return;
+      if (seenPaths) {
+        seenPaths.add(pathKey);
+      } else {
+        seen.set(schema, new Set([pathKey]));
+      }
+
+      const asCell = schema.asCell;
+      if (
+        Array.isArray(asCell) &&
+        (asCell.includes("cell") || asCell.includes("writeonly"))
+      ) {
+        if (shouldCollectPath(path)) {
+          links.push(...findAllWriteRedirectCells(currentValue, processCell));
+        }
+        return;
+      }
+
+      if (isRecord(schema.properties) && isRecord(currentValue)) {
+        for (const [key, propertySchema] of Object.entries(schema.properties)) {
+          visit(propertySchema, currentValue[key], [...path, key]);
+        }
+      }
+
+      for (const key of ["items", "additionalProperties"] as const) {
+        if (schema[key] !== undefined) {
+          visit(schema[key], currentValue, path);
+        }
+      }
+      for (const key of ["anyOf", "oneOf", "allOf"] as const) {
+        const branches = schema[key];
+        if (Array.isArray(branches)) {
+          for (const branch of branches) visit(branch, currentValue, path);
+        }
+      }
+    };
+
+    visit(argumentSchema, value, []);
+    return dedupeNormalizedLinks(links);
+  }
+
+  private moduleHasOpaqueResult(module: Module): boolean {
+    const resultSchema = module.resultSchema;
+    return isRecord(resultSchema) &&
+      Array.isArray(resultSchema.asCell) &&
+      resultSchema.asCell.includes("opaque");
+  }
+
   private collectArgumentSchedulerReadLinks(
     argumentSchema: JSONSchema | undefined,
     value: unknown,
@@ -2956,10 +3033,26 @@ export class Runner {
       );
     }
 
-    // Writable arguments alone do not make an action a materializer: pure UI
-    // computations frequently read Writable cells. Only explicit module
-    // metadata can opt into broad writable-input materializer scheduling.
-    const materializerWriteEnvelopes = module.materializerWriteEnvelopes ?? [];
+    // Writable arguments alone do not make an output-producing action a
+    // materializer: pure UI computations frequently read Writable cells. The
+    // transformer marks callbacks that actually write through captured cells;
+    // the opaque-result fallback covers older generated side-write modules
+    // that do not carry that metadata.
+    const materializerWriteEnvelopes = module.materializerWriteEnvelopes ??
+      (module.materializerWriteInputPaths !== undefined
+        ? this.collectWritableCellArgumentLinks(
+          module.argumentSchema,
+          inputs,
+          processCell,
+          module.materializerWriteInputPaths,
+        )
+        : this.moduleHasOpaqueResult(module)
+        ? this.collectWritableCellArgumentLinks(
+          module.argumentSchema,
+          inputs,
+          processCell,
+        )
+        : []);
     const hasMaterializerWriteEnvelopes = materializerWriteEnvelopes.length > 0;
     const staticRedirectWriteTargets = hasMaterializerWriteEnvelopes
       ? []

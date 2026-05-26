@@ -718,11 +718,18 @@ too imprecise to use as normal dependency evidence. They also should not dirty
 all possible downstream readers when an input changes, because that recreates
 the broad fanout that pull mode is trying to avoid.
 
-Materializer identity is explicit scheduler metadata, not a runtime inference
-from the presence of Writable inputs. A generated action may read Writable
-cells without side-writing through them; those pure computations must remain
-normal pull computations so changes to their reads can fan out through their
-declared/current-known outputs.
+Materializer identity is explicit scheduler metadata. For generated
+`computed()`/`derive()` callbacks, the transformer emits
+`materializerWriteInputPaths` only when capability analysis observes actual
+writes through captured cell inputs; the runner resolves those input paths to
+`materializerWriteEnvelopes` for the concrete action instance. A generated
+action may read Writable cells without side-writing through them;
+output-producing pure computations must remain normal pull computations so
+changes to their reads can fan out through their declared/current-known outputs.
+The current runtime fallback is limited to opaque-result generated computations
+that do not carry write-path metadata, where the computation has no normal
+output surface and its observable work is side-writing through captured Writable
+inputs.
 
 On restart:
 

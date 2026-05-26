@@ -1046,3 +1046,64 @@ export default pattern<Input, { [NAME]: string; [UI]: VNode }>(({ selections }) 
     );
   },
 );
+
+Deno.test(
+  "Pipeline regression: side-writing computed marks writable inputs for materialization",
+  async () => {
+    const source =
+      `import { computed, pattern, type Writable } from "commonfabric";
+
+interface Input {
+  departments: Writable<string[]>;
+}
+
+export default pattern<Input>(({ departments }) => {
+  const init = computed(() => {
+    if (departments.get().length === 0) departments.set(["Bakery"]);
+    return true;
+  });
+  return { init };
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const deriveStart = output.indexOf("const init = __cfHelpers.derive(");
+    assert(deriveStart >= 0, "expected computed() to lower to derive()");
+    const deriveWindow = output.slice(deriveStart, deriveStart + 1400);
+
+    assertStringIncludes(deriveWindow, "materializerWriteInputPaths");
+    assertStringIncludes(deriveWindow, '["departments"]');
+  },
+);
+
+Deno.test(
+  "Pipeline regression: readonly computed does not mark writable-looking inputs for materialization",
+  async () => {
+    const source =
+      `import { computed, pattern, type Writable } from "commonfabric";
+
+interface Input {
+  departments: Writable<string[]>;
+}
+
+export default pattern<Input>(({ departments }) => {
+  const count = computed(() => departments.get().length);
+  return { count };
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const deriveStart = output.indexOf("const count = __cfHelpers.derive(");
+    assert(deriveStart >= 0, "expected computed() to lower to derive()");
+    const deriveWindow = output.slice(deriveStart, deriveStart + 1200);
+
+    assert(
+      !deriveWindow.includes("materializerWriteInputPaths"),
+      "readonly computed() should remain a normal pull computation",
+    );
+  },
+);

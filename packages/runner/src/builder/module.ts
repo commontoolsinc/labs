@@ -293,6 +293,7 @@ export function resolveSourceLocationFromStack(
 export function lift<T extends JSONSchema = JSONSchema, R = any>(
   argumentSchema: T,
   implementation: (input: Schema<T>) => R,
+  options?: DeriveSchedulerOptions,
 ): ModuleFactory<SchemaWithoutCell<T>, R>;
 export function lift<
   T extends JSONSchema = JSONSchema,
@@ -301,24 +302,30 @@ export function lift<
   argumentSchema: T,
   resultSchema: R,
   implementation: (input: Schema<T>) => Schema<R>,
+  options?: DeriveSchedulerOptions,
 ): ModuleFactory<SchemaWithoutCell<T>, SchemaWithoutCell<R>>;
 export function lift<T, R>(
   implementation: (input: T) => R,
+  options?: DeriveSchedulerOptions,
 ): ModuleFactory<T, R>;
 export function lift<T>(
   implementation: (input: T) => any,
+  options?: DeriveSchedulerOptions,
 ): ModuleFactory<T, ReturnType<typeof implementation>>;
 export function lift<T extends (...args: any[]) => any>(
   implementation: T,
+  options?: DeriveSchedulerOptions,
 ): ModuleFactory<Parameters<T>[0], ReturnType<T>>;
 export function lift<T, R>(
   argumentSchema?: JSONSchema | ((input: any) => any),
-  resultSchema?: JSONSchema | ((input: any) => any),
-  implementation?: (input: T) => R,
+  resultSchema?: JSONSchema | ((input: any) => any) | DeriveSchedulerOptions,
+  implementation?: ((input: T) => R) | DeriveSchedulerOptions,
+  options?: DeriveSchedulerOptions,
 ): ModuleFactory<T, R> {
   if (typeof argumentSchema === "function") {
     // lift(fn)
     implementation = argumentSchema;
+    options = resultSchema as DeriveSchedulerOptions | undefined;
     argumentSchema = resultSchema = undefined;
   } else if (typeof resultSchema === "function") {
     // lift(argumentSchema, fn) — two-arg form. The middle slot is the
@@ -327,16 +334,30 @@ export function lift<T, R>(
     // application valid with no input (see runner's isValidArgument check),
     // which is how computed-origin (zero-capture) lifts lower without the
     // legacy `lift(fn)({})` empty-object stopgap.
+    options = implementation as DeriveSchedulerOptions | undefined;
     implementation = resultSchema;
     resultSchema = undefined;
   }
+  const resolvedImplementation = implementation as
+    | ((input: T) => R)
+    | undefined;
+  const resolvedResultSchema = resultSchema as JSONSchema | undefined;
 
   return createNodeFactory({
     type: "javascript",
-    implementation,
+    implementation: resolvedImplementation,
     ...(argumentSchema !== undefined ? { argumentSchema } : {}),
-    ...(resultSchema !== undefined ? { resultSchema } : {}),
+    ...(resolvedResultSchema !== undefined
+      ? { resultSchema: resolvedResultSchema }
+      : {}),
+    ...(options?.materializerWriteInputPaths
+      ? { materializerWriteInputPaths: options.materializerWriteInputPaths }
+      : {}),
   });
+}
+
+interface DeriveSchedulerOptions {
+  materializerWriteInputPaths?: readonly (readonly string[])[];
 }
 
 export function byRef<T, R>(ref: string): ModuleFactory<T, R> {
@@ -466,24 +487,30 @@ export function derive<
   f: (
     input: Schema<InputSchema>,
   ) => Schema<ResultSchema>,
+  options?: DeriveSchedulerOptions,
 ): OpaqueRef<SchemaWithoutCell<ResultSchema>>;
 export function derive<In, Out>(
   input: Opaque<In>,
   f: (input: In) => Out,
 ): OpaqueRef<Out>;
 export function derive<In, Out>(...args: any[]): OpaqueRef<any> {
-  if (args.length === 4) {
-    const [argumentSchema, resultSchema, input, f] = args as [
+  if (args.length >= 4) {
+    const [argumentSchema, resultSchema, input, f, options] = args as [
       JSONSchema,
       JSONSchema,
       Opaque<SchemaWithoutCell<any>>,
       (input: Schema<any>) => Schema<any>,
+      DeriveSchedulerOptions | undefined,
     ];
-    return lift(
+    return createNodeFactory({
+      type: "javascript",
       argumentSchema,
       resultSchema,
-      f as (input: Schema<any>) => Schema<any>,
-    )(input);
+      implementation: f as (input: Schema<any>) => Schema<any>,
+      ...(options?.materializerWriteInputPaths
+        ? { materializerWriteInputPaths: options.materializerWriteInputPaths }
+        : {}),
+    })(input);
   }
 
   const [input, f] = args as [

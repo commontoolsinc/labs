@@ -427,8 +427,11 @@
 - Debugged a pull-mode browser regression in the CFC group chat demo: auto
   classifying every generated action with Writable inputs as a materializer also
   caught pure UI computations. Those computations then stopped normal dirty
-  fanout for their declared outputs. Materializer membership is now explicit
-  module metadata only; Writable inputs remain normal reads unless annotated.
+  fanout for their declared outputs. The transformer now emits
+  `materializerWriteInputPaths` only when callback capability analysis observes
+  actual cell writes, and the runner resolves those paths to envelopes. The
+  older opaque-result fallback remains for generated side-write modules that do
+  not carry write-path metadata.
 - Validation:
   - `deno lint packages/runner/test/scheduler-observations.test.ts`
   - `deno test -A packages/runner/test/scheduler-observations.test.ts packages/memory/test/v2-scheduler-state-test.ts`
