@@ -39,7 +39,7 @@ export default pattern((_state) => {
                     properties: {}
                 }]
         } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            items: import("commonfabric").Cell<string[]>;
+            items: Cell<string[]>;
         }, number>({
             type: "object",
             properties: {

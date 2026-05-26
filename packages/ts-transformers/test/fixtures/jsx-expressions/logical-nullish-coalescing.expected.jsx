@@ -57,7 +57,7 @@ export default pattern((_state) => {
         } as const satisfies __cfHelpers.JSONSchema, {
             type: ["number", "string"]
         } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            config: import("commonfabric").Cell<{ timeout: number | null; retries: number | undefined; }>;
+            config: Cell<{ timeout: number | null; retries: number | undefined; }>;
         }, number>({
             type: "object",
             properties: {
@@ -89,7 +89,7 @@ export default pattern((_state) => {
         } as const satisfies __cfHelpers.JSONSchema, {
             "enum": [false, "Will retry"]
         } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            config: import("commonfabric").Cell<{ timeout: number | null; retries: number | undefined; }>;
+            config: Cell<{ timeout: number | null; retries: number | undefined; }>;
         }, boolean>({
             type: "object",
             properties: {
@@ -117,7 +117,7 @@ export default pattern((_state) => {
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            items: import("commonfabric").Cell<string[]>;
+            items: Cell<string[]>;
         }, string | false>({
             type: "object",
             properties: {

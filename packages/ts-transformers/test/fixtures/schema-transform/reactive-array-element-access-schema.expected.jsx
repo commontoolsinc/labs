@@ -26,8 +26,8 @@ export default pattern((_state) => {
     } as const satisfies __cfHelpers.JSONSchema).for("index", true);
     return {
         [UI]: <div>{__cfHelpers.lift<{
-            items: import("commonfabric").Cell<string[]>;
-            index: import("commonfabric").Cell<number>;
+            items: Cell<string[]>;
+            index: Cell<number>;
         }, string | undefined>({
             type: "object",
             properties: {

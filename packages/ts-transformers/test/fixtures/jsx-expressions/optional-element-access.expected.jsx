@@ -44,18 +44,18 @@ export default pattern(() => {
                     properties: {}
                 }]
         } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            list: import("commonfabric").Cell<string[] | undefined>;
+            list: Cell<string[] | undefined>;
         }, boolean>({
             type: "object",
             properties: {
                 list: {
                     anyOf: [{
-                            type: "undefined"
-                        }, {
                             type: "array",
                             items: {
                                 type: "string"
                             }
+                        }, {
+                            type: "undefined"
                         }],
                     asCell: ["readonly"]
                 }

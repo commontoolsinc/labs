@@ -40,7 +40,7 @@ export default pattern(() => {
                     properties: {}
                 }]
         } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            items: import("commonfabric").Cell<string[]>;
+            items: Cell<string[]>;
         }, boolean>({
             type: "object",
             properties: {

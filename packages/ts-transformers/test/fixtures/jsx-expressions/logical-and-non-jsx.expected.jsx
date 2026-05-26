@@ -42,7 +42,7 @@ export default pattern((_state) => {
         } as const satisfies __cfHelpers.JSONSchema, {
             type: ["boolean", "string"]
         } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            user: import("commonfabric").Cell<{ name: string; age: number; }>;
+            user: Cell<{ name: string; age: number; }>;
         }, boolean>({
             type: "object",
             properties: {
@@ -61,7 +61,7 @@ export default pattern((_state) => {
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema, ({ user }) => user.get().name.length > 0)({ user: user }), __cfHelpers.lift<{
-            user: import("commonfabric").Cell<{ name: string; age: number; }>;
+            user: Cell<{ name: string; age: number; }>;
         }, string>({
             type: "object",
             properties: {
@@ -89,7 +89,7 @@ export default pattern((_state) => {
         } as const satisfies __cfHelpers.JSONSchema, {
             type: ["boolean", "number"]
         } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            user: import("commonfabric").Cell<{ name: string; age: number; }>;
+            user: Cell<{ name: string; age: number; }>;
         }, boolean>({
             type: "object",
             properties: {
@@ -108,7 +108,7 @@ export default pattern((_state) => {
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema, ({ user }) => user.get().age > 18)({ user: user }), __cfHelpers.lift<{
-            user: import("commonfabric").Cell<{ name: string; age: number; }>;
+            user: Cell<{ name: string; age: number; }>;
         }, number>({
             type: "object",
             properties: {

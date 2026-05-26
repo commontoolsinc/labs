@@ -46,8 +46,8 @@ export default pattern((_state) => {
                     properties: {}
                 }]
         } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            items: import("commonfabric").Cell<string[]>;
-            isEnabled: import("commonfabric").Cell<boolean>;
+            items: Cell<string[]>;
+            isEnabled: Cell<boolean>;
         }, Readonly<boolean>>({
             type: "object",
             properties: {
@@ -87,8 +87,8 @@ export default pattern((_state) => {
                     properties: {}
                 }]
         } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            count: import("commonfabric").Cell<number>;
-            items: import("commonfabric").Cell<string[]>;
+            count: Cell<number>;
+            items: Cell<string[]>;
         }, boolean>({
             type: "object",
             properties: {

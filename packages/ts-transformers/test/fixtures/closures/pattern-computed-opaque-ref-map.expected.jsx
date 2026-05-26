@@ -21,7 +21,7 @@ export default pattern((items) => {
     // items is OpaqueRef<number[]> as a pattern parameter
     // Inside the computed callback (which becomes derive), items.map should NOT be transformed
     const doubled = __cfHelpers.lift<{
-        items: number[] & {} & { [SELF]: import("commonfabric").OpaqueRef<any>; };
+        items: number[] & {} & { [SELF]: OpaqueRef<any>; };
     }, number[]>({
         type: "object",
         properties: {

@@ -35,7 +35,9 @@ export default pattern(() => {
     } as const satisfies __cfHelpers.JSONSchema).for("value", true);
     const result = __cfHelpers.lift<{
         value: __cfHelpers.ReadonlyCell<number>;
-        config: __cfHelpers.ReadonlyCell<{ multiplier?: number; } | null>;
+        config: __cfHelpers.ReadonlyCell<{
+            multiplier?: number;
+        } | null>;
     }, number>({
         type: "object",
         properties: {

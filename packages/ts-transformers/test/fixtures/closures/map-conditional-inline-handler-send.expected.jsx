@@ -67,7 +67,7 @@ const castVote = handler({
 // handler subtree; the authored handler arrow must be treated as safe context.
 export default pattern((state) => {
     const boundCastVote = __cfHelpers.lift<{
-        castVote: import("commonfabric").HandlerFactory<{ votes: Cell<VoteEvent[]>; }, unknown>;
+        castVote: HandlerFactory<{ votes: Cell<VoteEvent[]>; }, unknown>;
         state: {
             votes: VoteEvent[];
         };

@@ -86,7 +86,7 @@ export default pattern((__cf_pattern_input) => {
                         type: "string"
                     }
                 } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-                    path: import("commonfabric").Cell<string[]>;
+                    path: Cell<string[]>;
                 }, readonly string[]>({
                     type: "object",
                     properties: {
@@ -124,7 +124,7 @@ export default pattern((__cf_pattern_input) => {
                         type: "string"
                     }
                 } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-                    path: import("commonfabric").Cell<string[]>;
+                    path: Cell<string[]>;
                 }, readonly string[]>({
                     type: "object",
                     properties: {

@@ -27,7 +27,7 @@ export default pattern((_state) => {
         [UI]: (<div>
         <p>Count: {count}</p>
         <p>Next: {__cfHelpers.lift<{
-            count: import("commonfabric").Cell<number>;
+            count: Cell<number>;
         }, number>({
             type: "object",
             properties: {
@@ -41,7 +41,7 @@ export default pattern((_state) => {
             type: "number"
         } as const satisfies __cfHelpers.JSONSchema, ({ count }) => count.get() + 1)({ count: count })}</p>
         <p>Double: {__cfHelpers.lift<{
-            count: import("commonfabric").Cell<number>;
+            count: Cell<number>;
         }, number>({
             type: "object",
             properties: {
@@ -55,7 +55,7 @@ export default pattern((_state) => {
             type: "number"
         } as const satisfies __cfHelpers.JSONSchema, ({ count }) => count.get() * 2)({ count: count })}</p>
         <p>Total: {__cfHelpers.lift<{
-            price: import("commonfabric").Cell<number>;
+            price: Cell<number>;
         }, number>({
             type: "object",
             properties: {

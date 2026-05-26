@@ -39,8 +39,8 @@ export default pattern((_state) => {
         } as const satisfies __cfHelpers.JSONSchema, {
             type: ["number", "string"]
         } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            primary: import("commonfabric").Cell<string>;
-            secondary: import("commonfabric").Cell<string>;
+            primary: Cell<string>;
+            secondary: Cell<string>;
         }, number>({
             type: "object",
             properties: {
@@ -69,7 +69,7 @@ export default pattern((_state) => {
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
         } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
-            items: import("commonfabric").Cell<string[]>;
+            items: Cell<string[]>;
         }, number | undefined>({
             type: "object",
             properties: {

@@ -16,9 +16,15 @@ import {
  * Common flags for type-to-typenode conversion.
  * NoTruncation: Prevents type strings from being truncated
  * UseStructuralFallback: Falls back to structural types when nominal types aren't available
+ * UseAliasDefinedOutsideCurrentScope: Prefer existing aliases (e.g. `Cell<T>`
+ *   imported at module scope) over their canonical qualified forms (e.g.
+ *   `import("commonfabric").Cell<T>`). Without this flag, type-arg
+ *   annotations on synthesized helper calls print the import-qualified form
+ *   even when an alias is in scope (CT-1615 Berni review on PR #3676).
  */
 export const DEFAULT_TYPE_NODE_FLAGS = ts.NodeBuilderFlags.NoTruncation |
-  ts.NodeBuilderFlags.UseStructuralFallback;
+  ts.NodeBuilderFlags.UseStructuralFallback |
+  ts.NodeBuilderFlags.UseAliasDefinedOutsideCurrentScope;
 
 export interface TypeLiteralRegistrationContext {
   readonly factory: ts.NodeFactory;
