@@ -2794,7 +2794,7 @@ interface CFHTMLElement extends CFDOM.HTMLElement {}
 // Extend this to add attributes to only the CF elements.
 interface CFHTMLAttributes<T> extends CFDOM.HTMLAttributes<T> {}
 
-// Minimal theme typing for cf-theme
+// Theme typing for cf-theme
 type CFColorToken = string | {
   light: string;
   dark: string;
@@ -2820,20 +2820,49 @@ interface CFThemeColors {
   warningForeground: CFColorToken;
   accent: CFColorToken;
   accentForeground: CFColorToken;
+  brand: CFColorToken;
+  brandForeground: CFColorToken;
+  textTertiary: CFColorToken;
+  textDisabled: CFColorToken;
+  surfaceDisabled: CFColorToken;
+  surfacePressed: CFColorToken;
+  surfaceTertiary: CFColorToken;
+  surfaceInverse: CFColorToken;
+  textOnColorSecondary: CFColorToken;
+  textOnInverse: CFColorToken;
+  textPressed: CFColorToken;
 }
 
 interface CFThemeDef {
   fontFamily: string;
   monoFontFamily: string;
+  fontSize: string;
   borderRadius: string;
   density: "compact" | "comfortable" | "spacious";
   colorScheme: "light" | "dark" | "auto";
   animationSpeed: "none" | "slow" | "normal" | "fast";
+  roundness: number;
+  scale: number;
+  motion: number;
   colors: CFThemeColors;
 }
 
+interface CFThemeAliases {
+  accentColor: CFColorToken;
+  fontFace: string;
+}
+
 type CFThemeInput =
-  & Partial<Omit<CFThemeDef, "colors"> & { colors: Partial<CFThemeColors> }>
+  & Partial<
+    Omit<CFThemeDef, "colors"> & CFThemeAliases & {
+      colors:
+        & Partial<CFThemeColors>
+        & Record<
+          string,
+          CFColorToken | undefined
+        >;
+    }
+  >
   & Record<string, unknown>;
 
 type CFEvent<T> = {

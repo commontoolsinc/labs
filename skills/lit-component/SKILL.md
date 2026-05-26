@@ -125,7 +125,10 @@ export type {}; /* exported types */
 
 ## Theme Integration
 
-For components that need to consume theme (input and complex components):
+Most components should use `var(--cf-theme-*)` CSS variables with fallbacks.
+Consume `cfThemeContext` only when JavaScript needs the theme object for runtime
+logic, derived values, or applying theme variables to dynamically created
+elements:
 
 ```typescript
 import { consume } from "@lit/context";
