@@ -42,16 +42,16 @@ and CFC write contract.
 
 ## Use Admin Helpers
 
-Use `admin.ts` when a pattern has a local notion of "admin" but wants the common
-registry shape and helper functions. The pattern still defines its own subject
-and integrity labels.
+Use `admin/mod.ts` when a pattern has a local notion of "admin" but wants the
+common registry shape and helper functions. The pattern still defines its own
+subject and integrity labels.
 
 ```ts
 import {
   type AdminManagerCredential,
   adminManagerCredentialIsActive,
   adminRegistryEntries,
-} from "../cfc/admin.ts";
+} from "../cfc/admin/mod.ts";
 import {
   type AddIntegrity,
   type RequiresIntegrity,

@@ -5,7 +5,7 @@ This index lists the primitives that pattern authors are expected to reuse from
 
 ## Admin Registry
 
-From `admin.ts`:
+From `admin/mod.ts`:
 
 - `AdminSubject`
 - `AdminRoleAssignment`
