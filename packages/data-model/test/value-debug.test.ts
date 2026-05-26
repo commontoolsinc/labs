@@ -5,13 +5,11 @@ import {
   toDebugKindString,
   toIndentedDebugString,
 } from "../src/value-debug.ts";
-import { FabricBytes } from "../src/FabricBytes.ts";
-import { FabricEpochNsec } from "../src/fabric-epoch.ts";
-import {
-  FabricError,
-  FabricMap,
-  FabricRegExp,
-} from "../src/fabric-native-instances.ts";
+import { FabricBytes } from "../src/fabric-primitives/FabricBytes.ts";
+import { FabricEpochNsec } from "../src/fabric-primitives/FabricEpochNsec.ts";
+import { FabricError } from "../src/fabric-instances/FabricError.ts";
+import { FabricMap } from "../src/fabric-instances/FabricMap.ts";
+import { FabricRegExp } from "../src/fabric-instances/FabricRegExp.ts";
 
 // ============================================================================
 // Tests

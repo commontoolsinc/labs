@@ -29,6 +29,9 @@ describe("shell login tests", () => {
     );
 
     await clickPierce(page, '[test-id="register-new-key"]');
+    await pierce(page, '[test-id="use-passphrase"]');
+
+    await clickPierce(page, '[test-id="use-passphrase"]');
     await pierce(page, '[test-id="generate-passphrase"]');
 
     await clickPierce(page, '[test-id="generate-passphrase"]');

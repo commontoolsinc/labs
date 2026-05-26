@@ -358,10 +358,11 @@ export interface BuilderFunctionsAndConstants {
   FabricPrimitive:
     typeof import("@commonfabric/data-model/fabric-value").FabricPrimitive;
   FabricEpochNsec:
-    typeof import("@commonfabric/data-model/fabric-epoch").FabricEpochNsec;
+    typeof import("@commonfabric/data-model/fabric-primitives").FabricEpochNsec;
   FabricEpochDays:
-    typeof import("@commonfabric/data-model/fabric-epoch").FabricEpochDays;
-  FabricHash: typeof import("@commonfabric/data-model/FabricHash").FabricHash;
+    typeof import("@commonfabric/data-model/fabric-primitives").FabricEpochDays;
+  FabricHash:
+    typeof import("@commonfabric/data-model/fabric-primitives").FabricHash;
 
   // Debug stringifiers
   toCompactDebugString:

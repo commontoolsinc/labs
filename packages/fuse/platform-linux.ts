@@ -132,6 +132,7 @@ const O_APPEND = 0x400;
 const ENOTEMPTY = 39;
 const ENOSYS = 38;
 const ENODATA = 61; // Linux equivalent of macOS ENOATTR
+const ENOTSUP = 95;
 
 // --- fuse_lowlevel_ops offsets ---
 // v3 keeps the same order for existing ops and adds new ones at the end.
@@ -227,6 +228,7 @@ const linuxPlatform: FusePlatform = {
   ENOTEMPTY,
   ENOSYS,
   ENODATA,
+  ENOTSUP,
   FH_OFFSET,
 
   // Linux getxattr: no `position` parameter

@@ -2,7 +2,7 @@ import { getDataModelConfig } from "@commonfabric/data-model/fabric-value";
 import {
   jsonFromValue,
   valueFromJson,
-} from "@commonfabric/data-model/json-encoding";
+} from "@commonfabric/data-model/json-wire";
 import { internPathSelector } from "@commonfabric/data-model/schema-utils";
 import type { FabricValue, SchemaPathSelector } from "./interface.ts";
 import { EmptyReconstructionContext } from "@commonfabric/data-model/EmptyReconstructionContext";

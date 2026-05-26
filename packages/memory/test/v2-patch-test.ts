@@ -1,9 +1,9 @@
 import { assert, assertEquals, assertStrictEquals } from "@std/assert";
 import { applyPatch } from "../v2/patch.ts";
-import { FabricError } from "@commonfabric/data-model/fabric-native-instances";
+import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import { FabricInstance } from "@commonfabric/data-model/interface";
-import { FabricBytes } from "@commonfabric/data-model/FabricBytes";
-import { FabricEpochNsec } from "@commonfabric/data-model/fabric-epoch";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { FabricEpochNsec } from "@commonfabric/data-model/fabric-primitives";
 
 // `patch.ts` deep-clones incoming op values for isolation. It MUST preserve
 // fabric wrapper classes: it previously used `structuredClone()`, which

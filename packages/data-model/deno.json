@@ -20,7 +20,7 @@
   },
   "test": {
     "include": [
-      "test/*.test.ts"
+      "test/**/*.test.ts"
     ]
   },
   "exports": {
@@ -28,11 +28,9 @@
     "./BaseReconstructionContext": "./src/BaseReconstructionContext.ts",
     "./deep-freeze": "./src/deep-freeze.ts",
     "./EmptyReconstructionContext": "./src/EmptyReconstructionContext.ts",
-    "./ExplicitTagValue": "./src/ExplicitTagValue.ts",
-    "./FabricBytes": "./src/FabricBytes.ts",
-    "./fabric-epoch": "./src/fabric-epoch.ts",
-    "./FabricHash": "./src/FabricHash.ts",
-    "./fabric-native-instances": "./src/fabric-native-instances.ts",
+    "./fabric-instances": "./src/fabric-instances/index.ts",
+    "./native-instance-utils": "./src/native-instance-utils.ts",
+    "./fabric-primitives": "./src/fabric-primitives/index.ts",
     "./fabric-type-tags": "./src/fabric-type-tags.ts",
     "./fabric-value": "./src/fabric-value.ts",
     "./fabric-value-legacy": "./src/fabric-value-legacy.ts",
@@ -40,14 +38,10 @@
     "./value-clone": "./src/value-clone.ts",
     "./frozen-builtins": "./src/frozen-builtins.ts",
     "./interface": "./src/interface.ts",
-    "./json-encoding": "./src/json-encoding.ts",
-    "./JsonEncodingContext": "./src/JsonEncodingContext.ts",
-    "./json-type-handlers": "./src/json-type-handlers.ts",
+    "./json-wire": "./src/json-wire/index.ts",
     "./native-type-tags": "./src/native-type-tags.ts",
-    "./ProblematicValue": "./src/ProblematicValue.ts",
     "./schema-hash": "./src/schema-hash.ts",
     "./schema-utils": "./src/schema-utils.ts",
-    "./UnknownValue": "./src/UnknownValue.ts",
     "./value-debug": "./src/value-debug.ts",
     "./value-hash": "./src/value-hash.ts"
   }

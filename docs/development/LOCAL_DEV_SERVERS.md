@@ -45,6 +45,11 @@ deno run -A packages/cli/mod.ts id derive "implicit trust" > claude.key
 export CF_IDENTITY=./claude.key
 ```
 
+For workflows that touch `PerUser`, `PerSession`, favorites, or home-space
+state, use one shared identity in both browser and CLI. The browser login screen
+can import a CLI PKCS8/PEM key via `Import CLI Key`. See
+[`SHARED_IDENTITY.md`](./SHARED_IDENTITY.md).
+
 **First-time browser login:**
 
 When accessing a space for the first time, you'll need to register:

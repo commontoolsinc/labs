@@ -128,6 +128,15 @@ export async function awaitForegroundMountExit(
   exit(status.code);
 }
 
+async function removeMountStateAndChildStatus(
+  statePath: string,
+  childStatusPath: string,
+  removeStateFile: (path: string) => Promise<void>,
+): Promise<void> {
+  await removeStateFile(statePath);
+  await removeStateFile(childStatusPath).catch(() => undefined);
+}
+
 export async function awaitBackgroundMountStartup(
   pid: number,
   statePath: string,
@@ -158,6 +167,7 @@ export async function awaitBackgroundMountStartup(
   const readMountStateFile = deps.readMountStateFile ?? Deno.readTextFile;
   const sleep = deps.sleep ??
     ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  let invalidChildStatusSeen = false;
 
   for (let i = 0; i < attempts; i++) {
     if (!isAliveFn(pid)) {
@@ -172,6 +182,7 @@ export async function awaitBackgroundMountStartup(
         status = parseChildSupervisorStatus(
           await readTextFile(deps.childStatusPath),
         );
+        if (!status) invalidChildStatusSeen = true;
       } catch {
         status = null;
       }
@@ -184,7 +195,56 @@ export async function awaitBackgroundMountStartup(
           readMountStateFile,
         },
       );
-      if (status?.state === "mounted" && belongsToThisMount) return;
+      if (status?.state === "mounted" && belongsToThisMount) {
+        if (!isAliveFn(status.pid!)) {
+          await removeMountStateAndChildStatus(
+            statePath,
+            deps.childStatusPath,
+            removeStateFileFn,
+          );
+          throw new Error(
+            "Background FUSE mount failed during startup: child exited after reporting mounted.",
+          );
+        }
+
+        await sleep(delayMs);
+        let confirmedStatus: FuseChildSupervisorStatus | null = null;
+        try {
+          confirmedStatus = parseChildSupervisorStatus(
+            await readTextFile(deps.childStatusPath),
+          );
+        } catch {
+          confirmedStatus = null;
+        }
+        const confirmedBelongsToThisMount = await childStatusBelongsToMount(
+          confirmedStatus,
+          statePath,
+          {
+            token: deps.childStatusToken,
+            mountpoint: deps.mountpoint,
+            readMountStateFile,
+          },
+        );
+        if (
+          confirmedStatus?.state === "mounted" &&
+          confirmedBelongsToThisMount &&
+          isAliveFn(pid) &&
+          isAliveFn(confirmedStatus.pid!)
+        ) {
+          return;
+        }
+        await removeMountStateAndChildStatus(
+          statePath,
+          deps.childStatusPath,
+          removeStateFileFn,
+        );
+        const reason = confirmedBelongsToThisMount && confirmedStatus
+          ? `child reported ${confirmedStatus.state}`
+          : "child did not remain mounted";
+        throw new Error(
+          `Background FUSE mount failed during startup: ${reason}`,
+        );
+      }
       if (
         belongsToThisMount &&
         (status?.state === "failed" || status?.state === "exiting" ||
@@ -204,7 +264,15 @@ export async function awaitBackgroundMountStartup(
   }
 
   if (deps.childStatusPath) {
-    await removeStateFileFn(statePath);
+    if (invalidChildStatusSeen) {
+      await removeMountStateAndChildStatus(
+        statePath,
+        deps.childStatusPath,
+        removeStateFileFn,
+      );
+    } else {
+      await removeStateFileFn(statePath);
+    }
     throw new Error(
       "Background FUSE process did not report mount readiness before startup timeout.",
     );

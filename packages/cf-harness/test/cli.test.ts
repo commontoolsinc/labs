@@ -498,6 +498,70 @@ Deno.test("parseCfHarnessCliArgs supports allowed tools and result json path", a
   assertEquals(parsed.resultJsonPath, "/tmp/project/results/output.json");
 });
 
+Deno.test({
+  name:
+    "parseCfHarnessCliArgs parses exact skill script allowlists with skills root",
+  permissions: { read: true, write: true },
+  async fn() {
+    const root = await Deno.makeTempDir({
+      prefix: "cf-harness-cli-skill-scripts-",
+    });
+    try {
+      await Deno.mkdir(`${root}/skills`, { recursive: true });
+      const parsed = await parseCfHarnessCliArgs(
+        [
+          "--workspace",
+          root,
+          "--prompt",
+          "hi",
+          "--skills-root",
+          "skills",
+          "--skill",
+          "deno-memory-profiler",
+          "--allow-tool",
+          "run_skill_script",
+          "--allow-skill-script",
+          "deno-memory-profiler:scripts/memory.ts",
+          "--allow-skill-script",
+          "deno-memory-profiler:scripts/memory.ts",
+        ],
+        {
+          cwd: root,
+          env: {},
+        },
+      );
+
+      if ("help" in parsed) {
+        throw new Error("expected config result");
+      }
+      assertEquals(parsed.allowedToolIds, ["run_skill_script"]);
+      assertEquals(parsed.allowedSkillScripts, [{
+        skill: "deno-memory-profiler",
+        path: "scripts/memory.ts",
+      }]);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  },
+});
+
+Deno.test("parseCfHarnessCliArgs rejects skill script allowlists without a skills root", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [
+          "--prompt",
+          "hi",
+          "--allow-skill-script",
+          "pattern-test:scripts/check.ts",
+        ],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--allow-skill-script requires --skills-root",
+  );
+});
+
 Deno.test("parseCfHarnessCliArgs supports structured result validation flags", async () => {
   const parsed = await parseCfHarnessCliArgs(
     [
@@ -694,6 +758,29 @@ Deno.test("parseCfHarnessCliArgs supports explicit web_fetch subagent profile au
   assertEquals(parsed.allowedSubagentProfiles, ["web_fetch"]);
 });
 
+Deno.test("parseCfHarnessCliArgs supports explicit web_search subagent profile authorization", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--allow-tool",
+      "delegate_task",
+      "--allow-subagent-profile",
+      "web_search",
+    ],
+    {
+      cwd: "/tmp/project",
+      env: {},
+    },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.allowedToolIds, ["delegate_task"]);
+  assertEquals(parsed.allowedSubagentProfiles, ["web_search"]);
+});
+
 Deno.test("parseCfHarnessCliArgs covers tool allowlist and subagent profile permutations", async () => {
   const cases = [
     {
@@ -719,6 +806,12 @@ Deno.test("parseCfHarnessCliArgs covers tool allowlist and subagent profile perm
       flags: ["--allow-subagent-profile", "web_fetch"],
       allowedToolIds: undefined,
       allowedSubagentProfiles: ["web_fetch"],
+    },
+    {
+      name: "explicit web_search profile when parent tools are unrestricted",
+      flags: ["--allow-subagent-profile", "web_search"],
+      allowedToolIds: undefined,
+      allowedSubagentProfiles: ["web_search"],
     },
     {
       name: "delegate_task alone does not imply child profile authority",
@@ -766,7 +859,8 @@ Deno.test("parseCfHarnessCliArgs covers tool allowlist and subagent profile perm
       allowedSubagentProfiles: ["default"],
     },
     {
-      name: "default, browser, and web_fetch profiles can all be preauthorized",
+      name:
+        "default, browser, web_fetch, and web_search profiles can all be preauthorized",
       flags: [
         "--allow-tool",
         "delegate_task",
@@ -776,9 +870,16 @@ Deno.test("parseCfHarnessCliArgs covers tool allowlist and subagent profile perm
         "browser",
         "--allow-subagent-profile",
         "web_fetch",
+        "--allow-subagent-profile",
+        "web_search",
       ],
       allowedToolIds: ["delegate_task"],
-      allowedSubagentProfiles: ["default", "browser", "web_fetch"],
+      allowedSubagentProfiles: [
+        "default",
+        "browser",
+        "web_fetch",
+        "web_search",
+      ],
     },
   ] as const;
 
@@ -818,7 +919,7 @@ Deno.test("parseCfHarnessCliArgs rejects unknown subagent profiles", async () =>
         },
       ),
     Error,
-    "allowed subagent profiles must be one or more of default, browser, web_fetch",
+    "allowed subagent profiles must be one or more of default, browser, web_fetch, web_search",
   );
 });
 
@@ -833,7 +934,7 @@ Deno.test("parseCfHarnessCliArgs rejects bash-no-sandbox as a parent allow-tool"
         },
       ),
     Error,
-    "allowed tools must be one or more of bash, read_file, view_image, web_fetch, read_skill_resource, edit_file, write_file, delegate_task",
+    "allowed tools must be one or more of bash, read_file, view_image, web_fetch, read_skill_resource, run_skill_script, edit_file, write_file, delegate_task",
   );
 });
 
@@ -855,7 +956,7 @@ Deno.test("parseCfHarnessCliArgs rejects unknown allowed tools before resolving 
         },
       ),
     Error,
-    "allowed tools must be one or more of bash, read_file, view_image, web_fetch, read_skill_resource, edit_file, write_file, delegate_task",
+    "allowed tools must be one or more of bash, read_file, view_image, web_fetch, read_skill_resource, run_skill_script, edit_file, write_file, delegate_task",
   );
 });
 
@@ -1331,6 +1432,17 @@ Deno.test("runCfHarnessCli passes tool and subagent profile allowlists", async (
       ],
       allowedToolIds: ["delegate_task"],
       allowedSubagentProfiles: ["browser"],
+    },
+    {
+      name: "delegate_task with explicit web_search profile authorization",
+      flags: [
+        "--allow-tool",
+        "delegate_task",
+        "--allow-subagent-profile",
+        "web_search",
+      ],
+      allowedToolIds: ["delegate_task"],
+      allowedSubagentProfiles: ["web_search"],
     },
   ] as const;
 

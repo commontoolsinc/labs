@@ -4021,6 +4021,228 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("does not apply exact-path policies for omitted optional fields", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const output = runtime.getCell(
+        signer.did(),
+        "cfc-optional-exact-path-policy",
+        {
+          type: "object",
+          properties: {
+            public: { type: "string" },
+            guarded: {
+              type: "string",
+              ifc: { requiredIntegrity: ["trusted"] },
+            },
+          },
+        },
+        tx,
+      );
+      output.set({ public: "ok" });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.ok).toBeDefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("rejects removing an existing protected optional field without required integrity", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const schema = {
+        type: "object",
+        properties: {
+          public: { type: "string" },
+          guarded: {
+            type: "string",
+            ifc: { requiredIntegrity: ["trusted"] },
+          },
+        },
+      } as const satisfies JSONSchema;
+
+      const seed = runtime.edit();
+      const sourceId = parseLink(
+        runtime.getCell(
+          signer.did(),
+          "cfc-optional-removal-source",
+          {
+            type: "object",
+            properties: {
+              secret: { type: "string" },
+            },
+          },
+        ).getAsLink(),
+      ).id!;
+      seed.writeOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: sourceId,
+        path: [],
+      }, {
+        value: { secret: "untrusted" },
+        cfc: {
+          version: 1,
+          schemaHash: "optional-removal-source-schema",
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: ["secret"],
+              label: { integrity: ["untrusted"] },
+            }],
+          },
+        },
+      });
+      const targetId = parseLink(
+        runtime.getCell(
+          signer.did(),
+          "cfc-optional-removal-target",
+          schema,
+        ).getAsLink(),
+      ).id!;
+      seed.writeOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: targetId,
+        path: [],
+      }, {
+        value: { public: "before", guarded: "old" },
+      });
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const source = runtime.getCell(
+        signer.did(),
+        "cfc-optional-removal-source",
+        {
+          type: "object",
+          properties: {
+            secret: { type: "string" },
+          },
+        },
+        tx,
+      );
+      expect(source.get()).toEqual({ secret: "untrusted" });
+      tx.markCfcRelevant("stored-input-metadata");
+
+      const output = runtime.getCell(
+        signer.did(),
+        "cfc-optional-removal-target",
+        schema,
+        tx,
+      );
+      output.set({ public: "after" });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain("requiredIntegrity");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("evaluates exact-path policies against explicit null writes", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      const schema = {
+        type: "object",
+        properties: {
+          guarded: {
+            type: "null",
+            ifc: { requiredIntegrity: ["trusted"] },
+          },
+        },
+      } as const satisfies JSONSchema;
+
+      const seed = runtime.edit();
+      const sourceId = parseLink(
+        runtime.getCell(
+          signer.did(),
+          "cfc-null-write-source",
+          {
+            type: "object",
+            properties: {
+              secret: { type: "string" },
+            },
+          },
+        ).getAsLink(),
+      ).id!;
+      seed.writeOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: sourceId,
+        path: [],
+      }, {
+        value: { secret: "untrusted" },
+        cfc: {
+          version: 1,
+          schemaHash: "null-write-source-schema",
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: ["secret"],
+              label: { integrity: ["untrusted"] },
+            }],
+          },
+        },
+      });
+      const targetId = parseLink(
+        runtime.getCell(
+          signer.did(),
+          "cfc-null-write-target",
+          schema,
+        ).getAsLink(),
+      ).id!;
+      seed.writeOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: targetId,
+        path: [],
+      }, {
+        value: { guarded: "stale" },
+      });
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const source = runtime.getCell(
+        signer.did(),
+        "cfc-null-write-source",
+        {
+          type: "object",
+          properties: {
+            secret: { type: "string" },
+          },
+        },
+        tx,
+      );
+      expect(source.get()).toEqual({ secret: "untrusted" });
+      tx.markCfcRelevant("stored-input-metadata");
+
+      const output = runtime.getCell(
+        signer.did(),
+        "cfc-null-write-target",
+        schema,
+        tx,
+      );
+      output.set({ guarded: null });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain("requiredIntegrity");
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("treats unrelated consumed reads as influencing every target path in phase 1", async () => {
     const { runtime, storageManager } = createRuntime();
     try {

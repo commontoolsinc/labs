@@ -1,5 +1,4 @@
 import { describe, it } from "@std/testing/bdd";
-import { assert } from "@std/assert";
 import { expect } from "@std/expect";
 import type {
   FabricValue,
@@ -49,12 +48,12 @@ describe("toDeepFrozenSchema", () => {
 
       // Top-level should be the same reference — frozen in place.
       expect(result).toBe(schema);
-      assert(Object.isFrozen(schema));
+      expect(Object.isFrozen(schema)).toBe(true);
 
       // Property values are replaced with frozen clones (not the originals).
-      assert(Object.isFrozen(schema.properties));
+      expect(Object.isFrozen(schema.properties)).toBe(true);
       expect(schema.properties).not.toBe(originalProperties);
-      assert(Object.isFrozen(schema.properties!.name));
+      expect(Object.isFrozen(schema.properties!.name)).toBe(true);
     });
 
     it("unfrozen schema is frozen in place (same reference)", () => {
@@ -68,7 +67,7 @@ describe("toDeepFrozenSchema", () => {
 
       // Same reference — frozen in place, not cloned.
       expect(result).toBe(schema);
-      assert(Object.isFrozen(result));
+      expect(Object.isFrozen(result)).toBe(true);
     });
   });
 
@@ -87,13 +86,13 @@ describe("toDeepFrozenSchema", () => {
       expect(result).not.toBe(schema);
 
       // Original should NOT be frozen.
-      assert(!Object.isFrozen(schema));
+      expect(Object.isFrozen(schema)).toBe(false);
 
       // Result should be deeply frozen.
-      assert(Object.isFrozen(result));
+      expect(Object.isFrozen(result)).toBe(true);
       const obj = result as JSONSchemaObj;
-      assert(Object.isFrozen(obj.properties));
-      assert(Object.isFrozen(obj.properties!.age));
+      expect(Object.isFrozen(obj.properties)).toBe(true);
+      expect(Object.isFrozen(obj.properties!.age)).toBe(true);
     });
 
     it("preserves original schema", () => {
@@ -106,8 +105,8 @@ describe("toDeepFrozenSchema", () => {
       toDeepFrozenSchema(schema, false);
 
       // Original should still be mutable.
-      assert(!Object.isFrozen(schema));
-      assert(!Object.isFrozen(inner));
+      expect(Object.isFrozen(schema)).toBe(false);
+      expect(Object.isFrozen(inner)).toBe(false);
 
       // Prove mutability by actually mutating.
       (inner as Record<string, unknown>).type = "number";
@@ -124,7 +123,7 @@ describe("toDeepFrozenSchema", () => {
       toDeepFrozenSchema(schema, false);
 
       // Original property value should not be frozen.
-      assert(!Object.isFrozen(innerProp));
+      expect(Object.isFrozen(innerProp)).toBe(false);
     });
   });
 
@@ -146,14 +145,14 @@ describe("toDeepFrozenSchema", () => {
 
       const result = toDeepFrozenSchema(schema, true) as JSONSchemaObj;
 
-      assert(Object.isFrozen(result));
-      assert(Object.isFrozen(result.properties));
+      expect(Object.isFrozen(result)).toBe(true);
+      expect(Object.isFrozen(result.properties)).toBe(true);
 
       const address = result.properties!.address as JSONSchemaObj;
-      assert(Object.isFrozen(address));
-      assert(Object.isFrozen(address.properties));
-      assert(Object.isFrozen(address.required));
-      assert(Object.isFrozen(address.properties!.street));
+      expect(Object.isFrozen(address)).toBe(true);
+      expect(Object.isFrozen(address.properties)).toBe(true);
+      expect(Object.isFrozen(address.required)).toBe(true);
+      expect(Object.isFrozen(address.properties!.street)).toBe(true);
     });
 
     it("schema with arrays is frozen", () => {
@@ -170,12 +169,12 @@ describe("toDeepFrozenSchema", () => {
 
       const result = toDeepFrozenSchema(schema, true) as JSONSchemaObj;
 
-      assert(Object.isFrozen(result));
-      assert(Object.isFrozen(result.required));
+      expect(Object.isFrozen(result)).toBe(true);
+      expect(Object.isFrozen(result.required)).toBe(true);
 
       const tags = result.properties!.tags as JSONSchemaObj;
-      assert(Object.isFrozen(tags));
-      assert(Object.isFrozen(tags.items));
+      expect(Object.isFrozen(tags)).toBe(true);
+      expect(Object.isFrozen(tags.items)).toBe(true);
     });
 
     it("anyOf schemas are frozen", () => {
@@ -188,10 +187,10 @@ describe("toDeepFrozenSchema", () => {
 
       const result = toDeepFrozenSchema(schema, true) as JSONSchemaObj;
 
-      assert(Object.isFrozen(result));
-      assert(Object.isFrozen(result.anyOf));
-      assert(Object.isFrozen(result.anyOf![0]));
-      assert(Object.isFrozen(result.anyOf![1]));
+      expect(Object.isFrozen(result)).toBe(true);
+      expect(Object.isFrozen(result.anyOf)).toBe(true);
+      expect(Object.isFrozen(result.anyOf![0])).toBe(true);
+      expect(Object.isFrozen(result.anyOf![1])).toBe(true);
     });
 
     it("enum values are frozen", () => {
@@ -201,7 +200,7 @@ describe("toDeepFrozenSchema", () => {
       };
 
       const result = toDeepFrozenSchema(schema, true) as JSONSchemaObj;
-      assert(Object.isFrozen(result.enum));
+      expect(Object.isFrozen(result.enum)).toBe(true);
     });
   });
 
@@ -238,7 +237,7 @@ describe("toDeepFrozenSchema", () => {
       const schema: JSONSchemaObj = Object.freeze({ type: "string" as const });
       const result = toDeepFrozenSchema(schema, true);
       expect(result).toBe(schema);
-      assert(Object.isFrozen(result));
+      expect(Object.isFrozen(result)).toBe(true);
     });
 
     it("already-deep-frozen returns same reference (canShare=true)", () => {
@@ -276,9 +275,9 @@ describe("toDeepFrozenSchema", () => {
       expect(result).not.toBe(schema);
 
       // Result must be deeply frozen.
-      assert(Object.isFrozen(result));
+      expect(Object.isFrozen(result)).toBe(true);
       const obj = result as JSONSchemaObj;
-      assert(Object.isFrozen(obj.properties));
+      expect(Object.isFrozen(obj.properties)).toBe(true);
     });
   });
 
@@ -306,8 +305,8 @@ describe("toDeepFrozenSchema", () => {
       expect(result.required).not.toBe(unfrozenRequired);
 
       // Both should be deeply frozen in the result.
-      assert(Object.isFrozen(result.properties));
-      assert(Object.isFrozen(result.required));
+      expect(Object.isFrozen(result.properties)).toBe(true);
+      expect(Object.isFrozen(result.required)).toBe(true);
     });
   });
 });
@@ -315,33 +314,33 @@ describe("toDeepFrozenSchema", () => {
 describe("isNontrivialSchema", () => {
   describe("nullish inputs", () => {
     it("returns false for undefined", () => {
-      assert(!isNontrivialSchema(undefined));
+      expect(isNontrivialSchema(undefined)).toBe(false);
     });
 
     it("returns false for null", () => {
-      assert(!isNontrivialSchema(null));
+      expect(isNontrivialSchema(null)).toBe(false);
     });
   });
 
   describe("boolean schemas", () => {
     it("returns false for true", () => {
-      assert(!isNontrivialSchema(true));
+      expect(isNontrivialSchema(true)).toBe(false);
     });
 
     it("returns false for false", () => {
-      assert(!isNontrivialSchema(false));
+      expect(isNontrivialSchema(false)).toBe(false);
     });
   });
 
   describe("empty object schema", () => {
     it("returns false for {}", () => {
-      assert(!isNontrivialSchema({}));
+      expect(isNontrivialSchema({})).toBe(false);
     });
   });
 
   describe("non-trivial schemas", () => {
     it("returns true for a schema with type", () => {
-      assert(isNontrivialSchema({ type: "string" }));
+      expect(isNontrivialSchema({ type: "string" })).toBe(true);
     });
 
     it("returns true for a schema with properties", () => {
@@ -349,11 +348,11 @@ describe("isNontrivialSchema", () => {
         type: "object",
         properties: { name: { type: "string" } },
       };
-      assert(isNontrivialSchema(schema));
+      expect(isNontrivialSchema(schema)).toBe(true);
     });
 
     it("returns true for a schema with only $ref", () => {
-      assert(isNontrivialSchema({ $ref: "#/definitions/Foo" }));
+      expect(isNontrivialSchema({ $ref: "#/definitions/Foo" })).toBe(true);
     });
 
     it("returns true for a schema with anyOf", () => {
@@ -364,7 +363,7 @@ describe("isNontrivialSchema", () => {
 
     it("returns true for a frozen non-empty schema", () => {
       const schema = Object.freeze({ type: "number" as const });
-      assert(isNontrivialSchema(schema));
+      expect(isNontrivialSchema(schema)).toBe(true);
     });
 
     it("returns true for a deep-frozen schema", () => {
@@ -372,7 +371,7 @@ describe("isNontrivialSchema", () => {
         type: "object",
         properties: { x: { type: "number" } },
       });
-      assert(isNontrivialSchema(schema));
+      expect(isNontrivialSchema(schema)).toBe(true);
     });
   });
 
@@ -449,16 +448,16 @@ describe("cloneSchemaMutable", () => {
     };
 
     const result = cloneSchemaMutable(schema, true) as JSONSchemaObj;
-    assert(!Object.isFrozen(result));
+    expect(Object.isFrozen(result)).toBe(false);
 
     // Top-level mutation should work.
     (result as Record<string, unknown>).type = "array";
     expect(result.type).toBe("array");
 
     // Nested mutation should also work.
-    assert(!Object.isFrozen(result.properties));
+    expect(Object.isFrozen(result.properties)).toBe(false);
     const xProp = result.properties!.x as Record<string, unknown>;
-    assert(!Object.isFrozen(xProp));
+    expect(Object.isFrozen(xProp)).toBe(false);
     xProp.type = "string";
     expect((result.properties!.x as JSONSchemaObj).type).toBe("string");
   });
@@ -483,7 +482,7 @@ describe("cloneSchemaMutable", () => {
 
     const result = cloneSchemaMutable(schema, true) as JSONSchemaObj;
 
-    assert(!Object.isFrozen(result));
+    expect(Object.isFrozen(result)).toBe(false);
     expect(result.type).toBe("object");
     // Nested properties should also be mutable.
     expect(Object.isFrozen(result.properties)).toBe(false);
@@ -539,7 +538,7 @@ describe("schemaWithProperties", () => {
     // value distinct from absence, which matters once schemas carry
     // FabricValue-typed fields.
     expect(result.asStream).toBe(undefined);
-    assert("asStream" in result);
+    expect("asStream" in result).toBe(true);
     expect(result.type).toBe("object");
   });
 
@@ -576,27 +575,27 @@ describe("schemaWithProperties", () => {
       description: "hi",
     }) as JSONSchemaObj;
 
-    assert(Object.isFrozen(result));
-    assert(Object.isFrozen(result.properties));
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(Object.isFrozen(result.properties)).toBe(true);
   });
 
   it("distinguishes undefined-valued key from absent key", () => {
     // A schema with no `description` key at all.
     const schema: JSONSchemaObj = { type: "string" };
-    assert(!("description" in schema));
+    expect("description" in schema).toBe(false);
 
     // Setting description to undefined: key is present but value is undefined.
     const withUndefined = schemaWithProperties(schema, {
       description: undefined,
     }) as JSONSchemaObj;
-    assert("description" in withUndefined);
+    expect("description" in withUndefined).toBe(true);
     expect(withUndefined.description).toBe(undefined);
 
     // Not mentioning description: key remains absent.
     const withoutOverride = schemaWithProperties(schema, {
       type: "number",
     }) as JSONSchemaObj;
-    assert(!("description" in withoutOverride));
+    expect("description" in withoutOverride).toBe(false);
   });
 
   for (const truish of [true, undefined]) {
@@ -608,13 +607,13 @@ describe("schemaWithProperties", () => {
 
       it("returns an interned result", () => {
         const result = schemaWithProperties(truish, { type: "string" });
-        assert(isInternedSchema(result));
+        expect(isInternedSchema(result)).toBe(true);
       });
 
       it("does not freeze `overrides`", () => {
         const overrides: JSONSchemaObj = { type: "boolean" };
         schemaWithProperties(truish, overrides);
-        assert(!Object.isFrozen(overrides));
+        expect(Object.isFrozen(overrides)).toBe(false);
       });
     });
   }
@@ -628,18 +627,18 @@ describe("schemaWithProperties", () => {
     it("returns an interned result given an interned `schema`", () => {
       const schema = internSchema({ type: "string" });
       const result = schemaWithProperties(schema, true);
-      assert(isInternedSchema(result));
+      expect(isInternedSchema(result)).toBe(true);
     });
 
     it("returns an uninterned result given an uninterned `schema`", () => {
       const result = schemaWithProperties({ type: "string" }, true);
-      assert(!isInternedSchema(result));
+      expect(isInternedSchema(result)).toBe(false);
     });
 
     it("does not freeze a mutable `schema`", () => {
       const schema: JSONSchemaObj = { type: "boolean" };
       schemaWithProperties(schema, true);
-      assert(!Object.isFrozen(schema));
+      expect(Object.isFrozen(schema)).toBe(false);
     });
   });
 
@@ -673,7 +672,7 @@ describe("schemaWithProperties", () => {
       const result = schemaWithProperties(base, {
         properties: { x: { type: "string" } },
       });
-      assert(isInternedSchema(result));
+      expect(isInternedSchema(result)).toBe(true);
     });
 
     it("result is not interned when base schema is not interned", () => {
@@ -681,9 +680,9 @@ describe("schemaWithProperties", () => {
       const result = schemaWithProperties(base, {
         properties: { x: { type: "string" } },
       });
-      assert(!isInternedSchema(result));
+      expect(isInternedSchema(result)).toBe(false);
       // But it should still be frozen.
-      assert(Object.isFrozen(result));
+      expect(Object.isFrozen(result)).toBe(true);
     });
   });
 });
@@ -694,7 +693,7 @@ describe("schemaWithoutProperties", () => {
     const result = schemaWithoutProperties(schema, "asCell") as JSONSchemaObj;
 
     expect(result).toEqual({ type: "object" });
-    assert(!("asCell" in result));
+    expect("asCell" in result).toBe(false);
   });
 
   it("removes multiple named properties", () => {
@@ -710,15 +709,15 @@ describe("schemaWithoutProperties", () => {
     ) as JSONSchemaObj;
 
     expect(result).toEqual({ type: "object" });
-    assert(!("asCell" in result));
-    assert(!("asStream" in result));
+    expect("asCell" in result).toBe(false);
+    expect("asStream" in result).toBe(false);
   });
 
   it("returns a frozen result", () => {
     const schema: JSONSchemaObj = { type: "object", asCell: true };
     const result = schemaWithoutProperties(schema, "asCell");
 
-    assert(Object.isFrozen(result));
+    expect(Object.isFrozen(result)).toBe(true);
   });
 
   it("does not mutate the original", () => {
@@ -733,8 +732,8 @@ describe("schemaWithoutProperties", () => {
     const result = schemaWithoutProperties(schema, "asCell");
 
     expect(result).toEqual(schema);
-    assert(Object.isFrozen(result));
-    assert(Object.isFrozen((result as JSONSchemaObj).not));
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(Object.isFrozen((result as JSONSchemaObj).not)).toBe(true);
   });
 
   it("is a true no-op when the named property is absent from a deep-frozen schema", () => {
@@ -763,22 +762,22 @@ describe("schemaWithoutProperties", () => {
     it("result is interned when input schema is interned", () => {
       const schema = internSchema({ type: "object", asCell: true });
       const result = schemaWithoutProperties(schema, "asCell");
-      assert(isInternedSchema(result));
+      expect(isInternedSchema(result)).toBe(true);
     });
 
     it("result is not interned when input schema is not interned", () => {
       const schema: JSONSchemaObj = { type: "object", asCell: true };
       const result = schemaWithoutProperties(schema, "asCell");
-      assert(!isInternedSchema(result));
+      expect(isInternedSchema(result)).toBe(false);
       // But it should still be frozen.
-      assert(Object.isFrozen(result));
+      expect(Object.isFrozen(result)).toBe(true);
     });
 
     it("no-op on interned schema preserves interned identity", () => {
       const schema = internSchema({ type: "string" });
       const result = schemaWithoutProperties(schema, "nonexistent");
       expect(result).toBe(schema);
-      assert(isInternedSchema(result));
+      expect(isInternedSchema(result)).toBe(true);
     });
   });
 });
@@ -789,19 +788,19 @@ describe("schemaForValueType", () => {
     example: FabricValue,
   ) {
     describe(typeName, () => {
-      it(`should return { type: "${typeName}" }`, () => {
+      it(`returns { type: "${typeName}" }`, () => {
         expect(schemaForValueType(example)).toEqual({ type: typeName });
       });
 
-      it("should return a frozen result", () => {
-        assert(isDeepFrozen(schemaForValueType(example)!));
+      it("returns a frozen result", () => {
+        expect(isDeepFrozen(schemaForValueType(example)!)).toBe(true);
       });
 
-      it("should return an interned result", () => {
-        assert(isInternedSchema(schemaForValueType(example)!));
+      it("returns an interned result", () => {
+        expect(isInternedSchema(schemaForValueType(example)!)).toBe(true);
       });
 
-      it("should return the same result every time", () => {
+      it("returns the same result every time", () => {
         expect(schemaForValueType(example)).toBe(schemaForValueType(example));
       });
     });
@@ -816,39 +815,39 @@ describe("schemaForValueType", () => {
   testType("object", { a: 1 });
 
   describe("undefined", () => {
-    it("should return undefined", () => {
+    it("returns undefined", () => {
       expect(schemaForValueType(undefined)).toBe(undefined);
     });
   });
 
   describe("bigint", () => {
-    it("should return undefined", () => {
+    it("returns undefined", () => {
       expect(schemaForValueType(BigInt(42))).toBe(undefined);
     });
   });
 
   describe("symbol", () => {
-    it("should return undefined", () => {
+    it("returns undefined", () => {
       expect(schemaForValueType(Symbol("test"))).toBe(undefined);
     });
   });
 });
 
 describe("emptySchemaObject", () => {
-  it("should return {}", () => {
+  it("returns {}", () => {
     expect(emptySchemaObject()).toEqual({});
   });
 
-  it("should return the same object every time", () => {
+  it("returns the same object every time", () => {
     expect(emptySchemaObject()).toBe(emptySchemaObject());
   });
 
-  it("should return an interned result", () => {
-    assert(isInternedSchema(emptySchemaObject()));
+  it("returns an interned result", () => {
+    expect(isInternedSchema(emptySchemaObject())).toBe(true);
   });
 
-  it("should return a frozen result", () => {
-    assert(isDeepFrozen(emptySchemaObject()));
+  it("returns a frozen result", () => {
+    expect(isDeepFrozen(emptySchemaObject())).toBe(true);
   });
 });
 
@@ -913,8 +912,8 @@ describe("internSchemaPairAsKey()", () => {
     internSchemaPairAsKey(a, b);
     expect(isInternedSchema(a)).toBe(true);
     expect(isInternedSchema(b)).toBe(true);
-    assert(isDeepFrozen(a));
-    assert(isDeepFrozen(b));
+    expect(isDeepFrozen(a)).toBe(true);
+    expect(isDeepFrozen(b)).toBe(true);
   });
 });
 
@@ -944,7 +943,7 @@ describe("internPathSelector", () => {
     expect(isInternedSchema(schema)).toBe(false);
     internPathSelector(selector);
     expect(isInternedSchema(schema)).toBe(true);
-    assert(isDeepFrozen(schema));
+    expect(isDeepFrozen(schema)).toBe(true);
   });
 
   it("handles selectors whose `schema` is undefined", () => {

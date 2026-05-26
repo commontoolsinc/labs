@@ -1,9 +1,11 @@
 export const AUTH_METHOD_PASSKEY = "passkey" as const;
 export const AUTH_METHOD_PASSPHRASE = "passphrase" as const;
+export const AUTH_METHOD_KEYFILE = "keyfile" as const;
 
 export type AuthMethod =
   | typeof AUTH_METHOD_PASSKEY
-  | typeof AUTH_METHOD_PASSPHRASE;
+  | typeof AUTH_METHOD_PASSPHRASE
+  | typeof AUTH_METHOD_KEYFILE;
 
 export interface StoredCredential {
   id: string;
@@ -26,14 +28,21 @@ export function clearStoredCredential(): void {
 export function createPasskeyCredential(id: string): StoredCredential {
   return {
     id,
-    method: "passkey",
+    method: AUTH_METHOD_PASSKEY,
   };
 }
 
 export function createPassphraseCredential(): StoredCredential {
   return {
     id: crypto.randomUUID(),
-    method: "passphrase",
+    method: AUTH_METHOD_PASSPHRASE,
+  };
+}
+
+export function createKeyFileCredential(did: string): StoredCredential {
+  return {
+    id: did,
+    method: AUTH_METHOD_KEYFILE,
   };
 }
 

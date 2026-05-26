@@ -50,6 +50,38 @@ Deno.test("OpenAICompatibleGatewayClient forwards requests through the injected 
   );
 });
 
+Deno.test("OpenAICompatibleGatewayClient forwards abort signals to chat completion fetch", async () => {
+  const controller = new AbortController();
+  let seenSignal: AbortSignal | null | undefined;
+  const client = new OpenAICompatibleGatewayClient({
+    baseUrl: "https://llm.stage.commontools.dev/",
+    apiKey: "test-key",
+    fetchFn: (_input, init) => {
+      seenSignal = init?.signal;
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [{
+              index: 0,
+              message: { role: "assistant", content: "ok" },
+            }],
+          }),
+          { status: 200 },
+        ),
+      );
+    },
+  });
+
+  await client.createChatCompletionJson({
+    model: "gpt-5.4",
+    messages: [],
+  }, {
+    signal: controller.signal,
+  });
+
+  assertEquals(seenSignal, controller.signal);
+});
+
 Deno.test("OpenAICompatibleGatewayClient omits authorization headers in no-auth mode", async () => {
   const calls: Array<{ input: URL | RequestInfo; init?: RequestInit }> = [];
   const client = new OpenAICompatibleGatewayClient({
@@ -69,6 +101,47 @@ Deno.test("OpenAICompatibleGatewayClient omits authorization headers in no-auth 
     new Headers(calls[0].init?.headers).get("authorization"),
     null,
   );
+});
+
+Deno.test("OpenAICompatibleGatewayClient forwards native model tools and summarizes them in diagnostics", async () => {
+  const attempts: OpenAIChatCompletionAttemptDiagnostic[] = [];
+  let requestBody: unknown;
+  const client = new OpenAICompatibleGatewayClient({
+    baseUrl: "https://llm.stage.commontools.dev/",
+    apiKey: "test-key",
+    fetchFn: (_input, init) => {
+      requestBody = JSON.parse(String(init?.body));
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [{
+              index: 0,
+              message: { role: "assistant", content: "ok" },
+            }],
+          }),
+          { status: 200 },
+        ),
+      );
+    },
+  });
+
+  await client.createChatCompletionJson({
+    model: "google:gemini-3.5-flash",
+    messages: [],
+    native_model_tools: [{ type: "google_search" }],
+  }, {
+    onChatCompletionAttempt: (attempt) => {
+      attempts.push(attempt);
+    },
+  });
+
+  assertEquals(requestBody, {
+    model: "google:gemini-3.5-flash",
+    messages: [],
+    native_model_tools: [{ type: "google_search" }],
+  });
+  assertEquals(attempts[0].request.nativeModelToolIds, ["google_search"]);
+  assertEquals(attempts[0].request.nativeModelToolCount, 1);
 });
 
 Deno.test("OpenAICompatibleGatewayClient parses successful chat completion JSON responses", async () => {
@@ -141,6 +214,46 @@ Deno.test("OpenAICompatibleGatewayClient retries chat completion transport failu
   assertEquals(attempts.map((attempt) => attempt.attempt), [1, 2]);
   assertEquals(attempts[0].errorDetail, "connection error: timed out");
   assertEquals(attempts[1].httpStatus, 200);
+});
+
+Deno.test("OpenAICompatibleGatewayClient does not retry aborted chat completion requests", async () => {
+  let calls = 0;
+  const attempts: OpenAIChatCompletionAttemptDiagnostic[] = [];
+  const controller = new AbortController();
+  const client = new OpenAICompatibleGatewayClient({
+    baseUrl: "https://llm.stage.commontools.dev/",
+    apiKey: "test-key",
+    chatCompletionRetryDelayMs: 0,
+    fetchFn: (_input, init) => {
+      calls += 1;
+      assertEquals(init?.signal, controller.signal);
+      const reason = new DOMException("user canceled", "AbortError");
+      controller.abort(reason);
+      return Promise.reject(reason);
+    },
+  });
+
+  let rejected: unknown;
+  try {
+    await client.createChatCompletionJson({
+      model: "gpt-5.4",
+      messages: [],
+    }, {
+      signal: controller.signal,
+      onChatCompletionAttempt: (attempt) => {
+        attempts.push(attempt);
+      },
+    });
+  } catch (error) {
+    rejected = error;
+  }
+
+  assert(rejected instanceof DOMException);
+  assertEquals(rejected.name, "AbortError");
+  assertEquals(rejected.message, "user canceled");
+  assertEquals(calls, 1);
+  assertEquals(attempts.length, 1);
+  assertEquals(attempts[0].outcome, "transport_error");
 });
 
 Deno.test("OpenAICompatibleGatewayClient surfaces exhausted chat completion transport retries", async () => {

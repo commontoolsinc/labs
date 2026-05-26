@@ -15,7 +15,7 @@ import {
   RequestType,
 } from "../protocol/mod.ts";
 import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
-import { FabricBytes } from "@commonfabric/data-model/FabricBytes";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { cellRefToSigilLink } from "./utils.ts";
 import {
   getDataModelConfig,
@@ -141,6 +141,134 @@ describe("page slug metadata", () => {
       });
 
     expect(result).toEqual({ slug: undefined });
+  });
+});
+
+describe("page slug redirects", () => {
+  const space = "did:key:z6Mk-runtime-processor-page-redirect" as CellRef[
+    "space"
+  ];
+
+  function mockCell(ref: CellRef, options: {
+    raw?: unknown;
+    sourceCell?: unknown;
+    onSync?: () => void;
+  } = {}) {
+    return {
+      sync: () => {
+        options.onSync?.();
+        return Promise.resolve();
+      },
+      getRaw: () => options.raw,
+      getSourceCell: () => options.sourceCell,
+      getAsLink: () => cellRefToSigilLink(ref),
+      getAsNormalizedFullLink: () => ref,
+    };
+  }
+
+  function redirectRaw(ref: CellRef) {
+    return {
+      "/": {
+        "link@1": {
+          ...ref,
+          overwrite: "redirect",
+        },
+      },
+    };
+  }
+
+  it("renders slug redirects to output cells directly", async () => {
+    const targetRef: CellRef = {
+      id: "of:fid1-sub-page" as CellRef["id"],
+      space,
+      scope: "space",
+      path: ["capture"],
+    };
+    const slugRef: CellRef = {
+      id: "of:fid1-slug-doc" as CellRef["id"],
+      space,
+      scope: "space",
+      path: [],
+    };
+    let targetSynced = false;
+    const targetCell = mockCell(targetRef, {
+      onSync: () => {
+        targetSynced = true;
+      },
+    });
+    const slugCell = mockCell(slugRef, { raw: redirectRaw(targetRef) });
+    const manager = {
+      get: () => {
+        throw new Error("output-cell slug redirects should not load as pieces");
+      },
+    };
+    const processor = {
+      pieceManager: { getSpace: () => space },
+      runtime: {
+        getCellFromEntityId: () => slugCell,
+        getCellFromLink: () => targetCell,
+      },
+      cc: { manager: () => manager },
+    };
+
+    const result = await (RuntimeProcessor.prototype as any).handlePageGet
+      .call(processor, {
+        type: RequestType.PageGet,
+        pageId: "fid1-slug-doc",
+        runIt: true,
+      });
+
+    expect(targetSynced).toBe(true);
+    expect(result.page.cell).toMatchObject(targetRef);
+  });
+
+  it("loads slug redirects to piece cells through the piece manager", async () => {
+    const pieceRef: CellRef = {
+      id: "of:fid1-piece" as CellRef["id"],
+      space,
+      scope: "space",
+      path: [],
+    };
+    const resultRef: CellRef = {
+      id: "of:fid1-piece-result" as CellRef["id"],
+      space,
+      scope: "space",
+      path: [],
+    };
+    const slugRef: CellRef = {
+      id: "of:fid1-slug-doc" as CellRef["id"],
+      space,
+      scope: "space",
+      path: [],
+    };
+    const pieceCell = mockCell(pieceRef, { sourceCell: {} });
+    const resultCell = mockCell(resultRef);
+    const slugCell = mockCell(slugRef, { raw: redirectRaw(pieceRef) });
+    const calls: unknown[][] = [];
+    const manager = {
+      get: (...args: unknown[]) => {
+        calls.push(args);
+        return Promise.resolve(resultCell);
+      },
+    };
+    const processor = {
+      pieceManager: { getSpace: () => space },
+      runtime: {
+        getCellFromEntityId: () => slugCell,
+        getCellFromLink: () => pieceCell,
+      },
+      cc: { manager: () => manager },
+    };
+
+    const result = await (RuntimeProcessor.prototype as any).handlePageGet
+      .call(processor, {
+        type: RequestType.PageGet,
+        pageId: "fid1-slug-doc",
+        runIt: true,
+      });
+
+    expect(calls).toEqual([[pieceCell, true]]);
+    expect(result.page.cell).toMatchObject(resultRef);
   });
 });
 

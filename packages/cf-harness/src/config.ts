@@ -5,6 +5,7 @@ import {
 } from "@commonfabric/runner/cfc";
 import type { HarnessCfcEnforcementModeSource } from "./contracts/cfc-policy-snapshot.ts";
 import type { HarnessRunManifest } from "./contracts/run-manifest.ts";
+import type { HarnessAllowedSkillScript } from "./contracts/skill.ts";
 import type { HarnessSandboxConfig } from "./sandbox/types.ts";
 
 export const DEFAULT_GATEWAY_BASE_URL = "https://llm.stage.commontools.dev/";
@@ -19,6 +20,7 @@ export interface HarnessConfig {
   model?: string;
   vmTarget?: string;
   skillsRoot?: string;
+  allowedSkillScripts?: readonly HarnessAllowedSkillScript[];
   artifactRoot?: string;
   cfcEnforcementMode: CfcEnforcementMode;
   cfcEnforcementModeSource: HarnessCfcEnforcementModeSource;
@@ -36,6 +38,7 @@ export interface ResolveHarnessConfigOptions {
   model?: string;
   vmTarget?: string;
   skillsRoot?: string;
+  allowedSkillScripts?: readonly HarnessAllowedSkillScript[];
   artifactRoot?: string;
   cfcEnforcementMode?: CfcEnforcementMode;
   inheritedCfcEnforcementMode?: CfcEnforcementMode;
@@ -145,6 +148,9 @@ export const resolveHarnessConfig = (
   ...(options.vmTarget !== undefined ? { vmTarget: options.vmTarget } : {}),
   ...(options.skillsRoot !== undefined
     ? { skillsRoot: options.skillsRoot }
+    : {}),
+  ...(options.allowedSkillScripts !== undefined
+    ? { allowedSkillScripts: options.allowedSkillScripts }
     : {}),
   ...(options.artifactRoot !== undefined
     ? { artifactRoot: options.artifactRoot }

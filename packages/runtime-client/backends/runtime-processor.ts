@@ -1,7 +1,7 @@
 import { DID, Identity, type Session } from "@commonfabric/identity";
-import { FabricBytes } from "@commonfabric/data-model/FabricBytes";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { JsonEncodingContext } from "@commonfabric/data-model/JsonEncodingContext";
+import { JsonEncodingContext } from "@commonfabric/data-model/json-wire";
 import { PieceManager } from "@commonfabric/piece";
 import { PiecesController } from "@commonfabric/piece/ops";
 import {
@@ -675,6 +675,37 @@ export class RuntimeProcessor {
   async handlePageGet(
     request: PageGetRequest,
   ): Promise<PageResponse> {
+    const requestedCell = this.runtime.getCellFromEntityId(
+      this.pieceManager.getSpace(),
+      { "/": request.pageId },
+    );
+    await requestedCell.sync();
+    const redirect = parseLink(
+      requestedCell.getRaw(),
+      requestedCell.getAsNormalizedFullLink(),
+    );
+    if (redirect?.overwrite === "redirect") {
+      const target = this.runtime.getCellFromLink({
+        ...redirect,
+        space: redirect.space ?? this.pieceManager.getSpace(),
+        scope: redirect.scope ?? "space",
+      });
+      await target.sync();
+      if (!target.getSourceCell()) {
+        return {
+          page: createPageRef(target),
+        };
+      }
+
+      const cell = await this.cc.manager().get(
+        target,
+        request.runIt ?? false,
+      );
+      return {
+        page: createPageRef(cell),
+      };
+    }
+
     const cell = await this.cc.manager().get(
       request.pageId,
       request.runIt ?? false,

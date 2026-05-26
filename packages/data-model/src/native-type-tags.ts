@@ -1,6 +1,7 @@
-import { FabricEpochDays, FabricEpochNsec } from "./fabric-epoch.ts";
-import { FabricHash } from "./FabricHash.ts";
-import { FabricBytes } from "./FabricBytes.ts";
+import { FabricEpochDays } from "./fabric-primitives/FabricEpochDays.ts";
+import { FabricEpochNsec } from "./fabric-primitives/FabricEpochNsec.ts";
+import { FabricHash } from "./fabric-primitives/FabricHash.ts";
+import { FabricBytes } from "./fabric-primitives/FabricBytes.ts";
 import { FabricInstance } from "./interface.ts";
 
 /**
