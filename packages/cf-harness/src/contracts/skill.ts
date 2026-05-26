@@ -2,6 +2,8 @@ export const HARNESS_SKILL_REGISTRY_TYPE = "cf-harness.skill-registry";
 export const HARNESS_SKILL_ACTIVATIONS_TYPE = "cf-harness.skill-activations";
 export const HARNESS_SKILL_RESOURCE_READS_TYPE =
   "cf-harness.skill-resource-reads";
+export const HARNESS_SKILL_SCRIPT_EXECUTIONS_TYPE =
+  "cf-harness.skill-script-executions";
 
 export type HarnessSkillDiagnosticSeverity = "warning" | "error";
 
@@ -28,6 +30,14 @@ export type HarnessSkillResourceContentKind = "text" | "binary";
 
 export type HarnessSkillCfcPromptRole = "context";
 
+export type HarnessSkillScriptRuntime = "deno" | "shebang" | "unknown";
+
+export interface HarnessSkillScriptMetadata {
+  executable: boolean;
+  shebang?: string;
+  runtime: HarnessSkillScriptRuntime;
+}
+
 export interface HarnessSkillResourceRecord {
   path: string;
   kind: HarnessSkillResourceKind;
@@ -36,7 +46,13 @@ export interface HarnessSkillResourceRecord {
   sizeBytes: number;
   digest: string;
   contentKind: HarnessSkillResourceContentKind;
+  script?: HarnessSkillScriptMetadata;
   diagnostics: HarnessSkillDiagnostic[];
+}
+
+export interface HarnessAllowedSkillScript {
+  skill: string;
+  path: string;
 }
 
 export type HarnessSkillResourceReadStatus = "read" | "binary" | "error";
@@ -86,6 +102,61 @@ export interface HarnessSkillResourceReads {
   version: 1;
   generatedAt: string;
   reads: HarnessSkillResourceRead[];
+}
+
+export type HarnessSkillScriptExecutionStatus = "executed" | "error";
+
+export type HarnessSkillScriptExecutionErrorCode =
+  | "skill_registry_missing"
+  | "skill_activations_missing"
+  | "skill_not_found"
+  | "skill_not_activated"
+  | "script_path_invalid"
+  | "script_not_allowlisted"
+  | "script_not_indexed"
+  | "resource_not_script"
+  | "script_not_found"
+  | "script_not_file"
+  | "script_outside_root"
+  | "script_snapshot_mismatch"
+  | "unsupported_runtime"
+  | "permission_denied"
+  | "unknown";
+
+export interface HarnessSkillScriptExecutionError {
+  code: HarnessSkillScriptExecutionErrorCode;
+  message: string;
+}
+
+export interface HarnessSkillScriptExecution {
+  type: "cf-harness.skill-script-execution";
+  outputId: string;
+  runId: string;
+  skillName: string;
+  path: string;
+  status: HarnessSkillScriptExecutionStatus;
+  executedAt: string;
+  runtime?: HarnessSkillScriptRuntime;
+  argv?: readonly string[];
+  args?: readonly string[];
+  cwd?: string;
+  resourcePath?: string;
+  sandboxResourcePath?: string;
+  registryDigest?: string;
+  observedDigest?: string;
+  digestMatchesRegistry?: boolean;
+  registrySizeBytes?: number;
+  observedSizeBytes?: number;
+  exitCode?: number;
+  diagnostics: HarnessSkillDiagnostic[];
+  error?: HarnessSkillScriptExecutionError;
+}
+
+export interface HarnessSkillScriptExecutions {
+  type: typeof HARNESS_SKILL_SCRIPT_EXECUTIONS_TYPE;
+  version: 1;
+  generatedAt: string;
+  executions: HarnessSkillScriptExecution[];
 }
 
 export interface HarnessSkillRecord {

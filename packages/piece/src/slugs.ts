@@ -90,6 +90,28 @@ export async function resolvePieceAddress(
     return token;
   }
 
+  const target = await resolveSlugTargetCell(manager, token);
+  if (!target.getSourceCell()) {
+    throw new SlugResolutionError(
+      `Slug "${token}" redirects to a document that is not a piece.`,
+      "not-piece",
+    );
+  }
+
+  const id = pieceId(target);
+  if (!id) {
+    throw new SlugResolutionError(
+      `Slug "${token}" redirects to a document without a piece id.`,
+      "missing-piece-id",
+    );
+  }
+  return id;
+}
+
+export async function resolveSlugTargetCell(
+  manager: PieceManager,
+  token: string,
+): Promise<Cell<unknown>> {
   const slug = validateSlug(token);
   const slugId = slugIdForSpace(manager.getSpace(), slug);
   const slugCell = manager.runtime.getCellFromEntityId(
@@ -117,19 +139,5 @@ export async function resolvePieceAddress(
     scope: targetLink.scope ?? "space",
   });
   await target.sync();
-  if (!target.getSourceCell()) {
-    throw new SlugResolutionError(
-      `Slug "${slug}" redirects to a document that is not a piece.`,
-      "not-piece",
-    );
-  }
-
-  const id = pieceId(target);
-  if (!id) {
-    throw new SlugResolutionError(
-      `Slug "${slug}" redirects to a document without a piece id.`,
-      "missing-piece-id",
-    );
-  }
-  return id;
+  return target;
 }

@@ -9,8 +9,8 @@ import {
   setDataModelConfig,
   shallowFabricFromNativeValue,
 } from "../src/fabric-value.ts";
-import { FabricError } from "../src/fabric-native-instances.ts";
-import { FabricBytes } from "../src/FabricBytes.ts";
+import { FabricError } from "../src/fabric-instances/FabricError.ts";
+import { FabricBytes } from "../src/fabric-primitives/FabricBytes.ts";
 
 describe("fabric-value", () => {
   // Explicitly pin modernDataModel off so the legacy-path tests (below the
@@ -1380,40 +1380,40 @@ describe("fabric-value", () => {
       resetDataModelConfig();
     });
 
-    it("isFabricValue accepts NaN", () => {
+    it("accepts NaN", () => {
       expect(isFabricValue(NaN)).toBe(true);
     });
 
-    it("isFabricValue accepts +/-Infinity", () => {
+    it("accepts +/-Infinity", () => {
       expect(isFabricValue(Infinity)).toBe(true);
       expect(isFabricValue(-Infinity)).toBe(true);
     });
 
-    it("isFabricValue accepts -0", () => {
+    it("accepts -0", () => {
       expect(isFabricValue(-0)).toBe(true);
     });
 
-    it("shallowFabricFromNativeValue passes NaN through", () => {
+    it("passes NaN through", () => {
       expect(Number.isNaN(shallowFabricFromNativeValue(NaN))).toBe(true);
     });
 
-    it("shallowFabricFromNativeValue passes +/-Infinity through", () => {
+    it("passes +/-Infinity through", () => {
       expect(shallowFabricFromNativeValue(Infinity)).toBe(Infinity);
       expect(shallowFabricFromNativeValue(-Infinity)).toBe(-Infinity);
     });
 
-    it("shallowFabricFromNativeValue preserves the sign of -0", () => {
+    it("preserves the sign of -0", () => {
       expect(Object.is(shallowFabricFromNativeValue(-0), -0)).toBe(true);
     });
 
-    it("fabricFromNativeValue passes special numbers through", () => {
+    it("passes special numbers through", () => {
       expect(Number.isNaN(fabricFromNativeValue(NaN))).toBe(true);
       expect(fabricFromNativeValue(Infinity)).toBe(Infinity);
       expect(fabricFromNativeValue(-Infinity)).toBe(-Infinity);
       expect(Object.is(fabricFromNativeValue(-0), -0)).toBe(true);
     });
 
-    it("fabricFromNativeValue preserves special numbers nested in objects", () => {
+    it("preserves special numbers nested in objects", () => {
       const result = fabricFromNativeValue({
         nz: -0,
         nan: NaN,
@@ -1426,7 +1426,7 @@ describe("fabric-value", () => {
       expect(result.ninf).toBe(-Infinity);
     });
 
-    it("fabricFromNativeValue preserves special numbers in arrays", () => {
+    it("preserves special numbers in arrays", () => {
       const result = fabricFromNativeValue(
         [1, -0, NaN, Infinity, -Infinity, 2],
       ) as number[];
@@ -1456,11 +1456,11 @@ describe("fabric-value", () => {
       resetDataModelConfig();
     });
 
-    it("isFabricValue accepts an interned symbol", () => {
+    it("accepts an interned symbol", () => {
       expect(isFabricValue(Symbol.for("k"))).toBe(true);
     });
 
-    it("isFabricValue rejects a unique symbol", () => {
+    it("rejects a unique symbol", () => {
       expect(isFabricValue(Symbol("k"))).toBe(false);
     });
 

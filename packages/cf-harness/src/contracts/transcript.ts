@@ -1,5 +1,6 @@
 import type { ToolResultRef } from "./tool-result.ts";
 import type { HarnessImageAttachment } from "./image.ts";
+import type { LLMNativeModelToolResult } from "@commonfabric/llm/types";
 
 export interface HarnessToolCall {
   id: string;
@@ -9,6 +10,8 @@ export interface HarnessToolCall {
     arguments: string;
   };
 }
+
+export type HarnessNativeModelToolResult = LLMNativeModelToolResult;
 
 export interface HarnessSystemTranscriptMessage {
   role: "system";
@@ -25,6 +28,7 @@ export interface HarnessAssistantTranscriptMessage {
   role: "assistant";
   content: string;
   toolCalls?: readonly HarnessToolCall[];
+  nativeModelToolResults?: readonly HarnessNativeModelToolResult[];
 }
 
 export interface HarnessToolTranscriptMessage {

@@ -13,6 +13,7 @@ import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
 import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
 import { createHarnessImageAttachment } from "../src/image-attachments.ts";
+import { discoverHarnessSkills } from "../src/skills/registry.ts";
 import {
   CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
   type PromptSlotBinding,
@@ -31,6 +32,7 @@ import type {
 import { createToolOutputId } from "../src/contracts/tool-result.ts";
 import type { OpenAIChatCompletionRequest } from "../src/gateway/openai-client.ts";
 import type { HarnessRunState } from "../src/run-state.ts";
+import type { HarnessSkillActivations } from "../src/contracts/skill.ts";
 
 const directPromptSlotBinding: PromptSlotBinding = {
   type: CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
@@ -104,6 +106,22 @@ class FakeSandboxRuntime implements SandboxRuntime {
     return Promise.resolve(
       this.shellResults.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
     );
+  }
+}
+
+class FakeRunSandboxRuntime extends FakeSandboxRuntime {
+  readonly runRequests: SandboxCommandRequest[] = [];
+
+  override run(request: SandboxCommandRequest): Promise<SandboxCommandResult> {
+    this.runRequests.push(request);
+    return super.runShell({
+      command: request.argv.join(" "),
+      cwd: request.cwd,
+      env: request.env,
+      stdinText: request.stdinText,
+      timeoutMs: request.timeoutMs,
+      cfcInvocationContext: request.cfcInvocationContext,
+    });
   }
 }
 
@@ -1573,6 +1591,133 @@ Deno.test("CfHarnessPromptLoop lets an explicit subagent profile expand child to
   assertEquals(output.subagent.manifest.hostToolIds, []);
 });
 
+Deno.test("CfHarnessPromptLoop applies the web_search profile model override and native search tool", async () => {
+  const requestBodies: Array<{
+    model: string;
+    messages: Array<{ role: string; content: string }>;
+    tools: Array<{ function: { name: string } }>;
+    native_model_tools?: Array<{ type: string }>;
+  }> = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedToolIds: ["delegate_task"],
+    allowedSubagentProfiles: ["web_search"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-delegate-web-search",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "enforce-explicit",
+    }),
+    fetchFn: (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as {
+        model: string;
+        messages: Array<{ role: string; content: string }>;
+        tools: Array<{ function: { name: string } }>;
+        native_model_tools?: Array<{ type: string }>;
+      };
+      requestBodies.push(body);
+      const payload = requestBodies.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-web-search",
+                type: "function",
+                function: {
+                  name: "delegate_task",
+                  arguments: JSON.stringify({
+                    goal: "Search for current docs.",
+                    profile: "web_search",
+                  }),
+                },
+              }],
+            },
+          }],
+        }
+        : requestBodies.length === 2
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Web search child completed.",
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Web search parent completed.",
+            },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Delegate search through the explicitly authorized profile.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+  const toolMessage = result.transcript.at(-2);
+  if (toolMessage?.role !== "tool") {
+    throw new Error("expected delegate_task tool message");
+  }
+  const output = JSON.parse(toolMessage.content) as {
+    subagent: {
+      model: string;
+      manifest: {
+        profile: string;
+        model: string;
+        modelSource: string;
+        allowedToolIds: string[];
+        hostToolIds: string[];
+        nativeModelToolIds: string[];
+      };
+    };
+  };
+
+  assertEquals(result.finalAssistantText, "Web search parent completed.");
+  assertEquals(requestBodies[0].model, "gpt-5.4");
+  assertEquals(requestBodies[1].model, "google:gemini-3.5-flash");
+  assertEquals(requestBodies[2].model, "gpt-5.4");
+  assertEquals(
+    requestBodies[1].tools.map((tool) => tool.function.name),
+    [],
+  );
+  assertEquals(requestBodies[0].native_model_tools, undefined);
+  assertEquals(requestBodies[1].native_model_tools, [{
+    type: "google_search",
+  }]);
+  assertEquals(requestBodies[2].native_model_tools, undefined);
+  assertEquals(
+    requestBodies[1].messages[0].content.includes(
+      "Subagent profile: web_search",
+    ),
+    true,
+  );
+  assertEquals(
+    requestBodies[1].messages[0].content.includes(
+      "provider-native search capabilities",
+    ),
+    true,
+  );
+  assertEquals(output.subagent.model, "google:gemini-3.5-flash");
+  assertEquals(output.subagent.manifest.profile, "web_search");
+  assertEquals(output.subagent.manifest.model, "google:gemini-3.5-flash");
+  assertEquals(output.subagent.manifest.modelSource, "profile");
+  assertEquals(output.subagent.manifest.allowedToolIds, []);
+  assertEquals(output.subagent.manifest.hostToolIds, []);
+  assertEquals(output.subagent.manifest.nativeModelToolIds, ["google_search"]);
+});
+
 Deno.test("CfHarnessPromptLoop keeps bash-no-sandbox unavailable to the parent by default", async () => {
   const fetchCalls: RequestInit[] = [];
   const loop = new CfHarnessPromptLoop({
@@ -2227,7 +2372,7 @@ Deno.test("CfHarnessPromptLoop rejects invalid delegate_task inputs before creat
       name: "unknown profile",
       arguments: { goal: "Inspect", profile: "unknown" },
       message:
-        "delegate_task profile must be one of default, browser, web_fetch",
+        "delegate_task profile must be one of default, browser, web_fetch, web_search",
     },
     {
       name: "array return schema",
@@ -3346,6 +3491,296 @@ Deno.test("CfHarnessPromptLoop denies bash output without CFC metadata in enforc
     },
   });
   assertEquals(result.runState.policyEvents.at(-1)?.severity, "denied");
+});
+
+Deno.test({
+  name:
+    "CfHarnessPromptLoop denies run_skill_script output without CFC metadata in enforce mode",
+  permissions: { read: true, write: true },
+  async fn() {
+    const root = await Deno.makeTempDir({
+      prefix: "cf-harness-prompt-skill-script-",
+    });
+    try {
+      const skillDir = join(root, "deno-memory-profiler");
+      await Deno.mkdir(join(skillDir, "scripts"), { recursive: true });
+      await Deno.writeTextFile(
+        join(skillDir, "SKILL.md"),
+        [
+          "---",
+          "name: deno-memory-profiler",
+          "description: Analyze Deno memory",
+          "---",
+        ].join("\n"),
+      );
+      await Deno.writeTextFile(
+        join(skillDir, "scripts", "memory.ts"),
+        "#!/usr/bin/env -S deno run --allow-net\nconsole.log('secret');\n",
+      );
+      const registry = await discoverHarnessSkills({
+        skillsRoot: root,
+        sandboxSkillsRoot: "/workspace/skills",
+      });
+      const skill = registry.skills[0];
+      const activations: HarnessSkillActivations = {
+        type: "cf-harness.skill-activations",
+        version: 1,
+        generatedAt: "2026-05-01T00:00:00.000Z",
+        activations: [{
+          name: skill.name,
+          source: "cli-preload",
+          runId: "run-missing-cfc-script-result",
+          skillPath: skill.skillPath,
+          skillDir: skill.skillDir,
+          sandboxSkillPath: skill.sandboxSkillPath,
+          sandboxSkillDir: skill.sandboxSkillDir,
+          digest: skill.digest,
+          activatedAt: "2026-05-01T00:00:00.000Z",
+          cfcPromptRole: "context",
+        }],
+      };
+      const fetchCalls: RequestInit[] = [];
+      const engine = new CfHarnessEngine({
+        sandboxRuntime: new FakeRunSandboxRuntime([
+          { stdout: "secret from skill script\n", stderr: "", exitCode: 0 },
+        ]),
+        runId: "run-missing-cfc-script-result",
+        model: "gpt-5.4",
+        cfcEnforcementMode: "enforce-explicit",
+        allowedSkillScripts: [{
+          skill: "deno-memory-profiler",
+          path: "scripts/memory.ts",
+        }],
+      });
+      await engine.persistSkillRegistry(registry);
+      await engine.persistSkillActivations(activations);
+      const loop = new CfHarnessPromptLoop({
+        apiKey: "test-key",
+        allowedToolIds: ["run_skill_script"],
+        engine,
+        fetchFn: (_input, init) => {
+          fetchCalls.push(init ?? {});
+          const payload = fetchCalls.length === 1
+            ? {
+              choices: [{
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content: "",
+                  tool_calls: [{
+                    id: "call-missing-cfc-script-result",
+                    type: "function",
+                    function: {
+                      name: "run_skill_script",
+                      arguments: JSON.stringify({
+                        skill: "deno-memory-profiler",
+                        path: "scripts/memory.ts",
+                        args: ["usage"],
+                      }),
+                    },
+                  }],
+                },
+              }],
+            }
+            : {
+              choices: [{
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content: "Handled denied script output.",
+                },
+              }],
+            };
+          return Promise.resolve(
+            new Response(JSON.stringify(payload), { status: 200 }),
+          );
+        },
+      });
+
+      const result = await loop.runPrompt({
+        prompt: "Run the profiler.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
+
+      const toolMessage = result.transcript.at(-2);
+      assert(toolMessage !== undefined && toolMessage.role === "tool");
+      assert(!toolMessage.content.includes("secret from skill script"));
+      const denied = JSON.parse(toolMessage.content);
+      assertEquals(denied, {
+        type: "cf-harness.observation-denied",
+        reason: "not-observable",
+        detail:
+          "run_skill_script output did not include trusted CFC mediation metadata",
+        handle: {
+          type: "cf-harness.opaque-handle",
+          handleId: "run-missing-cfc-script-result:run_skill_script:1:output",
+          scope: "run",
+          createdAt: denied.handle.createdAt,
+        },
+      });
+      assertEquals(result.runState.policyEvents.at(-1)?.severity, "denied");
+      assertEquals(
+        result.runState.policyEvents.at(-1)?.detail,
+        "run_skill_script output did not include trusted CFC mediation metadata",
+      );
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name:
+    "CfHarnessPromptLoop preserves run_skill_script provenance on mediated output",
+  permissions: { read: true, write: true },
+  async fn() {
+    const root = await Deno.makeTempDir({
+      prefix: "cf-harness-prompt-skill-script-",
+    });
+    try {
+      const skillDir = join(root, "deno-memory-profiler");
+      await Deno.mkdir(join(skillDir, "scripts"), { recursive: true });
+      await Deno.writeTextFile(
+        join(skillDir, "SKILL.md"),
+        [
+          "---",
+          "name: deno-memory-profiler",
+          "description: Analyze Deno memory",
+          "---",
+        ].join("\n"),
+      );
+      await Deno.writeTextFile(
+        join(skillDir, "scripts", "memory.ts"),
+        "#!/usr/bin/env -S deno run --allow-net\nconsole.log('secret');\n",
+      );
+      const registry = await discoverHarnessSkills({
+        skillsRoot: root,
+        sandboxSkillsRoot: "/workspace/skills",
+      });
+      const skill = registry.skills[0];
+      const activations: HarnessSkillActivations = {
+        type: "cf-harness.skill-activations",
+        version: 1,
+        generatedAt: "2026-05-01T00:00:00.000Z",
+        activations: [{
+          name: skill.name,
+          source: "cli-preload",
+          runId: "run-mediated-skill-script",
+          skillPath: skill.skillPath,
+          skillDir: skill.skillDir,
+          sandboxSkillPath: skill.sandboxSkillPath,
+          sandboxSkillDir: skill.sandboxSkillDir,
+          digest: skill.digest,
+          activatedAt: "2026-05-01T00:00:00.000Z",
+          cfcPromptRole: "context",
+        }],
+      };
+      const fetchCalls: RequestInit[] = [];
+      const engine = new CfHarnessEngine({
+        sandboxRuntime: new FakeRunSandboxRuntime([
+          {
+            stdout: "raw secret from skill script\n",
+            stderr: "raw secret stderr\n",
+            exitCode: 0,
+            cfcResult: observedCfcResult("released script stdout\n"),
+          },
+        ]),
+        runId: "run-mediated-skill-script",
+        model: "gpt-5.4",
+        cfcEnforcementMode: "enforce-explicit",
+        allowedSkillScripts: [{
+          skill: "deno-memory-profiler",
+          path: "scripts/memory.ts",
+        }],
+      });
+      await engine.persistSkillRegistry(registry);
+      await engine.persistSkillActivations(activations);
+      const loop = new CfHarnessPromptLoop({
+        apiKey: "test-key",
+        allowedToolIds: ["run_skill_script"],
+        engine,
+        fetchFn: (_input, init) => {
+          fetchCalls.push(init ?? {});
+          const payload = fetchCalls.length === 1
+            ? {
+              choices: [{
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content: "",
+                  tool_calls: [{
+                    id: "call-mediated-skill-script",
+                    type: "function",
+                    function: {
+                      name: "run_skill_script",
+                      arguments: JSON.stringify({
+                        skill: "deno-memory-profiler",
+                        path: "scripts/memory.ts",
+                        args: ["usage"],
+                      }),
+                    },
+                  }],
+                },
+              }],
+            }
+            : {
+              choices: [{
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content: "Handled mediated script output.",
+                },
+              }],
+            };
+          return Promise.resolve(
+            new Response(JSON.stringify(payload), { status: 200 }),
+          );
+        },
+      });
+
+      const result = await loop.runPrompt({
+        prompt: "Run the profiler.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
+
+      const toolMessage = result.transcript.at(-2);
+      assert(toolMessage !== undefined && toolMessage.role === "tool");
+      assert(!toolMessage.content.includes("raw secret"));
+      const content = JSON.parse(toolMessage.content);
+      assertEquals(content.type, "cf-harness.run-skill-script-output");
+      assertEquals(
+        content.outputId,
+        "run-mediated-skill-script:run_skill_script:1",
+      );
+      assertEquals(content.skill, "deno-memory-profiler");
+      assertEquals(content.path, "scripts/memory.ts");
+      assertEquals(content.status, "executed");
+      assertEquals(content.runtime, "deno");
+      assertEquals(content.argv, [
+        "deno",
+        "run",
+        "--allow-net",
+        "-",
+        "usage",
+      ]);
+      assertEquals(content.args, ["usage"]);
+      assertEquals(content.cwd, "/workspace");
+      assertEquals(
+        content.sandboxResourcePath,
+        "/workspace/skills/deno-memory-profiler/scripts/memory.ts",
+      );
+      assertStringIncludes(content.registryDigest, "sha256:");
+      assertEquals(content.observedDigest, content.registryDigest);
+      assertEquals(content.digestMatchesRegistry, true);
+      assertEquals(content.diagnostics, []);
+      assertEquals(content.stdout, "released script stdout\n");
+      assertEquals(content.stderr, "");
+      assertEquals(content.exitCode, 0);
+      assertEquals(content.cfc.stdout.policy, "observed");
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  },
 });
 
 Deno.test("CfHarnessPromptLoop exposes mediated bash output instead of raw stdout in enforce mode", async () => {

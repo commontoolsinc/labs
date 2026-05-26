@@ -4,6 +4,7 @@ import {
   parseSubagentReturnSchema,
   validateAndSanitizeSubagentReturn,
 } from "../src/subagent-return.ts";
+import { WEB_SEARCH_STRUCTURED_RESULT_SCHEMA } from "../src/contracts/web-search.ts";
 
 Deno.test("parseSubagentReturnSchema accepts JSON Schema objects, booleans, and strings", () => {
   assertEquals(parseSubagentReturnSchema(true), {
@@ -120,6 +121,45 @@ Deno.test("validateAndSanitizeSubagentReturn preserves control primitives and li
         "@link": "opaque:run-structured.subagent.1#/notes/0/text",
       },
     }],
+  });
+});
+
+Deno.test("web search structured result schema preserves ranks and linkifies search text", () => {
+  const sanitized = validateAndSanitizeSubagentReturn({
+    schema: WEB_SEARCH_STRUCTURED_RESULT_SCHEMA,
+    childRunId: "run-web-search.subagent.1",
+    value: {
+      query: "example docs",
+      results: [{
+        rank: 1,
+        title: "Example Domain",
+        url: "https://example.com/",
+        snippet: "Example Domain is reserved for documentation examples.",
+      }],
+      answerSummary: "The top result is the Example Domain page.",
+    },
+  });
+
+  assertEquals(sanitized.linkedStringCount, 5);
+  assertEquals(sanitized.value, {
+    query: {
+      "@link": "opaque:run-web-search.subagent.1#/query",
+    },
+    results: [{
+      rank: 1,
+      title: {
+        "@link": "opaque:run-web-search.subagent.1#/results/0/title",
+      },
+      url: {
+        "@link": "opaque:run-web-search.subagent.1#/results/0/url",
+      },
+      snippet: {
+        "@link": "opaque:run-web-search.subagent.1#/results/0/snippet",
+      },
+    }],
+    answerSummary: {
+      "@link": "opaque:run-web-search.subagent.1#/answerSummary",
+    },
   });
 });
 

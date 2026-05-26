@@ -1,6 +1,6 @@
 import type { URI } from "./interface.ts";
 import type { FabricValue } from "@commonfabric/api";
-import { FabricHash } from "@commonfabric/data-model/FabricHash";
+import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 import {
   Assertion,
   Fact,

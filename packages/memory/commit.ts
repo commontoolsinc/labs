@@ -8,7 +8,7 @@ import type {
   Revision,
   Transaction,
 } from "./interface.ts";
-import { FabricHash } from "@commonfabric/data-model/FabricHash";
+import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 import { assert } from "./fact.ts";
 
 export const COMMIT_LOG_TYPE = "application/commit+json" as const;

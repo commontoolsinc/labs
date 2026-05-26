@@ -1,11 +1,13 @@
 import {
   action,
+  type AddIntegrity,
   computed,
   Default,
   NAME,
   nonPrivateRandom,
   pattern,
   type PerSpace,
+  type RequiresIntegrity,
   safeDateNow,
   Stream,
   UI,
@@ -13,6 +15,12 @@ import {
   wish,
   Writable,
 } from "commonfabric";
+import {
+  type AdminManagerCredential,
+  adminManagerCredentialIsActive,
+  adminRegistryEntries,
+  type EmptyAdminRegistryValue,
+} from "../../admin.ts";
 
 // ============================================================
 // Domain Types
@@ -47,8 +55,51 @@ export interface SpotRequest {
   autoAllocated: boolean;
 }
 
+export const PARKING_ADMIN_INTEGRITY = "parking-admin" as const;
+export const PARKING_ADMIN_MANAGER_INTEGRITY = "parking-admin-manager" as const;
+
+export interface ParkingAdminSubject {
+  personName: string;
+}
+
+export interface ParkingAdminRoleAssignment {
+  subject: ParkingAdminSubject;
+  displayName: string;
+}
+
+export type ParkingAdminRole = AddIntegrity<
+  ParkingAdminRoleAssignment,
+  readonly [typeof PARKING_ADMIN_INTEGRITY]
+>;
+
+export type ParkingAdminManagerCredential = AdminManagerCredential<
+  typeof PARKING_ADMIN_MANAGER_INTEGRITY
+>;
+
+export type ParkingAdminList = RequiresIntegrity<
+  ParkingAdminRole[],
+  readonly [typeof PARKING_ADMIN_MANAGER_INTEGRITY]
+>;
+
+export interface ParkingAdminRegistryStoredValue {
+  admins?: ParkingAdminList;
+}
+
+export type ParkingAdminRegistryValue =
+  | ParkingAdminRegistryStoredValue
+  | Default<EmptyAdminRegistryValue>;
+export type ParkingAdminRegistryCell = Writable<ParkingAdminRegistryValue>;
+export type ParkingAdminManagerCredentialCell = Writable<
+  ParkingAdminManagerCredential | null
+>;
+
+export type ParkingSpotList = RequiresIntegrity<
+  ParkingSpot[],
+  readonly [typeof PARKING_ADMIN_INTEGRITY]
+>;
+
 type SpotsCell = Writable<
-  | ParkingSpot[]
+  | ParkingSpotList
   | Default<[
     { spotNumber: "1"; label: "Near entrance"; notes: ""; active: true },
     { spotNumber: "5"; label: ""; notes: ""; active: true },
@@ -71,6 +122,7 @@ export interface ParkingCoordinatorInput {
   spots?: PerSpace<SpotsCell>;
   people?: PerSpace<PeopleCell>;
   requests?: PerSpace<RequestsCell>;
+  adminRegistry?: PerSpace<ParkingAdminRegistryCell>;
 }
 
 export interface ParkingCoordinatorOutput {
@@ -83,6 +135,11 @@ export interface ParkingCoordinatorOutput {
   selectedPersonName: string;
   requestDate: string;
   requestResult: string;
+  adminRegistry: PerSpace<ParkingAdminRegistryCell>;
+  currentPersonIsAdmin: boolean;
+  currentUserCanManageAdmins: boolean;
+  enableAdminManager: Stream<void>;
+  togglePersonAdmin: Stream<{ name: string }>;
   toggleAdminMode: Stream<void>;
   submitRequest: Stream<{ personName: string; date: string }>;
   cancelRequest: Stream<{ requestId: string }>;
@@ -181,6 +238,79 @@ const genId = (): string =>
 const parsePreferences = (s: string | null | undefined): string[] =>
   (s ?? "").split(",").map((x) => x.trim()).filter(Boolean);
 
+const parkingAdminSubject = (personName: string): ParkingAdminSubject => ({
+  personName,
+});
+
+const parkingAdminRolesValue = (
+  registry: ParkingAdminRegistryCell,
+): ParkingAdminRole[] => adminRegistryEntries<ParkingAdminRole>(registry);
+
+const parkingAdminRoleForPerson = (
+  registry: ParkingAdminRegistryCell,
+  personName: string | undefined,
+): ParkingAdminRole | undefined => {
+  const trimmedName = (personName ?? "").trim();
+  return trimmedName === ""
+    ? undefined
+    : parkingAdminRolesValue(registry).find((role) =>
+      role.subject.personName === trimmedName
+    );
+};
+
+const personIsParkingAdmin = (
+  registry: ParkingAdminRegistryCell,
+  personName: string | undefined,
+): boolean => parkingAdminRoleForPerson(registry, personName) !== undefined;
+
+// Demo-only identity model: the selected person name stands in for the actor.
+// Do not copy this for production authorization; use a stable user/profile cell.
+const currentActorName = (
+  selectedPersonName: Writable<string>,
+  people: PeopleCell,
+): string => selectedPersonName.get() || people.get()[0]?.name || "";
+
+const currentParkingAdminRole = (
+  registry: ParkingAdminRegistryCell,
+  selectedPersonName: Writable<string>,
+  people: PeopleCell,
+): ParkingAdminRole | undefined =>
+  parkingAdminRoleForPerson(
+    registry,
+    currentActorName(selectedPersonName, people),
+  );
+
+const currentUserCanManageParkingAdmins = (
+  credential: ParkingAdminManagerCredentialCell,
+): boolean => adminManagerCredentialIsActive(credential.get());
+
+const prepareParkingAdminToggle = (
+  credential: ParkingAdminManagerCredential | null | undefined,
+  registry: ParkingAdminRegistryCell,
+  rawName: string,
+): ParkingAdminRole[] | null => {
+  const personName = rawName.trim();
+  if (!adminManagerCredentialIsActive(credential) || personName === "") {
+    return null;
+  }
+
+  const adminRoles = parkingAdminRolesValue(registry);
+  const nextRoles = adminRoles.filter((role) =>
+    role.subject.personName !== personName
+  );
+  if (nextRoles.length !== adminRoles.length) {
+    return nextRoles;
+  }
+
+  return [
+    ...nextRoles,
+    {
+      subject: parkingAdminSubject(personName),
+      displayName: personName,
+    } as ParkingAdminRole,
+  ];
+};
+
 const commuteIcon = (mode: CommuteMode): string => {
   const icons: Record<CommuteMode, string> = {
     drive: "🚗",
@@ -252,10 +382,27 @@ export const DEFAULT_SPOTS: ParkingSpot[] = [
 // ============================================================
 
 export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
-  ({ spots: inputSpots, people: inputPeople, requests: inputRequests }) => {
+  (
+    {
+      spots: inputSpots,
+      people: inputPeople,
+      requests: inputRequests,
+      adminRegistry: inputAdminRegistry,
+    },
+  ) => {
     const spots = inputSpots ?? Writable.perSpace.of(DEFAULT_SPOTS);
     const people = inputPeople ?? Writable.perSpace.of<Person[]>([]);
     const requests = inputRequests ?? Writable.perSpace.of<SpotRequest[]>([]);
+    const defaultAdminRegistry = new Writable.perSpace<
+      ParkingAdminRegistryValue
+    >(
+      {} as ParkingAdminRegistryValue,
+    );
+    const adminRegistry =
+      (inputAdminRegistry ?? defaultAdminRegistry) as ParkingAdminRegistryCell;
+    const adminManagerCredential = new Writable.perUser<
+      ParkingAdminManagerCredential | null
+    >(null);
 
     const nowTimestamp = wish<number>({ query: "#now" });
     const todayStr = computed(() =>
@@ -320,7 +467,31 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     // Actions
     // --------------------------------------------------------
 
+    const enableAdminManager = action(() => {
+      adminManagerCredential.set({
+        canManageAdmins: true,
+      } as ParkingAdminManagerCredential);
+    });
+
+    const togglePersonAdmin = action<{ name: string }>(({ name }) => {
+      const nextAdmins = prepareParkingAdminToggle(
+        adminManagerCredential.get(),
+        adminRegistry,
+        name,
+      );
+      if (nextAdmins === null) {
+        return;
+      }
+      adminRegistry.set({ admins: nextAdmins as ParkingAdminList });
+    });
+
     const toggleAdminMode = action(() => {
+      if (
+        !currentParkingAdminRole(adminRegistry, selectedPersonName, people)
+      ) {
+        adminMode.set(false);
+        return;
+      }
       adminMode.set(!adminMode.get());
     });
 
@@ -514,6 +685,18 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
             r.personName === originalName ? { ...r, personName: trimName } : r
           ),
         );
+        if (adminManagerCredentialIsActive(adminManagerCredential.get())) {
+          adminRegistry.set({
+            admins: parkingAdminRolesValue(adminRegistry).map((role) =>
+              role.subject.personName === originalName
+                ? {
+                  subject: parkingAdminSubject(trimName),
+                  displayName: trimName,
+                } as ParkingAdminRole
+                : role
+            ) as ParkingAdminList,
+          });
+        }
       }
 
       editingPersonName.set(null);
@@ -521,6 +704,13 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
 
     const removePerson = action<{ name: string }>(({ name }) => {
       people.set(people.get().filter((p) => p.name !== name));
+      if (adminManagerCredentialIsActive(adminManagerCredential.get())) {
+        adminRegistry.set({
+          admins: parkingAdminRolesValue(adminRegistry).filter((role) =>
+            role.subject.personName !== name
+          ) as ParkingAdminList,
+        });
+      }
       if (selectedPersonName.get() === name) {
         const remaining = people.get();
         selectedPersonName.set(remaining[0]?.name ?? "");
@@ -569,6 +759,11 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     const addSpot = action<
       { spotNumber: string; label: string; notes: string }
     >((event) => {
+      if (
+        !currentParkingAdminRole(adminRegistry, selectedPersonName, people)
+      ) {
+        return;
+      }
       const {
         spotNumber: spotNumArg = newSpotNumber.get() ?? "",
         label = newSpotLabel.get() ?? "",
@@ -582,12 +777,15 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
         return;
       }
       addSpotError.set("");
-      spots.set([...current, {
-        spotNumber: trimNum,
-        label: label.trim(),
-        notes: notes.trim(),
-        active: true,
-      }]);
+      spots.set([
+        ...current,
+        {
+          spotNumber: trimNum,
+          label: label.trim(),
+          notes: notes.trim(),
+          active: true,
+        },
+      ] as ParkingSpotList);
       newSpotNumber.set("");
       newSpotLabel.set("");
       newSpotNotes.set("");
@@ -603,6 +801,11 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
         active: boolean;
       }
     >((event) => {
+      if (
+        !currentParkingAdminRole(adminRegistry, selectedPersonName, people)
+      ) {
+        return;
+      }
       const {
         originalNumber = editingSpotNumber.get() ?? "",
         spotNumber: spotNumArg2 = editSpotNum.get() ?? "",
@@ -629,7 +832,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
               active: editSpotActiveArg,
             }
             : s
-        ),
+        ) as ParkingSpotList,
       );
 
       if (trimNum !== originalNumber) {
@@ -646,7 +849,16 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
 
     const removeSpot = action<{ spotNumber: string }>(
       ({ spotNumber: spotNumArg3 }) => {
-        spots.set(spots.get().filter((s) => s.spotNumber !== spotNumArg3));
+        if (
+          !currentParkingAdminRole(adminRegistry, selectedPersonName, people)
+        ) {
+          return;
+        }
+        spots.set(
+          spots.get().filter((s) =>
+            s.spotNumber !== spotNumArg3
+          ) as ParkingSpotList,
+        );
         removeSpotConfirmTarget.set(null);
       },
     );
@@ -654,6 +866,11 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     const adminOverride = action<
       { spotNumber: string; date: string; personName: string }
     >(({ spotNumber, date, personName }) => {
+      if (
+        !currentParkingAdminRole(adminRegistry, selectedPersonName, people)
+      ) {
+        return;
+      }
       if (!personName || !spotNumber || !date) return;
 
       const existingReqs = requests.get();
@@ -849,6 +1066,35 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       activeRequestDate < todayStr || people.get().length === 0
     );
 
+    const currentPersonIsAdmin = computed(() =>
+      currentParkingAdminRole(adminRegistry, selectedPersonName, people) !==
+        undefined
+    );
+
+    const adminModeEnabled = computed(() =>
+      adminMode.get() ? currentPersonIsAdmin : false
+    );
+
+    const currentUserCanManageAdmins = computed(() =>
+      currentUserCanManageParkingAdmins(adminManagerCredential)
+    );
+    const canBootstrapPeople = computed(() =>
+      people.get().length === 0 &&
+      currentUserCanManageParkingAdmins(adminManagerCredential)
+    );
+    const showAdminPeopleSection = computed(() =>
+      adminModeEnabled === true || canBootstrapPeople === true
+    );
+
+    const adminAccessRows = computed(() =>
+      people.get().map((person) => ({
+        name: person.name,
+        email: person.email,
+        isAdmin: personIsParkingAdmin(adminRegistry, person.name),
+        canManageAdmins: currentUserCanManageAdmins === true,
+      }))
+    );
+
     const commuteModeOptions = [
       { label: "🚗 Drive", value: "drive" },
       { label: "🚌 Transit", value: "transit" },
@@ -880,7 +1126,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       const overrideSpot = gridOverrideSpot.get();
       const overrideDate = gridOverrideDate.get();
       const overridePerson = overridePersonName.get();
-      const weekGridShowAdmin = adminMode.get();
+      const weekGridShowAdmin = adminModeEnabled === true;
 
       return allSpots.map((spot) => {
         const spotNum = spot.spotNumber;
@@ -926,7 +1172,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       const allSpots = spots.get().filter((s) => s != null && s.active);
       const allRequests = requests.get();
       const currentPerson = selectedPersonName.get();
-      const todayStripShowAdmin = adminMode.get();
+      const todayStripShowAdmin = adminModeEnabled === true;
 
       return allSpots.map((spot) => {
         const req = allRequests.find(
@@ -991,14 +1237,19 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                 {todayFormatted}
               </span>
               <cf-button
-                variant={computed(() =>
-                  adminMode.get() ? "primary" : "secondary"
-                )}
+                id="parking-admin-mode-toggle"
+                variant={adminModeEnabled ? "primary" : "secondary"}
                 size="sm"
+                disabled={!currentPersonIsAdmin}
                 onClick={() => toggleAdminMode.send()}
               >
-                {computed(() => `Admin: ${adminMode.get() ? "ON" : "OFF"}`)}
+                {adminModeEnabled ? "Admin: ON" : "Admin: OFF"}
               </cf-button>
+              <cf-chip
+                label={currentPersonIsAdmin
+                  ? "Current person is admin"
+                  : "Member"}
+              />
             </div>
           </div>
 
@@ -1174,7 +1425,84 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                 </cf-vstack>
               </cf-card>
 
-              {/* === Section C: Week-Ahead Grid === */}
+              {/* === Section C: Admin Access === */}
+              <cf-card id="parking-admin-access">
+                <cf-vstack gap="2">
+                  <cf-hstack justify="between" align="center" wrap gap="2">
+                    <cf-vstack gap="1">
+                      <cf-heading level={6}>Admin Access</cf-heading>
+                      <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
+                        Demo manager access lets any user change who can manage
+                        parking spots.
+                      </span>
+                    </cf-vstack>
+                    <cf-chip
+                      label={currentUserCanManageAdmins
+                        ? "Can manage admins"
+                        : "Cannot manage admins"}
+                    />
+                    <cf-button
+                      id="parking-enable-admin-manager"
+                      size="sm"
+                      disabled={currentUserCanManageAdmins}
+                      onClick={() => enableAdminManager.send()}
+                    >
+                      Enable manager demo
+                    </cf-button>
+                  </cf-hstack>
+
+                  {noPeople
+                    ? (
+                      <span style="font-size: 0.875rem; color: var(--cf-color-gray-500);">
+                        Add people before assigning admins.
+                      </span>
+                    )
+                    : null}
+
+                  {adminAccessRows.map((row) => {
+                    const rowName = row.name;
+                    const rowEmail = row.email;
+                    const rowIsAdmin = row.isAdmin;
+                    const rowCanManageAdmins = row.canManageAdmins;
+                    return (
+                      <cf-hstack
+                        data-parking-admin-row={rowName}
+                        justify="between"
+                        align="center"
+                        gap="2"
+                        wrap
+                        style="padding: 0.5rem 0.75rem; border: 1px solid var(--cf-color-gray-200); border-radius: 0.75rem;"
+                      >
+                        <cf-vstack gap="0">
+                          <cf-hstack gap="2" align="center" wrap>
+                            <span style="font-weight: 600;">{rowName}</span>
+                            <cf-chip
+                              label={rowIsAdmin ? "Admin" : "Member"}
+                              variant={rowIsAdmin ? "accent" : "default"}
+                            />
+                          </cf-hstack>
+                          <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
+                            {rowEmail}
+                          </span>
+                        </cf-vstack>
+                        <cf-button
+                          data-parking-admin-toggle={rowName}
+                          size="sm"
+                          disabled={!rowCanManageAdmins}
+                          onClick={() =>
+                            togglePersonAdmin.send({
+                              name: rowName,
+                            })}
+                        >
+                          {rowIsAdmin ? "Remove admin" : "Make admin"}
+                        </cf-button>
+                      </cf-hstack>
+                    );
+                  })}
+                </cf-vstack>
+              </cf-card>
+
+              {/* === Section D: Week-Ahead Grid === */}
               <cf-vstack gap="1">
                 <cf-heading level={6}>This Week</cf-heading>
 
@@ -1385,15 +1713,16 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                 </div>
               </cf-vstack>
 
-              {/* === Section D: Admin (admin mode only) === */}
-              {adminMode.get()
+              {/* === Section E: Admin / bootstrap people management === */}
+              {showAdminPeopleSection
                 ? (
                   <>
                     {/* People */}
-                    <cf-vstack gap="2">
+                    <cf-vstack id="parking-admin-people-section" gap="2">
                       <cf-hstack justify="between" align="center">
                         <cf-heading level={6}>People</cf-heading>
                         <cf-button
+                          id="parking-admin-add-person-open"
                           variant="primary"
                           size="sm"
                           onClick={() => toggleAddPersonForm.send()}
@@ -1804,42 +2133,231 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                     </cf-vstack>
 
                     {/* Parking Spots */}
-                    <cf-vstack gap="2">
-                      <cf-hstack justify="between" align="center">
-                        <cf-heading level={6}>Parking Spots</cf-heading>
-                        <cf-button
-                          variant="primary"
-                          size="sm"
-                          onClick={() => toggleAddSpotForm.send()}
-                        >
-                          + Add Spot
-                        </cf-button>
-                      </cf-hstack>
+                    {adminModeEnabled
+                      ? (
+                        <cf-vstack gap="2">
+                          <cf-hstack justify="between" align="center">
+                            <cf-heading level={6}>Parking Spots</cf-heading>
+                            <cf-button
+                              variant="primary"
+                              size="sm"
+                              onClick={() => toggleAddSpotForm.send()}
+                            >
+                              + Add Spot
+                            </cf-button>
+                          </cf-hstack>
 
-                      {adminSpotsData.map((spot) => {
-                        const spotNum2 = spot.spotNumber;
-                        const spotLabel2 = spot.label;
-                        const spotNotes2 = spot.notes;
-                        const spotActive2 = spot.active;
-                        const isEditingSpot = computed(() =>
-                          editingSpotNumber.get() === spotNum2
-                        );
-                        const isRemoveSpotConfirm = computed(() =>
-                          removeSpotConfirmTarget.get() === spotNum2
-                        );
+                          {adminSpotsData.map((spot) => {
+                            const spotNum2 = spot.spotNumber;
+                            const spotLabel2 = spot.label;
+                            const spotNotes2 = spot.notes;
+                            const spotActive2 = spot.active;
+                            const isEditingSpot = computed(() =>
+                              editingSpotNumber.get() === spotNum2
+                            );
+                            const isRemoveSpotConfirm = computed(() =>
+                              removeSpotConfirmTarget.get() === spotNum2
+                            );
 
-                        return (
-                          <cf-card style={spotActive2 ? "" : "opacity: 0.65;"}>
-                            {isEditingSpot
-                              ? (
+                            return (
+                              <cf-card
+                                style={spotActive2 ? "" : "opacity: 0.65;"}
+                              >
+                                {isEditingSpot
+                                  ? (
+                                    <cf-vstack gap="2">
+                                      <cf-hstack gap="2" wrap>
+                                        <cf-vstack
+                                          gap="1"
+                                          style="min-width: 60px;"
+                                        >
+                                          <span style="font-size: 0.75rem; font-weight: 500;">
+                                            Number *
+                                          </span>
+                                          <cf-input
+                                            $value={editSpotNum}
+                                            placeholder="e.g. 12"
+                                            style="width: 4rem;"
+                                          />
+                                        </cf-vstack>
+                                        <cf-vstack gap="1" style="flex: 1;">
+                                          <span style="font-size: 0.75rem; font-weight: 500;">
+                                            Label
+                                          </span>
+                                          <cf-input
+                                            $value={editSpotLabel}
+                                            placeholder="e.g. Near entrance"
+                                            style="width: 100%;"
+                                          />
+                                        </cf-vstack>
+                                      </cf-hstack>
+                                      <cf-vstack gap="1">
+                                        <span style="font-size: 0.75rem; font-weight: 500;">
+                                          Notes
+                                        </span>
+                                        <cf-input
+                                          $value={editSpotNotes}
+                                          placeholder="e.g. Tight, no large vehicles"
+                                          style="width: 100%;"
+                                        />
+                                      </cf-vstack>
+                                      <cf-hstack gap="2" align="center">
+                                        <cf-checkbox $checked={editSpotActive}>
+                                          Active
+                                        </cf-checkbox>
+                                        {spotDeactivateWarning
+                                          ? (
+                                            <span style="font-size: 0.75rem; color: var(--cf-color-amber-600);">
+                                              Has upcoming allocations — they
+                                              will remain.
+                                            </span>
+                                          )
+                                          : null}
+                                      </cf-hstack>
+                                      <cf-hstack gap="2">
+                                        <cf-button
+                                          variant="primary"
+                                          size="sm"
+                                          onClick={() =>
+                                            saveEditSpot.send({
+                                              originalNumber: spotNum2,
+                                            })}
+                                        >
+                                          Save
+                                        </cf-button>
+                                        <cf-button
+                                          variant="secondary"
+                                          size="sm"
+                                          onClick={() => cancelEditSpot.send()}
+                                        >
+                                          Cancel
+                                        </cf-button>
+                                      </cf-hstack>
+                                    </cf-vstack>
+                                  )
+                                  : (
+                                    <>
+                                      <cf-hstack
+                                        justify="between"
+                                        align="center"
+                                        gap="2"
+                                        wrap
+                                      >
+                                        <cf-hstack gap="2" align="center" wrap>
+                                          <span
+                                            style={`font-weight: 700; font-size: 1rem; color: ${
+                                              spotActive2
+                                                ? "var(--cf-color-gray-800)"
+                                                : "var(--cf-color-gray-400)"
+                                            };`}
+                                          >
+                                            #{spotNum2}
+                                          </span>
+                                          <cf-vstack gap="0">
+                                            <span
+                                              style={`font-size: 0.875rem; color: ${
+                                                spotActive2
+                                                  ? "var(--cf-color-gray-700)"
+                                                  : "var(--cf-color-gray-400)"
+                                              }; text-decoration: ${
+                                                spotActive2
+                                                  ? "none"
+                                                  : "line-through"
+                                              };`}
+                                            >
+                                              {spotLabel2 || "(no label)"}
+                                            </span>
+                                            {spotNotes2
+                                              ? (
+                                                <span style="font-size: 0.75rem; color: var(--cf-color-gray-400);">
+                                                  {spotNotes2}
+                                                </span>
+                                              )
+                                              : null}
+                                          </cf-vstack>
+                                          {!spotActive2
+                                            ? (
+                                              <span style="font-size: 0.6875rem; background-color: #f3f4f6; color: #6b7280; padding: 1px 6px; border-radius: 9999px;">
+                                                Inactive
+                                              </span>
+                                            )
+                                            : null}
+                                        </cf-hstack>
+                                        <cf-hstack gap="1">
+                                          <cf-button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() =>
+                                              startEditSpot.send({
+                                                spotNumber: spotNum2,
+                                              })}
+                                          >
+                                            Edit
+                                          </cf-button>
+                                          <cf-button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() =>
+                                              initiateRemoveSpot.send({
+                                                spotNumber: spotNum2,
+                                              })}
+                                          >
+                                            Remove
+                                          </cf-button>
+                                        </cf-hstack>
+                                      </cf-hstack>
+                                      {isRemoveSpotConfirm
+                                        ? (
+                                          <cf-card style="background: #fef2f2; border: 1px solid #fecaca; margin-top: 0.5rem;">
+                                            <cf-vstack gap="1">
+                                              <span style="font-size: 0.75rem; color: var(--cf-color-red-700);">
+                                                Spot #{spotNum2}{" "}
+                                                has upcoming allocations. They
+                                                will be preserved. Remove
+                                                anyway?
+                                              </span>
+                                              <cf-hstack gap="2">
+                                                <cf-button
+                                                  variant="primary"
+                                                  size="sm"
+                                                  onClick={() =>
+                                                    removeSpot.send({
+                                                      spotNumber: spotNum2,
+                                                    })}
+                                                >
+                                                  Remove
+                                                </cf-button>
+                                                <cf-button
+                                                  variant="ghost"
+                                                  size="sm"
+                                                  onClick={() =>
+                                                    cancelRemoveSpot.send()}
+                                                >
+                                                  Cancel
+                                                </cf-button>
+                                              </cf-hstack>
+                                            </cf-vstack>
+                                          </cf-card>
+                                        )
+                                        : null}
+                                    </>
+                                  )}
+                              </cf-card>
+                            );
+                          })}
+
+                          {addSpotFormOpen.get()
+                            ? (
+                              <cf-card style="border: 2px dashed var(--cf-color-gray-200);">
                                 <cf-vstack gap="2">
+                                  <cf-heading level={6}>Add Spot</cf-heading>
                                   <cf-hstack gap="2" wrap>
                                     <cf-vstack gap="1" style="min-width: 60px;">
                                       <span style="font-size: 0.75rem; font-weight: 500;">
                                         Number *
                                       </span>
                                       <cf-input
-                                        $value={editSpotNum}
+                                        $value={newSpotNumber}
                                         placeholder="e.g. 12"
                                         style="width: 4rem;"
                                       />
@@ -1849,7 +2367,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                         Label
                                       </span>
                                       <cf-input
-                                        $value={editSpotLabel}
+                                        $value={newSpotLabel}
                                         placeholder="e.g. Near entrance"
                                         style="width: 100%;"
                                       />
@@ -1860,222 +2378,43 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                       Notes
                                     </span>
                                     <cf-input
-                                      $value={editSpotNotes}
-                                      placeholder="e.g. Tight, no large vehicles"
+                                      $value={newSpotNotes}
+                                      placeholder="e.g. Compact only"
                                       style="width: 100%;"
                                     />
                                   </cf-vstack>
-                                  <cf-hstack gap="2" align="center">
-                                    <cf-checkbox $checked={editSpotActive}>
-                                      Active
-                                    </cf-checkbox>
-                                    {spotDeactivateWarning
-                                      ? (
-                                        <span style="font-size: 0.75rem; color: var(--cf-color-amber-600);">
-                                          Has upcoming allocations — they will
-                                          remain.
-                                        </span>
-                                      )
-                                      : null}
-                                  </cf-hstack>
+                                  {computed(() => {
+                                    const err = addSpotError.get();
+                                    if (!err) return null;
+                                    return (
+                                      <span style="font-size: 0.75rem; color: var(--cf-color-red-600);">
+                                        {err}
+                                      </span>
+                                    );
+                                  })}
                                   <cf-hstack gap="2">
                                     <cf-button
                                       variant="primary"
                                       size="sm"
-                                      onClick={() =>
-                                        saveEditSpot.send({
-                                          originalNumber: spotNum2,
-                                        })}
+                                      onClick={() => submitAddSpot.send()}
                                     >
-                                      Save
+                                      Add Spot
                                     </cf-button>
                                     <cf-button
-                                      variant="secondary"
+                                      variant="ghost"
                                       size="sm"
-                                      onClick={() => cancelEditSpot.send()}
+                                      onClick={() => toggleAddSpotForm.send()}
                                     >
                                       Cancel
                                     </cf-button>
                                   </cf-hstack>
                                 </cf-vstack>
-                              )
-                              : (
-                                <>
-                                  <cf-hstack
-                                    justify="between"
-                                    align="center"
-                                    gap="2"
-                                    wrap
-                                  >
-                                    <cf-hstack gap="2" align="center" wrap>
-                                      <span
-                                        style={`font-weight: 700; font-size: 1rem; color: ${
-                                          spotActive2
-                                            ? "var(--cf-color-gray-800)"
-                                            : "var(--cf-color-gray-400)"
-                                        };`}
-                                      >
-                                        #{spotNum2}
-                                      </span>
-                                      <cf-vstack gap="0">
-                                        <span
-                                          style={`font-size: 0.875rem; color: ${
-                                            spotActive2
-                                              ? "var(--cf-color-gray-700)"
-                                              : "var(--cf-color-gray-400)"
-                                          }; text-decoration: ${
-                                            spotActive2
-                                              ? "none"
-                                              : "line-through"
-                                          };`}
-                                        >
-                                          {spotLabel2 || "(no label)"}
-                                        </span>
-                                        {spotNotes2
-                                          ? (
-                                            <span style="font-size: 0.75rem; color: var(--cf-color-gray-400);">
-                                              {spotNotes2}
-                                            </span>
-                                          )
-                                          : null}
-                                      </cf-vstack>
-                                      {!spotActive2
-                                        ? (
-                                          <span style="font-size: 0.6875rem; background-color: #f3f4f6; color: #6b7280; padding: 1px 6px; border-radius: 9999px;">
-                                            Inactive
-                                          </span>
-                                        )
-                                        : null}
-                                    </cf-hstack>
-                                    <cf-hstack gap="1">
-                                      <cf-button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() =>
-                                          startEditSpot.send({
-                                            spotNumber: spotNum2,
-                                          })}
-                                      >
-                                        Edit
-                                      </cf-button>
-                                      <cf-button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() =>
-                                          initiateRemoveSpot.send({
-                                            spotNumber: spotNum2,
-                                          })}
-                                      >
-                                        Remove
-                                      </cf-button>
-                                    </cf-hstack>
-                                  </cf-hstack>
-                                  {isRemoveSpotConfirm
-                                    ? (
-                                      <cf-card style="background: #fef2f2; border: 1px solid #fecaca; margin-top: 0.5rem;">
-                                        <cf-vstack gap="1">
-                                          <span style="font-size: 0.75rem; color: var(--cf-color-red-700);">
-                                            Spot #{spotNum2}{" "}
-                                            has upcoming allocations. They will
-                                            be preserved. Remove anyway?
-                                          </span>
-                                          <cf-hstack gap="2">
-                                            <cf-button
-                                              variant="primary"
-                                              size="sm"
-                                              onClick={() =>
-                                                removeSpot.send({
-                                                  spotNumber: spotNum2,
-                                                })}
-                                            >
-                                              Remove
-                                            </cf-button>
-                                            <cf-button
-                                              variant="ghost"
-                                              size="sm"
-                                              onClick={() =>
-                                                cancelRemoveSpot.send()}
-                                            >
-                                              Cancel
-                                            </cf-button>
-                                          </cf-hstack>
-                                        </cf-vstack>
-                                      </cf-card>
-                                    )
-                                    : null}
-                                </>
-                              )}
-                          </cf-card>
-                        );
-                      })}
-
-                      {addSpotFormOpen.get()
-                        ? (
-                          <cf-card style="border: 2px dashed var(--cf-color-gray-200);">
-                            <cf-vstack gap="2">
-                              <cf-heading level={6}>Add Spot</cf-heading>
-                              <cf-hstack gap="2" wrap>
-                                <cf-vstack gap="1" style="min-width: 60px;">
-                                  <span style="font-size: 0.75rem; font-weight: 500;">
-                                    Number *
-                                  </span>
-                                  <cf-input
-                                    $value={newSpotNumber}
-                                    placeholder="e.g. 12"
-                                    style="width: 4rem;"
-                                  />
-                                </cf-vstack>
-                                <cf-vstack gap="1" style="flex: 1;">
-                                  <span style="font-size: 0.75rem; font-weight: 500;">
-                                    Label
-                                  </span>
-                                  <cf-input
-                                    $value={newSpotLabel}
-                                    placeholder="e.g. Near entrance"
-                                    style="width: 100%;"
-                                  />
-                                </cf-vstack>
-                              </cf-hstack>
-                              <cf-vstack gap="1">
-                                <span style="font-size: 0.75rem; font-weight: 500;">
-                                  Notes
-                                </span>
-                                <cf-input
-                                  $value={newSpotNotes}
-                                  placeholder="e.g. Compact only"
-                                  style="width: 100%;"
-                                />
-                              </cf-vstack>
-                              {computed(() => {
-                                const err = addSpotError.get();
-                                if (!err) return null;
-                                return (
-                                  <span style="font-size: 0.75rem; color: var(--cf-color-red-600);">
-                                    {err}
-                                  </span>
-                                );
-                              })}
-                              <cf-hstack gap="2">
-                                <cf-button
-                                  variant="primary"
-                                  size="sm"
-                                  onClick={() => submitAddSpot.send()}
-                                >
-                                  Add Spot
-                                </cf-button>
-                                <cf-button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => toggleAddSpotForm.send()}
-                                >
-                                  Cancel
-                                </cf-button>
-                              </cf-hstack>
-                            </cf-vstack>
-                          </cf-card>
-                        )
-                        : null}
-                    </cf-vstack>
+                              </cf-card>
+                            )
+                            : null}
+                        </cf-vstack>
+                      )
+                      : null}
                   </>
                 )
                 : null}
@@ -2088,12 +2427,17 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       spots,
       people,
       requests,
-      adminMode: computed(() => Boolean(adminMode.get())),
+      adminRegistry: adminRegistry as PerSpace<ParkingAdminRegistryCell>,
+      adminMode: adminModeEnabled,
+      currentPersonIsAdmin,
+      currentUserCanManageAdmins,
       selectedPersonName: computed(() => selectedPersonName.get() ?? ""),
       requestDate: activeRequestDate,
       requestResult: computed(() => requestResult.get() ?? ""),
 
       // Exposed actions
+      enableAdminManager,
+      togglePersonAdmin,
       toggleAdminMode,
       submitRequest,
       cancelRequest,
