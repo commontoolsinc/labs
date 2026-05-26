@@ -4,13 +4,15 @@ import { FabricInstance, FabricPrimitive } from "../../src/interface.ts";
 import { FabricBytes } from "../../src/fabric-primitives/FabricBytes.ts";
 
 describe("FabricBytes", () => {
-  describe("constructor()", () => {
-    it("extends `FabricPrimitive` (not `FabricInstance`)", () => {
-      const fb = new FabricBytes(new Uint8Array([1, 2, 3]));
-      expect(fb instanceof FabricPrimitive).toBe(true);
-      expect(fb instanceof FabricInstance).toBe(false);
-    });
+  // Pure type-identity / supertype check: cross-cutting carve-out per the
+  // rule (doesn't fit a single member, isn't construction mechanics).
+  it("extends `FabricPrimitive` (not `FabricInstance`)", () => {
+    const fb = new FabricBytes(new Uint8Array([1, 2, 3]));
+    expect(fb instanceof FabricPrimitive).toBe(true);
+    expect(fb instanceof FabricInstance).toBe(false);
+  });
 
+  describe("constructor()", () => {
     it("produces an always-frozen instance", () => {
       const fb = new FabricBytes(new Uint8Array([1, 2, 3]));
       expect(Object.isFrozen(fb)).toBe(true);

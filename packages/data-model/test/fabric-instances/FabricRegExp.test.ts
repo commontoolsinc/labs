@@ -36,26 +36,28 @@ class DummyReconstructionContext extends BaseReconstructionContext {
 const dummyContext = new DummyReconstructionContext();
 
 describe("FabricRegExp", () => {
+  // Pure type-identity / supertype checks: cross-cutting carve-out per the
+  // rule (don't fit a single member, aren't construction mechanics).
+  it("implements `FabricInstance`", () => {
+    const sr = new FabricRegExp(/abc/gi);
+    expect(sr instanceof FabricInstance).toBe(true);
+  });
+
+  it("has typeTag `RegExp@1`", () => {
+    const sr = new FabricRegExp(/abc/);
+    expect(sr.typeTag).toBe("RegExp@1");
+  });
+
+  it("is an instance of `FabricNativeWrapper`", () => {
+    const sr = new FabricRegExp(/abc/);
+    expect(sr instanceof FabricNativeWrapper).toBe(true);
+  });
+
   describe("constructor()", () => {
-    it("implements `FabricInstance`", () => {
-      const sr = new FabricRegExp(/abc/gi);
-      expect(sr instanceof FabricInstance).toBe(true);
-    });
-
-    it("has typeTag `RegExp@1`", () => {
-      const sr = new FabricRegExp(/abc/);
-      expect(sr.typeTag).toBe("RegExp@1");
-    });
-
     it("wraps the original RegExp", () => {
       const re = /test/i;
       const sr = new FabricRegExp(re);
       expect(sr.regex).toBe(re);
-    });
-
-    it("is an instance of `FabricNativeWrapper`", () => {
-      const sr = new FabricRegExp(/abc/);
-      expect(sr instanceof FabricNativeWrapper).toBe(true);
     });
   });
 

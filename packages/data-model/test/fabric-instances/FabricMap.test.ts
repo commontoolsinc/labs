@@ -15,17 +15,17 @@ import { deepFreeze, isDeepFrozenFabricValue } from "../../src/deep-freeze.ts";
 import { dummyContext, subFreeze, subIsDeepFrozen } from "./fixtures.ts";
 
 describe("FabricMap", () => {
-  describe("constructor()", () => {
-    it("implements `FabricInstance` with tag `Map@1`", () => {
-      const sm = new FabricMap(new Map());
-      expect(sm instanceof FabricInstance).toBe(true);
-      expect(sm.typeTag).toBe("Map@1");
-    });
+  // Pure type-identity / supertype checks: cross-cutting carve-out per the
+  // rule (they don't fit a single member, aren't construction mechanics).
+  it("implements `FabricInstance` with tag `Map@1`", () => {
+    const sm = new FabricMap(new Map());
+    expect(sm instanceof FabricInstance).toBe(true);
+    expect(sm.typeTag).toBe("Map@1");
+  });
 
-    it("is an instance of `FabricNativeWrapper`", () => {
-      const sm = new FabricMap(new Map());
-      expect(sm instanceof FabricNativeWrapper).toBe(true);
-    });
+  it("is an instance of `FabricNativeWrapper`", () => {
+    const sm = new FabricMap(new Map());
+    expect(sm instanceof FabricNativeWrapper).toBe(true);
   });
 
   describe("instance members", () => {

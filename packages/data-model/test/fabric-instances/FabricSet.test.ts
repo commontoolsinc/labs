@@ -13,12 +13,12 @@ import { deepFreeze, isDeepFrozenFabricValue } from "../../src/deep-freeze.ts";
 import { subFreeze, subIsDeepFrozen } from "./fixtures.ts";
 
 describe("FabricSet", () => {
-  describe("constructor()", () => {
-    it("implements `FabricInstance` with tag `Set@1`", () => {
-      const ss = new FabricSet(new Set());
-      expect(ss instanceof FabricInstance).toBe(true);
-      expect(ss.typeTag).toBe("Set@1");
-    });
+  // Pure type-identity / supertype check: cross-cutting carve-out per the
+  // rule (doesn't fit a single member, isn't construction mechanics).
+  it("implements `FabricInstance` with tag `Set@1`", () => {
+    const ss = new FabricSet(new Set());
+    expect(ss instanceof FabricInstance).toBe(true);
+    expect(ss.typeTag).toBe("Set@1");
   });
 
   describe("instance members", () => {

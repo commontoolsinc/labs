@@ -18,10 +18,9 @@ import {
 import { dummyContext, subFreeze, subIsDeepFrozen } from "./fixtures.ts";
 
 describe("FabricError", () => {
-  // `FabricError` has no public `new` constructor — instances come from the
-  // static `fromNativeError()`. These check the identity and fixed-schema
-  // slots of a constructed instance, which cross-cut construction and instance
-  // state rather than a single member, so they live directly under the class.
+  // Pure type-identity / supertype checks: they don't fit a single member and
+  // aren't about construction mechanics, so they live directly under the class
+  // `describe()` (the rule's cross-cutting carve-out).
   it("implements `FabricInstance`", () => {
     const se = FabricError.fromNativeError(new Error("test"));
     expect(se instanceof FabricInstance).toBe(true);
@@ -32,41 +31,43 @@ describe("FabricError", () => {
     expect(se.typeTag).toBe("Error@1");
   });
 
-  it("wraps the Error's `FabricValue`-shaped state", () => {
-    const err = new TypeError("bad");
-    const se = FabricError.fromNativeError(err);
-    expect(se.type).toBe("TypeError");
-    expect(se.name).toBe("TypeError");
-    expect(se.message).toBe("bad");
-  });
-
-  it("has mutable fixed-schema slots while unfrozen", () => {
-    const se = FabricError.fromNativeError(new Error("orig"));
-    se.message = "changed";
-    se.name = "Renamed";
-    se.cause = { detail: 1 } as FabricValue;
-    expect(se.message).toBe("changed");
-    expect(se.name).toBe("Renamed");
-    expect(se.cause).toEqual({ detail: 1 });
-    // The native projection reflects the mutated state (no stale cache).
-    expect(se.toNativeValue(true).message).toBe("changed");
-  });
-
-  it("throws on fixed-schema slot assignment once frozen", () => {
-    const se = FabricError.fromNativeError(new Error("orig"));
-    Object.freeze(se);
-    expect(() => {
-      se.message = "nope";
-    }).toThrow();
-    expect(() => {
-      (se as { name: string }).name = "nope";
-    }).toThrow();
-    expect(se.message).toBe("orig");
-  });
-
   it("is an instance of `FabricNativeWrapper`", () => {
     const se = FabricError.fromNativeError(new Error("test"));
     expect(se instanceof FabricNativeWrapper).toBe(true);
+  });
+
+  describe("constructor()", () => {
+    it("wraps the Error's `FabricValue`-shaped state", () => {
+      const err = new TypeError("bad");
+      const se = FabricError.fromNativeError(err);
+      expect(se.type).toBe("TypeError");
+      expect(se.name).toBe("TypeError");
+      expect(se.message).toBe("bad");
+    });
+
+    it("has mutable fixed-schema slots while unfrozen", () => {
+      const se = FabricError.fromNativeError(new Error("orig"));
+      se.message = "changed";
+      se.name = "Renamed";
+      se.cause = { detail: 1 } as FabricValue;
+      expect(se.message).toBe("changed");
+      expect(se.name).toBe("Renamed");
+      expect(se.cause).toEqual({ detail: 1 });
+      // The native projection reflects the mutated state (no stale cache).
+      expect(se.toNativeValue(true).message).toBe("changed");
+    });
+
+    it("throws on fixed-schema slot assignment once frozen", () => {
+      const se = FabricError.fromNativeError(new Error("orig"));
+      Object.freeze(se);
+      expect(() => {
+        se.message = "nope";
+      }).toThrow();
+      expect(() => {
+        (se as { name: string }).name = "nope";
+      }).toThrow();
+      expect(se.message).toBe("orig");
+    });
   });
 
   describe("instance members", () => {

@@ -9,23 +9,25 @@ import {
 } from "../../src/fabric-value.ts";
 
 describe("FabricEpochDays", () => {
+  // Pure type-identity / supertype checks: cross-cutting carve-out per the
+  // rule (don't fit a single member, aren't construction mechanics).
+  it("is an instance of `FabricEpochDays`", () => {
+    const sd = new FabricEpochDays(100n);
+    expect(sd instanceof FabricEpochDays).toBe(true);
+  });
+
+  it("is an instance of `FabricPrimitive`", () => {
+    expect(new FabricEpochDays(0n) instanceof FabricPrimitive).toBe(
+      true,
+    );
+  });
+
+  it("is not a `FabricInstance` (no [DECONSTRUCT])", () => {
+    const sd = new FabricEpochDays(0n);
+    expect(sd instanceof FabricInstance).toBe(false);
+  });
+
   describe("constructor()", () => {
-    it("is an instance of `FabricEpochDays`", () => {
-      const sd = new FabricEpochDays(100n);
-      expect(sd instanceof FabricEpochDays).toBe(true);
-    });
-
-    it("is an instance of `FabricPrimitive`", () => {
-      expect(new FabricEpochDays(0n) instanceof FabricPrimitive).toBe(
-        true,
-      );
-    });
-
-    it("is not a `FabricInstance` (no [DECONSTRUCT])", () => {
-      const sd = new FabricEpochDays(0n);
-      expect(sd instanceof FabricInstance).toBe(false);
-    });
-
     it("produces an always-frozen instance", () => {
       expect(Object.isFrozen(new FabricEpochDays(100n))).toBe(true);
     });
