@@ -25,7 +25,12 @@ export interface OpenAIChatCompletionTool {
 
 export interface OpenAIChatCompletionNativeModelTool {
   type: LLMNativeModelToolId;
+  google_search?: Record<string, never>;
 }
+
+export type OpenAIChatCompletionRequestTool =
+  | OpenAIChatCompletionTool
+  | OpenAIChatCompletionNativeModelTool;
 
 export interface OpenAIChatCompletionNativeModelToolResult {
   type: LLMNativeModelToolId;
@@ -60,12 +65,13 @@ export interface OpenAIChatCompletionMessage {
   content: OpenAIChatMessageContent;
   tool_calls?: readonly OpenAIChatCompletionToolCall[];
   tool_call_id?: string;
+  grounding_metadata?: unknown;
 }
 
 export interface OpenAIChatCompletionRequest {
   model: string;
   messages: readonly OpenAIChatCompletionMessage[];
-  tools?: readonly OpenAIChatCompletionTool[];
+  tools?: readonly OpenAIChatCompletionRequestTool[];
   native_model_tools?: readonly OpenAIChatCompletionNativeModelTool[];
   tool_choice?: "auto" | "none" | Record<string, unknown>;
 }
@@ -196,17 +202,20 @@ const summarizeChatCompletionRequest = (
   payload: OpenAIChatCompletionRequest,
   serializedPayload: string,
 ): OpenAIChatCompletionRequestDiagnosticSummary => {
-  const nativeModelToolIds = payload.native_model_tools?.map((tool) =>
-    tool.type
-  );
+  const nativeModelToolIds = [
+    ...(payload.native_model_tools?.map((tool) => tool.type) ?? []),
+    ...(payload.tools?.flatMap((tool) =>
+      tool.type === "function" ? [] : [tool.type]
+    ) ?? []),
+  ];
   return {
     model: payload.model,
     messageCount: payload.messages.length,
     toolCount: payload.tools?.length ?? 0,
-    ...(nativeModelToolIds !== undefined
+    ...(nativeModelToolIds.length > 0
       ? { nativeModelToolIds: [...nativeModelToolIds] }
       : {}),
-    nativeModelToolCount: nativeModelToolIds?.length ?? 0,
+    nativeModelToolCount: nativeModelToolIds.length,
     serializedBytes: textByteLength(serializedPayload),
   };
 };

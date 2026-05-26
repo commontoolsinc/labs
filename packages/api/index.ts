@@ -5,6 +5,8 @@
  * Workspace code should import these types via `@commonfabric/builder`.
  */
 
+import type { Cfc, WriteAuthorizedBy } from "./cfc.ts";
+
 // ============================================================================
 // Fabric Value Types
 // ============================================================================
@@ -1576,6 +1578,48 @@ export type JSONSchemaMutable = JSONSchemaObjMutable | boolean;
 
 export type * from "./cfc.ts";
 export { CFC_CANONICAL_ALIAS_NAMES } from "./cfc.ts";
+
+export type TrustedActionWriteWithIntegrity<
+  T,
+  Binding,
+  Action extends string,
+  Pattern extends string,
+  Integrity extends readonly [string, ...string[]],
+> = Cfc<
+  WriteAuthorizedBy<T, Binding>,
+  {
+    uiContract: {
+      helper: "UiAction";
+      action: Action;
+      trustedPattern: Pattern;
+      requiredEventIntegrity: Integrity;
+    };
+  }
+>;
+
+export type TrustedActionWrite<
+  T,
+  Binding,
+  Action extends string,
+  Pattern extends string,
+> = TrustedActionWriteWithIntegrity<T, Binding, Action, Pattern, [Pattern]>;
+
+export type TrustedActionUiContract<
+  T,
+  Action extends string,
+  Pattern extends string,
+  Integrity extends readonly [string, ...string[]] = [Pattern],
+> = Cfc<
+  T,
+  {
+    uiContract: {
+      helper: "UiAction";
+      action: Action;
+      trustedPattern: Pattern;
+      requiredEventIntegrity: Integrity;
+    };
+  }
+>;
 
 /**
  * Selects a sub-path within a document, optionally paired with a schema

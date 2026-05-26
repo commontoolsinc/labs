@@ -129,7 +129,7 @@ function findWriteAuthorizedByReferences(
     if (
       ts.isTypeReferenceNode(current) &&
       ts.isIdentifier(current.typeName) &&
-      current.typeName.text === "WriteAuthorizedBy"
+      isWriteAuthorizedByLikeTypeName(current.typeName.text)
     ) {
       matches.push(substituteTypeReferenceNode(current, typeParamMap));
       return;
@@ -177,6 +177,12 @@ function findWriteAuthorizedByReferences(
   };
   visit(node, new Map());
   return matches;
+}
+
+function isWriteAuthorizedByLikeTypeName(name: string): boolean {
+  return name === "WriteAuthorizedBy" ||
+    name === "TrustedActionWrite" ||
+    name === "TrustedActionWriteWithIntegrity";
 }
 
 function isSupportedWriteAuthorizedByBindingName(

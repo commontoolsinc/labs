@@ -1,5 +1,10 @@
 import { assertEquals } from "@std/assert";
-import type { Cfc as RootCfc } from "@commonfabric/api";
+import type {
+  Cfc as RootCfc,
+  TrustedActionUiContract,
+  TrustedActionWrite,
+  TrustedActionWriteWithIntegrity,
+} from "@commonfabric/api";
 import { CFC_CANONICAL_ALIAS_NAMES } from "@commonfabric/api";
 import type {
   AddIntegrity,
@@ -118,6 +123,28 @@ Deno.test("CFC API surface preserves the authored runtime value shape", () => {
   > = {
     title: "mu",
   };
+  const trustedWrite: TrustedActionWrite<
+    { title: string },
+    typeof localBinding,
+    "SaveTitle",
+    "TrustedSaveSurface"
+  > = {
+    title: "nu",
+  };
+  const trustedWriteWithIntegrity: TrustedActionWriteWithIntegrity<
+    { title: string },
+    typeof localBinding,
+    "SaveTitle",
+    "TrustedSaveSurface",
+    readonly ["TrustedSaveSurface", "TrustedDisclosureRendered"]
+  > = {
+    title: "xi",
+  };
+  const trustedUiContract: TrustedActionUiContract<
+    string,
+    "SaveTitle",
+    "TrustedSaveSurface"
+  > = "omicron";
 
   assertEquals(confidential, { title: "alpha" });
   assertEquals(integrity, { title: "beta" });
@@ -141,6 +168,9 @@ Deno.test("CFC API surface preserves the authored runtime value shape", () => {
   assertEquals(pathValue, undefined);
   assertEquals(refValue, undefined);
   assertEquals(writeAuthorizedBy, { title: "mu" });
+  assertEquals(trustedWrite, { title: "nu" });
+  assertEquals(trustedWriteWithIntegrity, { title: "xi" });
+  assertEquals(trustedUiContract, "omicron");
   assertEquals(aliasNames, [
     "Cfc",
     "Confidential",
@@ -152,6 +182,9 @@ Deno.test("CFC API surface preserves the authored runtime value shape", () => {
     "MaxConfidentiality",
     "OpaqueInput",
     "WriteAuthorizedBy",
+    "TrustedActionWriteWithIntegrity",
+    "TrustedActionWrite",
+    "TrustedActionUiContract",
     "ExactCopy",
     "ProjectionPath",
     "ProjectionOf",

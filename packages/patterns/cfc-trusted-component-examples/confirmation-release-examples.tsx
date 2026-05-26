@@ -10,7 +10,7 @@ import {
 import {
   TrustedRecipientConfirmSurface,
   TrustedRedactedReleaseSurface,
-} from "../cfc-trusted-surfaces/main.tsx";
+} from "../cfc/trusted-surfaces/mod.ts";
 
 type ConfirmationReleaseExampleOutput = {
   [NAME]: string;

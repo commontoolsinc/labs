@@ -102,7 +102,6 @@ What is not done yet:
   subagent profile
 - dynamic/model-driven Agent Skills activation
 - skill script execution
-- `web_search`
 - parallel child orchestration
 - app UI event provenance
 - streaming model responses
