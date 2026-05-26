@@ -8,8 +8,10 @@ import {
   pattern,
 } from "commonfabric";
 import type { JSONSchema } from "commonfabric";
-
-type ResultSchemaInput = any;
+import {
+  parseResultSchemaInput,
+  type ResultSchemaInput,
+} from "./result-schema.ts";
 
 type SubAgentInput = {
   prompt: BuiltInLLMContent;
@@ -27,22 +29,7 @@ type SubAgentInput = {
 const parseResultSchema = lift<
   { resultSchema: ResultSchemaInput },
   JSONSchema
->(({ resultSchema }) => {
-  if (typeof resultSchema === "string") {
-    return JSON.parse(resultSchema);
-  }
-  if (
-    typeof resultSchema === "boolean" ||
-    (resultSchema !== null && typeof resultSchema === "object" &&
-      !Array.isArray(resultSchema))
-  ) {
-    return resultSchema as JSONSchema;
-  }
-  // Fail closed for malformed inputs (arrays, numbers, null, undefined). A
-  // permissive `true` here would let arbitrary subagent output through —
-  // exactly the prompt-injection vector this demo is meant to illustrate.
-  return false;
-});
+>(({ resultSchema }) => parseResultSchemaInput(resultSchema));
 
 const appendTaskToSystem = lift<
   { system?: string; prompt: BuiltInLLMContent },

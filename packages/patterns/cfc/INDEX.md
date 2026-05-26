@@ -135,10 +135,12 @@ Schemas:
 Tools and sub-agent:
 
 - `TextOrLink`
+- `ResultSchemaInput`
 - `SendMailArgs`
 - `SendMailResult`
 - `ReadResourceResult`
 - `PromptInjectionTool`
 - `readResourceTool`
 - `sendMailTool`
+- `parseResultSchemaInput`
 - `subAgentPattern`

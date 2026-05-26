@@ -23,10 +23,8 @@ export const promptInputMessage = (
     if (
       attachment.type === "clipboard" && typeof attachment.data === "string"
     ) {
-      resolved = resolved.replace(
-        `[${attachment.name}](#${attachment.id})`,
-        attachment.data,
-      );
+      resolved = resolved.split(`[${attachment.name}](#${attachment.id})`)
+        .join(attachment.data);
     }
   }
 
