@@ -1,7 +1,7 @@
 #!/bin/bash
-# Template: Form Automation Workflow
+# Script: Form Automation Workflow
 # Purpose: Fill and submit web forms with validation
-# Usage: ./form-automation.sh <form-url>
+# Usage: ./scripts/form-automation.sh <form-url>
 #
 # This template demonstrates the snapshot-interact-verify pattern:
 # 1. Navigate to form
@@ -13,7 +13,8 @@
 
 set -euo pipefail
 
-FORM_URL="${1:?Usage: $0 <form-url>}"
+SCRIPT_NAME="${SKILL_SCRIPT:-scripts/form-automation.sh}"
+FORM_URL="${1:?Usage: $SCRIPT_NAME <form-url>}"
 
 echo "Form automation: $FORM_URL"
 

@@ -232,16 +232,22 @@ documented pierce selectors such as `[data-cf-button]` or `[data-cf-input]`.
 | [references/video-recording.md](references/video-recording.md)       | Recording workflows for debugging and documentation       |
 | [references/proxy-support.md](references/proxy-support.md)           | Proxy configuration, geo-testing, rotating proxies        |
 
-## Ready-to-Use Templates
+## Ready-to-Run Scripts
 
-| Template                                                                 | Description                         |
-| ------------------------------------------------------------------------ | ----------------------------------- |
-| [templates/form-automation.sh](templates/form-automation.sh)             | Form filling with validation        |
-| [templates/authenticated-session.sh](templates/authenticated-session.sh) | Login once, reuse state             |
-| [templates/capture-workflow.sh](templates/capture-workflow.sh)           | Content extraction with screenshots |
+When `run_skill_script` is available and exactly allowlisted, prefer these
+bundled scripts over constructing equivalent shell commands. Invoke them with
+`skill="agent-browser"` and the listed `scripts/...` path. These scripts expect
+the `agent-browser` CLI to be available on `PATH` in the script execution
+environment.
+
+| Script                                                               | Description                         |
+| -------------------------------------------------------------------- | ----------------------------------- |
+| [scripts/form-automation.sh](scripts/form-automation.sh)             | Form filling with validation        |
+| [scripts/authenticated-session.sh](scripts/authenticated-session.sh) | Login once, reuse state             |
+| [scripts/capture-workflow.sh](scripts/capture-workflow.sh)           | Content extraction with screenshots |
 
 ```bash
-./templates/form-automation.sh https://example.com/form
-./templates/authenticated-session.sh https://app.example.com/login
-./templates/capture-workflow.sh https://example.com ./output
+./scripts/form-automation.sh https://example.com/form
+./scripts/authenticated-session.sh https://app.example.com/login
+./scripts/capture-workflow.sh https://example.com ./output
 ```

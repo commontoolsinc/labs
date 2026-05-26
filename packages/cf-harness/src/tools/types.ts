@@ -8,8 +8,11 @@ import type {
   HarnessCfcInvocationOperation,
 } from "../contracts/cfc-invocation-context.ts";
 import type {
+  HarnessAllowedSkillScript,
+  HarnessSkillActivations,
   HarnessSkillRegistry,
   HarnessSkillResourceRead,
+  HarnessSkillScriptExecution,
 } from "../contracts/skill.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type { ToolOutputId } from "../contracts/tool-result.ts";
@@ -20,6 +23,8 @@ export interface HarnessToolContext {
   runId: string;
   cfcEnforcementMode: CfcEnforcementMode;
   skillRegistry?: HarnessSkillRegistry;
+  skillActivations?: HarnessSkillActivations;
+  allowedSkillScripts?: readonly HarnessAllowedSkillScript[];
   sandbox: SandboxRuntime;
   hostProcessRunner: ProcessRunner;
   currentDir: string;
@@ -43,6 +48,9 @@ export interface HarnessToolContext {
   nextOutputId(toolId: string): ToolOutputId;
   now(): string;
   recordSkillResourceRead(read: HarnessSkillResourceRead): Promise<void>;
+  recordSkillScriptExecution(
+    execution: HarnessSkillScriptExecution,
+  ): Promise<void>;
   createCfcInvocationContext(options: {
     toolId: string;
     toolOutputId?: ToolOutputId;

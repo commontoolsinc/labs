@@ -17,6 +17,7 @@ import type {
   HarnessSkillActivations,
   HarnessSkillRegistry,
   HarnessSkillResourceReads,
+  HarnessSkillScriptExecutions,
 } from "./contracts/skill.ts";
 import type { HarnessSubagentRunRef } from "./contracts/subagent.ts";
 import type { ToolResultRef } from "./contracts/tool-result.ts";
@@ -60,6 +61,8 @@ export interface HarnessRunState {
   skillActivationsPath?: string;
   skillResourceReads?: HarnessSkillResourceReads;
   skillResourceReadsPath?: string;
+  skillScriptExecutions?: HarnessSkillScriptExecutions;
+  skillScriptExecutionsPath?: string;
   transcriptPath?: string;
   runReportPath?: string;
   capabilitySnapshot?: HarnessCapabilitySnapshot;
@@ -96,6 +99,8 @@ export interface CreateHarnessRunStateOptions {
   skillActivationsPath?: string;
   skillResourceReads?: HarnessSkillResourceReads;
   skillResourceReadsPath?: string;
+  skillScriptExecutions?: HarnessSkillScriptExecutions;
+  skillScriptExecutionsPath?: string;
   transcriptPath?: string;
   runReportPath?: string;
   capabilitySnapshot?: HarnessCapabilitySnapshot;
@@ -158,6 +163,12 @@ export const createHarnessRunState = (
       : {}),
     ...(options.skillResourceReadsPath !== undefined
       ? { skillResourceReadsPath: options.skillResourceReadsPath }
+      : {}),
+    ...(options.skillScriptExecutions !== undefined
+      ? { skillScriptExecutions: options.skillScriptExecutions }
+      : {}),
+    ...(options.skillScriptExecutionsPath !== undefined
+      ? { skillScriptExecutionsPath: options.skillScriptExecutionsPath }
       : {}),
     ...(options.transcriptPath !== undefined
       ? { transcriptPath: options.transcriptPath }
@@ -397,6 +408,20 @@ export const setHarnessSkillResourceReads = (
   ...state,
   skillResourceReads,
   ...(skillResourceReadsPath !== undefined ? { skillResourceReadsPath } : {}),
+  updatedAt: now,
+});
+
+export const setHarnessSkillScriptExecutions = (
+  state: HarnessRunState,
+  skillScriptExecutions: HarnessSkillScriptExecutions,
+  skillScriptExecutionsPath?: string,
+  now = new Date().toISOString(),
+): HarnessRunState => ({
+  ...state,
+  skillScriptExecutions,
+  ...(skillScriptExecutionsPath !== undefined
+    ? { skillScriptExecutionsPath }
+    : {}),
   updatedAt: now,
 });
 
