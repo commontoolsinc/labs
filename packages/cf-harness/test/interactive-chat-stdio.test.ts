@@ -3,6 +3,8 @@ import {
   HARNESS_CHAT_PROTOCOL_VERSION,
   HARNESS_CHAT_REQUEST_TYPE,
 } from "../src/contracts/interactive-chat.ts";
+import { HARNESS_BROWSER_ACCESS_LEASE_TYPE } from "../src/contracts/browser-access.ts";
+import { CFC_PROMPT_SLOT_BOUND_ATOM_TYPE } from "../src/contracts/prompt-slot.ts";
 import { HarnessInteractiveChatService } from "../src/interactive-chat-service.ts";
 import {
   type HarnessInteractiveChatOutputEnvelope,
@@ -202,5 +204,148 @@ Deno.test("interactive NDJSON transport rejects malformed policy params", async 
   assertEquals(
     "ok" in response && response.ok === false ? response.error.code : "",
     "invalid_request",
+  );
+});
+
+Deno.test("interactive NDJSON transport rejects malformed policy prompt slots", async () => {
+  const output: string[] = [];
+  await runHarnessInteractiveChatNdjsonTransport({
+    lines: [
+      JSON.stringify({
+        type: HARNESS_CHAT_REQUEST_TYPE,
+        protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
+        requestId: "req-bad-prompt-slot",
+        method: "start_session",
+        params: {
+          sessionId: "session-1",
+          workspace: { hostPath: "/workspace" },
+          policy: {
+            type: "cf-harness.chat-policy",
+            toolMode: "workspace-write",
+            allowedToolIds: ["write_file"],
+            allowedSubagentProfiles: [],
+            promptSlot: {
+              role: "direct-command",
+            },
+          },
+        },
+      }),
+    ],
+    writeLine: (line) => {
+      output.push(line);
+    },
+  });
+
+  const response = decodeLines(output)[0];
+  assertEquals("ok" in response ? response.ok : true, false);
+  assertEquals(
+    "ok" in response && response.ok === false ? response.error.code : "",
+    "invalid_request",
+  );
+});
+
+Deno.test("interactive NDJSON transport accepts valid policy prompt slots", async () => {
+  const output: string[] = [];
+  await runHarnessInteractiveChatNdjsonTransport({
+    lines: [
+      JSON.stringify({
+        type: HARNESS_CHAT_REQUEST_TYPE,
+        protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
+        requestId: "req-good-prompt-slot",
+        method: "start_session",
+        params: {
+          sessionId: "session-1",
+          workspace: { hostPath: "/workspace" },
+          policy: {
+            type: "cf-harness.chat-policy",
+            toolMode: "workspace-write",
+            allowedToolIds: ["write_file"],
+            allowedSubagentProfiles: [],
+            promptSlot: {
+              type: CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
+              source: "comment-1",
+              role: "direct-command",
+              kernelName: "loom",
+              surface: "comment-thread",
+            },
+          },
+        },
+      }),
+    ],
+    writeLine: (line) => {
+      output.push(line);
+    },
+  });
+
+  const response = decodeLines(output).find((envelope) =>
+    "ok" in envelope && envelope.requestId === "req-good-prompt-slot"
+  );
+  assertEquals(
+    response !== undefined && "ok" in response ? response.ok : false,
+    true,
+  );
+});
+
+Deno.test("interactive NDJSON transport rejects malformed Browser Access leases", async () => {
+  const output: string[] = [];
+  await runHarnessInteractiveChatNdjsonTransport({
+    lines: [
+      JSON.stringify({
+        type: HARNESS_CHAT_REQUEST_TYPE,
+        protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
+        requestId: "req-bad-browser-access",
+        method: "start_session",
+        params: {
+          sessionId: "session-1",
+          workspace: { hostPath: "/workspace" },
+          browserAccess: {},
+        },
+      }),
+    ],
+    writeLine: (line) => {
+      output.push(line);
+    },
+  });
+
+  const response = decodeLines(output)[0];
+  assertEquals("ok" in response ? response.ok : true, false);
+  assertEquals(
+    "ok" in response && response.ok === false ? response.error.code : "",
+    "invalid_request",
+  );
+});
+
+Deno.test("interactive NDJSON transport accepts valid Browser Access leases", async () => {
+  const output: string[] = [];
+  await runHarnessInteractiveChatNdjsonTransport({
+    lines: [
+      JSON.stringify({
+        type: HARNESS_CHAT_REQUEST_TYPE,
+        protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
+        requestId: "req-good-browser-access",
+        method: "start_session",
+        params: {
+          sessionId: "session-1",
+          workspace: { hostPath: "/workspace" },
+          browserAccess: {
+            type: HARNESS_BROWSER_ACCESS_LEASE_TYPE,
+            leaseId: "lease-1",
+            cdpUrl: "http://127.0.0.1:9222",
+            owner: "loom",
+          },
+        },
+      }),
+    ],
+    writeLine: (line) => {
+      output.push(line);
+    },
+  });
+
+  const response = decodeLines(output).find((envelope) =>
+    "ok" in envelope && envelope.requestId === "req-good-browser-access"
+  );
+  assertEquals(
+    response !== undefined && "ok" in response ? response.ok : false,
+    true,
   );
 });

@@ -8,6 +8,8 @@ import {
   type HarnessChatRequestMethod,
   type HarnessChatResponse,
 } from "./contracts/interactive-chat.ts";
+import { HARNESS_BROWSER_ACCESS_LEASE_TYPE } from "./contracts/browser-access.ts";
+import { normalizePromptSlotBinding } from "./contracts/prompt-slot.ts";
 import {
   HARNESS_SUBAGENT_PROFILES,
   type HarnessSubagentProfile,
@@ -76,6 +78,9 @@ const hasOptionalString = (
   key: string,
 ): boolean => value[key] === undefined || typeof value[key] === "string";
 
+const isNonEmptyString = (value: unknown): value is string =>
+  typeof value === "string" && value.trim() !== "";
+
 const isValidWorkspaceParam = (value: unknown): boolean =>
   isRecord(value) &&
   typeof value.hostPath === "string" &&
@@ -95,6 +100,23 @@ const isStringArrayIn = (
   Array.isArray(value) &&
   value.every((item) => typeof item === "string" && allowedValues.has(item));
 
+const isValidPromptSlotParam = (value: unknown): boolean => {
+  try {
+    normalizePromptSlotBinding(value);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const isValidBrowserAccessParam = (value: unknown): boolean =>
+  isRecord(value) &&
+  value.type === HARNESS_BROWSER_ACCESS_LEASE_TYPE &&
+  isNonEmptyString(value.leaseId) &&
+  isNonEmptyString(value.cdpUrl) &&
+  hasOptionalString(value, "owner") &&
+  hasOptionalString(value, "expiresAt");
+
 const isValidChatPolicyParam = (value: unknown): boolean =>
   isRecord(value) &&
   value.type === "cf-harness.chat-policy" &&
@@ -108,7 +130,8 @@ const isValidChatPolicyParam = (value: unknown): boolean =>
   (value.cfcEnforcementMode === undefined ||
     (typeof value.cfcEnforcementMode === "string" &&
       SUPPORTED_CFC_ENFORCEMENT_MODES.has(value.cfcEnforcementMode))) &&
-  (value.promptSlot === undefined || isRecord(value.promptSlot));
+  (value.promptSlot === undefined ||
+    isValidPromptSlotParam(value.promptSlot));
 
 const isValidRequestParams = (
   method: HarnessChatRequestMethod,
@@ -125,7 +148,7 @@ const isValidRequestParams = (
           isValidChatPolicyParam(params.policy)) &&
         (params.capabilities === undefined || isRecord(params.capabilities)) &&
         (params.browserAccess === undefined ||
-          isRecord(params.browserAccess)) &&
+          isValidBrowserAccessParam(params.browserAccess)) &&
         (params.metadata === undefined || isRecord(params.metadata));
     case "start_turn":
       return typeof params.sessionId === "string" &&
@@ -135,7 +158,7 @@ const isValidRequestParams = (
         (params.policy === undefined ||
           isValidChatPolicyParam(params.policy)) &&
         (params.browserAccess === undefined ||
-          isRecord(params.browserAccess)) &&
+          isValidBrowserAccessParam(params.browserAccess)) &&
         (params.metadata === undefined || isRecord(params.metadata));
     case "cancel_turn":
       return typeof params.sessionId === "string" &&
