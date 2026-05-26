@@ -11,11 +11,6 @@ import {
 describe("FabricEpochDays", () => {
   // Pure type-identity / supertype checks: cross-cutting carve-out per the
   // rule (don't fit a single member, aren't construction mechanics).
-  it("is an instance of `FabricEpochDays`", () => {
-    const sd = new FabricEpochDays(100n);
-    expect(sd instanceof FabricEpochDays).toBe(true);
-  });
-
   it("is an instance of `FabricPrimitive`", () => {
     expect(new FabricEpochDays(0n) instanceof FabricPrimitive).toBe(
       true,
