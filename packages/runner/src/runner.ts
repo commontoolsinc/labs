@@ -3125,6 +3125,7 @@ export class Runner {
         resultCell.space,
         {
           pattern: module.implementation,
+          parent: resultCell.entityId,
           inputBindings,
           outputBindings,
         },
