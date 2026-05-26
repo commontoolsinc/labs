@@ -692,9 +692,14 @@ export class RuntimeProcessor {
       });
       await target.sync();
       const targetLink = target.getAsNormalizedFullLink();
-      if (!target.getSourceCell() || targetLink.path.length > 0) {
+      const sourceCell = target.getSourceCell();
+      if (!sourceCell || targetLink.path.length > 0) {
+        const pageCell = sourceCell && targetLink.path.length > 0
+          ? target.asSchemaFromLinks()
+          : target;
+        await pageCell.pull();
         return {
-          page: createPageRef(target),
+          page: createPageRef(pageCell),
         };
       }
 
