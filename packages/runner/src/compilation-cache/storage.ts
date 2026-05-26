@@ -7,6 +7,8 @@ export interface CompilationCacheEntry {
   id: string;
   /** Full JsScript including source maps. */
   jsScript: JsScript;
+  /** True only for bundles that passed the SES compiled-bundle validator. */
+  sesValidated?: true;
   fingerprint: string;
   /** Timestamp for diagnostics / count-based eviction. */
   cachedAt: number;
