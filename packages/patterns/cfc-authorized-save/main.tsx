@@ -11,7 +11,7 @@ import {
 import {
   TrustedSaveSurface,
   TrustedSaveTitleUiContract,
-} from "../cfc-trusted-surfaces/main.tsx";
+} from "../cfc/trusted-surfaces/mod.ts";
 
 interface AuthorizedSaveInput {
   draftTitle: Writable<Default<string, "">>;

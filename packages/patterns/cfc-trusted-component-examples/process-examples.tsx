@@ -11,7 +11,7 @@ import {
   TrustedLongRunningJobSurface,
   TrustedSharePolicySurface,
   TrustedSongIdRecordingSurface,
-} from "../cfc-trusted-surfaces/main.tsx";
+} from "../cfc/trusted-surfaces/mod.ts";
 
 type ProcessExampleOutput = {
   [NAME]: string;

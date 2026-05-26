@@ -14,7 +14,7 @@ import {
   TrustedPublishSurface,
   TrustedReviewSurface,
   TrustedSaveDraftSurface,
-} from "../cfc-trusted-surfaces/main.tsx";
+} from "../cfc/trusted-surfaces/mod.ts";
 
 const runDecoy = handler<
   void,

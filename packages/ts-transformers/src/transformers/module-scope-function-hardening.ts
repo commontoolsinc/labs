@@ -592,6 +592,8 @@ function discoverWriteAuthorizedByBindingPositions(
 ): Map<string, Set<number>> {
   const positionsByName = new Map<string, Set<number>>([
     ["WriteAuthorizedBy", new Set([1])],
+    ["TrustedActionWrite", new Set([1])],
+    ["TrustedActionWriteWithIntegrity", new Set([1])],
   ]);
 
   let changed = true;
