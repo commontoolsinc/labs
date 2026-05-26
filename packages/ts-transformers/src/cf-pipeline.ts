@@ -124,6 +124,7 @@ export class CommonFabricTransformerPipeline extends Pipeline {
       schemaHints: new WeakMap(),
       capabilitySummaryRegistry: new WeakMap(),
       narrowedWrapperTypeRegistry: new WeakMap(),
+      syntheticLiftAppliedCallRegistry: new WeakSet(),
       ...options,
     };
     // Create a shared diagnostics collector

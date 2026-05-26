@@ -3170,6 +3170,18 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             return ts.visitEachChild(node, visit, transformation);
           }
 
+          // Lift-applied calls emitted by createLiftAppliedCall (the
+          // synthetic JSX compute-wrap path used by expression-rewrite)
+          // carry an input TypeNode already built from accurate capture
+          // analysis. Re-applying the capability-summary shrink would
+          // collapse array element types to `unknown` (CT-1615 Berni
+          // review on PR #3676). User-source derive<T,R>(...) lowered
+          // into lift-applied is NOT marked, so it retains the legacy
+          // shrink behavior.
+          const isSynthetic = context.isSyntheticLiftAppliedCall(node) ||
+            (ts.isCallExpression(innerCallee) &&
+              context.isSyntheticLiftAppliedCall(innerCallee));
+
           const resolved = resolveDualSchemaBuilderTypes(
             liftAppliedArgs?.callback,
             checker,
@@ -3183,6 +3195,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
               explicitArgumentTypeValue: typeRegistry?.get(argumentType),
               explicitResultTypeNode: resultType,
               explicitResultTypeValue: typeRegistry?.get(resultType),
+              applyExplicitArgumentCapabilitySummary: !isSynthetic,
             },
           );
           if (!resolved) {

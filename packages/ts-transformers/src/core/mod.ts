@@ -69,6 +69,20 @@
  *   Writers: transformers/type-shrinking.ts (applyShrinkAndWrap)
  *   Readers: transformers/schema-injection.ts (inner-lift revisit path)
  *
+ * syntheticLiftAppliedCallRegistry (WeakSet<ts.CallExpression>)
+ *   Marks CallExpressions emitted by createLiftAppliedCall (the synthetic
+ *   JSX compute-wrap path used by expression-rewrite). Used to suppress
+ *   the capability-summary shrink in schema-injection's lift-applied
+ *   dispatch, because the input TypeNode is already built from accurate
+ *   capture analysis and re-shrinking collapses array element types to
+ *   `unknown` (regression surfaced by CT-1615 Berni review on PR #3676).
+ *   User-source derive<T,R>(...) lowered via LiftLoweringTransformer is
+ *   NOT marked, so it retains the legacy shrink behavior.
+ *   Writers: context.markSyntheticLiftAppliedCall() (called by
+ *            transformers/builtins/lift-applied.ts → createLiftAppliedCall)
+ *   Readers: context.isSyntheticLiftAppliedCall() (called by
+ *            transformers/schema-injection.ts lift-applied dispatch branch)
+ *
  * --- Cache invalidation contract ---
  *
  * The four context.mark* methods on TransformationContext (for
