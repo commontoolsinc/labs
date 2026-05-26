@@ -222,6 +222,54 @@ describe("page slug redirects", () => {
     expect(result.page.cell).toMatchObject(targetRef);
   });
 
+  it("renders slug redirects to nested output cells directly", async () => {
+    const targetRef: CellRef = {
+      id: "of:fid1-parent-page" as CellRef["id"],
+      space,
+      scope: "space",
+      path: ["activityTab"],
+    };
+    const slugRef: CellRef = {
+      id: "of:fid1-slug-doc" as CellRef["id"],
+      space,
+      scope: "space",
+      path: [],
+    };
+    let targetSynced = false;
+    const targetCell = mockCell(targetRef, {
+      sourceCell: {},
+      onSync: () => {
+        targetSynced = true;
+      },
+    });
+    const slugCell = mockCell(slugRef, { raw: redirectRaw(targetRef) });
+    const manager = {
+      get: () => {
+        throw new Error(
+          "nested output-cell slug redirects should not load as pieces",
+        );
+      },
+    };
+    const processor = {
+      pieceManager: { getSpace: () => space },
+      runtime: {
+        getCellFromEntityId: () => slugCell,
+        getCellFromLink: () => targetCell,
+      },
+      cc: { manager: () => manager },
+    };
+
+    const result = await (RuntimeProcessor.prototype as any).handlePageGet
+      .call(processor, {
+        type: RequestType.PageGet,
+        pageId: "fid1-slug-doc",
+        runIt: true,
+      });
+
+    expect(targetSynced).toBe(true);
+    expect(result.page.cell).toMatchObject(targetRef);
+  });
+
   it("loads slug redirects to piece cells through the piece manager", async () => {
     const pieceRef: CellRef = {
       id: "of:fid1-piece" as CellRef["id"],
