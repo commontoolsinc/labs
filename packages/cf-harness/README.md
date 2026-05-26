@@ -41,16 +41,21 @@ What works today:
   - `bash-no-sandbox` (provisional host shell for named subagent profiles only)
   - `read_file`
   - `view_image`
+  - `web_fetch` (explicit parent allowlist or `web_fetch` subagent profile only)
   - `read_skill_resource`
   - `edit_file`
   - `write_file`
   - `delegate_task`
 - targeted exact-string edits plus whole-file replace/create and append writes
 - initial and in-run image attachments for model vision-capable flows
+- bounded public HTTP(S) fetches through `web_fetch`, with redirect validation,
+  local/private target blocking, extracted text/links, and raw bounded response
+  retention in tool-output artifacts; `web_fetch` is intentionally not part of
+  the default parent tool surface
 - bounded OpenAI-compatible prompt/tool loop
 - single-child subagent delegation with fresh child prompt context, explicit
-  default/browser child profiles, retained child run references, and a sanitized
-  summary/state return channel
+  default/browser/web_fetch/web_search child profiles, retained child run
+  references, and a sanitized summary/state return channel
 - optional schema-validated subagent structured returns, with raw child return
   artifacts retained in the child run and open-ended strings linkified before
   the parent sees them
@@ -97,6 +102,7 @@ What is not done yet:
   subagent profile
 - dynamic/model-driven Agent Skills activation
 - skill script execution
+- `web_search`
 - parallel child orchestration
 - app UI event provenance
 - streaming model responses
@@ -284,6 +290,30 @@ deno task run -- \
   --allow-subagent-profile browser \
   --prompt "Delegate browser inspection of the local app and summarize the result."
 ```
+
+The `web_fetch` profile is the preferred first-pass path for web page
+inspection. It gives the child only the `web_fetch` tool: no shell, no browser,
+no workspace reads, and no workspace writes. This keeps external web content in
+the child run and returns only the normal sanitized subagent summary/state to
+the parent. Use this profile when a task needs to inspect public HTTP(S) pages
+but does not need authenticated browser state or general web search.
+
+```bash
+deno task run -- \
+  --workspace /path/to/workspace \
+  --gateway-auth-mode none \
+  --allow-tool delegate_task \
+  --allow-subagent-profile web_fetch \
+  --prompt "Delegate inspection of https://example.com and summarize the result."
+```
+
+The `web_search` profile is the provider-native search profile. It runs the
+child on the configured Gemini search model, requests the gateway's
+`google_search` native model tool, and gives the child no built-in file, shell,
+browser, or fetch tools. The intended use is the same CFC boundary as browser
+and web_fetch subagents: the parent delegates a focused search task, raw search
+observations stay in child artifacts, and the parent receives only the sanitized
+subagent return channel.
 
 Programmatic `delegate_task` calls may include `returnSchema`, a JSON Schema
 object or boolean. In that mode the child is required to return a single JSON

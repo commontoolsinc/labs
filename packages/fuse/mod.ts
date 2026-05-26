@@ -55,6 +55,7 @@ import {
   ENOENT,
   ENOTDIR,
   ERANGE,
+  EROFS,
   EXDEV,
   FILE_MODE_RW,
   FUSE_SET_ATTR_SIZE,
@@ -75,7 +76,6 @@ import { decodeFuseComponent, encodeFusePathSegments } from "./path-codec.ts";
 import { buildNodeStat, getMountOwnership, nodeMode } from "./stat.ts";
 
 const encoder = new TextEncoder();
-
 // Operation ring buffer — last 50 ops for crash diagnostics
 const OP_RING: string[] = [];
 const OP_RING_SIZE = 50;
@@ -104,6 +104,17 @@ globalThis.addEventListener("error", (e) => {
   console.error("[FUSE] Uncaught error:", e.error ?? e.message);
   e.preventDefault();
 });
+
+type FusePromiseRejectionEvent = Event & {
+  readonly reason?: unknown;
+  preventDefault(): void;
+};
+
+type FuseErrorEvent = Event & {
+  readonly error?: unknown;
+  readonly message?: string;
+  preventDefault(): void;
+};
 
 type HandleWriteTarget =
   | { kind: "handler"; target: HandlerTarget }
@@ -169,6 +180,36 @@ export function bufferForNoHandleTruncate(
   return content.slice(0, Math.min(newSize, content.length));
 }
 
+export function writeUnavailableErrno(
+  bridge: Pick<CellBridge, "disconnected"> | null | undefined,
+): number {
+  return bridge?.disconnected ? EROFS : EACCES;
+}
+
+export function disconnectedWriteErrno(
+  bridge: Pick<CellBridge, "disconnected"> | null | undefined,
+): number | null {
+  return bridge?.disconnected ? EROFS : null;
+}
+
+export function isConnectionWriteFailure(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  return msg.includes("transport closed") ||
+    msg.includes("ConnectionError") ||
+    msg.includes("connection refused") ||
+    msg.includes("failed to connect to WebSocket");
+}
+
+export function cfcWritebackXattrResultErrno(
+  result: { ok: true } | { ok: false; reason: string },
+  errnos: { enotsup: number },
+): number {
+  if (result.ok) return 0;
+  return result.reason === "unsupported writeback xattr"
+    ? errnos.enotsup
+    : EINVAL;
+}
+
 export function rootSpaceLookupNames(name: string): {
   spaceName: string;
   directoryName: string;
@@ -188,6 +229,26 @@ function readBuffer(ptr: Deno.PointerValue, size: bigint): Uint8Array {
   return data;
 }
 
+type SupervisorStatusState =
+  | "starting"
+  | "mounted"
+  | "failed"
+  | "exiting"
+  | "exited";
+
+export async function writeFailedSupervisorStartupStatus(
+  error: unknown,
+  writeSupervisorStatus: (
+    state: "failed",
+    extra?: Record<string, unknown>,
+  ) => Promise<void>,
+): Promise<void> {
+  console.error(String(error));
+  await writeSupervisorStatus("failed", { error: String(error) }).catch(() => {
+    // Best effort; startup failure is already being reported by process exit.
+  });
+}
+
 export async function main(argv: string[] = Deno.args) {
   const args = parseArgs(argv, {
     string: [
@@ -196,6 +257,8 @@ export async function main(argv: string[] = Deno.args) {
       "identity",
       "exec-cli",
       "log-file",
+      "supervisor-status",
+      "supervisor-token",
       "cfc-xattr-namespace",
       "cfc-mode",
       "cfc-writeback-state",
@@ -213,6 +276,8 @@ export async function main(argv: string[] = Deno.args) {
       identity: Deno.env.get("CF_IDENTITY") ?? "",
       "exec-cli": "",
       "log-file": "",
+      "supervisor-status": "",
+      "supervisor-token": "",
       "cfc-xattr-namespace": DEFAULT_CFC_XATTR_NAMESPACE,
       "cfc-mode": "",
       "cfc-writeback-state": "",
@@ -296,6 +361,37 @@ export async function main(argv: string[] = Deno.args) {
     );
     Deno.exit(1);
   }
+  const supervisorStatusPath = String(args["supervisor-status"] ?? "");
+  const supervisorToken = String(args["supervisor-token"] ?? "");
+  const supervisorStatusStartedAt = new Date().toISOString();
+  async function writeSupervisorStatus(
+    state: SupervisorStatusState,
+    extra: Record<string, unknown> = {},
+  ): Promise<void> {
+    if (!supervisorStatusPath) return;
+    await Deno.writeTextFile(
+      supervisorStatusPath,
+      JSON.stringify(
+        {
+          state,
+          pid: Deno.pid,
+          mountpoint,
+          token: supervisorToken || undefined,
+          startedAt: supervisorStatusStartedAt,
+          updatedAt: new Date().toISOString(),
+          ...extra,
+        },
+        null,
+        2,
+      ),
+    );
+  }
+  try {
+    await writeSupervisorStatus("starting");
+  } catch (error) {
+    console.error(`[FUSE] Unable to write supervisor status: ${error}`);
+    Deno.exit(1);
+  }
   const requestedCfcWritebackState = String(args["cfc-writeback-state"] ?? "");
   const cfcWritebackStatePath = requestedCfcWritebackState ||
     (cfcWritebackXattrs || cfcMode !== "disabled"
@@ -308,16 +404,23 @@ export async function main(argv: string[] = Deno.args) {
   });
   const cfcDiagnostics: string[] = [];
 
-  // Ensure mountpoint exists
+  let platform: Awaited<ReturnType<typeof getPlatform>>;
+  let fuse: ReturnType<Awaited<ReturnType<typeof getPlatform>>["openFuse"]>;
   try {
-    Deno.statSync(mountpoint);
-  } catch {
-    Deno.mkdirSync(mountpoint, { recursive: true });
-  }
+    // Ensure mountpoint exists
+    try {
+      Deno.statSync(mountpoint);
+    } catch {
+      Deno.mkdirSync(mountpoint, { recursive: true });
+    }
 
-  // Open libfuse via platform abstraction
-  const platform = await getPlatform();
-  const fuse = platform.openFuse();
+    // Open libfuse via platform abstraction
+    platform = await getPlatform();
+    fuse = platform.openFuse();
+  } catch (e) {
+    await writeFailedSupervisorStartupStatus(e, writeSupervisorStatus);
+    Deno.exit(1);
+  }
   const {
     STAT_SIZE,
     ENTRY_PARAM_SIZE,
@@ -330,6 +433,7 @@ export async function main(argv: string[] = Deno.args) {
     writeFileInfo,
     O_TRUNC,
     ENODATA,
+    ENOTSUP,
   } = platform;
 
   // Create filesystem tree
@@ -349,6 +453,44 @@ export async function main(argv: string[] = Deno.args) {
     lastError: null as string | null,
     lastErrorAt: null as string | null,
   };
+
+  function noteWriteFailure(e: unknown): string {
+    const msg = e instanceof Error ? e.message : String(e);
+    writeStats.flushErrors++;
+    writeStats.lastError = msg;
+    writeStats.lastErrorAt = new Date().toISOString();
+    if (bridge && !bridge.disconnected && isConnectionWriteFailure(e)) {
+      bridge.markDisconnected(msg);
+    }
+    return msg;
+  }
+
+  function recordAsyncWriteFailure(context: string, e: unknown): void {
+    const msg = noteWriteFailure(e);
+    console.error(`[fuse] ${context}: ${msg}`);
+  }
+
+  function failIfDisconnectedWrite(req: Deno.PointerValue): boolean {
+    const errno = disconnectedWriteErrno(bridge);
+    if (errno === null) return false;
+    fuse.symbols.fuse_reply_err(req, errno);
+    return true;
+  }
+
+  globalThis.addEventListener("unhandledrejection", (event: Event) => {
+    const rejection = event as FusePromiseRejectionEvent;
+    if (!isConnectionWriteFailure(rejection.reason)) return;
+    recordAsyncWriteFailure("unhandled async write failure", rejection.reason);
+    rejection.preventDefault();
+  });
+
+  globalThis.addEventListener("error", (event: Event) => {
+    const errorEvent = event as FuseErrorEvent;
+    const error = errorEvent.error ?? errorEvent.message;
+    if (!isConnectionWriteFailure(error)) return;
+    recordAsyncWriteFailure("uncaught async write failure", error);
+    errorEvent.preventDefault();
+  });
 
   // Number of FUSE requests whose reply is intentionally delayed while async
   // bridge work runs. Reverse invalidations are unsafe while these requests are
@@ -370,42 +512,47 @@ export async function main(argv: string[] = Deno.args) {
   }
 
   // Populate tree
-  const apiUrl = args["api-url"];
-  if (apiUrl) {
-    bridge = new CellBridge(tree, args["exec-cli"] || "", {
-      cfcAnnotations: cfcAnnotationsEnabled,
-      statusProvider: () => ({
-        writes: { ...writeStats },
-        logFile: logFilePath || null,
-        cfc: {
-          mode: cfcMode,
-          annotations: cfcAnnotationsEnabled,
-          writebackXattrs: cfcWritebackXattrs,
-          writeback: cfcWritebacks.status(),
-          diagnostics: cfcDiagnostics.slice(-50),
-        },
-      }),
-      onCfcProjectionRebuilt: reconcileCfcWritebacks,
-    });
-    bridge.init({
-      apiUrl,
-      identity: args.identity || "",
-    });
-    bridge.setDebug(debug);
-    bridge.initStatus();
+  try {
+    const apiUrl = args["api-url"];
+    if (apiUrl) {
+      bridge = new CellBridge(tree, args["exec-cli"] || "", {
+        cfcAnnotations: cfcAnnotationsEnabled,
+        statusProvider: () => ({
+          writes: { ...writeStats },
+          logFile: logFilePath || null,
+          cfc: {
+            mode: cfcMode,
+            annotations: cfcAnnotationsEnabled,
+            writebackXattrs: cfcWritebackXattrs,
+            writeback: cfcWritebacks.status(),
+            diagnostics: cfcDiagnostics.slice(-50),
+          },
+        }),
+        onCfcProjectionRebuilt: reconcileCfcWritebacks,
+      });
+      bridge.init({
+        apiUrl,
+        identity: args.identity || "",
+      });
+      bridge.setDebug(debug);
+      bridge.initStatus();
 
-    // Connect initial spaces (default: "home")
-    const spaces = (args.space as string[]).length > 0
-      ? (args.space as string[])
-      : ["home"];
-    for (const spaceName of spaces) {
-      await bridge.connectSpace(spaceName);
-      reconcileCfcWritebacks();
-      console.log(`Connected space: ${spaceName}`);
+      // Connect initial spaces (default: "home")
+      const spaces = (args.space as string[]).length > 0
+        ? (args.space as string[])
+        : ["home"];
+      for (const spaceName of spaces) {
+        await bridge.connectSpace(spaceName);
+        reconcileCfcWritebacks();
+        console.log(`Connected space: ${spaceName}`);
+      }
+    } else {
+      tree.addFile(tree.rootIno, "hello.txt", "Hello from FUSE!\n", "string");
+      console.log("Static mode: hello.txt");
     }
-  } else {
-    tree.addFile(tree.rootIno, "hello.txt", "Hello from FUSE!\n", "string");
-    console.log("Static mode: hello.txt");
+  } catch (e) {
+    await writeFailedSupervisorStartupStatus(e, writeSupervisorStatus);
+    Deno.exit(1);
   }
 
   // --- Callbacks ---
@@ -952,6 +1099,7 @@ export async function main(argv: string[] = Deno.args) {
 
         let writeTarget: HandleWriteTarget | undefined;
         if (node.callableKind === "handler" && isWriting) {
+          if (failIfDisconnectedWrite(req)) return;
           if (isCfcEnforcing(cfcMode)) {
             fuse.symbols.fuse_reply_err(req, EACCES);
             return;
@@ -1009,6 +1157,10 @@ export async function main(argv: string[] = Deno.args) {
           }
           writeTarget = { kind: "value", target: writePath };
         }
+      }
+
+      if (isWriting && writeTarget?.kind !== "ignored") {
+        if (failIfDisconnectedWrite(req)) return;
       }
 
       // Get current content for the handle buffer
@@ -1297,6 +1449,12 @@ export async function main(argv: string[] = Deno.args) {
         return 0;
       }
 
+      const disconnectedErrno = disconnectedWriteErrno(bridge);
+      if (disconnectedErrno !== null) {
+        markExistingFailed("backend disconnected");
+        return disconnectedErrno;
+      }
+
       if (writeTarget?.kind === "handler") {
         const text = new TextDecoder().decode(buffer);
         const trimmed = text.trim();
@@ -1350,8 +1508,11 @@ export async function main(argv: string[] = Deno.args) {
           meta = await piece.getPatternMeta();
         } catch (e) {
           console.error(`[source] Failed to get pattern meta: ${e}`);
-          markExistingFailed(String(e));
-          return EACCES;
+          const errorMsg = isConnectionWriteFailure(e)
+            ? noteWriteFailure(e)
+            : String(e);
+          markExistingFailed(errorMsg);
+          return isConnectionWriteFailure(e) ? EROFS : EACCES;
         }
 
         // Normalise to a files array, mirroring buildSourceTree:
@@ -1416,6 +1577,11 @@ export async function main(argv: string[] = Deno.args) {
         } catch (e) {
           // Write compile error to error.log
           const errorMsg = e instanceof Error ? e.message : String(e);
+          if (isConnectionWriteFailure(e)) {
+            noteWriteFailure(e);
+            markExistingFailed(errorMsg);
+            return EROFS;
+          }
           const errorLogIno = tree.lookup(srcIno, "error.log");
           if (errorLogIno !== undefined) {
             tree.updateFile(errorLogIno, errorMsg);
@@ -1531,35 +1697,31 @@ export async function main(argv: string[] = Deno.args) {
         : "[fuse] flush error";
       console.error(`${logPrefix}: ${e}`);
 
-      // Detect transport/connection failures and mark the bridge as
-      // disconnected so subsequent writes fail loudly (EACCES) instead
-      // of silently succeeding in the optimistic local tree.
-      const msg = e instanceof Error ? e.message : String(e);
-      writeStats.flushErrors++;
-      writeStats.lastError = msg;
-      writeStats.lastErrorAt = new Date().toISOString();
+      const isConnectionFailure = isConnectionWriteFailure(e);
+      const msg = isConnectionFailure
+        ? noteWriteFailure(e)
+        : e instanceof Error
+        ? e.message
+        : String(e);
+      if (!isConnectionFailure) {
+        writeStats.flushErrors++;
+        writeStats.lastError = msg;
+        writeStats.lastErrorAt = new Date().toISOString();
+      }
       console.error(
         `[write-trace] flush-err ino=${handle.ino} err=${
           e instanceof Error ? e.stack ?? e.message : String(e)
         }`,
       );
-      if (
-        bridge && !bridge.disconnected &&
-        (msg.includes("transport closed") ||
-          msg.includes("ConnectionError") ||
-          msg.includes("connection refused"))
-      ) {
-        bridge.markDisconnected(msg);
-      }
 
       markExistingFailed(msg);
-      return EIO;
+      return isConnectionFailure ? EROFS : EIO;
     } finally {
       handle.flushing = false;
       if (handleHasPendingChanges(handle) && handle.version !== flushVersion) {
         queueMicrotask(() => {
           flushHandle(handle).catch((e) => {
-            console.error(`[fuse] flush retry error: ${e}`);
+            recordAsyncWriteFailure("flush retry error", e);
           });
         });
       }
@@ -1590,7 +1752,7 @@ export async function main(argv: string[] = Deno.args) {
         return;
       }
       flushHandle(handle).catch((e) => {
-        console.error(`[fuse] scheduled flush error: ${e}`);
+        recordAsyncWriteFailure("scheduled flush error", e);
       });
     }, delayMs);
     scheduledFlushes.set(handle, timer);
@@ -1634,6 +1796,13 @@ export async function main(argv: string[] = Deno.args) {
       }
 
       const writeTarget = handle.writeTarget as HandleWriteTarget | undefined;
+      if (writeTarget?.kind !== "ignored") {
+        const errno = disconnectedWriteErrno(bridge);
+        if (errno !== null) {
+          fuse.symbols.fuse_reply_err(req, errno);
+          return;
+        }
+      }
       if (
         writeTarget?.kind !== "ignored" &&
         !authorizeHandleCfcWrite(fh, handle, "write")
@@ -1677,6 +1846,15 @@ export async function main(argv: string[] = Deno.args) {
         return;
       }
 
+      const writeTarget = handle.writeTarget as HandleWriteTarget | undefined;
+      if (writeTarget?.kind !== "ignored") {
+        const errno = disconnectedWriteErrno(bridge);
+        if (errno !== null) {
+          fuse.symbols.fuse_reply_err(req, errno);
+          return;
+        }
+      }
+
       // Reply immediately — the subscription rebuild triggered by writeValue
       // must not run while a FUSE reply is still pending (it invalidates
       // inodes via notify_inval_entry which crashes FUSE-T mid-callback).
@@ -1684,7 +1862,6 @@ export async function main(argv: string[] = Deno.args) {
       console.log(`[write-trace] flush-fire fh=${fh}`);
 
       // Fire-and-forget the actual write to the cell
-      const writeTarget = handle.writeTarget as HandleWriteTarget | undefined;
       const shouldDelay = handle.truncatePending ||
         (writeTarget?.kind === "value" &&
           writeTarget.target.fsProjection === "markdown");
@@ -1697,7 +1874,7 @@ export async function main(argv: string[] = Deno.args) {
       } else {
         clearScheduledFlush(handle);
         flushHandle(handle).catch((e) => {
-          console.error(`[fuse] flush write error: ${e}`);
+          recordAsyncWriteFailure("flush write error", e);
         });
       }
     },
@@ -1740,6 +1917,9 @@ export async function main(argv: string[] = Deno.args) {
       const metadataFields = metadataChange
         ? metadataFieldsForSetattrFlags(metadataFlags)
         : [];
+      if ((sizeChange || metadataChange) && failIfDisconnectedWrite(req)) {
+        return;
+      }
       let newSize = 0;
       if (sizeChange) {
         const attrView = new Deno.UnsafePointerView(_attrPtr!);
@@ -1859,7 +2039,7 @@ export async function main(argv: string[] = Deno.args) {
             }
             tree.updateFile(inode, truncateHandle.buffer, node.jsonType);
             flushHandle(truncateHandle).catch((e) => {
-              console.error(`[fuse] truncate write error: ${e}`);
+              recordAsyncWriteFailure("truncate write error", e);
             }).finally(() => {
               handles.close(truncateFh);
             });
@@ -1903,16 +2083,24 @@ export async function main(argv: string[] = Deno.args) {
       // Reply immediately. Fire-and-forget the write if dirty.
       // Defer handles.close() until after the flush settles so
       // flushHandle can still read handle state (writeTarget, buffer).
-      fuse.symbols.fuse_reply_err(req, 0);
-
       if (handle && handleHasPendingChanges(handle) && bridge) {
         const writeTarget = handle.writeTarget as HandleWriteTarget | undefined;
+        if (writeTarget?.kind !== "ignored") {
+          const errno = disconnectedWriteErrno(bridge);
+          if (errno !== null) {
+            handles.close(fh);
+            fuse.symbols.fuse_reply_err(req, errno);
+            return;
+          }
+        }
+
+        fuse.symbols.fuse_reply_err(req, 0);
         let flushPromise: Promise<unknown> | undefined;
         if (
           handle.truncatePending && !handle.dirty && !handle.flushing
         ) {
           flushPromise = flushHandle(handle).catch((e) => {
-            console.error(`[fuse] release flush error: ${e}`);
+            recordAsyncWriteFailure("release flush error", e);
           });
         } else if (
           writeTarget?.kind === "value" &&
@@ -1921,7 +2109,7 @@ export async function main(argv: string[] = Deno.args) {
           scheduleFlush(handle, 0);
         } else if (!handle.flushing) {
           flushPromise = flushHandle(handle).catch((e) => {
-            console.error(`[fuse] release flush error: ${e}`);
+            recordAsyncWriteFailure("release flush error", e);
           });
         }
         if (flushPromise) {
@@ -1933,6 +2121,7 @@ export async function main(argv: string[] = Deno.args) {
           queueMicrotask(() => handles.close(fh));
         }
       } else {
+        fuse.symbols.fuse_reply_err(req, 0);
         handles.close(fh);
       }
     },
@@ -2077,6 +2266,7 @@ export async function main(argv: string[] = Deno.args) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
+      if (failIfDisconnectedWrite(req)) return;
       const name = readCString(namePtr);
       const normalizedName = normalizeCfcWritebackXattrName(name);
       const value = new TextDecoder().decode(readBuffer(valuePtr, size));
@@ -2094,7 +2284,10 @@ export async function main(argv: string[] = Deno.args) {
       if (!result.ok) {
         console.warn(`[FUSE:CFC] rejected ${name}: ${result.reason}`);
         bridge?.refreshStatus();
-        fuse.symbols.fuse_reply_err(req, EINVAL);
+        fuse.symbols.fuse_reply_err(
+          req,
+          cfcWritebackXattrResultErrno(result, { enotsup: ENOTSUP }),
+        );
         return;
       }
       bridge?.refreshStatus();
@@ -2115,6 +2308,7 @@ export async function main(argv: string[] = Deno.args) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
+      if (failIfDisconnectedWrite(req)) return;
       const name = readCString(namePtr);
       const normalizedName = normalizeCfcWritebackXattrName(name);
       if (
@@ -2185,6 +2379,7 @@ export async function main(argv: string[] = Deno.args) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
+      if (failIfDisconnectedWrite(req)) return;
       if (!authorizeCreateCfcWrite(parent, "create", name)) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
@@ -2246,7 +2441,7 @@ export async function main(argv: string[] = Deno.args) {
         cfcWritebacks.deletePrepared(parent, "create", name);
       }).catch((e) => {
         cfcWritebacks.markRunnerCommitFailed(parent, "create", String(e), name);
-        console.error(`[fuse] create write error: ${e}`);
+        recordAsyncWriteFailure("create write error", e);
       });
     },
   );
@@ -2278,6 +2473,7 @@ export async function main(argv: string[] = Deno.args) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
+      if (failIfDisconnectedWrite(req)) return;
       if (!authorizeCreateCfcWrite(parent, "mkdir", name)) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
@@ -2305,7 +2501,7 @@ export async function main(argv: string[] = Deno.args) {
         cfcWritebacks.deletePrepared(parent, "mkdir", name);
       }).catch((e) => {
         cfcWritebacks.markRunnerCommitFailed(parent, "mkdir", String(e), name);
-        console.error(`[fuse] mkdir write error: ${e}`);
+        recordAsyncWriteFailure("mkdir write error", e);
       });
     },
   );
@@ -2367,6 +2563,7 @@ export async function main(argv: string[] = Deno.args) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
+      if (failIfDisconnectedWrite(req)) return;
       authorization ??= authorizeNamespaceCfcWrite(parent, "unlink", name);
       if (!authorization.allowed) {
         fuse.symbols.fuse_reply_err(req, EACCES);
@@ -2448,7 +2645,7 @@ export async function main(argv: string[] = Deno.args) {
         }
       })().catch((e) => {
         cfcWritebacks.markRunnerCommitFailed(parent, "unlink", String(e), name);
-        console.error(`[fuse] unlink write error: ${e}`);
+        recordAsyncWriteFailure("unlink write error", e);
       });
     },
   );
@@ -2511,6 +2708,7 @@ export async function main(argv: string[] = Deno.args) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
+      if (failIfDisconnectedWrite(req)) return;
       authorization ??= authorizeNamespaceCfcWrite(parent, "rmdir", name);
       if (!authorization.allowed) {
         fuse.symbols.fuse_reply_err(req, EACCES);
@@ -2585,7 +2783,7 @@ export async function main(argv: string[] = Deno.args) {
         }
       })().catch((e) => {
         cfcWritebacks.markRunnerCommitFailed(parent, "rmdir", String(e), name);
-        console.error(`[fuse] rmdir write error: ${e}`);
+        recordAsyncWriteFailure("rmdir write error", e);
       });
     },
   );
@@ -2673,6 +2871,7 @@ export async function main(argv: string[] = Deno.args) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
+      if (failIfDisconnectedWrite(req)) return;
       renameAuthorization ??= authorizeRenameCfcWrite(
         oldParent,
         oldName,
@@ -2814,7 +3013,7 @@ export async function main(argv: string[] = Deno.args) {
           String(e),
           newName,
         );
-        console.error(`[fuse] rename write error: ${e}`);
+        recordAsyncWriteFailure("rename write error", e);
       });
     },
   );
@@ -2846,6 +3045,7 @@ export async function main(argv: string[] = Deno.args) {
         fuse.symbols.fuse_reply_err(req, EACCES);
         return;
       }
+      if (failIfDisconnectedWrite(req)) return;
 
       let authorization = undefined as
         | ReturnType<typeof authorizeSymlinkWriteback>
@@ -2926,7 +3126,7 @@ export async function main(argv: string[] = Deno.args) {
           String(e),
           name,
         );
-        console.error(`[fuse] symlink write error: ${e}`);
+        recordAsyncWriteFailure("symlink write error", e);
       });
     },
   );
@@ -2998,6 +3198,9 @@ export async function main(argv: string[] = Deno.args) {
     );
   } catch (e) {
     console.error(String(e));
+    await writeSupervisorStatus("failed", { error: String(e) }).catch(() => {
+      // Best effort; mount failure is already being reported by process exit.
+    });
     Deno.exit(1);
   }
   // handle is guaranteed assigned — Deno.exit(1) never returns
@@ -3122,6 +3325,16 @@ export async function main(argv: string[] = Deno.args) {
     };
   }
 
+  await writeSupervisorStatus("mounted").catch((error) => {
+    console.warn(`[FUSE] Unable to write mounted supervisor status: ${error}`);
+  });
+  const supervisorHeartbeat = supervisorStatusPath
+    ? setInterval(() => {
+      if (unmounting) return;
+      writeSupervisorStatus("mounted").catch(() => undefined);
+    }, 1_000)
+    : undefined;
+
   console.log(`Mounted at ${mountpoint}`);
   console.log("Press Ctrl+C to unmount");
 
@@ -3130,6 +3343,7 @@ export async function main(argv: string[] = Deno.args) {
     if (unmounting) return;
     unmounting = true;
     console.log("\nUnmounting...");
+    writeSupervisorStatus("exiting").catch(() => undefined);
     platform.unmount(fuse, handle, mountpointBuf);
   }
 
@@ -3143,6 +3357,10 @@ export async function main(argv: string[] = Deno.args) {
   // Run FUSE event loop (nonblocking: true → returns Promise)
   const result = await fuse.symbols.fuse_session_loop(handle.session);
   console.log(`FUSE loop exited (code ${result})`);
+  if (supervisorHeartbeat !== undefined) clearInterval(supervisorHeartbeat);
+  await writeSupervisorStatus("exited", { exitCode: result }).catch(() => {
+    // Best effort during shutdown.
+  });
 
   // Final cleanup
   platform.cleanup(fuse, handle, mountpointBuf, unmounting);

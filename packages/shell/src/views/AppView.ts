@@ -14,7 +14,7 @@ import {
   updatePageTitle,
 } from "../../shared/mod.ts";
 import { KeyboardController } from "../lib/keyboard-router.ts";
-import { NAME, PageHandle } from "@commonfabric/runtime-client";
+import { type Cancel, NAME, PageHandle } from "@commonfabric/runtime-client";
 
 export class XAppView extends BaseView {
   static override styles = css`
@@ -61,6 +61,15 @@ export class XAppView extends BaseView {
 
   @state()
   private accessor _patternError: Error | undefined = undefined;
+
+  @state()
+  private accessor _slugRevision = 0;
+
+  private slugCancel: Cancel | undefined = undefined;
+  private slugPollInterval: number | undefined = undefined;
+  private slugSubscriptionKey: string | undefined = undefined;
+  private slugSubscriptionToken = 0;
+  private slugTargetKey: string | undefined = undefined;
 
   private debuggerController = new DebuggerController(this);
   private _keyboard = new KeyboardController(this);
@@ -123,7 +132,7 @@ export class XAppView extends BaseView {
         }
       }
     },
-    args: () => [this.app, this.rt],
+    args: () => [this.app, this.rt, this._slugRevision],
   });
 
   // This derives a space root pattern as well as an "active" (main)
@@ -170,6 +179,110 @@ export class XAppView extends BaseView {
       this._selectedPattern.status,
     ],
   });
+
+  #syncSlugSubscription() {
+    const rt = this.rt;
+    const slug = "pieceSlug" in this.app.view
+      ? this.app.view.pieceSlug
+      : undefined;
+    const key = rt && slug ? `${rt.space()}:${slug}` : undefined;
+
+    if (key === this.slugSubscriptionKey) return;
+    this.#clearSlugSubscription();
+    if (!rt || !slug || !key) return;
+
+    this.slugSubscriptionKey = key;
+    const token = ++this.slugSubscriptionToken;
+    rt.getSlugCell(slug).then(async (cell) => {
+      if (
+        this.slugSubscriptionToken !== token ||
+        this.slugSubscriptionKey !== key
+      ) {
+        return;
+      }
+
+      await this.#refreshSlugTarget(rt, slug, token, key, false);
+      if (
+        this.slugSubscriptionToken !== token ||
+        this.slugSubscriptionKey !== key
+      ) {
+        return;
+      }
+
+      this.slugPollInterval = globalThis.setInterval(() => {
+        void this.#refreshSlugTarget(rt, slug, token, key, true);
+      }, 1000);
+
+      let sawInitialCallback = false;
+      this.slugCancel = cell.subscribe(() => {
+        if (!sawInitialCallback) {
+          sawInitialCallback = true;
+          return;
+        }
+        void this.#refreshSlugTarget(rt, slug, token, key, true);
+      });
+    }).catch((error) => {
+      if (this.slugSubscriptionToken === token) {
+        console.error("[AppView] Failed to watch slug cell:", error);
+      }
+    });
+  }
+
+  #clearSlugSubscription() {
+    this.slugSubscriptionToken++;
+    this.slugCancel?.();
+    if (this.slugPollInterval !== undefined) {
+      globalThis.clearInterval(this.slugPollInterval);
+    }
+    this.slugCancel = undefined;
+    this.slugPollInterval = undefined;
+    this.slugSubscriptionKey = undefined;
+    this.slugTargetKey = undefined;
+  }
+
+  async #refreshSlugTarget(
+    rt: RuntimeInternals,
+    slug: string,
+    token: number,
+    key: string,
+    notify: boolean,
+  ) {
+    if (
+      this.slugSubscriptionToken !== token ||
+      this.slugSubscriptionKey !== key
+    ) {
+      return;
+    }
+
+    let targetKey: string;
+    try {
+      const pattern = await rt.refreshPattern(slugIdForSpace(rt.space(), slug));
+      targetKey = pattern.id();
+    } catch (error) {
+      if (notify) {
+        console.error("[AppView] Failed to refresh slug target:", error);
+      }
+      return;
+    }
+    if (targetKey === this.slugTargetKey) return;
+    this.slugTargetKey = targetKey;
+    if (notify) {
+      this.#handleSlugCellUpdate(rt, slug);
+    }
+  }
+
+  #handleSlugCellUpdate(rt: RuntimeInternals, slug: string) {
+    if (
+      this.rt !== rt ||
+      !("pieceSlug" in this.app.view) ||
+      this.app.view.pieceSlug !== slug
+    ) {
+      return;
+    }
+
+    rt.invalidatePattern(slugIdForSpace(rt.space(), slug));
+    this._slugRevision++;
+  }
 
   #setTitleSubscription(activePiece?: PageHandle<NameSchema>) {
     if (!activePiece) {
@@ -251,6 +364,7 @@ export class XAppView extends BaseView {
       "recreate-space-root-pattern",
       this.#handleRecreateSpaceRootPattern,
     );
+    this.#clearSlugSubscription();
   }
 
   override updated(changedProperties: Map<string, unknown>) {
@@ -283,6 +397,10 @@ export class XAppView extends BaseView {
       this.debuggerController.setVisibility(
         this.app.config.showDebuggerView ?? false,
       );
+    }
+
+    if (changedProperties.has("app") || changedProperties.has("rt")) {
+      this.#syncSlugSubscription();
     }
   }
 

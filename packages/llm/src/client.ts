@@ -1,6 +1,8 @@
 import {
+  isLLMNativeModelToolResults,
   LLMGenerateObjectRequest,
   LLMGenerateObjectResponse,
+  type LLMNativeModelToolResult,
   LLMRequest,
   LLMResponse,
   LLMToolCall,
@@ -33,6 +35,27 @@ const _isTestEnvironment = (() => {
 const TEST_GUARD_MESSAGE =
   "LLMClient: live LLM calls are blocked in test environments. " +
   "Use enableMockMode() and addMockResponse() to set up mocks.";
+
+export function normalizeLLMResponse(data: unknown, id: string): LLMResponse {
+  const message = data && typeof data === "object"
+    ? data as Record<string, unknown>
+    : {};
+  const nativeModelToolResults = isLLMNativeModelToolResults(
+      message.nativeModelToolResults,
+    )
+    ? message.nativeModelToolResults
+    : undefined;
+  const rest = { ...message };
+  delete rest.nativeModelToolResults;
+
+  return {
+    ...rest,
+    role: typeof message.role === "string" ? message.role : "assistant",
+    content: message.content,
+    id: typeof message.id === "string" ? message.id : id,
+    ...(nativeModelToolResults !== undefined ? { nativeModelToolResults } : {}),
+  } as LLMResponse;
+}
 
 function getInitialLLMUrl(): string {
   if (typeof globalThis.location !== "undefined") {
@@ -555,13 +578,9 @@ export class LLMClient {
     const id = response.headers.get("x-cf-llm-trace-id") as string;
 
     // the server might return cached data instead of a stream
-    if (response.headers.get("content-type") === "application/json") {
+    if (response.headers.get("content-type")?.includes("application/json")) {
       const data = await response.json();
-      return {
-        role: "assistant" as const,
-        content: data.content,
-        id,
-      } as LLMResponse;
+      return normalizeLLMResponse(data, id);
     }
     return await this.stream(response.body, id, callback);
   }
@@ -579,6 +598,7 @@ export class LLMClient {
     let text = "";
     const toolCalls: LLMToolCall[] = [];
     const toolResults: LLMToolResult[] = [];
+    let nativeModelToolResults: LLMNativeModelToolResult[] | undefined;
 
     while (!doneReading) {
       const { value, done } = await reader.read();
@@ -622,6 +642,11 @@ export class LLMClient {
                 };
                 toolResults.push(toolResult);
               } else if (event.type === "finish") {
+                if (
+                  isLLMNativeModelToolResults(event.nativeModelToolResults)
+                ) {
+                  nativeModelToolResults = event.nativeModelToolResults;
+                }
                 // Stream finished
                 break;
               } else if (event.type === "error") {
@@ -645,6 +670,10 @@ export class LLMClient {
           if (callback) callback(text);
         } else if (event.type === "error") {
           throw new LLMStreamError(event.error ?? "LLM stream error");
+        } else if (event.type === "finish") {
+          if (isLLMNativeModelToolResults(event.nativeModelToolResults)) {
+            nativeModelToolResults = event.nativeModelToolResults;
+          }
         }
       } catch (error) {
         if (error instanceof LLMStreamError) throw error;
@@ -673,6 +702,9 @@ export class LLMClient {
       role: "assistant",
       content: content.length > 0 ? content : text,
       id,
+      ...(nativeModelToolResults !== undefined
+        ? { nativeModelToolResults }
+        : {}),
     };
   }
 }

@@ -7,7 +7,12 @@ import { createBuilder } from "../../runner/src/builder/factory.ts";
 import { parseLink } from "../../runner/src/link-utils.ts";
 import { slugIdForSpace } from "../../runner/src/slugs.ts";
 import { pieceId, PieceManager } from "../src/manager.ts";
-import { assignSlug, resolvePieceAddress, setSlugLink } from "../src/slugs.ts";
+import {
+  assignSlug,
+  resolvePieceAddress,
+  resolveSlugTargetCell,
+  setSlugLink,
+} from "../src/slugs.ts";
 
 const signer = await Identity.fromPassphrase("piece slug tests");
 
@@ -79,6 +84,29 @@ describe("piece slugs", () => {
     expect(link?.id).toBe(piece.getAsNormalizedFullLink().id);
     expect(link?.path).toEqual(["value"]);
     expect(readRootMeta(slugId, "slug")).toBe("value-link");
+  });
+
+  it("resolves slug redirects to arbitrary cells without treating them as pieces", async () => {
+    const cell = runtime.getCell(
+      manager.getSpace(),
+      { space: manager.getSpace(), random: "slug-cell-target" },
+    );
+    await runtime.editWithRetry((tx) => {
+      cell.withTx(tx).set({ value: 1 });
+    });
+
+    await setSlugLink(manager, "value-link", cell);
+
+    const target = await resolveSlugTargetCell(manager, "value-link");
+    expect(target.getAsNormalizedFullLink().id).toBe(
+      cell.getAsNormalizedFullLink().id,
+    );
+    expect(target.getAsNormalizedFullLink().path).toEqual([]);
+    expect(target.get()).toEqual({ value: 1 });
+
+    await expect(resolvePieceAddress(manager, "value-link")).rejects.toThrow(
+      /not a piece/,
+    );
   });
 
   it("can resolve source links before setting a slug redirect", async () => {

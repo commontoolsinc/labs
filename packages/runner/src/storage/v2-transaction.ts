@@ -1,5 +1,6 @@
-import { deepFreeze, isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
+  cloneForMutation,
+  CloneForMutationError,
   cloneIfNecessary,
   getDataModelConfig,
   isArrayIndexPropertyName,
@@ -66,11 +67,7 @@ import {
   isReadIgnoredForScheduling,
   isReadMarkedAsAttemptedWrite,
 } from "./reactivity-log.ts";
-import {
-  createPathContainer,
-  ensureParentContainers,
-  readValueAtPath,
-} from "./v2-path.ts";
+import { createPathContainer, readValueAtPath } from "./v2-path.ts";
 import { recordWriteStackTrace } from "./write-stack-trace.ts";
 import { normalizeCellScope } from "../scope.ts";
 import type { CellScope } from "../builder/types.ts";
@@ -141,75 +138,6 @@ function withCommitTiming<T>(
   }
 }
 
-/**
- * Produces a value that is isolated from later mutations to the source. For
- * a deep-frozen input the source can't be mutated, so the input is returned
- * unchanged; otherwise plain objects and arrays are deep-cloned (with cycle
- * detection) and non-plain-prototype objects are passed through. Sub-trees
- * that are themselves deep-frozen short-circuit by identity during the
- * recursion, so partially-frozen trees only copy their unfrozen portions.
- *
- * The result is NOT guaranteed to be mutable, since deep-frozen inputs are
- * returned as-is. Callers that need a mutable copy (e.g. before in-place
- * write helpers like `ensureParentContainers` or `applyMutablePathWrite`)
- * must use `cloneIfNecessary(value, { frozen: false })` from
- * `@commonfabric/data-model` instead.
- */
-const isolateTransactionValue = <T>(
-  value: T,
-  seen: Map<object, unknown> = new Map(),
-): T => {
-  if (value === null || typeof value !== "object") {
-    return value;
-  }
-
-  // A deep-frozen value is already isolated: nothing can mutate it, so the
-  // returned reference is safe to share with the caller. `isDeepFrozen()` is
-  // O(1) on values previously cached as deep-frozen (the common case for
-  // values that came back out of storage in modern data model).
-  if (isDeepFrozen(value)) {
-    return value;
-  }
-
-  if (seen.has(value)) {
-    return seen.get(value) as T;
-  }
-
-  if (Array.isArray(value)) {
-    const copy = new Array(value.length);
-    seen.set(value, copy);
-    for (let i = 0; i < value.length; i++) {
-      if (i in value) {
-        copy[i] = isolateTransactionValue(value[i], seen);
-      }
-    }
-    return copy as T;
-  }
-
-  const prototype = Object.getPrototypeOf(value);
-  if (prototype !== Object.prototype && prototype !== null) {
-    return value;
-  }
-
-  const copy = Object.create(prototype) as Record<PropertyKey, unknown>;
-  seen.set(value, copy);
-  for (const key of Reflect.ownKeys(value)) {
-    copy[key] = isolateTransactionValue(
-      (value as Record<PropertyKey, unknown>)[key],
-      seen,
-    );
-  }
-  return copy as T;
-};
-
-const sparseArrayCopy = <T>(array: T[]): T[] => {
-  const copy = new Array<T>(array.length);
-  array.forEach((value, index) => {
-    copy[index] = value;
-  });
-  return copy;
-};
-
 const currentDocument = (doc: DocumentEntry): RootAttestation =>
   doc.current ?? doc.initial;
 
@@ -241,11 +169,12 @@ const freezeReadValue = <T extends FabricValue | undefined>(value: T): T => {
   ) {
     return value;
   }
-  // `isolateTransactionValue()` short-circuits on already-deep-frozen input
-  // (returns the source by identity) and `deepFreeze()` is O(1) on values
-  // already in its cache, so the steady-state cost on repeated reads of the
-  // same stored value collapses to two cache lookups.
-  return deepFreeze(isolateTransactionValue(value)) as T;
+  // `cloneIfNecessary()` (frozen by default) returns an already-deep-frozen
+  // value by identity (O(1) via the deep-frozen cache) and otherwise
+  // deep-clones-and-freezes -- isolating the result from later source
+  // mutation. On the hot read path, repeated reads of the same stored
+  // (deep-frozen) value collapse to a single cache lookup.
+  return cloneIfNecessary(value as FabricValue) as T;
 };
 
 const collapseEmptyJsonDocumentEnvelope = (
@@ -353,6 +282,27 @@ type MutableWriteResult = {
   changed: boolean;
 };
 
+/**
+ * Applies a write at `address.path` within `currentRoot`, returning the
+ * (possibly new) root, the previous value at the path, and whether
+ * anything changed.
+ *
+ * Delegates spine descent + thaw + missing-intermediate creation to
+ * `cloneForMutation` (with `createMissing: true`), which exposes the
+ * parent container at `address.path.slice(0, -1)` as a mutable handle.
+ * The function then performs the leaf write -- a property set/delete on
+ * an object, an element set/delete on an array, or the legacy
+ * length-write coercion when the parent is an array and the leaf key is
+ * `"length"`. Subtrees off the spine are preserved by identity, so a
+ * subsequent re-freeze short-circuits on everything except the freshly
+ * thawed spine.
+ *
+ * `force: false` is passed to `cloneForMutation` because the root, by
+ * this point, is either (a) freshly allocated by us (in the
+ * `undefined`-root branch) and thus owned outright, or (b) the caller's
+ * value which by contract is treated as caller-owned within the
+ * transaction.
+ */
 const applyMutablePathWrite = (
   currentRoot: FabricValue | undefined,
   address: IMemoryAddress,
@@ -389,149 +339,126 @@ const applyMutablePathWrite = (
     };
   }
 
-  const root = currentRoot;
-  let current = root as Record<string, FabricValue> | FabricValue[];
-  let parent: Record<string, FabricValue> | FabricValue[] | undefined;
-  let parentKey: string | number | undefined;
+  const leafKey = address.path[address.path.length - 1]!;
+  const parentPath = address.path.slice(0, -1);
 
-  for (let index = 0; index < address.path.length; index += 1) {
-    const key = address.path[index]!;
-    const isLast = index === address.path.length - 1;
-
-    if (Array.isArray(current)) {
-      if (key === "length") {
-        if (!isLast) {
-          return {
-            error: TypeMismatchError(
-              { ...address, path: address.path.slice(0, index + 1) },
-              "number",
-              "write",
-            ),
-          };
-        }
-        const previousValue = current.length;
-        const changed = !deepEqual(previousValue, value);
-        if (changed) {
-          const nextLength = value as number;
-          const replacement = nextLength < current.length || nextLength < 0 ||
-              !Number.isFinite(nextLength)
-            ? current.slice(0, nextLength)
-            : (() => {
-              const copy = sparseArrayCopy(current);
-              copy.length = nextLength;
-              return copy;
-            })();
-          if (parent === undefined) {
-            return {
-              ok: {
-                root: replacement,
-                previousValue,
-                changed: true,
-              },
-            };
-          }
-          if (Array.isArray(parent)) {
-            parent[parentKey as number] = replacement;
-          } else {
-            parent[parentKey as string] = replacement;
-          }
-        }
-        return {
-          ok: {
-            root,
-            previousValue,
-            changed,
-          },
-        };
-      }
-
-      if (!isArrayIndexPropertyName(key)) {
-        return {
-          error: TypeMismatchError(
-            { ...address, path: address.path.slice(0, index + 1) },
-            "array",
-            "write",
-          ),
-        };
-      }
-
-      const slot = Number(key);
-      if (isLast) {
-        const previousValue = current[slot];
-        if (deepEqual(previousValue, value)) {
-          return { ok: { root, previousValue, changed: false } };
-        }
-        if (value === undefined) {
-          delete current[slot];
-        } else {
-          current[slot] = value;
-        }
-        return {
-          ok: {
-            root,
-            previousValue,
-            changed: true,
-          },
-        };
-      }
-
-      parent = current;
-      parentKey = slot;
-      let next = current[slot];
-      if (next === undefined) {
-        next = createPathContainer(address.path[index + 1]!);
-        current[slot] = next;
-      } else if (!isContainerValue(next)) {
-        return {
-          error: TypeMismatchError(
-            { ...address, path: address.path.slice(0, index + 1) },
-            getValueTypeName(next),
-            "write",
-          ),
-        };
-      }
-      current = next as Record<string, FabricValue> | FabricValue[];
-      continue;
-    }
-
-    if (isLast) {
-      const previousValue = current[key];
-      if (deepEqual(previousValue, value)) {
-        return { ok: { root, previousValue, changed: false } };
-      }
-      if (value === undefined) {
-        delete current[key];
-      } else {
-        current[key] = value;
-      }
-      return {
-        ok: {
-          root,
-          previousValue,
-          changed: true,
-        },
-      };
-    }
-
-    parent = current;
-    parentKey = key;
-    let next = current[key];
-    if (next === undefined) {
-      next = createPathContainer(address.path[index + 1]!);
-      current[key] = next;
-    } else if (!isContainerValue(next)) {
+  // Thaw the spine and create missing intermediates, all in one call.
+  // The resulting `parent` is the mutable container at `parentPath` --
+  // the slot whose `[leafKey]` we're about to write.
+  let newRoot: FabricValue;
+  let parent: Record<string, FabricValue> | FabricValue[];
+  try {
+    const result = cloneForMutation(currentRoot, parentPath, {
+      createMissing: true,
+      nextKeyAfterPath: leafKey,
+      force: false,
+    });
+    newRoot = result.value as FabricValue;
+    parent = result.pathValue as
+      | Record<string, FabricValue>
+      | FabricValue[];
+  } catch (e) {
+    if (e instanceof CloneForMutationError) {
+      // The descent surfaced a type mismatch (or a non-container value
+      // along the path); convert to the v2-transaction-shaped error.
+      // `e.pathIndex` is the index within `parentPath`, which is the
+      // same as the index within `address.path` (since `parentPath` is
+      // a prefix). The slice end is `e.pathIndex + 1` to include the
+      // offending key, matching `read`/`write`'s error-path semantics.
       return {
         error: TypeMismatchError(
-          { ...address, path: address.path.slice(0, index + 1) },
-          getValueTypeName(next),
+          { ...address, path: address.path.slice(0, e.pathIndex + 1) },
+          e.valueKind,
           "write",
         ),
       };
     }
-    current = next as Record<string, FabricValue> | FabricValue[];
+    throw e;
   }
 
-  return { ok: { root, previousValue: undefined, changed: false } };
+  // Leaf write at `parent[leafKey]`.
+  if (Array.isArray(parent)) {
+    if (leafKey === "length") {
+      return applyArrayLengthWrite(newRoot, parent, value);
+    }
+    if (!isArrayIndexPropertyName(leafKey)) {
+      return {
+        error: TypeMismatchError(
+          { ...address, path: address.path },
+          "array",
+          "write",
+        ),
+      };
+    }
+    const slot = Number(leafKey);
+    const previousValue = parent[slot];
+    if (deepEqual(previousValue, value)) {
+      return { ok: { root: newRoot, previousValue, changed: false } };
+    }
+    if (value === undefined) {
+      delete parent[slot];
+    } else {
+      parent[slot] = value;
+    }
+    return { ok: { root: newRoot, previousValue, changed: true } };
+  }
+
+  // Object branch.
+  const obj = parent as Record<string, FabricValue>;
+  const previousValue = obj[leafKey];
+  if (deepEqual(previousValue, value)) {
+    return { ok: { root: newRoot, previousValue, changed: false } };
+  }
+  if (value === undefined) {
+    delete obj[leafKey];
+  } else {
+    obj[leafKey] = value;
+  }
+  return { ok: { root: newRoot, previousValue, changed: true } };
+};
+
+/**
+ * Helper for the legacy array-length-write semantics, called when
+ * `applyMutablePathWrite` reaches a leaf key of `"length"` against an
+ * array parent. Replicates `Array.prototype.slice(0, nextLength)`'s
+ * coercion rules for truncation (NaN → 0, +Infinity → unchanged,
+ * −Infinity → 0, negative → count from end, fractional → floor) so
+ * direct in-place mutation matches what the pre-refactor `slice + (or)
+ * sparseArrayCopy + length=` pair produced. Grow with holes uses the JS
+ * native semantic of `arr.length = nextLength` (with `Math.floor` to
+ * keep length a uint32).
+ */
+const applyArrayLengthWrite = (
+  newRoot: FabricValue,
+  parent: FabricValue[],
+  value: FabricValue | undefined,
+): Result<MutableWriteResult, ITypeMismatchError> => {
+  const previousValue = parent.length;
+  if (deepEqual(previousValue, value)) {
+    return { ok: { root: newRoot, previousValue, changed: false } };
+  }
+  const nextLength = value as number;
+  if (
+    nextLength < previousValue || nextLength < 0 ||
+    !Number.isFinite(nextLength)
+  ) {
+    let effective: number;
+    if (Number.isNaN(nextLength)) {
+      effective = 0;
+    } else if (nextLength === Number.POSITIVE_INFINITY) {
+      effective = previousValue;
+    } else if (nextLength === Number.NEGATIVE_INFINITY) {
+      effective = 0;
+    } else if (nextLength < 0) {
+      effective = Math.max(0, previousValue + Math.floor(nextLength));
+    } else {
+      effective = Math.min(previousValue, Math.floor(nextLength));
+    }
+    parent.length = effective;
+  } else {
+    parent.length = Math.floor(nextLength);
+  }
+  return { ok: { root: newRoot, previousValue, changed: true } };
 };
 
 const findMaterializedParentPath = (
@@ -1251,7 +1178,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
     const isolatedValue = value === undefined
       ? undefined
-      : isolateTransactionValue(value) as FabricValue;
+      : cloneIfNecessary(value) as FabricValue;
     const result = writeAttestation(current, address, isolatedValue);
     if (result.error) {
       return { error: result.error.from(space) };
@@ -1280,7 +1207,7 @@ export class V2StorageTransaction implements IStorageTransaction {
         allowArrayLength: true,
       }),
       previous.kind === "ok"
-        ? isolateTransactionValue(previous.value) as FabricValue | undefined
+        ? cloneIfNecessary(previous.value) as FabricValue | undefined
         : undefined,
       doc,
     );
@@ -1336,19 +1263,24 @@ export class V2StorageTransaction implements IStorageTransaction {
       if (!isRecord(existingParent) && !Array.isArray(existingParent)) {
         return direct;
       }
-      // Use `cloneIfNecessary({ frozen: false })` (not
-      // `isolateTransactionValue()`): the parent is about to be mutated in
-      // place by `ensureParentContainers`, so we need a guaranteed-mutable
-      // copy even when the stored value is deep-frozen.
-      parentValue = cloneIfNecessary(existingParent, { frozen: false });
+      parentValue = existingParent as FabricValue;
     }
 
-    const seededParent = ensureParentContainers(
+    // Shallow-thaw the parent and create the missing intermediate
+    // containers along `remainingPath.slice(0, -1)`. The leaf-segment
+    // hint `remainingPath[last]` selects the shape of the deepest
+    // created container. Subtrees off the created path retain their
+    // identity, so subsequent reads short-circuit on the deep-frozen
+    // cache.
+    const { value: seededParent } = cloneForMutation(
       parentValue,
       remainingPath.slice(0, -1),
-      remainingPath[remainingPath.length - 1]!,
+      {
+        createMissing: true,
+        nextKeyAfterPath: remainingPath[remainingPath.length - 1]!,
+      },
     );
-    const isolatedValue = isolateTransactionValue(value) as FabricValue;
+    const isolatedValue = cloneIfNecessary(value) as FabricValue;
     const parentWrite = writeAttestation(
       {
         address: {
@@ -1384,10 +1316,10 @@ export class V2StorageTransaction implements IStorageTransaction {
       return { ok: collapsedNext };
     }
 
-    const previousActivityValue = isolateTransactionValue(
+    const previousActivityValue = cloneIfNecessary(
       readValueAtPath(doc.current.value, lastExistingPath, {
         allowArrayLength: true,
-      }),
+      }) as FabricValue,
     ) as FabricValue | undefined;
 
     doc.current = collapsedNext;
@@ -1446,7 +1378,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     for (const { address, value } of writes) {
       const isolatedValue = value === undefined
         ? undefined
-        : isolateTransactionValue(value) as FabricValue;
+        : cloneIfNecessary(value) as FabricValue;
       const previousValue = readValueAtPath(nextRoot, address.path, {
         allowArrayLength: true,
       });
@@ -1458,19 +1390,19 @@ export class V2StorageTransaction implements IStorageTransaction {
         address.path,
         isolatedValue,
       ) ?? address.path;
-      const previousActivityValue = isolateTransactionValue(
+      const previousActivityValue = cloneIfNecessary(
         readValueAtPath(nextRoot, activityPath, {
           allowArrayLength: true,
-        }),
+        }) as FabricValue,
       ) as FabricValue | undefined;
       if (
         !hasMutableRoot && address.path.length > 0 && nextRoot !== undefined
       ) {
-        // Use `cloneIfNecessary({ frozen: false })` (not
-        // `isolateTransactionValue()`): the next line passes `nextRoot` to
-        // `applyMutablePathWrite`, which mutates in place along the write
-        // path, so we need a guaranteed-mutable root even when the stored
-        // value is deep-frozen.
+        // Use `{ frozen: false }` here (unlike the isolating snapshots above,
+        // which take the default frozen result): the next line passes
+        // `nextRoot` to `applyMutablePathWrite`, which mutates in place along
+        // the write path, so we need a guaranteed-mutable root even when the
+        // stored value is deep-frozen.
         nextRoot = cloneIfNecessary(nextRoot, { frozen: false });
         hasMutableRoot = true;
       }
@@ -1498,7 +1430,7 @@ export class V2StorageTransaction implements IStorageTransaction {
         readValueAtPath(result.ok.root, address.path, {
           allowArrayLength: true,
         }),
-        isolateTransactionValue(previousValue) as FabricValue | undefined,
+        cloneIfNecessary(previousValue) as FabricValue | undefined,
         doc,
       );
       this.recordWriteActivity(

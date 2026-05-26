@@ -5,21 +5,20 @@ import {
   type CloneOptions,
   resetDataModelConfig,
   setDataModelConfig,
-} from "../fabric-value.ts";
-import type { FabricValue } from "../fabric-value.ts";
-import { isDeepFrozen, isDeepFrozenFabricValue } from "../deep-freeze.ts";
-import { FabricBytes } from "../fabric-bytes.ts";
-import { FabricEpochDays, FabricEpochNsec } from "../fabric-epoch.ts";
-import { FabricHash } from "../fabric-hash.ts";
-import {
-  FabricError,
-  FabricMap,
-  FabricRegExp,
-  FabricSet,
-} from "../fabric-native-instances.ts";
-import { ProblematicValue } from "../problematic-value.ts";
-import { UnknownValue } from "../unknown-value.ts";
-import { FabricPrimitive, FabricSpecialObject } from "../interface.ts";
+} from "../src/fabric-value.ts";
+import type { FabricValue } from "../src/fabric-value.ts";
+import { isDeepFrozen, isDeepFrozenFabricValue } from "../src/deep-freeze.ts";
+import { FabricBytes } from "../src/fabric-primitives/FabricBytes.ts";
+import { FabricEpochDays } from "../src/fabric-primitives/FabricEpochDays.ts";
+import { FabricEpochNsec } from "../src/fabric-primitives/FabricEpochNsec.ts";
+import { FabricHash } from "../src/fabric-primitives/FabricHash.ts";
+import { FabricError } from "../src/fabric-instances/FabricError.ts";
+import { FabricMap } from "../src/fabric-instances/FabricMap.ts";
+import { FabricRegExp } from "../src/fabric-instances/FabricRegExp.ts";
+import { FabricSet } from "../src/fabric-instances/FabricSet.ts";
+import { ProblematicValue } from "../src/fabric-instances/ProblematicValue.ts";
+import { UnknownValue } from "../src/fabric-instances/UnknownValue.ts";
+import { FabricPrimitive, FabricSpecialObject } from "../src/interface.ts";
 
 // ============================================================================
 // Tests
@@ -257,23 +256,34 @@ describe("cloneIfNecessary", () => {
     describe(`FabricInstance (${label} path)`, () => {
       beforeEach(() => setDataModelConfig(modernMode));
 
-      it("deep-clones a frozen `FabricError` (partial)", () => {
-        // Deep cloning of `FabricInstance` is now (partially) supported: the
-        // `FabricError` is rebuilt from its string-valued state, so the
-        // result is a fresh frozen `FabricError` preserving `message`.
-        const error = new FabricError(new Error("test"));
+      it("identity-returns an already-deep-frozen `FabricError`", () => {
+        // A `FabricError` with no `cause` or extras is deep-frozen as soon
+        // as the wrapper is `Object.freeze`'d (the wrapper itself is the
+        // canonical state). `cloneIfNecessary` therefore returns identity.
+        const error = FabricError.fromNativeError(new Error("test"));
+        Object.freeze(error);
+        const result = cloneIfNecessary(error);
+        expect(result).toBe(error);
+        expect((result as FabricError).message).toBe("test");
+      });
+
+      it("deep-clones a `FabricError` with a mutable cause", () => {
+        // Wrapper frozen but `cause` not -> not deep-frozen -> clone.
+        const error = FabricError.fromNativeError(
+          new Error("test", { cause: { mutable: true } }),
+        );
         Object.freeze(error);
         const result = cloneIfNecessary(error);
         expect(result).toBeInstanceOf(FabricError);
-        expect(result).not.toBe(error); // rebuilt (inner Error was not frozen)
+        expect(result).not.toBe(error);
         expect(Object.isFrozen(result)).toBe(true);
-        expect((result as FabricError).error.message).toBe("test");
+        expect((result as FabricError).message).toBe("test");
       });
 
       it("produces a mutable FabricError clone (deep, frozen=false)", () => {
         // Deep clone with `frozen: false` yields a fresh *mutable*
-        // `FabricError` (rebuilt from string state, not frozen).
-        const error = new FabricError(new Error("test"));
+        // `FabricError`.
+        const error = FabricError.fromNativeError(new Error("test"));
         Object.freeze(error);
         const result = cloneIfNecessary(
           error as unknown as FabricValue,
@@ -282,27 +292,28 @@ describe("cloneIfNecessary", () => {
         expect(result).toBeInstanceOf(FabricError);
         expect(result).not.toBe(error);
         expect(Object.isFrozen(result)).toBe(false);
-        expect((result as FabricError).error.message).toBe("test");
+        expect((result as FabricError).message).toBe("test");
       });
 
-      it("deep-clones a FabricError nested in an object (partial)", () => {
-        // Nested `FabricInstance`s are deep-cloned too, not shared: each is
-        // rebuilt from its string state.
-        const error = new FabricError(new Error("nested"));
+      it("preserves a nested already-deep-frozen FabricError by identity", () => {
+        // Container is rebuilt (mutable input -> frozen output) but the
+        // nested deep-frozen FabricError is returned by identity.
+        const error = FabricError.fromNativeError(new Error("nested"));
+        Object.freeze(error);
         const value = { err: error, x: 42 } as FabricValue;
         const result = cloneIfNecessary(value) as Record<string, unknown>;
         expect(result).not.toBe(value);
         expect(Object.isFrozen(result)).toBe(true);
         expect(result.err).toBeInstanceOf(FabricError);
-        expect(result.err).not.toBe(error); // deep-cloned, not shared
-        expect((result.err as FabricError).error.message).toBe("nested");
+        expect(result.err).toBe(error);
+        expect((result.err as FabricError).message).toBe("nested");
         expect(result.x).toBe(42);
       });
 
       it("shallow-clones an object containing a FabricError (deep=false)", () => {
         // Shallow clone of a container shares the nested instance by
         // reference -- it is never traversed or rebuilt.
-        const error = new FabricError(new Error("nested"));
+        const error = FabricError.fromNativeError(new Error("nested"));
         const value = { err: error, x: 42 } as FabricValue;
         const result = cloneIfNecessary(value, { deep: false }) as Record<
           string,
@@ -557,7 +568,7 @@ const subclassCases: readonly SubclassCase[] = [
   // ---------- `FabricInstance` with full protocol coverage ----------
   {
     name: "FabricError",
-    factory: () => new FabricError(new Error("test")),
+    factory: () => FabricError.fromNativeError(new Error("test")),
     deepCloneImplemented: true,
   },
   // ---------- `FabricInstance` with `deepClone` stub ----------

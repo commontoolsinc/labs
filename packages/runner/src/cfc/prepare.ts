@@ -1,5 +1,10 @@
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { emptySchemaObject } from "@commonfabric/data-model/schema-utils";
+import {
+  cloneForMutation,
+  type CloneForMutationResult,
+  isArrayIndexPropertyName,
+} from "@commonfabric/data-model/fabric-value";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import type {
   FabricValue,
@@ -23,7 +28,7 @@ import {
   isWriteRedirectLink,
   parseLink,
 } from "../link-utils.ts";
-import { getValueAtPath } from "../path-utils.ts";
+import { getValueAtPath, setValueAtPath } from "../path-utils.ts";
 import { encodePointer } from "../../../memory/v2/path.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { canonicalizeLogicalPath } from "./canonical.ts";
@@ -940,7 +945,9 @@ const currentPrincipalIntegrityReason = (
   return undefined;
 };
 
-const writeDetailValueForTarget = (
+// Exported for unit testing of write-detail reconstruction (the granularity
+// composition below). Not part of the public CFC surface.
+export const writeDetailValueForTarget = (
   tx: IExtendedStorageTransaction,
   target: {
     space: MemorySpace;
@@ -951,6 +958,7 @@ const writeDetailValueForTarget = (
   key: "value" | "previousValue",
 ): FabricValue => {
   const writeDetails = [...(tx.getWriteDetails?.(target.space) ?? [])];
+  const targetPath = target.path.map((entry) => String(entry));
   let matchingWrite:
     | {
       address: {
@@ -963,6 +971,12 @@ const writeDetailValueForTarget = (
     }
     | undefined;
   let matchingWritePath: string[] | undefined;
+  // Deeper ("descendant") writes under the target path are overlaid onto the
+  // base value below, so a value recorded granularly (an envelope plus
+  // per-field writes -- as happens when it is deep-frozen and so written
+  // field-by-field) reconstructs the same as one recorded coarsely (a single
+  // whole-object write). Reconstruction must not depend on write granularity.
+  const descendants: { rel: string[]; value: FabricValue | undefined }[] = [];
   for (const write of writeDetails) {
     if (write.address.id !== target.id) continue;
     if (normalizeCellScope(write.address.scope) !== target.scope) continue;
@@ -970,8 +984,15 @@ const writeDetailValueForTarget = (
       continue;
     }
     const writePath = write.address.path.slice(1).map((entry) => String(entry));
-    const targetPath = target.path.map((entry) => String(entry));
     if (writePath.length > targetPath.length) {
+      // Descendant write: when `targetPath` is a prefix, keep it to overlay
+      // onto the base value (composing granular field-writes).
+      if (targetPath.every((segment, index) => segment === writePath[index])) {
+        descendants.push({
+          rel: writePath.slice(targetPath.length),
+          value: write[key],
+        });
+      }
       continue;
     }
     if (!writePath.every((segment, index) => segment === targetPath[index])) {
@@ -990,11 +1011,53 @@ const writeDetailValueForTarget = (
   if (value === undefined || matchingWritePath === undefined) {
     return undefined;
   }
-  const targetPath = target.path.map((entry) => String(entry));
-  if (matchingWritePath.length === targetPath.length) {
-    return value;
+  const baseValue = matchingWritePath.length === targetPath.length
+    ? value
+    : getValueAtPath(value, targetPath.slice(matchingWritePath.length));
+
+  // Only the effective `value` composes deeper field-writes; the
+  // `previousValue` of the longest ancestor write already captures the whole
+  // pre-write subtree.
+  if (key !== "value" || descendants.length === 0) {
+    return baseValue;
   }
-  return getValueAtPath(value, targetPath.slice(matchingWritePath.length));
+
+  if (!(isRecord(baseValue) || Array.isArray(baseValue))) {
+    // Base isn't a container yet deeper writes exist (rare/incoherent): build a
+    // fresh container and overlay onto it (it's freshly mutable -- no COW).
+    const result: Record<PropertyKey, unknown> | unknown[] =
+      descendants.every(({ rel }) => isArrayIndexPropertyName(rel[0]))
+        ? []
+        : {};
+    for (const { rel, value: descendantValue } of descendants) {
+      setValueAtPath(result, rel, descendantValue);
+    }
+    return result as FabricValue;
+  }
+
+  // Overlay the deeper field-writes onto the base via copy-on-write
+  // spine-thawing: only the containers along each overlay path are shallow-
+  // copied; large off-spine subtrees are preserved by reference, never
+  // deep-copied. Process shallowest-first so an envelope write at a parent
+  // path lands before writes to its children. `cloneForMutation` defaults to
+  // `force: true`, so the shared (deep-frozen) base is never mutated.
+  const ordered = [...descendants].sort((a, b) => a.rel.length - b.rel.length);
+  let root: FabricValue = baseValue;
+  for (const { rel, value: descendantValue } of ordered) {
+    const leaf = rel[rel.length - 1]!;
+    const thawed: CloneForMutationResult<FabricValue> = cloneForMutation(
+      root,
+      rel.slice(0, -1),
+      { createMissing: true, nextKeyAfterPath: leaf },
+    );
+    setValueAtPath(
+      thawed.pathValue as Record<PropertyKey, unknown> | unknown[],
+      [leaf],
+      descendantValue,
+    );
+    root = thawed.value;
+  }
+  return root;
 };
 
 const writeValueForTarget = (

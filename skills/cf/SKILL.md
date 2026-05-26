@@ -43,6 +43,13 @@ export CF_API_URL=http://localhost:8000  # or https://toolshed.saga-castor.ts.ne
 export CF_IDENTITY=./cf.key
 ```
 
+**Identity visibility footgun:** If CLI and browser use different DIDs, the same
+piece should still load and unscoped/`PerSpace` data should remain visible, but
+`PerUser`, `PerSession`, favorites, drafts, and home-space state may look empty
+or default. For identity-sensitive local work, use one key everywhere and import
+the CLI PKCS8/PEM key in the browser via `Import CLI Key`. See
+`docs/development/SHARED_IDENTITY.md`.
+
 **Experimental flags** (must be set on both servers AND CLI commands):
 
 ```bash

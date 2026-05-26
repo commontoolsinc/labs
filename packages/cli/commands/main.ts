@@ -87,6 +87,63 @@ export const main = new Command()
         await main(daemonArgs);
       }),
   )
+  .command(
+    "fuse-supervisor",
+    new Command()
+      .description(
+        "Internal: supervise a background FUSE child process.",
+      )
+      .hidden()
+      .arguments("<mountpoint:string>")
+      .option("--api-url <url:string>", "URL of the fabric instance.")
+      .option("--identity <path:string>", "Path to an identity keyfile.")
+      .option("--exec-cli <path:string>", "Path to the cf exec shim.")
+      .option("--log-file <path:string>", "Path to the FUSE child log file.")
+      .option("--allow-other", "Pass allow_other through to the FUSE child.")
+      .option("--cfc-mode <mode:string>", "FUSE-side CFC mode.")
+      .option("--cfc-annotations", "Publish CFC annotation xattrs.")
+      .option(
+        "--cfc-xattr-namespace <namespace:string>",
+        "CFC xattr namespace.",
+      )
+      .option("--cfc-writeback-xattrs", "Enable CFC writeback xattrs.")
+      .option(
+        "--cfc-writeback-state <path:string>",
+        "CFC writeback state path.",
+      )
+      .option("--state-path <path:string>", "Mount state file to update.")
+      .option(
+        "--supervisor-status <path:string>",
+        "Child readiness and heartbeat status file.",
+      )
+      .option(
+        "--supervisor-token <token:string>",
+        "Child readiness status correlation token.",
+      )
+      .option("-s, --space <name:string>", "Space(s) to connect.", {
+        collect: true,
+      })
+      .action(async (options, mountpoint) => {
+        const { runFuseSupervisor } = await import("../lib/fuse-supervisor.ts");
+        await runFuseSupervisor({
+          mountpoint,
+          apiUrl: options.apiUrl ?? "",
+          identity: options.identity ?? "",
+          execCli: options.execCli ?? "",
+          logFile: options.logFile ?? "",
+          spaces: options.space ?? [],
+          allowOther: options.allowOther,
+          cfcMode: options.cfcMode,
+          cfcAnnotations: options.cfcAnnotations,
+          cfcXattrNamespace: options.cfcXattrNamespace,
+          cfcWritebackXattrs: options.cfcWritebackXattrs,
+          cfcWritebackState: options.cfcWritebackState,
+          statePath: options.statePath,
+          supervisorStatusPath: options.supervisorStatus,
+          supervisorToken: options.supervisorToken,
+        });
+      }),
+  )
   .command("id", identity)
   .command("init", init)
   .command("test", test)

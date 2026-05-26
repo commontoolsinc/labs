@@ -12,11 +12,37 @@ import { cliName } from "./cli-name.ts";
 
 export interface MountStateEntry {
   pid: number;
+  childPid?: number;
+  childStatusPath?: string;
   mountpoint: string;
   apiUrl: string;
   identity: string;
   startedAt: string;
   logFile?: string;
+}
+
+export interface FuseChildDenoArgsOptions {
+  modPath: string;
+  mountpoint: string;
+  apiUrl: string;
+  identity: string;
+  execCli: string;
+  logFile?: string;
+  spaces?: string[];
+  allowOther?: boolean;
+  cfcMode?: string;
+  cfcAnnotations?: boolean;
+  cfcXattrNamespace?: string;
+  cfcWritebackXattrs?: boolean;
+  cfcWritebackState?: string;
+  supervisorStatusPath?: string;
+  supervisorToken?: string;
+}
+
+export interface BackgroundSupervisorDenoArgsOptions
+  extends Omit<FuseChildDenoArgsOptions, "modPath"> {
+  cliModPath: string;
+  statePath?: string;
 }
 
 export async function canonicalizeMountLookupPath(
@@ -49,6 +75,20 @@ function normalizeMountStateEntry(entry: MountStateEntry): MountStateEntry {
       ? (isAbsolute(entry.identity) ? entry.identity : resolve(entry.identity))
       : "",
   };
+}
+
+function isMountStateEntry(value: unknown): value is MountStateEntry {
+  if (typeof value !== "object" || value === null) return false;
+  const entry = value as Record<string, unknown>;
+  return typeof entry.pid === "number" &&
+    typeof entry.mountpoint === "string" &&
+    typeof entry.apiUrl === "string" &&
+    typeof entry.identity === "string" &&
+    typeof entry.startedAt === "string" &&
+    (entry.childPid === undefined || typeof entry.childPid === "number") &&
+    (entry.childStatusPath === undefined ||
+      typeof entry.childStatusPath === "string") &&
+    (entry.logFile === undefined || typeof entry.logFile === "string");
 }
 
 function isWithinMountpoint(path: string, mountpoint: string): boolean {
@@ -130,8 +170,10 @@ export async function readMountState(
   for (const path of candidatePaths) {
     try {
       const text = await Deno.readTextFile(path);
+      const parsed = JSON.parse(text) as unknown;
+      if (!isMountStateEntry(parsed)) continue;
       matches.push({
-        entry: normalizeMountStateEntry(JSON.parse(text) as MountStateEntry),
+        entry: normalizeMountStateEntry(parsed),
         path,
       });
     } catch {
@@ -139,7 +181,8 @@ export async function readMountState(
     }
   }
 
-  return matches.find(({ entry }) => isAlive(entry.pid)) ?? matches[0] ?? null;
+  return matches.find(({ entry }) => isMountStateAlive(entry)) ?? matches[0] ??
+    null;
 }
 
 export async function readAllMountStates(
@@ -148,12 +191,17 @@ export async function readAllMountStates(
   const results: { entry: MountStateEntry; path: string }[] = [];
   try {
     for await (const file of Deno.readDir(stateDir)) {
-      if (!file.isFile || !file.name.endsWith(".json")) continue;
+      if (
+        !file.isFile || !file.name.endsWith(".json") ||
+        file.name.endsWith(".child-status.json")
+      ) continue;
       const path = resolve(stateDir, file.name);
       try {
         const text = await Deno.readTextFile(path);
+        const parsed = JSON.parse(text) as unknown;
+        if (!isMountStateEntry(parsed)) continue;
         results.push({
-          entry: normalizeMountStateEntry(JSON.parse(text) as MountStateEntry),
+          entry: normalizeMountStateEntry(parsed),
           path,
         });
       } catch {
@@ -176,7 +224,7 @@ export async function findMountForPath(
   let bestMatch: { entry: MountStateEntry; path: string } | null = null;
   let bestMatchMountpoint: string | null = null;
   for (const candidate of entries) {
-    if (!isAlive(candidate.entry.pid)) {
+    if (!isMountStateAlive(candidate.entry)) {
       try {
         await Deno.remove(candidate.path);
       } catch {
@@ -219,6 +267,11 @@ export function isAlive(pid: number): boolean {
   }
 }
 
+export function isMountStateAlive(entry: MountStateEntry): boolean {
+  return isAlive(entry.pid) ||
+    (entry.childPid !== undefined && isAlive(entry.childPid));
+}
+
 /** Default state directory for FUSE mount state. */
 export function defaultStateDir(): string {
   return resolve(Deno.env.get("HOME") ?? "/tmp", ".cf", "fuse");
@@ -228,6 +281,12 @@ export function defaultStateDir(): string {
 export function fuseMod(importMetaUrl: string): string {
   const cliCommandsDir = dirname(fromFileUrl(importMetaUrl));
   return resolve(cliCommandsDir, "../../fuse/mod.ts");
+}
+
+/** Resolve path to the minimal FUSE supervisor entrypoint. */
+export function fuseSupervisorMod(importMetaUrl: string): string {
+  const cliCommandsDir = dirname(fromFileUrl(importMetaUrl));
+  return resolve(cliCommandsDir, "../lib/fuse-supervisor.ts");
 }
 
 export async function ensureExecShim(
@@ -282,20 +341,9 @@ exec "${Deno.execPath()}" run --allow-net --allow-ffi --allow-read --allow-write
 }
 
 /** Build the deno subprocess args for running the FUSE module. */
-export function buildDenoArgs(opts: {
-  modPath: string;
-  mountpoint: string;
-  apiUrl: string;
-  identity: string;
-  execCli: string;
-  logFile?: string;
-  allowOther?: boolean;
-  cfcMode?: string;
-  cfcAnnotations?: boolean;
-  cfcXattrNamespace?: string;
-  cfcWritebackXattrs?: boolean;
-  cfcWritebackState?: string;
-}): string[] {
+export function buildFuseChildDenoArgs(
+  opts: FuseChildDenoArgsOptions,
+): string[] {
   const args = [
     "run",
     "--unstable-ffi",
@@ -322,6 +370,59 @@ export function buildDenoArgs(opts: {
   if (opts.cfcWritebackState) {
     args.push("--cfc-writeback-state", opts.cfcWritebackState);
   }
+  if (opts.supervisorStatusPath) {
+    args.push("--supervisor-status", opts.supervisorStatusPath);
+  }
+  if (opts.supervisorToken) {
+    args.push("--supervisor-token", opts.supervisorToken);
+  }
+  for (const space of opts.spaces ?? []) args.push("--space", space);
 
   return args;
+}
+
+/** Build the deno subprocess args for running the non-FFI FUSE supervisor. */
+export function buildBackgroundSupervisorDenoArgs(
+  opts: BackgroundSupervisorDenoArgsOptions,
+): string[] {
+  const args = [
+    "run",
+    "--allow-run",
+    opts.cliModPath,
+    opts.mountpoint,
+  ];
+
+  if (opts.statePath) {
+    args.splice(2, 0, `--allow-read=${opts.statePath}`);
+    args.splice(3, 0, `--allow-write=${opts.statePath}`);
+    args.push("--state-path", opts.statePath);
+  }
+
+  if (opts.apiUrl) args.push("--api-url", opts.apiUrl);
+  if (opts.identity) args.push("--identity", opts.identity);
+  if (opts.execCli) args.push("--exec-cli", opts.execCli);
+  if (opts.logFile) args.push("--log-file", opts.logFile);
+  if (opts.allowOther) args.push("--allow-other");
+  if (opts.cfcMode) args.push("--cfc-mode", opts.cfcMode);
+  if (opts.cfcAnnotations) args.push("--cfc-annotations");
+  if (opts.cfcXattrNamespace) {
+    args.push("--cfc-xattr-namespace", opts.cfcXattrNamespace);
+  }
+  if (opts.cfcWritebackXattrs) args.push("--cfc-writeback-xattrs");
+  if (opts.cfcWritebackState) {
+    args.push("--cfc-writeback-state", opts.cfcWritebackState);
+  }
+  if (opts.supervisorStatusPath) {
+    args.push("--supervisor-status", opts.supervisorStatusPath);
+  }
+  if (opts.supervisorToken) {
+    args.push("--supervisor-token", opts.supervisorToken);
+  }
+  for (const space of opts.spaces ?? []) args.push("--space", space);
+
+  return args;
+}
+
+export function buildDenoArgs(opts: FuseChildDenoArgsOptions): string[] {
+  return buildFuseChildDenoArgs(opts);
 }

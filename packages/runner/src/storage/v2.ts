@@ -568,6 +568,16 @@ export class StorageManager implements IStorageManager {
     this.#providers.clear();
   }
 
+  async closeNow(): Promise<void> {
+    if (this.#providers.size === 0) {
+      return;
+    }
+    await Promise.all(
+      [...this.#providers.values()].map((provider) => provider.destroyNow()),
+    );
+    this.#providers.clear();
+  }
+
   edit(): IStorageTransaction {
     return V2Transaction.V2StorageTransaction.create(this);
   }
@@ -857,6 +867,13 @@ class Provider implements IStorageProviderWithReplica {
     await this.replica.close();
   }
 
+  async destroyNow(): Promise<void> {
+    if (!this.#destroyed) {
+      this.#destroyed = true;
+    }
+    await this.replica.closeNow();
+  }
+
   getReplica(): string | undefined {
     return this.options.space;
   }
@@ -999,6 +1016,22 @@ class SpaceReplica implements ISpaceReplica {
       }
     }
     await Promise.allSettled([...this.#updatePromises]);
+    this.#syncTasks.clear();
+    this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>();
+  }
+
+  closeNow(): void {
+    this.cancelQueuedWatchRefresh();
+    this.#watchView?.close();
+    this.#watchView = null;
+    const sessionHandle = this.#sessionHandle;
+    this.#sessionHandle = undefined;
+    if (sessionHandle) {
+      sessionHandle.then(({ client }) => client.close()).catch(() => {
+        // The session never opened cleanly; there is nothing to close.
+      });
+    }
+    void Promise.allSettled([...this.#updatePromises]);
     this.#syncTasks.clear();
     this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>();
   }

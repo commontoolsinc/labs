@@ -132,18 +132,19 @@ describe("Cell", () => {
 
     // Modern path: error is stored as a `FabricError`-shaped value rather
     // than the legacy `@Error` wrapper. `c.get()` returns a proxy view of
-    // the stored wrapper — its `error` slot exposes the wrapped Error's
-    // observable fields (`message`, `stack`), and its `typeTag` is
-    // `"Error"` (`FabricError`'s tag).
+    // the stored wrapper — its observable fields (`type`, `name`,
+    // `message`, `stack`, etc.) are exposed directly on the projection,
+    // and its `typeTag` is `"Error@1"` (`FabricError`'s tag).
     const result = c.get() as {
-      error: { message: string; stack: string };
+      message: string;
+      stack: string;
       typeTag: string;
       "@Error"?: unknown;
     };
     expect(result["@Error"]).toBeUndefined();
     expect(result.typeTag).toBe("Error@1");
-    expect(result.error.message).toBe("something went wrong");
-    expect(typeof result.error.stack).toBe("string");
+    expect(result.message).toBe("something went wrong");
+    expect(typeof result.stack).toBe("string");
     await localTx.commit();
     await rt.dispose();
     await sm.close();
@@ -201,17 +202,19 @@ describe("Cell", () => {
 
     // Modern path: outer error is a `FabricError`-shaped value; its cause
     // is also `FabricError`-shaped (recursively wrapped at conversion
-    // time), not a legacy `@Error` wrapper.
+    // time), not a legacy `@Error` wrapper. The proxy view exposes the
+    // wrapper's observable fields directly.
     const result = c.get() as {
-      error: { message: string; cause: { message: string; stack: string } };
+      message: string;
+      cause: { message: string; stack: string };
       typeTag: string;
       "@Error"?: unknown;
     };
     expect(result["@Error"]).toBeUndefined();
     expect(result.typeTag).toBe("Error@1");
-    expect(result.error.message).toBe("wrapper error");
-    expect(result.error.cause.message).toBe("root cause");
-    expect(typeof result.error.cause.stack).toBe("string");
+    expect(result.message).toBe("wrapper error");
+    expect(result.cause.message).toBe("root cause");
+    expect(typeof result.cause.stack).toBe("string");
     await localTx.commit();
     await rt.dispose();
     await sm.close();
@@ -257,11 +260,11 @@ describe("Cell", () => {
     parent.set({ slot: new TypeError("through nested redirect") });
 
     const targetResult = target.get() as {
-      error: { message: string };
+      message: string;
       typeTag: string;
     };
     expect(targetResult.typeTag).toBe("Error@1");
-    expect(targetResult.error.message).toBe("through nested redirect");
+    expect(targetResult.message).toBe("through nested redirect");
 
     await localTx.commit();
     await rt.dispose();

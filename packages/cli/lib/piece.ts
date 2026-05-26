@@ -17,6 +17,7 @@ import {
   pieceId,
   PieceManager,
   resolvePieceAddress as resolveStoredPieceAddress,
+  resolveSlugTargetCell,
   setSlugLink,
   SlugResolutionError,
 } from "@commonfabric/piece";
@@ -96,6 +97,60 @@ export interface PieceResolutionDeps {
 }
 
 const CLI_TRACE_TIMINGS = Deno.env.get("CF_CLI_TRACE_TIMINGS") === "1";
+
+interface DisposableRuntime {
+  dispose(): Promise<unknown>;
+  storageManager?: unknown;
+}
+
+function storageManagerCloseNow(
+  storageManager: unknown,
+): (() => Promise<unknown>) | undefined {
+  if (
+    typeof storageManager === "object" && storageManager !== null &&
+    "closeNow" in storageManager
+  ) {
+    const closeNow = Reflect.get(storageManager, "closeNow");
+    if (typeof closeNow === "function") {
+      return () => Promise.resolve(closeNow.call(storageManager));
+    }
+  }
+  return undefined;
+}
+
+export async function withRuntimeCleanupOnFailure<T>(
+  runtime: DisposableRuntime,
+  run: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    const closeNow = storageManagerCloseNow(runtime.storageManager);
+    if (closeNow) {
+      await closeNow().catch((disposeError) => {
+        console.warn(
+          `loadManager storage cleanup failed: ${
+            disposeError instanceof Error
+              ? disposeError.message
+              : String(disposeError)
+          }`,
+        );
+      });
+    }
+    await runtime.dispose().catch(
+      (disposeError) => {
+        console.warn(
+          `loadManager cleanup failed: ${
+            disposeError instanceof Error
+              ? disposeError.message
+              : String(disposeError)
+          }`,
+        );
+      },
+    );
+    throw error;
+  }
+}
 
 async function timeCliPhase<T>(
   label: string,
@@ -192,25 +247,27 @@ export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
     CF_RUNTIME_ERROR_LOG
   ] = runtimeErrors;
 
-  if (
-    !(await timeCliPhase(
-      "loadManager.healthCheck",
-      () => runtime.healthCheck(),
-    ))
-  ) {
-    throw new Error(`Could not connect to "${config.apiUrl.toString()}".`);
-  }
+  return await withRuntimeCleanupOnFailure(runtime, async () => {
+    if (
+      !(await timeCliPhase(
+        "loadManager.healthCheck",
+        () => runtime.healthCheck(),
+      ))
+    ) {
+      throw new Error(`Could not connect to "${config.apiUrl.toString()}".`);
+    }
 
-  const pieceManager = await timeCliPhase(
-    "loadManager.pieceManager",
-    () => new PieceManager(session, runtime),
-  );
-  pieceManagerRef.current = pieceManager;
-  await timeCliPhase(
-    "loadManager.synced",
-    () => awaitSyncWithTimeout(pieceManager.synced()),
-  );
-  return pieceManager;
+    const pieceManager = await timeCliPhase(
+      "loadManager.pieceManager",
+      () => new PieceManager(session, runtime),
+    );
+    pieceManagerRef.current = pieceManager;
+    await timeCliPhase(
+      "loadManager.synced",
+      () => awaitSyncWithTimeout(pieceManager.synced()),
+    );
+    return pieceManager;
+  });
 }
 
 async function getProgramFromFile(
@@ -1004,13 +1061,24 @@ export async function inspectPiece(config: PieceConfig): Promise<{
   id: string;
   name?: string;
   patternName?: string;
-  source: Readonly<unknown>;
+  source?: Readonly<unknown>;
   result: Readonly<unknown>;
   readingFrom: Array<{ id: string; name?: string }>;
   readBy: Array<{ id: string; name?: string }>;
 }> {
   const manager = await loadManager(config);
-  const resolvedConfig = await resolvePieceConfigWithManager(config, manager);
+  let resolvedConfig: PieceConfig;
+  try {
+    resolvedConfig = await resolvePieceConfigWithManager(config, manager);
+  } catch (error) {
+    if (
+      error instanceof SlugResolutionError &&
+      error.code === "not-piece"
+    ) {
+      return await inspectSlugTargetCell(manager, config.piece);
+    }
+    throw error;
+  }
   const pieces = new PiecesController(manager);
   const piece = await pieces.get(
     resolvedConfig.piece,
@@ -1041,6 +1109,35 @@ export async function inspectPiece(config: PieceConfig): Promise<{
     result,
     readingFrom,
     readBy,
+  };
+}
+
+async function inspectSlugTargetCell(
+  manager: PieceManager,
+  slug: string,
+): Promise<{
+  id: string;
+  name?: string;
+  patternName?: string;
+  source?: Readonly<unknown>;
+  result: Readonly<unknown>;
+  readingFrom: Array<{ id: string; name?: string }>;
+  readBy: Array<{ id: string; name?: string }>;
+}> {
+  const target = await resolveSlugTargetCell(manager, slug);
+  await target.pull();
+  const result = target.get() as Readonly<unknown>;
+  const name = isRecord(result) && typeof result[NAME] === "string"
+    ? result[NAME]
+    : undefined;
+
+  return {
+    id: slug,
+    name,
+    patternName: "slug target cell",
+    result,
+    readingFrom: [],
+    readBy: [],
   };
 }
 

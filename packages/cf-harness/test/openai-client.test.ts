@@ -71,6 +71,47 @@ Deno.test("OpenAICompatibleGatewayClient omits authorization headers in no-auth 
   );
 });
 
+Deno.test("OpenAICompatibleGatewayClient forwards native model tools and summarizes them in diagnostics", async () => {
+  const attempts: OpenAIChatCompletionAttemptDiagnostic[] = [];
+  let requestBody: unknown;
+  const client = new OpenAICompatibleGatewayClient({
+    baseUrl: "https://llm.stage.commontools.dev/",
+    apiKey: "test-key",
+    fetchFn: (_input, init) => {
+      requestBody = JSON.parse(String(init?.body));
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [{
+              index: 0,
+              message: { role: "assistant", content: "ok" },
+            }],
+          }),
+          { status: 200 },
+        ),
+      );
+    },
+  });
+
+  await client.createChatCompletionJson({
+    model: "google:gemini-3.5-flash",
+    messages: [],
+    native_model_tools: [{ type: "google_search" }],
+  }, {
+    onChatCompletionAttempt: (attempt) => {
+      attempts.push(attempt);
+    },
+  });
+
+  assertEquals(requestBody, {
+    model: "google:gemini-3.5-flash",
+    messages: [],
+    native_model_tools: [{ type: "google_search" }],
+  });
+  assertEquals(attempts[0].request.nativeModelToolIds, ["google_search"]);
+  assertEquals(attempts[0].request.nativeModelToolCount, 1);
+});
+
 Deno.test("OpenAICompatibleGatewayClient parses successful chat completion JSON responses", async () => {
   const client = new OpenAICompatibleGatewayClient({
     baseUrl: "https://llm.stage.commontools.dev/",

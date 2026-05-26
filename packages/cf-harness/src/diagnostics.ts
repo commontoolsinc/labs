@@ -16,6 +16,7 @@ import {
 } from "./tools/browser-host-command-policy.ts";
 import type { DelegateTaskToolOutput } from "./contracts/subagent.ts";
 import type { ReadSkillResourceToolOutput } from "./tools/read-skill-resource.ts";
+import { isWebFetchToolErrorOutput } from "./tools/web-fetch.ts";
 import {
   isStructuredFileToolErrorOutput,
   type StructuredFileToolErrorCode,
@@ -709,6 +710,8 @@ export const classifyBuiltinToolFailure = (
       return classifyStructuredFileToolFailure(toolId, output, at);
     case "read_skill_resource":
       return classifySkillResourceToolFailure(output, at);
+    case "web_fetch":
+      return classifyWebFetchToolFailure(output, at);
     case "delegate_task": {
       if (isFailedDelegateTaskOutput(output)) {
         return createHarnessFailureRecord({
@@ -726,6 +729,24 @@ export const classifyBuiltinToolFailure = (
     default:
       return undefined;
   }
+};
+
+const classifyWebFetchToolFailure = (
+  output: unknown,
+  at: string,
+): HarnessFailureRecord | undefined => {
+  if (!isWebFetchToolErrorOutput(output)) {
+    return undefined;
+  }
+  return createHarnessFailureRecord({
+    kind: output.code === "blocked_url" ? "tool_not_allowed" : "harness_error",
+    source: "tool_output",
+    detail: output.message,
+    at,
+    toolId: "web_fetch",
+    outputId: output.outputId as ToolOutputId,
+    ...(output.status !== undefined ? { exitCode: output.status } : {}),
+  });
 };
 
 const isFailedSkillResourceOutput = (

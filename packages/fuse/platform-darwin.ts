@@ -121,6 +121,7 @@ const O_APPEND = 0x0008;
 const ENOTEMPTY = 66;
 const ENOSYS = 78;
 const ENODATA = 93; // macOS ENOATTR
+const ENOTSUP = 45;
 
 // --- fuse_lowlevel_ops offsets (v2) ---
 
@@ -212,6 +213,7 @@ const darwinPlatform: FusePlatform = {
   ENOTEMPTY,
   ENOSYS,
   ENODATA,
+  ENOTSUP,
   FH_OFFSET,
 
   // macOS getxattr has extra `position` parameter (uint32_t)

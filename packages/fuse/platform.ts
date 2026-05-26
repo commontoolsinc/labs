@@ -152,6 +152,7 @@ export interface FusePlatform {
   ENOTEMPTY: number;
   ENOSYS: number;
   ENODATA: number;
+  ENOTSUP: number;
   /** Byte offset of fh within fuse_file_info. */
   FH_OFFSET: number;
 

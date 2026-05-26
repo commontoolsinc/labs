@@ -1,4 +1,5 @@
 import { createSession, DID, Identity, Session } from "@commonfabric/identity";
+import { slugIdForSpace } from "@commonfabric/runner/slugs";
 import { NameSchema } from "@commonfabric/runner/schemas";
 import {
   CellHandle,
@@ -192,6 +193,22 @@ export class RuntimeInternals extends EventTarget {
     })();
     this.#patternCache.set(id, promise);
     return promise;
+  }
+
+  invalidatePattern(id: string): void {
+    this.#patternCache.delete(id);
+  }
+
+  async refreshPattern(id: string): Promise<PageHandle<NameSchema>> {
+    this.invalidatePattern(id);
+    return await this.getPattern(id);
+  }
+
+  async getSlugCell(slug: string): Promise<CellHandle<unknown>> {
+    this.#check();
+    return await this.#client.getCell(this.#space, {
+      "/": slugIdForSpace(this.#space, slug),
+    });
   }
 
   async getSlug(id: string): Promise<string | undefined> {

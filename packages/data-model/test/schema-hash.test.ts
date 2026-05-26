@@ -7,12 +7,12 @@ import {
   internSchema,
   internSchemaAsTaggedHashString,
   isInternedSchema,
-} from "../schema-hash.ts";
-import { SchemaAndHash } from "../schema-and-hash.ts";
-import { FabricHash } from "../fabric-hash.ts";
-import { hashStringOf } from "../value-hash.ts";
-import { isDeepFrozen } from "../deep-freeze.ts";
-import { toDeepFrozenSchema } from "../schema-utils.ts";
+} from "../src/schema-hash.ts";
+import { SchemaAndHash } from "../src/SchemaAndHash.ts";
+import { FabricHash } from "../src/fabric-primitives/FabricHash.ts";
+import { hashStringOf } from "../src/value-hash.ts";
+import { isDeepFrozen } from "../src/deep-freeze.ts";
+import { toDeepFrozenSchema } from "../src/schema-utils.ts";
 import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 
 describe("schema-hash dispatch", () => {

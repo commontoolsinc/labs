@@ -4,14 +4,12 @@ import {
   toCompactDebugString,
   toDebugKindString,
   toIndentedDebugString,
-} from "../value-debug.ts";
-import { FabricBytes } from "../fabric-bytes.ts";
-import { FabricEpochNsec } from "../fabric-epoch.ts";
-import {
-  FabricError,
-  FabricMap,
-  FabricRegExp,
-} from "../fabric-native-instances.ts";
+} from "../src/value-debug.ts";
+import { FabricBytes } from "../src/fabric-primitives/FabricBytes.ts";
+import { FabricEpochNsec } from "../src/fabric-primitives/FabricEpochNsec.ts";
+import { FabricError } from "../src/fabric-instances/FabricError.ts";
+import { FabricMap } from "../src/fabric-instances/FabricMap.ts";
+import { FabricRegExp } from "../src/fabric-instances/FabricRegExp.ts";
 
 // ============================================================================
 // Tests
@@ -439,7 +437,7 @@ describe("value-debug", () => {
     });
 
     it("renders FabricInstance subclasses with their constructor name", () => {
-      expect(toDebugKindString(new FabricError(new Error("x"))))
+      expect(toDebugKindString(FabricError.fromNativeError(new Error("x"))))
         .toBe("FabricInstance (FabricError)");
       expect(toDebugKindString(new FabricRegExp(/abc/g, "es2025")))
         .toBe("FabricInstance (FabricRegExp)");

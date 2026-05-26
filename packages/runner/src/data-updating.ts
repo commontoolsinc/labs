@@ -1,5 +1,6 @@
 import { isRecord } from "@commonfabric/utils/types";
 import {
+  fabricFromNativeValue,
   FabricInstance,
   type FabricObject,
   type FabricValue,
@@ -781,9 +782,9 @@ export function normalizeAndDiff(
   // `FabricRegExp`) are atomic from this layer's perspective: their
   // own-enumerable properties are implementation details, not
   // user-visible structure, and iterating them via the generic
-  // `isRecord` branch below would re-wrap embedded native values (e.g.,
-  // `FabricError.error` is a native `Error`) on each pass, recursing
-  // forever. Emit a single change at this link with the wrapper as the
+  // `isRecord` branch below would walk wrapper-internal fields, which
+  // is meaningless at the change-emission level. Emit a single change at
+  // this link with the wrapper as the
   // value — the storage layer's JSON encoding handles serialization via
   // `[DECONSTRUCT]`/`[RECONSTRUCT]`. Placed after the write-redirect
   // resolution above so writes through a redirect land on the target,
@@ -793,7 +794,36 @@ export function normalizeAndDiff(
       "diff",
       () => `[BRANCH_FABRIC_INSTANCE] Atomic FabricInstance at path=${pathStr}`,
     );
-    changes.push({ location: link, value: newValue as FabricValue });
+    // TODO(danfuzz): Replace this band-aid once the unified walk supports
+    // coordinated descent into `FabricInstance` internals (see below); at that
+    // point switch this to a shallow conversion.
+    //
+    // BAND-AID: this *should* be a shallow conversion. This is a unified walk
+    // (one `seen` map for shared-ref/cycle handling, `[ID]` assignment, and
+    // diffing), and the right design is to shallow-wrap the `FabricInstance`
+    // here and let this walk descend into its `FabricValue` internals as part
+    // of the same coordinated pass. We don't support that descent yet, so the
+    // wrapper's internals could otherwise reach storage improperly converted.
+    //
+    // As a stopgap we run the deep `fabricFromNativeValue()`, which converts
+    // the internals via a *separate, uncoordinated* pass. The cost: any
+    // `FabricValue` reachable both inside the wrapper and elsewhere in the
+    // outer tree gets de-shared (the outer walk handles one copy; this deep
+    // call mints an independent, separately-frozen copy with no shared `seen`
+    // / ID bookkeeping). That is invisible for `FabricError` today only
+    // because an error's `cause` / custom props aren't, in practice, shared
+    // with the rest of the tree -- but `FabricSet` / `FabricMap` (collections
+    // of arbitrary, routinely-shared `FabricValue`s) WILL break here once they
+    // carry real traffic. Proper fix: coordinated descent into wrapper
+    // internals, after which a shallow conversion suffices.
+    //
+    // The call is class-agnostic (no concrete-subclass special-casing): each
+    // subclass governs its own deep conversion and already-proper / deep-frozen
+    // instances short-circuit by identity.
+    changes.push({
+      location: link,
+      value: fabricFromNativeValue(newValue) as FabricValue,
+    });
     return changes;
   }
 

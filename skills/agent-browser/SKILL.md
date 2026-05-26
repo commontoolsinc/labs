@@ -100,6 +100,32 @@ agent-browser state load auth.json
 agent-browser open https://app.example.com/dashboard
 ```
 
+### Common Fabric identity checks
+
+For Common Fabric tests that touch `PerUser`, `PerSession`, favorites, drafts,
+or home-space state, import the same CLI key used by `deno task cf` into the
+browser session via `Import CLI Key`.
+
+```bash
+agent-browser --session cf-shared open http://localhost:8000/<space>/<piece>
+agent-browser --session cf-shared snapshot -i
+# Click Login, then Import CLI Key.
+agent-browser --session cf-shared upload @<choose-file-ref> "$CF_IDENTITY"
+agent-browser --session cf-shared click @<import-key-ref>
+agent-browser --session cf-shared console
+```
+
+The browser console should include `[Identity] User DID: ...`; compare it with:
+
+```bash
+deno run -A packages/cli/mod.ts id did "$CF_IDENTITY"
+```
+
+Use distinct `--session` names when comparing identities. A different identity
+should still see unscoped/`PerSpace` data in the same space, but `PerUser` and
+`PerSession` fields resolve to separate instances and may look empty/default.
+See `docs/development/SHARED_IDENTITY.md` for the full workflow.
+
 ### Data extraction
 
 ```bash

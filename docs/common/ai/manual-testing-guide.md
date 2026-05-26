@@ -51,6 +51,55 @@ agent-browser screenshot
 - use separate named sessions when comparing environments or parallel flows
 - remember that refs become stale after page transitions or significant DOM
   updates
+- verify the active Common Fabric DID before drawing conclusions about scoped
+  visibility
+
+## Identity and Scoped Visibility
+
+For Common Fabric tests that touch `PerUser`, `PerSession`, favorites,
+home-space data, drafts, or user-local UI state, the browser and CLI must use the
+same identity unless the test is explicitly about multi-user behavior. Use
+[`docs/development/SHARED_IDENTITY.md`](../../development/SHARED_IDENTITY.md) as
+the canonical workflow.
+
+Before debugging "missing" data, compare the CLI DID:
+
+```bash
+deno run -A packages/cli/mod.ts id did "$CF_IDENTITY"
+```
+
+with the browser console line:
+
+```text
+[Identity] User DID: did:key:...
+```
+
+When using `agent-browser`, import the CLI key into the browser session under
+test and then inspect the console:
+
+```bash
+agent-browser --session cf-shared open http://localhost:8000/<space>/<piece>
+agent-browser --session cf-shared snapshot -i
+# Click Login, then Import CLI Key.
+agent-browser --session cf-shared upload @<choose-file-ref> "$CF_IDENTITY"
+agent-browser --session cf-shared click @<import-key-ref>
+agent-browser --session cf-shared console
+```
+
+Use separate `agent-browser --session` names for different users and verify the
+`shell.identity` log in each session. Do not assume a fresh session has the
+identity you intended; stale stored credentials are a common source of false
+test results.
+
+Expected visibility:
+
+- unscoped and `PerSpace` data remains visible across identities in the same
+  space
+- `PerUser` data is per active user DID and may look default or missing under a
+  different identity
+- `PerSession` data is per active user DID and browser/runtime session
+- if the whole piece does not load, investigate URL, space, slug, server state,
+  source errors, and authorization before blaming identity scope
 
 ## Headed vs Headless
 
@@ -74,6 +123,8 @@ When behavior is unclear:
 - inspect rendered VDOM state
 - check for non-idempotent updates
 - verify action schema expectations
+- compare the CLI DID with the browser `shell.identity` log before treating
+  scoped defaults as missing storage
 - confirm that any identity-sensitive logic is not being masked by a CLI-only
   test path
 

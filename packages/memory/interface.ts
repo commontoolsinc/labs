@@ -1,5 +1,5 @@
 import type { FabricValue, JSONValue } from "@commonfabric/api";
-import type { FabricHash } from "@commonfabric/data-model/fabric-hash";
+import type { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 
 import type { SchemaPathSelector } from "@commonfabric/api";
 export type { SchemaPathSelector };
