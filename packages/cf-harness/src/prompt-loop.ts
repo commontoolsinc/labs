@@ -10,11 +10,15 @@ import {
   type CfcStreamObservation,
   evaluateHarnessWriteFileAuthorization,
 } from "@commonfabric/runner/cfc";
-import { type LLMNativeModelToolId } from "@commonfabric/llm/types";
+import {
+  GOOGLE_SEARCH_NATIVE_MODEL_TOOL,
+  type LLMNativeModelToolId,
+} from "@commonfabric/llm/types";
 import {
   type OpenAIChatCompletionAttemptDiagnostic,
   type OpenAIChatCompletionMessage,
   type OpenAIChatCompletionRequest,
+  type OpenAIChatCompletionRequestTool,
   type OpenAIChatCompletionResponse,
   type OpenAIChatCompletionTool,
   type OpenAIChatMessageContent,
@@ -228,6 +232,16 @@ const toOpenAITools = (
           : { ...tool.descriptor.inputSchema },
       },
     }));
+
+const toOpenAINativeModelTools = (
+  nativeModelToolIds: readonly LLMNativeModelToolId[],
+): OpenAIChatCompletionRequestTool[] =>
+  nativeModelToolIds.map((toolId) => {
+    switch (toolId) {
+      case GOOGLE_SEARCH_NATIVE_MODEL_TOOL:
+        return { type: GOOGLE_SEARCH_NATIVE_MODEL_TOOL };
+    }
+  });
 
 const parseToolArguments = (
   toolCall: HarnessToolCall,
@@ -951,11 +965,25 @@ const createAssistantTranscriptMessage = (
         : {}),
       ...(result.sources !== undefined ? { sources: result.sources } : {}),
     }));
+  const groundingMetadataNativeModelToolResults:
+    | HarnessNativeModelToolResult[]
+    | undefined = message.grounding_metadata === undefined ? undefined : [{
+      type: "cf-harness.native-model-tool-result",
+      toolId: GOOGLE_SEARCH_NATIVE_MODEL_TOOL,
+      provider: "google",
+      providerMetadata: message.grounding_metadata,
+    }];
+  const allNativeModelToolResults = [
+    ...(nativeModelToolResults ?? []),
+    ...(groundingMetadataNativeModelToolResults ?? []),
+  ];
   return {
     role: "assistant",
     content: normalizeTextContent(message.content),
     ...(toolCalls !== undefined ? { toolCalls } : {}),
-    ...(nativeModelToolResults !== undefined ? { nativeModelToolResults } : {}),
+    ...(allNativeModelToolResults.length > 0
+      ? { nativeModelToolResults: allNativeModelToolResults }
+      : {}),
   };
 };
 
@@ -1926,16 +1954,14 @@ export class CfHarnessPromptLoop {
     model: string,
     transcript: readonly HarnessTranscriptMessage[],
   ): Promise<OpenAIChatCompletionRequest> {
-    const nativeModelTools = this.#nativeModelToolIds.map((toolId) => ({
-      type: toolId,
-    }));
+    const tools = [
+      ...toOpenAITools(this.#allowedToolIds),
+      ...toOpenAINativeModelTools(this.#nativeModelToolIds),
+    ];
     return {
       model,
       messages: await Promise.all(transcript.map(toOpenAIChatMessage)),
-      tools: toOpenAITools(this.#allowedToolIds),
-      ...(nativeModelTools.length > 0
-        ? { native_model_tools: nativeModelTools }
-        : {}),
+      tools,
       tool_choice: "auto",
     };
   }

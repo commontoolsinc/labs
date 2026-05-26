@@ -1577,7 +1577,10 @@ Deno.test("CfHarnessPromptLoop applies the web_search profile model override and
   const requestBodies: Array<{
     model: string;
     messages: Array<{ role: string; content: string }>;
-    tools: Array<{ function: { name: string } }>;
+    tools: Array<
+      | { type: "function"; function: { name: string } }
+      | { type: "google_search" }
+    >;
     native_model_tools?: Array<{ type: string }>;
   }> = [];
   const loop = new CfHarnessPromptLoop({
@@ -1594,7 +1597,10 @@ Deno.test("CfHarnessPromptLoop applies the web_search profile model override and
       const body = JSON.parse(String(init?.body)) as {
         model: string;
         messages: Array<{ role: string; content: string }>;
-        tools: Array<{ function: { name: string } }>;
+        tools: Array<
+          | { type: "function"; function: { name: string } }
+          | { type: "google_search" }
+        >;
         native_model_tools?: Array<{ type: string }>;
       };
       requestBodies.push(body);
@@ -1668,16 +1674,14 @@ Deno.test("CfHarnessPromptLoop applies the web_search profile model override and
 
   assertEquals(result.finalAssistantText, "Web search parent completed.");
   assertEquals(requestBodies[0].model, "gpt-5.4");
-  assertEquals(requestBodies[1].model, "google:gemini-3.5-flash");
+  assertEquals(requestBodies[1].model, "gemini-3.5-flash");
   assertEquals(requestBodies[2].model, "gpt-5.4");
   assertEquals(
-    requestBodies[1].tools.map((tool) => tool.function.name),
-    [],
+    requestBodies[1].tools,
+    [{ type: "google_search" }],
   );
   assertEquals(requestBodies[0].native_model_tools, undefined);
-  assertEquals(requestBodies[1].native_model_tools, [{
-    type: "google_search",
-  }]);
+  assertEquals(requestBodies[1].native_model_tools, undefined);
   assertEquals(requestBodies[2].native_model_tools, undefined);
   assertEquals(
     requestBodies[1].messages[0].content.includes(
@@ -1691,9 +1695,9 @@ Deno.test("CfHarnessPromptLoop applies the web_search profile model override and
     ),
     true,
   );
-  assertEquals(output.subagent.model, "google:gemini-3.5-flash");
+  assertEquals(output.subagent.model, "gemini-3.5-flash");
   assertEquals(output.subagent.manifest.profile, "web_search");
-  assertEquals(output.subagent.manifest.model, "google:gemini-3.5-flash");
+  assertEquals(output.subagent.manifest.model, "gemini-3.5-flash");
   assertEquals(output.subagent.manifest.modelSource, "profile");
   assertEquals(output.subagent.manifest.allowedToolIds, []);
   assertEquals(output.subagent.manifest.hostToolIds, []);
