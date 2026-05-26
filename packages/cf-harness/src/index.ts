@@ -23,6 +23,7 @@ export * from "./contracts/tool-result.ts";
 export * from "./contracts/tool-descriptor.ts";
 export * from "./contracts/transcript.ts";
 export * from "./contracts/audit.ts";
+export * from "./contracts/web-search.ts";
 export * from "./sandbox/types.ts";
 export * from "./sandbox/process-runner.ts";
 export * from "./sandbox/docker-runsc.ts";

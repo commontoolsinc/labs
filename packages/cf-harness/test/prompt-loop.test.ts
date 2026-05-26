@@ -1573,6 +1573,133 @@ Deno.test("CfHarnessPromptLoop lets an explicit subagent profile expand child to
   assertEquals(output.subagent.manifest.hostToolIds, []);
 });
 
+Deno.test("CfHarnessPromptLoop applies the web_search profile model override and native search tool", async () => {
+  const requestBodies: Array<{
+    model: string;
+    messages: Array<{ role: string; content: string }>;
+    tools: Array<{ function: { name: string } }>;
+    native_model_tools?: Array<{ type: string }>;
+  }> = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedToolIds: ["delegate_task"],
+    allowedSubagentProfiles: ["web_search"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-delegate-web-search",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "enforce-explicit",
+    }),
+    fetchFn: (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as {
+        model: string;
+        messages: Array<{ role: string; content: string }>;
+        tools: Array<{ function: { name: string } }>;
+        native_model_tools?: Array<{ type: string }>;
+      };
+      requestBodies.push(body);
+      const payload = requestBodies.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-web-search",
+                type: "function",
+                function: {
+                  name: "delegate_task",
+                  arguments: JSON.stringify({
+                    goal: "Search for current docs.",
+                    profile: "web_search",
+                  }),
+                },
+              }],
+            },
+          }],
+        }
+        : requestBodies.length === 2
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Web search child completed.",
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Web search parent completed.",
+            },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Delegate search through the explicitly authorized profile.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+  const toolMessage = result.transcript.at(-2);
+  if (toolMessage?.role !== "tool") {
+    throw new Error("expected delegate_task tool message");
+  }
+  const output = JSON.parse(toolMessage.content) as {
+    subagent: {
+      model: string;
+      manifest: {
+        profile: string;
+        model: string;
+        modelSource: string;
+        allowedToolIds: string[];
+        hostToolIds: string[];
+        nativeModelToolIds: string[];
+      };
+    };
+  };
+
+  assertEquals(result.finalAssistantText, "Web search parent completed.");
+  assertEquals(requestBodies[0].model, "gpt-5.4");
+  assertEquals(requestBodies[1].model, "google:gemini-3.5-flash");
+  assertEquals(requestBodies[2].model, "gpt-5.4");
+  assertEquals(
+    requestBodies[1].tools.map((tool) => tool.function.name),
+    [],
+  );
+  assertEquals(requestBodies[0].native_model_tools, undefined);
+  assertEquals(requestBodies[1].native_model_tools, [{
+    type: "google_search",
+  }]);
+  assertEquals(requestBodies[2].native_model_tools, undefined);
+  assertEquals(
+    requestBodies[1].messages[0].content.includes(
+      "Subagent profile: web_search",
+    ),
+    true,
+  );
+  assertEquals(
+    requestBodies[1].messages[0].content.includes(
+      "provider-native search capabilities",
+    ),
+    true,
+  );
+  assertEquals(output.subagent.model, "google:gemini-3.5-flash");
+  assertEquals(output.subagent.manifest.profile, "web_search");
+  assertEquals(output.subagent.manifest.model, "google:gemini-3.5-flash");
+  assertEquals(output.subagent.manifest.modelSource, "profile");
+  assertEquals(output.subagent.manifest.allowedToolIds, []);
+  assertEquals(output.subagent.manifest.hostToolIds, []);
+  assertEquals(output.subagent.manifest.nativeModelToolIds, ["google_search"]);
+});
+
 Deno.test("CfHarnessPromptLoop keeps bash-no-sandbox unavailable to the parent by default", async () => {
   const fetchCalls: RequestInit[] = [];
   const loop = new CfHarnessPromptLoop({
@@ -2227,7 +2354,7 @@ Deno.test("CfHarnessPromptLoop rejects invalid delegate_task inputs before creat
       name: "unknown profile",
       arguments: { goal: "Inspect", profile: "unknown" },
       message:
-        "delegate_task profile must be one of default, browser, web_fetch",
+        "delegate_task profile must be one of default, browser, web_fetch, web_search",
     },
     {
       name: "array return schema",

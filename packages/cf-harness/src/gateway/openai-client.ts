@@ -1,3 +1,5 @@
+import type { LLMNativeModelToolId } from "@commonfabric/llm/types";
+
 export interface OpenAICompatibleGatewayClientOptions {
   baseUrl: string;
   authMode?: "bearer" | "none";
@@ -19,6 +21,17 @@ export interface OpenAIChatCompletionFunctionTool {
 export interface OpenAIChatCompletionTool {
   type: "function";
   function: OpenAIChatCompletionFunctionTool;
+}
+
+export interface OpenAIChatCompletionNativeModelTool {
+  type: LLMNativeModelToolId;
+}
+
+export interface OpenAIChatCompletionNativeModelToolResult {
+  type: LLMNativeModelToolId;
+  provider?: string;
+  providerMetadata?: unknown;
+  sources?: unknown;
 }
 
 export interface OpenAIChatCompletionToolCall {
@@ -53,6 +66,7 @@ export interface OpenAIChatCompletionRequest {
   model: string;
   messages: readonly OpenAIChatCompletionMessage[];
   tools?: readonly OpenAIChatCompletionTool[];
+  native_model_tools?: readonly OpenAIChatCompletionNativeModelTool[];
   tool_choice?: "auto" | "none" | Record<string, unknown>;
 }
 
@@ -60,6 +74,8 @@ export interface OpenAIChatCompletionRequestDiagnosticSummary {
   model: string;
   messageCount: number;
   toolCount: number;
+  nativeModelToolIds?: readonly LLMNativeModelToolId[];
+  nativeModelToolCount: number;
   serializedBytes: number;
 }
 
@@ -103,6 +119,10 @@ export interface OpenAIChatCompletionChoice {
 export interface OpenAIChatCompletionResponse {
   id?: string;
   choices: readonly OpenAIChatCompletionChoice[];
+  native_model_tool_results?:
+    readonly OpenAIChatCompletionNativeModelToolResult[];
+  provider_metadata?: Record<string, unknown>;
+  sources?: readonly unknown[];
 }
 
 const DEFAULT_CHAT_COMPLETION_TRANSPORT_RETRIES = 1;
@@ -146,12 +166,21 @@ const textByteLength = (input: string): number =>
 const summarizeChatCompletionRequest = (
   payload: OpenAIChatCompletionRequest,
   serializedPayload: string,
-): OpenAIChatCompletionRequestDiagnosticSummary => ({
-  model: payload.model,
-  messageCount: payload.messages.length,
-  toolCount: payload.tools?.length ?? 0,
-  serializedBytes: textByteLength(serializedPayload),
-});
+): OpenAIChatCompletionRequestDiagnosticSummary => {
+  const nativeModelToolIds = payload.native_model_tools?.map((tool) =>
+    tool.type
+  );
+  return {
+    model: payload.model,
+    messageCount: payload.messages.length,
+    toolCount: payload.tools?.length ?? 0,
+    ...(nativeModelToolIds !== undefined
+      ? { nativeModelToolIds: [...nativeModelToolIds] }
+      : {}),
+    nativeModelToolCount: nativeModelToolIds?.length ?? 0,
+    serializedBytes: textByteLength(serializedPayload),
+  };
+};
 
 const selectResponseHeaders = (
   headers: Headers,
