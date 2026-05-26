@@ -1,4 +1,5 @@
 import { getLogger } from "@commonfabric/utils/logger";
+import { getPersistentSchedulerStateConfig } from "@commonfabric/memory/v2";
 import type { Runtime } from "../runtime.ts";
 import { toMemorySpaceAddress } from "../link-utils.ts";
 import type {
@@ -479,6 +480,10 @@ function attachSchedulerActionObservation(
   },
   log: ReactivityLog,
 ): void {
+  if (!getPersistentSchedulerStateConfig()) {
+    return;
+  }
+
   const observationTarget = args.tx.setSchedulerObservation
     ? args.tx
     : args.tx.tx;

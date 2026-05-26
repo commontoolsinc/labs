@@ -17,6 +17,7 @@ import {
   type ClientCommit,
   type DocumentPath,
   type EntityDocument,
+  getPersistentSchedulerStateConfig,
   type PatchOp,
   type SchedulerActionSnapshotQuery,
   type SchedulerObservationCommit,
@@ -1013,13 +1014,21 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   async synced(): Promise<void> {
-    await this.flushSchedulerObservationBatch();
+    if (
+      this.#schedulerObservationBatch.length > 0 ||
+      this.#schedulerObservationFlushPromise
+    ) {
+      await this.flushSchedulerObservationBatch();
+    }
     await Promise.all([...this.#syncPromises, ...this.#commitPromises]);
   }
 
   async listSchedulerActionSnapshots(
     query: SchedulerActionSnapshotQuery = {},
   ): Promise<SchedulerSnapshotListResult> {
+    if (!getPersistentSchedulerStateConfig()) {
+      return { serverSeq: 0, snapshots: [] };
+    }
     const { session } = await this.sessionHandle();
     return await session.listSchedulerActionSnapshots(query);
   }
@@ -1174,7 +1183,9 @@ class SpaceReplica implements ISpaceReplica {
     transaction: NativeStorageCommit,
     source?: IStorageTransaction,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
-    const schedulerObservation = transaction.schedulerObservation;
+    const schedulerObservation = getPersistentSchedulerStateConfig()
+      ? transaction.schedulerObservation
+      : undefined;
     const operations = withCommitTiming(
       ["commitNative", "normalize"],
       () =>
@@ -1342,6 +1353,9 @@ class SpaceReplica implements ISpaceReplica {
     schedulerObservation: unknown,
     source?: IStorageTransaction,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
+    if (!getPersistentSchedulerStateConfig()) {
+      return Promise.resolve({ ok: {} });
+    }
     const localSeq = this.#nextLocalSeq++;
     const pending = Promise.withResolvers<
       Result<Unit, StorageTransactionRejected>

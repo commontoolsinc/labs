@@ -485,3 +485,37 @@
 - Validation:
   - `HEADLESS=1 deno task integration --port-offset=904 patterns default-app`
   - `HEADLESS=1 deno task integration --port-offset=909 patterns cfc-group-chat-demo`
+
+## 2026-05-26 - Persistent Scheduler State Flag
+
+- Added `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` using the same runtime,
+  shell/toolshed/CLI, and memory-protocol structure as
+  `EXPERIMENTAL_MODERN_DATA_MODEL`.
+- Decision: the flag defaults off. When off, runner action runs skip
+  `setSchedulerObservation`, memory-v2 clients do not request scheduler
+  snapshots, memory-v2 server responses return no snapshots, and server commit
+  handling strips scheduler observation payloads before applying the commit.
+  Existing SQLite scheduler rows are therefore inert while the flag is disabled.
+- Updated the default-app reload measurement to record total action,
+  computation, and effect time from graph stats. The strict rehydration action
+  count guardrail now only applies when
+  `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` is enabled.
+- Local notebook reload measurement:
+  - flag on, second measured reload: 30.4s to render, 28 scheduler action
+    runs, 13 computation runs, 119.4ms total computation time from graph stats.
+  - flag off with forced measurement: 46.6s to render, 138 scheduler action
+    runs, 75 computation runs, 4290.6ms total computation time from graph
+    stats.
+  - Interpretation: the remaining flag-on reload time is not primarily spent
+    running computations; with the flag on, graph-recorded computation work is
+    roughly 4.2s lower than the no-persistence path.
+- Validation so far:
+  - `deno test -A packages/memory/test/v2-test.ts packages/runner/test/experimental-options.test.ts packages/runner/test/memory-v2-stacked-commit.test.ts packages/shell/test/env.test.ts packages/shell/test/felt-config.test.ts`
+  - `deno test -A packages/runner/test/scheduler-observations.test.ts packages/memory/test/v2-scheduler-state-test.ts packages/memory/test/v2-server-test.ts packages/memory/test/v2-client-test.ts`
+  - `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE=true HEADLESS=1 PIPE_CONSOLE=1 deno task integration --port-offset=916 patterns default-app`
+  - `HEADLESS=1 PIPE_CONSOLE=1 deno task integration --port-offset=918 patterns default-app`
+  - `CF_FORCE_NOTEBOOK_RELOAD_MEASUREMENT=1 HEADLESS=1 PIPE_CONSOLE=1 deno task integration --port-offset=919 patterns default-app`
+  - `deno lint`
+  - `deno task check`
+  - `HEADLESS=1 deno task test`
+  - `HEADLESS=1 deno task integration --port-offset=920`

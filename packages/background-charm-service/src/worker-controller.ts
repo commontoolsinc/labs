@@ -26,6 +26,7 @@ export interface WorkerOptions {
   timeoutMs?: number;
   experimental?: {
     modernDataModel?: boolean;
+    persistentSchedulerState?: boolean;
   };
 }
 

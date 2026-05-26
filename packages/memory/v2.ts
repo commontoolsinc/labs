@@ -154,6 +154,7 @@ export interface SessionOpenResult {
 
 export interface MemoryProtocolFlags {
   modernDataModel: boolean;
+  persistentSchedulerState: boolean;
 }
 
 /** Legacy field name accepted on the wire for backward compatibility. */
@@ -166,7 +167,9 @@ export type WireFlagsKey = "modernDataModel" | "richStorableValues";
  * the legacy `richStorableValues` alias. Use `parseMemoryProtocolFlags()` to
  * normalize to a `MemoryProtocolFlags`.
  */
-export type WireMemoryProtocolFlags = { [K in WireFlagsKey]?: boolean };
+export type WireMemoryProtocolFlags =
+  & { [K in WireFlagsKey]?: boolean }
+  & { persistentSchedulerState?: boolean };
 
 export interface HelloMessage {
   type: "hello";
@@ -399,14 +402,36 @@ const memoryReconstructionContext = new EmptyReconstructionContext(
   "no cell reconstruction at the memory boundary",
 );
 
+let persistentSchedulerStateEnabled = false;
+
+/**
+ * Ambient runtime flag for persistent scheduler observations and rehydration.
+ * The runner owns the feature, but the memory protocol needs the value during
+ * client/server handshakes, so it lives beside the memory protocol flags.
+ */
+export function setPersistentSchedulerStateConfig(enabled?: boolean): void {
+  persistentSchedulerStateEnabled = enabled ?? false;
+}
+
+export function getPersistentSchedulerStateConfig(): boolean {
+  return persistentSchedulerStateEnabled;
+}
+
+export function resetPersistentSchedulerStateConfig(): void {
+  persistentSchedulerStateEnabled = false;
+}
+
 export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   modernDataModel: getDataModelConfig(),
+  persistentSchedulerState: getPersistentSchedulerStateConfig(),
 });
 
 export const sameMemoryProtocolFlags = (
   left: MemoryProtocolFlags,
   right: MemoryProtocolFlags,
-): boolean => left.modernDataModel === right.modernDataModel;
+): boolean =>
+  left.modernDataModel === right.modernDataModel &&
+  left.persistentSchedulerState === right.persistentSchedulerState;
 
 /**
  * Parses and normalizes incoming wire-protocol flags. Accepts either the
@@ -422,9 +447,20 @@ export const parseMemoryProtocolFlags = (
     return null;
   }
 
+  const persistentSchedulerState = value.persistentSchedulerState;
+  if (
+    persistentSchedulerState !== undefined &&
+    typeof persistentSchedulerState !== "boolean"
+  ) {
+    return null;
+  }
+
   if (typeof value.modernDataModel === "boolean") {
     return {
-      flags: { modernDataModel: value.modernDataModel },
+      flags: {
+        modernDataModel: value.modernDataModel,
+        persistentSchedulerState: persistentSchedulerState === true,
+      },
       wireKey: "modernDataModel",
     };
   }
@@ -432,7 +468,10 @@ export const parseMemoryProtocolFlags = (
   const legacy = value[LEGACY_MODERN_DATA_MODEL_KEY];
   if (typeof legacy === "boolean") {
     return {
-      flags: { modernDataModel: legacy },
+      flags: {
+        modernDataModel: legacy,
+        persistentSchedulerState: persistentSchedulerState === true,
+      },
       wireKey: LEGACY_MODERN_DATA_MODEL_KEY,
     };
   }
@@ -449,7 +488,10 @@ export const parseMemoryProtocolFlags = (
 export const wireMemoryProtocolFlags = (
   flags: MemoryProtocolFlags,
   wireKey: WireFlagsKey = "modernDataModel",
-): WireMemoryProtocolFlags => ({ [wireKey]: flags.modernDataModel });
+): WireMemoryProtocolFlags => ({
+  [wireKey]: flags.modernDataModel,
+  persistentSchedulerState: flags.persistentSchedulerState,
+});
 
 export const encodeMemoryBoundary = (value: unknown): string =>
   jsonFromValue(value as FabricValue);

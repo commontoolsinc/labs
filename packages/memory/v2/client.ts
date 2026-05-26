@@ -4,6 +4,7 @@ import {
   encodeMemoryBoundary,
   type EntitySnapshot,
   getMemoryProtocolFlags,
+  getPersistentSchedulerStateConfig,
   type GraphQuery,
   type GraphQueryResult,
   MEMORY_PROTOCOL,
@@ -458,6 +459,9 @@ export class SpaceSession {
     query: SchedulerActionSnapshotQuery = {},
   ): Promise<SchedulerSnapshotListResult> {
     this.#assertOpen();
+    if (!getPersistentSchedulerStateConfig()) {
+      return { serverSeq: this.#serverSeq, snapshots: [] };
+    }
     const result = await this.client.request<SchedulerSnapshotListResult>({
       type: "scheduler.snapshot.list",
       requestId: crypto.randomUUID(),

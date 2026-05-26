@@ -842,6 +842,7 @@ Current branch status:
 
 | Area | Version 1 status |
 | --- | --- |
+| Feature flag | Implemented as `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`, default off. |
 | Observation construction and no-op persistence | Implemented, including batched no-op observation commits. |
 | Memory scheduler tables and same-space dirty marking | Implemented. |
 | Cross-space read-index mirrors | Implemented with accepted non-atomic mirror writes. |
@@ -851,6 +852,15 @@ Current branch status:
 | Durable process graph generations | Future work; version 1 uses process cell identity plus generation `0`. |
 | Demand-targeted dirty recovery beyond subscription startup | Future work. |
 | Replication, retention, and mirror repair | Future work. |
+
+The version 1 implementation is gated by the same experimental-option plumbing
+as `EXPERIMENTAL_MODERN_DATA_MODEL`. With
+`EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE=false` or unset, the runner does not
+attach scheduler observations to transactions, memory clients do not request
+scheduler snapshots, and the memory server does not write scheduler observation
+rows, dirty rows, or cross-space mirrors. Snapshot-list requests intentionally
+return an empty result while the flag is off, even if a previous flagged run
+left scheduler rows in the SQLite database.
 
 ### Phase 1: Observe Without Rehydrating
 

@@ -12,6 +12,7 @@ import {
   type GraphQueryRequest,
   type GraphQueryResult,
   type HelloMessage,
+  getPersistentSchedulerStateConfig,
   parseMemoryProtocolFlags,
   type ResponseMessage,
   type SchedulerSnapshotListRequest,
@@ -680,9 +681,17 @@ export class Server {
 
     try {
       const engine = await this.openEngine(message.space);
-      const schedulerObservations = schedulerObservationsFromCommit(
-        message.commit,
-      );
+      const schedulerStateEnabled = getPersistentSchedulerStateConfig();
+      const commitPayload = schedulerStateEnabled
+        ? message.commit
+        : {
+          ...message.commit,
+          schedulerObservation: undefined,
+          schedulerObservationBatch: undefined,
+        };
+      const schedulerObservations = schedulerStateEnabled
+        ? schedulerObservationsFromCommit(commitPayload)
+        : [];
       const previousReadSpaces = new Map<number, Set<string>>();
       for (const { localSeq, observation } of schedulerObservations) {
         previousReadSpaces.set(
@@ -701,7 +710,7 @@ export class Server {
         sessionId: message.sessionId,
         space: message.space,
         principal: session.principal,
-        commit: message.commit,
+        commit: commitPayload,
       });
       await this.runPostCommitSchedulerSideEffects(
         message.space,
@@ -803,6 +812,16 @@ export class Server {
 
     try {
       const engine = await this.openEngine(message.space);
+      if (!getPersistentSchedulerStateConfig()) {
+        return {
+          type: "response",
+          requestId: message.requestId,
+          ok: {
+            serverSeq: Engine.serverSeq(engine),
+            snapshots: [],
+          },
+        };
+      }
       const snapshots = Engine.listSchedulerActionSnapshots(
         engine,
         message.query,
@@ -1483,6 +1502,10 @@ export class Server {
     previousReadSpaces: ReadonlyMap<number, ReadonlySet<string>>,
     session: SessionState | undefined,
   ): Promise<void> {
+    if (!getPersistentSchedulerStateConfig()) {
+      return;
+    }
+
     try {
       await this.propagateSchedulerDirtyToOwnerSpaces(ownerSpace, commit);
       const keptObservationLocalSeqs = commit.schedulerObservationResults

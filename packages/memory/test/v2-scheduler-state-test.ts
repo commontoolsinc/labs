@@ -17,7 +17,11 @@ import {
 import { connect, loopback } from "../v2/client.ts";
 import { Server } from "../v2/server.ts";
 import { resolveSpaceStoreUrl } from "../v2/storage-path.ts";
-import { toDocumentPath } from "../v2.ts";
+import {
+  resetPersistentSchedulerStateConfig,
+  setPersistentSchedulerStateConfig,
+  toDocumentPath,
+} from "../v2.ts";
 
 const createEngine = async (): Promise<{
   engine: Engine;
@@ -736,6 +740,7 @@ Deno.test("memory v2 marks persisted readers dirty during semantic commits", asy
 });
 
 Deno.test("memory v2 server mirrors scheduler read indexes into read spaces", async () => {
+  setPersistentSchedulerStateConfig(true);
   const storePath = await Deno.makeTempDir();
   const store = toFileUrl(`${storePath}/`);
   const server = new Server({
@@ -809,10 +814,58 @@ Deno.test("memory v2 server mirrors scheduler read indexes into read spaces", as
     await client.close().catch(() => {});
     await server.close().catch(() => {});
     await Deno.remove(storePath, { recursive: true });
+    resetPersistentSchedulerStateConfig();
+  }
+});
+
+Deno.test("memory v2 server does not serve scheduler snapshots while persistent scheduler state is off", async () => {
+  const storePath = await Deno.makeTempDir();
+  const store = toFileUrl(`${storePath}/`);
+  const ownerSpace = "did:key:scheduler-flag-off-owner-space";
+
+  setPersistentSchedulerStateConfig(true);
+  const setupServer = new Server({
+    store,
+    authorizeSessionOpen: () => "did:key:test-principal",
+  });
+  const setupClient = await connect({ transport: loopback(setupServer) });
+  const setupOwner = await setupClient.mount(ownerSpace);
+  try {
+    await setupOwner.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservation: { ...observation, ownerSpace },
+    });
+  } finally {
+    await setupClient.close().catch(() => {});
+    await setupServer.close().catch(() => {});
+    resetPersistentSchedulerStateConfig();
+  }
+
+  const server = new Server({
+    store,
+    authorizeSessionOpen: () => "did:key:test-principal",
+  });
+  const client = await connect({ transport: loopback(server) });
+  const owner = await client.mount(ownerSpace);
+
+  try {
+    const listed = await owner.listSchedulerActionSnapshots({
+      pieceId: observation.pieceId,
+      processGeneration: observation.processGeneration,
+      actionId: observation.actionId,
+    });
+    assertEquals(listed.snapshots, []);
+  } finally {
+    await client.close().catch(() => {});
+    await server.close().catch(() => {});
+    await Deno.remove(storePath, { recursive: true });
   }
 });
 
 Deno.test("memory v2 server mirrors batched scheduler observations into read spaces", async () => {
+  setPersistentSchedulerStateConfig(true);
   const storePath = await Deno.makeTempDir();
   const store = toFileUrl(`${storePath}/`);
   const server = new Server({
@@ -873,10 +926,12 @@ Deno.test("memory v2 server mirrors batched scheduler observations into read spa
     await client.close().catch(() => {});
     await server.close().catch(() => {});
     await Deno.remove(storePath, { recursive: true });
+    resetPersistentSchedulerStateConfig();
   }
 });
 
 Deno.test("memory v2 server skips scheduler mirrors for unmounted read spaces", async () => {
+  setPersistentSchedulerStateConfig(true);
   const storePath = await Deno.makeTempDir();
   const store = toFileUrl(`${storePath}/`);
   const server = new Server({
@@ -923,10 +978,12 @@ Deno.test("memory v2 server skips scheduler mirrors for unmounted read spaces", 
     await client.close().catch(() => {});
     await server.close().catch(() => {});
     await Deno.remove(storePath, { recursive: true });
+    resetPersistentSchedulerStateConfig();
   }
 });
 
 Deno.test("memory v2 server propagates cross-space dirty state back to the owner space", async () => {
+  setPersistentSchedulerStateConfig(true);
   const storePath = await Deno.makeTempDir();
   const store = toFileUrl(`${storePath}/`);
   const server = new Server({ store });
@@ -1002,5 +1059,6 @@ Deno.test("memory v2 server propagates cross-space dirty state back to the owner
     await client.close().catch(() => {});
     await server.close().catch(() => {});
     await Deno.remove(storePath, { recursive: true });
+    resetPersistentSchedulerStateConfig();
   }
 });

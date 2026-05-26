@@ -56,6 +56,8 @@ const initializeRuntime = async () => {
       }),
       experimental: {
         modernDataModel: env.EXPERIMENTAL_MODERN_DATA_MODEL,
+        persistentSchedulerState:
+          env.EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE,
       },
       cachedCompiler,
     });

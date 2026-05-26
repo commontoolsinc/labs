@@ -19,6 +19,11 @@ import {
   resetDataModelConfig,
   setDataModelConfig,
 } from "@commonfabric/data-model/fabric-value";
+import {
+  getPersistentSchedulerStateConfig,
+  resetPersistentSchedulerStateConfig,
+  setPersistentSchedulerStateConfig,
+} from "@commonfabric/memory/v2";
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
 import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
 import type {
@@ -166,6 +171,8 @@ export type PieceCreatedCallback = (piece: Cell<any>) => void;
 export interface ExperimentalOptions {
   /** Enable the new fabric value type system (bigint, Map, Set, Uint8Array, Date, FabricInstance). */
   modernDataModel?: boolean | undefined;
+  /** Persist scheduler observations and use them for scheduler rehydration. */
+  persistentSchedulerState?: boolean | undefined;
   /** Preserve cumulative scheduler write history instead of using current-known writes. */
   schedulerHistoricalMightWrite?: boolean | undefined;
 }
@@ -304,6 +311,7 @@ export class Runtime {
   constructor(options: RuntimeOptions) {
     this.experimental = {
       modernDataModel: undefined,
+      persistentSchedulerState: undefined,
       schedulerHistoricalMightWrite: undefined,
       ...options.experimental,
     };
@@ -326,6 +334,11 @@ export class Runtime {
     // default is modern).
     setDataModelConfig(this.experimental.modernDataModel);
     this.experimental.modernDataModel = getDataModelConfig();
+    setPersistentSchedulerStateConfig(
+      this.experimental.persistentSchedulerState,
+    );
+    this.experimental.persistentSchedulerState =
+      getPersistentSchedulerStateConfig();
 
     this.id = options.storageManager.id;
     this.apiUrl = new URL(options.apiUrl);
@@ -503,6 +516,7 @@ export class Runtime {
 
     // Reset experimental config to defaults.
     resetDataModelConfig();
+    resetPersistentSchedulerStateConfig();
 
     // Clear the current runtime reference
     // Removed setCurrentRuntime call - no longer using singleton pattern

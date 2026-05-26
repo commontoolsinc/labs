@@ -149,6 +149,21 @@ const CAPTURE_EVENT_INVOCATION_SERIES = (() => {
     return 0;
   }
 })();
+const PERSISTENT_SCHEDULER_STATE_ENABLED = (() => {
+  try {
+    const raw = Deno.env.get("EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE");
+    return raw === "1" || raw === "true";
+  } catch {
+    return false;
+  }
+})();
+const FORCE_NOTEBOOK_RELOAD_MEASUREMENT = (() => {
+  try {
+    return Deno.env.get("CF_FORCE_NOTEBOOK_RELOAD_MEASUREMENT") === "1";
+  } catch {
+    return false;
+  }
+})();
 const SCHEDULER_PULL_MODE = (() => {
   try {
     const raw = Deno.env.get("CF_SCHEDULER_PULL_MODE");
@@ -686,6 +701,16 @@ describe("default-app flow test", () => {
     assertEquals(summary.argumentNotesLength, noteCreates);
     assertEquals(summary.noteCount, noteCreates);
 
+    if (
+      !PERSISTENT_SCHEDULER_STATE_ENABLED &&
+      !FORCE_NOTEBOOK_RELOAD_MEASUREMENT
+    ) {
+      console.log(
+        "Skipping notebook reload rehydration summary because persistent scheduler state is disabled.",
+      );
+      return;
+    }
+
     // The first reload can legitimately run dirty catch-up work from the burst.
     // Measure the following reload as the clean persisted-state path.
     const warmNotebookReloadSummary = await collectNotebookReloadSummary(
@@ -693,6 +718,9 @@ describe("default-app flow test", () => {
       {
         identity,
         expectedNoteCount: noteCreates,
+        renderTimeoutMs: PERSISTENT_SCHEDULER_STATE_ENABLED
+          ? undefined
+          : 180_000,
       },
     );
     assert(
@@ -708,6 +736,9 @@ describe("default-app flow test", () => {
     const notebookReloadSummary = await collectNotebookReloadSummary(shell, {
       identity,
       expectedNoteCount: noteCreates,
+      renderTimeoutMs: PERSISTENT_SCHEDULER_STATE_ENABLED
+        ? undefined
+        : 180_000,
     });
     assert(
       notebookReloadSummary && typeof notebookReloadSummary === "object",
@@ -728,10 +759,12 @@ describe("default-app flow test", () => {
       reloadActionRunCount !== undefined,
       "Expected notebook reload summary to include action run count",
     );
-    assert(
-      reloadActionRunCount <= NOTEBOOK_RELOAD_TOTAL_ACTION_RUN_LIMIT,
-      `Expected notebook reload to stay within <= ${NOTEBOOK_RELOAD_TOTAL_ACTION_RUN_LIMIT} total action runs, saw ${reloadActionRunCount}`,
-    );
+    if (PERSISTENT_SCHEDULER_STATE_ENABLED) {
+      assert(
+        reloadActionRunCount <= NOTEBOOK_RELOAD_TOTAL_ACTION_RUN_LIMIT,
+        `Expected notebook reload to stay within <= ${NOTEBOOK_RELOAD_TOTAL_ACTION_RUN_LIMIT} total action runs, saw ${reloadActionRunCount}`,
+      );
+    }
     const reloadComputationRunCount = computationRunCountFromHomeLoadSummary(
       notebookReloadSummary,
     );
@@ -739,10 +772,12 @@ describe("default-app flow test", () => {
       reloadComputationRunCount !== undefined,
       "Expected notebook reload summary to include computation run count",
     );
-    assert(
-      reloadComputationRunCount <= NOTEBOOK_RELOAD_COMPUTATION_RUN_LIMIT,
-      `Expected notebook reload to reuse persisted scheduler state with <= ${NOTEBOOK_RELOAD_COMPUTATION_RUN_LIMIT} computation runs, saw ${reloadComputationRunCount}`,
-    );
+    if (PERSISTENT_SCHEDULER_STATE_ENABLED) {
+      assert(
+        reloadComputationRunCount <= NOTEBOOK_RELOAD_COMPUTATION_RUN_LIMIT,
+        `Expected notebook reload to reuse persisted scheduler state with <= ${NOTEBOOK_RELOAD_COMPUTATION_RUN_LIMIT} computation runs, saw ${reloadComputationRunCount}`,
+      );
+    }
   });
 });
 
@@ -1584,6 +1619,7 @@ async function collectNotebookReloadSummary(
   options: {
     identity: Identity;
     expectedNoteCount: number;
+    renderTimeoutMs?: number;
   },
 ): Promise<unknown> {
   const page = shell.page();
@@ -1606,7 +1642,7 @@ async function collectNotebookReloadSummary(
       return state.isNotebook &&
         state.noteCount === options.expectedNoteCount &&
         state.renderedNoteChips === options.expectedNoteCount;
-    });
+    }, { timeout: options.renderTimeoutMs });
   } catch (error) {
     console.log(
       "Notebook reload diagnostics:",
@@ -1615,6 +1651,10 @@ async function collectNotebookReloadSummary(
     console.log(
       "Notebook reload navigation diagnostics:",
       JSON.stringify(await collectNavigationDiagnostics(page), null, 2),
+    );
+    console.log(
+      "Notebook reload home-load summary at failure:",
+      JSON.stringify(await collectHomeLoadSummary(page), null, 2),
     );
     throw error;
   }
@@ -2568,7 +2608,15 @@ async function collectHomeLoadSummary(page: Page): Promise<unknown> {
       }
     }
 
-    const topActions = [...byActionId.values()]
+    const actionRows = [...byActionId.values()];
+    const computationRows = actionRows.filter((row) =>
+      row.actionType === "computation"
+    );
+    const effectRows = actionRows.filter((row) =>
+      row.actionType === "effect"
+    );
+
+    const topActions = actionRows
       .sort((a, b) =>
         b.runCount - a.runCount ||
         b.totalTime - a.totalTime ||
@@ -2595,16 +2643,29 @@ async function collectHomeLoadSummary(page: Page): Promise<unknown> {
         actionsWithStats: actionNodes.length,
         actionRuns: schedulerRunCount,
         actionRunsThroughActionBody: schedulerRunActionCount,
-        actionRunsFromStats: [...byActionId.values()].reduce(
+        actionRunsFromStats: actionRows.reduce(
           (sum, row) => sum + row.runCount,
           0,
         ),
-        computationRunsFromStats: [...byActionId.values()]
-          .filter((row) => row.actionType === "computation")
-          .reduce((sum, row) => sum + row.runCount, 0),
-        effectRunsFromStats: [...byActionId.values()]
-          .filter((row) => row.actionType === "effect")
-          .reduce((sum, row) => sum + row.runCount, 0),
+        actionTotalTimeFromStats: Number(
+          actionRows.reduce((sum, row) => sum + row.totalTime, 0).toFixed(3),
+        ),
+        computationRunsFromStats: computationRows.reduce(
+          (sum, row) => sum + row.runCount,
+          0,
+        ),
+        computationTotalTimeFromStats: Number(
+          computationRows
+            .reduce((sum, row) => sum + row.totalTime, 0)
+            .toFixed(3),
+        ),
+        effectRunsFromStats: effectRows.reduce(
+          (sum, row) => sum + row.runCount,
+          0,
+        ),
+        effectTotalTimeFromStats: Number(
+          effectRows.reduce((sum, row) => sum + row.totalTime, 0).toFixed(3),
+        ),
       },
       topSchedulerTiming,
       topActions,

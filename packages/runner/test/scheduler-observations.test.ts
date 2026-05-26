@@ -1,5 +1,5 @@
 import {
-  createSchedulerTestRuntime,
+  createSchedulerTestRuntime as createBaseSchedulerTestRuntime,
   describe,
   disposeSchedulerTestRuntime,
   expect,
@@ -26,6 +26,18 @@ import type {
   Runtime,
 } from "./scheduler-test-utils.ts";
 import type { SchedulerActionSnapshotResult } from "@commonfabric/memory/v2";
+
+const createSchedulerTestRuntime: typeof createBaseSchedulerTestRuntime = (
+  apiUrl,
+  options = {},
+) =>
+  createBaseSchedulerTestRuntime(apiUrl, {
+    ...options,
+    experimental: {
+      persistentSchedulerState: true,
+      ...options.experimental,
+    },
+  });
 
 const readAddress = {
   space: "did:key:space" as const,

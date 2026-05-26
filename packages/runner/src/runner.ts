@@ -2,6 +2,7 @@ import {
   fabricFromNativeValue,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
+import { getPersistentSchedulerStateConfig } from "@commonfabric/memory/v2";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import {
   toCompactDebugString,
@@ -1573,12 +1574,15 @@ export class Runner {
   }
 
   private schedulerRehydrationOptions(processCell: Cell<any>): {
-    rehydrateFromStorage: {
+    rehydrateFromStorage?: {
       space: MemorySpace;
       pieceId: string;
       processGeneration: number;
     };
   } {
+    if (!getPersistentSchedulerStateConfig()) {
+      return {};
+    }
     const { space, id, scope } = processCell.getAsNormalizedFullLink();
     return {
       rehydrateFromStorage: {

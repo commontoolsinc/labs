@@ -26,6 +26,9 @@ export function experimentalOptionsFromEnv(): ExperimentalOptions {
   };
   const opts: ExperimentalOptions = {
     modernDataModel: read("EXPERIMENTAL_MODERN_DATA_MODEL"),
+    persistentSchedulerState: read(
+      "EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE",
+    ),
   };
 
   // Log any overridden experimental flags.
@@ -59,6 +62,7 @@ export async function awaitSyncWithTimeout(
           `Sync timed out after ${timeoutMs / 1000}s. ` +
             `This often indicates a client/server configuration mismatch ` +
             `(e.g., EXPERIMENTAL_MODERN_DATA_MODEL enabled on the server but not the CLI). ` +
+            `Also check EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE. ` +
             `Check toolshed logs for AuthorizationError details.`,
         ),
       );

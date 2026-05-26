@@ -19,6 +19,8 @@ import {
   type EntityDocument,
   getMemoryProtocolFlags,
   type PatchOp,
+  resetPersistentSchedulerStateConfig,
+  setPersistentSchedulerStateConfig,
 } from "@commonfabric/memory/v2";
 import { EmptyReconstructionContext } from "@commonfabric/data-model/EmptyReconstructionContext";
 import type {
@@ -555,7 +557,24 @@ const schedulerObservationFor = (actionId: string) => ({
   status: "success",
 });
 
+Deno.test("memory v2 ignores no-op scheduler observations when persistent scheduler state is off", async () => {
+  resetPersistentSchedulerStateConfig();
+  const harness = createHarness();
+  try {
+    const result = await harness.replica.commitNative({
+      operations: [],
+      schedulerObservation: schedulerObservationFor("action:off"),
+    });
+
+    assertEquals(result, { ok: {} });
+    assertEquals(harness.model.transactLocalSeqs, []);
+  } finally {
+    await harness.close();
+  }
+});
+
 Deno.test("memory v2 batches adjacent no-op scheduler observations", async () => {
+  setPersistentSchedulerStateConfig(true);
   const harness = createHarness();
   try {
     const first = harness.replica.commitNative({
@@ -582,10 +601,12 @@ Deno.test("memory v2 batches adjacent no-op scheduler observations", async () =>
     );
   } finally {
     await harness.close();
+    resetPersistentSchedulerStateConfig();
   }
 });
 
 Deno.test("memory v2 flushes no-op scheduler batches before semantic writes", async () => {
+  setPersistentSchedulerStateConfig(true);
   const harness = createHarness();
   try {
     const observation = harness.replica.commitNative({
@@ -627,6 +648,7 @@ Deno.test("memory v2 flushes no-op scheduler batches before semantic writes", as
     );
   } finally {
     await harness.close();
+    resetPersistentSchedulerStateConfig();
   }
 });
 

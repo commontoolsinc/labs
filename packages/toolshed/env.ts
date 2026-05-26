@@ -206,6 +206,7 @@ const EnvSchema = z.object({
   // env vars in this file have the same latent bug.
   // ===========================================================================
   EXPERIMENTAL_MODERN_DATA_MODEL: flagValue(),
+  EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: flagValue(),
 
   // ===========================================================================
   // Compilation cache flags (see docs/specs/compilation-cache.md)

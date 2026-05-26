@@ -47,7 +47,8 @@ The client MUST declare its protocol version in the first WebSocket message:
   "type": "hello",
   "protocol": "memory/v2",
   "flags": {
-    "modernDataModel": true
+    "modernDataModel": true,
+    "persistentSchedulerState": true
   }
 }
 ```
@@ -59,7 +60,8 @@ If the server accepts the protocol, it returns:
   "type": "hello.ok",
   "protocol": "memory/v2",
   "flags": {
-    "modernDataModel": true
+    "modernDataModel": true,
+    "persistentSchedulerState": true
   }
 }
 ```
@@ -74,6 +76,13 @@ treat it as equivalent to `modernDataModel`. When responding to a `hello`,
 the server echoes whichever wire-key the client used, so an older client
 that sent `richStorableValues` receives a reply using the same field name.
 New clients SHOULD send `modernDataModel`.
+
+`persistentSchedulerState` advertises whether the runner and memory server are
+allowed to write and serve internal scheduler observations. It defaults to
+`false` when absent. When `false`, clients should not send scheduler observation
+payloads, servers ignore scheduler observation payloads if received, and
+snapshot-list requests return no scheduler snapshots even if older scheduler
+rows exist in the database.
 
 ### 4.1.2 Logical Sessions and Resume
 
@@ -145,6 +154,7 @@ interface HelloMessage {
   protocol: "memory/v2";
   flags: {
     modernDataModel: boolean;
+    persistentSchedulerState?: boolean;
     // `richStorableValues` is accepted as a legacy alias on input only.
   };
 }

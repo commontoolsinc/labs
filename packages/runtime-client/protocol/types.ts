@@ -131,6 +131,7 @@ export interface InitializationData {
   // Experimental space-model feature flags.
   experimental?: {
     modernDataModel?: boolean;
+    persistentSchedulerState?: boolean;
   };
   // Commit-boundary CFC mode for the worker runtime.
   cfcEnforcementMode?:
