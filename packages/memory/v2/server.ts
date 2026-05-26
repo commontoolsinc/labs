@@ -8,11 +8,11 @@ import {
   decodeMemoryBoundary,
   encodeMemoryBoundary,
   type EntityDocument,
+  getPersistentSchedulerStateConfig,
   type GraphQuery,
   type GraphQueryRequest,
   type GraphQueryResult,
   type HelloMessage,
-  getPersistentSchedulerStateConfig,
   parseMemoryProtocolFlags,
   type ResponseMessage,
   type SchedulerSnapshotListRequest,
@@ -682,13 +682,11 @@ export class Server {
     try {
       const engine = await this.openEngine(message.space);
       const schedulerStateEnabled = getPersistentSchedulerStateConfig();
-      const commitPayload = schedulerStateEnabled
-        ? message.commit
-        : {
-          ...message.commit,
-          schedulerObservation: undefined,
-          schedulerObservationBatch: undefined,
-        };
+      const commitPayload = schedulerStateEnabled ? message.commit : {
+        ...message.commit,
+        schedulerObservation: undefined,
+        schedulerObservationBatch: undefined,
+      };
       const schedulerObservations = schedulerStateEnabled
         ? schedulerObservationsFromCommit(commitPayload)
         : [];
