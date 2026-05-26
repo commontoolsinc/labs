@@ -51,6 +51,32 @@ Before writing JSX, decide these things explicitly:
 Do not settle into a generic default app shell. Commit to a direction and make
 the UI clearly about that direction.
 
+## Smallest Button Retheme
+
+If the task is just "make this button look different", wrap the button in a
+small `cf-theme` and set semantic tokens. Do not reach into the button's shadow
+DOM.
+
+```tsx
+const buttonTheme = {
+  borderRadius: "999px",
+  colors: {
+    primary: "#121826",
+    primaryForeground: "#ffffff",
+  },
+};
+
+<cf-theme theme={buttonTheme}>
+  <cf-button color="primary" variant="solid" size="lg">
+    Save changes
+  </cf-button>
+</cf-theme>;
+```
+
+This changes the filled primary button's background, text color, hover family,
+and radius for that subtree. Use the same pattern around a larger section when
+several controls should share the treatment.
+
 ## Theme-First Workflow
 
 When polishing a non-trivial UI, default to this workflow:
@@ -59,8 +85,10 @@ When polishing a non-trivial UI, default to this workflow:
 2. Wrap the main surface in `<cf-theme theme={theme}>`.
 3. Build the layout with `cf-screen`, `cf-vstack`, `cf-hstack`, `cf-vgroup`,
    `cf-hgroup`, `cf-card`, and other `cf-*` primitives.
-4. When `cf-screen` is part of the layout, put overflow content in an inner
-   `cf-vscroll` instead of relying on document scroll.
+4. Content in `cf-screen`'s default slot scrolls automatically when it
+   overflows. Use `cf-vscroll` only when you need snap-to-bottom behavior,
+   fade edges, or a styled/hidden scrollbar. Use `cf-hscroll` for wide
+   tabular content.
 5. Let the theme carry most of the typography, color, radius, density, and
    motion decisions.
 6. Use component-specific CSS custom properties only for local emphasis or
@@ -105,25 +133,26 @@ const theme = {
 <cf-theme theme={theme}>
   <cf-screen>
     <cf-heading slot="header" level={2}>Budget tracker</cf-heading>
-    <cf-vscroll flex showScrollbar fadeEdges>
-      <cf-vstack gap="4" padding="4">
-        {/* themed UI */}
-      </cf-vstack>
-    </cf-vscroll>
+    <cf-vstack gap="4" padding="4">
+      {/* themed UI */}
+    </cf-vstack>
   </cf-screen>
 </cf-theme>;
 ```
 
 ## Full-Height Layout Rule
 
-`cf-screen` is a full-surface frame, not an automatically scrolling page.
+`cf-screen` is a full-surface frame with a pinned header, an auto-scrolling
+main area, and a pinned footer.
 
-- If the content can exceed one screen, wrap it in `cf-vscroll` inside
-  `cf-screen`.
+- Put ordinary vertical content directly in the default slot; it scrolls when
+  it overflows.
+- Use `cf-vscroll` inside `cf-screen` only when you need snap-to-bottom
+  behavior, fade edges, or a styled/hidden scrollbar.
 - If the layout is wider than one viewport, introduce a deliberate `cf-hscroll`
   region.
-- Do not place a long `cf-vstack` directly under `cf-screen` and assume the
-  shell or document will scroll for you.
+- Do not rely on document scrolling around `cf-screen`; the scroll boundary is
+  the component's main area.
 
 Verified top-level theme fields:
 
@@ -134,7 +163,21 @@ Verified top-level theme fields:
 - `density`
 - `colorScheme`
 - `animationSpeed`
+- `roundness`
+- `scale`
+- `motion`
 - `colors`
+
+Supported `colors` keys:
+
+- Core: `primary`, `primaryForeground`, `secondary`,
+  `secondaryForeground`, `background`, `surface`, `surfaceHover`, `text`,
+  `textMuted`, `border`, `borderMuted`, `success`, `successForeground`,
+  `error`, `errorForeground`, `warning`, `warningForeground`, `accent`,
+  `accentForeground`
+- Extended: `brand`, `brandForeground`, `textTertiary`, `textDisabled`,
+  `surfaceDisabled`, `surfacePressed`, `surfaceTertiary`, `surfaceInverse`,
+  `textOnColorSecondary`, `textOnInverse`, `textPressed`
 
 Supported pattern-style aliases:
 
@@ -156,7 +199,12 @@ See:
 - `--cf-theme-mono-font-family`
 - `--cf-theme-font-size`
 - `--cf-theme-border-radius`
+- `--cf-theme-border-radius-full`
 - `--cf-theme-animation-duration`
+
+Compatibility aliases are also emitted for older components:
+
+- `--cf-theme-font-mono`
 
 ### Colors
 
@@ -179,6 +227,30 @@ See:
 - `--cf-theme-color-warning-foreground`
 - `--cf-theme-color-accent`
 - `--cf-theme-color-accent-foreground`
+- `--cf-theme-color-brand`
+- `--cf-theme-color-brand-foreground`
+- `--cf-theme-color-text-tertiary`
+- `--cf-theme-color-text-disabled`
+- `--cf-theme-color-surface-disabled`
+- `--cf-theme-color-surface-pressed`
+- `--cf-theme-color-surface-tertiary`
+- `--cf-theme-color-surface-inverse`
+- `--cf-theme-color-text-on-color-secondary`
+- `--cf-theme-color-text-on-inverse`
+- `--cf-theme-color-text-pressed`
+
+Derived and compatibility color variables:
+
+- `--cf-theme-color-error-surface`
+- `--cf-theme-color-error-light`
+- `--cf-theme-color-primary-light`
+- `--cf-theme-color-success-light`
+- `--cf-theme-color-muted`
+- `--cf-theme-color-text-secondary`
+- `--cf-theme-{background,border,border-muted,error,primary,success,surface,surface-hover,text,text-muted}`
+- `--cf-theme-color-{primary,accent,danger}-{pressed,soft,subtle}`
+- `--cf-theme-color-status-{info,success,warning,error}`
+- `--cf-theme-color-status-{info,success,warning,error}-{pressed,soft,subtle,foreground}`
 
 ### Spacing
 
@@ -188,6 +260,9 @@ See:
 - `--cf-theme-spacing-padding-message`
 - `--cf-theme-spacing-padding-code`
 - `--cf-theme-spacing-padding-block`
+- `--cf-theme-spacing`
+- `--cf-theme-spacing-compact`
+- `--cf-theme-padding`
 
 These are the right starting point for most visual decisions.
 
