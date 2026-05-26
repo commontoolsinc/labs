@@ -1,4 +1,4 @@
-import { css, html } from "lit";
+import { css, html, nothing } from "lit";
 import { property, state } from "lit/decorators.js";
 import { BaseView, createDefaultAppState } from "./BaseView.ts";
 import { KeyStore } from "@commonfabric/identity";
@@ -9,6 +9,7 @@ import { Task, TaskStatus } from "@lit/task";
 import { CellEventTarget, CellUpdateEvent } from "../lib/cell-event-target.ts";
 import { type NameSchema, stringSchema } from "@commonfabric/runner/schemas";
 import {
+  isEmbeddedView,
   isViewingDefaultPatternView,
   replaceNavigation,
   updatePageTitle,
@@ -422,6 +423,7 @@ export class XAppView extends BaseView {
   override render() {
     const config = this.app.config ?? {};
     const { activePattern, spaceRootPattern } = this._patterns.value ?? {};
+    const embedded = isEmbeddedView(this.app.view);
     this.#setTitleSubscription(activePattern);
 
     const authenticated = html`
@@ -432,6 +434,7 @@ export class XAppView extends BaseView {
         .patternError="${this._patternError}"
         .showShellPieceListView="${config.showShellPieceListView ?? false}"
         .showSidebar="${config.showSidebar ?? false}"
+        .embedded="${embedded}"
       ></x-body-view>
     `;
     const unauthenticated = html`
@@ -449,22 +452,24 @@ export class XAppView extends BaseView {
     const content = this.app?.identity ? authenticated : unauthenticated;
     return html`
       <div class="shell-container">
-        <x-header-view
-          .isLoggedIn="${!!this.app.identity}"
-          .spaceName="${spaceName}"
-          .spaceDid="${spaceDid}"
-          .rt="${this.rt}"
-          .keyStore="${this.keyStore}"
-          .pieceTitle="${this.pieceTitle}"
-          .pieceId="${pieceId}"
-          .isViewingDefaultPattern="${isViewingDefaultPattern}"
-          .showDebuggerView="${config.showDebuggerView ?? false}"
-        ></x-header-view>
+        ${embedded ? nothing : html`
+          <x-header-view
+            .isLoggedIn="${!!this.app.identity}"
+            .spaceName="${spaceName}"
+            .spaceDid="${spaceDid}"
+            .rt="${this.rt}"
+            .keyStore="${this.keyStore}"
+            .pieceTitle="${this.pieceTitle}"
+            .pieceId="${pieceId}"
+            .isViewingDefaultPattern="${isViewingDefaultPattern}"
+            .showDebuggerView="${config.showDebuggerView ?? false}"
+          ></x-header-view>
+        `}
         <div class="content-area">
           ${content}
         </div>
       </div>
-      ${this.app.identity
+      ${this.app.identity && !embedded
         ? html`
           <x-debugger-view
             .visible="${this.debuggerController.isVisible()}"

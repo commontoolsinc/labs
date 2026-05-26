@@ -42,9 +42,17 @@ export class XBodyView extends BaseView {
       box-sizing: border-box;
     }
 
+    .content.embedded {
+      padding: 0;
+    }
+
     @media (max-width: 768px) {
       .content {
         padding: 1rem;
+      }
+
+      .content.embedded {
+        padding: 0;
       }
     }
 
@@ -102,6 +110,9 @@ export class XBodyView extends BaseView {
   @property({ attribute: false })
   accessor patternError: Error | undefined = undefined;
 
+  @property({ type: Boolean })
+  accessor embedded = false;
+
   override connectedCallback() {
     super.connectedCallback();
     this.addEventListener("cf-cell-pin", this._handleCellPin);
@@ -147,7 +158,13 @@ export class XBodyView extends BaseView {
   };
 
   private _subPages = new Task(this, {
-    task: async ([activePattern, spaceRootPattern]) => {
+    task: async ([activePattern, spaceRootPattern, embedded]) => {
+      if (embedded) {
+        return {
+          sidebarUI: undefined,
+          fabUI: undefined,
+        };
+      }
       const [sidebarUI, fabUI] = await Promise.all([
         getSubPageCell(
           activePattern?.cell() as CellHandle<SubPages> | undefined,
@@ -163,7 +180,7 @@ export class XBodyView extends BaseView {
         fabUI,
       };
     },
-    args: () => [this.activePattern, this.spaceRootPattern],
+    args: () => [this.activePattern, this.spaceRootPattern, this.embedded],
   });
 
   override render() {
@@ -183,12 +200,14 @@ export class XBodyView extends BaseView {
       `
       : null;
 
-    const sidebar = this._subPages?.value?.sidebarUI;
-    const fab = this._subPages?.value?.fabUI;
+    const sidebar = this.embedded
+      ? undefined
+      : this._subPages?.value?.sidebarUI;
+    const fab = this.embedded ? undefined : this._subPages?.value?.fabUI;
 
     return html`
-      <div class="content">
-        <x-omni-layout .sidebarOpen="${this.showSidebar}">
+      <div class="content ${this.embedded ? "embedded" : ""}">
+        <x-omni-layout .sidebarOpen="${!this.embedded && this.showSidebar}">
           ${mainContent} ${sidebar
             ? html`
               <cf-render slot="sidebar" .cell="${sidebar}"></cf-render>
