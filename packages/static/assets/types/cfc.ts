@@ -7,6 +7,147 @@ export type Cfc<T, Meta> = T & {
   readonly __ct_cfc__?: Meta;
 };
 
+export type CfcJsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | readonly CfcJsonValue[]
+  | CfcAtomObject;
+
+export interface CfcAtomObject {
+  readonly [key: string]: CfcJsonValue;
+}
+
+export type CfcAtom = CfcJsonValue;
+
+export declare const CFC_ATOM_BASE: "https://commonfabric.org/cfc/atom/";
+
+export declare const CFC_ATOM_TYPE: {
+  readonly Builtin: "https://commonfabric.org/cfc/atom/Builtin";
+  readonly Caveat: "https://commonfabric.org/cfc/atom/Caveat";
+  readonly InjectionSafe: "https://commonfabric.org/cfc/atom/InjectionSafe";
+  readonly LinkReference: "https://commonfabric.org/cfc/atom/LinkReference";
+  readonly Origin: "https://commonfabric.org/cfc/atom/Origin";
+  readonly PromptSlotBound: "https://commonfabric.org/cfc/atom/PromptSlotBound";
+  readonly PromptSlotInfluence:
+    "https://commonfabric.org/cfc/atom/PromptSlotInfluence";
+  readonly Resource: "https://commonfabric.org/cfc/atom/Resource";
+  readonly UserSurfaceInput:
+    "https://commonfabric.org/cfc/atom/UserSurfaceInput";
+};
+
+export declare const CFC_RUNTIME_SUBJECT: "did:web:commonfabric.org#runtime";
+
+export declare const CFC_CONCEPT_KIND: {
+  readonly PromptInfluence:
+    "https://commonfabric.org/cfc/concepts/prompt-influence";
+  readonly PromptInjectionRiskUnscreened:
+    "https://commonfabric.org/cfc/concepts/prompt-injection-risk-unscreened";
+};
+
+export declare const CFC_FUSE_ATOM_CLASS: {
+  readonly ProjectionMetadataIncomplete:
+    "CommonFabricFuseProjectionMetadataIncomplete";
+  readonly SymlinkTarget: "CommonFabricFuseSymlinkTarget";
+  readonly TopologyObservation: "FilesystemTopologyObservation";
+};
+
+export interface CfcResourceAtom {
+  readonly type: typeof CFC_ATOM_TYPE.Resource;
+  readonly class: string;
+  readonly subject: string;
+  readonly scope?: CfcAtom;
+}
+
+export interface CfcCaveatAtom {
+  readonly type: typeof CFC_ATOM_TYPE.Caveat;
+  readonly kind: string;
+  readonly source: CfcAtom;
+  readonly by?: CfcAtom;
+}
+
+export interface CfcBuiltinAtom {
+  readonly type: typeof CFC_ATOM_TYPE.Builtin;
+  readonly name: string;
+}
+
+export interface CfcInjectionSafeAtom {
+  readonly type: typeof CFC_ATOM_TYPE.InjectionSafe;
+}
+
+export interface CfcUserSurfaceInputAtom {
+  readonly type: typeof CFC_ATOM_TYPE.UserSurfaceInput;
+  readonly user: string;
+  readonly surface: string;
+  readonly valueDigest: string;
+}
+
+export interface CfcPromptSlotBoundAtom<
+  Source extends CfcAtom = CfcAtom,
+  Role extends string = string,
+> {
+  readonly type: typeof CFC_ATOM_TYPE.PromptSlotBound;
+  readonly source: Source;
+  readonly role: Role;
+  readonly kernelName: string;
+  readonly surface: string;
+  readonly subject?: string;
+  readonly renderRef?: CfcAtom;
+  readonly eventId?: string;
+  readonly valueDigest?: string;
+  readonly slotDigest?: string;
+  readonly snapshotDigest?: string;
+  readonly targetPath?: string;
+}
+
+export interface CfcPromptSlotInfluenceAtom<Role extends string = string> {
+  readonly type: typeof CFC_ATOM_TYPE.PromptSlotInfluence;
+  readonly version: 1;
+  readonly role: Role;
+  readonly kernelName: string;
+  readonly surface: string;
+  readonly subject?: string;
+  readonly eventId?: string;
+  readonly valueDigest?: string;
+  readonly slotDigest?: string;
+  readonly snapshotDigest?: string;
+  readonly targetPath?: string;
+  readonly runManifest?: {
+    readonly source?: string;
+    readonly wishId?: string;
+    readonly dispatchClass?: string;
+  };
+}
+
+export declare const cfcAtom: {
+  readonly resource: (
+    className: string,
+    subject?: string,
+    scope?: CfcAtom,
+  ) => CfcResourceAtom;
+  readonly caveat: (
+    kind: string,
+    source: CfcAtom,
+    by?: CfcAtom,
+  ) => CfcCaveatAtom;
+  readonly builtin: (name: string) => CfcBuiltinAtom;
+  readonly injectionSafe: () => CfcInjectionSafeAtom;
+  readonly userSurfaceInput: (
+    user: string,
+    surface: string,
+    valueDigest: string,
+  ) => CfcUserSurfaceInputAtom;
+  readonly promptSlotBound: <Source extends CfcAtom, Role extends string>(
+    source: Source,
+    role: Role,
+    kernelName: string,
+    subject: string,
+    surface: string,
+    valueDigest: string,
+  ) => CfcPromptSlotBoundAtom<Source, Role>;
+};
+
 export declare const CFC_CANONICAL_ALIAS_NAMES: readonly [
   "Cfc",
   "Confidential",
@@ -18,6 +159,9 @@ export declare const CFC_CANONICAL_ALIAS_NAMES: readonly [
   "MaxConfidentiality",
   "OpaqueInput",
   "WriteAuthorizedBy",
+  "TrustedActionWriteWithIntegrity",
+  "TrustedActionWrite",
+  "TrustedActionUiContract",
   "ExactCopy",
   "ProjectionPath",
   "ProjectionOf",
@@ -154,3 +298,45 @@ export type Projection<SourceRef> = SourceRef extends Ref<
 export type WriteAuthorizedBy<T, Binding> = Cfc<T, {
   writeAuthorizedBy: Binding;
 }>;
+
+export type TrustedActionWriteWithIntegrity<
+  T,
+  Binding,
+  Action extends string,
+  Pattern extends string,
+  Integrity extends readonly [string, ...string[]],
+> = Cfc<
+  WriteAuthorizedBy<T, Binding>,
+  {
+    uiContract: {
+      helper: "UiAction";
+      action: Action;
+      trustedPattern: Pattern;
+      requiredEventIntegrity: Integrity;
+    };
+  }
+>;
+
+export type TrustedActionWrite<
+  T,
+  Binding,
+  Action extends string,
+  Pattern extends string,
+> = TrustedActionWriteWithIntegrity<T, Binding, Action, Pattern, [Pattern]>;
+
+export type TrustedActionUiContract<
+  T,
+  Action extends string,
+  Pattern extends string,
+  Integrity extends readonly [string, ...string[]] = [Pattern],
+> = Cfc<
+  T,
+  {
+    uiContract: {
+      helper: "UiAction";
+      action: Action;
+      trustedPattern: Pattern;
+      requiredEventIntegrity: Integrity;
+    };
+  }
+>;

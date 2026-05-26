@@ -1,8 +1,5 @@
-import {
-  CFC_ATOM_TYPE,
-  type ImmutableJSONValue,
-  type JSONSchema,
-} from "@commonfabric/api";
+import type { ImmutableJSONValue, JSONSchema } from "@commonfabric/api";
+import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import {
   cloneIfNecessary,
   type FabricValue,

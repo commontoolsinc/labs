@@ -1577,15 +1577,7 @@ export type JSONSchemaObjMutable = Mutable<JSONSchemaObj>;
 export type JSONSchemaMutable = JSONSchemaObjMutable | boolean;
 
 export type * from "./cfc.ts";
-export {
-  CFC_ATOM_BASE,
-  CFC_ATOM_TYPE,
-  CFC_CANONICAL_ALIAS_NAMES,
-  CFC_CONCEPT_KIND,
-  CFC_FUSE_ATOM_CLASS,
-  CFC_RUNTIME_SUBJECT,
-  cfcAtom,
-} from "./cfc.ts";
+export { CFC_CANONICAL_ALIAS_NAMES } from "./cfc.ts";
 
 export type TrustedActionWriteWithIntegrity<
   T,
