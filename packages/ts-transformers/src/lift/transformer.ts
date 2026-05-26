@@ -56,7 +56,7 @@ export class LiftLoweringTransformer extends HelpersOnlyTransformer {
 function createLiftLoweringVisitor(
   context: TransformationContext,
 ): ts.Visitor {
-  const { factory, checker, tsContext } = context;
+  const { checker, tsContext } = context;
 
   const visitor: ts.Visitor = (node: ts.Node): ts.Node => {
     if (!ts.isCallExpression(node)) {
@@ -97,7 +97,7 @@ function lowerComputedCall(
   context: TransformationContext,
   visitor: ts.Visitor,
 ): ts.Node {
-  const { factory, checker, tsContext } = context;
+  const { factory, tsContext } = context;
 
   if (node.arguments.length !== 1) {
     return ts.visitEachChild(node, visitor, tsContext);
