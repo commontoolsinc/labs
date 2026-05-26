@@ -46,8 +46,6 @@ type BrowserTriggerTraceEntry = {
 };
 
 const { FRONTEND_URL, SPACE_NAME } = env;
-const NOTEBOOK_RELOAD_TOTAL_ACTION_RUN_LIMIT = 65;
-const NOTEBOOK_RELOAD_COMPUTATION_RUN_LIMIT = 35;
 
 export function parseCaptureSeriesCount(raw: string | undefined): number {
   if (!raw) return 0;
@@ -147,21 +145,6 @@ const CAPTURE_EVENT_INVOCATION_SERIES = (() => {
     );
   } catch {
     return 0;
-  }
-})();
-const PERSISTENT_SCHEDULER_STATE_ENABLED = (() => {
-  try {
-    const raw = Deno.env.get("EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE");
-    return raw === "1" || raw === "true";
-  } catch {
-    return false;
-  }
-})();
-const FORCE_NOTEBOOK_RELOAD_MEASUREMENT = (() => {
-  try {
-    return Deno.env.get("CF_FORCE_NOTEBOOK_RELOAD_MEASUREMENT") === "1";
-  } catch {
-    return false;
   }
 })();
 const SCHEDULER_PULL_MODE = (() => {
@@ -700,84 +683,6 @@ describe("default-app flow test", () => {
 
     assertEquals(summary.argumentNotesLength, noteCreates);
     assertEquals(summary.noteCount, noteCreates);
-
-    if (
-      !PERSISTENT_SCHEDULER_STATE_ENABLED &&
-      !FORCE_NOTEBOOK_RELOAD_MEASUREMENT
-    ) {
-      console.log(
-        "Skipping notebook reload rehydration summary because persistent scheduler state is disabled.",
-      );
-      return;
-    }
-
-    // The first reload can legitimately run dirty catch-up work from the burst.
-    // Measure the following reload as the clean persisted-state path.
-    const warmNotebookReloadSummary = await collectNotebookReloadSummary(
-      shell,
-      {
-        identity,
-        expectedNoteCount: noteCreates,
-        renderTimeoutMs: PERSISTENT_SCHEDULER_STATE_ENABLED
-          ? undefined
-          : 180_000,
-      },
-    );
-    assert(
-      warmNotebookReloadSummary &&
-        typeof warmNotebookReloadSummary === "object",
-      "Expected warm notebook reload summary to be available",
-    );
-    console.log(
-      "Notebook warm reload rehydration summary:",
-      JSON.stringify(warmNotebookReloadSummary, null, 2),
-    );
-
-    const notebookReloadSummary = await collectNotebookReloadSummary(shell, {
-      identity,
-      expectedNoteCount: noteCreates,
-      renderTimeoutMs: PERSISTENT_SCHEDULER_STATE_ENABLED
-        ? undefined
-        : 180_000,
-    });
-    assert(
-      notebookReloadSummary && typeof notebookReloadSummary === "object",
-      "Expected notebook reload summary to be available",
-    );
-    console.log(
-      "Notebook reload rehydration summary:",
-      JSON.stringify(notebookReloadSummary, null, 2),
-    );
-    const reloadRenderState = await collectNotebookRenderState(page);
-    assertEquals(reloadRenderState.noteCount, noteCreates);
-    assertEquals(reloadRenderState.renderedNoteChips, noteCreates);
-
-    const reloadActionRunCount = actionRunCountFromHomeLoadSummary(
-      notebookReloadSummary,
-    );
-    assert(
-      reloadActionRunCount !== undefined,
-      "Expected notebook reload summary to include action run count",
-    );
-    if (PERSISTENT_SCHEDULER_STATE_ENABLED) {
-      assert(
-        reloadActionRunCount <= NOTEBOOK_RELOAD_TOTAL_ACTION_RUN_LIMIT,
-        `Expected notebook reload to stay within <= ${NOTEBOOK_RELOAD_TOTAL_ACTION_RUN_LIMIT} total action runs, saw ${reloadActionRunCount}`,
-      );
-    }
-    const reloadComputationRunCount = computationRunCountFromHomeLoadSummary(
-      notebookReloadSummary,
-    );
-    assert(
-      reloadComputationRunCount !== undefined,
-      "Expected notebook reload summary to include computation run count",
-    );
-    if (PERSISTENT_SCHEDULER_STATE_ENABLED) {
-      assert(
-        reloadComputationRunCount <= NOTEBOOK_RELOAD_COMPUTATION_RUN_LIMIT,
-        `Expected notebook reload to reuse persisted scheduler state with <= ${NOTEBOOK_RELOAD_COMPUTATION_RUN_LIMIT} computation runs, saw ${reloadComputationRunCount}`,
-      );
-    }
   });
 });
 
@@ -1558,15 +1463,6 @@ async function waitForRuntimeIdle(page: Page): Promise<boolean> {
   });
 }
 
-async function waitForRuntimeSynced(page: Page): Promise<boolean> {
-  return await page.evaluate(async () => {
-    const rt = globalThis.commonfabric?.rt;
-    if (!rt?.synced) return false;
-    await rt.synced();
-    return true;
-  });
-}
-
 async function disposeBrowserRuntime(page: Page): Promise<void> {
   await page.evaluate(async () => {
     try {
@@ -1612,62 +1508,6 @@ async function waitForHomePageReady(
   await waitFor(async () => {
     return await waitForRuntimeIdle(page);
   });
-}
-
-async function collectNotebookReloadSummary(
-  shell: ShellIntegration,
-  options: {
-    identity: Identity;
-    expectedNoteCount: number;
-    renderTimeoutMs?: number;
-  },
-): Promise<unknown> {
-  const page = shell.page();
-  const state = await shell.state();
-  const view = state?.view;
-  assert(
-    view && "pieceId" in view && typeof view.pieceId === "string",
-    "Expected notebook reload to start from a piece view",
-  );
-  await waitFor(async () => await waitForRuntimeIdle(page));
-  await waitFor(async () => await waitForRuntimeSynced(page));
-  const startedAt = performance.now();
-  await page.reload({ waitUntil: "load" });
-  await page.applyConsoleFormatter();
-  await shell.login(options.identity);
-
-  try {
-    await waitFor(async () => {
-      const state = await collectNotebookRenderState(page);
-      return state.isNotebook &&
-        state.noteCount === options.expectedNoteCount &&
-        state.renderedNoteChips === options.expectedNoteCount;
-    }, { timeout: options.renderTimeoutMs });
-  } catch (error) {
-    console.log(
-      "Notebook reload diagnostics:",
-      JSON.stringify(await collectNotebookDiagnostics(page), null, 2),
-    );
-    console.log(
-      "Notebook reload navigation diagnostics:",
-      JSON.stringify(await collectNavigationDiagnostics(page), null, 2),
-    );
-    console.log(
-      "Notebook reload home-load summary at failure:",
-      JSON.stringify(await collectHomeLoadSummary(page), null, 2),
-    );
-    throw error;
-  }
-  await waitFor(async () => await waitForRuntimeIdle(page));
-
-  const homeLoadSummary = await collectHomeLoadSummary(page);
-  if (!homeLoadSummary || typeof homeLoadSummary !== "object") {
-    return homeLoadSummary;
-  }
-  return {
-    reloadToRenderedMs: Number((performance.now() - startedAt).toFixed(3)),
-    ...(homeLoadSummary as Record<string, unknown>),
-  };
 }
 
 async function collectNotebookSourceState(page: Page): Promise<{
@@ -1747,26 +1587,6 @@ async function collectNotebookSourceState(page: Page): Promise<{
         : undefined,
     };
   });
-}
-
-function actionRunCountFromHomeLoadSummary(
-  summary: unknown,
-): number | undefined {
-  if (!summary || typeof summary !== "object") return undefined;
-  const graph = (summary as { graph?: { actionRuns?: unknown } }).graph;
-  return typeof graph?.actionRuns === "number" ? graph.actionRuns : undefined;
-}
-
-function computationRunCountFromHomeLoadSummary(
-  summary: unknown,
-): number | undefined {
-  if (!summary || typeof summary !== "object") return undefined;
-  const graph = (summary as {
-    graph?: { computationRunsFromStats?: unknown };
-  }).graph;
-  return typeof graph?.computationRunsFromStats === "number"
-    ? graph.computationRunsFromStats
-    : undefined;
 }
 
 async function collectHomeLoadSummaryFromFreshPage(
@@ -2612,9 +2432,7 @@ async function collectHomeLoadSummary(page: Page): Promise<unknown> {
     const computationRows = actionRows.filter((row) =>
       row.actionType === "computation"
     );
-    const effectRows = actionRows.filter((row) =>
-      row.actionType === "effect"
-    );
+    const effectRows = actionRows.filter((row) => row.actionType === "effect");
 
     const topActions = actionRows
       .sort((a, b) =>
@@ -3441,117 +3259,6 @@ async function collectNotebookRenderState(page: Page): Promise<{
       renderedNoteLabels: noteLabels,
     };
   });
-}
-
-async function collectNotebookDiagnostics(
-  page: Page,
-): Promise<
-  Awaited<ReturnType<typeof collectNotebookRenderState>> & {
-    dirtyComputations?: Array<{
-      id: string;
-      preview?: string;
-      isPending: boolean;
-      isDemanded?: boolean;
-      isDebouncedWaiting?: boolean;
-      isConditionallyScheduled?: boolean;
-      hasActiveDebounceTimer?: boolean;
-      nextDebounceRunInMs?: number;
-      nextEligibleRunInMs?: number;
-      reads: string[];
-      writes: string[];
-      outgoing: Array<{ to: string; cells?: string[]; edgeType?: string }>;
-    }>;
-    effectState?: Array<{
-      id: string;
-      preview?: string;
-      isPending: boolean;
-      isDirty: boolean;
-      isPullDemandRoot?: boolean;
-      isConditionallyScheduled?: boolean;
-      hasActiveDebounceTimer?: boolean;
-      debounceMs?: number;
-      nextEligibleRunInMs?: number;
-      reads: string[];
-      writes: string[];
-    }>;
-    actionTraceTail?: Array<{ id: string; type: string; writes: string[] }>;
-  }
-> {
-  const renderState = await collectNotebookRenderState(page);
-  const graphState = await page.evaluate(async () => {
-    const commonfabric = globalThis.commonfabric as any;
-    const graph = await commonfabric?.rt?.getGraphSnapshot?.();
-    const actionTrace = await commonfabric?.rt?.getActionRunTrace?.();
-    const edgesByFrom = new Map<string, any[]>();
-    for (const edge of graph?.edges ?? []) {
-      const edges = edgesByFrom.get(edge.from) ?? [];
-      edges.push(edge);
-      edgesByFrom.set(edge.from, edges);
-    }
-    const dirtyComputations = (graph?.nodes ?? [])
-      .filter((node: any) => node.type === "computation" && node.isDirty)
-      .slice(0, 20)
-      .map((node: any) => ({
-        id: node.id,
-        preview: node.preview,
-        isPending: node.isPending,
-        isDemanded: node.isDemanded,
-        isDebouncedWaiting: node.isDebouncedWaiting,
-        isConditionallyScheduled: node.isConditionallyScheduled,
-        hasActiveDebounceTimer: node.hasActiveDebounceTimer,
-        nextDebounceRunInMs: node.nextDebounceRunInMs,
-        nextEligibleRunInMs: node.nextEligibleRunInMs,
-        reads: (node.reads ?? []).slice(0, 12),
-        writes: (node.writes ?? []).slice(0, 8),
-        outgoing: (edgesByFrom.get(node.id) ?? [])
-          .slice(0, 8)
-          .map((edge: any) => ({
-            to: edge.to,
-            cells: (edge.cells ?? []).slice(0, 4),
-            edgeType: edge.edgeType,
-          })),
-      }));
-    const effectState = (graph?.nodes ?? [])
-      .filter((node: any) =>
-        node.type === "effect" &&
-        (node.isPending ||
-          node.isDirty ||
-          node.isConditionallyScheduled ||
-          node.hasActiveDebounceTimer ||
-          node.debounceMs !== undefined)
-      )
-      .slice(0, 20)
-      .map((node: any) => ({
-        id: node.id,
-        preview: node.preview,
-        isPending: node.isPending,
-        isDirty: node.isDirty,
-        isPullDemandRoot: node.isPullDemandRoot,
-        isConditionallyScheduled: node.isConditionallyScheduled,
-        hasActiveDebounceTimer: node.hasActiveDebounceTimer,
-        debounceMs: node.debounceMs,
-        nextEligibleRunInMs: node.nextEligibleRunInMs,
-        reads: (node.reads ?? []).slice(0, 8),
-        writes: (node.writes ?? []).slice(0, 6),
-      }));
-    const actionTraceTail = (actionTrace ?? []).slice(-20).map((
-      entry: any,
-    ) => ({
-      id: entry.actionId,
-      type: entry.actionType,
-      writes: (entry.actualWrites ?? []).slice(0, 4).map((write: any) =>
-        `${write.space}/${write.entityId}/${write.path.join("/")}`
-      ),
-    }));
-
-    return {
-      dirtyComputations,
-      effectState,
-      actionTraceTail,
-    };
-  });
-
-  return { ...renderState, ...graphState };
 }
 
 async function collectNavigationDiagnostics(page: Page): Promise<unknown> {

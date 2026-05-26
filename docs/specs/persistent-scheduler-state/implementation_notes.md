@@ -519,3 +519,27 @@
   - `deno task check`
   - `HEADLESS=1 deno task test`
   - `HEADLESS=1 deno task integration --port-offset=920`
+
+## 2026-05-26 - Split Reload Guardrail Out Of Default App
+
+- The notebook rapid-create test now stops after proving that the source model
+  has seven notes. The reload measurement was making the default-app shard the
+  CI long pole, so reload coverage moved out of the main
+  `packages/patterns/integration/*.test.ts` set.
+- Moved notebook reload coverage into a dedicated pattern reload integration
+  suite. It creates seven notes through the default app, waits for scheduler
+  idle and storage sync, reloads the page once, asserts all seven note chips
+  render after reload, and records the reload scheduler action/computation
+  counts.
+- Local validation of the one-reload version rendered in about 11s after the
+  reload and saw 101 scheduler action runs / 60 computation runs. This is a
+  higher bound than the former second-clean-reload check because the first
+  reload after the rapid burst can still perform catch-up work, but it removes
+  the extra reload from the expensive default-app path.
+- Added `deno task integration:reload` under `packages/patterns` and a
+  separate GitHub Actions job, `Pattern Reload Integration Tests`, with
+  `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE=true`. The CI job uses the root
+  integration runner so the shell is built with the flag enabled; using the
+  shared prebuilt shell binary would leave the browser-side runtime flag off.
+  The main pattern integration matrix can now run in parallel with the reload
+  guardrail instead of carrying its reload cost inside shard 2.
