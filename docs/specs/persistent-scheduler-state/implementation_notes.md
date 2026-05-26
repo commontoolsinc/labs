@@ -424,6 +424,11 @@
   materializer action that reads a changed input is visible in the durable
   dirty set, then rehydrates and writes the materialized target so downstream
   persisted readers can be found from the target write.
+- Debugged a pull-mode browser regression in the CFC group chat demo: auto
+  classifying every generated action with Writable inputs as a materializer also
+  caught pure UI computations. Those computations then stopped normal dirty
+  fanout for their declared outputs. Materializer membership is now explicit
+  module metadata only; Writable inputs remain normal reads unless annotated.
 - Validation:
   - `deno lint packages/runner/test/scheduler-observations.test.ts`
   - `deno test -A packages/runner/test/scheduler-observations.test.ts packages/memory/test/v2-scheduler-state-test.ts`

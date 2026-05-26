@@ -95,6 +95,12 @@ resolvable, it is represented as a normal declared write. Broad or dynamic
 writable-input targets are represented as `materializerWriteEnvelopes`, a
 separate pull-mode index.
 
+Materializer membership must come from explicit module/action metadata. A
+Writable input in a generated action schema is not enough evidence: pure
+computations commonly accept Writable cells so they can read their current
+values, and treating those computations as materializers would stop normal
+dirty fanout for their own outputs.
+
 The materializer index is owned by `SchedulerMaterializers` and exposed to
 scheduler helper modules through the `MaterializerIndexState` interface. That
 index owns both membership checks and write-envelope lookup; consumers do not

@@ -2047,51 +2047,6 @@ export class Runner {
     });
   }
 
-  private collectWritableCellArgumentLinks(
-    argumentSchema: JSONSchema | undefined,
-    value: unknown,
-    processCell: Cell<any>,
-  ): NormalizedFullLink[] {
-    const links: NormalizedFullLink[] = [];
-    const seen = new WeakSet<object>();
-
-    const visit = (schema: unknown, currentValue: unknown): void => {
-      if (!isRecord(schema)) return;
-      if (seen.has(schema)) return;
-      seen.add(schema);
-
-      const asCell = schema.asCell;
-      if (
-        Array.isArray(asCell) &&
-        (asCell.includes("cell") || asCell.includes("writeonly"))
-      ) {
-        links.push(...findAllWriteRedirectCells(currentValue, processCell));
-        return;
-      }
-
-      if (isRecord(schema.properties) && isRecord(currentValue)) {
-        for (const [key, propertySchema] of Object.entries(schema.properties)) {
-          visit(propertySchema, currentValue[key]);
-        }
-      }
-
-      for (const key of ["items", "additionalProperties"] as const) {
-        if (schema[key] !== undefined) {
-          visit(schema[key], currentValue);
-        }
-      }
-      for (const key of ["anyOf", "oneOf", "allOf"] as const) {
-        const branches = schema[key];
-        if (Array.isArray(branches)) {
-          for (const branch of branches) visit(branch, currentValue);
-        }
-      }
-    };
-
-    visit(argumentSchema, value);
-    return dedupeNormalizedLinks(links);
-  }
-
   private collectArgumentSchedulerReadLinks(
     argumentSchema: JSONSchema | undefined,
     value: unknown,
@@ -3001,12 +2956,10 @@ export class Runner {
       );
     }
 
-    const materializerWriteEnvelopes = module.materializerWriteEnvelopes ??
-      this.collectWritableCellArgumentLinks(
-        module.argumentSchema,
-        inputs,
-        processCell,
-      );
+    // Writable arguments alone do not make an action a materializer: pure UI
+    // computations frequently read Writable cells. Only explicit module
+    // metadata can opt into broad writable-input materializer scheduling.
+    const materializerWriteEnvelopes = module.materializerWriteEnvelopes ?? [];
     const hasMaterializerWriteEnvelopes = materializerWriteEnvelopes.length > 0;
     const staticRedirectWriteTargets = hasMaterializerWriteEnvelopes
       ? []
