@@ -2,6 +2,12 @@
 
 Use `navigateTo()` for drilling into detail views from list patterns.
 
+`navigateTo()` changes the current shell view while preserving the current shell
+mode. If a pattern is running under the shell embed route
+`/.embed/<space-name-or-did>/<piece-id-or-slug>`, navigation to another piece
+stays under `/.embed/...`. Pattern authors do not need to handle embedded
+navigation specially.
+
 ## List Pattern
 
 ```typescript

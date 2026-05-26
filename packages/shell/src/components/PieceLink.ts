@@ -1,7 +1,13 @@
 import { css, html, LitElement } from "lit";
 import { property } from "lit/decorators.js";
 import { type DID } from "@commonfabric/identity";
-import { navigate } from "../../shared/mod.ts";
+import {
+  AppView,
+  appViewToUrlPath,
+  navigate,
+  preserveAppViewMode,
+  urlToAppView,
+} from "../../shared/mod.ts";
 
 export class PieceLinkElement extends LitElement {
   static override styles = css`
@@ -39,14 +45,27 @@ export class PieceLinkElement extends LitElement {
     }
   };
 
-  asHref(): string {
+  asView(): AppView {
     if (this.spaceName) {
-      return `/${this.spaceName}${this.pieceId ? `/${this.pieceId}` : ""}`;
+      return this.pieceId
+        ? { spaceName: this.spaceName, pieceId: this.pieceId }
+        : { spaceName: this.spaceName };
     }
     if (this.spaceDid) {
-      return `/${this.spaceDid}${this.pieceId ? `/${this.pieceId}` : ""}`;
+      return this.pieceId
+        ? { spaceDid: this.spaceDid, pieceId: this.pieceId }
+        : { spaceDid: this.spaceDid };
     }
-    return "/";
+    return { builtin: "home" };
+  }
+
+  asHref(): string {
+    return appViewToUrlPath(
+      preserveAppViewMode(
+        urlToAppView(new URL(globalThis.location.href)),
+        this.asView(),
+      ),
+    );
   }
 
   override render() {
