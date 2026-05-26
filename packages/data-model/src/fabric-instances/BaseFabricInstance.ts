@@ -2,15 +2,10 @@ import { FabricInstance } from "../interface.ts";
 
 /**
  * Abstract base class providing shared scaffolding for `FabricInstance`
- * subclasses. Concrete fabric-instance classes in the data-model extend
- * this, not `FabricInstance` directly: `FabricInstance` is the pure
- * abstract protocol (the `instanceof`-able contract that external code is
- * written against), while `BaseFabricInstance` is where shared template-method
- * implementations live.
- *
- * Currently houses the `shallowClone()` template method, which defers to a
- * `protected abstract shallowUnfrozenClone()` that each concrete subclass
- * implements.
+ * subclasses. Concrete `FabricInstance` classes extend this, not
+ * `FabricInstance` directly: `FabricInstance` is the pure abstract protocol
+ * (the `instanceof`-able contract that external code is written against), while
+ * `BaseFabricInstance` is where shared template-method implementations live.
  *
  * TODO(danfuzz): `deepClone()` should grow a base implementation here that
  * defers to a sibling `protected abstract` method (mirroring the
