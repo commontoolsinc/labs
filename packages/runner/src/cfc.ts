@@ -21,7 +21,14 @@ import {
   resolveCfcSchemaRefs,
   resolveCfcSchemaRefsOrThrow,
 } from "./cfc/schema-refs.ts";
-export { CFC_ATOM_TYPE, CFC_RUNTIME_SUBJECT, cfcAtom } from "./cfc/atoms.ts";
+export {
+  CFC_ATOM_BASE,
+  CFC_ATOM_TYPE,
+  CFC_CONCEPT_KIND,
+  CFC_FUSE_ATOM_CLASS,
+  CFC_RUNTIME_SUBJECT,
+  cfcAtom,
+} from "@commonfabric/api/cfc";
 
 type IFCAtom = ImmutableJSONValue;
 

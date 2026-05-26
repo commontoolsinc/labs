@@ -1,9 +1,9 @@
+import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { isRecord } from "@commonfabric/utils/types";
 
 export type PromptSlotRole = "direct-command" | "context" | "quote";
 
-export const CFC_PROMPT_SLOT_BOUND_ATOM_TYPE =
-  "https://commonfabric.org/cfc/atom/PromptSlotBound" as const;
+export const CFC_PROMPT_SLOT_BOUND_ATOM_TYPE = CFC_ATOM_TYPE.PromptSlotBound;
 
 export type PromptSlotReference = string | Record<string, unknown>;
 
