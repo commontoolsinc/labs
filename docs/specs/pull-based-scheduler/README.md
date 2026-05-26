@@ -57,7 +57,9 @@ handlers are queued separately and run through the event path.
 In pull mode, when a cell changes:
 - Effects → added to `pending`
 - Computations → marked `dirty`/`stale`, and downstream effects are scheduled
-  unless the computation is a materializer
+  through the ordinary dependency/output graph
+- Materializer computations → also queued for idle side-write materialization,
+  but their broad write envelopes are not used for downstream fanout
 
 A computation stays dirty until an effect, event preflight, or explicit
 `cell.pull()` needs it. If nothing ever observes it, it never runs.
@@ -100,25 +102,30 @@ For generated `computed()`/`derive()` callbacks, the transformer emits
 `materializerWriteInputPaths` only when capability analysis observes actual
 writes through captured cell inputs. A Writable input in an output-producing
 generated action schema is not enough evidence: pure computations commonly
-accept Writable cells so they can read their current values, and treating those
-computations as materializers would stop normal dirty fanout for their own
-outputs. The current runtime fallback is limited to opaque-result generated
-computations that do not carry write-path metadata, where the computation has no
-normal output surface and its observable work is side-writing through captured
-Writable inputs.
+accept Writable cells so they can read their current values. When an
+output-producing action also has materializer metadata, materializer membership
+is treated as an additional side-write facet and must not suppress normal dirty
+fanout for its declared or current-known outputs. The current runtime fallback
+is limited to opaque-result generated computations that do not carry write-path
+metadata, where the computation has no normal output surface and its observable
+work is side-writing through captured Writable inputs.
 
 The materializer index is owned by `SchedulerMaterializers` and exposed to
 scheduler helper modules through the `MaterializerIndexState` interface. That
 index owns both membership checks and write-envelope lookup; consumers do not
 thread separate `isMaterializer` callbacks through scheduler state.
 
-When a materializer's inputs change, dirtying stops at the materializer. It is
-queued for the idle pull loop, coalescing repeated source changes and honoring
-manual debounce/throttle settings. If an effect, event preflight, or explicit
-demand reads a path overlapping a dirty materializer envelope before idle runs,
-that materializer is promoted into the same settle pass and ordered before the
-reader. After it runs, only actual changed writes are propagated to downstream
-readers.
+When a materializer's inputs change, broad dirtying through the materializer
+envelope stops at the materializer. It is queued for the idle pull loop,
+coalescing repeated source changes and honoring manual debounce/throttle
+settings. If the same action also has normal declared or current-known outputs,
+those outputs still participate in the ordinary dependency graph, so demand for
+them can pull the action before idle. That run satisfies the coalesced
+materializer work rather than causing a duplicate idle run. If an effect, event
+preflight, or explicit demand reads a path overlapping a dirty materializer
+envelope before idle runs, that materializer is promoted into the same settle
+pass and ordered before the reader. After it runs, only actual changed writes
+are propagated to downstream readers.
 
 ## Execution Flow
 
@@ -134,7 +141,8 @@ Find actions that read X (via trigger index)
 For each triggered action:
     Effect → add to pending, queue execution
     Computation → mark dirty, propagate to dependents, schedule affected effects
-    Materializer computation → mark dirty and queue idle pull work
+    Materializer computation → mark dirty, keep ordinary dependent propagation,
+        and queue idle pull work for broad side-write materialization
 ```
 
 The trigger index groups actions by the cells they read, so finding affected
@@ -504,8 +512,9 @@ Push mode schedules every remaining triggered action with debounce. Pull mode:
 - Marks triggered computations dirty/stale.
 - Schedules downstream effects that transitively depend on the dirty
   computation.
-- For materializer computations, stops at the materializer and queues execution
-  instead of scheduling downstream effects from the broad envelope.
+- For materializer computations, also queues idle execution, but only the
+  ordinary dependency graph is used for downstream scheduling; broad
+  materializer envelopes are not used as fanout evidence.
 
 When trigger tracing is enabled, each matched change records a bounded
 `TriggerTraceEntry` with the notification type, change index, before/after value
@@ -647,9 +656,10 @@ When computations write changed data, the scheduler records the changed write
 addresses in `changedWritesHistory`. After the run, the scheduler finds readers
 of those changed writes through the trigger index. Reader effects are scheduled
 directly. Reader computations are marked dirty and their affected downstream
-effects are scheduled. If a reader computation is itself a materializer,
-dirtying stops there and it is queued/coalesced instead of scheduling
-downstream effects from its envelope.
+effects are scheduled. If a reader computation is itself a materializer, it is
+also queued/coalesced for idle materialization, but downstream effects that
+depend on its ordinary outputs are still scheduled. The materializer envelope
+itself is not used as downstream fanout evidence.
 
 Pull-mode storage notification handling can also conditionally schedule
 downstream effects and remember the history index at which the effect was

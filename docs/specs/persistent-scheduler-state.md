@@ -724,16 +724,19 @@ Materializer identity is explicit scheduler metadata. For generated
 writes through captured cell inputs; the runner resolves those input paths to
 `materializerWriteEnvelopes` for the concrete action instance. A generated
 action may read Writable cells without side-writing through them;
-output-producing pure computations must remain normal pull computations so
-changes to their reads can fan out through their declared/current-known outputs.
-The current runtime fallback is limited to opaque-result generated computations
-that do not carry write-path metadata, where the computation has no normal
-output surface and its observable work is side-writing through captured Writable
-inputs.
+output-producing computations can also be materializers, and materializer
+membership must not suppress normal dirty fanout through their declared or
+current-known outputs. The current runtime fallback is limited to opaque-result
+generated computations that do not carry write-path metadata, where the
+computation has no normal output surface and its observable work is
+side-writing through captured Writable inputs.
 
 On restart:
 
 - If a materializer's input reads are stale, mark the materializer dirty.
+- If the same action has declared or current-known writes, rebuild those normal
+  writer/dependent edges and propagate stale demand through them like any other
+  computation.
 - If no primary pull demand exists, run dirty materializers from the idle pull
   loop.
 - If a demand root or event preflight reads a path inside a dirty materializer
@@ -750,8 +753,9 @@ these actions:
 - `materializerWriteEnvelopes`: broad/dynamic target envelopes used to discover
   demand overlap and to know that this action must run when its inputs are
   dirty.
-- `currentKnownWrites`: the last precise scheduling writes produced by the
-  materializer after it ran.
+- `currentKnownWrites`: the last precise normal scheduling writes produced by
+  the action after it ran. These remain in the ordinary writer index even when
+  the action also has materializer envelopes.
 - `actualChangedWrites`: the precise changed paths from the latest run, used to
   dirty downstream readers.
 
@@ -759,14 +763,16 @@ Server-side dirty propagation for materializers follows the same split:
 
 1. A committed write that overlaps a materializer's input reads marks the
    materializer direct-dirty in `scheduler_action_state`.
-2. The server does not fan out through the materializer envelope to all possible
+2. The server still propagates stale state through any ordinary dependency edges
+   from that action's declared or current-known writes.
+3. The server does not fan out through the materializer envelope to all possible
    downstream readers.
-3. Loaded runners schedule dirty materializers as eager idle work, honoring
+4. Loaded runners schedule dirty materializers as eager idle work, honoring
    debounce/throttle settings.
-4. If a demand root or event preflight reads inside a dirty materializer
+5. If a demand root or event preflight reads inside a dirty materializer
    envelope before idle work runs, the runner promotes the materializer and runs
    it first.
-5. Only after the materializer commits actual changed writes does durable dirty
+6. Only after the materializer commits actual changed writes does durable dirty
    propagation mark precise downstream readers dirty.
 
 ## Correctness Invariants

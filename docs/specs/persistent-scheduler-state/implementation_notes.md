@@ -551,3 +551,23 @@
   shared prebuilt shell binary would leave the browser-side runtime flag off.
   The main pattern integration matrix can now run in parallel with the reload
   guardrail instead of carrying its reload cost inside shard 2.
+
+## 2026-05-26 - Materializer Side-Write Facet
+
+- Red test first: added a scheduler regression where one action has both normal
+  current-known output writes and broad materializer side-write envelopes. The
+  test failed because pull-mode dirtying queued the materializer but suppressed
+  affected downstream effects for the normal output.
+- Decision: materializer membership is a side-write facet, not a replacement
+  scheduling identity. Broad materializer envelopes still stop at the
+  materializer and run idle/promoted, but normal declared/current-known writes
+  must stay in the ordinary dependency graph and keep scheduling downstream
+  demand.
+- Implementation: pull-triggered dirtying and changed-write propagation now
+  always schedule affected effects for dirty computations, while materializer
+  computations additionally queue/coalesce idle work.
+- Spec update: both the pull scheduler spec and persistent scheduler state spec
+  now describe output-producing materializers as normal computations plus
+  materializer side-write behavior.
+- Validation so far:
+  - `deno test -A packages/runner/test/scheduler-effects.test.ts`

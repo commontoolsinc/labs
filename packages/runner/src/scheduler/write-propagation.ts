@@ -88,6 +88,9 @@ export function markReadersDirtyForChangedWrites(
       state.scheduleWithDebounce(reader);
     } else if (state.computations.has(reader)) {
       state.markDirty(reader);
+      if (state.materializerIndex.isMaterializer(reader)) {
+        state.queueExecution();
+      }
       if (isAncestorAction(state.actionParent, sourceAction, reader)) {
         // Continuations are only for actions in the scheduler parent chain.
         // Dependency edges already schedule ordinary downstream readers; this
@@ -97,9 +100,7 @@ export function markReadersDirtyForChangedWrites(
         state.pending.add(reader);
         state.queueExecution();
       }
-      if (!state.materializerIndex.isMaterializer(reader)) {
-        state.scheduleAffectedEffects(reader);
-      }
+      state.scheduleAffectedEffects(reader);
     }
   }
 }
