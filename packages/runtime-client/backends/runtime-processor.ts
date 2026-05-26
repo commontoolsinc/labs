@@ -691,7 +691,8 @@ export class RuntimeProcessor {
         scope: redirect.scope ?? "space",
       });
       await target.sync();
-      if (!target.getSourceCell()) {
+      const targetLink = target.getAsNormalizedFullLink();
+      if (!target.getSourceCell() || targetLink.path.length > 0) {
         return {
           page: createPageRef(target),
         };
