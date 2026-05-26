@@ -114,7 +114,6 @@ const SharedTranscript = pattern<
               {messageCell.authorName}
             </span>
             <cf-cfc-authorship
-              data-authorship-surface={messageCell.id}
               $value={messageCell.body}
               $author={messageCell.authorProfile}
               authorName={messageCell.authorName}

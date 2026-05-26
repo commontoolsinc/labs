@@ -15,7 +15,6 @@ export interface ParticipantClaim<ProfileRef = unknown> {
 
 export interface SentChatMessage<ProfileRef = unknown> {
   readonly origin: "sent";
-  readonly id: string;
   readonly authorName: string;
   readonly authorProfile: ProfileRef;
   readonly body: string;
@@ -24,7 +23,6 @@ export interface SentChatMessage<ProfileRef = unknown> {
 
 export interface ImportedClaimedChatMessage<ProfileRef = unknown> {
   readonly origin: "imported";
-  readonly id: string;
   readonly authorName: string;
   readonly authorProfile?: ProfileRef;
   readonly body: string;
@@ -36,7 +34,6 @@ export type PlainChatMessage<ProfileRef = unknown> =
   | ImportedClaimedChatMessage<ProfileRef>;
 
 export interface ChatRoom<Message = PlainChatMessage> {
-  readonly id: string;
   readonly name: string;
   readonly messages: Message[];
   readonly createdAt: number;
@@ -76,16 +73,12 @@ export const makeProfileSnapshot = (
   accentColor: previous?.accentColor ?? accentColorForName(name),
 });
 
-const createId = (prefix: string): string =>
-  `${prefix}-${safeDateNow()}-${nonPrivateRandom().toString(36).slice(2, 8)}`;
-
 export const createSentMessageSnapshot = <ProfileRef>(
   authorProfile: ProfileRef,
   author: ChatProfile,
   body: string,
 ): SentChatMessage<ProfileRef> => ({
   origin: "sent",
-  id: createId("msg"),
   authorName: author.name,
   authorProfile,
   body,
@@ -95,7 +88,6 @@ export const createSentMessageSnapshot = <ProfileRef>(
 export const createRoomSnapshot = <Message>(
   name: string,
 ): ChatRoom<Message> => ({
-  id: createId("room"),
   name,
   messages: [],
   createdAt: safeDateNow(),
@@ -107,7 +99,6 @@ const createImportedClaimedMessage = <ProfileRef>(
   timestamp: number,
 ): ImportedClaimedChatMessage<ProfileRef> => ({
   origin: "imported",
-  id: createId("imported"),
   authorName: author.name,
   ...(author.profile !== undefined ? { authorProfile: author.profile } : {}),
   body,
@@ -115,15 +106,32 @@ const createImportedClaimedMessage = <ProfileRef>(
 });
 
 const compareMessagesByThreadOrder = (
-  left: Pick<PlainChatMessage, "id" | "timestamp">,
-  right: Pick<PlainChatMessage, "id" | "timestamp">,
-): number =>
-  left.timestamp === right.timestamp
-    ? left.id.localeCompare(right.id)
-    : left.timestamp - right.timestamp;
+  left: Pick<PlainChatMessage, "authorName" | "body" | "origin" | "timestamp">,
+  right: Pick<PlainChatMessage, "authorName" | "body" | "origin" | "timestamp">,
+): number => {
+  const timestampOrder = left.timestamp - right.timestamp;
+  if (timestampOrder !== 0) {
+    return timestampOrder;
+  }
+
+  const authorOrder = left.authorName.localeCompare(right.authorName);
+  if (authorOrder !== 0) {
+    return authorOrder;
+  }
+
+  const bodyOrder = left.body.localeCompare(right.body);
+  if (bodyOrder !== 0) {
+    return bodyOrder;
+  }
+
+  return left.origin.localeCompare(right.origin);
+};
 
 export const sortDisplayMessages = <
-  Message extends Pick<PlainChatMessage, "id" | "timestamp">,
+  Message extends Pick<
+    PlainChatMessage,
+    "authorName" | "body" | "origin" | "timestamp"
+  >,
 >(
   messages: readonly Message[],
 ): Message[] => Array.from(messages).sort(compareMessagesByThreadOrder);

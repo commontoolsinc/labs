@@ -128,14 +128,12 @@ export default pattern(() => {
       ...(messages.get() as SharedChatMessage[]),
       {
         origin: "imported",
-        id: "same-name-imported-1",
         authorName: "Sam",
         body: "first Sam",
         timestamp: 10_000,
       },
       {
         origin: "imported",
-        id: "same-name-imported-2",
         authorName: "Sam",
         body: "second Sam",
         timestamp: 10_001,
@@ -264,6 +262,12 @@ export default pattern(() => {
       participant.name === "Sam" && participant.profile === undefined
     ).length === 2;
   });
+  const assert_messages_and_rooms_do_not_store_ids = computed(() =>
+    (messages.get() as SharedChatMessage[]).every((message) =>
+      !("id" in message)
+    ) &&
+    roomsValue(rooms).every((room) => !("id" in room))
+  );
 
   return {
     tests: [
@@ -305,6 +309,7 @@ export default pattern(() => {
       { assertion: assert_verified_imports_do_not_duplicate_participants },
       { action: action_add_same_name_unverified_imports },
       { assertion: assert_same_name_unverified_imports_are_distinct },
+      { assertion: assert_messages_and_rooms_do_not_store_ids },
     ],
   };
 });
