@@ -9,6 +9,7 @@ Quick error reference and debugging workflows. For detailed explanations, see li
 | "Property 'set' does not exist" | Missing `Writable<>` in signature | Add `Writable<T>` for write access ([@writeable](../../common/concepts/types-and-schemas/writable.md)) |
 | "X.get is not a function" | Calling `.get()` on computed/lift result | Access directly without `.get()` - only `Writable<>` has `.get()` ([gotchas/get-is-not-a-function](gotchas/get-is-not-a-function.md)) |
 | "X.filter is not a function" | Value isn't an array (yet) | Check `Default<>`, don't assume `.get()` is the fix ([gotchas/filter-map-find-not-a-function](gotchas/filter-map-find-not-a-function.md)) |
+| Console storm of "Cannot read properties of undefined (reading 'map')"; a UI section silently fails to render | A render-path `computed` chains `.map()`/`.filter()`/`[...]` off a scoped `.get()` that is `undefined` until first sync (esp. `perSession`); `Default<>` hasn't hydrated yet | Guard every render-path scoped read with `?? []` ([gotchas/scoped-cell-pitfalls](gotchas/scoped-cell-pitfalls.md#5)) |
 | "new Cell() only accepts static data" | Passing an input prop, mapped field, or computed/reactive value into `new Writable()` / `new Cell()` | Use the input writable cell directly, or initialize pattern-owned local cells from static values only ([new-cells](../../common/patterns/new-cells.md), [@reactivity](../../common/concepts/reactivity.md)) |
 | "Tried to access a reactive reference outside a reactive context" | Accessing reactive value at init time (in `[NAME]`, `new Writable()`, or object indexing) | Wrap in `computed()`, use `lift()`, or set in event handler ([gotchas/reactive-reference-outside-context](gotchas/reactive-reference-outside-context.md)) |
 | ".trim is not a function" / ".replace is not a function" / ".includes is not a function" | Calling plain string helpers on reactive fields, often from JSX or `.map()` render contexts | Render reactive values directly when possible, or derive labels/branches in `computed()` ([reactivity-issues](reactivity-issues.md), [@reactivity](../../common/concepts/reactivity.md)) |
@@ -59,6 +60,7 @@ These issues compile without errors but fail at runtime.
 - [Cell Reference Overwrite](gotchas/cell-reference-overwrite.md) - Box references with `{ item }`
 - [Persisting Images in Cells](gotchas/persisting-images-in-cells.md) - Store the blob `url`, not the inline `data`
 - [perSession Read in a Mapped computed()](gotchas/persession-read-in-mapped-computed.md) - Per-row inline forms that never open; hoist the session read out of the nested `computed()`
+- [Scoped Cell Pitfalls](gotchas/scoped-cell-pitfalls.md) - `PerSpace`/`PerUser`/`PerSession` gotchas, incl. guarding render-path `.get().map()` against undefined-before-sync
 
 ### Error Categories
 
