@@ -284,25 +284,6 @@ export class TransformationContext {
     return this.options.capabilitySummaryRegistry?.get(fn);
   }
 
-  markSyntheticLiftAppliedCall(call: ts.CallExpression): void {
-    this.options.syntheticLiftAppliedCallRegistry?.add(call);
-  }
-
-  isSyntheticLiftAppliedCall(call: ts.CallExpression): boolean {
-    if (this.options.syntheticLiftAppliedCallRegistry?.has(call)) {
-      return true;
-    }
-    const original = ts.getOriginalNode(call);
-    return !!(
-      original &&
-      original !== call &&
-      ts.isCallExpression(original as ts.Node) &&
-      this.options.syntheticLiftAppliedCallRegistry?.has(
-        original as ts.CallExpression,
-      )
-    );
-  }
-
   markSyntheticReactiveCollectionDeclaration(node: ts.Node): void {
     const symbol = ts.isVariableDeclaration(node)
       ? (ts.isIdentifier(node.name)

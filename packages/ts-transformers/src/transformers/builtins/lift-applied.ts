@@ -269,17 +269,6 @@ export function createLiftAppliedCall(
     [inputObject],
   );
 
-  // Mark this synthetic emission so SchemaInjection can skip the explicit-
-  // argument capability-summary shrink. The shrink collapses array element
-  // types in our already-narrowed input TypeNode (CT-1615 Berni review on
-  // PR #3676 — `items: { type: "unknown" }` regression). User-source
-  // derive<T,R>(...) lowered via LiftLoweringTransformer is NOT marked, so
-  // it retains the legacy behavior of shrinking explicit type args.
-  if (ts.isCallExpression(innerLiftCall)) {
-    context.markSyntheticLiftAppliedCall?.(innerLiftCall);
-  }
-  context.markSyntheticLiftAppliedCall?.(liftAppliedCall);
-
   // Register the type of the call expression itself in the typeRegistry
   // so that type inference works correctly for synthetic nodes. The
   // result type is the value the callback returns.

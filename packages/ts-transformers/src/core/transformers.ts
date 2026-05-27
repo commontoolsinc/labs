@@ -93,18 +93,6 @@ export interface TransformationOptions {
    */
   readonly narrowedWrapperTypeRegistry?: WeakMap<ts.TypeNode, ts.Type>;
   /**
-   * Marks CallExpressions emitted by `createLiftAppliedCall` (the synthetic
-   * JSX compute-wrap path used by expression-rewrite). SchemaInjection
-   * consults this when deciding whether to re-apply the capability-summary
-   * shrink on the lift's explicit input typeArg: synthetic emissions
-   * already produce their input TypeNode from accurate capture analysis,
-   * so re-shrinking collapses array element types to `unknown`
-   * (regression surfaced by CT-1615 Berni review on PR #3676).
-   * User-source derive<T,R>(...) lowered via LiftLoweringTransformer is
-   * NOT marked, so it retains the legacy shrink behavior.
-   */
-  readonly syntheticLiftAppliedCallRegistry?: WeakSet<ts.CallExpression>;
-  /**
    * Shared diagnostics collector that accumulates diagnostics across all transformers.
    * If provided, diagnostics are pushed to this array in addition to the local context.
    */

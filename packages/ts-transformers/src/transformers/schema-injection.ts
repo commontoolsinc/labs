@@ -3150,18 +3150,14 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             return ts.visitEachChild(node, visit, transformation);
           }
 
-          // Lift-applied calls emitted by createLiftAppliedCall (the
-          // synthetic JSX compute-wrap path used by expression-rewrite)
-          // carry an input TypeNode already built from accurate capture
-          // analysis. Re-applying the capability-summary shrink would
-          // collapse array element types to `unknown` (CT-1615 Berni
-          // review on PR #3676). User-source derive<T,R>(...) lowered
-          // into lift-applied is NOT marked, so it retains the legacy
-          // shrink behavior.
-          const isSynthetic = context.isSyntheticLiftAppliedCall(node) ||
-            (innerLiftCall !== undefined &&
-              context.isSyntheticLiftAppliedCall(innerLiftCall));
-
+          // Always apply the capability-summary shrink to the explicit
+          // argument TypeNode. (Previously this was suppressed for calls
+          // marked by syntheticLiftAppliedCallRegistry, to avoid collapsing
+          // array element types to `unknown`. That marker was verified inert
+          // — a downstream array-shrink in type-shrinking re-collapses the
+          // items to `unknown[]` regardless, so the emitted schema is
+          // identical either way — and was removed in the registry-unification
+          // effort. See docs/scratch/12-registry-unification-design.md.)
           const resolved = resolveDualSchemaBuilderTypes(
             liftAppliedArgs?.callback,
             checker,
@@ -3175,7 +3171,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
               explicitArgumentTypeValue: typeRegistry?.get(argumentType),
               explicitResultTypeNode: resultType,
               explicitResultTypeValue: typeRegistry?.get(resultType),
-              applyExplicitArgumentCapabilitySummary: !isSynthetic,
+              applyExplicitArgumentCapabilitySummary: true,
             },
           );
           if (!resolved) {
