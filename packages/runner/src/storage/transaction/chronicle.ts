@@ -28,10 +28,63 @@ import {
   read,
   TypeMismatchError,
   UnsupportedMediaTypeError,
-  write,
 } from "./attestation.ts";
+import { applyMutablePathWrite } from "./mutable-path-write.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import * as Edit from "./edit.ts";
+
+/**
+ * Mutating-write wrapper around `applyMutablePathWrite()` that mirrors
+ * the signature of the legacy `Attestation.write`: take a source
+ * `IAttestation`, apply a write at `address` with `value`, and return
+ * the new attestation.
+ *
+ * Differences from the legacy `Attestation.write`:
+ *
+ * - When the write path traverses through a missing intermediate
+ *   (parent of an intermediate doesn't exist), this version
+ *   auto-creates the intermediates (via `cloneForMutation({
+ *   createMissing: true })`) rather than returning a `NotFoundError`.
+ *   The v2-transaction write path already auto-creates; bringing
+ *   Chronicle in line removes a divergence between the two stacks.
+ *   The "non-existent doc + nested write" case is still guarded by an
+ *   explicit pre-check inside `Chronicle.write`.
+ * - Mutates `source.value` in place when the helper can do so safely
+ *   (already-mutable spine). Callers that need an isolated snapshot
+ *   are responsible for cloning before calling.
+ */
+const applyWriteToAttestation = (
+  source: IAttestation,
+  address: IMemoryAddress,
+  value: FabricValue | undefined,
+): Result<IAttestation, INotFoundError | ITypeMismatchError> => {
+  const relativePath = address.path.slice(source.address.path.length);
+
+  // Root write: pure replacement; bypass `applyMutablePathWrite` to
+  // avoid forcing a deep-equal comparison (we know nothing here is
+  // structurally equal to the new root unless it's literally the
+  // same reference).
+  if (relativePath.length === 0) {
+    if (source.value === value) return { ok: source };
+    return { ok: { ...source, value } };
+  }
+
+  if (source.value === undefined) {
+    return {
+      error: NotFound(source, address, source.address.path),
+    };
+  }
+
+  const relativeAddress = { ...address, path: relativePath };
+  const result = applyMutablePathWrite(source.value, relativeAddress, value);
+  if (result.error) {
+    return { error: result.error };
+  }
+  if (!result.ok.changed) {
+    return { ok: source };
+  }
+  return { ok: { ...source, value: result.ok.root } };
+};
 
 const isEmptyRecord = (
   value: FabricValue | undefined,
@@ -446,7 +499,7 @@ class Novelty {
       // If the candidate is a parent of the new invariant, merge the new invariant
       // into the existing parent invariant.
       if (Address.includes(candidate.address, invariant.address)) {
-        const { error, ok: merged } = write(
+        const { error, ok: merged } = applyWriteToAttestation(
           candidate,
           invariant.address,
           invariant.value,
@@ -579,7 +632,11 @@ class Changes {
       };
     }
 
-    const result = write(this.#workingCopy, address, value);
+    const result = applyWriteToAttestation(
+      this.#workingCopy,
+      address,
+      value,
+    );
     if (result.ok) {
       this.#workingCopy = result.ok;
       // Store individual path attestation for novelty() iterator
@@ -596,7 +653,7 @@ class Changes {
       this.#workingCopy = invariant;
     } else {
       // Apply write to working copy
-      const result = write(
+      const result = applyWriteToAttestation(
         this.#workingCopy,
         invariant.address,
         invariant.value,

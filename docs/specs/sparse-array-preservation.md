@@ -70,11 +70,9 @@ indices. This makes sparse-safety structural: you can't forget to check `i in
 arr` because there's no check to write. Use this for copies, transforms, and any
 iteration where you only care about present elements.
 
-For a plain copy, `attestation.ts` has a `sparseArrayCopy` helper that uses
-this pattern. (As of PR #3704 it is only used by the legacy `setAtPath` /
-`Attestation.write` path; the v2-transaction hot write path uses
-`cloneIfNecessary` for spine thawing, which has its own sparse-preserving
-implementation -- see "v2-transaction write path" below.)
+For a plain copy, `cloneIfNecessary({ frozen: false, deep: false })`
+preserves sparseness internally -- see "v2-transaction write path" below
+for the production usage shape.
 
 ### `for` + `i in arr` (when you need to detect absences)
 
@@ -138,21 +136,15 @@ The leaf write itself is one of:
   `applyArrayLengthWrite`) -- JS `length=` truncates the tail, leaving
   holes within the new bound intact.
 
-### Attestation (`packages/runner/src/storage/transaction/attestation.ts`) — legacy
+### Chronicle (`packages/runner/src/storage/transaction/chronicle.ts`)
 
-The `setAtPath` function (and the `Attestation.write` wrapper around it)
-does copy-on-write: when it needs to modify an element in an array, it
-copies the array first. The `sparseArrayCopy` helper (which uses
-`forEach`) is used at all three copy sites (extension, element set, nested
-modification). The `delete` operation at `setAtPath` creates true holes
-via `delete newArray[index]`.
-
-As of PR #3704 this is no longer on the v2-transaction hot write path.
-It is still used by `chronicle.ts` for its working-copy management
-(commit-time conflict detection), but that's a separate code path from
-the storage-write loop. Migrating Chronicle is a separately tracked
-follow-on; once that lands, `setAtPath` / `sparseArrayCopy` /
-`Attestation.write` can be removed.
+The working-copy management used by Chronicle (commit-time conflict
+detection) routes its writes through the same
+`applyMutablePathWrite()` helper as the v2-transaction hot write path
+(see above), via a thin `applyWriteToAttestation()` wrapper that maps
+between Chronicle's `IAttestation`-shaped inputs and
+`applyMutablePathWrite`'s `FabricValue`-rooted form. Sparse-array
+handling is therefore identical between the two layers.
 
 ### Cell write path (`packages/runner/src/cell.ts`)
 
@@ -233,9 +225,9 @@ reactive pipeline:
    directive `// deno-lint-ignore no-sparse-arrays`) and verify holes survive
    with `i in result`.
 
-If you're writing a plain array copy, follow the pattern in
-`sparseArrayCopy` (in `attestation.ts`) or use `cloneIfNecessary` with
-`{ frozen: false, deep: false }`, which preserves sparseness internally.
+If you're writing a plain array copy, `cloneIfNecessary` with
+`{ frozen: false, deep: false }` preserves sparseness internally and is
+the preferred entry point in runner code.
 
 ## How we ensure this stays correct
 
@@ -243,8 +235,10 @@ Test coverage verifies sparse preservation at each layer:
 
 - **`packages/data-model/test/fabric-value.test.ts`** — `isFabricValue` accepts
   sparse arrays; `fabricFromNativeValue` and `toDeepFabricValue` preserve holes.
-- **`packages/runner/test/attestation.test.ts`** — `setAtPath` preserves holes
-  through array copies (extension, element set, nested modification).
+- **`packages/runner/test/cell-core.test.ts`** — sparse-array writes through
+  the full Cell write path (which lands in `applyMutablePathWrite`) preserve
+  holes; the helper's `cloneForMutation` + leaf-mutation steps round-trip
+  sparseness.
 - **`packages/runner/test/cell.test.ts`** — Writing a sparse array to a cell and
   reading it back preserves holes; `push` onto a sparse array preserves existing
   holes.
