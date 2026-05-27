@@ -31,6 +31,7 @@ Quick error reference and debugging workflows. For detailed explanations, see li
 | "lift() should not be immediately invoked inside a pattern" | `lift(...)(args)` inside pattern | Use `computed()` instead, or define lift() at module scope ([gotchas/handler-inside-pattern](gotchas/handler-inside-pattern.md)) |
 | Click handler does nothing, ID lookup fails silently | Using custom `id` property for lookups | Use `equals()` for identity, not custom IDs ([gotchas/custom-id-property-pitfall](gotchas/custom-id-property-pitfall.md)) |
 | Selection overwrites item data, `.set()` changes wrong value | Storing Cell reference directly | Box the reference: `{ item }` instead of `item` ([gotchas/cell-reference-overwrite](gotchas/cell-reference-overwrite.md)) |
+| List of records renders intermittently/blank; full-cell read is huge | Persisting inline image `data` (base64 data-URL) in a (PerSpace) cell | Persist the blob `url`, not `data`; `includeData` only for transient LLM use ([gotchas/persisting-images-in-cells](gotchas/persisting-images-in-cells.md)) |
 | Writable-input computed causes churn or stale fan-out | Computed writes through a `Writable<>` input while also participating in reactive scheduling | Treat it as effectful and check for cycles. Pull mode materializes stable side writes through idle materializers, so actual changed paths should drive downstream updates instead of broad fan-out. |
 
 ---
@@ -55,6 +56,7 @@ These issues compile without errors but fail at runtime.
 - [handler() or Function Inside Pattern](gotchas/handler-inside-pattern.md) - Module scope requirement
 - [Custom `id` Property Pitfall](gotchas/custom-id-property-pitfall.md) - Use `equals()` for identity
 - [Cell Reference Overwrite](gotchas/cell-reference-overwrite.md) - Box references with `{ item }`
+- [Persisting Images in Cells](gotchas/persisting-images-in-cells.md) - Store the blob `url`, not the inline `data`
 
 ### Error Categories
 
