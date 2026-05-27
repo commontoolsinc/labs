@@ -781,10 +781,12 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                   </div>
                 )}
 
-                {/* Open host takeover — kept out of the way: a non-host sees a
+                {
+                  /* Open host takeover — kept out of the way: a non-host sees a
                   subtle "Hosted by …" label and clicks it to reveal the
                   "Become host" button. Plain JSX with a per-session toggle so
-                  the onClicks lower as handlers (not lifts). */}
+                  the onClicks lower as handlers (not lifts). */
+                }
                 {canClaimHost
                   ? (isClaimHostRevealed
                     ? (
@@ -1141,9 +1143,11 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                               </button>
                             )
                             : null}
-                          {/* Host logs that the group actually ate here —
+                          {
+                            /* Host logs that the group actually ate here —
                             a visible pill so it reads as an action. Uses the
-                            host's date field (blank = today). */}
+                            host's date field (blank = today). */
+                          }
                           {isAdmin
                             ? (
                               <button
@@ -1275,12 +1279,14 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                   );
                 })}
 
-                {/* Recently eaten — the visit log, shown below the options.
+                {
+                  /* Recently eaten — the visit log, shown below the options.
                   Everyone sees it; the host can delete a single mistaken entry
                   (✕) or clear the whole log. Plain JSX with derived-boolean
                   ternaries (the host-controls idiom), NOT a computed-returned
                   VNode, so the interactive onClick handlers lower as handlers
-                  rather than lifts ("$event in inputs" / non-idempotent trap). */}
+                  rather than lifts ("$event in inputs" / non-idempotent trap). */
+                }
                 {hasHistory
                   ? (
                     <div
@@ -1491,8 +1497,10 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                             </cf-button>
                           )}
                       </div>
-                      {/* Backdates the next "✓ we went here" you click on an
-                        option above. Blank = today; cleared after each log. */}
+                      {
+                        /* Backdates the next "✓ we went here" you click on an
+                        option above. Blank = today; cleared after each log. */
+                      }
                       <div
                         style={{
                           marginTop: "8px",
@@ -1511,7 +1519,9 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                           aria-label="Visit date (blank = today)"
                           timing-strategy="immediate"
                         />
-                        <span style={{ color: "#64748b" }}>(blank = today)</span>
+                        <span style={{ color: "#64748b" }}>
+                          (blank = today)
+                        </span>
                       </div>
                     </div>
                   )

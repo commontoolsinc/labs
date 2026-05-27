@@ -20,8 +20,8 @@ piece:  fid1:nye-cJnJnU5OQIPiVXzvAoq_YeU5pZARxyXp-9-JCZg
 url:    https://toolshed.saga-castor.ts.net/lunch-2026-05-26/fid1:nye-cJnJnU5OQIPiVXzvAoq_YeU5pZARxyXp-9-JCZg
 ```
 
-Set these once so you don't repeat flags (substitute your own identity key
-path and the current piece/space):
+Set these once so you don't repeat flags (substitute your own identity key path
+and the current piece/space):
 
 ```bash
 export CF_API_URL=https://toolshed.saga-castor.ts.net/
@@ -91,14 +91,15 @@ consequences trip everyone up:
    — it shows you the join card and won't treat you as host. To act as the same
    person in both, import your CLI key into the browser (`Import CLI Key`); see
    [`docs/development/SHARED_IDENTITY.md`](../../../docs/development/SHARED_IDENTITY.md).
-   Verify with `cf id did "$CF_IDENTITY"` and the browser's `shell.identity` log.
+   Verify with `cf id did "$CF_IDENTITY"` and the browser's `shell.identity`
+   log.
 
 2. **Names are unique (name-as-identity).** `joinAs` rejects a name already in
    `users`. So if a test/seed already claimed your preferred name, you can't
    re-join under it from another identity — pick a different name, or clear the
    stale entry.
 
-3. **Host role is claimable.** The host seat (`adminName`) goes to the *first*
+3. **Host role is claimable.** The host seat (`adminName`) goes to the _first_
    joiner, but any joined participant can take it over with the **Become host**
    button (`claimHost` sets `adminName` to themselves). So a stuck/squatted host
    seat no longer requires an operator reset — just join and click Become host.

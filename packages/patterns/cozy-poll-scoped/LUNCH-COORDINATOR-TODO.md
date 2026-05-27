@@ -15,10 +15,11 @@ rest are still backlog.
 Keep a per-space log of where the group actually ended up eating, with dates, so
 nobody suggests the same place three days running.
 
-- ✅ `history: PerSpace<HistoryEntry[]>` (`{ id, title, loggedByName, wentAt }`),
-  appended via a host-only `logVisit` handler. Each option has a "✓ we went
-  here" button that logs that place. The stored log is capped at the 50 most
-  recent visits so the PerSpace array can't grow without bound.
+- ✅ `history: PerSpace<HistoryEntry[]>`
+  (`{ id, title, loggedByName, wentAt }`), appended via a host-only `logVisit`
+  handler. Each option has a "✓ we went here" button that logs that place. The
+  stored log is capped at the 50 most recent visits so the PerSpace array can't
+  grow without bound.
 - ✅ **Backdating:** a host "Log 'we went here' as of:" date field (blank =
   today) backdates the entry; `logVisit` also accepts an explicit `wentAt`. The
   date draft clears after each log so it defaults back to today.
@@ -34,8 +35,8 @@ nobody suggests the same place three days running.
     non-idempotent (it belongs in handlers, like the backdate parse). This is
     also why there's no live "within the last N days" window; we show the
     visit's own date and let the human judge.
-  - Interactive `onClick` handlers must live in **plain-ternary JSX**, not inside
-    a `computed(() => …)`-returned VNode, or they mis-lower as lifts
+  - Interactive `onClick` handlers must live in **plain-ternary JSX**, not
+    inside a `computed(() => …)`-returned VNode, or they mis-lower as lifts
     (`$event in inputs` → non-idempotent write).
   - Don't name a `.map((h) => …)` callback `h` when the body contains JSX — `h`
     is the JSX factory; shadowing it yields `TypeError: h is not a function`.
