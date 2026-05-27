@@ -202,7 +202,11 @@ const applyArrayLengthWrite = (
   if (deepEqual(previousValue, value)) {
     return { ok: { root: newRoot, previousValue, changed: false } };
   }
-  const nextLength = value as number;
+  // Funnel non-numbers (and `undefined`, which arises from
+  // `tx.write(path/length, undefined)`) through the existing NaN
+  // handling branch -- otherwise `Math.floor(nonNumber)` would yield
+  // `NaN` and `parent.length = NaN` would throw `RangeError`.
+  const nextLength = typeof value === "number" ? value : NaN;
   if (
     nextLength < previousValue || nextLength < 0 ||
     !Number.isFinite(nextLength)
@@ -223,5 +227,16 @@ const applyArrayLengthWrite = (
   } else {
     parent.length = Math.floor(nextLength);
   }
-  return { ok: { root: newRoot, previousValue, changed: true } };
+  // The coercion paths above (`+Infinity → previousValue`, NaN→0 when
+  // previousValue is already 0, etc.) can leave the array's `.length`
+  // unchanged even when `value !== previousValue`; report the change
+  // status against the post-mutation length rather than asserting
+  // `true` unconditionally.
+  return {
+    ok: {
+      root: newRoot,
+      previousValue,
+      changed: parent.length !== previousValue,
+    },
+  };
 };
