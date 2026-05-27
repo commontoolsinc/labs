@@ -13,6 +13,8 @@ import {
 import { getRelevantDataFlows } from "../ast/normalize.ts";
 import {
   DiagnosticInput,
+  type FunctionCapabilitySummary,
+  type SchemaHint,
   TransformationDiagnostic,
   TransformationOptions,
 } from "./transformers.ts";
@@ -230,6 +232,56 @@ export class TransformationContext {
    */
   lookupNarrowedWrapper(wrapperNode: ts.TypeNode): ts.Type | undefined {
     return this.options.narrowedWrapperTypeRegistry?.get(wrapperNode);
+  }
+
+  /**
+   * Record a schema-generation hint for a node (and its original node, so the
+   * hint survives visitor node-replacement). Overwrites any existing hint for
+   * the node, matching the prior direct-`.set` behavior. See `SchemaHints`
+   * docs in core/mod.ts: producers are schema-injection + jsx-site-router,
+   * consumers are schema-injection + the schema generator.
+   */
+  recordSchemaHint(node: ts.Node, hint: SchemaHint): void {
+    const registry = this.options.schemaHints;
+    if (!registry) return;
+    registry.set(node, hint);
+    const original = ts.getOriginalNode(node);
+    if (original !== node) {
+      registry.set(original, hint);
+    }
+  }
+
+  /**
+   * Look up a schema-generation hint for a node, falling back to its original
+   * node (handles visitor-replaced nodes). Returns undefined when absent.
+   */
+  lookupSchemaHint(node: ts.Node): SchemaHint | undefined {
+    const registry = this.options.schemaHints;
+    if (!registry) return undefined;
+    return registry.get(node) ?? registry.get(ts.getOriginalNode(node));
+  }
+
+  /**
+   * Record a per-function capability summary computed by
+   * PatternCallbackLoweringTransformer (expensive interprocedural analysis;
+   * cached here for SchemaInjection to reuse). See `CapabilitySummaryRegistry`
+   * docs in core/mod.ts.
+   */
+  recordCapabilitySummary(
+    fn: ts.Node,
+    summary: FunctionCapabilitySummary,
+  ): void {
+    this.options.capabilitySummaryRegistry?.set(fn, summary);
+  }
+
+  /**
+   * Look up a previously-recorded capability summary. Returns undefined when
+   * absent; callers fall through to computing the summary on demand.
+   */
+  lookupCapabilitySummary(
+    fn: ts.Node,
+  ): FunctionCapabilitySummary | undefined {
+    return this.options.capabilitySummaryRegistry?.get(fn);
   }
 
   markSyntheticLiftAppliedCall(call: ts.CallExpression): void {

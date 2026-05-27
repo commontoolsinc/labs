@@ -540,7 +540,7 @@ function collectFunctionSchemaTypeNodes(
       preserveUiContractHint(
         previousResultNode,
         synthesizedResult,
-        context.options.schemaHints,
+        context,
       );
       resultNode = synthesizedResult;
       resultType = undefined;
@@ -566,7 +566,7 @@ function collectFunctionSchemaTypeNodes(
       preserveUiContractHint(
         resultNode,
         scopedResult,
-        context.options.schemaHints,
+        context,
       );
       resultNode = scopedResult;
       resultType = undefined;
@@ -601,7 +601,7 @@ function collectFunctionSchemaTypeNodes(
         preserveUiContractHint(
           resultNode,
           recoveredNode,
-          context.options.schemaHints,
+          context,
         );
         resultNode = recoveredNode;
         resultType = undefined;
@@ -618,11 +618,13 @@ function collectFunctionSchemaTypeNodes(
         typeRegistry,
       );
       if (projectedResult?.result) {
-        preserveUiContractHint(
-          resultNode,
-          projectedResult.result,
-          context?.options.schemaHints,
-        );
+        if (context) {
+          preserveUiContractHint(
+            resultNode,
+            projectedResult.result,
+            context,
+          );
+        }
         resultNode = projectedResult.result;
         resultType = projectedResult.resultType;
       }
@@ -992,7 +994,20 @@ function createSchemaCallWithRegistryTransfer(
     typeRegistry,
   );
   const schemaCall = createToSchemaCall(context, emittedTypeNode, options);
-  preserveUiContractHint(typeNode, schemaCall, schemaHints);
+  // This leaf utility takes a narrowed `context` (Pick) and the schemaHints map
+  // explicitly, so it can't use context.recordSchemaHint; preserve the
+  // cfcUiContract hint directly on the raw map (mirroring to the original node).
+  if (schemaHints) {
+    const hint = schemaHints.get(typeNode)?.cfcUiContract ??
+      schemaHints.get(ts.getOriginalNode(typeNode))?.cfcUiContract;
+    if (hint) {
+      schemaHints.set(schemaCall, { cfcUiContract: hint });
+      const originalSchemaCall = ts.getOriginalNode(schemaCall);
+      if (originalSchemaCall !== schemaCall) {
+        schemaHints.set(originalSchemaCall, { cfcUiContract: hint });
+      }
+    }
+  }
 
   // Transfer TypeRegistry entry from source typeNode to schema call
   // This preserves type information for closure-captured variables
@@ -1014,8 +1029,7 @@ function applyIdentityArrayItemSchemaHints(
   identityPaths: readonly (readonly string[])[],
   context: TransformationContext,
 ): void {
-  const schemaHints = context.options.schemaHints;
-  if (!schemaHints || identityPaths.length === 0) return;
+  if (!context.options.schemaHints || identityPaths.length === 0) return;
 
   const grouped = new Map<string, boolean>();
   for (const path of identityPaths) {
@@ -1037,7 +1051,7 @@ function applyIdentityArrayItemSchemaHints(
           ? member.name.text
           : undefined;
         if (name && grouped.has(name)) {
-          schemaHints.set(member.type, { items: false });
+          context.recordSchemaHint(member.type, { items: false });
         }
       }
     }
@@ -1758,20 +1772,11 @@ function buildObjectLiteralReturnTypeNode(
       return undefined;
     }
     typeRegistry?.set(valueTypeNode, valueType);
-    const valueHint = getUiContractHintFromNode(
-      valueExpr,
-      context?.options.schemaHints,
-    );
-    if (valueHint && context?.options.schemaHints) {
-      context.options.schemaHints.set(valueTypeNode, {
-        cfcUiContract: valueHint,
-      });
-      const originalValueTypeNode = ts.getOriginalNode(valueTypeNode);
-      if (originalValueTypeNode !== valueTypeNode) {
-        context.options.schemaHints.set(originalValueTypeNode, {
-          cfcUiContract: valueHint,
-        });
-      }
+    const valueHint = context
+      ? getUiContractHintFromNode(valueExpr, context)
+      : undefined;
+    if (valueHint && context) {
+      context.recordSchemaHint(valueTypeNode, { cfcUiContract: valueHint });
     }
 
     members.push(
@@ -1877,8 +1882,7 @@ function propagateUiContractHintsFromObjectLiteral(
 ):
   | UiContractHint
   | undefined {
-  const schemaHints = context.options.schemaHints;
-  if (!schemaHints || !resultNode) {
+  if (!context.options.schemaHints || !resultNode) {
     return undefined;
   }
 
@@ -1897,7 +1901,7 @@ function propagateUiContractHintsFromObjectLiteral(
     const valueExpr = ts.isPropertyAssignment(property)
       ? property.initializer
       : property.name;
-    const hint = getUiContractHintFromNode(valueExpr, schemaHints);
+    const hint = getUiContractHintFromNode(valueExpr, context);
     if (!hint) {
       continue;
     }
@@ -1915,21 +1919,13 @@ function propagateUiContractHintsFromObjectLiteral(
           getObjectLiteralPropertyName(entry.name) === memberName,
       );
       if (member?.type) {
-        schemaHints.set(member.type, { cfcUiContract: hint });
-        const originalMemberType = ts.getOriginalNode(member.type);
-        if (originalMemberType !== member.type) {
-          schemaHints.set(originalMemberType, { cfcUiContract: hint });
-        }
+        context.recordSchemaHint(member.type, { cfcUiContract: hint });
       }
     }
   }
 
   if (resultHint) {
-    schemaHints.set(target, { cfcUiContract: resultHint });
-    const originalTarget = ts.getOriginalNode(target);
-    if (originalTarget !== target) {
-      schemaHints.set(originalTarget, { cfcUiContract: resultHint });
-    }
+    context.recordSchemaHint(target, { cfcUiContract: resultHint });
     return resultHint;
   }
 
@@ -1938,14 +1934,10 @@ function propagateUiContractHintsFromObjectLiteral(
 
 function getUiContractHintFromObjectLiteral(
   expr: ts.ObjectLiteralExpression,
-  schemaHints: TransformationContext["options"]["schemaHints"],
+  context: TransformationContext,
 ):
   | UiContractHint
   | undefined {
-  if (!schemaHints) {
-    return undefined;
-  }
-
   for (const property of expr.properties) {
     if (
       !ts.isPropertyAssignment(property) &&
@@ -1956,7 +1948,7 @@ function getUiContractHintFromObjectLiteral(
     const valueExpr = ts.isPropertyAssignment(property)
       ? property.initializer
       : property.name;
-    const hint = getUiContractHintFromNode(valueExpr, schemaHints);
+    const hint = getUiContractHintFromNode(valueExpr, context);
     if (hint) {
       return hint;
     }
@@ -1968,44 +1960,35 @@ function getUiContractHintFromObjectLiteral(
 function setUiContractHint(
   target: ts.Node | undefined,
   hint: UiContractHint | undefined,
-  schemaHints: TransformationContext["options"]["schemaHints"],
+  context: TransformationContext,
 ): void {
-  if (!schemaHints || !target || !hint) {
+  if (!target || !hint) {
     return;
   }
 
-  schemaHints.set(target, { cfcUiContract: hint });
-  const originalTarget = ts.getOriginalNode(target);
-  if (originalTarget !== target) {
-    schemaHints.set(originalTarget, { cfcUiContract: hint });
-  }
+  context.recordSchemaHint(target, { cfcUiContract: hint });
 }
 
 function preserveUiContractHint(
   fromNode: ts.Node | undefined,
   toNode: ts.Node | undefined,
-  schemaHints: TransformationContext["options"]["schemaHints"],
+  context: TransformationContext,
 ): void {
-  if (!schemaHints || !fromNode || !toNode) {
+  if (!fromNode || !toNode) {
     return;
   }
 
-  const hint = schemaHints.get(fromNode)?.cfcUiContract ??
-    schemaHints.get(ts.getOriginalNode(fromNode))?.cfcUiContract;
+  const hint = context.lookupSchemaHint(fromNode)?.cfcUiContract;
   if (!hint) {
     return;
   }
 
-  schemaHints.set(toNode, { cfcUiContract: hint });
-  const originalTarget = ts.getOriginalNode(toNode);
-  if (originalTarget !== toNode) {
-    schemaHints.set(originalTarget, { cfcUiContract: hint });
-  }
+  context.recordSchemaHint(toNode, { cfcUiContract: hint });
 }
 
 function getUiContractHintFromNode(
   node: ts.Node | undefined,
-  schemaHints: TransformationContext["options"]["schemaHints"],
+  context: TransformationContext,
 ):
   | UiContractHint
   | undefined {
@@ -2013,8 +1996,7 @@ function getUiContractHintFromNode(
     return undefined;
   }
 
-  const storedHint = schemaHints?.get(node)?.cfcUiContract ??
-    schemaHints?.get(ts.getOriginalNode(node))?.cfcUiContract;
+  const storedHint = context.lookupSchemaHint(node)?.cfcUiContract;
   if (storedHint) {
     return storedHint;
   }
@@ -2619,9 +2601,9 @@ function handlePatternSchemaInjection(
         resultTypeNode,
         getUiContractHintFromObjectLiteral(
           unwrappedPatternReturnExpr,
-          context.options.schemaHints,
+          context,
         ),
-        context.options.schemaHints,
+        context,
       );
     }
   } else if (typeArgs && typeArgs.length === 1) {
@@ -2713,12 +2695,12 @@ function handlePatternSchemaInjection(
       preserveUiContractHint(
         resultTypeNode,
         toSchemaResult,
-        context.options.schemaHints,
+        context,
       );
       preserveUiContractHint(
         getCallbackReturnExpression(builderFunction),
         toSchemaResult,
-        context.options.schemaHints,
+        context,
       );
       if (resultType && typeRegistry) {
         typeRegistry.set(toSchemaResult, resultType);
@@ -2732,10 +2714,10 @@ function handlePatternSchemaInjection(
           ts.isObjectLiteralExpression(unwrappedPatternReturnExpr)
           ? getUiContractHintFromObjectLiteral(
             unwrappedPatternReturnExpr,
-            context.options.schemaHints,
+            context,
           )
           : undefined,
-        context.options.schemaHints,
+        context,
       );
       return visited;
     } else {
@@ -2823,9 +2805,9 @@ function handlePatternSchemaInjection(
       resultSchemaCall,
       getUiContractHintFromObjectLiteral(
         unwrappedPatternReturnExpr,
-        context.options.schemaHints,
+        context,
       ),
-      context.options.schemaHints,
+      context,
     );
   }
   if (resultType && typeRegistry) {
@@ -2840,10 +2822,10 @@ function handlePatternSchemaInjection(
       ts.isObjectLiteralExpression(unwrappedPatternReturnExpr)
       ? getUiContractHintFromObjectLiteral(
         unwrappedPatternReturnExpr,
-        context.options.schemaHints,
+        context,
       )
       : undefined,
-    context.options.schemaHints,
+    context,
   );
   return visited;
 }
