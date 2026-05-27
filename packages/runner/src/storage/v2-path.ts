@@ -132,9 +132,7 @@ export const cloneWithValueAtPath = (
   value: FabricValue | undefined,
 ): EntityDocument | undefined => {
   if (path.length === 0) {
-    return deepFreeze(
-      cloneIfNecessary(value as FabricValue, { frozen: false }),
-    ) as EntityDocument;
+    return cloneIfNecessary(value as FabricValue) as EntityDocument;
   }
 
   const baseRoot = (root ?? {}) as Record<string, unknown>;
@@ -159,7 +157,7 @@ export const cloneWithValueAtPath = (
   }
 
   const last = path[path.length - 1]!;
-  const nextValue = cloneIfNecessary(value as FabricValue, { frozen: false });
+  const nextValue = cloneIfNecessary(value as FabricValue);
   setPathSegmentValue(currentClone, last, nextValue);
   return deepFreeze(nextRoot) as EntityDocument;
 };
