@@ -48,6 +48,25 @@ export const pathsOverlap = (
   right: readonly string[],
 ): boolean => isPrefixPath(left, right) || isPrefixPath(right, left);
 
+/**
+ * String-form counterpart to `pathsOverlap`, operating directly on JSON
+ * Pointer strings (as produced by `encodePointer()`). Two pointers overlap
+ * iff one is a strict prefix of the other at a `/` boundary, or they are
+ * equal, or either is the root `""`. Lets callers compare pre-encoded keys
+ * (e.g. `Map<string, ...>` keys) without round-tripping through
+ * `parsePointer()`, which would otherwise allocate per comparison.
+ */
+export const pathStringsOverlap = (a: string, b: string): boolean => {
+  if (a === b) return true;
+  if (a === "" || b === "") return true;
+  // Both non-empty pointers start with "/". Either string is on the other's
+  // chain iff one is a prefix of the other AND the next character on the
+  // longer string is "/" (i.e. a true segment boundary, not e.g. "/foo" vs.
+  // "/foobar").
+  if (a.length < b.length) return b.startsWith(a) && b[a.length] === "/";
+  return a.startsWith(b) && a[b.length] === "/";
+};
+
 export const parentPath = (path: readonly string[]): string[] => {
   return path.length === 0 ? [] : [...path.slice(0, -1)];
 };

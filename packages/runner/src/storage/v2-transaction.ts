@@ -7,7 +7,11 @@ import {
 } from "@commonfabric/data-model/fabric-value";
 import { unclaimed } from "@commonfabric/memory/fact";
 import type { PatchOp } from "@commonfabric/memory/v2";
-import { encodePointer, pathsOverlap } from "../../../memory/v2/path.ts";
+import {
+  encodePointer,
+  pathsOverlap,
+  pathStringsOverlap,
+} from "../../../memory/v2/path.ts";
 import type { FabricValue } from "@commonfabric/memory/interface";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -160,6 +164,62 @@ const ensureWritableDocument = (
   doc.writeDetails = new Map();
   doc.patchDetails = new Map();
   return doc as WritableDocumentEntry;
+};
+
+/**
+ * Drops `doc.frozenReads` entries whose paths lie on the same ancestor /
+ * descendant chain as any of the written paths in `writtenPointers` (each a
+ * JSON Pointer string produced by `encodePointer()`). Sibling-path entries
+ * are preserved, since `setAtPath()` and `applyMutablePathWrite()` leave
+ * those subtrees structurally shared with the prior `doc.current`.
+ *
+ * Additionally invalidates the synthetic `<parent>/length` sibling of each
+ * written path: writing to a JS array's index can change its `.length`
+ * property, which lives at a sibling pointer (`/arr/length`) that is not on
+ * the chain of `/arr/<i>` by path-string overlap. Including it here keeps
+ * cached `length` reads consistent with array-element writes. False positives
+ * (a non-array parent with no `/length` entry cached) are no-ops in the
+ * per-key sweep.
+ *
+ * A root write (`""`) collapses to a full `.clear()` because every cached
+ * path is on the root's chain. The "more writes than cache entries" guard
+ * also short-circuits to `.clear()` when the per-key sweep would do more
+ * work than just discarding the map.
+ */
+const invalidateFrozenReadsOnChains = (
+  doc: WritableDocumentEntry,
+  writtenPointers: readonly string[],
+): void => {
+  const map = doc.frozenReads;
+  if (map.size === 0 || writtenPointers.length === 0) return;
+  if (
+    writtenPointers.length >= map.size ||
+    writtenPointers.includes("")
+  ) {
+    map.clear();
+    return;
+  }
+  // Precompute the synthetic `<parent>/length` pointer for each written
+  // pointer (string-key check below avoids re-computing per cache entry).
+  const lengthPointers = new Set<string>();
+  for (const written of writtenPointers) {
+    const lastSlash = written.lastIndexOf("/");
+    if (lastSlash >= 0) {
+      lengthPointers.add(`${written.slice(0, lastSlash)}/length`);
+    }
+  }
+  for (const key of map.keys()) {
+    if (lengthPointers.has(key)) {
+      map.delete(key);
+      continue;
+    }
+    for (const written of writtenPointers) {
+      if (pathStringsOverlap(written, key)) {
+        map.delete(key);
+        break;
+      }
+    }
+  }
 };
 
 const freezeReadValue = <T extends FabricValue | undefined>(value: T): T => {
@@ -1199,7 +1259,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
 
     doc.current = collapsedNext;
-    doc.frozenReads.clear();
+    invalidateFrozenReadsOnChains(doc, [encodePointer(address.path)]);
     this.recordPatchIntent(
       space,
       address,
@@ -1323,7 +1383,9 @@ export class V2StorageTransaction implements IStorageTransaction {
     ) as FabricValue | undefined;
 
     doc.current = collapsedNext;
-    doc.frozenReads.clear();
+    // The created intermediate containers all lie at prefixes of
+    // `address.path`, so chain-invalidation against `address.path` covers them.
+    invalidateFrozenReadsOnChains(doc, [encodePointer(address.path)]);
     this.recordPatchIntent(
       space,
       address,
@@ -1374,6 +1436,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     let nextRoot = originalRoot;
     let hasMutableRoot = false;
     let changed = false;
+    const writtenPointers: string[] = [];
 
     for (const { address, value } of writes) {
       const isolatedValue = value === undefined
@@ -1415,7 +1478,7 @@ export class V2StorageTransaction implements IStorageTransaction {
               nextRoot,
             ),
           };
-          doc.frozenReads.clear();
+          invalidateFrozenReadsOnChains(doc, writtenPointers);
         }
         return { error: result.error.from(space) };
       }
@@ -1424,6 +1487,7 @@ export class V2StorageTransaction implements IStorageTransaction {
         continue;
       }
       changed = true;
+      writtenPointers.push(encodePointer(address.path));
       this.recordPatchIntent(
         space,
         address,
@@ -1457,7 +1521,7 @@ export class V2StorageTransaction implements IStorageTransaction {
         nextRoot,
       ),
     };
-    doc.frozenReads.clear();
+    invalidateFrozenReadsOnChains(doc, writtenPointers);
     return { ok: {} };
   }
 
