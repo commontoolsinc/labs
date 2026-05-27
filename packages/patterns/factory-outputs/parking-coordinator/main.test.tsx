@@ -721,6 +721,147 @@ export default pattern(() => {
     return len(vs) === 0;
   });
 
+  // 9e: addPerson with invalid make+model combo → model dropped, make preserved
+  const s9e = ParkingCoordinator({
+    spots: DEFAULT_SPOTS,
+    people: [],
+    requests: [],
+  });
+
+  const action_s9e_add_invalid_combo = action(() => {
+    s9e.addPerson.send({
+      name: "Eve",
+      email: "eve@co.com",
+      commuteMode: "drive",
+      priorityRank: 1,
+      defaultSpot: "",
+      preferences: "",
+      vehicles: [
+        // Honda does not have Camry — model must be dropped
+        {
+          plateId: "EVE001",
+          plateState: "CA",
+          color: "",
+          make: "Honda",
+          model: "Camry",
+        },
+      ],
+    });
+  });
+
+  const assert_s9e_model_dropped = computed(() => {
+    const eve = s9e.people.find((p: Person) => p.name === "Eve");
+    const vs: Vehicle[] = eve?.vehicles ?? [];
+    return len(vs) === 1 && vs[0].make === "Honda" && vs[0].model === "";
+  });
+
+  // 9f: addPerson with valid make+model combo → both kept
+  const s9f = ParkingCoordinator({
+    spots: DEFAULT_SPOTS,
+    people: [],
+    requests: [],
+  });
+
+  const action_s9f_add_valid_combo = action(() => {
+    s9f.addPerson.send({
+      name: "Frank",
+      email: "frank@co.com",
+      commuteMode: "drive",
+      priorityRank: 1,
+      defaultSpot: "",
+      preferences: "",
+      vehicles: [
+        {
+          plateId: "FRK001",
+          plateState: "CA",
+          color: "",
+          make: "Honda",
+          model: "Civic",
+        },
+      ],
+    });
+  });
+
+  const assert_s9f_valid_combo_kept = computed(() => {
+    const frank = s9f.people.find((p: Person) => p.name === "Frank");
+    const vs: Vehicle[] = frank?.vehicles ?? [];
+    return len(vs) === 1 && vs[0].make === "Honda" && vs[0].model === "Civic";
+  });
+
+  // 9g: addPerson with two vehicles sharing same plateId+state → deduped to one
+  const s9g = ParkingCoordinator({
+    spots: DEFAULT_SPOTS,
+    people: [],
+    requests: [],
+  });
+
+  const action_s9g_add_dupes = action(() => {
+    s9g.addPerson.send({
+      name: "Grace",
+      email: "grace@co.com",
+      commuteMode: "drive",
+      priorityRank: 1,
+      defaultSpot: "",
+      preferences: "",
+      vehicles: [
+        {
+          plateId: "DUP001",
+          plateState: "CA",
+          color: "Red",
+          make: "",
+          model: "",
+        },
+        {
+          plateId: "DUP001",
+          plateState: "CA",
+          color: "Blue",
+          make: "",
+          model: "",
+        },
+      ],
+    });
+  });
+
+  const assert_s9g_deduped = computed(() => {
+    const grace = s9g.people.find((p: Person) => p.name === "Grace");
+    const vs: Vehicle[] = grace?.vehicles ?? [];
+    // First occurrence kept, second dropped
+    return len(vs) === 1 && vs[0].plateId === "DUP001" && vs[0].color === "Red";
+  });
+
+  // 9h: addPerson with invalid color → stored as ""
+  const s9h = ParkingCoordinator({
+    spots: DEFAULT_SPOTS,
+    people: [],
+    requests: [],
+  });
+
+  const action_s9h_add_invalid_color = action(() => {
+    s9h.addPerson.send({
+      name: "Hank",
+      email: "hank@co.com",
+      commuteMode: "drive",
+      priorityRank: 1,
+      defaultSpot: "",
+      preferences: "",
+      vehicles: [
+        {
+          plateId: "HNK001",
+          plateState: "CA",
+          color: "Chartreuse",
+          make: "",
+          model: "",
+        },
+      ],
+    });
+  });
+
+  const assert_s9h_invalid_color_cleared = computed(() => {
+    const hank = s9h.people.find((p: Person) => p.name === "Hank");
+    const vs: Vehicle[] = hank?.vehicles ?? [];
+    return len(vs) === 1 && vs[0].color === "";
+  });
+
   // 9d: editPerson WITH vehicles replaces them; WITHOUT vehicles preserves them
   const personWithVehicle: Person = {
     name: "Dana",
@@ -917,6 +1058,15 @@ export default pattern(() => {
       { assertion: assert_s9d_vehicles_replaced },
       { action: action_s9d_edit_no_vehicles },
       { assertion: assert_s9d_vehicles_preserved },
+      // Extended boundary tests
+      { action: action_s9e_add_invalid_combo },
+      { assertion: assert_s9e_model_dropped },
+      { action: action_s9f_add_valid_combo },
+      { assertion: assert_s9f_valid_combo_kept },
+      { action: action_s9g_add_dupes },
+      { assertion: assert_s9g_deduped },
+      { action: action_s9h_add_invalid_color },
+      { assertion: assert_s9h_invalid_color_cleared },
     ],
     s1,
     s2,
@@ -930,5 +1080,9 @@ export default pattern(() => {
     s9b,
     s9c,
     s9d,
+    s9e,
+    s9f,
+    s9g,
+    s9h,
   };
 });

@@ -400,3 +400,34 @@ export const formatVehicle = (v: Vehicle): string => {
 
 export const normalizePlateId = (raw: string): string =>
   raw.toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+// Constrain one vehicle to the catalog: normalize plate, default+uppercase state,
+// and DROP any color/make/model not in the fixed sets. Model is only kept when a
+// valid make is set AND the model belongs to that make (fixes stale-cascade data).
+export const normalizeVehicle = (v: Vehicle): Vehicle => {
+  const make = VEHICLE_MAKES.includes(v.make) ? v.make : "";
+  const model = make && modelsForMake(make).includes(v.model) ? v.model : "";
+  return {
+    plateId: normalizePlateId(v.plateId),
+    plateState: (v.plateState || "CA").toUpperCase(),
+    color: VEHICLE_COLORS.includes(v.color) ? v.color : "",
+    make,
+    model,
+  };
+};
+
+// Normalize a list, drop blank-plate entries, and dedupe by plateId|plateState
+// (keep first occurrence). This is the single source of truth for vehicle hygiene.
+export const normalizeVehicles = (list: Vehicle[]): Vehicle[] => {
+  const seen = new Set<string>();
+  const result: Vehicle[] = [];
+  for (const v of list) {
+    const norm = normalizeVehicle(v);
+    if (!norm.plateId) continue;
+    const key = `${norm.plateId}|${norm.plateState}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(norm);
+  }
+  return result;
+};

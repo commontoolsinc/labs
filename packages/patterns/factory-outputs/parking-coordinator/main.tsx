@@ -3,6 +3,7 @@ import {
   type AddIntegrity,
   computed,
   Default,
+  handler,
   NAME,
   nonPrivateRandom,
   pattern,
@@ -24,12 +25,13 @@ import {
 import {
   formatVehicle,
   modelsForMake,
-  normalizePlateId,
+  normalizeVehicle,
+  normalizeVehicles,
   US_STATES,
   type Vehicle,
   VEHICLE_COLORS,
   VEHICLE_MAKES,
-} from "./vehicles.ts";
+} from "../../vehicles.ts";
 
 export type { Vehicle };
 
@@ -251,6 +253,17 @@ const genId = (): string =>
 
 const parsePreferences = (s: string | null | undefined): string[] =>
   (s ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+
+// Make→model cascade: when a make select changes, clear the dependent model so a
+// stale value (e.g. make=Honda, model=Camry) can't linger. `$value` keeps the
+// make cell in sync; this handler only resets the model. cf-select event props
+// bind to a handler() object, which must be defined at module scope.
+const resetModelOnMakeChange = handler<
+  { detail?: { value?: string } },
+  { model: Writable<string> }
+>((_event, { model }) => {
+  model.set("");
+});
 
 const parkingAdminSubject = (personName: string): ParkingAdminSubject => ({
   personName,
@@ -487,6 +500,10 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     const editDraftMake = new Writable.perSession("");
     const editDraftModel = new Writable.perSession("");
 
+    // Vehicle draft error cells
+    const draftVehicleError = new Writable.perSession("");
+    const editDraftVehicleError = new Writable.perSession("");
+
     // Override state
     const gridOverrideSpot = new Writable.perSession("");
     const gridOverrideDate = new Writable.perSession("");
@@ -639,14 +656,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       }
       addPersonError.set("");
 
-      const rawVehicles = vehiclesArg ?? [];
-      const normalizedVehicles: Vehicle[] = rawVehicles
-        .map((v) => ({
-          ...v,
-          plateId: normalizePlateId(v.plateId),
-          plateState: v.plateState || "CA",
-        }))
-        .filter((v) => v.plateId !== "");
+      const normalizedVehicles = normalizeVehicles(vehiclesArg ?? []);
 
       const newPerson: Person = {
         name: trimName,
@@ -710,18 +720,9 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
         if (p.name !== originalName) return p;
 
         // When vehicles omitted, preserve existing; when provided, normalize
-        let nextVehicles: Vehicle[];
-        if (vehiclesArg === undefined) {
-          nextVehicles = p.vehicles ?? [];
-        } else {
-          nextVehicles = vehiclesArg
-            .map((v) => ({
-              ...v,
-              plateId: normalizePlateId(v.plateId),
-              plateState: v.plateState || "CA",
-            }))
-            .filter((v) => v.plateId !== "");
-        }
+        const nextVehicles: Vehicle[] = vehiclesArg === undefined
+          ? (p.vehicles ?? [])
+          : normalizeVehicles(vehiclesArg);
 
         return {
           ...p,
@@ -1006,6 +1007,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       editDraftColor.set("");
       editDraftMake.set("");
       editDraftModel.set("");
+      editDraftVehicleError.set("");
     });
 
     const cancelEditPerson = action(() => editingPersonName.set(null));
@@ -1102,16 +1104,25 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
 
     // Vehicle actions — add/remove for pending (add-person form)
     const addPendingVehicle = action(() => {
-      const plate = normalizePlateId(draftPlateId.get());
-      if (!plate) return;
-      const state = draftPlateState.get() || "CA";
-      const color = draftColor.get();
-      const make = draftMake.get();
-      const model = draftModel.get();
-      pendingVehicles.set([
-        ...pendingVehicles.get(),
-        { plateId: plate, plateState: state, color, make, model },
-      ]);
+      const candidate = normalizeVehicle({
+        plateId: draftPlateId.get(),
+        plateState: draftPlateState.get(),
+        color: draftColor.get(),
+        make: draftMake.get(),
+        model: draftModel.get(),
+      });
+      if (!candidate.plateId) {
+        draftVehicleError.set("Plate ID is required.");
+        return;
+      }
+      const existing = pendingVehicles.get();
+      const key = `${candidate.plateId}|${candidate.plateState}`;
+      if (existing.some((v) => `${v.plateId}|${v.plateState}` === key)) {
+        draftVehicleError.set("That plate is already listed.");
+        return;
+      }
+      draftVehicleError.set("");
+      pendingVehicles.set([...existing, candidate]);
       draftPlateId.set("");
       draftPlateState.set("CA");
       draftColor.set("");
@@ -1127,16 +1138,25 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
 
     // Vehicle actions — add/remove for editVehicles (edit-person form)
     const addEditVehicle = action(() => {
-      const plate = normalizePlateId(editDraftPlateId.get());
-      if (!plate) return;
-      const state = editDraftPlateState.get() || "CA";
-      const color = editDraftColor.get();
-      const make = editDraftMake.get();
-      const model = editDraftModel.get();
-      editVehicles.set([
-        ...editVehicles.get(),
-        { plateId: plate, plateState: state, color, make, model },
-      ]);
+      const candidate = normalizeVehicle({
+        plateId: editDraftPlateId.get(),
+        plateState: editDraftPlateState.get(),
+        color: editDraftColor.get(),
+        make: editDraftMake.get(),
+        model: editDraftModel.get(),
+      });
+      if (!candidate.plateId) {
+        editDraftVehicleError.set("Plate ID is required.");
+        return;
+      }
+      const existing = editVehicles.get();
+      const key = `${candidate.plateId}|${candidate.plateState}`;
+      if (existing.some((v) => `${v.plateId}|${v.plateState}` === key)) {
+        editDraftVehicleError.set("That plate is already listed.");
+        return;
+      }
+      editDraftVehicleError.set("");
+      editVehicles.set([...existing, candidate]);
       editDraftPlateId.set("");
       editDraftPlateState.set("CA");
       editDraftColor.set("");
@@ -1150,9 +1170,10 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       editVehicles.set(current);
     });
 
-    const toggleAddPersonForm = action(() =>
-      addPersonFormOpen.set(!addPersonFormOpen.get())
-    );
+    const toggleAddPersonForm = action(() => {
+      addPersonFormOpen.set(!addPersonFormOpen.get());
+      draftVehicleError.set("");
+    });
     const toggleAddSpotForm = action(() =>
       addSpotFormOpen.set(!addSpotFormOpen.get())
     );
@@ -1322,11 +1343,6 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
         defaultSpot: p.defaultSpot,
         spotPreferences: [...p.spotPreferences],
         vehicles: [...(p.vehicles ?? [])].map((v) => ({
-          plateId: v.plateId,
-          plateState: v.plateState,
-          color: v.color,
-          make: v.make,
-          model: v.model,
           formatted: formatVehicle(v),
         })),
         isFirst: idx === 0,
@@ -2117,6 +2133,9 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                         <cf-select
                                           $value={editDraftMake}
                                           items={makeSelectItems}
+                                          oncf-change={resetModelOnMakeChange({
+                                            model: editDraftModel,
+                                          })}
                                           style="width: 100%;"
                                         />
                                       </cf-vstack>
@@ -2142,6 +2161,15 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                         + Add vehicle
                                       </cf-button>
                                     </cf-hstack>
+                                    {computed(() => {
+                                      const err = editDraftVehicleError.get();
+                                      if (!err) return null;
+                                      return (
+                                        <span style="font-size: 0.75rem; color: var(--cf-color-red-600);">
+                                          {err}
+                                        </span>
+                                      );
+                                    })}
                                   </cf-vstack>
 
                                   <cf-hstack gap="2">
@@ -2455,6 +2483,9 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                     <cf-select
                                       $value={draftMake}
                                       items={makeSelectItems}
+                                      oncf-change={resetModelOnMakeChange({
+                                        model: draftModel,
+                                      })}
                                       style="width: 100%;"
                                     />
                                   </cf-vstack>
@@ -2477,6 +2508,15 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                     + Add vehicle
                                   </cf-button>
                                 </cf-hstack>
+                                {computed(() => {
+                                  const err = draftVehicleError.get();
+                                  if (!err) return null;
+                                  return (
+                                    <span style="font-size: 0.75rem; color: var(--cf-color-red-600);">
+                                      {err}
+                                    </span>
+                                  );
+                                })}
                               </cf-vstack>
 
                               {computed(() => {
