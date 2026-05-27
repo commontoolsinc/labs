@@ -5,10 +5,11 @@
  * measurement via `b.start()` / `b.end()`.
  *
  * Why this bench exists: the v2-transaction-level frozenReads bench
- * (`packages/runner/test/frozen-reads-cache.bench.ts`) measures the SUM
- * of cache invalidation cost and `setAtPath` structural-sharing cost,
- * both of which are K-dependent. This bench isolates the invalidation
- * algorithm and shows its scaling with cache size directly.
+ * (`packages/runner/test/frozen-reads-cache.bench.ts`) historically
+ * measured the SUM of cache invalidation cost and structural-sharing
+ * write-rebuild cost, both K-dependent. This bench isolates the
+ * invalidation algorithm and shows its scaling with cache size
+ * directly.
  *
  * Expected shape:
  *   - `Map.clear()` baseline: roughly constant (V8's Map.clear is O(1)

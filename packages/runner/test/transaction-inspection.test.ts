@@ -452,6 +452,123 @@ describe("transaction inspection", () => {
     }
   });
 
+  it(
+    "preserves correct previousValue across distinct-path writes within a single transaction " +
+      "(regression: applyMutablePathWrite mutates current.value in place on 2nd+ write)",
+    async () => {
+      // Two writes at *different* leaf paths within one transaction. The
+      // second write's `previousValue` must capture what was at path
+      // ["value", "b"] BEFORE the second write (= the seed value), not the
+      // value that's just been written. Reading the activity-path snapshot
+      // AFTER `applyMutablePathWrite()` would observe the post-mutation
+      // state because the helper mutates `current.value` in place on the
+      // second-and-later write (cloneForMutation short-circuits to
+      // identity on an already-mutable root).
+      const storageManager = StorageManager.emulate({ as: signer });
+      try {
+        const id =
+          "test:transaction-inspection-previousvalue-across-paths-v2" as const;
+        const seed = storageManager.edit();
+        seed.write({ space, scope: "space", id, path: [] }, {
+          value: { a: 1, b: 2 },
+        });
+        await seed.commit();
+
+        const tx = storageManager.edit();
+        tx.write({ space, scope: "space", id, path: ["value", "a"] }, 10);
+        tx.write({ space, scope: "space", id, path: ["value", "b"] }, 20);
+
+        const details = [...getTransactionWriteDetails(tx, space)].sort(
+          (l, r) =>
+            l.address.path.join("/").localeCompare(r.address.path.join("/")),
+        );
+        assertEquals(details, [
+          {
+            address: { space, scope: "space", id, path: ["value", "a"] },
+            value: 10,
+            previousValue: 1,
+          },
+          {
+            address: { space, scope: "space", id, path: ["value", "b"] },
+            value: 20,
+            previousValue: 2, // <- regression: was 20 (post-mutation) before fix
+          },
+        ]);
+      } finally {
+        await storageManager.close();
+      }
+    },
+  );
+
+  it(
+    "captures correct previousActivityValue for a create-parents write that follows " +
+      "an earlier in-tx write (regression: read-before-mutate ordering for the " +
+      "materialization-parent activity snapshot)",
+    async () => {
+      // The first write thaws `doc.current.value` in place (sub-tree at
+      // `/value/a` becomes mutable). The second write creates new parents
+      // at a sibling subtree `/value/new/nested`. Its
+      // `findMaterializedParentPath` walks the (already-mutable)
+      // `current.value` and returns `["value"]` as the materialization
+      // point. `previousActivityValue` at that path must capture the
+      // PRE-second-write state of `/value` (= `{a: 10}` from the first
+      // write's in-place result, not the POST-second-write state with the
+      // `new` child added).
+      const storageManager = StorageManager.emulate({ as: signer });
+      try {
+        const id =
+          "test:transaction-inspection-create-parents-after-mutation-v2" as const;
+        const seed = storageManager.edit();
+        seed.write({ space, scope: "space", id, path: [] }, {
+          value: { a: 1 },
+        });
+        await seed.commit();
+
+        const tx = storageManager.edit();
+        // 1st write: mutates `/value/a` in place (thaws the spine).
+        tx.write({ space, scope: "space", id, path: ["value", "a"] }, 10);
+        // 2nd write: create-parents at `/value/new/nested`. The activity
+        // path will be `["value"]` (the materialization point); the
+        // previousActivityValue there must be `{a: 10}` -- the inter-write
+        // state of `/value` -- not the post-second-write state.
+        tx.write({
+          space,
+          scope: "space",
+          id,
+          path: ["value", "new", "nested"],
+        }, "hello");
+
+        const detailByPath = new Map<
+          string,
+          ReturnType<typeof getTransactionWriteDetails> extends
+            Iterable<infer T> ? T
+            : never
+        >();
+        for (const detail of getTransactionWriteDetails(tx, space)) {
+          detailByPath.set(detail.address.path.join("/"), detail);
+        }
+        // `/value/a` is a simple-path leaf write -- previousValue is the
+        // seed value `1` (pre-transaction).
+        assertEquals(detailByPath.get("value/a"), {
+          address: { space, scope: "space", id, path: ["value", "a"] },
+          value: 10,
+          previousValue: 1,
+        });
+        // `/value` is the create-parents materialization point. The
+        // entry's previousValue is what was at `/value` before the
+        // second write -- the inter-write `{a: 10}` -- not the post-write
+        // `{a: 10, new: {nested: "hello"}}`.
+        assertEquals(detailByPath.get("value"), {
+          address: { space, scope: "space", id, path: ["value"] },
+          value: { a: 10, new: { nested: "hello" } },
+          previousValue: { a: 10 },
+        });
+      } finally {
+        await storageManager.close();
+      }
+    },
+  );
+
   it("records the rewritten parent path when a single native v2 batch write materializes missing parents", async () => {
     const storageManager = StorageManager.emulate({
       as: signer,

@@ -71,7 +71,10 @@ arr` because there's no check to write. Use this for copies, transforms, and any
 iteration where you only care about present elements.
 
 For a plain copy, `attestation.ts` has a `sparseArrayCopy` helper that uses
-this pattern.
+this pattern. (As of PR #3704 it is only used by the legacy `setAtPath` /
+`Attestation.write` path; the v2-transaction hot write path uses
+`cloneIfNecessary` for spine thawing, which has its own sparse-preserving
+implementation -- see "v2-transaction write path" below.)
 
 ### `for` + `i in arr` (when you need to detect absences)
 
@@ -115,13 +118,41 @@ uses `for` + `i in` because it needs early return.  `fabricFromNativeValueLegacy
 `toDeepFabricValueInternal` both use `forEach` to preserve holes during
 conversion.
 
-### Attestation (`packages/runner/src/storage/transaction/attestation.ts`)
+### v2-transaction write path (`packages/runner/src/storage/v2-transaction.ts`)
 
-The `setAtPath` function does copy-on-write: when it needs to modify an element
-in an array, it copies the array first. The `sparseArrayCopy` helper (which uses
+The hot write path (since PR #3704) goes through `applyMutablePathWrite`,
+which calls `cloneForMutation` (in `value-clone.ts`) to shallow-thaw the
+spine and then mutates the leaf parent in place. `cloneForMutation`'s
+shallow-thaw step uses `cloneIfNecessary({ frozen: false, deep: false })`
+on each spine container, which for arrays preserves sparseness: it
+pre-allocates `new Array(arr.length)` and copies elements via `i in arr`,
+so holes survive.
+
+The leaf write itself is one of:
+
+- `parent[slot] = value` for array indices -- the rest of the array
+  (including holes elsewhere) is untouched, so sparseness is preserved.
+- `delete parent[slot]` for array index deletes -- creates a true hole
+  (`i in arr` returns `false` afterwards).
+- `parent.length = effective` for `.length` writes (see
+  `applyArrayLengthWrite`) -- JS `length=` truncates the tail, leaving
+  holes within the new bound intact.
+
+### Attestation (`packages/runner/src/storage/transaction/attestation.ts`) — legacy
+
+The `setAtPath` function (and the `Attestation.write` wrapper around it)
+does copy-on-write: when it needs to modify an element in an array, it
+copies the array first. The `sparseArrayCopy` helper (which uses
 `forEach`) is used at all three copy sites (extension, element set, nested
-modification). The `delete` operation at `setAtPath` creates true holes via
-`delete newArray[index]`.
+modification). The `delete` operation at `setAtPath` creates true holes
+via `delete newArray[index]`.
+
+As of PR #3704 this is no longer on the v2-transaction hot write path.
+It is still used by `chronicle.ts` for its working-copy management
+(commit-time conflict detection), but that's a separate code path from
+the storage-write loop. Migrating Chronicle is a separately tracked
+follow-on; once that lands, `setAtPath` / `sparseArrayCopy` /
+`Attestation.write` can be removed.
 
 ### Cell write path (`packages/runner/src/cell.ts`)
 
@@ -202,8 +233,9 @@ reactive pipeline:
    directive `// deno-lint-ignore no-sparse-arrays`) and verify holes survive
    with `i in result`.
 
-If you're writing a plain array copy, use or follow `sparseArrayCopy` from
-`attestation.ts`.
+If you're writing a plain array copy, follow the pattern in
+`sparseArrayCopy` (in `attestation.ts`) or use `cloneIfNecessary` with
+`{ frozen: false, deep: false }`, which preserves sparseness internally.
 
 ## How we ensure this stays correct
 
