@@ -1,6 +1,4 @@
 import {
-  cloneForMutation,
-  CloneForMutationError,
   cloneIfNecessary,
   getDataModelConfig,
   isArrayIndexPropertyName,
@@ -30,7 +28,6 @@ import type {
   ITransactionReader,
   ITransactionWriter,
   ITransactionWriteRequest,
-  ITypeMismatchError,
   MediaType,
   MemorySpace,
   NativeStorageCommit,
@@ -56,6 +53,11 @@ import {
   read as readAttestation,
   TypeMismatchError,
 } from "./transaction/attestation.ts";
+import {
+  applyMutablePathWrite,
+  getValueTypeName,
+  isContainerValue,
+} from "./transaction/mutable-path-write.ts";
 import { ReadOnlyAddressError } from "./transaction/chronicle.ts";
 import {
   TransactionAborted,
@@ -67,7 +69,7 @@ import {
   isReadIgnoredForScheduling,
   isReadMarkedAsAttemptedWrite,
 } from "./reactivity-log.ts";
-import { createPathContainer, readValueAtPath } from "./v2-path.ts";
+import { readValueAtPath } from "./v2-path.ts";
 import { recordWriteStackTrace } from "./write-stack-trace.ts";
 import { normalizeCellScope } from "../scope.ts";
 import type { CellScope } from "../builder/types.ts";
@@ -291,206 +293,6 @@ const inspectPath = (
     kind: "ok",
     value: current as FabricValue | undefined,
   };
-};
-
-const isContainerValue = (
-  value: FabricValue | undefined,
-): value is Record<string, FabricValue> | FabricValue[] =>
-  Array.isArray(value) || isRecord(value);
-
-const getValueTypeName = (value: FabricValue | undefined): string => {
-  if (value === null) {
-    return "null";
-  }
-  if (Array.isArray(value)) {
-    return "array";
-  }
-  return typeof value;
-};
-
-type MutableWriteResult = {
-  root: FabricValue | undefined;
-  previousValue: FabricValue | undefined;
-  changed: boolean;
-};
-
-/**
- * Applies a write at `address.path` within `currentRoot`, returning the
- * (possibly new) root, the previous value at the path, and whether
- * anything changed.
- *
- * Delegates spine descent + thaw + missing-intermediate creation to
- * `cloneForMutation` (with `createMissing: true`), which exposes the
- * parent container at `address.path.slice(0, -1)` as a mutable handle.
- * The function then performs the leaf write -- a property set/delete on
- * an object, an element set/delete on an array, or the legacy
- * length-write coercion when the parent is an array and the leaf key is
- * `"length"`. Subtrees off the spine are preserved by identity, so a
- * subsequent re-freeze short-circuits on everything except the freshly
- * thawed spine.
- *
- * `force: false` is passed to `cloneForMutation` because the root, by
- * this point, is either (a) freshly allocated by us (in the
- * `undefined`-root branch) and thus owned outright, or (b) the caller's
- * value which by contract is treated as caller-owned within the
- * transaction.
- */
-const applyMutablePathWrite = (
-  currentRoot: FabricValue | undefined,
-  address: IMemoryAddress,
-  value: FabricValue | undefined,
-): Result<MutableWriteResult, ITypeMismatchError> => {
-  if (address.path.length === 0) {
-    return {
-      ok: {
-        root: value,
-        previousValue: currentRoot,
-        changed: !deepEqual(currentRoot, value),
-      },
-    };
-  }
-
-  if (currentRoot === undefined) {
-    if (value === undefined) {
-      return {
-        ok: {
-          root: currentRoot,
-          previousValue: undefined,
-          changed: false,
-        },
-      };
-    }
-    currentRoot = createPathContainer(address.path[0]!);
-  } else if (!isContainerValue(currentRoot)) {
-    return {
-      error: TypeMismatchError(
-        { ...address, path: address.path.slice(0, 1) },
-        getValueTypeName(currentRoot),
-        "write",
-      ),
-    };
-  }
-
-  const leafKey = address.path[address.path.length - 1]!;
-  const parentPath = address.path.slice(0, -1);
-
-  // Thaw the spine and create missing intermediates, all in one call.
-  // The resulting `parent` is the mutable container at `parentPath` --
-  // the slot whose `[leafKey]` we're about to write.
-  let newRoot: FabricValue;
-  let parent: Record<string, FabricValue> | FabricValue[];
-  try {
-    const result = cloneForMutation(currentRoot, parentPath, {
-      createMissing: true,
-      nextKeyAfterPath: leafKey,
-      force: false,
-    });
-    newRoot = result.value as FabricValue;
-    parent = result.pathValue as
-      | Record<string, FabricValue>
-      | FabricValue[];
-  } catch (e) {
-    if (e instanceof CloneForMutationError) {
-      // The descent surfaced a type mismatch (or a non-container value
-      // along the path); convert to the v2-transaction-shaped error.
-      // `e.pathIndex` is the index within `parentPath`, which is the
-      // same as the index within `address.path` (since `parentPath` is
-      // a prefix). The slice end is `e.pathIndex + 1` to include the
-      // offending key, matching `read`/`write`'s error-path semantics.
-      return {
-        error: TypeMismatchError(
-          { ...address, path: address.path.slice(0, e.pathIndex + 1) },
-          e.valueKind,
-          "write",
-        ),
-      };
-    }
-    throw e;
-  }
-
-  // Leaf write at `parent[leafKey]`.
-  if (Array.isArray(parent)) {
-    if (leafKey === "length") {
-      return applyArrayLengthWrite(newRoot, parent, value);
-    }
-    if (!isArrayIndexPropertyName(leafKey)) {
-      return {
-        error: TypeMismatchError(
-          { ...address, path: address.path },
-          "array",
-          "write",
-        ),
-      };
-    }
-    const slot = Number(leafKey);
-    const previousValue = parent[slot];
-    if (deepEqual(previousValue, value)) {
-      return { ok: { root: newRoot, previousValue, changed: false } };
-    }
-    if (value === undefined) {
-      delete parent[slot];
-    } else {
-      parent[slot] = value;
-    }
-    return { ok: { root: newRoot, previousValue, changed: true } };
-  }
-
-  // Object branch.
-  const obj = parent as Record<string, FabricValue>;
-  const previousValue = obj[leafKey];
-  if (deepEqual(previousValue, value)) {
-    return { ok: { root: newRoot, previousValue, changed: false } };
-  }
-  if (value === undefined) {
-    delete obj[leafKey];
-  } else {
-    obj[leafKey] = value;
-  }
-  return { ok: { root: newRoot, previousValue, changed: true } };
-};
-
-/**
- * Helper for the legacy array-length-write semantics, called when
- * `applyMutablePathWrite` reaches a leaf key of `"length"` against an
- * array parent. Replicates `Array.prototype.slice(0, nextLength)`'s
- * coercion rules for truncation (NaN → 0, +Infinity → unchanged,
- * −Infinity → 0, negative → count from end, fractional → floor) so
- * direct in-place mutation matches what the pre-refactor `slice + (or)
- * sparseArrayCopy + length=` pair produced. Grow with holes uses the JS
- * native semantic of `arr.length = nextLength` (with `Math.floor` to
- * keep length a uint32).
- */
-const applyArrayLengthWrite = (
-  newRoot: FabricValue,
-  parent: FabricValue[],
-  value: FabricValue | undefined,
-): Result<MutableWriteResult, ITypeMismatchError> => {
-  const previousValue = parent.length;
-  if (deepEqual(previousValue, value)) {
-    return { ok: { root: newRoot, previousValue, changed: false } };
-  }
-  const nextLength = value as number;
-  if (
-    nextLength < previousValue || nextLength < 0 ||
-    !Number.isFinite(nextLength)
-  ) {
-    let effective: number;
-    if (Number.isNaN(nextLength)) {
-      effective = 0;
-    } else if (nextLength === Number.POSITIVE_INFINITY) {
-      effective = previousValue;
-    } else if (nextLength === Number.NEGATIVE_INFINITY) {
-      effective = 0;
-    } else if (nextLength < 0) {
-      effective = Math.max(0, previousValue + Math.floor(nextLength));
-    } else {
-      effective = Math.min(previousValue, Math.floor(nextLength));
-    }
-    parent.length = effective;
-  } else {
-    parent.length = Math.floor(nextLength);
-  }
-  return { ok: { root: newRoot, previousValue, changed: true } };
 };
 
 const findMaterializedParentPath = (

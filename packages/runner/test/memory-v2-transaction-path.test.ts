@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
+import { getTransactionWriteDetails } from "../src/storage/transaction-inspection.ts";
 
 const signer = await Identity.fromPassphrase("memory-v2-transaction-path");
 const space = signer.did();
@@ -287,6 +288,72 @@ describe("memory v2 transaction path semantics", () => {
         path: [],
       }),
     ).toEqual({ name: "Ada" });
+
+    tx.abort();
+  });
+
+  it("writing `undefined` to an array's `.length` does not crash with RangeError", () => {
+    // Regression: a degenerate write (undefined value at array .length)
+    // used to fall through `applyArrayLengthWrite`'s guards and end up
+    // attempting `parent.length = NaN`, which throws a `RangeError`.
+    const tx = runtime.edit();
+    tx.writeValueOrThrow({
+      space,
+      scope: "space",
+      id: "of:path-length-undefined",
+      path: [],
+    }, { items: [1, 2, 3] });
+
+    // Should not throw.
+    tx.writeValueOrThrow({
+      space,
+      scope: "space",
+      id: "of:path-length-undefined",
+      path: ["items", "length"],
+    }, undefined as unknown as number);
+
+    tx.abort();
+  });
+
+  it("setting an array's `.length` to `+Infinity` is a no-op (no phantom write recorded)", () => {
+    // Regression: per the documented "+Infinity → unchanged" semantics
+    // for length writes, the array's `.length` is left as-is. But the
+    // write helper used to return `changed: true` unconditionally, which
+    // would make the transaction observe a phantom write (and trigger
+    // spurious reactivity / write-activity).
+    const tx = runtime.edit();
+    tx.writeValueOrThrow({
+      space,
+      scope: "space",
+      id: "of:path-length-infinity",
+      path: [],
+    }, { items: [1, 2, 3] });
+
+    tx.writeValueOrThrow({
+      space,
+      scope: "space",
+      id: "of:path-length-infinity",
+      path: ["items", "length"],
+    }, Number.POSITIVE_INFINITY);
+
+    // The array contents must be unchanged.
+    expect(
+      tx.readValueOrThrow({
+        space,
+        scope: "space",
+        id: "of:path-length-infinity",
+        path: ["items"],
+      }),
+    ).toEqual([1, 2, 3]);
+
+    // And no write should be recorded at the length path: a no-op
+    // shouldn't fire reactivity or be reported as a write.
+    const lengthWrites = [...getTransactionWriteDetails(tx, space)].filter(
+      (detail) =>
+        detail.address.id === "of:path-length-infinity" &&
+        detail.address.path[detail.address.path.length - 1] === "length",
+    );
+    expect(lengthWrites).toEqual([]);
 
     tx.abort();
   });
