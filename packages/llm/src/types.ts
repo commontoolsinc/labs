@@ -6,7 +6,10 @@ import type {
   JSONSchema,
 } from "@commonfabric/api";
 
-export const DEFAULT_MODEL_NAME: ModelName = "anthropic:claude-sonnet-4-5";
+// Resolved by the toolshed at startup: prefers gateway:claude-sonnet-4-6 when
+// available, falls back to anthropic:claude-sonnet-4-5 otherwise. See
+// `registerDefaultModel` in packages/toolshed/routes/ai/llm/models.ts.
+export const DEFAULT_MODEL_NAME: ModelName = "default";
 
 // NOTE(ja): This should be an array of models, the first model will be tried, if it
 // fails, the second model will be tried, etc.
