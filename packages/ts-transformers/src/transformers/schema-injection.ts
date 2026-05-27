@@ -12,6 +12,7 @@ import {
   detectCallKind,
   detectNewExpressionKind,
   ensureTypeNodeRegistered,
+  getLiftAppliedInnerCall,
   getTypeAtLocationWithFallback,
   getTypeFromTypeNodeWithFallback,
   getVariableInitializer,
@@ -2241,12 +2242,12 @@ function prependSchemaArguments(
   // be prepended to the INNER lift call's arguments, not the outer applied
   // call's. The outer call's input stays at index 0; the inner call gains
   // [argSchema, resSchema, ...originalInnerArgs].
-  const innerCallee = node.expression;
-  if (ts.isCallExpression(innerCallee)) {
+  const innerLiftCall = getLiftAppliedInnerCall(node);
+  if (innerLiftCall) {
     const rebuiltInner = context.factory.createCallExpression(
-      innerCallee.expression,
-      innerCallee.typeArguments,
-      [argSchemaCall, resSchemaCall, ...innerCallee.arguments],
+      innerLiftCall.expression,
+      innerLiftCall.typeArguments,
+      [argSchemaCall, resSchemaCall, ...innerLiftCall.arguments],
     );
     return context.factory.createCallExpression(
       rebuiltInner,
@@ -2300,11 +2301,10 @@ function resolveLiftAppliedInputAndCallback(
 
   // See getLiftAppliedInputAndCallback in src/ast/call-kind.ts for the
   // two recognized shapes (legacy derive vs lift-applied).
-  const innerCallee = call.expression;
-  if (ts.isCallExpression(innerCallee)) {
+  const innerCall = getLiftAppliedInnerCall(call);
+  if (innerCall) {
     // Lift-applied: callback is the last arg of the inner lift call; input
     // is the first arg of the outer applied call.
-    const innerCall = innerCallee;
     const callbackIndex = innerCall.arguments.length - 1;
     const callbackExpression = innerCall.arguments[callbackIndex];
     const callback = callbackExpression
@@ -3158,11 +3158,9 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
         // type arguments live on the *inner* lift call, not on the outer
         // applied call. The legacy derive shape kept them on the call
         // itself. Read from whichever holds them.
-        const innerCallee = node.expression;
-        const sourceTypeArguments =
-          ts.isCallExpression(innerCallee) && innerCallee.typeArguments
-            ? innerCallee.typeArguments
-            : node.typeArguments;
+        const innerLiftCall = getLiftAppliedInnerCall(node);
+        const sourceTypeArguments = innerLiftCall?.typeArguments ??
+          node.typeArguments;
 
         if (sourceTypeArguments && sourceTypeArguments.length >= 2) {
           const [argumentType, resultType] = sourceTypeArguments;
@@ -3179,8 +3177,8 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           // into lift-applied is NOT marked, so it retains the legacy
           // shrink behavior.
           const isSynthetic = context.isSyntheticLiftAppliedCall(node) ||
-            (ts.isCallExpression(innerCallee) &&
-              context.isSyntheticLiftAppliedCall(innerCallee));
+            (innerLiftCall !== undefined &&
+              context.isSyntheticLiftAppliedCall(innerLiftCall));
 
           const resolved = resolveDualSchemaBuilderTypes(
             liftAppliedArgs?.callback,

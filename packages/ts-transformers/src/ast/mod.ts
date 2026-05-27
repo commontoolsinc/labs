@@ -19,6 +19,7 @@ export {
   detectNewExpressionKind,
   FUNCTION_HARDENING_HELPER_PREFIX,
   getCapabilitySummaryCallbackArgument,
+  getLiftAppliedInnerCall,
   getLiftAppliedInputAndCallback,
   getLoweredArrayMethodName,
   getPatternBuilderCallbackArgument,

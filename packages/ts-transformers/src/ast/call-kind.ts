@@ -341,6 +341,26 @@ export function getCapabilitySummaryCallbackArgument(
     : undefined;
 }
 
+/**
+ * For a lift-applied call (`__cfHelpers.lift(...)(input)`), return the inner
+ * lift CallExpression — i.e. the `__cfHelpers.lift(...)` that builds the
+ * module factory before it's applied to the input object. Returns undefined
+ * if `call` doesn't have the lift-applied shape (no inner call expression).
+ *
+ * Uses `stripWrappers` so a parenthesized or as-cast callee is still
+ * recognised, matching how `getLiftAppliedInputAndCallback` reads the same
+ * shape. Use this in preference to bare `ts.isCallExpression(call.expression)`
+ * at all sites that need the inner call — TS rarely emits parens around
+ * synthesized calls today, but routing through one helper makes any future
+ * wrapper additions handled consistently across the pipeline.
+ */
+export function getLiftAppliedInnerCall(
+  call: ts.CallExpression,
+): ts.CallExpression | undefined {
+  const stripped = stripWrappers(call.expression);
+  return ts.isCallExpression(stripped) ? stripped : undefined;
+}
+
 export function getLiftAppliedInputAndCallback(
   call: ts.CallExpression,
   checker: ts.TypeChecker,

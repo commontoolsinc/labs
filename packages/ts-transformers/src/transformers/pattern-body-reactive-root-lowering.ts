@@ -1,5 +1,6 @@
 import ts from "typescript";
 import {
+  getLiftAppliedInnerCall,
   getLiftAppliedInputAndCallback,
   getTypeAtLocationWithFallback,
   isWildcardTraversalCall,
@@ -957,10 +958,7 @@ function rewriteNestedLiftAppliedCallbackBodies(
     // The callback can live on either the outer call (legacy derive shape:
     // derive(input, cb)) or the inner call (lift-applied shape:
     // lift(cb)(input)). Detect which by searching both argument lists.
-    const isLiftAppliedShape = ts.isCallExpression(visited.expression);
-    const innerCall = isLiftAppliedShape
-      ? (visited.expression as ts.CallExpression)
-      : undefined;
+    const innerCall = getLiftAppliedInnerCall(visited);
     const callbackHostArgs = innerCall
       ? innerCall.arguments
       : visited.arguments;

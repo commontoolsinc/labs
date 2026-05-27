@@ -1,6 +1,6 @@
 import ts from "typescript";
 
-import { detectCallKind } from "../ast/call-kind.ts";
+import { detectCallKind, getLiftAppliedInnerCall } from "../ast/call-kind.ts";
 import { setParentPointers } from "../ast/utils.ts";
 import {
   registerLiftAppliedCallType,
@@ -80,11 +80,14 @@ function createLiftLoweringVisitor(
     //   (b) our own __cfHelpers.lift(cb)(input) — callee is itself a
     //       CallExpression (the inner lift call). We do NOT want to re-lower
     //       our own output.
-    // Distinguish structurally: if the callee is a CallExpression, it's
-    // already lift-applied and we leave it alone.
+    // Distinguish structurally: if the callee is already a CallExpression
+    // (potentially wrapped in parens / as / non-null assertions), it's
+    // already lift-applied and we leave it alone. Use the shared helper so
+    // the wrapper-stripping convention matches every other site that
+    // detects the lift-applied shape.
     if (
       callKind?.kind === "lift-applied" &&
-      !ts.isCallExpression(node.expression)
+      !getLiftAppliedInnerCall(node)
     ) {
       return lowerDeriveCall(node, context, visitor);
     }
@@ -294,7 +297,7 @@ function sourceContainsLowerableCall(
       }
       if (
         callKind?.kind === "lift-applied" &&
-        !ts.isCallExpression(node.expression)
+        !getLiftAppliedInnerCall(node)
       ) {
         found = true;
         return;
