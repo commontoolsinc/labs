@@ -1341,6 +1341,14 @@ export class V2StorageTransaction implements IStorageTransaction {
     // mutable from then on). That gives us "mutate in place on the same
     // freshly-thawed spine across the whole batch" without ever needing a
     // deep clone of off-spine subtrees.
+    //
+    // Read-before-mutate ordering is load-bearing: `previousValue`,
+    // `activityPath`, and `previousActivityValue` are all computed from
+    // `nextRoot` BEFORE `applyMutablePathWrite()` is called. The helper
+    // mutates `nextRoot` in place from the second iteration onward, so
+    // reading it AFTER the call would observe the post-write state.
+    // (See `writeWithinBranch` for the same invariant and a regression
+    // test.)
     for (const { address, value } of writes) {
       const isolatedValue = value === undefined
         ? undefined
