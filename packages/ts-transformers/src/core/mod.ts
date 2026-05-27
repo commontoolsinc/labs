@@ -66,8 +66,10 @@
  *   typeRegistry for wrapper-inner property recovery — registering pre-shrink
  *   types there would un-shrink carefully-narrowed inner schemas. Added in
  *   CT-1615 to support the lift-applied form's re-narrowing pass.
- *   Writers: transformers/type-shrinking.ts (applyShrinkAndWrap)
- *   Readers: transformers/schema-injection.ts (inner-lift revisit path)
+ *   Writers: context.markNarrowedWrapper() (called by
+ *            transformers/type-shrinking.ts applyShrinkAndWrap)
+ *   Readers: context.lookupNarrowedWrapper() (called by
+ *            transformers/schema-injection.ts inner-lift revisit path)
  *
  * syntheticLiftAppliedCallRegistry (WeakSet<ts.CallExpression>)
  *   Marks CallExpressions emitted by createLiftAppliedCall (the synthetic
@@ -96,12 +98,18 @@
  * (createDataFlowAnalyzer's `analysisCache`) lives inside its closure and
  * would otherwise return stale pre-mutation verdicts after a registry write.
  *
- * The other four registries (typeRegistry, schemaHints,
- * capabilitySummaryRegistry, narrowedWrapperTypeRegistry) are mutated via
- * direct .set() at call sites and have no cache-invalidation discipline.
- * This is fine today because no analysis cache depends on their contents,
- * but if you add a cache that does, mutate the registry through a context
- * method that invalidates it (or extend invalidateReactiveAnalysisCaches).
+ * `narrowedWrapperTypeRegistry` is accessed only through
+ * `context.markNarrowedWrapper()` / `context.lookupNarrowedWrapper()` (no
+ * cache-invalidation needed because no analysis cache depends on it, but
+ * routing through the methods centralises the contract — Berni's review
+ * §3.4 on CT-1615).
+ *
+ * The remaining three registries (typeRegistry, schemaHints,
+ * capabilitySummaryRegistry) are mutated via direct .set() at call sites
+ * and have no cache-invalidation discipline. This is fine today because no
+ * analysis cache depends on their contents, but if you add a cache that
+ * does, mutate the registry through a context method that invalidates it
+ * (or extend invalidateReactiveAnalysisCaches).
  *
  * If you add a new context-level cache or registry, mutate it through a
  * mark* method that calls invalidateReactiveAnalysisCaches() (or extend the
@@ -114,9 +122,12 @@
  *
  * See `docs/scratch/07-registry-audit.md` for a more thorough audit and
  * follow-up opportunities. In brief:
- *   - Lift the four direct-.get/.set registries to context.recordX/lookupX
- *     methods (matching the marker-set trio's pattern). Centralizes mutation,
- *     gets getOriginalNode fallback for free, eases adding invariants later.
+ *   - Lift the three remaining direct-.get/.set registries (typeRegistry,
+ *     schemaHints, capabilitySummaryRegistry) to context.recordX/lookupX
+ *     methods (matching the marker-set trio's pattern and the
+ *     narrowedWrapperTypeRegistry promotion in CT-1615). Centralizes
+ *     mutation, gets getOriginalNode fallback for free where applicable,
+ *     eases adding invariants later.
  *   - Split typeRegistry into its three named purposes
  *     (replacementTypeRegistry, syntheticTypeNodeRegistry,
  *     syntheticCallResultRegistry). CT-1615 hit the consequences of the

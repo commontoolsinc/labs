@@ -3316,10 +3316,8 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             // TypeNode that `checker.getTypeFromTypeNode` resolves to `any`.
             // See type-shrinking.ts `applyShrinkAndWrap` for where this is
             // populated and the rationale for the separate registry channel.
-            const narrowedWrapperRegistry =
-              context.options.narrowedWrapperTypeRegistry;
             const argumentTypeValue =
-              narrowedWrapperRegistry?.get(argumentType) ??
+              context.lookupNarrowedWrapper(argumentType) ??
                 getTypeFromTypeNodeWithFallback(
                   argumentType,
                   checker,

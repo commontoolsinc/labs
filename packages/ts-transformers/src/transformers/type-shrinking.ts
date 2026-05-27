@@ -3231,14 +3231,8 @@ export function applyShrinkAndWrap(
   // `Comparable<number>`). The two consumers have opposite needs for the
   // same wrapper node; keeping them in separate registries is the cleanest
   // way to satisfy both.
-  if (
-    baseType && !isAnyOrUnknownType(baseType) &&
-    context?.options.narrowedWrapperTypeRegistry
-  ) {
-    const registry = context.options.narrowedWrapperTypeRegistry;
-    if (!registry.has(wrapped)) {
-      registry.set(wrapped, baseType);
-    }
+  if (baseType && !isAnyOrUnknownType(baseType) && context) {
+    context.markNarrowedWrapper(wrapped, baseType);
   }
   return wrapped;
 }
