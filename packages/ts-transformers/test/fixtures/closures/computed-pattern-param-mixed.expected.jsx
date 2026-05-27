@@ -28,7 +28,15 @@ export default pattern((config: {
     const threshold = new Writable(15, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("threshold", true); // cell local
-    const result = __cfHelpers.derive({
+    const result = __cfHelpers.lift<{
+        value: __cfHelpers.ReadonlyCell<number>;
+        config: {
+            base: number;
+            multiplier: number;
+        };
+        offset: number;
+        threshold: __cfHelpers.ReadonlyCell<number>;
+    }, number>({
         type: "object",
         properties: {
             value: {
@@ -58,7 +66,7 @@ export default pattern((config: {
         required: ["value", "config", "offset", "threshold"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, ({ value, config, offset, threshold }) => (value.get() + config.base + offset) * config.multiplier + threshold.get())({
         value: value,
         config: {
             base: config.key("base"),
@@ -66,7 +74,7 @@ export default pattern((config: {
         },
         offset: offset,
         threshold: threshold
-    }, ({ value, config, offset, threshold }) => (value.get() + config.base + offset) * config.multiplier + threshold.get()).for("result", true);
+    }).for("result", true);
     return result;
 }, {
     type: "object",

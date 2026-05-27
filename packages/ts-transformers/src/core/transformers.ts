@@ -82,6 +82,29 @@ export interface TransformationOptions {
   readonly schemaHints?: SchemaHints;
   readonly capabilitySummaryRegistry?: CapabilitySummaryRegistry;
   /**
+   * Maps synthetic wrapper TypeNodes produced by `applyShrinkAndWrap` back to
+   * the *pre-shrink* semantic Type that drove the narrowing. Read by
+   * SchemaInjection's inner-lift revisit path so it can re-narrow with the
+   * original baseType instead of receiving `any` from the checker on a
+   * synthetic node. Deliberately kept separate from the main `typeRegistry`
+   * because the schema generator consults `typeRegistry` to recover wrapper
+   * properties — if the pre-shrink type lived there, the generator would
+   * un-shrink carefully-narrowed inner schemas.
+   */
+  readonly narrowedWrapperTypeRegistry?: WeakMap<ts.TypeNode, ts.Type>;
+  /**
+   * Marks CallExpressions emitted by `createLiftAppliedCall` (the synthetic
+   * JSX compute-wrap path used by expression-rewrite). SchemaInjection
+   * consults this when deciding whether to re-apply the capability-summary
+   * shrink on the lift's explicit input typeArg: synthetic emissions
+   * already produce their input TypeNode from accurate capture analysis,
+   * so re-shrinking collapses array element types to `unknown`
+   * (regression surfaced by CT-1615 Berni review on PR #3676).
+   * User-source derive<T,R>(...) lowered via LiftLoweringTransformer is
+   * NOT marked, so it retains the legacy shrink behavior.
+   */
+  readonly syntheticLiftAppliedCallRegistry?: WeakSet<ts.CallExpression>;
+  /**
    * Shared diagnostics collector that accumulates diagnostics across all transformers.
    * If provided, diagnostics are pushed to this array in addition to the local context.
    */
@@ -114,7 +137,7 @@ export interface DiagnosticInput {
  * The registry carries three related kinds of synthetic typing:
  * - replacement expression nodes that should keep the original authored type
  * - synthetic TypeNodes that later schema/codegen phases must resolve faithfully
- * - synthetic call expressions (`derive`, `computed`, `ifElse`, etc.) whose
+ * - synthetic call expressions (`lift-applied`, `ifElse`, etc.) whose
  *   result types would otherwise be lost after rewriting
  *
  * Most TypeNodes are registered directly at creation time. For composite

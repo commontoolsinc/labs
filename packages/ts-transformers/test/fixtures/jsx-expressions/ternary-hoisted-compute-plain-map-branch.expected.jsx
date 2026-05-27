@@ -26,7 +26,11 @@ export default pattern((state) => {
     const showList = new Writable(true, {
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema).for("showList", true);
-    const sorted = __cfHelpers.derive({
+    const sorted = __cfHelpers.lift<{
+        state: {
+            items: Item[];
+        };
+    }, Item[]>({
         type: "object",
         properties: {
             state: {
@@ -76,10 +80,16 @@ export default pattern((state) => {
                 required: ["name", "value"]
             }
         }
-    } as const satisfies __cfHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => [...state.items].sort((a, b) => a.value - b.value))({ state: {
             items: state.key("items")
-        } }, ({ state }) => [...state.items].sort((a, b) => a.value - b.value)).for("sorted", true);
-    const count = __cfHelpers.derive({
+        } }).for("sorted", true);
+    const count = __cfHelpers.lift<{
+        state: {
+            items: {
+                length: number;
+            };
+        };
+    }, number>({
         type: "object",
         properties: {
             state: {
@@ -101,11 +111,11 @@ export default pattern((state) => {
         required: ["state"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.length)({ state: {
             items: {
                 length: state.key("items", "length")
             }
-        } }, ({ state }) => state.items.length).for("count", true);
+        } }).for("count", true);
     return {
         [UI]: (<div>
         {__cfHelpers.ifElse({

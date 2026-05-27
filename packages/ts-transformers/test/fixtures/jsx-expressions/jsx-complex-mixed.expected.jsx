@@ -37,7 +37,14 @@ export default pattern((state) => {
         <p>Total items: {state.key("items", "length")}</p>
         <p>
           Filtered count:{" "}
-          {__cfHelpers.derive({
+          {__cfHelpers.lift<{
+            state: {
+                items: {
+                    name: string;
+                }[];
+                filter: string;
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -65,10 +72,10 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.filter((i) => i.name.includes(state.filter)).length)({ state: {
                 items: state.key("items"),
                 filter: state.key("filter")
-            } }, ({ state }) => state.items.filter((i) => i.name.includes(state.filter)).length)}
+            } })}
         </p>
 
         <h3>Array with Complex Expressions</h3>
@@ -80,7 +87,14 @@ export default pattern((state) => {
               <span>{item.key("name")}</span>
               <span>- Original: ${item.key("price")}</span>
               <span>
-                - Discounted: ${__cfHelpers.derive({
+                - Discounted: ${__cfHelpers.lift<{
+                    item: {
+                        price: number;
+                    };
+                    state: {
+                        discount: number;
+                    };
+                }, string>({
                     type: "object",
                     properties: {
                         item: {
@@ -105,18 +119,26 @@ export default pattern((state) => {
                     required: ["item", "state"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, ({ item, state }) => (item.price * (1 - state.discount)).toFixed(2))({
                     item: {
                         price: item.key("price")
                     },
                     state: {
                         discount: state.key("discount")
                     }
-                }, ({ item, state }) => (item.price * (1 - state.discount)).toFixed(2))}
+                })}
               </span>
               <span>
                 - With tax:
-                ${__cfHelpers.derive({
+                ${__cfHelpers.lift<{
+                    item: {
+                        price: number;
+                    };
+                    state: {
+                        discount: number;
+                        taxRate: number;
+                    };
+                }, string>({
                     type: "object",
                     properties: {
                         item: {
@@ -144,7 +166,8 @@ export default pattern((state) => {
                     required: ["item", "state"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, ({ item, state }) => (item.price * (1 - state.discount) * (1 + state.taxRate))
+                    .toFixed(2))({
                     item: {
                         price: item.key("price")
                     },
@@ -152,8 +175,7 @@ export default pattern((state) => {
                         discount: state.key("discount"),
                         taxRate: state.key("taxRate")
                     }
-                }, ({ item, state }) => (item.price * (1 - state.discount) * (1 + state.taxRate))
-                    .toFixed(2))}
+                })}
               </span>
             </li>);
             }, {
@@ -232,7 +254,11 @@ export default pattern((state) => {
 
         <h3>Array Methods</h3>
         <p>Item count: {state.key("items", "length")}</p>
-        <p>Active items: {__cfHelpers.derive({
+        <p>Active items: {__cfHelpers.lift<{
+            state: {
+                items: Item[];
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -257,12 +283,16 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.filter((i) => i.active).length)({ state: {
                 items: state.key("items")
-            } }, ({ state }) => state.items.filter((i) => i.active).length)}</p>
+            } })}</p>
 
         <h3>Simple Operations</h3>
-        <p>Discount percent: {__cfHelpers.derive({
+        <p>Discount percent: {__cfHelpers.lift<{
+            state: {
+                discount: number;
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -278,10 +308,14 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.discount * 100)({ state: {
                 discount: state.key("discount")
-            } }, ({ state }) => state.discount * 100)}%</p>
-        <p>Tax percent: {__cfHelpers.derive({
+            } })}%</p>
+        <p>Tax percent: {__cfHelpers.lift<{
+            state: {
+                taxRate: number;
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -297,9 +331,9 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.taxRate * 100)({ state: {
                 taxRate: state.key("taxRate")
-            } }, ({ state }) => state.taxRate * 100)}%</p>
+            } })}%</p>
 
         <h3>Array Predicates</h3>
         <p>All active: {__cfHelpers.ifElse({
@@ -310,7 +344,11 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["Yes", "No"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+            state: {
+                items: Item[];
+            };
+        }, boolean>({
             type: "object",
             properties: {
                 state: {
@@ -335,9 +373,9 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.every((i) => i.active))({ state: {
                 items: state.key("items")
-            } }, ({ state }) => state.items.every((i) => i.active)), "Yes", "No")}</p>
+            } }), "Yes", "No")}</p>
         <p>Any active: {__cfHelpers.ifElse({
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema, {
@@ -346,7 +384,11 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["Yes", "No"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+            state: {
+                items: Item[];
+            };
+        }, boolean>({
             type: "object",
             properties: {
                 state: {
@@ -371,9 +413,9 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.some((i) => i.active))({ state: {
                 items: state.key("items")
-            } }, ({ state }) => state.items.some((i) => i.active)), "Yes", "No")}</p>
+            } }), "Yes", "No")}</p>
         <p>
           Has expensive (gt 100):{" "}
           {__cfHelpers.ifElse({
@@ -384,7 +426,11 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["Yes", "No"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+            state: {
+                items: Item[];
+            };
+        }, boolean>({
             type: "object",
             properties: {
                 state: {
@@ -409,13 +455,19 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.some((i) => i.price > 100))({ state: {
                 items: state.key("items")
-            } }, ({ state }) => state.items.some((i) => i.price > 100)), "Yes", "No")}
+            } }), "Yes", "No")}
         </p>
 
         <h3>Object Operations</h3>
-        <div data-item-count={state.key("items", "length")} data-has-filter={__cfHelpers.derive({
+        <div data-item-count={state.key("items", "length")} data-has-filter={__cfHelpers.lift<{
+            state: {
+                filter: {
+                    length: number;
+                };
+            };
+        }, boolean>({
             type: "object",
             properties: {
                 state: {
@@ -437,11 +489,11 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.filter.length > 0)({ state: {
                 filter: {
                     length: state.key("filter", "length")
                 }
-            } }, ({ state }) => state.filter.length > 0)} data-discount={state.key("discount")}>
+            } })} data-discount={state.key("discount")}>
           Object attributes
         </div>
       </div>),

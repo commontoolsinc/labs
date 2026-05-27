@@ -8,11 +8,11 @@ export const emitTemplateExpression = ({
   dataFlows,
   context,
   inSafeContext,
-  preferDeriveWrappers,
+  preferInputBoundWrappers,
 }: EmitterContext) => {
   if (!ts.isTemplateExpression(expression)) return undefined;
 
-  // Skip derive wrapping in safe contexts - they don't need it
+  // Skip lift-applied wrapping in safe contexts - they don't need it
   if (inSafeContext) return undefined;
 
   if (dataFlows.length === 0) return undefined;
@@ -22,7 +22,7 @@ export const emitTemplateExpression = ({
     dataFlows,
     context,
     {
-      preferDeriveWrapper: preferDeriveWrappers,
+      preferInputBoundWrapper: preferInputBoundWrappers,
     },
   );
 };

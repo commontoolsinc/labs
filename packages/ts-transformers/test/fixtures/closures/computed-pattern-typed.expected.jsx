@@ -22,7 +22,10 @@ export default pattern((__cf_pattern_input) => {
     const value = new Writable(10, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("value", true);
-    const result = __cfHelpers.derive({
+    const result = __cfHelpers.lift<{
+        value: __cfHelpers.ReadonlyCell<number>;
+        multiplier: number;
+    }, number>({
         type: "object",
         properties: {
             value: {
@@ -36,10 +39,10 @@ export default pattern((__cf_pattern_input) => {
         required: ["value", "multiplier"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, ({ value, multiplier }) => value.get() * multiplier)({
         value: value,
         multiplier: multiplier
-    }, ({ value, multiplier }) => value.get() * multiplier).for("result", true);
+    }).for("result", true);
     return result;
 }, {
     type: "object",

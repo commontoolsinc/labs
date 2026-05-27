@@ -45,10 +45,12 @@ Deno.test("Closure Transformer hoists nested derive callbacks that close over mo
   assert(hoistedMatch, `expected hoisted helper in output:\n${output}`);
 
   const hoistedName = hoistedMatch[1]!;
+  // After CT-1615 Phase 1, derive calls lower to the lift-applied form:
+  // __cfHelpers.lift(argSchema, resultSchema, callback)(input)
   assertMatch(
     normalized,
     new RegExp(
-      `derive\\(.*\\{ dateStr \\}, ${hoistedName}\\)`,
+      `__cfHelpers\\.lift\\([\\s\\S]*?, ${hoistedName}\\)\\(\\{ dateStr \\}\\)`,
     ),
   );
 });

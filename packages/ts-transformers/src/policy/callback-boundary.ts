@@ -126,7 +126,7 @@ export function classifyCallbackBoundary(
   }
 
   const callKind = detectCallKind(parent, checker);
-  if (callKind?.kind === "derive") {
+  if (callKind?.kind === "lift-applied") {
     return {
       kind: "supported",
       boundaryKind: "derive",

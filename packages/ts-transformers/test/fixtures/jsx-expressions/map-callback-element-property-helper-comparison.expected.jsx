@@ -41,7 +41,14 @@ export default pattern((__cf_pattern_input) => {
     const selectedRoom = __cf_pattern_input.key("selectedRoom");
     return {
         [UI]: (<div>
-        {__cfHelpers.derive({
+        {__cfHelpers.lift<{
+            selectedRoom: __cfHelpers.ReadonlyCell<Default<{
+                messages: Message[];
+            }, {
+                messages: [
+                ];
+            }>>;
+        }, Message[]>({
             type: "object",
             properties: {
                 selectedRoom: {
@@ -95,10 +102,15 @@ export default pattern((__cf_pattern_input) => {
                     required: ["author", "body"]
                 }
             }
-        } as const satisfies __cfHelpers.JSONSchema, { selectedRoom: selectedRoom }, ({ selectedRoom }) => selectedRoom.get()?.messages).mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+        } as const satisfies __cfHelpers.JSONSchema, ({ selectedRoom }) => selectedRoom.get()?.messages)({ selectedRoom: selectedRoom }).mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
             const message = __cf_pattern_input.key("element");
             const name = __cf_pattern_input.key("params", "name");
-            const isMine = __cfHelpers.derive({
+            const isMine = __cfHelpers.lift<{
+                message: {
+                    author: string;
+                };
+                name: Writable<Default<string, "">>;
+            }, boolean>({
                 type: "object",
                 properties: {
                     message: {
@@ -119,13 +131,17 @@ export default pattern((__cf_pattern_input) => {
                 required: ["message", "name"]
             } as const satisfies __cfHelpers.JSONSchema, {
                 type: "boolean"
-            } as const satisfies __cfHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({
                 message: {
                     author: message.key("author")
                 },
                 name: name
-            }, __cfModuleCallback_1).for("isMine", true);
-            const isKnownAuthor = __cfHelpers.derive({
+            }).for("isMine", true);
+            const isKnownAuthor = __cfHelpers.lift<{
+                message: {
+                    author: string;
+                };
+            }, boolean>({
                 type: "object",
                 properties: {
                     message: {
@@ -141,9 +157,9 @@ export default pattern((__cf_pattern_input) => {
                 required: ["message"]
             } as const satisfies __cfHelpers.JSONSchema, {
                 type: "boolean"
-            } as const satisfies __cfHelpers.JSONSchema, { message: {
+            } as const satisfies __cfHelpers.JSONSchema, ({ message }) => message.author === "Alice")({ message: {
                     author: message.key("author")
-                } }, ({ message }) => message.author === "Alice").for("isKnownAuthor", true);
+                } }).for("isKnownAuthor", true);
             return (<div data-author-kind={__cfHelpers.ifElse({
                 type: "boolean"
             } as const satisfies __cfHelpers.JSONSchema, {

@@ -175,7 +175,9 @@ export default pattern(() => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, {} as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+            cellRef: unknown[];
+        }, boolean>({
             type: "object",
             properties: {
                 cellRef: {
@@ -188,7 +190,7 @@ export default pattern(() => {
             required: ["cellRef"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { cellRef: cellRef }, ({ cellRef }) => !cellRef?.length), <div>No charms created yet</div>, <ul>
+        } as const satisfies __cfHelpers.JSONSchema, ({ cellRef }) => !cellRef?.length)({ cellRef: cellRef }), <div>No charms created yet</div>, <ul>
             {cellRef.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const charm = __cf_pattern_input.key("element");
                 const index = __cf_pattern_input.key("index");
@@ -198,13 +200,15 @@ export default pattern(() => {
                 </cf-button>
                 <span>Charm {index + 1}: {__cfHelpers.unless(true as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+                    charm: any;
+                }, any>({
                     type: "object",
                     properties: {
                         charm: true
                     },
                     required: ["charm"]
-                } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, { charm: charm }, ({ charm }) => charm[__cfHelpers.NAME]), "Unnamed")}</span>
+                } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, ({ charm }) => charm[__cfHelpers.NAME])({ charm: charm }), "Unnamed")}</span>
               </li>);
             }, {
                 type: "object",

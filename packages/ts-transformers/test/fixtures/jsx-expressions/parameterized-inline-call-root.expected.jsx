@@ -21,7 +21,10 @@ export default pattern((__cf_pattern_input) => {
     const prefix = __cf_pattern_input.key("prefix");
     const count = __cf_pattern_input.key("count");
     return ({
-        [UI]: <div>{__cfHelpers.derive({
+        [UI]: <div>{__cfHelpers.lift<{
+            prefix: string;
+            count: number;
+        }, string>({
             type: "object",
             properties: {
                 prefix: {
@@ -34,10 +37,10 @@ export default pattern((__cf_pattern_input) => {
             required: ["prefix", "count"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, ({ prefix, count }) => ((value: number) => prefix + value)(count))({
             prefix: prefix,
             count: count
-        }, ({ prefix, count }) => ((value: number) => prefix + value)(count))}</div>,
+        })}</div>,
     });
 }, {
     type: "object",

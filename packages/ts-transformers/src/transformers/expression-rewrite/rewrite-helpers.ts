@@ -7,7 +7,7 @@ import {
 } from "../../ast/mod.ts";
 import { isModuleScopedDeclaration } from "../../ast/scope-analysis.ts";
 import { TransformationContext } from "../../core/mod.ts";
-import { createDeriveCall } from "../builtins/derive.ts";
+import { createLiftAppliedCall } from "../builtins/lift-applied.ts";
 
 function getCaptureRootExpression(expression: ts.Expression): ts.Expression {
   let current = expression;
@@ -66,7 +66,7 @@ export function createReactiveWrapperForExpression(
   context: TransformationContext,
   options: {
     allowDirectExpressionWrap?: boolean;
-    preferDeriveWrapper?: boolean;
+    preferInputBoundWrapper?: boolean;
     filterNestedFunctionLocalCaptures?: boolean;
   } = {},
 ): ts.Expression | undefined {
@@ -85,12 +85,12 @@ export function createReactiveWrapperForExpression(
 
   if (wrapperDataFlows.length === 0) return undefined;
 
-  // Don't wrap expressions that are already derive, computed, when, or unless calls
+  // Don't wrap expressions that are already lift-applied, computed, when, or unless calls
   // These are already reactive and wrapping them would create unnecessary nesting
   if (ts.isCallExpression(expression)) {
     const callKind = detectCallKind(expression, context.checker);
     if (
-      callKind?.kind === "derive" ||
+      callKind?.kind === "lift-applied" ||
       callKind?.kind === "when" ||
       callKind?.kind === "unless" ||
       (callKind?.kind === "builder" && callKind.builderName === "computed")
@@ -109,13 +109,13 @@ export function createReactiveWrapperForExpression(
     }
   }
 
-  if (options.preferDeriveWrapper) {
+  if (options.preferInputBoundWrapper) {
     const refs = unionWithEnclosingScopeFreeIdentifiers(
       wrapperDataFlows.map((dataFlow) => dataFlow.expression),
       expression,
       context.checker,
     );
-    return createDeriveCall(expression, refs, {
+    return createLiftAppliedCall(expression, refs, {
       factory: context.factory,
       tsContext: context.tsContext,
       cfHelpers: context.cfHelpers,
@@ -127,7 +127,7 @@ export function createReactiveWrapperForExpression(
 
   context.markSyntheticComputeOwnedSubtree(expression);
 
-  // Get result type for the computed call
+  // Get result type for the synthetic lift-applied call we're about to emit.
   let resultTypeNode: ts.TypeNode | undefined;
   let resultType: ts.Type | undefined;
 
@@ -144,7 +144,15 @@ export function createReactiveWrapperForExpression(
     resultType = undefined;
   }
 
-  // Create computed(() => expression)
+  // Emit the canonical lift-applied form for a zero-input compute wrapper:
+  //   __cfHelpers.lift(() => expression)({})
+  //
+  // This matches LiftLoweringTransformer's lowering of source-level
+  // `computed(() => expr)`. Previously this site emitted bare
+  // `__cfHelpers.computed(...)` — but LiftLoweringTransformer has already run
+  // by this stage in the pipeline, so emitting computed here would leave it
+  // in lowered output, defeating Phase 1's "no computed/derive in lowered
+  // output" invariant.
   const arrowFunction = factory.createArrowFunction(
     undefined,
     undefined,
@@ -155,24 +163,30 @@ export function createReactiveWrapperForExpression(
   );
   context.markAsSyntheticComputeCallback(arrowFunction);
 
-  const computedCall = context.cfHelpers.createHelperCall(
-    "computed",
+  const innerLiftCall = context.cfHelpers.createHelperCall(
+    "lift",
     expression,
     undefined,
     [arrowFunction],
   );
+  const emptyInput = factory.createObjectLiteralExpression([], false);
+  const liftAppliedCall = factory.createCallExpression(
+    innerLiftCall,
+    undefined,
+    [emptyInput],
+  );
 
-  // Register types for both the TypeNode and the computed CallExpression
+  // Register types for both the TypeNode and the lift-applied CallExpression
   if (resultTypeNode && resultType && context.options.typeRegistry) {
     context.options.typeRegistry.set(resultTypeNode, resultType);
-    context.options.typeRegistry.set(computedCall, resultType);
+    context.options.typeRegistry.set(liftAppliedCall, resultType);
   }
 
   // CRITICAL: Set parent pointers and connect to parent chain
   // This maintains the parent chain so walking up from nested callbacks works
-  setParentPointers(computedCall, expression.parent);
+  setParentPointers(liftAppliedCall, expression.parent);
 
-  return computedCall;
+  return liftAppliedCall;
 }
 
 /**
@@ -180,11 +194,11 @@ export function createReactiveWrapperForExpression(
  * whose declarations live in an enclosing (non-module, non-expression-local)
  * function scope. This is what makes plain-JS captures (e.g. `const suffix =
  * "!"` declared in the enclosing pattern/map callback) become explicit
- * derive inputs instead of flowing through lexical closure.
+ * lift-applied inputs instead of flowing through lexical closure.
  *
  * The dataflow analyzer only surfaces reactive captures (Cell/OpaqueRef).
  * Plain-JS values declared in enclosing scope are invisible to it, so they
- * default to lexical closure when `createDeriveCall` emits the callback.
+ * default to lexical closure when `createLiftAppliedCall` emits the callback.
  * That breaks the self-contained-callback contract that SES sandboxing and
  * module-scope hoisting rely on. Including them here gives them schema
  * coverage and explicit transport.
@@ -302,7 +316,7 @@ function isEnclosingScopeDeclaration(symbol: ts.Symbol): boolean {
   const declarations = symbol.getDeclarations();
   if (!declarations || declarations.length === 0) return false;
   // Reject if ANY declaration is module-scoped or an import — those don't
-  // need to be passed as derive inputs. They're stable and hoistable.
+  // need to be passed as lift-applied inputs. They're stable and hoistable.
   for (const decl of declarations) {
     if (
       ts.isImportSpecifier(decl) ||

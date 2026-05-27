@@ -23,7 +23,10 @@ export default pattern(() => {
     // Input name 'multiplier' collides with captured variable 'multiplier'
     // The callback returns an object with a property named 'multiplier'
     // Only the variable reference should be renamed, NOT the property name
-    const result = __cfHelpers.derive({
+    const result = __cfHelpers.lift<{
+        multiplier_1: __cfHelpers.ReadonlyCell<number>;
+        multiplier: __cfHelpers.ReadonlyCell<number>;
+    }, { multiplier: number; value: number; }>({
         type: "object",
         properties: {
             multiplier_1: {
@@ -47,13 +50,13 @@ export default pattern(() => {
             }
         },
         required: ["multiplier", "value"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        multiplier: multiplier.for(["result", 2, "multiplier"], true),
-        multiplier_1: multiplier
-    }, ({ multiplier: m, multiplier_1 }) => ({
+    } as const satisfies __cfHelpers.JSONSchema, ({ multiplier: m, multiplier_1 }) => ({
         multiplier: multiplier_1.get(),
         value: m.get() * 3,
-    })).for("result", true);
+    }))({
+        multiplier: multiplier.for(["result", "multiplier"], true),
+        multiplier_1: multiplier
+    }).for("result", true);
     return result;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",

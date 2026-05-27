@@ -152,7 +152,15 @@ export type CallKind =
   | { kind: "unless"; symbol?: ts.Symbol }
   | { kind: "builder"; symbol?: ts.Symbol; builderName: string }
   | { kind: "array-method"; symbol?: ts.Symbol }
-  | { kind: "derive"; symbol?: ts.Symbol }
+  // "lift-applied" labels a __cfHelpers.lift(...)(input) call shape — the
+  // canonical lowered form for reactive lifted-function computations,
+  // established by CT-1615. The historic discriminator was "derive" (the
+  // builder name the transformer used to emit before Phase 1); the
+  // discriminator was renamed in the mechanical rename step of CT-1615.
+  // detectCallKind also classifies an unapplied __cfHelpers.lift(...) call
+  // (no curry) as { kind: "builder", builderName: "lift" }, so the two
+  // are distinguishable at dispatch.
+  | { kind: "lift-applied"; symbol?: ts.Symbol }
   | { kind: "cell-factory"; symbol?: ts.Symbol; factoryName: string }
   | { kind: "cell-for"; symbol?: ts.Symbol }
   | { kind: "wish"; symbol?: ts.Symbol }
@@ -308,8 +316,14 @@ export function getCapabilitySummaryCallbackArgument(
   if (!callKind) return undefined;
 
   let callbackArg: ts.Expression | undefined;
-  if (callKind.kind === "derive") {
-    callbackArg = call.arguments[call.arguments.length - 1];
+  if (callKind.kind === "lift-applied") {
+    // For lift-applied shape (lift(cb)(input)), the callback lives on the
+    // inner lift call. For legacy derive shape, on the outer call itself.
+    const innerCallee = stripWrappers(call.expression);
+    const argSource = ts.isCallExpression(innerCallee)
+      ? innerCallee.arguments
+      : call.arguments;
+    callbackArg = argSource[argSource.length - 1];
   } else if (
     callKind.kind === "builder" &&
     (
@@ -327,7 +341,27 @@ export function getCapabilitySummaryCallbackArgument(
     : undefined;
 }
 
-export function getDeriveInputAndCallbackArgument(
+/**
+ * For a lift-applied call (`__cfHelpers.lift(...)(input)`), return the inner
+ * lift CallExpression — i.e. the `__cfHelpers.lift(...)` that builds the
+ * module factory before it's applied to the input object. Returns undefined
+ * if `call` doesn't have the lift-applied shape (no inner call expression).
+ *
+ * Uses `stripWrappers` so a parenthesized or as-cast callee is still
+ * recognised, matching how `getLiftAppliedInputAndCallback` reads the same
+ * shape. Use this in preference to bare `ts.isCallExpression(call.expression)`
+ * at all sites that need the inner call — TS rarely emits parens around
+ * synthesized calls today, but routing through one helper makes any future
+ * wrapper additions handled consistently across the pipeline.
+ */
+export function getLiftAppliedInnerCall(
+  call: ts.CallExpression,
+): ts.CallExpression | undefined {
+  const stripped = stripWrappers(call.expression);
+  return ts.isCallExpression(stripped) ? stripped : undefined;
+}
+
+export function getLiftAppliedInputAndCallback(
   call: ts.CallExpression,
   checker: ts.TypeChecker,
 ): {
@@ -335,10 +369,40 @@ export function getDeriveInputAndCallbackArgument(
   callback: ts.ArrowFunction | ts.FunctionExpression;
 } | undefined {
   const callKind = detectCallKind(call, checker);
-  if (callKind?.kind !== "derive") {
+  if (callKind?.kind !== "lift-applied") {
     return undefined;
   }
 
+  // Two shapes are recognized as kind:"lift-applied":
+  //   (a) Legacy derive shape: __cfHelpers.derive(input, cb) or
+  //       __cfHelpers.derive(argSchema, resSchema, input, cb). Recognized
+  //       defensively for any unlowered legacy emission that reaches here.
+  //   (b) Canonical lift-applied shape: __cfHelpers.lift(cb)(input) or
+  //       __cfHelpers.lift(argSchema, resSchema, cb)(input).
+  // The lift-applied shape's outer call has the callee as a CallExpression.
+  const innerCallee = stripWrappers(call.expression);
+  if (ts.isCallExpression(innerCallee)) {
+    // Lift-applied: callback is the last arg of the inner lift call; input
+    // is the first arg of the outer applied call.
+    const innerCall = innerCallee;
+    const callbackIndex = innerCall.arguments.length - 1;
+    const callbackArg = innerCall.arguments[callbackIndex];
+    const callback = callbackArg
+      ? resolveCallbackFunctionExpression(callbackArg, checker)
+      : undefined;
+    if (!callback) {
+      return undefined;
+    }
+
+    const input = call.arguments[0];
+    if (!input) {
+      return undefined;
+    }
+
+    return { input, callback };
+  }
+
+  // Legacy derive shape.
   const callbackIndex = call.arguments.length - 1;
   const callbackArg = call.arguments[callbackIndex];
   const callback = callbackArg
@@ -739,7 +803,7 @@ function isReactiveOriginKind(callKind: CallKind): boolean {
     case "cell-factory":
     case "cell-for":
       return true;
-    case "derive":
+    case "lift-applied":
       return COMMONFABRIC_REACTIVE_ORIGIN_CALL_EXPORT_NAMES.has("derive");
     case "ifElse":
       return COMMONFABRIC_REACTIVE_ORIGIN_CALL_EXPORT_NAMES.has("ifElse");
@@ -1063,6 +1127,34 @@ function resolveExpressionKind(
     followFactoryResults: true,
   });
   if (builderKind) {
+    // Lift-applied recognition: when the callee is itself a call to lift
+    // (e.g. __cfHelpers.lift(cb)({})), the *outer* call applies the lift
+    // factory to inputs and is semantically the lowered form of the
+    // user-source derive(input, cb). Return kind:"lift-applied" so
+    // downstream dispatchers handle it.
+    //
+    // The plain unapplied builder case (e.g. __cfHelpers.lift(cb) on its
+    // own, or a pattern() call) has `target` not as a CallExpression.
+    //
+    // Guard against multi-application chains like `lift(cb)(x)(y)`: only
+    // the SINGLE-application form is canonical lift-applied. If the
+    // outer-outer call's inner expression (`target.expression`) is itself
+    // a call AND that inner call's expression (`target.expression.expression`)
+    // is ALSO a call, we have an over-application and should NOT classify
+    // as lift-applied — even if the chain happens to resolve through a
+    // lift symbol via factory-following. (CT-1615 Berni review §2.2.)
+    if (
+      builderKind.builderName === "lift" &&
+      ts.isCallExpression(target) &&
+      !isMultiApplicationChain(target)
+    ) {
+      const liftAppliedKind: CallKind = {
+        kind: "lift-applied",
+        symbol: builderKind.symbol,
+      };
+      cache.set(expression, liftAppliedKind);
+      return liftAppliedKind;
+    }
     cache.set(expression, builderKind);
     return builderKind;
   }
@@ -1128,6 +1220,23 @@ function resolveExpressionKind(
 
   cache.set(expression, null);
   return undefined;
+}
+
+/**
+ * For a lift-applied candidate `outerCall` (already known to be a
+ * CallExpression whose builder resolution points at lift), return true if
+ * the call is part of a multi-application chain like `lift(cb)(x)(y)` —
+ * i.e. the inner call's *own* callee is also a CallExpression.
+ *
+ * Canonical lift-applied is exactly one application: `lift(cb)(input)`.
+ * Anything deeper is not a Phase-1 lowered shape and should not be
+ * classified as `kind: "lift-applied"`. (CT-1615 Berni review §2.2.)
+ */
+function isMultiApplicationChain(outerCall: ts.CallExpression): boolean {
+  const innerCallee = stripWrappers(outerCall.expression);
+  if (!ts.isCallExpression(innerCallee)) return false;
+  const innerCalleeCallee = stripWrappers(innerCallee.expression);
+  return ts.isCallExpression(innerCalleeCallee);
 }
 
 function stripWrappers(expression: ts.Expression): ts.Expression {
@@ -1688,8 +1797,10 @@ function createNamedCallKind(
   }
 
   switch (spec.callKind) {
-    case "derive":
-      return symbol ? { kind: "derive", symbol } : { kind: "derive" };
+    case "lift-applied":
+      return symbol
+        ? { kind: "lift-applied", symbol }
+        : { kind: "lift-applied" };
     case "ifElse":
       return symbol ? { kind: "ifElse", symbol } : { kind: "ifElse" };
     case "when":

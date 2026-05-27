@@ -20,7 +20,11 @@ export default pattern((cell) => {
     return {
         [UI]: (<div>
         <p>Current value: {cell.key("value")}</p>
-        <p>Next value: {__cfHelpers.derive({
+        <p>Next value: {__cfHelpers.lift<{
+            cell: {
+                value: number;
+            };
+        }, number>({
             type: "object",
             properties: {
                 cell: {
@@ -36,10 +40,14 @@ export default pattern((cell) => {
             required: ["cell"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { cell: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ cell }) => cell.value + 1)({ cell: {
                 value: cell.key("value")
-            } }, ({ cell }) => cell.value + 1)}</p>
-        <p>Double: {__cfHelpers.derive({
+            } })}</p>
+        <p>Double: {__cfHelpers.lift<{
+            cell: {
+                value: number;
+            };
+        }, number>({
             type: "object",
             properties: {
                 cell: {
@@ -55,9 +63,9 @@ export default pattern((cell) => {
             required: ["cell"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { cell: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ cell }) => cell.value * 2)({ cell: {
                 value: cell.key("value")
-            } }, ({ cell }) => cell.value * 2)}</p>
+            } })}</p>
       </div>),
         value: cell.key("value"),
     };

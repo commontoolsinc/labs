@@ -22,7 +22,10 @@ export default pattern(() => {
     const __cf_reserved = new Writable(2, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema);
-    const result = __cfHelpers.derive({
+    const result = __cfHelpers.lift<{
+        value: __cfHelpers.ReadonlyCell<number>;
+        __cf_reserved: __cfHelpers.ReadonlyCell<number>;
+    }, number>({
         type: "object",
         properties: {
             value: {
@@ -37,10 +40,10 @@ export default pattern(() => {
         required: ["value", "__cf_reserved"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        value: value.for(["result", 2, "value"], true),
+    } as const satisfies __cfHelpers.JSONSchema, ({ value: v, __cf_reserved }) => v.get() * __cf_reserved.get())({
+        value: value.for(["result", "value"], true),
         __cf_reserved: __cf_reserved
-    }, ({ value: v, __cf_reserved }) => v.get() * __cf_reserved.get()).for("result", true);
+    }).for("result", true);
     return result;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "number"

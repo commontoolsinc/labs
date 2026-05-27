@@ -73,7 +73,12 @@ export default pattern((__cf_pattern_input) => {
             <span>{card.key("title")}</span>
             {/* Explicit computed() wrapping JSX that references the action */}
             {/* The action must be captured in the derive created for this computed */}
-            {__cfHelpers.derive({
+            {__cfHelpers.lift<{
+                card: {
+                    description: string;
+                };
+                startEditing: __cfHelpers.Stream<void>;
+            }, import("commonfabric").JSXElement>({
                 type: "object",
                 properties: {
                     card: {
@@ -110,15 +115,15 @@ export default pattern((__cf_pattern_input) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __cfHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, ({ card, startEditing }) => (<div>
+                <span>{card.description}</span>
+                <cf-button onClick={startEditing}>Edit</cf-button>
+              </div>))({
                 card: {
                     description: card.key("description")
                 },
                 startEditing: startEditing
-            }, ({ card, startEditing }) => (<div>
-                <span>{card.description}</span>
-                <cf-button onClick={startEditing}>Edit</cf-button>
-              </div>))}
+            })}
           </div>)}
       </cf-card>),
         card,

@@ -20,7 +20,12 @@ const __cfAmdHooks = undefined;
 // Context: all three shapes should lower without leaking callback locals.
 export default pattern((state) => ({
     [UI]: (<div>
-      <p>{__cfHelpers.derive({
+      <p>{__cfHelpers.lift<{
+        state: {
+            items: number[];
+            threshold: number;
+        };
+    }, number>({
         type: "object",
         properties: {
             state: {
@@ -42,11 +47,16 @@ export default pattern((state) => ({
         required: ["state"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.filter((x) => x > state.threshold).length)({ state: {
             items: state.key("items"),
             threshold: state.key("threshold")
-        } }, ({ state }) => state.items.filter((x) => x > state.threshold).length)}</p>
-      <p>{__cfHelpers.derive({
+        } })}</p>
+      <p>{__cfHelpers.lift<{
+        state: {
+            items: number[];
+            threshold: number;
+        };
+    }, boolean>({
         type: "object",
         properties: {
             state: {
@@ -68,10 +78,10 @@ export default pattern((state) => ({
         required: ["state"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.filter((x) => x > state.threshold).length > 0)({ state: {
             items: state.key("items"),
             threshold: state.key("threshold")
-        } }, ({ state }) => state.items.filter((x) => x > state.threshold).length > 0)}</p>
+        } })}</p>
       <p>
         {__cfHelpers.ifElse({
         type: "boolean"
@@ -81,7 +91,12 @@ export default pattern((state) => ({
         type: "string"
     } as const satisfies __cfHelpers.JSONSchema, {
         "enum": ["Yes", "No"]
-    } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+    } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+        state: {
+            items: number[];
+            threshold: number;
+        };
+    }, boolean>({
         type: "object",
         properties: {
             state: {
@@ -103,10 +118,10 @@ export default pattern((state) => ({
         required: ["state"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.filter((x) => x > state.threshold).length > 0)({ state: {
             items: state.key("items"),
             threshold: state.key("threshold")
-        } }, ({ state }) => state.items.filter((x) => x > state.threshold).length > 0), "Yes", "No")}
+        } }), "Yes", "No")}
       </p>
     </div>),
 }), {

@@ -17,12 +17,12 @@ const __cfAmdHooks = undefined;
 // Context: The capture schema has no properties and the captures object is empty {}.
 //   The callback parameter list is also empty (no destructuring needed).
 export default pattern(() => {
-    const result = __cfHelpers.derive({
+    const result = __cfHelpers.lift({
         type: "object",
         properties: {}
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, {}, () => 42).for("result", true);
+    } as const satisfies __cfHelpers.JSONSchema, () => 42)({}).for("result", true);
     return result;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "number"

@@ -216,11 +216,15 @@ export default pattern<State>((state) => ({
       types: COMMONFABRIC_TYPES,
     });
 
-    assertEquals(output.match(/__cfHelpers\.derive\(/g)?.length ?? 0, 2);
+    // After CT-1615 Phase 1, synthesized derives lower to lift-applied:
+    //   __cfHelpers.lift<...>(cb)(input)
+    // Match `__cfHelpers.lift<` since the synthesized form always has
+    // type arguments.
+    assertEquals(output.match(/__cfHelpers\.lift</g)?.length ?? 0, 2);
     assertStringIncludes(output, "item.price * (1 - state.discount)");
     assert(
-      !output.includes("item.price * (__cfHelpers.derive("),
-      "expected ternary branch derive to absorb inner arithmetic instead of nesting a second derive",
+      !output.includes("item.price * (__cfHelpers.lift<"),
+      "expected ternary branch lift-applied to absorb inner arithmetic instead of nesting a second lift",
     );
   },
 );

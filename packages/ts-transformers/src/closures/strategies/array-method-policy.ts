@@ -101,7 +101,7 @@ export function shouldTransformArrayMethod(
 
   if (
     ts.isCallExpression(mapTarget) &&
-    detectCallKind(mapTarget, context.checker)?.kind === "derive"
+    detectCallKind(mapTarget, context.checker)?.kind === "lift-applied"
   ) {
     return contextInfo.kind === "pattern";
   }

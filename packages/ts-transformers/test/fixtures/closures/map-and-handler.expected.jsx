@@ -31,7 +31,14 @@ export default pattern((state) => {
                 const index = __cf_pattern_input.key("index");
                 const state = __cf_pattern_input.key("params", "state");
                 return (<div>
-            <span>{__cfHelpers.derive({
+            <span>{__cfHelpers.lift<{
+                    item: {
+                        price: number;
+                    };
+                    state: {
+                        discount: number;
+                    };
+                }, number>({
                     type: "object",
                     properties: {
                         item: {
@@ -56,14 +63,14 @@ export default pattern((state) => {
                     required: ["item", "state"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "number"
-                } as const satisfies __cfHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, ({ item, state }) => item.price * state.discount)({
                     item: {
                         price: item.key("price")
                     },
                     state: {
                         discount: state.key("discount")
                     }
-                }, ({ item, state }) => item.price * state.discount)}</span>
+                })}</span>
             <button type="button" onClick={__cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
                     type: "object",
                     properties: {
@@ -154,7 +161,12 @@ export default pattern((state) => {
                 }
             })}
         <div>
-          Selected: {__cfHelpers.derive({
+          Selected: {__cfHelpers.lift<{
+            state: {
+                items: { price: number; }[];
+                selectedIndex: __cfHelpers.Cell<number>;
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -183,11 +195,17 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items[state.selectedIndex.get()]?.price ?? 0)({ state: {
                 items: state.key("items"),
                 selectedIndex: state.key("selectedIndex")
-            } }, ({ state }) => state.items[state.selectedIndex.get()]?.price ?? 0)} x {state.key("discount")} ={" "}
-          {__cfHelpers.derive({
+            } })} x {state.key("discount")} ={" "}
+          {__cfHelpers.lift<{
+            state: {
+                items: { price: number; }[];
+                selectedIndex: __cfHelpers.Cell<number>;
+                discount: number;
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -219,11 +237,11 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => (state.items[state.selectedIndex.get()]?.price ?? 0) * state.discount)({ state: {
                 items: state.key("items"),
                 selectedIndex: state.key("selectedIndex"),
                 discount: state.key("discount")
-            } }, ({ state }) => (state.items[state.selectedIndex.get()]?.price ?? 0) * state.discount)}
+            } })}
         </div>
       </div>),
     };

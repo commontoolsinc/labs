@@ -25,7 +25,10 @@ export default pattern((_state) => {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("index", true);
     return {
-        [UI]: <div>{__cfHelpers.derive({
+        [UI]: <div>{__cfHelpers.lift<{
+            items: __cfHelpers.Cell<string[]>;
+            index: __cfHelpers.Cell<number>;
+        }, string | undefined>({
             type: "object",
             properties: {
                 items: {
@@ -43,10 +46,10 @@ export default pattern((_state) => {
             required: ["items", "index"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: ["string", "undefined"]
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, ({ items, index }) => items.get()[index.get()])({
             items: items,
             index: index
-        }, ({ items, index }) => items.get()[index.get()])}</div>,
+        })}</div>,
     };
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",

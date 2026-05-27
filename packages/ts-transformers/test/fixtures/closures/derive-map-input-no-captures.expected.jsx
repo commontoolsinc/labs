@@ -38,14 +38,14 @@ export default pattern((__cf_pattern_input) => {
     // items.map() will be transformed to items.mapWithPattern()
     // derive has NO captures, so it won't be transformed by ClosureTransformer
     // The callback param has NO explicit type annotation
-    const count = derive({
+    const count = __cfHelpers.lift({
         type: "array",
         items: {
             type: "unknown"
         }
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+    } as const satisfies __cfHelpers.JSONSchema, (arr) => arr.length)(items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
         const item = __cf_pattern_input.key("element");
         return item.key("value");
     }, {
@@ -72,7 +72,7 @@ export default pattern((__cf_pattern_input) => {
         }
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema), {}).for(["count", 2], true), (arr) => arr.length).for("count", true);
+    } as const satisfies __cfHelpers.JSONSchema), {}).for(["count", 0], true)).for("count", true);
     return { count };
 }, {
     type: "object",

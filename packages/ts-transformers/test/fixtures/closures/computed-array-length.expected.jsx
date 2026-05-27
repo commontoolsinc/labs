@@ -61,7 +61,11 @@ export default pattern(() => {
         }
     } as const satisfies __cfHelpers.JSONSchema), allCharms = __cf_destructure_1.key("result", "allCharms").for("allCharms", true);
     return {
-        [NAME]: __cfHelpers.derive({
+        [NAME]: __cfHelpers.lift<{
+            allCharms: {
+                length: number;
+            };
+        }, string>({
             type: "object",
             properties: {
                 allCharms: {
@@ -77,11 +81,15 @@ export default pattern(() => {
             required: ["allCharms"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { allCharms: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ allCharms }) => `Charms (${allCharms.length})`)({ allCharms: {
                 length: allCharms.key("length")
-            } }, ({ allCharms }) => `Charms (${allCharms.length})`),
+            } }),
         [UI]: (<div>
-        <span>Count: {__cfHelpers.derive({
+        <span>Count: {__cfHelpers.lift<{
+            allCharms: {
+                length: number;
+            };
+        }, number>({
             type: "object",
             properties: {
                 allCharms: {
@@ -97,9 +105,9 @@ export default pattern(() => {
             required: ["allCharms"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { allCharms: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ allCharms }) => allCharms.length)({ allCharms: {
                 length: allCharms.key("length")
-            } }, ({ allCharms }) => allCharms.length)}</span>
+            } })}</span>
         <ul>
           {allCharms.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const charm = __cf_pattern_input.key("element");

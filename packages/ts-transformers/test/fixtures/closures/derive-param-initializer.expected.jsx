@@ -21,7 +21,10 @@ export default pattern(() => {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("multiplier", true);
     // Test parameter with default value
-    const result = __cfHelpers.derive({
+    const result = __cfHelpers.lift<{
+        value: number;
+        multiplier: __cfHelpers.ReadonlyCell<number>;
+    }, number>({
         type: "object",
         properties: {
             value: {
@@ -35,10 +38,10 @@ export default pattern(() => {
         required: ["value", "multiplier"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, ({ value: v = 10, multiplier }) => v * multiplier.get())({
         value,
         multiplier: multiplier
-    }, ({ value: v = 10, multiplier }) => v * multiplier.get()).for("result", true);
+    }).for("result", true);
     return result;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "number"

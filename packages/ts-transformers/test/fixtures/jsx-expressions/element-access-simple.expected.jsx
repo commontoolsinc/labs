@@ -28,7 +28,12 @@ export default pattern((state) => {
         [UI]: (<div>
         <h3>Dynamic Element Access</h3>
         {/* Basic dynamic index */}
-        <p>Item: {__cfHelpers.derive({
+        <p>Item: {__cfHelpers.lift<{
+            state: {
+                items: string[];
+                index: number;
+            };
+        }, string | undefined>({
             type: "object",
             properties: {
                 state: {
@@ -50,13 +55,17 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: ["string", "undefined"]
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items[state.index])({ state: {
                 items: state.key("items"),
                 index: state.key("index")
-            } }, ({ state }) => state.items[state.index])}</p>
+            } })}</p>
 
         {/* Computed index */}
-        <p>Last: {__cfHelpers.derive({
+        <p>Last: {__cfHelpers.lift<{
+            state: {
+                items: string[];
+            };
+        }, string | undefined>({
             type: "object",
             properties: {
                 state: {
@@ -75,12 +84,18 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: ["string", "undefined"]
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items[state.items.length - 1])({ state: {
                 items: state.key("items")
-            } }, ({ state }) => state.items[state.items.length - 1])}</p>
+            } })}</p>
 
         {/* Double indexing */}
-        <p>Matrix: {__cfHelpers.derive({
+        <p>Matrix: {__cfHelpers.lift<{
+            state: {
+                matrix: number[][];
+                row: number;
+                col: number;
+            };
+        }, number | undefined>({
             type: "object",
             properties: {
                 state: {
@@ -108,11 +123,11 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: ["number", "undefined"]
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.matrix[state.row]![state.col])({ state: {
                 matrix: state.key("matrix"),
                 row: state.key("row"),
                 col: state.key("col")
-            } }, ({ state }) => state.matrix[state.row]![state.col])}</p>
+            } })}</p>
       </div>),
     };
 }, {

@@ -31,7 +31,11 @@ interface Item {
 //   Note the captures use result.key("tasks") to extract the needed sub-property.
 export default pattern((__cf_pattern_input) => {
     const items = __cf_pattern_input.key("items");
-    const result = __cfHelpers.derive({
+    const result = __cfHelpers.lift<{
+        items: {
+            done: boolean;
+        }[];
+    }, { tasks: Item[]; view: string; }>({
         type: "object",
         properties: {
             items: {
@@ -76,13 +80,19 @@ export default pattern((__cf_pattern_input) => {
                 required: ["name", "done"]
             }
         }
-    } as const satisfies __cfHelpers.JSONSchema, { items: items }, ({ items }) => ({
+    } as const satisfies __cfHelpers.JSONSchema, ({ items }) => ({
         tasks: items.filter((i) => !i.done),
         view: "inbox",
-    })).for("result", true);
+    }))({ items: items }).for("result", true);
     return {
         [UI]: (<div>
-        {__cfHelpers.derive({
+        {__cfHelpers.lift<{
+                result: {
+                    tasks: {
+                        name: string;
+                    }[];
+                };
+            }, import("commonfabric").JSXElement[]>({
                 type: "object",
                 properties: {
                     result: {
@@ -131,11 +141,11 @@ export default pattern((__cf_pattern_input) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __cfHelpers.JSONSchema, { result: {
-                    tasks: result.key("tasks")
-                } }, ({ result }) => {
+            } as const satisfies __cfHelpers.JSONSchema, ({ result }) => {
                 return result.tasks.map((task) => <li>{task.name}</li>);
-            })}
+            })({ result: {
+                    tasks: result.key("tasks")
+                } })}
       </div>),
     };
 }, {

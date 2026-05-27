@@ -94,7 +94,9 @@ export default pattern((__cf_pattern_input) => {
                     items: {
                         type: "string"
                     }
-                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+                    path: __cfHelpers.Cell<string[]>;
+                }, readonly string[]>({
                     type: "object",
                     properties: {
                         path: {
@@ -111,8 +113,11 @@ export default pattern((__cf_pattern_input) => {
                     items: {
                         type: "string"
                     }
-                } as const satisfies __cfHelpers.JSONSchema, { path: path }, ({ path }) => path.get()).for(["p", 3], true), []).for("p", true);
-                const unsorted = __cfHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, ({ path }) => path.get())({ path: path }).for(["p", 3], true), []).for("p", true);
+                const unsorted = __cfHelpers.lift<{
+                    tree: __cfHelpers.Cell<Entry[]>;
+                    p: readonly string[];
+                }, readonly Entry[]>({
                     type: "object",
                     properties: {
                         tree: {
@@ -181,11 +186,13 @@ export default pattern((__cf_pattern_input) => {
                             required: ["id", "name", "type"]
                         }
                     }
-                } as const satisfies __cfHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({
                     tree: tree,
                     p: p
-                }, __cfModuleCallback_1).for("unsorted", true);
-                const items = __cfHelpers.derive({
+                }).for("unsorted", true);
+                const items = __cfHelpers.lift<{
+                    unsorted: readonly Entry[];
+                }, Entry[]>({
                     type: "object",
                     properties: {
                         unsorted: {
@@ -247,7 +254,7 @@ export default pattern((__cf_pattern_input) => {
                             required: ["id", "name", "type"]
                         }
                     }
-                } as const satisfies __cfHelpers.JSONSchema, { unsorted: unsorted }, ({ unsorted }) => [...unsorted].sort((a: Entry, b: Entry) => a.name.localeCompare(b.name))).for("items", true);
+                } as const satisfies __cfHelpers.JSONSchema, ({ unsorted }) => [...unsorted].sort((a: Entry, b: Entry) => a.name.localeCompare(b.name)))({ unsorted: unsorted }).for("items", true);
                 return items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                     const item = __cf_pattern_input.key("element");
                     const pushPath = __cf_pattern_input.key("params", "pushPath");

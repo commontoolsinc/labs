@@ -24,7 +24,13 @@ interface State {
 //   rows.map((row) => row.done ? "Done" : "Pending")
 //   → rows.mapWithPattern(pattern(... return ifElse(row.done, "Done", "Pending")))
 export default pattern((state) => {
-    const rows = __cfHelpers.derive({
+    const rows = __cfHelpers.lift<{
+        state: {
+            items: {
+                done: boolean;
+            }[];
+        };
+    }, { done: boolean; }[]>({
         type: "object",
         properties: {
             state: {
@@ -58,9 +64,9 @@ export default pattern((state) => {
             },
             required: ["done"]
         }
-    } as const satisfies __cfHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.map((item) => ({ done: item.done })))({ state: {
             items: state.key("items")
-        } }, ({ state }) => state.items.map((item) => ({ done: item.done }))).for("rows", true);
+        } }).for("rows", true);
     return {
         [UI]: (<div>
         {rows.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {

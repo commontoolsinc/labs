@@ -33,7 +33,12 @@ export default pattern((state) => {
                 const index = __cf_pattern_input.key("index");
                 const state = __cf_pattern_input.key("params", "state");
                 return (<div>
-            Item #{__cfHelpers.derive({
+            Item #{__cfHelpers.lift<{
+                    index: number;
+                    state: {
+                        offset: number;
+                    };
+                }, number>({
                     type: "object",
                     properties: {
                         index: {
@@ -52,12 +57,12 @@ export default pattern((state) => {
                     required: ["index", "state"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "number"
-                } as const satisfies __cfHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, ({ index, state }) => index + state.offset)({
                     index: index,
                     state: {
                         offset: state.key("offset")
                     }
-                }, ({ index, state }) => index + state.offset)}: {item.key("name")}
+                })}: {item.key("name")}
           </div>);
             }, {
                 type: "object",

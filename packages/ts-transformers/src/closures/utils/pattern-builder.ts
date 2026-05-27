@@ -79,7 +79,7 @@ export class PatternBuilder {
    * @param originalCallback The original callback function (to preserve modifiers/types)
    * @param body The transformed body of the function
    * @param paramsPropertyName The name of the property containing captures (default: "params").
-   *                           If null, captures are merged into the top-level object (for derive).
+   *                           If null, captures are merged into the top-level object (for lift-applied).
    */
   buildCallback(
     originalCallback: ts.ArrowFunction | ts.FunctionExpression,
@@ -152,7 +152,7 @@ export class PatternBuilder {
         ),
       );
     } else {
-      // Merge captures into top-level object (for derive)
+      // Merge captures into top-level object (for lift-applied)
       bindingElements.push(...captureBindings);
     }
 

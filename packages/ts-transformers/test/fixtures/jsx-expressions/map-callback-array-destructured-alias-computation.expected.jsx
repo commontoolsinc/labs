@@ -38,7 +38,9 @@ export default pattern((__cf_pattern_input) => {
         {files.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const file = __cf_pattern_input.key("element");
                 const __cf_destructure_1 = file.key("tags"), kind = __cf_destructure_1.key("0");
-                const isFolder = __cfHelpers.derive({
+                const isFolder = __cfHelpers.lift<{
+                    kind: string;
+                }, boolean>({
                     type: "object",
                     properties: {
                         kind: {
@@ -48,7 +50,7 @@ export default pattern((__cf_pattern_input) => {
                     required: ["kind"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, { kind: kind }, ({ kind }) => kind === "folder").for("isFolder", true);
+                } as const satisfies __cfHelpers.JSONSchema, ({ kind }) => kind === "folder")({ kind: kind }).for("isFolder", true);
                 return <span>{__cfHelpers.ifElse({
                     type: "boolean"
                 } as const satisfies __cfHelpers.JSONSchema, {

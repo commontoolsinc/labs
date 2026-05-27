@@ -19,13 +19,13 @@ const __cfAmdHooks = undefined;
 //   inside a derive callback need .key() rewriting even though they are not
 //   captured from an outer scope.
 export default pattern(() => {
-    const outer = __cfHelpers.derive({
+    const outer = __cfHelpers.lift({
         type: "object",
         properties: {}
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, {}, () => {
-        const foo = __cfHelpers.derive({
+    } as const satisfies __cfHelpers.JSONSchema, () => {
+        const foo = __cfHelpers.lift({
             type: "object",
             properties: {}
         } as const satisfies __cfHelpers.JSONSchema, {
@@ -36,9 +36,9 @@ export default pattern(() => {
                 }
             },
             required: ["bar"]
-        } as const satisfies __cfHelpers.JSONSchema, {}, () => ({ bar: 1 })).for("foo", true);
+        } as const satisfies __cfHelpers.JSONSchema, () => ({ bar: 1 }))({}).for("foo", true);
         return foo.key("bar");
-    }).for("outer", true);
+    })({}).for("outer", true);
     return outer;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "number"

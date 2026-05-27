@@ -70,7 +70,10 @@ export default pattern((__cf_pattern_input) => {
                             required: ["name"]
                         }
                     }
-                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+                    entries: Entry[];
+                    prefix: string;
+                }, Entry[]>({
                     type: "object",
                     properties: {
                         entries: {
@@ -111,10 +114,10 @@ export default pattern((__cf_pattern_input) => {
                             required: ["name"]
                         }
                     }
-                } as const satisfies __cfHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({
                     entries: entries,
                     prefix: prefix
-                }, __cfModuleCallback_1).for(["visible", 3], true), []).for("visible", true);
+                }).for(["visible", 3], true), []).for("visible", true);
                 const labels = visible.flatMapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                     const entry = __cf_pattern_input.key("element");
                     const labelPrefix = __cf_pattern_input.key("params", "labelPrefix");
@@ -133,7 +136,12 @@ export default pattern((__cf_pattern_input) => {
                         items: {
                             type: "string"
                         }
-                    } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+                    } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+                        entry: {
+                            name: string;
+                        };
+                        labelPrefix: string;
+                    }, boolean>({
                         type: "object",
                         properties: {
                             entry: {
@@ -152,12 +160,12 @@ export default pattern((__cf_pattern_input) => {
                         required: ["entry", "labelPrefix"]
                     } as const satisfies __cfHelpers.JSONSchema, {
                         type: "boolean"
-                    } as const satisfies __cfHelpers.JSONSchema, {
+                    } as const satisfies __cfHelpers.JSONSchema, ({ entry, labelPrefix }) => entry.name.startsWith(labelPrefix))({
                         entry: {
                             name: entry.key("name")
                         },
                         labelPrefix: labelPrefix
-                    }, ({ entry, labelPrefix }) => entry.name.startsWith(labelPrefix)), [entry.key("name")], []);
+                    }), [entry.key("name")], []);
                 }, {
                     type: "object",
                     properties: {

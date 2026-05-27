@@ -7,11 +7,11 @@ export const emitPrefixUnaryExpression: Emitter = ({
   dataFlows,
   context,
   inSafeContext,
-  preferDeriveWrappers,
+  preferInputBoundWrappers,
 }) => {
   if (!ts.isPrefixUnaryExpression(expression)) return undefined;
 
-  // Skip derive wrapping in safe contexts - they don't need it
+  // Skip lift-applied wrapping in safe contexts - they don't need it
   if (inSafeContext) return undefined;
 
   if (expression.operator !== ts.SyntaxKind.ExclamationToken) {
@@ -24,7 +24,7 @@ export const emitPrefixUnaryExpression: Emitter = ({
     dataFlows,
     context,
     {
-      preferDeriveWrapper: preferDeriveWrappers,
+      preferInputBoundWrapper: preferInputBoundWrappers,
     },
   );
 };

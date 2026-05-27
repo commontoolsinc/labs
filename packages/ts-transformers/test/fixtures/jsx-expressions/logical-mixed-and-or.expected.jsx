@@ -46,7 +46,9 @@ export default pattern((_state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+            user: __cfHelpers.Cell<{ name: string; age: number; }>;
+        }, string | false>({
             type: "object",
             properties: {
                 user: {
@@ -54,12 +56,9 @@ export default pattern((_state) => {
                     properties: {
                         name: {
                             type: "string"
-                        },
-                        age: {
-                            type: "number"
                         }
                     },
-                    required: ["name", "age"],
+                    required: ["name"],
                     asCell: ["readonly"]
                 }
             },
@@ -71,7 +70,9 @@ export default pattern((_state) => {
                     type: "boolean",
                     "enum": [false]
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, { user: user }, ({ user }) => (user.get().name.length > 0 && user.get().name)), __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, ({ user }) => (user.get().name.length > 0 && user.get().name))({ user: user }), __cfHelpers.lift<{
+            defaultMessage: __cfHelpers.Cell<string>;
+        }, string>({
             type: "object",
             properties: {
                 defaultMessage: {
@@ -82,7 +83,7 @@ export default pattern((_state) => {
             required: ["defaultMessage"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { defaultMessage: defaultMessage }, ({ defaultMessage }) => defaultMessage.get()))}</span>
+        } as const satisfies __cfHelpers.JSONSchema, ({ defaultMessage }) => defaultMessage.get())({ defaultMessage: defaultMessage }))}</span>
 
         {/* condition && (value || fallback) pattern */}
         <span>{__cfHelpers.when({
@@ -91,33 +92,34 @@ export default pattern((_state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: ["boolean", "string"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+            user: __cfHelpers.Cell<{ name: string; age: number; }>;
+        }, boolean>({
             type: "object",
             properties: {
                 user: {
                     type: "object",
                     properties: {
-                        name: {
-                            type: "string"
-                        },
                         age: {
                             type: "number"
                         }
                     },
-                    required: ["name", "age"],
+                    required: ["age"],
                     asCell: ["readonly"]
                 }
             },
             required: ["user"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { user: user }, ({ user }) => user.get().age > 18), __cfHelpers.unless({
+        } as const satisfies __cfHelpers.JSONSchema, ({ user }) => user.get().age > 18)({ user: user }), __cfHelpers.unless({
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+            user: __cfHelpers.Cell<{ name: string; age: number; }>;
+        }, string>({
             type: "object",
             properties: {
                 user: {
@@ -125,19 +127,16 @@ export default pattern((_state) => {
                     properties: {
                         name: {
                             type: "string"
-                        },
-                        age: {
-                            type: "number"
                         }
                     },
-                    required: ["name", "age"],
+                    required: ["name"],
                     asCell: ["readonly"]
                 }
             },
             required: ["user"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { user: user }, ({ user }) => user.get().name), "Anonymous Adult"))}</span>
+        } as const satisfies __cfHelpers.JSONSchema, ({ user }) => user.get().name)({ user: user }), "Anonymous Adult"))}</span>
 
         {/* Complex: (a && b) || (c && d) */}
         <span>
@@ -147,7 +146,9 @@ export default pattern((_state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+            user: __cfHelpers.Cell<{ name: string; age: number; }>;
+        }, string | false>({
             type: "object",
             properties: {
                 user: {
@@ -172,8 +173,8 @@ export default pattern((_state) => {
                     type: "boolean",
                     "enum": [false]
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, { user: user }, ({ user }) => (user.get().name.length > 0 && `Hello ${user.get().name}`) ||
-            (user.get().age > 0 && `Age: ${user.get().age}`)), "Unknown user")}
+        } as const satisfies __cfHelpers.JSONSchema, ({ user }) => (user.get().name.length > 0 && `Hello ${user.get().name}`) ||
+            (user.get().age > 0 && `Age: ${user.get().age}`))({ user: user }), "Unknown user")}
         </span>
       </div>),
     };
