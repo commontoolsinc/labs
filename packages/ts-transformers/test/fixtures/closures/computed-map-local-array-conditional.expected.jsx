@@ -23,7 +23,11 @@ interface State {
 //   const view = [row.done ? "Done" : "Pending"]
 //   → const view = [ifElse(row.done, "Done", "Pending")]
 export default pattern((state) => {
-    const rows = __cfHelpers.derive({
+    const rows = __cfHelpers.lift<{
+        state: {
+            items: Item[];
+        };
+    }, Item[]>({
         type: "object",
         properties: {
             state: {
@@ -67,9 +71,9 @@ export default pattern((state) => {
                 required: ["done"]
             }
         }
-    } as const satisfies __cfHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items)({ state: {
             items: state.key("items")
-        } }, ({ state }) => state.items).for("rows", true);
+        } }).for("rows", true);
     return {
         [UI]: (<div>
         {rows.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
@@ -83,7 +87,9 @@ export default pattern((state) => {
                     } as const satisfies __cfHelpers.JSONSchema, {
                         "enum": ["Done", "Pending"]
                     } as const satisfies __cfHelpers.JSONSchema, row.key("done"), "Done", "Pending").for(["view", 0], true)];
-                return <span>{__cfHelpers.derive({
+                return <span>{__cfHelpers.lift<{
+                    view: string[];
+                }, string | undefined>({
                     type: "object",
                     properties: {
                         view: {
@@ -96,7 +102,7 @@ export default pattern((state) => {
                     required: ["view"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: ["string", "undefined"]
-                } as const satisfies __cfHelpers.JSONSchema, { view: view }, ({ view }) => view[0])}</span>;
+                } as const satisfies __cfHelpers.JSONSchema, ({ view }) => view[0])({ view: view })}</span>;
             }, {
                 type: "object",
                 properties: {

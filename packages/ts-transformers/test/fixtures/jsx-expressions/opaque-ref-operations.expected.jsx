@@ -26,7 +26,9 @@ export default pattern((_state) => {
     return {
         [UI]: (<div>
         <p>Count: {count}</p>
-        <p>Next: {__cfHelpers.derive({
+        <p>Next: {__cfHelpers.lift<{
+            count: __cfHelpers.Cell<number>;
+        }, number>({
             type: "object",
             properties: {
                 count: {
@@ -37,8 +39,10 @@ export default pattern((_state) => {
             required: ["count"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { count: count }, ({ count }) => count.get() + 1)}</p>
-        <p>Double: {__cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, ({ count }) => count.get() + 1)({ count: count })}</p>
+        <p>Double: {__cfHelpers.lift<{
+            count: __cfHelpers.Cell<number>;
+        }, number>({
             type: "object",
             properties: {
                 count: {
@@ -49,8 +53,10 @@ export default pattern((_state) => {
             required: ["count"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { count: count }, ({ count }) => count.get() * 2)}</p>
-        <p>Total: {__cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, ({ count }) => count.get() * 2)({ count: count })}</p>
+        <p>Total: {__cfHelpers.lift<{
+            price: __cfHelpers.Cell<number>;
+        }, number>({
             type: "object",
             properties: {
                 price: {
@@ -61,7 +67,7 @@ export default pattern((_state) => {
             required: ["price"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { price: price }, ({ price }) => price.get() * 1.1)}</p>
+        } as const satisfies __cfHelpers.JSONSchema, ({ price }) => price.get() * 1.1)({ price: price })}</p>
       </div>),
     };
 }, false as const satisfies __cfHelpers.JSONSchema, {

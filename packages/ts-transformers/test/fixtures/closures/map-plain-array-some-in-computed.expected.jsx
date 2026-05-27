@@ -38,7 +38,13 @@ export default pattern((__cf_pattern_input) => {
                 const habit = __cf_pattern_input.key("element");
                 const logs = __cf_pattern_input.key("params", "logs");
                 const todayDate = __cf_pattern_input.key("params", "todayDate");
-                const doneToday = __cfHelpers.derive({
+                const doneToday = __cfHelpers.lift<{
+                    logs: __cfHelpers.ReadonlyCell<HabitLog[]>;
+                    habit: {
+                        name: string;
+                    };
+                    todayDate: string;
+                }, boolean>({
                     type: "object",
                     properties: {
                         logs: {
@@ -81,15 +87,15 @@ export default pattern((__cf_pattern_input) => {
                     }
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, ({ logs, habit, todayDate }) => logs.get().some((log) => log.habitName === habit.name &&
+                    log.date === todayDate &&
+                    log.completed))({
                     logs: logs,
                     habit: {
                         name: habit.key("name")
                     },
                     todayDate: todayDate
-                }, ({ logs, habit, todayDate }) => logs.get().some((log) => log.habitName === habit.name &&
-                    log.date === todayDate &&
-                    log.completed)).for("doneToday", true);
+                }).for("doneToday", true);
                 return <span>{__cfHelpers.ifElse({
                     type: "boolean"
                 } as const satisfies __cfHelpers.JSONSchema, {

@@ -27,11 +27,13 @@ const testJsScript2: JsScript = {
 const testResult: CompileResult = {
   id: "test-id-1",
   jsScript: testJsScript,
+  sesValidated: true,
 };
 
 const testResult2: CompileResult = {
   id: "test-id-2",
   jsScript: testJsScript2,
+  sesValidated: true,
 };
 
 // Run the same storage test suite against each backend
@@ -322,6 +324,29 @@ describe("CachedCompiler", () => {
     expect(result).toBeDefined();
     expect(result!.id).toBe("test-id-1");
     expect(result!.jsScript.js).toBe("var x = 42;");
+    expect(result!.sesValidated).toBe(true);
+  });
+
+  it("does not store unvalidated CompileResult values", async () => {
+    await compiler.set("hash1", {
+      id: "test-id-1",
+      jsScript: testJsScript,
+    });
+
+    expect(await storage.get("hash1")).toBeUndefined();
+    expect(compiler.getStats().skippedUnvalidatedWrites).toBe(1);
+  });
+
+  it("treats legacy entries without SES validation as misses", async () => {
+    await storage.set("hash1", {
+      id: "test-id-1",
+      jsScript: testJsScript,
+      fingerprint: "fingerprint-v1",
+      cachedAt: 1000,
+    });
+
+    expect(await compiler.get("hash1")).toBeUndefined();
+    expect(compiler.getStats().missReasons.unvalidated).toBe(1);
   });
 
   it("returns undefined when fingerprint doesn't match", async () => {

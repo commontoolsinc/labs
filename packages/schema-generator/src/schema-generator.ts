@@ -756,6 +756,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     if (ts.isTypeLiteralNode(typeNode)) {
       const properties: Record<string, JSONSchemaMutable> = {};
       const required: string[] = [];
+      let additionalProperties: JSONSchemaMutable | undefined;
 
       for (const member of typeNode.members) {
         if (ts.isPropertySignature(member) && member.name && member.type) {
@@ -786,6 +787,38 @@ export class SchemaGenerator implements ISchemaGenerator {
           if (!member.questionToken) {
             required.push(propName);
           }
+        } else if (ts.isIndexSignatureDeclaration(member) && member.type) {
+          // Handle string/number index signatures on synthetic TypeLiteralNodes
+          // by emitting them as `additionalProperties` with the value type's
+          // schema. Without this branch, synthetic `Record<K, V>` /
+          // `{ [k: string]: V }` shapes silently drop their index signature
+          // when routed through node-based analysis (e.g. the SchemaInjection
+          // lift-revisit path that feeds `any` as the paired Type, see
+          // ts-transformers schema-injection.ts ~line 3290).
+          //
+          // Note: unlike `ObjectFormatter.formatType`'s type-driven path
+          // (object-formatter.ts:344-365), this branch does NOT propagate
+          // JSDoc from the index signature. Synthetic TypeLiteralNodes have
+          // no source-positioned declarations to read JSDoc from, so there
+          // is nothing to propagate. If we ever route declaration-bearing
+          // nodes through this path, JSDoc propagation should be added.
+          let valueType: ts.Type;
+          if (typeRegistry && typeRegistry.has(member.type)) {
+            valueType = typeRegistry.get(member.type)!;
+          } else {
+            valueType = checker.getTypeFromTypeNode(member.type);
+          }
+          const valueSchema = this.formatChildType(
+            valueType,
+            context,
+            member.type,
+          );
+          // If multiple index signatures are present (e.g. both string and
+          // number key), the first non-undefined wins — matching
+          // ObjectFormatter's `stringIndex ?? numberIndex` precedence.
+          if (additionalProperties === undefined) {
+            additionalProperties = valueSchema;
+          }
         }
       }
 
@@ -796,6 +829,11 @@ export class SchemaGenerator implements ISchemaGenerator {
 
       if (required.length > 0) {
         schema.required = required;
+      }
+
+      if (additionalProperties !== undefined) {
+        (schema as Record<string, unknown>).additionalProperties =
+          additionalProperties;
       }
 
       return schema;

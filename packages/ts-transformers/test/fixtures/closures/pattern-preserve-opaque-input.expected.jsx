@@ -23,7 +23,9 @@ interface State {
 //   reactive context, so it gets wrapped in a derive.
 export default pattern((input: Writable<State>) => {
     return {
-        [UI]: <div>{__cfHelpers.derive({
+        [UI]: <div>{__cfHelpers.lift<{
+            input: __cfHelpers.Writable<State>;
+        }, string>({
             type: "object",
             properties: {
                 input: {
@@ -48,7 +50,7 @@ export default pattern((input: Writable<State>) => {
             }
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { input: input }, ({ input }) => input.key("foo").get())}</div>,
+        } as const satisfies __cfHelpers.JSONSchema, ({ input }) => input.key("foo").get())({ input: input })}</div>,
     };
 }, {
     $ref: "#/$defs/State",

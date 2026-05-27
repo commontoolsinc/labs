@@ -1,4 +1,4 @@
-import { cfcAtom } from "@commonfabric/runner";
+import { CFC_FUSE_ATOM_CLASS, cfcAtom } from "@commonfabric/api/cfc";
 import { sha256 } from "@commonfabric/content-hash";
 import { encodeHex } from "@std/encoding/hex";
 import type { CallableKind } from "./callables.ts";
@@ -161,7 +161,7 @@ type AnnotatableTree = {
 export const CFC_TRUSTED_XATTR_PREFIX = "trusted.cfc.";
 export const CFC_COMPAT_XATTR_PREFIX = "user.commonfabric.cfc.";
 export const CFC_FAIL_CLOSED_ATOM_CLASS =
-  "CommonFabricFuseProjectionMetadataIncomplete";
+  CFC_FUSE_ATOM_CLASS.ProjectionMetadataIncomplete;
 export const CFC_FUSE_PROJECTION_PROFILE_VERSION =
   "common-fabric-fuse-projection-v1";
 
@@ -178,7 +178,7 @@ const CFC_FAIL_CLOSED_LABEL: CfcLabel = {
 };
 const CFC_TOPOLOGY_LABEL: CfcLabel = {
   confidentiality: [
-    cfcAtom.resource("FilesystemTopologyObservation", undefined, {
+    cfcAtom.resource(CFC_FUSE_ATOM_CLASS.TopologyObservation, undefined, {
       profile: "CfcGVisorSandboxProfile",
       kind: "inode-identity",
     }),
@@ -447,7 +447,9 @@ export function cfcDirectoryEntryKind(
 function targetIdentityLabel(target: string): CfcLabel {
   return {
     confidentiality: [
-      cfcAtom.resource("CommonFabricFuseSymlinkTarget", undefined, { target }),
+      cfcAtom.resource(CFC_FUSE_ATOM_CLASS.SymlinkTarget, undefined, {
+        target,
+      }),
     ],
   };
 }

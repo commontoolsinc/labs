@@ -22,6 +22,7 @@ import {
 } from "../../src/native-type-tags.ts";
 import { UnknownValue } from "../../src/fabric-instances/UnknownValue.ts";
 import { ProblematicValue } from "../../src/fabric-instances/ProblematicValue.ts";
+import { BaseFabricInstance } from "../../src/fabric-instances/BaseFabricInstance.ts";
 import { deepFreeze, isDeepFrozen } from "../../src/deep-freeze.ts";
 import { DummyReconstructionContext } from "./fixtures.ts";
 
@@ -457,7 +458,7 @@ describe("native-instance-utils", () => {
     });
 
     it("returns true for custom FabricInstance subclass", () => {
-      class CustomFabInst extends FabricInstance {
+      class CustomFabInst extends BaseFabricInstance {
         [DECONSTRUCT](): FabricValue {
           return { value: 42 };
         }

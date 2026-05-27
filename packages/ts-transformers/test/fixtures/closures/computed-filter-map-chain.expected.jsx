@@ -21,7 +21,14 @@ interface Preference {
 //   .filter() and .map() are standard Array methods — they must remain
 //   untransformed. This is a negative test for the reactive method detection.
 export default pattern((state) => {
-    const liked = __cfHelpers.derive({
+    const liked = __cfHelpers.lift<{
+        state: {
+            preferences: {
+                ingredient: string;
+                preference: "liked" | "disliked";
+            }[];
+        };
+    }, string[]>({
         type: "object",
         properties: {
             state: {
@@ -52,13 +59,13 @@ export default pattern((state) => {
         items: {
             type: "string"
         }
-    } as const satisfies __cfHelpers.JSONSchema, { state: {
-            preferences: state.key("preferences")
-        } }, ({ state }) => {
+    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => {
         return state.preferences
             .filter((p) => p.preference === "liked")
             .map((p) => p.ingredient);
-    }).for("liked", true);
+    })({ state: {
+            preferences: state.key("preferences")
+        } }).for("liked", true);
     return { liked };
 }, {
     type: "object",

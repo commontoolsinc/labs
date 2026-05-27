@@ -34,14 +34,14 @@ export default pattern((__cf_pattern_input) => {
     return {
         [UI]: (<div>
         {/* User-written derive with simple parameter transformation - should NOT be double-wrapped */}
-        <span>Count: {derive({
+        <span>Count: {__cfHelpers.lift({
             type: "number"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, items.key("length"), (n) => n + 1)}</span>
+        } as const satisfies __cfHelpers.JSONSchema, (n) => n + 1)(items.key("length"))}</span>
 
         {/* User-written derive accessing opaque ref property - should NOT be double-wrapped */}
-        <span>Name: {derive({
+        <span>Name: {__cfHelpers.lift({
             type: "object",
             properties: {
                 name: {
@@ -50,7 +50,7 @@ export default pattern((__cf_pattern_input) => {
             }
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, cellRef, (ref) => ref.name || "Unknown")}</span>
+        } as const satisfies __cfHelpers.JSONSchema, (ref) => ref.name || "Unknown")(cellRef)}</span>
 
         {/* Nested in map with user-written derive - derives should NOT be double-wrapped */}
         {items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
@@ -58,11 +58,11 @@ export default pattern((__cf_pattern_input) => {
                 const index = __cf_pattern_input.key("index");
                 return (<li key={item.key("id")}>
             {/* These user-written derives should remain as-is, not wrapped in another derive */}
-            Item {derive({
+            Item {__cfHelpers.lift({
                     type: "number"
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "number"
-                } as const satisfies __cfHelpers.JSONSchema, index, (i) => i + 1)}: {derive({
+                } as const satisfies __cfHelpers.JSONSchema, (i) => i + 1)(index)}: {__cfHelpers.lift({
                     type: "object",
                     properties: {
                         title: {
@@ -72,7 +72,7 @@ export default pattern((__cf_pattern_input) => {
                     required: ["title"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, item, (it) => it.title)}
+                } as const satisfies __cfHelpers.JSONSchema, (it) => it.title)(item)}
           </li>);
             }, {
                 type: "object",

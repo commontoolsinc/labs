@@ -132,7 +132,10 @@ export {
 export { createNodeFactory } from "./builder/module.ts";
 export { opaqueRef as cell } from "./builder/opaque-ref.ts";
 export {
+  CFC_ATOM_BASE,
   CFC_ATOM_TYPE,
+  CFC_CONCEPT_KIND,
+  CFC_FUSE_ATOM_CLASS,
   CFC_RUNTIME_SUBJECT,
   cfcAtom,
   ContextualFlowControl,

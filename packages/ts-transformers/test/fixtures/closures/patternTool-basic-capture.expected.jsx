@@ -30,7 +30,12 @@ export default pattern(() => {
         query: string;
         content: string;
     }) => {
-        return __cfHelpers.derive({
+        return __cfHelpers.lift<{
+            input: {
+                query: string;
+            };
+            content: string;
+        }, string[]>({
             type: "object",
             properties: {
                 input: {
@@ -52,11 +57,11 @@ export default pattern(() => {
             items: {
                 type: "string"
             }
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, ({ input: { query }, content }) => {
+            return content.split("\n").filter((c: string) => c.includes(query));
+        })({
             input: { query },
             content: content
-        }, ({ input: { query }, content }) => {
-            return content.split("\n").filter((c: string) => c.includes(query));
         });
     }, { content: content.for(["grepTool", 1, "content"], true) });
     return { grepTool };

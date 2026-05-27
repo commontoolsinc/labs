@@ -23,7 +23,10 @@ export default pattern(() => {
     // Input name 'multiplier' collides with captured variable 'multiplier'
     // The callback uses shorthand property { multiplier }
     // This should expand to { multiplier: multiplier_1 } after renaming
-    const result = __cfHelpers.derive({
+    const result = __cfHelpers.lift<{
+        multiplier: __cfHelpers.ReadonlyCell<number>;
+        multiplier_1: __cfHelpers.ReadonlyCell<number>;
+    }, { value: number; data: { multiplier: import("commonfabric").Cell<number>; }; }>({
         type: "object",
         properties: {
             multiplier: {
@@ -54,13 +57,13 @@ export default pattern(() => {
             }
         },
         required: ["value", "data"]
-    } as const satisfies __cfHelpers.JSONSchema, {
-        multiplier: multiplier.for(["result", 2, "multiplier"], true),
-        multiplier_1: multiplier
-    }, ({ multiplier: m, multiplier_1 }) => ({
+    } as const satisfies __cfHelpers.JSONSchema, ({ multiplier: m, multiplier_1 }) => ({
         value: m.get() * 3,
         data: { multiplier: multiplier_1 },
-    })).for("result", true);
+    }))({
+        multiplier: multiplier.for(["result", "multiplier"], true),
+        multiplier_1: multiplier
+    }).for("result", true);
     return result;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "object",

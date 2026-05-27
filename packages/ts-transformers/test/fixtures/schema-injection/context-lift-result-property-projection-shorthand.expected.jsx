@@ -54,7 +54,7 @@ export default pattern((__cf_pattern_input) => {
     const primary = __cf_pattern_input.key("primary");
     const secondary = __cf_pattern_input.key("secondary");
     const summary = liftSummary({ primary: primary.for(["summary", "primary"], true), secondary: secondary.for(["summary", "secondary"], true) }).for("summary", true);
-    const difference = derive({
+    const difference = __cfHelpers.lift({
         type: "object",
         properties: {
             difference: {
@@ -64,7 +64,7 @@ export default pattern((__cf_pattern_input) => {
         required: ["difference"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, summary, (snapshot) => snapshot.difference).for("difference", true);
+    } as const satisfies __cfHelpers.JSONSchema, (snapshot) => snapshot.difference)(summary).for("difference", true);
     return { difference };
 }, {
     type: "object",

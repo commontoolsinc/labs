@@ -51,7 +51,7 @@ export class CFHelpers {
   }
 
   // Returns an PropertyAccessExpression of the requested
-  // helper name e.g. `(__cfHelpers.derive)`.
+  // helper name e.g. `(__cfHelpers.lift)`.
   preserveNodeSourceMap<T extends ts.Node>(
     node: T,
     originalNode: ts.Node,

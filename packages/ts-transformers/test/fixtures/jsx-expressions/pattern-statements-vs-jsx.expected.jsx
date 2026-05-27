@@ -58,7 +58,11 @@ export default pattern((state) => {
           {/* These SHOULD be transformed (JSX expression context) */}
           Current: {state.key("value")}
           <br />
-          Next number: {__cfHelpers.derive({
+          Next number: {__cfHelpers.lift<{
+            state: {
+                value: number;
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -74,11 +78,15 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.value + 1)({ state: {
                 value: state.key("value")
-            } }, ({ state }) => state.value + 1)}
+            } })}
           <br />
-          Previous: {__cfHelpers.derive({
+          Previous: {__cfHelpers.lift<{
+            state: {
+                value: number;
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -94,11 +102,15 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.value - 1)({ state: {
                 value: state.key("value")
-            } }, ({ state }) => state.value - 1)}
+            } })}
           <br />
-          Doubled: {__cfHelpers.derive({
+          Doubled: {__cfHelpers.lift<{
+            state: {
+                value: number;
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -114,9 +126,9 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.value * 2)({ state: {
                 value: state.key("value")
-            } }, ({ state }) => state.value * 2)}
+            } })}
           <br />
           Status: {__cfHelpers.ifElse({
             type: "boolean"
@@ -126,7 +138,11 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["High", "Low"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+            state: {
+                value: number;
+            };
+        }, boolean>({
             type: "object",
             properties: {
                 state: {
@@ -142,9 +158,9 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.value > 10)({ state: {
                 value: state.key("value")
-            } }, ({ state }) => state.value > 10), "High", "Low")}
+            } }), "High", "Low")}
         </p>
         <cf-button onClick={increment({ value: state.key("value") })}>+</cf-button>
       </div>),

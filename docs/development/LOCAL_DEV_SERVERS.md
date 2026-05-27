@@ -153,7 +153,7 @@ cd packages/toolshed
 SHELL_URL=http://localhost:5173 API_URL=https://toolshed.saga-castor.ts.net/ deno task dev
 ```
 
-**Environment setup:** Copy `.env.example` to `.env` in the toolshed directory. See `packages/toolshed/env.ts` for all available environment variables.
+**Environment setup:** Copy `.env.example` to `.env` in the toolshed directory. See [`CONFIGURATION.md`](./CONFIGURATION.md) for a categorized reference of all configuration (env vars, tasks, flags), or `packages/toolshed/env.ts` for the canonical Zod schema.
 
 ### Checking Logs
 

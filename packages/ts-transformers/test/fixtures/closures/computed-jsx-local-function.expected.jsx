@@ -19,7 +19,9 @@ export default pattern((__cf_pattern_input) => {
     const count = __cf_pattern_input.key("count");
     return {
         [UI]: (<div>
-        {__cfHelpers.derive({
+        {__cfHelpers.lift<{
+                count: number;
+            }, import("commonfabric").JSXElement>({
                 type: "object",
                 properties: {
                     count: {
@@ -47,10 +49,10 @@ export default pattern((__cf_pattern_input) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __cfHelpers.JSONSchema, { count: count }, ({ count }) => {
+            } as const satisfies __cfHelpers.JSONSchema, ({ count }) => {
                 const format = (value: number) => `Count: ${value}`;
                 return <span>{format(count)}</span>;
-            })}
+            })({ count: count })}
       </div>),
     };
 }, {

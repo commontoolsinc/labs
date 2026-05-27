@@ -1,3 +1,4 @@
+import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { emptySchemaObject } from "@commonfabric/data-model/schema-utils";
 import {
@@ -1697,7 +1698,7 @@ const mergeLabels = (
 });
 
 const linkReferenceIntegrity = (input: LinkWritePolicyInput): unknown => ({
-  type: "https://commonfabric.org/cfc/atom/LinkReference",
+  type: CFC_ATOM_TYPE.LinkReference,
   source: {
     space: input.source.space,
     id: input.source.id,

@@ -5,6 +5,7 @@
   },
   "exports": {
     ".": "./index.ts",
+    "./cfc-atoms": "./cfc-atoms.ts",
     "./cfc": "./cfc.ts",
     "./schema": "./schema.ts"
   }

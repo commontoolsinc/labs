@@ -23,7 +23,9 @@ export default pattern((__cf_pattern_input) => {
     const items = __cf_pattern_input.key("items");
     return items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
         const item = __cf_pattern_input.key("element");
-        return __cfHelpers.derive({
+        return __cfHelpers.lift<{
+            item: string;
+        }, string>({
             type: "object",
             properties: {
                 item: {
@@ -33,7 +35,7 @@ export default pattern((__cf_pattern_input) => {
             required: ["item"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { item: item }, __cfModuleCallback_1);
+        } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({ item: item });
     }, {
         type: "object",
         properties: {

@@ -24,7 +24,13 @@ const identity = __cfHardenFn(<T,>(value: T) => value);
 //   state.label ?? "Pending"      -> derive-wrapped nullish root
 //   state.items?.[0]              -> lowered optional element access
 export default pattern((state) => {
-    const label = __cfHelpers.derive({
+    const label = __cfHelpers.lift<{
+        state: {
+            user: {
+                name: string;
+            };
+        };
+    }, string>({
         type: "object",
         properties: {
             state: {
@@ -46,12 +52,16 @@ export default pattern((state) => {
         required: ["state"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({ state: {
             user: {
                 name: state.key("user", "name")
             }
-        } }, __cfModuleCallback_1).for("label", true);
-    const maybeLabel = __cfHelpers.derive({
+        } }).for("label", true);
+    const maybeLabel = __cfHelpers.lift<{
+        state: {
+            maybeUser?: { name: string; } | undefined;
+        };
+    }, string | undefined>({
         type: "object",
         properties: {
             state: {
@@ -72,13 +82,18 @@ export default pattern((state) => {
         required: ["state"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: ["string", "undefined"]
-    } as const satisfies __cfHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_2)({ state: {
             maybeUser: state.key("maybeUser")
-        } }, __cfModuleCallback_2).for("maybeLabel", true);
+        } }).for("maybeLabel", true);
     return {
         label,
         maybeLabel,
-        maxValue: __cfHelpers.derive({
+        maxValue: __cfHelpers.lift<{
+            state: {
+                a: number;
+                b: number;
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -97,11 +112,15 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => Math.max(state.a, state.b))({ state: {
                 a: state.key("a"),
                 b: state.key("b")
-            } }, ({ state }) => Math.max(state.a, state.b)).for(["__patternResult", "maxValue"], true),
-        parsedValue: __cfHelpers.derive({
+            } }).for(["__patternResult", "maxValue"], true),
+        parsedValue: __cfHelpers.lift<{
+            state: {
+                float: string;
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -117,10 +136,14 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => parseInt(state.float))({ state: {
                 float: state.key("float")
-            } }, ({ state }) => parseInt(state.float)).for(["__patternResult", "parsedValue"], true),
-        fallbackLabel: __cfHelpers.derive({
+            } }).for(["__patternResult", "parsedValue"], true),
+        fallbackLabel: __cfHelpers.lift<{
+            state: {
+                label?: string | null | undefined;
+            };
+        }, string>({
             type: "object",
             properties: {
                 state: {
@@ -135,9 +158,9 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.label ?? "Pending")({ state: {
                 label: state.key("label")
-            } }, ({ state }) => state.label ?? "Pending").for(["__patternResult", "fallbackLabel"], true),
+            } }).for(["__patternResult", "fallbackLabel"], true),
         firstItem: state.key("items", "0")
     };
 }, {

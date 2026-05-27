@@ -204,6 +204,53 @@ export class TransformationContext {
     );
   }
 
+  /**
+   * Record the pre-shrink semantic type that drove a wrapper narrowing.
+   * `applyShrinkAndWrap` (in type-shrinking.ts) calls this on every wrapper
+   * TypeNode it produces so the SchemaInjection inner-lift revisit path can
+   * re-narrow from the original baseType instead of `any` (the checker
+   * widens synthetic wrappers). See `narrowedWrapperTypeRegistry` docs in
+   * core/mod.ts and the underlying smell tracked as CT-1621.
+   *
+   * Promoted from direct `.set` to a method so the registry's contract is
+   * documented and enforced in one place (Berni's review §3.4).
+   */
+  markNarrowedWrapper(wrapperNode: ts.TypeNode, preShrinkType: ts.Type): void {
+    const registry = this.options.narrowedWrapperTypeRegistry;
+    if (!registry) return;
+    if (!registry.has(wrapperNode)) {
+      registry.set(wrapperNode, preShrinkType);
+    }
+  }
+
+  /**
+   * Look up the pre-shrink semantic type for a wrapper TypeNode previously
+   * recorded by `markNarrowedWrapper`. Returns undefined when not present;
+   * callers should fall through to their existing recovery path.
+   */
+  lookupNarrowedWrapper(wrapperNode: ts.TypeNode): ts.Type | undefined {
+    return this.options.narrowedWrapperTypeRegistry?.get(wrapperNode);
+  }
+
+  markSyntheticLiftAppliedCall(call: ts.CallExpression): void {
+    this.options.syntheticLiftAppliedCallRegistry?.add(call);
+  }
+
+  isSyntheticLiftAppliedCall(call: ts.CallExpression): boolean {
+    if (this.options.syntheticLiftAppliedCallRegistry?.has(call)) {
+      return true;
+    }
+    const original = ts.getOriginalNode(call);
+    return !!(
+      original &&
+      original !== call &&
+      ts.isCallExpression(original as ts.Node) &&
+      this.options.syntheticLiftAppliedCallRegistry?.has(
+        original as ts.CallExpression,
+      )
+    );
+  }
+
   markSyntheticReactiveCollectionDeclaration(node: ts.Node): void {
     const symbol = ts.isVariableDeclaration(node)
       ? (ts.isIdentifier(node.name)

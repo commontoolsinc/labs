@@ -759,7 +759,7 @@ function buildShrunkTypeNodeFromType(
   }
 
   // Keep array-like roots as arrays. Narrowing `T[]` to `{ length: number }`
-  // breaks runtime schema matching for downstream derives/lifts.
+  // breaks runtime schema matching for downstream lift-applied calls.
   // However, when only array-intrinsic properties like `length` are accessed
   // (no item-level access), shrink the item type to `unknown` to avoid
   // fetching full item schemas unnecessarily.
@@ -3207,10 +3207,32 @@ export function applyShrinkAndWrap(
   if (!shouldWrap) {
     return next;
   }
-  return wrapTypeNodeWithCapabilityOrStream(
+  const wrapped = wrapTypeNodeWithCapabilityOrStream(
     next,
     wrapCapability,
     factory,
     preserveStreamWrapper,
   );
+  // Register the produced wrapper TypeNode against the pre-shrink semantic
+  // baseType in `narrowedWrapperTypeRegistry`. This is consumed by
+  // SchemaInjection's inner-lift revisit path (see schema-injection.ts at the
+  // `kind === "builder" && builderName === "lift"` branch with
+  // `isToSchemaCall(firstArgument)`): after `ts.visitEachChild` re-enters our
+  // injected `__cfHelpers.lift(toSchema(...), toSchema(...), cb)` call,
+  // capability narrowing wants the original baseType to feed the next pass —
+  // without it the checker resolves the synthetic wrapper to `any` and the
+  // schema collapses to `unknown`.
+  //
+  // We deliberately do NOT write to the main `typeRegistry` here. The schema
+  // generator's wrapper-recovery path (`formatWrapperTypeFromNode`) reads from
+  // `typeRegistry` to recover inner properties — if the pre-shrink type lived
+  // there, the generator would un-shrink the carefully-narrowed inner
+  // schemas (e.g., turn an equals-only-shrunk `Comparable<unknown>` back into
+  // `Comparable<number>`). The two consumers have opposite needs for the
+  // same wrapper node; keeping them in separate registries is the cleanest
+  // way to satisfy both.
+  if (baseType && !isAnyOrUnknownType(baseType) && context) {
+    context.markNarrowedWrapper(wrapped, baseType);
+  }
+  return wrapped;
 }

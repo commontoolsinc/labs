@@ -282,9 +282,10 @@ property.
 
 Each wrapper class above:
 
-- **Extends `FabricNativeWrapper<T>`** (which in turn extends
-  `FabricInstance`), inheriting the `shallowClone()` frozenness-management
-  method and providing a `toNativeValue(frozen)` method for unwrapping.
+- **Extends `FabricNativeWrapper<T>`** (which extends `BaseFabricInstance`,
+  which in turn extends `FabricInstance`), inheriting the `shallowClone()`
+  frozenness-management template method from `BaseFabricInstance` and
+  providing a `toNativeValue(frozen)` method for unwrapping.
 - **Has a `[DECONSTRUCT]` method** that extracts essential state from the
   wrapped native object.
 - **Has a static `[RECONSTRUCT]` method** (following the `FabricClass<T>`
@@ -301,10 +302,11 @@ Each wrapper class above:
 ##### `FabricNativeWrapper<T>` Base Class
 
 All native object wrappers share an abstract base class that extends
-`FabricInstance` and adds methods for unwrapping back to native form:
+`BaseFabricInstance` (see Section 2.3) and adds methods for unwrapping back
+to native form:
 
 ```typescript
-// file: packages/data-model/fabric-native-instances.ts
+// file: packages/data-model/fabric-instances/FabricNativeWrapper.ts
 
 /**
  * Abstract base class for `FabricInstance` wrappers that bridge native JS
@@ -314,7 +316,7 @@ All native object wrappers share an abstract base class that extends
  * cascades with a single `instanceof FabricNativeWrapper` check.
  */
 abstract class FabricNativeWrapper<T extends object>
-  extends FabricInstance {
+  extends BaseFabricInstance {
   abstract readonly typeTag: string;
 
   /** The wrapped native value, used by `toNativeValue` for freeze-state checks. */
@@ -377,7 +379,7 @@ these native types have no established convention for custom properties.
 #### 1.4.2 `FabricError`
 
 ```typescript
-// file: packages/data-model/fabric-native-instances.ts
+// file: packages/data-model/fabric-instances/FabricError.ts
 
 import {
   DECONSTRUCT, RECONSTRUCT,
@@ -514,7 +516,7 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
 #### 1.4.5 `FabricRegExp`
 
 ```typescript
-// file: packages/data-model/fabric-native-instances.ts
+// file: packages/data-model/fabric-instances/FabricRegExp.ts
 
 import {
   DECONSTRUCT, RECONSTRUCT,
@@ -646,7 +648,7 @@ functions' freeze-bypass logic).
 #### 1.4.7 `FabricEpochNsec`
 
 ```typescript
-// file: packages/data-model/fabric-epoch.ts
+// file: packages/data-model/fabric-primitives/FabricEpochNsec.ts
 
 /**
  * Temporal type representing nanoseconds from the POSIX Epoch
@@ -673,7 +675,7 @@ export class FabricEpochNsec extends FabricPrimitive {
 #### 1.4.8 `FabricEpochDays`
 
 ```typescript
-// file: packages/data-model/fabric-epoch.ts
+// file: packages/data-model/fabric-primitives/FabricEpochDays.ts
 
 /**
  * Temporal type representing days from the POSIX Epoch (1970-01-01).
@@ -696,7 +698,7 @@ export class FabricEpochDays extends FabricPrimitive {
 #### 1.4.9 `FabricHash`
 
 ```typescript
-// file: packages/data-model/fabric-hash.ts
+// file: packages/data-model/fabric-primitives/FabricHash.ts
 
 /**
  * A content-addressed identifier: a hash digest paired with an algorithm tag.
@@ -804,7 +806,7 @@ different algorithm tags are distinct values.
 #### 1.4.10 `FabricBytes`
 
 ```typescript
-// file: packages/data-model/fabric-bytes.ts
+// file: packages/data-model/fabric-primitives/FabricBytes.ts
 
 /**
  * Immutable byte sequence in the fabric type system. Extends `FabricPrimitive`
@@ -890,12 +892,13 @@ Section 4.5.
 > native objects. Code that needs the underlying native type uses
 > `nativeFromFabricValue()` (Section 8) as a separate step.
 >
-> **File organization.** The native object wrapper classes (`FabricError`,
-> `FabricMap`, `FabricSet`, `FabricRegExp`) live in
-> `fabric-native-instances.ts`. The `FabricPrimitive` subclasses
-> (`FabricEpochNsec`, `FabricEpochDays`, `FabricHash`, `FabricBytes`)
-> each have their own file (`fabric-epoch.ts`, `fabric-hash.ts`,
-> `fabric-bytes.ts`).
+> **File organization.** Each fabric-instance and fabric-primitive class
+> lives in its own file: the `FabricInstance` subclasses (including the
+> native object wrappers `FabricError`, `FabricMap`, `FabricSet`,
+> `FabricRegExp` and the explicit-tag-value family) under
+> `packages/data-model/fabric-instances/`; the `FabricPrimitive`
+> subclasses (`FabricEpochNsec`, `FabricEpochDays`, `FabricHash`,
+> `FabricBytes`) under `packages/data-model/fabric-primitives/`.
 
 ### 1.5 Recursive Containers
 
@@ -1010,6 +1013,13 @@ export const IS_DEEP_FROZEN = Symbol.for('common.isDeepFrozen');
 
 ### 2.3 Instance Protocol
 
+`FabricInstance` is the **pure abstract protocol surface** — the
+`instanceof`-able contract that external code is written against. It
+declares every member of the protocol as `abstract`, including
+`shallowClone()`; it carries no implementations. Shared template-method
+scaffolding lives on a separate abstract base class `BaseFabricInstance`
+(below), which subclasses extend in practice.
+
 ```typescript
 // file: packages/data-model/interface.ts
 
@@ -1018,6 +1028,12 @@ export const IS_DEEP_FROZEN = Symbol.for('common.isDeepFrozen');
  * Extends `FabricSpecialObject` — the common root for all fabric-system
  * value types.
  *
+ * This is the pure abstract protocol — the `instanceof`-able contract that
+ * external code is written against. Concrete fabric-instance classes
+ * extend `BaseFabricInstance` (a subclass of this one) rather than this
+ * class directly; `BaseFabricInstance` is where shared template-method
+ * scaffolding (such as `shallowClone()`) lives.
+ *
  * Subclasses must implement:
  * - `[DECONSTRUCT]()` -- returns essential state for serialization.
  * - `[DEEP_FREEZE](subFreeze)` -- deeply freezes this instance in place.
@@ -1025,21 +1041,17 @@ export const IS_DEEP_FROZEN = Symbol.for('common.isDeepFrozen');
  *   check, mirroring `[DEEP_FREEZE]`.
  * - `deepClone(frozen)` -- returns a new deep clone with the requested
  *   frozenness.
- * - `shallowUnfrozenClone()` -- returns a new unfrozen copy of this instance.
+ * - `shallowClone(frozen)` -- returns a shallow clone with the requested
+ *   frozenness. Concrete subclasses normally inherit this from
+ *   `BaseFabricInstance` and instead implement `shallowUnfrozenClone()`
+ *   (see below).
  *
  * Subclasses must also define a static `[RECONSTRUCT]()` (the class-protocol
  * member; see Section 2.4).
  *
- * `shallowClone(frozen)` is an effectively-final method that manages the
- * frozenness contract:
- * - `shallowClone(true)` on a frozen instance returns `this` (identity).
- * - `shallowClone(true)` on an unfrozen instance returns a frozen clone.
- * - `shallowClone(false)` always returns a new unfrozen clone -- even if the
- *   instance is already unfrozen. The caller gets a distinct, mutable object.
- *
  * The native object wrapper classes (`FabricError`, `FabricMap`,
- * `FabricSet`, `FabricRegExp`) extend this class, as do user-defined
- * types (`Cell`, `Stream`) and system types (`UnknownValue`,
+ * `FabricSet`, `FabricRegExp`) extend `BaseFabricInstance`, as do
+ * user-defined types (`Cell`, `Stream`) and system types (`UnknownValue`,
  * `ProblematicValue`).
  *
  * Note: `FabricPrimitive` subclasses (`FabricEpochNsec`,
@@ -1094,6 +1106,28 @@ export abstract class FabricInstance extends FabricSpecialObject {
   abstract deepClone(frozen: boolean): FabricInstance;
 
   /**
+   * Returns a shallow clone of this instance with the requested frozenness.
+   * The concrete template-method implementation lives on
+   * `BaseFabricInstance`; this declaration just pins the protocol surface so
+   * that callers can invoke it through a `FabricInstance` reference.
+   */
+  abstract shallowClone(frozen: boolean): FabricInstance;
+}
+```
+
+```typescript
+// file: packages/data-model/fabric-instances/BaseFabricInstance.ts
+
+/**
+ * Abstract base class providing shared scaffolding for `FabricInstance`
+ * subclasses. Concrete `FabricInstance` classes extend this, not
+ * `FabricInstance` directly: `FabricInstance` is the pure abstract protocol
+ * (the `instanceof`-able contract that external code is written against),
+ * while `BaseFabricInstance` is where shared template-method
+ * implementations live.
+ */
+export abstract class BaseFabricInstance extends FabricInstance {
+  /**
    * Returns a new unfrozen copy of this instance with the same data. Called
    * by `shallowClone()` when a new instance is needed.
    */
@@ -1106,6 +1140,14 @@ export abstract class FabricInstance extends FabricSpecialObject {
    * `this` (identity optimization -- freezing is idempotent). In all other
    * cases, creates a new instance via `shallowUnfrozenClone()` and freezes
    * it if requested.
+   *
+   * This effectively-final template method manages the frozenness
+   * contract:
+   * - `shallowClone(true)` on a frozen instance returns `this` (identity).
+   * - `shallowClone(true)` on an unfrozen instance returns a frozen clone.
+   * - `shallowClone(false)` always returns a new unfrozen clone -- even
+   *   if the instance is already unfrozen. The caller gets a distinct,
+   *   mutable object.
    */
   shallowClone(frozen: boolean): FabricInstance {
     if (frozen && Object.isFrozen(this)) return this;
@@ -1124,12 +1166,23 @@ export abstract class FabricInstance extends FabricSpecialObject {
 > **Why an abstract class, not an interface?** The earlier spec defined
 > `FabricInstance` as an interface with `[DECONSTRUCT]` as the sole method.
 > The current design uses an abstract class so that `shallowClone()` can be
-> an effectively-final method on the base class, encapsulating the
-> frozenness-management contract (clone-if-necessary, freeze-if-requested) in
-> one place. Subclasses implement only `shallowUnfrozenClone()` (the
-> type-specific copy logic) and `[DECONSTRUCT]` (the serialization state
-> extraction). Brand detection uses `instanceof FabricInstance` directly —
-> no type guard function is needed (see Section 2.6).
+> an effectively-final template method (on `BaseFabricInstance`),
+> encapsulating the frozenness-management contract (clone-if-necessary,
+> freeze-if-requested) in one place. Concrete subclasses implement only
+> `shallowUnfrozenClone()` (the type-specific copy logic) and
+> `[DECONSTRUCT]` (the serialization state extraction). Brand detection
+> uses `instanceof FabricInstance` directly — no type guard function is
+> needed (see Section 2.6).
+
+> **Why a separate `BaseFabricInstance`?** Keeping `FabricInstance` pure
+> abstract (no implementations) gives the protocol surface a clean,
+> minimal definition for external consumers: the api-layer mirror in
+> `packages/api/` exposes `FabricInstance` with its protocol members as
+> abstract declarations, and `BaseFabricInstance` stays an internal
+> implementation detail of the data-model package. External code written
+> against `FabricInstance` is therefore stable against changes to the
+> template-method scaffolding, and the `instanceof FabricInstance` brand
+> check still catches every concrete fabric-instance value.
 
 ### 2.4 Class Protocol
 
@@ -1240,14 +1293,14 @@ serialization system can round-trip it back to a real `Temperature` instance.
 import {
   DECONSTRUCT,
   RECONSTRUCT,
-  FabricInstance,
   type FabricValue,
   type ReconstructionContext,
-} from '@commonfabric/data-model';
+} from '@commonfabric/data-model/interface';
+import { BaseFabricInstance } from '@commonfabric/data-model/fabric-instances';
 
 type TemperatureUnit = "C" | "F" | "K";
 
-class Temperature extends FabricInstance {
+class Temperature extends BaseFabricInstance {
   // (deepFreeze protocol members
   //  omitted for brevity; see §2.3
   //  and §8 for the full pattern.)
@@ -1381,7 +1434,7 @@ enabling a single `instanceof ExplicitTagValue` check where code needs to
 handle both subtypes uniformly (e.g., serialization dispatch).
 
 ```typescript
-// file: packages/data-model/explicit-tag-value.ts
+// file: packages/data-model/fabric-instances/ExplicitTagValue.ts
 
 /**
  * Base class for fabric types that carry an explicit wire-format tag.
@@ -1389,10 +1442,10 @@ handle both subtypes uniformly (e.g., serialization dispatch).
  * (failed deconstruction/reconstruction). Enables a single instanceof
  * check where code needs to handle both.
  *
- * Extends `FabricInstance` so subclasses inherit the `shallowClone()`
- * method.
+ * Extends `BaseFabricInstance` so subclasses inherit the `shallowClone()`
+ * template method.
  */
-export abstract class ExplicitTagValue extends FabricInstance {
+export abstract class ExplicitTagValue extends BaseFabricInstance {
   constructor(
     /** The original type tag, e.g. `"FutureType@2"`. */
     readonly typeTag: string,
@@ -1411,14 +1464,14 @@ stays on each subclass since the deconstruction payloads differ in shape.
 ### 3.3 `UnknownValue`
 
 ```typescript
-// file: packages/data-model/unknown-value.ts
+// file: packages/data-model/fabric-instances/UnknownValue.ts
 
 import {
   DECONSTRUCT,
   RECONSTRUCT,
   type ReconstructionContext,
 } from './interface';
-import { ExplicitTagValue } from './explicit-tag-value';
+import { ExplicitTagValue } from './ExplicitTagValue';
 
 /**
  * Holds an unrecognized type's data for round-tripping. The serialization
@@ -1462,14 +1515,14 @@ failures — for example, a type whose `[RECONSTRUCT]` throws can be preserved a
 a `ProblematicValue` with the original tag, state, and error information.
 
 ```typescript
-// file: packages/data-model/problematic-value.ts
+// file: packages/data-model/fabric-instances/ProblematicValue.ts
 
 import {
   DECONSTRUCT,
   RECONSTRUCT,
   type ReconstructionContext,
 } from './interface';
-import { ExplicitTagValue } from './explicit-tag-value';
+import { ExplicitTagValue } from './ExplicitTagValue';
 
 /**
  * Holds a value whose deconstruction or reconstruction failed. Preserves
@@ -1524,7 +1577,7 @@ serialization and deserialization. This type is internal to the JSON
 implementation — it is not part of the public boundary interface.
 
 ```typescript
-// file: packages/data-model/json-type-handlers.ts
+// file: packages/data-model/json-wire/interface.ts
 
 /**
  * JSON-compatible wire format value. This is the intermediate tree
@@ -1621,7 +1674,7 @@ handlers** — small objects that know how to serialize values of a specific typ
 and how to deserialize them from a specific tag.
 
 ```typescript
-// file: packages/data-model/json-type-handlers.ts
+// file: packages/data-model/json-wire/interface.ts
 
 /**
  * Narrow interface for what type handlers need from the encoding context
@@ -1785,11 +1838,11 @@ version requirements.
 The storage boundary in `space.ts` routes through flag-gated dispatch functions
 that bridge between the storage layer (JSON strings) and the runtime layer
 (`FabricValue`). These functions live in a dedicated dispatch module
-(`packages/data-model/json-encoding.ts`) and are reassigned at runtime
-based on whether unified JSON encoding is enabled.
+(`packages/data-model/json-wire/json-encoding.ts`) and are reassigned at
+runtime based on whether unified JSON encoding is enabled.
 
 ```typescript
-// file: packages/data-model/json-encoding.ts
+// file: packages/data-model/json-wire/json-encoding.ts
 
 /**
  * Encode a fabric value to a JSON string. When unified JSON encoding is
@@ -1897,7 +1950,7 @@ The implementation is split across several files for separation of concerns:
 | `fabric-value-modern.ts` | Modern (flag-ON) conversion: `shallowFabricFromNativeValueModern`, `fabricFromNativeValueModern`, `isFabricValueModern`, `isFabricCompatibleModern` |
 | `fabric-value-legacy.ts` | Legacy (flag-OFF) conversion: `fabricFromNativeValueLegacy`, `isFabricValueLegacy`, `isFabricCompatibleLegacy` |
 | `array-utils.ts` | Pure utilities shared by both paths: `isArrayIndexPropertyName`, `isArrayWithOnlyIndexProperties` |
-| `fabric-native-instances.ts` | Native object wrapper classes (`FabricError`, `FabricMap`, etc.) and unwrap functions (`nativeFromFabricValue`, `nativeFromFabricValueModern`) |
+| `fabric-instances/` | Native object wrapper classes, each in its own file: `BaseFabricInstance.ts`, `FabricNativeWrapper.ts`, `FabricError.ts`, `FabricMap.ts`, `FabricSet.ts`, `FabricRegExp.ts`, `ExplicitTagValue.ts`, `UnknownValue.ts`, `ProblematicValue.ts` (plus an `index.ts` barrel). |
 
 In the `Cell` implementation:
 

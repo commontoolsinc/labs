@@ -276,6 +276,12 @@ the same reason: stdin execution deliberately avoids resolving supporting code
 from the mutable workspace cwd. Other executable shebang scripts are indexed for
 metadata, but are not executable by `run_skill_script` in v1.
 
+Bundled scripts that wrap host-adjacent tools should still be parameterized and
+policy-shaped. For example, the `agent-browser` scripts require an explicit
+local `--cdp` origin or `AGENT_BROWSER_CDP`, avoid saved browser state and
+filesystem capture commands, and emit snapshots/text to stdout so the harness
+can capture the run artifact.
+
 The tool executes via the sandbox direct argv API, not a model-authored shell
 string. The default cwd is the workspace root, even if the harness current
 directory is elsewhere. Optional `cwd` is resolved through normal sandbox path

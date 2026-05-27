@@ -46,6 +46,28 @@ Only split into `schemas.tsx` or additional modules when:
 Do not split by default. A moderate pattern with a few entities can still live
 comfortably in one file while you discover the right shape.
 
+## Multi-User Patterns
+
+For collaborative or identity-sensitive patterns, read
+`docs/common/patterns/multi-user-patterns.md` before choosing the input and
+output shape. Decide which state is shared across the space, which state belongs
+to the active user, and which state is local to one session.
+
+## Reusing CFC Helpers
+
+For CFC policy code, check `packages/patterns/cfc/README.md` before copying
+from an existing demo. Reuse the shared helpers there for common admin
+registries, trusted UI actions, trusted surfaces, and prompt-injection
+workflows.
+
+Keep concrete policy vocabulary local to the pattern: integrity strings, label
+atoms, resource subjects, value digests, demo fixtures, routes, and domain
+models should usually stay beside the code that owns them.
+
+If an existing helper is not enough and the code appears reusable, read
+`docs/common/ai/cfc-helper-authoring-guide.md` before promoting it into
+`packages/patterns/cfc/`.
+
 ## Development Loop: Sketch -> Run -> Iterate
 
 Do not write the finished code up front. Write the minimum needed to see real

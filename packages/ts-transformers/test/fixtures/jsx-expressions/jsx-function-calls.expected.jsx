@@ -29,7 +29,12 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         <h3>Math Functions</h3>
-        <p>Max: {__cfHelpers.derive({
+        <p>Max: {__cfHelpers.lift<{
+            state: {
+                a: number;
+                b: number;
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -48,11 +53,15 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => Math.max(state.a, state.b))({ state: {
                 a: state.key("a"),
                 b: state.key("b")
-            } }, ({ state }) => Math.max(state.a, state.b))}</p>
-        <p>Min: {__cfHelpers.derive({
+            } })}</p>
+        <p>Min: {__cfHelpers.lift<{
+            state: {
+                a: number;
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -68,10 +77,15 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => Math.min(state.a, 10))({ state: {
                 a: state.key("a")
-            } }, ({ state }) => Math.min(state.a, 10))}</p>
-        <p>Abs: {__cfHelpers.derive({
+            } })}</p>
+        <p>Abs: {__cfHelpers.lift<{
+            state: {
+                a: number;
+                b: number;
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -90,11 +104,15 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => Math.abs(state.a - state.b))({ state: {
                 a: state.key("a"),
                 b: state.key("b")
-            } }, ({ state }) => Math.abs(state.a - state.b))}</p>
-        <p>Round: {__cfHelpers.derive({
+            } })}</p>
+        <p>Round: {__cfHelpers.lift<{
+            state: {
+                price: number;
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -110,10 +128,14 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => Math.round(state.price))({ state: {
                 price: state.key("price")
-            } }, ({ state }) => Math.round(state.price))}</p>
-        <p>Floor: {__cfHelpers.derive({
+            } })}</p>
+        <p>Floor: {__cfHelpers.lift<{
+            state: {
+                price: number;
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -129,10 +151,14 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => Math.floor(state.price))({ state: {
                 price: state.key("price")
-            } }, ({ state }) => Math.floor(state.price))}</p>
-        <p>Ceiling: {__cfHelpers.derive({
+            } })}</p>
+        <p>Ceiling: {__cfHelpers.lift<{
+            state: {
+                price: number;
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -148,10 +174,14 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => Math.ceil(state.price))({ state: {
                 price: state.key("price")
-            } }, ({ state }) => Math.ceil(state.price))}</p>
-        <p>Square root: {__cfHelpers.derive({
+            } })}</p>
+        <p>Square root: {__cfHelpers.lift<{
+            state: {
+                a: number;
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -167,12 +197,16 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => Math.sqrt(state.a))({ state: {
                 a: state.key("a")
-            } }, ({ state }) => Math.sqrt(state.a))}</p>
+            } })}</p>
 
         <h3>String Methods as Function Calls</h3>
-        <p>Uppercase: {__cfHelpers.derive({
+        <p>Uppercase: {__cfHelpers.lift<{
+            state: {
+                name: string;
+            };
+        }, string>({
             type: "object",
             properties: {
                 state: {
@@ -188,10 +222,14 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.name.toUpperCase())({ state: {
                 name: state.key("name")
-            } }, ({ state }) => state.name.toUpperCase())}</p>
-        <p>Lowercase: {__cfHelpers.derive({
+            } })}</p>
+        <p>Lowercase: {__cfHelpers.lift<{
+            state: {
+                name: string;
+            };
+        }, string>({
             type: "object",
             properties: {
                 state: {
@@ -207,10 +245,14 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.name.toLowerCase())({ state: {
                 name: state.key("name")
-            } }, ({ state }) => state.name.toLowerCase())}</p>
-        <p>Substring: {__cfHelpers.derive({
+            } })}</p>
+        <p>Substring: {__cfHelpers.lift<{
+            state: {
+                text: string;
+            };
+        }, string>({
             type: "object",
             properties: {
                 state: {
@@ -226,10 +268,14 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.text.substring(0, 5))({ state: {
                 text: state.key("text")
-            } }, ({ state }) => state.text.substring(0, 5))}</p>
-        <p>Replace: {__cfHelpers.derive({
+            } })}</p>
+        <p>Replace: {__cfHelpers.lift<{
+            state: {
+                text: string;
+            };
+        }, string>({
             type: "object",
             properties: {
                 state: {
@@ -245,9 +291,9 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.text.replace("old", "new"))({ state: {
                 text: state.key("text")
-            } }, ({ state }) => state.text.replace("old", "new"))}</p>
+            } })}</p>
         <p>Includes: {__cfHelpers.ifElse({
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema, {
@@ -256,7 +302,11 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["Yes", "No"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+            state: {
+                text: string;
+            };
+        }, boolean>({
             type: "object",
             properties: {
                 state: {
@@ -272,9 +322,9 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.text.includes("test"))({ state: {
                 text: state.key("text")
-            } }, ({ state }) => state.text.includes("test")), "Yes", "No")}</p>
+            } }), "Yes", "No")}</p>
         <p>Starts with: {__cfHelpers.ifElse({
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema, {
@@ -283,7 +333,11 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["Yes", "No"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+            state: {
+                name: string;
+            };
+        }, boolean>({
             type: "object",
             properties: {
                 state: {
@@ -299,12 +353,16 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.name.startsWith("A"))({ state: {
                 name: state.key("name")
-            } }, ({ state }) => state.name.startsWith("A")), "Yes", "No")}</p>
+            } }), "Yes", "No")}</p>
 
         <h3>Number Methods</h3>
-        <p>To Fixed: {__cfHelpers.derive({
+        <p>To Fixed: {__cfHelpers.lift<{
+            state: {
+                price: number;
+            };
+        }, string>({
             type: "object",
             properties: {
                 state: {
@@ -320,10 +378,14 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.price.toFixed(2))({ state: {
                 price: state.key("price")
-            } }, ({ state }) => state.price.toFixed(2))}</p>
-        <p>To Precision: {__cfHelpers.derive({
+            } })}</p>
+        <p>To Precision: {__cfHelpers.lift<{
+            state: {
+                price: number;
+            };
+        }, string>({
             type: "object",
             properties: {
                 state: {
@@ -339,12 +401,16 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.price.toPrecision(4))({ state: {
                 price: state.key("price")
-            } }, ({ state }) => state.price.toPrecision(4))}</p>
+            } })}</p>
 
         <h3>Parse Functions</h3>
-        <p>Parse Int: {__cfHelpers.derive({
+        <p>Parse Int: {__cfHelpers.lift<{
+            state: {
+                float: string;
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -360,10 +426,14 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => parseInt(state.float))({ state: {
                 float: state.key("float")
-            } }, ({ state }) => parseInt(state.float))}</p>
-        <p>Parse Float: {__cfHelpers.derive({
+            } })}</p>
+        <p>Parse Float: {__cfHelpers.lift<{
+            state: {
+                float: string;
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -379,12 +449,16 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => parseFloat(state.float))({ state: {
                 float: state.key("float")
-            } }, ({ state }) => parseFloat(state.float))}</p>
+            } })}</p>
 
         <h3>Array Method Calls</h3>
-        <p>Sum: {__cfHelpers.derive({
+        <p>Sum: {__cfHelpers.lift<{
+            state: {
+                values: number[];
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -403,10 +477,14 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.values.reduce((a, b) => a + b, 0))({ state: {
                 values: state.key("values")
-            } }, ({ state }) => state.values.reduce((a, b) => a + b, 0))}</p>
-        <p>Max value: {__cfHelpers.derive({
+            } })}</p>
+        <p>Max value: {__cfHelpers.lift<{
+            state: {
+                values: number[];
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -425,10 +503,14 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => Math.max(...state.values))({ state: {
                 values: state.key("values")
-            } }, ({ state }) => Math.max(...state.values))}</p>
-        <p>Joined: {__cfHelpers.derive({
+            } })}</p>
+        <p>Joined: {__cfHelpers.lift<{
+            state: {
+                values: number[];
+            };
+        }, string>({
             type: "object",
             properties: {
                 state: {
@@ -447,12 +529,16 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.values.join(", "))({ state: {
                 values: state.key("values")
-            } }, ({ state }) => state.values.join(", "))}</p>
+            } })}</p>
 
         <h3>Complex Function Calls</h3>
-        <p>Multiple args: {__cfHelpers.derive({
+        <p>Multiple args: {__cfHelpers.lift<{
+            state: {
+                a: number;
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -468,10 +554,14 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => Math.pow(state.a, 2))({ state: {
                 a: state.key("a")
-            } }, ({ state }) => Math.pow(state.a, 2))}</p>
-        <p>Nested calls: {__cfHelpers.derive({
+            } })}</p>
+        <p>Nested calls: {__cfHelpers.lift<{
+            state: {
+                a: number;
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -487,10 +577,14 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => Math.round(Math.sqrt(state.a)))({ state: {
                 a: state.key("a")
-            } }, ({ state }) => Math.round(Math.sqrt(state.a)))}</p>
-        <p>Chained calls: {__cfHelpers.derive({
+            } })}</p>
+        <p>Chained calls: {__cfHelpers.lift<{
+            state: {
+                name: string;
+            };
+        }, string>({
             type: "object",
             properties: {
                 state: {
@@ -506,10 +600,15 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.name.trim().toUpperCase())({ state: {
                 name: state.key("name")
-            } }, ({ state }) => state.name.trim().toUpperCase())}</p>
-        <p>With expressions: {__cfHelpers.derive({
+            } })}</p>
+        <p>With expressions: {__cfHelpers.lift<{
+            state: {
+                a: number;
+                b: number;
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -528,10 +627,10 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => Math.max(state.a + 1, state.b * 2))({ state: {
                 a: state.key("a"),
                 b: state.key("b")
-            } }, ({ state }) => Math.max(state.a + 1, state.b * 2))}</p>
+            } })}</p>
       </div>),
     };
 }, {

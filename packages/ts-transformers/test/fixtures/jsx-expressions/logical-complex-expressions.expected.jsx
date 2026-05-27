@@ -45,13 +45,16 @@ export default pattern((_state) => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+            items: __cfHelpers.Cell<string[]>;
+            isEnabled: __cfHelpers.Cell<boolean>;
+        }, Readonly<boolean>>({
             type: "object",
             properties: {
                 items: {
                     type: "array",
                     items: {
-                        type: "string"
+                        type: "unknown"
                     },
                     asCell: ["readonly"]
                 },
@@ -63,10 +66,10 @@ export default pattern((_state) => {
             required: ["items", "isEnabled"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, ({ items, isEnabled }) => items.get().length > 0 && isEnabled.get())({
             items: items,
             isEnabled: isEnabled
-        }, ({ items, isEnabled }) => items.get().length > 0 && isEnabled.get()), <div>Enabled with items</div>)}
+        }), <div>Enabled with items</div>)}
 
         {/* Mixed || and && */}
         {__cfHelpers.when({
@@ -83,7 +86,10 @@ export default pattern((_state) => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+            count: __cfHelpers.Cell<number>;
+            items: __cfHelpers.Cell<string[]>;
+        }, boolean>({
             type: "object",
             properties: {
                 count: {
@@ -93,7 +99,7 @@ export default pattern((_state) => {
                 items: {
                     type: "array",
                     items: {
-                        type: "string"
+                        type: "unknown"
                     },
                     asCell: ["readonly"]
                 }
@@ -101,10 +107,10 @@ export default pattern((_state) => {
             required: ["count", "items"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, ({ count, items }) => (count.get() > 10 || items.get().length > 5))({
             count: count,
             items: items
-        }, ({ count, items }) => (count.get() > 10 || items.get().length > 5)), <div>Threshold met</div>)}
+        }), <div>Threshold met</div>)}
       </div>),
     };
 }, false as const satisfies __cfHelpers.JSONSchema, {

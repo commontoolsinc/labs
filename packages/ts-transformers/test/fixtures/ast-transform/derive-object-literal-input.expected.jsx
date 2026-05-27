@@ -49,7 +49,7 @@ const rejected = __cfHelpers.__cf_data(lift({
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, (count: number) => count)(rejectedCount).for("rejected", true));
-const _summary = __cfHelpers.__cf_data(derive({
+const _summary = __cfHelpers.__cf_data(__cfHelpers.lift({
     type: "object",
     properties: {
         stage: {
@@ -68,13 +68,13 @@ const _summary = __cfHelpers.__cf_data(derive({
     required: ["stage", "attempts", "accepted", "rejected"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, {
+} as const satisfies __cfHelpers.JSONSchema, (snapshot) => `stage:${snapshot.stage} attempts:${snapshot.attempts}` +
+    ` accepted:${snapshot.accepted} rejected:${snapshot.rejected}`)({
     stage: normalizedStage,
     attempts: attempts,
     accepted: accepted,
     rejected: rejected,
-}, (snapshot) => `stage:${snapshot.stage} attempts:${snapshot.attempts}` +
-    ` accepted:${snapshot.accepted} rejected:${snapshot.rejected}`).for("_summary", true));
+}).for("_summary", true));
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

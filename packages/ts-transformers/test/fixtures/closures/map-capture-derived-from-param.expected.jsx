@@ -28,7 +28,12 @@ export default pattern((state) => {
         {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const item = __cf_pattern_input.key("element");
                 const settings = __cf_pattern_input.key("params", "settings");
-                return (<span>{__cfHelpers.derive({
+                return (<span>{__cfHelpers.lift<{
+                    item: number;
+                    settings: {
+                        multiplier: number;
+                    };
+                }, number>({
                     type: "object",
                     properties: {
                         item: {
@@ -47,12 +52,12 @@ export default pattern((state) => {
                     required: ["item", "settings"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "number"
-                } as const satisfies __cfHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, ({ item, settings }) => item * settings.multiplier)({
                     item: item,
                     settings: {
                         multiplier: settings.key("multiplier")
                     }
-                }, ({ item, settings }) => item * settings.multiplier)}</span>);
+                })}</span>);
             }, {
                 type: "object",
                 properties: {

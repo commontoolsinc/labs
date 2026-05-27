@@ -27,7 +27,9 @@ interface Result {
 export default pattern((__cf_pattern_input) => {
     const count = __cf_pattern_input.key("count");
     return {
-        doubled: __cfHelpers.derive({
+        doubled: __cfHelpers.lift<{
+            count: number;
+        }, number>({
             type: "object",
             properties: {
                 count: {
@@ -37,7 +39,7 @@ export default pattern((__cf_pattern_input) => {
             required: ["count"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { count: count }, ({ count }) => count * 2).for(["__patternResult", "doubled"], true)
+        } as const satisfies __cfHelpers.JSONSchema, ({ count }) => count * 2)({ count: count }).for(["__patternResult", "doubled"], true)
     };
 }, {
     type: "object",

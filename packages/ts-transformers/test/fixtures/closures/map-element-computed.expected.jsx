@@ -32,7 +32,11 @@ export default pattern((state) => {
                 const item = __cf_pattern_input.key("element");
                 const index = __cf_pattern_input.key("index");
                 return (<div>
-            Item #{index}: {__cfHelpers.derive({
+            Item #{index}: {__cfHelpers.lift<{
+                    item: {
+                        name: string;
+                    };
+                }, string>({
                     type: "object",
                     properties: {
                         item: {
@@ -48,9 +52,9 @@ export default pattern((state) => {
                     required: ["item"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, { item: {
+                } as const satisfies __cfHelpers.JSONSchema, ({ item }) => item.name.toUpperCase())({ item: {
                         name: item.key("name")
-                    } }, ({ item }) => item.name.toUpperCase())}
+                    } })}
           </div>);
             }, {
                 type: "object",

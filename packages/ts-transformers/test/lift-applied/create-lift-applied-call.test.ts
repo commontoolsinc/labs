@@ -1,10 +1,10 @@
 import { assertStringIncludes } from "@std/assert";
 import ts from "typescript";
 
-import { createDeriveCall } from "../../src/transformers/builtins/derive.ts";
+import { createLiftAppliedCall } from "../../src/transformers/builtins/lift-applied.ts";
 import { CFHelpers } from "../../src/core/cf-helpers.ts";
 
-Deno.test("createDeriveCall keeps fallback refs synced when names collide", () => {
+Deno.test("createLiftAppliedCall keeps fallback refs synced when names collide", () => {
   const source = ts.createSourceFile(
     "test.tsx",
     "",
@@ -72,7 +72,7 @@ Deno.test("createDeriveCall keeps fallback refs synced when names collide", () =
       [],
     );
 
-    const derive = createDeriveCall(fallbackExpr, [
+    const derive = createLiftAppliedCall(fallbackExpr, [
       rootIdentifier,
       fallbackExpr,
     ], {

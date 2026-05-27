@@ -1,7 +1,6 @@
 import {
   type AddIntegrity,
   AuthoredByCurrentUser,
-  Cfc,
   computed,
   Default,
   equals,
@@ -11,9 +10,9 @@ import {
   RepresentsCurrentUser,
   RequiresIntegrity,
   Stream,
+  type TrustedActionWrite,
   UI,
   Writable,
-  WriteAuthorizedBy,
 } from "commonfabric";
 import {
   activeAdminRoleForSubject,
@@ -22,7 +21,7 @@ import {
   adminRegistryEntries,
   type EmptyAdminRegistryValue,
   subjectHasAdminRole,
-} from "../admin.ts";
+} from "../cfc/admin/mod.ts";
 import {
   type ChatProfile,
   type ChatRoom,
@@ -34,23 +33,6 @@ import {
   type PlainChatMessage,
   type SentChatMessage,
 } from "./logic.ts";
-
-export type TrustedActionWrite<
-  T,
-  Binding,
-  Action extends string,
-  Pattern extends string,
-> = Cfc<
-  WriteAuthorizedBy<T, Binding>,
-  {
-    uiContract: {
-      helper: "UiAction";
-      action: Action;
-      trustedPattern: Pattern;
-      requiredEventIntegrity: [Pattern];
-    };
-  }
->;
 
 export const TRUSTED_GROUP_CHAT_PROFILE_SURFACE =
   "TrustedGroupChatProfileSurface";

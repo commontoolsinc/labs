@@ -25,7 +25,14 @@ export default pattern((state: State) => {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("value", true);
     // Capture property before method call
-    const result = __cfHelpers.derive({
+    const result = __cfHelpers.lift<{
+        value: __cfHelpers.ReadonlyCell<number>;
+        state: {
+            counter: {
+                value: number;
+            };
+        };
+    }, number>({
         type: "object",
         properties: {
             value: {
@@ -51,14 +58,14 @@ export default pattern((state: State) => {
         required: ["value", "state"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        value: value.for(["result", 2, "value"], true),
+    } as const satisfies __cfHelpers.JSONSchema, ({ value: v, state }) => v.get() + state.counter.value)({
+        value: value.for(["result", "value"], true),
         state: {
             counter: {
                 value: state.key("counter", "value")
             }
         }
-    }, ({ value: v, state }) => v.get() + state.counter.value).for("result", true);
+    }).for("result", true);
     return result;
 }, {
     type: "object",

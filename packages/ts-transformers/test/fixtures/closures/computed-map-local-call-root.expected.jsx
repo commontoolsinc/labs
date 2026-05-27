@@ -26,7 +26,11 @@ interface State {
 //   const label = identity(row.done ? "Done" : "Pending")
 //   → const label = derive(..., ({ row }) => identity(row.done ? "Done" : "Pending"))
 export default pattern((state) => {
-    const rows = __cfHelpers.derive({
+    const rows = __cfHelpers.lift<{
+        state: {
+            items: Item[];
+        };
+    }, Item[]>({
         type: "object",
         properties: {
             state: {
@@ -70,12 +74,16 @@ export default pattern((state) => {
                 required: ["done"]
             }
         }
-    } as const satisfies __cfHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items)({ state: {
             items: state.key("items")
-        } }, ({ state }) => state.items).for("rows", true);
+        } }).for("rows", true);
     const labels = rows.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
         const row = __cf_pattern_input.key("element");
-        const label = __cfHelpers.derive({
+        const label = __cfHelpers.lift<{
+            row: {
+                done: boolean;
+            };
+        }, string>({
             type: "object",
             properties: {
                 row: {
@@ -91,9 +99,9 @@ export default pattern((state) => {
             required: ["row"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { row: {
+        } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({ row: {
                 done: row.key("done")
-            } }, __cfModuleCallback_1).for("label", true);
+            } }).for("label", true);
         return label;
     }, {
         type: "object",

@@ -198,7 +198,9 @@ export default pattern((__cf_pattern_input) => {
                     items: {
                         type: "string"
                     }
-                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+                    path: __cfHelpers.Cell<string[]>;
+                }, readonly string[]>({
                     type: "object",
                     properties: {
                         path: {
@@ -215,9 +217,11 @@ export default pattern((__cf_pattern_input) => {
                     items: {
                         type: "string"
                     }
-                } as const satisfies __cfHelpers.JSONSchema, { path: path }, ({ path }) => path.get()), [])).for("p", true) as string[];
+                } as const satisfies __cfHelpers.JSONSchema, ({ path }) => path.get())({ path: path }), [])).for("p", true) as string[];
                 const unsorted = findChildren(tree, p) as Entry[];
-                const items = __cfHelpers.derive({
+                const items = __cfHelpers.lift<{
+                    unsorted: Entry[];
+                }, Entry[]>({
                     type: "object",
                     properties: {
                         unsorted: {
@@ -285,11 +289,11 @@ export default pattern((__cf_pattern_input) => {
                             required: ["id", "name", "type"]
                         }
                     }
-                } as const satisfies __cfHelpers.JSONSchema, { unsorted: unsorted }, ({ unsorted }) => [...unsorted].sort((a: Entry, b: Entry) => {
+                } as const satisfies __cfHelpers.JSONSchema, ({ unsorted }) => [...unsorted].sort((a: Entry, b: Entry) => {
                     if (a.type === b.type)
                         return 0;
                     return a.type === "file" ? -1 : 1;
-                })).for("items", true);
+                }))({ unsorted: unsorted }).for("items", true);
                 return items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                     const item = __cf_pattern_input.key("element");
                     const handleNavigateInto = __cf_pattern_input.key("params", "handleNavigateInto");

@@ -12,6 +12,18 @@
  *   immutable thereafter.
  * - The first joiner's name is captured into `adminName` (per-space). They can
  *   add/remove options and reset votes. `isAdmin` is derived, not stored.
+ * - Open host takeover: any joined participant can `claimHost`, transferring
+ *   the role (and the host controls) to themselves. Deliberately ungated
+ *   beyond "must be joined"; see `ADMIN-FUTURE.md`.
+ *
+ * "We went here" history (Lunch Coordinator roadmap #1): the host logs where
+ * the group actually ate via each option's "we went here" button. A host date
+ * field backdates the next log (blank = today; `logVisit` also takes an
+ * explicit `wentAt`). Each entry is a per-space `HistoryEntry` (place + date);
+ * the stored log is capped at the MAX_HISTORY most recent. The log shows as a
+ * "Recently eaten" list below the options (8 most recent); the host can delete
+ * a single mistaken entry (`removeHistoryEntry`) or clear the whole log.
+ * See `LUNCH-COORDINATOR-TODO.md`.
  */
 
 import {
@@ -55,6 +67,8 @@ export interface JoinEvent {
   name?: string;
 }
 
+export type ClaimHostEvent = Record<PropertyKey, never>;
+
 export interface AddOptionEvent {
   title?: string;
 }
@@ -70,10 +84,36 @@ export interface CastVoteEvent {
 
 export type ResetVotesEvent = Record<PropertyKey, never>;
 
+/** A place the group actually ate, logged by the host. */
+export interface HistoryEntry {
+  id: string;
+  title: string;
+  loggedByName: string;
+  wentAt: number;
+}
+
+/**
+ * Log a visit — by existing option id, or a free-typed place title.
+ * `wentAt` backdates the entry (ms epoch); omitted → the host's date draft,
+ * which itself defaults to today.
+ */
+export interface LogVisitEvent {
+  optionId?: string;
+  title?: string;
+  wentAt?: number;
+}
+
+export interface RemoveHistoryEntryEvent {
+  id: string;
+}
+
+export type ClearHistoryEvent = Record<PropertyKey, never>;
+
 type QuestionCell = Writable<string | Default<"Where should we eat?">>;
 type OptionsCell = Writable<Option[] | Default<[]>>;
 type VotesCell = Writable<Vote[] | Default<[]>>;
 type UsersCell = Writable<User[] | Default<[]>>;
+type HistoryCell = Writable<HistoryEntry[] | Default<[]>>;
 type NameCell = Writable<string | Default<"">>;
 
 const PLAYER_COLORS = [
@@ -138,6 +178,46 @@ const getInitials = (name: string): string => {
   );
 };
 
+const DAY_NAMES = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+];
+
+// Cap on the stored visit log so a long-lived poll's PerSpace array can't grow
+// without bound. The "Recently eaten" card shows fewer (the 8 most recent).
+const MAX_HISTORY = 50;
+
+const newHistoryId = () =>
+  `h_${safeDateNow().toString(36)}_${
+    Math.floor(nonPrivateRandom() * 1e6).toString(36)
+  }`;
+
+// Parse a "YYYY-MM-DD" draft (from the host's date input) into a timestamp,
+// anchored to local midnight. Blank or unparseable → now. Only ever called
+// from a handler, so reading the clock here is fine.
+const parseVisitDate = (draft: string | undefined): number => {
+  const s = (draft ?? "").trim();
+  if (!s) return safeDateNow();
+  const t = new Date(`${s}T00:00:00`).getTime();
+  return Number.isNaN(t) ? safeDateNow() : t;
+};
+
+// Label for a visit derived purely from its own timestamp — never from the
+// current clock, so it stays idempotent inside reactive derives (timestamps
+// read against "now" belong in handlers, not computeds). Reads like
+// "Tuesday, May 20".
+const visitLabel = (wentAt: number): string => {
+  const d = new Date(wentAt);
+  return `${DAY_NAMES[d.getDay()]}, ${
+    d.toLocaleDateString([], { month: "short", day: "numeric" })
+  }`;
+};
+
 const joinAs = handler<JoinEvent, {
   users: UsersCell;
   myName: NameCell;
@@ -161,6 +241,20 @@ const joinAs = handler<JoinEvent, {
   if (trimmedName(adminName.get()) === "") {
     adminName.set(trimmed);
   }
+});
+
+// Open host takeover: any joined participant can claim the host role, which
+// transfers it away from the current host (isAdmin is derived from this). This
+// is deliberately ungated beyond "must be joined" — see ADMIN-FUTURE.md for the
+// kernel-level authority model this pattern-level check is a placeholder for.
+const claimHost = handler<ClaimHostEvent, {
+  myName: NameCell;
+  adminName: NameCell;
+}>((_, { myName, adminName }) => {
+  const me = trimmedName(myName.get());
+  if (!me) return;
+  if (trimmedName(adminName.get()) === me) return;
+  adminName.set(me);
 });
 
 const addOption = handler<AddOptionEvent, {
@@ -248,6 +342,71 @@ const clearMyVote = handler<ClearVoteEvent, {
   );
 });
 
+// Host-only, same gate as the other mutating admin actions. Logs where the
+// group actually ate — by option id (resolved to its title) or a free title.
+const logVisit = handler<LogVisitEvent, {
+  history: HistoryCell;
+  options: OptionsCell;
+  myName: NameCell;
+  adminName: NameCell;
+  visitDate: NameCell;
+}>(
+  (
+    { optionId, title, wentAt },
+    { history, options, myName, adminName, visitDate },
+  ) => {
+    const me = trimmedName(myName.get());
+    const admin = trimmedName(adminName.get());
+    if (!me || me !== admin) return;
+    let place = trimmedName(title);
+    if (!place && optionId) {
+      const opt = options.get().find((o) => o.id === optionId);
+      place = opt ? trimmedName(opt.title) : "";
+    }
+    if (!place) return;
+    const when = typeof wentAt === "number"
+      ? wentAt
+      : parseVisitDate(visitDate.get());
+    const entry: HistoryEntry = {
+      id: newHistoryId(),
+      title: place,
+      loggedByName: me,
+      wentAt: when,
+    };
+    // Cap the stored log at the MAX_HISTORY most recent visits (by date).
+    const next = [...history.get(), entry];
+    history.set(
+      next.length > MAX_HISTORY
+        ? [...next].sort((a, b) => b.wentAt - a.wentAt).slice(0, MAX_HISTORY)
+        : next,
+    );
+    // Reset the date draft so the next log defaults back to today.
+    visitDate.set("");
+  },
+);
+
+const removeHistoryEntry = handler<RemoveHistoryEntryEvent, {
+  history: HistoryCell;
+  myName: NameCell;
+  adminName: NameCell;
+}>(({ id }, { history, myName, adminName }) => {
+  const me = trimmedName(myName.get());
+  const admin = trimmedName(adminName.get());
+  if (!me || me !== admin) return;
+  history.set(history.get().filter((h) => h.id !== id));
+});
+
+const clearHistory = handler<ClearHistoryEvent, {
+  history: HistoryCell;
+  myName: NameCell;
+  adminName: NameCell;
+}>((_, { history, myName, adminName }) => {
+  const me = trimmedName(myName.get());
+  const admin = trimmedName(adminName.get());
+  if (!me || me !== admin) return;
+  history.set([]);
+});
+
 interface OptionTally {
   option: Option;
   green: number;
@@ -298,6 +457,7 @@ export interface CozyPollInput {
   options?: PerSpace<Option[] | Default<[]>>;
   votes?: PerSpace<Vote[] | Default<[]>>;
   users?: PerSpace<User[] | Default<[]>>;
+  history?: PerSpace<HistoryEntry[] | Default<[]>>;
   adminName?: PerSpace<string | Default<"">>;
   myName?: PerUser<string | Default<"">>;
   // joinName + optionDraft are internal form drafts, declared as local
@@ -311,19 +471,25 @@ export interface CozyPollOutput {
   options: readonly Option[];
   votes: readonly Vote[];
   users: readonly User[];
+  history: readonly HistoryEntry[];
   adminName: string;
   myName: string;
   userCount: number;
   optionCount: number;
   voteCount: number;
+  historyCount: number;
   isJoined: boolean;
   isAdmin: boolean;
   joinAs: Stream<JoinEvent>;
+  claimHost: Stream<ClaimHostEvent>;
   addOption: Stream<AddOptionEvent>;
   removeOption: Stream<RemoveOptionEvent>;
   castVote: Stream<CastVoteEvent>;
   clearMyVote: Stream<ClearVoteEvent>;
   resetVotes: Stream<ResetVotesEvent>;
+  logVisit: Stream<LogVisitEvent>;
+  removeHistoryEntry: Stream<RemoveHistoryEntryEvent>;
+  clearHistory: Stream<ClearHistoryEvent>;
 }
 
 export default pattern<CozyPollInput, CozyPollOutput>(
@@ -333,6 +499,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       options,
       votes,
       users,
+      history,
       adminName,
       myName,
     },
@@ -342,13 +509,21 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     // introduced by parking-coordinator (PR #3610).
     const joinName = Writable.perSession.of<string>("");
     const optionDraft = Writable.perSession.of<string>("");
+    // Host's backdate field for "we went here" — a "YYYY-MM-DD" draft, blank
+    // means today. Per-session like the other form drafts.
+    const visitDate = Writable.perSession.of<string>("");
     // Two-step confirmation for destructive actions. Stores the optionId
     // pending remove-confirm (null = nothing pending). Same idiom as
     // parking-coordinator's `removePersonConfirmTarget`.
     const removeConfirmTarget = Writable.perSession.of<string | null>(null);
     const resetConfirmPending = Writable.perSession.of<boolean>(false);
+    const clearHistoryConfirmPending = Writable.perSession.of<boolean>(false);
+    // Click-to-reveal for the host-takeover control, so it stays out of the
+    // way until a non-host clicks the "Hosted by …" label.
+    const claimHostRevealed = Writable.perSession.of<boolean>(false);
 
     const boundJoin = joinAs({ users, myName, adminName, joinName });
+    const boundClaimHost = claimHost({ myName, adminName });
     const boundAddOption = addOption({
       options,
       myName,
@@ -364,10 +539,30 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     const boundCastVote = castVote({ votes, myName });
     const boundClearMyVote = clearMyVote({ votes, myName });
     const boundResetVotes = resetVotes({ votes, myName, adminName });
+    const boundLogVisit = logVisit({
+      history,
+      options,
+      myName,
+      adminName,
+      visitDate,
+    });
+    const boundRemoveHistoryEntry = removeHistoryEntry({
+      history,
+      myName,
+      adminName,
+    });
+    const boundClearHistory = clearHistory({ history, myName, adminName });
 
     const userCount = derive(users, (u) => u.length);
     const optionCount = derive(options, (o) => o.length);
     const voteCount = derive(votes, (v) => v.length);
+    const historyCount = derive(history, (h) => h.length);
+    const hasHistory = derive(history, (h) => h.length > 0);
+    // Most-recent-first, capped — the "Recently eaten" card stays compact.
+    const recentHistory = derive(
+      history,
+      (h) => [...h].sort((a, b) => b.wentAt - a.wentAt).slice(0, 8),
+    );
     const isJoined = derive(myName, (n) => trimmedName(n) !== "");
     const isAdmin = derive(
       { myName, adminName },
@@ -386,6 +581,10 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     // narrow `resetConfirmPending` itself and lose the `.set` method in
     // the false branch.
     const isResetConfirm = computed(() => resetConfirmPending.get());
+    const isClearHistoryConfirm = computed(() =>
+      clearHistoryConfirmPending.get()
+    );
+    const isClaimHostRevealed = computed(() => claimHostRevealed.get());
     const ranked = derive(
       { options, votes, users },
       ({ options, votes, users }) => tallyOptions(options, votes, users),
@@ -395,6 +594,13 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       { ranked, voteCount },
       ({ ranked, voteCount }) =>
         voteCount > 0 && ranked.length > 0 ? ranked[0] : null,
+    );
+    // A joined viewer who is not the current host can take the host role.
+    const canClaimHost = derive(
+      { myName, adminName },
+      ({ myName, adminName }) =>
+        trimmedName(myName) !== "" &&
+        trimmedName(myName) !== trimmedName(adminName),
     );
 
     return {
@@ -574,6 +780,74 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                     </div>
                   </div>
                 )}
+
+                {
+                  /* Open host takeover — kept out of the way: a non-host sees a
+                  subtle "Hosted by …" label and clicks it to reveal the
+                  "Become host" button. Plain JSX with a per-session toggle so
+                  the onClicks lower as handlers (not lifts). */
+                }
+                {canClaimHost
+                  ? (isClaimHostRevealed
+                    ? (
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "8px",
+                          flexWrap: "wrap",
+                          padding: "8px 12px",
+                          marginBottom: "16px",
+                          backgroundColor: "#eef2ff",
+                          border: "1px solid #c7d2fe",
+                          borderRadius: "8px",
+                          fontSize: "13px",
+                          color: "#3730a3",
+                        }}
+                      >
+                        <span>{joinHint}</span>
+                        <cf-button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => {
+                            boundClaimHost.send({});
+                            claimHostRevealed.set(false);
+                          }}
+                        >
+                          Become host
+                        </cf-button>
+                        <cf-button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => claimHostRevealed.set(false)}
+                        >
+                          Cancel
+                        </cf-button>
+                      </div>
+                    )
+                    : (
+                      <div style={{ marginBottom: "16px" }}>
+                        <button
+                          type="button"
+                          aria-label="Hosting info — click to take over as host"
+                          title="Click to take over as host"
+                          style={{
+                            background: "none",
+                            border: "none",
+                            padding: 0,
+                            fontSize: "13px",
+                            color: "#6b7280",
+                            cursor: "pointer",
+                            textDecoration: "underline dotted",
+                            textUnderlineOffset: "3px",
+                          }}
+                          onClick={() => claimHostRevealed.set(true)}
+                        >
+                          {joinHint}
+                        </button>
+                      </div>
+                    ))
+                  : null}
 
                 {/* Top choice — only when there are votes */}
                 {computed(() => {
@@ -869,6 +1143,33 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                               </button>
                             )
                             : null}
+                          {
+                            /* Host logs that the group actually ate here —
+                            a visible pill so it reads as an action. Uses the
+                            host's date field (blank = today). */
+                          }
+                          {isAdmin
+                            ? (
+                              <button
+                                type="button"
+                                aria-label="Log that we went here (host)"
+                                style={{
+                                  background: "#eaf6ef",
+                                  border: "1px solid #b7e0c8",
+                                  borderRadius: "9999px",
+                                  padding: "2px 10px",
+                                  color: "#2f6f4e",
+                                  fontSize: "11px",
+                                  fontWeight: 600,
+                                  cursor: "pointer",
+                                }}
+                                onClick={() =>
+                                  boundLogVisit.send({ optionId: oid })}
+                              >
+                                ✓ we went here
+                              </button>
+                            )
+                            : null}
                         </div>
                         {isRemoveConfirm
                           ? (
@@ -978,6 +1279,157 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                   );
                 })}
 
+                {
+                  /* Recently eaten — the visit log, shown below the options.
+                  Everyone sees it; the host can delete a single mistaken entry
+                  (✕) or clear the whole log. Plain JSX with derived-boolean
+                  ternaries (the host-controls idiom), NOT a computed-returned
+                  VNode, so the interactive onClick handlers lower as handlers
+                  rather than lifts ("$event in inputs" / non-idempotent trap). */
+                }
+                {hasHistory
+                  ? (
+                    <div
+                      style={{
+                        marginBottom: "16px",
+                        padding: "12px 16px",
+                        backgroundColor: "#fdf6ec",
+                        border: "1px solid #f0e0c8",
+                        borderRadius: "8px",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: "8px",
+                          marginBottom: "10px",
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize: "11px",
+                            fontWeight: 700,
+                            letterSpacing: "0.05em",
+                            textTransform: "uppercase",
+                            color: "#92702a",
+                          }}
+                        >
+                          🗓 Recently eaten
+                        </div>
+                        {isAdmin
+                          ? (isClearHistoryConfirm
+                            ? (
+                              <span
+                                style={{
+                                  display: "inline-flex",
+                                  gap: "6px",
+                                  alignItems: "center",
+                                }}
+                              >
+                                <cf-button
+                                  size="sm"
+                                  variant="primary"
+                                  onClick={() => {
+                                    boundClearHistory.send({});
+                                    clearHistoryConfirmPending.set(false);
+                                  }}
+                                >
+                                  Clear all
+                                </cf-button>
+                                <cf-button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() =>
+                                    clearHistoryConfirmPending.set(false)}
+                                >
+                                  Cancel
+                                </cf-button>
+                              </span>
+                            )
+                            : (
+                              <button
+                                type="button"
+                                aria-label="Clear all history (host)"
+                                style={{
+                                  background: "none",
+                                  border: "none",
+                                  padding: 0,
+                                  color: "#b08642",
+                                  fontSize: "11px",
+                                  textDecoration: "underline",
+                                  cursor: "pointer",
+                                }}
+                                onClick={() =>
+                                  clearHistoryConfirmPending.set(true)}
+                              >
+                                clear all
+                              </button>
+                            ))
+                          : null}
+                      </div>
+                      {recentHistory.map((entry) => {
+                        const entryId = entry.id;
+                        return (
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "baseline",
+                              justifyContent: "space-between",
+                              gap: "8px",
+                              padding: "4px 0",
+                              fontSize: "13px",
+                              color: "#5b4a2c",
+                            }}
+                          >
+                            <span style={{ fontWeight: 500 }}>
+                              {entry.title}
+                            </span>
+                            <span
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "baseline",
+                                gap: "8px",
+                              }}
+                            >
+                              <span
+                                style={{ fontSize: "12px", color: "#a08552" }}
+                              >
+                                {visitLabel(entry.wentAt)}
+                              </span>
+                              {isAdmin
+                                ? (
+                                  <button
+                                    type="button"
+                                    aria-label="Delete this visit (host)"
+                                    title="We didn't actually eat there"
+                                    style={{
+                                      background: "none",
+                                      border: "none",
+                                      padding: 0,
+                                      color: "#b08642",
+                                      fontSize: "13px",
+                                      lineHeight: 1,
+                                      cursor: "pointer",
+                                    }}
+                                    onClick={() =>
+                                      boundRemoveHistoryEntry.send({
+                                        id: entryId,
+                                      })}
+                                  >
+                                    ✕
+                                  </button>
+                                )
+                                : null}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )
+                  : null}
+
                 {/* Host controls — only the admin sees this card. */}
                 {isAdmin
                   ? (
@@ -1045,6 +1497,32 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                             </cf-button>
                           )}
                       </div>
+                      {
+                        /* Backdates the next "✓ we went here" you click on an
+                        option above. Blank = today; cleared after each log. */
+                      }
+                      <div
+                        style={{
+                          marginTop: "8px",
+                          display: "flex",
+                          gap: "8px",
+                          alignItems: "center",
+                          flexWrap: "wrap",
+                          fontSize: "12px",
+                          color: "#1e40af",
+                        }}
+                      >
+                        <span>Date for "✓ we went here":</span>
+                        <cf-input
+                          type="date"
+                          $value={visitDate}
+                          aria-label="Visit date (blank = today)"
+                          timing-strategy="immediate"
+                        />
+                        <span style={{ color: "#64748b" }}>
+                          (blank = today)
+                        </span>
+                      </div>
                     </div>
                   )
                   : null}
@@ -1057,19 +1535,25 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       options: derive(options, (o) => o),
       votes: derive(votes, (v) => v),
       users: derive(users, (u) => u),
+      history: derive(history, (h) => h),
       adminName: derive(adminName, (a) => a),
       myName: derive(myName, (n) => n),
       userCount,
       optionCount,
       voteCount,
+      historyCount,
       isJoined,
       isAdmin,
       joinAs: boundJoin,
+      claimHost: boundClaimHost,
       addOption: boundAddOption,
       removeOption: boundRemoveOption,
       castVote: boundCastVote,
       clearMyVote: boundClearMyVote,
       resetVotes: boundResetVotes,
+      logVisit: boundLogVisit,
+      removeHistoryEntry: boundRemoveHistoryEntry,
+      clearHistory: boundClearHistory,
     };
   },
 );
