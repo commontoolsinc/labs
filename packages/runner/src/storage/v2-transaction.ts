@@ -164,11 +164,11 @@ const ensureWritableDocument = (
 
 /**
  * Drops `doc.frozenReads` entries on the chain of `writtenPath` -- both
- * ancestors (their containers were rebuilt by `setAtPath()` /
- * `applyMutablePathWrite()`) and descendants (the subtree at the write
- * target is gone). Sibling subtrees off divergent ancestors are preserved:
- * structural sharing leaves their values reference-identical to the
- * consumer's cached snapshot.
+ * ancestors (whose containers were rebuilt by `applyMutablePathWrite()`)
+ * and descendants (the subtree at the write target is gone). Sibling
+ * subtrees off divergent ancestors are preserved: structural sharing
+ * leaves their values reference-identical to the consumer's cached
+ * snapshot.
  *
  * Additionally drops the synthetic `<parent>/length` sibling: writing to
  * `array[N]` can change `array.length`, and that pointer is a true sibling
@@ -1241,18 +1241,15 @@ export class V2StorageTransaction implements IStorageTransaction {
     const isolatedValue = value === undefined
       ? undefined
       : cloneIfNecessary(value) as FabricValue;
-    const result = applyMutablePathWrite(
-      current.value,
-      address,
-      isolatedValue,
-    );
-    if (result.error) {
-      return { error: result.error.from(space) };
-    }
-    if (!result.ok.changed) {
-      return { ok: current };
-    }
 
+    // Compute the activity path and previous-value snapshots BEFORE the
+    // write -- `applyMutablePathWrite()` mutates `current.value` in place
+    // on the second-and-later write to this doc within a transaction
+    // (`cloneForMutation({ force: false })` short-circuits to identity on
+    // an already-mutable root). Reading `current.value` AFTER the mutation
+    // would observe the post-write state and silently mis-report the
+    // `previousActivityValue` to the reactivity log.
+    //
     // For create-parents writes, the materialization point (deepest
     // pre-existing parent on the write path) is where the observable
     // change happens for subscribers watching a parent. For simple writes
@@ -1267,6 +1264,18 @@ export class V2StorageTransaction implements IStorageTransaction {
         allowArrayLength: true,
       }) as FabricValue,
     ) as FabricValue | undefined;
+
+    const result = applyMutablePathWrite(
+      current.value,
+      address,
+      isolatedValue,
+    );
+    if (result.error) {
+      return { error: result.error.from(space) };
+    }
+    if (!result.ok.changed) {
+      return { ok: current };
+    }
 
     const collapsedNext: RootAttestation = {
       ...current,

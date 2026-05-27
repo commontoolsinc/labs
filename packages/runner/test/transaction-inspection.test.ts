@@ -452,6 +452,54 @@ describe("transaction inspection", () => {
     }
   });
 
+  it(
+    "preserves correct previousValue across distinct-path writes within a single transaction " +
+      "(regression: applyMutablePathWrite mutates current.value in place on 2nd+ write)",
+    async () => {
+      // Two writes at *different* leaf paths within one transaction. The
+      // second write's `previousValue` must capture what was at path
+      // ["value", "b"] BEFORE the second write (= the seed value), not the
+      // value that's just been written. Reading the activity-path snapshot
+      // AFTER `applyMutablePathWrite()` would observe the post-mutation
+      // state because the helper mutates `current.value` in place on the
+      // second-and-later write (cloneForMutation short-circuits to
+      // identity on an already-mutable root).
+      const storageManager = StorageManager.emulate({ as: signer });
+      try {
+        const id =
+          "test:transaction-inspection-previousvalue-across-paths-v2" as const;
+        const seed = storageManager.edit();
+        seed.write({ space, scope: "space", id, path: [] }, {
+          value: { a: 1, b: 2 },
+        });
+        await seed.commit();
+
+        const tx = storageManager.edit();
+        tx.write({ space, scope: "space", id, path: ["value", "a"] }, 10);
+        tx.write({ space, scope: "space", id, path: ["value", "b"] }, 20);
+
+        const details = [...getTransactionWriteDetails(tx, space)].sort(
+          (l, r) =>
+            l.address.path.join("/").localeCompare(r.address.path.join("/")),
+        );
+        assertEquals(details, [
+          {
+            address: { space, scope: "space", id, path: ["value", "a"] },
+            value: 10,
+            previousValue: 1,
+          },
+          {
+            address: { space, scope: "space", id, path: ["value", "b"] },
+            value: 20,
+            previousValue: 2, // <- regression: was 20 (post-mutation) before fix
+          },
+        ]);
+      } finally {
+        await storageManager.close();
+      }
+    },
+  );
+
   it("records the rewritten parent path when a single native v2 batch write materializes missing parents", async () => {
     const storageManager = StorageManager.emulate({
       as: signer,
