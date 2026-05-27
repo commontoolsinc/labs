@@ -697,6 +697,7 @@ export class Server {
           this.schedulerObservationReadSpaces(
             Engine.getLatestSchedulerActionSnapshot(engine, {
               branch: message.commit.branch ?? "",
+              ownerSpace: message.space,
               pieceId: observation.pieceId,
               processGeneration: observation.processGeneration,
               actionId: observation.actionId,

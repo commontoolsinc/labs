@@ -349,6 +349,50 @@ describe("persistent scheduler observations", () => {
     }
   });
 
+  it("rehydrates failed scheduler observations as runnable work", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {
+      pullMode: "enabled",
+    });
+    try {
+      const failedPersistedAction = () => {};
+      testRuntime.runtime.scheduler.subscribe(failedPersistedAction, {
+        reads: [],
+        shallowReads: [],
+        writes: [],
+      });
+
+      const rehydrated = testRuntime.runtime.scheduler
+        .rehydrateActionFromObservation(failedPersistedAction, {
+          observation: buildSchedulerActionObservation({
+            actionId: "failedPersistedAction",
+            actionKind: "computation",
+            branch: "",
+            pieceId: "of:piece",
+            processGeneration: 1,
+            implementationFingerprint: "impl:v1",
+            runtimeFingerprint: "runtime:test",
+            observedAtSeq: 5,
+            transactionKind: "action-run",
+            transactionLog: {
+              reads: [readAddress],
+              shallowReads: [],
+              writes: [],
+            },
+            currentKnownWrites: [writeAddress],
+            status: "failed",
+            errorFingerprint: "error:test",
+          }),
+        });
+
+      expect(rehydrated).toBe(true);
+      expect(testRuntime.runtime.scheduler.isDirty(failedPersistedAction))
+        .toBe(true);
+      expect(testRuntime.runtime.scheduler.getStats().pending).toBe(1);
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
   it("rehydrates dirty scheduler observations as runnable work", async () => {
     const testRuntime = createSchedulerTestRuntime("https://example.test", {
       pullMode: "enabled",

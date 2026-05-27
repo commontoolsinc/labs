@@ -221,6 +221,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_scheduler_observation_session_local
 
 CREATE TABLE IF NOT EXISTS scheduler_action_snapshot (
   branch              TEXT    NOT NULL DEFAULT '',
+  owner_space         TEXT    NOT NULL DEFAULT '',
   piece_id            TEXT    NOT NULL,
   process_generation  INTEGER NOT NULL,
   action_id           TEXT    NOT NULL,
@@ -228,7 +229,13 @@ CREATE TABLE IF NOT EXISTS scheduler_action_snapshot (
   commit_seq          INTEGER,
   observed_at_seq     INTEGER NOT NULL,
   payload             JSON    NOT NULL,
-  PRIMARY KEY (branch, piece_id, process_generation, action_id),
+  PRIMARY KEY (
+    branch,
+    owner_space,
+    piece_id,
+    process_generation,
+    action_id
+  ),
   FOREIGN KEY (observation_id)
     REFERENCES scheduler_observation(observation_id)
 );
@@ -275,6 +282,7 @@ CREATE INDEX IF NOT EXISTS idx_scheduler_read_index_action
 
 CREATE TABLE IF NOT EXISTS scheduler_write_index (
   branch              TEXT    NOT NULL DEFAULT '',
+  owner_space         TEXT    NOT NULL DEFAULT '',
   write_space         TEXT    NOT NULL,
   write_id            TEXT    NOT NULL,
   write_scope         TEXT    NOT NULL,
@@ -297,6 +305,7 @@ CREATE INDEX IF NOT EXISTS idx_scheduler_write_index_action
 
 CREATE TABLE IF NOT EXISTS scheduler_action_state (
   branch                 TEXT    NOT NULL DEFAULT '',
+  owner_space            TEXT    NOT NULL DEFAULT '',
   piece_id               TEXT    NOT NULL,
   process_generation     INTEGER NOT NULL,
   action_id              TEXT    NOT NULL,
@@ -304,7 +313,13 @@ CREATE TABLE IF NOT EXISTS scheduler_action_state (
   direct_dirty_seq       INTEGER,
   stale_seq              INTEGER,
   unknown_reason         TEXT,
-  PRIMARY KEY (branch, piece_id, process_generation, action_id),
+  PRIMARY KEY (
+    branch,
+    owner_space,
+    piece_id,
+    process_generation,
+    action_id
+  ),
   FOREIGN KEY (latest_observation_id)
     REFERENCES scheduler_observation(observation_id)
 );
@@ -795,6 +810,7 @@ export interface SchedulerReaderIndexEntry {
 
 export interface SchedulerActionState {
   branch: BranchName;
+  ownerSpace?: string;
   pieceId: string;
   processGeneration: number;
   actionId: string;
@@ -935,6 +951,25 @@ const hasColumn = (
   return rows.some((row) => row.name === column);
 };
 
+const primaryKeyColumns = (database: Database, table: string): string[] => {
+  const rows = database.prepare(`PRAGMA table_info("${table}")`).all() as Array<
+    { name: string; pk: number }
+  >;
+  return rows
+    .filter((row) => row.pk > 0)
+    .sort((left, right) => left.pk - right.pk)
+    .map((row) => row.name);
+};
+
+const indexColumns = (database: Database, index: string): string[] => {
+  const rows = database.prepare(`PRAGMA index_info("${index}")`).all() as Array<
+    { seqno: number; name: string }
+  >;
+  return rows
+    .sort((left, right) => left.seqno - right.seqno)
+    .map((row) => row.name);
+};
+
 const migrateScopedEntityTables = (database: Database): void => {
   if (hasColumn(database, "revision", "scope_key")) {
     return;
@@ -1024,6 +1059,17 @@ ADD COLUMN owner_space TEXT;
 `);
 };
 
+const migrateSchedulerWriteIndexOwnerSpace = (database: Database): void => {
+  if (hasColumn(database, "scheduler_write_index", "owner_space")) {
+    return;
+  }
+
+  database.exec(`
+ALTER TABLE scheduler_write_index
+ADD COLUMN owner_space TEXT NOT NULL DEFAULT '';
+`);
+};
+
 const migrateSchedulerActionSnapshotMetadata = (database: Database): void => {
   if (!hasColumn(database, "scheduler_action_snapshot", "commit_seq")) {
     database.exec(`
@@ -1037,6 +1083,192 @@ ALTER TABLE scheduler_action_snapshot
 ADD COLUMN observed_at_seq INTEGER NOT NULL DEFAULT 0;
 `);
   }
+};
+
+const migrateSchedulerActionSnapshotOwnerSpaceKey = (
+  database: Database,
+): void => {
+  if (
+    primaryKeyColumns(database, "scheduler_action_snapshot").includes(
+      "owner_space",
+    )
+  ) {
+    return;
+  }
+
+  const ownerSpaceSelect = hasColumn(
+      database,
+      "scheduler_action_snapshot",
+      "owner_space",
+    )
+    ? "COALESCE(owner_space, '')"
+    : "''";
+
+  database.exec(`
+BEGIN TRANSACTION;
+
+ALTER TABLE scheduler_action_snapshot
+RENAME TO scheduler_action_snapshot_owner_space_migration;
+
+CREATE TABLE scheduler_action_snapshot (
+  branch              TEXT    NOT NULL DEFAULT '',
+  owner_space         TEXT    NOT NULL DEFAULT '',
+  piece_id            TEXT    NOT NULL,
+  process_generation  INTEGER NOT NULL,
+  action_id           TEXT    NOT NULL,
+  observation_id      INTEGER NOT NULL,
+  commit_seq          INTEGER,
+  observed_at_seq     INTEGER NOT NULL,
+  payload             JSON    NOT NULL,
+  PRIMARY KEY (
+    branch,
+    owner_space,
+    piece_id,
+    process_generation,
+    action_id
+  ),
+  FOREIGN KEY (observation_id)
+    REFERENCES scheduler_observation(observation_id)
+);
+
+INSERT OR REPLACE INTO scheduler_action_snapshot (
+  branch,
+  owner_space,
+  piece_id,
+  process_generation,
+  action_id,
+  observation_id,
+  commit_seq,
+  observed_at_seq,
+  payload
+)
+SELECT
+  branch,
+  ${ownerSpaceSelect},
+  piece_id,
+  process_generation,
+  action_id,
+  observation_id,
+  commit_seq,
+  observed_at_seq,
+  payload
+FROM scheduler_action_snapshot_owner_space_migration;
+
+DROP TABLE scheduler_action_snapshot_owner_space_migration;
+
+COMMIT;
+`);
+};
+
+const migrateSchedulerActionStateOwnerSpaceKey = (
+  database: Database,
+): void => {
+  if (
+    primaryKeyColumns(database, "scheduler_action_state").includes(
+      "owner_space",
+    )
+  ) {
+    return;
+  }
+
+  const ownerSpaceSelect = hasColumn(
+      database,
+      "scheduler_action_state",
+      "owner_space",
+    )
+    ? "COALESCE(owner_space, '')"
+    : "''";
+
+  database.exec(`
+BEGIN TRANSACTION;
+
+ALTER TABLE scheduler_action_state
+RENAME TO scheduler_action_state_owner_space_migration;
+
+CREATE TABLE scheduler_action_state (
+  branch                 TEXT    NOT NULL DEFAULT '',
+  owner_space            TEXT    NOT NULL DEFAULT '',
+  piece_id               TEXT    NOT NULL,
+  process_generation     INTEGER NOT NULL,
+  action_id              TEXT    NOT NULL,
+  latest_observation_id  INTEGER,
+  direct_dirty_seq       INTEGER,
+  stale_seq              INTEGER,
+  unknown_reason         TEXT,
+  PRIMARY KEY (
+    branch,
+    owner_space,
+    piece_id,
+    process_generation,
+    action_id
+  ),
+  FOREIGN KEY (latest_observation_id)
+    REFERENCES scheduler_observation(observation_id)
+);
+
+INSERT OR REPLACE INTO scheduler_action_state (
+  branch,
+  owner_space,
+  piece_id,
+  process_generation,
+  action_id,
+  latest_observation_id,
+  direct_dirty_seq,
+  stale_seq,
+  unknown_reason
+)
+SELECT
+  branch,
+  ${ownerSpaceSelect},
+  piece_id,
+  process_generation,
+  action_id,
+  latest_observation_id,
+  direct_dirty_seq,
+  stale_seq,
+  unknown_reason
+FROM scheduler_action_state_owner_space_migration;
+
+DROP TABLE scheduler_action_state_owner_space_migration;
+
+COMMIT;
+`);
+};
+
+const migrateSchedulerActionIndexes = (database: Database): void => {
+  const readIndexHasOwnerSpace = indexColumns(
+    database,
+    "idx_scheduler_read_index_action",
+  ).includes("owner_space");
+  const writeIndexHasOwnerSpace = indexColumns(
+    database,
+    "idx_scheduler_write_index_action",
+  ).includes("owner_space");
+  if (readIndexHasOwnerSpace && writeIndexHasOwnerSpace) {
+    return;
+  }
+
+  database.exec(`
+DROP INDEX IF EXISTS idx_scheduler_read_index_action;
+CREATE INDEX idx_scheduler_read_index_action
+  ON scheduler_read_index (
+    branch,
+    owner_space,
+    piece_id,
+    process_generation,
+    action_id
+  );
+
+DROP INDEX IF EXISTS idx_scheduler_write_index_action;
+CREATE INDEX idx_scheduler_write_index_action
+  ON scheduler_write_index (
+    branch,
+    owner_space,
+    piece_id,
+    process_generation,
+    action_id
+  );
+`);
 };
 
 const migrateSchedulerObservationReplayStatus = (database: Database): void => {
@@ -1105,7 +1337,11 @@ export const open = async (
   database.exec(INIT);
   migrateScopedEntityTables(database);
   migrateSchedulerReadIndexOwnerSpace(database);
+  migrateSchedulerWriteIndexOwnerSpace(database);
   migrateSchedulerActionSnapshotMetadata(database);
+  migrateSchedulerActionSnapshotOwnerSpaceKey(database);
+  migrateSchedulerActionStateOwnerSpaceKey(database);
+  migrateSchedulerActionIndexes(database);
   migrateSchedulerObservationReplayStatus(database);
   return {
     url,
@@ -1313,6 +1549,7 @@ const upsertSchedulerObservationTransaction = (
   const payload = encodeSchedulerDependencySnapshot(observation);
   const actionKey = {
     branch,
+    ownerSpace: observation.ownerSpace,
     pieceId: observation.pieceId,
     processGeneration: observation.processGeneration,
     actionId: observation.actionId,
@@ -1384,6 +1621,7 @@ export const getLatestSchedulerActionSnapshot = (
   engine: Engine,
   options: {
     branch?: BranchName;
+    ownerSpace?: string;
     pieceId: string;
     processGeneration: number;
     actionId: string;
@@ -1399,11 +1637,13 @@ export const getLatestSchedulerActionSnapshot = (
     JOIN scheduler_observation o
       ON o.observation_id = s.observation_id
     WHERE s.branch = :branch
+      AND s.owner_space = :owner_space
       AND s.piece_id = :piece_id
       AND s.process_generation = :process_generation
       AND s.action_id = :action_id
   `).get({
     branch: options.branch ?? DEFAULT_BRANCH,
+    owner_space: normalizeSchedulerOwnerSpace(options.ownerSpace),
     piece_id: options.pieceId,
     process_generation: options.processGeneration,
     action_id: options.actionId,
@@ -1430,6 +1670,7 @@ export const listSchedulerActionSnapshots = (
   engine: Engine,
   options: {
     branch?: BranchName;
+    ownerSpace?: string;
     pieceId?: string;
     processGeneration?: number;
     actionId?: string;
@@ -1449,19 +1690,24 @@ export const listSchedulerActionSnapshots = (
       ON o.observation_id = s.observation_id
     LEFT JOIN scheduler_action_state a
       ON a.branch = s.branch
+      AND a.owner_space = s.owner_space
       AND a.piece_id = s.piece_id
       AND a.process_generation = s.process_generation
       AND a.action_id = s.action_id
     WHERE s.branch = :branch
+      AND (:owner_space IS NULL OR s.owner_space = :owner_space)
       AND (:piece_id IS NULL OR s.piece_id = :piece_id)
       AND (
         :process_generation IS NULL OR
         s.process_generation = :process_generation
       )
       AND (:action_id IS NULL OR s.action_id = :action_id)
-    ORDER BY s.piece_id, s.process_generation, s.action_id
+    ORDER BY s.owner_space, s.piece_id, s.process_generation, s.action_id
   `).all({
     branch: options.branch ?? DEFAULT_BRANCH,
+    owner_space: options.ownerSpace !== undefined
+      ? normalizeSchedulerOwnerSpace(options.ownerSpace)
+      : null,
     piece_id: options.pieceId ?? null,
     process_generation: options.processGeneration ?? null,
     action_id: options.actionId ?? null,
@@ -1534,21 +1780,26 @@ export const findSchedulerReadersForWrite = (
         row.read_kind === "shallow",
       )
     )
-    .map((row) => ({
-      branch: row.branch,
-      ...(row.owner_space !== null ? { ownerSpace: row.owner_space } : {}),
-      pieceId: row.piece_id,
-      processGeneration: row.process_generation,
-      actionId: row.action_id,
-      observationId: row.observation_id,
-      readKind: row.read_kind === "shallow" ? "shallow" : "recursive",
-      read: {
-        space: row.read_space,
-        id: row.read_id,
-        scope: row.read_scope as CellScope,
-        path: decodeSchedulerPath(row.read_path),
-      },
-    }));
+    .map((row) => {
+      const ownerSpace = denormalizeSchedulerOwnerSpace(
+        row.owner_space ?? "",
+      );
+      return {
+        branch: row.branch,
+        ...(ownerSpace !== undefined ? { ownerSpace } : {}),
+        pieceId: row.piece_id,
+        processGeneration: row.process_generation,
+        actionId: row.action_id,
+        observationId: row.observation_id,
+        readKind: row.read_kind === "shallow" ? "shallow" : "recursive",
+        read: {
+          space: row.read_space,
+          id: row.read_id,
+          scope: row.read_scope as CellScope,
+          path: decodeSchedulerPath(row.read_path),
+        },
+      };
+    });
 };
 
 export const markSchedulerReadersDirtyForWrites = (
@@ -1612,6 +1863,7 @@ export const getSchedulerActionState = (
   engine: Engine,
   options: {
     branch?: BranchName;
+    ownerSpace?: string;
     pieceId: string;
     processGeneration: number;
     actionId: string;
@@ -1620,6 +1872,7 @@ export const getSchedulerActionState = (
   const row = engine.database.prepare(`
     SELECT
       branch,
+      owner_space,
       piece_id,
       process_generation,
       action_id,
@@ -1629,19 +1882,23 @@ export const getSchedulerActionState = (
       unknown_reason
     FROM scheduler_action_state
     WHERE branch = :branch
+      AND owner_space = :owner_space
       AND piece_id = :piece_id
       AND process_generation = :process_generation
       AND action_id = :action_id
   `).get({
     branch: options.branch ?? DEFAULT_BRANCH,
+    owner_space: normalizeSchedulerOwnerSpace(options.ownerSpace),
     piece_id: options.pieceId,
     process_generation: options.processGeneration,
     action_id: options.actionId,
   }) as SchedulerActionStateRow | undefined;
 
   if (!row) return undefined;
+  const ownerSpace = denormalizeSchedulerOwnerSpace(row.owner_space);
   return {
     branch: row.branch,
+    ...(ownerSpace !== undefined ? { ownerSpace } : {}),
     pieceId: row.piece_id,
     processGeneration: row.process_generation,
     actionId: row.action_id,
@@ -1675,6 +1932,7 @@ function markSchedulerActionDirectDirty(
   engine.database.prepare(`
     INSERT INTO scheduler_action_state (
       branch,
+      owner_space,
       piece_id,
       process_generation,
       action_id,
@@ -1682,12 +1940,19 @@ function markSchedulerActionDirectDirty(
     )
     VALUES (
       :branch,
+      :owner_space,
       :piece_id,
       :process_generation,
       :action_id,
       :direct_dirty_seq
     )
-    ON CONFLICT (branch, piece_id, process_generation, action_id)
+    ON CONFLICT (
+      branch,
+      owner_space,
+      piece_id,
+      process_generation,
+      action_id
+    )
     DO UPDATE SET
       direct_dirty_seq = CASE
         WHEN direct_dirty_seq IS NULL OR direct_dirty_seq < excluded.direct_dirty_seq
@@ -1696,6 +1961,7 @@ function markSchedulerActionDirectDirty(
       END
   `).run({
     branch: action.branch,
+    owner_space: normalizeSchedulerOwnerSpace(action.ownerSpace),
     piece_id: action.pieceId,
     process_generation: action.processGeneration,
     action_id: action.actionId,
@@ -1711,6 +1977,7 @@ function markSchedulerActionStale(
   engine.database.prepare(`
     INSERT INTO scheduler_action_state (
       branch,
+      owner_space,
       piece_id,
       process_generation,
       action_id,
@@ -1718,12 +1985,19 @@ function markSchedulerActionStale(
     )
     VALUES (
       :branch,
+      :owner_space,
       :piece_id,
       :process_generation,
       :action_id,
       :stale_seq
     )
-    ON CONFLICT (branch, piece_id, process_generation, action_id)
+    ON CONFLICT (
+      branch,
+      owner_space,
+      piece_id,
+      process_generation,
+      action_id
+    )
     DO UPDATE SET
       stale_seq = CASE
         WHEN stale_seq IS NULL OR stale_seq < excluded.stale_seq
@@ -1732,6 +2006,7 @@ function markSchedulerActionStale(
       END
   `).run({
     branch: action.branch,
+    owner_space: normalizeSchedulerOwnerSpace(action.ownerSpace),
     piece_id: action.pieceId,
     process_generation: action.processGeneration,
     action_id: action.actionId,
@@ -1789,12 +2064,14 @@ function schedulerWritesForAction(
       write_path
     FROM scheduler_write_index
     WHERE branch = :branch
+      AND owner_space = :owner_space
       AND piece_id = :piece_id
       AND process_generation = :process_generation
       AND action_id = :action_id
       AND write_kind IN ('current-known', 'declared')
   `).all({
     branch: action.branch,
+    owner_space: normalizeSchedulerOwnerSpace(action.ownerSpace),
     piece_id: action.pieceId,
     process_generation: action.processGeneration,
     action_id: action.actionId,
@@ -1839,6 +2116,7 @@ type SchedulerReadIndexRow = {
 
 type SchedulerWriteIndexRow = {
   branch: BranchName;
+  owner_space: string;
   write_space: string;
   write_id: EntityId;
   write_scope: string;
@@ -1859,6 +2137,7 @@ type SchedulerSnapshotRow = {
 
 type SchedulerActionStateRow = {
   branch: BranchName;
+  owner_space: string;
   piece_id: string;
   process_generation: number;
   action_id: string;
@@ -1899,6 +2178,18 @@ function normalizeSchedulerObservation(
       }
       : {}),
   };
+}
+
+function normalizeSchedulerOwnerSpace(
+  ownerSpace: string | null | undefined,
+): string {
+  return ownerSpace ?? "";
+}
+
+function denormalizeSchedulerOwnerSpace(
+  ownerSpace: string,
+): string | undefined {
+  return ownerSpace === "" ? undefined : ownerSpace;
 }
 
 function encodeSchedulerDependencySnapshot(
@@ -1943,6 +2234,7 @@ function selectSchedulerSnapshotRow(
   engine: Engine,
   key: {
     branch: BranchName;
+    ownerSpace?: string;
     pieceId: string;
     processGeneration: number;
     actionId: string;
@@ -1958,11 +2250,13 @@ function selectSchedulerSnapshotRow(
     JOIN scheduler_observation o
       ON o.observation_id = s.observation_id
     WHERE s.branch = :branch
+      AND s.owner_space = :owner_space
       AND s.piece_id = :piece_id
       AND s.process_generation = :process_generation
       AND s.action_id = :action_id
   `).get({
     branch: key.branch,
+    owner_space: normalizeSchedulerOwnerSpace(key.ownerSpace),
     piece_id: key.pieceId,
     process_generation: key.processGeneration,
     action_id: key.actionId,
@@ -2149,6 +2443,7 @@ function upsertSchedulerSnapshot(
   engine.database.prepare(`
     INSERT INTO scheduler_action_snapshot (
       branch,
+      owner_space,
       piece_id,
       process_generation,
       action_id,
@@ -2159,6 +2454,7 @@ function upsertSchedulerSnapshot(
     )
     VALUES (
       :branch,
+      :owner_space,
       :piece_id,
       :process_generation,
       :action_id,
@@ -2167,7 +2463,13 @@ function upsertSchedulerSnapshot(
       :observed_at_seq,
       :payload
     )
-    ON CONFLICT (branch, piece_id, process_generation, action_id)
+    ON CONFLICT (
+      branch,
+      owner_space,
+      piece_id,
+      process_generation,
+      action_id
+    )
     DO UPDATE SET
       observation_id = excluded.observation_id,
       commit_seq = excluded.commit_seq,
@@ -2175,6 +2477,7 @@ function upsertSchedulerSnapshot(
       payload = excluded.payload
   `).run({
     branch: options.branch,
+    owner_space: normalizeSchedulerOwnerSpace(options.observation.ownerSpace),
     piece_id: options.observation.pieceId,
     process_generation: options.observation.processGeneration,
     action_id: options.observation.actionId,
@@ -2203,7 +2506,7 @@ function schedulerReadIndexEntries(
     const normalized = normalizeSchedulerAddress(address);
     return {
       branch,
-      owner_space: observation.ownerSpace ?? null,
+      owner_space: normalizeSchedulerOwnerSpace(observation.ownerSpace),
       read_space: normalized.space,
       read_id: normalized.id,
       read_scope: normalizeSchedulerScope(normalized.scope),
@@ -2227,6 +2530,7 @@ function reconcileSchedulerReadRows(
 ): void {
   const params = {
     branch: options.branch,
+    owner_space: normalizeSchedulerOwnerSpace(options.observation.ownerSpace),
     piece_id: options.observation.pieceId,
     process_generation: options.observation.processGeneration,
     action_id: options.observation.actionId,
@@ -2246,6 +2550,7 @@ function reconcileSchedulerReadRows(
       observation_id
     FROM scheduler_read_index
     WHERE branch = :branch
+      AND COALESCE(owner_space, '') = :owner_space
       AND piece_id = :piece_id
       AND process_generation = :process_generation
       AND action_id = :action_id
@@ -2271,6 +2576,7 @@ function reconcileSchedulerReadRows(
     engine.database.prepare(`
       DELETE FROM scheduler_read_index
       WHERE branch = :branch
+        AND COALESCE(owner_space, '') = :owner_space
         AND piece_id = :piece_id
         AND process_generation = :process_generation
         AND action_id = :action_id
@@ -2380,6 +2686,7 @@ function schedulerWriteIndexEntries(
     const normalized = normalizeSchedulerAddress(address);
     return {
       branch,
+      owner_space: normalizeSchedulerOwnerSpace(observation.ownerSpace),
       write_space: normalized.space,
       write_id: normalized.id,
       write_scope: normalizeSchedulerScope(normalized.scope),
@@ -2403,6 +2710,7 @@ function reconcileSchedulerWriteRows(
 ): void {
   const params = {
     branch: options.branch,
+    owner_space: normalizeSchedulerOwnerSpace(options.observation.ownerSpace),
     piece_id: options.observation.pieceId,
     process_generation: options.observation.processGeneration,
     action_id: options.observation.actionId,
@@ -2410,6 +2718,7 @@ function reconcileSchedulerWriteRows(
   const existingRows = engine.database.prepare(`
     SELECT
       branch,
+      owner_space,
       write_space,
       write_id,
       write_scope,
@@ -2421,6 +2730,7 @@ function reconcileSchedulerWriteRows(
       observation_id
     FROM scheduler_write_index
     WHERE branch = :branch
+      AND owner_space = :owner_space
       AND piece_id = :piece_id
       AND process_generation = :process_generation
       AND action_id = :action_id
@@ -2446,6 +2756,7 @@ function reconcileSchedulerWriteRows(
     engine.database.prepare(`
       DELETE FROM scheduler_write_index
       WHERE branch = :branch
+        AND owner_space = :owner_space
         AND piece_id = :piece_id
         AND process_generation = :process_generation
         AND action_id = :action_id
@@ -2456,6 +2767,7 @@ function reconcileSchedulerWriteRows(
   const deleteWriteRow = engine.database.prepare(`
     DELETE FROM scheduler_write_index
     WHERE branch = :branch
+      AND owner_space = :owner_space
       AND write_space = :write_space
       AND write_id = :write_id
       AND write_scope = :write_scope
@@ -2469,6 +2781,7 @@ function reconcileSchedulerWriteRows(
     if (nextKeys.has(key)) continue;
     deleteWriteRow.run({
       branch: row.branch,
+      owner_space: row.owner_space,
       write_space: row.write_space,
       write_id: row.write_id,
       write_scope: row.write_scope,
@@ -2483,6 +2796,7 @@ function reconcileSchedulerWriteRows(
   const insertWriteRow = engine.database.prepare(`
     INSERT INTO scheduler_write_index (
       branch,
+      owner_space,
       write_space,
       write_id,
       write_scope,
@@ -2495,6 +2809,7 @@ function reconcileSchedulerWriteRows(
     )
     VALUES (
       :branch,
+      :owner_space,
       :write_space,
       :write_id,
       :write_scope,
@@ -2517,6 +2832,7 @@ function reconcileSchedulerWriteRows(
 function schedulerWriteIndexKey(row: SchedulerWriteIndexRow): string {
   return [
     row.branch,
+    row.owner_space,
     row.write_space,
     row.write_id,
     row.write_scope,
@@ -2539,6 +2855,7 @@ function upsertSchedulerActionState(
   engine.database.prepare(`
     INSERT INTO scheduler_action_state (
       branch,
+      owner_space,
       piece_id,
       process_generation,
       action_id,
@@ -2549,6 +2866,7 @@ function upsertSchedulerActionState(
     )
     VALUES (
       :branch,
+      :owner_space,
       :piece_id,
       :process_generation,
       :action_id,
@@ -2557,7 +2875,13 @@ function upsertSchedulerActionState(
       NULL,
       NULL
     )
-    ON CONFLICT (branch, piece_id, process_generation, action_id)
+    ON CONFLICT (
+      branch,
+      owner_space,
+      piece_id,
+      process_generation,
+      action_id
+    )
     DO UPDATE SET
       latest_observation_id = excluded.latest_observation_id,
       direct_dirty_seq = NULL,
@@ -2565,6 +2889,7 @@ function upsertSchedulerActionState(
       unknown_reason = NULL
   `).run({
     branch: options.branch,
+    owner_space: normalizeSchedulerOwnerSpace(options.observation.ownerSpace),
     piece_id: options.observation.pieceId,
     process_generation: options.observation.processGeneration,
     action_id: options.observation.actionId,
@@ -2614,11 +2939,14 @@ function pathIsPrefix(
 
 function schedulerActionKey(entry: {
   branch: BranchName;
+  ownerSpace?: string | null;
   pieceId: string;
   processGeneration: number;
   actionId: string;
 }): string {
-  return `${entry.branch}\0${entry.pieceId}\0${entry.processGeneration}\0${entry.actionId}`;
+  return `${entry.branch}\0${
+    normalizeSchedulerOwnerSpace(entry.ownerSpace)
+  }\0${entry.pieceId}\0${entry.processGeneration}\0${entry.actionId}`;
 }
 
 const applyCommitTransaction = (

@@ -620,6 +620,7 @@ export class Scheduler {
     }
 
     if (
+      observation.status === "failed" ||
       snapshot.directDirtySeq !== undefined ||
       snapshot.staleSeq !== undefined ||
       snapshot.unknownReason !== undefined
@@ -654,6 +655,7 @@ export class Scheduler {
 
     const result = await listSnapshots.call(provider, {
       ...query,
+      ownerSpace: query.ownerSpace ?? space,
       actionId: this.getActionId(action),
     });
     const snapshot = result.snapshots[0];
@@ -723,6 +725,7 @@ export class Scheduler {
         options.space,
         {
           ...(options.branch !== undefined ? { branch: options.branch } : {}),
+          ownerSpace: options.ownerSpace ?? options.space,
           pieceId: options.pieceId,
           ...(options.processGeneration !== undefined
             ? { processGeneration: options.processGeneration }

@@ -258,6 +258,87 @@ Deno.test("memory v2 accepts batched no-op scheduler observations", async () => 
   }
 });
 
+Deno.test("memory v2 namespaces scheduler mirrors by owner space", async () => {
+  const { engine, path } = await createEngine();
+  const ownerA = "did:key:scheduler-owner-a";
+  const ownerB = "did:key:scheduler-owner-b";
+  const ownerAObservation = {
+    ...observation,
+    ownerSpace: ownerA,
+  } satisfies SchedulerActionObservation;
+  const ownerBObservation = {
+    ...observation,
+    ownerSpace: ownerB,
+  } satisfies SchedulerActionObservation;
+
+  try {
+    upsertSchedulerObservation(engine, {
+      branch: "",
+      ownerSpace: ownerA,
+      observedAtSeq: 1,
+      observation: ownerAObservation,
+    });
+    upsertSchedulerObservation(engine, {
+      branch: "",
+      ownerSpace: ownerB,
+      observedAtSeq: 1,
+      observation: ownerBObservation,
+    });
+
+    assertEquals(
+      getLatestSchedulerActionSnapshot(engine, {
+        branch: "",
+        ownerSpace: ownerA,
+        pieceId: observation.pieceId,
+        processGeneration: observation.processGeneration,
+        actionId: observation.actionId,
+      })?.observation.ownerSpace,
+      ownerA,
+    );
+    assertEquals(
+      getLatestSchedulerActionSnapshot(engine, {
+        branch: "",
+        ownerSpace: ownerB,
+        pieceId: observation.pieceId,
+        processGeneration: observation.processGeneration,
+        actionId: observation.actionId,
+      })?.observation.ownerSpace,
+      ownerB,
+    );
+
+    const readers = findSchedulerReadersForWrite(engine, {
+      branch: "",
+      write: sourceRead,
+    });
+    assertEquals(
+      readers.map((reader) => reader.ownerSpace).sort(),
+      [ownerA, ownerB],
+    );
+
+    markSchedulerReadersDirtyForWrites(engine, {
+      branch: "",
+      dirtySeq: 7,
+      writes: [sourceRead],
+    });
+
+    for (const ownerSpace of [ownerA, ownerB]) {
+      assertEquals(
+        getSchedulerActionState(engine, {
+          branch: "",
+          ownerSpace,
+          pieceId: observation.pieceId,
+          processGeneration: observation.processGeneration,
+          actionId: observation.actionId,
+        })?.directDirtySeq,
+        7,
+      );
+    }
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 drops stale batched no-op observations independently", async () => {
   const { engine, path } = await createEngine();
 
@@ -802,6 +883,7 @@ Deno.test("memory v2 server mirrors scheduler read indexes into read spaces", as
       ]);
       const state = getSchedulerActionState(readEngine, {
         branch: "",
+        ownerSpace,
         pieceId: observation.pieceId,
         processGeneration: observation.processGeneration,
         actionId: observation.actionId,

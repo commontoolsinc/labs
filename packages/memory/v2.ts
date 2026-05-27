@@ -317,6 +317,7 @@ export interface SessionAckRequest {
 
 export interface SchedulerActionSnapshotQuery {
   branch?: BranchName;
+  ownerSpace?: string;
   pieceId?: string;
   processGeneration?: number;
   actionId?: string;
