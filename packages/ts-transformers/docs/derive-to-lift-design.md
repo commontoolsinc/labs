@@ -1,10 +1,12 @@
 # `derive` → `lift` → sandboxable: design
 
-_Status: Phase 1 implementation complete in CT-1615 (lift-applied form
-`__cfHelpers.lift(cb)(input)`). Phases 2 & 3 designed at high level; details
-deferred. Two follow-ups bundled together to land next: remove the runtime
-`derive` export, and switch the transformer's emitted form from `lift(...)({})`
-to `lift(...)()` (requires a small runtime change to `lift`)._
+_Status: Phase 1 complete in CT-1615 (lift-applied form
+`__cfHelpers.lift(cb)(input)`). Registry-architecture follow-up landed in PR
+#3707 (registries consolidated into `CrossStageState`). No-input form switch
+landed in PR #3709 (`computed`-origin lifts now emit `lift(false, fn)()` instead
+of the `lift(...)({})` stopgap). Still outstanding: removing the runtime
+`derive` export (deferred — not dead; see follow-ups below). Phases 2 & 3
+designed at high level; details deferred._
 
 ## Motivation
 
@@ -413,24 +415,36 @@ the relevant phase lands.
   user-authored module-scope variables + zero enclosing-scope captures outside
   the input object + only globals + transformer scaffolding + own params" is the
   right gate.
-- **[Follow-up post-Phase 1]** Remove `derive` from runtime exports entirely
-  (Berni 2026-05-21: agreed). The transformer no longer emits derive after Phase
-  1; runtime `derive` becomes dead code for transformer-lowered patterns.
-  Bundled with the follow-up that moves transformer output from `lift(...)({})`
-  to `lift(...)()` form (requires small runtime change to make `lift` apply with
-  no argument equivalent to today's `computed`'s `argumentSchema: false`).
-- **[Follow-up post-Phase 1 — registry architecture]** Audit at
-  `docs/scratch/07-registry-audit.md`. The ts-transformers pipeline currently
-  threads eight registries through `TransformationOptions`; the marker-set trio
-  has a clean `markX`/`isX` API with automatic cache invalidation and
-  `getOriginalNode` fallback, but the other five use direct `.get`/`.set` at
-  scattered call sites with no such discipline. CT-1615 hit the consequences of
-  `typeRegistry`'s triple-overloading firsthand (replacement-types,
-  synthetic-TypeNode-types, synthetic-call-result-types all sharing one map;
-  ended up adding a fourth channel `narrowedWrapperTypeRegistry`). Opportunities
-  in increasing order of scope: (1) lift the five direct-access registries to
-  `context.recordX`/`lookupX` methods (~half-day, mechanical); (2) split
-  `typeRegistry` into its three named purposes (~day); (3) scope per-stage hints
-  out of global options (~day, more invasive); (4) unified `CrossStageState`
-  abstraction (defer until the registry count would otherwise grow to 9+).
-  Refresh of inline doc landed with this work.
+- **[DONE — PR #3709]** Move transformer output from `lift(...)({})` to the
+  no-input form. Shipped as `lift(false, fn)()` (not a bare `lift(fn)()`: the
+  runner skips a no-arg lift unless `argumentSchema === false`, so the explicit
+  `false` is required — it mirrors `computed`'s runtime semantics). Added a
+  2-arg `lift(argumentSchema, implementation)` overload (runtime +
+  `LiftFunction` type). The rewrite is gated in schema-injection's
+  `prependSchemaArguments`, AFTER ClosureTransformer, so it fires only for
+  genuinely zero-capture computeds (empty outer input); captured computeds keep
+  `lift(fn)({...refs})`.
+- **[Follow-up post-Phase 1 — STILL OPEN]** Remove `derive` from runtime exports
+  (Berni 2026-05-21: agreed in principle). NOTE: not actually dead — the
+  transformer still _lowers_ user-source `derive()`, and runner tests call
+  `derive()` directly. Needs a who-still-uses-derive analysis + a decision on
+  whether `derive` stays a user-facing API before removal. Not a quick deletion.
+- **[Follow-up]** Collapse the `lift` type-surface duplication: the overloads
+  are declared in BOTH `module.ts` and the `LiftFunction` interface
+  (`packages/api`), mirrored by hand (PR #3709 had to add the new overload to
+  both). Consider typing the runtime builders _as_ their facade interfaces for a
+  single source of truth.
+- **[DONE — PR #3707, registry architecture]** Consolidated the cross-stage
+  registries into a single `CrossStageState` object (audit:
+  `docs/scratch/07-registry-audit.md`, design:
+  `12-registry-unification-design.md`). Outcome differed from the original
+  tiered plan in two evidence-driven ways: (1) the `typeRegistry` three-way
+  split was investigated and **dropped** — the three uses are isolated by key
+  node-kind (replacement-Expr / TypeNode / CallExpression never coincide), so
+  the split fixed no reachable bug; the invariant is documented instead. (2)
+  `syntheticLiftAppliedCallRegistry` was **removed** as verified-inert. The
+  remaining channels (incl. the still load-bearing
+  `narrowedWrapperTypeRegistry`) now live in `CrossStageState`, accessed via
+  record/lookup/mark methods; cache-invalidation stays on the context.
+  `typeRegistry` + `schemaHints` remain plain maps at the schema-generator
+  package boundary.
