@@ -309,7 +309,12 @@ when you run `deno task integration`:
 | `HEADLESS` | `false` | Browser tests headless when `true`. |
 | `PIPE_CONSOLE` | `false` | Pipe browser console output into the test runner. |
 | `SPACE_NAME` | random UUID | Stable name for cross-run debugging. |
-| `INTEGRATION_TEST_FLAGS` | _(unset)_ | Extra `deno test` flags forwarded into per-package `integration` tasks (e.g. `--filter`). |
+
+Additionally, [`tasks/integration.ts`](../../tasks/integration.ts) sets
+`INTEGRATION_TEST_FLAGS` (default: unset; populated with `--junit-path=…` when
+`--junit-dir` is passed, or passed through from the environment otherwise).
+Per-package `deno.json` `integration` scripts pick it up via `$INTEGRATION_TEST_FLAGS`
+shell expansion to forward extra `deno test` flags (e.g. `--filter`).
 
 ---
 
