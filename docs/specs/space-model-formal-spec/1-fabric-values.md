@@ -1293,10 +1293,10 @@ serialization system can round-trip it back to a real `Temperature` instance.
 import {
   DECONSTRUCT,
   RECONSTRUCT,
-  BaseFabricInstance,
   type FabricValue,
   type ReconstructionContext,
-} from '@commonfabric/data-model';
+} from '@commonfabric/data-model/interface';
+import { BaseFabricInstance } from '@commonfabric/data-model/fabric-instances';
 
 type TemperatureUnit = "C" | "F" | "K";
 
