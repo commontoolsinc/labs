@@ -30,6 +30,10 @@ export default pattern(() => {
     poll.resetVotes.send({});
   });
 
+  const action_try_log_before_join = action(() => {
+    poll.logVisit.send({ title: "Sneaky" });
+  });
+
   const action_join_as_alex = action(() => {
     poll.joinAs.send({ name: "Alex" });
   });
@@ -73,6 +77,33 @@ export default pattern(() => {
   const action_remove_first_option = action(() => {
     const first = poll.options[0];
     if (first) poll.removeOption.send({ optionId: first.id });
+  });
+
+  // Log a specific place by title (defaults wentAt to today).
+  const action_log_thai = action(() => {
+    poll.logVisit.send({ title: "Thai Kitchen" });
+  });
+
+  // Backdated visits — fixed past timestamp so assertions are deterministic.
+  const PAST_VISIT = 1700000000000; // 2023-11-14
+  const action_log_visit_chipotle_backdated = action(() => {
+    poll.logVisit.send({ title: "Chipotle", wentAt: PAST_VISIT + 1000 });
+  });
+
+  const action_remove_first_history = action(() => {
+    const first = poll.history[0];
+    if (first) poll.removeHistoryEntry.send({ id: first.id });
+  });
+
+  const action_clear_history = action(() => {
+    poll.clearHistory.send({});
+  });
+
+  // Single-identity caveat (CT-1598): we can't simulate a *second* user, so
+  // host *takeover* can't be exercised. This just confirms claimHost is wired
+  // and is a harmless no-op when the caller already holds the role.
+  const action_claim_host = action(() => {
+    poll.claimHost.send({});
   });
 
   // === Assertions ===
@@ -132,6 +163,36 @@ export default pattern(() => {
     poll.votes.length === 0
   );
 
+  const assert_still_alex_host = computed(() =>
+    poll.adminName === "Alex" && poll.isAdmin === true
+  );
+
+  // Winner logged via logVisit({}) — the only remaining option (Thai Kitchen)
+  // has the sole vote, so it's the top choice. Attributed to the host. If the
+  // pre-join attempt ("Sneaky") had not been gated, history[0] would be
+  // "Sneaky" — so this implicitly verifies the host gate too.
+  const assert_thai_logged = computed(() =>
+    poll.history.length === 1 &&
+    poll.history[0]?.title === "Thai Kitchen" &&
+    poll.history[0]?.loggedByName === "Alex"
+  );
+
+  // Second entry is the backdated Chipotle log, with the exact wentAt we
+  // passed (proves backdating).
+  const assert_two_history = computed(() =>
+    poll.history.length === 2 &&
+    poll.history[1]?.title === "Chipotle" &&
+    poll.history[1]?.wentAt === PAST_VISIT + 1000
+  );
+
+  // After deleting history[0] (Thai), only the Chipotle entry remains.
+  const assert_one_history_after_remove = computed(() =>
+    poll.history.length === 1 &&
+    poll.history[0]?.title === "Chipotle"
+  );
+
+  const assert_history_cleared = computed(() => poll.history.length === 0);
+
   return {
     tests: [
       // Admin-gated handlers are no-ops before anyone joins (myName empty).
@@ -143,6 +204,7 @@ export default pattern(() => {
       { action: action_try_add_before_join },
       { action: action_try_remove_before_join },
       { action: action_try_reset_before_join },
+      { action: action_try_log_before_join },
 
       // First join → claims admin
       { action: action_join_as_alex },
@@ -151,6 +213,10 @@ export default pattern(() => {
       // Second join attempt → no-op (name immutable after join)
       { action: action_try_rejoin_as_alex_two },
       { assertion: assert_immutable_after_join },
+
+      // claimHost is a harmless no-op when the caller is already host.
+      { action: action_claim_host },
+      { assertion: assert_still_alex_host },
 
       // Admin adds options
       { action: action_add_chipotle },
@@ -183,6 +249,21 @@ export default pattern(() => {
       { action: action_vote_green_first },
       { action: action_remove_first_option },
       { assertion: assert_option_removed_with_its_votes },
+
+      // "We went here" history. The pre-join attempt above ("Sneaky") must
+      // have left no trace.
+      // Log the surviving option by title → one entry, attributed to host.
+      { action: action_log_thai },
+      { assertion: assert_thai_logged },
+      // A second, backdated, explicit log → two entries (proves backdating).
+      { action: action_log_visit_chipotle_backdated },
+      { assertion: assert_two_history },
+      // Delete a single entry (host) → the other remains.
+      { action: action_remove_first_history },
+      { assertion: assert_one_history_after_remove },
+      // Clear all → empty.
+      { action: action_clear_history },
+      { assertion: assert_history_cleared },
     ],
     poll,
   };
