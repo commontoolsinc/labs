@@ -2184,6 +2184,22 @@ function isIntentionallyUnusedSchemaParameter(
   return true;
 }
 
+/**
+ * True when the outer applied-call args are exactly a single empty object
+ * literal `{}` — the no-capture placeholder LiftLoweringTransformer emits for
+ * computed-origin lifts and which ClosureTransformer leaves untouched when the
+ * computation captures nothing. By schema-injection time this reliably means
+ * "zero input"; captured computeds carry a populated input object here.
+ */
+function isSingleEmptyObjectInput(
+  args: readonly ts.Expression[],
+): boolean {
+  if (args.length !== 1) return false;
+  const arg = args[0];
+  return !!arg && ts.isObjectLiteralExpression(arg) &&
+    arg.properties.length === 0;
+}
+
 function prependSchemaArguments(
   context: Pick<TransformationContext, "factory" | "cfHelpers" | "sourceFile">,
   node: ts.CallExpression,
@@ -2227,6 +2243,26 @@ function prependSchemaArguments(
   // [argSchema, resSchema, ...originalInnerArgs].
   const innerLiftCall = getLiftAppliedInnerCall(node);
   if (innerLiftCall) {
+    // No-input case: a single empty object literal `{}` as the outer input
+    // means a genuinely zero-capture computation (computed-origin). By this
+    // stage ClosureTransformer has already reified any captures into the
+    // input, so an empty input here is final. Emit the canonical no-input
+    // form `lift(false, cb)()`: `false` argument schema (matching computed's
+    // runtime semantics — keeps the no-arg application valid) and no outer
+    // input. We deliberately omit the result schema, again matching computed.
+    if (isSingleEmptyObjectInput(node.arguments)) {
+      const rebuiltInner = context.factory.createCallExpression(
+        innerLiftCall.expression,
+        innerLiftCall.typeArguments,
+        [context.factory.createFalse(), ...innerLiftCall.arguments],
+      );
+      return context.factory.createCallExpression(
+        rebuiltInner,
+        undefined,
+        [],
+      );
+    }
+
     const rebuiltInner = context.factory.createCallExpression(
       innerLiftCall.expression,
       innerLiftCall.typeArguments,

@@ -1935,6 +1935,17 @@ export interface LiftFunction {
     implementation: T,
   ): ModuleFactory<StripCell<Parameters<T>[0]>, StripCell<ReturnType<T>>>;
 
+  // Two-arg form: lift(argumentSchema, fn). Listed before the all-optional
+  // catch-all so `lift(false, fn)` resolves here (fn in slot 2) instead of
+  // matching the catch-all and rejecting fn as a resultSchema. The transformer
+  // emits no-input (computed-origin) lifts as `lift(false, fn)()`:
+  // argumentSchema:false keeps the no-input application valid (the runner's
+  // isValidArgument check passes on `argumentSchema === false`).
+  <T, R>(
+    argumentSchema: JSONSchema,
+    implementation: (input: T) => R,
+  ): ModuleFactory<StripCell<T>, StripCell<R>>;
+
   <T, R>(
     argumentSchema?: JSONSchema,
     resultSchema?: JSONSchema,
