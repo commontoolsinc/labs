@@ -157,6 +157,64 @@ const classificationBg = (c: Classification): string => {
   return "#f3f4f6"; // unknown
 };
 
+// Phase 3: group sightings by normalized plate (plateNumber|plateState).
+// Module-scope pure helper so both the sightings list and the repeat-offender
+// summary derive from it without one computed reading another. Sightings with
+// no readable plate are skipped (can't be matched/deduped).
+export const plateKey = (plateNumber: string, plateState: string): string =>
+  `${plateNumber}|${plateState}`;
+
+export interface PlateGroup {
+  plate: string;
+  state: string;
+  description: string;
+  count: number;
+  spots: string[];
+  firstSeen: number;
+  lastSeen: number;
+  isRepeat: boolean; // seen 2+ times => repeat offender
+}
+
+const groupSightingsByPlate = (all: readonly Sighting[]): PlateGroup[] => {
+  const map = new Map<string, PlateGroup>();
+  for (const s of all) {
+    if (!s.plateNumber) continue;
+    const key = plateKey(s.plateNumber, s.plateState);
+    const g = map.get(key);
+    if (g) {
+      g.count += 1;
+      if (!g.spots.includes(s.spotNumber)) g.spots.push(s.spotNumber);
+      g.firstSeen = Math.min(g.firstSeen, s.capturedAt);
+      g.lastSeen = Math.max(g.lastSeen, s.capturedAt);
+      if (!g.description && s.description) g.description = s.description;
+    } else {
+      map.set(key, {
+        plate: s.plateNumber,
+        state: s.plateState,
+        description: s.description,
+        count: 1,
+        spots: [s.spotNumber],
+        firstSeen: s.capturedAt,
+        lastSeen: s.capturedAt,
+        isRepeat: false,
+      });
+    }
+  }
+  const groups: PlateGroup[] = [];
+  for (const g of map.values()) {
+    g.isRepeat = g.count >= 2;
+    groups.push(g);
+  }
+  return groups;
+};
+
+const fmtWhen = (ts: number): string => {
+  const d = new Date(ts);
+  return `${
+    d.toLocaleDateString("en-US", { month: "short", day: "numeric" })
+  } ${d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
+};
+
 // ============================================================
 // Default seed data
 // ============================================================
@@ -363,7 +421,13 @@ export default pattern<LotWatchInput, LotWatchOutput>(
       // Use .map() directly on the cell array (spread `[...cell.get()]` throws
       // "not iterable" inside a computed), then reverse the resulting plain
       // array for newest-first order.
-      return (sightings.get() ?? []).map((s) => {
+      const all = sightings.get() ?? [];
+      const repeatKeys = new Set(
+        groupSightingsByPlate(all)
+          .filter((g) => g.isRepeat)
+          .map((g) => plateKey(g.plate, g.state)),
+      );
+      return all.map((s) => {
         const date = new Date(s.capturedAt);
         const dateStr = date.toLocaleDateString("en-US", {
           month: "short",
@@ -392,9 +456,31 @@ export default pattern<LotWatchInput, LotWatchOutput>(
           classificationLabel: cls,
           classificationColor: classificationColor(cls),
           classificationBg: classificationBg(cls),
+          isRepeat: s.plateNumber
+            ? repeatKeys.has(plateKey(s.plateNumber, s.plateState))
+            : false,
         };
       }).reverse();
     });
+
+    // Phase 3: repeat offenders — plates seen 2+ times, newest activity first.
+    const repeatOffenders = computed(() =>
+      groupSightingsByPlate(sightings.get() ?? [])
+        .filter((g) => g.isRepeat)
+        .map((g) => ({
+          plate: g.plate,
+          state: g.state,
+          description: g.description,
+          count: g.count,
+          spotsLabel: g.spots.map((n) => "#" + n).join(", "),
+          firstSeen: fmtWhen(g.firstSeen),
+          lastSeen: fmtWhen(g.lastSeen),
+        }))
+        .sort((a, b) => b.count - a.count)
+    );
+    const hasRepeatOffenders = computed(() =>
+      groupSightingsByPlate(sightings.get() ?? []).some((g) => g.isRepeat)
+    );
 
     // Save is disabled until an image is captured AND a spot is chosen.
     // (Read writables with .get() and return a real boolean — referencing a
@@ -669,6 +755,48 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                       </cf-card>
                     ) : null}
 
+                    {/* Phase 3: repeat offenders (plates seen 2+ times) */}
+                    {hasRepeatOffenders ? (
+                      <cf-card style="background: #fef2f2; border: 1px solid #fecaca;">
+                        <cf-vstack gap="2">
+                          <cf-heading level={6}>🔁 Repeat offenders</cf-heading>
+                          {repeatOffenders.map((g) => (
+                            <cf-hstack
+                              justify="between"
+                              align="center"
+                              gap="2"
+                              wrap
+                            >
+                              <cf-vstack gap="0">
+                                <span style="font-weight: 600; font-family: monospace;">
+                                  {g.plate} ({g.state})
+                                </span>
+                                <span style="font-size: 0.75rem; color: var(--cf-color-gray-600);">
+                                  {g.description} · spots {g.spotsLabel}
+                                </span>
+                                <span style="font-size: 0.7rem; color: var(--cf-color-gray-500);">
+                                  {g.firstSeen} → {g.lastSeen}
+                                </span>
+                              </cf-vstack>
+                              <span
+                                style={{
+                                  padding: "2px 10px",
+                                  borderRadius: "9999px",
+                                  backgroundColor: "#991b1b",
+                                  color: "white",
+                                  fontSize: "0.75rem",
+                                  fontWeight: "700",
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                {g.count}× seen
+                              </span>
+                            </cf-hstack>
+                          ))}
+                        </cf-vstack>
+                      </cf-card>
+                    ) : null}
+
                     {sightingRows.map((row) => {
                       const rowId = row.id;
                       const isConfirmTarget = computed(() =>
@@ -718,6 +846,20 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                                   >
                                     {row.classificationLabel}
                                   </span>
+                                  {row.isRepeat ? (
+                                    <span
+                                      style={{
+                                        padding: "2px 8px",
+                                        borderRadius: "9999px",
+                                        backgroundColor: "#991b1b",
+                                        color: "white",
+                                        fontSize: "0.7rem",
+                                        fontWeight: "700",
+                                      }}
+                                    >
+                                      🔁 repeat
+                                    </span>
+                                  ) : null}
                                 </cf-hstack>
                                 {row.description
                                   ? (
