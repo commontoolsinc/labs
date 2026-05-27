@@ -1597,6 +1597,131 @@ describe("runner utils", () => {
       expect(result).toBe(true);
     });
 
+    it("deduplicates concurrent start calls while resumed dependencies sync", async () => {
+      const valueAlias = {
+        $alias: {
+          cell: "argument",
+          path: ["value"],
+          scope: "space",
+          schema: { type: "number", default: 0 },
+        },
+      };
+      const streamAlias = {
+        $alias: {
+          cell: "internal",
+          path: ["stream:increment"],
+          scope: "space",
+          schema: true,
+        },
+      };
+      const pattern: Pattern = {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            value: {
+              type: "number",
+              default: 0,
+              asCell: ["cell"],
+            },
+          },
+        },
+        resultSchema: {
+          type: "object",
+          properties: {
+            value: { type: "number" },
+            increment: { asCell: ["stream", "opaque"] },
+          },
+        },
+        internalSchema: {
+          type: "object",
+          properties: {
+            "stream:increment": true,
+          },
+        },
+        initial: {
+          internal: {
+            "stream:increment": { $stream: true },
+          },
+        },
+        result: {
+          value: valueAlias,
+          increment: streamAlias,
+        },
+        nodes: [
+          {
+            module: {
+              type: "javascript",
+              wrapper: "handler",
+              argumentSchema: {
+                type: "object",
+                properties: {
+                  $event: false,
+                  $ctx: {
+                    type: "object",
+                    properties: {
+                      value: {
+                        type: "number",
+                        asCell: ["cell"],
+                      },
+                    },
+                    required: ["value"],
+                  },
+                },
+                required: ["$ctx"],
+              },
+              implementation: (_event: unknown, { value }: any) => {
+                value.set(value.get() + 1);
+              },
+            },
+            inputs: {
+              $ctx: { value: valueAlias },
+              $event: streamAlias,
+            },
+            outputs: {},
+          },
+        ],
+      };
+
+      const resultCell = runtime.getCell<any>(
+        space,
+        "concurrent start dedupe",
+      );
+      await setupTrusted(runtime, undefined, pattern, { value: 0 }, resultCell);
+
+      // Simulate a persisted piece being resumed. In that path start() syncs
+      // dependencies before registering handlers, which is where this race
+      // used to allow duplicate starts for the same result cell.
+      (runtime.runner as any).locallyPreparedResults.clear();
+      (resultCell as any).synced = true;
+
+      const runner = runtime.runner as any;
+      const originalSync = runner.syncCellsForRunningPattern.bind(runner);
+      let syncCalls = 0;
+      runner.syncCellsForRunningPattern = async (...args: any[]) => {
+        syncCalls++;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        return originalSync(...args);
+      };
+
+      try {
+        const [first, second] = await Promise.all([
+          runtime.start(resultCell),
+          runtime.start(resultCell),
+        ]);
+        expect(first).toBe(true);
+        expect(second).toBe(true);
+        expect(syncCalls).toBe(1);
+
+        resultCell.key("increment").send();
+        await runtime.idle();
+        await resultCell.pull();
+
+        expect(resultCell.key("value").get()).toBe(1);
+      } finally {
+        runner.syncCellsForRunningPattern = originalSync;
+      }
+    });
+
     it("start() runs synchronously when data is available", async () => {
       const pattern: Pattern = {
         argumentSchema: {
