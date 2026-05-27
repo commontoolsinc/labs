@@ -15,6 +15,7 @@ import {
 } from "commonfabric";
 import {
   createRandomImportedClaimedMessages,
+  seededRandom,
   sortDisplayMessages,
 } from "./logic.ts";
 import {
@@ -338,6 +339,7 @@ export const GroupChatDemo = pattern<GroupChatDemoInput, GroupChatDemoOutput>((
     const nextMessages = createRandomImportedClaimedMessages(
       sortDisplayMessages(messagesValue(messagesCell)),
       participantClaimsValue(profilesCell, myProfileCell, messagesCell),
+      seededRandom(0xdecafbad),
     );
     nextMessages.forEach((message) =>
       messagesCell.push(message as SharedChatMessage)

@@ -2,6 +2,17 @@ import { nonPrivateRandom, safeDateNow } from "commonfabric";
 
 export type RandomSource = () => number;
 
+export const seededRandom = (seed: number): RandomSource => {
+  let current = seed >>> 0;
+  return () => {
+    current |= 0;
+    current = (current + 0x6d2b79f5) | 0;
+    let value = Math.imul(current ^ (current >>> 15), 1 | current);
+    value = (value + Math.imul(value ^ (value >>> 7), 61 | value)) ^ value;
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+};
+
 export type MessageOrigin = "sent" | "imported";
 
 export interface ChatProfile {
