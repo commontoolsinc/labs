@@ -1188,7 +1188,13 @@ export class Runner {
       )
         .then((loaded) => {
           if (loaded) {
-            return this.doStart(rootCell, seenCells);
+            return this.startAvailablePattern(
+              rootCell,
+              patternId,
+              wasSyncedAtEntry,
+              wasPreparedLocally,
+              seenCells,
+            );
           } else {
             return Promise.reject(
               new Error(`Could not load pattern ${patternId}`),
