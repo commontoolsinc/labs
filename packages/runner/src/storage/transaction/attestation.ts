@@ -80,6 +80,11 @@ export const UnsupportedMediaTypeError = (
  *
  * CT-1123 Phase 2: This replaces the O(N) JSON.parse(JSON.stringify()) deep clone
  * with O(D) structural sharing where D is path depth.
+ *
+ * NOTE: As of #3704, this is no longer on the v2-transaction write path
+ * (which uses `applyMutablePathWrite` for in-place mutation). It is still
+ * used by `chronicle.ts` for its working-copy management; once that
+ * migrates, this and `write` below can be removed.
  */
 const setAtPath = (
   root: FabricValue,
@@ -202,6 +207,10 @@ const setAtPath = (
  * CT-1123 Phase 2: Now uses structural sharing via setAtPath() instead of
  * JSON.parse(JSON.stringify()) deep clone. Only clones objects along the
  * modified path, leaving siblings shared.
+ *
+ * NOTE: As of #3704, the v2-transaction write path no longer routes through
+ * here -- it uses `applyMutablePathWrite` for in-place mutation. This
+ * function is still used by `chronicle.ts` for its working-copy management.
  */
 export const write = (
   source: IAttestation,

@@ -120,17 +120,17 @@ Deno.bench({
 // Loop shape is fixed at {write sub0/count; read sub1}. The cache holds K
 // cached sibling reads.
 //
-// Important caveat about what this bench measures: per-write cost here is
-// the SUM of two K-dependent things:
-//
-//   - `setAtPath()` rebuilding the K-wide `value` container via
-//     `{ ...obj, sub0: newSub0 }` -- structural-sharing cost O(K).
-//   - cache invalidation -- O(K) for the previous PR's sibling sweep,
-//     O(D) for the PathKeyMap.
-//
-// So this bench shows how the full per-write cost grows with K under
-// each invalidator. To isolate just the invalidator's O(K)-vs-O(D)
-// behavior, see `packages/utils/test/path-key-map.bench.ts`.
+// Historical caveat (preserved for context): pre-#3704, per-write cost
+// was the SUM of two K-dependent things: structural-sharing cost
+// (`{ ...obj, sub0: newSub0 }` rebuilding the K-wide `value` container)
+// AND cache invalidation cost (the sibling sweep). Post-#3704 the
+// production write path uses `applyMutablePathWrite()` with
+// `cloneForMutation()`, which does per-spine shallow thaw and then
+// in-place mutates -- so the structural-sharing-of-K-wide-container
+// cost is gone, and PathKeyMap brings invalidation to O(D). The bench
+// remains shaped to flag any future change that re-introduces K-scaling.
+// To isolate just the invalidator's O(K)-vs-O(D) behavior, see
+// `packages/utils/test/path-key-map.bench.ts`.
 
 for (const K of [16, 64, 256]) {
   Deno.bench({
