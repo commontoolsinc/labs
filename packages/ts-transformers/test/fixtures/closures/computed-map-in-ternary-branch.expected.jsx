@@ -32,7 +32,9 @@ export default pattern((__cf_pattern_input) => {
     const showAdmin = new Writable(false, {
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema).for("showAdmin", true);
-    const adminData = __cfHelpers.derive({
+    const adminData = __cfHelpers.lift<{
+        people: __cfHelpers.ReadonlyCell<Person[]>;
+    }, { name: string; rank: number; isFirst: boolean; }[]>({
         type: "object",
         properties: {
             people: {
@@ -75,10 +77,12 @@ export default pattern((__cf_pattern_input) => {
             },
             required: ["name", "rank", "isFirst"]
         }
-    } as const satisfies __cfHelpers.JSONSchema, { people: people }, ({ people }) => [...people.get()]
+    } as const satisfies __cfHelpers.JSONSchema, ({ people }) => [...people.get()]
         .sort((a, b) => a.rank - b.rank)
-        .map((p) => ({ name: p.name, rank: p.rank, isFirst: p.rank === 1 }))).for("adminData", true);
-    const count = __cfHelpers.derive({
+        .map((p) => ({ name: p.name, rank: p.rank, isFirst: p.rank === 1 })))({ people: people }).for("adminData", true);
+    const count = __cfHelpers.lift<{
+        people: __cfHelpers.ReadonlyCell<unknown[]>;
+    }, number>({
         type: "object",
         properties: {
             people: {
@@ -92,7 +96,7 @@ export default pattern((__cf_pattern_input) => {
         required: ["people"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, { people: people }, ({ people }) => people.get().length).for("count", true);
+    } as const satisfies __cfHelpers.JSONSchema, ({ people }) => people.get().length)({ people: people }).for("count", true);
     return {
         [UI]: (<div>
         {people.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
@@ -159,7 +163,9 @@ export default pattern((__cf_pattern_input) => {
                     properties: {}
                 }]
         } as const satisfies __cfHelpers.JSONSchema, showAdmin, <div>
-              <span>{__cfHelpers.derive({
+              <span>{__cfHelpers.lift<{
+            count: number;
+        }, string>({
             type: "object",
             properties: {
                 count: {
@@ -169,7 +175,7 @@ export default pattern((__cf_pattern_input) => {
             required: ["count"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { count: count }, ({ count }) => count + " people")}</span>
+        } as const satisfies __cfHelpers.JSONSchema, ({ count }) => count + " people")({ count: count })}</span>
               <ul>
                 {adminData.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const entry = __cf_pattern_input.key("element");

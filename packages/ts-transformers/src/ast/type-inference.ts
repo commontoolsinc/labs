@@ -199,8 +199,13 @@ export function inferParameterType(
     return explicitType;
   }
 
-  // Try to infer from parameter location
-  let paramType = checker.getTypeAtLocation(parameter);
+  // Try to infer from parameter location. Check typeRegistry first so that
+  // transformer-stage overrides (e.g. lift-applied lowering registering the
+  // input expression's type against the callback parameter) take precedence
+  // over the checker's contextual inference, which may unwrap or otherwise
+  // lose information when the parameter is reached from a curried call form.
+  const registered = typeRegistry?.get(parameter);
+  let paramType = registered ?? checker.getTypeAtLocation(parameter);
 
   // If it's 'any' and we have a fallback, use that
   if (isAnyOrUnknownType(paramType) && fallbackType) {
@@ -703,20 +708,20 @@ export function getTypeFromTypeNodeWithFallback(
 }
 
 /**
- * Register the result type for a synthetic derive CallExpression.
+ * Register the result type for a synthetic lift-applied CallExpression.
  *
  * This is needed because synthetic nodes created by transformers don't have
  * type information from the TypeChecker. We need to explicitly register the
  * type so that later transformations can infer types correctly.
  *
- * @param deriveCall The synthetic derive CallExpression to register type for
- * @param resultTypeNode The TypeNode representing the derive's result type
+ * @param liftAppliedCall The synthetic lift-applied CallExpression to register type for
+ * @param resultTypeNode The TypeNode representing the call's result type
  * @param resultType Optional pre-computed Type object for the result
  * @param checker TypeChecker instance
  * @param typeRegistry The type registry to update
  */
-export function registerDeriveCallType(
-  deriveCall: ts.CallExpression,
+export function registerLiftAppliedCallType(
+  liftAppliedCall: ts.CallExpression,
   resultTypeNode: ts.TypeNode | undefined,
   resultType: ts.Type | undefined,
   checker: ts.TypeChecker,
@@ -734,12 +739,12 @@ export function registerDeriveCallType(
   }
 
   if (typeToRegister) {
-    registerSyntheticCallType(deriveCall, typeToRegister, typeRegistry);
+    registerSyntheticCallType(liftAppliedCall, typeToRegister, typeRegistry);
   }
 }
 
 /**
- * Register the result type for a synthetic call (derive, ifElse, when, unless, etc.) in the TypeRegistry.
+ * Register the result type for a synthetic call (lift-applied, ifElse, when, unless, etc.) in the TypeRegistry.
  * This enables schema injection to find the correct result type for the call.
  *
  * @param call The synthetic call node
@@ -1156,10 +1161,3 @@ export function hasArrayTypeArgument(
 
   return false;
 }
-
-/**
- * Check if an expression is a derive call (synthetic or user-written).
- * derive() always returns OpaqueRef<T> at runtime, but we register the
- * unwrapped callback return type in the type registry. This helper lets
- * us detect derive calls syntactically to work around that limitation.
- */

@@ -24,7 +24,11 @@ export default pattern(() => {
     const multiplier = new Writable(2, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("multiplier", true);
-    const result = __cfHelpers.derive({
+    const result = __cfHelpers.lift<{
+        value: __cfHelpers.ReadonlyCell<number>;
+        threshold: __cfHelpers.ReadonlyCell<number>;
+        multiplier: __cfHelpers.ReadonlyCell<number>;
+    }, number>({
         type: "object",
         properties: {
             value: {
@@ -43,11 +47,11 @@ export default pattern(() => {
         required: ["value", "threshold", "multiplier"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        value: value.for(["result", 2, "value"], true),
+    } as const satisfies __cfHelpers.JSONSchema, ({ value: v, threshold, multiplier }) => v.get() > threshold.get() ? v.get() * multiplier.get() : v.get())({
+        value: value.for(["result", "value"], true),
         threshold: threshold,
         multiplier: multiplier
-    }, ({ value: v, threshold, multiplier }) => v.get() > threshold.get() ? v.get() * multiplier.get() : v.get()).for("result", true);
+    }).for("result", true);
     return result;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "number"

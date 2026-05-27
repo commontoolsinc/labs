@@ -26,7 +26,12 @@ export default pattern((state) => {
     return {
         [UI]: (<div>
         {/* Plain array should NOT be transformed, even with captures */}
-        {plainArray.map((n) => (<span>{__cfHelpers.derive({
+        {plainArray.map((n) => (<span>{__cfHelpers.lift<{
+                state: {
+                    multiplier: number;
+                };
+                n: number;
+            }, number>({
                 type: "object",
                 properties: {
                     n: {
@@ -45,12 +50,12 @@ export default pattern((state) => {
                 required: ["n", "state"]
             } as const satisfies __cfHelpers.JSONSchema, {
                 type: "number"
-            } as const satisfies __cfHelpers.JSONSchema, {
+            } as const satisfies __cfHelpers.JSONSchema, ({ state, n }) => n * state.multiplier)({
                 state: {
                     multiplier: state.multiplier
                 },
                 n: n
-            }, ({ state, n }) => n * state.multiplier)}</span>))}
+            })}</span>))}
       </div>),
     };
 }, {

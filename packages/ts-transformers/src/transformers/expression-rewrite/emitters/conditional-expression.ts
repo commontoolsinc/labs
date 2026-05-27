@@ -67,7 +67,7 @@ function processBranch(
   analyze: Parameters<Emitter>[0]["analyze"],
   rewriteChildren: Parameters<Emitter>[0]["rewriteChildren"],
   rewriteSubexpression: Parameters<Emitter>[0]["rewriteSubexpression"],
-  preferDeriveWrappers: boolean,
+  preferInputBoundWrappers: boolean,
 ): ts.Expression {
   if (isJsxLocalRewriteContainer(expr)) {
     return rewriteChildren(expr) || expr;
@@ -106,7 +106,7 @@ function processBranch(
       branchDataFlows,
       context,
       {
-        preferDeriveWrapper: preferDeriveWrappers,
+        preferInputBoundWrapper: preferInputBoundWrappers,
       },
     );
     if (derived) {
@@ -125,7 +125,7 @@ export const emitConditionalExpression: Emitter = ({
   rewriteChildren,
   rewriteSubexpression,
   inSafeContext,
-  preferDeriveWrappers,
+  preferInputBoundWrappers,
 }) => {
   if (!ts.isConditionalExpression(expression)) return undefined;
 
@@ -147,7 +147,7 @@ export const emitConditionalExpression: Emitter = ({
       expression.condition,
       predicateDataFlows,
       context,
-      { preferDeriveWrapper: preferDeriveWrappers },
+      { preferInputBoundWrapper: preferInputBoundWrappers },
     );
     if (derivedPredicate) {
       predicate = derivedPredicate;
@@ -160,7 +160,7 @@ export const emitConditionalExpression: Emitter = ({
     analyze,
     rewriteChildren,
     rewriteSubexpression,
-    preferDeriveWrappers,
+    preferInputBoundWrappers,
   );
 
   const whenFalse = processBranch(
@@ -169,7 +169,7 @@ export const emitConditionalExpression: Emitter = ({
     analyze,
     rewriteChildren,
     rewriteSubexpression,
-    preferDeriveWrappers,
+    preferInputBoundWrappers,
   );
 
   const ifElseCall = createIfElseCall({

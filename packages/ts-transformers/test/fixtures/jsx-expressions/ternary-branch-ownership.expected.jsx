@@ -39,7 +39,11 @@ export default pattern((state) => {
     const showList = new Writable(true, {
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema).for("showList", true);
-    const sorted = __cfHelpers.derive({
+    const sorted = __cfHelpers.lift<{
+        state: {
+            items: Item[];
+        };
+    }, Item[]>({
         type: "object",
         properties: {
             state: {
@@ -89,10 +93,16 @@ export default pattern((state) => {
                 required: ["name", "value"]
             }
         }
-    } as const satisfies __cfHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => [...state.items].sort((a, b) => a.value - b.value))({ state: {
             items: state.key("items")
-        } }, ({ state }) => [...state.items].sort((a, b) => a.value - b.value)).for("sorted", true);
-    const count = __cfHelpers.derive({
+        } }).for("sorted", true);
+    const count = __cfHelpers.lift<{
+        state: {
+            items: {
+                length: number;
+            };
+        };
+    }, number>({
         type: "object",
         properties: {
             state: {
@@ -114,11 +124,11 @@ export default pattern((state) => {
         required: ["state"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.length)({ state: {
             items: {
                 length: state.key("items", "length")
             }
-        } }, ({ state }) => state.items.length).for("count", true);
+        } }).for("count", true);
     return {
         [UI]: (<div>
         <p>{__cfHelpers.ifElse({
@@ -147,7 +157,9 @@ export default pattern((state) => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+            state: any;
+        }, boolean>({
             type: "object",
             properties: {
                 state: true
@@ -155,7 +167,7 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { state: state }, ({ state }) => state.recentEvents.length === 0), <span>No events yet</span>, <div>
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.recentEvents.length === 0)({ state: state }), <span>No events yet</span>, <div>
               {state.key("recentEvents").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const event = __cf_pattern_input.key("element");
                 const idx = __cf_pattern_input.key("index");

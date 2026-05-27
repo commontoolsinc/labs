@@ -625,7 +625,7 @@ function shouldAddReactiveFor(
           context,
         );
       case "cell-factory":
-      case "derive":
+      case "lift-applied":
       case "ifElse":
       case "when":
       case "unless":

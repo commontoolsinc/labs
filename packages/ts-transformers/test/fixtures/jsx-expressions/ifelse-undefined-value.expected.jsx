@@ -49,7 +49,10 @@ export default pattern(() => {
             }, {
                 type: "undefined"
             }]
-    } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+    } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+        pending: boolean;
+        result: unknown;
+    }, boolean>({
         type: "object",
         properties: {
             pending: {
@@ -62,10 +65,10 @@ export default pattern(() => {
         required: ["pending", "result"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, ({ pending, result }) => pending || !result)({
         pending: pending,
         result: result
-    }, ({ pending, result }) => pending || !result).for(["output1", 4], true), undefined, { result }).for("output1", true);
+    }).for(["output1", 4], true), undefined, { result }).for("output1", true);
     // Pattern 2: undefined as ifFalse (error state returns nothing)
     const output2 = ifElse({
         type: "boolean"
@@ -91,7 +94,9 @@ export default pattern(() => {
             }, {
                 type: "undefined"
             }]
-    } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+    } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+        result: unknown;
+    }, boolean>({
         type: "object",
         properties: {
             result: {
@@ -101,7 +106,7 @@ export default pattern(() => {
         required: ["result"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, { result: result }, ({ result }) => !!result).for(["output2", 4], true), { data: result }, undefined).for("output2", true);
+    } as const satisfies __cfHelpers.JSONSchema, ({ result }) => !!result)({ result: result }).for(["output2", 4], true), { data: result }, undefined).for("output2", true);
     return {
         [UI]: (<div>
         <span>{output1}</span>

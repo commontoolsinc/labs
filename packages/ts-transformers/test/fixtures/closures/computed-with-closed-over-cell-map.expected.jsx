@@ -31,7 +31,10 @@ export default pattern(() => {
     // The computed gets transformed to derive({}, () => numbers.map(...))
     // Inside a derive, .map on a closed-over Cell should STILL be transformed to mapWithPattern
     // because Cells need the pattern-based mapping even when unwrapped
-    const doubled = __cfHelpers.derive({
+    const doubled = __cfHelpers.lift<{
+        numbers: __cfHelpers.ReadonlyCell<number[]>;
+        multiplier: __cfHelpers.ReadonlyCell<number>;
+    }, number[]>({
         type: "object",
         properties: {
             numbers: {
@@ -52,10 +55,7 @@ export default pattern(() => {
         items: {
             type: "number"
         }
-    } as const satisfies __cfHelpers.JSONSchema, {
-        numbers: numbers,
-        multiplier: multiplier
-    }, ({ numbers, multiplier }) => numbers.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+    } as const satisfies __cfHelpers.JSONSchema, ({ numbers, multiplier }) => numbers.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
         const n = __cf_pattern_input.key("element");
         const multiplier = __cf_pattern_input.key("params", "multiplier");
         return n * multiplier.get();
@@ -81,7 +81,10 @@ export default pattern(() => {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema), {
         multiplier: multiplier
-    })).for("doubled", true);
+    }))({
+        numbers: numbers,
+        multiplier: multiplier
+    }).for("doubled", true);
     return doubled;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "array",

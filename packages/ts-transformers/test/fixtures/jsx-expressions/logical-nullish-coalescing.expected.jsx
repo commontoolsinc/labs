@@ -56,7 +56,9 @@ export default pattern((_state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: ["number", "string"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+            config: __cfHelpers.Cell<{ timeout: number | null; retries: number | undefined; }>;
+        }, number>({
             type: "object",
             properties: {
                 config: {
@@ -68,19 +70,16 @@ export default pattern((_state) => {
                                 }, {
                                     type: "null"
                                 }]
-                        },
-                        retries: {
-                            type: ["number", "undefined"]
                         }
                     },
-                    required: ["timeout", "retries"],
+                    required: ["timeout"],
                     asCell: ["readonly"]
                 }
             },
             required: ["config"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { config: config }, ({ config }) => (config.get().timeout ?? 30)), "disabled")}</span>
+        } as const satisfies __cfHelpers.JSONSchema, ({ config }) => (config.get().timeout ?? 30))({ config: config }), "disabled")}</span>
 
         {/* ?? followed by && */}
         <span>{__cfHelpers.when({
@@ -89,31 +88,25 @@ export default pattern((_state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             "enum": [false, "Will retry"]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+            config: __cfHelpers.Cell<{ timeout: number | null; retries: number | undefined; }>;
+        }, boolean>({
             type: "object",
             properties: {
                 config: {
                     type: "object",
                     properties: {
-                        timeout: {
-                            anyOf: [{
-                                    type: "number"
-                                }, {
-                                    type: "null"
-                                }]
-                        },
                         retries: {
-                            type: ["number", "undefined"]
+                            type: "number"
                         }
                     },
-                    required: ["timeout", "retries"],
                     asCell: ["readonly"]
                 }
             },
             required: ["config"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { config: config }, ({ config }) => (config.get().retries ?? 3) > 0), "Will retry")}</span>
+        } as const satisfies __cfHelpers.JSONSchema, ({ config }) => (config.get().retries ?? 3) > 0)({ config: config }), "Will retry")}</span>
 
         {/* Mixed: ?? with && and || */}
         <span>
@@ -123,7 +116,9 @@ export default pattern((_state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+            items: __cfHelpers.Cell<string[]>;
+        }, string | false>({
             type: "object",
             properties: {
                 items: {
@@ -142,7 +137,7 @@ export default pattern((_state) => {
                     type: "boolean",
                     "enum": [false]
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, { items: items }, ({ items }) => items.get().length > 0 && (items.get()[0] ?? "empty")), "no items")}
+        } as const satisfies __cfHelpers.JSONSchema, ({ items }) => items.get().length > 0 && (items.get()[0] ?? "empty"))({ items: items }), "no items")}
         </span>
       </div>),
     };

@@ -101,7 +101,9 @@ export default pattern((state) => {
                             type: "object",
                             properties: {}
                         }]
-                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+                    spotPreferences: string[];
+                }, boolean>({
                     type: "object",
                     properties: {
                         spotPreferences: {
@@ -114,7 +116,9 @@ export default pattern((state) => {
                     required: ["spotPreferences"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, { spotPreferences: spotPreferences }, ({ spotPreferences }) => spotPreferences.length > 0), <span>{__cfHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, ({ spotPreferences }) => spotPreferences.length > 0)({ spotPreferences: spotPreferences }), <span>{__cfHelpers.lift<{
+                    spotPreferences: string[];
+                }, string>({
                     type: "object",
                     properties: {
                         spotPreferences: {
@@ -127,7 +131,7 @@ export default pattern((state) => {
                     required: ["spotPreferences"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, { spotPreferences: spotPreferences }, ({ spotPreferences }) => spotPreferences.map((n) => "#" + n).join(", "))}</span>, null)}
+                } as const satisfies __cfHelpers.JSONSchema, ({ spotPreferences }) => spotPreferences.map((n) => "#" + n).join(", "))({ spotPreferences: spotPreferences })}</span>, null)}
               </li>);
             }, {
                 type: "object",

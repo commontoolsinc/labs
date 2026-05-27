@@ -30,7 +30,11 @@ interface Item {
 //   This is a negative test for reactive .map() detection on local aliases.
 export default pattern((__cf_pattern_input) => {
     const items = __cf_pattern_input.key("items");
-    const filtered = __cfHelpers.derive({
+    const filtered = __cfHelpers.lift<{
+        items: {
+            price: number;
+        }[];
+    }, Item[]>({
         type: "object",
         properties: {
             items: {
@@ -66,10 +70,14 @@ export default pattern((__cf_pattern_input) => {
                 required: ["name", "price"]
             }
         }
-    } as const satisfies __cfHelpers.JSONSchema, { items: items }, ({ items }) => items.filter((i) => i.price > 100)).for("filtered", true);
+    } as const satisfies __cfHelpers.JSONSchema, ({ items }) => items.filter((i) => i.price > 100))({ items: items }).for("filtered", true);
     return {
         [UI]: (<div>
-        {__cfHelpers.derive({
+        {__cfHelpers.lift<{
+                filtered: {
+                    name: string;
+                }[];
+            }, import("commonfabric").JSXElement[]>({
                 type: "object",
                 properties: {
                     filtered: {
@@ -112,10 +120,10 @@ export default pattern((__cf_pattern_input) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __cfHelpers.JSONSchema, { filtered: filtered }, ({ filtered }) => {
+            } as const satisfies __cfHelpers.JSONSchema, ({ filtered }) => {
                 const localVar = filtered;
                 return localVar.map((item) => <li>{item.name}</li>);
-            })}
+            })({ filtered: filtered })}
       </div>),
     };
 }, {

@@ -20,7 +20,9 @@ const __cfAmdHooks = undefined;
 export default pattern((items) => {
     // items is OpaqueRef<number[]> as a pattern parameter
     // Inside the derive callback, items.map should NOT be transformed
-    const doubled = __cfHelpers.derive({
+    const doubled = __cfHelpers.lift<{
+        items: number[] & {} & { [SELF]: OpaqueRef<any>; };
+    }, number[]>({
         type: "object",
         properties: {
             items: {
@@ -36,7 +38,7 @@ export default pattern((items) => {
         items: {
             type: "number"
         }
-    } as const satisfies __cfHelpers.JSONSchema, { items: items }, ({ items }) => items.map((n) => n * 2)).for("doubled", true);
+    } as const satisfies __cfHelpers.JSONSchema, ({ items }) => items.map((n) => n * 2))({ items: items }).for("doubled", true);
     return doubled;
 }, {
     type: "array",

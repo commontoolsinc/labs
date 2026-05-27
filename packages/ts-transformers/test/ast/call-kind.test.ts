@@ -8,7 +8,7 @@ import {
   detectCallKind,
   detectNewExpressionKind,
   getCapabilitySummaryCallbackArgument,
-  getDeriveInputAndCallbackArgument,
+  getLiftAppliedInputAndCallback,
   getPatternBuilderCallbackArgument,
 } from "../../src/ast/mod.ts";
 
@@ -369,7 +369,7 @@ Deno.test("getCapabilitySummaryCallbackArgument recognizes derive and builder ca
   assertEquals(!!getCapabilitySummaryCallbackArgument(fourth, checker), true);
 });
 
-Deno.test("getDeriveInputAndCallbackArgument recognizes derive input positions", () => {
+Deno.test("getLiftAppliedInputAndCallback recognizes derive input positions", () => {
   const { sourceFile, checker } = createProgram(`
     declare function derive<T, U>(input: T, callback: (value: T) => U): U;
     declare function derive<T, U>(
@@ -396,9 +396,9 @@ Deno.test("getDeriveInputAndCallbackArgument recognizes derive input positions",
     throw new Error("Expected call expression initializers");
   }
 
-  const firstArgs = getDeriveInputAndCallbackArgument(first, checker);
-  const secondArgs = getDeriveInputAndCallbackArgument(second, checker);
-  const thirdArgs = getDeriveInputAndCallbackArgument(third, checker);
+  const firstArgs = getLiftAppliedInputAndCallback(first, checker);
+  const secondArgs = getLiftAppliedInputAndCallback(second, checker);
+  const thirdArgs = getLiftAppliedInputAndCallback(third, checker);
 
   assertEquals(firstArgs?.input.getText(), "1");
   assertEquals(firstArgs?.callback.parameters[0]?.name.getText(), "value");

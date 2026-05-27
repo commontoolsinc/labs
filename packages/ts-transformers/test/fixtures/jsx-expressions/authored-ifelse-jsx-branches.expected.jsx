@@ -60,7 +60,9 @@ export default pattern((__cf_pattern_input) => {
                         }]
                 }
             }
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+            limit: number;
+        }, boolean>({
             type: "object",
             properties: {
                 limit: {
@@ -70,7 +72,7 @@ export default pattern((__cf_pattern_input) => {
             required: ["limit"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { limit: limit }, ({ limit }) => limit > 0), items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+        } as const satisfies __cfHelpers.JSONSchema, ({ limit }) => limit > 0)({ limit: limit }), items.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
             const item = __cf_pattern_input.key("element");
             return <span>{item.key("name")}</span>;
         }, {
@@ -121,7 +123,9 @@ export default pattern((__cf_pattern_input) => {
             type: "number"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, show, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, show, __cfHelpers.lift<{
+            count: __cfHelpers.ReadonlyCell<number>;
+        }, number>({
             type: "object",
             properties: {
                 count: {
@@ -132,7 +136,7 @@ export default pattern((__cf_pattern_input) => {
             required: ["count"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { count: count }, ({ count }) => count.get()), 0)}</p>
+        } as const satisfies __cfHelpers.JSONSchema, ({ count }) => count.get())({ count: count }), 0)}</p>
     </div>),
     });
 }, {

@@ -104,7 +104,17 @@ export default pattern((state) => {
         {/* String concatenation with multiple property accesses */}
         <p>
           Full profile:{" "}
-          {__cfHelpers.derive({
+          {__cfHelpers.lift<{
+            state: {
+                user: {
+                    name: string;
+                    profile: {
+                        location: string;
+                        bio: string;
+                    };
+                };
+            };
+        }, string>({
             type: "object",
             properties: {
                 state: {
@@ -138,7 +148,8 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.user.name + " from " + state.user.profile.location + " - " +
+            state.user.profile.bio)({ state: {
                 user: {
                     name: state.key("user", "name"),
                     profile: {
@@ -146,13 +157,18 @@ export default pattern((state) => {
                         bio: state.key("user", "profile", "bio")
                     }
                 }
-            } }, ({ state }) => state.user.name + " from " + state.user.profile.location + " - " +
-            state.user.profile.bio)}
+            } })}
         </p>
 
         {/* Arithmetic with multiple properties from same base */}
         <p>
-          Age calculation: {__cfHelpers.derive({
+          Age calculation: {__cfHelpers.lift<{
+            state: {
+                user: {
+                    age: number;
+                };
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -174,12 +190,18 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.user.age * 12)({ state: {
                 user: {
                     age: state.key("user", "age")
                 }
-            } }, ({ state }) => state.user.age * 12)} months, or{" "}
-          {__cfHelpers.derive({
+            } })} months, or{" "}
+          {__cfHelpers.lift<{
+            state: {
+                user: {
+                    age: number;
+                };
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -201,11 +223,11 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.user.age * 365)({ state: {
                 user: {
                     age: state.key("user", "age")
                 }
-            } }, ({ state }) => state.user.age * 365)} days
+            } })} days
         </p>
 
         <h3>Deeply Nested Property Chains</h3>
@@ -286,7 +308,16 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, state.key("user", "settings", "notifications"), __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, state.key("user", "settings", "notifications"), __cfHelpers.lift<{
+            state: {
+                user: {
+                    name: string;
+                    settings: {
+                        theme: string;
+                    };
+                };
+            };
+        }, string>({
             type: "object",
             properties: {
                 state: {
@@ -317,15 +348,21 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.user.name + " has notifications on with " +
+            state.user.settings.theme + " theme")({ state: {
                 user: {
                     name: state.key("user", "name"),
                     settings: {
                         theme: state.key("user", "settings", "theme")
                     }
                 }
-            } }, ({ state }) => state.user.name + " has notifications on with " +
-            state.user.settings.theme + " theme"), __cfHelpers.derive({
+            } }), __cfHelpers.lift<{
+            state: {
+                user: {
+                    name: string;
+                };
+            };
+        }, string>({
             type: "object",
             properties: {
                 state: {
@@ -347,16 +384,28 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.user.name + " has notifications off")({ state: {
                 user: {
                     name: state.key("user", "name")
                 }
-            } }, ({ state }) => state.user.name + " has notifications off"))}
+            } }))}
         </p>
 
         {/* Computed expression with shared base */}
         <p>
-          Spacing calc: {__cfHelpers.derive({
+          Spacing calc: {__cfHelpers.lift<{
+            state: {
+                config: {
+                    theme: {
+                        spacing: {
+                            small: number;
+                            medium: number;
+                            large: number;
+                        };
+                    };
+                };
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -396,7 +445,9 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.config.theme.spacing.small +
+            state.config.theme.spacing.medium +
+            state.config.theme.spacing.large)({ state: {
                 config: {
                     theme: {
                         spacing: {
@@ -406,9 +457,7 @@ export default pattern((state) => {
                         }
                     }
                 }
-            } }, ({ state }) => state.config.theme.spacing.small +
-            state.config.theme.spacing.medium +
-            state.config.theme.spacing.large)} total
+            } })} total
         </p>
 
         {/* Boolean expressions with multiple properties */}
@@ -434,7 +483,13 @@ export default pattern((state) => {
         <h3>Method Calls on Shared Bases</h3>
         {/* Multiple method calls on properties from same base */}
         <p>
-          Formatted: {__cfHelpers.derive({
+          Formatted: {__cfHelpers.lift<{
+            state: {
+                user: {
+                    name: string;
+                };
+            };
+        }, string>({
             type: "object",
             properties: {
                 state: {
@@ -456,12 +511,18 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.user.name.toUpperCase())({ state: {
                 user: {
                     name: state.key("user", "name")
                 }
-            } }, ({ state }) => state.user.name.toUpperCase())} -{" "}
-          {__cfHelpers.derive({
+            } })} -{" "}
+          {__cfHelpers.lift<{
+            state: {
+                user: {
+                    email: string;
+                };
+            };
+        }, string>({
             type: "object",
             properties: {
                 state: {
@@ -483,11 +544,11 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.user.email.toLowerCase())({ state: {
                 user: {
                     email: state.key("user", "email")
                 }
-            } }, ({ state }) => state.user.email.toLowerCase())}
+            } })}
         </p>
 
         {/* Property access and method calls mixed */}

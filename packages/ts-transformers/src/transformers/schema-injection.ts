@@ -12,6 +12,7 @@ import {
   detectCallKind,
   detectNewExpressionKind,
   ensureTypeNodeRegistered,
+  getLiftAppliedInnerCall,
   getTypeAtLocationWithFallback,
   getTypeFromTypeNodeWithFallback,
   getVariableInitializer,
@@ -629,7 +630,7 @@ function collectFunctionSchemaTypeNodes(
   }
 
   // 3. If we couldn't infer a type, we can't transform at all
-  // Both types are required for derive/lift to work
+  // Both types are required for lift-applied calls to work
   if (!argumentNode && !resultNode) {
     return {}; // No types could be determined
   }
@@ -1600,7 +1601,7 @@ function recoverProjectedResultSchema(
   return undefined;
 }
 
-function inferDeriveResultTypeFromInitializer(
+function inferLiftAppliedResultTypeFromInitializer(
   node: ts.Expression,
   checker: ts.TypeChecker,
   sourceFile: ts.SourceFile,
@@ -1615,19 +1616,19 @@ function inferDeriveResultTypeFromInitializer(
   }
 
   const callKind = detectCallKind(initializer, checker);
-  if (callKind?.kind !== "derive") {
+  if (callKind?.kind !== "lift-applied") {
     return undefined;
   }
 
-  const deriveArgs = resolveDeriveInputAndCallbackArgument(
+  const liftAppliedArgs = resolveLiftAppliedInputAndCallback(
     initializer,
     checker,
     sourceFile,
   );
-  if (!deriveArgs) {
+  if (!liftAppliedArgs) {
     return undefined;
   }
-  const { input: firstArg, callback } = deriveArgs;
+  const { input: firstArg, callback } = liftAppliedArgs;
 
   let argumentType =
     getTypeAtLocationWithFallback(firstArg, checker, typeRegistry) ??
@@ -1700,7 +1701,7 @@ function inferExpressionTypeWithInitializerFallback(
     return fromLift;
   }
 
-  const fromDerive = inferDeriveResultTypeFromInitializer(
+  const fromLiftApplied = inferLiftAppliedResultTypeFromInitializer(
     expr,
     checker,
     sourceFile,
@@ -1709,8 +1710,8 @@ function inferExpressionTypeWithInitializerFallback(
     capabilityRegistry,
     context,
   );
-  if (fromDerive && !isAnyOrUnknownType(fromDerive)) {
-    return fromDerive;
+  if (fromLiftApplied && !isAnyOrUnknownType(fromLiftApplied)) {
+    return fromLiftApplied;
   }
 
   return type;
@@ -2237,6 +2238,24 @@ function prependSchemaArguments(
     }
   }
 
+  // For the lift-applied shape (__cfHelpers.lift(cb)(input)), schemas must
+  // be prepended to the INNER lift call's arguments, not the outer applied
+  // call's. The outer call's input stays at index 0; the inner call gains
+  // [argSchema, resSchema, ...originalInnerArgs].
+  const innerLiftCall = getLiftAppliedInnerCall(node);
+  if (innerLiftCall) {
+    const rebuiltInner = context.factory.createCallExpression(
+      innerLiftCall.expression,
+      innerLiftCall.typeArguments,
+      [argSchemaCall, resSchemaCall, ...innerLiftCall.arguments],
+    );
+    return context.factory.createCallExpression(
+      rebuiltInner,
+      undefined,
+      node.arguments,
+    );
+  }
+
   return context.factory.createCallExpression(
     node.expression,
     undefined,
@@ -2267,7 +2286,7 @@ function findFunctionArgument(
   return undefined;
 }
 
-function resolveDeriveInputAndCallbackArgument(
+function resolveLiftAppliedInputAndCallback(
   call: ts.CallExpression,
   checker: ts.TypeChecker,
   sourceFile: ts.SourceFile,
@@ -2276,8 +2295,29 @@ function resolveDeriveInputAndCallbackArgument(
   callback: ts.ArrowFunction | ts.FunctionExpression;
 } | undefined {
   const callKind = detectCallKind(call, checker);
-  if (callKind?.kind !== "derive") {
+  if (callKind?.kind !== "lift-applied") {
     return undefined;
+  }
+
+  // See getLiftAppliedInputAndCallback in src/ast/call-kind.ts for the
+  // two recognized shapes (legacy derive vs lift-applied).
+  const innerCall = getLiftAppliedInnerCall(call);
+  if (innerCall) {
+    // Lift-applied: callback is the last arg of the inner lift call; input
+    // is the first arg of the outer applied call.
+    const callbackIndex = innerCall.arguments.length - 1;
+    const callbackExpression = innerCall.arguments[callbackIndex];
+    const callback = callbackExpression
+      ? resolveFunctionLikeExpression(callbackExpression, checker, sourceFile)
+      : undefined;
+    if (!callback) {
+      return undefined;
+    }
+    const input = call.arguments[0];
+    if (!input) {
+      return undefined;
+    }
+    return { input, callback };
   }
 
   const callbackIndex = call.arguments.length - 1;
@@ -3106,22 +3146,42 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
         }
       }
 
-      if (callKind?.kind === "derive") {
+      if (callKind?.kind === "lift-applied") {
         const factory = transformation.factory;
-        const deriveArgs = resolveDeriveInputAndCallbackArgument(
+        const liftAppliedArgs = resolveLiftAppliedInputAndCallback(
           node,
           checker,
           sourceFile,
         );
 
-        if (node.typeArguments && node.typeArguments.length >= 2) {
-          const [argumentType, resultType] = node.typeArguments;
+        // For lift-applied shape (callee is itself a call), the generic
+        // type arguments live on the *inner* lift call, not on the outer
+        // applied call. The legacy derive shape kept them on the call
+        // itself. Read from whichever holds them.
+        const innerLiftCall = getLiftAppliedInnerCall(node);
+        const sourceTypeArguments = innerLiftCall?.typeArguments ??
+          node.typeArguments;
+
+        if (sourceTypeArguments && sourceTypeArguments.length >= 2) {
+          const [argumentType, resultType] = sourceTypeArguments;
           if (!argumentType || !resultType) {
             return ts.visitEachChild(node, visit, transformation);
           }
 
+          // Lift-applied calls emitted by createLiftAppliedCall (the
+          // synthetic JSX compute-wrap path used by expression-rewrite)
+          // carry an input TypeNode already built from accurate capture
+          // analysis. Re-applying the capability-summary shrink would
+          // collapse array element types to `unknown` (CT-1615 Berni
+          // review on PR #3676). User-source derive<T,R>(...) lowered
+          // into lift-applied is NOT marked, so it retains the legacy
+          // shrink behavior.
+          const isSynthetic = context.isSyntheticLiftAppliedCall(node) ||
+            (innerLiftCall !== undefined &&
+              context.isSyntheticLiftAppliedCall(innerLiftCall));
+
           const resolved = resolveDualSchemaBuilderTypes(
-            deriveArgs?.callback,
+            liftAppliedArgs?.callback,
             checker,
             sourceFile,
             factory,
@@ -3133,6 +3193,7 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
               explicitArgumentTypeValue: typeRegistry?.get(argumentType),
               explicitResultTypeNode: resultType,
               explicitResultTypeValue: typeRegistry?.get(resultType),
+              applyExplicitArgumentCapabilitySummary: !isSynthetic,
             },
           );
           if (!resolved) {
@@ -3153,8 +3214,8 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           );
         }
 
-        if (deriveArgs) {
-          const { input: firstArg, callback } = deriveArgs;
+        if (liftAppliedArgs) {
+          const { input: firstArg, callback } = liftAppliedArgs;
 
           // Special case: detect empty object literal {} and generate specific schema
           let argNode: ts.TypeNode | undefined;
@@ -3249,11 +3310,19 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             sourceFile,
           );
           if (argumentType && liftCallback) {
-            const argumentTypeValue = getTypeFromTypeNodeWithFallback(
-              argumentType,
-              checker,
-              typeRegistry,
-            );
+            // Prefer the pre-shrink type from `narrowedWrapperTypeRegistry`
+            // when available — for our own injected lift-applied output, the
+            // outer call's first toSchema argument is a synthetic wrapper
+            // TypeNode that `checker.getTypeFromTypeNode` resolves to `any`.
+            // See type-shrinking.ts `applyShrinkAndWrap` for where this is
+            // populated and the rationale for the separate registry channel.
+            const argumentTypeValue =
+              context.lookupNarrowedWrapper(argumentType) ??
+                getTypeFromTypeNodeWithFallback(
+                  argumentType,
+                  checker,
+                  typeRegistry,
+                );
             const {
               argumentTypeNode: narrowedArgumentType,
               argumentTypeValue: narrowedArgumentTypeValue,
@@ -3677,8 +3746,8 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
         const [conditionExpr, valueExpr] = args;
 
         // Infer types for each argument
-        // Use getTypeAtLocationWithFallback to handle synthetic nodes (e.g., derive calls)
-        // which have their types registered in the typeRegistry
+        // Use getTypeAtLocationWithFallback to handle synthetic nodes (e.g.,
+        // lift-applied calls) which have their types registered in the typeRegistry
         const conditionType = getTypeAtLocationWithFallback(
           conditionExpr!,
           checker,
@@ -3724,8 +3793,8 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
         const [conditionExpr, fallbackExpr] = args;
 
         // Infer types for each argument
-        // Use getTypeAtLocationWithFallback to handle synthetic nodes (e.g., derive calls)
-        // which have their types registered in the typeRegistry
+        // Use getTypeAtLocationWithFallback to handle synthetic nodes (e.g.,
+        // lift-applied calls) which have their types registered in the typeRegistry
         const conditionType = getTypeAtLocationWithFallback(
           conditionExpr!,
           checker,
@@ -3771,8 +3840,8 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
         const [conditionExpr, ifTrueExpr, ifFalseExpr] = args;
 
         // Infer types for each argument
-        // Use getTypeAtLocationWithFallback to handle synthetic nodes (e.g., derive calls)
-        // which have their types registered in the typeRegistry
+        // Use getTypeAtLocationWithFallback to handle synthetic nodes (e.g.,
+        // lift-applied calls) which have their types registered in the typeRegistry
         const conditionType = getTypeAtLocationWithFallback(
           conditionExpr!,
           checker,

@@ -37,13 +37,15 @@ export default pattern((_state) => {
                     type: "object",
                     properties: {}
                 }]
-        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+            list: __cfHelpers.Cell<string[]>;
+        }, boolean>({
             type: "object",
             properties: {
                 list: {
                     type: "array",
                     items: {
-                        type: "string"
+                        type: "unknown"
                     },
                     asCell: ["readonly"]
                 }
@@ -51,7 +53,7 @@ export default pattern((_state) => {
             required: ["list"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { list: list }, ({ list }) => list.get().length > 0), <div>
+        } as const satisfies __cfHelpers.JSONSchema, ({ list }) => list.get().length > 0)({ list: list }), <div>
             {list.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const name = __cf_pattern_input.key("element");
                 return (<span>{name}</span>);

@@ -69,7 +69,9 @@ export default pattern<{ count: number }, { doubled: number }>((state) => ({
     });
     const main = output["/main.tsx"]!;
 
-    assertStringIncludes(main, "doubled: __cfHelpers.derive(");
+    // After CT-1615 Phase 1, pattern-owned synthesized derives lower to
+    // lift-applied: `doubled: __cfHelpers.lift<...>(cb)(input)`.
+    assertStringIncludes(main, "doubled: __cfHelpers.lift<");
     assertStringIncludes(main, '.for(["__patternResult", "doubled"], true)');
     assertNotMatch(main, /state\.key\("count"\)\.for/);
   });
@@ -495,7 +497,7 @@ export { value };
     });
     assertStringIncludes(
       enabledByDefault["/main.ts"]!,
-      "__cfHelpers.derive(",
+      "__cfHelpers.lift(",
     );
 
     const disabled = await transformFiles({
@@ -503,7 +505,7 @@ export { value };
     });
 
     assertStringIncludes(disabled["/main.ts"]!, "computed(() => 1)");
-    assertNotMatch(disabled["/main.ts"]!, /__cfHelpers\.derive/);
+    assertNotMatch(disabled["/main.ts"]!, /__cfHelpers\.lift/);
   });
 
   it("wraps top-level data candidates with __cfHelpers.__cf_data", async () => {

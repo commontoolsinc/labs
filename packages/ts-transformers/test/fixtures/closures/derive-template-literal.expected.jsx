@@ -21,7 +21,10 @@ export default pattern(() => {
     const prefix = new Writable("Value: ", {
         type: "string"
     } as const satisfies __cfHelpers.JSONSchema).for("prefix", true);
-    const result = __cfHelpers.derive({
+    const result = __cfHelpers.lift<{
+        prefix: __cfHelpers.ReadonlyCell<string>;
+        value: __cfHelpers.ReadonlyCell<number>;
+    }, string>({
         type: "object",
         properties: {
             prefix: {
@@ -36,10 +39,10 @@ export default pattern(() => {
         required: ["prefix", "value"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        value: value.for(["result", 2, "value"], true),
+    } as const satisfies __cfHelpers.JSONSchema, ({ value: v, prefix }) => `${prefix.get()}${v}`)({
+        value: value.for(["result", "value"], true),
         prefix: prefix
-    }, ({ value: v, prefix }) => `${prefix.get()}${v}`).for("result", true);
+    }).for("result", true);
     return result;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "string"

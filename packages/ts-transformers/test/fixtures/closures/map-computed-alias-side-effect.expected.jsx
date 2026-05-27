@@ -14,7 +14,10 @@ const __cfAmdHooks = undefined;
 const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
     const element = __cf_pattern_input.key("element");
     const __cf_amount_key = nextKey();
-    const amount = __cfHelpers.derive({
+    const amount = __cfHelpers.lift<{
+        element: any;
+        __cf_amount_key: any;
+    }, number | undefined>({
         type: "object",
         properties: {
             element: true,
@@ -23,10 +26,10 @@ const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
         required: ["element", "__cf_amount_key"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: ["number", "undefined"]
-    } as const satisfies __cfHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, ({ element, __cf_amount_key }) => element[__cf_amount_key])({
         element: element,
         __cf_amount_key: __cf_amount_key
-    }, ({ element, __cf_amount_key }) => element[__cf_amount_key]).for("amount", true);
+    }).for("amount", true);
     return (<span>{amount}</span>);
 });
 let keyCounter = 0;

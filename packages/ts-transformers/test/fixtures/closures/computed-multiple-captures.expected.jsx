@@ -25,7 +25,11 @@ export default pattern(() => {
     const c = new Writable(30, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("c", true);
-    const result = __cfHelpers.derive({
+    const result = __cfHelpers.lift<{
+        a: __cfHelpers.ReadonlyCell<number>;
+        b: __cfHelpers.ReadonlyCell<number>;
+        c: __cfHelpers.ReadonlyCell<number>;
+    }, number>({
         type: "object",
         properties: {
             a: {
@@ -44,13 +48,13 @@ export default pattern(() => {
         required: ["a", "b", "c"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, ({ a, b, c }) => {
+        const sum = a.get() + b.get();
+        return sum * c.get();
+    })({
         a: a,
         b: b,
         c: c
-    }, ({ a, b, c }) => {
-        const sum = a.get() + b.get();
-        return sum * c.get();
     }).for("result", true);
     return result;
 }, false as const satisfies __cfHelpers.JSONSchema, {

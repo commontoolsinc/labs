@@ -15,12 +15,15 @@ const handleClick = handler<unknown, { count: Cell<number> }>(
 );
 
 // FIXTURE: event-handler-no-derive
-// Verifies: handler invocations in JSX are NOT wrapped in derive(), while expressions are
-//   count + 1 (in JSX <span>)                → __cfHelpers.derive(...schemas, { count }, ({ count }) => count + 1)
-//   handleClick({ count }) (onClick attr)     → left as-is (not wrapped in derive)
-//   handleClick({ count }) (inside .map())    → left as-is (not wrapped in derive)
-//   pattern<{ count: Default<number, 0> }>    → pattern(fn, inputSchema, outputSchema)
-// Context: Negative test ensuring handler calls in event attributes and inside .map() are not derive-wrapped
+// Verifies: handler invocations in JSX are NOT wrapped in a reactive compute
+// wrapper (formerly derive, now lift-applied post-CT-1615), while
+// expressions are.
+//   count + 1 (in JSX <span>)                → __cfHelpers.lift<...>(({ count }) => count + 1)({ count })
+//   handleClick({ count }) (onClick attr)    → left as-is (not wrapped)
+//   handleClick({ count }) (inside .map())   → left as-is (not wrapped)
+//   pattern<{ count: Default<number, 0> }>   → pattern(fn, inputSchema, outputSchema)
+// Context: Negative test ensuring handler calls in event attributes and
+// inside .map() are not wrapped as reactive compute.
 export default pattern<{ count: Default<number, 0> }>(
   ({ count }) => {
     return {

@@ -23,7 +23,13 @@ export default pattern((config: Config) => {
     const value = new Writable(10, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("value", true);
-    const result = __cfHelpers.derive({
+    const result = __cfHelpers.lift<{
+        value: __cfHelpers.ReadonlyCell<number>;
+        config: {
+            required: number;
+            unionUndefined?: number | undefined;
+        };
+    }, number>({
         type: "object",
         properties: {
             value: {
@@ -46,13 +52,13 @@ export default pattern((config: Config) => {
         required: ["value", "config"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        value: value.for(["result", 2, "value"], true),
+    } as const satisfies __cfHelpers.JSONSchema, ({ value: v, config }) => v.get() + config.required + (config.unionUndefined ?? 0))({
+        value: value.for(["result", "value"], true),
         config: {
             required: config.key("required"),
             unionUndefined: config.key("unionUndefined")
         }
-    }, ({ value: v, config }) => v.get() + config.required + (config.unionUndefined ?? 0)).for("result", true);
+    }).for("result", true);
     return result;
 }, {
     type: "object",

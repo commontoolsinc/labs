@@ -28,7 +28,12 @@ export default pattern((state) => {
         [UI]: (<div>
         <p>
           Filter joined:{" "}
-          {__cfHelpers.derive({
+          {__cfHelpers.lift<{
+            state: {
+                items: number[];
+                threshold: number;
+            };
+        }, string>({
             type: "object",
             properties: {
                 state: {
@@ -50,14 +55,20 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.filter((x) => x > state.threshold).join(", "))({ state: {
                 items: state.key("items"),
                 threshold: state.key("threshold")
-            } }, ({ state }) => state.items.filter((x) => x > state.threshold).join(", "))}
+            } })}
         </p>
         <p>
           Filter map joined:{" "}
-          {__cfHelpers.derive({
+          {__cfHelpers.lift<{
+            state: {
+                items: number[];
+                threshold: number;
+                factor: number;
+            };
+        }, string>({
             type: "object",
             properties: {
                 state: {
@@ -82,15 +93,20 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.filter((x) => x > state.threshold).map((x) => x * state.factor).join(", "))({ state: {
                 items: state.key("items"),
                 threshold: state.key("threshold"),
                 factor: state.key("factor")
-            } }, ({ state }) => state.items.filter((x) => x > state.threshold).map((x) => x * state.factor).join(", "))}
+            } })}
         </p>
         <p>
           Filter joined upper:{" "}
-          {__cfHelpers.derive({
+          {__cfHelpers.lift<{
+            state: {
+                items: number[];
+                threshold: number;
+            };
+        }, string>({
             type: "object",
             properties: {
                 state: {
@@ -112,14 +128,19 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.filter((x) => x > state.threshold).join(", ").toUpperCase())({ state: {
                 items: state.key("items"),
                 threshold: state.key("threshold")
-            } }, ({ state }) => state.items.filter((x) => x > state.threshold).join(", ").toUpperCase())}
+            } })}
         </p>
         <p>
           Filter joined upper trimmed:{" "}
-          {__cfHelpers.derive({
+          {__cfHelpers.lift<{
+            state: {
+                items: number[];
+                threshold: number;
+            };
+        }, string>({
             type: "object",
             properties: {
                 state: {
@@ -141,11 +162,11 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.items.filter((x) => x > state.threshold).join(", ").toUpperCase()
+            .trim())({ state: {
                 items: state.key("items"),
                 threshold: state.key("threshold")
-            } }, ({ state }) => state.items.filter((x) => x > state.threshold).join(", ").toUpperCase()
-            .trim())}
+            } })}
         </p>
       </div>),
     };

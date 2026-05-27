@@ -105,7 +105,9 @@ const MyHandler = handler({
     },
     required: ["show"]
 } as const satisfies __cfHelpers.JSONSchema, (_event, { show }) => {
-    return <div>{__cfHelpers.derive({
+    return <div>{__cfHelpers.lift<{
+        show: boolean;
+    }, boolean>({
         type: "object",
         properties: {
             show: {
@@ -115,7 +117,7 @@ const MyHandler = handler({
         required: ["show"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, { show: show }, ({ show }) => show) && <span>Content</span>}</div>;
+    } as const satisfies __cfHelpers.JSONSchema, ({ show }) => show)({ show: show }) && <span>Content</span>}</div>;
 });
 // Test: || with JSX inside handler callback should transform to unless()
 const MyHandler2 = handler({
@@ -209,7 +211,9 @@ const MyHandler2 = handler({
     },
     required: ["value"]
 } as const satisfies __cfHelpers.JSONSchema, (_event, { value }) => {
-    return <div>{__cfHelpers.derive({
+    return <div>{__cfHelpers.lift<{
+        value: string | null;
+    }, string | null>({
         type: "object",
         properties: {
             value: {
@@ -227,7 +231,7 @@ const MyHandler2 = handler({
             }, {
                 type: "null"
             }]
-    } as const satisfies __cfHelpers.JSONSchema, { value: value }, ({ value }) => value) || <span>Fallback</span>}</div>;
+    } as const satisfies __cfHelpers.JSONSchema, ({ value }) => value)({ value: value }) || <span>Fallback</span>}</div>;
 });
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }

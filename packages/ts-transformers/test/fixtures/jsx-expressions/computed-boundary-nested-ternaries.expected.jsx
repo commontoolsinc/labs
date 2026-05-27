@@ -26,7 +26,9 @@ export const OuterTernary = pattern((__cf_pattern_input) => {
         type: "string"
     } as const satisfies __cfHelpers.JSONSchema, {
         "enum": ["B", "C", "D"]
-    } as const satisfies __cfHelpers.JSONSchema, show, __cfHelpers.derive({
+    } as const satisfies __cfHelpers.JSONSchema, show, __cfHelpers.lift<{
+        bar: boolean;
+    }, "B" | "C">({
         type: "object",
         properties: {
             bar: {
@@ -36,7 +38,7 @@ export const OuterTernary = pattern((__cf_pattern_input) => {
         required: ["bar"]
     } as const satisfies __cfHelpers.JSONSchema, {
         "enum": ["B", "C"]
-    } as const satisfies __cfHelpers.JSONSchema, { bar: bar }, ({ bar }) => bar ? "B" : "C"), "D")}</div>);
+    } as const satisfies __cfHelpers.JSONSchema, ({ bar }) => bar ? "B" : "C")({ bar: bar }), "D")}</div>);
 }, {
     type: "object",
     properties: {
@@ -81,7 +83,10 @@ export const AuthoredIfElse = pattern((__cf_pattern_input) => {
         type: "string"
     } as const satisfies __cfHelpers.JSONSchema, {
         "enum": ["A", "B", "C", "D"]
-    } as const satisfies __cfHelpers.JSONSchema, show, __cfHelpers.derive({
+    } as const satisfies __cfHelpers.JSONSchema, show, __cfHelpers.lift<{
+        foo: boolean;
+        bar: boolean;
+    }, "A" | "B" | "C">({
         type: "object",
         properties: {
             foo: {
@@ -94,10 +99,10 @@ export const AuthoredIfElse = pattern((__cf_pattern_input) => {
         required: ["foo", "bar"]
     } as const satisfies __cfHelpers.JSONSchema, {
         "enum": ["A", "B", "C"]
-    } as const satisfies __cfHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, ({ foo, bar }) => foo ? "A" : bar ? "B" : "C")({
         foo: foo,
         bar: bar
-    }, ({ foo, bar }) => foo ? "A" : bar ? "B" : "C"), "D");
+    }), "D");
 }, {
     type: "object",
     properties: {

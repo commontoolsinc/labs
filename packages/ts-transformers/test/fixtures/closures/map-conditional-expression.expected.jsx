@@ -41,7 +41,14 @@ export default pattern((state) => {
                     type: "number"
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "number"
-                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+                    item: {
+                        price: number;
+                    };
+                    state: {
+                        threshold: number;
+                    };
+                }, boolean>({
                     type: "object",
                     properties: {
                         item: {
@@ -66,14 +73,21 @@ export default pattern((state) => {
                     required: ["item", "state"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, ({ item, state }) => item.price > state.threshold)({
                     item: {
                         price: item.key("price")
                     },
                     state: {
                         threshold: state.key("threshold")
                     }
-                }, ({ item, state }) => item.price > state.threshold), __cfHelpers.derive({
+                }), __cfHelpers.lift<{
+                    item: {
+                        price: number;
+                    };
+                    state: {
+                        discount: number;
+                    };
+                }, number>({
                     type: "object",
                     properties: {
                         item: {
@@ -98,14 +112,14 @@ export default pattern((state) => {
                     required: ["item", "state"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "number"
-                } as const satisfies __cfHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, ({ item, state }) => item.price * (1 - state.discount))({
                     item: {
                         price: item.key("price")
                     },
                     state: {
                         discount: state.key("discount")
                     }
-                }, ({ item, state }) => item.price * (1 - state.discount)), item.key("price"))}
+                }), item.key("price"))}
           </div>);
             }, {
                 type: "object",

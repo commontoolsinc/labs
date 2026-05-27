@@ -32,7 +32,15 @@ export default pattern((state) => {
         {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const item = __cf_pattern_input.key("element");
                 const state = __cf_pattern_input.key("params", "state");
-                return (<div>{__cfHelpers.derive({
+                return (<div>{__cfHelpers.lift<{
+                    state: {
+                        prefix: string;
+                        suffix: string;
+                    };
+                    item: {
+                        name: string;
+                    };
+                }, string>({
                     type: "object",
                     properties: {
                         state: {
@@ -60,7 +68,7 @@ export default pattern((state) => {
                     required: ["state", "item"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, ({ state, item }) => `${state.prefix} ${item.name} ${state.suffix}`)({
                     state: {
                         prefix: state.key("prefix"),
                         suffix: state.key("suffix")
@@ -68,7 +76,7 @@ export default pattern((state) => {
                     item: {
                         name: item.key("name")
                     }
-                }, ({ state, item }) => `${state.prefix} ${item.name} ${state.suffix}`)}</div>);
+                })}</div>);
             }, {
                 type: "object",
                 properties: {

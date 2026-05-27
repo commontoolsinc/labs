@@ -28,7 +28,12 @@ export default pattern((state) => {
         {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const cost = __cf_pattern_input.key("element", "price");
                 const state = __cf_pattern_input.key("params", "state");
-                return (<span>{__cfHelpers.derive({
+                return (<span>{__cfHelpers.lift<{
+                    cost: number;
+                    state: {
+                        discount: number;
+                    };
+                }, number>({
                     type: "object",
                     properties: {
                         cost: {
@@ -47,12 +52,12 @@ export default pattern((state) => {
                     required: ["cost", "state"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "number"
-                } as const satisfies __cfHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, ({ cost, state }) => cost * state.discount)({
                     cost: cost,
                     state: {
                         discount: state.key("discount")
                     }
-                }, ({ cost, state }) => cost * state.discount)}</span>);
+                })}</span>);
             }, {
                 type: "object",
                 properties: {

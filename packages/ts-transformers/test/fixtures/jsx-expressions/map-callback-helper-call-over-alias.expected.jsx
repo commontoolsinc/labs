@@ -37,7 +37,9 @@ export default pattern((__cf_pattern_input) => {
         {files.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const file = __cf_pattern_input.key("element");
                 const kind = file.key("type");
-                const label = __cfHelpers.derive({
+                const label = __cfHelpers.lift<{
+                    kind: string;
+                }, string>({
                     type: "object",
                     properties: {
                         kind: {
@@ -47,7 +49,7 @@ export default pattern((__cf_pattern_input) => {
                     required: ["kind"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, { kind: kind }, __cfModuleCallback_1).for("label", true);
+                } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({ kind: kind }).for("label", true);
                 return <span>{label}</span>;
             }, {
                 type: "object",
