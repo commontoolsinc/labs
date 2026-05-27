@@ -15,16 +15,25 @@ import {
   type VNode,
   Writable,
 } from "commonfabric";
-import {
-  normalizePlateId,
-  US_STATES,
-} from "../../vehicles.ts";
+import { normalizePlateId, US_STATES } from "../../vehicles.ts";
 
 // ============================================================
 // Domain Types (DESIGN §4)
 // ============================================================
 
 export type Classification = "ours" | "guest" | "offender" | "unknown";
+
+// Phase 3b: known-vehicle registry entry (DESIGN §8). category "ours" is
+// derived from people[].vehicles — only guest/offender live here.
+export interface KnownVehicle {
+  plateNumber: string; // normalized uppercase alphanumerics
+  plateState: string; // uppercase 2-letter
+  description: string; // human note, e.g. "white delivery van"
+  category: "guest" | "offender";
+  name?: string; // optional display name for guests (e.g. "Mary Friend")
+  org: string; // e.g. "Local Butcher Shop"
+  label: string; // e.g. "delivery van, Tue mornings"
+}
 
 // Phase 2: structured result of LLM plate/vehicle extraction from a photo.
 export interface PlateExtraction {
@@ -83,6 +92,26 @@ type SpotsCell = Writable<
 
 type SightingsCell = Writable<Sighting[] | Default<[]>>;
 
+// Phase 3b: known-vehicle registry cell
+type KnownVehiclesCell = Writable<KnownVehicle[] | Default<[]>>;
+
+// Phase 3b: loose person shape — we read only vehicles from it.
+// The full parking-coordinator Person has more fields; this covers what we need.
+// Phase 3c: vehicle element type includes the full coordinator shape so writes
+// from assignToPerson are compatible with the coordinator's UI.
+interface PersonWithVehicles {
+  name: string;
+  vehicles?: {
+    plateId: string;
+    plateState: string;
+    color?: string;
+    make?: string;
+    model?: string;
+  }[];
+}
+
+type PeopleCell = Writable<PersonWithVehicles[] | Default<[]>>;
+
 // ============================================================
 // Pattern I/O (DESIGN §12, trimmed to Phase 1)
 // ============================================================
@@ -90,15 +119,19 @@ type SightingsCell = Writable<Sighting[] | Default<[]>>;
 export interface LotWatchInput {
   spots?: PerSpace<SpotsCell>;
   sightings?: PerSpace<SightingsCell>;
-  // Phase 2: people?: PerSpace<PeopleCell>;       — for "ours" classification
-  // Phase 2: adminRegistry?: PerSpace<...>;        — for admin gating
-  // Phase 2: knownVehicles?: PerSpace<...>;        — guest/offender registries
+  // Phase 3b: read employee vehicles → "ours" classification
+  people?: PerSpace<PeopleCell>;
+  // Phase 3b: guest/offender registries
+  knownVehicles?: PerSpace<KnownVehiclesCell>;
+  // Phase 3c: adminRegistry?: PerSpace<...>;  — admin gating
 }
 
 export interface LotWatchOutput {
   [NAME]: string;
   [UI]: VNode;
   sightings: Sighting[];
+  knownVehicles: KnownVehicle[];
+  people: PersonWithVehicles[];
   captureSighting: Stream<{
     spotNumber: string;
     image: ImageData;
@@ -109,6 +142,21 @@ export interface LotWatchOutput {
   }>;
   deleteSighting: Stream<{ id: string }>;
   selectTab: Stream<{ tab: "capture" | "sightings" }>;
+  markVehicle: Stream<{
+    plateNumber: string;
+    plateState: string;
+    category: "guest" | "offender";
+    org: string;
+    label?: string;
+    name?: string;
+  }>;
+  removeKnownVehicle: Stream<{ plateNumber: string; plateState: string }>;
+  openAssign: Stream<{ id: string }>;
+  cancelAssign: Stream<void>;
+  assignToPerson: Stream<void>;
+  openGuest: Stream<{ id: string }>;
+  cancelGuest: Stream<void>;
+  saveGuest: Stream<void>;
 }
 
 // ============================================================
@@ -155,6 +203,53 @@ const classificationBg = (c: Classification): string => {
   if (c === "guest") return "#dbeafe";
   if (c === "offender") return "#fee2e2";
   return "#f3f4f6"; // unknown
+};
+
+// ============================================================
+// Phase 3b: Classification helper (DESIGN §8) — module-scope pure function
+// so it can be called from inside computed() without capturing cells.
+// Priority: ours > offender > guest > unknown.
+// ============================================================
+
+export const classifyPlate = (
+  plateNumber: string,
+  plateState: string,
+  ours: readonly { plateId: string; plateState: string }[],
+  known: readonly KnownVehicle[],
+): Classification => {
+  if (!plateNumber) return "unknown";
+  const normPlate = normalizePlateId(plateNumber);
+  const normState = plateState.toUpperCase().trim();
+  // 1. ours — from people[].vehicles
+  for (const v of ours) {
+    if (
+      normalizePlateId(v.plateId) === normPlate &&
+      v.plateState.toUpperCase().trim() === normState
+    ) {
+      return "ours";
+    }
+  }
+  // 2. offender takes priority over guest
+  for (const kv of known) {
+    if (
+      normalizePlateId(kv.plateNumber) === normPlate &&
+      kv.plateState.toUpperCase().trim() === normState &&
+      kv.category === "offender"
+    ) {
+      return "offender";
+    }
+  }
+  // 3. guest
+  for (const kv of known) {
+    if (
+      normalizePlateId(kv.plateNumber) === normPlate &&
+      kv.plateState.toUpperCase().trim() === normState &&
+      kv.category === "guest"
+    ) {
+      return "guest";
+    }
+  }
+  return "unknown";
 };
 
 // Phase 3: group sightings by normalized plate (plateNumber|plateState).
@@ -231,12 +326,27 @@ const DEFAULT_SPOTS: ParkingSpot[] = [
 // ============================================================
 
 export default pattern<LotWatchInput, LotWatchOutput>(
-  ({ spots: inputSpots, sightings: inputSightings }) => {
+  ({
+    spots: inputSpots,
+    sightings: inputSightings,
+    people: inputPeople,
+    knownVehicles: inputKnownVehicles,
+  }) => {
     // ---- Cells (DESIGN §5) ----
 
     const spots = inputSpots ?? Writable.perSpace.of(DEFAULT_SPOTS);
     const sightings = inputSightings ??
       Writable.perSpace.of<Sighting[]>([]);
+
+    // Phase 3b: known-vehicle registry (guests + offenders). When wired from a
+    // parent space we share the same cell; standalone we own it.
+    const knownVehicles = inputKnownVehicles ??
+      Writable.perSpace.of<KnownVehicle[]>([]);
+
+    // Phase 3b: people cell — read-only for deriving the "ours" vehicle set.
+    // When absent (standalone) the "ours" bucket is empty.
+    const people = inputPeople ??
+      Writable.perSpace.of<PersonWithVehicles[]>([]);
 
     // PerUser: who is reporting
     const reporterName = new Writable.perUser("");
@@ -256,6 +366,18 @@ export default pattern<LotWatchInput, LotWatchOutput>(
 
     // PerSession: delete confirm dialog target
     const deleteConfirmTarget = new Writable.perSession<string | null>(null);
+
+    // Phase 3c: assign-to-person dialog state
+    // assignTarget: sighting id whose person-picker is open, or null
+    const assignTarget = new Writable.perSession<string | null>(null);
+    // assignPersonName: name of the person selected in the picker
+    const assignPersonName = new Writable.perSession<string>("");
+
+    // Guest name flow: inline form to optionally name a guest vehicle.
+    // guestTarget: sighting id whose guest-name form is open, or null
+    const guestTarget = new Writable.perSession<string | null>(null);
+    // guestName: free-text name typed in the guest form
+    const guestName = new Writable.perSession<string>("");
 
     // ---- Phase 2: LLM extraction from the draft photo ----
     // Runs reactively when a photo is captured. Uses the draft's inline `data`
@@ -287,11 +409,13 @@ export default pattern<LotWatchInput, LotWatchOutput>(
         properties: {
           description: {
             type: "string",
-            description: "Color + make + model in plain words, e.g. 'white Toyota Corolla'",
+            description:
+              "Color + make + model in plain words, e.g. 'white Toyota Corolla'",
           },
           plateNumber: {
             type: "string",
-            description: "Plate characters only, uppercase, no spaces/dashes; '' if illegible",
+            description:
+              "Plate characters only, uppercase, no spaces/dashes; '' if illegible",
           },
           plateState: {
             type: "string",
@@ -402,26 +526,238 @@ export default pattern<LotWatchInput, LotWatchOutput>(
       deleteConfirmTarget.set(null);
     });
 
+    // Phase 3c: assign-to-person actions — write the plate into the shared
+    // parking-coordinator people cell so sightings classify as "ours".
+    const openAssign = action<{ id: string }>(({ id }) => {
+      assignTarget.set(id);
+      // Default to the first person's name so the picker has a sensible value.
+      const first = (people.get() ?? [])[0];
+      assignPersonName.set(first?.name ?? "");
+    });
+
+    const cancelAssign = action(() => {
+      assignTarget.set(null);
+    });
+
+    // Reads assignTarget + assignPersonName from cells (safe inside action).
+    // Writes a coordinator-shaped Vehicle into that person's vehicles array.
+    const assignToPerson = action(() => {
+      const targetId = assignTarget.get();
+      const personName = assignPersonName.get() ?? "";
+      if (!targetId || !personName) return;
+
+      // Find the sighting by id.
+      const all = sightings.get() ?? [];
+      let sightingPlate = "";
+      let sightingState = "";
+      for (const s of all) {
+        if (s.id === targetId) {
+          sightingPlate = s.plateNumber;
+          sightingState = s.plateState;
+          break;
+        }
+      }
+      if (!sightingPlate) return; // no readable plate — nothing to write
+
+      const normPlate = normalizePlateId(sightingPlate);
+      const normState = sightingState.toUpperCase().trim();
+
+      // Build a coordinator-compatible Vehicle object (extra fields fine).
+      const newVehicle = {
+        plateId: normPlate,
+        plateState: normState,
+        color: "",
+        make: "",
+        model: "",
+      };
+
+      // Update the people list: find the named person, dedupe by plateId|state,
+      // append if not already present.
+      const currentPeople = people.get() ?? [];
+      const updatedPeople = currentPeople.map((p) => {
+        if (p.name !== personName) return p;
+        const existing = p.vehicles ?? [];
+        // Dedupe: skip if this plate is already registered for this person.
+        for (const v of existing) {
+          if (
+            normalizePlateId(v.plateId) === normPlate &&
+            v.plateState.toUpperCase().trim() === normState
+          ) {
+            return p; // already there
+          }
+        }
+        return { ...p, vehicles: [...existing, newVehicle] };
+      });
+      people.set(updatedPeople);
+      assignTarget.set(null);
+    });
+
+    // Guest name flow actions.
+    const openGuest = action<{ id: string }>(({ id }) => {
+      guestTarget.set(id);
+      guestName.set("");
+    });
+
+    const cancelGuest = action(() => {
+      guestTarget.set(null);
+    });
+
+    // Reads guestTarget (sighting id) + guestName from cells; writes to registry.
+    const saveGuest = action(() => {
+      const targetId = guestTarget.get();
+      if (!targetId) return;
+
+      // Find the sighting to get its plate/state.
+      const all = sightings.get() ?? [];
+      let sightingPlate = "";
+      let sightingState = "";
+      for (const s of all) {
+        if (s.id === targetId) {
+          sightingPlate = s.plateNumber;
+          sightingState = s.plateState;
+          break;
+        }
+      }
+      if (!sightingPlate) return; // no readable plate
+
+      const normPlate = normalizePlateId(sightingPlate);
+      const normState = sightingState.toUpperCase().trim().slice(0, 2);
+      const guestNameVal = guestName.get() ?? "";
+
+      // Write directly to registry (same logic as markVehicle).
+      const entry: KnownVehicle = {
+        plateNumber: normPlate,
+        plateState: normState,
+        description: "",
+        category: "guest",
+        name: guestNameVal,
+        org: "",
+        label: "",
+      };
+      const current = knownVehicles.get() ?? [];
+      let found = false;
+      const updated: KnownVehicle[] = [];
+      for (const kv of current) {
+        if (
+          normalizePlateId(kv.plateNumber) === normPlate &&
+          kv.plateState.toUpperCase().trim() === normState
+        ) {
+          updated.push({ ...kv, category: "guest", name: guestNameVal });
+          found = true;
+        } else {
+          updated.push(kv);
+        }
+      }
+      if (!found) updated.push(entry);
+      knownVehicles.set(updated);
+      guestTarget.set(null);
+    });
+
+    // Phase 3b: curation actions — add/update a plate in the known registry.
+    // Phase 3c: admin-gate these writes before exposing to non-admin users.
+    const markVehicle = action<{
+      plateNumber: string;
+      plateState: string;
+      category: "guest" | "offender";
+      org: string;
+      label?: string;
+      name?: string;
+    }>(({ plateNumber, plateState, category, org, label, name }) => {
+      const normPlate = normalizePlateId(plateNumber);
+      const normState = plateState.toUpperCase().trim().slice(0, 2);
+      const entry: KnownVehicle = {
+        plateNumber: normPlate,
+        plateState: normState,
+        description: "",
+        category,
+        name: name ?? "",
+        org: org ?? "",
+        label: label ?? "",
+      };
+      const current = knownVehicles.get() ?? [];
+      // Dedupe: if plate|state already exists, update category/org/label/name.
+      let found = false;
+      const updated: KnownVehicle[] = [];
+      for (const kv of current) {
+        if (
+          normalizePlateId(kv.plateNumber) === normPlate &&
+          kv.plateState.toUpperCase().trim() === normState
+        ) {
+          updated.push({
+            ...kv,
+            category,
+            name: name ?? kv.name,
+            org: org ?? kv.org,
+            label: label ?? kv.label,
+          });
+          found = true;
+        } else {
+          updated.push(kv);
+        }
+      }
+      if (!found) updated.push(entry);
+      knownVehicles.set(updated);
+    });
+
+    const removeKnownVehicle = action<{
+      plateNumber: string;
+      plateState: string;
+    }>(({ plateNumber, plateState }) => {
+      const normPlate = normalizePlateId(plateNumber);
+      const normState = plateState.toUpperCase().trim();
+      knownVehicles.set(
+        (knownVehicles.get() ?? []).filter(
+          (kv) =>
+            !(normalizePlateId(kv.plateNumber) === normPlate &&
+              kv.plateState.toUpperCase().trim() === normState),
+        ),
+      );
+    });
+
     // ---- Pre-computed display data (avoid OpaqueCell closures in .map()) ----
 
-    // Active spots for the spot picker
-    const activeSpots = computed(() =>
-      (spots.get() ?? []).filter((s) => {
+    // Active spots for the spot picker. We read the perSession `draftSpot`
+    // HERE (top-level computed) and emit `selected` per spot — reading it in a
+    // `computed()` nested inside the `.map()` below silently returns undefined
+    // (a narrower perSession cell can't be followed from this space-scoped
+    // render context), so the selected highlight would never update.
+    const activeSpots = computed(() => {
+      const chosen = draftSpot.get();
+      return (spots.get() ?? []).filter((s) => {
         // active field may be undefined on spots from coordinator — treat as active
         const isActive = (s as ParkingSpot).active;
         return isActive === undefined || isActive === true;
       }).map((s) => ({
         spotNumber: s.spotNumber,
         label: s.label,
-      }))
-    );
+        selected: chosen === s.spotNumber,
+      }));
+    });
 
-    // Sightings in reverse-chronological order with display-ready data
+    // Sightings in reverse-chronological order with display-ready data.
+    // Phase 3b: classification is derived LIVE from registries here — not from
+    // s.classification — so promoting a plate instantly reclassifies all rows.
     const sightingRows = computed(() => {
       // Use .map() directly on the cell array (spread `[...cell.get()]` throws
       // "not iterable" inside a computed), then reverse the resulting plain
       // array for newest-first order.
       const all = sightings.get() ?? [];
+
+      // Phase 3b: read registries ONCE at the top of this computed.
+      const ourVehicles = (people.get() ?? []).flatMap(
+        (p) => p.vehicles ?? [],
+      );
+      const knownList = knownVehicles.get() ?? [];
+
+      // Per-row inline-open state. We read the perSession "which row's form is
+      // open" cells HERE, at the top of this computed, and emit a plain boolean
+      // per row. Defining a `computed()` *inside* the `.map()` below that reads
+      // these perSession cells does NOT reliably re-render when they change;
+      // deriving the flags in this single top-level computed does.
+      const confirmId = deleteConfirmTarget.get();
+      const guestId = guestTarget.get();
+      const assignId = assignTarget.get();
+
       const repeatKeys = new Set(
         groupSightingsByPlate(all)
           .filter((g) => g.isRepeat)
@@ -442,12 +778,43 @@ export default pattern<LotWatchInput, LotWatchOutput>(
           ? `${s.plateNumber}${s.plateState ? " (" + s.plateState + ")" : ""}`
           : "";
         const imgSrc = s.image?.url ?? "";
-        const cls = s.classification;
+        // Phase 3b: live classification from registries (not stored field)
+        const cls = classifyPlate(
+          s.plateNumber,
+          s.plateState,
+          ourVehicles,
+          knownList,
+        );
+        // Phase 3b: show curation buttons only for unknown plates with a
+        // readable plate number. Pre-compute plate/state as plain strings so
+        // the onClick arrow can read them without touching any cell.
+        const canMark = cls === "unknown" && !!s.plateNumber;
+        // Phase 3c: "assign to person" button — show when plate is readable
+        // and currently unknown (same gate as canMark, kept separate for clarity).
+        const canAssign = !!s.plateNumber && cls === "unknown";
+        // knownTag: supplemental label shown next to the classification chip.
+        // For guests: the optional name. For offenders: the org name.
+        let knownTag = "";
+        if (cls === "guest" || cls === "offender") {
+          const normPlate = normalizePlateId(s.plateNumber);
+          const normState = s.plateState.toUpperCase().trim();
+          for (const kv of knownList) {
+            if (
+              normalizePlateId(kv.plateNumber) === normPlate &&
+              kv.plateState.toUpperCase().trim() === normState
+            ) {
+              knownTag = cls === "guest" ? (kv.name ?? "") : (kv.org ?? "");
+              break;
+            }
+          }
+        }
         return {
           id: s.id,
           spotNumber: s.spotNumber,
           description: s.description,
           plateDisplay,
+          plateNumber: s.plateNumber,
+          plateState: s.plateState,
           reportedBy: s.reportedBy,
           dateStr,
           timeStr,
@@ -459,6 +826,12 @@ export default pattern<LotWatchInput, LotWatchOutput>(
           isRepeat: s.plateNumber
             ? repeatKeys.has(plateKey(s.plateNumber, s.plateState))
             : false,
+          canMark,
+          canAssign,
+          knownTag,
+          isConfirmOpen: confirmId === s.id,
+          isGuestOpen: guestId === s.id,
+          isAssignOpen: assignId === s.id,
         };
       }).reverse();
     });
@@ -486,9 +859,7 @@ export default pattern<LotWatchInput, LotWatchOutput>(
     // (Read writables with .get() and return a real boolean — referencing a
     // computed inside JSX props and negating it would coerce the cell object,
     // not its value.)
-    const cannotSave = computed(() =>
-      !draftImage.get() || !draftSpot.get()
-    );
+    const cannotSave = computed(() => !draftImage.get() || !draftSpot.get());
 
     // Phase 2: gate the extraction UI on having a photo.
     const hasDraftImage = computed(() => draftImage.get() !== null);
@@ -508,6 +879,13 @@ export default pattern<LotWatchInput, LotWatchOutput>(
 
     // State select items
     const stateSelectItems = US_STATES.map((s) => ({ label: s, value: s }));
+
+    // Phase 3c: people select items for the assign-to-person picker.
+    // Use .map() not spread — spread throws inside computed().
+    const peopleSelectItems = computed(() =>
+      (people.get() ?? []).map((p) => ({ label: p.name, value: p.name }))
+    );
+    const hasPeople = computed(() => (people.get() ?? []).length > 0);
 
     // ---- UI ----
 
@@ -548,10 +926,10 @@ export default pattern<LotWatchInput, LotWatchOutput>(
 
           <cf-vscroll flex>
             <cf-vstack gap="3" style="padding: 1rem;">
-
               {/* ====== CAPTURE TAB ====== */}
-              {isCaptureTab ? (
-                <cf-vstack gap="3">
+              {isCaptureTab
+                ? (
+                  <cf-vstack gap="3">
                     {/* Reporter name */}
                     <cf-card>
                       <cf-vstack gap="2">
@@ -568,13 +946,15 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                     <cf-card>
                       <cf-vstack gap="2">
                         <cf-heading level={6}>📸 Capture</cf-heading>
-                        {/* `includeData` gives the DRAFT image both `url` (blob
+                        {
+                          /* `includeData` gives the DRAFT image both `url` (blob
                             store) and inline `data` — `data` is used transiently
                             for Phase 2 LLM extraction. But we persist only the
                             lightweight `{url}` into the sighting (see
                             captureSighting): inlining the ~700KB `data` into the
                             perSpace array destabilizes its sync. Idiom per
-                            photo.tsx — persist the blob `url`, not the bytes. */}
+                            photo.tsx — persist the blob `url`, not the bytes. */
+                        }
                         <cf-image-input
                           capture="environment"
                           includeData
@@ -587,43 +967,51 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                     </cf-card>
 
                     {/* Phase 2: auto-extraction status (once a photo exists) */}
-                    {hasDraftImage ? (
-                      <cf-card style="border-left: 3px solid #6366f1;">
-                        <cf-vstack gap="1">
-                          <cf-heading level={6}>✨ Auto-extraction</cf-heading>
-                          {extraction.pending ? (
-                            <span style="font-size: 0.875rem; color: var(--cf-color-gray-500);">
-                              Reading the plate…
-                            </span>
-                          ) : extraction.error ? (
-                            <span style="font-size: 0.875rem; color: #991b1b;">
-                              Couldn't read it: {extraction.error}
-                            </span>
-                          ) : (
-                            <cf-vstack gap="0">
-                              <span style="font-size: 0.875rem;">
-                                {extraction.result?.description}
-                              </span>
-                              <span style="font-size: 0.875rem; font-family: monospace; font-weight: 500;">
-                                {extraction.result?.plateNumber}{" "}
-                                {extraction.result?.plateState}
-                              </span>
-                              <span style="font-size: 0.7rem; color: var(--cf-color-gray-500);">
-                                confidence: {extraction.result?.confidence}
-                              </span>
-                              <cf-button
-                                variant="secondary"
-                                size="sm"
-                                style="margin-top: 0.25rem;"
-                                onClick={() => applyExtraction.send()}
-                              >
-                                ✨ Use these
-                              </cf-button>
-                            </cf-vstack>
-                          )}
-                        </cf-vstack>
-                      </cf-card>
-                    ) : null}
+                    {hasDraftImage
+                      ? (
+                        <cf-card style="border-left: 3px solid #6366f1;">
+                          <cf-vstack gap="1">
+                            <cf-heading level={6}>
+                              ✨ Auto-extraction
+                            </cf-heading>
+                            {extraction.pending
+                              ? (
+                                <span style="font-size: 0.875rem; color: var(--cf-color-gray-500);">
+                                  Reading the plate…
+                                </span>
+                              )
+                              : extraction.error
+                              ? (
+                                <span style="font-size: 0.875rem; color: #991b1b;">
+                                  Couldn't read it: {extraction.error}
+                                </span>
+                              )
+                              : (
+                                <cf-vstack gap="0">
+                                  <span style="font-size: 0.875rem;">
+                                    {extraction.result?.description}
+                                  </span>
+                                  <span style="font-size: 0.875rem; font-family: monospace; font-weight: 500;">
+                                    {extraction.result?.plateNumber}{" "}
+                                    {extraction.result?.plateState}
+                                  </span>
+                                  <span style="font-size: 0.7rem; color: var(--cf-color-gray-500);">
+                                    confidence: {extraction.result?.confidence}
+                                  </span>
+                                  <cf-button
+                                    variant="secondary"
+                                    size="sm"
+                                    style="margin-top: 0.25rem;"
+                                    onClick={() => applyExtraction.send()}
+                                  >
+                                    ✨ Use these
+                                  </cf-button>
+                                </cf-vstack>
+                              )}
+                          </cf-vstack>
+                        </cf-card>
+                      )
+                      : null}
 
                     {/* Spot picker */}
                     <cf-card>
@@ -634,19 +1022,14 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                             const spotNum = spot.spotNumber;
                             return (
                               <cf-button
-                                variant={computed(() =>
-                                  draftSpot.get() === spotNum
-                                    ? "primary"
-                                    : "secondary"
-                                )}
-                                onClick={() => setDraftSpot.send({ spot: spotNum })}
+                                variant={spot.selected ? "primary" : "secondary"}
+                                onClick={() =>
+                                  setDraftSpot.send({ spot: spotNum })}
                               >
                                 #{spotNum}
                                 {spot.label
                                   ? (
-                                    <span
-                                      style="font-size: 0.75rem; margin-left: 4px; opacity: 0.8;"
-                                    >
+                                    <span style="font-size: 0.75rem; margin-left: 4px; opacity: 0.8;">
                                       {spot.label}
                                     </span>
                                   )
@@ -729,79 +1112,89 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                       if (!img) missing.push("a photo");
                       if (!spot) missing.push("a spot");
                       return (
-                        <span
-                          style="font-size: 0.75rem; color: var(--cf-color-gray-500); text-align: center;"
-                        >
+                        <span style="font-size: 0.75rem; color: var(--cf-color-gray-500); text-align: center;">
                           Requires {missing.join(" and ")} to save.
                         </span>
                       );
                     })}
-                </cf-vstack>
-              ) : null}
+                  </cf-vstack>
+                )
+                : null}
 
               {/* ====== SIGHTINGS TAB ====== */}
-              {isSightingsTab ? (
-                <cf-vstack gap="2">
+              {isSightingsTab
+                ? (
+                  <cf-vstack gap="2">
                     <cf-heading level={6}>
                       Sightings ({sightingCount})
                     </cf-heading>
 
-                    {noSightings ? (
-                      <cf-card>
-                        <span style="color: var(--cf-color-gray-500); font-size: 0.875rem;">
-                          No sightings yet. Use 📸 Capture to document a car in
-                          one of your spots.
-                        </span>
-                      </cf-card>
-                    ) : null}
+                    {noSightings
+                      ? (
+                        <cf-card>
+                          <span style="color: var(--cf-color-gray-500); font-size: 0.875rem;">
+                            No sightings yet. Use 📸 Capture to document a car
+                            in one of your spots.
+                          </span>
+                        </cf-card>
+                      )
+                      : null}
 
                     {/* Phase 3: repeat offenders (plates seen 2+ times) */}
-                    {hasRepeatOffenders ? (
-                      <cf-card style="background: #fef2f2; border: 1px solid #fecaca;">
-                        <cf-vstack gap="2">
-                          <cf-heading level={6}>🔁 Repeat offenders</cf-heading>
-                          {repeatOffenders.map((g) => (
-                            <cf-hstack
-                              justify="between"
-                              align="center"
-                              gap="2"
-                              wrap
-                            >
-                              <cf-vstack gap="0">
-                                <span style="font-weight: 600; font-family: monospace;">
-                                  {g.plate} ({g.state})
-                                </span>
-                                <span style="font-size: 0.75rem; color: var(--cf-color-gray-600);">
-                                  {g.description} · spots {g.spotsLabel}
-                                </span>
-                                <span style="font-size: 0.7rem; color: var(--cf-color-gray-500);">
-                                  {g.firstSeen} → {g.lastSeen}
-                                </span>
-                              </cf-vstack>
-                              <span
-                                style={{
-                                  padding: "2px 10px",
-                                  borderRadius: "9999px",
-                                  backgroundColor: "#991b1b",
-                                  color: "white",
-                                  fontSize: "0.75rem",
-                                  fontWeight: "700",
-                                  whiteSpace: "nowrap",
-                                }}
+                    {hasRepeatOffenders
+                      ? (
+                        <cf-card style="background: #fef2f2; border: 1px solid #fecaca;">
+                          <cf-vstack gap="2">
+                            <cf-heading level={6}>
+                              🔁 Repeat offenders
+                            </cf-heading>
+                            {repeatOffenders.map((g) => (
+                              <cf-hstack
+                                justify="between"
+                                align="center"
+                                gap="2"
+                                wrap
                               >
-                                {g.count}× seen
-                              </span>
-                            </cf-hstack>
-                          ))}
-                        </cf-vstack>
-                      </cf-card>
-                    ) : null}
+                                <cf-vstack gap="0">
+                                  <span style="font-weight: 600; font-family: monospace;">
+                                    {g.plate} ({g.state})
+                                  </span>
+                                  <span style="font-size: 0.75rem; color: var(--cf-color-gray-600);">
+                                    {g.description} · spots {g.spotsLabel}
+                                  </span>
+                                  <span style="font-size: 0.7rem; color: var(--cf-color-gray-500);">
+                                    {g.firstSeen} → {g.lastSeen}
+                                  </span>
+                                </cf-vstack>
+                                <span
+                                  style={{
+                                    padding: "2px 10px",
+                                    borderRadius: "9999px",
+                                    backgroundColor: "#991b1b",
+                                    color: "white",
+                                    fontSize: "0.75rem",
+                                    fontWeight: "700",
+                                    whiteSpace: "nowrap",
+                                  }}
+                                >
+                                  {g.count}× seen
+                                </span>
+                              </cf-hstack>
+                            ))}
+                          </cf-vstack>
+                        </cf-card>
+                      )
+                      : null}
 
                     {sightingRows.map((row) => {
                       const rowId = row.id;
-                      const isConfirmTarget = computed(() =>
-                        deleteConfirmTarget.get() === rowId
-                      );
+                      // Per-row open-state booleans are derived in the
+                      // `sightingRows` computed (see note there) — reading the
+                      // perSession target cells in a `computed()` nested in this
+                      // `.map()` does not reliably re-render.
+                      const isConfirmTarget = row.isConfirmOpen;
+                      const isAssignTarget = row.isAssignOpen;
+                      const isGuestTarget = row.isGuestOpen;
                       return (
                         <cf-card>
                           <cf-vstack gap="2">
@@ -816,9 +1209,7 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                                   />
                                 )
                                 : (
-                                  <div
-                                    style="width: 80px; height: 60px; background: var(--cf-color-gray-100); border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 1.5rem;"
-                                  >
+                                  <div style="width: 80px; height: 60px; background: var(--cf-color-gray-100); border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 1.5rem;">
                                     🚗
                                   </div>
                                 )}
@@ -832,34 +1223,50 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                                   <span style="font-weight: 600; font-size: 0.875rem;">
                                     Spot #{row.spotNumber}
                                   </span>
-                                  <span
-                                    style={{
-                                      display: "inline-block",
-                                      padding: "2px 8px",
-                                      borderRadius: "9999px",
-                                      backgroundColor: row.classificationBg,
-                                      color: row.classificationColor,
-                                      fontSize: "0.7rem",
-                                      fontWeight: "600",
-                                      textTransform: "uppercase",
-                                    }}
-                                  >
-                                    {row.classificationLabel}
-                                  </span>
-                                  {row.isRepeat ? (
+                                  <cf-hstack gap="1" align="center">
                                     <span
                                       style={{
+                                        display: "inline-block",
                                         padding: "2px 8px",
                                         borderRadius: "9999px",
-                                        backgroundColor: "#991b1b",
-                                        color: "white",
+                                        backgroundColor: row.classificationBg,
+                                        color: row.classificationColor,
                                         fontSize: "0.7rem",
-                                        fontWeight: "700",
+                                        fontWeight: "600",
+                                        textTransform: "uppercase",
                                       }}
                                     >
-                                      🔁 repeat
+                                      {row.classificationLabel}
                                     </span>
-                                  ) : null}
+                                    {row.knownTag
+                                      ? (
+                                        <span
+                                          style={{
+                                            fontSize: "0.7rem",
+                                            color: row.classificationColor,
+                                          }}
+                                        >
+                                          {row.knownTag}
+                                        </span>
+                                      )
+                                      : null}
+                                  </cf-hstack>
+                                  {row.isRepeat
+                                    ? (
+                                      <span
+                                        style={{
+                                          padding: "2px 8px",
+                                          borderRadius: "9999px",
+                                          backgroundColor: "#991b1b",
+                                          color: "white",
+                                          fontSize: "0.7rem",
+                                          fontWeight: "700",
+                                        }}
+                                      >
+                                        🔁 repeat
+                                      </span>
+                                    )
+                                    : null}
                                 </cf-hstack>
                                 {row.description
                                   ? (
@@ -870,9 +1277,7 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                                   : null}
                                 {row.plateDisplay
                                   ? (
-                                    <span
-                                      style="font-size: 0.875rem; font-family: monospace; font-weight: 500;"
-                                    >
+                                    <span style="font-size: 0.875rem; font-family: monospace; font-weight: 500;">
                                       {row.plateDisplay}
                                     </span>
                                   )
@@ -883,76 +1288,221 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                             {/* Notes */}
                             {row.notes
                               ? (
-                                <span
-                                  style="font-size: 0.75rem; color: var(--cf-color-gray-600); font-style: italic; padding: 0.375rem 0.5rem; background: var(--cf-color-gray-50); border-radius: 4px;"
-                                >
+                                <span style="font-size: 0.75rem; color: var(--cf-color-gray-600); font-style: italic; padding: 0.375rem 0.5rem; background: var(--cf-color-gray-50); border-radius: 4px;">
                                   {row.notes}
                                 </span>
                               )
                               : null}
 
+                            {/* Phase 3b: curation buttons for unknown plates */}
+                            {row.canMark
+                              ? (
+                                <cf-vstack gap="1">
+                                  {/* Guest flow: button → inline form */}
+                                  {isGuestTarget
+                                    ? (
+                                      <cf-card style="border-left: 3px solid #1e40af; padding: 0.5rem;">
+                                        <cf-vstack gap="2">
+                                          <span style="font-size: 0.75rem; font-weight: 600;">
+                                            Mark as guest
+                                          </span>
+                                          <cf-input
+                                            $value={guestName}
+                                            placeholder="Guest name (optional)"
+                                            style="width: 100%;"
+                                          />
+                                          <cf-hstack gap="1">
+                                            <cf-button
+                                              variant="primary"
+                                              size="sm"
+                                              onClick={() => saveGuest.send()}
+                                            >
+                                              Save guest
+                                            </cf-button>
+                                            <cf-button
+                                              variant="ghost"
+                                              size="sm"
+                                              onClick={() => cancelGuest.send()}
+                                            >
+                                              Cancel
+                                            </cf-button>
+                                          </cf-hstack>
+                                        </cf-vstack>
+                                      </cf-card>
+                                    )
+                                    : (
+                                      <cf-hstack gap="1" wrap>
+                                        <cf-button
+                                          variant="secondary"
+                                          size="sm"
+                                          onClick={() =>
+                                            openGuest.send({ id: rowId })}
+                                        >
+                                          Mark guest
+                                        </cf-button>
+                                        <cf-button
+                                          variant="secondary"
+                                          size="sm"
+                                          onClick={() =>
+                                            markVehicle.send({
+                                              plateNumber: row.plateNumber,
+                                              plateState: row.plateState,
+                                              category: "offender",
+                                              org: "Local Butcher Shop",
+                                            })}
+                                        >
+                                          Mark offender
+                                        </cf-button>
+                                        {/* Phase 3c: admin-gate */}
+                                      </cf-hstack>
+                                    )}
+                                </cf-vstack>
+                              )
+                              : null}
+
+                            {/* Phase 3c: "assign to known person" button + inline picker */}
+                            {row.canAssign
+                              ? (
+                                <cf-vstack gap="1">
+                                  {isAssignTarget
+                                    ? (
+                                      <cf-card style="border-left: 3px solid #6366f1; padding: 0.5rem;">
+                                        <cf-vstack gap="2">
+                                          <span style="font-size: 0.75rem; font-weight: 600;">
+                                            👤 Assign to person
+                                          </span>
+                                          {hasPeople
+                                            ? (
+                                              <cf-vstack gap="1">
+                                                <cf-select
+                                                  $value={assignPersonName}
+                                                  items={peopleSelectItems}
+                                                />
+                                                <cf-hstack gap="1">
+                                                  <cf-button
+                                                    variant="primary"
+                                                    size="sm"
+                                                    onClick={() =>
+                                                      assignToPerson.send()}
+                                                  >
+                                                    Add to their vehicles
+                                                  </cf-button>
+                                                  <cf-button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    onClick={() =>
+                                                      cancelAssign.send()}
+                                                  >
+                                                    Cancel
+                                                  </cf-button>
+                                                </cf-hstack>
+                                              </cf-vstack>
+                                            )
+                                            : (
+                                              <cf-hstack gap="1" align="center">
+                                                <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
+                                                  Add people in Parking
+                                                  Coordinator first.
+                                                </span>
+                                                <cf-button
+                                                  variant="ghost"
+                                                  size="sm"
+                                                  onClick={() =>
+                                                    cancelAssign.send()}
+                                                >
+                                                  Cancel
+                                                </cf-button>
+                                              </cf-hstack>
+                                            )}
+                                        </cf-vstack>
+                                      </cf-card>
+                                    )
+                                    : (
+                                      <cf-button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() =>
+                                          openAssign.send({ id: rowId })}
+                                      >
+                                        👤 It's a known person's car
+                                      </cf-button>
+                                    )}
+                                </cf-vstack>
+                              )
+                              : null}
+
                             {/* Footer: reporter + time + delete */}
                             <cf-hstack justify="between" align="center" wrap>
-                              <span
-                                style="font-size: 0.75rem; color: var(--cf-color-gray-500);"
-                              >
+                              <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
                                 {row.reportedBy} — {row.dateStr} {row.timeStr}
                               </span>
 
                               {/* Delete */}
-                              {isConfirmTarget ? (
-                                <cf-hstack gap="1">
-                                  <span style="font-size: 0.75rem; color: #991b1b;">
-                                    Delete?
-                                  </span>
+                              {isConfirmTarget
+                                ? (
+                                  <cf-hstack gap="1">
+                                    <span style="font-size: 0.75rem; color: #991b1b;">
+                                      Delete?
+                                    </span>
+                                    <cf-button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() =>
+                                        deleteSighting.send({ id: rowId })}
+                                    >
+                                      Yes
+                                    </cf-button>
+                                    <cf-button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => cancelDelete.send()}
+                                    >
+                                      No
+                                    </cf-button>
+                                  </cf-hstack>
+                                )
+                                : (
                                   <cf-button
                                     variant="ghost"
                                     size="sm"
                                     onClick={() =>
-                                      deleteSighting.send({ id: rowId })}
+                                      initiateDelete.send({ id: rowId })}
                                   >
-                                    Yes
+                                    ×
                                   </cf-button>
-                                  <cf-button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => cancelDelete.send()}
-                                  >
-                                    No
-                                  </cf-button>
-                                </cf-hstack>
-                              ) : (
-                                <cf-button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() =>
-                                    initiateDelete.send({ id: rowId })}
-                                >
-                                  ×
-                                </cf-button>
-                              )}
+                                )}
                             </cf-hstack>
                           </cf-vstack>
                         </cf-card>
                       );
                     })}
-                </cf-vstack>
-              ) : null}
+                  </cf-vstack>
+                )
+                : null}
 
               {/* Phase 2: Report tab content */}
               {/* Phase 2: Classification, dedup/grouping, LLM extraction */}
               {/* Phase 2: Admin gating on delete/curation */}
               {/* Phase 2: knownVehicles registry management UI */}
-
             </cf-vstack>
           </cf-vscroll>
         </cf-screen>
       ),
 
       sightings,
+      knownVehicles,
+      people,
       captureSighting,
       deleteSighting,
       selectTab,
+      markVehicle,
+      removeKnownVehicle,
+      openAssign,
+      cancelAssign,
+      assignToPerson,
+      openGuest,
+      cancelGuest,
+      saveGuest,
     };
   },
 );
