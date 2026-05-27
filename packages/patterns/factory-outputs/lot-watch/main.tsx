@@ -2,6 +2,7 @@ import {
   action,
   computed,
   Default,
+  generateObject,
   handler,
   ImageData,
   NAME,
@@ -24,6 +25,14 @@ import {
 // ============================================================
 
 export type Classification = "ours" | "guest" | "offender" | "unknown";
+
+// Phase 2: structured result of LLM plate/vehicle extraction from a photo.
+export interface PlateExtraction {
+  description: string; // color + make + model in plain words; "" if unclear
+  plateNumber: string; // characters only; "" if not legible
+  plateState: string; // 2-letter US state; "" if not visible
+  confidence: "high" | "medium" | "low";
+}
 
 // Lightweight persisted image reference. We deliberately store only the blob
 // `url` (+ filename), NOT the full `ImageData` — its required `data` field is a
@@ -190,6 +199,55 @@ export default pattern<LotWatchInput, LotWatchOutput>(
     // PerSession: delete confirm dialog target
     const deleteConfirmTarget = new Writable.perSession<string | null>(null);
 
+    // ---- Phase 2: LLM extraction from the draft photo ----
+    // Runs reactively when a photo is captured. Uses the draft's inline `data`
+    // (that's why `includeData` stays on the capture input) — transient, the
+    // saved Sighting keeps only the blob url.
+    const extraction = generateObject<PlateExtraction>({
+      system:
+        "You are reading a photo of a parked car to log a parking violation. " +
+        "Extract the vehicle description (color + make + model in plain words), " +
+        "the license plate characters, and the 2-letter US state if visible. " +
+        "The photo may be rotated. If a field is not legible, return an empty " +
+        "string — do not guess.",
+      prompt: computed(() => {
+        const img = draftImage.get();
+        const image = img?.data ?? img?.url;
+        if (!image) return [];
+        return [
+          { type: "image" as const, image },
+          {
+            type: "text" as const,
+            text:
+              "Extract description, plateNumber (characters only, no spaces or " +
+              "dashes), plateState (2-letter), and your confidence.",
+          },
+        ];
+      }),
+      schema: {
+        type: "object",
+        properties: {
+          description: {
+            type: "string",
+            description: "Color + make + model in plain words, e.g. 'white Toyota Corolla'",
+          },
+          plateNumber: {
+            type: "string",
+            description: "Plate characters only, uppercase, no spaces/dashes; '' if illegible",
+          },
+          plateState: {
+            type: "string",
+            description: "2-letter US state code if visible, else ''",
+          },
+          confidence: {
+            type: "string",
+            enum: ["high", "medium", "low"],
+          },
+        },
+      },
+      model: "anthropic:claude-sonnet-4-5",
+    });
+
     // ---- Actions ----
 
     const selectTab = action<{ tab: "capture" | "sightings" }>(({ tab }) => {
@@ -200,6 +258,17 @@ export default pattern<LotWatchInput, LotWatchOutput>(
     // `.set()` in an inline onClick.
     const setDraftSpot = action<{ spot: string }>(({ spot }) => {
       draftSpot.set(spot);
+    });
+
+    // Phase 2: copy the LLM extraction into the editable draft fields. The
+    // extracted values are read in JSX (where `extraction.result` is reactive)
+    // and passed in as plain args — an action can't read a generateObject
+    // result directly. The user can then review/correct before saving.
+    const applyExtraction = action(() => {
+      const r = extraction.result;
+      if (r?.description) draftDescription.set(r.description);
+      if (r?.plateNumber) draftPlateNumber.set(r.plateNumber);
+      if (r?.plateState) draftPlateState.set(r.plateState);
     });
 
     const captureSighting = action<{
@@ -335,6 +404,9 @@ export default pattern<LotWatchInput, LotWatchOutput>(
       !draftImage.get() || !draftSpot.get()
     );
 
+    // Phase 2: gate the extraction UI on having a photo.
+    const hasDraftImage = computed(() => draftImage.get() !== null);
+
     // Reverse-chron count for the Sightings header / empty-state.
     const sightingCount = computed(() => (sightings.get() ?? []).length);
     const noSightings = computed(() => (sightings.get() ?? []).length === 0);
@@ -427,6 +499,45 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                         />
                       </cf-vstack>
                     </cf-card>
+
+                    {/* Phase 2: auto-extraction status (once a photo exists) */}
+                    {hasDraftImage ? (
+                      <cf-card style="border-left: 3px solid #6366f1;">
+                        <cf-vstack gap="1">
+                          <cf-heading level={6}>✨ Auto-extraction</cf-heading>
+                          {extraction.pending ? (
+                            <span style="font-size: 0.875rem; color: var(--cf-color-gray-500);">
+                              Reading the plate…
+                            </span>
+                          ) : extraction.error ? (
+                            <span style="font-size: 0.875rem; color: #991b1b;">
+                              Couldn't read it: {extraction.error}
+                            </span>
+                          ) : (
+                            <cf-vstack gap="0">
+                              <span style="font-size: 0.875rem;">
+                                {extraction.result?.description}
+                              </span>
+                              <span style="font-size: 0.875rem; font-family: monospace; font-weight: 500;">
+                                {extraction.result?.plateNumber}{" "}
+                                {extraction.result?.plateState}
+                              </span>
+                              <span style="font-size: 0.7rem; color: var(--cf-color-gray-500);">
+                                confidence: {extraction.result?.confidence}
+                              </span>
+                              <cf-button
+                                variant="secondary"
+                                size="sm"
+                                style="margin-top: 0.25rem;"
+                                onClick={() => applyExtraction.send()}
+                              >
+                                ✨ Use these
+                              </cf-button>
+                            </cf-vstack>
+                          )}
+                        </cf-vstack>
+                      </cf-card>
+                    ) : null}
 
                     {/* Spot picker */}
                     <cf-card>
