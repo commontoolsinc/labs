@@ -1,4 +1,3 @@
-import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import { cloneIfNecessary } from "@commonfabric/data-model/fabric-value";
 import {
   type ConflictError as IConflictError,
@@ -272,9 +271,7 @@ const applyPendingVersion = (
     case "delete":
       return undefined;
     case "set":
-      return deepFreeze(
-        cloneIfNecessary(pending.value as FabricValue, { frozen: false }),
-      ) as EntityDocument;
+      return cloneIfNecessary(pending.value as FabricValue) as EntityDocument;
     case "patch": {
       let next = base;
       for (
