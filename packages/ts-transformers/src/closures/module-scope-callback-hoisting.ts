@@ -313,6 +313,17 @@ function resolveHoistTarget(
       return { kind: "plain", callbackIndices: [] };
     }
     if (innerCall.arguments.length >= 3) {
+      // The 3+-arg form is the schema-injected shape:
+      //   __cfHelpers.lift(argSchema, resSchema, cb)(input)
+      // Schema injection runs only AFTER capability analysis has determined
+      // the input shape — its presence means the callback's input is fully
+      // described by the injected `argSchema`, so the callback is by
+      // construction self-describing regardless of whether its parameter
+      // carries a TypeScript annotation. Hoisting is therefore unconditionally
+      // safe here (no `isSyntheticComputeCallback || hasSelfDescribingFunctionTypes`
+      // gate needed — the schema injection upstream is the gate). The 1-arg
+      // pre-injection branch above still needs the explicit check because
+      // schemas haven't been computed yet at that point.
       const cbIndex = innerCall.arguments.length - 1;
       const cb = innerCall.arguments[cbIndex];
       if (!isFunctionLikeExpression(cb)) {
