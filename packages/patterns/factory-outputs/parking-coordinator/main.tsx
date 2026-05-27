@@ -1356,6 +1356,14 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
 
     // Pre-compute sorted people list for admin panel
     const adminPeopleData = computed(() => {
+      // Read the perSession edit/remove-confirm targets HERE, at the top of
+      // this computed, and emit `isEditing`/`isRemoveConfirm` per person.
+      // Reading these perSession cells from a `computed()` nested inside the
+      // `.map()` render below silently returns nothing (a narrower perSession
+      // cell can't be followed from that space-scoped render context), so the
+      // inline edit form / remove-confirm prompt never opened.
+      const editingName = editingPersonName.get();
+      const removeConfirmName = removePersonConfirmTarget.get();
       const sorted = [...people.get()].sort((a, b) =>
         a.priorityRank - b.priorityRank
       );
@@ -1371,6 +1379,8 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
         })),
         isFirst: idx === 0,
         isLast: idx === sorted.length - 1,
+        isEditing: editingName === p.name,
+        isRemoveConfirm: removeConfirmName === p.name,
       }));
     });
 
@@ -1426,14 +1436,22 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     const editDraftMakeSelected = computed(() => !!editDraftMake.get());
 
     // Pre-compute sorted spots list for admin panel
-    const adminSpotsData = computed(() =>
-      [...spots.get()].map((s) => ({
+    const adminSpotsData = computed(() => {
+      // Read the perSession edit/remove-confirm targets HERE (see the matching
+      // note on `adminPeopleData`): a `computed()` nested in the `.map()` render
+      // can't follow these narrower perSession cells from its space-scoped
+      // context, so the inline spot edit/remove prompts never opened.
+      const editingNum = editingSpotNumber.get();
+      const removeConfirmNum = removeSpotConfirmTarget.get();
+      return [...spots.get()].map((s) => ({
         spotNumber: s.spotNumber,
         label: s.label,
         notes: s.notes,
         active: s.active,
-      }))
-    );
+        isEditingSpot: editingNum === s.spotNumber,
+        isRemoveSpotConfirm: removeConfirmNum === s.spotNumber,
+      }));
+    });
 
     // --------------------------------------------------------
     // UI
@@ -1973,12 +1991,11 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                           isFirst,
                           isLast,
                         } = person;
-                        const isEditing = computed(() =>
-                          editingPersonName.get() === personName
-                        );
-                        const isRemoveConfirm = computed(() =>
-                          removePersonConfirmTarget.get() === personName
-                        );
+                        // Derived in `adminPeopleData` (see note there) — a
+                        // `computed()` nested here that reads the perSession
+                        // target cells does not re-render.
+                        const isEditing = person.isEditing;
+                        const isRemoveConfirm = person.isRemoveConfirm;
                         const activeSpotOpts = computed(() =>
                           spots.get()
                             .filter((s) => s.active)
@@ -2594,12 +2611,12 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                             const spotLabel2 = spot.label;
                             const spotNotes2 = spot.notes;
                             const spotActive2 = spot.active;
-                            const isEditingSpot = computed(() =>
-                              editingSpotNumber.get() === spotNum2
-                            );
-                            const isRemoveSpotConfirm = computed(() =>
-                              removeSpotConfirmTarget.get() === spotNum2
-                            );
+                            // Derived in `adminSpotsData` (see note there) — a
+                            // `computed()` nested here reading the perSession
+                            // target cells does not re-render.
+                            const isEditingSpot = spot.isEditingSpot;
+                            const isRemoveSpotConfirm =
+                              spot.isRemoveSpotConfirm;
 
                             return (
                               <cf-card

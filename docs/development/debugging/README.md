@@ -32,6 +32,7 @@ Quick error reference and debugging workflows. For detailed explanations, see li
 | Click handler does nothing, ID lookup fails silently | Using custom `id` property for lookups | Use `equals()` for identity, not custom IDs ([gotchas/custom-id-property-pitfall](gotchas/custom-id-property-pitfall.md)) |
 | Selection overwrites item data, `.set()` changes wrong value | Storing Cell reference directly | Box the reference: `{ item }` instead of `item` ([gotchas/cell-reference-overwrite](gotchas/cell-reference-overwrite.md)) |
 | List of records renders intermittently/blank; full-cell read is huge | Persisting inline image `data` (base64 data-URL) in a (PerSpace) cell | Persist the blob `url`, not `data`; `includeData` only for transient LLM use ([gotchas/persisting-images-in-cells](gotchas/persisting-images-in-cells.md)) |
+| Per-row inline form (delete-confirm, edit, picker) never opens; no error | `computed()` nested in `.map()` reads a `perSession` cell from a space-scoped render context — the narrower-scope follow is silently blocked | Hoist the perSession read into the top-level row `computed`/`derive`; emit a plain boolean per row ([gotchas/persession-read-in-mapped-computed](gotchas/persession-read-in-mapped-computed.md)) |
 | Writable-input computed causes churn or stale fan-out | Computed writes through a `Writable<>` input while also participating in reactive scheduling | Treat it as effectful and check for cycles. Pull mode materializes stable side writes through idle materializers, so actual changed paths should drive downstream updates instead of broad fan-out. |
 
 ---
@@ -57,6 +58,7 @@ These issues compile without errors but fail at runtime.
 - [Custom `id` Property Pitfall](gotchas/custom-id-property-pitfall.md) - Use `equals()` for identity
 - [Cell Reference Overwrite](gotchas/cell-reference-overwrite.md) - Box references with `{ item }`
 - [Persisting Images in Cells](gotchas/persisting-images-in-cells.md) - Store the blob `url`, not the inline `data`
+- [perSession Read in a Mapped computed()](gotchas/persession-read-in-mapped-computed.md) - Per-row inline forms that never open; hoist the session read out of the nested `computed()`
 
 ### Error Categories
 
