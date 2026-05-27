@@ -214,7 +214,7 @@ export function createLiftAppliedCall(
     factory,
     tsContext,
     context.checker,
-    context.options.typeRegistry,
+    context.options.state?.typeRegistry,
   );
 
   const arrowFunction = factory.createArrowFunction(
@@ -272,13 +272,13 @@ export function createLiftAppliedCall(
   // Register the type of the call expression itself in the typeRegistry
   // so that type inference works correctly for synthetic nodes. The
   // result type is the value the callback returns.
-  if (context.options.typeRegistry && context.checker) {
+  if (context.options.state?.typeRegistry && context.checker) {
     registerLiftAppliedCallType(
       liftAppliedCall,
       resultTypeNode,
       undefined, // resultType not available in this code path
       context.checker,
-      context.options.typeRegistry,
+      context.options.state?.typeRegistry,
     );
   }
 
@@ -322,7 +322,7 @@ function buildInputTypeNode(
     {
       factory,
       checker: context.checker,
-      typeRegistry: context.options.typeRegistry,
+      typeRegistry: context.options.state?.typeRegistry,
     },
   );
 }
@@ -339,7 +339,7 @@ function buildResultTypeNode(
   const resultType = getTypeAtLocationWithFallback(
     expression,
     checker,
-    context.options.typeRegistry,
+    context.options.state?.typeRegistry,
   );
 
   // If we couldn't get a type, fallback to unknown
@@ -357,8 +357,8 @@ function buildResultTypeNode(
 
   if (resultTypeNode) {
     // Register the type in typeRegistry for SchemaGeneratorTransformer
-    if (context.options.typeRegistry) {
-      context.options.typeRegistry.set(resultTypeNode, resultType);
+    if (context.options.state?.typeRegistry) {
+      context.options.state?.typeRegistry.set(resultTypeNode, resultType);
     }
     return resultTypeNode;
   }

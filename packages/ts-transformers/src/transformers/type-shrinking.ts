@@ -1728,7 +1728,7 @@ export function validateShrinkCoverage(
         shrunk,
         checker,
         context.sourceFile,
-        context.options.typeRegistry,
+        context.options.state?.typeRegistry,
       ) ?? ts.factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
 
       validateShrinkCoverage(
@@ -1757,13 +1757,13 @@ export function validateShrinkCoverage(
         baseTypeNode,
         checker,
         context.sourceFile,
-        context.options.typeRegistry,
+        context.options.state?.typeRegistry,
       ) ?? ts.factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
       const shrunkElementNode = getArrayElementTypeNode(
         shrunk,
         checker,
         context.sourceFile,
-        context.options.typeRegistry,
+        context.options.state?.typeRegistry,
       );
 
       validateShrinkCoverage(
@@ -3023,7 +3023,7 @@ export function applyShrinkAndWrap(
         factory,
         checker,
         baseType,
-        context?.options.typeRegistry,
+        context?.options.state?.typeRegistry,
       )
       : applyCapabilityDefaultsToTypeNode(
         baseTypeNode,
@@ -3061,7 +3061,7 @@ export function applyShrinkAndWrap(
       factory,
       checker,
       baseType,
-      context?.options.typeRegistry,
+      context?.options.state?.typeRegistry,
     )
     : identityPaths.length > 0
     ? applyIdentityOnlyPathsToTypeNode(
@@ -3072,7 +3072,7 @@ export function applyShrinkAndWrap(
       factory,
       checker,
       baseType,
-      context?.options.typeRegistry,
+      context?.options.state?.typeRegistry,
     )
     : baseTypeNode;
   let shrunk: ts.TypeNode | undefined;
@@ -3102,7 +3102,7 @@ export function applyShrinkAndWrap(
         checker,
         sourceFile,
         factory,
-        context?.options.typeRegistry,
+        context?.options.state?.typeRegistry,
         fullShapePaths,
       );
       const nodeDriven = buildShrunkTypeNodeFromTypeNode(
@@ -3110,7 +3110,7 @@ export function applyShrinkAndWrap(
         retainedPaths,
         factory,
         checker,
-        context?.options.typeRegistry,
+        context?.options.state?.typeRegistry,
         fullShapePaths,
       );
       shrunk = choosePreferredShrinkCandidate(
@@ -3131,7 +3131,7 @@ export function applyShrinkAndWrap(
         retainedPaths,
         factory,
         checker,
-        context?.options.typeRegistry,
+        context?.options.state?.typeRegistry,
         fullShapePaths,
       );
       const typeDriven = baseType && identityPaths.length === 0
@@ -3141,7 +3141,7 @@ export function applyShrinkAndWrap(
           checker,
           sourceFile,
           factory,
-          context?.options.typeRegistry,
+          context?.options.state?.typeRegistry,
           fullShapePaths,
         )
         : undefined;
@@ -3168,7 +3168,7 @@ export function applyShrinkAndWrap(
       factory,
       checker,
       baseType,
-      context?.options.typeRegistry,
+      context?.options.state?.typeRegistry,
     );
     shrunk = next;
   }
@@ -3201,7 +3201,7 @@ export function applyShrinkAndWrap(
     factory,
     checker,
     sourceFile,
-    context?.options.typeRegistry,
+    context?.options.state?.typeRegistry,
   );
 
   if (!shouldWrap) {

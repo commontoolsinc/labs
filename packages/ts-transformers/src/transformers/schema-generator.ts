@@ -15,7 +15,9 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
   transform(context: TransformationContext): ts.SourceFile {
     const schemaTransformer = createSchemaTransformerV2();
     const { sourceFile, tsContext: transformation, checker } = context;
-    const { logger, typeRegistry, schemaHints } = context.options;
+    const { logger, state } = context.options;
+    const typeRegistry = state?.typeRegistry;
+    const schemaHints = state?.schemaHints;
 
     const visit: ts.Visitor = (node) => {
       if (isToSchemaNode(node)) {

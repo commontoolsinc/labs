@@ -3,6 +3,7 @@ import ts from "typescript";
 
 import { createLiftAppliedCall } from "../../src/transformers/builtins/lift-applied.ts";
 import { CFHelpers } from "../../src/core/cf-helpers.ts";
+import { CrossStageState } from "../../src/core/mod.ts";
 
 Deno.test("createLiftAppliedCall keeps fallback refs synced when names collide", () => {
   const source = ts.createSourceFile(
@@ -56,7 +57,7 @@ Deno.test("createLiftAppliedCall keeps fallback refs synced when names collide",
       sourceFile: source,
       cfHelpers,
       options: {
-        typeRegistry: new WeakMap(),
+        state: new CrossStageState(),
       },
     } as any;
 

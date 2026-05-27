@@ -34,6 +34,7 @@ import {
   type CapabilitySummaryRegistry,
   HelpersOnlyTransformer,
   type SchemaHint,
+  type SchemaHints,
   TransformationContext,
   type TypeRegistry,
 } from "../core/mod.ts";
@@ -278,7 +279,7 @@ function applyCapabilitySummaryToArgument(
     baseType = getTypeFromTypeNodeWithFallback(
       baseTypeNode,
       checker,
-      context?.options.typeRegistry,
+      context?.options.state?.typeRegistry,
     );
   }
 
@@ -339,7 +340,7 @@ function applyCapabilitySummaryToParameter(
     baseType = getTypeFromTypeNodeWithFallback(
       baseTypeNode,
       checker,
-      context?.options.typeRegistry,
+      context?.options.state?.typeRegistry,
     );
   }
 
@@ -510,7 +511,7 @@ function collectFunctionSchemaTypeNodes(
   const unwrappedReturnExpr = returnExpr
     ? unwrapExpression(returnExpr)
     : undefined;
-  const uiContractHint = context?.options.schemaHints &&
+  const uiContractHint = context?.options.state?.schemaHints &&
       unwrappedReturnExpr &&
       ts.isObjectLiteralExpression(unwrappedReturnExpr)
     ? propagateUiContractHintsFromObjectLiteral(
@@ -985,7 +986,7 @@ function createSchemaCallWithRegistryTransfer(
   checker: ts.TypeChecker,
   typeRegistry?: TypeRegistry,
   options?: SchemaCallOptions,
-  schemaHints?: TransformationContext["options"]["schemaHints"],
+  schemaHints?: SchemaHints,
 ): ts.CallExpression {
   const emittedTypeNode = normalizeSchemaInjectionTypeNode(
     typeNode,
@@ -1029,7 +1030,7 @@ function applyIdentityArrayItemSchemaHints(
   identityPaths: readonly (readonly string[])[],
   context: TransformationContext,
 ): void {
-  if (!context.options.schemaHints || identityPaths.length === 0) return;
+  if (!context.options.state?.schemaHints || identityPaths.length === 0) return;
 
   const grouped = new Map<string, boolean>();
   for (const path of identityPaths) {
@@ -1882,7 +1883,7 @@ function propagateUiContractHintsFromObjectLiteral(
 ):
   | UiContractHint
   | undefined {
-  if (!context.options.schemaHints || !resultNode) {
+  if (!context.options.state?.schemaHints || !resultNode) {
     return undefined;
   }
 
@@ -2531,7 +2532,7 @@ function handlePatternSchemaInjection(
 ): ts.Node | undefined {
   const { factory, checker, sourceFile, tsContext: transformation } = context;
   const typeArgs = node.typeArguments;
-  const capabilityRegistry = context.options.capabilitySummaryRegistry;
+  const capabilityRegistry = context.options.state?.capabilitySummaryRegistry;
   const argsArray = Array.from(node.arguments);
 
   // Find the function argument
@@ -2833,8 +2834,8 @@ function handlePatternSchemaInjection(
 export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
   transform(context: TransformationContext): ts.SourceFile {
     const { sourceFile, tsContext: transformation, checker } = context;
-    const typeRegistry = context.options.typeRegistry;
-    const capabilityRegistry = context.options.capabilitySummaryRegistry;
+    const typeRegistry = context.options.state?.typeRegistry;
+    const capabilityRegistry = context.options.state?.capabilitySummaryRegistry;
 
     const visit = (node: ts.Node): ts.Node => {
       if (ts.isNewExpression(node)) {

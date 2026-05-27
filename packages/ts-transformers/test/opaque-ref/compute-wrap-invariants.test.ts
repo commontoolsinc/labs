@@ -2,7 +2,7 @@ import { assertStrictEquals } from "@std/assert";
 import ts from "typescript";
 
 import { createDataFlowAnalyzer } from "../../src/ast/mod.ts";
-import { TransformationContext } from "../../src/core/mod.ts";
+import { CrossStageState, TransformationContext } from "../../src/core/mod.ts";
 import { findPendingComputeWrapCandidate } from "../../src/transformers/expression-rewrite/emitters/compute-wrap-invariants.ts";
 
 function createProgramAndContext(source: string): {
@@ -44,12 +44,7 @@ function createProgramAndContext(source: string): {
     sourceFile,
     tsContext: { factory: ts.factory } as ts.TransformationContext,
     options: {
-      typeRegistry: new WeakMap(),
-      mapCallbackRegistry: new WeakSet(),
-      syntheticComputeCallbackRegistry: new WeakSet(),
-      syntheticComputeOwnedNodeRegistry: new WeakSet(),
-      schemaHints: new WeakMap(),
-      capabilitySummaryRegistry: new WeakMap(),
+      state: new CrossStageState(),
     },
   });
 

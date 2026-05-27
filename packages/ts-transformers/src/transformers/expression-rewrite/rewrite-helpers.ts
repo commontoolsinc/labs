@@ -177,9 +177,9 @@ export function createReactiveWrapperForExpression(
   );
 
   // Register types for both the TypeNode and the lift-applied CallExpression
-  if (resultTypeNode && resultType && context.options.typeRegistry) {
-    context.options.typeRegistry.set(resultTypeNode, resultType);
-    context.options.typeRegistry.set(liftAppliedCall, resultType);
+  if (resultTypeNode && resultType && context.options.state?.typeRegistry) {
+    context.options.state?.typeRegistry.set(resultTypeNode, resultType);
+    context.options.state?.typeRegistry.set(liftAppliedCall, resultType);
   }
 
   // CRITICAL: Set parent pointers and connect to parent chain

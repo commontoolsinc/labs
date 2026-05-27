@@ -89,7 +89,7 @@ export function registerCapabilitySummary(
   interprocedural: boolean,
   defaultsByParamName?: ReadonlyMap<string, readonly CapabilityParamDefault[]>,
 ): void {
-  const registry = context.options.capabilitySummaryRegistry;
+  const registry = context.options.state?.capabilitySummaryRegistry;
   if (!registry) return;
 
   const summary = analyzeFunctionCapabilities(callback, {
