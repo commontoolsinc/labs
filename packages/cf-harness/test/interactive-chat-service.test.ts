@@ -103,6 +103,15 @@ Deno.test("interactive service starts sessions and completes non-streaming turns
   );
   assertEquals(service.status("session-1").sessions[0].status, "idle");
   assertEquals(service.status("session-1").sessions[0].turnCount, 1);
+  assertEquals(
+    service.listEvents({ sessionId: "session-1", afterSequence: 2 }).events
+      .map((event) => event.event.kind),
+    ["assistant_delta", "assistant_completed", "turn_completed"],
+  );
+  assertEquals(
+    service.listEvents({ sessionId: "session-1" }).latestSequence,
+    5,
+  );
   assertEquals(loopOptions[0], {
     workspaceHostPath: "/workspace",
     cwd: "/workspace/project",
