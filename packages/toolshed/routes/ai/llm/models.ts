@@ -65,14 +65,25 @@ export const MODELS: ModelList = {};
 export const ALIAS_NAMES: string[] = [];
 export const PROVIDER_NAMES: Set<string> = new Set();
 
-export const TASK_MODELS = {
-  coding: "anthropic:claude-sonnet-4-5", // Best for code
-  json: "anthropic:claude-sonnet-4-5", // Fast & good at structured output
+export type TaskType = "coding" | "json" | "creative" | "vision";
+
+// Default model resolution: prefer the gateway-hosted Sonnet 4.6 when available,
+// fall back to the direct Anthropic Sonnet 4.6 (then Sonnet 4.5). Updated by
+// `registerDefaultModel` after providers (including the gateway) have finished
+// loading.
+export const DEFAULT_MODEL_CANDIDATES = [
+  "gateway:claude-sonnet-4-6",
+  "anthropic:claude-sonnet-4-6",
+  "anthropic:claude-sonnet-4-5",
+] as const;
+export const DEFAULT_MODEL_ALIAS = "default";
+
+export const TASK_MODELS: Record<TaskType, string> = {
+  coding: "anthropic:claude-sonnet-4-6", // Best for code
+  json: "anthropic:claude-sonnet-4-6", // Fast & good at structured output
   creative: "openai:gpt-5", // Best for creative tasks
   vision: "google:gemini-3-preview-pro", // Best for vision tasks
-} as const;
-
-export type TaskType = keyof typeof TASK_MODELS;
+};
 
 const addModel = ({
   provider,
@@ -232,6 +243,43 @@ if (env.CFTS_AI_LLM_ANTHROPIC_API_KEY) {
     provider: anthropicProvider,
     name: "anthropic:claude-sonnet-4-5-thinking",
     aliases: ["sonnet-4-5-thinking", "sonnet-4.5-thinking"],
+    capabilities: {
+      contextWindow: 200_000,
+      maxOutputTokens: 64000,
+      images: true,
+      prefill: true,
+      systemPrompt: true,
+      stopSequences: true,
+      streaming: true,
+      reasoning: true,
+    },
+    providerOptions: {
+      anthropic: {
+        thinking: { type: "enabled", budgetTokens: 64000 },
+      },
+    },
+  });
+
+  addModel({
+    provider: anthropicProvider,
+    name: "anthropic:claude-sonnet-4-6",
+    aliases: ["sonnet-4-6", "sonnet-4.6"],
+    capabilities: {
+      contextWindow: 200_000,
+      maxOutputTokens: 64000,
+      images: true,
+      prefill: true,
+      systemPrompt: true,
+      stopSequences: true,
+      streaming: true,
+      reasoning: false,
+    },
+  });
+
+  addModel({
+    provider: anthropicProvider,
+    name: "anthropic:claude-sonnet-4-6-thinking",
+    aliases: ["sonnet-4-6-thinking", "sonnet-4.6-thinking"],
     capabilities: {
       contextWindow: 200_000,
       maxOutputTokens: 64000,
@@ -458,15 +506,15 @@ async function loadGatewayModels() {
   const url = env.CFTS_AI_GATEWAY_URL.replace(/\/+$/, "");
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10_000);
+    const timeout = setTimeout(() => controller.abort(), 3_000);
     const res = await fetch(`${url}/v1/models`, {
       signal: controller.signal,
     });
     clearTimeout(timeout);
 
     if (!res.ok) {
-      console.error(
-        `[gateway] Failed to fetch models: ${res.status} ${res.statusText}`,
+      console.warn(
+        `[gateway] Skipping gateway models: ${res.status} ${res.statusText} from ${url}`,
       );
       return;
     }
@@ -525,10 +573,16 @@ async function loadGatewayModels() {
     }
     console.log(` Adding 🤖 gateway (${count} models from ${url})`);
   } catch (err) {
+    // The gateway is only reachable on Tailscale; an unreachable URL is
+    // expected off-network. Log as a warning and continue without gateway
+    // models — direct provider entries (Anthropic, etc.) remain available.
     if (err instanceof DOMException && err.name === "AbortError") {
-      console.error(`[gateway] Timeout fetching models from ${url}`);
+      console.warn(`[gateway] Timeout fetching models from ${url}; skipping.`);
     } else {
-      console.error(`[gateway] Error loading models:`, err);
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(
+        `[gateway] Could not reach ${url} (${message}); skipping gateway models.`,
+      );
     }
   }
 }
@@ -537,6 +591,26 @@ export const findModel = (name: string) => {
   return MODELS[name];
 };
 
+const registerDefaultModel = () => {
+  const chosenName = DEFAULT_MODEL_CANDIDATES.find((name) => MODELS[name]);
+  if (!chosenName) {
+    console.warn(
+      `[models] No default model available (tried ${
+        DEFAULT_MODEL_CANDIDATES.join(", ")
+      }).`,
+    );
+    return;
+  }
+  const chosen = MODELS[chosenName];
+  MODELS[DEFAULT_MODEL_ALIAS] = chosen;
+  ALIAS_NAMES.push(DEFAULT_MODEL_ALIAS);
+  TASK_MODELS.coding = chosenName;
+  TASK_MODELS.json = chosenName;
+  console.log(` Default model: ${chosenName}`);
+};
+
 if (env.CFTS_AI_GATEWAY_URL) {
   await loadGatewayModels();
 }
+
+registerDefaultModel();
