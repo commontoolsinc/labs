@@ -5,21 +5,42 @@
 into a full **Lunch Coordinator** — the poll stays at the core, but it grows the
 context a group actually needs to pick a place and go.
 
-This doc tracks the features we plan to add. Nothing here is built yet; it's the
-backlog.
+This doc tracks the features we plan to add. Feature #1 below is now built; the
+rest are still backlog.
 
 ## Planned features
 
-### 1. "Last days we went" history
+### 1. "Last days we went" history ✅ (shipped)
 
 Keep a per-space log of where the group actually ended up eating, with dates, so
 nobody suggests the same place three days running.
 
-- Append a history entry when a poll resolves (or via a manual "we went here"
-  action).
-- Surface recent history in the option list — e.g. dim or flag options visited
-  in the last N days.
-- Use it for a soft "you had this Tuesday" nudge rather than a hard block.
+- ✅ `history: PerSpace<HistoryEntry[]>` (`{ id, title, loggedByName, wentAt }`),
+  appended via a host-only `logVisit` handler. Each option has a "✓ we went
+  here" button that logs that place. `logVisit({})` with no target tallies the
+  winner from the votes — kept as an API path, no button (a Host-controls
+  "log winner" button was tried and removed as redundant with the per-option
+  buttons).
+- ✅ **Backdating:** a host "Log 'we went here' as of:" date field (blank =
+  today) backdates the entry; `logVisit` also accepts an explicit `wentAt`. The
+  date draft clears after each log so it defaults back to today.
+- ✅ **Editing:** `removeHistoryEntry({ id })` deletes a single mistaken entry
+  ("we didn't actually eat there") via a per-row ✕; `clearHistory` (two-step
+  confirm) wipes the whole log. Both host-only.
+- ✅ Shown as a **"Recently eaten" list below the options** (8 most recent,
+  most-recent-first), labelled with each visit's own date ("Tuesday, May 20").
+  No per-option nudge — history lives in this one section.
+- Implementation notes (hard-won; see also `scoped-cells-field-notes.md`):
+  - Visit labels derive **only from the stored `wentAt`**, never from the
+    current clock — calling `safeDateNow()` inside a `derive`/`computed` is
+    non-idempotent (it belongs in handlers, like the backdate parse). This is
+    also why there's no live "within the last N days" window; we show the
+    visit's own date and let the human judge.
+  - Interactive `onClick` handlers must live in **plain-ternary JSX**, not inside
+    a `computed(() => …)`-returned VNode, or they mis-lower as lifts
+    (`$event in inputs` → non-idempotent write).
+  - Don't name a `.map((h) => …)` callback `h` when the body contains JSX — `h`
+    is the JSX factory; shadowing it yields `TypeError: h is not a function`.
 
 ### 2. People's favorite foods
 
