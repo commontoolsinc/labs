@@ -10,14 +10,15 @@ piece." This doc covers both, plus the identity caveat that bites first.
 ## The canonical piece
 
 There is one shared instance everyone should iterate on. **These values are a
-deployment pointer, not a stable identifier — current as of 2026-05-26.** A
-piece is tied to one space/server and can be reset; if it 404s or `inspect`
-fails, re-establish it (see "Re-establishing" below) and update this block.
+deployment pointer, not a stable identifier — current as of 2026-05-27.** A
+piece is tied to one space/server and can be reset or wedged; if it 404s,
+`inspect` fails, or it stops responding to clicks, re-establish it (see
+"Re-establishing" / "Recovering a wedged piece" below) and update this block.
 
 ```
 space:  lunch-2026-05-26
-piece:  fid1:nye-cJnJnU5OQIPiVXzvAoq_YeU5pZARxyXp-9-JCZg
-url:    https://toolshed.saga-castor.ts.net/lunch-2026-05-26/fid1:nye-cJnJnU5OQIPiVXzvAoq_YeU5pZARxyXp-9-JCZg
+piece:  fid1:zGgrBLVmQDTSthOYTv_CHGRbf-Sb6YTGpn2ntAyBZQs
+url:    https://toolshed.saga-castor.ts.net/lunch-2026-05-26/fid1:zGgrBLVmQDTSthOYTv_CHGRbf-Sb6YTGpn2ntAyBZQs
 ```
 
 Set these once so you don't repeat flags (substitute your own identity key path
@@ -26,7 +27,7 @@ and the current piece/space):
 ```bash
 export CF_API_URL=https://toolshed.saga-castor.ts.net/
 export CF_IDENTITY=/path/to/your-identity.key   # e.g. ~/.config/commonfabric/identity.key
-PIECE=fid1:nye-cJnJnU5OQIPiVXzvAoq_YeU5pZARxyXp-9-JCZg   # current as of 2026-05-26
+PIECE=fid1:zGgrBLVmQDTSthOYTv_CHGRbf-Sb6YTGpn2ntAyBZQs   # current as of 2026-05-27
 SPACE=lunch-2026-05-26
 ```
 
@@ -132,3 +133,30 @@ deno task cf piece new packages/patterns/cozy-poll-scoped/main.tsx -s "$SPACE"
 
 You need `WRITE`/`OWNER` on the space (ACL-gated). A denied write is rejected by
 the kernel and changes nothing.
+
+## Recovering a wedged piece
+
+A piece can get into a bad **process** state — e.g. a write that wedges the
+scheduler mid-settle. Symptom: the UI renders but **clicks do nothing**, with no
+console errors (a settle loop instead flickers / logs warnings). Observed once
+when a "reset votes" click wedged the running instance.
+
+`setsrc` does **not** fix this: it swaps the program but reuses the same process
+cell, so the bad reactive state persists. The cure is a fresh process:
+
+```bash
+# 1. Confirm it's instance-specific: deploy the same code to a NEW piece and
+#    open it. If the fresh piece works, the old one's process is wedged.
+NEW=$(deno task cf piece new packages/patterns/cozy-poll-scoped/main.tsx \
+  -s "$SPACE" | grep '^fid1:')
+
+# 2. The data usually survives in the old piece's cells — copy it across with
+#    the Option B loop (get --input | set --input) into the fresh piece.
+#    Tip: don't copy users/adminName — leave them empty so the first joiner
+#    becomes host; or copy them and use "Become host" to reclaim the role.
+
+# 3. Make the fresh piece canonical: update the "canonical piece" block above.
+```
+
+Avoid writing to the cells of a piece someone is actively using in the browser —
+direct `set` races their live session.
