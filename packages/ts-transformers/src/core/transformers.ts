@@ -1,5 +1,6 @@
 import ts from "typescript";
 import { TransformationContext } from "./mod.ts";
+import { CrossStageState } from "./cross-stage-state.ts";
 
 export type TransformMode = "transform" | "error";
 
@@ -73,37 +74,12 @@ export interface TransformationOptions {
   readonly mode?: TransformMode;
   readonly debug?: boolean;
   readonly logger?: (message: string) => void;
-  readonly typeRegistry?: TypeRegistry;
-  readonly mapCallbackRegistry?: WeakSet<ts.Node>;
-  readonly syntheticComputeCallbackRegistry?: WeakSet<ts.Node>;
-  readonly syntheticComputeOwnedNodeRegistry?: WeakSet<ts.Node>;
-  readonly syntheticReactiveCollectionRegistry?:
-    SyntheticReactiveCollectionRegistry;
-  readonly schemaHints?: SchemaHints;
-  readonly capabilitySummaryRegistry?: CapabilitySummaryRegistry;
   /**
-   * Maps synthetic wrapper TypeNodes produced by `applyShrinkAndWrap` back to
-   * the *pre-shrink* semantic Type that drove the narrowing. Read by
-   * SchemaInjection's inner-lift revisit path so it can re-narrow with the
-   * original baseType instead of receiving `any` from the checker on a
-   * synthetic node. Deliberately kept separate from the main `typeRegistry`
-   * because the schema generator consults `typeRegistry` to recover wrapper
-   * properties — if the pre-shrink type lived there, the generator would
-   * un-shrink carefully-narrowed inner schemas.
+   * Single owner of the pipeline's cross-transformer communication registries
+   * (typeRegistry, schemaHints, the marker sets, etc.). Replaces the formerly
+   * separate registry fields. See `CrossStageState`.
    */
-  readonly narrowedWrapperTypeRegistry?: WeakMap<ts.TypeNode, ts.Type>;
-  /**
-   * Marks CallExpressions emitted by `createLiftAppliedCall` (the synthetic
-   * JSX compute-wrap path used by expression-rewrite). SchemaInjection
-   * consults this when deciding whether to re-apply the capability-summary
-   * shrink on the lift's explicit input typeArg: synthetic emissions
-   * already produce their input TypeNode from accurate capture analysis,
-   * so re-shrinking collapses array element types to `unknown`
-   * (regression surfaced by CT-1615 Berni review on PR #3676).
-   * User-source derive<T,R>(...) lowered via LiftLoweringTransformer is
-   * NOT marked, so it retains the legacy shrink behavior.
-   */
-  readonly syntheticLiftAppliedCallRegistry?: WeakSet<ts.CallExpression>;
+  readonly state?: CrossStageState;
   /**
    * Shared diagnostics collector that accumulates diagnostics across all transformers.
    * If provided, diagnostics are pushed to this array in addition to the local context.

@@ -6,6 +6,7 @@ export type {
   TransformMode,
 } from "./core/mod.ts";
 export {
+  CrossStageState,
   injectCfDataHelper,
   injectCfHelpers,
   Pipeline,

@@ -162,7 +162,7 @@ function transformActionCall(
   // Note: The action call has type `ModuleFactory<T, Stream<void>>`, but the finalCall
   // is `handler(...)({...})` which CALLS the factory. We need the return type of that call,
   // which is `OpaqueRef<Stream<void>>`.
-  const typeRegistry = context.options.typeRegistry;
+  const typeRegistry = context.options.state?.typeRegistry;
   if (typeRegistry) {
     // Get the type of the original action call (ModuleFactory<T, Stream<void>>)
     const actionType = checker.getTypeAtLocation(actionCall);

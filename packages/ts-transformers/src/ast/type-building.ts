@@ -386,7 +386,7 @@ export function expressionToTypeNode(
   if (declaredTypeNode) {
     const type = context.checker.getTypeFromTypeNode(declaredTypeNode);
     const clonedTypeNode = cloneTypeNode(declaredTypeNode);
-    context.options.typeRegistry?.set(clonedTypeNode, type);
+    context.options.state?.typeRegistry?.set(clonedTypeNode, type);
     return clonedTypeNode;
   }
 
@@ -395,12 +395,12 @@ export function expressionToTypeNode(
   const type = inferWidenedTypeFromExpression(
     expr,
     context.checker,
-    context.options.typeRegistry,
+    context.options.state?.typeRegistry,
   );
   return typeToTypeNodeWithRegistry(
     type,
     context,
-    context.options.typeRegistry,
+    context.options.state?.typeRegistry,
   );
 }
 
@@ -636,7 +636,7 @@ export function buildTypeElementsFromCaptureTree(
         {
           factory,
           checker,
-          typeRegistry: context.options.typeRegistry,
+          typeRegistry: context.options.state?.typeRegistry,
         },
       );
     } else {
@@ -698,7 +698,7 @@ export function createCaptureTypeLiteral(
     {
       factory: context.factory,
       checker: context.checker,
-      typeRegistry: context.options.typeRegistry,
+      typeRegistry: context.options.state?.typeRegistry,
     },
   );
 }
@@ -741,7 +741,7 @@ export function mergeCaptureTypesIntoTypeLiteral(
     {
       factory: context.factory,
       checker: context.checker,
-      typeRegistry: context.options.typeRegistry,
+      typeRegistry: context.options.state?.typeRegistry,
     },
   );
 }

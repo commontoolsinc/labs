@@ -275,10 +275,10 @@ function createAliasExpressionAsLiftApplied(
   // The type comes from info.symbol which was captured from the original
   // binding element. Without this registration, createLiftAppliedCall cannot
   // determine the correct result type for the synthetic lift-applied call.
-  if (context.options.typeRegistry && info.symbol) {
+  if (context.options.state?.typeRegistry && info.symbol) {
     const symbolType = checker.getTypeOfSymbol(info.symbol);
     if (symbolType) {
-      context.options.typeRegistry.set(elementAccess, symbolType);
+      context.options.state?.typeRegistry.set(elementAccess, symbolType);
     }
   }
 

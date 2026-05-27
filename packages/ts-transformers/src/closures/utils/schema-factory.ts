@@ -32,7 +32,7 @@ export class SchemaFactory {
     captureTree: Map<string, CaptureTreeNode>,
   ): ts.TypeNode {
     const { checker } = this.context;
-    const typeRegistry = this.context.options.typeRegistry;
+    const typeRegistry = this.context.options.state?.typeRegistry;
 
     // 1. Determine element type
     let elemTypeNode: ts.TypeNode;
@@ -130,7 +130,7 @@ export class SchemaFactory {
       const explicit = tryExplicitParameterType(
         stateParam,
         this.context.checker,
-        this.context.options.typeRegistry,
+        this.context.options.state?.typeRegistry,
       );
       if (explicit) return explicit.typeNode;
     }
@@ -145,7 +145,7 @@ export class SchemaFactory {
       {
         factory: this.factory,
         checker: this.context.checker,
-        typeRegistry: this.context.options.typeRegistry,
+        typeRegistry: this.context.options.state?.typeRegistry,
       },
     );
   }
@@ -205,7 +205,7 @@ export class SchemaFactory {
       {
         factory,
         checker: this.context.checker,
-        typeRegistry: this.context.options.typeRegistry,
+        typeRegistry: this.context.options.state?.typeRegistry,
       },
     );
   }
@@ -228,7 +228,7 @@ export class SchemaFactory {
     callback: ts.ArrowFunction | ts.FunctionExpression,
   ): ts.TypeNode {
     const { factory, checker } = this.context;
-    const typeRegistry = this.context.options.typeRegistry;
+    const typeRegistry = this.context.options.state?.typeRegistry;
     const eventParam = callback.parameters[0];
 
     // If no event parameter exists, use never type (will generate false schema)

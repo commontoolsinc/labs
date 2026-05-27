@@ -200,7 +200,7 @@ function createPatternCallWithParams(
   );
 
   const { checker } = context;
-  const typeRegistry = context.options.typeRegistry;
+  const typeRegistry = context.options.state?.typeRegistry;
   let resultTypeNode: ts.TypeNode | undefined;
 
   if (callback.type) {

@@ -2,7 +2,7 @@ import { assertEquals, assertStringIncludes } from "@std/assert";
 import ts from "typescript";
 
 import type { CapabilityParamSummary } from "../src/core/mod.ts";
-import { TransformationContext } from "../src/core/mod.ts";
+import { CrossStageState, TransformationContext } from "../src/core/mod.ts";
 import {
   applyShrinkAndWrap,
   printTypeNode,
@@ -847,13 +847,7 @@ function createMinimalContext(
     sourceFile,
     tsContext: { factory: ts.factory } as ts.TransformationContext,
     options: {
-      typeRegistry: new WeakMap(),
-      mapCallbackRegistry: new WeakSet(),
-      syntheticComputeCallbackRegistry: new WeakSet(),
-      syntheticComputeOwnedNodeRegistry: new WeakSet(),
-      schemaHints: new WeakMap(),
-      capabilitySummaryRegistry: new WeakMap(),
-      narrowedWrapperTypeRegistry: new WeakMap(),
+      state: new CrossStageState(),
     },
   });
   return { sourceFile, checker: program.getTypeChecker(), context };

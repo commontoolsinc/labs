@@ -5,17 +5,34 @@
  * (cf-pipeline.ts). Each is keyed by AST node or symbol identity, which is
  * preserved when transformers are applied in sequence via ts.transform().
  *
+ * (A ninth, syntheticLiftAppliedCallRegistry, was removed in the
+ * registry-unification effort — it was verified functionally inert. See
+ * docs/scratch/12-registry-unification-design.md.)
+ *
  * TypeRegistry (WeakMap<ts.Node, ts.Type>)
- *   Preserves and recovers synthetic typing across the pipeline. Currently
- *   overloaded with three distinct uses sharing one map:
- *   - replacement expression nodes keep their original authored types
- *   - synthetic TypeNodes keep faithful schema/codegen types
- *   - synthetic call expressions keep their result types
- *   The schema generator (packages/schema-generator) also consults this
- *   registry as authoritative for wrapper-inner property recovery — so any
- *   pre-shrink type registered here will cause carefully-narrowed inner
- *   schemas to be un-shrunk. See narrowedWrapperTypeRegistry for the
- *   separate channel that bypasses this consumer.
+ *   Preserves and recovers synthetic typing across the pipeline. Serves three
+ *   distinct uses sharing one map:
+ *   - (a) replacement expression nodes keep their original authored types
+ *   - (b) synthetic TypeNodes keep faithful schema/codegen types
+ *   - (c) synthetic call expressions keep their result types
+ *
+ *   WHY ONE MAP IS SAFE (and why we did NOT split it — registry-unification
+ *   investigation, 2026-05, docs/scratch/12-registry-unification-design.md):
+ *   the three uses are isolated by KEY NODE-KIND, not by separate maps. A
+ *   use-(a) key is always a replacement Expression/Identifier, a use-(b) key
+ *   is always a ts.TypeNode, a use-(c) key is always a ts.CallExpression.
+ *   These node-kinds never coincide for the same ts.Node, so a reader that
+ *   looks up one kind of key can never retrieve another use's value. In
+ *   particular the schema-generator package reads ONLY TypeNode keys (verified
+ *   exhaustively: every .get/.has there keys on member.type, elementType,
+ *   innerTypeNode, etc.), so it can only ever see use-(b) entries. Splitting
+ *   into three physical maps would make this isolation explicit but fixes no
+ *   reachable bug, while adding churn the reads can't even exploit (the shared
+ *   read helpers — getTypeAtLocationWithFallback, ensureTypeNodeRegistered —
+ *   are node-kind-agnostic and would have to consult all three anyway).
+ *   The one genuine cross-consumer hazard CT-1615 hit (schema generator pulling
+ *   a *pre-shrink* type meant for a different consumer) is already solved by
+ *   the separate narrowedWrapperTypeRegistry channel — see its entry below.
  *   Writers: closure strategies, builtins/lift-applied, expression rewrites,
  *            type-building/schema-factory/type-shrinking, schema-injection
  *   Readers: lift-lowering transformer, schema-generator, type-inference,
@@ -71,20 +88,6 @@
  *   Readers: context.lookupNarrowedWrapper() (called by
  *            transformers/schema-injection.ts inner-lift revisit path)
  *
- * syntheticLiftAppliedCallRegistry (WeakSet<ts.CallExpression>)
- *   Marks CallExpressions emitted by createLiftAppliedCall (the synthetic
- *   JSX compute-wrap path used by expression-rewrite). Used to suppress
- *   the capability-summary shrink in schema-injection's lift-applied
- *   dispatch, because the input TypeNode is already built from accurate
- *   capture analysis and re-shrinking collapses array element types to
- *   `unknown` (regression surfaced by CT-1615 Berni review on PR #3676).
- *   User-source derive<T,R>(...) lowered via LiftLoweringTransformer is
- *   NOT marked, so it retains the legacy shrink behavior.
- *   Writers: context.markSyntheticLiftAppliedCall() (called by
- *            transformers/builtins/lift-applied.ts → createLiftAppliedCall)
- *   Readers: context.isSyntheticLiftAppliedCall() (called by
- *            transformers/schema-injection.ts lift-applied dispatch branch)
- *
  * --- Cache invalidation contract ---
  *
  * The four context.mark* methods on TransformationContext (for
@@ -104,12 +107,14 @@
  * routing through the methods centralises the contract — Berni's review
  * §3.4 on CT-1615).
  *
- * The remaining three registries (typeRegistry, schemaHints,
- * capabilitySummaryRegistry) are mutated via direct .set() at call sites
- * and have no cache-invalidation discipline. This is fine today because no
- * analysis cache depends on their contents, but if you add a cache that
- * does, mutate the registry through a context method that invalidates it
- * (or extend invalidateReactiveAnalysisCaches).
+ * schemaHints and capabilitySummaryRegistry are accessed through context
+ * record/lookup methods (recordSchemaHint/lookupSchemaHint,
+ * recordCapabilitySummary/lookupCapabilitySummary) but, like
+ * narrowedWrapperTypeRegistry, do not invalidate caches (no analysis cache
+ * depends on them). typeRegistry is still mutated via direct .set() at call
+ * sites; same caveat applies. If you add a cache that depends on any of these,
+ * route the mutation through a method that invalidates it (or extend
+ * invalidateReactiveAnalysisCaches).
  *
  * If you add a new context-level cache or registry, mutate it through a
  * mark* method that calls invalidateReactiveAnalysisCaches() (or extend the
@@ -118,25 +123,30 @@
  * analyzer instance is dropped together, so any state captured in its
  * closure is GC'd.
  *
- * --- Open architectural improvements ---
+ * --- Registry unification (in progress, 2026-05) ---
  *
- * See `docs/scratch/07-registry-audit.md` for a more thorough audit and
- * follow-up opportunities. In brief:
- *   - Lift the three remaining direct-.get/.set registries (typeRegistry,
- *     schemaHints, capabilitySummaryRegistry) to context.recordX/lookupX
- *     methods (matching the marker-set trio's pattern and the
- *     narrowedWrapperTypeRegistry promotion in CT-1615). Centralizes
- *     mutation, gets getOriginalNode fallback for free where applicable,
- *     eases adding invariants later.
- *   - Split typeRegistry into its three named purposes
- *     (replacementTypeRegistry, syntheticTypeNodeRegistry,
- *     syntheticCallResultRegistry). CT-1615 hit the consequences of the
- *     overload firsthand — separate channels would have prevented it.
- *   - Reconsider whether single-stage-pair registries (schemaHints,
- *     capabilitySummaryRegistry) should be threaded explicitly between just
- *     those stages rather than living in global options.
+ * This registry layer is being consolidated into a single CrossStageState
+ * abstraction. The plan and rationale live in
+ * `docs/scratch/12-registry-unification-design.md` (supersedes the earlier
+ * audit in `07-registry-audit.md`). Sequence:
+ *   1. (done) doc refresh: count fix + mark the inert registry.
+ *   2. (done — NO-OP, by investigation) Splitting typeRegistry into three
+ *      maps was on the plan, but the split fixes no reachable bug: the three
+ *      uses are already isolated by key node-kind (see the TypeRegistry note
+ *      above), and the one real CT-1615 cross-consumer hazard is already
+ *      handled by narrowedWrapperTypeRegistry. Documented the invariant
+ *      instead of splitting.
+ *   3. (done) Lifted schemaHints + capabilitySummaryRegistry to context
+ *      record/lookup methods. typeRegistry stays on direct .set (its split
+ *      was dropped in step 2, so there's no per-use method to route through).
+ *   4. (done) Removed syntheticLiftAppliedCallRegistry (verified inert).
+ *   5. (pending) Fold the transformer-internal channels into CrossStageState;
+ *      keep typeRegistry + schemaHints as loose maps at the schema-generator
+ *      package boundary (the only channels that package reads), so no
+ *      CrossStageState type crosses into schema-generator.
  */
 export { TransformationContext } from "./context.ts";
+export { CrossStageState } from "./cross-stage-state.ts";
 export type {
   CapabilityParamDefault,
   CapabilityParamSummary,
