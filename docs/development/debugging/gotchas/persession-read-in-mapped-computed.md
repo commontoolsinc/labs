@@ -1,8 +1,7 @@
-# perSession read inside a `computed()` nested in `.map()` silently never updates
+# perSession read inside a `computed()` nested in a mapped `computed()` list
 
-**Symptom:** A list of rows is rendered with `someList.map((row) => { … })`. Each
-row has an inline form (a delete-confirm, an edit form, a picker) gated on
-per-row open-state, computed *inside* the map like:
+**Symptom:** A list of rows has a per-row inline form (delete-confirm, edit form,
+picker) gated on per-row open-state, computed *inside* the map:
 
 ```tsx
 {rows.map((row) => {
@@ -11,83 +10,80 @@ per-row open-state, computed *inside* the map like:
 })}
 ```
 
-Clicking the trigger does **nothing** — the inline form never appears, the
-`{isOpen ? … : …}` ternary never flips. There is **no compile error and no
-runtime error**: just a permanently dead control. Sibling buttons that mutate a
-**perSpace** cell (and reclassify the row) work fine, and a *top-level*
-perSession read (e.g. a tab gate `{selectedTab.get() === "x" ? …}`) reacts
-fine — which makes this maddening to localize.
+Clicking the trigger does **nothing** — the `{isOpen ? … : …}` ternary never
+flips. **No compile error, no runtime error** — just a permanently dead control.
+Sibling buttons that mutate a **perSpace** cell work fine, and a *top-level*
+perSession read (e.g. a tab gate `{selectedTab.get() === "x" ? …}`) reacts fine,
+which makes it hard to localize.
 
-**Cause:** The `.map()` runs in a **space-scoped reading context** whenever the
-list it iterates derives from a `perSpace` cell (e.g.
-`computed(() => myPerSpaceCell.get().map(…))`, or an input cell mapped
-directly). A `computed()` defined *inside* that callback inherits the
-space-scoped context, and the runner **blocks following a link into a narrower
-scope** (`perSession` is narrower than `space`) — so `openTarget.get()` resolves
-to nothing and never re-evaluates. The block is silent (no author-facing
-diagnostic). See `packages/runner/src/scope.ts:61-69`, enforced at
-`packages/runner/src/traverse.ts` / `link-resolution.ts`, pinned by
-`packages/runner/test/schema-links.test.ts`.
+## The boundary (verified by contrast)
 
-Note the non-obvious trigger: if the mapped list is a **static JS array**, the
-nested perSession read *works* — the bug only appears once the map iterates a
-perSpace/input-derived list. (This is also why it can lurk unnoticed: it only
-breaks once real data flows in.)
+The failure is tied to **what you're mapping**, not merely to reading a
+perSession cell in a `.map()`:
 
-**Fix — hoist the perSession read into the top-level row computed.** Read the
-`perSession` target cell once at the top (a top-level computed/derive read of a
-narrower-scoped cell *does* resolve), and emit a plain boolean per row:
+- ❌ **FAILS — mapping a `computed()`/`derive`-produced list** (rows are plain
+  objects). `lot-watch`'s `sightingRows = computed(() => sightings.get().map(…))`
+  with a per-row `computed(() => guestTarget.get() === row.id)` never opened the
+  form. (Verified before/after.)
+- ✅ **WORKS — mapping a reactive cell/input directly.** `cozy-poll`'s
+  `options.map((option) => { const isRemoveConfirm = computed(() =>
+  removeConfirmTarget.get() === option.id); … })` opens **and** closes the
+  confirm correctly. (Verified.) Here each mapped element is a live reactive
+  handle, so the nested `computed` can still follow into the perSession cell.
+
+Underlying this is a runner rule: following a link into a **narrower** scope
+(`perSession` is narrower than `space`) is blocked from a space-scoped reading
+context, **silently** (`packages/runner/src/scope.ts:61-69`, enforced via
+`traverse.ts`/`link-resolution.ts`, pinned by `schema-links.test.ts`). When the
+mapped rows are plain objects emitted by a `computed()`, the per-row `computed`
+runs in that space-scoped context and the follow is blocked; mapping a live cell
+keeps a per-element context that resolves. (The exact trigger isn't fully pinned —
+treat "mapping a computed-produced list" as the danger sign, and verify.)
+
+## Fix — bake the flag into the producing `computed()`
+
+When the list comes from a `computed()`/`derive`, read the perSession cell once
+at the top (a top-level read resolves) and emit a **plain boolean per row**, so
+no per-row perSession follow is needed:
 
 ```tsx
 const rows = computed(() => {
   const openId = openTarget.get();            // read perSession HERE, at top level
   return myPerSpaceCell.get().map((r) => ({
     ...r,
-    isOpen: openId === r.id,                  // plain boolean per row
+    isOpen: openId === r.id,                  // plain boolean baked in
   }));
 });
-// …in JSX:
+// …in JSX, read the plain field:
 {rows.map((row) => (row.isOpen ? <Form/> : <button onClick={() => open.send({ id: row.id })}/>))}
 ```
 
-The fix needs a `.get()`-able list cell, which depends on how the list is typed:
+This needs a `.get()`-able list cell — a pattern-local `new Writable.perSpace<T[]>`
+or an input typed `PerSpace<Writable<T[]>>` (e.g. parking-coordinator's
+`people?: PerSpace<PeopleCell>`). An input typed `PerSpace<T[]>` (bare array, e.g.
+cozy-poll's `options`) intentionally has no `.get()` in the body — but it's
+mapped **directly**, which is the case that already works, so it needs no fix.
 
-- A pattern-local `new Writable.perSpace<T[]>([…])` or an input typed
-  `PerSpace<Writable<T[]>>` (e.g. parking-coordinator's
-  `people?: PerSpace<PeopleCell>`) **exposes `.get()` in the body** — use the
-  `computed()` above directly.
-- An input typed `PerSpace<T[]>` (a *bare* array, e.g. cozy-poll's
-  `options?: PerSpace<Option[]>`) deliberately **does not** expose `.get()`
-  (`OpaqueCell` lacks it); you can only `.map()` it or read it via `derive`.
+### Substitutes that look right but FAIL (when mapping a computed-produced list)
 
-⚠️ **There is currently no clean fix for a `PerSpace<T[]>` input mapped
-directly.** Substitutes that look plausible but FAIL (verified):
-
-- Lifting the session value into a `computed()` and feeding it to a
-  `derive({ items, openId }, …)` that produces the rows: the derive's result
-  inherits **session scope** (it depends on a session-scoped value), so mapping
-  it in the space-scoped render renders **empty** (not just stale).
-- A per-row `derive({ openId, id }, …)` inside the map: never re-renders (same
-  scope-follow block).
+- Lifting the session value into a `computed()` then feeding it to a
+  `derive({ items, openId }, …)` that produces the rows: the derive inherits
+  **session scope** and renders an **empty** list when mapped in a space-scoped
+  render.
+- A per-row `derive({ openId, id }, …)` inside the map: never re-renders.
 - `equals()` + a boxed reference via a lifted `computed`: never flips.
 
-The only real options for that case are to **change the input type to
-`PerSpace<Writable<T[]>>`** so `.get()` becomes available (then use the
-`computed()` form), or to accept the limitation until the framework lifts the
-narrower-scope-follow restriction (see `LINEAR-TICKET-scope-map-reactivity.md`).
-
 Setting the perSession cell from an `onClick`/action is **not** affected — only
-the nested *read* is. Don't reach for `equals()`, `ifElse`, or restructuring the
-map; the scope of the read is the whole problem.
+the nested *read* (when mapping a computed-produced list) is.
 
-**Verify:** deploy, click the per-row trigger, confirm the inline form opens. A
-unit-level analogue is the perSession-vs-perSpace control in the repro attached
-to the framework ticket (`LINEAR-TICKET-scope-map-reactivity.md`): identical
-nested computed, perSpace flips / perSession doesn't.
+**Verify:** deploy, click the per-row trigger, confirm the inline form opens
+*and* closes. The repro attached to `LINEAR-TICKET-scope-map-reactivity.md`
+isolates it: a per-row `computed` over a perSession cell, mapping a
+`computed(() => perSpaceCell.get())` list — perSpace control flips, perSession
+doesn't.
 
-**Known-good references (post-fix):**
-`packages/patterns/factory-outputs/lot-watch/main.tsx` (sighting rows + spot
-picker) and `parking-coordinator/main.tsx`
-(`adminPeopleData`/`adminSpotsData`) — both map `.get()`-able lists.
-`cozy-poll-scoped/main.tsx` is the unfixed `PerSpace<Option[]>`-input case
-described above.
+**Known-good references:**
+`lot-watch/main.tsx` (`sightingRows`, spot picker) and
+`parking-coordinator/main.tsx` (`adminPeopleData`/`adminSpotsData`) both bake the
+flag into the producing computed. `cozy-poll-scoped/main.tsx` maps `options`
+directly and needs no change.
