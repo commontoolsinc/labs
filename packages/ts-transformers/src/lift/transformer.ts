@@ -2,7 +2,10 @@ import ts from "typescript";
 
 import { detectCallKind } from "../ast/call-kind.ts";
 import { setParentPointers } from "../ast/utils.ts";
-import { registerLiftAppliedCallType } from "../ast/type-inference.ts";
+import {
+  registerLiftAppliedCallType,
+  widenLiteralType,
+} from "../ast/type-inference.ts";
 import { HelpersOnlyTransformer } from "../core/transformers.ts";
 import type { TransformationContext } from "../core/mod.ts";
 
@@ -189,6 +192,11 @@ function lowerDeriveCall(
   // widened type against the callback's first parameter in the typeRegistry.
   // inferParameterType consults the registry before falling back to the
   // checker, so downstream schema injection sees the input-flowed type.
+  //
+  // `widenLiteralType` matches pre-Phase-1 derive's contextual-typing of fn's
+  // parameter: `derive(5, x => …)` should see `number`, not the literal `5`.
+  // Without the widen, schema injection picks up the literal type and emits
+  // an over-narrowed schema (CT-1615 Berni review on PR #3676).
   const typeRegistry = context.options.typeRegistry;
   if (typeRegistry) {
     const callbackFn = unwrapToFunctionLike(callbackArg);
@@ -196,7 +204,7 @@ function lowerDeriveCall(
     if (callbackParam && !callbackParam.type) {
       const inputType = checker.getTypeAtLocation(inputArg);
       if (inputType) {
-        typeRegistry.set(callbackParam, inputType);
+        typeRegistry.set(callbackParam, widenLiteralType(inputType, checker));
       }
     }
   }

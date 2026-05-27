@@ -396,7 +396,10 @@ the relevant phase lands.
   our own injection (via `ts.getOriginalNode` plus an injection tag) and skip
   the re-narrowing entirely. Defer to a separate investigation post-Phase 1 —
   needs to confirm the branch isn't load-bearing for truly user-authored
-  `lift(toSchema(...), toSchema(...), cb)` calls (rare but possible).
+  `lift(toSchema(...), toSchema(...), cb)` calls (rare but possible). **Tracked
+  as
+  [CT-1621](https://linear.app/common-tools/issue/CT-1621/remove-redundant-schema-re-narrowing-in-schema-injections-inner-lift)**
+  after Berni's review on PR #3676 (section 7.3).
 - **[Phase 3]** Final name for `sandboxable` (TL). **Berni 2026-05-21**: prefers
   `selfcontained`.
 - **[Phase 3]** Are non-deterministic globals (`Date.now()`, `Math.random()`) OK

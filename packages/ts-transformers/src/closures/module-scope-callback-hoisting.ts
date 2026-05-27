@@ -10,7 +10,6 @@ import { unwrapExpression } from "../utils/expression.ts";
 import type { TransformationContext } from "../core/mod.ts";
 
 const HOISTABLE_BUILDER_NAMES = new Set([
-  "derive",
   "handler",
   "lift",
   "pattern",
@@ -224,7 +223,7 @@ export function hoistModuleScopedBuilderCallbacks(
 
 function getBuilderCallbackIndices(
   call: ts.CallExpression,
-  context: TransformationContext,
+  _context: TransformationContext,
 ): readonly number[] {
   const callee = unwrapExpression(call.expression);
   const builderName = ts.isIdentifier(callee)
@@ -233,42 +232,18 @@ function getBuilderCallbackIndices(
     ? callee.name.text
     : undefined;
 
+  // After CT-1615 Phase 1, the hoister deliberately does NOT handle `derive`.
+  // LiftLoweringTransformer rewrites every supported derive shape (2-arg and
+  // 4-arg) into the lift-applied form well before this pass runs, so a
+  // canonically-shaped derive should never reach here. Malformed shapes
+  // (1-arg `derive(fn)` etc.) pass through to validation; refusing to hoist
+  // them is correct. `derive` is intentionally omitted from
+  // `HOISTABLE_BUILDER_NAMES` to enforce this.
   if (!builderName || !HOISTABLE_BUILDER_NAMES.has(builderName)) {
     return [];
   }
 
   switch (builderName) {
-    case "derive": {
-      // After CT-1615 Phase 1, derive is never emitted by the transformer —
-      // the analogous lift-applied form is handled by getLiftAppliedHoistTarget
-      // in the visit function. This branch is retained until the mechanical
-      // rename removes the "derive" name; it covers a hypothetical future
-      // path that re-introduces derive calls reaching the hoister.
-      if (call.arguments.length >= 4) return [3];
-      if (call.arguments.length < 2) return [];
-      const legacyDeriveCallback = call.arguments[1];
-      if (!isFunctionLikeExpression(legacyDeriveCallback)) return [];
-      // Two shapes of 2-arg derive reach the hoister:
-      //   (a) Synthetic compute callbacks produced by the closure
-      //       transformer's reactive-wrapping (e.g. `__cfHelpers.derive(
-      //       captures, ({ item }) => formatPrice(item.price * TAX_RATE))`).
-      //       These have destructured params with no explicit type
-      //       annotations because the transformer synthesizes them, and
-      //       the closure pipeline tags them via
-      //       `context.markAsSyntheticComputeCallback`.
-      //   (b) User-authored `derive(inputs, callback)` calls written
-      //       directly in source — usually with a destructured-and-typed
-      //       parameter like `({ x }: { x: T }) => …`. The type
-      //       annotation is what makes them safe to relocate to module
-      //       scope: it carries the structural contract the runtime
-      //       relies on. Untyped user-authored 2-arg derives are
-      //       skipped (better to leave them inline than guess).
-      if (context.isSyntheticComputeCallback?.(legacyDeriveCallback)) {
-        return [1];
-      }
-      if (hasSelfDescribingFunctionTypes(legacyDeriveCallback)) return [1];
-      return [];
-    }
     case "handler":
     case "lift":
     case "pattern":

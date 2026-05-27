@@ -127,7 +127,7 @@ export function createReactiveWrapperForExpression(
 
   context.markSyntheticComputeOwnedSubtree(expression);
 
-  // Get result type for the computed call
+  // Get result type for the synthetic lift-applied call we're about to emit.
   let resultTypeNode: ts.TypeNode | undefined;
   let resultType: ts.Type | undefined;
 

@@ -134,7 +134,7 @@ function getFirstParameterCapabilitySummary(
  * If a capture has the same name as originalInputParamName, rename it (e.g., multiplier -> multiplier_1).
  * Returns a mapping from original capture names to their potentially renamed versions.
  */
-function resolveDeriveCaptureNameCollisions(
+function resolveLiftAppliedCaptureNameCollisions(
   originalInputParamName: string,
   captureTree: Map<string, CaptureTreeNode>,
 ): Map<string, string> {
@@ -170,7 +170,7 @@ function resolveDeriveCaptureNameCollisions(
  * This handles the case where the user wrote derive({}, () => ...) (which lowers to
  * lift(() => ...)({})) and we only need captures.
  */
-function buildDeriveInputObject(
+function buildLiftAppliedInputObject(
   originalInput: ts.Expression,
   originalInputParamName: string,
   captureTree: Map<string, CaptureTreeNode>,
@@ -384,13 +384,13 @@ export function transformLiftAppliedCall(
   const hadZeroParameters = callback.parameters.length === 0;
 
   // Resolve capture name collisions with the original input parameter name
-  const captureNameMap = resolveDeriveCaptureNameCollisions(
+  const captureNameMap = resolveLiftAppliedCaptureNameCollisions(
     hadZeroParameters ? "" : originalInputParamName,
     captureTree,
   );
 
   // Build merged input object
-  const mergedInput = buildDeriveInputObject(
+  const mergedInput = buildLiftAppliedInputObject(
     originalInput,
     originalInputParamName,
     captureTree,

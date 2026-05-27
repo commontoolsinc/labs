@@ -144,7 +144,7 @@ export function rewritePatternCallbackBody(
     opaqueRootSymbols,
     context,
   );
-  return rewriteNestedDeriveCallbackBodies(rewrittenBody, context);
+  return rewriteNestedLiftAppliedCallbackBodies(rewrittenBody, context);
 }
 
 function rewriteTrackedOpaquePatternBody(
@@ -938,7 +938,7 @@ function rewriteTrackedOpaquePatternBody(
  * will be detected as opaque roots by the tracked-opaque body's variable
  * tracking.
  */
-function rewriteNestedDeriveCallbackBodies(
+function rewriteNestedLiftAppliedCallbackBodies(
   body: ts.ConciseBody,
   context: TransformationContext,
 ): ts.ConciseBody {
@@ -966,7 +966,7 @@ function rewriteNestedDeriveCallbackBodies(
       : visited.arguments;
     const callbackIndex = callbackHostArgs.indexOf(callbackArg);
 
-    let processedBody = rewriteNestedDeriveCallbackBodies(
+    let processedBody = rewriteNestedLiftAppliedCallbackBodies(
       callbackArg.body,
       context,
     );
@@ -986,7 +986,7 @@ function rewriteNestedDeriveCallbackBodies(
       localOpaqueRootSymbols,
       context,
     );
-    processedBody = rewriteDeriveCallbackComputedKeyAccesses(
+    processedBody = rewriteLiftAppliedCallbackComputedKeyAccesses(
       processedBody,
       localOpaqueRoots,
       context,
@@ -1052,7 +1052,7 @@ function rewriteNestedDeriveCallbackBodies(
   return visit(body) as ts.Expression;
 }
 
-function rewriteDeriveCallbackComputedKeyAccesses(
+function rewriteLiftAppliedCallbackComputedKeyAccesses(
   body: ts.ConciseBody,
   opaqueRoots: ReadonlySet<string>,
   context: TransformationContext,

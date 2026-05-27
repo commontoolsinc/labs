@@ -788,14 +788,20 @@ export class SchemaGenerator implements ISchemaGenerator {
             required.push(propName);
           }
         } else if (ts.isIndexSignatureDeclaration(member) && member.type) {
-          // Mirror ObjectFormatter.formatType's handling of string/number index
-          // signatures: emit them as `additionalProperties` with the value
-          // type's schema. Without this branch, synthetic TypeLiteralNodes
-          // representing `Record<K, V>` / `{ [k: string]: V }` shapes silently
-          // drop their index signature when routed through node-based
-          // analysis (e.g. the SchemaInjection lift-revisit path that feeds
-          // `any` as the paired Type, see ts-transformers
-          // schema-injection.ts ~line 3290).
+          // Handle string/number index signatures on synthetic TypeLiteralNodes
+          // by emitting them as `additionalProperties` with the value type's
+          // schema. Without this branch, synthetic `Record<K, V>` /
+          // `{ [k: string]: V }` shapes silently drop their index signature
+          // when routed through node-based analysis (e.g. the SchemaInjection
+          // lift-revisit path that feeds `any` as the paired Type, see
+          // ts-transformers schema-injection.ts ~line 3290).
+          //
+          // Note: unlike `ObjectFormatter.formatType`'s type-driven path
+          // (object-formatter.ts:344-365), this branch does NOT propagate
+          // JSDoc from the index signature. Synthetic TypeLiteralNodes have
+          // no source-positioned declarations to read JSDoc from, so there
+          // is nothing to propagate. If we ever route declaration-bearing
+          // nodes through this path, JSDoc propagation should be added.
           let valueType: ts.Type;
           if (typeRegistry && typeRegistry.has(member.type)) {
             valueType = typeRegistry.get(member.type)!;
