@@ -28,6 +28,7 @@ import {
 } from "./contracts/run-manifest.ts";
 import {
   DEFAULT_SUBAGENT_PROFILE,
+  getHarnessSubagentProfileConfig,
   HARNESS_SUBAGENT_PROFILES,
   type HarnessSubagentProfile,
 } from "./contracts/subagent.ts";
@@ -62,11 +63,56 @@ import {
   parseStructuredResultSchema,
   validateStructuredResultValue,
 } from "./structured-result.ts";
+import { BUILTIN_TOOLS } from "./tools/registry.ts";
 
-const DEFAULT_MODEL = "gpt-5.4";
+const DEFAULT_MODEL = "gpt-5.5";
 const DEFAULT_MAX_MODEL_TURNS = 8;
 const DEFAULT_ARTIFACT_DIRNAME = ".cf-harness-artifacts";
 const CLI_OUTPUT_MODES = ["operator", "batch"] as const;
+const CLI_STRING_FLAGS = [
+  "workspace",
+  "cwd",
+  "focus-root",
+  "allow-tool",
+  "allow-skill-script",
+  "allow-subagent-profile",
+  "output-mode",
+  "prompt-slot-role",
+  "prompt",
+  "prompt-file",
+  "image",
+  "system-prompt",
+  "resume-run",
+  "model",
+  "skills-root",
+  "skill",
+  "gateway-base-url",
+  "gateway-auth-mode",
+  "artifact-root",
+  "result-json-path",
+  "structured-result-path",
+  "structured-result-schema",
+  "structured-result-schema-file",
+  "run-manifest",
+  "cfc-enforcement-mode",
+  "sandbox-image",
+  "max-model-turns",
+  "fabric-mount",
+] as const;
+const CLI_BOOLEAN_FLAGS = [
+  "help",
+  "describe-capabilities",
+  "print-transcript",
+  "stream-events",
+  "no-skill-catalog",
+] as const;
+const CLI_COLLECT_FLAGS = [
+  "allow-tool",
+  "allow-skill-script",
+  "allow-subagent-profile",
+  "skill",
+  "image",
+] as const;
 
 export type CfHarnessCliOutputMode = (typeof CLI_OUTPUT_MODES)[number];
 
@@ -108,6 +154,26 @@ export interface CfHarnessStructuredResultConfig {
   path: string;
   sandboxPath: string;
   schema: JSONSchema;
+}
+
+export interface CfHarnessCliCapabilities {
+  type: "cf-harness.capabilities";
+  version: 1;
+  cliFlags: readonly string[];
+  repeatableCliFlags: readonly string[];
+  parentToolIds: readonly BuiltinToolId[];
+  builtinToolIds: readonly BuiltinToolId[];
+  subagentProfiles: readonly HarnessSubagentProfile[];
+  nativeModelToolIds: readonly string[];
+  features: {
+    images: true;
+    structuredResults: true;
+    skills: true;
+    skillScripts: true;
+    runManifest: true;
+    fabricMount: true;
+    resumeRun: true;
+  };
 }
 
 export interface CfHarnessCliIO {
@@ -237,6 +303,7 @@ Options:
   --fabric-mount <path>         Host path for a Fabric FUSE mount (mounted at /fabric in the sandbox)
   --max-model-turns <n>         Maximum model turns before aborting
   --print-transcript            Print the final transcript JSON after the response
+  --describe-capabilities       Print machine-readable capability JSON and exit
   --help                        Show this help text
 
 Environment:
@@ -275,6 +342,37 @@ const CLI_PARENT_TOOL_IDS = [
   "write_file",
   "delegate_task",
 ] as const satisfies readonly BuiltinToolId[];
+
+const uniqueStrings = <T extends string>(
+  values: readonly T[],
+): readonly T[] => [...new Set(values)];
+
+export const createCfHarnessCliCapabilities = (): CfHarnessCliCapabilities => ({
+  type: "cf-harness.capabilities",
+  version: 1,
+  cliFlags: [
+    ...CLI_STRING_FLAGS.map((flag) => `--${flag}`),
+    ...CLI_BOOLEAN_FLAGS.map((flag) => `--${flag}`),
+  ],
+  repeatableCliFlags: CLI_COLLECT_FLAGS.map((flag) => `--${flag}`),
+  parentToolIds: [...CLI_PARENT_TOOL_IDS],
+  builtinToolIds: BUILTIN_TOOLS.map((tool) => tool.descriptor.toolId),
+  subagentProfiles: [...HARNESS_SUBAGENT_PROFILES],
+  nativeModelToolIds: uniqueStrings(
+    HARNESS_SUBAGENT_PROFILES.flatMap((profile) =>
+      getHarnessSubagentProfileConfig(profile).nativeModelToolIds ?? []
+    ),
+  ),
+  features: {
+    images: true,
+    structuredResults: true,
+    skills: true,
+    skillScripts: true,
+    runManifest: true,
+    fabricMount: true,
+    resumeRun: true,
+  },
+});
 
 const parsePromptSlotRole = (
   input: string | undefined,
@@ -557,49 +655,9 @@ export const parseCfHarnessCliArgs = async (
 ): Promise<CfHarnessCliConfig | { help: true }> => {
   const normalizedArgv = argv[0] === "--" ? argv.slice(1) : argv;
   const args = parseArgs([...normalizedArgv], {
-    string: [
-      "workspace",
-      "cwd",
-      "focus-root",
-      "allow-tool",
-      "allow-skill-script",
-      "allow-subagent-profile",
-      "output-mode",
-      "prompt-slot-role",
-      "prompt",
-      "prompt-file",
-      "image",
-      "system-prompt",
-      "resume-run",
-      "model",
-      "skills-root",
-      "skill",
-      "gateway-base-url",
-      "gateway-auth-mode",
-      "artifact-root",
-      "result-json-path",
-      "structured-result-path",
-      "structured-result-schema",
-      "structured-result-schema-file",
-      "run-manifest",
-      "cfc-enforcement-mode",
-      "sandbox-image",
-      "max-model-turns",
-      "fabric-mount",
-    ],
-    boolean: [
-      "help",
-      "print-transcript",
-      "stream-events",
-      "no-skill-catalog",
-    ],
-    collect: [
-      "allow-tool",
-      "allow-skill-script",
-      "allow-subagent-profile",
-      "skill",
-      "image",
-    ],
+    string: [...CLI_STRING_FLAGS],
+    boolean: [...CLI_BOOLEAN_FLAGS],
+    collect: [...CLI_COLLECT_FLAGS],
     alias: {
       h: "help",
     },
@@ -1283,6 +1341,18 @@ export const formatCfHarnessCliResult = (
   return `${lines.join("\n")}\n`;
 };
 
+const parseCfHarnessCliControlArgs = (
+  argv: readonly string[],
+): ReturnType<typeof parseArgs> => {
+  const normalizedArgv = argv[0] === "--" ? argv.slice(1) : argv;
+  return parseArgs([...normalizedArgv], {
+    boolean: ["help", "describe-capabilities"],
+    alias: {
+      h: "help",
+    },
+  });
+};
+
 export const runCfHarnessCli = async (
   argv: readonly string[],
   deps: RunCfHarnessCliDependencies = {},
@@ -1298,6 +1368,17 @@ export const runCfHarnessCli = async (
     );
   };
   try {
+    const controlArgs = parseCfHarnessCliControlArgs(argv);
+    if (controlArgs.help) {
+      io.stdout(formatCfHarnessCliUsage());
+      return 0;
+    }
+    if (controlArgs["describe-capabilities"]) {
+      io.stdout(
+        `${JSON.stringify(createCfHarnessCliCapabilities(), null, 2)}\n`,
+      );
+      return 0;
+    }
     const parsed = await parseCfHarnessCliArgs(argv, deps);
     if ("help" in parsed) {
       io.stdout(formatCfHarnessCliUsage());

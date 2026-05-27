@@ -1,4 +1,10 @@
-import { App, AppView, appViewToUrlPath, urlToAppView } from "./app/mod.ts";
+import {
+  App,
+  AppView,
+  appViewToUrlPath,
+  preserveAppViewMode,
+  urlToAppView,
+} from "./app/mod.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 
 const logger = getLogger("shell.navigation", {
@@ -154,11 +160,12 @@ function mapNavigationView(
     "spaceDid" in view && view.spaceDid && currentSpaceName &&
     view.spaceDid === currentSpaceDID
   ) {
-    return {
+    view = {
       ...("pieceId" in view ? { pieceId: view.pieceId } : undefined),
       ...("pieceSlug" in view ? { pieceSlug: view.pieceSlug } : undefined),
+      ...("mode" in view ? { mode: view.mode } : undefined),
       spaceName: currentSpaceName,
     };
   }
-  return view;
+  return preserveAppViewMode(currentView, view);
 }

@@ -457,6 +457,24 @@ describe("PatternManager compilation cache integration", () => {
     expect(cachedCompiler.getStats().writes).toBe(1);
   });
 
+  it("skips evaluate-time bundle validation for SES-validated cache hits", async () => {
+    const first = await runtime.patternManager.compilePattern(simpleProgram);
+    expect(first).toBeDefined();
+
+    const originalEvaluate = runtime.harness.evaluate.bind(runtime.harness);
+    let evaluateOptions:
+      | Parameters<typeof runtime.harness.evaluate>[3]
+      | undefined;
+    runtime.harness.evaluate = ((id, jsScript, files, options) => {
+      evaluateOptions = options;
+      return originalEvaluate(id, jsScript, files, options);
+    }) as typeof runtime.harness.evaluate;
+
+    const second = await runtime.patternManager.compilePattern(simpleProgram);
+    expect(second).toBeDefined();
+    expect(evaluateOptions?.skipBundleValidation).toBe(true);
+  });
+
   it("cache miss with wrong fingerprint triggers recompile", async () => {
     // Seed the cache with a known key and fingerprint, then use a
     // CachedCompiler with a different fingerprint to observe the mismatch.

@@ -324,6 +324,37 @@ describe("Engine.evaluate()", () => {
     expect(result.exportMap).toBeDefined();
   });
 
+  it("does not initialize the TypeScript compiler when evaluating precompiled JS", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: "export default 42;",
+        },
+      ],
+    };
+
+    const { jsScript, id } = await engine.compile(program);
+    const evaluateOnlyEngine = new class extends Engine {
+      override initializeCompiler(): never {
+        throw new Error("compiler initialized during evaluate");
+      }
+    }(runtime);
+
+    try {
+      const result = await evaluateOnlyEngine.evaluate(
+        id,
+        jsScript,
+        program.files,
+        { skipBundleValidation: true },
+      );
+      expect(result.main!["default"]).toBe(42);
+    } finally {
+      evaluateOnlyEngine.dispose();
+    }
+  });
+
   it("rejects invalid bundles passed directly to evaluate()", async () => {
     const jsScript = {
       filename: "invalid-bundle.js",

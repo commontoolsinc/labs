@@ -38,12 +38,22 @@ export interface CompileResult {
    *  from export map keys. */
   id: string;
   jsScript: JsScript;
+  /** True only after the compiled JavaScript bundle has passed SES validation. */
+  sesValidated?: true;
 }
 
 export interface EvaluateResult {
   main?: Exports;
   exportMap?: Record<string, Exports>;
   loadId?: string;
+}
+
+export interface EvaluateOptions {
+  /**
+   * Skip SES bundle validation for compiled JavaScript loaded from a trusted
+   * cache entry. Direct callers should leave this unset.
+   */
+  skipBundleValidation?: boolean;
 }
 
 // A `Harness` wraps a flow of compiling, bundling, and executing typescript.
@@ -61,6 +71,7 @@ export interface Harness extends EventTarget {
     id: string,
     jsScript: JsScript,
     files: Source[],
+    options?: EvaluateOptions,
   ): Promise<EvaluateResult>;
 
   // Resolves a `ProgramResolver` into a `Program` using the engine's

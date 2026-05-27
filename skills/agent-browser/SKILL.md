@@ -240,14 +240,25 @@ bundled scripts over constructing equivalent shell commands. Invoke them with
 the `agent-browser` CLI to be available on `PATH` in the script execution
 environment.
 
-| Script                                                               | Description                         |
-| -------------------------------------------------------------------- | ----------------------------------- |
-| [scripts/form-automation.sh](scripts/form-automation.sh)             | Form filling with validation        |
-| [scripts/authenticated-session.sh](scripts/authenticated-session.sh) | Login once, reuse state             |
-| [scripts/capture-workflow.sh](scripts/capture-workflow.sh)           | Content extraction with screenshots |
+For cf-harness runs, pass a local CDP origin with `--cdp` or set
+`AGENT_BROWSER_CDP`. The scripts intentionally avoid browser state, screenshots,
+PDFs, uploads, downloads, and local file output; they print snapshots and
+extracted content to stdout for harness capture.
+
+| Script                                                               | Description                                      |
+| -------------------------------------------------------------------- | ------------------------------------------------ |
+| [scripts/form-automation.sh](scripts/form-automation.sh)             | Discover form refs or run ordered form actions   |
+| [scripts/authenticated-session.sh](scripts/authenticated-session.sh) | Discover login refs or submit provided refs      |
+| [scripts/capture-workflow.sh](scripts/capture-workflow.sh)           | Capture page metadata, snapshot, and text output |
 
 ```bash
-./scripts/form-automation.sh https://example.com/form
-./scripts/authenticated-session.sh https://app.example.com/login
-./scripts/capture-workflow.sh https://example.com ./output
+./scripts/form-automation.sh --cdp http://host.docker.internal:9222 https://example.com/form
+./scripts/form-automation.sh --cdp http://host.docker.internal:9222 https://example.com/form \
+  --type @e1="Ada" --click @e3 --wait-url "**/success"
+
+APP_USERNAME="user@example.com" APP_PASSWORD="..." \
+  ./scripts/authenticated-session.sh --cdp http://host.docker.internal:9222 \
+  https://app.example.com/login --username-ref @e1 --password-ref @e2 --submit-ref @e3
+
+./scripts/capture-workflow.sh --cdp http://host.docker.internal:9222 https://example.com
 ```

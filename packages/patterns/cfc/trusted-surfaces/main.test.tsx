@@ -15,7 +15,7 @@ import {
   TrustedSaveSurface,
   TrustedSharePolicySurface,
   TrustedSongIdRecordingSurface,
-} from "./main.tsx";
+} from "./mod.ts";
 
 const setString = handler<void, { value: Writable<string>; next: string }>((
   _,

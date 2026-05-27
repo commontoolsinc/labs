@@ -128,6 +128,44 @@ describe("piece slugs", () => {
     const link = parseLink(secondSlugCell.getRaw(), secondSlugCell);
     expect(link?.overwrite).toBe("redirect");
     expect(link?.id).toBe(piece.getAsNormalizedFullLink().id);
+    expect(readRootMeta(pieceId(piece)!, "slug")).toBe("second-link");
+  });
+
+  it("stores slug metadata on the fully resolved target", async () => {
+    const output = runtime.getCell(
+      manager.getSpace(),
+      { space: manager.getSpace(), random: "slug-final-target" },
+    );
+    const intermediate = runtime.getCell(
+      manager.getSpace(),
+      { space: manager.getSpace(), random: "slug-intermediate-target" },
+    );
+
+    await runtime.editWithRetry((tx) => {
+      output.withTx(tx).set({ value: 1 });
+      intermediate.withTx(tx).key("child").setRawUntyped(
+        output.withTx(tx).getAsWriteRedirectLink({
+          base: intermediate.withTx(tx).key("child"),
+        }),
+      );
+    });
+
+    await setSlugLink(manager, "resolved-target", intermediate.key("child"), {
+      writeTargetMetadata: true,
+    });
+
+    const slugCell = runtime.getCellFromEntityId(manager.getSpace(), {
+      "/": slugIdForSpace(manager.getSpace(), "resolved-target"),
+    });
+    await slugCell.sync();
+    const link = parseLink(slugCell.getRaw(), slugCell);
+    expect(link?.overwrite).toBe("redirect");
+    expect(link?.id).toBe(intermediate.getAsNormalizedFullLink().id);
+    expect(link?.path).toEqual(["child"]);
+    expect(readRootMeta(
+      String(output.getAsNormalizedFullLink().id).replace(/^of:/, ""),
+      "slug",
+    )).toBe("resolved-target");
   });
 
   it("preserves resolved slug redirect paths", async () => {

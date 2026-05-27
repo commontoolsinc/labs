@@ -693,9 +693,15 @@ export class RuntimeProcessor {
         scope: redirect.scope ?? "space",
       });
       await target.sync();
-      if (target.getMetaRaw("pattern") === undefined) {
+      const targetLink = target.getAsNormalizedFullLink();
+      const hasPattern = target.getMetaRaw("pattern") !== undefined;
+      if (!hasPattern || targetLink.path.length > 0) {
+        const pageCell = hasPattern && targetLink.path.length > 0
+          ? target.asSchemaFromLinks()
+          : target;
+        await pageCell.pull();
         return {
-          page: createPageRef(target),
+          page: createPageRef(pageCell),
         };
       }
 

@@ -1,4 +1,5 @@
-import { FabricInstance, type FabricValue } from "../interface.ts";
+import type { FabricValue } from "../interface.ts";
+import { BaseFabricInstance } from "./BaseFabricInstance.ts";
 
 /**
  * Base class for fabric types that carry an explicit wire-format tag.
@@ -6,11 +7,12 @@ import { FabricInstance, type FabricValue } from "../interface.ts";
  * (failed deconstruction/reconstruction). Enables a single `instanceof`
  * check where code needs to handle both.
  *
- * Extends `FabricInstance` so subclasses inherit the `shallowClone()` method.
+ * Extends `BaseFabricInstance` so subclasses inherit the `shallowClone()`
+ * template method.
  *
  * See Section 3.2 of the formal spec.
  */
-export abstract class ExplicitTagValue extends FabricInstance {
+export abstract class ExplicitTagValue extends BaseFabricInstance {
   constructor(
     /** The original type tag, e.g. `"FutureType@2"`. */
     readonly typeTag: string,

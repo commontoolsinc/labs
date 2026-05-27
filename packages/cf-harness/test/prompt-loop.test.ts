@@ -410,6 +410,115 @@ Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant 
   );
 });
 
+Deno.test("CfHarnessPromptLoop forwards abort signals to gateway requests", async () => {
+  const controller = new AbortController();
+  let seenSignal: RequestInit["signal"];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-loop-signal",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "disabled",
+    }),
+    fetchFn: (_input, init) => {
+      seenSignal = init?.signal;
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "Hi.",
+              },
+            }],
+          }),
+          { status: 200 },
+        ),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Say hi.",
+    signal: controller.signal,
+  });
+
+  assertEquals(result.finalAssistantText, "Hi.");
+  assertEquals(seenSignal, controller.signal);
+});
+
+Deno.test("CfHarnessPromptLoop forwards abort signals to delegate_task child loops", async () => {
+  const controller = new AbortController();
+  const seenSignals: Array<RequestInit["signal"]> = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-loop-delegate-signal",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "disabled",
+    }),
+    fetchFn: (_input, init) => {
+      seenSignals.push(init?.signal);
+      const payload = seenSignals.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-delegate",
+                type: "function",
+                function: {
+                  name: "delegate_task",
+                  arguments: JSON.stringify({
+                    goal: "Inspect the workspace.",
+                  }),
+                },
+              }],
+            },
+          }],
+        }
+        : seenSignals.length === 2
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Child done.",
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Parent done.",
+            },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Delegate a task.",
+    signal: controller.signal,
+  });
+
+  assertEquals(result.finalAssistantText, "Parent done.");
+  assertEquals(seenSignals.length, 3);
+  assertEquals(seenSignals[0], controller.signal);
+  assertEquals(seenSignals[1], controller.signal);
+  assertEquals(seenSignals[2], controller.signal);
+});
+
 Deno.test("CfHarnessPromptLoop strips trusted-only CFC input labels from model tool args", async () => {
   const sandbox = new FakeSandboxRuntime([
     { stdout: "ok\n", stderr: "", exitCode: 0 },
@@ -1595,7 +1704,10 @@ Deno.test("CfHarnessPromptLoop applies the web_search profile model override and
   const requestBodies: Array<{
     model: string;
     messages: Array<{ role: string; content: string }>;
-    tools: Array<{ function: { name: string } }>;
+    tools: Array<
+      | { type: "function"; function: { name: string } }
+      | { type: "google_search" }
+    >;
     native_model_tools?: Array<{ type: string }>;
   }> = [];
   const loop = new CfHarnessPromptLoop({
@@ -1612,7 +1724,10 @@ Deno.test("CfHarnessPromptLoop applies the web_search profile model override and
       const body = JSON.parse(String(init?.body)) as {
         model: string;
         messages: Array<{ role: string; content: string }>;
-        tools: Array<{ function: { name: string } }>;
+        tools: Array<
+          | { type: "function"; function: { name: string } }
+          | { type: "google_search" }
+        >;
         native_model_tools?: Array<{ type: string }>;
       };
       requestBodies.push(body);
@@ -1686,16 +1801,14 @@ Deno.test("CfHarnessPromptLoop applies the web_search profile model override and
 
   assertEquals(result.finalAssistantText, "Web search parent completed.");
   assertEquals(requestBodies[0].model, "gpt-5.4");
-  assertEquals(requestBodies[1].model, "google:gemini-3.5-flash");
+  assertEquals(requestBodies[1].model, "gemini-3.5-flash");
   assertEquals(requestBodies[2].model, "gpt-5.4");
   assertEquals(
-    requestBodies[1].tools.map((tool) => tool.function.name),
-    [],
+    requestBodies[1].tools,
+    [{ type: "google_search" }],
   );
   assertEquals(requestBodies[0].native_model_tools, undefined);
-  assertEquals(requestBodies[1].native_model_tools, [{
-    type: "google_search",
-  }]);
+  assertEquals(requestBodies[1].native_model_tools, undefined);
   assertEquals(requestBodies[2].native_model_tools, undefined);
   assertEquals(
     requestBodies[1].messages[0].content.includes(
@@ -1709,9 +1822,9 @@ Deno.test("CfHarnessPromptLoop applies the web_search profile model override and
     ),
     true,
   );
-  assertEquals(output.subagent.model, "google:gemini-3.5-flash");
+  assertEquals(output.subagent.model, "gemini-3.5-flash");
   assertEquals(output.subagent.manifest.profile, "web_search");
-  assertEquals(output.subagent.manifest.model, "google:gemini-3.5-flash");
+  assertEquals(output.subagent.manifest.model, "gemini-3.5-flash");
   assertEquals(output.subagent.manifest.modelSource, "profile");
   assertEquals(output.subagent.manifest.allowedToolIds, []);
   assertEquals(output.subagent.manifest.hostToolIds, []);
@@ -1911,6 +2024,100 @@ Deno.test("CfHarnessPromptLoop gives bash-no-sandbox only to the authorized brow
   ]);
   assertEquals(output.subagent.manifest.hostToolIds, ["bash-no-sandbox"]);
   assertEquals(result.finalAssistantText, "Browser-profile parent completed.");
+});
+
+Deno.test("CfHarnessPromptLoop includes Browser Access lease instructions for browser subagents", async () => {
+  const requestBodies: Array<{
+    messages: Array<{ role: string; content: string }>;
+    tools: Array<{ function: { name: string } }>;
+  }> = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedToolIds: ["delegate_task"],
+    allowedSubagentProfiles: ["browser"],
+    browserAccess: {
+      type: "cf-harness.chat.browser-access-lease",
+      leaseId: "lease-browser-1",
+      cdpUrl: "http://127.0.0.1:9222",
+      owner: "loom",
+    },
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      workspaceHostPath: "/tmp/project",
+      runId: "run-delegate-browser-lease",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "enforce-explicit",
+    }),
+    fetchFn: (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as {
+        messages: Array<{ role: string; content: string }>;
+        tools: Array<{ function: { name: string } }>;
+      };
+      requestBodies.push(body);
+      const payload = requestBodies.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-browser-lease",
+                type: "function",
+                function: {
+                  name: "delegate_task",
+                  arguments: JSON.stringify({
+                    goal: "Inspect the current page.",
+                    profile: "browser",
+                  }),
+                },
+              }],
+            },
+          }],
+        }
+        : requestBodies.length === 2
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Browser child used the provided endpoint.",
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "Parent done.",
+            },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      );
+    },
+  });
+
+  await loop.runPrompt({
+    prompt: "Delegate browser work.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+
+  const childSystemPrompt = requestBodies[1].messages[0].content;
+  assertStringIncludes(
+    childSystemPrompt,
+    "Loom Browser Access lease: lease-browser-1",
+  );
+  assertStringIncludes(
+    childSystemPrompt,
+    "Loom Browser Access CDP endpoint: http://127.0.0.1:9222",
+  );
+  assertStringIncludes(
+    childSystemPrompt,
+    "Use agent-browser --cdp http://127.0.0.1:9222 for page commands.",
+  );
 });
 
 Deno.test("CfHarnessPromptLoop gives web_fetch only to the authorized web_fetch subagent profile", async () => {

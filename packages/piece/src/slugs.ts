@@ -45,6 +45,11 @@ export async function setSlugLink(
     ? source.resolveAsCell()
     : source;
   await target.sync();
+  const metadataTarget = options?.writeTargetMetadata ||
+      options?.resolveBeforeLinking
+    ? target.resolveAsCell()
+    : undefined;
+  await metadataTarget?.sync();
 
   const slugCell = manager.runtime.getCellFromEntityId(
     manager.getSpace(),
@@ -54,13 +59,15 @@ export async function setSlugLink(
   await manager.runtime.editWithRetry((tx) => {
     const targetWithTx = target.withTx(tx);
     const slugWithTx = slugCell.withTx(tx);
-    const targetLink = targetWithTx.getAsNormalizedFullLink();
+    const metadataTargetWithTx = metadataTarget?.withTx(tx);
 
+    const metadataTargetLink = metadataTargetWithTx
+      ?.getAsNormalizedFullLink();
     if (
-      options?.writeTargetMetadata &&
-      (!targetLink.path || targetLink.path.length === 0)
+      metadataTargetWithTx !== undefined &&
+      metadataTargetLink?.path.length === 0
     ) {
-      targetWithTx.setMetaRaw("slug", validSlug);
+      metadataTargetWithTx.setMetaRaw("slug", validSlug);
     }
     slugWithTx.setMetaRaw("slug", validSlug);
     slugWithTx.setRawUntyped(

@@ -1,5 +1,5 @@
 import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { cfcAtom } from "../cfc/atoms.ts";
+import { cfcAtom } from "@commonfabric/api/cfc";
 
 const credentialSecretAtom = cfcAtom.resource("CredentialSecret");
 

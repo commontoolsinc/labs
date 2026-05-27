@@ -1,11 +1,24 @@
 import { assertEquals } from "@std/assert";
-import type { Cfc as RootCfc } from "@commonfabric/api";
+import type {
+  Cfc as RootCfc,
+  TrustedActionUiContract,
+  TrustedActionWrite,
+  TrustedActionWriteWithIntegrity,
+} from "@commonfabric/api";
 import { CFC_CANONICAL_ALIAS_NAMES } from "@commonfabric/api";
 import type {
   AddIntegrity,
   AuthoredByCurrentUser,
   CanonicalPointer,
   Cfc,
+  CfcAtom,
+  CfcBuiltinAtom,
+  CfcCaveatAtom,
+  CfcInjectionSafeAtom,
+  CfcPromptSlotBoundAtom,
+  CfcPromptSlotInfluenceAtom,
+  CfcResourceAtom,
+  CfcUserSurfaceInputAtom,
   Confidential,
   ExactCopy,
   FilteredFrom,
@@ -25,6 +38,7 @@ import type {
   SubsetOf,
   WriteAuthorizedBy,
 } from "@commonfabric/api/cfc";
+import { cfcAtom } from "@commonfabric/api/cfc";
 
 Deno.test("CFC API surface preserves the authored runtime value shape", () => {
   const aliasNames = CFC_CANONICAL_ALIAS_NAMES;
@@ -118,6 +132,69 @@ Deno.test("CFC API surface preserves the authored runtime value shape", () => {
   > = {
     title: "mu",
   };
+  const trustedWrite: TrustedActionWrite<
+    { title: string },
+    typeof localBinding,
+    "SaveTitle",
+    "TrustedSaveSurface"
+  > = {
+    title: "nu",
+  };
+  const trustedWriteWithIntegrity: TrustedActionWriteWithIntegrity<
+    { title: string },
+    typeof localBinding,
+    "SaveTitle",
+    "TrustedSaveSurface",
+    readonly ["TrustedSaveSurface", "TrustedDisclosureRendered"]
+  > = {
+    title: "xi",
+  };
+  const trustedUiContract: TrustedActionUiContract<
+    string,
+    "SaveTitle",
+    "TrustedSaveSurface"
+  > = "omicron";
+  const resourceAtom: CfcResourceAtom = cfcAtom.resource("Document", "doc:1");
+  const caveatAtom: CfcCaveatAtom = cfcAtom.caveat(
+    "reviewed",
+    resourceAtom,
+  );
+  const builtinAtom: CfcBuiltinAtom = cfcAtom.builtin("current-user");
+  const injectionSafeAtom: CfcInjectionSafeAtom = cfcAtom.injectionSafe();
+  const userSurfaceInputAtom: CfcUserSurfaceInputAtom = cfcAtom
+    .userSurfaceInput("did:user:1", "TrustedSurface", "sha256:abc");
+  const promptSlotBoundAtom: CfcPromptSlotBoundAtom<
+    CfcResourceAtom,
+    "direct-command"
+  > = cfcAtom.promptSlotBound(
+    resourceAtom,
+    "direct-command",
+    "agent-kernel-v1",
+    "did:user:1",
+    "TrustedSurface",
+    "sha256:abc",
+  );
+  const promptSlotInfluenceAtom: CfcPromptSlotInfluenceAtom<"direct-command"> =
+    {
+      type: "https://commonfabric.org/cfc/atom/PromptSlotInfluence",
+      version: 1,
+      role: "direct-command",
+      kernelName: "agent-kernel-v1",
+      surface: "TrustedSurface",
+      runManifest: {
+        source: "prompt-input",
+      },
+    };
+  const atomValues: CfcAtom[] = [
+    resourceAtom,
+    caveatAtom,
+    builtinAtom,
+    injectionSafeAtom,
+    userSurfaceInputAtom,
+    promptSlotBoundAtom,
+    promptSlotInfluenceAtom,
+    cfcAtom.caveat("nested", cfcAtom.resource("Nested")),
+  ];
 
   assertEquals(confidential, { title: "alpha" });
   assertEquals(integrity, { title: "beta" });
@@ -141,6 +218,10 @@ Deno.test("CFC API surface preserves the authored runtime value shape", () => {
   assertEquals(pathValue, undefined);
   assertEquals(refValue, undefined);
   assertEquals(writeAuthorizedBy, { title: "mu" });
+  assertEquals(trustedWrite, { title: "nu" });
+  assertEquals(trustedWriteWithIntegrity, { title: "xi" });
+  assertEquals(trustedUiContract, "omicron");
+  assertEquals(atomValues.length, 8);
   assertEquals(aliasNames, [
     "Cfc",
     "Confidential",
@@ -152,6 +233,9 @@ Deno.test("CFC API surface preserves the authored runtime value shape", () => {
     "MaxConfidentiality",
     "OpaqueInput",
     "WriteAuthorizedBy",
+    "TrustedActionWriteWithIntegrity",
+    "TrustedActionWrite",
+    "TrustedActionUiContract",
     "ExactCopy",
     "ProjectionPath",
     "ProjectionOf",

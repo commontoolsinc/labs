@@ -11,15 +11,83 @@ import {
 } from "../theme-context.ts";
 import { type CellHandle, isCellHandle } from "@commonfabric/runtime-client";
 
+export function unwrapThemeCellValues(
+  value: unknown,
+  seen = new WeakSet<object>(),
+): unknown {
+  if (isCellHandle(value)) {
+    return value.get();
+  }
+
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  if (seen.has(value)) {
+    return value;
+  }
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    return value.map((item) => unwrapThemeCellValues(item, seen));
+  }
+
+  const out: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value)) {
+    out[key] = unwrapThemeCellValues(child, seen);
+  }
+  return out;
+}
+
+export function subscribeToThemeCellValues(
+  value: unknown,
+  onChange: () => void,
+  seen = new WeakSet<object>(),
+): Array<() => void> {
+  const unsubs: Array<() => void> = [];
+
+  const visit = (current: unknown) => {
+    if (isCellHandle(current)) {
+      const cellVal = current as CellHandle<unknown>;
+      let didReceiveInitialValue = false;
+      const off = cellVal.subscribe(() => {
+        if (!didReceiveInitialValue) {
+          didReceiveInitialValue = true;
+          return;
+        }
+        onChange();
+      });
+      unsubs.push(off);
+      return;
+    }
+
+    if (!current || typeof current !== "object") {
+      return;
+    }
+
+    if (seen.has(current)) {
+      return;
+    }
+    seen.add(current);
+
+    for (const child of Object.values(current)) {
+      visit(child);
+    }
+  };
+
+  visit(value);
+  return unsubs;
+}
+
 /**
  * cf-theme — Provides a theme to a subtree and applies CSS vars.
  *
  * Usage:
  * <cf-theme .theme=${partialTheme}><slot/></cf-theme>
  *
- * The component merges a partial theme (pattern-style) with defaults,
- * provides the result via context, and sets CSS custom properties on
- * the host so descendants pick up tokens.
+ * The component unwraps CellHandle values inside a partial theme, merges the
+ * result with defaults, provides it via context, and sets CSS custom properties
+ * on the host so descendants pick up tokens.
  *
  * @element cf-theme
  */
@@ -67,7 +135,9 @@ export class CFThemeProvider extends BaseElement {
   }
 
   private _recomputeAndApply() {
-    this._computedTheme = mergeWithDefaultTheme(this.theme);
+    this._computedTheme = mergeWithDefaultTheme(
+      unwrapThemeCellValues(this.theme),
+    );
     applyThemeToElement(this, this._computedTheme);
     this.#setupSubscriptions();
 
@@ -95,18 +165,10 @@ export class CFThemeProvider extends BaseElement {
     for (const off of this.#unsubs) off();
     this.#unsubs = [];
 
-    const t = this.theme as Record<string, unknown> | undefined;
-    if (!t) return;
-
-    // Subscribe to top-level cell properties to refresh CSS vars on change
-    for (const key of Object.keys(t)) {
-      const val = (t as any)[key];
-      if (isCellHandle(val)) {
-        const cellVal = val as CellHandle<any>;
-        const off = cellVal.subscribe(() => this._recomputeAndApply());
-        this.#unsubs.push(off);
-      }
-    }
+    this.#unsubs = subscribeToThemeCellValues(
+      this.theme,
+      () => this._recomputeAndApply(),
+    );
   }
 
   override disconnectedCallback(): void {
