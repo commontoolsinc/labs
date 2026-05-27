@@ -539,6 +539,9 @@ export class Server {
         ? await this.syncSessionForConnection(
           message.space,
           opened.sessionId,
+          undefined,
+          undefined,
+          opened.presentedSeenSeq,
         )
         : null;
       return {
@@ -993,6 +996,7 @@ export class Server {
     sessionId: string,
     dirtyIds?: ReadonlySet<string>,
     dirtyOrigins?: ReadonlyMap<string, DirtyOrigin>,
+    resumeFromSeenSeq?: number,
   ): Promise<SessionEffectMessage | null> {
     const session = this.#sessions.get(space, sessionId);
     if (session === null || session.watches.length === 0) {
@@ -1095,10 +1099,21 @@ export class Server {
         sessionId,
       },
     );
+    // Per the protocol spec, resume catch-up is relative to the client's
+    // integrated `seenSeq`, not the server's `session.entities` cache (which
+    // mirrors the PRIOR owner's replica). A cold client — a fresh process
+    // resuming a persisted sessionId with an empty local replica — presents
+    // `seenSeq === 0` against an already-synced session; diffing against the
+    // populated cache would yield an empty sync and leave it unable to read
+    // its watched cells. Detect that and diff against an empty baseline so it
+    // gets a full sync. Warm reconnects present `seenSeq > 0` and keep the
+    // incremental diff against `session.entities` (preserving upserts AND
+    // removes), so the browser reconnect path is unchanged.
+    const coldReplica = resumeFromSeenSeq === 0 && session.lastSyncedSeq > 0;
     const sync = buildDiffSync(
-      session.entities,
+      coldReplica ? new Map<string, SessionCacheEntry>() : session.entities,
       entities,
-      session.lastSyncedSeq,
+      coldReplica ? 0 : session.lastSyncedSeq,
       serverSeq,
     );
     session.graphs = graphs;

@@ -112,6 +112,37 @@ const newId = () =>
   }`;
 ```
 
+## 6. `perSession` cells do NOT persist across `cf` invocations by default
+
+**Symptom:** A `perSession` cell written by one `cf piece call` reads back as
+its default (empty) from the very next `cf piece get`, even within the same
+space and piece.
+
+**Why:** Each `cf` invocation is a fresh process that mounts a brand-new memory
+session, and the server mints a new session UUID per mount
+(`packages/memory/v2/session-registry.ts`). `perSession` state is keyed by that
+session id, so it is effectively per-invocation — it never carries from one
+command to the next.
+
+**Opt in to persistence:** Pass `--session <id>` (or set `CF_SESSION=<id>`) on
+each command. This pins a stable client-supplied session id so the server keeps
+the same `perSession` bucket across invocations. (The CLI persists the rotated
+session token in `~/.cache/common-fabric/cli-sessions.json` and replays it, so
+reuse within the 30s session TTL avoids the server's `revokedError`.)
+
+```bash
+# Same --session => shared perSession state
+cf piece call --session demo --piece <id> --space my-space setNote
+cf piece get  --session demo --piece <id> --space my-space note   # -> the set value
+
+# No --session => fresh session, default value
+cf piece get  --piece <id> --space my-space note                  # -> "" (empty)
+```
+
+**Alternatives if you don't want per-invocation behavior at all:** use a
+broader scope (`perSpace` / `perUser`), or pass the value explicitly as a
+handler payload instead of relying on session-scoped state.
+
 ## See Also
 
 - `docs/specs/scoped-cell-instances.md` — the underlying scope model

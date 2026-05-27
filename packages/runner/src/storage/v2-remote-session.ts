@@ -103,10 +103,26 @@ class WebSocketTransport implements MemoryClient.Transport {
   }
 }
 
+/**
+ * Opt-in session resume hook. When provided, the factory mounts with a
+ * client-supplied `sessionId` so server-side `perSession` state persists
+ * across separate client lifecycles (e.g. separate CLI invocations).
+ *
+ * The server rotates `sessionToken` on every mount and throws `revokedError`
+ * if a still-live `sessionId` is reused without the matching token, so the
+ * resumed token must be persisted via `onToken` and replayed via `getToken`.
+ */
+export interface SessionResume {
+  id: string;
+  getToken?: () => string | undefined;
+  onToken?: (token: string | undefined) => void;
+}
+
 export class RemoteSessionFactory implements SessionFactory {
   constructor(
     private readonly address: URL,
     private readonly defaultSigner: Signer,
+    private readonly resume?: SessionResume,
   ) {}
 
   async #createSessionOpenAuth(
@@ -141,9 +157,19 @@ export class RemoteSessionFactory implements SessionFactory {
         toSpaceWebSocketAddress(this.address, space),
       ),
     });
+    // Default behavior (no resume hook): mount with empty options so the
+    // server mints a fresh session id per client lifecycle.
+    let mountOptions: MemoryClient.MountOptions = {};
+    if (this.resume) {
+      const sessionToken = this.resume.getToken?.();
+      mountOptions = {
+        sessionId: this.resume.id,
+        ...(sessionToken !== undefined ? { sessionToken } : {}),
+      };
+    }
     const session = await client.mount(
       space,
-      {},
+      mountOptions,
       (targetSpace: string, descriptor: MemoryClient.MountOptions) =>
         this.#createSessionOpenAuth(
           signer,
@@ -151,6 +177,9 @@ export class RemoteSessionFactory implements SessionFactory {
           descriptor,
         ),
     );
+    // Persist the rotated token so the next mount with the same sessionId can
+    // replay it and avoid the server's revokedError.
+    this.resume?.onToken?.(session.sessionToken);
     return { client, session };
   }
 }
