@@ -418,7 +418,7 @@ export const normalizeVehicle = (v: Vehicle): Vehicle => {
 
 // Normalize a list, drop blank-plate entries, and dedupe by plateId|plateState
 // (keep first occurrence). This is the single source of truth for vehicle hygiene.
-export const normalizeVehicles = (list: Vehicle[]): Vehicle[] => {
+export const normalizeVehicles = (list: readonly Vehicle[]): Vehicle[] => {
   const seen = new Set<string>();
   const result: Vehicle[] = [];
   for (const v of list) {

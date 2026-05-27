@@ -656,7 +656,13 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       }
       addPersonError.set("");
 
-      const normalizedVehicles = normalizeVehicles(vehiclesArg ?? []);
+      // The staged vehicles array does not survive the intra-pattern
+      // action→action stream send (it arrives `undefined` at the handler),
+      // so fall back to reading the staged perSession cell directly — the
+      // same way the other fields default to their form cells above.
+      const normalizedVehicles = normalizeVehicles(
+        vehiclesArg ?? pendingVehicles.get(),
+      );
 
       const newPerson: Person = {
         name: trimName,
@@ -1022,7 +1028,16 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
           priorityRank: parseInt(editPriorityRank.get()) || 1,
           defaultSpot: editDefaultSpot.get(),
           preferences: editPreferences.get(),
-          vehicles: [...editVehicles.get()],
+          // Materialize plain objects: spreading the cell's array yields
+          // query-result proxies whose fields read empty across the send()
+          // boundary, so vehicles would silently drop. Rebuild them here.
+          vehicles: editVehicles.get().map((v) => ({
+            plateId: v.plateId,
+            plateState: v.plateState,
+            color: v.color,
+            make: v.make,
+            model: v.model,
+          })),
         });
       },
     );
@@ -1090,7 +1105,16 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
         priorityRank: parseInt(newPersonPriority.get()) || 1,
         defaultSpot: newPersonDefaultSpot.get(),
         preferences: newPersonPreferences.get(),
-        vehicles: [...pendingVehicles.get()],
+        // Materialize plain objects: spreading the cell's array yields
+        // query-result proxies whose fields read empty across the send()
+        // boundary, so vehicles would silently drop. Rebuild them here.
+        vehicles: pendingVehicles.get().map((v) => ({
+          plateId: v.plateId,
+          plateState: v.plateState,
+          color: v.color,
+          make: v.make,
+          model: v.model,
+        })),
       });
     });
 
