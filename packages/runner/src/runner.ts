@@ -433,10 +433,6 @@ function dedupeNormalizedLinks(
 
 export class Runner {
   readonly cancels = new Map<`${MemorySpace}/${CellScope}/${URI}`, Cancel>();
-  private starting = new Map<
-    `${MemorySpace}/${CellScope}/${URI}`,
-    Promise<boolean>
-  >();
   private allCancels = new Set<Cancel>();
   private functionCache = new FunctionCache();
   private locallyPreparedResults = new Set<
@@ -1090,32 +1086,6 @@ export class Runner {
     resultCell: Cell<T>,
     seenCells: Set<Cell> = new Set(),
   ): Promise<boolean> {
-    const link = resultCell.getAsNormalizedFullLink();
-    const rootCell = link.path.length > 0
-      ? this.runtime.getCellFromLink({ ...link, path: [] })
-      : resultCell;
-    const key = this.getDocKey(rootCell);
-
-    if (this.cancels.has(key)) return Promise.resolve(true);
-
-    const inFlight = this.starting.get(key);
-    if (inFlight) return inFlight;
-
-    const started = this.doStartUnlocked(resultCell, seenCells);
-    this.starting.set(key, started);
-    const clearStarting = () => {
-      if (this.starting.get(key) === started) {
-        this.starting.delete(key);
-      }
-    };
-    started.then(clearStarting, clearStarting);
-    return started;
-  }
-
-  private doStartUnlocked<T = any>(
-    resultCell: Cell<T>,
-    seenCells: Set<Cell> = new Set(),
-  ): Promise<boolean> {
     // `synced === true` means this cell was rehydrated from storage rather than
     // assembled purely from writes in the current runtime, so start() may need
     // to await dependency sync before process startup.
@@ -1141,7 +1111,7 @@ export class Runner {
         if (rootCell.getRaw() === undefined) {
           return Promise.reject(new Error("No data at cell"));
         } else {
-          return this.doStartUnlocked(rootCell, seenCells);
+          return this.doStart(rootCell, seenCells);
         }
       });
     }
@@ -1188,13 +1158,7 @@ export class Runner {
       )
         .then((loaded) => {
           if (loaded) {
-            return this.startAvailablePattern(
-              rootCell,
-              patternId,
-              wasSyncedAtEntry,
-              wasPreparedLocally,
-              seenCells,
-            );
+            return this.doStart(rootCell, seenCells);
           } else {
             return Promise.reject(
               new Error(`Could not load pattern ${patternId}`),
