@@ -786,7 +786,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     });
 
     const movePersonUp = action<{ name: string }>(({ name }) => {
-      const sorted = [...people.get()].sort((a, b) =>
+      const sorted = [...(people.get() ?? [])].sort((a, b) =>
         a.priorityRank - b.priorityRank
       );
       const idx = sorted.findIndex((p) => p.name === name);
@@ -805,7 +805,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     });
 
     const movePersonDown = action<{ name: string }>(({ name }) => {
-      const sorted = [...people.get()].sort((a, b) =>
+      const sorted = [...(people.get() ?? [])].sort((a, b) =>
         a.priorityRank - b.priorityRank
       );
       const idx = sorted.findIndex((p) => p.name === name);
@@ -1211,22 +1211,22 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     const spotDeactivateWarning = computed(() => {
       const editNum = editingSpotNumber.get();
       if (!editNum || (editSpotActive.get() ?? true)) return false;
-      return requests.get().some(
+      return (requests.get() ?? []).some(
         (r) =>
           r.assignedSpot === editNum && r.status === "allocated" &&
           r.date >= todayStr,
       );
     });
 
-    const noPeople = computed(() => people.get().length === 0);
+    const noPeople = computed(() => (people.get() ?? []).length === 0);
 
     const personSelectItems = computed(() =>
-      people.get().map((p) => ({ label: p.name, value: p.name }))
+      (people.get() ?? []).map((p) => ({ label: p.name, value: p.name }))
     );
 
     const requestDisabled = computed(() =>
       !selectedPersonName.get() ||
-      activeRequestDate < todayStr || people.get().length === 0
+      activeRequestDate < todayStr || (people.get() ?? []).length === 0
     );
 
     const currentPersonIsAdmin = computed(() =>
@@ -1242,7 +1242,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       currentUserCanManageParkingAdmins(adminManagerCredential)
     );
     const canBootstrapPeople = computed(() =>
-      people.get().length === 0 &&
+      (people.get() ?? []).length === 0 &&
       currentUserCanManageParkingAdmins(adminManagerCredential)
     );
     const showAdminPeopleSection = computed(() =>
@@ -1250,7 +1250,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     );
 
     const adminAccessRows = computed(() =>
-      people.get().map((person) => ({
+      (people.get() ?? []).map((person) => ({
         name: person.name,
         email: person.email,
         isAdmin: personIsParkingAdmin(adminRegistry, person.name),
@@ -1283,8 +1283,8 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     // Accessing OpaqueCell values (spot.number, req.id etc.) inside this
     // single computed() is safe — the closure is at top-level, not nested.
     const weekGridData = computed(() => {
-      const allSpots = spots.get().filter((s) => s != null && s.active);
-      const allRequests = requests.get();
+      const allSpots = (spots.get() ?? []).filter((s) => s != null && s.active);
+      const allRequests = requests.get() ?? [];
       const currentPerson = selectedPersonName.get();
       const overrideSpot = gridOverrideSpot.get();
       const overrideDate = gridOverrideDate.get();
@@ -1332,8 +1332,8 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
 
     // Pre-compute today strip cell data for each active spot
     const todayStripData = computed(() => {
-      const allSpots = spots.get().filter((s) => s != null && s.active);
-      const allRequests = requests.get();
+      const allSpots = (spots.get() ?? []).filter((s) => s != null && s.active);
+      const allRequests = requests.get() ?? [];
       const currentPerson = selectedPersonName.get();
       const todayStripShowAdmin = adminModeEnabled === true;
 
@@ -1364,7 +1364,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       // inline edit form / remove-confirm prompt never opened.
       const editingName = editingPersonName.get();
       const removeConfirmName = removePersonConfirmTarget.get();
-      const sorted = [...people.get()].sort((a, b) =>
+      const sorted = [...(people.get() ?? [])].sort((a, b) =>
         a.priorityRank - b.priorityRank
       );
       return sorted.map((p, idx) => ({
@@ -1418,14 +1418,14 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     // Pre-compute vehicle row display data to avoid OpaqueCell closure issues.
     // Accessing Vehicle fields inside these single top-level computeds is safe.
     const pendingVehicleRows = computed(() =>
-      pendingVehicles.get().map((v, idx) => ({
+      (pendingVehicles.get() ?? []).map((v, idx) => ({
         idx,
         formatted: formatVehicle(v),
       }))
     );
 
     const editVehicleRows = computed(() =>
-      editVehicles.get().map((v, idx) => ({
+      (editVehicles.get() ?? []).map((v, idx) => ({
         idx,
         formatted: formatVehicle(v),
       }))
@@ -1443,7 +1443,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       // context, so the inline spot edit/remove prompts never opened.
       const editingNum = editingSpotNumber.get();
       const removeConfirmNum = removeSpotConfirmTarget.get();
-      return [...spots.get()].map((s) => ({
+      return [...(spots.get() ?? [])].map((s) => ({
         spotNumber: s.spotNumber,
         label: s.label,
         notes: s.notes,
@@ -1833,7 +1833,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                   <cf-select
                                     $value={overridePersonName}
                                     items={computed(() =>
-                                      people.get().map((p) => ({
+                                      (people.get() ?? []).map((p) => ({
                                         label: p.name,
                                         value: p.name,
                                       }))
@@ -1966,7 +1966,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                         </cf-button>
                       </cf-hstack>
 
-                      {people.get().length === 0
+                      {(people.get() ?? []).length === 0
                         ? (
                           <cf-card style="text-align: center; padding: 1.5rem;">
                             <cf-vstack gap="2" align="center">
@@ -1997,7 +1997,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                         const isEditing = person.isEditing;
                         const isRemoveConfirm = person.isRemoveConfirm;
                         const activeSpotOpts = computed(() =>
-                          spots.get()
+                          (spots.get() ?? [])
                             .filter((s) => s.active)
                             .map((s) => ({
                               label: `#${s.spotNumber}${
@@ -2440,7 +2440,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                     $value={newPersonDefaultSpot}
                                     items={computed(() => [
                                       { label: "None", value: "" },
-                                      ...spots.get()
+                                      ...(spots.get() ?? [])
                                         .filter((s) => s.active)
                                         .map((s) => ({
                                           label: `#${s.spotNumber}`,
