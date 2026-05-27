@@ -12,16 +12,29 @@
  * It only becomes observable if CT-1621 lands.
  *
  * TypeRegistry (WeakMap<ts.Node, ts.Type>)
- *   Preserves and recovers synthetic typing across the pipeline. Currently
- *   overloaded with three distinct uses sharing one map:
- *   - replacement expression nodes keep their original authored types
- *   - synthetic TypeNodes keep faithful schema/codegen types
- *   - synthetic call expressions keep their result types
- *   The schema generator (packages/schema-generator) also consults this
- *   registry as authoritative for wrapper-inner property recovery — so any
- *   pre-shrink type registered here will cause carefully-narrowed inner
- *   schemas to be un-shrunk. See narrowedWrapperTypeRegistry for the
- *   separate channel that bypasses this consumer.
+ *   Preserves and recovers synthetic typing across the pipeline. Serves three
+ *   distinct uses sharing one map:
+ *   - (a) replacement expression nodes keep their original authored types
+ *   - (b) synthetic TypeNodes keep faithful schema/codegen types
+ *   - (c) synthetic call expressions keep their result types
+ *
+ *   WHY ONE MAP IS SAFE (and why we did NOT split it — registry-unification
+ *   investigation, 2026-05, docs/scratch/12-registry-unification-design.md):
+ *   the three uses are isolated by KEY NODE-KIND, not by separate maps. A
+ *   use-(a) key is always a replacement Expression/Identifier, a use-(b) key
+ *   is always a ts.TypeNode, a use-(c) key is always a ts.CallExpression.
+ *   These node-kinds never coincide for the same ts.Node, so a reader that
+ *   looks up one kind of key can never retrieve another use's value. In
+ *   particular the schema-generator package reads ONLY TypeNode keys (verified
+ *   exhaustively: every .get/.has there keys on member.type, elementType,
+ *   innerTypeNode, etc.), so it can only ever see use-(b) entries. Splitting
+ *   into three physical maps would make this isolation explicit but fixes no
+ *   reachable bug, while adding churn the reads can't even exploit (the shared
+ *   read helpers — getTypeAtLocationWithFallback, ensureTypeNodeRegistered —
+ *   are node-kind-agnostic and would have to consult all three anyway).
+ *   The one genuine cross-consumer hazard CT-1615 hit (schema generator pulling
+ *   a *pre-shrink* type meant for a different consumer) is already solved by
+ *   the separate narrowedWrapperTypeRegistry channel — see its entry below.
  *   Writers: closure strategies, builtins/lift-applied, expression rewrites,
  *            type-building/schema-factory/type-shrinking, schema-injection
  *   Readers: lift-lowering transformer, schema-generator, type-inference,
@@ -136,20 +149,20 @@
  * abstraction. The plan and rationale live in
  * `docs/scratch/12-registry-unification-design.md` (supersedes the earlier
  * audit in `07-registry-audit.md`). Sequence:
- *   1. (this commit) doc refresh: count fix + mark the inert registry.
- *   2. Split typeRegistry into its three named purposes
- *      (replacementTypeRegistry, syntheticTypeNodeRegistry,
- *      syntheticCallResultRegistry) behind record/lookup methods, plus a
- *      combined lookupType() for the node-kind-agnostic read helper. CT-1615
- *      hit the overload's consequences firsthand — separate channels would
- *      have prevented it.
+ *   1. (done) doc refresh: count fix + mark the inert registry.
+ *   2. (done — NO-OP, by investigation) Splitting typeRegistry into three
+ *      maps was on the plan, but the split fixes no reachable bug: the three
+ *      uses are already isolated by key node-kind (see the TypeRegistry note
+ *      above), and the one real CT-1615 cross-consumer hazard is already
+ *      handled by narrowedWrapperTypeRegistry. Documented the invariant
+ *      instead of splitting.
  *   3. Lift the remaining direct-.get/.set registries (schemaHints,
  *      capabilitySummaryRegistry) to record/lookup methods.
  *   4. Remove syntheticLiftAppliedCallRegistry (inert; see its entry above).
  *   5. Fold the transformer-internal channels into CrossStageState; keep
- *      syntheticTypeNodeRegistry + schemaHints as loose maps at the
- *      schema-generator package boundary (the only channels that package
- *      reads), so no CrossStageState type crosses into schema-generator.
+ *      typeRegistry + schemaHints as loose maps at the schema-generator
+ *      package boundary (the only channels that package reads), so no
+ *      CrossStageState type crosses into schema-generator.
  */
 export { TransformationContext } from "./context.ts";
 export type {

@@ -37,7 +37,13 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
         }
 
         // First check if we have a registered Type for this node or the typeArg
-        // (from schema-injection when synthetic TypeNodes were created)
+        // (from schema-injection when synthetic TypeNodes were created).
+        //
+        // Note on typeRegistry's three overloaded uses (see core/mod.ts): this
+        // reads the toSchema CallExpression key (use-(c), synthetic call result)
+        // here, then TypeNode keys (use-(b)) via getTypeFromTypeNodeWithFallback
+        // below and inside the schema-generator package. The uses don't collide
+        // because they key on different node-kinds; no split needed.
         let type: ts.Type;
         if (typeRegistry && typeRegistry.has(node)) {
           type = typeRegistry.get(node)!;
