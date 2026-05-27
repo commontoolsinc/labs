@@ -7,11 +7,8 @@ import {
 } from "@commonfabric/data-model/fabric-value";
 import { unclaimed } from "@commonfabric/memory/fact";
 import type { PatchOp } from "@commonfabric/memory/v2";
-import {
-  encodePointer,
-  pathsOverlap,
-  pathStringsOverlap,
-} from "../../../memory/v2/path.ts";
+import { encodePointer, pathsOverlap } from "../../../memory/v2/path.ts";
+import { PathKeyMap } from "@commonfabric/utils/path-key-map";
 import type { FabricValue } from "@commonfabric/memory/interface";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -85,7 +82,7 @@ type ReadDocumentEntry = {
   seq?: number;
   validated: boolean;
   current?: RootAttestation;
-  frozenReads?: Map<string, FabricValue | undefined>;
+  frozenReads?: PathKeyMap<FabricValue | undefined>;
   writeDetails?: Map<string, TransactionWriteDetail>;
   patchDetails?: Map<string, TransactionWriteDetail>;
 };
@@ -95,7 +92,7 @@ type WritableDocumentEntry = {
   current: RootAttestation;
   seq?: number;
   validated: boolean;
-  frozenReads: Map<string, FabricValue | undefined>;
+  frozenReads: PathKeyMap<FabricValue | undefined>;
   writeDetails: Map<string, TransactionWriteDetail>;
   patchDetails: Map<string, TransactionWriteDetail>;
 };
@@ -160,65 +157,41 @@ const ensureWritableDocument = (
     return doc;
   }
   doc.current = doc.initial;
-  doc.frozenReads = new Map();
+  doc.frozenReads = new PathKeyMap();
   doc.writeDetails = new Map();
   doc.patchDetails = new Map();
   return doc as WritableDocumentEntry;
 };
 
 /**
- * Drops `doc.frozenReads` entries whose paths lie on the same ancestor /
- * descendant chain as any of the written paths in `writtenPointers` (each a
- * JSON Pointer string produced by `encodePointer()`). Sibling-path entries
- * are preserved, since `setAtPath()` and `applyMutablePathWrite()` leave
- * those subtrees structurally shared with the prior `doc.current`.
+ * Drops `doc.frozenReads` entries on the chain of `writtenPath` -- both
+ * ancestors (their containers were rebuilt by `setAtPath()` /
+ * `applyMutablePathWrite()`) and descendants (the subtree at the write
+ * target is gone). Sibling subtrees off divergent ancestors are preserved:
+ * structural sharing leaves their values reference-identical to the
+ * consumer's cached snapshot.
  *
- * Additionally invalidates the synthetic `<parent>/length` sibling of each
- * written path: writing to a JS array's index can change its `.length`
- * property, which lives at a sibling pointer (`/arr/length`) that is not on
- * the chain of `/arr/<i>` by path-string overlap. Including it here keeps
- * cached `length` reads consistent with array-element writes. False positives
- * (a non-array parent with no `/length` entry cached) are no-ops in the
- * per-key sweep.
+ * Additionally drops the synthetic `<parent>/length` sibling: writing to
+ * `array[N]` can change `array.length`, and that pointer is a true sibling
+ * of `array[N]` in the trie (not on its chain), so it needs its own
+ * targeted invalidation.
  *
- * A root write (`""`) collapses to a full `.clear()` because every cached
- * path is on the root's chain. The "more writes than cache entries" guard
- * also short-circuits to `.clear()` when the per-key sweep would do more
- * work than just discarding the map.
+ * Both operations are O(D) in `writtenPath.length` thanks to the
+ * `PathKeyMap` tree-walk -- no per-cache-entry sweep.
  */
-const invalidateFrozenReadsOnChains = (
+const invalidateFrozenReadsOnChain = (
   doc: WritableDocumentEntry,
-  writtenPointers: readonly string[],
+  writtenPath: readonly string[],
 ): void => {
   const map = doc.frozenReads;
-  if (map.size === 0 || writtenPointers.length === 0) return;
-  if (
-    writtenPointers.length >= map.size ||
-    writtenPointers.includes("")
-  ) {
-    map.clear();
-    return;
-  }
-  // Precompute the synthetic `<parent>/length` pointer for each written
-  // pointer (string-key check below avoids re-computing per cache entry).
-  const lengthPointers = new Set<string>();
-  for (const written of writtenPointers) {
-    const lastSlash = written.lastIndexOf("/");
-    if (lastSlash >= 0) {
-      lengthPointers.add(`${written.slice(0, lastSlash)}/length`);
-    }
-  }
-  for (const key of map.keys()) {
-    if (lengthPointers.has(key)) {
-      map.delete(key);
-      continue;
-    }
-    for (const written of writtenPointers) {
-      if (pathStringsOverlap(written, key)) {
-        map.delete(key);
-        break;
-      }
-    }
+  map.invalidateChain(writtenPath);
+  // The chain walk already cleared every ancestor's value AND dropped the
+  // subtree at `writtenPath`. Now also drop the parent's `length` child for
+  // the JS-array-index case. For a root write this is a no-op; the chain
+  // walk already cleared everything.
+  if (writtenPath.length > 0) {
+    const parent = writtenPath.slice(0, -1);
+    map.invalidateChain([...parent, "length"]);
   }
 };
 
@@ -1112,7 +1085,6 @@ export class V2StorageTransaction implements IStorageTransaction {
       };
     }
 
-    const cacheKey = encodePointer(memoryAddress.path);
     if (isMutableTransactionReadAllowed(readMeta)) {
       if (
         !address.id.startsWith("data:") &&
@@ -1130,11 +1102,11 @@ export class V2StorageTransaction implements IStorageTransaction {
       };
     }
     const frozenReads = doc.frozenReads;
-    if (frozenReads?.has(cacheKey)) {
+    if (frozenReads?.has(memoryAddress.path)) {
       return {
         ok: {
           address: memoryAddress,
-          value: frozenReads.get(cacheKey),
+          value: frozenReads.get(memoryAddress.path),
         },
       };
     }
@@ -1151,7 +1123,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
 
     const frozenValue = freezeReadValue(result.ok.value);
-    (doc.frozenReads ??= new Map()).set(cacheKey, frozenValue);
+    (doc.frozenReads ??= new PathKeyMap()).set(memoryAddress.path, frozenValue);
     return {
       ok: {
         ...result.ok,
@@ -1259,7 +1231,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
 
     doc.current = collapsedNext;
-    invalidateFrozenReadsOnChains(doc, [encodePointer(address.path)]);
+    invalidateFrozenReadsOnChain(doc, address.path);
     this.recordPatchIntent(
       space,
       address,
@@ -1385,7 +1357,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     doc.current = collapsedNext;
     // The created intermediate containers all lie at prefixes of
     // `address.path`, so chain-invalidation against `address.path` covers them.
-    invalidateFrozenReadsOnChains(doc, [encodePointer(address.path)]);
+    invalidateFrozenReadsOnChain(doc, address.path);
     this.recordPatchIntent(
       space,
       address,
@@ -1436,7 +1408,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     let nextRoot = originalRoot;
     let hasMutableRoot = false;
     let changed = false;
-    const writtenPointers: string[] = [];
+    const writtenPaths: (readonly string[])[] = [];
 
     for (const { address, value } of writes) {
       const isolatedValue = value === undefined
@@ -1478,7 +1450,9 @@ export class V2StorageTransaction implements IStorageTransaction {
               nextRoot,
             ),
           };
-          invalidateFrozenReadsOnChains(doc, writtenPointers);
+          for (const written of writtenPaths) {
+            invalidateFrozenReadsOnChain(doc, written);
+          }
         }
         return { error: result.error.from(space) };
       }
@@ -1487,7 +1461,7 @@ export class V2StorageTransaction implements IStorageTransaction {
         continue;
       }
       changed = true;
-      writtenPointers.push(encodePointer(address.path));
+      writtenPaths.push(address.path);
       this.recordPatchIntent(
         space,
         address,
@@ -1521,7 +1495,9 @@ export class V2StorageTransaction implements IStorageTransaction {
         nextRoot,
       ),
     };
-    invalidateFrozenReadsOnChains(doc, writtenPointers);
+    for (const written of writtenPaths) {
+      invalidateFrozenReadsOnChain(doc, written);
+    }
     return { ok: {} };
   }
 
