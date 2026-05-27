@@ -25,7 +25,12 @@ export default pattern(() => {
     const strLiteral = "hello";
     const boolLiteral = true;
     const floatLiteral = 3.14;
-    const result = __cfHelpers.derive({
+    const result = __cfHelpers.lift<{
+        value: __cfHelpers.ReadonlyCell<number>;
+        numLiteral: number;
+        floatLiteral: number;
+        strLiteral: string;
+    }, string>({
         type: "object",
         properties: {
             value: {
@@ -45,16 +50,16 @@ export default pattern(() => {
         required: ["value", "numLiteral", "floatLiteral", "strLiteral"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        value: value.for(["result", 2, "value"], true),
+    } as const satisfies __cfHelpers.JSONSchema, ({ value: v, numLiteral, floatLiteral, boolLiteral, strLiteral }) => {
+        // Use all captured literals to ensure they're all widened
+        const combined = v.get() + numLiteral + floatLiteral;
+        return boolLiteral ? strLiteral + combined : "";
+    })({
+        value: value.for(["result", "value"], true),
         numLiteral: numLiteral,
         floatLiteral: floatLiteral,
         boolLiteral: boolLiteral,
         strLiteral: strLiteral
-    }, ({ value: v, numLiteral, floatLiteral, boolLiteral, strLiteral }) => {
-        // Use all captured literals to ensure they're all widened
-        const combined = v.get() + numLiteral + floatLiteral;
-        return boolLiteral ? strLiteral + combined : "";
     }).for("result", true);
     return result;
 }, false as const satisfies __cfHelpers.JSONSchema, {

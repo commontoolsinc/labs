@@ -22,7 +22,7 @@ declare const state: AliasInput;
 // Verifies: derive imported under an alias still gets schema injection
 //   deriveAlias<AliasInput, AliasResult>(state, fn) → deriveAlias(inputSchema, outputSchema, state, fn)
 // Context: Uses `import { derive as deriveAlias }` to test aliased import tracking
-export const textLength = __cfHelpers.__cf_data(deriveAlias({
+export const textLength = __cfHelpers.__cf_data(__cfHelpers.lift<AliasInput, AliasResult>({
     type: "object",
     properties: {
         text: {
@@ -38,9 +38,9 @@ export const textLength = __cfHelpers.__cf_data(deriveAlias({
         }
     },
     required: ["length"]
-} as const satisfies __cfHelpers.JSONSchema, state, (value) => ({
+} as const satisfies __cfHelpers.JSONSchema, (value) => ({
     length: value.text.length,
-})).for("textLength", true));
+}))(state).for("textLength", true));
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

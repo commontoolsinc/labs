@@ -70,7 +70,10 @@ export default pattern((__cf_pattern_input) => {
                             required: ["name"]
                         }
                     }
-                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+                    entries: Entry[];
+                    prefix: string;
+                }, Entry[]>({
                     type: "object",
                     properties: {
                         entries: {
@@ -111,10 +114,10 @@ export default pattern((__cf_pattern_input) => {
                             required: ["name"]
                         }
                     }
-                } as const satisfies __cfHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({
                     entries: entries,
                     prefix: prefix
-                }, __cfModuleCallback_1).for(["visible", 3], true), []).for("visible", true);
+                }).for(["visible", 3], true), []).for("visible", true);
                 return visible.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                     const entry = __cf_pattern_input.key("element");
                     const labelPrefix = __cf_pattern_input.key("params", "labelPrefix");

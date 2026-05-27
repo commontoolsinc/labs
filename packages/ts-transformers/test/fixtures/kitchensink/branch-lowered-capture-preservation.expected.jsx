@@ -122,7 +122,9 @@ export default pattern((__cf_pattern_input) => {
     const settingsModuleIndex = new Writable<number | undefined>(undefined, {
         type: ["number", "undefined"]
     } as const satisfies __cfHelpers.JSONSchema).for("settingsModuleIndex", true);
-    const allEntries = __cfHelpers.derive({
+    const allEntries = __cfHelpers.lift<{
+        items: Item[];
+    }, { entry: Item; index: number; isExpanded: boolean; isPinned: boolean; allowMultiple: boolean; }[]>({
         type: "object",
         properties: {
             items: {
@@ -196,13 +198,13 @@ export default pattern((__cf_pattern_input) => {
                 required: ["allowMultiple"]
             }
         }
-    } as const satisfies __cfHelpers.JSONSchema, { items: items }, ({ items }) => items.map((entry, index) => ({
+    } as const satisfies __cfHelpers.JSONSchema, ({ items }) => items.map((entry, index) => ({
         entry,
         index,
         isExpanded: index === 0,
         isPinned: entry.pinned || false,
         allowMultiple: entry.allowMultiple,
-    }))).for("allEntries", true);
+    })))({ items: items }).for("allEntries", true);
     return {
         [UI]: (<div>
         {allEntries.mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
@@ -230,7 +232,11 @@ export default pattern((__cf_pattern_input) => {
                     anyOf: [{
                             type: "null"
                         }, {}]
-                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+                    entry: {
+                        collapsed?: boolean | undefined;
+                    };
+                }, boolean>({
                     type: "object",
                     properties: {
                         entry: {
@@ -249,9 +255,9 @@ export default pattern((__cf_pattern_input) => {
                     required: ["entry"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, { entry: {
+                } as const satisfies __cfHelpers.JSONSchema, ({ entry }) => !entry.collapsed)({ entry: {
                         collapsed: entry.key("collapsed")
-                    } }, ({ entry }) => !entry.collapsed), <div>
+                    } }), <div>
               {ifElse({
                         type: "boolean"
                     } as const satisfies __cfHelpers.JSONSchema, {
@@ -270,7 +276,11 @@ export default pattern((__cf_pattern_input) => {
                             editingNoteIndex,
                             editingNoteText,
                             index,
-                        })} style={__cfHelpers.derive({
+                        })} style={__cfHelpers.lift<{
+                            entry: {
+                                note?: string | undefined;
+                            };
+                        }, { fontWeight: string; }>({
                             type: "object",
                             properties: {
                                 entry: {
@@ -291,9 +301,13 @@ export default pattern((__cf_pattern_input) => {
                                 }
                             },
                             required: ["fontWeight"]
-                        } as const satisfies __cfHelpers.JSONSchema, { entry: entry }, ({ entry }) => ({
+                        } as const satisfies __cfHelpers.JSONSchema, ({ entry }) => ({
                             fontWeight: entry?.note ? "700" : "400",
-                        }))} title={__cfHelpers.derive({
+                        }))({ entry: entry })} title={__cfHelpers.lift<{
+                        entry: {
+                            note?: string | undefined;
+                        };
+                    }, string>({
                         type: "object",
                         properties: {
                             entry: {
@@ -308,7 +322,7 @@ export default pattern((__cf_pattern_input) => {
                         required: ["entry"]
                     } as const satisfies __cfHelpers.JSONSchema, {
                         type: "string"
-                    } as const satisfies __cfHelpers.JSONSchema, { entry: entry }, ({ entry }) => entry?.note || "Add note...")}>
+                    } as const satisfies __cfHelpers.JSONSchema, ({ entry }) => entry?.note || "Add note...")({ entry: entry })}>
                   note
                 </button>, null)}
               {__cfHelpers.when({
@@ -321,7 +335,9 @@ export default pattern((__cf_pattern_input) => {
                     anyOf: [{
                             type: ["boolean", "null"]
                         }, {}]
-                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+                    isExpanded: boolean;
+                }, boolean>({
                     type: "object",
                     properties: {
                         isExpanded: {
@@ -331,7 +347,7 @@ export default pattern((__cf_pattern_input) => {
                     required: ["isExpanded"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, { isExpanded: isExpanded }, ({ isExpanded }) => !isExpanded), ifElse({
+                } as const satisfies __cfHelpers.JSONSchema, ({ isExpanded }) => !isExpanded)({ isExpanded: isExpanded }), ifElse({
                     type: "boolean"
                 } as const satisfies __cfHelpers.JSONSchema, {
                     anyOf: [{}, {
@@ -372,7 +388,9 @@ export default pattern((__cf_pattern_input) => {
                             type: "object",
                             properties: {}
                         }]
-                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+                    isExpanded: boolean;
+                }, boolean>({
                     type: "object",
                     properties: {
                         isExpanded: {
@@ -382,7 +400,7 @@ export default pattern((__cf_pattern_input) => {
                     required: ["isExpanded"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, { isExpanded: isExpanded }, ({ isExpanded }) => !isExpanded), <button type="button" onClick={trashSubPiece({
+                } as const satisfies __cfHelpers.JSONSchema, ({ isExpanded }) => !isExpanded)({ isExpanded: isExpanded }), <button type="button" onClick={trashSubPiece({
                         subPieces,
                         trashedSubPieces,
                         expandedIndex,

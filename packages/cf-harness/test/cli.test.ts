@@ -8,6 +8,7 @@ import {
   type CfHarnessCliIO,
   type CfHarnessCliSignalHandler,
   createCfHarnessBatchResult,
+  createCfHarnessCliCapabilities,
   formatCfHarnessCliResult,
   formatCfHarnessCliUsage,
   formatCfHarnessTranscriptEvent,
@@ -1101,6 +1102,30 @@ Deno.test("runCfHarnessCli prints usage for help", async () => {
   assertEquals(exitCode, 0);
   assertEquals(stdout, [formatCfHarnessCliUsage()]);
   assertEquals(stderr, []);
+});
+
+Deno.test("runCfHarnessCli prints machine-readable capabilities", async () => {
+  const { io, stdout, stderr } = createIoBuffers();
+  const exitCode = await runCfHarnessCli(["--describe-capabilities"], { io });
+
+  assertEquals(exitCode, 0);
+  assertEquals(stderr, []);
+  assertEquals(stdout.length, 1);
+  const capabilities = JSON.parse(stdout[0]);
+  assertEquals(capabilities, createCfHarnessCliCapabilities());
+  assertEquals(capabilities.type, "cf-harness.capabilities");
+  assertEquals(capabilities.version, 1);
+  assertEquals(capabilities.parentToolIds.includes("web_fetch"), true);
+  assertEquals(capabilities.parentToolIds.includes("bash-no-sandbox"), false);
+  assertEquals(capabilities.builtinToolIds.includes("bash-no-sandbox"), true);
+  assertEquals(capabilities.subagentProfiles.includes("web_search"), true);
+  assertEquals(capabilities.nativeModelToolIds.includes("google_search"), true);
+  assertEquals(
+    capabilities.cliFlags.includes("--structured-result-path"),
+    true,
+  );
+  assertEquals(capabilities.cliFlags.includes("--describe-capabilities"), true);
+  assertEquals(capabilities.repeatableCliFlags.includes("--allow-tool"), true);
 });
 
 Deno.test("installCfHarnessSignalHandlers terminalizes the active run before exiting", async () => {

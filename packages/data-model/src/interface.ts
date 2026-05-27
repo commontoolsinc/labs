@@ -79,9 +79,16 @@ export const IS_DEEP_FROZEN: unique symbol = Symbol.for(
  * Abstract base class for values that participate in the fabric protocol.
  * See Section 2.3 of the formal spec.
  *
+ * This is the pure abstract protocol -- the `instanceof`-able contract that
+ * external code is written against. Concrete fabric-instance classes in the
+ * data-model extend `BaseFabricInstance` (a subclass of this one) rather
+ * than this class directly; `BaseFabricInstance` is where shared
+ * template-method scaffolding (such as `shallowClone()`) lives.
+ *
  * Subclasses must implement `[DECONSTRUCT]()`, `[DEEP_FREEZE]()`,
- * `[IS_DEEP_FROZEN]()`, `deepClone()`, and `shallowUnfrozenClone()`.
- * Subclasses must also define a static member `[RECONSTRUCT]()`.
+ * `[IS_DEEP_FROZEN]()`, `deepClone()`, and `shallowClone()` (the latter is
+ * normally inherited from `BaseFabricInstance`). Subclasses must also
+ * define a static member `[RECONSTRUCT]()`.
  */
 export abstract class FabricInstance extends FabricSpecialObject {
   /**
@@ -130,32 +137,19 @@ export abstract class FabricInstance extends FabricSpecialObject {
    * produces a deeply-mutable instance with no visible shared reference
    * structure with the original.
    *
-   * TODO(danfuzz): This method should have a base implementation which defers
-   * to a _different_ `protected abstract` method.
+   * TODO(danfuzz): This method should grow a base implementation on
+   * `BaseFabricInstance` which defers to a `protected abstract` sibling,
+   * mirroring the `shallowClone()`/`shallowUnfrozenClone()` split.
    */
   abstract deepClone(frozen: boolean): FabricInstance;
 
   /**
-   * Returns a new unfrozen copy of this instance with the same data. Called
-   * by `shallowClone()` when a new instance is needed.
-   */
-  protected abstract shallowUnfrozenClone(): FabricInstance;
-
-  /**
    * Returns a shallow clone of this instance with the requested frozenness.
-   *
-   * When `frozen` is `true` and this instance is already frozen, returns
-   * `this` (identity optimization -- freezing is idempotent). In all other
-   * cases, creates a new instance via `shallowUnfrozenClone()` and freezes
-   * it if requested.
+   * The concrete template-method implementation lives on
+   * `BaseFabricInstance`; this declaration just pins the protocol surface so
+   * that callers can invoke it through a `FabricInstance` reference.
    */
-  shallowClone(frozen: boolean): FabricInstance {
-    if (frozen && Object.isFrozen(this)) return this;
-    const copy = this.shallowUnfrozenClone();
-    // Cast needed: `Object.freeze()` returns `Readonly<T>`, which TS considers
-    // incompatible with abstract class types due to protected members.
-    return frozen ? Object.freeze(copy) as FabricInstance : copy;
-  }
+  abstract shallowClone(frozen: boolean): FabricInstance;
 }
 
 // ===========================================================================

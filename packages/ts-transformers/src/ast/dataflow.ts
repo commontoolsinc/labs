@@ -540,7 +540,7 @@ export function createDataFlowAnalyzer(
     callee: InternalAnalysis,
     rewriteHint: RewriteHint,
   ): InternalAnalysis => {
-    // Builder calls (like pattern) don't need derive wrapping
+    // Builder calls (like pattern) don't need lift-applied wrapping
     if (callKind?.kind === "builder") {
       return {
         ...merged,
@@ -900,8 +900,8 @@ export function createDataFlowAnalyzer(
       // the plain field type (e.g. `string`), not OpaqueRef. But the read is
       // still a reactive fine-grained dependency: the runtime can subscribe to
       // `element.key("foo")` specifically. Record the property access (not
-      // just the root identifier) as the dataflow so downstream derive-input
-      // builders can emit the partial-key shape:
+      // just the root identifier) as the dataflow so downstream lift-applied
+      // input builders can emit the partial-key shape:
       //   { element: { foo: element.key("foo") } }
       // instead of the broader { element: element } whole-binding capture.
       if (

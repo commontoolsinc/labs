@@ -11,43 +11,6 @@ import { derive, pattern, UI } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
-    const item = __cf_pattern_input.key("element");
-    return (<div>
-            <h2>{item.key("title")}</h2>
-            <p>
-              Active items:{" "}
-              {derive({
-            type: "array",
-            items: {
-                $ref: "#/$defs/SubItem"
-            },
-            $defs: {
-                SubItem: {
-                    type: "object",
-                    properties: {
-                        id: {
-                            type: "number"
-                        },
-                        name: {
-                            type: "string"
-                        },
-                        active: {
-                            type: "boolean"
-                        }
-                    },
-                    required: ["id", "name", "active"]
-                }
-            }
-        } as const satisfies __cfHelpers.JSONSchema, {
-            type: "string"
-        } as const satisfies __cfHelpers.JSONSchema, item.key("subItems"), (subs) => subs
-            .filter((s) => s.active)
-            .map((s) => s.name)
-            .join(", "))}
-            </p>
-          </div>);
-});
 interface SubItem {
     id: number;
     name: string;
@@ -74,7 +37,43 @@ export default pattern((state) => {
                 - subs is a derive callback parameter (unwrapped at runtime)
                 - .filter() returns a plain JS array
                 - Plain arrays don't have .mapWithPattern() */}
-        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cfModuleCallback_1, {
+        {state.key("items").mapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
+                const item = __cf_pattern_input.key("element");
+                return (<div>
+            <h2>{item.key("title")}</h2>
+            <p>
+              Active items:{" "}
+              {__cfHelpers.lift({
+                        type: "array",
+                        items: {
+                            $ref: "#/$defs/SubItem"
+                        },
+                        $defs: {
+                            SubItem: {
+                                type: "object",
+                                properties: {
+                                    id: {
+                                        type: "number"
+                                    },
+                                    name: {
+                                        type: "string"
+                                    },
+                                    active: {
+                                        type: "boolean"
+                                    }
+                                },
+                                required: ["id", "name", "active"]
+                            }
+                        }
+                    } as const satisfies __cfHelpers.JSONSchema, {
+                        type: "string"
+                    } as const satisfies __cfHelpers.JSONSchema, (subs) => subs
+                        .filter((s) => s.active)
+                        .map((s) => s.name)
+                        .join(", "))(item.key("subItems"))}
+            </p>
+          </div>);
+            }, {
                 type: "object",
                 properties: {
                     element: {

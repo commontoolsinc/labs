@@ -13,7 +13,8 @@ ambient context that flows down the tree like CSS inheritance.
 1. **Default works:** Components should work without explicit theme
 2. **Composition over specification:** Nest theme providers for progressive
    refinement
-3. **Reactive:** Theme values can be Cells that update live
+3. **Reactive-friendly:** Pass a reactive/computed theme object when the whole
+   theme should update live
 4. **Pattern-friendly:** Support partial themes with pattern-style properties
    (`accentColor`, `fontFace`)
 5. **CSS-native:** Emit CSS variables for performance and browser devtools
@@ -28,23 +29,26 @@ The `<cf-theme>` component wraps children and provides theme context using
 
 - Uses `display: contents` to be invisible in layout
 - Merges partial themes with defaults (supports pattern-style)
-- Subscribes to Cell properties for reactive updates
+- Recomputes and reapplies CSS variables when the `theme` property changes
 - Applies CSS variables to itself for cascade to children
 
 ```typescript
 // Wrap any subtree to theme it
-<cf-theme .theme=${{ accentColor: cell("#3b82f6") }}>
+<cf-theme .theme=${{ accentColor: "#3b82f6" }}>
   <cf-button>Themed Button</cf-button>
 </cf-theme>
 
 // Nest providers for refinement
 <cf-theme .theme=${{ colorScheme: "dark" }}>
   <div>Dark section</div>
-  <cf-theme .theme=${{ accentColor: cell("#ff0000") }}>
+  <cf-theme .theme=${{ accentColor: "#ff0000" }}>
     <div>Dark section with red accent</div>
   </cf-theme>
 </cf-theme>
 ```
+
+In pattern JSX, prefer passing a reactive/computed theme object to `theme` when
+the theme should update. Keep individual theme fields as plain values.
 
 ## Theme Context
 
@@ -57,10 +61,14 @@ component tree.
 interface CFTheme {
   fontFamily: string;
   monoFontFamily: string;
+  fontSize: string;
   borderRadius: string;
   density: "compact" | "comfortable" | "spacious";
   colorScheme: "light" | "dark" | "auto";
   animationSpeed: "none" | "slow" | "normal" | "fast";
+  roundness: number;
+  scale: number;
+  motion: number;
   colors: {
     primary: ColorToken;
     primaryForeground: ColorToken;
@@ -81,6 +89,17 @@ interface CFTheme {
     warningForeground: ColorToken;
     accent: ColorToken;
     accentForeground: ColorToken;
+    brand: ColorToken;
+    brandForeground: ColorToken;
+    textTertiary: ColorToken;
+    textDisabled: ColorToken;
+    surfaceDisabled: ColorToken;
+    surfacePressed: ColorToken;
+    surfaceTertiary: ColorToken;
+    surfaceInverse: ColorToken;
+    textOnColorSecondary: ColorToken;
+    textOnInverse: ColorToken;
+    textPressed: ColorToken;
   };
 }
 
@@ -91,7 +110,12 @@ type ColorToken = string | { light: string; dark: string };
 
 ### Basic Theme Consumption
 
-Use `@consume` decorator to access theme context:
+Most components should read `var(--cf-theme-*)` in CSS with sane fallbacks.
+Consume `cfThemeContext` only when JavaScript needs the theme object for runtime
+logic, derived values, or applying theme variables to dynamically created
+elements.
+
+Use `@consume` decorator to access theme context when needed:
 
 ```typescript
 import { consume } from "@lit/context";
@@ -138,7 +162,12 @@ available:
 - `--cf-theme-mono-font-family`
 - `--cf-theme-font-size`
 - `--cf-theme-border-radius`
+- `--cf-theme-border-radius-full`
 - `--cf-theme-animation-duration`
+
+Compatibility aliases:
+
+- `--cf-theme-font-mono`
 
 **Colors:**
 
@@ -161,6 +190,30 @@ available:
 - `--cf-theme-color-warning-foreground`
 - `--cf-theme-color-accent`
 - `--cf-theme-color-accent-foreground`
+- `--cf-theme-color-brand`
+- `--cf-theme-color-brand-foreground`
+- `--cf-theme-color-text-tertiary`
+- `--cf-theme-color-text-disabled`
+- `--cf-theme-color-surface-disabled`
+- `--cf-theme-color-surface-pressed`
+- `--cf-theme-color-surface-tertiary`
+- `--cf-theme-color-surface-inverse`
+- `--cf-theme-color-text-on-color-secondary`
+- `--cf-theme-color-text-on-inverse`
+- `--cf-theme-color-text-pressed`
+
+**Derived and compatibility colors:**
+
+- `--cf-theme-color-error-surface`
+- `--cf-theme-color-error-light`
+- `--cf-theme-color-primary-light`
+- `--cf-theme-color-success-light`
+- `--cf-theme-color-muted`
+- `--cf-theme-color-text-secondary`
+- `--cf-theme-{background,border,border-muted,error,primary,success,surface,surface-hover,text,text-muted}`
+- `--cf-theme-color-{primary,accent,danger}-{pressed,soft,subtle}`
+- `--cf-theme-color-status-{info,success,warning,error}`
+- `--cf-theme-color-status-{info,success,warning,error}-{pressed,soft,subtle,foreground}`
 
 **Spacing:**
 
@@ -170,6 +223,9 @@ available:
 - `--cf-theme-spacing-padding-message`
 - `--cf-theme-spacing-padding-code`
 - `--cf-theme-spacing-padding-block`
+- `--cf-theme-spacing`
+- `--cf-theme-spacing-compact`
+- `--cf-theme-padding`
 
 ### CSS Variable Fallback Pattern
 

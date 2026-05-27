@@ -27,7 +27,11 @@ interface State {
 // Verifies: wildcard traversal calls lower as whole JSX call roots
 export default pattern((state) => ({
     [UI]: (<div>
-      <p>{__cfHelpers.derive({
+      <p>{__cfHelpers.lift<{
+        state: {
+            wishes: [{ id: string; status: string; }, { id: string; status: string; }];
+        };
+    }, string>({
         type: "object",
         properties: {
             state: {
@@ -55,10 +59,14 @@ export default pattern((state) => ({
         required: ["state"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "string"
-    } as const satisfies __cfHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => JSON.stringify(state.wishes[1]))({ state: {
             wishes: state.key("wishes")
-        } }, ({ state }) => JSON.stringify(state.wishes[1]))}</p>
-      <p>{__cfHelpers.derive({
+        } })}</p>
+      <p>{__cfHelpers.lift<{
+        state: {
+            wishes: [{ id: string; status: string; }, { id: string; status: string; }];
+        };
+    }, string[]>({
         type: "object",
         properties: {
             state: {
@@ -89,10 +97,14 @@ export default pattern((state) => ({
         items: {
             type: "string"
         }
-    } as const satisfies __cfHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => Object.keys(state.wishes[1]))({ state: {
             wishes: state.key("wishes")
-        } }, ({ state }) => Object.keys(state.wishes[1]))}</p>
-      <p>{__cfHelpers.derive({
+        } })}</p>
+      <p>{__cfHelpers.lift<{
+        state: {
+            wishes: [{ id: string; status: string; }, { id: string; status: string; }];
+        };
+    }, string[]>({
         type: "object",
         properties: {
             state: {
@@ -123,10 +135,14 @@ export default pattern((state) => ({
         items: {
             type: "string"
         }
-    } as const satisfies __cfHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => Object.values(state.wishes[1]))({ state: {
             wishes: state.key("wishes")
-        } }, ({ state }) => Object.values(state.wishes[1]))}</p>
-      <p>{__cfHelpers.derive({
+        } })}</p>
+      <p>{__cfHelpers.lift<{
+        state: {
+            wishes: [{ id: string; status: string; }, { id: string; status: string; }];
+        };
+    }, [string, string][]>({
         type: "object",
         properties: {
             state: {
@@ -160,9 +176,9 @@ export default pattern((state) => ({
                 type: "string"
             }
         }
-    } as const satisfies __cfHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => Object.entries(state.wishes[1]))({ state: {
             wishes: state.key("wishes")
-        } }, ({ state }) => Object.entries(state.wishes[1]))}</p>
+        } })}</p>
     </div>),
 }), {
     type: "object",

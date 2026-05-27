@@ -24,7 +24,14 @@ export default pattern((state: State) => {
     const value = new Writable(10, {
         type: "number"
     } as const satisfies __cfHelpers.JSONSchema).for("value", true);
-    const result = __cfHelpers.derive({
+    const result = __cfHelpers.lift<{
+        value: __cfHelpers.ReadonlyCell<number>;
+        state: {
+            config: {
+                multiplier: number;
+            };
+        };
+    }, number>({
         type: "object",
         properties: {
             value: {
@@ -50,14 +57,14 @@ export default pattern((state: State) => {
         required: ["value", "state"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        value: value.for(["result", 2, "value"], true),
+    } as const satisfies __cfHelpers.JSONSchema, ({ value: v, state }) => v.get() * state.config.multiplier)({
+        value: value.for(["result", "value"], true),
         state: {
             config: {
                 multiplier: state.key("config", "multiplier")
             }
         }
-    }, ({ value: v, state }) => v.get() * state.config.multiplier).for("result", true);
+    }).for("result", true);
     return result;
 }, {
     type: "object",

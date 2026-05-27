@@ -20,15 +20,15 @@ const config = __cfHelpers.__cf_data({ bar: "module-level" });
 // Context: The pre-scan collects opaque roots by name; it must not leak
 //   across lexical scopes and incorrectly rewrite unrelated same-named accesses.
 export default pattern(() => {
-    const outer = __cfHelpers.derive({
+    const outer = __cfHelpers.lift({
         type: "object",
         properties: {}
     } as const satisfies __cfHelpers.JSONSchema, {
         type: ["number", "string"]
-    } as const satisfies __cfHelpers.JSONSchema, {}, () => {
+    } as const satisfies __cfHelpers.JSONSchema, () => {
         const condition = 1 > 0;
         if (condition) {
-            const config = __cfHelpers.derive({
+            const config = __cfHelpers.lift({
                 type: "object",
                 properties: {}
             } as const satisfies __cfHelpers.JSONSchema, {
@@ -39,11 +39,11 @@ export default pattern(() => {
                     }
                 },
                 required: ["bar"]
-            } as const satisfies __cfHelpers.JSONSchema, {}, () => ({ bar: 1 })).for("config", true);
+            } as const satisfies __cfHelpers.JSONSchema, () => ({ bar: 1 }))({}).for("config", true);
             return config.key("bar");
         }
         return config.bar;
-    }).for("outer", true);
+    })({}).for("outer", true);
     return outer;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: ["number", "string"]

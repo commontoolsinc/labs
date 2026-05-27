@@ -43,7 +43,14 @@ export default pattern((state) => {
         }
     } as const satisfies __cfHelpers.JSONSchema).for("fallbackMembers", true);
     // [TRANSFORM] computed() → derive(): captures state.showArchived, state.projects
-    const visibleProjects = __cfHelpers.derive({
+    const visibleProjects = __cfHelpers.lift<{
+        state: {
+            showArchived: boolean;
+            projects: {
+                archived: boolean;
+            }[];
+        };
+    }, Project[]>({
         type: "object",
         properties: {
             state: {
@@ -115,14 +122,27 @@ export default pattern((state) => {
                 required: ["text", "active"]
             }
         }
-    } as const satisfies __cfHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.showArchived
+        ? state.projects
+        : state.projects.filter((project) => !project.archived))({ state: {
             showArchived: state.key("showArchived"),
             projects: state.key("projects")
-        } }, ({ state }) => state.showArchived
-        ? state.projects
-        : state.projects.filter((project) => !project.archived)).for("visibleProjects", true);
+        } }).for("visibleProjects", true);
     // [TRANSFORM] computed() → derive(): captures visibleProjects (asOpaque), state.prefix, fallbackMembers (asCell — Writable)
-    const rows = __cfHelpers.derive({
+    const rows = __cfHelpers.lift<{
+        visibleProjects: {
+            name: string;
+            badges: {
+                active: boolean;
+                text: string;
+            }[];
+            members: string[];
+        }[];
+        state: {
+            prefix: string;
+        };
+        fallbackMembers: __cfHelpers.ReadonlyCell<string[]>;
+    }, (import("commonfabric").VNode | import("commonfabric").UIRenderable)[]>({
         type: "object",
         properties: {
             visibleProjects: {
@@ -196,13 +216,7 @@ export default pattern((state) => {
                 required: ["$UI"]
             }
         }
-    } as const satisfies __cfHelpers.JSONSchema, {
-        visibleProjects: visibleProjects,
-        state: {
-            prefix: state.key("prefix")
-        },
-        fallbackMembers: fallbackMembers
-    }, ({ visibleProjects, state, fallbackMembers }) => 
+    } as const satisfies __cfHelpers.JSONSchema, ({ visibleProjects, state, fallbackMembers }) => 
     // [TRANSFORM] .map() stays plain: visibleProjects is a captured derive input, plain inside this compute
     visibleProjects.map((project, projectIndex) => {
         // [TRANSFORM] .map() stays plain: ["alpha","beta"] is a literal array
@@ -244,7 +258,9 @@ export default pattern((state) => {
                     type: "string"
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+                    memberIndex: number;
+                }, boolean>({
                     type: "object",
                     properties: {
                         memberIndex: {
@@ -254,7 +270,12 @@ export default pattern((state) => {
                     required: ["memberIndex"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "boolean"
-                } as const satisfies __cfHelpers.JSONSchema, { memberIndex: memberIndex }, ({ memberIndex }) => memberIndex === 0), __cfHelpers.derive({
+                } as const satisfies __cfHelpers.JSONSchema, ({ memberIndex }) => memberIndex === 0)({ memberIndex: memberIndex }), __cfHelpers.lift<{
+                    project: {
+                        name: string;
+                    };
+                    member: string;
+                }, string>({
                     type: "object",
                     properties: {
                         project: {
@@ -273,12 +294,12 @@ export default pattern((state) => {
                     required: ["project", "member"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "string"
-                } as const satisfies __cfHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, ({ project, member }) => `${project.name}-${member}`)({
                     project: {
                         name: project.name
                     },
                     member: member
-                }, ({ project, member }) => `${project.name}-${member}`), member)}
+                }), member)}
             </small>);
             }, {
                 type: "object",
@@ -341,7 +362,13 @@ export default pattern((state) => {
                     : member}
             </span>))}
         </div>);
-    })).for("rows", true);
+    }))({
+        visibleProjects: visibleProjects,
+        state: {
+            prefix: state.key("prefix")
+        },
+        fallbackMembers: fallbackMembers
+    }).for("rows", true);
     return {
         [UI]: <div>{rows}</div>,
     };

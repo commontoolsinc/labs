@@ -15,7 +15,10 @@ const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
     const element = __cf_pattern_input.key("element");
     const __cf_val_key = dynamicKey();
     const foo = element.key("foo");
-    const val = __cfHelpers.derive({
+    const val = __cfHelpers.lift<{
+        element: any;
+        __cf_val_key: any;
+    }, number>({
         type: "object",
         properties: {
             element: true,
@@ -24,11 +27,14 @@ const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
         required: ["element", "__cf_val_key"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, ({ element, __cf_val_key }) => element[__cf_val_key])({
         element: element,
         __cf_val_key: __cf_val_key
-    }, ({ element, __cf_val_key }) => element[__cf_val_key]).for("val", true);
-    return (<span>{__cfHelpers.derive({
+    }).for("val", true);
+    return (<span>{__cfHelpers.lift<{
+        foo: number;
+        val: number;
+    }, number>({
         type: "object",
         properties: {
             foo: {
@@ -41,10 +47,10 @@ const __cfModuleCallback_1 = __cfHardenFn(__cf_pattern_input => {
         required: ["foo", "val"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, {
+    } as const satisfies __cfHelpers.JSONSchema, ({ foo, val }) => foo + val)({
         foo: foo,
         val: val
-    }, ({ foo, val }) => foo + val)}</span>);
+    })}</span>);
 });
 function dynamicKey(): "value" {
     return "value";

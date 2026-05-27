@@ -151,6 +151,8 @@ describe("page slug redirects", () => {
 
   function mockCell(ref: CellRef, options: {
     raw?: unknown;
+    schemaCell?: unknown;
+    onPull?: () => void;
     sourceCell?: unknown;
     onSync?: () => void;
   } = {}) {
@@ -159,10 +161,15 @@ describe("page slug redirects", () => {
         options.onSync?.();
         return Promise.resolve();
       },
+      pull: () => {
+        options.onPull?.();
+        return Promise.resolve(options.raw);
+      },
       getRaw: () => options.raw,
       getSourceCell: () => options.sourceCell,
       getAsLink: () => cellRefToSigilLink(ref),
       getAsNormalizedFullLink: () => ref,
+      asSchemaFromLinks: () => options.schemaCell,
     };
   }
 
@@ -220,6 +227,73 @@ describe("page slug redirects", () => {
 
     expect(targetSynced).toBe(true);
     expect(result.page.cell).toMatchObject(targetRef);
+  });
+
+  it("renders slug redirects to nested output cells directly", async () => {
+    const targetRef: CellRef = {
+      id: "of:fid1-parent-page" as CellRef["id"],
+      space,
+      scope: "space",
+      path: ["activityTab"],
+    };
+    const slugRef: CellRef = {
+      id: "of:fid1-slug-doc" as CellRef["id"],
+      space,
+      scope: "space",
+      path: [],
+    };
+    const schemaRef: CellRef = {
+      ...targetRef,
+      schema: {
+        type: "object",
+        properties: {
+          "$NAME": { type: "string" },
+          "$UI": { type: "object" },
+        },
+        required: ["$NAME", "$UI"],
+      },
+    };
+    let schemaPulled = false;
+    const schemaCell = mockCell(schemaRef, {
+      onPull: () => {
+        schemaPulled = true;
+      },
+    });
+    let targetSynced = false;
+    const targetCell = mockCell(targetRef, {
+      schemaCell,
+      sourceCell: {},
+      onSync: () => {
+        targetSynced = true;
+      },
+    });
+    const slugCell = mockCell(slugRef, { raw: redirectRaw(targetRef) });
+    const manager = {
+      get: () => {
+        throw new Error(
+          "nested output-cell slug redirects should not load as pieces",
+        );
+      },
+    };
+    const processor = {
+      pieceManager: { getSpace: () => space },
+      runtime: {
+        getCellFromEntityId: () => slugCell,
+        getCellFromLink: () => targetCell,
+      },
+      cc: { manager: () => manager },
+    };
+
+    const result = await (RuntimeProcessor.prototype as any).handlePageGet
+      .call(processor, {
+        type: RequestType.PageGet,
+        pageId: "fid1-slug-doc",
+        runIt: true,
+      });
+
+    expect(targetSynced).toBe(true);
+    expect(schemaPulled).toBe(true);
+    expect(result.page.cell).toMatchObject(schemaRef);
   });
 
   it("loads slug redirects to piece cells through the piece manager", async () => {

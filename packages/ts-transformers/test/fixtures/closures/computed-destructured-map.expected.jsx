@@ -30,7 +30,11 @@ interface Item {
 //   This is a negative test for reactive .map() detection on derived values.
 export default pattern((__cf_pattern_input) => {
     const items = __cf_pattern_input.key("items");
-    const result = __cfHelpers.derive({
+    const result = __cfHelpers.lift<{
+        items: {
+            done: boolean;
+        }[];
+    }, { tasks: Item[]; view: string; }>({
         type: "object",
         properties: {
             items: {
@@ -75,13 +79,15 @@ export default pattern((__cf_pattern_input) => {
                 required: ["name", "done"]
             }
         }
-    } as const satisfies __cfHelpers.JSONSchema, { items: items }, ({ items }) => ({
+    } as const satisfies __cfHelpers.JSONSchema, ({ items }) => ({
         tasks: items.filter((i) => !i.done),
         view: "inbox",
-    })).for("result", true);
+    }))({ items: items }).for("result", true);
     return {
         [UI]: (<div>
-        {__cfHelpers.derive({
+        {__cfHelpers.lift<{
+                result: { tasks: Item[]; view: string; };
+            }, import("commonfabric").JSXElement[]>({
                 type: "object",
                 properties: {
                     result: {
@@ -141,10 +147,10 @@ export default pattern((__cf_pattern_input) => {
                         required: ["$UI"]
                     }
                 }
-            } as const satisfies __cfHelpers.JSONSchema, { result: result }, ({ result }) => {
+            } as const satisfies __cfHelpers.JSONSchema, ({ result }) => {
                 const { tasks } = result;
                 return tasks.map((task) => <li>{task.name}</li>);
-            })}
+            })({ result: result })}
       </div>),
     };
 }, {

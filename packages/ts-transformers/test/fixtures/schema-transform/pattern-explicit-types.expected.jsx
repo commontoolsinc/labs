@@ -22,7 +22,9 @@ interface Output extends Input {
 //   pattern<Input, Output>() → input schema from Input, output schema from Output (includes inherited fields)
 //   Output extends Input → output schema includes both own (bar) and inherited (foo) properties
 export default pattern((input) => {
-    return __cfHelpers.derive({
+    return __cfHelpers.lift<{
+        input: { foo: string; } & {} & { [SELF]: Output; };
+    }, { bar: number; foo: string; [SELF]: Output; }>({
         type: "object",
         properties: {
             input: {
@@ -47,7 +49,7 @@ export default pattern((input) => {
             }
         },
         required: ["bar", "foo"]
-    } as const satisfies __cfHelpers.JSONSchema, { input: input }, ({ input }) => ({ ...input, bar: 123 })).for("__patternResult", true);
+    } as const satisfies __cfHelpers.JSONSchema, ({ input }) => ({ ...input, bar: 123 }))({ input: input }).for("__patternResult", true);
 }, {
     type: "object",
     properties: {

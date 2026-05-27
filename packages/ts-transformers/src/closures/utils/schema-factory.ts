@@ -156,7 +156,7 @@ export class SchemaFactory {
    *
    * When hadZeroParameters is true, skip the input and only include captures.
    */
-  createDeriveInputSchema(
+  createLiftAppliedInputSchema(
     originalInputParamName: string,
     originalInput: ts.Expression,
     captureTree: Map<string, CaptureTreeNode>,

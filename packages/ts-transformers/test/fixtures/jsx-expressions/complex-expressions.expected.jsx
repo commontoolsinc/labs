@@ -27,7 +27,10 @@ export default pattern((__cf_pattern_input) => {
     return {
         [UI]: (<div>
           <p>Price: {price}</p>
-          <p>Discount: {__cfHelpers.derive({
+          <p>Discount: {__cfHelpers.lift<{
+            price: number;
+            discount: number;
+        }, number>({
             type: "object",
             properties: {
                 price: {
@@ -40,11 +43,15 @@ export default pattern((__cf_pattern_input) => {
             required: ["price", "discount"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, ({ price, discount }) => price - discount)({
             price: price,
             discount: discount
-        }, ({ price, discount }) => price - discount)}</p>
-          <p>With tax: {__cfHelpers.derive({
+        })}</p>
+          <p>With tax: {__cfHelpers.lift<{
+            price: number;
+            discount: number;
+            tax: number;
+        }, number>({
             type: "object",
             properties: {
                 price: {
@@ -60,11 +67,11 @@ export default pattern((__cf_pattern_input) => {
             required: ["price", "discount", "tax"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, {
+        } as const satisfies __cfHelpers.JSONSchema, ({ price, discount, tax }) => (price - discount) * (1 + tax))({
             price: price,
             discount: discount,
             tax: tax
-        }, ({ price, discount, tax }) => (price - discount) * (1 + tax))}</p>
+        })}</p>
         </div>),
     };
 }, {

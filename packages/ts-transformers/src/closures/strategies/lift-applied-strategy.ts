@@ -6,13 +6,13 @@ import type {
 import type { ClosureTransformationStrategy } from "./strategy.ts";
 import {
   detectCallKind,
-  getDeriveInputAndCallbackArgument,
+  getLiftAppliedInputAndCallback,
   getTypeFromTypeNodeWithFallback,
   setParentPointers,
   unwrapOpaqueLikeType,
 } from "../../ast/mod.ts";
 import { analyzeFunctionCapabilities } from "../../policy/capability-analysis.ts";
-import { registerDeriveCallType } from "../../ast/type-inference.ts";
+import { registerLiftAppliedCallType } from "../../ast/type-inference.ts";
 import { applyShrinkAndWrap } from "../../transformers/type-shrinking.ts";
 import { getCellKind } from "../../transformers/opaque-ref/opaque-ref.ts";
 import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
@@ -30,7 +30,7 @@ import { SchemaFactory } from "../utils/schema-factory.ts";
  * This allows nested transformations (like map -> mapWithPattern decisions)
  * to see the correct unwrapped types for captured variables.
  *
- * Inside a derive callback:
+ * Inside a lift-applied callback:
  * - OpaqueRef<T> captures become T parameters (unwrapped)
  * - Cell<T> captures remain Cell<T> (NOT unwrapped)
  *
@@ -83,12 +83,12 @@ function preRegisterCaptureTypes(
   visit(body);
 }
 
-export class DeriveStrategy implements ClosureTransformationStrategy {
+export class LiftAppliedStrategy implements ClosureTransformationStrategy {
   canTransform(
     node: ts.Node,
     context: TransformationContext,
   ): boolean {
-    return ts.isCallExpression(node) && isDeriveCall(node, context);
+    return ts.isCallExpression(node) && isLiftAppliedCall(node, context);
   }
 
   transform(
@@ -97,19 +97,20 @@ export class DeriveStrategy implements ClosureTransformationStrategy {
     visitor: ts.Visitor,
   ): ts.Node | undefined {
     if (!ts.isCallExpression(node)) return undefined;
-    return transformDeriveCall(node, context, visitor);
+    return transformLiftAppliedCall(node, context, visitor);
   }
 }
 
 /**
- * Check if a call expression is a derive() call from commonfabric
+ * Check if a call expression is a lift-applied call (the lowered form of a
+ * user-source derive() / computed() call) from commonfabric.
  */
-export function isDeriveCall(
+export function isLiftAppliedCall(
   node: ts.CallExpression,
   context: TransformationContext,
 ): boolean {
   const callKind = detectCallKind(node, context.checker);
-  return callKind?.kind === "derive";
+  return callKind?.kind === "lift-applied";
 }
 
 function getFirstParameterCapabilitySummary(
@@ -133,7 +134,7 @@ function getFirstParameterCapabilitySummary(
  * If a capture has the same name as originalInputParamName, rename it (e.g., multiplier -> multiplier_1).
  * Returns a mapping from original capture names to their potentially renamed versions.
  */
-function resolveDeriveCaptureNameCollisions(
+function resolveLiftAppliedCaptureNameCollisions(
   originalInputParamName: string,
   captureTree: Map<string, CaptureTreeNode>,
 ): Map<string, string> {
@@ -166,9 +167,10 @@ function resolveDeriveCaptureNameCollisions(
  * Example: {value, multiplier} where value is the original input and multiplier is a capture.
  *
  * When hadZeroParameters is true, skip the original input and only include captures.
- * This handles the case where user wrote derive({}, () => ...) and we only need captures.
+ * This handles the case where the user wrote derive({}, () => ...) (which lowers to
+ * lift(() => ...)({})) and we only need captures.
  */
-function buildDeriveInputObject(
+function buildLiftAppliedInputObject(
   originalInput: ts.Expression,
   originalInputParamName: string,
   captureTree: Map<string, CaptureTreeNode>,
@@ -215,7 +217,7 @@ function buildDeriveInputObject(
  * references to the captured `multiplier` with `multiplier_1`.
  *
  * Also registers the new identifiers with their UNWRAPPED types in typeRegistry,
- * so type-based checks inside the derive callback see the correct types.
+ * so type-based checks inside the lift-applied callback see the correct types.
  */
 function rewriteCaptureReferences(
   body: ts.ConciseBody,
@@ -325,23 +327,23 @@ function rewriteCaptureReferences(
 }
 
 /**
- * Transform a derive call that has closures in its callback.
- * Converts: derive(value, (v) => v * multiplier.get())
- * To: derive(inputSchema, resultSchema, {value, multiplier}, ({value: v, multiplier}) => v * multiplier)
+ * Transform a lift-applied call that has closures in its callback.
+ * Converts: lift((v) => v * multiplier.get())(value)
+ * To: lift(inputSchema, resultSchema, ({value: v, multiplier}) => v * multiplier)({value, multiplier})
  */
-export function transformDeriveCall(
-  deriveCall: ts.CallExpression,
+export function transformLiftAppliedCall(
+  inputCall: ts.CallExpression,
   context: TransformationContext,
   visitor: ts.Visitor,
 ): ts.CallExpression | undefined {
   const { factory, checker, options } = context;
 
   // Extract callback
-  const deriveArgs = getDeriveInputAndCallbackArgument(deriveCall, checker);
-  if (!deriveArgs) {
+  const liftAppliedArgs = getLiftAppliedInputAndCallback(inputCall, checker);
+  if (!liftAppliedArgs) {
     return undefined;
   }
-  const { input: originalInput, callback } = deriveArgs;
+  const { input: originalInput, callback } = liftAppliedArgs;
 
   // Collect captures
   const collector = new CaptureCollector(checker);
@@ -355,7 +357,7 @@ export function transformDeriveCall(
 
   // Pre-register unwrapped types for captured identifiers BEFORE the visitor runs.
   // This allows nested transformations (like map -> mapWithPattern) to see the
-  // correct unwrapped types for captured variables inside this derive callback.
+  // correct unwrapped types for captured variables inside this lift-applied callback.
   preRegisterCaptureTypes(
     callback.body,
     captureExpressions,
@@ -382,13 +384,13 @@ export function transformDeriveCall(
   const hadZeroParameters = callback.parameters.length === 0;
 
   // Resolve capture name collisions with the original input parameter name
-  const captureNameMap = resolveDeriveCaptureNameCollisions(
+  const captureNameMap = resolveLiftAppliedCaptureNameCollisions(
     hadZeroParameters ? "" : originalInputParamName,
     captureTree,
   );
 
   // Build merged input object
-  const mergedInput = buildDeriveInputObject(
+  const mergedInput = buildLiftAppliedInputObject(
     originalInput,
     originalInputParamName,
     captureTree,
@@ -481,14 +483,14 @@ export function transformDeriveCall(
   const newCallback = builder.buildCallback(
     callback,
     rewrittenBody,
-    null, // derive merges captures into top-level object
+    null, // lift-applied merges captures into top-level object
     hasExplicitReturnType ? resultTypeNode : null,
   );
   setParentPointers(newCallback);
 
   // Build TypeNodes for schema generation
   const schemaFactory = new SchemaFactory(context);
-  let inputTypeNode = schemaFactory.createDeriveInputSchema(
+  let inputTypeNode = schemaFactory.createLiftAppliedInputSchema(
     originalInputParamName,
     originalInput,
     captureTree,
@@ -519,20 +521,29 @@ export function transformDeriveCall(
     );
   }
 
-  // Build the derive call expression
-  const newDeriveCall = context.cfHelpers.createHelperCall(
-    "derive",
-    deriveCall,
+  // Build the lift-applied call expression:
+  //   __cfHelpers.lift<inputTypeNode, resultTypeNode>(newCallback)(mergedInput)
+  //
+  // Type arguments (when present) live on the inner lift call — lift<In, Out>
+  // is the generic. The outer applied call carries the merged input object.
+  const innerLiftCall = context.cfHelpers.createHelperCall(
+    "lift",
+    inputCall,
     hasTypeParameter
       ? undefined
       : (resultTypeNode ? [inputTypeNode, resultTypeNode] : [inputTypeNode]),
-    [mergedInput, newCallback],
+    [newCallback],
+  );
+  const rebuiltCall = factory.createCallExpression(
+    innerLiftCall,
+    undefined,
+    [mergedInput],
   );
 
-  // Register the type of the derive call expression itself
+  // Register the type of the call expression itself
   if (options.typeRegistry) {
-    registerDeriveCallType(
-      newDeriveCall,
+    registerLiftAppliedCallType(
+      rebuiltCall,
       resultTypeNode,
       resultType,
       checker,
@@ -540,5 +551,5 @@ export function transformDeriveCall(
     );
   }
 
-  return newDeriveCall;
+  return rebuiltCall;
 }

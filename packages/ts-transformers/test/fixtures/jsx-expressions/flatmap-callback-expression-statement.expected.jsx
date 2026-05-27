@@ -30,7 +30,12 @@ export default pattern((__cf_pattern_input) => {
         [UI]: (<div>
         {files.flatMapWithPattern(__cfHelpers.pattern(__cf_pattern_input => {
                 const file = __cf_pattern_input.key("element");
-                __cfHelpers.derive({
+                __cfHelpers.lift<{
+                    file: {
+                        name: string;
+                        type: string;
+                    };
+                }, void>({
                     type: "object",
                     properties: {
                         file: {
@@ -49,10 +54,10 @@ export default pattern((__cf_pattern_input) => {
                     required: ["file"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     asCell: ["opaque"]
-                } as const satisfies __cfHelpers.JSONSchema, { file: {
+                } as const satisfies __cfHelpers.JSONSchema, ({ file }) => console.log("mapping", file.name, file.type))({ file: {
                         name: file.key("name"),
                         type: file.key("type")
-                    } }, ({ file }) => console.log("mapping", file.name, file.type));
+                    } });
                 return [<span>{file.key("name")}</span>];
             }, {
                 type: "object",

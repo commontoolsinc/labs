@@ -21,7 +21,11 @@ export default pattern(() => {
     } as const satisfies __cfHelpers.JSONSchema).for("value", true);
     const config = { multiplier: 2, divisor: 5 };
     const key = "multiplier";
-    const result = __cfHelpers.derive({
+    const result = __cfHelpers.lift<{
+        value: __cfHelpers.ReadonlyCell<number>;
+        config: { multiplier: number; divisor: number; };
+        key: string;
+    }, number>({
         type: "object",
         properties: {
             value: {
@@ -47,11 +51,11 @@ export default pattern(() => {
         required: ["value", "config", "key"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "number"
-    } as const satisfies __cfHelpers.JSONSchema, {
-        value: value.for(["result", 2, "value"], true),
+    } as const satisfies __cfHelpers.JSONSchema, ({ value: v, config, key }) => v.get() * config[key])({
+        value: value.for(["result", "value"], true),
         config: config,
         key: key
-    }, ({ value: v, config, key }) => v.get() * config[key]).for("result", true);
+    }).for("result", true);
     return result;
 }, false as const satisfies __cfHelpers.JSONSchema, {
     type: "number"

@@ -13,7 +13,12 @@ import {
 } from "@commonfabric/runtime-client";
 import type { DID } from "@commonfabric/identity";
 import { runtimeContext, spaceContext } from "../../runtime-context.ts";
-import { appViewToUrlPath, navigate } from "@commonfabric/shell/shared";
+import {
+  appViewToUrlPath,
+  navigate,
+  preserveAppViewMode,
+  urlToAppView,
+} from "@commonfabric/shell/shared";
 import {
   createDragPreview,
   endDrag,
@@ -383,7 +388,12 @@ export class CFCellLink extends BaseElement {
 
       // Cmd (Mac) or Ctrl (Windows/Linux) opens in new tab
       if (e.metaKey || e.ctrlKey) {
-        const url = appViewToUrlPath(view);
+        const url = appViewToUrlPath(
+          preserveAppViewMode(
+            urlToAppView(new URL(globalThis.location.href)),
+            view,
+          ),
+        );
         globalThis.open(url, "_blank");
       } else {
         navigate(view);

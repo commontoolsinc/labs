@@ -16,11 +16,11 @@ declare const total: number;
 // Verifies: derive() with no generic type args infers schemas from the declared source type
 //   derive(total, fn) → derive({ type: "number" }, { type: "number" }, total, fn)
 // Context: Input type comes from `declare const total: number`; output inferred from arrow body
-export const doubled = __cfHelpers.__cf_data(derive({
+export const doubled = __cfHelpers.__cf_data(__cfHelpers.lift({
     type: "number"
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, total, (value) => value * 2).for("doubled", true));
+} as const satisfies __cfHelpers.JSONSchema, (value) => value * 2)(total).for("doubled", true));
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

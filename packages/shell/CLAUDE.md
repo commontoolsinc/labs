@@ -68,7 +68,11 @@ RootView (authentication wrapper)
    - Storage via StorageManager for persistent data
 
 4. **Routing**:
-   - URL pattern: `/{spaceName}/{pieceId}`
+   - URL patterns: `/{spaceNameOrDid}`, `/{spaceNameOrDid}/{pieceIdOrSlug}`, and
+     `/.embed/{spaceNameOrDid}/{pieceIdOrSlug}`
+   - Embed mode strips shell-owned chrome for iframe/web-view embedding
+   - Navigation preserves embed mode, including `navigateTo(...)` calls from
+     rendered patterns
    - History API integration with back/forward support
    - Default space: "common-knowledge"
 

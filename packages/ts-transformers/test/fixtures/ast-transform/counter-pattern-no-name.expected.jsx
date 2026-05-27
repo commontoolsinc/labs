@@ -66,7 +66,11 @@ export default pattern((state) => {
             type: "string"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: ["number", "string"]
-        } as const satisfies __cfHelpers.JSONSchema, state.key("value"), __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, state.key("value"), __cfHelpers.lift<{
+            state: {
+                value: number;
+            };
+        }, number>({
             type: "object",
             properties: {
                 state: {
@@ -82,9 +86,9 @@ export default pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "number"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.value + 1)({ state: {
                 value: state.key("value")
-            } }, ({ state }) => state.value + 1), "unknown")}</li>
+            } }), "unknown")}</li>
         </ul>
         <cf-button onClick={increment({ value: state.key("value") })}>+</cf-button>
       </div>),

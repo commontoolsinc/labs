@@ -27,7 +27,11 @@ const identity = __cfHardenFn(<T,>(value: T) => value);
 //   → return derive(..., ({ state }) => identity(state.done ? "Done" : "Pending"))
 export const objectAndArray = pattern((state) => {
     const view = {
-        value: __cfHelpers.derive({
+        value: __cfHelpers.lift<{
+            state: {
+                done: boolean;
+            };
+        }, "Done" | "Pending">({
             type: "object",
             properties: {
                 state: {
@@ -43,10 +47,14 @@ export const objectAndArray = pattern((state) => {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             "enum": ["Done", "Pending"]
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_1)({ state: {
                 done: state.key("done")
-            } }, __cfModuleCallback_1).for(["view", "value"], true),
-        list: [__cfHelpers.derive({
+            } }).for(["view", "value"], true),
+        list: [__cfHelpers.lift<{
+                state: {
+                    done: boolean;
+                };
+            }, "Done" | "Pending">({
                 type: "object",
                 properties: {
                     state: {
@@ -62,9 +70,9 @@ export const objectAndArray = pattern((state) => {
                 required: ["state"]
             } as const satisfies __cfHelpers.JSONSchema, {
                 "enum": ["Done", "Pending"]
-            } as const satisfies __cfHelpers.JSONSchema, { state: {
+            } as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_2)({ state: {
                     done: state.key("done")
-                } }, __cfModuleCallback_2).for(["view", "list", 0], true)]
+                } }).for(["view", "list", 0], true)]
     };
     return view;
 }, {
@@ -90,7 +98,11 @@ export const objectAndArray = pattern((state) => {
     },
     required: ["value", "list"]
 } as const satisfies __cfHelpers.JSONSchema);
-export default pattern((state) => __cfHelpers.derive({
+export default pattern((state) => __cfHelpers.lift<{
+    state: {
+        done: boolean;
+    };
+}, "Done" | "Pending">({
     type: "object",
     properties: {
         state: {
@@ -106,9 +118,9 @@ export default pattern((state) => __cfHelpers.derive({
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     "enum": ["Done", "Pending"]
-} as const satisfies __cfHelpers.JSONSchema, { state: {
+} as const satisfies __cfHelpers.JSONSchema, __cfModuleCallback_3)({ state: {
         done: state.key("done")
-    } }, __cfModuleCallback_3).for("__patternResult", true), {
+    } }).for("__patternResult", true), {
     type: "object",
     properties: {
         done: {

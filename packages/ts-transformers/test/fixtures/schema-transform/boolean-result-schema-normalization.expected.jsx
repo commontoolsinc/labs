@@ -33,7 +33,11 @@ export default pattern((state: {
             type: "boolean"
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, state.key("isPremium"), __cfHelpers.derive({
+        } as const satisfies __cfHelpers.JSONSchema, state.key("isPremium"), __cfHelpers.lift<{
+            state: {
+                score: number;
+            };
+        }, boolean>({
             type: "object",
             properties: {
                 state: {
@@ -49,9 +53,9 @@ export default pattern((state: {
             required: ["state"]
         } as const satisfies __cfHelpers.JSONSchema, {
             type: "boolean"
-        } as const satisfies __cfHelpers.JSONSchema, { state: {
+        } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.score > 100)({ state: {
                 score: state.key("score")
-            } }, ({ state }) => state.score > 100)), "Premium", "Regular")}</div>,
+            } })), "Premium", "Regular")}</div>,
     };
 }, {
     type: "object",

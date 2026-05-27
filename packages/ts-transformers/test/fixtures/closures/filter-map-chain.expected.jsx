@@ -64,7 +64,14 @@ export default pattern((state) => {
                 const item = __cf_pattern_input.key("element");
                 const state = __cf_pattern_input.key("params", "state");
                 return (<div>
-              Total: {__cfHelpers.derive({
+              Total: {__cfHelpers.lift<{
+                    item: {
+                        price: number;
+                    };
+                    state: {
+                        taxRate: number;
+                    };
+                }, number>({
                     type: "object",
                     properties: {
                         item: {
@@ -89,14 +96,14 @@ export default pattern((state) => {
                     required: ["item", "state"]
                 } as const satisfies __cfHelpers.JSONSchema, {
                     type: "number"
-                } as const satisfies __cfHelpers.JSONSchema, {
+                } as const satisfies __cfHelpers.JSONSchema, ({ item, state }) => item.price * (1 + state.taxRate))({
                     item: {
                         price: item.key("price")
                     },
                     state: {
                         taxRate: state.key("taxRate")
                     }
-                }, ({ item, state }) => item.price * (1 + state.taxRate))}
+                })}
             </div>);
             }, {
                 type: "object",

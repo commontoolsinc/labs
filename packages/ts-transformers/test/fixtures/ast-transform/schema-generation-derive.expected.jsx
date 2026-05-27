@@ -21,7 +21,7 @@ declare const source: DeriveInput;
 // FIXTURE: schema-generation-derive
 // Verifies: derive() with generic type args generates input and output schemas
 //   derive<DeriveInput, DeriveResult>(source, fn) → derive(inputSchema, outputSchema, source, fn)
-export const doubledValue = __cfHelpers.__cf_data(derive({
+export const doubledValue = __cfHelpers.__cf_data(__cfHelpers.lift<DeriveInput, DeriveResult>({
     type: "object",
     properties: {
         count: {
@@ -37,9 +37,9 @@ export const doubledValue = __cfHelpers.__cf_data(derive({
         }
     },
     required: ["doubled"]
-} as const satisfies __cfHelpers.JSONSchema, source, (input) => ({
+} as const satisfies __cfHelpers.JSONSchema, (input) => ({
     doubled: input.count * 2,
-})).for("doubledValue", true));
+}))(source).for("doubledValue", true));
 // @ts-ignore: Internals
 function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);

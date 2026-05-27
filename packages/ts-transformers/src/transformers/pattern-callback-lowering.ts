@@ -255,8 +255,9 @@ export class PatternCallbackLoweringTransformer extends HelpersOnlyTransformer {
     ) as ts.SourceFile;
 
     // ── Module-extracted callback post-pass ────────────────────────────
-    // ClosureTransformer hoists reactive callback bodies (from
-    // `computed(...)`, `derive(...)`, etc.) into top-level
+    // ClosureTransformer hoists reactive callback bodies (from lift-applied
+    // forms — the lowered shape of `computed(...)`, `derive(...)`, etc.)
+    // into top-level
     // `const __cfModuleCallback_N = (() => { ... })` declarations. The
     // main pass above only walks INSIDE pattern callbacks, so those
     // module-level bodies never receive the reactive-root lowering pass

@@ -74,7 +74,11 @@ export default pattern((state) => {
         type: ["string", "undefined"]
     } as const satisfies __cfHelpers.JSONSchema).for("hoveredSectionId", true);
     // [TRANSFORM] computed() → derive(): captures state.sections (asCell — Writable<Section[]>)
-    const hasSections = __cfHelpers.derive({
+    const hasSections = __cfHelpers.lift<{
+        state: {
+            sections: __cfHelpers.ReadonlyCell<unknown[]>;
+        };
+    }, boolean>({
         type: "object",
         properties: {
             state: {
@@ -94,9 +98,9 @@ export default pattern((state) => {
         required: ["state"]
     } as const satisfies __cfHelpers.JSONSchema, {
         type: "boolean"
-    } as const satisfies __cfHelpers.JSONSchema, { state: {
+    } as const satisfies __cfHelpers.JSONSchema, ({ state }) => state.sections.get().length > 0)({ state: {
             sections: state.key("sections")
-        } }, ({ state }) => state.sections.get().length > 0).for("hasSections", true);
+        } }).for("hasSections", true);
     return {
         [UI]: (<div>
         {/* [TRANSFORM] ifElse: schema-injected authored ifElse(hasSections, ..., ...) */}
@@ -200,7 +204,11 @@ export default pattern((state) => {
                                     type: "boolean"
                                 } as const satisfies __cfHelpers.JSONSchema, {
                                     type: "boolean"
-                                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+                                } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+                                    task: {
+                                        note?: string | undefined;
+                                    };
+                                }, boolean>({
                                     type: "object",
                                     properties: {
                                         task: {
@@ -215,9 +223,9 @@ export default pattern((state) => {
                                     required: ["task"]
                                 } as const satisfies __cfHelpers.JSONSchema, {
                                     type: "boolean"
-                                } as const satisfies __cfHelpers.JSONSchema, { task: {
+                                } as const satisfies __cfHelpers.JSONSchema, ({ task }) => task.note !== undefined)({ task: {
                                         note: task.key("note")
-                                    } }, ({ task }) => task.note !== undefined), task.key("note") !== ""), <strong>{task.key("label")}</strong>, <em>{task.key("label")}</em>))}
+                                    } }), task.key("note") !== ""), <strong>{task.key("label")}</strong>, <em>{task.key("label")}</em>))}
                         </button>
                         {/* [TRANSFORM] .map() → mapWithPattern: task.tags is reactive pattern-owned data (nested inside sections map) */}
                         {/* [TRANSFORM] closure captures: taskIndex, section, state, task (all via params) */}
@@ -238,7 +246,10 @@ export default pattern((state) => {
                                             type: "string"
                                         } as const satisfies __cfHelpers.JSONSchema, {
                                             type: "string"
-                                        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.derive({
+                                        } as const satisfies __cfHelpers.JSONSchema, __cfHelpers.lift<{
+                                            tagIndex: number;
+                                            taskIndex: number;
+                                        }, boolean>({
                                             type: "object",
                                             properties: {
                                                 tagIndex: {
@@ -251,10 +262,10 @@ export default pattern((state) => {
                                             required: ["tagIndex", "taskIndex"]
                                         } as const satisfies __cfHelpers.JSONSchema, {
                                             type: "boolean"
-                                        } as const satisfies __cfHelpers.JSONSchema, {
+                                        } as const satisfies __cfHelpers.JSONSchema, ({ tagIndex, taskIndex }) => tagIndex === taskIndex)({
                                             tagIndex: tagIndex,
                                             taskIndex: taskIndex
-                                        }, ({ tagIndex, taskIndex }) => tagIndex === taskIndex), `${section.key("title")}:${tag}`, __cfHelpers.ifElse({
+                                        }), `${section.key("title")}:${tag}`, __cfHelpers.ifElse({
                                             type: "boolean"
                                         } as const satisfies __cfHelpers.JSONSchema, {
                                             type: "string"
@@ -457,7 +468,14 @@ export default pattern((state) => {
                                 showCompleted: state.key("showCompleted")
                             }
                         })}
-                  </div>, __cfHelpers.derive({
+                  </div>, __cfHelpers.lift<{
+                        section: {
+                            tasks: {
+                                length: number;
+                            };
+                            title: string;
+                        };
+                    }, import("commonfabric").JSXElement>({
                         type: "object",
                         properties: {
                             section: {
@@ -500,18 +518,18 @@ export default pattern((state) => {
                                 required: ["$UI"]
                             }
                         }
-                    } as const satisfies __cfHelpers.JSONSchema, { section: {
-                            tasks: {
-                                length: section.key("tasks", "length")
-                            },
-                            title: section.key("title")
-                        } }, ({ section }) => 
+                    } as const satisfies __cfHelpers.JSONSchema, ({ section }) => 
                     // [TRANSFORM] ternary preserved inside the ifElse(expanded) false branch:
                     //   section.tasks.length > 0 ? <small>...collapsed</small> : <small>empty</small>
                     //   → plain local ternary inside the JSX branch
                     section.tasks.length > 0
                         ? <small>{section.title} collapsed</small>
-                        : <small>empty</small>))}
+                        : <small>empty</small>)({ section: {
+                            tasks: {
+                                length: section.key("tasks", "length")
+                            },
+                            title: section.key("title")
+                        } }))}
               </section>);
             }, {
                 type: "object",
