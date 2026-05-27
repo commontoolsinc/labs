@@ -79,9 +79,9 @@ export default pattern(() => {
     if (first) poll.removeOption.send({ optionId: first.id });
   });
 
-  // logVisit with no target logs the current winner (top choice by tally).
-  const action_log_winner = action(() => {
-    poll.logVisit.send({});
+  // Log a specific place by title (defaults wentAt to today).
+  const action_log_thai = action(() => {
+    poll.logVisit.send({ title: "Thai Kitchen" });
   });
 
   // Backdated visits — fixed past timestamp so assertions are deterministic.
@@ -171,7 +171,7 @@ export default pattern(() => {
   // has the sole vote, so it's the top choice. Attributed to the host. If the
   // pre-join attempt ("Sneaky") had not been gated, history[0] would be
   // "Sneaky" — so this implicitly verifies the host gate too.
-  const assert_winner_logged = computed(() =>
+  const assert_thai_logged = computed(() =>
     poll.history.length === 1 &&
     poll.history[0]?.title === "Thai Kitchen" &&
     poll.history[0]?.loggedByName === "Alex"
@@ -252,10 +252,9 @@ export default pattern(() => {
 
       // "We went here" history. The pre-join attempt above ("Sneaky") must
       // have left no trace.
-      // Vote for the surviving option, then log the winner via logVisit({}).
-      { action: action_vote_green_first },
-      { action: action_log_winner },
-      { assertion: assert_winner_logged },
+      // Log the surviving option by title → one entry, attributed to host.
+      { action: action_log_thai },
+      { assertion: assert_thai_logged },
       // A second, backdated, explicit log → two entries (proves backdating).
       { action: action_log_visit_chipotle_backdated },
       { assertion: assert_two_history },

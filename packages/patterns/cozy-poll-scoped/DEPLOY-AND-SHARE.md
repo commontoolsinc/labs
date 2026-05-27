@@ -9,7 +9,10 @@ piece." This doc covers both, plus the identity caveat that bites first.
 
 ## The canonical piece
 
-There is one shared instance everyone should iterate on:
+There is one shared instance everyone should iterate on. **These values are a
+deployment pointer, not a stable identifier — current as of 2026-05-26.** A
+piece is tied to one space/server and can be reset; if it 404s or `inspect`
+fails, re-establish it (see "Re-establishing" below) and update this block.
 
 ```
 space:  lunch-2026-05-26
@@ -17,15 +20,13 @@ piece:  fid1:nye-cJnJnU5OQIPiVXzvAoq_YeU5pZARxyXp-9-JCZg
 url:    https://toolshed.saga-castor.ts.net/lunch-2026-05-26/fid1:nye-cJnJnU5OQIPiVXzvAoq_YeU5pZARxyXp-9-JCZg
 ```
 
-(If this piece is ever lost — e.g. the space is reset — re-establish it with a
-single `cf piece new` and update the ID here. See "Re-establishing" below.)
-
-Set these once so you don't repeat flags:
+Set these once so you don't repeat flags (substitute your own identity key
+path and the current piece/space):
 
 ```bash
 export CF_API_URL=https://toolshed.saga-castor.ts.net/
-export CF_IDENTITY="$HOME/.config/commonfabric/identity.key"   # your key
-PIECE=fid1:nye-cJnJnU5OQIPiVXzvAoq_YeU5pZARxyXp-9-JCZg
+export CF_IDENTITY=/path/to/your-identity.key   # e.g. ~/.config/commonfabric/identity.key
+PIECE=fid1:nye-cJnJnU5OQIPiVXzvAoq_YeU5pZARxyXp-9-JCZg   # current as of 2026-05-26
 SPACE=lunch-2026-05-26
 ```
 

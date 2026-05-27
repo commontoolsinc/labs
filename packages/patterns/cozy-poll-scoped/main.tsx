@@ -19,11 +19,11 @@
  * "We went here" history (Lunch Coordinator roadmap #1): the host logs where
  * the group actually ate via each option's "we went here" button. A host date
  * field backdates the next log (blank = today; `logVisit` also takes an
- * explicit `wentAt`, and `logVisit({})` with no target tallies the current
- * winner — an API path with no button). Each entry is a per-space `HistoryEntry`
- * (place + date). The log shows as a "Recently eaten" list below the options
- * (8 most recent); the host can delete a single mistaken entry
- * (`removeHistoryEntry`) or clear the whole log. See `LUNCH-COORDINATOR-TODO.md`.
+ * explicit `wentAt`). Each entry is a per-space `HistoryEntry` (place + date);
+ * the stored log is capped at the MAX_HISTORY most recent. The log shows as a
+ * "Recently eaten" list below the options (8 most recent); the host can delete
+ * a single mistaken entry (`removeHistoryEntry`) or clear the whole log.
+ * See `LUNCH-COORDINATOR-TODO.md`.
  */
 
 import {
@@ -188,6 +188,10 @@ const DAY_NAMES = [
   "Saturday",
 ];
 
+// Cap on the stored visit log so a long-lived poll's PerSpace array can't grow
+// without bound. The "Recently eaten" card shows fewer (the 8 most recent).
+const MAX_HISTORY = 50;
+
 const newHistoryId = () =>
   `h_${safeDateNow().toString(36)}_${
     Math.floor(nonPrivateRandom() * 1e6).toString(36)
@@ -345,12 +349,11 @@ const logVisit = handler<LogVisitEvent, {
   options: OptionsCell;
   myName: NameCell;
   adminName: NameCell;
-  votes: VotesCell;
   visitDate: NameCell;
 }>(
   (
     { optionId, title, wentAt },
-    { history, options, myName, adminName, votes, visitDate },
+    { history, options, myName, adminName, visitDate },
   ) => {
     const me = trimmedName(myName.get());
     const admin = trimmedName(adminName.get());
@@ -360,24 +363,23 @@ const logVisit = handler<LogVisitEvent, {
       const opt = options.get().find((o) => o.id === optionId);
       place = opt ? trimmedName(opt.title) : "";
     }
-    // No explicit target → log the current winner (top choice by tally).
-    if (!place && !optionId) {
-      const currentVotes = votes.get();
-      if (currentVotes.length > 0) {
-        const winner = tallyOptions(options.get(), currentVotes, [])[0];
-        place = winner ? trimmedName(winner.option.title) : "";
-      }
-    }
     if (!place) return;
     const when = typeof wentAt === "number"
       ? wentAt
       : parseVisitDate(visitDate.get());
-    history.push({
+    const entry: HistoryEntry = {
       id: newHistoryId(),
       title: place,
       loggedByName: me,
       wentAt: when,
-    });
+    };
+    // Cap the stored log at the MAX_HISTORY most recent visits (by date).
+    const next = [...history.get(), entry];
+    history.set(
+      next.length > MAX_HISTORY
+        ? [...next].sort((a, b) => b.wentAt - a.wentAt).slice(0, MAX_HISTORY)
+        : next,
+    );
     // Reset the date draft so the next log defaults back to today.
     visitDate.set("");
   },
@@ -542,7 +544,6 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       options,
       myName,
       adminName,
-      votes,
       visitDate,
     });
     const boundRemoveHistoryEntry = removeHistoryEntry({
@@ -1508,6 +1509,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                           type="date"
                           $value={visitDate}
                           aria-label="Visit date (blank = today)"
+                          timing-strategy="immediate"
                         />
                         <span style={{ color: "#64748b" }}>(blank = today)</span>
                       </div>

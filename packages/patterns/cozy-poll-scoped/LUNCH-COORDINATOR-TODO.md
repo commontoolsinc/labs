@@ -17,10 +17,8 @@ nobody suggests the same place three days running.
 
 - ✅ `history: PerSpace<HistoryEntry[]>` (`{ id, title, loggedByName, wentAt }`),
   appended via a host-only `logVisit` handler. Each option has a "✓ we went
-  here" button that logs that place. `logVisit({})` with no target tallies the
-  winner from the votes — kept as an API path, no button (a Host-controls
-  "log winner" button was tried and removed as redundant with the per-option
-  buttons).
+  here" button that logs that place. The stored log is capped at the 50 most
+  recent visits so the PerSpace array can't grow without bound.
 - ✅ **Backdating:** a host "Log 'we went here' as of:" date field (blank =
   today) backdates the entry; `logVisit` also accepts an explicit `wentAt`. The
   date draft clears after each log so it defaults back to today.
