@@ -325,13 +325,11 @@ Add these explicit profile targets:
 ```tsx
 wish({ query: "#profile" })            // homeDefault.profile
 wish({ query: "#profileSpace" })       // the profile space cell, derived from the profile link
-wish({ query: "#profileDefault" })     // homeDefault.profile
 wish({ query: "#profileName" })        // homeDefault.profile.name
 wish({ query: "#profileAvatar" })      // homeDefault.profile.avatar
 ```
 
-The optional `[UI]` for `wish({ query: "#profile" })` and
-`wish({ query: "#profileDefault" })` is persona-aware:
+The optional `[UI]` for `wish({ query: "#profile" })` is persona-aware:
 
 - when the profile exists, render a link to the profile default pattern
 - when the profile is missing, render the same profile-name input as the home
@@ -423,8 +421,8 @@ Add focused runner tests for `wish()`:
 5. Update the home pattern to render missing and linked profile states.
 6. Update `WishParams.scope`, `wish()` parsing, and hashtag search for
    `"profile"`.
-7. Add explicit profile well-known targets: `#profileSpace`,
-   `#profileDefault`, `#profileName`, and `#profileAvatar`.
+7. Add explicit profile well-known targets: `#profileSpace`, `#profileName`,
+   and `#profileAvatar`.
 8. Add runner tests for wish behavior.
 9. Add the browser integration test and demo pattern.
 10. Update `docs/common/conventions/wish.md` and
