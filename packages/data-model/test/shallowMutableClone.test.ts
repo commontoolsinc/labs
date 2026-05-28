@@ -50,7 +50,7 @@ describe("shallowMutableClone", () => {
     expect(out).not.toBe(input);
   });
 
-  it("preserves a FabricInstance class and content (not a husk)", () => {
+  it("preserves a `FabricInstance` class and content (not a husk)", () => {
     const native = new Error("boom");
     (native as unknown as Record<string, unknown>).code = "E42";
     const input = deepFreeze(FabricError.fromNativeError(native));
@@ -62,7 +62,7 @@ describe("shallowMutableClone", () => {
     expect(out.message).toBe("boom");
   });
 
-  it("preserves getter-backed FabricPrimitives by identity-passthrough", () => {
+  it("preserves getter-backed `FabricPrimitive`s by identity-passthrough", () => {
     const hash = FabricHash.fromString("sha256:abcd");
     const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
 
@@ -76,7 +76,7 @@ describe("shallowMutableClone", () => {
     expect(outBytes.length).toBe(3);
   });
 
-  it("matches the equivalent cloneIfNecessary options", () => {
+  it("matches the equivalent `cloneIfNecessary()` options", () => {
     const input = deepFreeze({ a: { b: 1 } });
     const viaWrapper = shallowMutableClone(input) as Record<string, unknown>;
     const viaOptions = cloneIfNecessary(input, {
