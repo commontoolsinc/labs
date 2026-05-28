@@ -1042,11 +1042,9 @@ const GmailAgenticSearch = pattern<
     const itemFoundSignal = itemFoundSignalInput;
     // Track last signal value in a Cell (closure vars don't persist in derive)
     const lastSignalValueCell = new Writable<number>(0);
-    // Track last executed query ID in a Cell (so derive can access it)
+    // Track last executed query ID in a Cell
     const lastExecutedQueryIdCell = new Writable<string | null>(null);
     // Track foundItems counts separately from localQueries
-    // Local cells work correctly in derives (no closure issues with input cells)
-    // See: community-docs/superstitions/2025-12-08-locally-created-cells-not-unwrapped-in-derive.md
     const foundItemsTracker = new Writable<Record<string, number>>({});
 
     // Watch the signal and update foundItemsTracker when it increases.
@@ -1131,12 +1129,12 @@ const GmailAgenticSearch = pattern<
     // other pieces to trigger token refresh in google-auth's transaction context.
     //
     // KEY INSIGHT (from Berni, verified 2024-12-10):
-    // - Streams from wished pieces appear as opaque objects with `$stream` marker at derive time
+    // - Streams from wished pieces appear as opaque objects with `$stream` marker at build time
     // - To call .send(), you must pass the stream to a handler with `Stream<T>` in its type signature
     // - The framework "unwraps" the opaque stream into a callable one inside the handler
     //
     // PATTERN:
-    // 1. Extract stream via derive (will be opaque)
+    // 1. Extract stream via a plain projection (will be opaque)
     // 2. Pass to handler with Stream<T> declared in signature
     // 3. Call .send() inside handler
     //
@@ -1519,7 +1517,7 @@ When you're done searching, STOP calling tools and produce your final structured
         {/* Account Type Selector (only shown if not using direct auth) */}
         {hasDirectAuth ? null : accountTypeSelector}
 
-        {/* Auth Status - use nested ifElse to avoid Cell-in-Cell problem */}
+        {/* Auth Status - nested ternaries to avoid the Cell-in-Cell problem */}
         {
           /* Only show custom error UIs for specific warning states;
             authFullUI handles everything else (not-auth, selecting, ready) */
