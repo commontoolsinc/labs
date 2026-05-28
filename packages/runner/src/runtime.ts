@@ -12,6 +12,7 @@ import type {
   NodeFactory,
   Pattern,
   Schema,
+  Stream,
 } from "./builder/types.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import {
@@ -255,12 +256,69 @@ export const spaceCellSchema = internSchema(
         },
         asCell: ["cell"],
       },
+      profileSpace: {
+        type: "object",
+        properties: {
+          defaultPattern: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              avatar: { type: "string" },
+              elements: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    cell: { asCell: ["cell"] },
+                    tag: { type: "string" },
+                    userTags: {
+                      type: "array",
+                      items: { type: "string" },
+                    },
+                    title: { type: "string" },
+                    source: { type: "string" },
+                  },
+                },
+              },
+              addElement: { asCell: ["stream"] },
+              removeElement: { asCell: ["stream"] },
+            },
+            asCell: ["cell"],
+          },
+        },
+        asCell: ["cell"],
+      },
     },
   },
 );
 
+export type ProfileElement = {
+  cell: Cell<unknown>;
+  tag: string;
+  userTags: string[];
+  title?: string;
+  source?: "catalog" | "url";
+};
+
+export type AddProfileElementEvent =
+  | { catalogId: string }
+  | { patternUrl: string; title?: string; tag?: string };
+
+export type ProfileDefaultPattern = {
+  name: string;
+  avatar: string;
+  elements: ProfileElement[];
+  addElement: Stream<AddProfileElementEvent>;
+  removeElement: Stream<{ cell: Cell<unknown> }>;
+};
+
+export interface ProfileSpaceCell {
+  defaultPattern: Cell<ProfileDefaultPattern>;
+}
+
 export interface SpaceCellContents {
   defaultPattern: Cell<unknown>;
+  profileSpace?: Cell<ProfileSpaceCell>;
 }
 
 /**

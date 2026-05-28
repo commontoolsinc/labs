@@ -66,3 +66,41 @@ made before committing.
 
 - The spec said a profile schema factory may be needed. Implementation confirms
   that need and uses `ifc.ownerPrincipal` as the internal policy marker.
+
+## Slice 3: Profile Schemas and Default-Pattern Controller
+
+### Ambiguity or Incorrect Spec
+
+- The plan named `ensureProfileDefaultPattern(profileSpaceDID)`, but the
+  existing `PiecesController` is already bound to a single `PieceManager` and
+  space. Passing a DID into that controller would fight the local shape of the
+  API.
+- The profile default pattern file does not exist yet in this slice. The
+  controller can still be tested by mocking pattern fetches and proving URL
+  selection.
+
+### Decision
+
+- Added `deriveProfileSpaceDID(identity)` in `packages/piece/src/profile-space.ts`
+  using the stable derivation name `common-fabric-profile`.
+- Added `ensureProfileDefaultPattern()` on the current-space
+  `PiecesController`. Callers create a `PieceManager` for the derived profile
+  DID, then call this explicit method.
+- Left `ensureDefaultPattern()` behavior unchanged for home and ordinary spaces.
+- Added `profileSpace` to `spaceCellSchema` and exported profile data types from
+  the runner runtime surface.
+
+### Tests Added
+
+- `packages/piece/test/profile-default-pattern.test.ts`
+  - Profile spaces fetch `/api/patterns/system/profile-home.tsx` via
+    `ensureProfileDefaultPattern()`.
+  - Ordinary spaces still fetch `/api/patterns/system/default-app.tsx`.
+  - Home spaces still fetch `/api/patterns/system/home.tsx`.
+- `packages/runner/test/space-cell.test.ts`
+  - The default space-cell schema exposes `profileSpace` as a cell-valued field.
+
+### Spec Correction Needed
+
+- The implementation uses `ensureProfileDefaultPattern()` on a profile-space
+  manager rather than passing a profile DID into a controller for another space.
