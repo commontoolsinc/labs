@@ -1,5 +1,6 @@
 import {
   action,
+  type AddIntegrity,
   computed,
   Default,
   generateObject,
@@ -9,12 +10,20 @@ import {
   nonPrivateRandom,
   pattern,
   type PerSpace,
+  type PerUser,
+  type RequiresIntegrity,
   safeDateNow,
   Stream,
   UI,
   type VNode,
   Writable,
 } from "commonfabric";
+import {
+  type AdminManagerCredential,
+  adminManagerCredentialIsActive,
+  adminRegistryEntries,
+  type EmptyAdminRegistryValue,
+} from "../../cfc/admin/mod.ts";
 import { normalizePlateId, US_STATES } from "../../vehicles.ts";
 
 // ============================================================
@@ -113,6 +122,49 @@ interface PersonWithVehicles {
 type PeopleCell = Writable<PersonWithVehicles[] | Default<[]>>;
 
 // ============================================================
+// Admin Types (DESIGN §6) — mirror parking-coordinator
+// ============================================================
+
+export const LOT_WATCH_ADMIN_INTEGRITY = "lot-watch-admin" as const;
+export const LOT_WATCH_ADMIN_MANAGER_INTEGRITY =
+  "lot-watch-admin-manager" as const;
+
+export interface LotWatchAdminSubject {
+  personName: string;
+}
+
+export interface LotWatchAdminRoleAssignment {
+  subject: LotWatchAdminSubject;
+  displayName: string;
+}
+
+export type LotWatchAdminRole = AddIntegrity<
+  LotWatchAdminRoleAssignment,
+  readonly [typeof LOT_WATCH_ADMIN_INTEGRITY]
+>;
+
+export type LotWatchAdminManagerCredential = AdminManagerCredential<
+  typeof LOT_WATCH_ADMIN_MANAGER_INTEGRITY
+>;
+
+export type LotWatchAdminList = RequiresIntegrity<
+  LotWatchAdminRole[],
+  readonly [typeof LOT_WATCH_ADMIN_MANAGER_INTEGRITY]
+>;
+
+export interface LotWatchAdminRegistryStoredValue {
+  admins?: LotWatchAdminList;
+}
+
+export type LotWatchAdminRegistryValue =
+  | LotWatchAdminRegistryStoredValue
+  | Default<EmptyAdminRegistryValue>;
+export type LotWatchAdminRegistryCell = Writable<LotWatchAdminRegistryValue>;
+export type LotWatchAdminManagerCredentialCell = Writable<
+  LotWatchAdminManagerCredential | null
+>;
+
+// ============================================================
 // Pattern I/O (DESIGN §12, trimmed to Phase 1)
 // ============================================================
 
@@ -123,7 +175,9 @@ export interface LotWatchInput {
   people?: PerSpace<PeopleCell>;
   // Phase 3b: guest/offender registries
   knownVehicles?: PerSpace<KnownVehiclesCell>;
-  // Phase 3c: adminRegistry?: PerSpace<...>;  — admin gating
+  // Phase 3c: admin gating (DESIGN §6)
+  adminRegistry?: PerSpace<LotWatchAdminRegistryCell>;
+  adminManagerCredential?: PerUser<LotWatchAdminManagerCredentialCell>;
 }
 
 export interface LotWatchOutput {
@@ -141,7 +195,7 @@ export interface LotWatchOutput {
     notes: string;
   }>;
   deleteSighting: Stream<{ id: string }>;
-  selectTab: Stream<{ tab: "capture" | "sightings" }>;
+  selectTab: Stream<{ tab: "capture" | "sightings" | "report" }>;
   markVehicle: Stream<{
     plateNumber: string;
     plateState: string;
@@ -157,6 +211,9 @@ export interface LotWatchOutput {
   openGuest: Stream<{ id: string }>;
   cancelGuest: Stream<void>;
   saveGuest: Stream<void>;
+  enableAdminManager: Stream<void>;
+  togglePersonAdmin: Stream<{ name: string }>;
+  toggleAdminMode: Stream<void>;
 }
 
 // ============================================================
@@ -275,12 +332,13 @@ const groupSightingsByPlate = (all: readonly Sighting[]): PlateGroup[] => {
   for (const s of all) {
     if (!s.plateNumber) continue;
     const key = plateKey(s.plateNumber, s.plateState);
+    const ts = Number(s.capturedAt); // coerce proxy → plain number
     const g = map.get(key);
     if (g) {
       g.count += 1;
       if (!g.spots.includes(s.spotNumber)) g.spots.push(s.spotNumber);
-      g.firstSeen = Math.min(g.firstSeen, s.capturedAt);
-      g.lastSeen = Math.max(g.lastSeen, s.capturedAt);
+      g.firstSeen = Math.min(g.firstSeen, ts);
+      g.lastSeen = Math.max(g.lastSeen, ts);
       if (!g.description && s.description) g.description = s.description;
     } else {
       map.set(key, {
@@ -289,8 +347,8 @@ const groupSightingsByPlate = (all: readonly Sighting[]): PlateGroup[] => {
         description: s.description,
         count: 1,
         spots: [s.spotNumber],
-        firstSeen: s.capturedAt,
-        lastSeen: s.capturedAt,
+        firstSeen: ts,
+        lastSeen: ts,
         isRepeat: false,
       });
     }
@@ -308,6 +366,59 @@ const fmtWhen = (ts: number): string => {
   return `${
     d.toLocaleDateString("en-US", { month: "short", day: "numeric" })
   } ${d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
+};
+
+// ============================================================
+// Admin helpers (DESIGN §6) — module-scope pure functions, mirror coordinator
+// ============================================================
+
+const lotWatchAdminSubject = (personName: string): LotWatchAdminSubject => ({
+  personName,
+});
+
+const lotWatchAdminRolesValue = (
+  registry: LotWatchAdminRegistryCell,
+): LotWatchAdminRole[] =>
+  adminRegistryEntries<LotWatchAdminRole>(registry);
+
+const personIsLotWatchAdmin = (
+  registry: LotWatchAdminRegistryCell,
+  personName: string | undefined,
+): boolean => {
+  const trimmed = (personName ?? "").trim();
+  if (!trimmed) return false;
+  return lotWatchAdminRolesValue(registry).some(
+    (role) => role.subject.personName === trimmed,
+  );
+};
+
+const currentUserCanManageLotWatchAdmins = (
+  credential: LotWatchAdminManagerCredentialCell,
+): boolean => adminManagerCredentialIsActive(credential.get());
+
+const prepareLotWatchAdminToggle = (
+  credential: LotWatchAdminManagerCredential | null | undefined,
+  registry: LotWatchAdminRegistryCell,
+  rawName: string,
+): LotWatchAdminRole[] | null => {
+  const personName = rawName.trim();
+  if (!adminManagerCredentialIsActive(credential) || personName === "") {
+    return null;
+  }
+  const adminRoles = lotWatchAdminRolesValue(registry);
+  const nextRoles = adminRoles.filter(
+    (role) => role.subject.personName !== personName,
+  );
+  if (nextRoles.length !== adminRoles.length) {
+    return nextRoles;
+  }
+  return [
+    ...nextRoles,
+    {
+      subject: lotWatchAdminSubject(personName),
+      displayName: personName,
+    } as LotWatchAdminRole,
+  ];
 };
 
 // ============================================================
@@ -331,6 +442,7 @@ export default pattern<LotWatchInput, LotWatchOutput>(
     sightings: inputSightings,
     people: inputPeople,
     knownVehicles: inputKnownVehicles,
+    adminRegistry: inputAdminRegistry,
   }) => {
     // ---- Cells (DESIGN §5) ----
 
@@ -348,13 +460,30 @@ export default pattern<LotWatchInput, LotWatchOutput>(
     const people = inputPeople ??
       Writable.perSpace.of<PersonWithVehicles[]>([]);
 
+    // DESIGN §6: admin registry + manager credential (mirror coordinator)
+    const defaultAdminRegistry = new Writable.perSpace<LotWatchAdminRegistryValue>(
+      {} as LotWatchAdminRegistryValue,
+    );
+    const adminRegistry =
+      (inputAdminRegistry ?? defaultAdminRegistry) as LotWatchAdminRegistryCell;
+    const adminManagerCredential = new Writable.perUser<
+      LotWatchAdminManagerCredential | null
+    >(null);
+
     // PerUser: who is reporting
     const reporterName = new Writable.perUser("");
 
     // PerSession: tab navigation
-    const selectedTab = new Writable.perSession<"capture" | "sightings">(
-      "capture",
-    );
+    const selectedTab = new Writable.perSession<
+      "capture" | "sightings" | "report"
+    >("capture");
+
+    // PerSession: admin mode toggle (only active admins can enable)
+    const adminMode = new Writable.perSession(false);
+
+    // PerSession: report tab filters
+    const reportFilterSpot = new Writable.perSession<string>("");
+    const reportFilterClassification = new Writable.perSession<string>("");
 
     // PerSession: capture draft fields
     const draftSpot = new Writable.perSession("");
@@ -432,8 +561,39 @@ export default pattern<LotWatchInput, LotWatchOutput>(
 
     // ---- Actions ----
 
-    const selectTab = action<{ tab: "capture" | "sightings" }>(({ tab }) => {
-      selectedTab.set(tab);
+    const selectTab = action<{ tab: "capture" | "sightings" | "report" }>(
+      ({ tab }) => {
+        selectedTab.set(tab);
+      },
+    );
+
+    // DESIGN §6: admin actions — mirror coordinator exactly
+    const enableAdminManager = action(() => {
+      adminManagerCredential.set({
+        canManageAdmins: true,
+      } as LotWatchAdminManagerCredential);
+    });
+
+    const togglePersonAdmin = action<{ name: string }>(({ name }) => {
+      const nextAdmins = prepareLotWatchAdminToggle(
+        adminManagerCredential.get(),
+        adminRegistry,
+        name,
+      );
+      if (nextAdmins === null) return;
+      adminRegistry.set({ admins: nextAdmins as LotWatchAdminList });
+    });
+
+    const toggleAdminMode = action(() => {
+      const isAdmin = personIsLotWatchAdmin(
+        adminRegistry,
+        reporterName.get() || "",
+      );
+      if (!isAdmin) {
+        adminMode.set(false);
+        return;
+      }
+      adminMode.set(!adminMode.get());
     });
 
     // Spot selection — cell mutations must go through an action(), not a bare
@@ -514,11 +674,19 @@ export default pattern<LotWatchInput, LotWatchOutput>(
     });
 
     const deleteSighting = action<{ id: string }>(({ id }) => {
+      // Admin-gated: only active admins may delete sightings
+      if (!personIsLotWatchAdmin(adminRegistry, reporterName.get() || "")) {
+        return;
+      }
       sightings.set((sightings.get() ?? []).filter((s) => s.id !== id));
       deleteConfirmTarget.set(null);
     });
 
     const initiateDelete = action<{ id: string }>(({ id }) => {
+      // Admin-gated: only show confirm dialog to active admins
+      if (!personIsLotWatchAdmin(adminRegistry, reporterName.get() || "")) {
+        return;
+      }
       deleteConfirmTarget.set(id);
     });
 
@@ -541,7 +709,11 @@ export default pattern<LotWatchInput, LotWatchOutput>(
 
     // Reads assignTarget + assignPersonName from cells (safe inside action).
     // Writes a coordinator-shaped Vehicle into that person's vehicles array.
+    // Admin-gated: only active admins may assign vehicles to people.
     const assignToPerson = action(() => {
+      if (!personIsLotWatchAdmin(adminRegistry, reporterName.get() || "")) {
+        return;
+      }
       const targetId = assignTarget.get();
       const personName = assignPersonName.get() ?? "";
       if (!targetId || !personName) return;
@@ -604,6 +776,10 @@ export default pattern<LotWatchInput, LotWatchOutput>(
 
     // Reads guestTarget (sighting id) + guestName from cells; writes to registry.
     const saveGuest = action(() => {
+      // Admin-gated: only active admins may curate guests
+      if (!personIsLotWatchAdmin(adminRegistry, reporterName.get() || "")) {
+        return;
+      }
       const targetId = guestTarget.get();
       if (!targetId) return;
 
@@ -654,7 +830,7 @@ export default pattern<LotWatchInput, LotWatchOutput>(
     });
 
     // Phase 3b: curation actions — add/update a plate in the known registry.
-    // Phase 3c: admin-gate these writes before exposing to non-admin users.
+    // Admin-gated: only active admins may curate the registry.
     const markVehicle = action<{
       plateNumber: string;
       plateState: string;
@@ -663,6 +839,9 @@ export default pattern<LotWatchInput, LotWatchOutput>(
       label?: string;
       name?: string;
     }>(({ plateNumber, plateState, category, org, label, name }) => {
+      if (!personIsLotWatchAdmin(adminRegistry, reporterName.get() || "")) {
+        return;
+      }
       const normPlate = normalizePlateId(plateNumber);
       const normState = plateState.toUpperCase().trim().slice(0, 2);
       const entry: KnownVehicle = {
@@ -703,6 +882,9 @@ export default pattern<LotWatchInput, LotWatchOutput>(
       plateNumber: string;
       plateState: string;
     }>(({ plateNumber, plateState }) => {
+      if (!personIsLotWatchAdmin(adminRegistry, reporterName.get() || "")) {
+        return;
+      }
       const normPlate = normalizePlateId(plateNumber);
       const normState = plateState.toUpperCase().trim();
       knownVehicles.set(
@@ -749,6 +931,13 @@ export default pattern<LotWatchInput, LotWatchOutput>(
       );
       const knownList = knownVehicles.get() ?? [];
 
+      // GOTCHA §1: read adminMode + reporterName HERE at the top of this
+      // computed and bake plain booleans per row. Do NOT read perSession cells
+      // in a computed() nested inside the .map() below — it silently never
+      // re-renders.
+      const isAdminValue = adminMode.get() &&
+        personIsLotWatchAdmin(adminRegistry, reporterName.get() || "");
+
       // Per-row inline-open state. We read the perSession "which row's form is
       // open" cells HERE, at the top of this computed, and emit a plain boolean
       // per row. Defining a `computed()` *inside* the `.map()` below that reads
@@ -764,7 +953,7 @@ export default pattern<LotWatchInput, LotWatchOutput>(
           .map((g) => plateKey(g.plate, g.state)),
       );
       return all.map((s) => {
-        const date = new Date(s.capturedAt);
+        const date = new Date(s.capturedAt); // capturedAt is a plain number stored in perSpace
         const dateStr = date.toLocaleDateString("en-US", {
           month: "short",
           day: "numeric",
@@ -828,6 +1017,7 @@ export default pattern<LotWatchInput, LotWatchOutput>(
             : false,
           canMark,
           canAssign,
+          canCurate: isAdminValue, // baked boolean — GOTCHA §1
           knownTag,
           isConfirmOpen: confirmId === s.id,
           isGuestOpen: guestId === s.id,
@@ -876,6 +1066,192 @@ export default pattern<LotWatchInput, LotWatchOutput>(
       (selectedTab.get() ?? "capture") === "capture"
     );
     const isSightingsTab = computed(() => selectedTab.get() === "sightings");
+    const isReportTab = computed(() => selectedTab.get() === "report");
+
+    // DESIGN §6: admin-mode computeds (mirror coordinator pattern)
+    const currentPersonIsAdmin = computed(() =>
+      personIsLotWatchAdmin(adminRegistry, reporterName.get() || "")
+    );
+    const adminModeEnabled = computed(() =>
+      adminMode.get() && personIsLotWatchAdmin(adminRegistry, reporterName.get() || "")
+    );
+    const currentUserCanManageAdmins = computed(() =>
+      currentUserCanManageLotWatchAdmins(adminManagerCredential)
+    );
+
+    // Admin access rows: one per person-name-like entry.
+    // Lot Watch doesn't own a `people` list, so we use the shared people cell
+    // (may be empty standalone). We read canManageAdmins here (top-level) and
+    // bake it per row so no perSession read leaks into a nested computed.
+    const adminAccessRows = computed(() => {
+      const canManage = currentUserCanManageLotWatchAdmins(adminManagerCredential);
+      return (people.get() ?? []).map((p) => ({
+        name: p.name,
+        isAdmin: personIsLotWatchAdmin(adminRegistry, p.name),
+        canManageAdmins: canManage,
+      }));
+    });
+
+    // Reporter admin info — baked boolean so no computed-in-computed JSX needed.
+    // Avoids the "handler used as lift" error from onClick inside computed() JSX.
+    const reporterAdminInfo = computed(() => {
+      const name = reporterName.get() ?? "";
+      const canManage = currentUserCanManageLotWatchAdmins(adminManagerCredential);
+      if (!name.trim() || !canManage) return null;
+      return {
+        name,
+        isAdmin: personIsLotWatchAdmin(adminRegistry, name),
+      };
+    });
+
+    // DESIGN §10: Report tab computeds — all over PerSpace sightings (guard ?? [])
+    // Spot occupancy frequency
+    const spotOccupancy = computed(() => {
+      const all = sightings.get() ?? [];
+      const ourVehicles = (people.get() ?? []).flatMap((p) => p.vehicles ?? []);
+      const knownList = knownVehicles.get() ?? [];
+      const spotNums = ["1", "5", "12", "13"];
+      return spotNums.map((spotNum) => {
+        const forSpot = all.filter((s) => s.spotNumber === spotNum);
+        const nonOurs = forSpot.filter((s) => {
+          const cls = classifyPlate(
+            s.plateNumber,
+            s.plateState,
+            ourVehicles,
+            knownList,
+          );
+          return cls !== "ours";
+        });
+        return {
+          spotNum,
+          total: forSpot.length,
+          nonOursCount: nonOurs.length,
+        };
+      });
+    });
+
+    // Repeat-offender leaderboard: offender-classified plates ranked by count,
+    // plus frequent unknowns (seen 3+ times)
+    const offenderLeaderboard = computed(() => {
+      const all = sightings.get() ?? [];
+      const ourVehicles = (people.get() ?? []).flatMap((p) => p.vehicles ?? []);
+      const knownList = knownVehicles.get() ?? [];
+      const groups = groupSightingsByPlate(all);
+      return groups
+        .filter((g) => {
+          // Find the classification of this plate group
+          if (!g.plate) return false;
+          const cls = classifyPlate(g.plate, g.state, ourVehicles, knownList);
+          // Include offenders + frequent unknowns (3+ sightings)
+          return cls === "offender" || (cls === "unknown" && g.count >= 3);
+        })
+        .map((g) => {
+          const cls = classifyPlate(g.plate, g.state, ourVehicles, knownList);
+          // Find org/name from registry for offenders
+          let org = "";
+          if (cls === "offender") {
+            const normP = normalizePlateId(g.plate);
+            const normS = g.state.toUpperCase().trim();
+            for (const kv of knownList) {
+              if (
+                normalizePlateId(kv.plateNumber) === normP &&
+                kv.plateState.toUpperCase().trim() === normS
+              ) {
+                org = kv.org ?? "";
+                break;
+              }
+            }
+          }
+          return {
+            plate: g.plate,
+            state: g.state,
+            description: g.description,
+            count: g.count,
+            spotsLabel: g.spots.map((n) => "#" + n).join(", "),
+            lastSeen: fmtWhen(g.lastSeen),
+            cls,
+            org,
+          };
+        })
+        .sort((a, b) => b.count - a.count);
+    });
+
+    // Recent activity feed — reverse-chron with filters applied
+    const recentActivity = computed(() => {
+      const all = sightings.get() ?? [];
+      const ourVehicles = (people.get() ?? []).flatMap((p) => p.vehicles ?? []);
+      const knownList = knownVehicles.get() ?? [];
+      const filterSpot = reportFilterSpot.get() ?? "";
+      const filterCls = reportFilterClassification.get() ?? "";
+
+      return all
+        .map((s) => {
+          const cls = classifyPlate(
+            s.plateNumber,
+            s.plateState,
+            ourVehicles,
+            knownList,
+          );
+          const capturedAtMs = Number(s.capturedAt);
+          return {
+            id: s.id,
+            spotNumber: s.spotNumber,
+            imgSrc: s.image?.url ?? "",
+            reportedBy: s.reportedBy,
+            when: fmtWhen(capturedAtMs),
+            capturedAt: capturedAtMs,
+            cls,
+            clsColor: classificationColor(cls),
+            clsBg: classificationBg(cls),
+            plateDisplay: s.plateNumber
+              ? `${s.plateNumber}${s.plateState ? " (" + s.plateState + ")" : ""}`
+              : "",
+            description: s.description,
+          };
+        })
+        .filter((r) => {
+          if (filterSpot && r.spotNumber !== filterSpot) return false;
+          if (filterCls && r.cls !== filterCls) return false;
+          return true;
+        })
+        .sort((a, b) => b.capturedAt - a.capturedAt);
+    });
+
+    // Boolean gates for report tab empty states
+    const noRecentActivity = computed(() => {
+      const all = sightings.get() ?? [];
+      const filterSpot = reportFilterSpot.get() ?? "";
+      const filterCls = reportFilterClassification.get() ?? "";
+      const ourVehicles = (people.get() ?? []).flatMap((p) => p.vehicles ?? []);
+      const knownList = knownVehicles.get() ?? [];
+      if (all.length === 0) return true;
+      for (const s of all) {
+        if (filterSpot && s.spotNumber !== filterSpot) continue;
+        if (filterCls) {
+          const cls = classifyPlate(s.plateNumber, s.plateState, ourVehicles, knownList);
+          if (cls !== filterCls) continue;
+        }
+        return false; // found at least one match
+      }
+      return true;
+    });
+
+    // Filter options for report tab
+    const reportSpotOptions = computed(() => {
+      const all = sightings.get() ?? [];
+      const usedSpots = [...new Set(all.map((s) => s.spotNumber))].sort();
+      return [
+        { label: "All spots", value: "" },
+        ...usedSpots.map((s) => ({ label: `Spot #${s}`, value: s })),
+      ];
+    });
+    const reportClsOptions = [
+      { label: "All classifications", value: "" },
+      { label: "Ours", value: "ours" },
+      { label: "Guest", value: "guest" },
+      { label: "Offender", value: "offender" },
+      { label: "Unknown", value: "unknown" },
+    ];
 
     // State select items
     const stateSelectItems = US_STATES.map((s) => ({ label: s, value: s }));
@@ -898,7 +1274,19 @@ export default pattern<LotWatchInput, LotWatchOutput>(
             slot="header"
             style="padding: 0.75rem 1rem; display: flex; flex-direction: column; gap: 0.5rem; border-bottom: 1px solid var(--cf-color-gray-200);"
           >
-            <cf-heading level={4}>Lot Watch</cf-heading>
+            <cf-hstack justify="between" align="center">
+              <cf-heading level={4}>Lot Watch</cf-heading>
+              <cf-hstack gap="1" align="center">
+                <cf-button
+                  variant={adminModeEnabled ? "primary" : "secondary"}
+                  size="sm"
+                  disabled={!currentPersonIsAdmin}
+                  onClick={() => toggleAdminMode.send()}
+                >
+                  {adminModeEnabled ? "Admin: ON" : "Admin: OFF"}
+                </cf-button>
+              </cf-hstack>
+            </cf-hstack>
             <cf-hstack gap="2">
               <cf-button
                 variant={computed(() =>
@@ -920,7 +1308,15 @@ export default pattern<LotWatchInput, LotWatchOutput>(
               >
                 🚗 Sightings
               </cf-button>
-              {/* Phase 2: Report tab */}
+              <cf-button
+                variant={computed(() =>
+                  selectedTab.get() === "report" ? "primary" : "secondary"
+                )}
+                size="sm"
+                onClick={() => selectTab.send({ tab: "report" })}
+              >
+                📊 Report
+              </cf-button>
             </cf-hstack>
           </div>
 
@@ -1294,8 +1690,8 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                               )
                               : null}
 
-                            {/* Phase 3b: curation buttons for unknown plates */}
-                            {row.canMark
+                            {/* Phase 3b: curation buttons — gated on canMark AND canCurate (admin) */}
+                            {row.canMark && row.canCurate
                               ? (
                                 <cf-vstack gap="1">
                                   {/* Guest flow: button → inline form */}
@@ -1360,8 +1756,8 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                               )
                               : null}
 
-                            {/* Phase 3c: "assign to known person" button + inline picker */}
-                            {row.canAssign
+                            {/* Phase 3c: "assign to known person" — gated on canAssign AND canCurate (admin) */}
+                            {row.canAssign && row.canCurate
                               ? (
                                 <cf-vstack gap="1">
                                   {isAssignTarget
@@ -1437,40 +1833,42 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                                 {row.reportedBy} — {row.dateStr} {row.timeStr}
                               </span>
 
-                              {/* Delete */}
-                              {isConfirmTarget
-                                ? (
-                                  <cf-hstack gap="1">
-                                    <span style="font-size: 0.75rem; color: #991b1b;">
-                                      Delete?
-                                    </span>
+                              {/* Delete — only shown to admins (canCurate) */}
+                              {row.canCurate
+                                ? isConfirmTarget
+                                  ? (
+                                    <cf-hstack gap="1">
+                                      <span style="font-size: 0.75rem; color: #991b1b;">
+                                        Delete?
+                                      </span>
+                                      <cf-button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() =>
+                                          deleteSighting.send({ id: rowId })}
+                                      >
+                                        Yes
+                                      </cf-button>
+                                      <cf-button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => cancelDelete.send()}
+                                      >
+                                        No
+                                      </cf-button>
+                                    </cf-hstack>
+                                  )
+                                  : (
                                     <cf-button
                                       variant="ghost"
                                       size="sm"
                                       onClick={() =>
-                                        deleteSighting.send({ id: rowId })}
+                                        initiateDelete.send({ id: rowId })}
                                     >
-                                      Yes
+                                      ×
                                     </cf-button>
-                                    <cf-button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => cancelDelete.send()}
-                                    >
-                                      No
-                                    </cf-button>
-                                  </cf-hstack>
-                                )
-                                : (
-                                  <cf-button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() =>
-                                      initiateDelete.send({ id: rowId })}
-                                  >
-                                    ×
-                                  </cf-button>
-                                )}
+                                  )
+                                : null}
                             </cf-hstack>
                           </cf-vstack>
                         </cf-card>
@@ -1480,10 +1878,384 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                 )
                 : null}
 
-              {/* Phase 2: Report tab content */}
-              {/* Phase 2: Classification, dedup/grouping, LLM extraction */}
-              {/* Phase 2: Admin gating on delete/curation */}
-              {/* Phase 2: knownVehicles registry management UI */}
+              {/* ====== REPORT TAB ====== */}
+              {isReportTab
+                ? (
+                  <cf-vstack gap="3">
+                    <cf-heading level={6}>📊 Report</cf-heading>
+
+                    {/* Filters */}
+                    <cf-card>
+                      <cf-vstack gap="2">
+                        <cf-heading level={6}>Filters</cf-heading>
+                        <cf-hstack gap="2" wrap>
+                          <cf-vstack gap="1" style="flex: 1; min-width: 120px;">
+                            <span style="font-size: 0.75rem; font-weight: 500;">
+                              Spot
+                            </span>
+                            <cf-select
+                              $value={reportFilterSpot}
+                              items={reportSpotOptions}
+                            />
+                          </cf-vstack>
+                          <cf-vstack gap="1" style="flex: 1; min-width: 140px;">
+                            <span style="font-size: 0.75rem; font-weight: 500;">
+                              Classification
+                            </span>
+                            <cf-select
+                              $value={reportFilterClassification}
+                              items={reportClsOptions}
+                            />
+                          </cf-vstack>
+                        </cf-hstack>
+                      </cf-vstack>
+                    </cf-card>
+
+                    {/* Spot occupancy frequency */}
+                    <cf-card>
+                      <cf-vstack gap="2">
+                        <cf-heading level={6}>Spot Occupancy</cf-heading>
+                        <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
+                          Total sightings per spot, and how many were non-ours.
+                        </span>
+                        {spotOccupancy.map((row) => (
+                          <cf-hstack
+                            justify="between"
+                            align="center"
+                            gap="2"
+                            style="padding: 0.375rem 0.5rem; border: 1px solid var(--cf-color-gray-200); border-radius: 0.5rem;"
+                          >
+                            <span style="font-weight: 600;">
+                              Spot #{row.spotNum}
+                            </span>
+                            <cf-hstack gap="2" align="center">
+                              <span style="font-size: 0.75rem; color: var(--cf-color-gray-600);">
+                                {row.total} total
+                              </span>
+                              {row.nonOursCount > 0
+                                ? (
+                                  <span
+                                    style={{
+                                      padding: "2px 8px",
+                                      borderRadius: "9999px",
+                                      backgroundColor: "#fee2e2",
+                                      color: "#991b1b",
+                                      fontSize: "0.7rem",
+                                      fontWeight: "600",
+                                    }}
+                                  >
+                                    {row.nonOursCount} non-ours
+                                  </span>
+                                )
+                                : (
+                                  <span
+                                    style={{
+                                      padding: "2px 8px",
+                                      borderRadius: "9999px",
+                                      backgroundColor: "#dcfce7",
+                                      color: "#166534",
+                                      fontSize: "0.7rem",
+                                      fontWeight: "600",
+                                    }}
+                                  >
+                                    all ours
+                                  </span>
+                                )}
+                            </cf-hstack>
+                          </cf-hstack>
+                        ))}
+                      </cf-vstack>
+                    </cf-card>
+
+                    {/* Repeat-offender leaderboard */}
+                    {computed(() => groupSightingsByPlate(sightings.get() ?? []).some((g) => {
+                      const cls = classifyPlate(
+                        g.plate,
+                        g.state,
+                        (people.get() ?? []).flatMap((p) => p.vehicles ?? []),
+                        knownVehicles.get() ?? [],
+                      );
+                      return cls === "offender" || (cls === "unknown" && g.count >= 3);
+                    }))
+                      ? (
+                        <cf-card style="background: #fef2f2; border: 1px solid #fecaca;">
+                          <cf-vstack gap="2">
+                            <cf-heading level={6}>
+                              🚨 Offender Leaderboard
+                            </cf-heading>
+                            {offenderLeaderboard.map((g) => (
+                              <cf-hstack
+                                justify="between"
+                                align="center"
+                                gap="2"
+                                wrap
+                                style="padding: 0.375rem 0.5rem; border: 1px solid #fecaca; border-radius: 0.5rem; background: white;"
+                              >
+                                <cf-vstack gap="0">
+                                  <cf-hstack gap="1" align="center">
+                                    <span style="font-weight: 600; font-family: monospace;">
+                                      {g.plate}
+                                    </span>
+                                    <span style="font-size: 0.7rem; color: var(--cf-color-gray-500);">
+                                      ({g.state})
+                                    </span>
+                                    <span
+                                      style={{
+                                        padding: "1px 6px",
+                                        borderRadius: "9999px",
+                                        backgroundColor: g.cls === "offender"
+                                          ? "#fee2e2"
+                                          : "#f3f4f6",
+                                        color: g.cls === "offender"
+                                          ? "#991b1b"
+                                          : "#374151",
+                                        fontSize: "0.65rem",
+                                        fontWeight: "600",
+                                        textTransform: "uppercase",
+                                      }}
+                                    >
+                                      {g.cls}
+                                    </span>
+                                  </cf-hstack>
+                                  {g.org
+                                    ? (
+                                      <span style="font-size: 0.75rem; color: var(--cf-color-gray-600);">
+                                        {g.org}
+                                      </span>
+                                    )
+                                    : null}
+                                  <span style="font-size: 0.7rem; color: var(--cf-color-gray-500);">
+                                    {g.description
+                                      ? g.description + " · "
+                                      : ""}spots {g.spotsLabel} · last{" "}
+                                    {g.lastSeen}
+                                  </span>
+                                </cf-vstack>
+                                <span
+                                  style={{
+                                    padding: "2px 10px",
+                                    borderRadius: "9999px",
+                                    backgroundColor: "#991b1b",
+                                    color: "white",
+                                    fontSize: "0.75rem",
+                                    fontWeight: "700",
+                                    whiteSpace: "nowrap",
+                                  }}
+                                >
+                                  {g.count}× seen
+                                </span>
+                              </cf-hstack>
+                            ))}
+                          </cf-vstack>
+                        </cf-card>
+                      )
+                      : null}
+
+                    {/* Recent activity feed */}
+                    <cf-card>
+                      <cf-vstack gap="2">
+                        <cf-heading level={6}>Recent Activity</cf-heading>
+                        {noRecentActivity
+                          ? (
+                            <span style="font-size: 0.875rem; color: var(--cf-color-gray-500);">
+                              No sightings match the current filters.
+                            </span>
+                          )
+                          : null}
+                        {recentActivity.map((r) => (
+                          <cf-hstack
+                            gap="2"
+                            align="center"
+                            style="padding: 0.375rem 0; border-bottom: 1px solid var(--cf-color-gray-100);"
+                          >
+                            {r.imgSrc
+                              ? (
+                                <img
+                                  src={r.imgSrc}
+                                  style="width: 48px; height: 36px; object-fit: cover; border-radius: 4px; flex-shrink: 0;"
+                                  alt="Sighting"
+                                />
+                              )
+                              : (
+                                <div style="width: 48px; height: 36px; background: var(--cf-color-gray-100); border-radius: 4px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 1rem;">
+                                  🚗
+                                </div>
+                              )}
+                            <cf-vstack gap="0" style="flex: 1; min-width: 0;">
+                              <cf-hstack gap="1" align="center">
+                                <span style="font-size: 0.8rem; font-weight: 600;">
+                                  Spot #{r.spotNumber}
+                                </span>
+                                <span
+                                  style={{
+                                    display: "inline-block",
+                                    padding: "1px 6px",
+                                    borderRadius: "9999px",
+                                    backgroundColor: r.clsBg,
+                                    color: r.clsColor,
+                                    fontSize: "0.65rem",
+                                    fontWeight: "600",
+                                    textTransform: "uppercase",
+                                  }}
+                                >
+                                  {r.cls}
+                                </span>
+                              </cf-hstack>
+                              {r.plateDisplay
+                                ? (
+                                  <span style="font-size: 0.75rem; font-family: monospace;">
+                                    {r.plateDisplay}
+                                  </span>
+                                )
+                                : null}
+                              <span style="font-size: 0.7rem; color: var(--cf-color-gray-500);">
+                                {r.reportedBy} · {r.when}
+                              </span>
+                            </cf-vstack>
+                          </cf-hstack>
+                        ))}
+                      </cf-vstack>
+                    </cf-card>
+                  </cf-vstack>
+                )
+                : null}
+
+              {/* ====== ADMIN BOOTSTRAP: always visible to allow enabling manager ====== */}
+              {computed(() => !currentUserCanManageLotWatchAdmins(adminManagerCredential) && !personIsLotWatchAdmin(adminRegistry, reporterName.get() || ""))
+                ? (
+                  <cf-card style="border: 1px dashed #6366f1;">
+                    <cf-hstack justify="between" align="center" wrap gap="2">
+                      <cf-vstack gap="0">
+                        <span style="font-size: 0.875rem; font-weight: 600;">
+                          🔐 Admin Access
+                        </span>
+                        <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
+                          Enable manager demo to assign lot-watch admins.
+                        </span>
+                      </cf-vstack>
+                      <cf-button
+                        size="sm"
+                        onClick={() => enableAdminManager.send()}
+                      >
+                        Enable manager demo
+                      </cf-button>
+                    </cf-hstack>
+                  </cf-card>
+                )
+                : null}
+
+              {/* ====== ADMIN SECTION (shown when adminModeEnabled OR manager can bootstrap) ====== */}
+              {computed(() => (adminMode.get() && personIsLotWatchAdmin(adminRegistry, reporterName.get() || "")) || currentUserCanManageLotWatchAdmins(adminManagerCredential))
+                ? (
+                  <cf-card style="border: 2px solid #6366f1; margin-top: 0.5rem;">
+                    <cf-vstack gap="3">
+                      <cf-heading level={6}>🔐 Admin Panel</cf-heading>
+
+                      {/* Admin Access */}
+                      <cf-card>
+                        <cf-vstack gap="2">
+                          <cf-hstack justify="between" align="center" wrap gap="2">
+                            <cf-vstack gap="1">
+                              <cf-heading level={6}>Admin Access</cf-heading>
+                              <span style="font-size: 0.75rem; color: var(--cf-color-gray-500);">
+                                Enable manager demo to assign/remove lot-watch
+                                admins.
+                              </span>
+                            </cf-vstack>
+                            <cf-chip
+                              label={currentUserCanManageAdmins
+                                ? "Can manage admins"
+                                : "Cannot manage admins"}
+                            />
+                            <cf-button
+                              size="sm"
+                              disabled={currentUserCanManageAdmins}
+                              onClick={() => enableAdminManager.send()}
+                            >
+                              Enable manager demo
+                            </cf-button>
+                          </cf-hstack>
+
+                          {computed(() =>
+                            (people.get() ?? []).length === 0
+                          )
+                            ? (
+                              <span style="font-size: 0.875rem; color: var(--cf-color-gray-500);">
+                                No people in shared people cell. Type your name
+                                in "Who's reporting?" to add yourself as admin.
+                              </span>
+                            )
+                            : null}
+
+                          {/* Reporter-name based admin toggle — uses baked computed to avoid
+                              computed-in-computed JSX with onClick (causes "handler used as lift" error) */}
+                          {[reporterAdminInfo].filter(Boolean).map((info) => {
+                            const rName = info!.name;
+                            const rIsAdmin = info!.isAdmin;
+                            return (
+                              <cf-hstack
+                                justify="between"
+                                align="center"
+                                gap="2"
+                                wrap
+                                style="padding: 0.5rem 0.75rem; border: 1px solid #a5b4fc; border-radius: 0.75rem; background: #eef2ff;"
+                              >
+                                <cf-hstack gap="2" align="center">
+                                  <span style="font-weight: 600;">{rName}</span>
+                                  <cf-chip
+                                    label={rIsAdmin ? "Admin" : "Member"}
+                                    variant={rIsAdmin ? "accent" : "default"}
+                                  />
+                                </cf-hstack>
+                                <cf-button
+                                  size="sm"
+                                  onClick={() =>
+                                    togglePersonAdmin.send({ name: rName })}
+                                >
+                                  {rIsAdmin ? "Remove admin" : "Make admin"}
+                                </cf-button>
+                              </cf-hstack>
+                            );
+                          })}
+
+                          {adminAccessRows.map((row) => {
+                            const rowName = row.name;
+                            const rowIsAdmin = row.isAdmin;
+                            const rowCanManage = row.canManageAdmins;
+                            return (
+                              <cf-hstack
+                                justify="between"
+                                align="center"
+                                gap="2"
+                                wrap
+                                style="padding: 0.5rem 0.75rem; border: 1px solid var(--cf-color-gray-200); border-radius: 0.75rem;"
+                              >
+                                <cf-hstack gap="2" align="center">
+                                  <span style="font-weight: 600;">
+                                    {rowName}
+                                  </span>
+                                  <cf-chip
+                                    label={rowIsAdmin ? "Admin" : "Member"}
+                                    variant={rowIsAdmin ? "accent" : "default"}
+                                  />
+                                </cf-hstack>
+                                <cf-button
+                                  size="sm"
+                                  disabled={!rowCanManage}
+                                  onClick={() =>
+                                    togglePersonAdmin.send({ name: rowName })}
+                                >
+                                  {rowIsAdmin ? "Remove admin" : "Make admin"}
+                                </cf-button>
+                              </cf-hstack>
+                            );
+                          })}
+                        </cf-vstack>
+                      </cf-card>
+                    </cf-vstack>
+                  </cf-card>
+                )
+                : null}
             </cf-vstack>
           </cf-vscroll>
         </cf-screen>
@@ -1503,6 +2275,9 @@ export default pattern<LotWatchInput, LotWatchOutput>(
       openGuest,
       cancelGuest,
       saveGuest,
+      enableAdminManager,
+      togglePersonAdmin,
+      toggleAdminMode,
     };
   },
 );
