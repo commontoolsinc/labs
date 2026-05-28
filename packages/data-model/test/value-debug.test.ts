@@ -73,7 +73,7 @@ describe("value-debug", () => {
         .toBe('{"n":42n}');
     });
 
-    it("does not throw on mixed bigint/undefined values", () => {
+    it("does not throw on mixed `bigint`/`undefined` values", () => {
       const v = {
         count: 100n,
         missing: undefined,
@@ -411,7 +411,7 @@ describe("value-debug", () => {
   // --------------------------------------------------------------------------
 
   describe("toDebugKindString", () => {
-    it("renders null and undefined literally", () => {
+    it("renders `null` and `undefined` literally", () => {
       expect(toDebugKindString(null)).toBe("null");
       expect(toDebugKindString(undefined)).toBe("undefined");
     });
