@@ -24,11 +24,10 @@
  */
 import {
   action,
+  computed,
   Default,
-  derive,
   generateObject,
   handler,
-  ifElse,
   NAME,
   navigateTo,
   nonPrivateRandom,
@@ -1013,7 +1012,7 @@ const GmailAgenticSearch = pattern<
     // ========================================================================
 
     // Check if we have direct auth input (CT-1085 workaround)
-    const hasDirectAuth = derive(inputAuth, (a: Auth) => !!(a?.token));
+    const hasDirectAuth = !!(inputAuth?.token);
 
     // Local writable cell for account type selection
     // Input `accountType` may be read-only (Default cells are read-only when using default value)
@@ -1050,65 +1049,56 @@ const GmailAgenticSearch = pattern<
     // See: community-docs/superstitions/2025-12-08-locally-created-cells-not-unwrapped-in-derive.md
     const foundItemsTracker = new Writable<Record<string, number>>({});
 
-    // Watch the signal and update foundItemsTracker when it increases
-    derive(
-      [itemFoundSignal, lastSignalValueCell, lastExecutedQueryIdCell],
-      (
-        [signalValue, lastSignalValue, queryId]: [
-          number,
-          number,
-          string | null,
-        ],
-      ) => {
-        // Use the unwrapped values from derive directly
-        const signalVal = signalValue || 0;
-        const lastSignalVal = lastSignalValue || 0;
+    // Watch the signal and update foundItemsTracker when it increases.
+    // Side-effect-only reactive computation (return unused); statement body → computed.
+    computed(() => {
+      const signalVal = itemFoundSignal || 0;
+      const lastSignalVal = lastSignalValueCell.get() || 0;
+      const queryId = lastExecutedQueryIdCell.get();
 
-        if (DEBUG_AGENT) {
-          console.log(
-            `[GmailAgenticSearch] itemFoundSignal derive triggered: signalValue=${signalVal}, lastSignalValue=${lastSignalVal}, queryId=${queryId}`,
-          );
-        }
+      if (DEBUG_AGENT) {
+        console.log(
+          `[GmailAgenticSearch] itemFoundSignal watcher triggered: signalValue=${signalVal}, lastSignalValue=${lastSignalVal}, queryId=${queryId}`,
+        );
+      }
 
-        if (signalVal > lastSignalVal) {
-          if (queryId) {
-            const tracker = foundItemsTracker.get() || {};
-            const currentCount = tracker[queryId] || 0;
-            const newCount = currentCount + 1;
+      if (signalVal > lastSignalVal) {
+        if (queryId) {
+          const tracker = foundItemsTracker.get() || {};
+          const currentCount = tracker[queryId] || 0;
+          const newCount = currentCount + 1;
 
-            foundItemsTracker.set({
-              ...tracker,
-              [queryId]: newCount,
-            });
+          foundItemsTracker.set({
+            ...tracker,
+            [queryId]: newCount,
+          });
 
-            if (DEBUG_AGENT) {
-              console.log(
-                `[GmailAgenticSearch] Marked query ${queryId} as found item (now ${newCount})`,
-              );
-            }
-          } else {
-            if (DEBUG_AGENT) {
-              console.warn(
-                "[GmailAgenticSearch] itemFoundSignal increased but no recent query to mark",
-              );
-            }
+          if (DEBUG_AGENT) {
+            console.log(
+              `[GmailAgenticSearch] Marked query ${queryId} as found item (now ${newCount})`,
+            );
           }
-          lastSignalValueCell.set(signalVal);
+        } else {
+          if (DEBUG_AGENT) {
+            console.warn(
+              "[GmailAgenticSearch] itemFoundSignal increased but no recent query to mark",
+            );
+          }
         }
-      },
-    );
+        lastSignalValueCell.set(signalVal);
+      }
+    });
 
     // Merge localQueries with foundItems from the tracker for display
-    const localQueriesWithFoundItems = derive(
-      [localQueries, foundItemsTracker],
-      ([queries, tracker]: [LocalQuery[], Record<string, number>]) => {
-        return (queries || []).map((q) => {
-          if (!q || !q.id) return q;
-          const trackedCount = tracker[q.id] || 0;
-          return { ...q, foundItems: trackedCount };
-        });
-      },
-    );
+    const localQueriesWithFoundItems = computed(() => {
+      const queries = localQueries;
+      const tracker = foundItemsTracker.get();
+      return (queries || []).map((q: LocalQuery) => {
+        if (!q || !q.id) return q;
+        const trackedCount = tracker[q.id] || 0;
+        return { ...q, foundItems: trackedCount };
+      });
+    });
 
     // Use createGoogleAuth utility for wish-based auth (when not using direct auth)
     // Passes reactive selectedAccountType for dynamic account switching
@@ -1123,11 +1113,8 @@ const GmailAgenticSearch = pattern<
       accountType: selectedAccountType,
     });
 
-    // For compatibility with existing code - derive piece from authInfo
-    const wishedAuthPiece = derive(
-      authInfo,
-      (info: any) => info?.piece || null,
-    );
+    // For compatibility with existing code - project piece from authInfo
+    const wishedAuthPiece = (authInfo as any)?.piece || null;
     const hasWishedAuth = wishedAuthReady;
 
     // Access auth via property path to maintain writability
@@ -1135,11 +1122,7 @@ const GmailAgenticSearch = pattern<
     // When hasDirectAuth is false, we use wishedAuth from the utility
     // NOTE: This means inputAuth must be passed as a live cell reference, not derived.
     // See: community-docs/superstitions/2025-12-03-derive-creates-readonly-cells-use-property-access.md
-    const auth = ifElse(
-      hasDirectAuth,
-      inputAuth,
-      wishedAuth,
-    );
+    const auth = hasDirectAuth ? inputAuth : wishedAuth;
 
     // ========================================================================
     // CROSS-CHARM TOKEN REFRESH
@@ -1161,25 +1144,21 @@ const GmailAgenticSearch = pattern<
     // See: patterns/jkomoros/issues/ISSUE-Token-Refresh-Blocked-By-Storage-Transaction.md
     //
     // Extract refresh stream from wished piece (will be opaque at derive time)
-    const authRefreshStream = derive(
-      wishedAuthPiece,
-      (piece: any) => piece?.refreshToken || null,
-    );
+    const authRefreshStream = wishedAuthPiece?.refreshToken || null;
 
     // Track where auth came from
-    const authSource = derive(
-      [hasDirectAuth, hasWishedAuth],
-      ([direct, wished]: [boolean, boolean]): "direct" | "wish" | "none" =>
-        direct ? "direct" : wished ? "wish" : "none",
-    );
+    const authSource: "direct" | "wish" | "none" = hasDirectAuth
+      ? "direct"
+      : hasWishedAuth
+      ? "wish"
+      : "none";
 
-    const isAuthenticated = derive(
-      auth,
-      (a: Auth) => !!(a && a.token && a.user && a.user.email),
-    );
+    const isAuthenticated = !!(auth && auth.token && auth.user &&
+      auth.user.email);
 
     // Check if token may be expired based on expiresAt timestamp
-    const tokenMayBeExpired = derive(auth, (a: Auth) => {
+    const tokenMayBeExpired = computed(() => {
+      const a = auth as Auth;
       if (!a?.expiresAt) return false;
       // Add 5 minute buffer - if within 5 min of expiry, consider it potentially expired
       const bufferMs = 5 * 60 * 1000;
@@ -1189,10 +1168,9 @@ const GmailAgenticSearch = pattern<
     // Gmail scope URL for checking
     const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 
-    const hasGmailScope = derive(auth, (a: Auth) => {
-      const scopes = (a?.scope || []) as string[];
-      return scopes.includes(GMAIL_SCOPE);
-    });
+    const hasGmailScope = (((auth as Auth)?.scope || []) as string[]).includes(
+      GMAIL_SCOPE,
+    );
 
     // Note: Scope warnings are handled by authFullUI via createGoogleAuth utility
 
@@ -1248,132 +1226,121 @@ const GmailAgenticSearch = pattern<
     // ========================================================================
 
     // Wish for the community registry (tagged #gmailSearchRegistry)
-    // NOTE: wish() must be called outside derive() to avoid infinite loops
-    // See: community-docs/superstitions/2025-12-06-wish-inside-derive-causes-infinite-loop.md
     const registryWish = wish<GmailSearchRegistryOutput>({
       query: "#gmailSearchRegistry",
     });
 
     // Extract community queries for this agent type (with IDs for upvoting)
     // Conditional enablement is handled here, not in the wish call
-    const communityQueryRefs = derive(
-      [registryWish, agentTypeUrl, enableCommunityQueries],
-      (
-        [wishResult, typeUrl, enabled]: [any, string, boolean],
-      ): CommunityQueryRef[] => {
-        // Guard: skip if community queries disabled or no agent type URL
-        if (!enabled || !typeUrl) return [];
-        if (!wishResult?.result) return [];
-        // wishResult.result is a Cell reference, use .key() for dynamic access
-        const registryCell = wishResult.result;
-        const registriesCell = registryCell?.key?.("registries");
-        if (!registriesCell) return [];
-        const agentRegistry = registriesCell.key(typeUrl)?.get?.();
-        if (!agentRegistry) return [];
-        // Return top queries sorted by score, keeping IDs for upvoting
-        return [...(agentRegistry.queries || [])]
-          .sort((a: SharedQuery, b: SharedQuery) =>
-            (b.upvotes - b.downvotes) - (a.upvotes - a.downvotes)
-          )
-          .slice(0, 10)
-          .map((q: SharedQuery) => ({ id: q.id, query: q.query }));
-      },
-    );
+    const communityQueryRefs = computed((): CommunityQueryRef[] => {
+      const wishResult = registryWish as any;
+      const typeUrl = agentTypeUrl;
+      const enabled = enableCommunityQueries;
+      // Guard: skip if community queries disabled or no agent type URL
+      if (!enabled || !typeUrl) return [];
+      if (!wishResult?.result) return [];
+      // wishResult.result is a Cell reference, use .key() for dynamic access
+      const registryCell = wishResult.result;
+      const registriesCell = registryCell?.key?.("registries");
+      if (!registriesCell) return [];
+      const agentRegistry = registriesCell.key(typeUrl)?.get?.();
+      if (!agentRegistry) return [];
+      // Return top queries sorted by score, keeping IDs for upvoting
+      return [...(agentRegistry.queries || [])]
+        .sort((a: SharedQuery, b: SharedQuery) =>
+          (b.upvotes - b.downvotes) - (a.upvotes - a.downvotes)
+        )
+        .slice(0, 10)
+        .map((q: SharedQuery) => ({ id: q.id, query: q.query }));
+    });
 
     // Just the query strings for combining with other suggestions
-    const communityQueries = derive(
-      communityQueryRefs,
-      (refs: CommunityQueryRef[]) => refs.map((r) => r.query),
+    const communityQueries = computed(() =>
+      communityQueryRefs.map((r: CommunityQueryRef) => r.query)
     );
 
     // Combine all suggested queries: local effective + community + pattern-defined
-    const allSuggestedQueries = derive(
-      [suggestedQueries, localQueries, communityQueries],
-      ([suggested, local, community]: [string[], LocalQuery[], string[]]) => {
-        const effectiveLocal = (local || [])
-          .filter((q) => q && q.effectiveness >= 3)
-          .map((q) => q.query);
-        // Deduplicate and combine: pattern-defined first, then community, then local
-        const all = new Set<string>();
-        (suggested || []).forEach((q) => all.add(q));
-        (community || []).forEach((q) => all.add(q));
-        effectiveLocal.forEach((q) => all.add(q));
-        return Array.from(all);
-      },
-    );
+    const allSuggestedQueries = computed(() => {
+      const suggested = suggestedQueries;
+      const local = localQueries;
+      const community = communityQueries;
+      const effectiveLocal = (local || [])
+        .filter((q: LocalQuery) => q && q.effectiveness >= 3)
+        .map((q: LocalQuery) => q.query);
+      // Deduplicate and combine: pattern-defined first, then community, then local
+      const all = new Set<string>();
+      (suggested || []).forEach((q: string) => all.add(q));
+      (community || []).forEach((q: string) => all.add(q));
+      effectiveLocal.forEach((q: string) => all.add(q));
+      return Array.from(all);
+    });
 
     // ========================================================================
     // AGENT SETUP
     // ========================================================================
 
     // Build the full prompt with suggested queries
-    const fullPrompt = derive(
-      [agentGoal, suggestedQueries, maxSearches],
-      ([goal, queries, max]: [string, string[], number]) => {
-        if (!goal) return ""; // Don't run agent without a goal
+    const fullPrompt = computed(() => {
+      const goal = agentGoal;
+      const queries = suggestedQueries;
+      const max = maxSearches;
+      if (!goal) return ""; // Don't run agent without a goal
 
-        let prompt = goal;
+      let prompt = goal;
 
-        if (queries && queries.length > 0) {
-          prompt += `\n\nSuggested queries to try:\n`;
-          prompt += queries.map((q, i) => `${i + 1}. ${q}`).join("\n");
-        }
+      if (queries && queries.length > 0) {
+        prompt += `\n\nSuggested queries to try:\n`;
+        prompt += queries.map((q: string, i: number) => `${i + 1}. ${q}`).join(
+          "\n",
+        );
+      }
 
-        if (max > 0) {
-          prompt +=
-            `\n\n⚠️ LIMITED TO ${max} SEARCHES. Focus on high-value queries!`;
-        }
+      if (max > 0) {
+        prompt +=
+          `\n\n⚠️ LIMITED TO ${max} SEARCHES. Focus on high-value queries!`;
+      }
 
-        return prompt;
-      },
-    );
+      return prompt;
+    });
 
     // Build agent prompt (only active when scanning)
-    const agentPrompt = derive(
-      [isScanning, fullPrompt],
-      ([scanning, prompt]: [boolean, string]) => {
-        if (!scanning) return ""; // Don't run unless scanning
-        return prompt;
-      },
-    );
+    const agentPrompt = isScanning ? fullPrompt : "";
 
     // Merge searchGmail with additional tools
-    const allTools = derive(
-      additionalTools,
-      (additional: Record<string, ToolDefinition>) => {
-        const baseTools = {
-          searchGmail: {
-            description:
-              "Search Gmail with a query and return matching emails. Returns email id, subject, from, date, snippet, and body text.",
-            handler: searchGmailHandler({
-              auth,
-              authRefreshStream,
-              progress: searchProgress,
-              maxSearches,
-              debugLog,
-              localQueries,
-              communityQueryRefs,
-              registryWish,
-              agentTypeUrl,
-              lastExecutedQueryIdCell,
-            }),
-          },
-        };
+    const allTools = computed(() => {
+      const additional = additionalTools;
+      const baseTools = {
+        searchGmail: {
+          description:
+            "Search Gmail with a query and return matching emails. Returns email id, subject, from, date, snippet, and body text.",
+          handler: searchGmailHandler({
+            auth,
+            authRefreshStream,
+            progress: searchProgress,
+            maxSearches,
+            debugLog,
+            localQueries,
+            communityQueryRefs,
+            registryWish,
+            agentTypeUrl,
+            lastExecutedQueryIdCell,
+          }),
+        },
+      };
 
-        // Merge additional tools if provided
-        if (additional && typeof additional === "object") {
-          return { ...baseTools, ...additional };
-        }
-        return baseTools;
-      },
-    );
+      // Merge additional tools if provided
+      if (additional && typeof additional === "object") {
+        return { ...baseTools, ...additional };
+      }
+      return baseTools;
+    });
 
     // Default system prompt - includes suggested queries from all sources
-    const fullSystemPrompt = derive(
-      [systemPrompt, allSuggestedQueries],
-      ([custom, suggested]: [string, string[]]) => {
-        const base =
-          `You are a Gmail search agent. Your job is to search through emails to find relevant information.
+    const fullSystemPrompt = computed(() => {
+      const custom = systemPrompt;
+      const suggested = allSuggestedQueries;
+      const base =
+        `You are a Gmail search agent. Your job is to search through emails to find relevant information.
 
 You have the searchGmail tool available. Use it to search Gmail with queries like:
 - from:domain.com
@@ -1390,21 +1357,20 @@ IMPORTANT - WHEN TO STOP SEARCHING:
 
 When you're done searching, STOP calling tools and produce your final structured output.`;
 
-        // Add suggested queries if available
-        let prompt = base;
-        if (suggested && suggested.length > 0) {
-          prompt +=
-            `\n\nSuggested queries to try (from pattern config and community):\n${
-              suggested.map((q) => `- ${q}`).join("\n")
-            }`;
-        }
+      // Add suggested queries if available
+      let prompt = base;
+      if (suggested && suggested.length > 0) {
+        prompt +=
+          `\n\nSuggested queries to try (from pattern config and community):\n${
+            suggested.map((q) => `- ${q}`).join("\n")
+          }`;
+      }
 
-        if (custom) {
-          prompt += `\n\n${custom}`;
-        }
-        return prompt;
-      },
-    );
+      if (custom) {
+        prompt += `\n\n${custom}`;
+      }
+      return prompt;
+    });
 
     // Create the agent
     const agent = generateObject({
@@ -1412,7 +1378,8 @@ When you're done searching, STOP calling tools and produce your final structured
       prompt: agentPrompt,
       tools: allTools,
       model: "anthropic:claude-sonnet-4-5",
-      schema: derive(resultSchema, (schema: object) => {
+      schema: computed(() => {
+        const schema = resultSchema;
         if (schema && Object.keys(schema).length > 0) {
           return schema;
         }
@@ -1434,46 +1401,40 @@ When you're done searching, STOP calling tools and produce your final structured
     const { result: agentResult, pending: agentPending } = agent;
 
     // Detect when agent completes
-    const scanCompleted = derive(
-      [isScanning, agentPending, agentResult],
-      ([scanning, pending, result]: [boolean, boolean, any]) =>
-        scanning && !pending && !!result,
-    );
+    const scanCompleted = isScanning && !agentPending && !!agentResult;
 
     // Detect auth errors from agent result or token validation
-    const hasAuthError = derive(
-      [agentResult, searchProgress],
-      ([r, progress]: [any, SearchProgress]) => {
-        // Check progress status first (from token validation)
-        if (progress?.status === "auth_error") {
-          return true;
-        }
-        // Check agent result
-        const summary = r?.summary || "";
-        return (
-          summary.includes("401") ||
-          summary.toLowerCase().includes("authentication error")
-        );
-      },
-    );
+    const hasAuthError = computed(() => {
+      const r = agentResult as any;
+      const progress = searchProgress as SearchProgress;
+      // Check progress status first (from token validation)
+      if (progress?.status === "auth_error") {
+        return true;
+      }
+      // Check agent result
+      const summary = r?.summary || "";
+      return (
+        summary.includes("401") ||
+        summary.toLowerCase().includes("authentication error")
+      );
+    });
 
     // Get the specific auth error message
-    const authErrorMessage = derive(
-      [searchProgress, agentResult],
-      ([progress, result]: [SearchProgress, any]) => {
-        if (progress?.authError) {
-          return progress.authError;
-        }
-        const summary = result?.summary || "";
-        if (summary.includes("401")) {
-          return "Token expired. Please re-authenticate.";
-        }
-        if (summary.toLowerCase().includes("authentication error")) {
-          return "Authentication error. Please re-authenticate.";
-        }
-        return "";
-      },
-    );
+    const authErrorMessage = computed(() => {
+      const progress = searchProgress as SearchProgress;
+      const result = agentResult as any;
+      if (progress?.authError) {
+        return progress.authError;
+      }
+      const summary = result?.summary || "";
+      if (summary.includes("401")) {
+        return "Token expired. Please re-authenticate.";
+      }
+      if (summary.toLowerCase().includes("authentication error")) {
+        return "Authentication error. Please re-authenticate.";
+      }
+      return "";
+    });
 
     // Pre-bind handlers (important: must be done outside of derive callbacks)
     // Use module-scope handlers (startScanHandler, stopScanHandler, completeScanHandler)
@@ -1495,8 +1456,7 @@ When you're done searching, STOP calling tools and produce your final structured
     // UI PIECES (extracted for flexible composition)
     // ========================================================================
 
-    // Account type selector - built OUTSIDE derive so handler works
-    // Handlers don't work inside derive() callbacks
+    // Account type selector
     const accountTypeSelector = (
       <div
         style={{
@@ -1524,39 +1484,32 @@ When you're done searching, STOP calling tools and produce your final structured
         >
           <option
             value="default"
-            selected={derive(
-              selectedAccountType,
-              (t: string) => t === "default",
-            )}
+            selected={selectedAccountType.get() === "default"}
           >
             Any Google Account
           </option>
           <option
             value="personal"
-            selected={derive(
-              selectedAccountType,
-              (t: string) => t === "personal",
-            )}
+            selected={selectedAccountType.get() === "personal"}
           >
             Personal Account
           </option>
           <option
             value="work"
-            selected={derive(selectedAccountType, (t: string) => t === "work")}
+            selected={selectedAccountType.get() === "work"}
           >
             Work Account
           </option>
         </select>
-        {derive(selectedAccountType, (type: string) =>
-          type !== "default"
-            ? (
-              <span style={{ color: "#94a3b8", fontSize: "11px" }}>
-                (using #{type === "personal"
-                  ? "googleAuthPersonal"
-                  : "googleAuthWork"})
-              </span>
-            )
-            : null)}
+        {selectedAccountType.get() !== "default"
+          ? (
+            <span style={{ color: "#94a3b8", fontSize: "11px" }}>
+              (using #{selectedAccountType.get() === "personal"
+                ? "googleAuthPersonal"
+                : "googleAuthWork"})
+            </span>
+          )
+          : null}
       </div>
     );
 
@@ -1564,44 +1517,39 @@ When you're done searching, STOP calling tools and produce your final structured
     const authUI = (
       <div>
         {/* Account Type Selector (only shown if not using direct auth) */}
-        {ifElse(hasDirectAuth, null, accountTypeSelector)}
+        {hasDirectAuth ? null : accountTypeSelector}
 
         {/* Auth Status - use nested ifElse to avoid Cell-in-Cell problem */}
         {
           /* Only show custom error UIs for specific warning states;
             authFullUI handles everything else (not-auth, selecting, ready) */
         }
-        {ifElse(
-          // Show custom error UI only when authenticated AND has API error
-          derive(
-            [isAuthenticated, hasAuthError],
-            ([auth, err]: [boolean, boolean]) => auth && err,
-          ),
+        {isAuthenticated && hasAuthError
           // Auth error state - custom warning UI
-          <div
-            style={{
-              padding: "12px",
-              background: "#fef3c7",
-              border: "1px solid #fde68a",
-              borderRadius: "8px",
-            }}
-          >
+          ? (
             <div
               style={{
-                fontSize: "14px",
-                color: "#92400e",
-                textAlign: "center",
-                marginBottom: "8px",
+                padding: "12px",
+                background: "#fef3c7",
+                border: "1px solid #fde68a",
+                borderRadius: "8px",
               }}
             >
-              ⚠️ {authErrorMessage}
-            </div>
-            <div style={{ textAlign: "center" }}>
-              {derive(wishedAuthPiece, (piece: any) =>
-                piece
+              <div
+                style={{
+                  fontSize: "14px",
+                  color: "#92400e",
+                  textAlign: "center",
+                  marginBottom: "8px",
+                }}
+              >
+                ⚠️ {authErrorMessage}
+              </div>
+              <div style={{ textAlign: "center" }}>
+                {wishedAuthPiece
                   ? (
                     <cf-button
-                      onClick={() => navigateTo(piece)}
+                      onClick={() => navigateTo(wishedAuthPiece)}
                       size="sm"
                       variant="secondary"
                     >
@@ -1616,17 +1564,14 @@ When you're done searching, STOP calling tools and produce your final structured
                     >
                       Connect Gmail
                     </cf-button>
-                  ))}
+                  )}
+              </div>
             </div>
-          </div>,
+          )
           // No auth error - check for token expiry warning
-          ifElse(
-            // Show expiry warning only when authenticated AND token may be expired
-            derive(
-              [isAuthenticated, tokenMayBeExpired],
-              ([auth, exp]: [boolean, boolean]) => auth && exp,
-            ),
-            // Token expiry warning - custom warning UI
+          : isAuthenticated && tokenMayBeExpired
+          // Token expiry warning - custom warning UI
+          ? (
             <div
               style={{
                 padding: "12px",
@@ -1646,136 +1591,120 @@ When you're done searching, STOP calling tools and produce your final structured
                 ⚠️ Gmail token may have expired - will verify on scan
               </div>
               <div style={{ textAlign: "center" }}>
-                {derive(wishedAuthPiece, (piece: any) =>
-                  piece
-                    ? (
-                      <cf-button
-                        onClick={() => navigateTo(piece)}
-                        size="sm"
-                        variant="secondary"
-                      >
-                        Re-authenticate Gmail
-                      </cf-button>
-                    )
-                    : null)}
+                {wishedAuthPiece
+                  ? (
+                    <cf-button
+                      onClick={() => navigateTo(wishedAuthPiece)}
+                      size="sm"
+                      variant="secondary"
+                    >
+                      Re-authenticate Gmail
+                    </cf-button>
+                  )
+                  : null}
               </div>
-            </div>,
-            // All other cases: use authFullUI directly
-            // - Not authenticated → shows onboarding/picker UI
-            // - Authenticated success → shows user chip with avatar, email, Switch/Add buttons
-            authFullUI,
-          ),
-        )}
+            </div>
+          )
+          // All other cases: use authFullUI directly
+          // - Not authenticated → shows onboarding/picker UI
+          // - Authenticated success → shows user chip with avatar, email, Switch/Add buttons
+          : authFullUI}
       </div>
     );
 
     // Check if agentGoal is empty (pattern not configured for a specific task)
-    const hasAgentGoal = derive(
-      agentGoal,
-      (goal: string) => !!(goal && goal.trim()),
-    );
+    const hasAgentGoal = !!(agentGoal && agentGoal.trim());
 
     // Controls UI - scan and stop buttons
     const controlsUI = (
       <div>
         {/* Warning when no agent goal is set */}
-        {derive(
-          [isAuthenticated, hasAgentGoal],
-          ([authenticated, hasGoal]: [boolean, boolean]) =>
-            authenticated && !hasGoal
-              ? (
-                <div
-                  style={{
-                    padding: "16px",
-                    background: "#fef3c7",
-                    border: "1px solid #fde68a",
-                    borderRadius: "8px",
-                    marginBottom: "12px",
-                  }}
-                >
-                  <div
-                    style={{
-                      fontWeight: "600",
-                      color: "#92400e",
-                      marginBottom: "8px",
-                      fontSize: "14px",
-                    }}
-                  >
-                    ⚠️ No Search Goal Configured
-                  </div>
-                  <div style={{ fontSize: "13px", color: "#78350f" }}>
-                    This is the base Gmail Agentic Search pattern. To use it,
-                    you need to either:
-                  </div>
-                  <ul
-                    style={{
-                      margin: "8px 0 0 0",
-                      paddingLeft: "20px",
-                      fontSize: "12px",
-                      color: "#78350f",
-                    }}
-                  >
-                    <li>
-                      Use a specialized pattern (like Hotel Membership
-                      Extractor) that has a built-in goal
-                    </li>
-                    <li>
-                      Pass an <code>agentGoal</code>{" "}
-                      input when embedding this pattern
-                    </li>
-                  </ul>
-                  <div
-                    style={{
-                      marginTop: "12px",
-                      fontSize: "11px",
-                      color: "#92400e",
-                    }}
-                  >
-                    The agent won't run without a search goal.
-                  </div>
-                </div>
-              )
-              : null,
-        )}
+        {isAuthenticated && !hasAgentGoal
+          ? (
+            <div
+              style={{
+                padding: "16px",
+                background: "#fef3c7",
+                border: "1px solid #fde68a",
+                borderRadius: "8px",
+                marginBottom: "12px",
+              }}
+            >
+              <div
+                style={{
+                  fontWeight: "600",
+                  color: "#92400e",
+                  marginBottom: "8px",
+                  fontSize: "14px",
+                }}
+              >
+                ⚠️ No Search Goal Configured
+              </div>
+              <div style={{ fontSize: "13px", color: "#78350f" }}>
+                This is the base Gmail Agentic Search pattern. To use it, you
+                need to either:
+              </div>
+              <ul
+                style={{
+                  margin: "8px 0 0 0",
+                  paddingLeft: "20px",
+                  fontSize: "12px",
+                  color: "#78350f",
+                }}
+              >
+                <li>
+                  Use a specialized pattern (like Hotel Membership Extractor)
+                  that has a built-in goal
+                </li>
+                <li>
+                  Pass an <code>agentGoal</code>{" "}
+                  input when embedding this pattern
+                </li>
+              </ul>
+              <div
+                style={{
+                  marginTop: "12px",
+                  fontSize: "11px",
+                  color: "#92400e",
+                }}
+              >
+                The agent won't run without a search goal.
+              </div>
+            </div>
+          )
+          : null}
 
         {/* Scan Button */}
-        {ifElse(
-          isAuthenticated,
-          <cf-button
-            onClick={boundStartScan}
-            size="lg"
-            style="width: 100%;"
-            disabled={derive(
-              [isScanning, hasAgentGoal],
-              ([scanning, hasGoal]: [boolean, boolean]) => scanning || !hasGoal,
-            )}
-          >
-            {derive(
-              [isScanning, hasAgentGoal],
-              ([scanning, hasGoal]: [boolean, boolean]) =>
-                scanning
-                  ? "⏳ Scanning..."
-                  : hasGoal
-                  ? scanButtonLabel
-                  : "⚠️ No Goal Set",
-            )}
-          </cf-button>,
-          null,
-        )}
+        {isAuthenticated
+          ? (
+            <cf-button
+              onClick={boundStartScan}
+              size="lg"
+              style="width: 100%;"
+              disabled={isScanning || !hasAgentGoal}
+            >
+              {isScanning
+                ? "⏳ Scanning..."
+                : hasAgentGoal
+                ? scanButtonLabel
+                : "⚠️ No Goal Set"}
+            </cf-button>
+          )
+          : null}
 
         {/* Stop Button */}
-        {ifElse(
-          isScanning,
-          <cf-button
-            onClick={boundStopScan}
-            variant="secondary"
-            size="lg"
-            style="width: 100%; margin-top: 8px;"
-          >
-            ⏹ Stop Scan
-          </cf-button>,
-          null,
-        )}
+        {isScanning
+          ? (
+            <cf-button
+              onClick={boundStopScan}
+              variant="secondary"
+              size="lg"
+              style="width: 100%; margin-top: 8px;"
+            >
+              ⏹ Stop Scan
+            </cf-button>
+          )
+          : null}
       </div>
     );
 
@@ -1785,333 +1714,320 @@ When you're done searching, STOP calling tools and produce your final structured
     const progressUI = (
       <div>
         {/* Progress during scanning - hide when scan is complete */}
-        {ifElse(
-          scanCompleted,
-          null,
-          derive(
-            [isScanning, searchProgress],
-            ([scanning, progress]: [boolean, SearchProgress]) =>
-              scanning && progress.status !== "idle" &&
-                progress.status !== "auth_error"
+        {scanCompleted
+          ? null
+          : isScanning && searchProgress.status !== "idle" &&
+              searchProgress.status !== "auth_error"
+          ? (
+            <div
+              style={{
+                padding: "16px",
+                background: "#f8fafc",
+                border: "1px solid #e2e8f0",
+                borderRadius: "8px",
+              }}
+            >
+              <div
+                style={{
+                  fontWeight: "600",
+                  marginBottom: "12px",
+                  textAlign: "center",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "12px",
+                  color: "#475569",
+                }}
+              >
+                <cf-loader show-elapsed></cf-loader>
+                Scanning emails...
+              </div>
+
+              {/* Current Activity */}
+              {searchProgress.currentQuery
                 ? (
                   <div
                     style={{
-                      padding: "16px",
-                      background: "#f8fafc",
-                      border: "1px solid #e2e8f0",
-                      borderRadius: "8px",
+                      padding: "8px",
+                      background: "#f1f5f9",
+                      borderRadius: "4px",
+                      marginBottom: "12px",
                     }}
                   >
                     <div
                       style={{
-                        fontWeight: "600",
-                        marginBottom: "12px",
-                        textAlign: "center",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        gap: "12px",
+                        fontSize: "12px",
                         color: "#475569",
+                        fontWeight: "600",
                       }}
                     >
-                      <cf-loader show-elapsed></cf-loader>
-                      Scanning emails...
+                      🔍 Currently searching:
                     </div>
-
-                    {/* Current Activity */}
-                    {derive(searchProgress, (progress: SearchProgress) =>
-                      progress.currentQuery
-                        ? (
-                          <div
-                            style={{
-                              padding: "8px",
-                              background: "#f1f5f9",
-                              borderRadius: "4px",
-                              marginBottom: "12px",
-                            }}
-                          >
-                            <div
-                              style={{
-                                fontSize: "12px",
-                                color: "#475569",
-                                fontWeight: "600",
-                              }}
-                            >
-                              🔍 Currently searching:
-                            </div>
-                            <div
-                              style={{
-                                fontSize: "13px",
-                                color: "#334155",
-                                fontFamily: "monospace",
-                                wordBreak: "break-all",
-                              }}
-                            >
-                              {progress.currentQuery}
-                            </div>
-                          </div>
-                        )
-                        : (
-                          <div
-                            style={{
-                              padding: "8px",
-                              background: "#f1f5f9",
-                              borderRadius: "4px",
-                              marginBottom: "12px",
-                            }}
-                          >
-                            <div
-                              style={{
-                                fontSize: "12px",
-                                color: "#475569",
-                                display: "flex",
-                                alignItems: "center",
-                                gap: "8px",
-                              }}
-                            >
-                              <cf-loader size="sm"></cf-loader>
-                              Analyzing emails...
-                            </div>
-                          </div>
-                        ))}
-
-                    {/* Completed Searches */}
-                    {derive(searchProgress, (progress: SearchProgress) =>
-                      progress.completedQueries.length > 0
-                        ? (
-                          <div style={{ marginTop: "8px" }}>
-                            <div
-                              style={{
-                                fontSize: "12px",
-                                color: "#475569",
-                                fontWeight: "600",
-                                marginBottom: "4px",
-                              }}
-                            >
-                              ✅ Completed searches ({progress.completedQueries
-                                .length}
-                              ):
-                            </div>
-                            <div
-                              style={{
-                                maxHeight: "120px",
-                                overflowY: "auto",
-                                fontSize: "11px",
-                                color: "#3b82f6",
-                              }}
-                            >
-                              {[...progress.completedQueries]
-                                .reverse()
-                                .slice(0, 5)
-                                .map(
-                                  (
-                                    q: { query: string; emailCount: number },
-                                    i: number,
-                                  ) => (
-                                    <div
-                                      key={i}
-                                      style={{
-                                        padding: "2px 0",
-                                        borderBottom: "1px solid #dbeafe",
-                                      }}
-                                    >
-                                      <span style={{ fontFamily: "monospace" }}>
-                                        {q?.query
-                                          ? q.query.length > 50
-                                            ? q.query.substring(0, 50) + "..."
-                                            : q.query
-                                          : "unknown"}
-                                      </span>
-                                      <span
-                                        style={{
-                                          marginLeft: "8px",
-                                          color: "#059669",
-                                        }}
-                                      >
-                                        ({q?.emailCount ?? 0} emails)
-                                      </span>
-                                    </div>
-                                  ),
-                                )}
-                            </div>
-                          </div>
-                        )
-                        : null)}
+                    <div
+                      style={{
+                        fontSize: "13px",
+                        color: "#334155",
+                        fontFamily: "monospace",
+                        wordBreak: "break-all",
+                      }}
+                    >
+                      {searchProgress.currentQuery}
+                    </div>
                   </div>
                 )
-                : null,
-          ),
-        )}
+                : (
+                  <div
+                    style={{
+                      padding: "8px",
+                      background: "#f1f5f9",
+                      borderRadius: "4px",
+                      marginBottom: "12px",
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: "12px",
+                        color: "#475569",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                      }}
+                    >
+                      <cf-loader size="sm"></cf-loader>
+                      Analyzing emails...
+                    </div>
+                  </div>
+                )}
+
+              {/* Completed Searches */}
+              {searchProgress.completedQueries.length > 0
+                ? (
+                  <div style={{ marginTop: "8px" }}>
+                    <div
+                      style={{
+                        fontSize: "12px",
+                        color: "#475569",
+                        fontWeight: "600",
+                        marginBottom: "4px",
+                      }}
+                    >
+                      ✅ Completed searches ({searchProgress
+                        .completedQueries
+                        .length}
+                      ):
+                    </div>
+                    <div
+                      style={{
+                        maxHeight: "120px",
+                        overflowY: "auto",
+                        fontSize: "11px",
+                        color: "#3b82f6",
+                      }}
+                    >
+                      {[...searchProgress.completedQueries]
+                        .reverse()
+                        .slice(0, 5)
+                        .map(
+                          (
+                            q: { query: string; emailCount: number },
+                            i: number,
+                          ) => (
+                            <div
+                              key={i}
+                              style={{
+                                padding: "2px 0",
+                                borderBottom: "1px solid #dbeafe",
+                              }}
+                            >
+                              <span style={{ fontFamily: "monospace" }}>
+                                {q?.query
+                                  ? q.query.length > 50
+                                    ? q.query.substring(0, 50) + "..."
+                                    : q.query
+                                  : "unknown"}
+                              </span>
+                              <span
+                                style={{
+                                  marginLeft: "8px",
+                                  color: "#059669",
+                                }}
+                              >
+                                ({q?.emailCount ?? 0} emails)
+                              </span>
+                            </div>
+                          ),
+                        )}
+                    </div>
+                  </div>
+                )
+                : null}
+            </div>
+          )
+          : null}
 
         {/* Scan Complete */}
-        {derive(scanCompleted, (completed: boolean) =>
-          completed
-            ? (
+        {scanCompleted
+          ? (
+            <div
+              style={{
+                padding: "16px",
+                background: "#f0fdf4",
+                border: "1px solid #bbf7d0",
+                borderRadius: "8px",
+              }}
+            >
               <div
                 style={{
-                  padding: "16px",
-                  background: "#f0fdf4",
-                  border: "1px solid #bbf7d0",
-                  borderRadius: "8px",
+                  fontSize: "16px",
+                  fontWeight: "600",
+                  color: "#166534",
+                  marginBottom: "12px",
+                  textAlign: "center",
                 }}
               >
-                <div
-                  style={{
-                    fontSize: "16px",
-                    fontWeight: "600",
-                    color: "#166534",
-                    marginBottom: "12px",
-                    textAlign: "center",
-                  }}
-                >
-                  ✓ Scan Complete
-                </div>
-                <div
-                  style={{
-                    fontSize: "12px",
-                    color: "#059669",
-                    textAlign: "center",
-                  }}
-                >
-                  <cf-markdown>
-                    {derive(agentResult, (r: any) => r?.summary || "")}
-                  </cf-markdown>
-                </div>
-                <cf-button
-                  onClick={boundCompleteScan}
-                  size="lg"
-                  style="width: 100%; margin-top: 12px;"
-                >
-                  ✓ Done
-                </cf-button>
+                ✓ Scan Complete
               </div>
-            )
-            : null)}
+              <div
+                style={{
+                  fontSize: "12px",
+                  color: "#059669",
+                  textAlign: "center",
+                }}
+              >
+                <cf-markdown>
+                  {(agentResult as any)?.summary || ""}
+                </cf-markdown>
+              </div>
+              <cf-button
+                onClick={boundCompleteScan}
+                size="lg"
+                style="width: 100%; margin-top: 12px;"
+              >
+                ✓ Done
+              </cf-button>
+            </div>
+          )
+          : null}
       </div>
     );
 
     // Stats UI - last scan timestamp
     const statsUI = (
       <div style={{ fontSize: "13px", color: "#666" }}>
-        {derive(lastScanAt, (ts: number) =>
-          ts > 0
-            ? <div>Last Scan: {new Date(ts).toLocaleString()}</div>
-            : null)}
+        {lastScanAt > 0
+          ? <div>Last Scan: {new Date(lastScanAt).toLocaleString()}</div>
+          : null}
       </div>
     );
 
     // Debug Log UI - collapsible log of agent activity
     const debugLogUI = (
       <div style={{ marginTop: "8px" }}>
-        {derive(debugLog, (log: DebugLogEntry[]) =>
-          log && log.length > 0
-            ? (
+        {debugLog && debugLog.length > 0
+          ? (
+            <div
+              style={{
+                border: "1px solid #e2e8f0",
+                borderRadius: "8px",
+                overflow: "hidden",
+              }}
+            >
+              {/* Header - clickable to toggle */}
               <div
+                onClick={toggleDebugHandler({ expanded: debugExpanded })}
                 style={{
-                  border: "1px solid #e2e8f0",
-                  borderRadius: "8px",
-                  overflow: "hidden",
+                  padding: "8px 12px",
+                  background: "#f8fafc",
+                  borderBottom: "1px solid #e2e8f0",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  fontSize: "13px",
+                  fontWeight: "500",
+                  color: "#475569",
                 }}
               >
-                {/* Header - clickable to toggle */}
-                <div
-                  onClick={toggleDebugHandler({ expanded: debugExpanded })}
-                  style={{
-                    padding: "8px 12px",
-                    background: "#f8fafc",
-                    borderBottom: "1px solid #e2e8f0",
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    fontSize: "13px",
-                    fontWeight: "500",
-                    color: "#475569",
-                  }}
-                >
-                  <span>
-                    {derive(debugExpanded, (e: boolean) => e ? "▼" : "▶")}{" "}
-                    Debug Log ({log.length} entries)
-                  </span>
-                  <span style={{ fontSize: "11px", color: "#94a3b8" }}>
-                    click to {derive(
-                      debugExpanded,
-                      (e: boolean) => e ? "collapse" : "expand",
-                    )}
-                  </span>
-                </div>
+                <span>
+                  {debugExpanded.get() ? "▼" : "▶"} Debug Log ({debugLog.length}
+                  {" "}
+                  entries)
+                </span>
+                <span style={{ fontSize: "11px", color: "#94a3b8" }}>
+                  click to {debugExpanded.get() ? "collapse" : "expand"}
+                </span>
+              </div>
 
-                {/* Content - shown when expanded */}
-                {derive(debugExpanded, (expanded: boolean) =>
-                  expanded
-                    ? (
+              {/* Content - shown when expanded */}
+              {debugExpanded.get()
+                ? (
+                  <div
+                    style={{
+                      maxHeight: "300px",
+                      overflowY: "auto",
+                      background: "#1e293b",
+                      padding: "12px",
+                      fontFamily: "monospace",
+                      fontSize: "11px",
+                    }}
+                  >
+                    {debugLog.filter((e): e is DebugLogEntry => e != null).map((
+                      entry: DebugLogEntry,
+                      i: number,
+                    ) => (
                       <div
+                        key={i}
                         style={{
-                          maxHeight: "300px",
-                          overflowY: "auto",
-                          background: "#1e293b",
-                          padding: "12px",
-                          fontFamily: "monospace",
-                          fontSize: "11px",
+                          padding: "4px 0",
+                          borderBottom: "1px solid #334155",
+                          color: entry.type === "error"
+                            ? "#f87171"
+                            : entry.type === "search_start"
+                            ? "#60a5fa"
+                            : entry.type === "search_result"
+                            ? "#4ade80"
+                            : "#e2e8f0",
                         }}
                       >
-                        {log.filter((e): e is DebugLogEntry => e != null).map((
-                          entry: DebugLogEntry,
-                          i: number,
-                        ) => (
+                        <span style={{ color: "#64748b" }}>
+                          {new Date(entry.timestamp).toLocaleTimeString()}
+                        </span>{" "}
+                        <span
+                          style={{
+                            padding: "1px 4px",
+                            borderRadius: "3px",
+                            fontSize: "10px",
+                            background: entry.type === "error"
+                              ? "#7f1d1d"
+                              : entry.type === "search_start"
+                              ? "#1e3a5f"
+                              : entry.type === "search_result"
+                              ? "#14532d"
+                              : "#334155",
+                          }}
+                        >
+                          {entry.type}
+                        </span>{" "}
+                        {entry.message}
+                        {entry.details && (
                           <div
-                            key={i}
                             style={{
-                              padding: "4px 0",
-                              borderBottom: "1px solid #334155",
-                              color: entry.type === "error"
-                                ? "#f87171"
-                                : entry.type === "search_start"
-                                ? "#60a5fa"
-                                : entry.type === "search_result"
-                                ? "#4ade80"
-                                : "#e2e8f0",
+                              marginLeft: "16px",
+                              color: "#94a3b8",
+                              fontSize: "10px",
                             }}
                           >
-                            <span style={{ color: "#64748b" }}>
-                              {new Date(entry.timestamp).toLocaleTimeString()}
-                            </span>{" "}
-                            <span
-                              style={{
-                                padding: "1px 4px",
-                                borderRadius: "3px",
-                                fontSize: "10px",
-                                background: entry.type === "error"
-                                  ? "#7f1d1d"
-                                  : entry.type === "search_start"
-                                  ? "#1e3a5f"
-                                  : entry.type === "search_result"
-                                  ? "#14532d"
-                                  : "#334155",
-                              }}
-                            >
-                              {entry.type}
-                            </span>{" "}
-                            {entry.message}
-                            {entry.details && (
-                              <div
-                                style={{
-                                  marginLeft: "16px",
-                                  color: "#94a3b8",
-                                  fontSize: "10px",
-                                }}
-                              >
-                                {toIndentedDebugString(entry.details)}
-                              </div>
-                            )}
+                            {toIndentedDebugString(entry.details)}
                           </div>
-                        ))}
+                        )}
                       </div>
-                    )
-                    : null)}
-              </div>
-            )
-            : null)}
+                    ))}
+                  </div>
+                )
+                : null}
+            </div>
+          )
+          : null}
       </div>
     );
 
@@ -2123,168 +2039,162 @@ When you're done searching, STOP calling tools and produce your final structured
     // and called directly with all parameters in onClick handlers (no pre-binding needed)
     // Note: localQueriesExpanded/toggleLocalQueries removed - using native <details>/<summary> instead
 
-    // Local Queries UI - collapsible list of saved queries
-    // Uses native <details>/<summary> to avoid nested derive closure issues
-    // (see superstition: 2025-12-06-use-native-details-summary-for-expand-collapse.md)
-    //
-    // Key fix: Instead of nested derive(localQueriesExpanded, ...) inside derive(localQueries, ...),
-    // we use native <details open> which handles expand/collapse via browser without reactive state.
-    // The derive(localQueries) renders the entire details block including content - no closure issues.
+    // Local Queries UI - collapsible list of saved queries.
+    // Uses native <details>/<summary> so expand/collapse is handled by the
+    // browser without reactive state.
     const localQueriesUI = (
       <div style={{ marginTop: "8px" }}>
-        {derive(
-          [localQueriesWithFoundItems, onlySaveQueriesWithItems],
-          ([queries, onlyWithItems]: [LocalQuery[], boolean]) => {
-            // Filter queries: when onlyWithItems is true, only show queries that found target items
-            const filteredQueries = (queries || []).filter(
+        {computed(() => {
+          // Filter queries: when onlySaveQueriesWithItems is true, only show queries that found target items
+          const filteredQueries =
+            (localQueriesWithFoundItems as LocalQuery[] || []).filter(
               (q): q is LocalQuery => {
                 if (!q) return false;
-                if (onlyWithItems) {
+                if (onlySaveQueriesWithItems) {
                   return (q.foundItems || 0) > 0;
                 }
                 return true;
               },
             );
 
-            if (filteredQueries.length === 0) return null;
+          if (filteredQueries.length === 0) return null;
 
-            return (
-              <details
-                open
+          return (
+            <details
+              open
+              style={{
+                border: "1px solid #e2e8f0",
+                borderRadius: "8px",
+                overflow: "hidden",
+              }}
+            >
+              {/* Summary - clickable header */}
+              <summary
                 style={{
-                  border: "1px solid #e2e8f0",
-                  borderRadius: "8px",
-                  overflow: "hidden",
+                  padding: "8px 12px",
+                  background: "#fefce8",
+                  borderBottom: "1px solid #fef08a",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  fontSize: "13px",
+                  fontWeight: "500",
+                  color: "#854d0e",
+                  listStyle: "none",
                 }}
               >
-                {/* Summary - clickable header */}
-                <summary
-                  style={{
-                    padding: "8px 12px",
-                    background: "#fefce8",
-                    borderBottom: "1px solid #fef08a",
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    fontSize: "13px",
-                    fontWeight: "500",
-                    color: "#854d0e",
-                    listStyle: "none",
-                  }}
-                >
-                  <span>My Saved Queries ({filteredQueries.length})</span>
-                  <span style={{ fontSize: "11px", color: "#a16207" }}>
-                    click to toggle
-                  </span>
-                </summary>
+                <span>My Saved Queries ({filteredQueries.length})</span>
+                <span style={{ fontSize: "11px", color: "#a16207" }}>
+                  click to toggle
+                </span>
+              </summary>
 
-                {/* Content - shown when expanded (handled by browser) */}
-                <div
-                  style={{
-                    maxHeight: "300px",
-                    overflowY: "auto",
-                    background: "#fffbeb",
-                    padding: "8px",
-                  }}
-                >
-                  {[...filteredQueries]
-                    .sort((a, b) =>
-                      (b.effectiveness || 0) - (a.effectiveness || 0)
-                    )
-                    .map((query: LocalQuery) => (
+              {/* Content - shown when expanded (handled by browser) */}
+              <div
+                style={{
+                  maxHeight: "300px",
+                  overflowY: "auto",
+                  background: "#fffbeb",
+                  padding: "8px",
+                }}
+              >
+                {[...filteredQueries]
+                  .sort((a, b) =>
+                    (b.effectiveness || 0) - (a.effectiveness || 0)
+                  )
+                  .map((query: LocalQuery) => (
+                    <div
+                      style={{
+                        padding: "8px",
+                        marginBottom: "8px",
+                        background: "white",
+                        borderRadius: "6px",
+                        border: "1px solid #fef08a",
+                      }}
+                    >
                       <div
                         style={{
-                          padding: "8px",
-                          marginBottom: "8px",
-                          background: "white",
-                          borderRadius: "6px",
-                          border: "1px solid #fef08a",
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "flex-start",
                         }}
                       >
-                        <div
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "flex-start",
-                          }}
-                        >
-                          <div style={{ flex: 1 }}>
-                            <div
-                              style={{
-                                fontFamily: "monospace",
-                                fontSize: "12px",
-                                color: "#1e293b",
-                                wordBreak: "break-all",
-                                marginBottom: "4px",
-                              }}
-                            >
-                              {query.query}
-                            </div>
-                            <div style={{ fontSize: "10px", color: "#64748b" }}>
-                              Used {query.useCount}x
-                              {query.lastUsed &&
-                                ` · Last: ${
-                                  new Date(query.lastUsed).toLocaleDateString()
-                                }`}
-                              {query.shareStatus === "pending_review" && (
-                                <span
-                                  style={{
-                                    color: "#3b82f6",
-                                    marginLeft: "8px",
-                                  }}
-                                >
-                                  (pending review)
-                                </span>
-                              )}
-                              {query.shareStatus === "submitted" && (
-                                <span
-                                  style={{
-                                    color: "#22c55e",
-                                    marginLeft: "8px",
-                                  }}
-                                >
-                                  (shared)
-                                </span>
-                              )}
-                            </div>
+                        <div style={{ flex: 1 }}>
+                          <div
+                            style={{
+                              fontFamily: "monospace",
+                              fontSize: "12px",
+                              color: "#1e293b",
+                              wordBreak: "break-all",
+                              marginBottom: "4px",
+                            }}
+                          >
+                            {query.query}
                           </div>
-                          <div style={{ display: "flex", gap: "4px" }}>
-                            {query.shareStatus === "private" && (
-                              <cf-button
-                                onClick={flagForShareHandler({
-                                  queryId: query.id,
-                                  localQueries,
-                                  pendingSubmissions,
-                                })}
-                                variant="ghost"
-                                size="sm"
-                                style="color: #3b82f6; font-size: 11px;"
+                          <div style={{ fontSize: "10px", color: "#64748b" }}>
+                            Used {query.useCount}x
+                            {query.lastUsed &&
+                              ` · Last: ${
+                                new Date(query.lastUsed).toLocaleDateString()
+                              }`}
+                            {query.shareStatus === "pending_review" && (
+                              <span
+                                style={{
+                                  color: "#3b82f6",
+                                  marginLeft: "8px",
+                                }}
                               >
-                                Share
-                              </cf-button>
+                                (pending review)
+                              </span>
                             )}
+                            {query.shareStatus === "submitted" && (
+                              <span
+                                style={{
+                                  color: "#22c55e",
+                                  marginLeft: "8px",
+                                }}
+                              >
+                                (shared)
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div style={{ display: "flex", gap: "4px" }}>
+                          {query.shareStatus === "private" && (
                             <cf-button
-                              onClick={deleteLocalQueryHandler({
+                              onClick={flagForShareHandler({
                                 queryId: query.id,
                                 localQueries,
                                 pendingSubmissions,
                               })}
                               variant="ghost"
                               size="sm"
-                              style="color: #dc2626; font-size: 12px;"
+                              style="color: #3b82f6; font-size: 11px;"
                             >
-                              ×
+                              Share
                             </cf-button>
-                          </div>
+                          )}
+                          <cf-button
+                            onClick={deleteLocalQueryHandler({
+                              queryId: query.id,
+                              localQueries,
+                              pendingSubmissions,
+                            })}
+                            variant="ghost"
+                            size="sm"
+                            style="color: #dc2626; font-size: 12px;"
+                          >
+                            ×
+                          </cf-button>
                         </div>
                       </div>
-                    ))}
-                </div>
-              </details>
-            );
-          },
-        )}
+                    </div>
+                  ))}
+              </div>
+            </details>
+          );
+        })}
       </div>
     );
 
@@ -2345,23 +2255,22 @@ When you're done searching, STOP calling tools and produce your final structured
 
     // Run PII screening on pending submissions
     // Uses derive to reactively screen new submissions
-    const piiScreeningPrompt = derive(
-      pendingSubmissions,
-      (submissions: PendingSubmission[]) => {
-        // Filter out any undefined/null items first, then find unscreened submissions
-        const validSubmissions = (submissions || []).filter((
+    const piiScreeningPrompt = computed(() => {
+      // Filter out any undefined/null items first, then find unscreened submissions
+      const validSubmissions =
+        ((pendingSubmissions as PendingSubmission[]) || []).filter((
           s,
         ): s is PendingSubmission => s != null);
-        const unscreened = validSubmissions.filter(
-          (s) =>
-            s.sanitizedQuery === s.originalQuery &&
-            s.piiWarnings.length === 0 && !s.userApproved,
-        );
-        if (unscreened.length === 0) return "";
+      const unscreened = validSubmissions.filter(
+        (s) =>
+          s.sanitizedQuery === s.originalQuery &&
+          s.piiWarnings.length === 0 && !s.userApproved,
+      );
+      if (unscreened.length === 0) return "";
 
-        // Build prompt for the first unscreened submission
-        const submission = unscreened[0];
-        return `Analyze this Gmail search query for privacy issues and generalizability.
+      // Build prompt for the first unscreened submission
+      const submission = unscreened[0];
+      return `Analyze this Gmail search query for privacy issues and generalizability.
 
 Query: "${submission.originalQuery}"
 
@@ -2395,14 +2304,13 @@ Return a sanitized version that:
 1. Removes/generalizes PII
 2. Makes the query more general if it's too specific
 3. Returns empty string "" if the query can't be made useful for others`;
-      },
-    );
+    });
 
     // Only run PII screening when there's a prompt
-    const piiScreeningResult = derive(piiScreeningPrompt, (prompt: string) => {
-      if (!prompt) return null;
+    const piiScreeningResult = computed(() => {
+      if (!piiScreeningPrompt) return null;
       return generateObject({
-        prompt,
+        prompt: piiScreeningPrompt,
         schema: piiScreeningSchema,
         system:
           `You are a privacy analyst and query curator for a community knowledge base.
@@ -2421,7 +2329,8 @@ Be conservative: when in doubt, recommend "do_not_share".`,
 
     // Update pending submissions with screening results
     // This is a side effect that runs when screening completes
-    derive(piiScreeningResult, (result: any) => {
+    computed(() => {
+      const result = piiScreeningResult as any;
       if (!result || !result.result) return;
 
       const screeningData = result.result as {
@@ -2479,440 +2388,426 @@ Be conservative: when in doubt, recommend "do_not_share".`,
     // Pending Submissions UI
     const pendingSubmissionsUI = (
       <div style={{ marginTop: "8px" }}>
-        {derive(pendingSubmissions, (submissions: PendingSubmission[]) =>
-          submissions && submissions.length > 0
-            ? (
+        {(pendingSubmissions as PendingSubmission[]) &&
+            (pendingSubmissions as PendingSubmission[]).length > 0
+          ? (
+            <div
+              style={{
+                border: "1px solid #dbeafe",
+                borderRadius: "8px",
+                overflow: "hidden",
+              }}
+            >
+              {/* Header */}
               <div
+                onClick={togglePendingSubmissionsHandler({
+                  expanded: pendingSubmissionsExpanded,
+                })}
                 style={{
-                  border: "1px solid #dbeafe",
-                  borderRadius: "8px",
-                  overflow: "hidden",
+                  padding: "8px 12px",
+                  background: "#eff6ff",
+                  borderBottom: "1px solid #dbeafe",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  fontSize: "13px",
+                  fontWeight: "500",
+                  color: "#1e40af",
                 }}
               >
-                {/* Header */}
-                <div
-                  onClick={togglePendingSubmissionsHandler({
-                    expanded: pendingSubmissionsExpanded,
-                  })}
-                  style={{
-                    padding: "8px 12px",
-                    background: "#eff6ff",
-                    borderBottom: "1px solid #dbeafe",
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    fontSize: "13px",
-                    fontWeight: "500",
-                    color: "#1e40af",
-                  }}
-                >
-                  <span>
-                    {derive(pendingSubmissionsExpanded, (e: boolean) =>
-                      e ? "▼" : "▶")}{" "}
-                    Share Your Discoveries ({submissions.length} pending)
-                  </span>
-                  <span style={{ fontSize: "11px", color: "#3b82f6" }}>
-                    click to{" "}
-                    {derive(pendingSubmissionsExpanded, (e: boolean) =>
-                      e ? "collapse" : "expand")}
-                  </span>
-                </div>
+                <span>
+                  {pendingSubmissionsExpanded.get() ? "▼" : "▶"}{" "}
+                  Share Your Discoveries
+                  ({(pendingSubmissions as PendingSubmission[]).length} pending)
+                </span>
+                <span style={{ fontSize: "11px", color: "#3b82f6" }}>
+                  click to{" "}
+                  {pendingSubmissionsExpanded.get() ? "collapse" : "expand"}
+                </span>
+              </div>
 
-                {/* Content */}
-                {derive(pendingSubmissionsExpanded, (expanded: boolean) =>
-                  expanded
-                    ? (
+              {/* Content */}
+              {pendingSubmissionsExpanded.get()
+                ? (
+                  <div
+                    style={{
+                      maxHeight: "400px",
+                      overflowY: "auto",
+                      background: "#f8fafc",
+                      padding: "8px",
+                    }}
+                  >
+                    {(pendingSubmissions as PendingSubmission[]).filter((
+                      s,
+                    ): s is PendingSubmission => s != null).map((
+                      submission: PendingSubmission,
+                    ) => (
                       <div
                         style={{
-                          maxHeight: "400px",
-                          overflowY: "auto",
-                          background: "#f8fafc",
-                          padding: "8px",
+                          padding: "12px",
+                          marginBottom: "8px",
+                          background: "white",
+                          borderRadius: "6px",
+                          border: "1px solid #e2e8f0",
                         }}
                       >
-                        {submissions.filter((s): s is PendingSubmission =>
-                          s != null
-                        ).map((submission: PendingSubmission) => (
+                        {/* Original query */}
+                        <div style={{ marginBottom: "8px" }}>
                           <div
                             style={{
-                              padding: "12px",
-                              marginBottom: "8px",
-                              background: "white",
-                              borderRadius: "6px",
-                              border: "1px solid #e2e8f0",
+                              fontSize: "11px",
+                              color: "#64748b",
+                              marginBottom: "2px",
                             }}
                           >
-                            {/* Original query */}
-                            <div style={{ marginBottom: "8px" }}>
-                              <div
-                                style={{
-                                  fontSize: "11px",
-                                  color: "#64748b",
-                                  marginBottom: "2px",
-                                }}
-                              >
-                                Original Query:
-                              </div>
-                              <div
-                                style={{
-                                  fontFamily: "monospace",
-                                  fontSize: "12px",
-                                  color: "#1e293b",
-                                  background: "#f1f5f9",
-                                  padding: "6px 8px",
-                                  borderRadius: "4px",
-                                }}
-                              >
-                                {submission.originalQuery}
-                              </div>
-                            </div>
+                            Original Query:
+                          </div>
+                          <div
+                            style={{
+                              fontFamily: "monospace",
+                              fontSize: "12px",
+                              color: "#1e293b",
+                              background: "#f1f5f9",
+                              padding: "6px 8px",
+                              borderRadius: "4px",
+                            }}
+                          >
+                            {submission.originalQuery}
+                          </div>
+                        </div>
 
-                            {/* Recommendation badge */}
-                            {submission.recommendation !== "pending" && (
-                              <div style={{ marginBottom: "8px" }}>
-                                <span
-                                  style={{
-                                    display: "inline-block",
-                                    padding: "2px 8px",
-                                    borderRadius: "4px",
-                                    fontSize: "11px",
-                                    fontWeight: "500",
-                                    background:
-                                      submission.recommendation === "share"
-                                        ? "#dcfce7"
-                                        : submission.recommendation ===
-                                            "share_with_edits"
-                                        ? "#fef9c3"
-                                        : "#fee2e2",
-                                    color: submission.recommendation === "share"
-                                      ? "#166534"
-                                      : submission.recommendation ===
-                                          "share_with_edits"
-                                      ? "#854d0e"
-                                      : "#b91c1c",
-                                  }}
-                                >
-                                  {submission.recommendation === "share"
-                                    ? "✓ Good to share"
+                        {/* Recommendation badge */}
+                        {submission.recommendation !== "pending" && (
+                          <div style={{ marginBottom: "8px" }}>
+                            <span
+                              style={{
+                                display: "inline-block",
+                                padding: "2px 8px",
+                                borderRadius: "4px",
+                                fontSize: "11px",
+                                fontWeight: "500",
+                                background:
+                                  submission.recommendation === "share"
+                                    ? "#dcfce7"
                                     : submission.recommendation ===
                                         "share_with_edits"
-                                    ? "⚠ Needs editing"
-                                    : "✗ Not recommended"}
-                                </span>
-                              </div>
-                            )}
-
-                            {/* PII Warnings */}
-                            {submission.piiWarnings.length > 0 && (
-                              <div style={{ marginBottom: "8px" }}>
-                                <div
-                                  style={{
-                                    fontSize: "11px",
-                                    color: "#dc2626",
-                                    marginBottom: "2px",
-                                  }}
-                                >
-                                  ⚠️ Privacy Issues:
-                                </div>
-                                <div
-                                  style={{ fontSize: "12px", color: "#b91c1c" }}
-                                >
-                                  {submission.piiWarnings.join(", ")}
-                                </div>
-                              </div>
-                            )}
-
-                            {/* Generalizability Issues */}
-                            {submission.generalizabilityIssues.length > 0 && (
-                              <div style={{ marginBottom: "8px" }}>
-                                <div
-                                  style={{
-                                    fontSize: "11px",
-                                    color: "#b45309",
-                                    marginBottom: "2px",
-                                  }}
-                                >
-                                  ⚠️ Generalizability Issues:
-                                </div>
-                                <div
-                                  style={{ fontSize: "12px", color: "#92400e" }}
-                                >
-                                  {submission.generalizabilityIssues.join(", ")}
-                                </div>
-                              </div>
-                            )}
-
-                            {/* Sanitized query (editable) */}
-                            <div style={{ marginBottom: "8px" }}>
-                              <div
-                                style={{
-                                  fontSize: "11px",
-                                  color: "#64748b",
-                                  marginBottom: "2px",
-                                }}
-                              >
-                                {submission.piiWarnings.length > 0
-                                  ? "Sanitized Query (editable):"
-                                  : "Query to Share:"}
-                              </div>
-                              <input
-                                type="text"
-                                value={submission.sanitizedQuery}
-                                onChange={(e: any) => {
-                                  const newValue = e.target.value;
-                                  const pendingWritable =
-                                    pendingSubmissions as Writable<
-                                      PendingSubmission[]
-                                    >;
-                                  const subs = pendingWritable.get() || [];
-                                  const idx = subs.findIndex((
-                                    s: PendingSubmission,
-                                  ) =>
-                                    s.localQueryId === submission.localQueryId
-                                  );
-                                  if (idx >= 0) {
-                                    (pendingWritable.key(idx).key(
-                                      "sanitizedQuery",
-                                    ) as Writable<string>).set(newValue);
-                                  }
-                                }}
-                                style={{
-                                  width: "100%",
-                                  fontFamily: "monospace",
-                                  fontSize: "12px",
-                                  padding: "6px 8px",
-                                  border: "1px solid #d1d5db",
-                                  borderRadius: "4px",
-                                }}
-                              />
-                            </div>
-
-                            {/* Action buttons */}
-                            <div
-                              style={{
-                                display: "flex",
-                                gap: "8px",
-                                justifyContent: "flex-end",
+                                    ? "#fef9c3"
+                                    : "#fee2e2",
+                                color: submission.recommendation === "share"
+                                  ? "#166534"
+                                  : submission.recommendation ===
+                                      "share_with_edits"
+                                  ? "#854d0e"
+                                  : "#b91c1c",
                               }}
                             >
-                              <cf-button
-                                onClick={() => {
-                                  // Reject
-                                  const pendingWritable =
-                                    pendingSubmissions as Writable<
-                                      PendingSubmission[]
-                                    >;
-                                  const localWritable =
-                                    localQueries as Writable<LocalQuery[]>;
-                                  const subs = pendingWritable.get() || [];
-                                  pendingWritable.set(
-                                    subs.filter((s: PendingSubmission) =>
-                                      s.localQueryId !== submission.localQueryId
-                                    ),
-                                  );
-                                  // Reset local query status
-                                  const queries = localWritable.get() || [];
-                                  const idx = queries.findIndex((
-                                    q: LocalQuery,
-                                  ) =>
-                                    q.id === submission.localQueryId
-                                  );
-                                  if (idx >= 0) {
-                                    (localWritable.key(idx).key(
-                                      "shareStatus",
-                                    ) as Writable<
-                                      "private" | "pending_review" | "submitted"
-                                    >).set("private");
-                                  }
-                                }}
-                                variant="ghost"
-                                size="sm"
-                                style="color: #64748b;"
-                              >
-                                Keep Private
-                              </cf-button>
-                              <cf-button
-                                onClick={() => {
-                                  // Approve
-                                  const pendingWritable =
-                                    pendingSubmissions as Writable<
-                                      PendingSubmission[]
-                                    >;
-                                  const subs = pendingWritable.get() || [];
-                                  const idx = subs.findIndex((
-                                    s: PendingSubmission,
-                                  ) =>
-                                    s.localQueryId === submission.localQueryId
-                                  );
-                                  if (idx >= 0) {
-                                    (pendingWritable.key(idx).key(
-                                      "userApproved",
-                                    ) as Writable<boolean>).set(true);
-                                  }
-                                }}
-                                variant={submission.userApproved
-                                  ? "secondary"
-                                  : "default"}
-                                size="sm"
-                                disabled={submission.userApproved}
-                              >
-                                {submission.userApproved
-                                  ? "✓ Approved"
-                                  : "Approve for Sharing"}
-                              </cf-button>
+                              {submission.recommendation === "share"
+                                ? "✓ Good to share"
+                                : submission.recommendation ===
+                                    "share_with_edits"
+                                ? "⚠ Needs editing"
+                                : "✗ Not recommended"}
+                            </span>
+                          </div>
+                        )}
+
+                        {/* PII Warnings */}
+                        {submission.piiWarnings.length > 0 && (
+                          <div style={{ marginBottom: "8px" }}>
+                            <div
+                              style={{
+                                fontSize: "11px",
+                                color: "#dc2626",
+                                marginBottom: "2px",
+                              }}
+                            >
+                              ⚠️ Privacy Issues:
+                            </div>
+                            <div
+                              style={{ fontSize: "12px", color: "#b91c1c" }}
+                            >
+                              {submission.piiWarnings.join(", ")}
                             </div>
                           </div>
-                        ))}
+                        )}
 
-                        {/* Submit all approved button */}
-                        {derive(
-                          [pendingSubmissions, registryWish, agentTypeUrl],
-                          (
-                            [subs, registry, typeUrl]: [
-                              PendingSubmission[],
-                              any,
-                              string,
-                            ],
-                          ) => {
-                            const approvedCount = (subs || []).filter((s) =>
-                              s.userApproved && !s.submittedAt
-                            ).length;
-                            const hasRegistry = !!registry?.result?.submitQuery;
+                        {/* Generalizability Issues */}
+                        {submission.generalizabilityIssues.length > 0 && (
+                          <div style={{ marginBottom: "8px" }}>
+                            <div
+                              style={{
+                                fontSize: "11px",
+                                color: "#b45309",
+                                marginBottom: "2px",
+                              }}
+                            >
+                              ⚠️ Generalizability Issues:
+                            </div>
+                            <div
+                              style={{ fontSize: "12px", color: "#92400e" }}
+                            >
+                              {submission.generalizabilityIssues.join(", ")}
+                            </div>
+                          </div>
+                        )}
 
-                            return approvedCount > 0
-                              ? (
+                        {/* Sanitized query (editable) */}
+                        <div style={{ marginBottom: "8px" }}>
+                          <div
+                            style={{
+                              fontSize: "11px",
+                              color: "#64748b",
+                              marginBottom: "2px",
+                            }}
+                          >
+                            {submission.piiWarnings.length > 0
+                              ? "Sanitized Query (editable):"
+                              : "Query to Share:"}
+                          </div>
+                          <input
+                            type="text"
+                            value={submission.sanitizedQuery}
+                            onChange={(e: any) => {
+                              const newValue = e.target.value;
+                              const pendingWritable =
+                                pendingSubmissions as Writable<
+                                  PendingSubmission[]
+                                >;
+                              const subs = pendingWritable.get() || [];
+                              const idx = subs.findIndex((
+                                s: PendingSubmission,
+                              ) => s.localQueryId === submission.localQueryId);
+                              if (idx >= 0) {
+                                (pendingWritable.key(idx).key(
+                                  "sanitizedQuery",
+                                ) as Writable<string>).set(newValue);
+                              }
+                            }}
+                            style={{
+                              width: "100%",
+                              fontFamily: "monospace",
+                              fontSize: "12px",
+                              padding: "6px 8px",
+                              border: "1px solid #d1d5db",
+                              borderRadius: "4px",
+                            }}
+                          />
+                        </div>
+
+                        {/* Action buttons */}
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: "8px",
+                            justifyContent: "flex-end",
+                          }}
+                        >
+                          <cf-button
+                            onClick={() => {
+                              // Reject
+                              const pendingWritable =
+                                pendingSubmissions as Writable<
+                                  PendingSubmission[]
+                                >;
+                              const localWritable = localQueries as Writable<
+                                LocalQuery[]
+                              >;
+                              const subs = pendingWritable.get() || [];
+                              pendingWritable.set(
+                                subs.filter((s: PendingSubmission) =>
+                                  s.localQueryId !== submission.localQueryId
+                                ),
+                              );
+                              // Reset local query status
+                              const queries = localWritable.get() || [];
+                              const idx = queries.findIndex((
+                                q: LocalQuery,
+                              ) => q.id === submission.localQueryId);
+                              if (idx >= 0) {
+                                (localWritable.key(idx).key(
+                                  "shareStatus",
+                                ) as Writable<
+                                  "private" | "pending_review" | "submitted"
+                                >).set("private");
+                              }
+                            }}
+                            variant="ghost"
+                            size="sm"
+                            style="color: #64748b;"
+                          >
+                            Keep Private
+                          </cf-button>
+                          <cf-button
+                            onClick={() => {
+                              // Approve
+                              const pendingWritable =
+                                pendingSubmissions as Writable<
+                                  PendingSubmission[]
+                                >;
+                              const subs = pendingWritable.get() || [];
+                              const idx = subs.findIndex((
+                                s: PendingSubmission,
+                              ) => s.localQueryId === submission.localQueryId);
+                              if (idx >= 0) {
+                                (pendingWritable.key(idx).key(
+                                  "userApproved",
+                                ) as Writable<boolean>).set(true);
+                              }
+                            }}
+                            variant={submission.userApproved
+                              ? "secondary"
+                              : "default"}
+                            size="sm"
+                            disabled={submission.userApproved}
+                          >
+                            {submission.userApproved
+                              ? "✓ Approved"
+                              : "Approve for Sharing"}
+                          </cf-button>
+                        </div>
+                      </div>
+                    ))}
+
+                    {/* Submit all approved button */}
+                    {computed(() => {
+                      const subs = pendingSubmissions as PendingSubmission[];
+                      const registry = registryWish as any;
+                      const typeUrl = agentTypeUrl as string;
+                      const approvedCount = (subs || []).filter((s) =>
+                        s.userApproved && !s.submittedAt
+                      ).length;
+                      const hasRegistry = !!registry?.result?.submitQuery;
+
+                      return approvedCount > 0
+                        ? (
+                          <div
+                            style={{
+                              marginTop: "12px",
+                              textAlign: "center",
+                            }}
+                          >
+                            <cf-button
+                              variant="default"
+                              disabled={!hasRegistry}
+                              onClick={() => {
+                                if (!hasRegistry || !typeUrl) {
+                                  return;
+                                }
+                                const approved = (subs || []).filter((
+                                  s: PendingSubmission,
+                                ) =>
+                                  s.userApproved && !s.submittedAt
+                                );
+                                const submitHandler = registry?.result
+                                  ?.submitQuery;
+                                const pendingWritable =
+                                  pendingSubmissions as Writable<
+                                    PendingSubmission[]
+                                  >;
+                                const localWritable = localQueries as Writable<
+                                  LocalQuery[]
+                                >;
+
+                                // Submit each approved query
+                                approved.forEach(
+                                  (submission: PendingSubmission) => {
+                                    if (submitHandler) {
+                                      submitHandler({
+                                        agentTypeUrl: typeUrl,
+                                        query: submission.sanitizedQuery,
+                                      });
+                                    }
+
+                                    // Mark as submitted in pendingSubmissions
+                                    const currentSubs = pendingWritable.get() ||
+                                      [];
+                                    const idx = currentSubs.findIndex((
+                                      s: PendingSubmission,
+                                    ) =>
+                                      s.localQueryId ===
+                                        submission.localQueryId
+                                    );
+                                    if (idx >= 0) {
+                                      (pendingWritable.key(idx).key(
+                                        "submittedAt",
+                                      ) as Writable<number | undefined>)
+                                        .set(safeDateNow());
+                                    }
+
+                                    // Update local query status to submitted
+                                    const queries = localWritable.get() ||
+                                      [];
+                                    const qIdx = queries.findIndex((
+                                      q: LocalQuery,
+                                    ) => q.id === submission.localQueryId);
+                                    if (qIdx >= 0) {
+                                      (localWritable.key(qIdx).key(
+                                        "shareStatus",
+                                      ) as Writable<
+                                        | "private"
+                                        | "pending_review"
+                                        | "submitted"
+                                      >).set("submitted");
+                                    }
+                                  },
+                                );
+                              }}
+                            >
+                              Submit {approvedCount} Approved{" "}
+                              {approvedCount === 1 ? "Query" : "Queries"}{" "}
+                              to Community
+                            </cf-button>
+                            {!hasRegistry && (
+                              <div
+                                style={{
+                                  marginTop: "12px",
+                                  padding: "12px",
+                                  background: "#fef3c7",
+                                  border: "1px solid #fde68a",
+                                  borderRadius: "8px",
+                                }}
+                              >
                                 <div
                                   style={{
-                                    marginTop: "12px",
-                                    textAlign: "center",
+                                    fontSize: "12px",
+                                    color: "#92400e",
+                                    marginBottom: "8px",
                                   }}
                                 >
-                                  <cf-button
-                                    variant="default"
-                                    disabled={!hasRegistry}
-                                    onClick={() => {
-                                      if (!hasRegistry || !typeUrl) {
-                                        return;
-                                      }
-                                      const approved = (subs || []).filter((
-                                        s: PendingSubmission,
-                                      ) =>
-                                        s.userApproved && !s.submittedAt
-                                      );
-                                      const submitHandler = registry?.result
-                                        ?.submitQuery;
-                                      const pendingWritable =
-                                        pendingSubmissions as Writable<
-                                          PendingSubmission[]
-                                        >;
-                                      const localWritable =
-                                        localQueries as Writable<LocalQuery[]>;
-
-                                      // Submit each approved query
-                                      approved.forEach(
-                                        (submission: PendingSubmission) => {
-                                          if (submitHandler) {
-                                            submitHandler({
-                                              agentTypeUrl: typeUrl,
-                                              query: submission.sanitizedQuery,
-                                            });
-                                          }
-
-                                          // Mark as submitted in pendingSubmissions
-                                          const currentSubs =
-                                            pendingWritable.get() || [];
-                                          const idx = currentSubs.findIndex((
-                                            s: PendingSubmission,
-                                          ) =>
-                                            s.localQueryId ===
-                                              submission.localQueryId
-                                          );
-                                          if (idx >= 0) {
-                                            (pendingWritable.key(idx).key(
-                                              "submittedAt",
-                                            ) as Writable<number | undefined>)
-                                              .set(safeDateNow());
-                                          }
-
-                                          // Update local query status to submitted
-                                          const queries = localWritable.get() ||
-                                            [];
-                                          const qIdx = queries.findIndex((
-                                            q: LocalQuery,
-                                          ) =>
-                                            q.id === submission.localQueryId
-                                          );
-                                          if (qIdx >= 0) {
-                                            (localWritable.key(qIdx).key(
-                                              "shareStatus",
-                                            ) as Writable<
-                                              | "private"
-                                              | "pending_review"
-                                              | "submitted"
-                                            >).set("submitted");
-                                          }
-                                        },
-                                      );
-                                    }}
-                                  >
-                                    Submit {approvedCount} Approved{" "}
-                                    {approvedCount === 1 ? "Query" : "Queries"}
-                                    {" "}
-                                    to Community
-                                  </cf-button>
-                                  {!hasRegistry && (
-                                    <div
-                                      style={{
-                                        marginTop: "12px",
-                                        padding: "12px",
-                                        background: "#fef3c7",
-                                        border: "1px solid #fde68a",
-                                        borderRadius: "8px",
-                                      }}
-                                    >
-                                      <div
-                                        style={{
-                                          fontSize: "12px",
-                                          color: "#92400e",
-                                          marginBottom: "8px",
-                                        }}
-                                      >
-                                        No community registry found. You can
-                                        create one to share queries with other
-                                        users.
-                                      </div>
-                                      <div
-                                        style={{
-                                          fontSize: "10px",
-                                          color: "#a16207",
-                                          marginBottom: "8px",
-                                        }}
-                                      >
-                                        Note: Registry will be created in your
-                                        current space. After creation, favorite
-                                        it with tag #gmailSearchRegistry.
-                                      </div>
-                                      <cf-button
-                                        onClick={createSearchRegistry}
-                                        variant="secondary"
-                                        size="sm"
-                                      >
-                                        Create Registry
-                                      </cf-button>
-                                    </div>
-                                  )}
+                                  No community registry found. You can create
+                                  one to share queries with other users.
                                 </div>
-                              )
-                              : null;
-                          },
-                        )}
-                      </div>
-                    )
-                    : null)}
-              </div>
-            )
-            : null)}
+                                <div
+                                  style={{
+                                    fontSize: "10px",
+                                    color: "#a16207",
+                                    marginBottom: "8px",
+                                  }}
+                                >
+                                  Note: Registry will be created in your current
+                                  space. After creation, favorite it with tag
+                                  #gmailSearchRegistry.
+                                </div>
+                                <cf-button
+                                  onClick={createSearchRegistry}
+                                  variant="secondary"
+                                  size="sm"
+                                >
+                                  Create Registry
+                                </cf-button>
+                              </div>
+                            )}
+                          </div>
+                        )
+                        : null;
+                    })}
+                  </div>
+                )
+                : null}
+            </div>
+          )
+          : null}
       </div>
     );
 
