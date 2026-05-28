@@ -48,6 +48,25 @@ const mentionableListSchema = internSchema(
   },
 );
 
+const profileElementListSchema = internSchema(
+  {
+    type: "array",
+    items: {
+      type: "object",
+      properties: {
+        cell: { type: "object", asCell: ["cell"] },
+        tag: { type: "string" },
+        userTags: {
+          type: "array",
+          items: { type: "string" },
+        },
+        title: { type: "string" },
+        source: { type: "string" },
+      },
+    },
+  },
+);
+
 class WishError extends Error {
   constructor(message: string) {
     super(message);
@@ -114,6 +133,10 @@ function getResolutionKind(parsed: ParsedWishTarget): string {
     case "#journal":
     case "#learned":
     case "#profile":
+    case "#profileDefault":
+    case "#profileName":
+    case "#profileAvatar":
+    case "#profileSpace":
       return "home-target";
     default:
       return "hashtag-search";
@@ -162,7 +185,7 @@ type WishContext = {
   tx: IExtendedStorageTransaction;
   parentCell: Cell<any>;
   spaceCell?: Cell<unknown>;
-  scope?: ("~" | "." | string)[];
+  scope?: ("~" | "." | "profile" | string)[];
   /** Cached #now cell to avoid non-idempotent re-runs from Date.now() */
   nowCell?: Cell<unknown>;
   usedHomeSpace?: boolean;
@@ -217,7 +240,7 @@ function getSpaceCellForDID(
 }
 
 function getArbitraryDIDs(scope?: string[]): string[] {
-  return (scope ?? []).filter((s) => s !== "~" && s !== ".");
+  return (scope ?? []).filter((s) => s !== "~" && s !== "." && s !== "profile");
 }
 
 function resolvePath(
@@ -234,6 +257,18 @@ function resolvePath(
 function getHomeSpaceCell(ctx: WishContext): Cell<unknown> {
   ctx.usedHomeSpace = true;
   return ctx.runtime.getHomeSpaceCell(ctx.tx);
+}
+
+function getProfileSpaceCell(ctx: WishContext): Cell<unknown> {
+  const profileSpaceField = getHomeSpaceCell(ctx).key("profileSpace");
+  if (profileSpaceField.getRaw() === undefined) {
+    throw new WishError("homeSpaceCell.profileSpace is not set");
+  }
+  const profileSpace = profileSpaceField.get();
+  if (!profileSpace) {
+    throw new WishError("homeSpaceCell.profileSpace is not set");
+  }
+  return (profileSpace as Cell<unknown>).resolveAsCell();
 }
 
 function formatTarget(parsed: ParsedWishTarget): string {
@@ -396,6 +431,54 @@ function searchMentionablesForHashtag(
   };
 }
 
+function searchProfileForHashtag(
+  ctx: WishContext,
+  searchTermWithoutHash: string,
+  pathPrefix: string[],
+): BaseResolution[] {
+  const queryKey = sanitizeQueryKey(`#${searchTermWithoutHash}`);
+  const elementsCell = measureWishPhase(
+    "profile-elements-cell",
+    queryKey,
+    () =>
+      getProfileSpaceCell(ctx)
+        .key("defaultPattern")
+        .key("elements")
+        .asSchema(profileElementListSchema),
+  );
+  const elements = measureWishPhase(
+    "profile-elements-get",
+    queryKey,
+    () => elementsCell.get() || [],
+  ) as Array<{
+    cell?: Cell<unknown>;
+    tag?: string;
+    userTags?: string[];
+  }>;
+
+  const matches = measureWishPhase(
+    "profile-elements-filter",
+    queryKey,
+    () =>
+      elements.filter((entry) => {
+        const userTags = entry.userTags ?? [];
+        for (const t of userTags) {
+          if (t.toLowerCase() === searchTermWithoutHash) return true;
+        }
+        return tagMatchesHashtag(entry.tag, searchTermWithoutHash);
+      }),
+  );
+
+  return measureWishPhase(
+    "profile-elements-result-map",
+    queryKey,
+    () =>
+      matches.flatMap((match) =>
+        match.cell ? [{ cell: match.cell, pathPrefix }] : []
+      ),
+  );
+}
+
 /**
  * Search for pieces by hashtag across favorites and/or mentionables based on scope.
  * Synchronous: relies on cell.get() returning undefined for unloaded data;
@@ -412,6 +495,7 @@ function searchByHashtag(
   // Default (no scope) = favorites only for backward compatibility
   const searchFavorites = !ctx.scope || ctx.scope.includes("~");
   const searchMentionables = ctx.scope?.includes(".");
+  const searchProfile = ctx.scope?.includes("profile");
 
   const allMatches: BaseResolution[] = [];
   let allMentionablesLoaded = true;
@@ -430,6 +514,12 @@ function searchByHashtag(
     );
     allMatches.push(...matches);
     if (!loaded) allMentionablesLoaded = false;
+  }
+
+  if (searchProfile) {
+    allMatches.push(
+      ...searchProfileForHashtag(ctx, searchTermWithoutHash, parsed.path),
+    );
   }
 
   // Search mentionables in arbitrary DID spaces
@@ -455,6 +545,7 @@ function searchByHashtag(
     const parts: string[] = [];
     if (searchFavorites) parts.push("favorites");
     if (searchMentionables) parts.push("mentionables");
+    if (searchProfile) parts.push("profile");
     if (arbitraryDIDs.length > 0) {
       parts.push(`${arbitraryDIDs.length} space(s)`);
     }
@@ -549,18 +640,36 @@ function resolveHomeSpaceTarget(
       }];
     }
 
-    case "#profile": {
+    case "#profile":
+    case "#profileDefault": {
       const userDID = ctx.runtime.userIdentityDID;
       if (!userDID) {
         throw new WishError("User identity DID not available for #profile");
       }
-      const learnedCell = getHomeSpaceCell(ctx)
-        .key("defaultPattern")
-        .key("learned")
-        .resolveAsCell();
       return [{
-        cell: learnedCell,
-        pathPrefix: ["summary"],
+        cell: getProfileSpaceCell(ctx),
+        pathPrefix: ["defaultPattern"],
+      }];
+    }
+
+    case "#profileName": {
+      return [{
+        cell: getProfileSpaceCell(ctx),
+        pathPrefix: ["defaultPattern", "name"],
+      }];
+    }
+
+    case "#profileAvatar": {
+      return [{
+        cell: getProfileSpaceCell(ctx),
+        pathPrefix: ["defaultPattern", "avatar"],
+      }];
+    }
+
+    case "#profileSpace": {
+      return [{
+        cell: getProfileSpaceCell(ctx),
+        pathPrefix: [],
       }];
     }
 
@@ -686,7 +795,7 @@ function canUseSharedHashtagResult(
 function sharedHashtagResolverKey(
   parentSpace: string,
   parsed: ParsedWishTarget,
-  scope?: ("~" | "." | string)[],
+  scope?: ("~" | "." | "profile" | string)[],
 ): string {
   return JSON.stringify({
     space: parentSpace,
@@ -959,9 +1068,12 @@ function wishOutputScope(
 
 export function wishTargetMayUseHomeSpace(
   query: unknown,
-  scope?: ("~" | "." | string)[],
+  scope?: ("~" | "." | "profile" | string)[],
 ): boolean {
-  if (typeof query !== "string") return scope?.includes("~") === true;
+  if (typeof query !== "string") {
+    return scope?.includes("~") === true ||
+      scope?.includes("profile") === true;
+  }
 
   let parsed: ParsedWishTarget;
   try {
@@ -972,7 +1084,7 @@ export function wishTargetMayUseHomeSpace(
 
   const kind = getResolutionKind(parsed);
   if (kind === "home-target") return true;
-  if (scope?.includes("~")) return true;
+  if (scope?.includes("~") || scope?.includes("profile")) return true;
   return kind === "hashtag-search" && scope === undefined;
 }
 

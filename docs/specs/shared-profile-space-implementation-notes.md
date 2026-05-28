@@ -139,3 +139,38 @@ made before committing.
 - URL element creation needs a host/runtime operation if it must compile the URL
   into a real piece immediately. The pattern-local v1 stores a URL-backed
   element record instead.
+
+## Slice 5: `wish()` Profile Behavior
+
+### Ambiguity or Incorrect Spec
+
+- Existing `wish()` tests use nested BDD steps, and `deno test --filter profile`
+  does not select the nested `wish.test.ts` profile cases. The full
+  `wish.test.ts` file is the reliable focused verification for this slice.
+- Profile elements need an explicit schema when reading `elements`; otherwise
+  `element.cell` can materialize as plain data instead of a cell link.
+
+### Decision
+
+- Added `"profile"` to `WishParams.scope` and excluded it from arbitrary DID
+  scope parsing.
+- `#profile` and `#profileDefault` resolve to
+  `homeSpaceCell.profileSpace.defaultPattern`.
+- `#profileName`, `#profileAvatar`, and `#profileSpace` resolve explicitly.
+- `scope: ["profile"]` searches profile default `elements`, checking
+  `userTags` before `tag`.
+- Missing `homeSpaceCell.profileSpace` returns a normal `WishState` error.
+
+### Tests Added
+
+- `packages/runner/test/wish.test.ts`
+  - Well-known profile target resolution.
+  - Profile-scoped hashtag search by `userTags` and `tag`.
+  - `"profile"` scope is not treated as an arbitrary DID.
+  - Missing profile link produces an error state.
+
+### Spec Correction Needed
+
+- None for behavior. Test command expectations should mention that the nested
+  profile wish cases require running `packages/runner/test/wish.test.ts` or the
+  broader `--filter wish`, not only `--filter profile`.
