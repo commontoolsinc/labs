@@ -132,6 +132,17 @@ but render code can't). Handlers/actions run in a settled context, so the same
 chained reads there are usually safe; the danger is the always-evaluating render
 computeds. Fixed across `packages/patterns/factory-outputs/parking-coordinator/main.tsx`.
 
+⚠️ **Don't take this `?? []` recipe into a NESTED `.map()`.** Inside an outer
+`rows.map((row) => …)`, an inner `(cellCall() ?? []).map((el) => …)` whose
+inner closure references any pattern-scope cell aborts pattern construction —
+this is a *different* gotcha (the ts-transformer doesn't recognize binary-
+expression receivers wrapping a reactive call, so no `mapWithPattern`
+rewrite happens). The very guard that's correct at the top level is the thing
+that breaks it nested. See
+[closure-capture-in-nested-map.md](./closure-capture-in-nested-map.md) for
+the three idiomatic alternatives (map the cell directly; pre-bake into a
+top-level `computed`; explicit `derive({deps}, …)` per row).
+
 ## 6. `Math.random()` throws under SES
 
 **Symptom:** `TypeError: secure mode %SharedMath%.random() throws` when a
