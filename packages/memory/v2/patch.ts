@@ -30,6 +30,16 @@ const MAX_ARRAY_INDEX = 2 ** 32 - 2;
  */
 const cloneValue = (value: FabricValue): FabricValue => cloneIfNecessary(value);
 
+// Shallow-thaw a spine container to a mutable copy: clone only the top-level
+// container (children stay identity-shared), always allocate (`force`), and
+// leave the result mutable for the in-place spine write that follows. The
+// boundary `deepFreeze()` re-freezes the assembled tree on the way out.
+const SHALLOW_THAW_OPTS = {
+  frozen: false,
+  deep: false,
+  force: true,
+} as const;
+
 /**
  * Applies a sequence of RFC 6902 JSON Patch operations (`replace`, `add`,
  * `remove`, `move`, `splice`) to a document tree, returning a new document
@@ -42,10 +52,11 @@ const cloneValue = (value: FabricValue): FabricValue => cloneIfNecessary(value);
  * The function is therefore on the hot path for any read that reconstructs
  * a document from its stored patch list.
  *
- * Mutation discipline: each `applyOp` call uses `shallowCloneContainer` to
- * produce a new top-level copy of the container being modified, then
- * recurses into the path; containers off the modified path remain
- * frozen-by-reference. The returned tree is then fully deep-frozen at the
+ * Mutation discipline: each `applyOp` call uses `cloneIfNecessary(_, {
+ * frozen: false, deep: false, force: true })` to produce a new top-level
+ * copy of the container being modified, then recurses into the path;
+ * containers off the modified path remain frozen-by-reference. The
+ * returned tree is then fully deep-frozen at the
  * function boundary, completing the shallow-clone / mutate / deep-freeze
  * pattern: shallow clones at the immediate containers on the modified
  * path, deep-freeze of the assembled result before it leaves the function.
@@ -95,7 +106,7 @@ const replaceAtPath = (
 
   if (Array.isArray(root)) {
     const index = requireExistingArrayIndex(root, path[0]!, fullPath);
-    const next = shallowCloneContainer(root) as FabricValue[];
+    const next = cloneIfNecessary(root, SHALLOW_THAW_OPTS) as FabricValue[];
     if (path.length === 1) {
       next[index] = cloneValue(value);
       return next;
@@ -113,7 +124,7 @@ const replaceAtPath = (
     throw new Error(`path is not traversable at ${encodePointer(fullPath)}`);
   }
 
-  const next = shallowCloneContainer(root) as PatchObject;
+  const next = cloneIfNecessary(root, SHALLOW_THAW_OPTS) as PatchObject;
   const key = path[0]!;
   if (path.length === 1) {
     next[key] = cloneValue(value);
@@ -143,7 +154,7 @@ const addAtPath = (
   }
 
   if (Array.isArray(root)) {
-    const next = shallowCloneContainer(root) as FabricValue[];
+    const next = cloneIfNecessary(root, SHALLOW_THAW_OPTS) as FabricValue[];
     const segment = path[0]!;
     if (path.length === 1) {
       if (segment === "-") {
@@ -168,7 +179,7 @@ const addAtPath = (
     throw new Error(`path is not traversable at ${encodePointer(fullPath)}`);
   }
 
-  const next = shallowCloneContainer(root) as PatchObject;
+  const next = cloneIfNecessary(root, SHALLOW_THAW_OPTS) as PatchObject;
   const key = path[0]!;
   if (path.length === 1) {
     next[key] = cloneValue(value);
@@ -197,7 +208,7 @@ const removeAtPath = (
 
   if (Array.isArray(root)) {
     const index = requireExistingArrayIndex(root, path[0]!, fullPath);
-    const next = shallowCloneContainer(root) as FabricValue[];
+    const next = cloneIfNecessary(root, SHALLOW_THAW_OPTS) as FabricValue[];
     if (path.length === 1) {
       next.splice(index, 1);
       return next;
@@ -215,7 +226,7 @@ const removeAtPath = (
     throw new Error(`path is not traversable at ${encodePointer(fullPath)}`);
   }
 
-  const next = shallowCloneContainer(root) as PatchObject;
+  const next = cloneIfNecessary(root, SHALLOW_THAW_OPTS) as PatchObject;
   const key = path[0]!;
   if (path.length === 1) {
     if (!Object.hasOwn(root, key)) {
@@ -270,13 +281,13 @@ const spliceAtPath = (
     if (index < 0 || remove < 0 || index > root.length) {
       throw new Error(`invalid splice at ${encodePointer(fullPath)}`);
     }
-    const next = shallowCloneContainer(root) as FabricValue[];
+    const next = cloneIfNecessary(root, SHALLOW_THAW_OPTS) as FabricValue[];
     next.splice(index, remove, ...add.map((value) => cloneValue(value)));
     return next;
   }
 
   if (Array.isArray(root)) {
-    const next = shallowCloneContainer(root) as FabricValue[];
+    const next = cloneIfNecessary(root, SHALLOW_THAW_OPTS) as FabricValue[];
     const pathIndex = requireExistingArrayIndex(root, path[0]!, fullPath);
     const child = root[pathIndex];
     if (!isContainer(child)) {
@@ -307,7 +318,7 @@ const spliceAtPath = (
     throw new Error(`path is not traversable at ${encodePointer(fullPath)}`);
   }
 
-  const next = shallowCloneContainer(root) as PatchObject;
+  const next = cloneIfNecessary(root, SHALLOW_THAW_OPTS) as PatchObject;
   next[key] = spliceAtPath(child, path.slice(1), index, remove, add, fullPath);
   return next;
 };
@@ -328,18 +339,6 @@ const getAtPath = (root: FabricValue, path: string[]): FabricValue => {
 
 const createContainer = (nextSegment: string): PatchContainer => {
   return isArraySegment(nextSegment) || nextSegment === "-" ? [] : {};
-};
-
-const shallowCloneContainer = (value: PatchContainer): PatchContainer => {
-  if (Array.isArray(value)) {
-    const copy = new Array(value.length);
-    Object.assign(copy, value);
-    return copy as FabricValue[];
-  }
-
-  const copy = Object.create(Object.getPrototypeOf(value)) as PatchObject;
-  Object.assign(copy, value);
-  return copy;
 };
 
 const parseArrayIndex = (segment: string): number => {

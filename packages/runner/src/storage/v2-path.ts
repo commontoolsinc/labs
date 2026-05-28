@@ -90,24 +90,15 @@ export const readValueAtPath = (
   return current as FabricValue | undefined;
 };
 
-const shallowCloneContainer = <
-  Container extends Record<string, unknown> | unknown[],
->(
-  value: Container,
-): Container => {
-  if (Array.isArray(value)) {
-    const copy = new Array(value.length);
-    Object.assign(copy, value);
-    return copy as Container;
-  }
-
-  const copy = Object.create(Object.getPrototypeOf(value)) as Record<
-    string,
-    unknown
-  >;
-  Object.assign(copy, value);
-  return copy as Container;
-};
+// Shallow-thaw a spine container to a mutable copy: clone only the top-level
+// container (children stay identity-shared), always allocate (`force`), and
+// leave the result mutable for the in-place spine write that follows. The
+// boundary `deepFreeze()` re-freezes the assembled tree on the way out.
+const SHALLOW_THAW_OPTS = {
+  frozen: false,
+  deep: false,
+  force: true,
+} as const;
 
 const getPathSegmentValue = (
   value: Record<string, unknown> | unknown[],
@@ -136,7 +127,10 @@ export const cloneWithValueAtPath = (
   }
 
   const baseRoot = (root ?? {}) as Record<string, unknown>;
-  const nextRoot = shallowCloneContainer(baseRoot);
+  const nextRoot = cloneIfNecessary(
+    baseRoot as FabricValue,
+    SHALLOW_THAW_OPTS,
+  ) as Record<string, unknown>;
   let currentClone: Record<string, unknown> | unknown[] = nextRoot;
   let currentBase: unknown = baseRoot;
   for (let index = 0; index < path.length - 1; index += 1) {
@@ -149,7 +143,7 @@ export const cloneWithValueAtPath = (
       )
       : undefined;
     const nextChild = isRecord(existing) || Array.isArray(existing)
-      ? shallowCloneContainer(existing)
+      ? cloneIfNecessary(existing as FabricValue, SHALLOW_THAW_OPTS)
       : createPathContainer(nextSegment);
     setPathSegmentValue(currentClone, segment, nextChild);
     currentClone = nextChild as Record<string, unknown> | unknown[];
@@ -190,7 +184,10 @@ export const cloneWithoutPath = (
     return root;
   }
 
-  const nextRoot = shallowCloneContainer(root);
+  const nextRoot = cloneIfNecessary(
+    root as FabricValue,
+    SHALLOW_THAW_OPTS,
+  ) as Record<string, unknown>;
   let currentClone: Record<string, unknown> | unknown[] = nextRoot;
   let currentBase: Record<string, unknown> | unknown[] = root;
   for (let index = 0; index < path.length - 1; index += 1) {
@@ -198,7 +195,10 @@ export const cloneWithoutPath = (
     const next = getPathSegmentValue(currentBase, segment) as
       | Record<string, unknown>
       | unknown[];
-    const nextClone = shallowCloneContainer(next);
+    const nextClone = cloneIfNecessary(
+      next as FabricValue,
+      SHALLOW_THAW_OPTS,
+    ) as Record<string, unknown> | unknown[];
     setPathSegmentValue(currentClone, segment, nextClone);
     currentClone = nextClone;
     currentBase = next;
