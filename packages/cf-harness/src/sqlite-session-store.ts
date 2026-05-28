@@ -1,13 +1,21 @@
 import { Database } from "@db/sqlite";
 import {
+  type HarnessChatBrowserAccessLease,
+  type HarnessChatContext,
   type HarnessChatEventEnvelope,
+  type HarnessChatPolicy,
   type HarnessChatSessionStatus,
+  type HarnessChatTurnInput,
+  type HarnessChatTurnRecord,
+  type HarnessChatTurnStatus,
 } from "./contracts/interactive-chat.ts";
 import type { HarnessTranscriptMessage } from "./contracts/transcript.ts";
 import type {
   HarnessChatEventListOptions,
   HarnessChatSessionSnapshot,
   HarnessChatSessionStore,
+  HarnessChatSessionTurnEventMutation,
+  HarnessChatTurnListOptions,
 } from "./session-store.ts";
 
 const PRAGMAS = `
@@ -30,6 +38,29 @@ CREATE TABLE IF NOT EXISTS chat_session (
 );
 CREATE INDEX IF NOT EXISTS idx_chat_session_updated_at
   ON chat_session (updated_at);
+
+CREATE TABLE IF NOT EXISTS chat_turn (
+  session_id      TEXT NOT NULL,
+  turn_id         TEXT NOT NULL,
+  status          TEXT NOT NULL,
+  turn            TEXT NOT NULL,
+  input           TEXT NOT NULL,
+  context         TEXT,
+  policy          TEXT NOT NULL,
+  browser_access  TEXT,
+  metadata        TEXT,
+  started_at      TEXT NOT NULL,
+  updated_at      TEXT NOT NULL,
+  ended_at        TEXT,
+  cancel_reason   TEXT,
+  error           TEXT,
+  PRIMARY KEY (session_id, turn_id),
+  FOREIGN KEY (session_id) REFERENCES chat_session(session_id)
+);
+CREATE INDEX IF NOT EXISTS idx_chat_turn_session_status_updated
+  ON chat_turn (session_id, status, updated_at);
+CREATE INDEX IF NOT EXISTS idx_chat_turn_updated_at
+  ON chat_turn (updated_at);
 
 CREATE TABLE IF NOT EXISTS chat_event (
   sequence    INTEGER NOT NULL PRIMARY KEY,
@@ -57,12 +88,28 @@ type EventRow = {
   event: string;
 };
 
+type TurnRow = {
+  session_id: string;
+  turn: string;
+  input: string;
+  context: string | null;
+  policy: string;
+  browser_access: string | null;
+  metadata: string | null;
+};
+
 export interface OpenSqliteHarnessChatSessionStoreOptions {
   url: URL;
 }
 
-const databaseAddress = (url: URL): URL | string =>
-  url.protocol === "file:" ? url : ":memory:";
+const databaseAddress = (url: URL): URL => {
+  if (url.protocol !== "file:") {
+    throw new Error(
+      `unsupported SQLite chat session store URL protocol: ${url.protocol}; expected file:`,
+    );
+  }
+  return url;
+};
 
 const parseJsonColumn = <Value>(
   value: string,
@@ -78,6 +125,31 @@ const parseJsonColumn = <Value>(
     );
   }
 };
+
+const parseNullableJsonColumn = <Value>(
+  value: string | null,
+  column: string,
+): Value | undefined =>
+  value === null ? undefined : parseJsonColumn<Value>(value, column);
+
+const turnRowParams = (turn: HarnessChatTurnRecord) => ({
+  session_id: turn.sessionId,
+  turn_id: turn.turn.turnId,
+  status: turn.turn.status,
+  turn: JSON.stringify(turn.turn),
+  input: JSON.stringify(turn.input),
+  context: turn.context === undefined ? null : JSON.stringify(turn.context),
+  policy: JSON.stringify(turn.policy),
+  browser_access: turn.browserAccess === undefined
+    ? null
+    : JSON.stringify(turn.browserAccess),
+  metadata: turn.metadata === undefined ? null : JSON.stringify(turn.metadata),
+  started_at: turn.turn.startedAt,
+  updated_at: turn.turn.updatedAt,
+  ended_at: turn.turn.endedAt ?? null,
+  cancel_reason: turn.turn.cancelReason ?? null,
+  error: turn.turn.error === undefined ? null : JSON.stringify(turn.turn.error),
+});
 
 export class SqliteHarnessChatSessionStore implements HarnessChatSessionStore {
   readonly database: Database;
@@ -155,6 +227,154 @@ export class SqliteHarnessChatSessionStore implements HarnessChatSessionStore {
       }
       throw error;
     }
+  }
+
+  saveSessionTurnAndAppendEvent(
+    mutation: HarnessChatSessionTurnEventMutation,
+  ): boolean {
+    this.database.exec("BEGIN IMMEDIATE TRANSACTION;");
+    try {
+      if (mutation.createTurn) {
+        const inserted = this.insertTurn(mutation.turn);
+        if (!inserted) {
+          this.database.exec("ROLLBACK;");
+          return false;
+        }
+      } else {
+        this.saveTurn(mutation.turn);
+      }
+      this.saveSession(mutation.session);
+      this.appendEvent(mutation.event);
+      this.database.exec("COMMIT;");
+      return true;
+    } catch (error) {
+      try {
+        this.database.exec("ROLLBACK;");
+      } catch {
+        // Preserve the original persistence error.
+      }
+      throw error;
+    }
+  }
+
+  insertTurn(turn: HarnessChatTurnRecord): boolean {
+    return this.database.prepare(`
+      INSERT OR IGNORE INTO chat_turn (
+        session_id,
+        turn_id,
+        status,
+        turn,
+        input,
+        context,
+        policy,
+        browser_access,
+        metadata,
+        started_at,
+        updated_at,
+        ended_at,
+        cancel_reason,
+        error
+      )
+      VALUES (
+        :session_id,
+        :turn_id,
+        :status,
+        :turn,
+        :input,
+        :context,
+        :policy,
+        :browser_access,
+        :metadata,
+        :started_at,
+        :updated_at,
+        :ended_at,
+        :cancel_reason,
+        :error
+      )
+    `).run(turnRowParams(turn)) > 0;
+  }
+
+  saveTurn(turn: HarnessChatTurnRecord): void {
+    this.database.prepare(`
+      INSERT INTO chat_turn (
+        session_id,
+        turn_id,
+        status,
+        turn,
+        input,
+        context,
+        policy,
+        browser_access,
+        metadata,
+        started_at,
+        updated_at,
+        ended_at,
+        cancel_reason,
+        error
+      )
+      VALUES (
+        :session_id,
+        :turn_id,
+        :status,
+        :turn,
+        :input,
+        :context,
+        :policy,
+        :browser_access,
+        :metadata,
+        :started_at,
+        :updated_at,
+        :ended_at,
+        :cancel_reason,
+        :error
+      )
+      ON CONFLICT(session_id, turn_id) DO UPDATE SET
+        status = :status,
+        turn = :turn,
+        input = :input,
+        context = :context,
+        policy = :policy,
+        browser_access = :browser_access,
+        metadata = :metadata,
+        updated_at = :updated_at,
+        ended_at = :ended_at,
+        cancel_reason = :cancel_reason,
+        error = :error
+    `).run(turnRowParams(turn));
+  }
+
+  getTurn(
+    sessionId: string,
+    turnId: string,
+  ): HarnessChatTurnRecord | undefined {
+    const row = this.database.prepare(`
+      SELECT session_id, turn, input, context, policy, browser_access, metadata
+      FROM chat_turn
+      WHERE session_id = :session_id AND turn_id = :turn_id
+    `).get({ session_id: sessionId, turn_id: turnId }) as TurnRow | undefined;
+    return row === undefined ? undefined : decodeTurnRow(row);
+  }
+
+  listTurns(
+    options: HarnessChatTurnListOptions = {},
+  ): readonly HarnessChatTurnRecord[] {
+    const clauses: string[] = [];
+    const params: Record<string, string> = {};
+    if (options.sessionId !== undefined) {
+      clauses.push("session_id = :session_id");
+      params.session_id = options.sessionId;
+    }
+    if (options.status !== undefined) {
+      clauses.push("status = :status");
+      params.status = options.status;
+    }
+    const where = clauses.length === 0 ? "" : `WHERE ${clauses.join(" AND ")}`;
+    return (this.database.prepare(`
+      SELECT session_id, turn, input, context, policy, browser_access, metadata
+      FROM chat_turn
+      ${where}
+      ORDER BY started_at ASC, turn_id ASC
+    `).all(params) as TurnRow[]).map(decodeTurnRow);
   }
 
   appendEvent(event: HarnessChatEventEnvelope): void {
@@ -237,6 +457,30 @@ const decodeSessionRow = (row: SessionRow): HarnessChatSessionSnapshot => ({
     "chat_session.transcript",
   ),
 });
+
+const decodeTurnRow = (row: TurnRow): HarnessChatTurnRecord => {
+  const context = parseNullableJsonColumn<HarnessChatContext>(
+    row.context,
+    "chat_turn.context",
+  );
+  const browserAccess = parseNullableJsonColumn<HarnessChatBrowserAccessLease>(
+    row.browser_access,
+    "chat_turn.browser_access",
+  );
+  const metadata = parseNullableJsonColumn<Record<string, unknown>>(
+    row.metadata,
+    "chat_turn.metadata",
+  );
+  return {
+    sessionId: row.session_id,
+    turn: parseJsonColumn<HarnessChatTurnStatus>(row.turn, "chat_turn.turn"),
+    input: parseJsonColumn<HarnessChatTurnInput>(row.input, "chat_turn.input"),
+    policy: parseJsonColumn<HarnessChatPolicy>(row.policy, "chat_turn.policy"),
+    ...(context !== undefined ? { context } : {}),
+    ...(browserAccess !== undefined ? { browserAccess } : {}),
+    ...(metadata !== undefined ? { metadata } : {}),
+  };
+};
 
 export const openSqliteHarnessChatSessionStore = async (
   options: OpenSqliteHarnessChatSessionStoreOptions,

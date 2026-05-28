@@ -1,4 +1,4 @@
-import { assertEquals, assertThrows } from "@std/assert";
+import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { toFileUrl } from "@std/path";
 import {
   createHarnessChatEventEnvelope,
@@ -36,6 +36,17 @@ const makeResult = (
   runState: {} as HarnessPromptLoopResult["runState"],
 });
 
+Deno.test("sqlite session store rejects unsupported URL schemes", async () => {
+  await assertRejects(
+    () =>
+      openSqliteHarnessChatSessionStore({
+        url: new URL("https://example.com/chat.sqlite"),
+      }),
+    Error,
+    "unsupported SQLite chat session store URL protocol: https:; expected file:",
+  );
+});
+
 Deno.test("sqlite session store persists chat sessions and replayable events", async () => {
   const path = await Deno.makeTempFile({ suffix: ".sqlite" });
   const store = await openSqliteHarnessChatSessionStore({
@@ -69,9 +80,24 @@ Deno.test("sqlite session store persists chat sessions and replayable events", a
       sessionId: "session-1",
       turnId: "turn-1",
       input: { text: "Remember this" },
+      metadata: { origin: "first-turn" },
     });
     await service.waitForTurn("session-1", "turn-1");
 
+    assertEquals(
+      (await store.listTurns({ sessionId: "session-1" })).map((turn) => ({
+        turnId: turn.turn.turnId,
+        status: turn.turn.status,
+        input: turn.input,
+        metadata: turn.metadata,
+      })),
+      [{
+        turnId: "turn-1",
+        status: "completed",
+        input: { text: "Remember this" },
+        metadata: { origin: "first-turn" },
+      }],
+    );
     assertEquals(
       (await store.listEvents({ sessionId: "session-1", afterSequence: 2 }))
         .map((event) => event.event.kind),
@@ -87,6 +113,12 @@ Deno.test("sqlite session store persists chat sessions and replayable events", a
 
     assertEquals(restored.status("session-1").sessions[0].status, "idle");
     assertEquals(restored.status("session-1").sessions[0].turnCount, 1);
+    assertEquals(
+      restored.listTurns({ sessionId: "session-1" }).turns.map((turn) =>
+        turn.turn.status
+      ),
+      ["completed"],
+    );
     assertEquals(
       restored.status("session-1").sessions[0].metadata,
       { source: "sqlite-test" },
@@ -119,6 +151,13 @@ Deno.test("sqlite session store persists chat sessions and replayable events", a
         [8, "assistant_completed"],
         [9, "turn_completed"],
       ],
+    );
+    assertEquals(
+      restored.listTurns({ sessionId: "session-1" }).turns.map((turn) => [
+        turn.turn.turnId,
+        turn.turn.status,
+      ]),
+      [["turn-1", "completed"], ["turn-2", "completed"]],
     );
 
     const duplicate = await new HarnessInteractiveChatService({
@@ -198,6 +237,247 @@ Deno.test("sqlite session store persists session snapshots and events atomically
     );
     assertEquals(store.getSession("session-atomic")?.transcript, []);
     assertEquals(await store.latestSequence(), 1);
+  } finally {
+    store.close();
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("sqlite session store persists turn session event mutations atomically", async () => {
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+  const store = await openSqliteHarnessChatSessionStore({
+    url: toFileUrl(path),
+  });
+
+  try {
+    const initialSession = createHarnessChatSessionStatus({
+      sessionId: "session-turn-atomic",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      workspace: { hostPath: "/workspace" },
+      metadata: { version: "before" },
+    });
+    store.saveSessionAndAppendEvent(
+      {
+        session: initialSession,
+        transcript: [],
+      },
+      createHarnessChatEventEnvelope({
+        sessionId: "session-turn-atomic",
+        sequence: 1,
+        emittedAt: "2026-05-27T00:00:01.000Z",
+        event: {
+          kind: "session_started",
+          session: initialSession,
+        },
+      }),
+    );
+
+    const turn = {
+      turnId: "turn-1",
+      status: "running" as const,
+      startedAt: "2026-05-27T00:00:02.000Z",
+      updatedAt: "2026-05-27T00:00:02.000Z",
+    };
+    const updatedSession = {
+      ...initialSession,
+      status: "turn_running" as const,
+      reusable: true,
+      activeTurnId: turn.turnId,
+      activeTurn: turn,
+      turnCount: 1,
+      updatedAt: "2026-05-27T00:00:02.000Z",
+      metadata: { version: "after" },
+    };
+
+    assertThrows(() =>
+      store.saveSessionTurnAndAppendEvent({
+        session: {
+          session: updatedSession,
+          transcript: [{ role: "user", content: "should rollback" }],
+        },
+        turn: {
+          sessionId: "session-turn-atomic",
+          turn,
+          input: { text: "should rollback" },
+          policy: initialSession.policy,
+        },
+        createTurn: true,
+        event: createHarnessChatEventEnvelope({
+          sessionId: "session-turn-atomic",
+          turnId: turn.turnId,
+          sequence: 1,
+          emittedAt: "2026-05-27T00:00:02.000Z",
+          event: {
+            kind: "turn_started",
+            turn,
+          },
+        }),
+      })
+    );
+
+    assertEquals(
+      store.getSession("session-turn-atomic")?.session.metadata,
+      { version: "before" },
+    );
+    assertEquals(store.getSession("session-turn-atomic")?.transcript, []);
+    assertEquals(store.getTurn("session-turn-atomic", "turn-1"), undefined);
+    assertEquals(await store.latestSequence(), 1);
+  } finally {
+    store.close();
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("sqlite session store restores and terminalizes interrupted turns", async () => {
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+  const store = await openSqliteHarnessChatSessionStore({
+    url: toFileUrl(path),
+  });
+
+  try {
+    const stalled = new HarnessInteractiveChatService({
+      createPromptLoop: () => ({
+        runTranscript: () =>
+          new Promise<HarnessPromptLoopResult>(() => {
+            // Simulates a process dying while a turn is still in flight.
+          }),
+      }),
+      now: nextIsoNow(),
+      sessionStore: store,
+    });
+
+    await stalled.startSession("req-1", {
+      sessionId: "session-1",
+      workspace: { hostPath: "/workspace" },
+    });
+    await stalled.startTurn("req-2", {
+      sessionId: "session-1",
+      turnId: "turn-1",
+      input: { text: "This will be interrupted" },
+    });
+
+    assertEquals(
+      (await store.listTurns({ sessionId: "session-1" })).map((turn) =>
+        turn.turn.status
+      ),
+      ["running"],
+    );
+
+    const restored = new HarnessInteractiveChatService({
+      createPromptLoop: () => ({
+        runTranscript: (options) =>
+          Promise.resolve(makeResult(options, "Recovered.")),
+      }),
+      now: () => "2026-05-27T00:01:00.000Z",
+      sessionStore: store,
+    });
+    await restored.initializeFromStore();
+
+    assertEquals(restored.status("session-1").sessions[0].status, "idle");
+    assertEquals(restored.status("session-1").sessions[0].reusable, true);
+    assertEquals(
+      restored.listTurns({ sessionId: "session-1" }).turns[0].turn.status,
+      "failed",
+    );
+    assertEquals(
+      restored.listTurns({ sessionId: "session-1" }).turns[0].turn.error
+        ?.details,
+      {
+        terminalReason: "process_interrupted",
+        priorStatus: "running",
+      },
+    );
+    assertEquals(
+      restored.listEvents({ sessionId: "session-1", afterSequence: 2 }).events
+        .map((event) => [event.sequence, event.event.kind]),
+      [[3, "turn_failed"]],
+    );
+
+    const followUp = await restored.startTurn("req-3", {
+      sessionId: "session-1",
+      turnId: "turn-2",
+      input: { text: "Continue" },
+    });
+    assertEquals(followUp.ok, true);
+    await restored.waitForTurn("session-1", "turn-2");
+    assertEquals(
+      restored.listTurns({ sessionId: "session-1" }).turns.map((turn) => [
+        turn.turn.turnId,
+        turn.turn.status,
+      ]),
+      [["turn-1", "failed"], ["turn-2", "completed"]],
+    );
+  } finally {
+    store.close();
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("sqlite session restore keeps closed sessions closed while terminalizing turns", async () => {
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+  const store = await openSqliteHarnessChatSessionStore({
+    url: toFileUrl(path),
+  });
+
+  try {
+    const turn = {
+      turnId: "turn-closed",
+      status: "running" as const,
+      startedAt: "2026-05-27T00:00:01.000Z",
+      updatedAt: "2026-05-27T00:00:01.000Z",
+    };
+    const session = {
+      ...createHarnessChatSessionStatus({
+        sessionId: "session-closed",
+        createdAt: "2026-05-27T00:00:00.000Z",
+        workspace: { hostPath: "/workspace" },
+      }),
+      status: "closed" as const,
+      reusable: false,
+      activeTurnId: turn.turnId,
+      activeTurn: turn,
+      closedAt: "2026-05-27T00:00:02.000Z",
+      updatedAt: "2026-05-27T00:00:02.000Z",
+    };
+    store.saveSession({
+      session,
+      transcript: [],
+    });
+    store.saveTurn({
+      sessionId: "session-closed",
+      turn,
+      input: { text: "interrupted under closed session" },
+      policy: session.policy,
+    });
+
+    const restored = new HarnessInteractiveChatService({
+      createPromptLoop: () => ({
+        runTranscript: (options) =>
+          Promise.resolve(makeResult(options, "Should not run.")),
+      }),
+      now: () => "2026-05-27T00:01:00.000Z",
+      sessionStore: store,
+    });
+    await restored.initializeFromStore();
+
+    assertEquals(
+      restored.status("session-closed").sessions[0].status,
+      "closed",
+    );
+    assertEquals(
+      restored.status("session-closed").sessions[0].reusable,
+      false,
+    );
+    assertEquals(
+      restored.listTurns({ sessionId: "session-closed" }).turns[0].turn.status,
+      "failed",
+    );
+    assertEquals(
+      restored.listEvents({ sessionId: "session-closed" }).events.map((
+        event,
+      ) => event.event.kind),
+      ["turn_failed"],
+    );
   } finally {
     store.close();
     await Deno.remove(path);
