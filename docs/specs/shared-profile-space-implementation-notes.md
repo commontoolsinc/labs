@@ -330,3 +330,29 @@ made before committing.
 - The spec should call out that profile-aware shared patterns may need
   user-scoped results when rendered output directly depends on the viewer's
   profile.
+
+## Slice 8: Common Docs Cleanup
+
+### Ambiguity or Incorrect Spec
+
+- `HOME_SPACE.md` still described favorites as `spaceCell.favorites`, while the
+  implementation stores durable home fields on `homeSpaceCell.defaultPattern`.
+- `wish.md` only documented favorites and mentionables, so profile scope and
+  well-known profile targets were invisible outside the feature spec.
+
+### Decision
+
+- Updated `wish.md` with `scope: ["profile"]`, well-known profile targets, and
+  the user-scoped rendering rule for shared pieces that display viewer profile
+  data.
+- Updated `HOME_SPACE.md` to document `defaultPattern.profile`, the home
+  profile-name creation flow, and profile default-pattern selection.
+
+### Tests Added
+
+- Documentation-only slice. Validation is by docs review plus the previously
+  green focused tests and browser integration.
+
+### Spec Correction Needed
+
+- None.

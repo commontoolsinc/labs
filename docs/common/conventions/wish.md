@@ -3,7 +3,8 @@
 # wish()
 
 `wish()` discovers and connects to other pieces at runtime. It searches
-favorites and/or mentionables by tag, and returns a reactive `WishState<T>`.
+favorites, mentionables, and profile elements by tag, and returns a reactive
+`WishState<T>`.
 
 ```tsx
 const wishResult = wish<{ content: string }>({ query: "#note" });
@@ -72,6 +73,7 @@ The `scope` parameter controls where wish searches for matching pieces:
 
 - `"~"` - Search favorites in the [[HOME_SPACE]] (global, cross-space)
 - `"."` - Search [[mentionable]] items in the current space
+- `"profile"` - Search elements in the current user's shared profile
 
 By default (no scope), wish searches **favorites only** for backward
 compatibility.
@@ -88,21 +90,43 @@ wish({ query: "#note", scope: ["."] })
 
 // Search both favorites AND mentionables (favorites first)
 wish({ query: "#note", scope: ["~", "."] })
+
+// Search the current user's shared profile elements
+wish({ query: "#portfolio", scope: ["profile"] })
 ```
 
-### Favorites vs Mentionables
+### Well-Known Profile Targets
 
-| Feature    | Favorites (`~`)           | Mentionables (`.`)              |
-|------------|---------------------------|---------------------------------|
-| Storage    | Home space (global)       | Current space                   |
-| Scope      | Cross-space               | Per-space                       |
-| Source     | User's favorites list     | Pattern's `mentionable` export  |
-| Tag source | Snapshotted when favorited| Computed from schema            |
+Profiles are linked from the user's home default pattern at
+`homeSpaceCell.defaultPattern.profile`. These well-known wishes resolve from
+that link:
+
+```tsx
+wish({ query: "#profile" }) // profile default pattern
+wish({ query: "#profileDefault" }) // same profile default pattern
+wish({ query: "#profileName" }) // profile.name
+wish({ query: "#profileAvatar" }) // profile.avatar
+wish({ query: "#profileSpace" }) // profile space cell
+```
+
+When rendering profile data from a shared piece, use a user-scoped result schema
+for the rendered output so each viewer sees their own home profile projection.
+
+### Favorites vs Mentionables vs Profile
+
+| Feature    | Favorites (`~`)            | Mentionables (`.`)              | Profile (`profile`)              |
+|------------|----------------------------|---------------------------------|----------------------------------|
+| Storage    | Home default pattern       | Current space                   | Profile default pattern          |
+| Scope      | Cross-space                | Per-space                       | Cross-space, per-user            |
+| Source     | User's favorites list      | Pattern's `mentionable` export  | User's profile element list      |
+| Tag source | Snapshotted when favorited | Computed from schema            | `userTags` first, then `tag`     |
 
 ### When to Use Each Scope
 
 - **Favorites only (default)**: Globally available pieces the user has explicitly saved
 - **Mentionables only**: Space-specific features that discover pieces created within that space
+- **Profile only**: User-owned profile pieces that should follow the viewer
+  across shared spaces
 - **Both**: Find any relevant piece regardless of where it lives
 
 ## Call wish() at Pattern Level
