@@ -509,7 +509,6 @@ export class ContextualFlowControl {
   static getAsCellValues(
     schema: JSONSchema | undefined,
   ): readonly AsCellEntry[] {
-    // Support both modern and legacy versions
     if (isRecord(schema) && Array.isArray(schema.asCell)) {
       return schema.asCell;
     }
