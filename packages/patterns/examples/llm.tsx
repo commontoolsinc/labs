@@ -1,7 +1,6 @@
 import {
   BuiltInLLMContent,
   Default,
-  derive,
   generateText,
   handler,
   NAME,
@@ -54,40 +53,35 @@ export default pattern<LLMTestInput>(({ title }) => {
         </div>
 
         <cf-cell-context $cell={question}>
-          {derive(question, (q) =>
-            q
-              ? (
-                <div>
-                  <h3>Your Question:</h3>
-                  <blockquote>
-                    {q}
-                  </blockquote>
-                </div>
-              )
-              : null)}
+          {question.get()
+            ? (
+              <div>
+                <h3>Your Question:</h3>
+                <blockquote>
+                  {question.get()}
+                </blockquote>
+              </div>
+            )
+            : null}
         </cf-cell-context>
 
         <cf-cell-context $cell={llmResponse}>
-          {derive(
-            [llmResponse.pending, llmResponse.result],
-            ([pending, r]) =>
-              pending
-                ? (
-                  <div>
-                    <cf-loader show-elapsed /> Thinking...
-                  </div>
-                )
-                : r
-                ? (
-                  <div>
-                    <h3>LLM Response:</h3>
-                    <pre>
-                      {r}
-                    </pre>
-                  </div>
-                )
-                : null,
-          )}
+          {llmResponse.pending
+            ? (
+              <div>
+                <cf-loader show-elapsed /> Thinking...
+              </div>
+            )
+            : llmResponse.result
+            ? (
+              <div>
+                <h3>LLM Response:</h3>
+                <pre>
+                  {llmResponse.result}
+                </pre>
+              </div>
+            )
+            : null}
         </cf-cell-context>
       </div>
     ),
