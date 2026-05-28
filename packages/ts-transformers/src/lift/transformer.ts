@@ -200,7 +200,7 @@ function lowerDeriveCall(
   // parameter: `derive(5, x => …)` should see `number`, not the literal `5`.
   // Without the widen, schema injection picks up the literal type and emits
   // an over-narrowed schema (CT-1615 Berni review on PR #3676).
-  const typeRegistry = context.options.typeRegistry;
+  const typeRegistry = context.options.state?.typeRegistry;
   if (typeRegistry) {
     const callbackFn = unwrapToFunctionLike(callbackArg);
     const callbackParam = callbackFn?.parameters[0];
@@ -262,15 +262,15 @@ function finalizeLoweredCall(
     originalNode,
   );
 
-  if (context.options.typeRegistry) {
-    const originalType = context.options.typeRegistry.get(originalNode);
+  if (context.options.state?.typeRegistry) {
+    const originalType = context.options.state?.typeRegistry.get(originalNode);
     if (originalType) {
       registerLiftAppliedCallType(
         preservedVisitedCall,
         undefined,
         originalType,
         checker,
-        context.options.typeRegistry,
+        context.options.state?.typeRegistry,
       );
     }
   }

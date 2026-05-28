@@ -362,7 +362,7 @@ export function transformLiftAppliedCall(
     callback.body,
     captureExpressions,
     checker,
-    options.typeRegistry,
+    options.state?.typeRegistry,
   );
 
   // Recursively transform the callback body first
@@ -407,7 +407,7 @@ export function transformLiftAppliedCall(
     captureExpressions,
     factory,
     checker,
-    options.typeRegistry,
+    options.state?.typeRegistry,
   );
 
   // Initialize PatternBuilder
@@ -454,8 +454,8 @@ export function transformLiftAppliedCall(
       );
 
       // Register the result Type in typeRegistry
-      if (resultTypeNode && options.typeRegistry) {
-        options.typeRegistry.set(resultTypeNode, resultType);
+      if (resultTypeNode && options.state?.typeRegistry) {
+        options.state?.typeRegistry.set(resultTypeNode, resultType);
       }
     }
   }
@@ -508,7 +508,7 @@ export function transformLiftAppliedCall(
       getTypeFromTypeNodeWithFallback(
         inputTypeNode,
         checker,
-        options.typeRegistry,
+        options.state?.typeRegistry,
       ),
       false,
       checker,
@@ -541,13 +541,13 @@ export function transformLiftAppliedCall(
   );
 
   // Register the type of the call expression itself
-  if (options.typeRegistry) {
+  if (options.state?.typeRegistry) {
     registerLiftAppliedCallType(
       rebuiltCall,
       resultTypeNode,
       resultType,
       checker,
-      options.typeRegistry,
+      options.state?.typeRegistry,
     );
   }
 

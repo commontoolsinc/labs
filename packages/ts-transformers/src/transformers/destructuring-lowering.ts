@@ -144,7 +144,7 @@ export function getStaticDefaultTypeNode(
       {
         factory,
         checker: context.checker,
-        typeRegistry: context.options.typeRegistry,
+        typeRegistry: context.options.state?.typeRegistry,
       },
     );
   }

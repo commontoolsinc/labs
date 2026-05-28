@@ -152,12 +152,12 @@ export const emitBinaryExpression: Emitter = ({
         cfHelpers: context.cfHelpers,
       });
 
-      if (context.options.typeRegistry) {
+      if (context.options.state?.typeRegistry) {
         const resultType = context.checker.getTypeAtLocation(expression);
         registerSyntheticCallType(
           whenCall,
           resultType,
-          context.options.typeRegistry,
+          context.options.state?.typeRegistry,
         );
       }
 
@@ -202,12 +202,12 @@ export const emitBinaryExpression: Emitter = ({
         cfHelpers: context.cfHelpers,
       });
 
-      if (context.options.typeRegistry) {
+      if (context.options.state?.typeRegistry) {
         const resultType = context.checker.getTypeAtLocation(expression);
         registerSyntheticCallType(
           unlessCall,
           resultType,
-          context.options.typeRegistry,
+          context.options.state?.typeRegistry,
         );
       }
 

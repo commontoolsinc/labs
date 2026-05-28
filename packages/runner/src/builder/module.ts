@@ -286,6 +286,14 @@ export function resolveSourceLocationFromStack(
  *
  * @returns A module node factory that also serializes as module.
  */
+// Two-arg form: lift(argumentSchema, fn). Listed before the three-arg overload
+// so `lift(false, fn)` resolves here (the impl in slot 2) rather than matching
+// the three-arg signature and erroring on a missing resultSchema. Used by the
+// transformer to emit no-input lifts as `lift(false, fn)()`.
+export function lift<T extends JSONSchema = JSONSchema, R = any>(
+  argumentSchema: T,
+  implementation: (input: Schema<T>) => R,
+): ModuleFactory<SchemaWithoutCell<T>, R>;
 export function lift<
   T extends JSONSchema = JSONSchema,
   R extends JSONSchema = JSONSchema,
@@ -305,12 +313,22 @@ export function lift<T extends (...args: any[]) => any>(
 ): ModuleFactory<Parameters<T>[0], ReturnType<T>>;
 export function lift<T, R>(
   argumentSchema?: JSONSchema | ((input: any) => any),
-  resultSchema?: JSONSchema,
+  resultSchema?: JSONSchema | ((input: any) => any),
   implementation?: (input: T) => R,
 ): ModuleFactory<T, R> {
   if (typeof argumentSchema === "function") {
+    // lift(fn)
     implementation = argumentSchema;
     argumentSchema = resultSchema = undefined;
+  } else if (typeof resultSchema === "function") {
+    // lift(argumentSchema, fn) — two-arg form. The middle slot is the
+    // implementation, not a result schema. Used by the transformer to emit
+    // no-input lifts as `lift(false, fn)()`: argumentSchema:false makes the
+    // application valid with no input (see runner's isValidArgument check),
+    // which is how computed-origin (zero-capture) lifts lower without the
+    // legacy `lift(fn)({})` empty-object stopgap.
+    implementation = resultSchema;
+    resultSchema = undefined;
   }
 
   return createNodeFactory({

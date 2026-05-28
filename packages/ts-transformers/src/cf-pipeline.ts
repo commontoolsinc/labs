@@ -19,6 +19,7 @@ import {
 import { ClosureTransformer } from "./closures/transformer.ts";
 import { LiftLoweringTransformer } from "./lift/transformer.ts";
 import {
+  CrossStageState,
   Pipeline,
   TransformationDiagnostic,
   TransformationOptions,
@@ -116,15 +117,7 @@ export class CommonFabricTransformerPipeline extends Pipeline {
 
   constructor(options: TransformationOptions = {}) {
     const ops: TransformationOptions = {
-      typeRegistry: new WeakMap(),
-      mapCallbackRegistry: new WeakSet(),
-      syntheticComputeCallbackRegistry: new WeakSet(),
-      syntheticComputeOwnedNodeRegistry: new WeakSet(),
-      syntheticReactiveCollectionRegistry: new WeakSet(),
-      schemaHints: new WeakMap(),
-      capabilitySummaryRegistry: new WeakMap(),
-      narrowedWrapperTypeRegistry: new WeakMap(),
-      syntheticLiftAppliedCallRegistry: new WeakSet(),
+      state: new CrossStageState(),
       ...options,
     };
     // Create a shared diagnostics collector

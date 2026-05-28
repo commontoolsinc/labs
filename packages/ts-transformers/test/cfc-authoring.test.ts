@@ -4,7 +4,7 @@ import { transformCfDirective } from "../src/mod.ts";
 import { transformSource, validateSource } from "./utils.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 import { CFC_CANONICAL_ALIAS_NAMES } from "../src/cfc-authoring.ts";
-import { SchemaInjectionTransformer } from "../src/mod.ts";
+import { CrossStageState, SchemaInjectionTransformer } from "../src/mod.ts";
 
 function normalizePrintedNode(
   node: ts.Node,
@@ -159,7 +159,7 @@ function transformWithSchemaInjection(source: string): string {
   const program = ts.createProgram(rootFiles, compilerOptions, host);
   const transformer = new SchemaInjectionTransformer({
     mode: "transform",
-    typeRegistry: new WeakMap(),
+    state: new CrossStageState(),
   });
   const sourceFile = program.getSourceFile(fileName);
   if (!sourceFile) {
