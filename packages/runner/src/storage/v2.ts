@@ -14,9 +14,14 @@ import { assert, unclaimed } from "@commonfabric/memory/fact";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import {
   type CellScope,
+  type ClientCommit,
   type DocumentPath,
   type EntityDocument,
+  getPersistentSchedulerStateConfig,
   type PatchOp,
+  type SchedulerActionSnapshotQuery,
+  type SchedulerObservationCommit,
+  type SchedulerSnapshotListResult,
   type SessionSync,
   toDocumentPath,
 } from "@commonfabric/memory/v2";
@@ -844,6 +849,12 @@ class Provider implements IStorageProviderWithReplica {
     return this.replica.synced();
   }
 
+  listSchedulerActionSnapshots(
+    query: SchedulerActionSnapshotQuery = {},
+  ): Promise<SchedulerSnapshotListResult> {
+    return this.replica.listSchedulerActionSnapshots(query);
+  }
+
   get(uri: URI, scope?: CellScope): EntityDocument | undefined {
     return this.replica.getDocument(uri, scope);
   }
@@ -890,6 +901,22 @@ type WatchRefreshBatch = {
   pending: PromiseWithResolvers<Result<Unit, PullError>>;
 };
 
+type NativeCommitOperation =
+  | { op: "set"; id: URI; scope?: CellScope; value: EntityDocument }
+  | {
+    op: "patch";
+    id: URI;
+    scope?: CellScope;
+    patches: PatchOp[];
+    value: EntityDocument;
+  }
+  | { op: "delete"; id: URI; scope?: CellScope };
+
+type SchedulerObservationBatchEntry = {
+  commit: SchedulerObservationCommit;
+  pending: PromiseWithResolvers<Result<Unit, StorageTransactionRejected>>;
+};
+
 const docKey = (id: URI, scope?: CellScope): string =>
   `${normalizeCellScope(scope)}\0${id}`;
 
@@ -909,6 +936,11 @@ class SpaceReplica implements ISpaceReplica {
   readonly #commitPromises = new Set<
     Promise<Result<Unit, StorageTransactionRejected>>
   >();
+  readonly #schedulerObservationBatch: SchedulerObservationBatchEntry[] = [];
+  #schedulerObservationFlushScheduled = false;
+  #schedulerObservationFlushPromise:
+    | Promise<Result<Unit, StorageTransactionRejected>>
+    | undefined;
   readonly #syncPromises = new Set<Promise<Result<Unit, PullError>>>();
   readonly #updatePromises = new Set<Promise<void>>();
   readonly #sinks = new Map<
@@ -982,7 +1014,23 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   async synced(): Promise<void> {
+    if (
+      this.#schedulerObservationBatch.length > 0 ||
+      this.#schedulerObservationFlushPromise
+    ) {
+      await this.flushSchedulerObservationBatch();
+    }
     await Promise.all([...this.#syncPromises, ...this.#commitPromises]);
+  }
+
+  async listSchedulerActionSnapshots(
+    query: SchedulerActionSnapshotQuery = {},
+  ): Promise<SchedulerSnapshotListResult> {
+    if (!getPersistentSchedulerStateConfig()) {
+      return { serverSeq: 0, snapshots: [] };
+    }
+    const { session } = await this.sessionHandle();
+    return await session.listSchedulerActionSnapshots(query);
   }
 
   getDocument(uri: URI, scope?: CellScope): EntityDocument | undefined {
@@ -1135,6 +1183,9 @@ class SpaceReplica implements ISpaceReplica {
     transaction: NativeStorageCommit,
     source?: IStorageTransaction,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
+    const schedulerObservation = getPersistentSchedulerStateConfig()
+      ? transaction.schedulerObservation
+      : undefined;
     const operations = withCommitTiming(
       ["commitNative", "normalize"],
       () =>
@@ -1164,13 +1215,13 @@ class SpaceReplica implements ISpaceReplica {
           ),
     );
 
-    if (operations.length === 0) {
+    if (operations.length === 0 && schedulerObservation === undefined) {
       return { ok: {} };
     }
 
     return await withCommitTiming(
       ["commitNative", "commitOperations"],
-      () => this.commitOperations(operations, source),
+      () => this.commitOperations(operations, source, schedulerObservation),
     );
   }
 
@@ -1298,24 +1349,122 @@ class SpaceReplica implements ISpaceReplica {
     }
   }
 
-  private async commitOperations(
-    operations: Array<
-      | { op: "set"; id: URI; scope?: CellScope; value: EntityDocument }
-      | {
-        op: "patch";
-        id: URI;
-        scope?: CellScope;
-        patches: PatchOp[];
-        value: EntityDocument;
-      }
-      | { op: "delete"; id: URI; scope?: CellScope }
-    >,
+  private enqueueSchedulerObservationCommit(
+    schedulerObservation: unknown,
     source?: IStorageTransaction,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
+    if (!getPersistentSchedulerStateConfig()) {
+      return Promise.resolve({ ok: {} });
+    }
+    const localSeq = this.#nextLocalSeq++;
+    const pending = Promise.withResolvers<
+      Result<Unit, StorageTransactionRejected>
+    >();
+    this.#schedulerObservationBatch.push({
+      commit: {
+        localSeq,
+        reads: this.buildReads(source, localSeq),
+        schedulerObservation,
+      },
+      pending,
+    });
+    this.scheduleSchedulerObservationFlush();
+    return pending.promise;
+  }
+
+  private scheduleSchedulerObservationFlush(): void {
+    if (this.#schedulerObservationFlushScheduled) {
+      return;
+    }
+    this.#schedulerObservationFlushScheduled = true;
+    queueMicrotask(() => {
+      this.#schedulerObservationFlushScheduled = false;
+      void this.flushSchedulerObservationBatch();
+    });
+  }
+
+  private async flushSchedulerObservationBatch(): Promise<
+    Result<Unit, StorageTransactionRejected>
+  > {
+    let lastResult: Result<Unit, StorageTransactionRejected> = { ok: {} };
+    while (true) {
+      if (this.#schedulerObservationFlushPromise) {
+        lastResult = await this.#schedulerObservationFlushPromise;
+        if (
+          this.#schedulerObservationBatch.length === 0 ||
+          "error" in lastResult
+        ) {
+          return lastResult;
+        }
+        continue;
+      }
+
+      if (this.#schedulerObservationBatch.length === 0) {
+        return lastResult;
+      }
+
+      lastResult = await this.startSchedulerObservationBatchFlush();
+      if ("error" in lastResult) {
+        return lastResult;
+      }
+    }
+  }
+
+  private startSchedulerObservationBatchFlush(): Promise<
+    Result<Unit, StorageTransactionRejected>
+  > {
+    const entries = this.#schedulerObservationBatch.splice(0);
+    const localSeq = this.#nextLocalSeq++;
+    const commit: ClientCommit = {
+      localSeq,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservationBatch: entries.map((entry) => entry.commit),
+    };
+    const promise = this.pushCommit(localSeq, [], commit, undefined)
+      .then((result) => {
+        for (const entry of entries) {
+          entry.pending.resolve(result);
+        }
+        return result;
+      }, (error) => {
+        const rejection = toRejectedError(error, commit);
+        const result = { error: rejection };
+        for (const entry of entries) {
+          entry.pending.resolve(result);
+        }
+        return result;
+      });
+    this.#schedulerObservationFlushPromise = promise;
+    this.#commitPromises.add(promise);
+    promise.finally(() => {
+      this.#commitPromises.delete(promise);
+      if (this.#schedulerObservationFlushPromise === promise) {
+        this.#schedulerObservationFlushPromise = undefined;
+      }
+    });
+    return promise;
+  }
+
+  private async commitOperations(
+    operations: NativeCommitOperation[],
+    source?: IStorageTransaction,
+    schedulerObservation?: unknown,
+  ): Promise<Result<Unit, StorageTransactionRejected>> {
+    if (operations.length === 0) {
+      if (schedulerObservation === undefined) {
+        return { ok: {} };
+      }
+      return await this.enqueueSchedulerObservationCommit(
+        schedulerObservation,
+        source,
+      );
+    }
+
     const localSeq = this.#nextLocalSeq++;
     const commit = withCommitTiming(
       ["commitOperations", "buildCommit"],
-      () => ({
+      (): ClientCommit => ({
         localSeq,
         reads: this.buildReads(source, localSeq),
         operations: operations.map((operation) => {
@@ -1338,14 +1487,18 @@ class SpaceReplica implements ISpaceReplica {
               };
           }
         }),
+        ...(schedulerObservation !== undefined ? { schedulerObservation } : {}),
       }),
     );
     const touched = operations.map((operation) => ({
       id: operation.id,
       scope: operation.scope,
     }));
-    const shouldNotifySubscribers = this.hasNotificationSubscribers();
-    const shouldNotifySinks = this.hasSinkSubscribers(touched);
+    const hasSemanticOperations = operations.length > 0;
+    const shouldNotifySubscribers = hasSemanticOperations &&
+      this.hasNotificationSubscribers();
+    const shouldNotifySinks = hasSemanticOperations &&
+      this.hasSinkSubscribers(touched);
     const before = withCommitTiming(
       ["commitOperations", "snapshotBefore"],
       () =>
@@ -1386,7 +1539,7 @@ class SpaceReplica implements ISpaceReplica {
         this.pushCommit(
           localSeq,
           operations,
-          commit as any,
+          commit,
           source,
         ),
     );
@@ -1398,21 +1551,24 @@ class SpaceReplica implements ISpaceReplica {
 
   private async pushCommit(
     localSeq: number,
-    operations: Array<
-      | { op: "set"; id: URI; scope?: CellScope; value: EntityDocument }
-      | {
-        op: "patch";
-        id: URI;
-        scope?: CellScope;
-        patches: PatchOp[];
-        value: EntityDocument;
-      }
-      | { op: "delete"; id: URI; scope?: CellScope }
-    >,
-    commit: any,
+    operations: NativeCommitOperation[],
+    commit: ClientCommit,
     source?: IStorageTransaction,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     try {
+      if (
+        operations.length > 0 &&
+        (this.#schedulerObservationBatch.length > 0 ||
+          this.#schedulerObservationFlushPromise)
+      ) {
+        const flushResult = await this.flushSchedulerObservationBatch();
+        const rejection = flushResult.error;
+        if (rejection !== undefined) {
+          const error = new Error(rejection.message);
+          error.name = rejection.name ?? "TransactionError";
+          throw error;
+        }
+      }
       const { session } = await this.sessionHandle();
       const applied = await session.transact(commit);
       this.confirmPending(localSeq, operations, applied);
@@ -1423,8 +1579,11 @@ class SpaceReplica implements ISpaceReplica {
         id: operation.id,
         scope: operation.scope,
       }));
-      const shouldNotifySubscribers = this.hasNotificationSubscribers();
-      const shouldNotifySinks = this.hasSinkSubscribers(touched);
+      const hasSemanticOperations = operations.length > 0;
+      const shouldNotifySubscribers = hasSemanticOperations &&
+        this.hasNotificationSubscribers();
+      const shouldNotifySinks = hasSemanticOperations &&
+        this.hasSinkSubscribers(touched);
       const before = shouldNotifySubscribers
         ? Differential.checkout(
           this,
@@ -1590,16 +1749,7 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   private applyPending(
-    operation:
-      | { op: "set"; id: URI; scope?: CellScope; value: EntityDocument }
-      | {
-        op: "patch";
-        id: URI;
-        scope?: CellScope;
-        patches: PatchOp[];
-        value: EntityDocument;
-      }
-      | { op: "delete"; id: URI; scope?: CellScope },
+    operation: NativeCommitOperation,
     localSeq: number,
   ): void {
     const { id, scope, ...pending } = operation;
@@ -1609,17 +1759,7 @@ class SpaceReplica implements ISpaceReplica {
 
   private confirmPending(
     localSeq: number,
-    operations: Array<
-      | { op: "set"; id: URI; scope?: CellScope; value: EntityDocument }
-      | {
-        op: "patch";
-        id: URI;
-        scope?: CellScope;
-        patches: PatchOp[];
-        value: EntityDocument;
-      }
-      | { op: "delete"; id: URI; scope?: CellScope }
-    >,
+    operations: NativeCommitOperation[],
     applied: AppliedCommit,
   ): void {
     const keys = new Map(

@@ -103,6 +103,15 @@ export interface PendingRead {
   localSeq: number;
 }
 
+export interface SchedulerObservationCommit {
+  localSeq: number;
+  reads: {
+    confirmed: ConfirmedRead[];
+    pending: PendingRead[];
+  };
+  schedulerObservation: unknown;
+}
+
 export interface ClientCommit {
   localSeq: number;
   reads: {
@@ -110,6 +119,8 @@ export interface ClientCommit {
     pending: PendingRead[];
   };
   operations: Operation[];
+  schedulerObservation?: unknown;
+  schedulerObservationBatch?: SchedulerObservationCommit[];
   codeCID?: Reference;
   branch?: BranchName;
   merge?: {
@@ -143,6 +154,7 @@ export interface SessionOpenResult {
 
 export interface MemoryProtocolFlags {
   modernDataModel: boolean;
+  persistentSchedulerState: boolean;
 }
 
 /** Legacy field name accepted on the wire for backward compatibility. */
@@ -155,7 +167,9 @@ export type WireFlagsKey = "modernDataModel" | "richStorableValues";
  * the legacy `richStorableValues` alias. Use `parseMemoryProtocolFlags()` to
  * normalize to a `MemoryProtocolFlags`.
  */
-export type WireMemoryProtocolFlags = { [K in WireFlagsKey]?: boolean };
+export type WireMemoryProtocolFlags =
+  & { [K in WireFlagsKey]?: boolean }
+  & { persistentSchedulerState?: boolean };
 
 export interface HelloMessage {
   type: "hello";
@@ -301,6 +315,47 @@ export interface SessionAckRequest {
   seenSeq: number;
 }
 
+export interface SchedulerActionSnapshotQuery {
+  branch?: BranchName;
+  ownerSpace?: string;
+  pieceId?: string;
+  processGeneration?: number;
+  actionId?: string;
+  limit?: number;
+  cursor?: SchedulerActionSnapshotCursor;
+}
+
+export interface SchedulerActionSnapshotCursor {
+  ownerSpace?: string;
+  pieceId: string;
+  processGeneration: number;
+  actionId: string;
+}
+
+export interface SchedulerActionSnapshotResult {
+  observationId: number;
+  commitSeq: number | null;
+  observedAtSeq: number;
+  observation: unknown;
+  directDirtySeq?: number;
+  staleSeq?: number;
+  unknownReason?: string;
+}
+
+export interface SchedulerSnapshotListResult {
+  serverSeq: number;
+  snapshots: SchedulerActionSnapshotResult[];
+  nextCursor?: SchedulerActionSnapshotCursor;
+}
+
+export interface SchedulerSnapshotListRequest {
+  type: "scheduler.snapshot.list";
+  requestId: string;
+  space: string;
+  sessionId: SessionId;
+  query: SchedulerActionSnapshotQuery;
+}
+
 export interface ResponseMessage<Result> {
   type: "response";
   requestId: string;
@@ -345,6 +400,7 @@ export type ClientMessage =
   | GraphQueryRequest
   | WatchSetRequest
   | WatchAddRequest
+  | SchedulerSnapshotListRequest
   | SessionAckRequest;
 export type ServerMessage =
   | HelloOkMessage
@@ -357,11 +413,44 @@ const memoryReconstructionContext = new EmptyReconstructionContext(
   "no cell reconstruction at the memory boundary",
 );
 
+let persistentSchedulerStateEnabled = false;
+
+/**
+ * Ambient runtime flag for persistent scheduler observations and rehydration.
+ * The runner owns the feature, but the memory protocol needs the value during
+ * client/server handshakes, so it lives beside the memory protocol flags.
+ */
+export function setPersistentSchedulerStateConfig(enabled?: boolean): void {
+  persistentSchedulerStateEnabled = enabled ?? false;
+}
+
+export function getPersistentSchedulerStateConfig(): boolean {
+  return persistentSchedulerStateEnabled;
+}
+
+export function resetPersistentSchedulerStateConfig(): void {
+  persistentSchedulerStateEnabled = false;
+}
+
 export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   modernDataModel: getDataModelConfig(),
+  persistentSchedulerState: getPersistentSchedulerStateConfig(),
 });
 
 export const sameMemoryProtocolFlags = (
+  left: MemoryProtocolFlags,
+  right: MemoryProtocolFlags,
+): boolean =>
+  left.modernDataModel === right.modernDataModel &&
+  left.persistentSchedulerState === right.persistentSchedulerState;
+
+/**
+ * Scheduler-state persistence is an optional capability, not a data-model wire
+ * contract. Peers with different scheduler flags can still share memory data;
+ * the server's flag controls whether scheduler observation rows are accepted
+ * and served on that connection.
+ */
+export const compatibleMemoryProtocolFlags = (
   left: MemoryProtocolFlags,
   right: MemoryProtocolFlags,
 ): boolean => left.modernDataModel === right.modernDataModel;
@@ -380,9 +469,20 @@ export const parseMemoryProtocolFlags = (
     return null;
   }
 
+  const persistentSchedulerState = value.persistentSchedulerState;
+  if (
+    persistentSchedulerState !== undefined &&
+    typeof persistentSchedulerState !== "boolean"
+  ) {
+    return null;
+  }
+
   if (typeof value.modernDataModel === "boolean") {
     return {
-      flags: { modernDataModel: value.modernDataModel },
+      flags: {
+        modernDataModel: value.modernDataModel,
+        persistentSchedulerState: persistentSchedulerState === true,
+      },
       wireKey: "modernDataModel",
     };
   }
@@ -390,7 +490,10 @@ export const parseMemoryProtocolFlags = (
   const legacy = value[LEGACY_MODERN_DATA_MODEL_KEY];
   if (typeof legacy === "boolean") {
     return {
-      flags: { modernDataModel: legacy },
+      flags: {
+        modernDataModel: legacy,
+        persistentSchedulerState: persistentSchedulerState === true,
+      },
       wireKey: LEGACY_MODERN_DATA_MODEL_KEY,
     };
   }
@@ -407,7 +510,10 @@ export const parseMemoryProtocolFlags = (
 export const wireMemoryProtocolFlags = (
   flags: MemoryProtocolFlags,
   wireKey: WireFlagsKey = "modernDataModel",
-): WireMemoryProtocolFlags => ({ [wireKey]: flags.modernDataModel });
+): WireMemoryProtocolFlags => ({
+  [wireKey]: flags.modernDataModel,
+  persistentSchedulerState: flags.persistentSchedulerState,
+});
 
 export const encodeMemoryBoundary = (value: unknown): string =>
   jsonFromValue(value as FabricValue);

@@ -197,6 +197,8 @@ declare module "@commonfabric/api" {
     throttle?: number;
     /** Pull-mode write envelopes for broad/dynamic writable-input materializers */
     materializerWriteEnvelopes?: readonly NormalizedFullLink[];
+    /** Input paths whose writable cells should become materializer envelopes */
+    materializerWriteInputPaths?: readonly (readonly string[])[];
   }
 }
 

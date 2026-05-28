@@ -5,6 +5,7 @@ import {
   setDataModelConfig,
 } from "@commonfabric/data-model/fabric-value";
 import {
+  compatibleMemoryProtocolFlags,
   decodeMemoryBoundary,
   DEFAULT_BRANCH,
   encodeMemoryBoundary,
@@ -12,6 +13,8 @@ import {
   isSourceLink,
   MEMORY_PROTOCOL,
   parseMemoryProtocolFlags,
+  resetPersistentSchedulerStateConfig,
+  setPersistentSchedulerStateConfig,
   toDocumentPath,
   toDocumentSelector,
   toValuePath,
@@ -108,41 +111,71 @@ describe("memory v2 source links", () => {
 describe("memory v2 flags", () => {
   it("reflects the active runtime storage flags", () => {
     resetDataModelConfig();
+    resetPersistentSchedulerStateConfig();
     setDataModelConfig(false);
+    setPersistentSchedulerStateConfig(false);
 
     assertEquals(getMemoryProtocolFlags(), {
       modernDataModel: false,
+      persistentSchedulerState: false,
     });
 
     setDataModelConfig(true);
+    setPersistentSchedulerStateConfig(true);
 
     assertEquals(getMemoryProtocolFlags(), {
       modernDataModel: true,
+      persistentSchedulerState: true,
     });
 
     resetDataModelConfig();
+    resetPersistentSchedulerStateConfig();
+  });
+
+  it("treats scheduler-state persistence as an optional capability", () => {
+    assert(compatibleMemoryProtocolFlags(
+      { modernDataModel: true, persistentSchedulerState: true },
+      { modernDataModel: true, persistentSchedulerState: false },
+    ));
+    assertFalse(compatibleMemoryProtocolFlags(
+      { modernDataModel: true, persistentSchedulerState: true },
+      { modernDataModel: false, persistentSchedulerState: true },
+    ));
   });
 });
 
 describe("parseMemoryProtocolFlags", () => {
   it("accepts the canonical modernDataModel key", () => {
     assertEquals(parseMemoryProtocolFlags({ modernDataModel: true }), {
-      flags: { modernDataModel: true },
+      flags: { modernDataModel: true, persistentSchedulerState: false },
       wireKey: "modernDataModel",
     });
     assertEquals(parseMemoryProtocolFlags({ modernDataModel: false }), {
-      flags: { modernDataModel: false },
+      flags: { modernDataModel: false, persistentSchedulerState: false },
       wireKey: "modernDataModel",
     });
   });
 
+  it("accepts the canonical persistentSchedulerState key", () => {
+    assertEquals(
+      parseMemoryProtocolFlags({
+        modernDataModel: false,
+        persistentSchedulerState: true,
+      }),
+      {
+        flags: { modernDataModel: false, persistentSchedulerState: true },
+        wireKey: "modernDataModel",
+      },
+    );
+  });
+
   it("accepts the legacy richStorableValues key and normalizes it", () => {
     assertEquals(parseMemoryProtocolFlags({ richStorableValues: true }), {
-      flags: { modernDataModel: true },
+      flags: { modernDataModel: true, persistentSchedulerState: false },
       wireKey: "richStorableValues",
     });
     assertEquals(parseMemoryProtocolFlags({ richStorableValues: false }), {
-      flags: { modernDataModel: false },
+      flags: { modernDataModel: false, persistentSchedulerState: false },
       wireKey: "richStorableValues",
     });
   });
@@ -153,7 +186,10 @@ describe("parseMemoryProtocolFlags", () => {
         modernDataModel: true,
         richStorableValues: false,
       }),
-      { flags: { modernDataModel: true }, wireKey: "modernDataModel" },
+      {
+        flags: { modernDataModel: true, persistentSchedulerState: false },
+        wireKey: "modernDataModel",
+      },
     );
   });
 
@@ -164,6 +200,13 @@ describe("parseMemoryProtocolFlags", () => {
     assertEquals(parseMemoryProtocolFlags([true]), null);
     assertEquals(parseMemoryProtocolFlags({}), null);
     assertEquals(parseMemoryProtocolFlags({ modernDataModel: "true" }), null);
+    assertEquals(
+      parseMemoryProtocolFlags({
+        modernDataModel: true,
+        persistentSchedulerState: "true",
+      }),
+      null,
+    );
     assertEquals(
       parseMemoryProtocolFlags({ richStorableValues: 1 }),
       null,
