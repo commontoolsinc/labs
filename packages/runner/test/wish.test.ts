@@ -2293,7 +2293,6 @@ describe("wish built-in", () => {
       const wishPattern = pattern(() => {
         return {
           profile: wish({ query: "#profile" }),
-          profileDefault: wish({ query: "#profileDefault" }),
           profileName: wish({ query: "#profileName" }),
           profileAvatar: wish({ query: "#profileAvatar" }),
           profileSpace: wish({ query: "#profileSpace" }),
@@ -2313,13 +2312,66 @@ describe("wish built-in", () => {
       await result.pull();
 
       expect(result.key("profile").get()?.result?.name).toBe("Ada Lovelace");
-      expect(result.key("profileDefault").get()?.result?.name).toBe(
-        "Ada Lovelace",
-      );
       expect(result.key("profileName").get()?.result).toBe("Ada Lovelace");
       expect(result.key("profileAvatar").get()?.result).toBe("ada.png");
       expect(result.key("profileSpace").get()?.result?.defaultPattern?.name)
         .toBe("Ada Lovelace");
+    });
+
+    it("#profileDefault is not a well-known profile target", async () => {
+      const profileSpaceDid = (await Identity.fromPassphrase(
+        "wish-profile-default-removed-space",
+      )).did();
+      const profileDefaultCell = runtime.getCell(
+        profileSpaceDid,
+        "profile-default-removed",
+        undefined,
+        tx,
+      );
+      profileDefaultCell.set({
+        name: "Ada Lovelace",
+        avatar: "ada.png",
+        elements: [],
+      });
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const homeSpaceCell = runtime.getHomeSpaceCell(tx);
+      const homeDefaultCell = runtime.getCell(
+        userIdentity.did(),
+        "home-default-profile-default-removed",
+        undefined,
+        tx,
+      );
+      homeDefaultCell.key("profile").set(profileDefaultCell);
+      (homeSpaceCell as any).key("defaultPattern").set(homeDefaultCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const wishPattern = pattern(() => ({
+        profileDefault: wish({ query: "#profileDefault" }),
+      }));
+
+      const resultCell = runtime.getCell<Record<string, any>>(
+        patternSpace.did(),
+        "wish-profile-default-removed-result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+
+      await result.pull();
+
+      expect(result.key("profileDefault").get()?.result).toBeUndefined();
+      expect(String(result.key("profileDefault").get()?.error)).toContain(
+        "#profiledefault",
+      );
     });
 
     it("renders #profile wish UI as a link when the profile exists", async () => {

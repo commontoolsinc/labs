@@ -18,8 +18,8 @@ made before committing.
 ### Decision
 
 - `#profile` is now the well-known target for the profile default pattern.
-- `#profileName`, `#profileAvatar`, `#profileDefault`, and `#profileSpace` are
-  explicit profile targets.
+- `#profileName`, `#profileAvatar`, and `#profileSpace` are explicit profile
+  targets.
 - Profile owner protection is CFC-enforced for `name`, `avatar`, `elements`,
   and trusted add/remove element mutation paths.
 - `homeSpaceCell.profileSpace` is a durable link written by the authenticated
@@ -154,8 +154,7 @@ made before committing.
 
 - Added `"profile"` to `WishParams.scope` and excluded it from arbitrary DID
   scope parsing.
-- `#profile` and `#profileDefault` resolve to
-  `homeSpaceCell.profileSpace.defaultPattern`.
+- `#profile` resolves to `homeSpaceCell.profileSpace.defaultPattern`.
 - `#profileName`, `#profileAvatar`, and `#profileSpace` resolve explicitly.
 - `scope: ["profile"]` searches profile default `elements`, checking
   `userTags` before `tag`.
@@ -268,7 +267,7 @@ made before committing.
 
 - `wish()` now resolves profile targets from
   `homeSpaceCell.defaultPattern.profile`.
-- `#profile` and `#profileDefault` return the linked profile default pattern.
+- `#profile` returns the linked profile default pattern.
 - `#profileName` and `#profileAvatar` read fields on that linked profile
   default pattern.
 - `#profileSpace` derives the profile space from the linked profile default
@@ -370,11 +369,10 @@ made before committing.
 
 ### Decision
 
-- `wish({ query: "#profile" })[UI]` and
-  `wish({ query: "#profileDefault" })[UI]` now render `cf-cell-link` when a
-  profile exists.
-- If the profile is missing, the same wishes render a `cf-message-input` wired
-  to `homeSpaceCell.defaultPattern.createProfile`. Submitting a name creates the
+- `wish({ query: "#profile" })[UI]` now renders `cf-cell-link` when a profile
+  exists.
+- If the profile is missing, the wish renders a `cf-message-input` wired to
+  `homeSpaceCell.defaultPattern.createProfile`. Submitting a name creates the
   profile without navigating away from the current view.
 - The shared-profile demo renders both `#profileName` and the `#profile` wish UI
   so integration coverage exercises the inline creation surface directly.
@@ -394,3 +392,28 @@ made before committing.
 
 - The spec and `wish.md` now document that profile persona wish UI is
   non-navigating and reactive.
+
+## Slice 10: Remove #profileDefault Alias
+
+### Ambiguity or Incorrect Spec
+
+- `#profileDefault` and `#profile` resolved to the same profile default-pattern
+  link, which made the explicit alias redundant.
+
+### Decision
+
+- Removed `#profileDefault` as a well-known wish target.
+- `#profile` is now the only well-known target for the current user's profile
+  default pattern.
+- A `#profileDefault` query now falls through to ordinary hashtag search
+  semantics instead of resolving the profile link.
+
+### Tests Added
+
+- `packages/runner/test/wish.test.ts`
+  - `#profileDefault` no longer resolves through the home profile link.
+
+### Spec Correction Needed
+
+- The spec and `wish.md` now list only `#profile`, `#profileName`,
+  `#profileAvatar`, and `#profileSpace`.

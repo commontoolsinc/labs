@@ -137,7 +137,6 @@ function getResolutionKind(parsed: ParsedWishTarget): string {
     case "#journal":
     case "#learned":
     case "#profile":
-    case "#profileDefault":
     case "#profileName":
     case "#profileAvatar":
     case "#profileSpace":
@@ -280,8 +279,7 @@ function getProfileSpaceCell(ctx: WishContext): Cell<unknown> {
 }
 
 function isProfilePersonaTarget(parsed: ParsedWishTarget): boolean {
-  return (parsed.key === "#profile" || parsed.key === "#profileDefault") &&
-    parsed.path.length === 0;
+  return parsed.key === "#profile" && parsed.path.length === 0;
 }
 
 function formatTarget(parsed: ParsedWishTarget): string {
@@ -652,8 +650,7 @@ function resolveHomeSpaceTarget(
       }];
     }
 
-    case "#profile":
-    case "#profileDefault": {
+    case "#profile": {
       const userDID = ctx.runtime.userIdentityDID;
       if (!userDID) {
         throw new WishError("User identity DID not available for #profile");
