@@ -19,6 +19,8 @@ import { homeSchema } from "@commonfabric/home-schemas";
 const PIECE_TRACE_TIMINGS = typeof Deno !== "undefined" &&
   Deno.env.get("CF_CLI_TRACE_TIMINGS") === "1";
 
+const PROFILE_DEFAULT_PATTERN_URL = "/api/patterns/system/profile-home.tsx";
+
 async function timePiecesPhase<T>(
   label: string,
   run: () => T | Promise<T>,
@@ -439,6 +441,99 @@ export class PiecesController<T = unknown> {
     );
     await timePiecesPhase(
       "ensureDefaultPattern.synced",
+      () => this.#manager.synced(),
+    );
+
+    return new PieceController<NameSchema>(this.#manager, finalPattern);
+  }
+
+  /**
+   * Ensures the current space has the profile-specific default pattern.
+   *
+   * This is intentionally separate from ensureDefaultPattern(): ordinary
+   * non-home spaces must continue to get the default app unless the caller is
+   * explicitly creating or repairing the user's profile space.
+   */
+  async ensureProfileDefaultPattern(): Promise<PieceController<NameSchema>> {
+    this.disposeCheck();
+
+    const existingPattern = await this.#manager.getDefaultPattern();
+    if (existingPattern) {
+      return new PieceController<NameSchema>(this.#manager, existingPattern);
+    }
+
+    const patternConfig = {
+      name: "ProfileHome",
+      urlPath: PROFILE_DEFAULT_PATTERN_URL,
+      cause: "profile-home",
+    };
+
+    const patternUrl = new URL(
+      patternConfig.urlPath,
+      this.#manager.runtime.apiUrl,
+    );
+
+    const program = await timePiecesPhase(
+      "ensureProfileDefaultPattern.resolveProgram",
+      () =>
+        this.#manager.runtime.harness.resolve(
+          new HttpProgramResolver(patternUrl.href),
+        ),
+    );
+    const pattern = await timePiecesPhase(
+      "ensureProfileDefaultPattern.compilePattern",
+      () =>
+        this.#manager.runtime.patternManager.compilePattern(
+          program,
+        ),
+    );
+
+    let pieceCell: Cell<NameSchema>;
+
+    await timePiecesPhase(
+      "ensureProfileDefaultPattern.editWithRetry",
+      () =>
+        this.#manager.runtime.editWithRetry((tx) => {
+          const spaceCellWithTx = this.#manager.getSpaceCellContents().withTx(
+            tx,
+          );
+          const defaultPatternCell = spaceCellWithTx.key("defaultPattern");
+          const existingDefault = defaultPatternCell.get();
+
+          if (existingDefault?.get()) {
+            return;
+          }
+
+          pieceCell = this.#manager.runtime.getCell<NameSchema>(
+            this.#manager.getSpace(),
+            patternConfig.cause,
+            nameSchema,
+            tx,
+          );
+
+          this.#manager.runtime.run(tx, pattern, {}, pieceCell);
+          defaultPatternCell.set(pieceCell.withTx(tx));
+        }),
+    );
+
+    const finalPattern = await timePiecesPhase(
+      "ensureProfileDefaultPattern.getDefaultPattern(false)",
+      () => this.#manager.getDefaultPattern(false),
+    );
+    if (!finalPattern) {
+      throw new Error("Failed to create or find profile default pattern");
+    }
+
+    await timePiecesPhase(
+      "ensureProfileDefaultPattern.startPiece",
+      () => this.#manager.startPiece(finalPattern),
+    );
+    await timePiecesPhase(
+      "ensureProfileDefaultPattern.runtime.idle",
+      () => this.#manager.runtime.idle(),
+    );
+    await timePiecesPhase(
+      "ensureProfileDefaultPattern.synced",
       () => this.#manager.synced(),
     );
 
