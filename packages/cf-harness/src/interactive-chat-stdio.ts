@@ -48,8 +48,16 @@ const SUPPORTED_REQUEST_METHODS = new Set<HarnessChatRequestMethod>([
   "close_session",
   "status",
   "list_events",
+  "list_turns",
 ]);
 const SUPPORTED_POLICY_TOOL_MODES = new Set(["workspace-write", "read-only"]);
+const SUPPORTED_TURN_STATUSES = new Set([
+  "running",
+  "canceling",
+  "canceled",
+  "completed",
+  "failed",
+]);
 const SUPPORTED_POLICY_TOOL_IDS = new Set<BuiltinToolId>([
   "bash",
   "bash-no-sandbox",
@@ -188,6 +196,11 @@ const isValidRequestParams = (
       return hasOptionalString(params, "sessionId") &&
         hasOptionalNonNegativeInteger(params, "afterSequence") &&
         hasOptionalPositiveInteger(params, "limit");
+    case "list_turns":
+      return hasOptionalString(params, "sessionId") &&
+        (params.status === undefined ||
+          (typeof params.status === "string" &&
+            SUPPORTED_TURN_STATUSES.has(params.status)));
   }
 };
 

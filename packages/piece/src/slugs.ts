@@ -1,5 +1,6 @@
 import type { Cell, URI } from "@commonfabric/runner";
 import {
+  getMetaLink,
   isSlugAddress,
   parseLink,
   slugIdForSpace,
@@ -58,27 +59,17 @@ export async function setSlugLink(
   await manager.runtime.editWithRetry((tx) => {
     const targetWithTx = target.withTx(tx);
     const slugWithTx = slugCell.withTx(tx);
-    const slugLink = slugWithTx.getAsNormalizedFullLink();
+    const metadataTargetWithTx = metadataTarget?.withTx(tx);
 
-    const metadataTargetLink = metadataTarget?.withTx(tx)
-      .getAsNormalizedFullLink();
+    const metadataTargetLink = metadataTargetWithTx
+      ?.getAsNormalizedFullLink();
     if (
-      metadataTargetLink &&
-      (!metadataTargetLink.path || metadataTargetLink.path.length === 0)
+      metadataTargetWithTx !== undefined &&
+      metadataTargetLink?.path.length === 0
     ) {
-      tx.writeOrThrow({
-        space: metadataTargetLink.space,
-        id: metadataTargetLink.id,
-        scope: metadataTargetLink.scope,
-        path: ["slug"],
-      }, validSlug);
+      metadataTargetWithTx.setMetaRaw("slug", validSlug);
     }
-    tx.writeOrThrow({
-      space: slugLink.space,
-      id: slugLink.id,
-      scope: slugLink.scope,
-      path: ["slug"],
-    }, validSlug);
+    slugWithTx.setMetaRaw("slug", validSlug);
     slugWithTx.setRawUntyped(
       targetWithTx.getAsWriteRedirectLink({ base: slugWithTx }),
     );
@@ -97,7 +88,7 @@ export async function resolvePieceAddress(
   }
 
   const target = await resolveSlugTargetCell(manager, token);
-  if (!target.getSourceCell()) {
+  if (getMetaLink(target, "pattern") === undefined) {
     throw new SlugResolutionError(
       `Slug "${token}" redirects to a document that is not a piece.`,
       "not-piece",

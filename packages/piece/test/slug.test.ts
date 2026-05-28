@@ -168,6 +168,30 @@ describe("piece slugs", () => {
     )).toBe("resolved-target");
   });
 
+  it("preserves resolved slug redirect paths", async () => {
+    const piece = await createPiece("slug-resolved-path-target");
+    await setSlugLink(manager, "first-path-link", piece.key("value"));
+
+    const firstSlugCell = runtime.getCellFromEntityId(manager.getSpace(), {
+      "/": slugIdForSpace(manager.getSpace(), "first-path-link"),
+    });
+    const secondSlugCell = runtime.getCellFromEntityId(manager.getSpace(), {
+      "/": slugIdForSpace(manager.getSpace(), "second-path-link"),
+    });
+
+    await setSlugLink(manager, "second-path-link", firstSlugCell, {
+      resolveBeforeLinking: true,
+    });
+
+    await secondSlugCell.sync();
+    const resolvedFirstLink = firstSlugCell.resolveAsCell()
+      .getAsNormalizedFullLink();
+    const link = parseLink(secondSlugCell.getRaw(), secondSlugCell);
+    expect(link?.overwrite).toBe("redirect");
+    expect(link?.id).toBe(resolvedFirstLink.id);
+    expect(link?.path).toEqual(resolvedFirstLink.path);
+  });
+
   it("preserves URI-shaped piece addresses", async () => {
     expect(await resolvePieceAddress(manager, "fid1:piece-123")).toBe(
       "fid1:piece-123",

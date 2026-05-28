@@ -7,6 +7,7 @@ import type { RuntimeProgram } from "../../runner/src/harness/types.ts";
 import { createBuilder } from "../../runner/src/builder/factory.ts";
 import type { Cell } from "../../runner/src/builder/types.ts";
 import { pieceId, PieceManager } from "../src/manager.ts";
+import { PiecesController } from "../src/ops/pieces-controller.ts";
 
 const signer = await Identity.fromPassphrase(
   "test default pattern persistence",
@@ -47,6 +48,51 @@ const persistedPieceProgram: RuntimeProgram = {
     },
   ],
 };
+
+async function createDefaultPatternPieceWithResult(manager: PieceManager) {
+  const { commonfabric } = createBuilder();
+  const { handler, pattern } = commonfabric;
+
+  const addPiece = handler<
+    { piece: Cell<unknown> },
+    { allPieces: Cell<unknown>[] }
+  >(
+    ({ piece }, { allPieces }) => {
+      allPieces.push(piece);
+    },
+    { proxy: true },
+  );
+  const defaultPattern = pattern<{ allPieces: Cell<unknown>[] }>(
+    ({ allPieces }) => ({
+      allPieces,
+      addPiece: addPiece({ allPieces }),
+    }),
+  );
+
+  const defaultPatternPiece = await manager.runPersistent(
+    defaultPattern,
+    { allPieces: [] },
+    "default-pattern-persistence",
+  );
+  await manager.linkDefaultPattern(defaultPatternPiece);
+  await manager.runtime.idle();
+  await manager.synced();
+
+  const persistedPattern = pattern<{ value: number }>(({ value }) => ({
+    value,
+    nested: { value },
+  }));
+  const persistedPiece = await manager.runPersistent(
+    persistedPattern,
+    { value: 42 },
+    "persisted-piece",
+  );
+  await manager.add([persistedPiece]);
+  await manager.runtime.idle();
+  await manager.synced();
+
+  return persistedPiece;
+}
 
 describe("PieceManager default pattern persistence", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -167,12 +213,58 @@ describe("PieceManager default pattern persistence", () => {
       const ids = piecesCell.get().map((piece) => pieceId(piece)).filter(
         Boolean,
       );
+      const pieces = new PiecesController(freshManager);
+      const listedPiece = (await pieces.getAllPieces()).find((piece) =>
+        piece.id === pieceId(persistedPiece)
+      );
+      const directPiece = await pieces.get(pieceId(persistedPiece)!, false);
 
       expect(ids.filter((id) => id === pieceId(persistedPiece))).toHaveLength(
         1,
       );
+      expect(listedPiece).toBeDefined();
+      expect(await listedPiece!.result.get()).toEqual(
+        await directPiece.result.get(),
+      );
     } finally {
       await freshRuntime.dispose();
     }
+  });
+
+  it("getAllPieces controllers expose the same result root as direct cold lookup", async () => {
+    const persistedPiece = await createDefaultPatternPieceWithResult(manager);
+    const id = pieceId(persistedPiece)!;
+    const pieces = new PiecesController(manager);
+
+    const listedPiece = (await pieces.getAllPieces()).find((piece) =>
+      piece.id === id
+    );
+    expect(listedPiece).toBeDefined();
+
+    const directPiece = await pieces.get(id, false);
+
+    expect(await listedPiece!.result.get()).toEqual(
+      await directPiece.result.get(),
+    );
+  });
+
+  it("getAllPieces controllers resolve result paths like direct cold lookup", async () => {
+    const persistedPiece = await createDefaultPatternPieceWithResult(manager);
+    const id = pieceId(persistedPiece)!;
+    const pieces = new PiecesController(manager);
+
+    const listedPiece = (await pieces.getAllPieces()).find((piece) =>
+      piece.id === id
+    );
+    expect(listedPiece).toBeDefined();
+
+    const directPiece = await pieces.get(id, false);
+
+    expect(await listedPiece!.result.get(["value"])).toEqual(
+      await directPiece.result.get(["value"]),
+    );
+    expect(await listedPiece!.result.get(["nested", "value"])).toEqual(
+      await directPiece.result.get(["nested", "value"]),
+    );
   });
 });

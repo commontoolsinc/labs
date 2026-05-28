@@ -185,7 +185,8 @@ describe("module", () => {
       expect(clickPattern.result).toEqual({
         click: {
           $alias: {
-            path: ["internal", "stream:click"],
+            cell: "internal",
+            path: ["stream:click"],
             schema: true,
             scope: "space",
           },
@@ -201,7 +202,8 @@ describe("module", () => {
       };
       expect(handlerInputs.$event).toEqual({
         $alias: {
-          path: ["internal", "stream:click"],
+          cell: "internal",
+          path: ["stream:click"],
           schema: true,
           scope: "space",
         },
@@ -224,10 +226,7 @@ describe("module", () => {
 
       expect(arrayCausePattern.result).toEqual({
         value: {
-          $alias: {
-            path: ["internal", '["a","b"]'],
-            scope: "space",
-          },
+          $alias: { cell: "internal", path: ['["a","b"]'], scope: "space" },
         },
       });
       expect(arrayCausePattern.initial).toEqual({

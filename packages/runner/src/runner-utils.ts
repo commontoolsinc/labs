@@ -1,5 +1,4 @@
 import { type FabricValue } from "@commonfabric/data-model/fabric-value";
-import { hashOf } from "@commonfabric/data-model/value-hash";
 import {
   isPlainObject,
   isRecord,
@@ -13,7 +12,7 @@ import {
   type Pattern,
 } from "./builder/types.ts";
 import { isCellLink } from "./link-utils.ts";
-import { LINK_V1_TAG, type SigilLink } from "./sigil-types.ts";
+import { LINK_V1_TAG, type SigilLink, type URI } from "./sigil-types.ts";
 
 export function setRunnableName<T extends object & { src?: string }>(
   target: T,
@@ -35,9 +34,8 @@ export function sanitizeDebugLabel(label?: string): string | undefined {
   return label.replace(/^async\s+/, "").trim() || undefined;
 }
 
-export function getSpellLink(patternId: string): SigilLink {
-  const id = hashOf({ causal: { patternId, type: "pattern" } }).toJSON()["/"];
-  return { "/": { [LINK_V1_TAG]: { id: `of:${id}` } } };
+export function getSigilLink(id: URI): SigilLink {
+  return { "/": { [LINK_V1_TAG]: { id } } };
 }
 
 export function describePatternOrModule(

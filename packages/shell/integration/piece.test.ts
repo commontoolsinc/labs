@@ -215,10 +215,11 @@ describe("shell piece tests", () => {
         "counter.tsx",
       );
       identityPath = await writeIdentityKey(identity);
+      const slug = `compile-cache-${crypto.randomUUID()}`;
       const pieceId = await runCfPieceNewWithSlug({
         sourcePath,
         identityPath,
-        slug: `compile-cache-${crypto.randomUUID()}`,
+        slug,
       });
       const currentPiece = await cc.get(pieceId, false);
       piece = currentPiece;
@@ -254,7 +255,7 @@ describe("shell piece tests", () => {
       await shell.waitForState({
         view: {
           spaceName: SPACE_NAME,
-          pieceId,
+          pieceSlug: slug,
         },
         identity,
       });

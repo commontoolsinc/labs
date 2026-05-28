@@ -2,12 +2,13 @@ import { isRecord } from "@commonfabric/utils/types";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
   isPattern,
+  type JSONSchema,
   type Pattern,
   unsafe_originalPattern,
   unsafe_parentPattern,
   unsafe_verifiedLoadId,
 } from "./builder/types.ts";
-import { type AnyCell, type Cell } from "./cell.ts";
+import { type AnyCell } from "./cell.ts";
 import { resolveLink } from "./link-resolution.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import {
@@ -21,11 +22,55 @@ import {
 } from "./link-utils.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import { ignoreReadForScheduling } from "./scheduler.ts";
+import { ContextualFlowControl } from "./cfc.ts";
 import type { CellScope } from "./builder/types.ts";
-import { scopeRank } from "./scope.ts";
+import { isCellScope, scopeRank } from "./scope.ts";
 
 type SendValueToBindingOptions = {
   narrowestReadScope?: CellScope;
+};
+
+type UnwrapOneLevelOptions = {
+  bindPatterns?: boolean;
+  targetSchema?: JSONSchema;
+};
+
+const scopedLinkForPath = (
+  cfc: ContextualFlowControl,
+  link: NormalizedFullLink,
+  path: readonly string[],
+  schemaOverride?: JSONSchema,
+): NormalizedFullLink => {
+  let scope = link.scope;
+  let schema = link.schema;
+  let childSchema: JSONSchema | undefined;
+
+  for (const key of path) {
+    childSchema = cfc.getSchemaAtPath(schema, [key]);
+    if (isRecord(childSchema) && isCellScope(childSchema.scope)) {
+      scope = childSchema.scope;
+    }
+    schema = childSchema;
+  }
+
+  const finalSchema = schemaOverride ?? childSchema;
+  if (isRecord(finalSchema)) {
+    if (isCellScope(finalSchema.scope)) {
+      scope = finalSchema.scope;
+    }
+    const asCellEntry = ContextualFlowControl.getAsCellValues(finalSchema)[0];
+    const asCellScope = ContextualFlowControl.getAsCellScope(asCellEntry);
+    if (isCellScope(asCellScope)) {
+      scope = asCellScope;
+    }
+  }
+
+  return {
+    ...link,
+    path: [...path],
+    scope,
+    ...(finalSchema !== undefined && { schema: finalSchema }),
+  };
 };
 
 /**
@@ -34,25 +79,56 @@ type SendValueToBindingOptions = {
  * an alias, it will follow all aliases and send the value to the last aliased
  * doc. If the binding is a literal, we verify that it matches the value and
  * throw an error otherwise.
+ *
  * @param tx - The transaction to use for updates
- * @param docOrCell - The document or cell context
+ * @param resultCell - The document or cell context
+ * @param argumentCellLink - The link to the argument cell
+ * @param internalCellLink - The link to the internal cell
  * @param binding - The binding to send to
  * @param value - The value to send
  */
 export function sendValueToBinding<T>(
   tx: IExtendedStorageTransaction,
   cell: AnyCell<T>,
+  argumentCellLink: NormalizedFullLink,
+  internalCellLink: NormalizedFullLink,
   binding: unknown,
   value: unknown,
   options: SendValueToBindingOptions = {},
 ): void {
   // Handle both legacy $alias format and new sigil link format
   if (isWriteRedirectLink(binding)) {
+    if (isLegacyAlias(binding)) {
+      const alias = binding.$alias;
+      if (typeof alias.cell !== "string") {
+        throw new Error(
+          "Invalid pseudo-alias cell: " + JSON.stringify(binding),
+        );
+      }
+      // Certain strings have special meaning as the cell id
+      const link = alias.cell === "argument"
+        ? argumentCellLink
+        : alias.cell === "internal"
+        ? internalCellLink
+        : alias.cell === "result"
+        ? parseLink(cell.getAsWriteRedirectLink(), cell)
+        : undefined;
+      if (link === undefined) {
+        throw new Error("Invalid pseudo-alias path: " + alias.path);
+      }
+      const path = alias.path.map((p) => p.toString());
+      binding = createSigilLinkFromParsedLink(
+        scopedLinkForPath(cell.runtime.cfc, link, path, alias.schema),
+        { includeSchema: true, overwrite: "redirect" },
+      );
+    }
+
     const ref = resolveLink(
       cell.runtime,
       tx,
-      parseLink(binding, cell),
+      parseLink(binding, cell)!,
       "writeRedirect",
+      { preserveOverwrite: true },
     );
     const outputScope = options.narrowestReadScope;
     if (
@@ -91,13 +167,29 @@ export function sendValueToBinding<T>(
   } else if (Array.isArray(binding)) {
     if (Array.isArray(value)) {
       for (let i = 0; i < Math.min(binding.length, value.length); i++) {
-        sendValueToBinding(tx, cell, binding[i], value[i], options);
+        sendValueToBinding(
+          tx,
+          cell,
+          argumentCellLink,
+          internalCellLink,
+          binding[i],
+          value[i],
+          options,
+        );
       }
     }
   } else if (isRecord(binding) && isRecord(value)) {
     for (const key of Object.keys(binding)) {
       if (key in value) {
-        sendValueToBinding(tx, cell, binding[key], value[key], options);
+        sendValueToBinding(
+          tx,
+          cell,
+          argumentCellLink,
+          internalCellLink,
+          binding[key],
+          value[key],
+          options,
+        );
       }
     }
   } else if (!isRecord(binding) || Object.keys(binding).length !== 0) {
@@ -122,21 +214,34 @@ export function sendValueToBinding<T>(
  * - { $alias: { cell: <doc>, path: ["a"] } }
  *   = Unwrapped, executing the pattern
  *
+ * @param cfc - The ContextualFlowControl object, which we need to get the schema at sub-paths
  * @param binding - The binding to unwrap.
- * @param docOrCell - The doc or cell to bind to.
+ * @param argumentCellLink - The link to the argument cell
+ * @param internalCellLink - The link to the internal cell
+ * @param resultCellLink - The link to the result cell
  * @param options - Optional configuration.
  * @param options.bindPatterns - If false, skip binding aliases inside pattern values.
  *   This is used by raw/map nodes to prevent premature alias binding. Default: true.
+ * @param options.targetSchema - Schema for the binding being produced. Source
+ *   links still resolve through the argument/internal/result links above, but
+ *   emitted links are annotated with the corresponding target schema.
  * @returns The unwrapped binding.
  */
 export function unwrapOneLevelAndBindtoDoc<T, U>(
+  cfc: ContextualFlowControl,
   binding: T,
-  cell: Cell<U>,
-  options?: { bindPatterns?: boolean },
+  argumentCellLink: NormalizedFullLink,
+  internalCellLink: NormalizedFullLink,
+  resultCellLink: NormalizedFullLink,
+  options?: UnwrapOneLevelOptions,
 ): T {
   const bindPatterns = options?.bindPatterns !== false;
 
-  function convert(binding: unknown, bindToDoc: boolean): unknown {
+  function convert(
+    binding: unknown,
+    bindToDoc: boolean,
+    targetSchema: JSONSchema | undefined,
+  ): unknown {
     if (isLegacyAlias(binding)) {
       const alias = { ...binding.$alias };
       if (typeof alias.cell === "number") {
@@ -147,32 +252,43 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
         } else {
           alias.cell = alias.cell - 1;
         }
-      } else if (!alias.cell && bindToDoc) {
-        alias.cell = cell.entityId;
-      } else if (
-        // CT-1230 WORKAROUND: Rebind local pattern aliases to the current doc.
-        //
-        // Problem: When a subpattern is used in .map(), its internal/argument/resultRef
-        // aliases could be bound to a doc from a previous execution context. When the
-        // pattern runs again (e.g., adding a new item), these stale bindings caused
-        // stream sentinels to not be found, making handlers incorrectly treated as lifts.
-        //
-        // Why this helps: If we detect a local alias (internal/argument/resultRef path)
-        // that's already bound to a different doc than our current context, we rebind it.
-        // This ensures the alias points to the correct doc for this execution.
-        //
-        // We're uncertain if this is the right architectural fix or just masking a deeper
-        // issue with how patterns capture their execution context.
-        bindToDoc &&
-        alias.cell &&
-        Array.isArray(alias.path) &&
-        (alias.path[0] === "internal" ||
-          alias.path[0] === "argument" ||
-          alias.path[0] === "resultRef")
-      ) {
-        const currentId = (alias.cell as { "/": string })["/"];
-        if (currentId !== cell.entityId["/"]) {
-          alias.cell = cell.entityId;
+      } else if (typeof alias.cell === "string" && bindToDoc) {
+        // Resolve the special values for "argument" and "internal"
+        // we can't use "result" here.
+        const link = alias.cell === "argument"
+          ? argumentCellLink
+          : alias.cell === "internal"
+          ? internalCellLink
+          : alias.cell === "result"
+          ? resultCellLink
+          : undefined;
+        if (link === undefined) {
+          throw new Error("Invalid pseudo-alias cell: " + alias.cell);
+        }
+        const path = alias.path.map((p) => p.toString());
+        // we might have a schema in the alias, but if not, we may have one
+        // in the link (from the pattern)
+        const sourceSchema = alias.schema !== undefined
+          ? alias.schema
+          : link.schema !== undefined
+          ? cfc.schemaAtPath(link.schema, path)
+          : undefined;
+        return createSigilLinkFromParsedLink(
+          scopedLinkForPath(cfc, link, path, targetSchema ?? sourceSchema),
+          { includeSchema: true, overwrite: "redirect" },
+        );
+      } else if (Array.isArray(alias.cell)) {
+        const { cell, ...rest } = alias;
+        if (cell.length < 2) {
+          // probably an error, but remove cell
+          return { $alias: rest };
+        } else if (cell.length === 2) {
+          // If after removing the first element, we only will have one,
+          // convert it to a string instead of array
+          return { $alias: { ...rest, cell: cell[1] } };
+        } else {
+          // If there's more elements remove the first
+          return { $alias: { ...rest, cell: cell.slice(1) } };
         }
       } else if (!bindToDoc && alias.cell) {
         // CT-1230 WORKAROUND: Clear previously-bound alias when not binding to doc.
@@ -185,9 +301,16 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
         // when the pattern is actually executed in its correct context.
         delete alias.cell;
       }
+      // TODO(@ubik2) - we may never get here -- see if this can be removed
       return { $alias: alias };
     } else if (Array.isArray(binding)) {
-      return binding.map((value) => convert(value, bindToDoc));
+      return binding.map((value, index) =>
+        convert(
+          value,
+          bindToDoc,
+          cfc.getSchemaAtPath(targetSchema, [String(index)]),
+        )
+      );
     } else if (isRecord(binding)) {
       // CT-1230 WORKAROUND: Don't bind aliases inside pattern values when bindPatterns=false.
       //
@@ -201,7 +324,7 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
       const result: Record<string | symbol, unknown> = Object.fromEntries(
         Object.entries(binding).map(([key, value]) => [
           key,
-          convert(value, shouldBind),
+          convert(value, shouldBind, cfc.getSchemaAtPath(targetSchema, [key])),
         ]),
       );
       if (binding[unsafe_originalPattern]) {
@@ -213,7 +336,7 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
       return result;
     } else return binding;
   }
-  return convert(binding, true) as T;
+  return convert(binding, true, options?.targetSchema) as T;
 }
 
 export function unsafe_noteParentOnPatterns(
@@ -249,6 +372,8 @@ export function findAllWriteRedirectCells<T>(
     } else if (isWriteRedirectLink(binding)) {
       // If the binding is a write redirect, add the link to the seen list and
       // recurse into the linked cell.
+      // TODO(@ubik2): Need to determine whether this baseCell can be the resultCell. If the binding's link is missing an id, this will
+      // turn into a link into the processCell, which I want to eliminate.
       const link = parseLink(binding, baseCell);
       if (seen.find((s) => areNormalizedLinksSame(s, link))) return;
       seen.push(link);

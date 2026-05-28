@@ -170,11 +170,9 @@ export function buildKnownSchedulingWrites(state: {
   newCurrentKnownWrites: IMemorySpaceAddress[];
   newHistoricalMightWrite: IMemorySpaceAddress[];
 } {
-  const currentSeedWrites = state.writes.length > 0
+  const observedWrites = state.writes.length > 0
     ? state.writes
-    : state.existingCurrentWrites.length > 0
-    ? state.existingCurrentWrites
-    : state.declaredWrites;
+    : state.existingCurrentWrites;
   const dynamicParentWrites = deriveDynamicCollectionParentWrites(
     state.writes,
     state.declaredWrites,
@@ -184,7 +182,8 @@ export function buildKnownSchedulingWrites(state: {
     state.declaredWrites,
   );
   const newCurrentKnownWrites = sortAndCompactPaths([
-    ...currentSeedWrites,
+    ...state.declaredWrites,
+    ...observedWrites,
     ...dynamicParentWrites,
     ...declaredAncestorWrites,
   ]);

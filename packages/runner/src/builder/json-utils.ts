@@ -63,14 +63,38 @@ export function toJSONWithLegacyAliases(
     if (pathToCell) {
       if (ignoreSelfAliases && deepEqual(path, pathToCell)) return undefined;
 
-      return {
-        $alias: {
-          path: pathToCell as (string | number)[],
-          ...(scope !== undefined && { scope }),
-          ...(schema !== undefined &&
-            { schema: sanitizeSchemaForLinks(schema, { keepStreams: true }) }),
-        },
-      } satisfies LegacyAlias;
+      const [maybeCellName, ...restPath] = pathToCell;
+      const cellName = maybeCellName === "argument"
+        ? "argument"
+        : maybeCellName === "internal"
+        ? "internal"
+        : maybeCellName === "result"
+        ? "result"
+        : undefined;
+      if (cellName !== undefined) {
+        return {
+          $alias: {
+            cell: cellName,
+            path: restPath.map(String),
+            ...(scope !== undefined && { scope }),
+            ...(schema !== undefined &&
+              {
+                schema: sanitizeSchemaForLinks(schema, { keepStreams: true }),
+              }),
+          },
+        } satisfies LegacyAlias;
+      } else {
+        return {
+          $alias: {
+            path: pathToCell as (string | number)[],
+            ...(scope !== undefined && { scope }), // we're including scope, though we may not honor it
+            ...(schema !== undefined &&
+              {
+                schema: sanitizeSchemaForLinks(schema, { keepStreams: true }),
+              }),
+          },
+        } satisfies LegacyAlias;
+      }
     } else throw new Error(`Cell not found in paths`);
   }
 
@@ -89,6 +113,26 @@ export function toJSONWithLegacyAliases(
           path: alias.path as (string | number)[],
         },
       } satisfies LegacyAlias;
+    } else if (typeof alias.cell === "string") {
+      // If we encounter an existing alias and it isn't an absolute reference
+      // with a cell id, then increase the nesting level.
+      return {
+        $alias: {
+          ...alias, // Preserve existing metadata.
+          cell: [null, alias.cell], // Increase nesting level.
+          path: alias.path as (string | number)[],
+        },
+      };
+    } else if (Array.isArray(alias.cell)) {
+      // If we encounter an existing alias and it isn't an absolute reference
+      // with a cell id, then increase the nesting level.
+      return {
+        $alias: {
+          ...alias, // Preserve existing metadata.
+          cell: [null, ...alias.cell], // Increase nesting level.
+          path: alias.path as (string | number)[],
+        },
+      };
     } else {
       throw new Error(`Invalid alias cell`);
     }

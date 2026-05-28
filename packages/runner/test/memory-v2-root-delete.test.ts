@@ -3,6 +3,7 @@ import { Identity } from "@commonfabric/identity";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { setResultCell } from "../src/result-utils.ts";
 
 const signer = await Identity.fromPassphrase("memory v2 root delete");
 const space = signer.did();
@@ -78,7 +79,7 @@ Deno.test("memory v2 source-backed cells clear to undefined", async () => {
       tx,
     );
 
-    child.setSourceCell(parent);
+    setResultCell(child, parent);
     child.set({ name: "Alice" });
     await tx.commit();
 

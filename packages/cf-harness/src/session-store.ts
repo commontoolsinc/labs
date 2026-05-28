@@ -1,6 +1,8 @@
 import type {
   HarnessChatEventEnvelope,
   HarnessChatSessionStatus,
+  HarnessChatTurnLifecycle,
+  HarnessChatTurnRecord,
 } from "./contracts/interactive-chat.ts";
 import type { HarnessTranscriptMessage } from "./contracts/transcript.ts";
 
@@ -15,7 +17,19 @@ export interface HarnessChatEventListOptions {
   limit?: number;
 }
 
+export interface HarnessChatTurnListOptions {
+  sessionId?: string;
+  status?: HarnessChatTurnLifecycle;
+}
+
 export type HarnessMaybePromise<Value> = Value | Promise<Value>;
+
+export interface HarnessChatSessionTurnEventMutation {
+  session: HarnessChatSessionSnapshot;
+  event: HarnessChatEventEnvelope;
+  turn: HarnessChatTurnRecord;
+  createTurn?: boolean;
+}
 
 export interface HarnessChatSessionStore {
   saveSession(snapshot: HarnessChatSessionSnapshot): HarnessMaybePromise<void>;
@@ -27,6 +41,17 @@ export interface HarnessChatSessionStore {
     snapshot: HarnessChatSessionSnapshot,
     event: HarnessChatEventEnvelope,
   ): HarnessMaybePromise<void>;
+  saveSessionTurnAndAppendEvent(
+    mutation: HarnessChatSessionTurnEventMutation,
+  ): HarnessMaybePromise<boolean>;
+  saveTurn(turn: HarnessChatTurnRecord): HarnessMaybePromise<void>;
+  getTurn(
+    sessionId: string,
+    turnId: string,
+  ): HarnessMaybePromise<HarnessChatTurnRecord | undefined>;
+  listTurns(
+    options?: HarnessChatTurnListOptions,
+  ): HarnessMaybePromise<readonly HarnessChatTurnRecord[]>;
   appendEvent(event: HarnessChatEventEnvelope): HarnessMaybePromise<void>;
   listEvents(
     options?: HarnessChatEventListOptions,

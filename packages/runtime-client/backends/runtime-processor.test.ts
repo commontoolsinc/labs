@@ -79,17 +79,14 @@ describe("page slug metadata", () => {
       runtime: {
         getCellFromEntityId: () => ({
           sync: () => Promise.resolve(),
-          getAsNormalizedFullLink: () => ({
-            space: "did:key:z6Mk-runtime-processor-slug",
-            id: "of:fid1-slugged-piece",
-            scope: "space",
-            path: [],
-          }),
-        }),
-        readTx: () => ({
-          readOrThrow: (address: unknown) => {
-            reads.push(address);
-            return "demo";
+          getMetaRaw: (metaField: string) => {
+            reads.push({
+              space: "did:key:z6Mk-runtime-processor-slug",
+              id: "of:fid1-slugged-piece",
+              scope: "space",
+              path: [metaField],
+            });
+            return metaField === "slug" ? "demo" : undefined;
           },
         }),
       },
@@ -118,15 +115,8 @@ describe("page slug metadata", () => {
       runtime: {
         getCellFromEntityId: () => ({
           sync: () => Promise.resolve(),
-          getAsNormalizedFullLink: () => ({
-            space: "did:key:z6Mk-runtime-processor-slug",
-            id: "of:fid1-slugged-piece",
-            scope: "space",
-            path: [],
-          }),
-        }),
-        readTx: () => ({
-          readOrThrow: () => ({ not: "a slug" }),
+          getMetaRaw: (metaField: string) =>
+            metaField === "slug" ? { not: "a slug" } : undefined,
         }),
       },
       pieceManager: {
@@ -153,7 +143,7 @@ describe("page slug redirects", () => {
     raw?: unknown;
     schemaCell?: unknown;
     onPull?: () => void;
-    sourceCell?: unknown;
+    patternLink?: unknown;
     onSync?: () => void;
   } = {}) {
     return {
@@ -166,7 +156,8 @@ describe("page slug redirects", () => {
         return Promise.resolve(options.raw);
       },
       getRaw: () => options.raw,
-      getSourceCell: () => options.sourceCell,
+      getMetaRaw: (metaField: string) =>
+        metaField === "pattern" ? options.patternLink : undefined,
       getAsLink: () => cellRefToSigilLink(ref),
       getAsNormalizedFullLink: () => ref,
       asSchemaFromLinks: () => options.schemaCell,
@@ -253,6 +244,14 @@ describe("page slug redirects", () => {
         required: ["$NAME", "$UI"],
       },
     };
+    // if we don't have a pattern link, the processor won't pull the cell and
+    // thus won't pull the schema, so we have to include a pattern link
+    const patternRef: CellRef = {
+      id: "of:fid1-pattern-doc" as CellRef["id"],
+      space,
+      scope: "space",
+      path: [],
+    };
     let schemaPulled = false;
     const schemaCell = mockCell(schemaRef, {
       onPull: () => {
@@ -262,7 +261,7 @@ describe("page slug redirects", () => {
     let targetSynced = false;
     const targetCell = mockCell(targetRef, {
       schemaCell,
-      sourceCell: {},
+      patternLink: redirectRaw(patternRef),
       onSync: () => {
         targetSynced = true;
       },
@@ -315,7 +314,15 @@ describe("page slug redirects", () => {
       scope: "space",
       path: [],
     };
-    const pieceCell = mockCell(pieceRef, { sourceCell: {} });
+    const patternRef: CellRef = {
+      id: "of:fid1-pattern-doc" as CellRef["id"],
+      space,
+      scope: "space",
+      path: [],
+    };
+    const pieceCell = mockCell(pieceRef, {
+      patternLink: redirectRaw(patternRef),
+    });
     const resultCell = mockCell(resultRef);
     const slugCell = mockCell(slugRef, { raw: redirectRaw(pieceRef) });
     const calls: unknown[][] = [];
@@ -775,6 +782,72 @@ describe("RuntimeProcessor blob upload IPC", () => {
   });
 });
 
+describe("RuntimeProcessor home pattern IPC", () => {
+  it("uses the default-pattern metadata fast path when the home pattern is already instantiated", async () => {
+    const defaultPatternRef: CellRef = {
+      id: "of:default-pattern-result" as CellRef["id"],
+      space: "did:key:test-home" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+    const patternRef: CellRef = {
+      id: "of:default-pattern-source" as CellRef["id"],
+      space: "did:key:test-home" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+    let startedCell: unknown;
+    let idleCalled = false;
+    let defaultPatternSynced = false;
+
+    const defaultPatternCell = {
+      ...defaultPatternRef,
+      getAsLink: () => cellRefToSigilLink(defaultPatternRef),
+      getAsNormalizedFullLink: () => defaultPatternRef,
+      getMetaRaw: (metaField: string) =>
+        defaultPatternSynced && metaField === "pattern"
+          ? cellRefToSigilLink(patternRef)
+          : undefined,
+      sync: () => {
+        defaultPatternSynced = true;
+        return Promise.resolve();
+      },
+    };
+    const processor = {
+      runtime: {
+        getHomeSpaceCell: () => ({
+          sync: () => Promise.resolve(),
+          key: (key: string) => {
+            expect(key).toBe("defaultPattern");
+            return {
+              get: () => ({
+                resolveAsCell: () => defaultPatternCell,
+              }),
+            };
+          },
+        }),
+        start: (cell: unknown) => {
+          startedCell = cell;
+          return Promise.resolve();
+        },
+        idle: () => {
+          idleCalled = true;
+          return Promise.resolve();
+        },
+      },
+    } as unknown as RuntimeProcessor;
+
+    await expect(
+      RuntimeProcessor.prototype.handleEnsureHomePatternRunning.call(
+        processor,
+        { type: RequestType.EnsureHomePatternRunning },
+      ),
+    ).resolves.toEqual({ cell: defaultPatternRef });
+    expect(startedCell).toBe(defaultPatternCell);
+    expect(idleCalled).toBe(true);
+  });
+});
+
 describe("RuntimeProcessor CFC label IPC", () => {
   it("returns a label view for a cell ref", async () => {
     const ref: CellRef = {
@@ -805,7 +878,7 @@ describe("RuntimeProcessor CFC label IPC", () => {
             }),
           },
           getAsNormalizedFullLink: () => ref,
-          getSourceCell: () => undefined,
+          getMetaRaw: () => undefined,
           sync: () => Promise.resolve(),
         }),
       },
@@ -892,7 +965,7 @@ describe("RuntimeProcessor CFC label IPC", () => {
     });
   });
 
-  it("does not look up CFC labels from a result cell source", async () => {
+  it("does not look up CFC labels from a result meta cell", async () => {
     const resultRef: CellRef = {
       id: "of:cfc-label-result" as CellRef["id"],
       space: "did:key:test" as CellRef["space"],
@@ -927,12 +1000,13 @@ describe("RuntimeProcessor CFC label IPC", () => {
             }
             : { value: "result cell" },
       }),
-      getCellFromLink: () => resultCell,
+      getCellFromLink: (link: { id?: string }) =>
+        link.id === sourceRef.id ? sourceCell : resultCell,
     };
     const sourceCell = {
       runtime,
       getAsNormalizedFullLink: () => sourceRef,
-      getSourceCell: () => undefined,
+      getMetaRaw: (_metaField: string) => undefined,
       sync: () => {
         sourceSynced = true;
         return Promise.resolve();
@@ -941,7 +1015,11 @@ describe("RuntimeProcessor CFC label IPC", () => {
     const resultCell = {
       runtime,
       getAsNormalizedFullLink: () => resultRef,
-      getSourceCell: () => resultSynced ? sourceCell : undefined,
+      resultRef,
+      getMetaRaw: (metaField: string) =>
+        resultSynced && metaField === "result"
+          ? cellRefToSigilLink(sourceRef)
+          : undefined,
       sync: () => {
         resultSynced = true;
         return Promise.resolve();
@@ -958,7 +1036,178 @@ describe("RuntimeProcessor CFC label IPC", () => {
       cfcLabel: undefined,
     });
     expect(resultSynced).toBe(true);
-    expect(sourceSynced).toBe(true);
+    expect(sourceSynced).toBe(false);
+  });
+
+  it("syncs pattern, argument, and internal metadata links before reading labels", async () => {
+    const resultRef: CellRef = {
+      id: "of:cfc-label-sync-result" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+    const patternRef: CellRef = {
+      id: "of:cfc-label-sync-pattern" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+    const argumentRef: CellRef = {
+      id: "of:cfc-label-sync-argument" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+    const internalRef: CellRef = {
+      id: "of:cfc-label-sync-internal" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+    const syncLog: string[] = [];
+    const cells = new Map<string, unknown>();
+    const runtime = {
+      getCellFromLink: (link: CellRef) => cells.get(link.id),
+      readTx: () => {
+        return {
+          readOrThrow: () => ({
+            version: 1,
+            schemaHash: "test-schema",
+            labelMap: {
+              version: 1,
+              entries: [{
+                path: [],
+                label: { confidentiality: ["result-label"] },
+              }],
+            },
+          }),
+        };
+      },
+    };
+    const makeCell = (
+      name: string,
+      ref: CellRef,
+      links: Partial<Record<"pattern" | "argument" | "internal", CellRef>> = {},
+    ) => {
+      let synced = false;
+      return {
+        ...ref,
+        sourceURI: `${ref.space}/${ref.scope}/${ref.id}`,
+        runtime,
+        getAsNormalizedFullLink: () => ref,
+        getMetaRaw: (metaField: "pattern" | "argument" | "internal") =>
+          synced && links[metaField] !== undefined
+            ? cellRefToSigilLink(links[metaField]!)
+            : undefined,
+        sync: () => {
+          synced = true;
+          syncLog.push(name);
+          return Promise.resolve();
+        },
+      };
+    };
+    cells.set(
+      resultRef.id,
+      makeCell("result", resultRef, {
+        pattern: patternRef,
+        argument: argumentRef,
+        internal: internalRef,
+      }),
+    );
+    cells.set(patternRef.id, makeCell("pattern", patternRef));
+    cells.set(argumentRef.id, makeCell("argument", argumentRef));
+    cells.set(internalRef.id, makeCell("internal", internalRef));
+    const processor = { runtime } as unknown as RuntimeProcessor;
+
+    await expect(
+      RuntimeProcessor.prototype.handleCellGetCfcLabel.call(processor, {
+        type: RequestType.CellGetCfcLabel,
+        cell: resultRef,
+      }),
+    ).resolves.toEqual({
+      cfcLabel: {
+        version: 1,
+        entries: [{
+          path: [],
+          label: { confidentiality: ["result-label"] },
+        }],
+      },
+    });
+
+    expect(syncLog).toEqual([
+      "result",
+      "pattern",
+      "argument",
+      "internal",
+      "result",
+    ]);
+  });
+
+  it("does not loop when metadata links form a cycle", async () => {
+    const resultRef: CellRef = {
+      id: "of:cfc-label-cycle-result" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+    const patternRef: CellRef = {
+      id: "of:cfc-label-cycle-pattern" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+    const syncLog: string[] = [];
+    const cells = new Map<string, unknown>();
+    const runtime = {
+      getCellFromLink: (link: CellRef) => cells.get(link.id),
+      readTx: () => ({
+        readOrThrow: () => undefined,
+      }),
+    };
+    const makeCell = (
+      name: string,
+      ref: CellRef,
+      links: Partial<Record<"pattern" | "argument" | "internal", CellRef>> = {},
+    ) => {
+      let synced = false;
+      return {
+        ...ref,
+        sourceURI: `${ref.space}/${ref.scope}/${ref.id}`,
+        runtime,
+        getAsNormalizedFullLink: () => ref,
+        getMetaRaw: (metaField: "pattern" | "argument" | "internal") =>
+          synced && links[metaField] !== undefined
+            ? cellRefToSigilLink(links[metaField]!)
+            : undefined,
+        sync: () => {
+          synced = true;
+          syncLog.push(name);
+          return Promise.resolve();
+        },
+      };
+    };
+    cells.set(
+      resultRef.id,
+      makeCell("result", resultRef, {
+        pattern: patternRef,
+      }),
+    );
+    cells.set(
+      patternRef.id,
+      makeCell("pattern", patternRef, {
+        internal: resultRef,
+      }),
+    );
+    const processor = { runtime } as unknown as RuntimeProcessor;
+
+    await expect(
+      RuntimeProcessor.prototype.handleCellGetCfcLabel.call(processor, {
+        type: RequestType.CellGetCfcLabel,
+        cell: resultRef,
+      }),
+    ).resolves.toEqual({ cfcLabel: undefined });
+
+    expect(syncLog).toEqual(["result", "pattern", "result"]);
   });
 
   it("ignores schema-bearing anyOf refs when reading nested stored labels", async () => {

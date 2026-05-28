@@ -5,7 +5,11 @@ import {
   nodeIncludesText,
   propValue,
 } from "../test-ui-helpers.ts";
-import { sortDisplayMessages } from "./logic.ts";
+import {
+  createRandomImportedClaimedMessages,
+  seededRandom,
+  sortDisplayMessages,
+} from "./logic.ts";
 import {
   type ChatAdminRegistryValue,
   chatAdminRolesValue,
@@ -120,8 +124,17 @@ export default pattern(() => {
   const action_save_profile_rename = action(() => {
     chat.saveProfile.send();
   });
-  const action_add_random_imported = action(() => {
-    chat.addRandomMessages.send();
+  const action_add_deterministic_imported = action(() => {
+    const random = seededRandom(0xdecafbad);
+    const nextMessages = createRandomImportedClaimedMessages(
+      sortDisplayMessages(messages.get() as SharedChatMessage[]),
+      participantClaimsValue(profiles, myProfile, messages),
+      random,
+    );
+    messages.set([
+      ...(messages.get() as SharedChatMessage[]),
+      ...nextMessages,
+    ]);
   });
   const action_add_same_name_unverified_imports = action(() => {
     messages.set([
@@ -303,7 +316,7 @@ export default pattern(() => {
       { action: action_set_message_after_rename },
       { action: action_send_message },
       { assertion: assert_second_message_uses_current_name },
-      { action: action_add_random_imported },
+      { action: action_add_deterministic_imported },
       { assertion: assert_imported_messages_injected },
       { assertion: assert_thread_order_sortable },
       { assertion: assert_verified_imports_do_not_duplicate_participants },

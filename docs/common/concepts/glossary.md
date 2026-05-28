@@ -21,26 +21,29 @@ statically and dynamically.
 
 ## Piece
 
-Piece is a [spell] invocation binding set of [cell]s as inputs and set of
-[cell]s as outputs, creating an execution graph. It may help to think of [spell]
+Piece is a [pattern] invocation binding set of [cell]s as inputs and set of
+[cell]s as outputs, creating an execution graph. It may help to think of [pattern]
 as an open electric circuit, in this case [piece] would be a closed electric
 circuit as current will flow through it. Different analogy could be to think of
-[piece] as a process, where's [spell] would be a program and [cell]s would be
+[piece] as a process, where's [pattern] would be a program and [cell]s would be
 program inputs and outputs.
 
 There are a few more specific terms for cells within the piece:
 
 - Result Cell -- This is the main piece cell. The UI will be built here.
-- Process Cell -- This holds much of the working state of the piece.
+- Argument Cell -- This holds some of the inputs of the piece.
+- Internal Cell -- This is a temporary cell, but it holds the working state of the piece.
 - Pattern Cell -- Contains the pattern source code.
 
 ```mermaid
 flowchart TD
     A["Result Cell"]
-    A --source--> B["Process Cell"]
-    B --value.resultRef--> A
-    B --value.spell--> C["Pattern Cell"]
-    D@{ shape: procs, label: "Data Cells"} --source--> B
+    A --argument--> B["Argument Cell"]
+    A --internal--> C["Internal Cell"]
+    A --pattern--> D["Pattern Cell"]
+    B --result--> A
+    C --result--> A
+    E@{ shape: procs, label: "Data Cells"} --result--> A
 ```
 
 ## CRDT (Conflict-free Replicated Data Type)
@@ -114,8 +117,16 @@ deterministic way, using dependency graphs of reactive cells.
 
 ## Pattern
 
-A function that defines a reactive graph. Can produce UI, derived data, or
-streams. Used like components in other reactive frameworks.
+A unit of computation that defines a reactive graph and describes a
+transformation from a set of inputs to a set of outputs. In practice it is
+manifested as a TypeScript function that takes an object with a set of
+properties and returns an object with a set of outputs. Patterns can produce UI,
+derived data, or streams and are used like components in other reactive
+frameworks.
+
+It is worth pointing out that while a TypeScript function is used it does not
+actually define a computation, instead it is a way to build a computation
+pipeline that flows through input [cell]s into output [cell]s.
 
 ## CTS (Common TypeScript)
 
@@ -128,16 +139,6 @@ make appropriate transformations.
 
 The secure, isolated rendering of pattern-generated UI, considered part of the
 Trusted Computing Base (TCB).
-
-## Spell
-
-Unit of computation that describes transformation from the set of inputs to the
-set of outputs. In practice it is manifested as a typescript function that takes
-an object with set of properties and returns an object with a set of outputs.
-
-It is worth pointing out that while typescript function is used it does not
-actually defines a computation, instead it is a way to build a computation
-pipeline that flows through input [cell]s into output [cell]s.
 
 ## Storage - Cache (IndexDB)
 
@@ -205,7 +206,7 @@ tokens.
 A data representation of UI elements returned by patterns, which the runtime
 turns into rendered HTML.
 
-[spell]: #spell
+[pattern]: #pattern
 [cell]: #cell
 [piece]: #piece
 [acl]: #acl-access-control-list

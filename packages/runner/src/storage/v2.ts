@@ -1703,6 +1703,11 @@ class SpaceReplica implements ISpaceReplica {
 
     for (const upsert of sync.upserts) {
       const record = this.record(upsert.id as URI, upsert.scope);
+      // Watch refreshes can arrive after local confirmations. Never move the
+      // confirmed base backwards; pending replay depends on monotonic bases.
+      if (upsert.seq < record.confirmed.seq) {
+        continue;
+      }
       record.confirmed = confirmedVersion(
         upsert.seq,
         upsert.deleted === true ? undefined : upsert.doc,
@@ -1963,7 +1968,10 @@ const snapshotState = (
   scope?: CellScope,
 ): State => {
   return replica.get({ id, type: DOCUMENT_MIME, path: [], scope }) ??
-    unclaimed({ of: id, the: DOCUMENT_MIME });
+    ({
+      ...unclaimed({ of: id, the: DOCUMENT_MIME }),
+      scope: normalizeCellScope(scope),
+    } as State);
 };
 
 const toConnectionError = (error: unknown): IConnectionError =>

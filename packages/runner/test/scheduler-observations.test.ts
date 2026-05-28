@@ -79,9 +79,7 @@ type SchedulerSnapshotWithObservation =
   & { observation: SchedulerActionObservation };
 
 const resultCellPieceId = (cell: Cell<unknown>): string => {
-  const processCell = cell.getSourceCell();
-  expect(processCell).toBeDefined();
-  const { scope, id } = processCell!.getAsNormalizedFullLink();
+  const { scope, id } = cell.getAsNormalizedFullLink();
   return `${scope}:${id}`;
 };
 
