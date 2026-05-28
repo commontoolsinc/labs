@@ -1,4 +1,8 @@
-import { cloneIfNecessary } from "@commonfabric/data-model/fabric-value";
+import {
+  cloneIfNecessary,
+  cloneWithoutValueAtPath,
+  cloneWithValueAtPath,
+} from "@commonfabric/data-model/fabric-value";
 import {
   type ConflictError as IConflictError,
   type ConnectionError as IConnectionError,
@@ -60,12 +64,7 @@ import { SelectorTracker } from "./selector-tracker.ts";
 import * as SubscriptionManager from "./subscription.ts";
 import { getDirectTransactionReadActivities } from "./transaction-inspection.ts";
 import { toTransactionDocumentValue } from "./v2-document.ts";
-import {
-  cloneWithoutPath,
-  cloneWithValueAtPath,
-  hasValueAtPath,
-  readValueAtPath,
-} from "./v2-path.ts";
+import { hasValueAtPath, readValueAtPath } from "./v2-path.ts";
 import {
   compactWatchEntries,
   normalizeSyncEntries,
@@ -284,10 +283,12 @@ const applyPendingVersion = (
             next,
             path,
             readValueAtPath(pending.value, path),
-          );
+          ) as EntityDocument;
           continue;
         }
-        next = cloneWithoutPath(next, path);
+        next = cloneWithoutValueAtPath(next, path) as
+          | EntityDocument
+          | undefined;
       }
       return next;
     }
