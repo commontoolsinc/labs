@@ -584,19 +584,6 @@ const hasChildAt = (
 };
 
 /**
- * Helper for the path-edit functions, which writes `value` into `container` at
- * `key`. A canonical array-index string addresses (and extends) the array
- * element directly -- no numeric coercion needed.
- */
-const writeChildAt = (
-  container: FabricValue,
-  key: string,
-  value: FabricValue,
-): void => {
-  (container as Record<string, FabricValue>)[key] = value;
-};
-
-/**
  * Returns a deep-frozen clone of `root` with `value` set at `path`, creating
  * missing intermediate containers as needed (their array-vs-object shape is
  * chosen from the next path segment, per `cloneForMutation`'s `createMissing`).
@@ -622,7 +609,9 @@ export function cloneWithValueAtPath(
     path.slice(0, -1),
     { createMissing: true, nextKeyAfterPath: lastKey },
   );
-  writeChildAt(pathValue, lastKey, cloneIfNecessary(value));
+  // A canonical array-index `lastKey` indexes (and extends) an array
+  // `pathValue` directly; otherwise it's a plain object key.
+  (pathValue as Record<string, FabricValue>)[lastKey] = cloneIfNecessary(value);
   return deepFreeze(newRoot);
 }
 
