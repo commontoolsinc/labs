@@ -404,10 +404,6 @@ const personIsLotWatchAdmin = (
   );
 };
 
-const currentUserCanManageLotWatchAdmins = (
-  credential: LotWatchAdminManagerCredentialCell,
-): boolean => adminManagerCredentialIsActive(credential.get());
-
 const prepareLotWatchAdminToggle = (
   credential: LotWatchAdminManagerCredential | null | undefined,
   registry: LotWatchAdminRegistryCell,
@@ -1179,11 +1175,6 @@ export default pattern<LotWatchInput, LotWatchOutput>(
     // (Read writables with .get() and return a real boolean — referencing a
     // computed inside JSX props and negating it would coerce the cell object,
     // not its value.)
-    const cannotSave = computed(() => !draftImage.get() || !draftSpot.get());
-
-    // Phase 2: gate the extraction UI on having a photo.
-    const hasDraftImage = computed(() => draftImage.get() !== null);
-
     // Reverse-chron count for the Sightings header / empty-state.
     const sightingCount = computed(() => (sightings.get() ?? []).length);
     const noSightings = computed(() => (sightings.get() ?? []).length === 0);
@@ -1223,46 +1214,15 @@ export default pattern<LotWatchInput, LotWatchOutput>(
       return lbl ? `Spot #${num} — ${lbl}` : `Spot #${num}`;
     });
 
-    // DESIGN §6: admin-mode computeds (mirror coordinator pattern)
-    const currentPersonIsAdmin = computed(() =>
-      personIsLotWatchAdmin(adminRegistry, reporterName.get() || "")
-    );
+    // DESIGN §6: only `adminModeEnabled` survives the single-button curator
+    // collapse — the multi-admin computeds (currentPersonIsAdmin /
+    // currentUserCanManageAdmins / adminAccessRows / reporterAdminInfo) were
+    // removed along with the old Admin Panel UI they fed; the gating itself
+    // still keys on personIsLotWatchAdmin(reporterName) per action.
     const adminModeEnabled = computed(() =>
       adminMode.get() &&
       personIsLotWatchAdmin(adminRegistry, reporterName.get() || "")
     );
-    const currentUserCanManageAdmins = computed(() =>
-      currentUserCanManageLotWatchAdmins(adminManagerCredential)
-    );
-
-    // Admin access rows: one per person-name-like entry.
-    // Lot Watch doesn't own a `people` list, so we use the shared people cell
-    // (may be empty standalone). We read canManageAdmins here (top-level) and
-    // bake it per row so no perSession read leaks into a nested computed.
-    const adminAccessRows = computed(() => {
-      const canManage = currentUserCanManageLotWatchAdmins(
-        adminManagerCredential,
-      );
-      return (people.get() ?? []).map((p) => ({
-        name: p.name,
-        isAdmin: personIsLotWatchAdmin(adminRegistry, p.name),
-        canManageAdmins: canManage,
-      }));
-    });
-
-    // Reporter admin info — baked boolean so no computed-in-computed JSX needed.
-    // Avoids the "handler used as lift" error from onClick inside computed() JSX.
-    const reporterAdminInfo = computed(() => {
-      const name = reporterName.get() ?? "";
-      const canManage = currentUserCanManageLotWatchAdmins(
-        adminManagerCredential,
-      );
-      if (!name.trim() || !canManage) return null;
-      return {
-        name,
-        isAdmin: personIsLotWatchAdmin(adminRegistry, name),
-      };
-    });
 
     // DESIGN §10: Report tab computeds — all over PerSpace sightings (guard ?? [])
     // Spot occupancy frequency — derived from the `spots` cell (NOT a hardcoded
@@ -1429,22 +1389,10 @@ export default pattern<LotWatchInput, LotWatchOutput>(
     // State select items
     const stateSelectItems = US_STATES.map((s) => ({ label: s, value: s }));
 
-    // Phase 3c: people select items for the assign-to-person picker.
-    // Use .map() not spread — spread throws inside computed().
-    const peopleSelectItems = computed(() =>
-      (people.get() ?? []).map((p) => ({ label: p.name, value: p.name }))
-    );
+    // Phase 3c: gate the assign picker's chip list on whether any people
+    // exist. The chips themselves map `people` directly (recipe A from
+    // `gotchas/closure-capture-in-nested-map.md` — works post-CT-1626).
     const hasPeople = computed(() => (people.get() ?? []).length > 0);
-    // Top-level computed for the assign picker's quick-pick chips. Reading
-    // `people` via closure inside the per-row map below trips the
-    // lift-closure pitfall ("Reactive reference from outer scope cannot be
-    // accessed via closure"); pre-bake the name list here so the row UI just
-    // maps a plain array of strings.
-    const peopleNames = computed(() =>
-      (people.get() ?? []).map((p) => p.name).filter((n) =>
-        (n ?? "").trim() !== ""
-      )
-    );
     // Disable "Become curator" until a reporter identity exists; the admin
     // role keys on `reporterName`.
     const noReporterName = computed(() => !(reporterName.get() ?? "").trim());
@@ -2099,24 +2047,16 @@ export default pattern<LotWatchInput, LotWatchOutput>(
                                           {hasPeople
                                             ? (
                                               <cf-hstack gap="1" wrap>
-                                                {/* Map the pre-baked
-                                                    top-level `peopleNames`
-                                                    computed instead of
-                                                    `people.get().map(...)` to
-                                                    avoid the "reactive
-                                                    reference from outer scope
-                                                    cannot be accessed via
-                                                    closure" error. */}
-                                                {peopleNames.map((name) => (
+                                                {people.map((p) => (
                                                   <cf-button
                                                     variant="ghost"
                                                     size="sm"
                                                     onClick={() =>
                                                       setAssignPersonName.send(
-                                                        { name },
+                                                        { name: p.name },
                                                       )}
                                                   >
-                                                    {name}
+                                                    {p.name}
                                                   </cf-button>
                                                 ))}
                                               </cf-hstack>

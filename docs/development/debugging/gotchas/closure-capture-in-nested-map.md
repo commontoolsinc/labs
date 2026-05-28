@@ -1,7 +1,25 @@
-# `(cellCall() ?? []).map(...)` nested in another `.map(...)` throws at construction
+# `(cellCall() ?? []).map(...)` nested in another `.map(...)` — partly fixed in the runtime; recipe A is the idiom
 
-**Symptom:** Pattern instantiation aborts (no UI renders, `cf test` fails fast)
-with one of these strings:
+> **2026-05-28 update:** the construction-time closure-capture error has been
+> **fixed at the transformer layer** by **CT-1626 / PR #3726** ("lower
+> `(reactive ?? []).map` nested in map + unify closure-capture diagnostic"),
+> which closed the policy gap our ticket flagged. The diagnostic also
+> unified so both error strings point at the same conceptual violation.
+>
+> The original failing shape no longer aborts at construction. Recipe A
+> below (map the cell directly, no `.get()` / `??`) is now the recommended
+> idiom and works cleanly. Recipe B (pre-bake into a top-level `computed`)
+> is still a reasonable choice when you also want to project/filter.
+>
+> Keep this doc — the *anti-pattern* of writing
+> `(cell.get() ?? []).map((p) => p.name)` inside a row `.map` is still a
+> code smell (the `?? []` should be a clear signal that you mean a plain
+> array; if you mean the cell, just map it), and the rule itself still
+> exists at `packages/runner/src/builder/node-utils.ts:15-19` for
+> closures that DO escape via genuine outer-frame cells.
+
+**Symptom (pre-fix):** Pattern instantiation aborts (no UI renders, `cf test`
+fails fast) with one of these strings:
 
 > Reactive reference from outer scope cannot be accessed via closure. Wrap the
 > access in a derive that passes the variable through, or use computed() which
@@ -143,9 +161,11 @@ builder frame being captured by an *inner* builder frame
 (`packages/runner/src/builder/node-utils.ts:15-19`). Same era, different
 layer, different fix recipe. Don't conflate them.
 
-## Tracked framework concern
+## Tracked framework concern — RESOLVED
 
 The transformer policy gap (binary-expression receivers wrapping reactive
-calls aren't recognized) and the diagnostic-vs-runtime-error split are filed
-as `LINEAR-TICKET-closure-capture-in-nested-map.md` — separate from the
-perSession scope-follow ticket.
+calls weren't recognized) and the diagnostic-vs-runtime-error split were
+filed and **fixed** in CT-1626 / PR #3726, separately from the still-open
+perSession scope-follow ticket. Recipe A is the cleanest form post-fix;
+this doc remains as the canonical reference for the shape and the three
+recipes.
