@@ -181,7 +181,7 @@ describe("FabricError", () => {
     });
 
     describe("toNativeValue()", () => {
-      it("returns a frozen `Error` projection when `frozen` is true", () => {
+      it("returns a frozen `Error` projection when `frozen` is `true`", () => {
         const err = new Error("native");
         const se = FabricError.fromNativeError(err);
         const result = se.toNativeValue(true);
@@ -204,7 +204,7 @@ describe("FabricError", () => {
         expect(Object.isFrozen(a)).toBe(true);
       });
 
-      it("returns a fresh unfrozen `Error` projection when `frozen` is false", () => {
+      it("returns a fresh unfrozen `Error` projection when `frozen` is `false`", () => {
         const se = FabricError.fromNativeError(new Error("native"));
         const result = se.toNativeValue(false);
         expect(result).toBeInstanceOf(Error);
@@ -212,7 +212,7 @@ describe("FabricError", () => {
         expect(Object.isFrozen(result)).toBe(false);
       });
 
-      it("returns a fresh copy each call when `frozen` is false", () => {
+      it("returns a fresh copy each call when `frozen` is `false`", () => {
         const se = FabricError.fromNativeError(new Error("native"));
         const a = se.toNativeValue(false);
         const b = se.toNativeValue(false);
@@ -244,7 +244,7 @@ describe("FabricError", () => {
         expect(Object.isFrozen(childObj)).toBe(true);
       });
 
-      it("via dispatch: `[IS_DEEP_FROZEN]` true only when wrapper + cause are frozen", () => {
+      it("via dispatch: `[IS_DEEP_FROZEN]` `true` only when wrapper + cause are frozen", () => {
         const fe = FabricError.fromNativeError(new Error("test"));
         expect(isDeepFrozenFabricValue(fe)).toBe(false);
         Object.freeze(fe); // wrapper only; some descendants still mutable
@@ -276,7 +276,7 @@ describe("FabricError", () => {
         expect(Object.isFrozen(childObj)).toBe(true);
       });
 
-      it("via direct member invocation: `[IS_DEEP_FROZEN]` true only when wrapper is frozen", () => {
+      it("via direct member invocation: `[IS_DEEP_FROZEN]` `true` only when wrapper is frozen", () => {
         const fe = FabricError.fromNativeError(new Error("test"));
         expect(fe[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(false);
         fe[DEEP_FREEZE](subFreeze);
