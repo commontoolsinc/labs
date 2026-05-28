@@ -550,7 +550,10 @@ function isMutableHandle(value: unknown): boolean {
   return isPlainContainer(value) || value instanceof FabricInstance;
 }
 
-/** Reads the child of `container` at `key` (array index or object key). */
+/**
+ * Helper for the path-edit functions, which reads the child of `container` at
+ * `key` (array index or object key).
+ */
 const readChildAt = (
   container: Record<string, unknown> | unknown[],
   key: string,
@@ -560,10 +563,10 @@ const readChildAt = (
     | undefined;
 
 /**
- * Whether `container` actually has an own child at `key`. For arrays this
- * tests `Object.hasOwn` (not just `index < length`), so a sparse hole counts
- * as absent -- removing a hole is then a no-op rather than a shift-inducing
- * splice.
+ * Helper for the path-edit functions, which indicates whether `container` has
+ * an own child at `key`. For arrays this tests `Object.hasOwn` (not just
+ * `index < length`), so a sparse hole counts as absent -- removing a hole is
+ * then a no-op rather than a shift-inducing splice.
  */
 const hasChildAt = (
   container: Record<string, unknown> | unknown[],
@@ -577,7 +580,10 @@ const hasChildAt = (
   return Object.hasOwn(container, key);
 };
 
-/** Writes `value` into `container` at `key` (array index or object key). */
+/**
+ * Helper for the path-edit functions, which writes `value` into `container` at
+ * `key` (array index or object key).
+ */
 const writeChildAt = (
   container: FabricValue,
   key: string,

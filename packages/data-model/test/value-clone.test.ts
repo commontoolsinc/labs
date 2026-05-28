@@ -11,131 +11,137 @@ import { FabricHash } from "../src/fabric-primitives/FabricHash.ts";
 // deno-lint-ignore no-explicit-any
 const obj = (v: unknown) => v as any;
 
-describe("cloneWithValueAtPath", () => {
-  it("copies only the mutated spine; off-spine subtrees are shared", () => {
-    const root = deepFreeze({
-      value: { left: { nested: { stable: true } }, right: { count: 1 } },
+describe("value-clone", () => {
+  describe("cloneWithValueAtPath", () => {
+    it("copies only the mutated spine; off-spine subtrees are shared", () => {
+      const root = deepFreeze({
+        value: { left: { nested: { stable: true } }, right: { count: 1 } },
+      });
+
+      const result = obj(
+        cloneWithValueAtPath(root, ["value", "right", "count"], 2),
+      );
+
+      expect(result).not.toBe(root);
+      expect(result.value).not.toBe(obj(root).value);
+      expect(result.value.left).toBe(obj(root).value.left); // off-spine: shared
+      expect(result.value.right).not.toBe(obj(root).value.right); // on-spine: copied
+      expect(result.value.right.count).toBe(2);
+      expect(obj(root).value.right.count).toBe(1); // input untouched
+      expect(isDeepFrozen(result)).toBe(true);
     });
 
-    const result = obj(
-      cloneWithValueAtPath(root, ["value", "right", "count"], 2),
-    );
+    it("creates missing intermediate containers, shaped by the next segment", () => {
+      const objResult = obj(
+        cloneWithValueAtPath(deepFreeze({}), ["a", "b"], 1),
+      );
+      expect(objResult.a.b).toBe(1);
+      expect(Array.isArray(objResult.a)).toBe(false);
+      expect(isDeepFrozen(objResult)).toBe(true);
 
-    expect(result).not.toBe(root);
-    expect(result.value).not.toBe(obj(root).value);
-    expect(result.value.left).toBe(obj(root).value.left); // off-spine: shared
-    expect(result.value.right).not.toBe(obj(root).value.right); // on-spine: copied
-    expect(result.value.right.count).toBe(2);
-    expect(obj(root).value.right.count).toBe(1); // input untouched
-    expect(isDeepFrozen(result)).toBe(true);
-  });
-
-  it("creates missing intermediate containers, shaped by the next segment", () => {
-    const objResult = obj(cloneWithValueAtPath(deepFreeze({}), ["a", "b"], 1));
-    expect(objResult.a.b).toBe(1);
-    expect(Array.isArray(objResult.a)).toBe(false);
-    expect(isDeepFrozen(objResult)).toBe(true);
-
-    // An array-index-shaped next segment creates an array.
-    const arrResult = obj(
-      cloneWithValueAtPath(deepFreeze({}), ["items", "0"], "x"),
-    );
-    expect(Array.isArray(arrResult.items)).toBe(true);
-    expect(arrResult.items[0]).toBe("x");
-  });
-
-  it("replaces the whole value for an empty path (deep-frozen)", () => {
-    const result = obj(cloneWithValueAtPath(deepFreeze({ old: true }), [], {
-      replacement: 1,
-    }));
-    expect(result).toEqual({ replacement: 1 });
-    expect(isDeepFrozen(result)).toBe(true);
-  });
-
-  it("throws rather than overwrite a present non-container leaf with spine structure", () => {
-    // Apparently-unintentional inconsistency now surfaced: descending a write
-    // path *through* a present primitive used to silently clobber it with a
-    // fresh container.
-    expect(() =>
-      cloneWithValueAtPath(deepFreeze({ a: "string" }), ["a", "b"], 1)
-    )
-      .toThrow(CloneForMutationError);
-    expect(() =>
-      cloneWithValueAtPath(deepFreeze({ a: { b: 5 } }), ["a", "b", "c"], 1)
-    ).toThrow(CloneForMutationError);
-  });
-
-  it("preserves a FabricInstance sibling of the mutated spine by identity", () => {
-    const hash = FabricHash.fromString("sha256:abcd");
-    const root = deepFreeze({ value: { keep: hash, target: { count: 1 } } });
-
-    const result = obj(
-      cloneWithValueAtPath(root, ["value", "target", "count"], 2),
-    );
-
-    // `value` is shallow-cloned (on the spine); its `keep` sibling rides along
-    // by identity rather than being reconstructed/demoted.
-    expect(result.value.keep).toBe(hash);
-    expect(result.value.keep).toBeInstanceOf(FabricHash);
-    expect(result.value.keep.tag).toBe("sha256");
-  });
-});
-
-describe("cloneWithoutValueAtPath", () => {
-  it("removes an object key, copying only the mutated spine", () => {
-    const root = deepFreeze({
-      value: { left: { nested: true }, right: { keep: 1, remove: 2 } },
+      // An array-index-shaped next segment creates an array.
+      const arrResult = obj(
+        cloneWithValueAtPath(deepFreeze({}), ["items", "0"], "x"),
+      );
+      expect(Array.isArray(arrResult.items)).toBe(true);
+      expect(arrResult.items[0]).toBe("x");
     });
 
-    const result = obj(
-      cloneWithoutValueAtPath(root, ["value", "right", "remove"]),
-    );
+    it("replaces the whole value for an empty path (deep-frozen)", () => {
+      const result = obj(cloneWithValueAtPath(deepFreeze({ old: true }), [], {
+        replacement: 1,
+      }));
+      expect(result).toEqual({ replacement: 1 });
+      expect(isDeepFrozen(result)).toBe(true);
+    });
 
-    expect(result.value.left).toBe(obj(root).value.left); // off-spine: shared
-    expect(result.value.right).toEqual({ keep: 1 });
-    expect(obj(root).value.right.remove).toBe(2); // input untouched
-    expect(isDeepFrozen(result)).toBe(true);
+    it("throws rather than overwrite a present non-container leaf with spine structure", () => {
+      // Apparently-unintentional inconsistency now surfaced: descending a write
+      // path *through* a present primitive used to silently clobber it with a
+      // fresh container.
+      expect(() =>
+        cloneWithValueAtPath(deepFreeze({ a: "string" }), ["a", "b"], 1)
+      )
+        .toThrow(CloneForMutationError);
+      expect(() =>
+        cloneWithValueAtPath(deepFreeze({ a: { b: 5 } }), ["a", "b", "c"], 1)
+      ).toThrow(CloneForMutationError);
+    });
+
+    it("preserves a FabricInstance sibling of the mutated spine by identity", () => {
+      const hash = FabricHash.fromString("sha256:abcd");
+      const root = deepFreeze({ value: { keep: hash, target: { count: 1 } } });
+
+      const result = obj(
+        cloneWithValueAtPath(root, ["value", "target", "count"], 2),
+      );
+
+      // `value` is shallow-cloned (on the spine); its `keep` sibling rides along
+      // by identity rather than being reconstructed/demoted.
+      expect(result.value.keep).toBe(hash);
+      expect(result.value.keep).toBeInstanceOf(FabricHash);
+      expect(result.value.keep.tag).toBe("sha256");
+    });
   });
 
-  it("splices out an array element", () => {
-    const root = deepFreeze({ items: [10, 20, 30] });
+  describe("cloneWithoutValueAtPath", () => {
+    it("removes an object key, copying only the mutated spine", () => {
+      const root = deepFreeze({
+        value: { left: { nested: true }, right: { keep: 1, remove: 2 } },
+      });
 
-    const result = obj(cloneWithoutValueAtPath(root, ["items", "1"]));
+      const result = obj(
+        cloneWithoutValueAtPath(root, ["value", "right", "remove"]),
+      );
 
-    expect(result.items).toEqual([10, 30]);
-    expect(isDeepFrozen(result)).toBe(true);
-  });
+      expect(result.value.left).toBe(obj(root).value.left); // off-spine: shared
+      expect(result.value.right).toEqual({ keep: 1 });
+      expect(obj(root).value.right.remove).toBe(2); // input untouched
+      expect(isDeepFrozen(result)).toBe(true);
+    });
 
-  it("treats a sparse array hole (and out-of-range index) as absent", () => {
-    const items = [10, 20, 30];
-    delete items[1]; // sparse hole at index 1
-    const root = deepFreeze({ items });
+    it("splices out an array element", () => {
+      const root = deepFreeze({ items: [10, 20, 30] });
 
-    // A hole is "nothing to remove" -- must not splice and shift the array.
-    expect(cloneWithoutValueAtPath(root, ["items", "1"])).toBe(root);
-    expect(cloneWithoutValueAtPath(root, ["items", "5"])).toBe(root);
-  });
+      const result = obj(cloneWithoutValueAtPath(root, ["items", "1"]));
 
-  it("is a no-op (returns the deep-frozen root) when the path is absent", () => {
-    const root = deepFreeze({ value: { left: { stable: true } } });
+      expect(result.items).toEqual([10, 30]);
+      expect(isDeepFrozen(result)).toBe(true);
+    });
 
-    expect(cloneWithoutValueAtPath(root, ["value", "right"])).toBe(root);
-    expect(cloneWithoutValueAtPath(root, ["value", "left", "missing"])).toBe(
-      root,
-    );
-  });
+    it("treats a sparse array hole (and out-of-range index) as absent", () => {
+      const items = [10, 20, 30];
+      delete items[1]; // sparse hole at index 1
+      const root = deepFreeze({ items });
 
-  it("does not descend into a FabricInstance/FabricPrimitive in the path", () => {
-    const hash = FabricHash.fromString("sha256:abcd");
-    const root = deepFreeze({ value: { wrapper: hash } });
+      // A hole is "nothing to remove" -- must not splice and shift the array.
+      expect(cloneWithoutValueAtPath(root, ["items", "1"])).toBe(root);
+      expect(cloneWithoutValueAtPath(root, ["items", "5"])).toBe(root);
+    });
 
-    // There is nothing path-addressable under an opaque wrapper, so removal is
-    // a no-op rather than an attempt to clone/mutate the wrapper.
-    expect(cloneWithoutValueAtPath(root, ["value", "wrapper", "x"])).toBe(root);
-  });
+    it("is a no-op (returns the deep-frozen root) when the path is absent", () => {
+      const root = deepFreeze({ value: { left: { stable: true } } });
 
-  it("removes the whole value for undefined root or empty path", () => {
-    expect(cloneWithoutValueAtPath(undefined, ["a"])).toBeUndefined();
-    expect(cloneWithoutValueAtPath(deepFreeze({ a: 1 }), [])).toBeUndefined();
+      expect(cloneWithoutValueAtPath(root, ["value", "right"])).toBe(root);
+      expect(cloneWithoutValueAtPath(root, ["value", "left", "missing"])).toBe(
+        root,
+      );
+    });
+
+    it("does not descend into a FabricInstance/FabricPrimitive in the path", () => {
+      const hash = FabricHash.fromString("sha256:abcd");
+      const root = deepFreeze({ value: { wrapper: hash } });
+
+      // There is nothing path-addressable under an opaque wrapper, so removal is
+      // a no-op rather than an attempt to clone/mutate the wrapper.
+      expect(cloneWithoutValueAtPath(root, ["value", "wrapper", "x"])).toBe(
+        root,
+      );
+    });
+
+    it("removes the whole value for undefined root or empty path", () => {
+      expect(cloneWithoutValueAtPath(undefined, ["a"])).toBeUndefined();
+      expect(cloneWithoutValueAtPath(deepFreeze({ a: 1 }), [])).toBeUndefined();
+    });
   });
 });
