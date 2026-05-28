@@ -76,18 +76,6 @@ export const COMMONFABRIC_RUNTIME_EXPORT_REGISTRY = [
     reactiveOrigin: true,
   },
   {
-    // User-source `derive(input, cb)` calls are recognized as the
-    // "lift-applied" kind so that they share dispatch with the synthetic
-    // lift-applied form the transformer produces post-CT-1615. The literal
-    // call shape at this stage is `derive(input, cb)` (the user-source
-    // form); LiftLoweringTransformer rewrites it to the lift-applied
-    // shape `__cfHelpers.lift(cb)(input)` early in the pipeline.
-    exportName: "derive",
-    category: "call",
-    callKind: "lift-applied",
-    reactiveOrigin: true,
-  },
-  {
     exportName: "ifElse",
     category: "call",
     callKind: "ifElse",

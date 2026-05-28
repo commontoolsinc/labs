@@ -26,7 +26,7 @@ import {
 } from "./types.ts";
 import { h, UiAction, UiDisclosure, UiPromptSlot } from "@commonfabric/html";
 import { pattern } from "./pattern.ts";
-import { action, byRef, computed, derive, handler, lift } from "./module.ts";
+import { action, byRef, computed, handler, lift } from "./module.ts";
 import {
   compileAndRun,
   fetchData,
@@ -112,10 +112,6 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     trustValue(
       (computed as (...args: any[]) => unknown)(...args),
     )) as typeof computed;
-  const trustedDerive = ((...args: any[]) =>
-    trustValue(
-      (derive as (...args: any[]) => unknown)(...args),
-    )) as typeof derive;
   const trustedStr =
     ((strings: TemplateStringsArray, ...values: unknown[]) =>
       trustValue(str(strings, ...values))) as typeof str;
@@ -145,7 +141,6 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     lift: trustedLift,
     handler: trustedHandler,
     action,
-    derive: trustedDerive,
     computed: trustedComputed,
 
     // Built-in modules

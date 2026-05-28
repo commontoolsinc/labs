@@ -1276,36 +1276,9 @@ export type Opaque<T> =
     : T);
 
 /**
- * Helper type to extract the innermost Cell type from any number of OpaqueRef wrappers.
- * UnwrapOpaqueRefLayers<Cell<T>> = Cell<T>
- * UnwrapOpaqueRefLayers<OpaqueRef<Cell<T>>> = Cell<T>
- * UnwrapOpaqueRefLayers<OpaqueRef<OpaqueRef<Cell<T>>>> = Cell<T>
- *
- * Support for nested OpaqueRef layers is limited to 4 levels.
- */
-type UnwrapOpaqueRefLayers4<T> = T extends OpaqueRef<infer U>
-  ? UnwrapOpaqueRefLayers3<U>
-  : T;
-
-type UnwrapOpaqueRefLayers3<T> = T extends OpaqueRef<infer U>
-  ? UnwrapOpaqueRefLayers2<U>
-  : T;
-
-type UnwrapOpaqueRefLayers2<T> = T extends OpaqueRef<infer U>
-  ? UnwrapOpaqueRefLayers1<U>
-  : T;
-
-type UnwrapOpaqueRefLayers1<T> = T extends OpaqueRef<infer U> ? U
-  : T;
-
-/**
  * Matches any non-opaque Cell type (Cell, Stream, ComparableCell, etc.) that may be
  * wrapped in any number of OpaqueRef layers. Excludes OpaqueCell and AnyCell (since OpaqueCell extends AnyCell).
  */
-type AnyCellWrappedInOpaqueRef<T> = UnwrapOpaqueRefLayers4<T> extends
-  BrandedCell<any, "cell"> ? UnwrapOpaqueRefLayers4<T>
-  : never;
-
 /**
  * Recursively unwraps AnyBrandedCell types at any nesting level.
  * UnwrapCell<AnyBrandedCell<AnyBrandedCell<string>>> = string
@@ -2013,48 +1986,6 @@ export type ActionFunction = {
   <T>(fn: (event: T) => void): Stream<T>;
 };
 
-/**
- * DeriveFunction creates a reactive computation that transforms input values.
- *
- * Special overload ordering is critical for correct type inference:
- *
- * 1. Boolean literal overload: Widens `OpaqueRef<true> | OpaqueRef<false>` to `boolean`
- *    - Required because TypeScript infers boolean cells as a union of literal types
- *    - Without this, the callback would get `true | false` instead of `boolean`
- * 2. Cell preservation overload: Keeps Cell types wrapped consistently
- *    - Prevents unwrapping of Cell<T> to T, maintaining consistent behavior
- *    - Whether Cell is passed directly or nested in objects, it stays wrapped
- *    - Example: derive(cell<number>(), (c) => ...) gives c: Cell<number>, not number
- * 3. Generic overload: Handles all other cases, unwrapping Opaque types
- *
- * Note: Schema-based overload is available when importing from "commonfabric/schema"
- *
- * @deprecated Use compute() instead
- */
-export interface DeriveFunction {
-  // Overload 1: Boolean literal union -> boolean
-  // Fixes: cell<boolean>() returns OpaqueRef<true> | OpaqueRef<false>
-  // Without this, callback gets (input: true | false) instead of (input: boolean)
-  <In extends boolean, Out>(
-    input: OpaqueRef<true> | OpaqueRef<false>,
-    f: (input: In) => Out,
-  ): OpaqueRef<Out>;
-
-  // Overload 2: Preserve Cell types - unwrap OpaqueRef layers but keep Cell
-  // Ensures consistent behavior: Cell<T> stays Cell<T> whether passed directly or in objects
-  // Handles: Cell<T>, OpaqueRef<Cell<T>>, OpaqueRef<OpaqueRef<Cell<T>>>, etc.
-  <In, Out>(
-    input: AnyCellWrappedInOpaqueRef<In>,
-    f: (input: In) => Out,
-  ): OpaqueRef<Out>;
-
-  // Overload 3: Generic fallback - unwraps all Opaque types
-  <In, Out>(
-    input: Opaque<In>,
-    f: (input: In) => Out,
-  ): OpaqueRef<Out>;
-}
-
 export type ComputedFunction = <T>(fn: () => T) => OpaqueRef<T>;
 
 export type StrFunction = (
@@ -2375,8 +2306,6 @@ export declare const patternTool: PatternToolFunction;
 export declare const lift: LiftFunction;
 export declare const handler: HandlerFunction;
 export declare const action: ActionFunction;
-/** @deprecated Use compute() instead */
-export declare const derive: DeriveFunction;
 export declare const computed: ComputedFunction;
 export declare const str: StrFunction;
 export declare const ifElse: IfElseFunction;

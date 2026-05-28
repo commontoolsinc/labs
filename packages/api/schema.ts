@@ -11,7 +11,7 @@
  *   import type { Schema } from "@commonfabric/api/schema";
  *
  * When imported, this module also augments the function types from the main API
- * (PatternFunction, DeriveFunction, etc.) with schema-based overloads.
+ * (PatternFunction, HandlerFunction, etc.) with schema-based overloads.
  */
 
 import type {
@@ -405,21 +405,6 @@ declare module "commonfabric" {
     ): HandlerFactory<SchemaWithoutCell<T>, SchemaWithoutCell<E>>;
   }
 
-  // Augment DeriveFunction with schema-based overload
-  /** @deprecated Use compute() instead */
-  interface DeriveFunction {
-    <
-      InputSchema extends JSONSchema = JSONSchema,
-      ResultSchema extends JSONSchema = JSONSchema,
-    >(
-      argumentSchema: InputSchema,
-      resultSchema: ResultSchema,
-      input: Opaque<SchemaWithoutCell<InputSchema>>,
-      f: (
-        input: Schema<InputSchema>,
-      ) => Schema<ResultSchema>,
-    ): OpaqueRef<SchemaWithoutCell<ResultSchema>>;
-  }
 
   // Augment WishFunction with schema-based overloads
   interface WishFunction {
