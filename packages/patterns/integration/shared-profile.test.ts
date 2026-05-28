@@ -4,7 +4,7 @@ import { PiecesController } from "@commonfabric/piece/ops";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
-import { waitForRuntimeIdle, waitForText } from "./cfc-browser-helpers.ts";
+import { waitForText } from "./cfc-browser-helpers.ts";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 const SHARED_PROFILE_TIMEOUT = 30_000;
@@ -60,11 +60,15 @@ describe("shared profile integration test", () => {
       view: { spaceDid: sharedSpaceDid as `did:${string}:${string}`, pieceId },
       identity,
     });
-    await waitForRuntimeIdle(page);
     await waitForText(page, "#shared-profile-name", "No profile");
-    await waitForText(page, "#shared-profile-wish-ui", "Send");
+    await waitForSelector(page, "#wish-profile-name-input");
+    await waitForSelector(page, '[data-ui-pattern="ProfileCreateSurface"]');
 
-    await sendMessageInput(page, "#wish-profile-name-input", "Ada Lovelace");
+    await submitProfileCreate(
+      page,
+      "cf-message-input#wish-profile-name-input",
+      "Ada Lovelace",
+    );
     await waitForText(page, "#shared-profile-name", "Ada Lovelace");
     await waitForSelector(page, "#shared-profile-wish-ui cf-cell-link");
 
@@ -73,11 +77,15 @@ describe("shared profile integration test", () => {
       identity: secondIdentity,
       view: { spaceDid: sharedSpaceDid as `did:${string}:${string}`, pieceId },
     });
-    await waitForRuntimeIdle(page);
     await waitForText(page, "#shared-profile-name", "No profile");
-    await waitForText(page, "#shared-profile-wish-ui", "Send");
+    await waitForSelector(page, "#wish-profile-name-input");
+    await waitForSelector(page, '[data-ui-pattern="ProfileCreateSurface"]');
 
-    await sendMessageInput(page, "#wish-profile-name-input", "Grace Hopper");
+    await submitProfileCreate(
+      page,
+      "cf-message-input#wish-profile-name-input",
+      "Grace Hopper",
+    );
     await waitForText(page, "#shared-profile-name", "Grace Hopper");
     await waitForSelector(page, "#shared-profile-wish-ui cf-cell-link");
   });
@@ -90,18 +98,33 @@ async function waitForSelector(page: Page, selector: string) {
   });
 }
 
-async function sendMessageInput(page: Page, selector: string, message: string) {
-  const host = await page.waitForSelector(selector, {
+async function submitProfileCreate(
+  page: Page,
+  inputSelector: string,
+  message: string,
+) {
+  await page.waitForSelector(inputSelector, {
     strategy: "pierce",
     timeout: SHARED_PROFILE_TIMEOUT,
   });
-  await host.evaluate((element: Element, value: string) => {
-    element.dispatchEvent(
-      new CustomEvent("cf-send", {
-        bubbles: true,
-        composed: true,
-        detail: { message: value },
-      }),
-    );
-  }, { args: [message] });
+  await page.evaluate((selector: string, value: string) => {
+    const matches: Element[] = [];
+    const visit = (root: Document | ShadowRoot) => {
+      matches.push(...root.querySelectorAll(selector));
+      for (const element of root.querySelectorAll("*")) {
+        if (element.shadowRoot) visit(element.shadowRoot);
+      }
+    };
+    visit(document);
+    for (const element of matches) {
+      element.dispatchEvent(
+        new CustomEvent("cf-send", {
+          bubbles: true,
+          composed: true,
+          detail: { message: value },
+        }),
+      );
+    }
+    return matches.length;
+  }, { args: [inputSelector, message] });
 }
