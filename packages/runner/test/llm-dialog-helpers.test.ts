@@ -461,7 +461,7 @@ Deno.test("toolAllowsObservedConfidentiality permits tools within maxConfidentia
 // Tests for simplifySchemaForContext
 // Note: We cast schemas to `any` to avoid strict type checking on `type` field literals
 
-Deno.test("simplifySchemaForContext preserves asStream marker", () => {
+Deno.test("simplifySchemaForContext preserves asCell stream marker", () => {
   const schema: any = {
     type: "object",
     properties: {

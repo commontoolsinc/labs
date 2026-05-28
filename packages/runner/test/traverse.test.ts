@@ -1827,7 +1827,7 @@ describe("canBranchMatch", () => {
     );
   });
 
-  it("never rejects asStream branches", () => {
+  it("never rejects asCell stream branches", () => {
     expect(
       canBranchMatch({ asCell: ["stream"], type: "number" }, "hello"),
     ).toBe(true);

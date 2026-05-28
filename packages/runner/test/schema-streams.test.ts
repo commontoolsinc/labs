@@ -35,7 +35,7 @@ describe("Schema - Streams and Promises", () => {
   });
 
   describe("Stream Support", () => {
-    it("should create a stream for properties marked with asStream", () => {
+    it("should create a stream for properties marked with asCell stream", () => {
       const c = runtime.getCell<{
         name: string;
         events: { $stream: boolean };
@@ -152,13 +152,13 @@ describe("Schema - Streams and Promises", () => {
       expect(isStream(value.events)).toBe(false);
     });
 
-    it("should behave correctly when both asCell and asStream are in the schema", () => {
+    it("should behave correctly when both asCell cell and asCell stream are in the schema", () => {
       const c = runtime.getCell<{
         cellData: { value: number };
         streamData: { $stream: boolean };
       }>(
         space,
-        "should behave correctly when both asCell and asStream are in the schema 1",
+        "should behave correctly when both asCell and asCell stream are in the schema 1",
         undefined,
         tx,
       );

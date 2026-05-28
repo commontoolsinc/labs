@@ -1630,7 +1630,7 @@ function combineOptionalSchema(
   return combineSchema(parentSchema, linkSchema);
 }
 
-// Merge any schema flags like asCell or asStream from flagSchema into schema.
+// Merge the asCell values from flagSchema into schema.
 export function mergeSchemaFlags(flagSchema: JSONSchema, schema: JSONSchema) {
   const key = internSchemaPairAsKey(flagSchema, schema);
   const cached = _mergeSchemaFlagsCache.get(key);
@@ -1643,14 +1643,10 @@ function _mergeSchemaFlagsUncached(
   flagSchema: JSONSchema,
   schema: JSONSchema,
 ) {
-  if (isRecord(flagSchema)) {
+  if (isRecord(flagSchema) && flagSchema.asCell !== undefined) {
     // we want to preserve asCell -- if set, this will override the value in
     // the schema
-    const { asCell } = flagSchema;
-    if (asCell) {
-      const props = { asCell: asCell ?? ["stream"] };
-      return schemaWithProperties(schema, props);
-    }
+    return schemaWithProperties(schema, { asCell: flagSchema.asCell });
   }
   return schema;
 }

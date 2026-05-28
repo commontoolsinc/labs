@@ -195,7 +195,7 @@ describe("Schema Lineage", () => {
       expect(cell.get()).toBe(5);
     });
 
-    it("should correctly handle aliases with asCell:true in schema", () => {
+    it("should correctly handle aliases with asCell cell in schema", () => {
       // Create a cell with nested objects that will be accessed with asCell
       const nestedCell = runtime.getCell<{
         items: Array<{ id: number; name: string }>;

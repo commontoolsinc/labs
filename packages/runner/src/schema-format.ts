@@ -129,7 +129,7 @@ function schemaToTypeStringInner(
     return "unknown"; // Can't resolve ref
   }
 
-  // Normalize asCell/asStream into a single asCellValues array for easier handling
+  // Normalize asCell array for easier handling
   const asCellValues = ContextualFlowControl.getAsCellValues(schema);
 
   // At max depth, return simplified representation

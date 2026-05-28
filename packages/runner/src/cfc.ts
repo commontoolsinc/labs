@@ -504,8 +504,7 @@ export class ContextualFlowControl {
     return cfcSchemaIsFalse(schema);
   }
 
-  // Utility function to handle the legacy asCell and asStream tags, as well
-  // as the modern asCell array tag.
+  // Utility function to handle the asCell array tag.
   static getAsCellValues(
     schema: JSONSchema | undefined,
   ): readonly AsCellEntry[] {
