@@ -44,13 +44,13 @@ describe("cloneIfNecessary", () => {
     describe(`error cases (${label} path)`, () => {
       beforeEach(() => setDataModelConfig(modernMode));
 
-      it("throws for frozen=true, force=true", () => {
+      it("throws for `frozen=true`, `force=true`", () => {
         const value = { a: 1 } as FabricValue;
         expect(() => cloneIfNecessary(value, { frozen: true, force: true }))
           .toThrow("frozen: true, force: true");
       });
 
-      it("throws for frozen=false, force=false, deep=true", () => {
+      it("throws for `frozen=false`, `force=false`, `deep=true`", () => {
         const value = { a: 1 } as FabricValue;
         expect(() => cloneIfNecessary(value, { frozen: false, force: false }))
           .toThrow("frozen: false, force: false, deep: true");
@@ -127,7 +127,7 @@ describe("cloneIfNecessary", () => {
     // frozen=false, force=true (default when frozen=false) -- deep
     // --------------------------------------------------------------------------
 
-    describe(`frozen=false, deep clone (${label} path)`, () => {
+    describe(`\`frozen=false\`, deep clone (${label} path)`, () => {
       beforeEach(() => setDataModelConfig(modernMode));
 
       it("returns a mutable copy of a frozen object", () => {
@@ -146,7 +146,7 @@ describe("cloneIfNecessary", () => {
         expect(Object.isFrozen(result)).toBe(false);
       });
 
-      it("clones already-mutable values (force=true default)", () => {
+      it("clones already-mutable values (`force=true` default)", () => {
         const inner = { x: 1 };
         const value = { a: inner, b: [2, 3] } as FabricValue;
         const result = cloneIfNecessary(value, { frozen: false }) as Record<
@@ -198,13 +198,13 @@ describe("cloneIfNecessary", () => {
         expect(result.a).toBe(inner);
       });
 
-      it("returns already-frozen object as-is (shallow, force=false)", () => {
+      it("returns already-frozen object as-is (shallow, `force=false`)", () => {
         const value = Object.freeze({ a: 1 }) as FabricValue;
         const result = cloneIfNecessary(value, { deep: false });
         expect(result).toBe(value);
       });
 
-      it("shallow-clones frozen object to mutable (deep=false, frozen=false)", () => {
+      it("shallow-clones frozen object to mutable (`deep=false`, `frozen=false`)", () => {
         const value = Object.freeze({ a: 1, b: "two" }) as FabricValue;
         const result = cloneIfNecessary(value, {
           deep: false,
@@ -215,7 +215,7 @@ describe("cloneIfNecessary", () => {
         expect(result.a).toBe(1);
       });
 
-      it("force-copies mutable object (shallow, frozen=false, force=true)", () => {
+      it("force-copies mutable object (shallow, `frozen=false`, `force=true`)", () => {
         const value = { a: 1 } as FabricValue;
         const result = cloneIfNecessary(value, {
           deep: false,
@@ -226,7 +226,7 @@ describe("cloneIfNecessary", () => {
         expect(Object.isFrozen(result)).toBe(false);
       });
 
-      it("returns mutable as-is (shallow, frozen=false, force=false)", () => {
+      it("returns mutable as-is (shallow, `frozen=false`, `force=false`)", () => {
         const value = { a: 1 } as FabricValue;
         const result = cloneIfNecessary(value, {
           deep: false,
@@ -236,7 +236,7 @@ describe("cloneIfNecessary", () => {
         expect(result).toBe(value);
       });
 
-      it("thaws frozen value (shallow, frozen=false, force=false)", () => {
+      it("thaws frozen value (shallow, `frozen=false`, `force=false`)", () => {
         const value = Object.freeze({ a: 1 }) as FabricValue;
         const result = cloneIfNecessary(value, {
           deep: false,
@@ -253,7 +253,7 @@ describe("cloneIfNecessary", () => {
     // FabricError (FabricInstance)
     // --------------------------------------------------------------------------
 
-    describe(`FabricInstance (${label} path)`, () => {
+    describe(`\`FabricInstance\` (${label} path)`, () => {
       beforeEach(() => setDataModelConfig(modernMode));
 
       it("identity-returns an already-deep-frozen `FabricError`", () => {
@@ -280,7 +280,7 @@ describe("cloneIfNecessary", () => {
         expect((result as FabricError).message).toBe("test");
       });
 
-      it("produces a mutable FabricError clone (deep, frozen=false)", () => {
+      it("produces a mutable `FabricError` clone (deep, `frozen=false`)", () => {
         // Deep clone with `frozen: false` yields a fresh *mutable*
         // `FabricError`.
         const error = FabricError.fromNativeError(new Error("test"));
@@ -295,7 +295,7 @@ describe("cloneIfNecessary", () => {
         expect((result as FabricError).message).toBe("test");
       });
 
-      it("preserves a nested already-deep-frozen FabricError by identity", () => {
+      it("preserves a nested already-deep-frozen `FabricError` by identity", () => {
         // Container is rebuilt (mutable input -> frozen output) but the
         // nested deep-frozen FabricError is returned by identity.
         const error = FabricError.fromNativeError(new Error("nested"));
@@ -310,7 +310,7 @@ describe("cloneIfNecessary", () => {
         expect(result.x).toBe(42);
       });
 
-      it("shallow-clones an object containing a FabricError (deep=false)", () => {
+      it("shallow-clones an object containing a `FabricError` (`deep=false`)", () => {
         // Shallow clone of a container shares the nested instance by
         // reference -- it is never traversed or rebuilt.
         const error = FabricError.fromNativeError(new Error("nested"));
@@ -330,10 +330,10 @@ describe("cloneIfNecessary", () => {
     // undefined preservation
     // --------------------------------------------------------------------------
 
-    describe(`undefined preservation (${label} path)`, () => {
+    describe(`\`undefined\` preservation (${label} path)`, () => {
       beforeEach(() => setDataModelConfig(modernMode));
 
-      it("preserves undefined in objects", () => {
+      it("preserves `undefined` in objects", () => {
         const value = { a: 1, b: undefined } as FabricValue;
         const result = cloneIfNecessary(value) as Record<string, unknown>;
         expect(result.b).toBe(undefined);
@@ -341,7 +341,7 @@ describe("cloneIfNecessary", () => {
         expect(Object.isFrozen(result)).toBe(true);
       });
 
-      it("preserves undefined in arrays", () => {
+      it("preserves `undefined` in arrays", () => {
         const value = [1, undefined, 3] as FabricValue;
         const result = cloneIfNecessary(value) as unknown[];
         expect(result[1]).toBe(undefined);
@@ -349,13 +349,13 @@ describe("cloneIfNecessary", () => {
         expect(Object.isFrozen(result)).toBe(true);
       });
 
-      it("passes through undefined as top-level value", () => {
+      it("passes through `undefined` as top-level value", () => {
         expect(cloneIfNecessary(undefined, { frozen: false })).toBe(
           undefined,
         );
       });
 
-      it("passes through undefined with default options", () => {
+      it("passes through `undefined` with default options", () => {
         expect(cloneIfNecessary(undefined)).toBe(undefined);
       });
     });
@@ -364,10 +364,10 @@ describe("cloneIfNecessary", () => {
     // null prototype preservation
     // --------------------------------------------------------------------------
 
-    describe(`null prototype preservation (${label} path)`, () => {
+    describe(`\`null\` prototype preservation (${label} path)`, () => {
       beforeEach(() => setDataModelConfig(modernMode));
 
-      it("preserves null prototype on objects", () => {
+      it("preserves `null` prototype on objects", () => {
         const value = Object.create(null) as Record<string, unknown>;
         value.a = 1;
         value.b = "two";
@@ -380,7 +380,7 @@ describe("cloneIfNecessary", () => {
         expect(Object.isFrozen(result)).toBe(true);
       });
 
-      it("preserves null prototype when frozen=false", () => {
+      it("preserves `null` prototype when `frozen=false`", () => {
         const value = Object.create(null) as Record<string, unknown>;
         value.x = 42;
         const result = cloneIfNecessary(
@@ -392,7 +392,7 @@ describe("cloneIfNecessary", () => {
         expect(Object.isFrozen(result)).toBe(false);
       });
 
-      it("preserves null prototype on shallow clone", () => {
+      it("preserves `null` prototype on shallow clone", () => {
         const value = Object.create(null) as Record<string, unknown>;
         value.a = 1;
         const result = cloneIfNecessary(
@@ -404,7 +404,7 @@ describe("cloneIfNecessary", () => {
         expect(Object.isFrozen(result)).toBe(true);
       });
 
-      it("preserves null prototype on shallow clone when frozen=false", () => {
+      it("preserves `null` prototype on shallow clone when `frozen=false`", () => {
         const value = Object.create(null) as Record<string, unknown>;
         value.b = 2;
         const result = cloneIfNecessary(
@@ -421,17 +421,17 @@ describe("cloneIfNecessary", () => {
     // FabricPrimitive pass-through
     // --------------------------------------------------------------------------
 
-    describe(`FabricPrimitive (${label} path)`, () => {
+    describe(`\`FabricPrimitive\` (${label} path)`, () => {
       beforeEach(() => setDataModelConfig(modernMode));
 
-      it("passes through FabricEpochNsec unchanged", () => {
+      it("passes through `FabricEpochNsec` unchanged", () => {
         const epoch = new FabricEpochNsec(1234567890n);
         Object.freeze(epoch);
         const result = cloneIfNecessary(epoch as unknown as FabricValue);
         expect(result).toBe(epoch); // identity -- special primitives are immutable
       });
 
-      it("passes through FabricEpochNsec when frozen=false", () => {
+      it("passes through `FabricEpochNsec` when `frozen=false`", () => {
         const epoch = new FabricEpochNsec(42n);
         Object.freeze(epoch);
         // frozen parameter is irrelevant for special primitives
@@ -442,7 +442,7 @@ describe("cloneIfNecessary", () => {
         expect(result).toBe(epoch); // identity -- special primitives are immutable
       });
 
-      it("passes through FabricEpochNsec nested in an object", () => {
+      it("passes through `FabricEpochNsec` nested in an object", () => {
         const epoch = new FabricEpochNsec(999n);
         Object.freeze(epoch);
         const value = { time: epoch, label: "test" } as FabricValue;
@@ -729,7 +729,7 @@ describe("cloneIfNecessary", () => {
     },
   ];
 
-  describe("cloneIfNecessary: subclass coverage matrix", () => {
+  describe("`cloneIfNecessary()`: subclass coverage matrix", () => {
     afterEach(() => {
       resetDataModelConfig();
     });
