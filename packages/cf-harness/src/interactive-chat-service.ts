@@ -385,6 +385,9 @@ export class HarnessInteractiveChatService {
     if (await this.#sessionStore?.getSession(sessionId) !== undefined) {
       return sessionExistsError(requestId, sessionId);
     }
+    if (this.#sessions.has(sessionId)) {
+      return sessionExistsError(requestId, sessionId);
+    }
     const session = createHarnessChatSessionStatus({
       sessionId,
       createdAt: this.#now(),
@@ -402,10 +405,15 @@ export class HarnessInteractiveChatService {
       transcript: [],
       canceledTurnIds: new Set(),
     });
-    await this.#emit(session.sessionId, undefined, {
-      kind: "session_started",
-      session,
-    });
+    try {
+      await this.#emit(session.sessionId, undefined, {
+        kind: "session_started",
+        session,
+      });
+    } catch (error) {
+      this.#sessions.delete(session.sessionId);
+      throw error;
+    }
     return createHarnessChatOkResponse(requestId, session);
   }
 
@@ -723,23 +731,31 @@ export class HarnessInteractiveChatService {
     turnId: string | undefined,
     event: HarnessChatStructuredEvent,
   ): Promise<void> {
+    const sequence = this.#sequence + 1;
     const envelope = createHarnessChatEventEnvelope({
       sessionId,
       ...(turnId !== undefined ? { turnId } : {}),
-      sequence: ++this.#sequence,
+      sequence,
       emittedAt: this.#now(),
       event,
     });
-    this.#events.push(envelope);
     const record = this.#sessions.get(sessionId);
-    if (record !== undefined) {
-      record.status = reduceHarnessChatSessionStatus(record.status, envelope);
-      await this.#sessionStore?.saveSession({
-        session: record.status,
+    const nextStatus = record === undefined
+      ? undefined
+      : reduceHarnessChatSessionStatus(record.status, envelope);
+    if (record !== undefined && nextStatus !== undefined) {
+      await this.#sessionStore?.saveSessionAndAppendEvent({
+        session: nextStatus,
         transcript: record.transcript,
-      });
+      }, envelope);
+    } else {
+      await this.#sessionStore?.appendEvent(envelope);
     }
-    await this.#sessionStore?.appendEvent(envelope);
+    this.#sequence = sequence;
+    this.#events.push(envelope);
+    if (record !== undefined && nextStatus !== undefined) {
+      record.status = nextStatus;
+    }
     await this.#onEvent?.(envelope);
   }
 }

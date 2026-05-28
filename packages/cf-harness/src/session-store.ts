@@ -23,6 +23,10 @@ export interface HarnessChatSessionStore {
     sessionId: string,
   ): HarnessMaybePromise<HarnessChatSessionSnapshot | undefined>;
   listSessions(): HarnessMaybePromise<readonly HarnessChatSessionSnapshot[]>;
+  saveSessionAndAppendEvent(
+    snapshot: HarnessChatSessionSnapshot,
+    event: HarnessChatEventEnvelope,
+  ): HarnessMaybePromise<void>;
   appendEvent(event: HarnessChatEventEnvelope): HarnessMaybePromise<void>;
   listEvents(
     options?: HarnessChatEventListOptions,

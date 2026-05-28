@@ -138,6 +138,25 @@ export class SqliteHarnessChatSessionStore implements HarnessChatSessionStore {
     `).all() as SessionRow[]).map(decodeSessionRow);
   }
 
+  saveSessionAndAppendEvent(
+    snapshot: HarnessChatSessionSnapshot,
+    event: HarnessChatEventEnvelope,
+  ): void {
+    this.database.exec("BEGIN IMMEDIATE TRANSACTION;");
+    try {
+      this.saveSession(snapshot);
+      this.appendEvent(event);
+      this.database.exec("COMMIT;");
+    } catch (error) {
+      try {
+        this.database.exec("ROLLBACK;");
+      } catch {
+        // Preserve the original persistence error.
+      }
+      throw error;
+    }
+  }
+
   appendEvent(event: HarnessChatEventEnvelope): void {
     this.database.prepare(`
       INSERT INTO chat_event (

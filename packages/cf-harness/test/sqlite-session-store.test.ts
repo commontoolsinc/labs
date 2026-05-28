@@ -1,5 +1,9 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 import { toFileUrl } from "@std/path";
+import {
+  createHarnessChatEventEnvelope,
+  createHarnessChatSessionStatus,
+} from "../src/contracts/interactive-chat.ts";
 import {
   HarnessInteractiveChatService,
   type HarnessInteractivePromptLoopFactory,
@@ -129,6 +133,71 @@ Deno.test("sqlite session store persists chat sessions and replayable events", a
       duplicate.ok === false ? duplicate.error.code : "",
       "session_exists",
     );
+  } finally {
+    store.close();
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("sqlite session store persists session snapshots and events atomically", async () => {
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+  const store = await openSqliteHarnessChatSessionStore({
+    url: toFileUrl(path),
+  });
+
+  try {
+    const initialSession = createHarnessChatSessionStatus({
+      sessionId: "session-atomic",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      workspace: { hostPath: "/workspace" },
+      metadata: { version: "before" },
+    });
+    store.saveSessionAndAppendEvent(
+      {
+        session: initialSession,
+        transcript: [],
+      },
+      createHarnessChatEventEnvelope({
+        sessionId: "session-atomic",
+        sequence: 1,
+        emittedAt: "2026-05-27T00:00:01.000Z",
+        event: {
+          kind: "session_started",
+          session: initialSession,
+        },
+      }),
+    );
+
+    const updatedSession = createHarnessChatSessionStatus({
+      sessionId: "session-atomic",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      workspace: { hostPath: "/workspace" },
+      metadata: { version: "after" },
+    });
+    assertThrows(() =>
+      store.saveSessionAndAppendEvent(
+        {
+          session: updatedSession,
+          transcript: [{ role: "assistant", content: "should rollback" }],
+        },
+        createHarnessChatEventEnvelope({
+          sessionId: "session-atomic",
+          sequence: 1,
+          emittedAt: "2026-05-27T00:00:02.000Z",
+          event: {
+            kind: "status_changed",
+            session: updatedSession,
+          },
+        }),
+      )
+    );
+
+    assertEquals(
+      store.getSession("session-atomic")?.session.metadata,
+      { version: "before" },
+    );
+    assertEquals(store.getSession("session-atomic")?.transcript, []);
+    assertEquals(await store.latestSequence(), 1);
   } finally {
     store.close();
     await Deno.remove(path);

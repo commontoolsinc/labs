@@ -13,6 +13,7 @@ import type {
   HarnessPromptLoopResult,
   RunHarnessTranscriptOptions,
 } from "../src/prompt-loop.ts";
+import type { HarnessChatSessionStore } from "../src/session-store.ts";
 
 const nextIsoNow = () => {
   let counter = 0;
@@ -561,6 +562,55 @@ Deno.test("interactive service rejects duplicate session ids", async () => {
   assertEquals(duplicate.ok, false);
   assertEquals(
     duplicate.ok === false ? duplicate.error.code : "",
+    "session_exists",
+  );
+  assertEquals(service.status().sessions.length, 1);
+  assertEquals(
+    service.status("session-1").sessions[0].workspace?.hostPath,
+    "/workspace",
+  );
+});
+
+Deno.test("interactive service rejects concurrent duplicate session creation after durable checks", async () => {
+  let releaseDurableCheck: (() => void) | undefined;
+  const durableCheck = new Promise<undefined>((resolve) => {
+    releaseDurableCheck = () => resolve(undefined);
+  });
+  const store: HarnessChatSessionStore = {
+    saveSession: () => {},
+    getSession: () => durableCheck,
+    listSessions: () => [],
+    saveSessionAndAppendEvent: () => {},
+    appendEvent: () => {},
+    listEvents: () => [],
+    latestSequence: () => 0,
+  };
+  const service = new HarnessInteractiveChatService({
+    createPromptLoop: () => ({
+      runTranscript: (options) => Promise.resolve(makeResult(options, "Done.")),
+    }),
+    now: nextIsoNow(),
+    sessionStore: store,
+  });
+
+  const first = service.startSession("req-1", {
+    sessionId: "session-1",
+    workspace: { hostPath: "/workspace" },
+  });
+  const duplicate = service.startSession("req-2", {
+    sessionId: "session-1",
+    workspace: { hostPath: "/other-workspace" },
+  });
+  releaseDurableCheck?.();
+  const [firstResult, duplicateResult] = await Promise.all([
+    first,
+    duplicate,
+  ]);
+
+  assertEquals(firstResult.ok, true);
+  assertEquals(duplicateResult.ok, false);
+  assertEquals(
+    duplicateResult.ok === false ? duplicateResult.error.code : "",
     "session_exists",
   );
   assertEquals(service.status().sessions.length, 1);
