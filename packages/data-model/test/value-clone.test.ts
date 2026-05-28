@@ -106,6 +106,16 @@ describe("cloneWithoutValueAtPath", () => {
     expect(isDeepFrozen(result)).toBe(true);
   });
 
+  it("treats a sparse array hole (and out-of-range index) as absent", () => {
+    const items = [10, 20, 30];
+    delete items[1]; // sparse hole at index 1
+    const root = deepFreeze({ items });
+
+    // A hole is "nothing to remove" -- must not splice and shift the array.
+    expect(cloneWithoutValueAtPath(root, ["items", "1"])).toBe(root);
+    expect(cloneWithoutValueAtPath(root, ["items", "5"])).toBe(root);
+  });
+
   it("is a no-op (returns the deep-frozen root) when the path is absent", () => {
     const root = deepFreeze({ value: { left: { stable: true } } });
 

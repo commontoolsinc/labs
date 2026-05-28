@@ -215,10 +215,6 @@ export function cloneHelper(
   }
 }
 
-// =============================================================================
-// `cloneForMutation`
-// =============================================================================
-
 /**
  * Categorical kinds of error that `cloneForMutation()` can fail with.
  *
@@ -554,14 +550,7 @@ function isMutableHandle(value: unknown): boolean {
   return isPlainContainer(value) || value instanceof FabricInstance;
 }
 
-// =============================================================================
-// Frozen path edits (`cloneWithValueAtPath` / `cloneWithoutValueAtPath`)
-// =============================================================================
-//
-// Copy-on-write path edits that return a deep-frozen result. Both build on
-// `cloneForMutation` (so they share its spine-thaw and missing-intermediate
-// handling) and differ only in what they do at the leaf.
-
+/** Reads the child of `container` at `key` (array index or object key). */
 const readChildAt = (
   container: Record<string, unknown> | unknown[],
   key: string,
@@ -570,17 +559,25 @@ const readChildAt = (
     | FabricValue
     | undefined;
 
+/**
+ * Whether `container` actually has an own child at `key`. For arrays this
+ * tests `Object.hasOwn` (not just `index < length`), so a sparse hole counts
+ * as absent -- removing a hole is then a no-op rather than a shift-inducing
+ * splice.
+ */
 const hasChildAt = (
   container: Record<string, unknown> | unknown[],
   key: string,
 ): boolean => {
   if (Array.isArray(container)) {
     const index = Number(key);
-    return Number.isInteger(index) && index >= 0 && index < container.length;
+    return Number.isInteger(index) && index >= 0 &&
+      Object.hasOwn(container, index);
   }
   return Object.hasOwn(container, key);
 };
 
+/** Writes `value` into `container` at `key` (array index or object key). */
 const writeChildAt = (
   container: FabricValue,
   key: string,
