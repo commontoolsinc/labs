@@ -38,6 +38,7 @@ import {
   isCellResultForDereferencing,
 } from "../query-result-proxy.ts";
 import { isCell } from "../cell.ts";
+import { closureCaptureErrorMessage } from "./closure-capture-diagnostic.ts";
 import { Runtime } from "../runtime.ts";
 import type { ImplementationIdentity } from "../cfc/types.ts";
 import {
@@ -203,11 +204,12 @@ function factoryFromPattern<T, R>(
     traverseValue(value, (value) => {
       if (isCellResultForDereferencing(value)) value = getCellOrThrow(value);
       if (isCell(value) && !allCells.has(value)) {
-        const { frame, nodes } = value.export();
+        const { frame, nodes, path, scope, name } = value.export();
         if (isOpaqueRef(value) && frame !== getTopFrame()) {
           throw new Error(
-            "Cannot access cell via closure - reactive dependencies must be explicit parameters\n" +
-              "help: use computed() for automatic extraction, or pass cells as parameters to lift()",
+            closureCaptureErrorMessage({
+              capturedCell: { path, scope, name },
+            }),
           );
         }
         allCells.add(value);
