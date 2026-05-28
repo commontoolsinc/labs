@@ -50,7 +50,7 @@ import {
 export {
   isArrayIndexPropertyName,
   isArrayWithOnlyIndexProperties,
-} from "./array-utils.ts";
+} from "@commonfabric/utils/arrays";
 
 //
 // Configuration flags

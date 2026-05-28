@@ -3,7 +3,7 @@ import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { isDeepFrozenFabricValue } from "./deep-freeze.ts";
 import { type Immutable, isPlainContainer } from "@commonfabric/utils/types";
 import { toDebugKindString } from "./value-debug.ts";
-import { isArrayIndexPropertyName } from "./array-utils.ts";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 
 /**
  * Options for `cloneIfNecessary()`.

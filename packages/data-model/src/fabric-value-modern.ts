@@ -16,7 +16,7 @@ import { FabricNativeWrapper } from "./fabric-instances/FabricNativeWrapper.ts";
 import { FabricRegExp } from "./fabric-instances/FabricRegExp.ts";
 import { FabricBytes } from "./fabric-primitives/FabricBytes.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
-import { isArrayWithOnlyIndexProperties } from "./array-utils.ts";
+import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
 import { cloneHelper } from "./value-clone.ts";
 import { isDeepFrozenFabricValue } from "./deep-freeze.ts";
 
