@@ -620,6 +620,83 @@ Deno.test("interactive service rejects concurrent duplicate session creation aft
   );
 });
 
+Deno.test("interactive service serializes concurrent emitted event sequences", async () => {
+  const persistedSequences: number[] = [];
+  const store: HarnessChatSessionStore = {
+    saveSession: () => {},
+    getSession: () => undefined,
+    listSessions: () => [],
+    saveSessionAndAppendEvent: async (_snapshot, event) => {
+      await Promise.resolve();
+      persistedSequences.push(event.sequence);
+    },
+    appendEvent: async (event) => {
+      await Promise.resolve();
+      persistedSequences.push(event.sequence);
+    },
+    listEvents: () => [],
+    latestSequence: () => 0,
+  };
+  const createPromptLoop: HarnessInteractivePromptLoopFactory = () => ({
+    runTranscript: async (options) => {
+      const first = { role: "assistant" as const, content: "First." };
+      const second = { role: "assistant" as const, content: "Second." };
+      const firstTranscript = [...options.transcript, first];
+      const secondTranscript = [...firstTranscript, second];
+      const firstEvent = options.onTranscriptEvent?.({
+        message: first,
+        transcript: firstTranscript,
+      }) ?? Promise.resolve();
+      const secondEvent = options.onTranscriptEvent?.({
+        message: second,
+        transcript: secondTranscript,
+      }) ?? Promise.resolve();
+      await Promise.all([firstEvent, secondEvent]);
+      return {
+        model: "gpt-test",
+        finalAssistantText: "Second.",
+        transcript: secondTranscript,
+        modelTurns: 1,
+        runState: {} as HarnessPromptLoopResult["runState"],
+      };
+    },
+  });
+  const service = new HarnessInteractiveChatService({
+    createPromptLoop,
+    now: nextIsoNow(),
+    sessionStore: store,
+  });
+
+  await service.startSession("req-1", {
+    sessionId: "session-1",
+    workspace: { hostPath: "/workspace" },
+  });
+  await service.startTurn("req-2", {
+    sessionId: "session-1",
+    turnId: "turn-1",
+    input: { text: "Hi" },
+  });
+  await service.waitForTurn("session-1", "turn-1");
+
+  assertEquals(
+    service.events("session-1").map((event) => event.sequence),
+    [1, 2, 3, 4, 5, 6, 7],
+  );
+  assertEquals(persistedSequences, [1, 2, 3, 4, 5, 6, 7]);
+  assertEquals(
+    service.events("session-1").map((event) => event.event.kind),
+    [
+      "session_started",
+      "turn_started",
+      "assistant_delta",
+      "assistant_delta",
+      "assistant_completed",
+      "assistant_completed",
+      "turn_completed",
+    ],
+  );
+});
+
 Deno.test("interactive service rejects missing sessions and concurrent turns", async () => {
   const service = new HarnessInteractiveChatService({
     createPromptLoop: () => ({

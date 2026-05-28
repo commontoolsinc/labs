@@ -235,6 +235,7 @@ export class HarnessInteractiveChatService {
   readonly #sessionStore?: HarnessChatSessionStore;
   readonly #sessions = new Map<string, HarnessInteractiveChatSessionRecord>();
   readonly #events: HarnessChatEventEnvelope[] = [];
+  #emitQueue: Promise<void> = Promise.resolve();
   #sequence = 0;
 
   constructor(options: CreateHarnessInteractiveChatServiceOptions = {}) {
@@ -727,6 +728,18 @@ export class HarnessInteractiveChatService {
   }
 
   async #emit(
+    sessionId: string,
+    turnId: string | undefined,
+    event: HarnessChatStructuredEvent,
+  ): Promise<void> {
+    const emitTask = this.#emitQueue.then(() =>
+      this.#emitImmediately(sessionId, turnId, event)
+    );
+    this.#emitQueue = emitTask.catch(() => undefined);
+    return await emitTask;
+  }
+
+  async #emitImmediately(
     sessionId: string,
     turnId: string | undefined,
     event: HarnessChatStructuredEvent,
