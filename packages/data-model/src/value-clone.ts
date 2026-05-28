@@ -623,8 +623,9 @@ export function cloneWithValueAtPath(
  * When `path` is genuinely absent -- a missing key, an out-of-range array
  * index, or a non-plain-container (primitive / `FabricInstance` /
  * `FabricPrimitive`) anywhere along the way -- there is nothing to remove, so
- * `root` is returned unchanged (deep-frozen). An `undefined` `root` or empty
- * `path` returns `undefined` (whole-value removal).
+ * a deep-frozen clone of `root` is returned (identity when `root` is already
+ * deep-frozen). An `undefined` `root` or empty `path` returns `undefined`
+ * (whole-value removal).
  */
 export function cloneWithoutValueAtPath(
   root: FabricValue,
@@ -640,15 +641,15 @@ export function cloneWithoutValueAtPath(
   // keeps us from descending into a `FabricInstance`/`FabricPrimitive`.
   let parent: FabricValue = root;
   for (let i = 0; i < path.length - 1; i++) {
-    if (!isPlainContainer(parent)) return deepFreeze(root);
+    if (!isPlainContainer(parent)) return cloneIfNecessary(root);
     const child = readChildAt(parent, path[i]!);
-    if (child === undefined) return deepFreeze(root);
+    if (child === undefined) return cloneIfNecessary(root);
     parent = child;
   }
   if (
     !isPlainContainer(parent) || !hasChildAt(parent, path[path.length - 1]!)
   ) {
-    return deepFreeze(root);
+    return cloneIfNecessary(root);
   }
 
   const { value: newRoot, pathValue } = cloneForMutation(

@@ -130,13 +130,24 @@ describe("value-clone", () => {
       expect(cloneWithoutValueAtPath(root, ["items", "length"])).toBe(root);
     });
 
-    it("is a no-op (returns the deep-frozen root) when the path is absent", () => {
+    it("is identity for an already-frozen root when the path is absent", () => {
       const root = deepFreeze({ value: { left: { stable: true } } });
 
       expect(cloneWithoutValueAtPath(root, ["value", "right"])).toBe(root);
       expect(cloneWithoutValueAtPath(root, ["value", "left", "missing"])).toBe(
         root,
       );
+    });
+
+    it("returns a frozen clone (not an in-place freeze) for an absent path on a mutable root", () => {
+      const root = { value: { left: { stable: true } } }; // not frozen
+
+      const result = obj(cloneWithoutValueAtPath(root, ["value", "right"]));
+
+      expect(isDeepFrozen(result)).toBe(true); // result is deep-frozen
+      expect(Object.isFrozen(root)).toBe(false); // input not frozen in place
+      expect(result).not.toBe(root); // a clone, not the input
+      expect(result).toEqual(root); // same content
     });
 
     it("does not descend into a FabricInstance/FabricPrimitive in the path", () => {
