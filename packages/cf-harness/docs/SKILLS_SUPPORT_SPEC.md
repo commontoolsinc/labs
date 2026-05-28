@@ -282,22 +282,34 @@ local `--cdp` origin or `AGENT_BROWSER_CDP`, avoid saved browser state and
 filesystem capture commands, and emit snapshots/text to stdout so the harness
 can capture the run artifact.
 
-The tool executes via the sandbox direct argv API, not a model-authored shell
-string. The default cwd is the workspace root, even if the harness current
-directory is elsewhere. Optional `cwd` is resolved through normal sandbox path
-rules. The runtime receives:
+The default execution target is the sandbox direct argv API, not a
+model-authored shell string. The default cwd is the workspace root, even if the
+harness current directory is elsewhere. Optional `cwd` is resolved through
+normal sandbox path rules. The sandbox runtime receives:
 
 ```text
 CF_HARNESS_RUN_ID=<run id>
 SKILL_NAME=<skill name>
 SKILL_DIR=<sandbox skill directory>
 SKILL_SCRIPT=<sandbox script path>
+CF_HARNESS_SKILL_SCRIPT_EXECUTION_TARGET=sandbox
 ```
+
+Subagent profiles may opt exact allowlisted scripts into host execution when the
+script is specifically a host-adjacent integration helper. The browser profile
+uses this for the bundled `agent-browser` scripts so they can call the host
+`agent-browser` CLI attached to a provided local CDP endpoint. Host-target
+scripts receive host paths in `SKILL_DIR` and `SKILL_SCRIPT` and
+`CF_HARNESS_SKILL_SCRIPT_EXECUTION_TARGET=host`; they must execute from a
+workspace cwd outside cf-harness artifacts. Host-target script output is treated
+like other browser-profile host observations: raw detail stays in the child run,
+and the parent sees only the sanitized subagent return channel.
 
 Script execution records provenance in the normal tool output artifact and in
 `skill-script-executions.json`. In CFC enforce modes, `run_skill_script` is
-treated like other side-effect tools: direct-command authorization is required,
-and stdout/stderr/exit-code observations must be mediated before model exposure.
+treated like other side-effect tools: direct-command authorization is required.
+Sandbox-target script stdout/stderr/exit-code observations must be mediated
+before model exposure.
 
 ## CLI and Config Surface
 
@@ -563,14 +575,21 @@ On resume:
 `cf-harness` subagents start with fresh context and return only a summary plus
 sanitized state to the parent. Skills therefore need explicit child handling.
 
-Initial rule:
+Current rule:
 
 - Parent active skills do not implicitly transfer to child runs.
-- `delegate_task` can later accept an optional `skills` list.
-- Subagent profiles can define allowed skill patterns.
-- Child skill activations are recorded in the child run artifacts.
-- The parent receives only the child summary and activation summary, not raw
-  child skill content.
+- Subagent profiles may define exact child skills, exact child skill-script
+  allowlists, and a skill-script execution target.
+- The browser profile activates `agent-browser` when the parent run has a skill
+  registry. It exposes `read_skill_resource` and `run_skill_script` in the child
+  and allowlists the bundled `agent-browser` browser workflow scripts.
+- Browser-profile skill scripts run through the host process runner because they
+  need the host `agent-browser` CLI. This is profile-scoped host execution, not
+  a general parent-run script mode.
+- Child skill activations and script executions are recorded in the child run
+  artifacts.
+- The parent receives only the child summary and sanitized state, not raw child
+  skill content.
 
 This preserves the current CFC posture: delegation is a visible policy
 transition, child artifacts retain detail, and the parent does not silently

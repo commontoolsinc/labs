@@ -31,6 +31,7 @@ export type HarnessSkillResourceContentKind = "text" | "binary";
 export type HarnessSkillCfcPromptRole = "context";
 
 export type HarnessSkillScriptRuntime = "deno" | "shebang" | "unknown";
+export type HarnessSkillScriptExecutionTarget = "sandbox" | "host";
 
 export interface HarnessSkillScriptMetadata {
   executable: boolean;
@@ -136,6 +137,7 @@ export interface HarnessSkillScriptExecution {
   path: string;
   status: HarnessSkillScriptExecutionStatus;
   executedAt: string;
+  executionTarget?: HarnessSkillScriptExecutionTarget;
   runtime?: HarnessSkillScriptRuntime;
   argv?: readonly string[];
   args?: readonly string[];

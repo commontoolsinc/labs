@@ -1093,6 +1093,7 @@ export class CfHarnessEngine {
       skillRegistry: this.#runState.skillRegistry,
       skillActivations: this.#runState.skillActivations,
       allowedSkillScripts: this.config.allowedSkillScripts,
+      skillScriptExecutionTarget: this.config.skillScriptExecutionTarget,
       sandbox: this.sandbox,
       hostProcessRunner: this.hostProcessRunner,
       resolvePath: (path: string) =>

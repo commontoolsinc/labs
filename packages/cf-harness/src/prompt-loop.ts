@@ -106,6 +106,7 @@ import {
   isRunSkillScriptToolSuccessOutput,
   type RunSkillScriptToolOutput,
 } from "./tools/run-skill-script.ts";
+import { loadHarnessSkillContext } from "./skills/registry.ts";
 import type { HarnessFailureRecord } from "./diagnostics.ts";
 import { DEFAULT_PARENT_TOOL_IDS as DEFAULT_PROMPT_LOOP_TOOL_IDS } from "./contracts/tool-descriptor.ts";
 
@@ -768,6 +769,29 @@ const buildSubagentSystemPrompt = (
           : []),
       ]
       : []),
+    ...(profileConfig.skillNames !== undefined &&
+        profileConfig.skillNames.length > 0
+      ? [
+        `Subagent profile skills: ${profileConfig.skillNames.join(", ")}`,
+        "When configured skill context is present, treat it as task guidance and use read_skill_resource for indexed supporting resources when relevant.",
+        ...(profileConfig.allowedSkillScripts !== undefined &&
+            profileConfig.allowedSkillScripts.length > 0
+          ? [
+            `Exact allowlisted skill scripts: ${
+              profileConfig.allowedSkillScripts.map((script) =>
+                `${script.skill}:${script.path}`
+              ).join(", ")
+            }`,
+            "Use run_skill_script for those exact scripts when they fit the delegated task.",
+            ...(profileConfig.skillScriptExecutionTarget === "host"
+              ? [
+                "This profile runs allowlisted skill scripts through host execution; pass any required local CDP endpoint explicitly in script args.",
+              ]
+              : []),
+          ]
+          : []),
+      ]
+      : []),
     ...(profileConfig.profile === WEB_FETCH_SUBAGENT_PROFILE
       ? [
         "Web fetch profile tools are limited to web_fetch. Do not attempt local file reads, local writes, shell commands, browser access, or nested delegation.",
@@ -1096,7 +1120,8 @@ const toolOutputNeedsSandboxMediation = (
 ): boolean =>
   toolId === "bash" ||
   (toolId === "run_skill_script" &&
-    isRunSkillScriptToolSuccessOutput(output)) ||
+    isRunSkillScriptToolSuccessOutput(output) &&
+    output.executionTarget !== "host") ||
   (toolId === "read_file" && isReadFileToolSuccessOutput(output)) ||
   (toolId === "edit_file" && isEditFileToolSuccessOutput(output));
 
@@ -2679,9 +2704,21 @@ export class CfHarnessPromptLoop {
       gatewayBaseUrl: this.engine.config.gatewayBaseUrl,
       gatewayAuthMode: this.engine.config.gatewayAuthMode,
       cwd: parentRunState.currentDir,
+      ...(this.engine.config.skillsRoot !== undefined
+        ? { skillsRoot: this.engine.config.skillsRoot }
+        : {}),
+      ...(profileConfig.allowedSkillScripts !== undefined
+        ? { allowedSkillScripts: profileConfig.allowedSkillScripts }
+        : {}),
+      ...(profileConfig.skillScriptExecutionTarget !== undefined
+        ? {
+          skillScriptExecutionTarget: profileConfig.skillScriptExecutionTarget,
+        }
+        : {}),
       cfcEnforcementMode: parentRunState.cfcEnforcementMode,
     });
     const childCreatedState = childEngine.getRunState();
+    const childSkillContextMessages: string[] = [];
     const manifest: HarnessSubagentRunManifest = {
       type: "cf-harness.subagent-run-manifest",
       version: 1,
@@ -2695,6 +2732,21 @@ export class CfHarnessPromptLoop {
       modelSource: childModel.source,
       allowedToolIds: [...profileConfig.allowedToolIds],
       hostToolIds: [...profileConfig.hostToolIds],
+      ...(profileConfig.skillNames !== undefined
+        ? { skillNames: [...profileConfig.skillNames] }
+        : {}),
+      ...(profileConfig.allowedSkillScripts !== undefined
+        ? {
+          allowedSkillScripts: profileConfig.allowedSkillScripts.map((
+            script,
+          ) => ({ ...script })),
+        }
+        : {}),
+      ...(profileConfig.skillScriptExecutionTarget !== undefined
+        ? {
+          skillScriptExecutionTarget: profileConfig.skillScriptExecutionTarget,
+        }
+        : {}),
       ...(profileConfig.nativeModelToolIds !== undefined
         ? { nativeModelToolIds: [...profileConfig.nativeModelToolIds] }
         : {}),
@@ -2716,6 +2768,22 @@ export class CfHarnessPromptLoop {
     let childModelTurns = 0;
     let structuredReturn: HarnessSubagentStructuredReturn | undefined;
     try {
+      if (
+        profileConfig.skillNames !== undefined &&
+        profileConfig.skillNames.length > 0 &&
+        parentRunState.skillRegistry !== undefined
+      ) {
+        await childEngine.persistSkillRegistry(parentRunState.skillRegistry);
+        const skillContext = await loadHarnessSkillContext({
+          registry: parentRunState.skillRegistry,
+          skillNames: profileConfig.skillNames,
+          source: "subagent-inherit",
+          runId: childRunId,
+          activatedAt: childCreatedState.updatedAt,
+        });
+        await childEngine.persistSkillActivations(skillContext.activations);
+        childSkillContextMessages.push(skillContext.contextText);
+      }
       const childResult = await childLoop.runPrompt({
         systemPrompt: buildSubagentSystemPrompt(
           childEngine.getRunState().currentDir,
@@ -2729,6 +2797,7 @@ export class CfHarnessPromptLoop {
           },
         ),
         prompt: buildSubagentUserPrompt(delegateInput),
+        contextMessages: childSkillContextMessages,
         model: childModel.model,
         maxModelTurns,
         promptSlotBinding: options.promptSlotBinding,

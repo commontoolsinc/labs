@@ -5,6 +5,10 @@ import {
   type LLMNativeModelToolId,
 } from "@commonfabric/llm/types";
 import type { HarnessFailureRecord } from "../diagnostics.ts";
+import type {
+  HarnessAllowedSkillScript,
+  HarnessSkillScriptExecutionTarget,
+} from "./skill.ts";
 import type { BuiltinToolId } from "./tool-descriptor.ts";
 
 export const DEFAULT_SUBAGENT_PROFILE = "default" as const;
@@ -27,6 +31,8 @@ export const BROWSER_SUBAGENT_ALLOWED_TOOL_IDS = [
   "bash-no-sandbox",
   "read_file",
   "view_image",
+  "read_skill_resource",
+  "run_skill_script",
 ] as const satisfies readonly BuiltinToolId[];
 export const WEB_FETCH_SUBAGENT_ALLOWED_TOOL_IDS = [
   "web_fetch",
@@ -37,6 +43,14 @@ export const NO_HOST_TOOL_IDS = [] as const satisfies readonly BuiltinToolId[];
 export const BROWSER_SUBAGENT_HOST_TOOL_IDS = [
   "bash-no-sandbox",
 ] as const satisfies readonly BuiltinToolId[];
+export const BROWSER_SUBAGENT_SKILL_NAMES = [
+  "agent-browser",
+] as const satisfies readonly string[];
+export const BROWSER_SUBAGENT_ALLOWED_SKILL_SCRIPTS = [
+  { skill: "agent-browser", path: "scripts/form-automation.sh" },
+  { skill: "agent-browser", path: "scripts/authenticated-session.sh" },
+  { skill: "agent-browser", path: "scripts/capture-workflow.sh" },
+] as const satisfies readonly HarnessAllowedSkillScript[];
 export const WEB_SEARCH_SUBAGENT_NATIVE_MODEL_TOOL_IDS = [
   GOOGLE_SEARCH_NATIVE_MODEL_TOOL,
 ] as const satisfies readonly HarnessNativeModelToolId[];
@@ -72,6 +86,9 @@ export interface HarnessSubagentProfileConfig {
   hostToolIds: readonly BuiltinToolId[];
   modelOverride?: string;
   nativeModelToolIds?: readonly HarnessNativeModelToolId[];
+  skillNames?: readonly string[];
+  allowedSkillScripts?: readonly HarnessAllowedSkillScript[];
+  skillScriptExecutionTarget?: HarnessSkillScriptExecutionTarget;
   maxModelTurns: number;
   returnPolicy: HarnessSubagentReturnPolicy;
 }
@@ -100,6 +117,9 @@ export const BROWSER_SUBAGENT_PROFILE_CONFIG: HarnessSubagentProfileConfig = {
   profile: BROWSER_SUBAGENT_PROFILE,
   allowedToolIds: BROWSER_SUBAGENT_ALLOWED_TOOL_IDS,
   hostToolIds: BROWSER_SUBAGENT_HOST_TOOL_IDS,
+  skillNames: BROWSER_SUBAGENT_SKILL_NAMES,
+  allowedSkillScripts: BROWSER_SUBAGENT_ALLOWED_SKILL_SCRIPTS,
+  skillScriptExecutionTarget: "host",
   maxModelTurns: DEFAULT_SUBAGENT_MAX_MODEL_TURNS,
   returnPolicy: DEFAULT_SUBAGENT_RETURN_POLICY,
 };
@@ -169,6 +189,9 @@ export interface HarnessSubagentRunManifest {
   allowedToolIds: readonly BuiltinToolId[];
   hostToolIds: readonly BuiltinToolId[];
   nativeModelToolIds?: readonly HarnessNativeModelToolId[];
+  skillNames?: readonly string[];
+  allowedSkillScripts?: readonly HarnessAllowedSkillScript[];
+  skillScriptExecutionTarget?: HarnessSkillScriptExecutionTarget;
   maxModelTurns: number;
   returnPolicy: HarnessSubagentReturnPolicy;
   createdAt: string;

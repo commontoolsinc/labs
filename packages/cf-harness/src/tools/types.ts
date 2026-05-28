@@ -13,6 +13,7 @@ import type {
   HarnessSkillRegistry,
   HarnessSkillResourceRead,
   HarnessSkillScriptExecution,
+  HarnessSkillScriptExecutionTarget,
 } from "../contracts/skill.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type { ToolOutputId } from "../contracts/tool-result.ts";
@@ -25,6 +26,7 @@ export interface HarnessToolContext {
   skillRegistry?: HarnessSkillRegistry;
   skillActivations?: HarnessSkillActivations;
   allowedSkillScripts?: readonly HarnessAllowedSkillScript[];
+  skillScriptExecutionTarget: HarnessSkillScriptExecutionTarget;
   sandbox: SandboxRuntime;
   hostProcessRunner: ProcessRunner;
   currentDir: string;
