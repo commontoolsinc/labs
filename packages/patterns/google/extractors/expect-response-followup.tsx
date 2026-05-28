@@ -21,10 +21,8 @@
  */
 import {
   computed,
-  derive,
   generateText,
   handler,
-  ifElse,
   NAME,
   pattern,
   UI,
@@ -612,10 +610,7 @@ export default pattern<PatternInput, PatternOutput>(() => {
   }>({
     query: "#emailStyle",
   });
-  const emailStylePrompt = derive(
-    emailStyleWish.result,
-    (r) => r?.stylePrompt ?? "",
-  );
+  const emailStylePrompt = emailStyleWish.result?.stylePrompt ?? "";
 
   // ==========================================================================
   // GMAIL EXTRACTOR
@@ -742,13 +737,9 @@ export default pattern<PatternInput, PatternOutput>(() => {
   // Uses computed prompt that builds from the selected thread's data
   // NOTE: When prompt is falsy/undefined, generateText should skip the API call
   // Build style-aware system prompt
-  const draftSystemPrompt = derive(
-    emailStylePrompt,
-    (prompt) =>
-      prompt
-        ? `You are a helpful assistant that drafts follow-up emails matching the user's personal writing style.\n\n${prompt}`
-        : "You are a helpful assistant that drafts professional follow-up emails.",
-  );
+  const draftSystemPrompt = emailStylePrompt
+    ? `You are a helpful assistant that drafts follow-up emails matching the user's personal writing style.\n\n${emailStylePrompt}`
+    : "You are a helpful assistant that drafts professional follow-up emails.";
 
   const draftLlmResult = generateText({
     prompt: computed((): string | undefined => {
@@ -909,524 +900,481 @@ Write only the email body, no subject line or greeting line (the greeting will b
             {authUI}
 
             {/* Refresh button when authenticated */}
-            {ifElse(
-              isReady,
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                  padding: "8px 12px",
-                  backgroundColor: "#f9fafb",
-                  borderRadius: "6px",
-                }}
-              >
-                <span style={{ color: "#6b7280", fontSize: "13px" }}>
-                  {threadCount} threads awaiting response
-                </span>
-                <button
-                  type="button"
-                  onClick={extractor.refresh}
+            {isReady
+              ? (
+                <div
                   style={{
-                    marginLeft: "auto",
-                    padding: "6px 12px",
-                    backgroundColor: "#10b981",
-                    color: "white",
-                    border: "none",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    padding: "8px 12px",
+                    backgroundColor: "#f9fafb",
                     borderRadius: "6px",
-                    cursor: "pointer",
-                    fontSize: "13px",
-                    fontWeight: "500",
                   }}
                 >
-                  Refresh
-                </button>
-              </div>,
-              null,
-            )}
+                  <span style={{ color: "#6b7280", fontSize: "13px" }}>
+                    {threadCount} threads awaiting response
+                  </span>
+                  <button
+                    type="button"
+                    onClick={extractor.refresh}
+                    style={{
+                      marginLeft: "auto",
+                      padding: "6px 12px",
+                      backgroundColor: "#10b981",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "6px",
+                      cursor: "pointer",
+                      fontSize: "13px",
+                      fontWeight: "500",
+                    }}
+                  >
+                    Refresh
+                  </button>
+                </div>
+              )
+              : null}
 
             {/* Label status */}
-            {ifElse(
-              derive(
-                { isReady, expectResponseLabelId, loadingLabels },
-                ({ isReady, expectResponseLabelId, loadingLabels }) =>
-                  isReady && (!expectResponseLabelId || loadingLabels),
-              ),
-              <div
-                style={{
-                  padding: "8px 12px",
-                  backgroundColor: "#fef3c7",
-                  borderRadius: "6px",
-                  fontSize: "13px",
-                  color: "#b45309",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                }}
-              >
-                {ifElse(
-                  loadingLabels,
-                  <span>Loading labels...</span>,
-                  <span>
-                    expect-response label not found - click Load Labels
-                  </span>,
-                )}
-                <button
-                  type="button"
-                  onClick={fetchLabels({
-                    auth,
-                    expectResponseLabelId,
-                    loadingLabels,
-                  })}
-                  disabled={loadingLabels}
+            {isReady && (!expectResponseLabelId.get() || loadingLabels.get())
+              ? (
+                <div
                   style={{
-                    marginLeft: "8px",
-                    padding: "4px 10px",
-                    backgroundColor: derive(
-                      loadingLabels,
-                      (l) => l ? "#9ca3af" : "#6366f1",
-                    ),
-                    color: "white",
-                    border: "none",
-                    borderRadius: "4px",
-                    fontSize: "12px",
-                    cursor: derive(
-                      loadingLabels,
-                      (l) => l ? "not-allowed" : "pointer",
-                    ),
-                    fontWeight: "500",
+                    padding: "8px 12px",
+                    backgroundColor: "#fef3c7",
+                    borderRadius: "6px",
+                    fontSize: "13px",
+                    color: "#b45309",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
                   }}
                 >
-                  {loadingLabels ? "Loading..." : "Load Labels"}
-                </button>
-              </div>,
-              null,
-            )}
+                  {loadingLabels.get() ? <span>Loading labels...</span> : (
+                    <span>
+                      expect-response label not found - click Load Labels
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={fetchLabels({
+                      auth,
+                      expectResponseLabelId,
+                      loadingLabels,
+                    })}
+                    disabled={loadingLabels}
+                    style={{
+                      marginLeft: "8px",
+                      padding: "4px 10px",
+                      backgroundColor: loadingLabels.get()
+                        ? "#9ca3af"
+                        : "#6366f1",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "4px",
+                      fontSize: "12px",
+                      cursor: loadingLabels.get() ? "not-allowed" : "pointer",
+                      fontWeight: "500",
+                    }}
+                  >
+                    {loadingLabels ? "Loading..." : "Load Labels"}
+                  </button>
+                </div>
+              )
+              : null}
 
             {/* Threads list */}
-            {ifElse(
-              derive(threadCount, (count) => count === 0),
-              <div
-                style={{
-                  padding: "24px",
-                  textAlign: "center",
-                  color: "#6b7280",
-                  backgroundColor: "#f9fafb",
-                  borderRadius: "8px",
-                }}
-              >
-                <div style={{ fontSize: "16px", marginBottom: "8px" }}>
-                  No threads awaiting response
+            {threadCount === 0
+              ? (
+                <div
+                  style={{
+                    padding: "24px",
+                    textAlign: "center",
+                    color: "#6b7280",
+                    backgroundColor: "#f9fafb",
+                    borderRadius: "8px",
+                  }}
+                >
+                  <div style={{ fontSize: "16px", marginBottom: "8px" }}>
+                    No threads awaiting response
+                  </div>
+                  <div style={{ fontSize: "13px" }}>
+                    Add the "expect-response" label to emails you're waiting on.
+                  </div>
                 </div>
-                <div style={{ fontSize: "13px" }}>
-                  Add the "expect-response" label to emails you're waiting on.
-                </div>
-              </div>,
-              <cf-vstack gap="3">
-                {threads.map((thread) => {
-                  const uiThreadId = thread.threadId;
-                  const isExpanded = computed(() =>
-                    expandedThreads.get().includes(uiThreadId)
-                  );
-                  const isSendingThis = computed(() =>
-                    activeSendThread.get() === uiThreadId
-                  );
-                  const settingsOpen = computed(() =>
-                    settingsOpenFor.get() === uiThreadId
-                  );
+              )
+              : (
+                <cf-vstack gap="3">
+                  {threads.map((thread) => {
+                    const uiThreadId = thread.threadId;
+                    const isExpanded = computed(() =>
+                      expandedThreads.get().includes(uiThreadId)
+                    );
+                    const isSendingThis = computed(() =>
+                      activeSendThread.get() === uiThreadId
+                    );
+                    const settingsOpen = computed(() =>
+                      settingsOpenFor.get() === uiThreadId
+                    );
+                    const isGenerating = computed(() =>
+                      generatingDraftFor.get() === uiThreadId &&
+                      draftLlmResult.pending
+                    );
+                    const hasDraft = computed(() => {
+                      const d = drafts.get();
+                      if (d[uiThreadId]) return true;
+                      const genFor = generatingDraftFor.get();
+                      if (
+                        genFor === uiThreadId &&
+                        !draftLlmResult.pending &&
+                        draftLlmResult.result
+                      ) {
+                        return true;
+                      }
+                      return false;
+                    });
+                    const draftText = computed((): string => {
+                      const d = drafts.get();
+                      if (d[uiThreadId]) return String(d[uiThreadId]);
+                      const genFor = generatingDraftFor.get();
+                      if (genFor === uiThreadId) {
+                        const result = draftLlmResult.result;
+                        const error = draftLlmResult.error;
+                        return String(result || error || "");
+                      }
+                      return "";
+                    });
 
-                  return (
-                    <div
-                      style={{
-                        backgroundColor: "#ffffff",
-                        borderRadius: "8px",
-                        border: derive(
-                          thread,
-                          (t) =>
-                            t.shouldGiveUp
-                              ? "2px solid #f97316"
-                              : t.isDue
-                              ? "2px solid #3b82f6"
-                              : "1px solid #e5e7eb",
-                        ),
-                        overflow: "hidden",
-                      }}
-                    >
-                      {/* Thread header */}
+                    return (
                       <div
                         style={{
-                          padding: "12px 16px",
-                          backgroundColor: derive(
-                            thread,
-                            (t) =>
-                              t.shouldGiveUp
-                                ? "#fff7ed"
-                                : t.isDue
-                                ? "#eff6ff"
-                                : "#f9fafb",
-                          ),
-                          borderBottom: "1px solid #e5e7eb",
+                          backgroundColor: "#ffffff",
+                          borderRadius: "8px",
+                          border: thread.shouldGiveUp
+                            ? "2px solid #f97316"
+                            : thread.isDue
+                            ? "2px solid #3b82f6"
+                            : "1px solid #e5e7eb",
+                          overflow: "hidden",
                         }}
                       >
+                        {/* Thread header */}
                         <div
                           style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "12px",
-                            marginBottom: "8px",
+                            padding: "12px 16px",
+                            backgroundColor: thread.shouldGiveUp
+                              ? "#fff7ed"
+                              : thread.isDue
+                              ? "#eff6ff"
+                              : "#f9fafb",
+                            borderBottom: "1px solid #e5e7eb",
                           }}
                         >
-                          {/* Subject */}
                           <div
                             style={{
-                              flex: 1,
-                              fontWeight: "600",
-                              fontSize: "14px",
-                              color: "#111827",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "12px",
+                              marginBottom: "8px",
                             }}
                           >
-                            {derive(thread, (t) => t.subject)}
-                          </div>
+                            {/* Subject */}
+                            <div
+                              style={{
+                                flex: 1,
+                                fontWeight: "600",
+                                fontSize: "14px",
+                                color: "#111827",
+                              }}
+                            >
+                              {thread.subject}
+                            </div>
 
-                          {/* Ping count badge */}
-                          {ifElse(
-                            derive(thread, (t) => t.pingCount > 0),
-                            <span
+                            {/* Ping count badge */}
+                            {thread.pingCount > 0
+                              ? (
+                                <span
+                                  style={{
+                                    padding: "2px 8px",
+                                    backgroundColor: "#fef3c7",
+                                    color: "#b45309",
+                                    borderRadius: "12px",
+                                    fontSize: "11px",
+                                    fontWeight: "500",
+                                  }}
+                                >
+                                  {thread.pingCount} pings
+                                </span>
+                              )
+                              : null}
+
+                            {/* Context badge */}
+                            <button
+                              type="button"
+                              onClick={toggleSettings({
+                                settingsOpenFor,
+                                threadId: uiThreadId,
+                              })}
                               style={{
                                 padding: "2px 8px",
-                                backgroundColor: "#fef3c7",
-                                color: "#b45309",
+                                backgroundColor:
+                                  contextBadgeColors[thread.settings.context]
+                                    .bg,
+                                color:
+                                  contextBadgeColors[thread.settings.context]
+                                    .text,
                                 borderRadius: "12px",
                                 fontSize: "11px",
                                 fontWeight: "500",
+                                border: "none",
+                                cursor: "pointer",
                               }}
                             >
-                              {derive(thread, (t) => t.pingCount)} pings
-                            </span>,
-                            null,
-                          )}
+                              {thread.settings.context.charAt(0).toUpperCase() +
+                                thread.settings.context.slice(1)}
+                            </button>
+                          </div>
 
-                          {/* Context badge */}
-                          <button
-                            type="button"
-                            onClick={toggleSettings({
-                              settingsOpenFor,
-                              threadId: uiThreadId,
-                            })}
+                          {/* Metadata row */}
+                          <div
                             style={{
-                              padding: "2px 8px",
-                              backgroundColor: derive(
-                                thread,
-                                (t) =>
-                                  contextBadgeColors[t.settings.context].bg,
-                              ),
-                              color: derive(
-                                thread,
-                                (t) =>
-                                  contextBadgeColors[t.settings.context].text,
-                              ),
-                              borderRadius: "12px",
-                              fontSize: "11px",
-                              fontWeight: "500",
-                              border: "none",
-                              cursor: "pointer",
-                            }}
-                          >
-                            {derive(
-                              thread,
-                              (t) =>
-                                t.settings.context.charAt(0).toUpperCase() +
-                                t.settings.context.slice(1),
-                            )}
-                          </button>
-                        </div>
-
-                        {/* Metadata row */}
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "16px",
-                            fontSize: "12px",
-                            color: "#6b7280",
-                          }}
-                        >
-                          <span>
-                            From: {derive(thread, (t) => t.lastResponder)}
-                          </span>
-                          <span>
-                            Last: {derive(
-                              thread,
-                              (t) => formatDate(t.lastMessageDate),
-                            )}
-                          </span>
-                          <span
-                            style={{
-                              fontWeight: "600",
-                              color: derive(
-                                thread,
-                                (t) => (t.isDue ? "#dc2626" : "#059669"),
-                              ),
-                            }}
-                          >
-                            {derive(
-                              thread,
-                              (t) =>
-                                formatDaysDisplay(
-                                  t.daysSinceLastResponse,
-                                  t.settings.context,
-                                ),
-                            )} waiting
-                          </span>
-                          <button
-                            type="button"
-                            onClick={toggleExpanded({
-                              expandedThreads,
-                              threadId: uiThreadId,
-                            })}
-                            style={{
-                              marginLeft: "auto",
-                              background: "none",
-                              border: "none",
-                              color: "#3b82f6",
-                              cursor: "pointer",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "16px",
                               fontSize: "12px",
+                              color: "#6b7280",
                             }}
                           >
-                            {isExpanded ? "Hide thread" : "Show thread"}
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Settings panel (collapsible) */}
-                      {ifElse(
-                        settingsOpen,
-                        <div
-                          style={{
-                            padding: "12px 16px",
-                            backgroundColor: "#f3f4f6",
-                            borderBottom: "1px solid #e5e7eb",
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "16px",
-                            fontSize: "13px",
-                          }}
-                        >
-                          <label
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: "6px",
-                            }}
-                          >
-                            Context:
-                            <select
-                              value={derive(thread, (t) => t.settings.context)}
-                              onChange={updateContext({
-                                threadMetadata,
+                            <span>
+                              From: {thread.lastResponder}
+                            </span>
+                            <span>
+                              Last: {formatDate(thread.lastMessageDate)}
+                            </span>
+                            <span
+                              style={{
+                                fontWeight: "600",
+                                color: thread.isDue ? "#dc2626" : "#059669",
+                              }}
+                            >
+                              {formatDaysDisplay(
+                                thread.daysSinceLastResponse,
+                                thread.settings.context,
+                              )} waiting
+                            </span>
+                            <button
+                              type="button"
+                              onClick={toggleExpanded({
+                                expandedThreads,
                                 threadId: uiThreadId,
                               })}
                               style={{
-                                padding: "4px 8px",
-                                borderRadius: "4px",
-                                border: "1px solid #d1d5db",
+                                marginLeft: "auto",
+                                background: "none",
+                                border: "none",
+                                color: "#3b82f6",
+                                cursor: "pointer",
                                 fontSize: "12px",
                               }}
                             >
-                              <option value="personal">Personal</option>
-                              <option value="business">Business</option>
-                              <option value="urgent">Urgent</option>
-                            </select>
-                          </label>
-                          <label
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: "6px",
-                            }}
-                          >
-                            Due after:
-                            <input
-                              type="number"
-                              value={derive(
-                                thread,
-                                (t) => t.settings.daysThreshold,
-                              )}
-                              onChange={updateDaysThreshold({
-                                threadMetadata,
-                                threadId: uiThreadId,
-                                context: derive(
-                                  thread,
-                                  (t) => t.settings.context,
-                                ),
-                              })}
-                              min="1"
-                              max="30"
-                              style={{
-                                width: "50px",
-                                padding: "4px 8px",
-                                borderRadius: "4px",
-                                border: "1px solid #d1d5db",
-                                fontSize: "12px",
-                              }}
-                            />
-                            days
-                          </label>
-                          <label
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: "6px",
-                            }}
-                          >
-                            Max pings:
-                            <input
-                              type="number"
-                              value={derive(thread, (t) => t.settings.maxPings)}
-                              onChange={updateMaxPings({
-                                threadMetadata,
-                                threadId: uiThreadId,
-                                context: derive(
-                                  thread,
-                                  (t) => t.settings.context,
-                                ),
-                              })}
-                              min="1"
-                              max="10"
-                              style={{
-                                width: "50px",
-                                padding: "4px 8px",
-                                borderRadius: "4px",
-                                border: "1px solid #d1d5db",
-                                fontSize: "12px",
-                              }}
-                            />
-                          </label>
-                        </div>,
-                        null,
-                      )}
+                              {isExpanded ? "Hide thread" : "Show thread"}
+                            </button>
+                          </div>
+                        </div>
 
-                      {/* Thread history (expandable) */}
-                      {ifElse(
-                        isExpanded,
-                        <div
-                          style={{
-                            padding: "12px 16px",
-                            backgroundColor: "#f9fafb",
-                            borderBottom: "1px solid #e5e7eb",
-                            maxHeight: "200px",
-                            overflowY: "auto",
-                          }}
-                        >
-                          {derive(thread, (t) =>
-                            t.emails.map((email, i) => (
-                              <div
-                                key={i}
+                        {/* Settings panel (collapsible) */}
+                        {settingsOpen
+                          ? (
+                            <div
+                              style={{
+                                padding: "12px 16px",
+                                backgroundColor: "#f3f4f6",
+                                borderBottom: "1px solid #e5e7eb",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "16px",
+                                fontSize: "13px",
+                              }}
+                            >
+                              <label
                                 style={{
-                                  padding: "8px",
-                                  marginBottom: "8px",
-                                  backgroundColor: "#ffffff",
-                                  borderRadius: "4px",
-                                  border: "1px solid #e5e7eb",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "6px",
                                 }}
                               >
+                                Context:
+                                <select
+                                  value={thread.settings.context}
+                                  onChange={updateContext({
+                                    threadMetadata,
+                                    threadId: uiThreadId,
+                                  })}
+                                  style={{
+                                    padding: "4px 8px",
+                                    borderRadius: "4px",
+                                    border: "1px solid #d1d5db",
+                                    fontSize: "12px",
+                                  }}
+                                >
+                                  <option value="personal">Personal</option>
+                                  <option value="business">Business</option>
+                                  <option value="urgent">Urgent</option>
+                                </select>
+                              </label>
+                              <label
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "6px",
+                                }}
+                              >
+                                Due after:
+                                <input
+                                  type="number"
+                                  value={thread.settings.daysThreshold}
+                                  onChange={updateDaysThreshold({
+                                    threadMetadata,
+                                    threadId: uiThreadId,
+                                    context: thread.settings.context,
+                                  })}
+                                  min="1"
+                                  max="30"
+                                  style={{
+                                    width: "50px",
+                                    padding: "4px 8px",
+                                    borderRadius: "4px",
+                                    border: "1px solid #d1d5db",
+                                    fontSize: "12px",
+                                  }}
+                                />
+                                days
+                              </label>
+                              <label
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "6px",
+                                }}
+                              >
+                                Max pings:
+                                <input
+                                  type="number"
+                                  value={thread.settings.maxPings}
+                                  onChange={updateMaxPings({
+                                    threadMetadata,
+                                    threadId: uiThreadId,
+                                    context: thread.settings.context,
+                                  })}
+                                  min="1"
+                                  max="10"
+                                  style={{
+                                    width: "50px",
+                                    padding: "4px 8px",
+                                    borderRadius: "4px",
+                                    border: "1px solid #d1d5db",
+                                    fontSize: "12px",
+                                  }}
+                                />
+                              </label>
+                            </div>
+                          )
+                          : null}
+
+                        {/* Thread history (expandable) */}
+                        {isExpanded
+                          ? (
+                            <div
+                              style={{
+                                padding: "12px 16px",
+                                backgroundColor: "#f9fafb",
+                                borderBottom: "1px solid #e5e7eb",
+                                maxHeight: "200px",
+                                overflowY: "auto",
+                              }}
+                            >
+                              {computed(() =>
+                                thread.emails.map((email, i) => (
+                                  <div
+                                    key={i}
+                                    style={{
+                                      padding: "8px",
+                                      marginBottom: "8px",
+                                      backgroundColor: "#ffffff",
+                                      borderRadius: "4px",
+                                      border: "1px solid #e5e7eb",
+                                    }}
+                                  >
+                                    <div
+                                      style={{
+                                        display: "flex",
+                                        justifyContent: "space-between",
+                                        fontSize: "11px",
+                                        color: "#6b7280",
+                                        marginBottom: "4px",
+                                      }}
+                                    >
+                                      <span>{email.from}</span>
+                                      <span>{formatDate(email.date)}</span>
+                                    </div>
+                                    <div
+                                      style={{
+                                        fontSize: "12px",
+                                        color: "#374151",
+                                        whiteSpace: "pre-wrap",
+                                      }}
+                                    >
+                                      {email.snippet?.slice(0, 200)}
+                                      {(email.snippet?.length || 0) > 200
+                                        ? "..."
+                                        : ""}
+                                    </div>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          )
+                          : null}
+
+                        {/* Draft / Send area */}
+                        <div style={{ padding: "12px 16px" }}>
+                          {isSendingThis
+                            // Gmail-sender UI shown inline when this thread is active
+                            ? (
+                              <div>
+                                {sender}
                                 <div
                                   style={{
                                     display: "flex",
-                                    justifyContent: "space-between",
-                                    fontSize: "11px",
-                                    color: "#6b7280",
-                                    marginBottom: "4px",
+                                    gap: "8px",
+                                    marginTop: "8px",
                                   }}
                                 >
-                                  <span>{email.from}</span>
-                                  <span>{formatDate(email.date)}</span>
-                                </div>
-                                <div
-                                  style={{
-                                    fontSize: "12px",
-                                    color: "#374151",
-                                    whiteSpace: "pre-wrap",
-                                  }}
-                                >
-                                  {email.snippet?.slice(0, 200)}
-                                  {(email.snippet?.length || 0) > 200
-                                    ? "..."
-                                    : ""}
+                                  <button
+                                    type="button"
+                                    onClick={cancelSendFlow({
+                                      senderDraft,
+                                      activeSendThread,
+                                    })}
+                                    style={{
+                                      padding: "8px 16px",
+                                      backgroundColor: "transparent",
+                                      color: "#6b7280",
+                                      border: "1px solid #d1d5db",
+                                      borderRadius: "6px",
+                                      cursor: "pointer",
+                                      fontSize: "13px",
+                                    }}
+                                  >
+                                    Cancel
+                                  </button>
                                 </div>
                               </div>
-                            )))}
-                        </div>,
-                        null,
-                      )}
-
-                      {/* Draft / Send area */}
-                      <div style={{ padding: "12px 16px" }}>
-                        {ifElse(
-                          isSendingThis,
-                          // Gmail-sender UI shown inline when this thread is active
-                          <div>
-                            {sender}
-                            <div
-                              style={{
-                                display: "flex",
-                                gap: "8px",
-                                marginTop: "8px",
-                              }}
-                            >
-                              <button
-                                type="button"
-                                onClick={cancelSendFlow({
-                                  senderDraft,
-                                  activeSendThread,
-                                })}
-                                style={{
-                                  padding: "8px 16px",
-                                  backgroundColor: "transparent",
-                                  color: "#6b7280",
-                                  border: "1px solid #d1d5db",
-                                  borderRadius: "6px",
-                                  cursor: "pointer",
-                                  fontSize: "13px",
-                                }}
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          </div>,
-                          // Draft editing UI
-                          (() => {
-                            const isGenerating = computed(() =>
-                              generatingDraftFor.get() === uiThreadId &&
-                              draftLlmResult.pending
-                            );
-                            const hasDraft = computed(() => {
-                              const d = drafts.get();
-                              if (d[uiThreadId]) return true;
-                              const genFor = generatingDraftFor.get();
-                              if (
-                                genFor === uiThreadId &&
-                                !draftLlmResult.pending &&
-                                draftLlmResult.result
-                              ) {
-                                return true;
-                              }
-                              return false;
-                            });
-                            const draftText = computed((): string => {
-                              const d = drafts.get();
-                              if (d[uiThreadId]) return String(d[uiThreadId]);
-                              const genFor = generatingDraftFor.get();
-                              if (genFor === uiThreadId) {
-                                const result = draftLlmResult.result;
-                                const error = draftLlmResult.error;
-                                return String(result || error || "");
-                              }
-                              return "";
-                            });
-
-                            return ifElse(
-                              isGenerating,
+                            )
+                            // Draft editing UI
+                            : isGenerating
+                            ? (
                               <div
                                 style={{
                                   padding: "12px",
@@ -1438,132 +1386,56 @@ Write only the email body, no subject line or greeting line (the greeting will b
                                 }}
                               >
                                 Generating follow-up draft...
-                              </div>,
-                              ifElse(
-                                hasDraft,
-                                <div>
-                                  <textarea
-                                    value={derive(
-                                      draftText,
-                                      (t) => String(t || ""),
-                                    )}
-                                    onChange={updateDraft({
+                              </div>
+                            )
+                            : hasDraft
+                            ? (
+                              <div>
+                                <textarea
+                                  value={String(draftText || "")}
+                                  onChange={updateDraft({
+                                    drafts,
+                                    threadId: uiThreadId,
+                                  })}
+                                  style={{
+                                    width: "100%",
+                                    minHeight: "100px",
+                                    padding: "8px 12px",
+                                    borderRadius: "6px",
+                                    border: "1px solid #d1d5db",
+                                    fontSize: "13px",
+                                    fontFamily: "inherit",
+                                    resize: "vertical",
+                                  }}
+                                />
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    gap: "8px",
+                                    marginTop: "8px",
+                                  }}
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={prepareSend({
+                                      senderDraft,
+                                      activeSendThread,
                                       drafts,
-                                      threadId: uiThreadId,
+                                      thread,
                                     })}
                                     style={{
-                                      width: "100%",
-                                      minHeight: "100px",
-                                      padding: "8px 12px",
+                                      padding: "8px 16px",
+                                      backgroundColor: "#10b981",
+                                      color: "white",
+                                      border: "none",
                                       borderRadius: "6px",
-                                      border: "1px solid #d1d5db",
+                                      cursor: "pointer",
                                       fontSize: "13px",
-                                      fontFamily: "inherit",
-                                      resize: "vertical",
-                                    }}
-                                  />
-                                  <div
-                                    style={{
-                                      display: "flex",
-                                      gap: "8px",
-                                      marginTop: "8px",
+                                      fontWeight: "500",
                                     }}
                                   >
-                                    <button
-                                      type="button"
-                                      onClick={prepareSend({
-                                        senderDraft,
-                                        activeSendThread,
-                                        drafts,
-                                        thread,
-                                      })}
-                                      style={{
-                                        padding: "8px 16px",
-                                        backgroundColor: "#10b981",
-                                        color: "white",
-                                        border: "none",
-                                        borderRadius: "6px",
-                                        cursor: "pointer",
-                                        fontSize: "13px",
-                                        fontWeight: "500",
-                                      }}
-                                    >
-                                      Send Follow-up
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={startDraftGeneration({
-                                        threadId: uiThreadId,
-                                        generatingDraftFor,
-                                        drafts,
-                                      })}
-                                      style={{
-                                        padding: "8px 16px",
-                                        backgroundColor: "transparent",
-                                        color: "#6366f1",
-                                        border: "1px solid #6366f1",
-                                        borderRadius: "6px",
-                                        cursor: "pointer",
-                                        fontSize: "13px",
-                                      }}
-                                    >
-                                      Regenerate
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={giveUp({
-                                        removeLabels: extractor.removeLabels,
-                                        thread,
-                                        expectResponseLabelId,
-                                        hiddenThreads,
-                                      })}
-                                      disabled={derive(
-                                        expectResponseLabelId,
-                                        (id) => !id,
-                                      )}
-                                      style={{
-                                        marginLeft: "auto",
-                                        padding: "8px 16px",
-                                        backgroundColor: derive(
-                                          thread,
-                                          (t) =>
-                                            t.shouldGiveUp
-                                              ? "#f97316"
-                                              : "transparent",
-                                        ),
-                                        color: derive(
-                                          thread,
-                                          (t) =>
-                                            t.shouldGiveUp
-                                              ? "white"
-                                              : "#f97316",
-                                        ),
-                                        border: derive(
-                                          thread,
-                                          (t) =>
-                                            t.shouldGiveUp
-                                              ? "none"
-                                              : "1px solid #f97316",
-                                        ),
-                                        borderRadius: "6px",
-                                        cursor: derive(
-                                          expectResponseLabelId,
-                                          (id) =>
-                                            id ? "pointer" : "not-allowed",
-                                        ),
-                                        fontSize: "13px",
-                                        fontWeight: derive(
-                                          thread,
-                                          (t) =>
-                                            t.shouldGiveUp ? "600" : "normal",
-                                        ),
-                                      }}
-                                    >
-                                      Give Up
-                                    </button>
-                                  </div>
-                                </div>,
-                                <div>
+                                    Send Follow-up
+                                  </button>
                                   <button
                                     type="button"
                                     onClick={startDraftGeneration({
@@ -1572,90 +1444,125 @@ Write only the email body, no subject line or greeting line (the greeting will b
                                       drafts,
                                     })}
                                     style={{
-                                      padding: "12px 24px",
-                                      backgroundColor: "#6366f1",
-                                      color: "white",
-                                      border: "none",
+                                      padding: "8px 16px",
+                                      backgroundColor: "transparent",
+                                      color: "#6366f1",
+                                      border: "1px solid #6366f1",
                                       borderRadius: "6px",
                                       cursor: "pointer",
-                                      fontSize: "14px",
-                                      fontWeight: "500",
-                                      width: "100%",
+                                      fontSize: "13px",
                                     }}
                                   >
-                                    Generate Follow-up Draft
+                                    Regenerate
                                   </button>
-                                  <div
+                                  <button
+                                    type="button"
+                                    onClick={giveUp({
+                                      removeLabels: extractor.removeLabels,
+                                      thread,
+                                      expectResponseLabelId,
+                                      hiddenThreads,
+                                    })}
+                                    disabled={!expectResponseLabelId.get()}
                                     style={{
-                                      display: "flex",
-                                      gap: "8px",
-                                      marginTop: "8px",
-                                      justifyContent: "flex-end",
+                                      marginLeft: "auto",
+                                      padding: "8px 16px",
+                                      backgroundColor: thread.shouldGiveUp
+                                        ? "#f97316"
+                                        : "transparent",
+                                      color: thread.shouldGiveUp
+                                        ? "white"
+                                        : "#f97316",
+                                      border: thread.shouldGiveUp
+                                        ? "none"
+                                        : "1px solid #f97316",
+                                      borderRadius: "6px",
+                                      cursor: expectResponseLabelId.get()
+                                        ? "pointer"
+                                        : "not-allowed",
+                                      fontSize: "13px",
+                                      fontWeight: thread.shouldGiveUp
+                                        ? "600"
+                                        : "normal",
                                     }}
                                   >
-                                    <button
-                                      type="button"
-                                      onClick={giveUp({
-                                        removeLabels: extractor.removeLabels,
-                                        thread,
-                                        expectResponseLabelId,
-                                        hiddenThreads,
-                                      })}
-                                      disabled={derive(
-                                        expectResponseLabelId,
-                                        (id) => !id,
-                                      )}
-                                      style={{
-                                        padding: "8px 16px",
-                                        backgroundColor: derive(
-                                          thread,
-                                          (t) =>
-                                            t.shouldGiveUp
-                                              ? "#f97316"
-                                              : "transparent",
-                                        ),
-                                        color: derive(
-                                          thread,
-                                          (t) =>
-                                            t.shouldGiveUp
-                                              ? "white"
-                                              : "#f97316",
-                                        ),
-                                        border: derive(
-                                          thread,
-                                          (t) =>
-                                            t.shouldGiveUp
-                                              ? "none"
-                                              : "1px solid #f97316",
-                                        ),
-                                        borderRadius: "6px",
-                                        cursor: derive(
-                                          expectResponseLabelId,
-                                          (id) =>
-                                            id ? "pointer" : "not-allowed",
-                                        ),
-                                        fontSize: "13px",
-                                        fontWeight: derive(
-                                          thread,
-                                          (t) =>
-                                            t.shouldGiveUp ? "600" : "normal",
-                                        ),
-                                      }}
-                                    >
-                                      Give Up
-                                    </button>
-                                  </div>
-                                </div>,
-                              ),
-                            );
-                          })(),
-                        )}
+                                    Give Up
+                                  </button>
+                                </div>
+                              </div>
+                            )
+                            : (
+                              <div>
+                                <button
+                                  type="button"
+                                  onClick={startDraftGeneration({
+                                    threadId: uiThreadId,
+                                    generatingDraftFor,
+                                    drafts,
+                                  })}
+                                  style={{
+                                    padding: "12px 24px",
+                                    backgroundColor: "#6366f1",
+                                    color: "white",
+                                    border: "none",
+                                    borderRadius: "6px",
+                                    cursor: "pointer",
+                                    fontSize: "14px",
+                                    fontWeight: "500",
+                                    width: "100%",
+                                  }}
+                                >
+                                  Generate Follow-up Draft
+                                </button>
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    gap: "8px",
+                                    marginTop: "8px",
+                                    justifyContent: "flex-end",
+                                  }}
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={giveUp({
+                                      removeLabels: extractor.removeLabels,
+                                      thread,
+                                      expectResponseLabelId,
+                                      hiddenThreads,
+                                    })}
+                                    disabled={!expectResponseLabelId.get()}
+                                    style={{
+                                      padding: "8px 16px",
+                                      backgroundColor: thread.shouldGiveUp
+                                        ? "#f97316"
+                                        : "transparent",
+                                      color: thread.shouldGiveUp
+                                        ? "white"
+                                        : "#f97316",
+                                      border: thread.shouldGiveUp
+                                        ? "none"
+                                        : "1px solid #f97316",
+                                      borderRadius: "6px",
+                                      cursor: expectResponseLabelId.get()
+                                        ? "pointer"
+                                        : "not-allowed",
+                                      fontSize: "13px",
+                                      fontWeight: thread.shouldGiveUp
+                                        ? "600"
+                                        : "normal",
+                                    }}
+                                  >
+                                    Give Up
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
-              </cf-vstack>,
-            )}
+                    );
+                  })}
+                </cf-vstack>
+              )}
           </cf-vstack>
         </cf-vscroll>
       </cf-screen>

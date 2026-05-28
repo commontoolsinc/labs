@@ -356,7 +356,7 @@ export default pattern<Input, Output>(({ items, storeLayout }) => {
   const hasConnectedStore = storeLayout.get().trim().length > 0;
 
   // Effective layout: use connected store or demo fallback
-  const effectiveLayout = storeLayout.get().trim().length > 0
+  const effectiveLayout = hasConnectedStore
     ? storeLayout.get()
     : DEMO_STORE_LAYOUT;
 

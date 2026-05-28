@@ -1033,9 +1033,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                     );
                     return idx >= 0 ? idx + 1 : 0;
                   });
-                  const isRemoveConfirm = computed(() =>
-                    removeConfirmTarget.get() === oid
-                  );
+                  const isRemoveConfirm = removeConfirmTarget.get() === oid;
                   // The castVote handler toggles per-color: clicking your
                   // active color clears, a different color updates, none
                   // pushes. JSX dispatches one event per click; the handler

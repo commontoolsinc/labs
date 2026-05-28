@@ -23,7 +23,6 @@ import {
   derive,
   generateObject,
   handler,
-  ifElse,
   NAME,
   type Opaque,
   pattern,
@@ -471,8 +470,8 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
   });
 
   // Resolve auth: use overrideAuth if provided, otherwise use created auth
-  const hasOverrideAuth = computed(() => !!(overrideAuth as any)?.token);
-  const resolvedAuth = ifElse(hasOverrideAuth, overrideAuth, auth);
+  const hasOverrideAuth = !!(overrideAuth as any)?.token;
+  const resolvedAuth = hasOverrideAuth ? overrideAuth : auth;
 
   // Create a Stream from the fetchLabels handler for auto-triggering
   const labelFetcherStream = fetchLabels({
@@ -525,7 +524,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
       });
   });
 
-  const taskCount = computed(() => taskEmails?.length || 0);
+  const taskCount = taskEmails?.length || 0;
 
   // Get available notes for the LLM context
   const availableNotes = computed(() => {
@@ -592,8 +591,8 @@ Respond with the most appropriate action.`;
       model: "anthropic:claude-sonnet-4-5",
     });
 
-    // Return the cells directly without wrapping in computed
-    // This allows derive() to properly unwrap them
+    // Return the cells directly without wrapping in computed;
+    // reactive reads unwrap them at the consuming sites.
     return {
       email,
       pending: llmAnalysis.pending,
@@ -642,10 +641,7 @@ Respond with the most appropriate action.`;
       <div style={{ flex: 1 }}>
         <div style={{ fontWeight: "600", fontSize: "14px" }}>Email Tasks</div>
         <div style={{ fontSize: "12px", color: "#6b7280" }}>
-          {computed(() => {
-            const count = taskCount;
-            return count === 1 ? "1 task" : `${count} tasks`;
-          })}
+          {taskCount === 1 ? "1 task" : `${taskCount} tasks`}
         </div>
         <ProcessingStatus
           totalCount={taskCount}
@@ -681,153 +677,151 @@ Respond with the most appropriate action.`;
             {authUI}
 
             {/* Connection status and refresh */}
-            {ifElse(
-              isReady,
-              <div
-                style={{
-                  padding: "12px 16px",
-                  backgroundColor: "#d1fae5",
-                  borderRadius: "8px",
-                  border: "1px solid #10b981",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                }}
-              >
-                <span
+            {isReady
+              ? (
+                <div
                   style={{
-                    width: "10px",
-                    height: "10px",
-                    borderRadius: "50%",
-                    backgroundColor: "#10b981",
-                  }}
-                />
-                <span>Connected</span>
-                <span style={{ marginLeft: "auto", color: "#059669" }}>
-                  {computed(() => `${taskCount} tasks found`)}
-                </span>
-                <button
-                  type="button"
-                  onClick={extractor.refresh}
-                  style={{
-                    marginLeft: "8px",
-                    padding: "6px 12px",
-                    backgroundColor: "#10b981",
-                    color: "white",
-                    border: "none",
-                    borderRadius: "6px",
-                    cursor: "pointer",
-                    fontSize: "13px",
-                    fontWeight: "500",
+                    padding: "12px 16px",
+                    backgroundColor: "#d1fae5",
+                    borderRadius: "8px",
+                    border: "1px solid #10b981",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
                   }}
                 >
-                  Refresh
-                </button>
-              </div>,
-              null,
-            )}
+                  <span
+                    style={{
+                      width: "10px",
+                      height: "10px",
+                      borderRadius: "50%",
+                      backgroundColor: "#10b981",
+                    }}
+                  />
+                  <span>Connected</span>
+                  <span style={{ marginLeft: "auto", color: "#059669" }}>
+                    {`${taskCount} tasks found`}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={extractor.refresh}
+                    style={{
+                      marginLeft: "8px",
+                      padding: "6px 12px",
+                      backgroundColor: "#10b981",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "6px",
+                      cursor: "pointer",
+                      fontSize: "13px",
+                      fontWeight: "500",
+                    }}
+                  >
+                    Refresh
+                  </button>
+                </div>
+              )
+              : null}
 
             {/* Analysis progress */}
-            {ifElse(
-              derive(
-                { isReady, pendingCount },
-                ({ isReady, pendingCount }) => isReady && pendingCount > 0,
-              ),
-              <div
-                style={{
-                  padding: "12px 16px",
-                  backgroundColor: "#eff6ff",
-                  borderRadius: "8px",
-                  border: "1px solid #3b82f6",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                }}
-              >
-                <cf-loader size="sm" />
-                <span style={{ color: "#2563eb" }}>
-                  Analyzing {pendingCount} tasks...
-                </span>
-              </div>,
-              null,
-            )}
-
-            {/* Label status warning */}
-            {ifElse(
-              derive(
-                { isReady, taskCurrentLabelId, loadingLabels },
-                ({ isReady, taskCurrentLabelId, loadingLabels }) =>
-                  isReady && (!taskCurrentLabelId || loadingLabels),
-              ),
-              <div
-                style={{
-                  padding: "8px 12px",
-                  backgroundColor: "#fef3c7",
-                  borderRadius: "6px",
-                  fontSize: "13px",
-                  color: "#b45309",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                }}
-              >
-                {ifElse(
-                  loadingLabels,
-                  <span>Loading labels...</span>,
-                  <span>task-current label not found - click Load Labels</span>,
-                )}
-                <button
-                  type="button"
-                  onClick={labelFetcherStream}
-                  disabled={loadingLabels}
+            {isReady && pendingCount > 0
+              ? (
+                <div
                   style={{
-                    marginLeft: "8px",
-                    padding: "4px 10px",
-                    backgroundColor: loadingLabels ? "#9ca3af" : "#6366f1",
-                    color: "white",
-                    border: "none",
-                    borderRadius: "4px",
-                    fontSize: "12px",
-                    cursor: loadingLabels ? "not-allowed" : "pointer",
-                    fontWeight: "500",
+                    padding: "12px 16px",
+                    backgroundColor: "#eff6ff",
+                    borderRadius: "8px",
+                    border: "1px solid #3b82f6",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
                   }}
                 >
-                  {ifElse(loadingLabels, "Loading...", "Load Labels")}
-                </button>
-              </div>,
-              null,
-            )}
+                  <cf-loader size="sm" />
+                  <span style={{ color: "#2563eb" }}>
+                    Analyzing {pendingCount} tasks...
+                  </span>
+                </div>
+              )
+              : null}
+
+            {/* Label status warning */}
+            {isReady && (!taskCurrentLabelId.get() || loadingLabels.get())
+              ? (
+                <div
+                  style={{
+                    padding: "8px 12px",
+                    backgroundColor: "#fef3c7",
+                    borderRadius: "6px",
+                    fontSize: "13px",
+                    color: "#b45309",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                  }}
+                >
+                  {loadingLabels.get() ? <span>Loading labels...</span> : (
+                    <span>
+                      task-current label not found - click Load Labels
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={labelFetcherStream}
+                    disabled={loadingLabels.get()}
+                    style={{
+                      marginLeft: "8px",
+                      padding: "4px 10px",
+                      backgroundColor: loadingLabels.get()
+                        ? "#9ca3af"
+                        : "#6366f1",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "4px",
+                      fontSize: "12px",
+                      cursor: loadingLabels.get() ? "not-allowed" : "pointer",
+                      fontWeight: "500",
+                    }}
+                  >
+                    {loadingLabels.get() ? "Loading..." : "Load Labels"}
+                  </button>
+                </div>
+              )
+              : null}
 
             {/* Task cards */}
-            {ifElse(
-              derive(taskCount, (count) => count === 0),
-              <div
-                style={{
-                  padding: "24px",
-                  textAlign: "center",
-                  color: "#6b7280",
-                  backgroundColor: "#f9fafb",
-                  borderRadius: "8px",
-                }}
-              >
-                <div style={{ fontSize: "16px", marginBottom: "8px" }}>
-                  No tasks found
+            {taskCount === 0
+              ? (
+                <div
+                  style={{
+                    padding: "24px",
+                    textAlign: "center",
+                    color: "#6b7280",
+                    backgroundColor: "#f9fafb",
+                    borderRadius: "8px",
+                  }}
+                >
+                  <div style={{ fontSize: "16px", marginBottom: "8px" }}>
+                    No tasks found
+                  </div>
+                  <div style={{ fontSize: "13px" }}>
+                    Send yourself an email with a subject and add the
+                    "task-current" label to see it here.
+                  </div>
                 </div>
-                <div style={{ fontSize: "13px" }}>
-                  Send yourself an email with a subject and add the
-                  "task-current" label to see it here.
-                </div>
-              </div>,
-              <cf-vstack gap="3">
-                {analyses.map((analysis) => {
-                  const isProcessing = computed(() =>
-                    processingTasks.get().includes(analysis.email.id)
-                  );
+              )
+              : (
+                <cf-vstack gap="3">
+                  {analyses.map((analysis) => {
+                    const isProcessing = processingTasks.get().includes(
+                      analysis.email.id,
+                    );
 
-                  // Determine card border color based on suggestion type
-                  const borderColor = derive(
-                    { pending: analysis.pending, result: analysis.result },
-                    ({ pending, result }) => {
+                    // Determine card border color based on suggestion type.
+                    // Statement body (early returns) → keep as a computed.
+                    const borderColor = computed(() => {
+                      const pending = analysis.pending;
+                      const result = analysis.result;
                       if (pending) return "#e5e7eb";
                       if (!result || result.actionType === "no-action") {
                         return "#e5e7eb";
@@ -835,13 +829,12 @@ Respond with the most appropriate action.`;
                       if (result.confidence >= 0.8) return "#10b981"; // High confidence - green
                       if (result.confidence >= 0.5) return "#f59e0b"; // Medium - amber
                       return "#e5e7eb"; // Low - neutral
-                    },
-                  );
+                    });
 
-                  // Pre-compute the handler based on action type BEFORE the button
-                  const executeHandler = derive(
-                    analysis.result,
-                    (result) => {
+                    // Pre-compute the handler based on action type BEFORE the
+                    // button. Statement body (branching) → keep as a computed.
+                    const executeHandler = computed(() => {
+                      const result = analysis.result;
                       if (result?.actionType === "edit-note") {
                         return executeEditNote({
                           removeLabels: extractor.removeLabels,
@@ -866,202 +859,178 @@ Respond with the most appropriate action.`;
                         });
                       }
                       return null;
-                    },
-                  );
+                    });
 
-                  return (
-                    <div
-                      style={{
-                        padding: "16px",
-                        backgroundColor: "#ffffff",
-                        borderRadius: "8px",
-                        border: derive(borderColor, (c) => `2px solid ${c}`),
-                        boxShadow: "0 1px 2px rgba(0, 0, 0, 0.05)",
-                      }}
-                    >
-                      {/* Email header */}
+                    return (
                       <div
                         style={{
-                          display: "flex",
-                          alignItems: "flex-start",
-                          justifyContent: "space-between",
-                          marginBottom: "12px",
+                          padding: "16px",
+                          backgroundColor: "#ffffff",
+                          borderRadius: "8px",
+                          border: `2px solid ${borderColor}`,
+                          boxShadow: "0 1px 2px rgba(0, 0, 0, 0.05)",
                         }}
                       >
-                        <div style={{ flex: 1 }}>
-                          <div
-                            style={{
-                              fontWeight: "600",
-                              fontSize: "14px",
-                              marginBottom: "4px",
-                            }}
-                          >
-                            {derive(analysis, (a) => a.email.subject)}
-                          </div>
-                          <div
-                            style={{
-                              fontSize: "12px",
-                              color: "#6b7280",
-                              marginBottom: "4px",
-                            }}
-                          >
-                            {derive(analysis, (a) => a.email.from)} •{" "}
-                            {derive(analysis, (a) => formatDate(a.email.date))}
-                          </div>
-                          <div
-                            style={{
-                              fontSize: "13px",
-                              color: "#4b5563",
-                            }}
-                          >
-                            {derive(
-                              analysis,
-                              (a) => truncateText(a.email.snippet, 150),
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Confidence badge */}
-                        {ifElse(
-                          derive(
-                            {
-                              pending: analysis.pending,
-                              result: analysis.result,
-                            },
-                            ({ pending, result }) => !pending && result,
-                          ),
-                          <div
-                            style={{
-                              padding: "2px 8px",
-                              borderRadius: "12px",
-                              fontSize: "11px",
-                              fontWeight: "500",
-                              backgroundColor: derive(
-                                analysis.result,
-                                (result) => {
-                                  if (!result) return "#f3f4f6";
-                                  if (result.confidence >= 0.8) {
-                                    return "#d1fae5";
-                                  }
-                                  if (result.confidence >= 0.5) {
-                                    return "#fef3c7";
-                                  }
-                                  return "#f3f4f6";
-                                },
-                              ),
-                              color: derive(
-                                analysis.result,
-                                (result) => {
-                                  if (!result) return "#6b7280";
-                                  if (result.confidence >= 0.8) {
-                                    return "#059669";
-                                  }
-                                  if (result.confidence >= 0.5) {
-                                    return "#b45309";
-                                  }
-                                  return "#6b7280";
-                                },
-                              ),
-                            }}
-                          >
-                            {derive(
-                              analysis.result,
-                              (result) =>
-                                result
-                                  ? `${Math.round(result.confidence * 100)}%`
-                                  : "",
-                            )}
-                          </div>,
-                          null,
-                        )}
-                      </div>
-
-                      {/* Suggestion section */}
-                      {ifElse(
-                        analysis.pending,
+                        {/* Email header */}
                         <div
                           style={{
                             display: "flex",
-                            alignItems: "center",
-                            gap: "8px",
-                            padding: "12px",
-                            backgroundColor: "#f9fafb",
-                            borderRadius: "6px",
+                            alignItems: "flex-start",
+                            justifyContent: "space-between",
+                            marginBottom: "12px",
                           }}
                         >
-                          <cf-loader size="sm" />
-                          <span style={{ fontSize: "13px", color: "#6b7280" }}>
-                            Analyzing...
-                          </span>
-                        </div>,
-                        // Show suggestion when analysis is complete
-                        ifElse(
-                          derive(
-                            analysis.result,
-                            (result) => result?.actionType === "edit-note",
-                          ),
-                          // Edit note suggestion
-                          <div
-                            style={{
-                              padding: "12px",
-                              backgroundColor: "#eff6ff",
-                              borderRadius: "6px",
-                              marginBottom: "12px",
-                            }}
-                          >
+                          <div style={{ flex: 1 }}>
                             <div
                               style={{
                                 fontWeight: "600",
-                                fontSize: "13px",
-                                color: "#1d4ed8",
+                                fontSize: "14px",
                                 marginBottom: "4px",
                               }}
                             >
-                              Suggest: Edit note "
-                              {derive(analysis.result, (result) =>
-                                result?.actionType === "edit-note"
-                                  ? result.noteTitle || ""
-                                  : "")}
-                              "
+                              {analysis.email.subject}
+                            </div>
+                            <div
+                              style={{
+                                fontSize: "12px",
+                                color: "#6b7280",
+                                marginBottom: "4px",
+                              }}
+                            >
+                              {analysis.email.from} •{" "}
+                              {formatDate(analysis.email.date)}
                             </div>
                             <div
                               style={{
                                 fontSize: "13px",
                                 color: "#4b5563",
-                                marginBottom: "8px",
-                                fontStyle: "italic",
                               }}
                             >
-                              {derive(
-                                analysis.result,
-                                (result) => result?.reasoning || "",
-                              )}
+                              {truncateText(analysis.email.snippet, 150)}
                             </div>
+                          </div>
+
+                          {/* Confidence badge */}
+                          {!analysis.pending && analysis.result
+                            ? (
+                              <div
+                                style={{
+                                  padding: "2px 8px",
+                                  borderRadius: "12px",
+                                  fontSize: "11px",
+                                  fontWeight: "500",
+                                  backgroundColor: computed(() => {
+                                    const result = analysis.result;
+                                    if (!result) return "#f3f4f6";
+                                    if (result.confidence >= 0.8) {
+                                      return "#d1fae5";
+                                    }
+                                    if (result.confidence >= 0.5) {
+                                      return "#fef3c7";
+                                    }
+                                    return "#f3f4f6";
+                                  }),
+                                  color: computed(() => {
+                                    const result = analysis.result;
+                                    if (!result) return "#6b7280";
+                                    if (result.confidence >= 0.8) {
+                                      return "#059669";
+                                    }
+                                    if (result.confidence >= 0.5) {
+                                      return "#b45309";
+                                    }
+                                    return "#6b7280";
+                                  }),
+                                }}
+                              >
+                                {analysis.result
+                                  ? `${
+                                    Math.round(analysis.result.confidence * 100)
+                                  }%`
+                                  : ""}
+                              </div>
+                            )
+                            : null}
+                        </div>
+
+                        {/* Suggestion section */}
+                        {analysis.pending
+                          ? (
                             <div
                               style={{
-                                fontSize: "13px",
-                                color: "#374151",
-                                padding: "8px",
-                                backgroundColor: "#ffffff",
-                                borderRadius: "4px",
-                                border: "1px solid #e5e7eb",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "8px",
+                                padding: "12px",
+                                backgroundColor: "#f9fafb",
+                                borderRadius: "6px",
                               }}
                             >
-                              {derive(
-                                analysis.result,
-                                (result) =>
-                                  result?.actionType === "edit-note"
-                                    ? truncateText(result.addition || "", 200)
-                                    : "",
-                              )}
+                              <cf-loader size="sm" />
+                              <span
+                                style={{ fontSize: "13px", color: "#6b7280" }}
+                              >
+                                Analyzing...
+                              </span>
                             </div>
-                          </div>,
-                          ifElse(
-                            derive(
-                              analysis.result,
-                              (result) =>
-                                result?.actionType === "create-note",
-                            ),
+                          )
+                          // Show suggestion when analysis is complete
+                          : analysis.result?.actionType === "edit-note"
+                          ? (
+                            // Edit note suggestion
+                            <div
+                              style={{
+                                padding: "12px",
+                                backgroundColor: "#eff6ff",
+                                borderRadius: "6px",
+                                marginBottom: "12px",
+                              }}
+                            >
+                              <div
+                                style={{
+                                  fontWeight: "600",
+                                  fontSize: "13px",
+                                  color: "#1d4ed8",
+                                  marginBottom: "4px",
+                                }}
+                              >
+                                Suggest: Edit note "
+                                {analysis.result?.actionType === "edit-note"
+                                  ? analysis.result.noteTitle || ""
+                                  : ""}
+                                "
+                              </div>
+                              <div
+                                style={{
+                                  fontSize: "13px",
+                                  color: "#4b5563",
+                                  marginBottom: "8px",
+                                  fontStyle: "italic",
+                                }}
+                              >
+                                {analysis.result?.reasoning || ""}
+                              </div>
+                              <div
+                                style={{
+                                  fontSize: "13px",
+                                  color: "#374151",
+                                  padding: "8px",
+                                  backgroundColor: "#ffffff",
+                                  borderRadius: "4px",
+                                  border: "1px solid #e5e7eb",
+                                }}
+                              >
+                                {analysis.result?.actionType === "edit-note"
+                                  ? truncateText(
+                                    analysis.result.addition || "",
+                                    200,
+                                  )
+                                  : ""}
+                              </div>
+                            </div>
+                          )
+                          : analysis.result?.actionType === "create-note"
+                          ? (
                             // Create note suggestion
                             <div
                               style={{
@@ -1080,13 +1049,9 @@ Respond with the most appropriate action.`;
                                 }}
                               >
                                 Suggest: Create note "
-                                {derive(
-                                  analysis.result,
-                                  (result) =>
-                                    result?.actionType === "create-note"
-                                      ? result.title || ""
-                                      : "",
-                                )}
+                                {analysis.result?.actionType === "create-note"
+                                  ? analysis.result.title || ""
+                                  : ""}
                                 "
                               </div>
                               <div
@@ -1097,10 +1062,7 @@ Respond with the most appropriate action.`;
                                   fontStyle: "italic",
                                 }}
                               >
-                                {derive(
-                                  analysis.result,
-                                  (result) => result?.reasoning || "",
-                                )}
+                                {analysis.result?.reasoning || ""}
                               </div>
                               <div
                                 style={{
@@ -1112,16 +1074,17 @@ Respond with the most appropriate action.`;
                                   border: "1px solid #e5e7eb",
                                 }}
                               >
-                                {derive(
-                                  analysis.result,
-                                  (result) =>
-                                    result?.actionType === "create-note"
-                                      ? truncateText(result.content || "", 200)
-                                      : "",
-                                )}
+                                {analysis.result?.actionType === "create-note"
+                                  ? truncateText(
+                                    analysis.result.content || "",
+                                    200,
+                                  )
+                                  : ""}
                               </div>
-                            </div>,
-                            // No action or low confidence
+                            </div>
+                          )
+                          // No action or low confidence
+                          : (
                             <div
                               style={{
                                 padding: "12px",
@@ -1136,109 +1099,93 @@ Respond with the most appropriate action.`;
                                   color: "#6b7280",
                                 }}
                               >
-                                {derive(
-                                  analysis.result,
-                                  (result) =>
-                                    result?.actionType === "no-action"
-                                      ? `No auto-suggestion: ${
-                                        result.reason || ""
-                                      }`
-                                      : "No auto-suggestion available",
-                                )}
+                                {analysis.result?.actionType === "no-action"
+                                  ? `No auto-suggestion: ${
+                                    analysis.result.reason || ""
+                                  }`
+                                  : "No auto-suggestion available"}
                               </div>
-                            </div>,
-                          ),
-                        ),
-                      )}
-
-                      {/* Action buttons */}
-                      {ifElse(
-                        derive(analysis.pending, (pending) => !pending),
-                        <div
-                          style={{
-                            display: "flex",
-                            gap: "8px",
-                            justifyContent: "flex-end",
-                          }}
-                        >
-                          {/* Execute button - only show for actionable suggestions */}
-                          {ifElse(
-                            derive(
-                              analysis.result,
-                              (result) => {
-                                return (
-                                  result &&
-                                  (result.actionType === "edit-note" ||
-                                    result.actionType === "create-note")
-                                );
-                              },
-                            ),
-                            <button
-                              type="button"
-                              onClick={executeHandler}
-                              disabled={derive(
-                                { isProcessing, taskCurrentLabelId },
-                                ({ isProcessing, taskCurrentLabelId }) =>
-                                  isProcessing || !taskCurrentLabelId,
-                              )}
-                              style={{
-                                padding: "6px 16px",
-                                backgroundColor: isProcessing
-                                  ? "#e5e7eb"
-                                  : "#10b981",
-                                color: isProcessing ? "#9ca3af" : "white",
-                                border: "none",
-                                borderRadius: "6px",
-                                fontSize: "13px",
-                                cursor: isProcessing
-                                  ? "not-allowed"
-                                  : "pointer",
-                                fontWeight: "500",
-                              }}
-                            >
-                              {ifElse(isProcessing, "Processing...", "Execute")}
-                            </button>,
-                            null,
+                            </div>
                           )}
 
-                          {/* Dismiss button */}
-                          <button
-                            type="button"
-                            onClick={dismissTask({
-                              removeLabels: extractor.removeLabels,
-                              emailId: analysis.email.id,
-                              taskCurrentLabelId,
-                              hiddenTasks,
-                              processingTasks,
-                            })}
-                            disabled={derive(
-                              { isProcessing, taskCurrentLabelId },
-                              ({ isProcessing, taskCurrentLabelId }) =>
-                                isProcessing || !taskCurrentLabelId,
-                            )}
-                            style={{
-                              padding: "6px 16px",
-                              backgroundColor: isProcessing
-                                ? "#e5e7eb"
-                                : "#f3f4f6",
-                              color: isProcessing ? "#9ca3af" : "#4b5563",
-                              border: "1px solid #e5e7eb",
-                              borderRadius: "6px",
-                              fontSize: "13px",
-                              cursor: isProcessing ? "not-allowed" : "pointer",
-                              fontWeight: "500",
-                            }}
-                          >
-                            Dismiss
-                          </button>
-                        </div>,
-                        null,
-                      )}
-                    </div>
-                  );
-                })}
-              </cf-vstack>,
-            )}
+                        {/* Action buttons */}
+                        {!analysis.pending
+                          ? (
+                            <div
+                              style={{
+                                display: "flex",
+                                gap: "8px",
+                                justifyContent: "flex-end",
+                              }}
+                            >
+                              {/* Execute button - only show for actionable suggestions */}
+                              {analysis.result &&
+                                  (analysis.result.actionType === "edit-note" ||
+                                    analysis.result.actionType ===
+                                      "create-note")
+                                ? (
+                                  <button
+                                    type="button"
+                                    onClick={executeHandler}
+                                    disabled={isProcessing ||
+                                      !taskCurrentLabelId.get()}
+                                    style={{
+                                      padding: "6px 16px",
+                                      backgroundColor: isProcessing
+                                        ? "#e5e7eb"
+                                        : "#10b981",
+                                      color: isProcessing ? "#9ca3af" : "white",
+                                      border: "none",
+                                      borderRadius: "6px",
+                                      fontSize: "13px",
+                                      cursor: isProcessing
+                                        ? "not-allowed"
+                                        : "pointer",
+                                      fontWeight: "500",
+                                    }}
+                                  >
+                                    {isProcessing ? "Processing..." : "Execute"}
+                                  </button>
+                                )
+                                : null}
+
+                              {/* Dismiss button */}
+                              <button
+                                type="button"
+                                onClick={dismissTask({
+                                  removeLabels: extractor.removeLabels,
+                                  emailId: analysis.email.id,
+                                  taskCurrentLabelId,
+                                  hiddenTasks,
+                                  processingTasks,
+                                })}
+                                disabled={isProcessing ||
+                                  !taskCurrentLabelId.get()}
+                                style={{
+                                  padding: "6px 16px",
+                                  backgroundColor: isProcessing
+                                    ? "#e5e7eb"
+                                    : "#f3f4f6",
+                                  color: isProcessing ? "#9ca3af" : "#4b5563",
+                                  border: "1px solid #e5e7eb",
+                                  borderRadius: "6px",
+                                  fontSize: "13px",
+                                  cursor: isProcessing
+                                    ? "not-allowed"
+                                    : "pointer",
+                                  fontWeight: "500",
+                                }}
+                              >
+                                Dismiss
+                              </button>
+                            </div>
+                          )
+                          : null}
+                      </div>
+                    );
+                  })}
+                </cf-vstack>
+              )}
           </cf-vstack>
         </cf-vscroll>
       </cf-screen>
