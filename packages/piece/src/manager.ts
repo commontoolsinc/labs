@@ -560,7 +560,7 @@ export class PieceManager {
               err,
             );
           }
-          return false; // Don't process cell link contents
+          return false; // Don't traverse runtime metadata link contents
         }
 
         // Safe recursive processing of arrays
@@ -669,10 +669,7 @@ export class PieceManager {
   getArgument<T = unknown>(
     piece: Cell<unknown | T>,
   ): Cell<T> {
-    // Currently, piece is a Result Cell, and we'll grab the source to get to
-    // the Process Cell, then follow that to get to the argument value. With
-    // the new model, we should be able to get the argument directly from the
-    // Result Cell through getMetaRaw.
+    // The piece is a result cell; read its argument metadata link directly.
     // With this approach, we aren't using the argumentSchema from the pattern
     // but that should have been written into the Result Cell's argument link.
     const argumentLink = getMetaLink(piece, "argument", {});
@@ -839,9 +836,9 @@ export class PieceManager {
     // so get that.
     let patternId = getMetaLink(piece, "pattern")?.id;
     if (!patternId) {
-      // Under remote sync, the source cell can transiently lag the result cell
-      // even though setup just wrote both. Wait for storage to settle and retry
-      // once before treating the source metadata as missing.
+      // Under remote sync, metadata can transiently lag the result value even
+      // though setup just wrote both. Wait for storage to settle and retry once
+      // before treating the pattern metadata as missing.
       await timePiecePhase("syncPattern.retry.synced", () => this.synced());
       await timePiecePhase("syncPattern.retry.piece.sync", () => piece.sync());
       patternId = getMetaLink(piece, "pattern")?.id;
@@ -1032,7 +1029,7 @@ function followCellToResult(
     visited.add(docIdStr);
 
     try {
-      // If document has a sourceCell, follow it
+      // If document has result metadata, follow it to the owning result cell.
       const resultLink = getMetaLink(cell, "result");
       if (resultLink !== undefined) {
         const resultCell = cell.runtime.getCellFromLink(resultLink);

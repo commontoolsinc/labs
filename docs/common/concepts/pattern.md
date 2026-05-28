@@ -5,10 +5,12 @@ A pattern is a TypeScript/JSX program that defines reactive data transformations
 ```mermaid
 flowchart TD
         A["Result Cell"]
-        A --source--> B["Process Cell"]
-        B --value.resultRef--> A
-        B --value.pattern--> C["Pattern Cell"]
-        D@{ shape: procs, label: "Input Cells"} --source--> B
+        A --meta.argument--> B["Argument Cell"]
+        A --meta.internal--> C["Internal Cell"]
+        A --meta.pattern--> D["Pattern Cell"]
+        B --meta.result--> A
+        C --meta.result--> A
+        E@{ shape: procs, label: "Data Cells"} --meta.result--> A
 ```
 
 ## Input and Output Types

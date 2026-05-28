@@ -82,7 +82,7 @@ export async function ensurePieceRunning(
       // Get the cell at the event link location
       const rootCell: Cell<any> = runtime.getCellFromLink(
         // We'll find the piece information at the root of what could be the
-        // process cell already, hence remove the path:
+        // owning result cell already, hence remove the path:
         { ...cellLink, path: [] },
         undefined,
         tx,
@@ -97,7 +97,7 @@ export async function ensurePieceRunning(
       const patternId = getMetaLink(resultCell, "pattern")?.id;
       if (!patternId) {
         logger.debug("ensure-piece", () => [
-          `No pattern ID (pattern) found in process cell`,
+          `No pattern ID (pattern) found in result metadata`,
         ]);
         return false;
       }
@@ -106,7 +106,7 @@ export async function ensurePieceRunning(
       runtime.prepareTxForCommit(tx);
       await tx.commit();
 
-      // Load the pattern from the persisted spell reference.
+      // Load the pattern from persisted result metadata.
       const pattern = await runtime.patternManager.loadPattern(
         patternId,
         cellLink.space,
@@ -124,7 +124,7 @@ export async function ensurePieceRunning(
       ]);
 
       // Start the existing piece - this registers event handlers without
-      // re-running setup and potentially allocating a different process cell.
+      // re-running setup and potentially allocating different metadata cells.
       await runtime.start(resultCell);
 
       logger.debug("ensure-piece", () => [

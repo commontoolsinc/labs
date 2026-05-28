@@ -369,7 +369,7 @@ document with a different `the`, but the same `of`.
 For reactive functions we should store
 
 - What data was read to compute this output and at what `since`
-- Link to process cell that explains how to recompute this
+- Link to result-cell metadata that explains how to recompute this
 
 For data last manipulated by an event we might just - if the event actually did
 read the prior state - write itself as dependent data. This makes it so that the
