@@ -28,7 +28,7 @@ import { DummyReconstructionContext } from "./fixtures.ts";
 
 describe("native-instance-utils", () => {
   describe("nativeFromFabricValueModern", () => {
-    it("unwraps FabricError in nested object", () => {
+    it("unwraps `FabricError` in nested object", () => {
       const se = FabricError.fromNativeError(new Error("deep"));
       const obj = { error: se } as FabricValue;
       const result = nativeFromFabricValueModern(obj) as Record<
@@ -39,7 +39,7 @@ describe("native-instance-utils", () => {
       expect((result.error as Error).message).toBe("deep");
     });
 
-    it("unwraps FabricMap in nested array", () => {
+    it("unwraps `FabricMap` in nested array", () => {
       const sm = new FabricMap(
         new Map<FabricValue, FabricValue>([["k", "v"]]),
       );
@@ -48,7 +48,7 @@ describe("native-instance-utils", () => {
       expect(result[0]).toBeInstanceOf(FrozenMap);
     });
 
-    it("unwraps FabricMap to mutable Map when frozen=false", () => {
+    it("unwraps `FabricMap` to mutable `Map` when `frozen=false`", () => {
       const sm = new FabricMap(
         new Map<FabricValue, FabricValue>([["k", "v"]]),
       );
@@ -81,7 +81,7 @@ describe("native-instance-utils", () => {
       expect(result.outer.inner.message).toBe("nested");
     });
 
-    it("deeply unwraps FabricError in objects (frozen)", () => {
+    it("deeply unwraps `FabricError` in objects (frozen)", () => {
       const err = new Error("deep");
       const se = FabricError.fromNativeError(err);
       const obj = {
@@ -99,7 +99,7 @@ describe("native-instance-utils", () => {
       expect(Object.isFrozen(result)).toBe(true);
     });
 
-    it("deeply unwraps FabricError in arrays (frozen)", () => {
+    it("deeply unwraps `FabricError` in arrays (frozen)", () => {
       const err = new Error("array");
       const se = FabricError.fromNativeError(err);
       const arr = [1, se, 3] as unknown as FabricValue;
@@ -112,7 +112,7 @@ describe("native-instance-utils", () => {
       expect(Object.isFrozen(result)).toBe(true);
     });
 
-    it("output is not frozen when frozen=false", () => {
+    it("output is not frozen when `frozen=false`", () => {
       const obj = Object.freeze({
         a: 1,
         b: "two",
@@ -127,7 +127,7 @@ describe("native-instance-utils", () => {
       expect(result.a).toBe(99);
     });
 
-    it("output is frozen when frozen=true (default)", () => {
+    it("output is frozen when `frozen=true` (default)", () => {
       const obj = { a: 1, b: "two" } as unknown as FabricValue;
       const result = nativeFromFabricValueModern(obj) as Record<
         string,
@@ -150,7 +150,7 @@ describe("native-instance-utils", () => {
       expect(result[2]).toBe(3);
     });
 
-    it("passes through non-native FabricInstance", () => {
+    it("passes through non-native `FabricInstance`", () => {
       const us = new UnknownValue("Test@1", null);
       const obj = { thing: us } as unknown as FabricValue;
       const result = nativeFromFabricValueModern(obj) as Record<
@@ -160,7 +160,7 @@ describe("native-instance-utils", () => {
       expect(result.thing).toBe(us);
     });
 
-    it("deeply unwraps FabricMap to FrozenMap", () => {
+    it("deeply unwraps `FabricMap` to `FrozenMap`", () => {
       const map = new Map<FabricValue, FabricValue>([
         ["x", 10],
       ] as [FabricValue, FabricValue][]);
@@ -174,7 +174,7 @@ describe("native-instance-utils", () => {
       expect((result.data as Map<string, number>).get("x")).toBe(10);
     });
 
-    it("deeply unwraps FabricSet to FrozenSet", () => {
+    it("deeply unwraps `FabricSet` to `FrozenSet`", () => {
       const set = new Set<FabricValue>([42] as FabricValue[]);
       const ss = new FabricSet(set);
       const arr = [ss] as unknown as FabricValue;
@@ -183,8 +183,8 @@ describe("native-instance-utils", () => {
       expect((result[0] as Set<number>).has(42)).toBe(true);
     });
 
-    it("deeply unwraps Error internals (C2)", () => {
-      // Error with a FabricError cause and a custom FabricMap property.
+    it("deeply unwraps `Error` internals (C2)", () => {
+      // `Error` with a `FabricError` cause and a custom `FabricMap` property.
       const innerErr = new Error("inner");
       const innerSe = FabricError.fromNativeError(innerErr);
       const outerErr = new Error("outer");
@@ -207,7 +207,7 @@ describe("native-instance-utils", () => {
       expect(data).toBeInstanceOf(FrozenMap);
     });
 
-    it("deeply unwraps Error internals unfrozen (C2)", () => {
+    it("deeply unwraps `Error` internals unfrozen (C2)", () => {
       const innerErr = new Error("inner");
       const innerSe = FabricError.fromNativeError(innerErr);
       const outerErr = new Error("outer");
@@ -230,7 +230,7 @@ describe("native-instance-utils", () => {
   // --------------------------------------------------------------------------
 
   describe("tagFromNativeValue", () => {
-    it("returns Error tag for standard Error subclasses", () => {
+    it("returns `Error` tag for standard `Error` subclasses", () => {
       const cases: [string, Error][] = [
         ["Error", new Error("test")],
         ["TypeError", new TypeError("test")],
@@ -245,7 +245,7 @@ describe("native-instance-utils", () => {
       }
     });
 
-    it("returns Error tag for exotic Error subclass (custom class)", () => {
+    it("returns `Error` tag for exotic `Error` subclass (custom class)", () => {
       class MyFancyError extends Error {
         constructor(msg: string) {
           super(msg);
@@ -258,53 +258,53 @@ describe("native-instance-utils", () => {
       expect(tagFromNativeValue(exotic)).toBe(NATIVE_TAGS.Error);
     });
 
-    it("returns Map tag for Map instances", () => {
+    it("returns `Map` tag for `Map` instances", () => {
       expect(tagFromNativeValue(new Map())).toBe(NATIVE_TAGS.Map);
     });
 
-    it("returns Set tag for Set instances", () => {
+    it("returns `Set` tag for `Set` instances", () => {
       expect(tagFromNativeValue(new Set())).toBe(NATIVE_TAGS.Set);
     });
 
-    it("returns Date tag for Date instances", () => {
+    it("returns `Date` tag for `Date` instances", () => {
       expect(tagFromNativeValue(new Date())).toBe(NATIVE_TAGS.Date);
     });
 
-    it("returns Uint8Array tag for Uint8Array instances", () => {
+    it("returns `Uint8Array` tag for `Uint8Array` instances", () => {
       expect(tagFromNativeValue(new Uint8Array())).toBe(
         NATIVE_TAGS.Uint8Array,
       );
     });
 
-    it("returns Object tag for plain objects", () => {
+    it("returns `Object` tag for plain objects", () => {
       expect(tagFromNativeValue({})).toBe(NATIVE_TAGS.Object);
     });
 
-    it("returns Array tag for arrays", () => {
+    it("returns `Array` tag for arrays", () => {
       expect(tagFromNativeValue([])).toBe(NATIVE_TAGS.Array);
     });
 
-    it("returns RegExp tag for RegExp instances", () => {
+    it("returns `RegExp` tag for `RegExp` instances", () => {
       expect(tagFromNativeValue(/abc/)).toBe(NATIVE_TAGS.RegExp);
     });
 
-    it("returns Object tag for null-prototype objects (no constructor)", () => {
+    it("returns `Object` tag for null-prototype objects (no constructor)", () => {
       const obj = Object.create(null);
       expect(tagFromNativeValue(obj)).toBe(NATIVE_TAGS.Object);
     });
 
-    it("returns HasToJSON tag for plain objects with toJSON()", () => {
+    it("returns `HasToJSON` tag for plain objects with `toJSON()`", () => {
       const obj = { toJSON: () => "converted" };
       expect(tagFromNativeValue(obj)).toBe(NATIVE_TAGS.HasToJSON);
     });
 
-    it("returns HasToJSON tag for arrays with toJSON()", () => {
+    it("returns `HasToJSON` tag for arrays with `toJSON()`", () => {
       const arr = [1, 2, 3] as unknown[] & { toJSON?: () => unknown };
       arr.toJSON = () => "custom array";
       expect(tagFromNativeValue(arr)).toBe(NATIVE_TAGS.HasToJSON);
     });
 
-    it("returns HasToJSON tag for class instances with toJSON()", () => {
+    it("returns `HasToJSON` tag for class instances with `toJSON()`", () => {
       class Custom {
         toJSON() {
           return { x: 1 };
@@ -313,14 +313,14 @@ describe("native-instance-utils", () => {
       expect(tagFromNativeValue(new Custom())).toBe(NATIVE_TAGS.HasToJSON);
     });
 
-    it("returns Date tag for Date (not HasToJSON despite Date.toJSON)", () => {
+    it("returns `Date` tag for `Date` (not `HasToJSON` despite `Date.toJSON`)", () => {
       expect(tagFromNativeValue(new Date())).toBe(NATIVE_TAGS.Date);
     });
 
     // Functions are non-objects and return Primitive from tagFromNativeValue.
     // In practice, functions with toJSON() are handled separately in
     // the modern conversion path, not via tagFromNativeValue.
-    it("returns Primitive for functions (even with toJSON)", () => {
+    it("returns `Primitive` for functions (even with `toJSON`)", () => {
       const fn = () => {};
       (fn as unknown as { toJSON: () => string }).toJSON = () => "converted";
       expect(tagFromNativeValue(fn)).toBe(NATIVE_TAGS.Primitive);
@@ -328,7 +328,7 @@ describe("native-instance-utils", () => {
   });
 
   describe("tagFromNativeClass", () => {
-    it("returns Error tag for standard Error constructors", () => {
+    it("returns `Error` tag for standard `Error` constructors", () => {
       const constructors = [
         Error,
         TypeError,
@@ -343,14 +343,14 @@ describe("native-instance-utils", () => {
       }
     });
 
-    it("returns Error tag for exotic Error subclass constructor", () => {
+    it("returns `Error` tag for exotic `Error` subclass constructor", () => {
       class ExoticError extends Error {}
       // Constructor is ExoticError, not in the switch -- falls back to
       // Error.isError(prototype) check.
       expect(tagFromNativeClass(ExoticError)).toBe(NATIVE_TAGS.Error);
     });
 
-    it("returns correct tags for Array, Object, Map, Set, Date, Uint8Array", () => {
+    it("returns correct tags for `Array`, `Object`, `Map`, `Set`, `Date`, `Uint8Array`", () => {
       expect(tagFromNativeClass(Array)).toBe(NATIVE_TAGS.Array);
       expect(tagFromNativeClass(Object)).toBe(NATIVE_TAGS.Object);
       expect(tagFromNativeClass(Map)).toBe(NATIVE_TAGS.Map);
@@ -359,16 +359,16 @@ describe("native-instance-utils", () => {
       expect(tagFromNativeClass(Uint8Array)).toBe(NATIVE_TAGS.Uint8Array);
     });
 
-    it("returns RegExp tag for RegExp constructor", () => {
+    it("returns `RegExp` tag for `RegExp` constructor", () => {
       expect(tagFromNativeClass(RegExp)).toBe(NATIVE_TAGS.RegExp);
     });
 
-    it("returns null for unrecognized constructors", () => {
+    it("returns `null` for unrecognized constructors", () => {
       expect(tagFromNativeClass(WeakMap)).toBe(null);
       expect(tagFromNativeClass(Promise)).toBe(null);
     });
 
-    it("returns HasToJSON for class with toJSON on prototype", () => {
+    it("returns `HasToJSON` for class with `toJSON` on prototype", () => {
       class WithToJSON {
         toJSON() {
           return { x: 1 };
@@ -377,7 +377,7 @@ describe("native-instance-utils", () => {
       expect(tagFromNativeClass(WithToJSON)).toBe(NATIVE_TAGS.HasToJSON);
     });
 
-    it("returns HasToJSON for subclass inheriting toJSON", () => {
+    it("returns `HasToJSON` for subclass inheriting `toJSON`", () => {
       class Base {
         toJSON() {
           return "base";
@@ -387,11 +387,11 @@ describe("native-instance-utils", () => {
       expect(tagFromNativeClass(Sub)).toBe(NATIVE_TAGS.HasToJSON);
     });
 
-    it("returns Date tag for Date (not HasToJSON despite Date.prototype.toJSON)", () => {
+    it("returns `Date` tag for `Date` (not `HasToJSON` despite `Date.prototype.toJSON`)", () => {
       expect(tagFromNativeClass(Date)).toBe(NATIVE_TAGS.Date);
     });
 
-    it("returns null for class without toJSON", () => {
+    it("returns `null` for class without `toJSON`", () => {
       class Plain {}
       expect(tagFromNativeClass(Plain)).toBe(null);
     });
@@ -422,17 +422,17 @@ describe("native-instance-utils", () => {
       expect(isConvertibleNativeInstance(new WeakMap())).toBe(false);
     });
 
-    it("returns false for objects with toJSON()", () => {
+    it("returns false for objects with `toJSON()`", () => {
       expect(isConvertibleNativeInstance({ toJSON: () => "x" })).toBe(false);
     });
   });
 
   describe("FabricInstance instanceof checks", () => {
-    it("returns false for null", () => {
+    it("returns false for `null`", () => {
       expect((null as unknown) instanceof FabricInstance).toBe(false);
     });
 
-    it("returns false for undefined", () => {
+    it("returns false for `undefined`", () => {
       expect((undefined as unknown) instanceof FabricInstance).toBe(false);
     });
 
@@ -447,17 +447,17 @@ describe("native-instance-utils", () => {
       expect(({ a: 1 } as unknown) instanceof FabricInstance).toBe(false);
     });
 
-    it("returns true for UnknownValue", () => {
+    it("returns true for `UnknownValue`", () => {
       const us = new UnknownValue("Test@1", null);
       expect(us instanceof FabricInstance).toBe(true);
     });
 
-    it("returns true for ProblematicValue", () => {
+    it("returns true for `ProblematicValue`", () => {
       const ps = new ProblematicValue("Test@1", null, "oops");
       expect(ps instanceof FabricInstance).toBe(true);
     });
 
-    it("returns true for custom FabricInstance subclass", () => {
+    it("returns true for custom `FabricInstance` subclass", () => {
       class CustomFabInst extends BaseFabricInstance {
         [DECONSTRUCT](): FabricValue {
           return { value: 42 };
@@ -483,17 +483,17 @@ describe("native-instance-utils", () => {
       expect(instance instanceof FabricInstance).toBe(true);
     });
 
-    it("returns true for FabricError", () => {
+    it("returns true for `FabricError`", () => {
       const se = FabricError.fromNativeError(new Error("test"));
       expect(se instanceof FabricInstance).toBe(true);
     });
   });
 
-  describe("[RECONSTRUCT] honors shouldDeepFreeze", () => {
+  describe("`[RECONSTRUCT]` honors `shouldDeepFreeze`", () => {
     const frozenCtx = new DummyReconstructionContext(true);
     const mutableCtx = new DummyReconstructionContext(false);
 
-    it("FabricError: shouldDeepFreeze true => deep-frozen, false => mutable", () => {
+    it("`FabricError`: `shouldDeepFreeze` true => deep-frozen, false => mutable", () => {
       const state = {
         type: "Error",
         name: null,
@@ -505,7 +505,7 @@ describe("native-instance-utils", () => {
       expect(Object.isFrozen(mutable)).toBe(false);
     });
 
-    it("FabricRegExp: shouldDeepFreeze true => deep-frozen, false => mutable", () => {
+    it("`FabricRegExp`: `shouldDeepFreeze` true => deep-frozen, false => mutable", () => {
       const state = {
         source: "abc",
         flags: "g",
@@ -518,7 +518,7 @@ describe("native-instance-utils", () => {
       expect(Object.isFrozen(mutable)).toBe(false);
     });
 
-    it("ProblematicValue: shouldDeepFreeze true => deep-frozen, false => mutable", () => {
+    it("`ProblematicValue`: `shouldDeepFreeze` true => deep-frozen, false => mutable", () => {
       const state = {
         type: "Bad@1",
         state: { x: 1 },
@@ -530,7 +530,7 @@ describe("native-instance-utils", () => {
       expect(Object.isFrozen(mutable)).toBe(false);
     });
 
-    it("UnknownValue: shouldDeepFreeze true => deep-frozen, false => mutable", () => {
+    it("`UnknownValue`: `shouldDeepFreeze` true => deep-frozen, false => mutable", () => {
       const state = { type: "Fancy@3", state: { y: 2 } } as unknown as {
         type: string;
         state: FabricValue;
@@ -559,8 +559,8 @@ describe("native-instance-utils", () => {
   // assertion.
   // --------------------------------------------------------------------------
 
-  describe("Arm 3 cycle behavior via [DEEP_FREEZE]", () => {
-    it("FabricError: cycle through `error.cause` terminates", () => {
+  describe("Arm 3 cycle behavior via `[DEEP_FREEZE]`", () => {
+    it("`FabricError`: cycle through `error.cause` terminates", () => {
       // Build a cycle: a plain-object wrapper holds the FabricError, and the
       // FabricError's `error.cause` points back at the wrapper. When
       // `deepFreeze(wrapper)` runs Arm 4 it recurses into the FabricError
@@ -575,7 +575,7 @@ describe("native-instance-utils", () => {
       expect(Object.isFrozen(fe)).toBe(true);
     });
 
-    it("ProblematicValue: cycle through `state` terminates", () => {
+    it("`ProblematicValue`: cycle through `state` terminates", () => {
       const cycle: Record<string, unknown> = { x: 1 };
       const pv = new ProblematicValue("Cycle@1", cycle as FabricValue, "oops");
       cycle.back = pv;
@@ -584,7 +584,7 @@ describe("native-instance-utils", () => {
       expect(Object.isFrozen(cycle)).toBe(true);
     });
 
-    it("UnknownValue: cycle through `state` terminates", () => {
+    it("`UnknownValue`: cycle through `state` terminates", () => {
       const cycle: Record<string, unknown> = { y: 2 };
       const uv = new UnknownValue("Cycle@1", cycle as FabricValue);
       cycle.back = uv;
@@ -593,7 +593,7 @@ describe("native-instance-utils", () => {
       expect(Object.isFrozen(cycle)).toBe(true);
     });
 
-    it("cross-instance cycle (FabricError <-> ProblematicValue) terminates", () => {
+    it("cross-instance cycle (`FabricError` <-> `ProblematicValue`) terminates", () => {
       // Two `FabricInstance` subclasses pointing into each other via their
       // recursing slots. Both must terminate, both must end deep-frozen.
       // FabricError snapshots its FabricValue state at construction, so wire

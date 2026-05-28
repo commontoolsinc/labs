@@ -54,14 +54,14 @@ describe("FabricMap", () => {
         expect(result).not.toBeInstanceOf(FrozenMap);
       });
 
-      it("returns the same `FrozenMap` if already frozen (frozen=true)", () => {
+      it("returns the same `FrozenMap` if already frozen (`frozen=true`)", () => {
         const fm = new FrozenMap<FabricValue, FabricValue>([["a", 1]]);
         const sm = new FabricMap(fm);
         const result = sm.toNativeValue(true);
         expect(result).toBe(fm); // same reference
       });
 
-      it("copies a `FrozenMap` to a mutable `Map` (frozen=false)", () => {
+      it("copies a `FrozenMap` to a mutable `Map` (`frozen=false`)", () => {
         const fm = new FrozenMap<FabricValue, FabricValue>([["a", 1]]);
         const sm = new FabricMap(fm);
         const result = sm.toNativeValue(false);
@@ -75,14 +75,14 @@ describe("FabricMap", () => {
     // FabricMap deliberately keeps throwing stubs for the protocol methods
     // (per Dan's PR #3612 review: not yet used, reworked separately).
     describe("`[DEEP_FREEZE]` / `[IS_DEEP_FROZEN]`", () => {
-      it("via dispatch: [DEEP_FREEZE] throws not-yet-implemented", () => {
+      it("via dispatch: `[DEEP_FREEZE]` throws not-yet-implemented", () => {
         const fm = new FabricMap(
           new FrozenMap<FabricValue, FabricValue>([["a", 1]]),
         );
         expect(() => deepFreeze(fm)).toThrow("FabricMap: not yet implemented");
       });
 
-      it("via dispatch: [IS_DEEP_FROZEN] throws not-yet-implemented (via type guard)", () => {
+      it("via dispatch: `[IS_DEEP_FROZEN]` throws not-yet-implemented (via type guard)", () => {
         const fm = new FabricMap(
           new FrozenMap<FabricValue, FabricValue>([["a", 1]]),
         );
@@ -92,7 +92,7 @@ describe("FabricMap", () => {
         );
       });
 
-      it("via direct member invocation: [DEEP_FREEZE] throws not-yet-implemented", () => {
+      it("via direct member invocation: `[DEEP_FREEZE]` throws not-yet-implemented", () => {
         const fm = new FabricMap(
           new FrozenMap<FabricValue, FabricValue>([["a", 1]]),
         );
@@ -101,7 +101,7 @@ describe("FabricMap", () => {
         );
       });
 
-      it("via direct member invocation: [IS_DEEP_FROZEN] throws not-yet-implemented", () => {
+      it("via direct member invocation: `[IS_DEEP_FROZEN]` throws not-yet-implemented", () => {
         const fm = new FabricMap(
           new FrozenMap<FabricValue, FabricValue>([["a", 1]]),
         );

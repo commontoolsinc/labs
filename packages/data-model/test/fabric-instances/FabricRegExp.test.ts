@@ -54,7 +54,7 @@ describe("FabricRegExp", () => {
   });
 
   describe("constructor()", () => {
-    it("wraps the original RegExp", () => {
+    it("wraps the original `RegExp`", () => {
       const re = /test/i;
       const sr = new FabricRegExp(re);
       expect(sr.regex).toBe(re);
@@ -63,7 +63,7 @@ describe("FabricRegExp", () => {
 
   describe("instance members", () => {
     describe("[DECONSTRUCT]", () => {
-      it("returns source, flags, and flavor", () => {
+      it("returns `source`, `flags`, and `flavor`", () => {
         const sr = new FabricRegExp(/abc/gi);
         const state = sr[DECONSTRUCT]() as Record<string, FabricValue>;
         expect(state.source).toBe("abc");
@@ -71,7 +71,7 @@ describe("FabricRegExp", () => {
         expect(state.flavor).toBe("es2025");
       });
 
-      it("returns correct source for a complex pattern", () => {
+      it("returns correct `source` for a complex pattern", () => {
         const sr = new FabricRegExp(/^foo\d+\.bar$/);
         const state = sr[DECONSTRUCT]() as Record<string, FabricValue>;
         expect(state.source).toBe("^foo\\d+\\.bar$");
@@ -79,13 +79,13 @@ describe("FabricRegExp", () => {
         expect(state.flavor).toBe("es2025");
       });
 
-      it("returns empty flags for a no-flag regexp", () => {
+      it("returns empty `flags` for a no-flag regexp", () => {
         const sr = new FabricRegExp(/abc/);
         const state = sr[DECONSTRUCT]() as Record<string, FabricValue>;
         expect(state.flags).toBe("");
       });
 
-      it("rejects a RegExp with extra enumerable properties", () => {
+      it("rejects a `RegExp` with extra enumerable properties", () => {
         const re = /abc/g;
         (re as unknown as Record<string, unknown>).custom = 1;
         const sr = new FabricRegExp(re);
@@ -96,7 +96,7 @@ describe("FabricRegExp", () => {
     });
 
     describe("round-trip", () => {
-      it("round-trips through [DECONSTRUCT]/[RECONSTRUCT]", () => {
+      it("round-trips through `[DECONSTRUCT]`/`[RECONSTRUCT]`", () => {
         const original = /hello\s+world/gim;
         const sr = new FabricRegExp(original);
         const state = sr[DECONSTRUCT]();
@@ -118,7 +118,7 @@ describe("FabricRegExp", () => {
         }
       });
 
-      it("round-trips with a custom flavor", () => {
+      it("round-trips with a custom `flavor`", () => {
         const sr = new FabricRegExp(/abc/gi, "pcre2");
         expect(sr.flavor).toBe("pcre2");
         const state = sr[DECONSTRUCT]();
@@ -130,7 +130,7 @@ describe("FabricRegExp", () => {
     });
 
     describe("toNativeValue()", () => {
-      it("returns a frozen RegExp (copy of unfrozen) when `frozen` is true", () => {
+      it("returns a frozen `RegExp` (copy of unfrozen) when `frozen` is true", () => {
         const re = /abc/gi;
         const sr = new FabricRegExp(re);
         const result = sr.toNativeValue(true);
@@ -142,14 +142,14 @@ describe("FabricRegExp", () => {
         expect(Object.isFrozen(re)).toBe(false);
       });
 
-      it("returns the same RegExp if already frozen (frozen=true)", () => {
+      it("returns the same `RegExp` if already frozen (`frozen=true`)", () => {
         const re = Object.freeze(/abc/gi);
         const sr = new FabricRegExp(re);
         const result = sr.toNativeValue(true);
         expect(result).toBe(re); // same reference
       });
 
-      it("returns the original unfrozen RegExp when `frozen` is false", () => {
+      it("returns the original unfrozen `RegExp` when `frozen` is false", () => {
         const re = /abc/gi;
         const sr = new FabricRegExp(re);
         const result = sr.toNativeValue(false);
@@ -157,7 +157,7 @@ describe("FabricRegExp", () => {
         expect(Object.isFrozen(result)).toBe(false);
       });
 
-      it("returns an unfrozen copy of a frozen RegExp when `frozen` is false", () => {
+      it("returns an unfrozen copy of a frozen `RegExp` when `frozen` is false", () => {
         const re = Object.freeze(/abc/gi);
         const sr = new FabricRegExp(re);
         const result = sr.toNativeValue(false);
@@ -170,7 +170,7 @@ describe("FabricRegExp", () => {
     });
 
     describe("`[DEEP_FREEZE]` / `[IS_DEEP_FROZEN]`", () => {
-      it("via dispatch: [DEEP_FREEZE] freezes the wrapped RegExp in place", () => {
+      it("via dispatch: `[DEEP_FREEZE]` freezes the wrapped `RegExp` in place", () => {
         const fr = new FabricRegExp(/abc/g);
         expect(Object.isFrozen(fr.regex)).toBe(false);
         const result = deepFreeze(fr);
@@ -179,14 +179,14 @@ describe("FabricRegExp", () => {
         expect(Object.isFrozen(fr.regex)).toBe(true);
       });
 
-      it("via dispatch: [IS_DEEP_FROZEN] true only when wrapper + RegExp frozen", () => {
+      it("via dispatch: `[IS_DEEP_FROZEN]` true only when wrapper + `RegExp` frozen", () => {
         const fr = new FabricRegExp(/abc/g);
         expect(isDeepFrozenFabricValue(fr)).toBe(false);
         deepFreeze(fr);
         expect(isDeepFrozenFabricValue(fr)).toBe(true);
       });
 
-      it("via direct member invocation: [DEEP_FREEZE] freezes the wrapped RegExp in place", () => {
+      it("via direct member invocation: `[DEEP_FREEZE]` freezes the wrapped `RegExp` in place", () => {
         const fr = new FabricRegExp(/abc/g);
         expect(Object.isFrozen(fr.regex)).toBe(false);
         const result = fr[DEEP_FREEZE](subFreeze);
@@ -195,7 +195,7 @@ describe("FabricRegExp", () => {
         expect(Object.isFrozen(fr.regex)).toBe(true);
       });
 
-      it("via direct member invocation: [IS_DEEP_FROZEN] true only when wrapper + RegExp frozen", () => {
+      it("via direct member invocation: `[IS_DEEP_FROZEN]` true only when wrapper + `RegExp` frozen", () => {
         const fr = new FabricRegExp(/abc/g);
         expect(fr[IS_DEEP_FROZEN](subIsDeepFrozen)).toBe(false);
         fr[DEEP_FREEZE](subFreeze);
@@ -206,7 +206,7 @@ describe("FabricRegExp", () => {
 
   describe("static members", () => {
     describe("[RECONSTRUCT]", () => {
-      it("creates a FabricRegExp from state", () => {
+      it("creates a `FabricRegExp` from state", () => {
         const state = { source: "abc", flags: "gi" } as FabricValue;
         const result = FabricRegExp[RECONSTRUCT](state, dummyContext);
         expect(result).toBeInstanceOf(FabricRegExp);
@@ -215,7 +215,7 @@ describe("FabricRegExp", () => {
         expect(result.flavor).toBe("es2025");
       });
 
-      it("defaults to empty source, flags, and es2025 flavor", () => {
+      it("defaults to empty `source`, `flags`, and `es2025` `flavor`", () => {
         const state = {} as FabricValue;
         const result = FabricRegExp[RECONSTRUCT](state, dummyContext);
         expect(result.regex.source).toBe("(?:)");
@@ -223,7 +223,7 @@ describe("FabricRegExp", () => {
         expect(result.flavor).toBe("es2025");
       });
 
-      it("preserves an explicit flavor from state", () => {
+      it("preserves an explicit `flavor` from state", () => {
         const state = {
           source: "abc",
           flags: "g",
@@ -241,7 +241,7 @@ describe("FabricRegExp", () => {
   // `RegExp` rather than members of the class itself, so they live directly
   // under the class `describe()` (the cross-cutting carve-out).
   describe("shallowFabricFromNativeValue() (modern path)", () => {
-    it("converts a RegExp to a FabricRegExp", () => {
+    it("converts a `RegExp` to a `FabricRegExp`", () => {
       setDataModelConfig(true);
       try {
         const result = shallowFabricFromNativeValue(/abc/gi);
@@ -253,7 +253,7 @@ describe("FabricRegExp", () => {
       }
     });
 
-    it("rejects a RegExp with extra enumerable properties", () => {
+    it("rejects a `RegExp` with extra enumerable properties", () => {
       setDataModelConfig(true);
       try {
         const re = /abc/;
@@ -268,15 +268,15 @@ describe("FabricRegExp", () => {
   });
 
   describe("tag functions", () => {
-    it("tagFromNativeValue() returns the RegExp tag for RegExp instances", () => {
+    it("`tagFromNativeValue()` returns the `RegExp` tag for `RegExp` instances", () => {
       expect(tagFromNativeValue(/abc/)).toBe(NATIVE_TAGS.RegExp);
     });
 
-    it("tagFromNativeClass() returns the RegExp tag for the RegExp constructor", () => {
+    it("`tagFromNativeClass()` returns the `RegExp` tag for the `RegExp` constructor", () => {
       expect(tagFromNativeClass(RegExp)).toBe(NATIVE_TAGS.RegExp);
     });
 
-    it("isConvertibleNativeInstance() returns true for RegExp", () => {
+    it("`isConvertibleNativeInstance()` returns true for `RegExp`", () => {
       expect(isConvertibleNativeInstance(/abc/)).toBe(true);
       expect(isConvertibleNativeInstance(new RegExp("test", "gi"))).toBe(true);
     });
@@ -290,17 +290,17 @@ describe("FabricRegExp", () => {
       resetDataModelConfig();
     });
 
-    it("returns true for a plain RegExp", () => {
+    it("returns true for a plain `RegExp`", () => {
       expect(isFabricCompatible(/abc/gi)).toBe(true);
     });
 
-    it("returns true for a RegExp nested in objects", () => {
+    it("returns true for a `RegExp` nested in objects", () => {
       expect(isFabricCompatible({ pattern: /abc/gi })).toBe(true);
     });
   });
 
   describe("hashOf()", () => {
-    it("produces a hash for a FabricRegExp", () => {
+    it("produces a hash for a `FabricRegExp`", () => {
       const sr = new FabricRegExp(/abc/gi);
       const hash = hashOf(sr);
       expect(hash.bytes).toBeInstanceOf(Uint8Array);
@@ -315,13 +315,13 @@ describe("FabricRegExp", () => {
       expect(h1).toEqual(h2);
     });
 
-    it("produces a different hash for a different source", () => {
+    it("produces a different hash for a different `source`", () => {
       const h1 = hashOf(new FabricRegExp(/abc/)).bytes;
       const h2 = hashOf(new FabricRegExp(/def/)).bytes;
       expect(h1).not.toEqual(h2);
     });
 
-    it("produces a different hash for different flags", () => {
+    it("produces a different hash for different `flags`", () => {
       const h1 = hashOf(new FabricRegExp(/abc/g)).bytes;
       const h2 = hashOf(new FabricRegExp(/abc/i)).bytes;
       expect(h1).not.toEqual(h2);
