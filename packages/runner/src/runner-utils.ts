@@ -1,6 +1,10 @@
 import { type FabricValue } from "@commonfabric/data-model/fabric-value";
 import { hashOf } from "@commonfabric/data-model/value-hash";
-import { isRecord, type Mutable } from "@commonfabric/utils/types";
+import {
+  isPlainObject,
+  isRecord,
+  type Mutable,
+} from "@commonfabric/utils/types";
 import {
   isModule,
   isOpaqueRef,
@@ -148,15 +152,31 @@ export function validateAndCheckOpaqueRefs(
 }
 
 export function cellAwareDeepCopy<T = unknown>(value: T): Mutable<T> {
+  // `CellLink`s and non-plain objects (`FabricInstance`/`FabricPrimitive`
+  // wrappers, and any other class instance) are treated as opaque leaves:
+  // returned by identity rather than recursed into. This preserves their class
+  // identity -- recursing via `Object.fromEntries` would demote a wrapper to a
+  // prototype-less husk -- and is safe because the wrappers are immutable, even
+  // though the copied plain-object/array spine is mutable.
+  //
+  // Latent limitation: a `FabricInstance` can itself hold arbitrary
+  // `FabricValue`s (including `CellLink`s) recursively, and treating it as an
+  // opaque leaf means we never descend to give those nested cells cell-aware
+  // handling. This is benign today because the recursive-holding instances
+  // (`FabricMap` / `FabricSet`) are not yet functional or used; it must be
+  // revisited when they are.
   if (isCellLink(value)) return value as Mutable<T>;
   if (isRecord(value)) {
-    return Array.isArray(value)
-      ? value.map(cellAwareDeepCopy) as unknown as Mutable<T>
-      : Object.fromEntries(
+    if (Array.isArray(value)) {
+      return value.map(cellAwareDeepCopy) as unknown as Mutable<T>;
+    }
+    if (isPlainObject(value)) {
+      return Object.fromEntries(
         Object.entries(value).map((
           [key, nestedValue],
         ) => [key, cellAwareDeepCopy(nestedValue)]),
       ) as unknown as Mutable<T>;
+    }
   }
 
   return value as Mutable<T>;
