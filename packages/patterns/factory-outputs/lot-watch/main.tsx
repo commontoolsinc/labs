@@ -239,10 +239,15 @@ type ImageUploadEvent = {
 
 const onPhotoCaptured = handler<
   ImageUploadEvent,
-  { draftImage: Writable<ImageData | null> }
->(({ detail }, { draftImage }) => {
+  {
+    draftImage: Writable<ImageData | null>;
+    captureStep: Writable<"photo" | "spot" | "review" | "saved">;
+  }
+>(({ detail }, { draftImage, captureStep }) => {
   const img = (detail?.allImages ?? detail?.images ?? [])[0] ?? null;
   draftImage.set(img);
+  // Auto-advance the wizard — once we have a photo, jump to spot picker.
+  if (img) captureStep.set("spot");
 });
 
 // ============================================================
@@ -502,6 +507,11 @@ export default pattern<LotWatchInput, LotWatchOutput>(
     const draftPlateState = new Writable.perSession("CA");
     const draftNotes = new Writable.perSession("");
 
+    // Wizard step for the capture flow — one decision per screen so the UI
+    // isn't an overwhelming wall of fields. Photo → Spot → Review → Saved.
+    type CaptureStep = "photo" | "spot" | "review" | "saved";
+    const captureStep = new Writable.perSession<CaptureStep>("photo");
+
     // PerSession: delete confirm dialog target
     const deleteConfirmTarget = new Writable.perSession<string | null>(null);
 
@@ -606,9 +616,23 @@ export default pattern<LotWatchInput, LotWatchOutput>(
     });
 
     // Spot selection — cell mutations must go through an action(), not a bare
-    // `.set()` in an inline onClick.
+    // `.set()` in an inline onClick. Also auto-prefills the editable fields
+    // from the LLM extraction (if it has resolved) so the user lands on
+    // pre-filled values they can review/correct in the next step, and advances
+    // the wizard.
     const setDraftSpot = action<{ spot: string }>(({ spot }) => {
       draftSpot.set(spot);
+      const r = extraction.result;
+      if (r?.description && !draftDescription.get()) {
+        draftDescription.set(r.description);
+      }
+      if (r?.plateNumber && !draftPlateNumber.get()) {
+        draftPlateNumber.set(r.plateNumber);
+      }
+      if (r?.plateState && !draftPlateState.get()) {
+        draftPlateState.set(r.plateState);
+      }
+      captureStep.set("review");
     });
 
     // Programmatic setter for the perUser `reporterName`. The UI binds the
@@ -671,7 +695,28 @@ export default pattern<LotWatchInput, LotWatchOutput>(
       draftPlateNumber.set("");
       draftPlateState.set("CA");
       draftNotes.set("");
-      selectedTab.set("sightings");
+      // Advance the wizard to the "saved" confirmation step — the user stays
+      // on the Capture tab and can immediately capture another car.
+      captureStep.set("saved");
+    });
+
+    // Wizard navigation helpers
+    const goBackToPhoto = action(() => captureStep.set("photo"));
+    const goBackToSpot = action(() => captureStep.set("spot"));
+    const captureAnother = action(() => {
+      // captureSighting already cleared the drafts; just rewind the step.
+      captureStep.set("photo");
+    });
+    // "Discard" from the spot/review steps when the user picked the wrong
+    // photo and wants to start over.
+    const discardDraft = action(() => {
+      draftSpot.set("");
+      draftImage.set(null);
+      draftDescription.set("");
+      draftPlateNumber.set("");
+      draftPlateState.set("CA");
+      draftNotes.set("");
+      captureStep.set("photo");
     });
 
     const submitCapture = action(() => {
@@ -1084,6 +1129,31 @@ export default pattern<LotWatchInput, LotWatchOutput>(
     const isSightingsTab = computed(() => selectedTab.get() === "sightings");
     const isReportTab = computed(() => selectedTab.get() === "report");
 
+    // Wizard step gates — same `?? "photo"` fallback pattern as `isCaptureTab`
+    // (perSession defaults aren't returned by `.get()` on first read).
+    const isPhotoStep = computed(() =>
+      (captureStep.get() ?? "photo") === "photo"
+    );
+    const isSpotStep = computed(() => captureStep.get() === "spot");
+    const isReviewStep = computed(() => captureStep.get() === "review");
+    const isSavedStep = computed(() => captureStep.get() === "saved");
+
+    // Source for the in-flight draft photo — prefer the transient `data` URL
+    // (set by `includeData`) so the user sees their photo immediately even
+    // before the blob has been served back. Falls back to the blob `url`.
+    const draftImageSrc = computed(() => {
+      const img = draftImage.get();
+      return img?.data ?? img?.url ?? "";
+    });
+    // "Spot #X — label" for the review step header.
+    const draftSpotLabel = computed(() => {
+      const num = draftSpot.get();
+      if (!num) return "";
+      const found = (spots.get() ?? []).find((s) => s.spotNumber === num);
+      const lbl = found?.label;
+      return lbl ? `Spot #${num} — ${lbl}` : `Spot #${num}`;
+    });
+
     // DESIGN §6: admin-mode computeds (mirror coordinator pattern)
     const currentPersonIsAdmin = computed(() =>
       personIsLotWatchAdmin(adminRegistry, reporterName.get() || "")
@@ -1360,196 +1430,306 @@ export default pattern<LotWatchInput, LotWatchOutput>(
               {isCaptureTab
                 ? (
                   <cf-vstack gap="3">
-                    {/* Reporter name */}
-                    <cf-card>
-                      <cf-vstack gap="2">
-                        <cf-heading level={6}>Who's reporting?</cf-heading>
+                    {/* Persistent reporter banner (always visible, small) */}
+                    <cf-card style="padding: 0.5rem 0.75rem;">
+                      <cf-hstack
+                        justify="between"
+                        align="center"
+                        gap="2"
+                        wrap
+                      >
+                        <span style="font-size: 0.75rem; color: var(--cf-color-gray-500); white-space: nowrap;">
+                          Reporting as
+                        </span>
                         <cf-input
                           $value={reporterName}
-                          placeholder="Your name"
-                          style="width: 100%;"
+                          placeholder="your name"
+                          style="flex: 1; min-width: 120px;"
                         />
-                      </cf-vstack>
+                      </cf-hstack>
                     </cf-card>
 
-                    {/* Photo capture */}
-                    <cf-card>
-                      <cf-vstack gap="2">
-                        <cf-heading level={6}>📸 Capture</cf-heading>
-                        {
-                          /* `includeData` gives the DRAFT image both `url` (blob
-                            store) and inline `data` — `data` is used transiently
-                            for Phase 2 LLM extraction. But we persist only the
-                            lightweight `{url}` into the sighting (see
-                            captureSighting): inlining the ~700KB `data` into the
-                            perSpace array destabilizes its sync. Idiom per
-                            photo.tsx — persist the blob `url`, not the bytes. */
-                        }
-                        <cf-image-input
-                          capture="environment"
-                          includeData
-                          showPreview
-                          previewSize="lg"
-                          buttonText="📸 Photograph the car"
-                          oncf-change={onPhotoCaptured({ draftImage })}
-                        />
-                      </cf-vstack>
-                    </cf-card>
-
-                    {/* Phase 2: auto-extraction status (once a photo exists) */}
-                    {hasDraftImage
+                    {/* STEP 1 — Photo */}
+                    {isPhotoStep
                       ? (
-                        <cf-card style="border-left: 3px solid #6366f1;">
-                          <cf-vstack gap="1">
-                            <cf-heading level={6}>
-                              ✨ Auto-extraction
+                        <cf-card>
+                          <cf-vstack gap="3" align="center">
+                            <cf-heading level={5}>
+                              Step 1 of 3 — Take a photo
                             </cf-heading>
-                            {extraction.pending
-                              ? (
-                                <span style="font-size: 0.875rem; color: var(--cf-color-gray-500);">
-                                  Reading the plate…
-                                </span>
-                              )
-                              : extraction.error
-                              ? (
-                                <span style="font-size: 0.875rem; color: #991b1b;">
-                                  Couldn't read the plate — enter it manually or
-                                  try another photo.
-                                </span>
-                              )
-                              : (
-                                <cf-vstack gap="0">
-                                  <span style="font-size: 0.875rem;">
-                                    {extraction.result?.description}
-                                  </span>
-                                  <span style="font-size: 0.875rem; font-family: monospace; font-weight: 500;">
-                                    {extraction.result?.plateNumber}{" "}
-                                    {extraction.result?.plateState}
-                                  </span>
-                                  <span style="font-size: 0.7rem; color: var(--cf-color-gray-500);">
-                                    confidence: {extraction.result?.confidence}
-                                  </span>
-                                  <cf-button
-                                    variant="secondary"
-                                    size="sm"
-                                    style="margin-top: 0.25rem;"
-                                    onClick={() => applyExtraction.send()}
-                                  >
-                                    ✨ Use these
-                                  </cf-button>
-                                </cf-vstack>
-                              )}
+                            <span style="text-align: center; font-size: 0.875rem; color: var(--cf-color-gray-500);">
+                              Photograph the car. We'll read the plate
+                              automatically while you pick the spot.
+                            </span>
+                            {
+                              /* `includeData` gives the draft both `url` (blob
+                                store) and inline `data` for transient LLM use.
+                                We persist only the `url` into the sighting; see
+                                captureSighting. Idiom per photo.tsx. */
+                            }
+                            <cf-image-input
+                              capture="environment"
+                              includeData
+                              showPreview={false}
+                              buttonText="📸 Photograph the car"
+                              oncf-change={onPhotoCaptured({
+                                draftImage,
+                                captureStep,
+                              })}
+                            />
                           </cf-vstack>
                         </cf-card>
                       )
                       : null}
 
-                    {/* Spot picker */}
-                    <cf-card>
-                      <cf-vstack gap="2">
-                        <cf-heading level={6}>Which spot?</cf-heading>
-                        <cf-hstack gap="2" wrap>
-                          {activeSpots.map((spot) => {
-                            const spotNum = spot.spotNumber;
-                            return (
-                              <cf-button
-                                variant={spot.selected
-                                  ? "primary"
-                                  : "secondary"}
-                                onClick={() =>
-                                  setDraftSpot.send({ spot: spotNum })}
-                              >
-                                #{spotNum}
-                                {spot.label
+                    {/* STEP 2 — Pick a spot (show the photo big) */}
+                    {isSpotStep
+                      ? (
+                        <cf-vstack gap="2">
+                          <cf-card>
+                            <cf-vstack gap="2" align="center">
+                              <cf-heading level={5}>
+                                Step 2 of 3 — Which spot?
+                              </cf-heading>
+                              {computed(() => {
+                                const src = draftImageSrc;
+                                return src
                                   ? (
-                                    <span style="font-size: 0.75rem; margin-left: 4px; opacity: 0.8;">
-                                      {spot.label}
-                                    </span>
+                                    <img
+                                      src={src}
+                                      alt="Captured car"
+                                      style="max-width: 100%; max-height: 240px; object-fit: contain; border-radius: 6px;"
+                                    />
                                   )
-                                  : null}
+                                  : null;
+                              })}
+                            </cf-vstack>
+                          </cf-card>
+                          <cf-card>
+                            <cf-vstack gap="2">
+                              <cf-hstack gap="2" wrap justify="center">
+                                {activeSpots.map((spot) => {
+                                  const spotNum = spot.spotNumber;
+                                  return (
+                                    <cf-button
+                                      variant={spot.selected
+                                        ? "primary"
+                                        : "secondary"}
+                                      size="lg"
+                                      onClick={() =>
+                                        setDraftSpot.send({ spot: spotNum })}
+                                    >
+                                      #{spotNum}
+                                      {spot.label
+                                        ? (
+                                          <span style="font-size: 0.75rem; margin-left: 4px; opacity: 0.8;">
+                                            {spot.label}
+                                          </span>
+                                        )
+                                        : null}
+                                    </cf-button>
+                                  );
+                                })}
+                              </cf-hstack>
+                              <cf-hstack gap="2" justify="between">
+                                <cf-button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => goBackToPhoto.send()}
+                                >
+                                  ← Different photo
+                                </cf-button>
+                                <cf-button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => discardDraft.send()}
+                                >
+                                  Discard
+                                </cf-button>
+                              </cf-hstack>
+                            </cf-vstack>
+                          </cf-card>
+                        </cf-vstack>
+                      )
+                      : null}
+
+                    {/* STEP 3 — Confirm (LLM extraction + editable fields) */}
+                    {isReviewStep
+                      ? (
+                        <cf-vstack gap="2">
+                          {/* Header: thumbnail + spot */}
+                          <cf-card>
+                            <cf-vstack gap="2">
+                              <cf-heading level={5}>
+                                Step 3 of 3 — Confirm
+                              </cf-heading>
+                              <cf-hstack gap="2" align="center">
+                                {computed(() => {
+                                  const src = draftImageSrc;
+                                  return src
+                                    ? (
+                                      <img
+                                        src={src}
+                                        alt="Car"
+                                        style="width: 120px; height: 90px; object-fit: cover; border-radius: 6px;"
+                                      />
+                                    )
+                                    : null;
+                                })}
+                                <span style="font-weight: 600; font-size: 0.95rem;">
+                                  {draftSpotLabel}
+                                </span>
+                              </cf-hstack>
+                            </cf-vstack>
+                          </cf-card>
+
+                          {/* AI extraction panel */}
+                          <cf-card style="border-left: 3px solid #6366f1;">
+                            <cf-vstack gap="1">
+                              <span style="font-weight: 600; font-size: 0.875rem;">
+                                ✨ AI extracted
+                              </span>
+                              {extraction.pending
+                                ? (
+                                  <span style="font-size: 0.875rem; color: var(--cf-color-gray-500);">
+                                    Reading the plate…
+                                  </span>
+                                )
+                                : extraction.error
+                                ? (
+                                  <span style="font-size: 0.875rem; color: #991b1b;">
+                                    Couldn't read the plate — fill it in
+                                    manually below.
+                                  </span>
+                                )
+                                : (
+                                  <cf-vstack gap="0">
+                                    <span style="font-size: 0.875rem;">
+                                      {extraction.result?.description}
+                                    </span>
+                                    <span style="font-size: 0.875rem; font-family: monospace; font-weight: 500;">
+                                      {extraction.result?.plateNumber}{" "}
+                                      {extraction.result?.plateState}
+                                    </span>
+                                    <span style="font-size: 0.7rem; color: var(--cf-color-gray-500);">
+                                      confidence:{" "}
+                                      {extraction.result?.confidence}
+                                    </span>
+                                    <cf-button
+                                      variant="secondary"
+                                      size="sm"
+                                      style="margin-top: 0.5rem; align-self: flex-start;"
+                                      onClick={() => applyExtraction.send()}
+                                    >
+                                      ↻ Use AI's reading
+                                    </cf-button>
+                                  </cf-vstack>
+                                )}
+                            </cf-vstack>
+                          </cf-card>
+
+                          {/* Editable fields (pre-filled by setDraftSpot) */}
+                          <cf-card>
+                            <cf-vstack gap="2">
+                              <cf-vstack gap="1">
+                                <span style="font-size: 0.75rem; font-weight: 500;">
+                                  Description
+                                </span>
+                                <cf-input
+                                  $value={draftDescription}
+                                  placeholder="e.g. black Subaru Outback"
+                                  style="width: 100%;"
+                                />
+                              </cf-vstack>
+                              <cf-hstack gap="2" wrap>
+                                <cf-vstack
+                                  gap="1"
+                                  style="flex: 1; min-width: 120px;"
+                                >
+                                  <span style="font-size: 0.75rem; font-weight: 500;">
+                                    Plate Number
+                                  </span>
+                                  <cf-input
+                                    $value={draftPlateNumber}
+                                    placeholder="e.g. 7ABC123"
+                                    style="width: 100%; text-transform: uppercase;"
+                                  />
+                                </cf-vstack>
+                                <cf-vstack gap="1" style="min-width: 100px;">
+                                  <span style="font-size: 0.75rem; font-weight: 500;">
+                                    State
+                                  </span>
+                                  <cf-select
+                                    $value={draftPlateState}
+                                    items={stateSelectItems}
+                                  />
+                                </cf-vstack>
+                              </cf-hstack>
+                              <cf-vstack gap="1">
+                                <span style="font-size: 0.75rem; font-weight: 500;">
+                                  Notes (optional)
+                                </span>
+                                <cf-input
+                                  $value={draftNotes}
+                                  placeholder="e.g. blocked the dumpster"
+                                  style="width: 100%;"
+                                />
+                              </cf-vstack>
+                            </cf-vstack>
+                          </cf-card>
+
+                          {/* Save + back */}
+                          <cf-hstack gap="2" justify="between">
+                            <cf-button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => goBackToSpot.send()}
+                            >
+                              ← Change spot
+                            </cf-button>
+                            <cf-button
+                              variant="primary"
+                              size="lg"
+                              onClick={() => submitCapture.send()}
+                            >
+                              ✓ Save sighting
+                            </cf-button>
+                          </cf-hstack>
+                        </cf-vstack>
+                      )
+                      : null}
+
+                    {/* STEP 4 — Saved confirmation */}
+                    {isSavedStep
+                      ? (
+                        <cf-card>
+                          <cf-vstack
+                            gap="3"
+                            align="center"
+                            style="padding: 1rem;"
+                          >
+                            <span style="font-size: 3rem;">✅</span>
+                            <cf-heading level={5}>Sighting saved!</cf-heading>
+                            <cf-hstack gap="2" wrap justify="center">
+                              <cf-button
+                                variant="primary"
+                                size="lg"
+                                onClick={() => captureAnother.send()}
+                              >
+                                📸 Capture another
                               </cf-button>
-                            );
-                          })}
-                        </cf-hstack>
-                      </cf-vstack>
-                    </cf-card>
-
-                    {/* Vehicle details */}
-                    <cf-card>
-                      <cf-vstack gap="2">
-                        <cf-heading level={6}>Vehicle Details</cf-heading>
-                        <cf-vstack gap="1">
-                          <span style="font-size: 0.75rem; font-weight: 500;">
-                            Description
-                          </span>
-                          <cf-input
-                            $value={draftDescription}
-                            placeholder="e.g. black Subaru Outback"
-                            style="width: 100%;"
-                          />
-                        </cf-vstack>
-                        {/* Phase 2: Description auto-filled by LLM extraction */}
-
-                        <cf-hstack gap="2" wrap>
-                          <cf-vstack gap="1" style="flex: 1; min-width: 120px;">
-                            <span style="font-size: 0.75rem; font-weight: 500;">
-                              Plate Number
-                            </span>
-                            <cf-input
-                              $value={draftPlateNumber}
-                              placeholder="e.g. 7ABC123"
-                              style="width: 100%; text-transform: uppercase;"
-                            />
+                              <cf-button
+                                variant="ghost"
+                                onClick={() =>
+                                  selectTab.send({ tab: "sightings" })}
+                              >
+                                🚗 View sightings
+                              </cf-button>
+                            </cf-hstack>
                           </cf-vstack>
-                          {/* Phase 2: Plate auto-filled by LLM extraction */}
-
-                          <cf-vstack gap="1" style="min-width: 100px;">
-                            <span style="font-size: 0.75rem; font-weight: 500;">
-                              State
-                            </span>
-                            <cf-select
-                              $value={draftPlateState}
-                              items={stateSelectItems}
-                            />
-                          </cf-vstack>
-                        </cf-hstack>
-
-                        <cf-vstack gap="1">
-                          <span style="font-size: 0.75rem; font-weight: 500;">
-                            Notes (optional)
-                          </span>
-                          <cf-input
-                            $value={draftNotes}
-                            placeholder="e.g. blocked the dumpster"
-                            style="width: 100%;"
-                          />
-                        </cf-vstack>
-                      </cf-vstack>
-                    </cf-card>
-
-                    {/* Save button */}
-                    <cf-button
-                      variant="primary"
-                      disabled={cannotSave}
-                      onClick={() => submitCapture.send()}
-                      style="width: 100%;"
-                    >
-                      Save Sighting
-                    </cf-button>
-
-                    {computed(() => {
-                      const img = draftImage.get();
-                      const spot = draftSpot.get();
-                      if (img && spot) return null;
-                      const missing: string[] = [];
-                      if (!img) missing.push("a photo");
-                      if (!spot) missing.push("a spot");
-                      return (
-                        <span style="font-size: 0.75rem; color: var(--cf-color-gray-500); text-align: center;">
-                          Requires {missing.join(" and ")} to save.
-                        </span>
-                      );
-                    })}
+                        </cf-card>
+                      )
+                      : null}
                   </cf-vstack>
                 )
                 : null}
