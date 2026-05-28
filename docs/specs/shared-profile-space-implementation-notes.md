@@ -104,3 +104,38 @@ made before committing.
 
 - The implementation uses `ensureProfileDefaultPattern()` on a profile-space
   manager rather than passing a profile DID into a controller for another space.
+
+## Slice 4: Profile Default Pattern
+
+### Ambiguity or Incorrect Spec
+
+- The plan said the default pattern lets the owner add elements from a fixed
+  catalog or a pattern URL. Pattern handlers cannot instantiate patterns from
+  inside standalone helpers, and compiling an arbitrary URL into a durable new
+  piece is a runtime/piece-controller operation rather than a pure pattern-local
+  mutation.
+- The spec listed `name` and `avatar` as fields but the slice called out edit
+  streams. The pattern needs both readable fields and explicit streams so tests
+  and trusted UI actions can mutate through named boundaries.
+
+### Decision
+
+- `profile-home.tsx` owns writable `name`, `avatar`, and `elements` cells.
+- It exports `setName`, `setAvatar`, `addElement`, and `removeElement` streams.
+- Fixed catalog addition currently creates a simple profile card element.
+- URL addition creates a durable URL-reference element with the supplied URL,
+  title, tag, and user tags. Actual compile-and-run URL creation is deferred to
+  the profile creation/runtime operation layer.
+
+### Tests Added
+
+- `packages/patterns/system/profile-home.test.tsx`
+  - Initial name/avatar/elements state.
+  - Name and avatar edit streams update exported fields.
+  - Catalog add/remove streams update `elements`.
+
+### Spec Correction Needed
+
+- URL element creation needs a host/runtime operation if it must compile the URL
+  into a real piece immediately. The pattern-local v1 stores a URL-backed
+  element record instead.
